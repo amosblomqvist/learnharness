@@ -22,7 +22,7 @@ export default function UpdateBanner() {
 	return (
 		<div
 			data-testid="update-banner"
-			className="fixed right-4 bottom-4 z-50 flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
+			className="fixed end-4 bottom-4 z-50 flex items-center gap-3 rounded-lg border border-border bg-popover px-4 py-3 shadow-lg"
 		>
 			<div className="text-sm">
 				<span className="font-medium">LearnHarness {ready.version ?? "update"} is ready</span>

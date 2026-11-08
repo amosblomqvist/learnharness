@@ -28,7 +28,7 @@ export function CacheRetentionMenu({ value, onPick }: {
 			data-testid={`cache-retention-option-${option.value ?? "default"}`}
 			aria-pressed={value === option.value}
 			onClick={() => onPick(option.value)}
-			className={`rounded-lg px-2 py-2 text-left transition-colors hover:bg-muted ${value === option.value ? "bg-muted/60" : ""}`}
+			className={`rounded-lg px-2 py-2 text-start transition-colors hover:bg-muted ${value === option.value ? "bg-muted/60" : ""}`}
 		>
 			<span className="flex justify-between gap-2 text-card-foreground"><span>{option.label}</span>{value === option.value && <span aria-hidden>✓</span>}</span>
 			<span className="mt-1 block text-muted-foreground">{option.description}</span>

@@ -172,7 +172,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			{isQuiz && answer.confidence != null && (
 				<div className="mt-3 flex items-center gap-3" data-testid="answered-confidence">
 					<ConfidenceRail value={answer.confidence} className="min-w-0 flex-1" />
-					<span className="w-9 shrink-0 text-right font-mono text-sm tabular-nums text-muted-foreground">
+					<span className="w-9 shrink-0 text-end font-mono text-sm tabular-nums text-muted-foreground">
 						{answer.confidence}%
 					</span>
 				</div>

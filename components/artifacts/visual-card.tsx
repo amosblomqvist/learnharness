@@ -141,7 +141,7 @@ export function VisualOutputCard({
 					: "mt-2 flex items-center justify-between gap-2"
 			}>
 				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Figure</div>
-				<div className={!invertible ? "ml-auto flex items-center gap-1.5" : "flex items-center gap-1.5"}>
+				<div className={!invertible ? "ms-auto flex items-center gap-1.5" : "flex items-center gap-1.5"}>
 					{/* The invert affordance (owner round, 2026-10-07): the disc IS
 					    the half-filled contrast circle; the tooltip names it. */}
 					{invertible && (

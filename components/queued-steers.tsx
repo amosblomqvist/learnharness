@@ -21,7 +21,7 @@ export interface QueuedSteerLine {
 export function QueuedSteersBody({ steers }: { steers: QueuedSteerLine[] }) {
 	if (steers.length === 0) return null;
 	return (
-		<div className="flex flex-col items-end gap-0.5 pb-1 pr-4" data-testid="queued-steers">
+		<div className="flex flex-col items-end gap-0.5 pb-1 pe-4" data-testid="queued-steers">
 			{steers.map((s) => (
 				<span
 					key={s.id}

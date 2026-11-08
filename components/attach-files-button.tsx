@@ -159,9 +159,9 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 					if (next >= 0) { event.preventDefault(); buttons[next]?.focus(); }
 				}}>
 				{open ? <>
-					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-start text-xs hover:bg-accent"
 						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
-					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-start text-xs hover:bg-accent"
 						onClick={() => { void chooseFolder(); }}>Folder</button>
 				</> : notice}
 			</div>, document.body)}

@@ -88,7 +88,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(""); onCancel?.(); }
 				if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void commit(); }
 			}} onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} />
-			: <button type="button" className={`block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent${muted ? " text-muted-foreground/60" : ""}`} title="Rename"
+			: <button type="button" className={`block max-w-full truncate rounded-sm text-start text-sm font-medium leading-5 transition-colors hover:bg-accent${muted ? " text-muted-foreground/60" : ""}`} title="Rename"
 				onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>{name}</button>}
 		{failure && <span role="alert" className="block text-xs text-red-400">{failure}</span>}
 	</span>;
@@ -178,7 +178,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 			return <div key={folder.id} data-testid={`source-folder-${folder.id}`} className="relative" {...dropProps(folder.id)}>
 				<SourceDragRow {...chainRow(["folder", folder.id], depth, open)} kind="folder" id={folder.id} name={folder.name} enabled={Boolean(onAction)} data-testid={`folder-row-${folder.id}`}
 					data-drop-active={dropTarget === folder.id}
-					className={`flex items-center gap-1 py-1.5 pr-3 transition-colors ${!open || !hasChildren ? "border-b border-transparent" : ""} ${dropTarget === folder.id ? "bg-accent/50" : ""}`}
+					className={`flex items-center gap-1 py-1.5 pe-3 transition-colors ${!open || !hasChildren ? "border-b border-transparent" : ""} ${dropTarget === folder.id ? "bg-accent/50" : ""}`}
 					style={{ paddingLeft: 12 + depth * 36 }}>
 					<input type="checkbox" aria-label={`Select ${sourceSelection ? "folder" : "contents of"} ${folder.name}`} data-testid={`folder-checkbox-${folder.id}`}
 						className="size-3.5 shrink-0 accent-primary" disabled={entryCheck ? false : empty ? !allowEmptySelection : members.length === 0}
@@ -187,7 +187,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 						onChange={(e) => { if (entryCheck || empty) onToggleFolder(folder.id, e.target.checked); else onToggleNodes(members, e.target.checked); }} />
 					<button type="button" aria-expanded={open} aria-label={`Expand folder ${folder.name}`} data-testid={`folder-toggle-${folder.id}`}
 						onClick={() => onToggleExpanded(folder.id)} className="flex h-5 w-3.5 shrink-0 items-center justify-center text-muted-foreground/70">
-						<ChevronRightIcon className={`size-3.5 ${open ? "rotate-90" : ""}`} />
+						<ChevronRightIcon className={`size-3.5 ${open ? "rotate-90" : "rtl:rotate-180"}`} />
 					</button>
 					<button type="button" data-source-icon data-testid={`folder-icon-${folder.id}`} aria-expanded={open} aria-label={`Expand folder ${folder.name}`}
 						onClick={() => onToggleExpanded(folder.id)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
@@ -195,12 +195,12 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 					</button>
 					{onAction ? <EditableSourceName name={folder.name} onSave={(name) => onAction({ action: "rename-folder", id: folder.id, name })} />
 						: <span className="min-w-0 flex-1 truncate text-sm font-medium">{folder.name}</span>}
-					<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{members.length}</span>
-					<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{folder.createdAt.slice(0, 10)}</span>
+					<span className="w-14 shrink-0 text-end text-xs tabular-nums text-muted-foreground">{members.length}</span>
+					<span className="w-20 shrink-0 text-end text-xs tabular-nums text-muted-foreground">{folder.createdAt.slice(0, 10)}</span>
 				</SourceDragRow>
 				{open && hasChildren && <div data-testid={`folder-thread-${folder.id}`} className="pointer-events-none absolute bottom-[8px] top-[23px] w-px bg-border/50" style={{ left: 37 + depth * 36 }} />}
 				{open && renderLevel(folder.id, depth + 1)}
-				<div data-testid={`folder-separator-${folder.id}`} className="pointer-events-none absolute bottom-0 right-0 border-b border-border/60" style={{ left: depth === 0 ? 0 : depth * 36 + 1 }} />
+				<div data-testid={`folder-separator-${folder.id}`} className="pointer-events-none absolute bottom-0 end-0 border-b border-border/60" style={{ left: depth === 0 ? 0 : depth * 36 + 1 }} />
 			</div>;
 		});
 	};

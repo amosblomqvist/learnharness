@@ -686,7 +686,7 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 			data-testid="plan-block-full"
 			aria-label="Open the full plan"
 			onClick={onOpen}
-			className="block w-full text-left"
+			className="block w-full text-start"
 		>
 			{/* pad keeps centered strokes + the glow halo inside the frame; the
 		    cap keeps node text at or below chat prose size while still filling
@@ -901,7 +901,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 					onClick={onClose}
 					aria-label="Close"
 					data-testid="plan-popup-close"
-					className="ml-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					className="ms-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 				>
 					<XIcon className="size-4" />
 				</button>
@@ -921,7 +921,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 				{tree ? (
 					<>
 						<div
-							className="absolute top-0 left-0 origin-top-left"
+							className="absolute top-0 start-0 origin-top-left"
 							style={{
 								transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,
 								// Hidden until the first fit has APPLIED — the fit runs in an

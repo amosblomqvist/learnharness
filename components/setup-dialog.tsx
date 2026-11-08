@@ -173,7 +173,7 @@ export function SetupKeysBody({
 						onClick={onToggleMenu}
 						className="flex h-7 w-full items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50"
 					>
-						<span className="min-w-0 flex-1 truncate text-left">{provider ? provider.label : "Pick a provider…"}</span>
+						<span className="min-w-0 flex-1 truncate text-start">{provider ? provider.label : "Pick a provider…"}</span>
 						<span aria-hidden className="text-muted-foreground">
 							▾
 						</span>
@@ -468,7 +468,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 						aria-label="Close setup"
 						data-testid="setup-close"
 						onClick={onClose}
-						className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
+						className="ms-auto text-muted-foreground transition-colors hover:text-foreground"
 					>
 						✕
 					</button>
@@ -583,7 +583,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 												onClick={() => setOpenMenu(openMenu?.slot === slot && openMenu.kind === "thinking" ? null : { slot, kind: "thinking" })}
 												className="flex h-7 w-24 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
 											>
-												<span className="min-w-0 flex-1 truncate text-left">
+												<span className="min-w-0 flex-1 truncate text-start">
 													{entry ? (level ? THINKING_LABEL[level] ?? level : "…") : "—"}
 												</span>
 												<span aria-hidden className="text-muted-foreground">

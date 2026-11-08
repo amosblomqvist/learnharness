@@ -149,7 +149,7 @@ export function Toggle({
 				// only the knob's face changes (the invert affordance).
 				<span
 					className={cn(
-						"absolute left-0 top-0.5 flex size-3 items-center justify-center rounded-full transition-transform",
+						"absolute start-0 top-0.5 flex size-3 items-center justify-center rounded-full transition-transform",
 						checked ? "translate-x-4 text-foreground" : "translate-x-0.5 text-muted-foreground",
 					)}
 				>
@@ -158,7 +158,7 @@ export function Toggle({
 			) : (
 				<span
 					className={cn(
-						"absolute left-0 top-0.5 size-3 rounded-full transition-transform",
+						"absolute start-0 top-0.5 size-3 rounded-full transition-transform",
 						// 2px inset from each inner edge, both states (owner round: the on
 						// disc used to touch the pill's right edge).
 						checked ? "translate-x-4 bg-foreground" : "translate-x-0.5 bg-muted-foreground",

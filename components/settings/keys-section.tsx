@@ -267,7 +267,7 @@ function KeyTableRow({
 				aria-expanded={expanded}
 				data-testid={`${testid}-row`}
 				onClick={() => !envOwned && onToggle()}
-				className={`flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left ${
+				className={`flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-start ${
 					envOwned ? "cursor-default" : "cursor-pointer transition-colors hover:bg-accent/50"
 				}`}
 			>
@@ -290,7 +290,7 @@ function KeyTableRow({
 				</span>
 			</button>
 			{error && (
-				<p role="alert" data-testid={`${testid}-error`} className="pl-6 text-xs text-red-500">
+				<p role="alert" data-testid={`${testid}-error`} className="ps-6 text-xs text-red-500">
 					{error}
 				</p>
 			)}
@@ -339,7 +339,7 @@ function AddProviderRow({
 				aria-expanded={open}
 				data-testid="add-provider"
 				onClick={() => setOpen((v) => !v)}
-				className="flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left font-ui text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
+				className="flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-start font-ui text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
 			>
 				<span>+ Add a provider</span>
 				{addable.length > 0 && <span className="font-mono text-[11px]">{addable.length}</span>}
@@ -662,7 +662,7 @@ function AddProviderEditor({
 				Cancel
 			</button>
 			{error && (
-				<p role="alert" className="w-full pl-0 text-xs text-red-500" data-testid={`key-${provider.id}-error`}>
+				<p role="alert" className="w-full ps-0 text-xs text-red-500" data-testid={`key-${provider.id}-error`}>
 					{error}
 				</p>
 			)}
@@ -703,7 +703,7 @@ function CustomEndpointRow({
 				data-testid="custom-endpoint-row-btn"
 				aria-expanded={expanded}
 				onClick={onToggle}
-				className="flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left cursor-pointer transition-colors hover:bg-accent/50"
+				className="flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-start cursor-pointer transition-colors hover:bg-accent/50"
 			>
 				<span className="font-ui text-xs text-foreground">Custom endpoint</span>
 				<span data-testid="custom-endpoint-status" className="max-w-[60%] truncate font-mono text-[11px] text-muted-foreground">
@@ -958,7 +958,7 @@ function CustomEndpointEditor({
 			</div>
 			{!setup && models.length > 0 && (
 				<div className="flex flex-col gap-1" data-testid="custom-pins">
-					<div className="flex max-h-56 flex-col gap-1 overflow-y-auto pr-1">
+					<div className="flex max-h-56 flex-col gap-1 overflow-y-auto pe-1">
 						{models.map((m) => {
 							const d = draftOf(m);
 							return (
@@ -976,7 +976,7 @@ function CustomEndpointEditor({
 										aria-label={`${m.id} context window in tokens`}
 										data-testid={pinTestid("custom-pin-context", m.id)}
 										disabled={pinsBusy}
-										className="h-7 w-20 shrink-0 rounded-sm border border-border bg-background px-1.5 text-right font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+										className="h-7 w-20 shrink-0 rounded-sm border border-border bg-background px-1.5 text-end font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
 									/>
 									<input
 										type="text"
@@ -987,7 +987,7 @@ function CustomEndpointEditor({
 										aria-label={`${m.id} max output tokens`}
 										data-testid={pinTestid("custom-pin-maxtokens", m.id)}
 										disabled={pinsBusy}
-										className="h-7 w-20 shrink-0 rounded-sm border border-border bg-background px-1.5 text-right font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+										className="h-7 w-20 shrink-0 rounded-sm border border-border bg-background px-1.5 text-end font-mono text-[11px] text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
 									/>
 									<select
 										value={d.reasoning}
@@ -1016,7 +1016,7 @@ function CustomEndpointEditor({
 							onClick={() => void savePins()}
 							disabled={pinsBusy || !dirty}
 							data-testid="custom-pins-save"
-							className="ml-auto shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
+							className="ms-auto shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
 						>
 							{pinsBusy ? "Saving…" : "Save limits"}
 						</button>
@@ -1027,7 +1027,7 @@ function CustomEndpointEditor({
 				{!setup && models.length > 0 && <p data-testid="custom-budget-help">Budget pins do not resize backend context. Blank uses reported limits, then fallback (8192 context / 4096 output). Custom pricing is unknown.</p>}
 				<p data-testid="custom-reasoning-help">Reasoning support is a capability declaration. The effort picker’s Off may not disable a custom backend’s default thinking.</p>
 			</div>
-			{(error || pinsError) && <button type="button" data-testid="custom-reload" onClick={() => void onReload()} className="text-left text-xs underline">Reload configuration</button>}
+			{(error || pinsError) && <button type="button" data-testid="custom-reload" onClick={() => void onReload()} className="text-start text-xs underline">Reload configuration</button>}
 			{error && (
 				<p role="alert" data-testid="custom-error" className="text-xs text-red-500">
 					{error}

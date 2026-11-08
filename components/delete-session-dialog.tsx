@@ -208,7 +208,7 @@ export function DeleteSessionBody({
 						data-testid="delete-retry"
 						onClick={onRun}
 						disabled={busy}
-						className="ml-3 text-xs text-foreground underline-offset-2 hover:underline disabled:opacity-40"
+						className="ms-3 text-xs text-foreground underline-offset-2 hover:underline disabled:opacity-40"
 					>
 						Try again
 					</button>

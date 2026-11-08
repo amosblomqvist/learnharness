@@ -230,7 +230,7 @@ export function MermaidOverlay({
 					onClick={onClose}
 					aria-label="Close"
 					data-testid="mermaid-overlay-close"
-					className="ml-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					className="ms-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 				>
 					<XIcon className="size-4" />
 				</button>
@@ -254,7 +254,7 @@ export function MermaidOverlay({
 				) : svg ? (
 					<>
 						<div
-							className="absolute top-0 left-0 origin-top-left"
+							className="absolute top-0 start-0 origin-top-left"
 							style={{
 								width: `${box.w}px`,
 								transform: `translate(${view.x}px, ${view.y}px) scale(${view.zoom})`,

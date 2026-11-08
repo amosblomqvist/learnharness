@@ -5,6 +5,7 @@ import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import { useLocale } from "@/lib/i18n/provider";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -139,6 +140,7 @@ export function Composer({
 	 *  empty-Enter share it. */
 	onNext?: () => void;
 }) {
+	const { t } = useLocale();
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
@@ -203,11 +205,11 @@ export function Composer({
 					<button
 						type="submit"
 						data-testid="next-problem-button"
-						aria-label="Next problem"
+						aria-label={t("composer.nextProblem")}
 						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-green-600 px-4 font-ui text-xs font-medium uppercase tracking-wide text-white transition-colors hover:bg-green-500"
 					>
-						Next problem
-						<ArrowRightIcon className="size-4" />
+						{t("composer.nextProblem")}
+						<ArrowRightIcon className="size-4 rtl-flip" />
 					</button>
 				) : (
 					<button
@@ -221,7 +223,7 @@ export function Composer({
 								: "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40",
 						)}
 					>
-						{busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5" />}
+						{busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5 rtl-flip" />}
 					</button>
 				)}
 		</form>

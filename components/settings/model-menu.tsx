@@ -129,7 +129,7 @@ export function ThinkingMenuList({
 						type="button"
 						data-testid={`thinking-option-${level}`}
 						onClick={() => onPick(level)}
-						className={`flex items-center justify-between rounded-lg px-2 py-1.5 text-left transition-colors hover:bg-muted ${
+						className={`flex items-center justify-between rounded-lg px-2 py-1.5 text-start transition-colors hover:bg-muted ${
 							level === effectiveLevel ? "bg-muted/60 text-card-foreground" : "text-card-foreground"
 						}`}
 					>
@@ -220,7 +220,7 @@ export function ProviderMenuList({
 							data-testid={`provider-option-${p.id.replace(/[^a-z0-9-]/gi, "_")}`}
 							data-idx={i}
 							onClick={() => onPick(p)}
-							className={`flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted ${
+							className={`flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-start outline-none transition-colors hover:bg-muted ${
 								i === menuIdx ? "bg-accent/40 ring-1 ring-inset ring-border" : ""
 							}`}
 						>
@@ -352,7 +352,7 @@ export function FontMenuList({
 									data-testid={isDefault ? "font-option-default" : `font-option-${family.replace(/[^a-z0-9-]/gi, "_")}`}
 									data-idx={i}
 									onClick={() => onPick(family)}
-									className={`flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted ${
+									className={`flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-start outline-none transition-colors hover:bg-muted ${
 										i === menuIdx ? "bg-accent/40 ring-1 ring-inset ring-border" : ""
 									}${effective && i !== menuIdx ? " bg-muted/60" : ""}`}
 								>
@@ -369,7 +369,7 @@ export function FontMenuList({
 							data-testid="font-option-custom"
 							data-idx={0}
 							onClick={() => onPick(customFamily)}
-							className={`flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-left outline-none transition-colors hover:bg-muted ${
+							className={`flex w-full items-center justify-between gap-3 rounded-lg px-2 py-1.5 text-start outline-none transition-colors hover:bg-muted ${
 								menuIdx === 0 ? "bg-accent/40 ring-1 ring-inset ring-border" : ""
 							}`}
 						>
