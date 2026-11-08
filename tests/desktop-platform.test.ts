@@ -173,9 +173,23 @@ describe("workflow action versions", () => {
 	type Workflow = { jobs: Record<string, { steps: Step[] }> };
 	const yaml = require("js-yaml") as { load(source: string): Workflow };
 
+	/** Actions are pinned as `owner/action@<commit sha> # vX.Y.Z`; YAML drops the
+	 *  comment, so the major comes from the raw lines. Returns `owner/action@vX`. */
+	function pinnedMajor(source: string, uses: string): string {
+		const [name, ref] = uses.split("@");
+		assert.match(ref ?? "", /^[0-9a-f]{40}$/, `${uses} must be pinned to a full commit SHA`);
+		const escaped = uses.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+		const lines = source.split("\n").filter(line => new RegExp(`uses:\\s*${escaped}(\\s|$)`).test(line));
+		const majors = new Set(lines.map(line => line.match(/#\s*(v\d+)\.\d+\.\d+\s*$/)?.[1]));
+		assert.ok(lines.length > 0 && !majors.has(undefined), `${uses} needs a "# vX.Y.Z" version comment`);
+		assert.equal(majors.size, 1, `${uses} has conflicting version comments`);
+		return `${name}@${[...majors][0]}`;
+	}
+
 	for (const filename of ["ci.yml", "release.yml"]) {
 		it(`${filename} uses supported Action runtimes without changing the app's Node 26`, () => {
-			const workflow = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
+			const source = readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8");
+			const workflow = yaml.load(source);
 			const expected = ["actions/checkout@v7", "actions/setup-node@v7"];
 			if (filename === "release.yml") {
 				expected.push("actions/github-script@v9", "actions/upload-artifact@v7", "maxim-lobanov/setup-xcode@v1");
@@ -184,13 +198,14 @@ describe("workflow action versions", () => {
 			for (const job of Object.values(workflow.jobs)) {
 				for (const step of job.steps) {
 					if (!step.uses) continue;
-					assert.ok(expected.includes(step.uses), `unexpected Action reference: ${step.uses}`);
-					observed.add(step.uses);
-					if (step.uses === "actions/setup-node@v7") {
+					const action = pinnedMajor(source, step.uses);
+					assert.ok(expected.includes(action), `unexpected Action reference: ${step.uses}`);
+					observed.add(action);
+					if (action === "actions/setup-node@v7") {
 						assert.equal(step.with?.["node-version"], "26");
 						assert.equal(step.with?.cache, "npm");
 					}
-					if (step.uses === "actions/upload-artifact@v7") {
+					if (action === "actions/upload-artifact@v7") {
 						assert.equal(step.with?.archive ?? true, true, "multi-file installers remain zipped artifacts");
 					}
 				}
@@ -274,7 +289,7 @@ describe("desktop release workflow", () => {
 		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
 		assert.equal(mac?.builder_args, "--mac --arm64");
 		assert.equal(packaging["runs-on"], "${{ matrix.os }}");
-		const xcodeIndex = packaging.steps.findIndex(step => step.uses === "maxim-lobanov/setup-xcode@v1");
+		const xcodeIndex = packaging.steps.findIndex(step => step.uses?.startsWith("maxim-lobanov/setup-xcode@"));
 		assert.ok(xcodeIndex >= 0);
 		const xcode = packaging.steps[xcodeIndex];
 		assert.equal(xcode?.if, "runner.os == 'macOS'");
