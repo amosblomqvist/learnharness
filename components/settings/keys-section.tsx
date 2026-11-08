@@ -18,9 +18,14 @@
  *  - Providers groups API keys, subscriptions, dictation and search.
  *    Unknown variables stay masked/read-only at the end of Model API keys.
  *
- * API: GET /api/keys (masked statuses + the providers array), PUT
- * /api/keys/:id (shape-gated 400s land inline), DELETE. Saves take
- * effect immediately. Plaintext never returns from the store.
+ * The global Pi setup gets its own group beneath: the switch (on by
+ * default, locked off without a pi CLI), the directory, and the providers
+ * Pi supplies — read-only, apart from the app's own rows above, which
+ * always take priority over them.
+ *
+ * API: GET /api/keys (masked statuses + the providers array + the Pi
+ * setup), PUT /api/keys/:id (shape-gated 400s land inline), DELETE. Saves
+ * take effect immediately. Plaintext never returns from the store.
  */
 
 import { useEffect, useRef, useState } from "react";
@@ -33,8 +38,11 @@ import {
 	type AuthKeyStatus,
 	type CustomModel,
 	type CustomModelOverride,
+	type PiProviderStatus,
+	type PiSettings,
+	type PiSetupStatus,
 } from "@/src/core";
-import { SettingsGroup } from "./controls.tsx";
+import { CommitInput, SettingsGroup, SettingsRow, Toggle } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
 import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
@@ -53,6 +61,7 @@ export interface ProviderKeyInfo {
 interface KeysResponse {
 	keys: AuthKeyStatus[];
 	providers?: ProviderKeyInfo[];
+	pi?: PiSetupStatus;
 }
 
 /** The custom endpoint's non-secret status (GET /api/custom-provider). */
@@ -372,11 +381,18 @@ export function KeysSection({
 	 *  while mounted too — the settings dialog's while-open retarget
 	 *  pattern. undefined = nothing seeded. */
 	initialRow,
+	pi,
+	onPiChange,
 }: {
 	initialRow?: string;
+	/** The settings record's pi section (the switch + directory). */
+	pi?: PiSettings;
+	/** Writes the pi section; the section reloads after it lands. */
+	onPiChange?: (next: PiSettings) => Promise<void>;
 }) {
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
+	const [piStatus, setPiStatus] = useState<PiSetupStatus | undefined>(undefined);
 	const [loading, setLoading] = useState(true);
 	/** The unfolded row (its id), null = all folded. Seeded by the
 	 *  deep-link (initialRow) and re-followed when it retargets. */
@@ -414,6 +430,7 @@ export function KeysSection({
 			const body = (await fetch("/api/keys").then((r) => r.json())) as KeysResponse;
 			setStatuses(body.keys ?? []);
 			if (body.providers) setProviders(body.providers);
+			setPiStatus(body.pi);
 		} catch {
 			setStatuses([]);
 		} finally {
@@ -578,6 +595,18 @@ export function KeysSection({
 			<SettingsGroup label="External CLI" testid="group-external-cli">
 				<ClaudeCodeInstallationStatus />
 			</SettingsGroup>
+
+			{piStatus && onPiChange && (
+				<PiSetupGroup
+					status={piStatus}
+					dir={pi?.dir ?? ""}
+					onChange={async (next) => {
+						await onPiChange({ ...pi, ...next });
+						await reload();
+						notifySettingsSaved("keys");
+					}}
+				/>
+			)}
 
 			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
 				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
@@ -1034,5 +1063,80 @@ function CustomEndpointEditor({
 				</p>
 			)}
 		</div>
+	);
+}
+
+/** A Pi-supplied provider's status line, e.g. "login · pi" or
+ *  "3 models · pi". Pure — exported for tests. */
+export function piProviderLine(p: PiProviderStatus): string {
+	if (p.overridden) return "app key wins";
+	if (!p.usable) return "no usable key";
+	const what = p.kind === "login" ? "login" : p.kind === "models" ? `${p.models ?? 0} models` : "api key";
+	return `${what} · pi`;
+}
+
+/** The global Pi setup group: the switch, the directory, and the
+ *  providers Pi supplies beside the app's own (read-only). */
+export function PiSetupGroup({
+	status,
+	dir,
+	onChange,
+}: {
+	status: PiSetupStatus;
+	/** The stored directory ("" = the default). */
+	dir: string;
+	onChange: (next: PiSettings) => Promise<void>;
+}) {
+	return (
+		<SettingsGroup label="From your Pi setup" testid="group-pi">
+			<SettingsRow
+				label="Use Pi's providers and models"
+				hint={
+					status.available
+						? "Adds your Pi providers and models alongside the app's own — providers set up above always take priority. Pi handles token refresh and credential storage; the app never writes your Pi config."
+						: "Needs the pi CLI — it was not found on your PATH."
+				}
+				dimmed={!status.available}
+				testid="row-pi-enabled"
+			>
+				<Toggle
+					checked={status.enabled}
+					disabled={!status.available}
+					label="use pi setup"
+					onChange={(on) => void onChange({ enabled: on })}
+				/>
+			</SettingsRow>
+			<SettingsRow
+				label="Pi config directory"
+				hint={
+					!status.enabled
+						? undefined
+						: status.found
+							? `Reading ${status.resolvedDir}`
+							: `No Pi config found in ${status.resolvedDir}`
+				}
+				dimmed={!status.enabled}
+				testid="row-pi-dir"
+			>
+				<CommitInput
+					value={dir}
+					placeholder="~/.pi"
+					ariaLabel="Pi config directory"
+					testid="pi-dir-input"
+					onCommit={(next) => void onChange({ dir: next || null })}
+				/>
+			</SettingsRow>
+			{status.enabled &&
+				status.providers.map((p) => (
+					<div
+						key={p.id}
+						data-testid={`pi-provider-${p.id}`}
+						className={`flex items-center justify-between gap-3 px-1 py-1.5 ${p.overridden || !p.usable ? "opacity-40" : ""}`}
+					>
+						<span className="font-ui text-xs text-foreground">{p.label}</span>
+						<span className="font-mono text-[11px] text-muted-foreground">{piProviderLine(p)}</span>
+					</div>
+				))}
+		</SettingsGroup>
 	);
 }

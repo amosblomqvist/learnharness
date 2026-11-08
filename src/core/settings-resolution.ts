@@ -39,6 +39,7 @@ import {
 	type CompactionSettings,
 	type CustomModel,
 	type CustomModelOverride,
+	type PiSettings,
 	type GraphSettings,
 	type ModelSlot,
 	type ModelSlotName,
@@ -101,6 +102,8 @@ export interface EffectiveSettings {
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
 	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
+	/** The global Pi setup switch (default on, dir null = ~/.pi). */
+	pi: Required<PiSettings>;
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -235,6 +238,10 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			models: record?.customProvider?.models ?? [],
 			overrides: record?.customProvider?.overrides ?? {},
 			manualModels: record?.customProvider?.manualModels ?? [],
+		},
+		pi: {
+			enabled: record?.pi?.enabled ?? FACTORY_SETTINGS.pi.enabled,
+			dir: record?.pi?.dir ?? FACTORY_SETTINGS.pi.dir,
 		},
 	};
 }

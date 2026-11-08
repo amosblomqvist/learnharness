@@ -1,3 +1,4 @@
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -145,3 +146,11 @@ export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
 export const AUTH_FILE = process.env.LH_AUTH_FILE
 	? path.resolve(process.env.LH_AUTH_FILE)
 	: path.join(ROOT, "auth.json");
+
+/**
+ * THE GLOBAL PI SETUP's default location: Pi's home (~/.pi), or wherever
+ * PI_CODING_AGENT_DIR points Pi — used while Settings → Keys names no
+ * directory. The store accepts either Pi's home or its agent dir
+ * (src/store/pi-global.ts).
+ */
+export const PI_DEFAULT_DIR = process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi");
