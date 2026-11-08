@@ -32,6 +32,7 @@ import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { CacheRetention } from "@earendil-works/pi-ai";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
+import { CODEX_PROVIDER } from "./contracts/codex.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
@@ -161,10 +162,11 @@ export interface ProviderKeyMissing {
  * (the label prefix varies by provider). */
 const PROVIDER_KEY_MISSING_TAIL = "key is set — add one in Settings → Keys";
 const CLAUDE_CODE_UNAVAILABLE = "Claude Code is unavailable. Enable and set it up in Settings → Providers.";
+const CODEX_UNAVAILABLE = "Codex is unavailable. Enable and sign in in Settings → Providers.";
 export function providerKeyMissing(provider: string, slots: ModelSlotName[]): ProviderKeyMissing {
 	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
 	return {
-		error: provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_UNAVAILABLE : `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
+		error: provider === CODEX_PROVIDER ? CODEX_UNAVAILABLE : provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_UNAVAILABLE : `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
 		code: PROVIDER_KEY_MISSING_CODE,
 		provider,
 		slots,
@@ -175,7 +177,7 @@ export function providerKeyMissing(provider: string, slots: ModelSlotName[]): Pr
  * scary-error) — the envelope's home module owns the string so the
  * writer and the matcher can never drift. */
 export function isProviderKeyRefusal(error: string | undefined): boolean {
-	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CLAUDE_CODE_UNAVAILABLE);
+	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CLAUDE_CODE_UNAVAILABLE || error === CODEX_UNAVAILABLE);
 }
 /** The typed throw for in-process seams (extraction pipeline) — the
  * ProviderKeyMissing sibling of ModelsNotConfiguredError: callers catch
@@ -476,6 +478,7 @@ export interface UserSettings {
 	dictation?: DictationSettings;
 	/** Explicit app-wide opt-in; absent/invalid is off, including older records. */
 	claudeCode?: { enabled?: boolean };
+	codex?: { enabled?: boolean };
 	agent?: AgentSettings;
 	/** The strong/cheap/vision model slots (model slots wave, 2026-09-20). */
 	models?: ModelsSettings;
@@ -827,9 +830,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 			? { language: (raw as DictationSettings).language }
 			: {};
 	}
-	if (r.claudeCode !== undefined) {
-		const raw = r.claudeCode;
-		out.claudeCode = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+	for (const section of ["claudeCode", "codex"] as const) {
+		if (r[section] === undefined) continue;
+		const raw = r[section];
+		out[section] = raw !== null && typeof raw === "object" && !Array.isArray(raw)
 			&& typeof (raw as Record<string, unknown>).enabled === "boolean"
 			? { enabled: (raw as { enabled: boolean }).enabled } : {};
 	}

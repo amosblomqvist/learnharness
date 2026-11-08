@@ -37,6 +37,7 @@ import {
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
 import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
+import { CodexConnection } from "./codex-connection.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -576,6 +577,7 @@ export function KeysSection({
 			</SettingsGroup>
 
 			<SettingsGroup label="External CLI" testid="group-external-cli">
+				<CodexConnection />
 				<ClaudeCodeInstallationStatus />
 			</SettingsGroup>
 

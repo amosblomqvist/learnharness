@@ -111,7 +111,8 @@ export function StatsBar({
 	const pricedCount = turns.length - unpriced - subscription;
 	const providers = pricing?.subscriptionProviders ?? subscriptionLabels(turns.map((turn) => turn.model));
 	const cliBilled = turns.some((turn) => turn.model.startsWith(`${CLAUDE_CODE_PROVIDER}:`));
-	const costLabel = planCostLabel(pricedCount > 0 ? cost : null, cliBilled ? [...providers, "CLI"] : providers);
+	const billingLabels = [...providers, ...(cliBilled ? ["CLI"] : []), ...(turns.some((turn) => turn.model.startsWith("codex:")) ? ["Codex plan"] : [])];
+	const costLabel = planCostLabel(pricedCount > 0 ? cost : null, billingLabels);
 
 	return (
 		<div
@@ -201,7 +202,7 @@ export function StatsBar({
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>
-													<span>{turn.model.startsWith(`${CLAUDE_CODE_PROVIDER}:`) ? "CLI" : subscriptionLabel(turn.model) ?? (c === null ? "—" : formatUsd(c))}</span>
+												<span>{turn.model.startsWith("codex:") ? "Codex plan" : turn.model.startsWith(`${CLAUDE_CODE_PROVIDER}:`) ? "CLI" : subscriptionLabel(turn.model) ?? (c === null ? "—" : formatUsd(c))}</span>
 												</span>
 											</li>
 										);

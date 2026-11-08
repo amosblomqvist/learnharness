@@ -87,7 +87,7 @@ import type {CallUsage} from "../core/contracts.ts";
 /** Fresh check only at new background-run admission; never cancel a run
  * already in progress when the opt-in is switched off. */
 function connectionBackgroundAllowed(provider: string): boolean {
-	return subscriptionBackgroundAllowed(provider) && (provider !== CLAUDE_CODE_PROVIDER || providerKeyPresent(provider));
+	return subscriptionBackgroundAllowed(provider) && (![CLAUDE_CODE_PROVIDER, "codex"].includes(provider) || providerKeyPresent(provider));
 }
 
 function settlementErrorText(error: unknown): string {

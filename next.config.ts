@@ -56,6 +56,7 @@ const nextConfig: NextConfig = {
 			"chatgpt-credentials.json*",
 			"github-copilot-credentials.json*",
 			"xai-credentials.json*",
+			"**/codex-profile/**/*",
 			".env*",
 		],
 	},

@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ModelCatalogResponse } from "@/src/core";
 import { onSettingsSaved } from "@/components/settings-signal";
+import { useNotifyHub } from "@/components/server-events";
 
 // Shared stale-while-revalidate catalog. Metadata refreshes retain the last
 // good snapshot; connection changes clear selectable models immediately.
@@ -32,23 +33,29 @@ function fetchCatalog(revalidate = false): void {
 }
 
 export function useModelCatalog(): { catalog: ModelCatalogResponse | undefined; failed: boolean; refresh: () => void } {
+	const hub = useNotifyHub();
 	const [snapshot, setSnapshot] = useState(() => ({ catalog: catalogCache, failed: catalogError }));
 	useEffect(() => {
 		const first = catalogReaders.size === 0;
 		const read = () => setSnapshot({ catalog: catalogCache, failed: catalogError });
 		catalogReaders.add(read);
 		if (first) {
-			stopCatalogSignals = onSettingsSaved((section) => {
+			const invalidate = () => {
+				catalogGeneration++; catalogInflight = undefined; catalogCache = undefined;
+				fetchCatalog();
+			};
+			const offSettings = onSettingsSaved((section) => {
 				if (section === "keys" || section === "claudeCode") {
-					catalogGeneration++; catalogInflight = undefined; catalogCache = undefined;
-					fetchCatalog();
+					invalidate();
 				} else if (section === "models") fetchCatalog(true);
 			});
+			const offConnection = hub?.subscribe("subscriptions-changed", invalidate);
+			stopCatalogSignals = () => { offSettings(); offConnection?.(); };
 			fetchCatalog(true);
 		} else fetchCatalog();
 		read();
 		return () => { catalogReaders.delete(read); if (!catalogReaders.size) { stopCatalogSignals?.(); stopCatalogSignals = undefined; } };
-	}, []);
+	}, [hub]);
 	const refresh = useCallback(() => fetchCatalog(true), []);
 	return { ...snapshot, refresh };
 }

@@ -56,6 +56,7 @@ import { authStore } from "../store/auth.ts";
 import { isSubscriptionProvider, subscriptionConnected } from "../agent/subscription-connections.ts";
 import { customProviderAvailable, installCustomProviderSource } from "./custom-provider.ts";
 import { claudeCodeAvailable } from "./claude-code-config.ts";
+import { codexAvailable } from "./codex.ts";
 import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
 import { CUSTOM_AUTH_BINDING } from "../core/custom-provider-auth.ts";
 
@@ -201,6 +202,7 @@ export function providerKeyPresent(provider: string): boolean {
 	// Explicit opt-in + installation only, never authentication readiness.
 	// Consulted at admission, not inside already-running agent loops.
 	if (provider === CLAUDE_CODE_PROVIDER) return claudeCodeAvailable();
+	if (provider === "codex") return codexAvailable();
 	if (isSubscriptionProvider(provider)) return subscriptionConnected(provider);
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
 	return info ? keyValue(info.envVar) !== undefined : true;
