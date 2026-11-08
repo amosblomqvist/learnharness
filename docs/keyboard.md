@@ -93,6 +93,8 @@ While a select question is expanded and active:
   picks a single-select option. Selecting Other focuses its input; Space on an
   already selected Other row deselects it without erasing its text.
 - **←/→** adjust quiz confidence through its stops, except on **I don't know**.
+  In explain/recall text mode the slider is mouse-only: ←/→ keep their caret
+  meaning.
 - **Tab** toggles between the thinking field and walked (or first) answer row.
   Focus follows the arrow walk while in the rows. The confidence slider is not
   part of this cycle. **Shift+Tab** remains the thinking-level shortcut.

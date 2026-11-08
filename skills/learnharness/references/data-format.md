@@ -116,7 +116,7 @@ Important answer-detail fields:
 | `thinking` | Learner reasoning about the question |
 | `note` | Legacy name for that same channel; use `thinking ?? note` |
 | `readingThinking` | Separate learner thinking while reading the teaching |
-| `confidence` | Self-reported 0–100 probability that the selected quiz answer is correct |
+| `confidence` | Self-reported 0–100 probability that the selected quiz answer or the written explain/recall answer is correct |
 | `correct`, `correctIndices` | Mechanical quiz grading in displayed-option order |
 | `committed`, `explanation` | Teacher's committed answer / quiz explanation, not learner speech |
 | `answeredAt` | ISO answer timestamp |

@@ -475,8 +475,8 @@ describe("buildAnswer", () => {
 	});
 
 	// Confidence (owner, 2026-10-01): the slider's raw probability rides on
-	// real quiz answers only — never on "I don't know" (no answer, no
-	// probability), never on ask/explain. Clamped defensively.
+	// real quiz AND explain answers — never on "I don't know" (no answer, no
+	// probability), never on ask. Clamped defensively.
 	it("carries confidence on quiz answers and clamps out-of-range values", () => {
 		assert.equal(buildAnswer(quizData(), { values: ["mercury"], confidence: 90 }).confidence, 90);
 		assert.equal(buildAnswer(quizData(), { values: ["mercury"], confidence: 150 }).confidence, 100);
@@ -484,7 +484,14 @@ describe("buildAnswer", () => {
 		assert.equal(buildAnswer(quizData(), { values: ["mercury"] }).confidence, undefined);
 	});
 
-	it("drops confidence on dontKnow and on non-quiz kinds", () => {
+	it("carries confidence on explain (free recall) answers too", () => {
+		const explain = quizData({ kind: "explain", correctIndices: undefined, explanation: undefined, committedAnswer: "Because." });
+		assert.equal(buildAnswer(explain, { text: "x", confidence: 70 }).confidence, 70);
+		assert.equal(buildAnswer(explain, { text: "x", confidence: 150 }).confidence, 100);
+		assert.equal(buildAnswer(explain, { dontKnow: true, confidence: 70 }).confidence, undefined, "no answer, no probability");
+	});
+
+	it("drops confidence on dontKnow and on ask", () => {
 		assert.equal(buildAnswer(quizData(), { dontKnow: true, confidence: 70 }).confidence, undefined);
 		const ask = quizData({ kind: "ask", correctIndices: undefined, explanation: undefined });
 		assert.equal(buildAnswer(ask, { other: "x", confidence: 70 }).confidence, undefined);
@@ -715,6 +722,11 @@ describe("buildAnswer / formatAnswerMessage: explain", () => {
 		assert.ok(!raw.includes("luminiferous"), "the commitment must not ride the result");
 		assert.ok(!("committed" in compact));
 		assert.ok(!("questionText" in compact));
+	});
+
+	it("compactAnswerForModel (explain): his stated confidence rides the result", () => {
+		const compact = compactAnswerForModel(buildAnswer(explainQD(), { text: "Aether, probably.", confidence: 30 }));
+		assert.equal(compact.confidence, 30);
 	});
 
 });

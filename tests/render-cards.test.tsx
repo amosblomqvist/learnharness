@@ -264,6 +264,18 @@ describe("render smoke tests", () => {
 		assert.match(html, /Your answer/, "labeled as the answer");
 		assert.ok(!html.includes('data-testid="thinking-field"'), "no thinking field in text mode (v1)");
 		assert.ok(!html.includes("⌘/Ctrl"), "no dump shortcut hint — Enter already submits");
+		assert.ok(!html.includes('data-testid="confidence-slider"'), "ask has no right answer — no probability");
+	});
+
+	it("text-mode explain carries the confidence slider, above the answer field", () => {
+		const html = renderDock({
+			toolName: "explain",
+			toolCallId: "e2",
+			input: { question: "Why does the null result matter?", correctAnswer: "It ruled out the aether." } as never,
+		});
+		assert.ok(html.includes('data-testid="confidence-slider"'), "free recall states a probability too");
+		assert.ok(html.includes("50%"), "resting at the coin flip, same default as quiz");
+		assert.ok(html.indexOf("confidence-slider") < html.indexOf('data-testid="answer-field"'), "above the field");
 	});
 
 	it("AnsweredCard grades quiz answers (✓/✗ + explanation)", () => {
@@ -297,6 +309,23 @@ describe("render smoke tests", () => {
 		const ask = buildAnswer(askQD(), { other: "Shaky" });
 		const askHtml = renderToStaticMarkup(<AnsweredCard answer={ask} />);
 		assert.ok(!askHtml.includes("answered-confidence"), "ask never had one");
+	});
+
+	it("AnsweredCard shows the rail on explain answers with confidence too", () => {
+		const explainQD: QuestionData = {
+			id: "e1",
+			kind: "explain",
+			question: "Explain why the null result matters.",
+			mode: "text",
+			options: [],
+			committedAnswer: "It ruled out the luminiferous aether.",
+			createdAt: new Date().toISOString(),
+		};
+		const html = renderToStaticMarkup(
+			<AnsweredCard answer={buildAnswer(explainQD, { text: "Something about light?", confidence: 70 })} />,
+		);
+		assert.match(html, /data-testid="answered-confidence"/);
+		assert.match(html, /70%/);
 	});
 
 	it("AnsweredCard renders the learner's own Other answer AS an option row", () => {
