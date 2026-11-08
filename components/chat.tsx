@@ -1043,9 +1043,10 @@ export function Chat({
 	const closeSideThreadRef = useRef(closeSideThread);
 	closeSideThreadRef.current = closeSideThread;
 	const toggleQuestionThread = useCallback(() => {
+		if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller)) return;
 		if (sideThreadOpenRef.current) closeSideThreadRef.current();
 		else openSideThread({ anchor: { kind: "composer" }, questionCallId: pendingRef.current?.toolCallId });
-	}, [openSideThread]);
+	}, [controller, openSideThread]);
 	useEffect(() => {
 		window.addEventListener(kbdEventForChat("toggle-question-thread"), toggleQuestionThread);
 		return () => window.removeEventListener(kbdEventForChat("toggle-question-thread"), toggleQuestionThread);

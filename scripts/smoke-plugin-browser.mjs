@@ -55,6 +55,96 @@ async function chromeExecutable(supplied) {
 		: "Plugin browser smoke: Chrome stable is unavailable. Supply options.executablePath pointing to an installed browser; this smoke never downloads Chromium.");
 }
 
+/** Page-origin pickers own the main pane, never the sidebar or a modal. */
+export async function assertPaneKnowledgePicker(page) {
+	const geometry = await page.$eval(KNOWLEDGE_OVERLAY, overlay => {
+		const box = element => { const { x, y, width, height } = element.getBoundingClientRect(); return { x, y, width, height }; };
+		const main = document.querySelector("main"), sidebar = document.querySelector("aside");
+		const pane = overlay.closest('[data-plugin-knowledge-picker-pane]');
+		const side = sidebar.getBoundingClientRect();
+		const hit = document.elementFromPoint(side.left + side.width / 2, side.top + Math.min(side.height / 2, 150));
+		return { ...box(overlay), main: box(main), inMain: main.contains(overlay), paneOwned: pane?.parentElement === main,
+			region: pane?.getAttribute("role"), popupOwner: pane?.querySelector('[data-interaction-popup-host]')?.getAttribute('data-interaction-popup-host'),
+			modal: !!overlay.closest('[role="dialog"]'), isolated: !!overlay.closest('[inert], [aria-hidden="true"]'),
+			coversSidebar: overlay.contains(hit), sidebarHit: sidebar.contains(hit), sidebarIsolated: !!sidebar.closest('[inert], [aria-hidden="true"]'),
+			focused: overlay.contains(document.activeElement), count: document.querySelectorAll('[data-testid="chain-table-overlay"]').length };
+	});
+	assert.equal(geometry.count, 1, "Page picker must reuse exactly one shared overlay");
+	assert.equal(geometry.inMain && geometry.paneOwned, true, "Page picker must belong to the host's main-pane view");
+	assert.equal(geometry.region, "region"); assert.equal(geometry.popupOwner, "knowledge-picker", "Pane owns its popup host");
+	assert.equal(geometry.modal || geometry.isolated, false, "Eligible page picker must NOT acquire a modal boundary");
+	for (const dimension of ["x", "y", "width", "height"]) assert.ok(Math.abs(geometry[dimension] - geometry.main[dimension]) <= 1, `Page picker must fill only the main pane: ${dimension}`);
+	assert.equal(geometry.coversSidebar || geometry.sidebarIsolated, false, "Page picker must not cover or isolate the sidebar");
+	assert.equal(geometry.sidebarHit && geometry.focused, true, "Sidebar remains hit-testable while picker owns initial content focus");
+	return geometry;
+}
+
+/** Modal-origin assertions stay strict; never reuse these for page origins. */
+export async function assertModalKnowledgePicker(page) {
+	const geometry = await page.$eval(KNOWLEDGE_OVERLAY, overlay => {
+		const bounds = overlay.getBoundingClientRect();
+		const modal = overlay.closest('[role="dialog"][data-interaction-layer]');
+		const sidebar = document.querySelector("aside");
+		const side = sidebar.getBoundingClientRect();
+		const hit = document.elementFromPoint(side.left + side.width / 2, side.top + Math.min(side.height / 2, 150));
+		return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+			viewportWidth: innerWidth, viewportHeight: innerHeight, modal: !!modal, active: modal?.getAttribute("aria-modal") === "true",
+			inMain: !!overlay.closest("main"), coversSidebar: overlay.contains(hit), sidebarIsolated: !!sidebar.closest('[inert], [aria-hidden="true"]') };
+	});
+	assert.equal(geometry.modal && geometry.active, true, "Picker must use the shared active semantic modal boundary");
+	assert.equal(geometry.inMain, false, "Picker must not remain portaled beneath a content-area z40 surface");
+	for (const [dimension, value] of Object.entries({ x: 0, y: 0, width: geometry.viewportWidth, height: geometry.viewportHeight })) assert.ok(Math.abs(geometry[dimension] - value) <= 1, `Picker must fill the viewport: ${dimension}`);
+	assert.equal(geometry.coversSidebar && geometry.sidebarIsolated, true, "The full-window picker must cover and isolate the sidebar");
+	return geometry;
+}
+
+/** Permanent real registry → Chat regression, independently callable without
+ * the broad model/worker campaign. Caller supplies existing public actions. */
+export async function verifySessionHelperShortcutOwnership({ page, chord, openSurface, closeSurface }) {
+	const helperSelector = '[data-testid="side-thread-popover"]';
+	const inputSelector = '[data-testid="side-thread-input"]';
+	const nativeEntry = '[data-testid="side-conversation-button"]';
+	const draft = "Registry shortcut retained helper draft";
+	assert.equal(await page.$(helperSelector), null, "Start with the native helper closed");
+	await page.focus(nativeEntry); await chord("j");
+	await page.waitForSelector(helperSelector, { visible: true });
+	await page.locator(inputSelector).fill(draft);
+	const helper = await page.$(helperSelector);
+	try {
+		await openSurface();
+		await page.waitForFunction(() => !!document.activeElement?.closest('[data-plugin-session-surface]'));
+		assert.equal(await helper.evaluate(node => node.isConnected && !!node.closest('[inert], [aria-hidden="true"]')), true, "Same open native helper starts covered");
+		await chord("j");
+		// Let the real command's async finishFor/React close settle on the RED
+		// baseline; checking immediately after dispatch can hide the regression.
+		await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		const covered = await helper.evaluate((node, { helperSelector, inputSelector }) => ({
+			same: node.isConnected && document.querySelector(helperSelector) === node,
+			covered: !!node.closest('[inert], [aria-hidden="true"]'), draft: node.querySelector(inputSelector)?.value,
+			surfaceOwnsFocus: !!document.activeElement?.closest('[data-plugin-session-surface]'),
+		}), { helperSelector, inputSelector });
+		assert.equal(covered.same, true, "Registry Mod+J must not close/unmount a covered Chat helper");
+		assert.equal(covered.covered && covered.surfaceOwnsFocus, true); assert.equal(covered.draft, draft);
+		await closeSurface();
+		await page.waitForSelector('[data-plugin-session-surface]', { hidden: true });
+		assert.equal(await helper.evaluate(node => node.isConnected && !node.closest('[inert], [aria-hidden="true"]')), true);
+		await page.focus(nativeEntry); await chord("j");
+		await page.waitForSelector(helperSelector, { hidden: true });
+		assert.equal(await helper.evaluate(node => node.isConnected), false, "Eligible registry Mod+J closes normally");
+		await openSurface();
+		await page.waitForFunction(() => !!document.activeElement?.closest('[data-plugin-session-surface]'));
+		await chord("j");
+		await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+		assert.equal(await page.$(helperSelector), null, "Registry Mod+J cannot open an inactive native helper either");
+		await closeSurface(); await page.waitForSelector('[data-plugin-session-surface]', { hidden: true });
+		await page.focus(nativeEntry); await chord("j");
+		await page.waitForSelector(helperSelector, { visible: true });
+		assert.equal(await page.$eval(inputSelector, input => input.value), draft, "Eligible reopen retains the exact draft");
+		await chord("j"); await page.waitForSelector(helperSelector, { hidden: true });
+		return { covered, coveredClosedStaysClosed: true, eligibleOpenCloseReopen: true, draftRetained: true };
+	} finally { await helper.dispose(); }
+}
+
 /** @param {string} url An already-running disposable server's loopback origin.
  * @param {{executablePath?: string, scratchDirectory?: string, headers?: Record<string, string>, timeoutMs?: number}} [options]
  * @returns {Promise<object>} Full console, network, RPC, and assertion evidence.
@@ -252,23 +342,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.waitForSelector(`${KNOWLEDGE_OVERLAY} [data-testid="add-source-folder"]`, { visible: true });
 		await assertFullWindowPicker();
 	};
-	const assertFullWindowPicker = async () => {
-		const geometry = await page.$eval(KNOWLEDGE_OVERLAY, overlay => {
-			const bounds = overlay.getBoundingClientRect();
-			const modal = overlay.closest('[role="dialog"][data-interaction-layer]');
-			const sidebar = document.querySelector("aside");
-			const side = sidebar.getBoundingClientRect();
-			const hit = document.elementFromPoint(side.left + side.width / 2, side.top + Math.min(side.height / 2, 150));
-			return { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
-				viewportWidth: innerWidth, viewportHeight: innerHeight, modal: !!modal, active: modal?.getAttribute("aria-modal") === "true",
-				inMain: !!overlay.closest("main"), coversSidebar: overlay.contains(hit), sidebarIsolated: !!sidebar.closest('[inert], [aria-hidden="true"]') };
-		});
-		assert.equal(geometry.modal && geometry.active, true, "Picker must use the shared active semantic modal boundary");
-		assert.equal(geometry.inMain, false, "Picker must not remain portaled beneath a content-area z40 surface");
-		for (const [dimension, value] of Object.entries({ x: 0, y: 0, width: geometry.viewportWidth, height: geometry.viewportHeight })) assert.ok(Math.abs(geometry[dimension] - value) <= 1, `Picker must fill the viewport: ${dimension}`);
-		assert.equal(geometry.coversSidebar && geometry.sidebarIsolated, true, "The full-window picker must cover and isolate the sidebar");
-		return geometry;
-	};
+	const assertFullWindowPicker = () => assertModalKnowledgePicker(page);
 	const capturePickerOrigin = async (scope, draft) => {
 		const root = `[data-smoke-picker-scope="${scope}"]`;
 		const selector = `${root} [data-smoke-picker-draft="${scope}"]`;
@@ -601,7 +675,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 				sharedDragHeader: header.classList.contains("lh-drag"), counts: header.textContent };
 		}, KNOWLEDGE_OVERLAY);
 		const geometry = evidence.knowledgeBounds;
-		evidence.knowledgeModalBounds = await assertFullWindowPicker();
+		evidence.knowledgePaneBounds = await assertPaneKnowledgePicker(page);
 		assert.equal(geometry.sharedDragHeader, true);
 		assert.equal(geometry.header.height, 60, "Picker must retain the standard TopBar");
 		assert.equal(geometry.header.y, 0);
@@ -648,7 +722,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await expandKnowledge(`cluster-toggle-${KNOWLEDGE.sourceId}`);
 		assert.equal(await page.$eval(`[data-testid="chain-checkbox-${KNOWLEDGE.chainId}"]`, input => input.checked), false);
 		await screenshot("knowledge-cleared");
-		evidence.assertions.push("Public controlled knowledge picker reuses native bubble and full-window modal ChainTableOverlay/TopBar, covers and isolates the sidebar, reports chain/proposition IDs and count immediately, retains values through Done/X/Escape and clears via callback");
+		evidence.assertions.push("Public controlled page-origin knowledge picker reuses native bubble and main-pane view ChainTableOverlay/TopBar, leaves the sidebar available, reports chain/proposition IDs and count immediately, retains values through Done/X/Escape and clears via callback");
 
 		evidence.stage = "knowledge picker retains normal source rename/folder/drag editing";
 		const sourceRow = `${KNOWLEDGE_OVERLAY} [data-source-drag-row="${KNOWLEDGE.sourceId}"]`;
@@ -702,7 +776,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await health();
 		evidence.assertions.push("The same picker permits actual source rename (restored), folder creation, native HTML5 drag into that folder and back to root; dedicated inert notes source leaves transcript identity/title untouched");
 		// Leave it OPEN: the existing global Graph/Home chord must dispose the
-		// modal with the view signal, without interacting with the inert sidebar
+		// pane with the view signal, without requiring a sidebar interaction
 		// or adding proof RPCs.
 
 		evidence.stage = "SPA Home navigation and view reattach";
@@ -1694,6 +1768,9 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 	assert.equal((await read(SESSION.chatId)).messages.some(message => message.lhQuestions), false, "Extension bootstrap must contain no pending question authority");
 	await page.waitForSelector(`${composer} [contenteditable="true"]`, { visible: true });
 	assert.equal(await page.$eval(send, button => button.disabled), true, "Empty ordinary native message starts disabled");
+	evidence.stage = "session helper registry shortcut ownership";
+	evidence.sessionExtensions.push({ label: evidence.stage, ...await verifySessionHelperShortcutOwnership({ page, chord, openSurface, closeSurface: () => action("close") }) });
+	evidence.stage = "session extensions: surfaces and image-only message";
 	await openSurface();
 	await page.locator(`${surface} input`).fill("Parent DOM draft survives nested coverage");
 	const parent = await page.$(`${surface} input`);
