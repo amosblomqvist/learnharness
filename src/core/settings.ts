@@ -1,3 +1,4 @@
+import { parseLocalDictation, type LocalDictationSettings } from "./local-dictation.ts";
 /**
  * THE USER SETTINGS RECORD's shape + sanitizer (settings-storage wave,
  * 2026-09-19): one versioned, DELTA-shaped record at the data-dir seam
@@ -339,6 +340,8 @@ export interface GeneralSettings {
 
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
+	provider?: "deepgram" | "local";
+	local?: LocalDictationSettings;
 	language?: DictationLanguage;
 }
 
@@ -495,7 +498,7 @@ export interface UserSettings {
 export interface FactorySettings {
 	version: number;
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
+	dictation: DictationSettings & { language: DictationLanguage };
 	appearance: {
 		mode: "dark" | "light";
 		background: string | null;
@@ -822,10 +825,14 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
-			: {};
+		out.dictation = {};
+		if (raw !== null && typeof raw === "object" && !Array.isArray(raw)) {
+			const d = raw as Record<string, unknown>;
+			if (isDictationLanguage(d.language)) out.dictation.language = d.language;
+			if (d.provider === "deepgram" || d.provider === "local") out.dictation.provider = d.provider;
+			const local = parseLocalDictation(d.local);
+			if (local) out.dictation.local = local;
+		}
 	}
 	if (r.claudeCode !== undefined) {
 		const raw = r.claudeCode;

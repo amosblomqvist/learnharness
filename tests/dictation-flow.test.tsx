@@ -39,15 +39,31 @@ class AudioGraph {
 	audioWorklet = { addModule: async () => {} };
 	createMediaStreamSource() { return { connect() {}, disconnect() {} }; }
 }
-class Worklet { port = {}; connect() {} disconnect() {} }
+class Worklet {
+	static all: Worklet[] = [];
+	tail: ArrayBuffer | undefined;
+	port = {
+		onmessage: undefined as ((event: { data: unknown }) => void) | undefined,
+		postMessage: (_message: unknown) => {
+			if (this.tail) this.emit({ type: "audio", buffer: this.tail });
+			this.emit({ type: "flushed" });
+		},
+	};
+	constructor() { Worklet.all.push(this); }
+	emit(data: unknown) { this.port.onmessage?.({ data }); }
+	connect() {} disconnect() {}
+}
 
 const globals = globalThis as Record<string, unknown>;
 let restore: (() => void) | undefined;
 let dispose: (() => Promise<void>) | undefined;
 
-async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Response>) {
+async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Response>, localMode = false) {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	const state = {
+		tokens: 0,
+		uploads: [] as { body: Uint8Array; config: unknown; signal: AbortSignal | null | undefined }[],
+		nextTranscription: undefined as Promise<Response> | undefined,
 		record: { version: 1, dictation: { language } } as UserSettings,
 		nextRead: delayedRead,
 		nextWrite: undefined as Promise<Response> | undefined,
@@ -59,6 +75,8 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 		stops: 0,
 		appends: [] as string[],
 	};
+	if (localMode) state.record.dictation = { language, provider: "local", local: { server: "llama.cpp", url: "http://localhost:8080/v1/audio/transcriptions", model: "lfm3" } };
+	Worklet.all = [];
 	Socket.all = [];
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [key, value] of Object.entries({
@@ -71,7 +89,12 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 		WebSocket: Socket, AudioContext: AudioGraph, AudioWorkletNode: Worklet,
 		IS_REACT_ACT_ENVIRONMENT: true,
 		fetch: async (url: string, init?: RequestInit) => {
-			if (url === "/api/stt/token") return Response.json({ token: "test-token" });
+			if (url === "/api/stt/token") { state.tokens++; return Response.json({ token: "test-token" }); }
+			if (url === "/api/stt/transcribe") {
+				assert(init?.body instanceof Uint8Array);
+				state.uploads.push({ body: init.body, config: JSON.parse(decodeURIComponent(new Headers(init.headers).get("x-dictation-config")!)), signal: init.signal });
+				return state.nextTranscription ?? Response.json({ text: "local words" });
+			}
 			if (url === "/api/settings") {
 				state.reads++;
 				if (state.nextRead) { const response = state.nextRead; state.nextRead = undefined; return response; }
@@ -105,6 +128,11 @@ async function fixture(language: "pl" | "en" = "pl", delayedRead?: Promise<Respo
 	let root = createRoot(document.getElementById("root")!);
 	let firstMount = true;
 	const mount = async () => {
+		if (localMode && firstMount) {
+			function PreferenceOnly() { useDictationLanguage(); return null; }
+			await act(async () => { root.render(<PreferenceOnly />); });
+			await act(async () => { notifySettingsSaved("dictation"); });
+		}
 		await act(async () => { root.render(<Harness />); });
 		// Each fixture is a new server record. Explicitly invalidate a prior
 		// fixture's window-lifetime cache, but do not refetch on remounts.
@@ -319,4 +347,130 @@ test("microphone permission resolving after unmount immediately stops the late s
 	assert.equal(f.state.stops, 1);
 	assert.equal(Socket.all.length, 0);
 	assert.equal(isDictationActive(), false);
+});
+
+
+test("local recording never contacts Deepgram; finish drains tail and waits before one append", async () => {
+	const f = await fixture("pl", undefined, true);
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	assert.equal(f.dictation.phase, "recording");
+	assert.equal(f.state.tokens, 0);
+	assert.equal(Socket.all.length, 0);
+	const worklet = Worklet.all[0]!;
+	worklet.emit({ type: "audio", buffer: new Int16Array([1, 2]).buffer });
+	worklet.tail = new Int16Array([3]).buffer;
+	const response = deferred<Response>();
+	f.state.nextTranscription = response.promise;
+	let finished = false;
+	await act(async () => { void f.dictation.finish().then(() => { finished = true; }); });
+	assert.equal(f.dictation.phase, "stopping");
+	assert.equal(f.state.active, true);
+	assert.equal(finished, false);
+	assert.equal(f.state.stops, 1);
+	assert.equal(f.state.uploads.length, 1);
+	const upload = f.state.uploads[0]!;
+	assert.equal(upload.body.byteLength, 44 + 6);
+	assert.deepEqual([...new Int16Array(upload.body.buffer, 44)], [1, 2, 3]);
+	assert.deepEqual(f.state.appends, []);
+	await act(async () => { response.resolve(Response.json({ text: " final local words " })); });
+	assert(finished);
+	assert.deepEqual(f.state.appends, ["final local words"]);
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.tokens, 0);
+});
+
+test("Esc while uploading aborts, resolves finish, and ignores late transcription", async () => {
+	const f = await fixture("pl", undefined, true);
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	Worklet.all[0]!.emit({ type: "audio", buffer: new Int16Array([1]).buffer });
+	const response = deferred<Response>();
+	f.state.nextTranscription = response.promise;
+	let finished = false;
+	await act(async () => { void f.dictation.finish().then(() => { finished = true; }); });
+	await act(async () => { f.dictation.cancel(); });
+	assert(finished);
+	assert(f.state.uploads[0]!.signal?.aborted);
+	await act(async () => { response.resolve(Response.json({ text: "discard me" })); });
+	assert.deepEqual(f.state.appends, []);
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.tokens, 0);
+});
+
+test("local cancel during capture uploads nothing; navigation ignores an uploading run", async () => {
+	const f = await fixture("pl", undefined, true);
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	Worklet.all[0]!.emit({ type: "audio", buffer: new Int16Array([1]).buffer });
+	await act(async () => { f.dictation.cancel(); });
+	assert.equal(f.state.uploads.length, 0);
+	await act(async () => { f.dictation.toggle(); });
+	Worklet.all[1]!.emit({ type: "audio", buffer: new Int16Array([2]).buffer });
+	const response = deferred<Response>(); f.state.nextTranscription = response.promise;
+	await act(async () => { f.dictation.stop(); });
+	await f.unmount();
+	assert(f.state.uploads[0]!.signal?.aborted);
+	await act(async () => { response.resolve(Response.json({ text: "departed page" })); });
+	assert.deepEqual(f.state.appends, []);
+});
+
+test("finishing before capture is ready releases immediately and stops any late microphone", async () => {
+	const f = await fixture("pl", undefined, true);
+	await f.mount();
+	const mic = deferred<{ getTracks: () => { stop: () => void }[] }>();
+	f.state.nextMic = mic.promise;
+	await act(async () => { f.dictation.toggle(); });
+	let finished = false;
+	await act(async () => { void f.dictation.finish().then(() => { finished = true; }); });
+	assert.equal(f.dictation.phase, "idle");
+	assert(finished);
+	let stopped = false;
+	await act(async () => { mic.resolve({ getTracks: () => [{ stop() { stopped = true; } }] }); });
+	assert(stopped);
+	assert.equal(f.dictation.error, null);
+	assert.equal(f.state.uploads.length, 0);
+});
+
+test("local endpoint errors remain visible without cloud fallback", async () => {
+	const f = await fixture("pl", undefined, true);
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	Worklet.all[0]!.emit({ type: "audio", buffer: new Int16Array([1]).buffer });
+	f.state.nextTranscription = Promise.resolve(Response.json({ error: "Local transcription endpoint returned HTTP 503" }, { status: 502 }));
+	await act(async () => { await f.dictation.finish(); });
+	assert.match(f.dictation.error!, /HTTP 503/);
+	assert.deepEqual(f.state.appends, []);
+	assert.equal(f.state.tokens, 0);
+});
+
+test("a stalled worklet flush fails explicitly instead of uploading a truncated recording", async (t) => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const f = await fixture("pl", undefined, true);
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	const worklet = Worklet.all[0]!;
+	worklet.emit({ type: "audio", buffer: new Int16Array([1]).buffer });
+	worklet.port.postMessage = () => {};
+	let finished = false;
+	await act(async () => { void f.dictation.finish().then(() => { finished = true; }); });
+	await act(async () => { t.mock.timers.tick(1000); });
+	assert(finished);
+	assert.equal(f.dictation.phase, "idle");
+	assert.match(f.dictation.error!, /Could not finish microphone capture/);
+	assert.equal(f.state.uploads.length, 0);
+	assert.deepEqual(f.state.appends, []);
+});
+
+
+test("selected Local without configuration reports setup required and never falls back to cloud", async () => {
+	const f = await fixture("en", undefined, true);
+	f.state.record.dictation = { provider: "local", language: "en" };
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	assert.match(f.dictation.error!, /Configure a local dictation endpoint/);
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.state.captures, 0);
+	assert.equal(f.state.tokens, 0);
+	assert.equal(f.state.uploads.length, 0);
 });

@@ -13,7 +13,7 @@ Open **Settings → Providers** and configure a connection:
 
 Choose **Strong**, **Cheap**, and **Vision** models in Settings. There are no factory model selections. New sessions start with Strong; background roles use their assigned slots or role overrides. A model selected inside an existing session belongs to that session and does not change background-role choices.
 
-Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. Research can still fetch known URLs without a search key. Dictation has its own service key below.
+Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. Research can still fetch known URLs without a search key. Dictation can use a Deepgram service key or a local server, as described below.
 
 ## Start a session
 
@@ -27,11 +27,28 @@ Sessions are saved locally, including earlier messages when context is compacted
 
 ## Dictation
 
-1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).
-2. Add it under **Settings → Providers → Dictation** and choose the language below the key. **Multilingual** supports automatic recognition and mixed-language speech.
-3. Use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
+Open **Settings → Providers → Dictation → + Add a provider**, then choose **Deepgram** or **Local**. Each choice opens its own settings. Saved providers appear as collapsed rows; click a row to edit. Use the **Active** selector on a saved row to choose the dictation engine. Adding or editing settings never switches the active provider.
 
-Audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
+For **Deepgram**, create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant). Save the key and choose the cloud language in its editor, then select **Active** on the Deepgram row when you want to use it. **Multilingual** supports automatic recognition and mixed-language speech. Audio streams directly from your browser to Deepgram using a short-lived token. A `403 Insufficient permissions` error during token minting can mean the key's role is insufficient.
+
+For **Local**, start your own server, select its server type, and enter its base URL. Click **Connect**, then select **Active** on its saved row to use it:
+
+| Server | Example base URL | Model |
+| --- | --- | --- |
+| llama.cpp | `http://localhost:8080` | An audio-capable model such as LFM3-Audio, with its required audio components |
+| whisper.cpp | `http://localhost:8081` | A Whisper model loaded by whisper-server |
+
+Saved local dictation settings collapse into a summary row showing the server, URL, model, language, and key status. Click the row to edit the saved values. Use **Connect** or **Cancel** beneath the fields. **Delete** removes the Local configuration and its saved bearer key. Deleting an active Local provider leaves dictation unconfigured; select another provider explicitly to resume.
+
+The app appends `/v1/audio/transcriptions` for llama.cpp or `/inference` for whisper.cpp to the base URL. Full URLs ending in the selected server's standard transcription path are also accepted without duplicating that path. HTTP(S) URLs may include a proxy prefix, which is preserved before the transcription path. The optional model ID is sent with each upload; whisper.cpp normally uses the model loaded at startup. Leave the bearer key blank for a keyless server. Saved keys live in private credential storage and apply only to their exact endpoint URL; changing URLs requires entering a key for the new destination. Use **Remove key** to return to keyless access.
+
+Each provider has its own **Language** dropdown with the same search and keyboard controls. Local defaults to **Auto-detect** (`auto`). Search for a language such as French, or type a backend-specific language code and choose **Use language code**. Local changes are saved with the server configuration; Deepgram saves its language when selected. This is independent of Deepgram's language and multilingual setting; recognition quality and language support depend on the backend/model. Use an up-to-date llama.cpp build with LFM3-Audio support. The app does not install servers or download models.
+
+Use the microphone or **Mod+D** to start and stop either mode. Review the text before sending. **Esc discards the recording or pending transcript**, including an upload already in progress. Enter during dictation waits for its completion before submitting.
+
+Local mode records 16 kHz mono PCM WAV in memory and uploads it through the app server only after you stop. Recording stops at **10 minutes**; transcription has a **5-minute timeout**. Errors are shown without automatically falling back to Deepgram. The app does not save recordings to disk; the backend may have its own storage policy. Local dictation does not contact Deepgram for tokens or audio.
+
+In the desktop app, the app server runs on your machine. If LearnHarness is hosted elsewhere, `localhost` in the transcription URL refers to that hosting machine. The custom dictation endpoint is independent of your custom LLM endpoint.
 
 ## Use local files in a session
 

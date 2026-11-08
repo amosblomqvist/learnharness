@@ -1,3 +1,4 @@
+import { parseLocalDictation } from "../core/local-dictation.ts";
 /**
  * The shared settings-PUT body parsers — one seam per settings surface.
  * Extracted verbatim from the per-chat route (default-settings wave,
@@ -411,9 +412,22 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
-	if (raw.language === undefined) return { ok: true, settings: {} };
-	if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
-	return { ok: true, settings: { language: raw.language } };
+	const settings: DictationSettings = {};
+	if (raw.language !== undefined) {
+		if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
+		settings.language = raw.language;
+	}
+	if (raw.provider !== undefined) {
+		if (raw.provider !== "deepgram" && raw.provider !== "local") return { ok: false, error: "Unsupported dictation provider" };
+		settings.provider = raw.provider;
+	}
+	if (raw.local !== undefined) {
+		const local = parseLocalDictation(raw.local);
+		if (!local) return { ok: false, error: "Invalid local dictation endpoint, server, model, or language" };
+		settings.local = local;
+	}
+	// An explicitly selected provider can remain unavailable after deletion.
+	return { ok: true, settings };
 }
 
 /** The custom endpoint's per-model pins (PATCH /api/custom-provider): the

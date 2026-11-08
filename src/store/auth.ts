@@ -1,3 +1,4 @@
+import { LOCAL_DICTATION_AUTH, normalizeDictationUrl } from "../core/local-dictation.ts";
 /**
  * The AuthStore adapter (auth-keys wave, 2026-09-19): the flat {VAR: value}
  * auth.json map at config.AUTH_FILE — the SAME file the Electron app has
@@ -80,7 +81,7 @@ function readCustomMap(): Record<string, unknown> {
 	return map;
 }
 function assertOrdinaryVar(name: string): void {
-	if (name === CUSTOM_AUTH_BINDING || name === CUSTOM_PROVIDER.envVar) throw new Error("Use the custom endpoint editor");
+	if (name === LOCAL_DICTATION_AUTH || name === CUSTOM_AUTH_BINDING || name === CUSTOM_PROVIDER.envVar) throw new Error("Use the custom endpoint editor");
 }
 /** One immutable file snapshot. Keyless callers never invoke fileKey(). */
 export function readCustomAuth() {
@@ -95,5 +96,20 @@ export function writeCustomAuth(binding: CustomAuthBinding | undefined, fileKey:
 	else Object.defineProperty(map, CUSTOM_PROVIDER.envVar, { value: fileKey, enumerable: true, configurable: true, writable: true });
 	if (binding === undefined) delete map[CUSTOM_AUTH_BINDING];
 	else Object.defineProperty(map, CUSTOM_AUTH_BINDING, { value: JSON.stringify(binding), enumerable: true, configurable: true, writable: true });
+	writeMap(map);
+}
+
+/** Private key and its authorized destination are published in one atomic write. */
+export function readDictationAuth(): { url: string; key: string } | undefined {
+	const raw = readCustomMap()[LOCAL_DICTATION_AUTH];
+	if (raw === undefined) return;
+	const value = typeof raw === "string" ? JSON.parse(raw) : undefined;
+	if (!value || !normalizeDictationUrl(value.url) || typeof value.key !== "string") throw new Error("Invalid local dictation credential record");
+	return { url: normalizeDictationUrl(value.url), key: value.key };
+}
+export function writeDictationAuth(url: string, key: string): void {
+	const map = readCustomMap();
+	if (key) map[LOCAL_DICTATION_AUTH] = JSON.stringify({ url, key });
+	else delete map[LOCAL_DICTATION_AUTH];
 	writeMap(map);
 }

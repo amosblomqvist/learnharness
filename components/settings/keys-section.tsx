@@ -23,7 +23,7 @@
  * effect immediately. Plaintext never returns from the store.
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import {
 	AUTH_KEYS,
 	CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
@@ -37,18 +37,10 @@ import {
 import { SettingsGroup } from "./controls.tsx";
 import { SubscriptionConnections } from "./subscription-connections.tsx";
 import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
-import { ProviderMenuList } from "./model-menu.tsx";
-import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { DictationLanguageSetting } from "@/components/dictation-language";
-
-/** One pi-ai provider with plain API-key auth (the Platform seam —
- *  derived from pi-ai's own env-key table; no drift possible). */
-export interface ProviderKeyInfo {
-	id: string;
-	envVar: string;
-	label: string;
-}
+import { DictationSettingsControl } from "./dictation-settings";
+import { KeyTableRow, AddProviderRow, type ProviderKeyInfo } from "./provider-controls";
+export { keyStatusLine, type ProviderKeyInfo } from "./provider-controls";
 
 interface KeysResponse {
 	keys: AuthKeyStatus[];
@@ -147,225 +139,6 @@ export function providerKeyLabel(id: string, providers: readonly ProviderKeyInfo
 	return matches?.[0]?.label;
 }
 
-/** The minimal status line, e.g. "…ab12 · 64 chars" (" · env" marks an
- *  environment-owned value — the row itself is read-only then). Pure. */
-export function keyStatusLine(status: AuthKeyStatus): string {
-	if (!status.present || !status.masked) return "not set";
-	const tail = status.masked.replace(/ \((\d+) chars\)$/, "");
-	const chars = status.masked.match(/\((\d+) chars\)$/)?.[1] ?? "?";
-	return `${tail} · ${chars}${status.source === "env" ? " · env" : ""}`;
-}
-
-/** One table row: label left, tiny docs link + status right. Writable
- *  rows click-unfold an editor beneath (owner interaction); env-owned
- *  rows are dimmed and read-only (a paste box there would mislead). */
-function KeyTableRow({
-	label,
-	docsUrl,
-	status,
-	expanded,
-	onToggle,
-	onSave,
-	onDelete,
-	onCancel,
-	testid,
-}: {
-	label: string;
-	/** The "Get a key ↗" target — curated keys carry one. */
-	docsUrl?: string;
-	status: AuthKeyStatus;
-	expanded: boolean;
-	onToggle: () => void;
-	onSave: (value: string) => Promise<string | null>;
-	onDelete?: () => Promise<void>;
-	/** Folds the editor (owner, fix wave: the way OUT of a paste prompt
-	 *  must be visible — Cancel beside Save/Delete, not only Esc). */
-	onCancel: () => void;
-	testid: string;
-}) {
-	const envOwned = status.source === "env";
-	const [value, setValue] = useState("");
-	const [error, setError] = useState<string | null>(null);
-	const [busy, setBusy] = useState(false);
-
-	async function save() {
-		if (!value.trim() || busy) return;
-		setBusy(true);
-		setError(null);
-		const err = await onSave(value);
-		if (err) setError(err);
-		else setValue("");
-		setBusy(false);
-	}
-
-	// INLINE editing (owner, fix wave: "type the keys in line — more
-	// table-like"): the expanded row becomes the editor itself — label
-	// left, the paste field filling the middle, Save | Cancel (| Delete)
-	// right — instead of a second line beneath the row.
-	if (expanded && !envOwned) {
-		return (
-			<div data-testid={testid}>
-				<div className="flex items-center gap-2 rounded-sm px-1 py-1.5" data-testid={`${testid}-editor`}>
-					<span className="shrink-0 font-ui text-xs text-foreground">{label}</span>
-					<input
-						type="text"
-						value={value}
-						onChange={(e) => setValue(e.target.value)}
-						onKeyDown={(e) => {
-							if (e.key === "Enter") void save();
-						}}
-						placeholder="Paste key…"
-						aria-label={`${label} key`}
-						data-testid={`${testid}-input`}
-						disabled={busy}
-						autoFocus
-						className="h-7 min-w-0 flex-1 rounded-sm border border-border bg-background px-1.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
-					/>
-					<button
-						type="button"
-						onClick={() => void save()}
-						disabled={busy || !value.trim()}
-						data-testid={`${testid}-save`}
-						className="shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
-					>
-						Save
-					</button>
-					<button
-						type="button"
-						onClick={onCancel}
-						disabled={busy}
-						data-testid={`${testid}-cancel`}
-						className="shrink-0 text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
-					>
-						Cancel
-					</button>
-					{status.present && status.source === "file" && onDelete && (
-						<button
-							type="button"
-							onClick={() => void onDelete()}
-							disabled={busy}
-							data-testid={`${testid}-delete`}
-							className="shrink-0 text-xs text-muted-foreground/70 underline-offset-2 hover:text-red-500 hover:underline"
-						>
-							Delete
-						</button>
-					)}
-				</div>
-				{error && (
-					<p role="alert" data-testid={`${testid}-error`} className="px-1 text-xs text-red-500">
-						{error}
-					</p>
-				)}
-			</div>
-		);
-	}
-
-	return (
-		<div data-testid={testid} className={envOwned ? "opacity-40" : undefined}>
-			<button
-				type="button"
-				aria-expanded={expanded}
-				data-testid={`${testid}-row`}
-				onClick={() => !envOwned && onToggle()}
-				className={`flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left ${
-					envOwned ? "cursor-default" : "cursor-pointer transition-colors hover:bg-accent/50"
-				}`}
-			>
-				<span className="font-ui text-xs text-foreground">{label}</span>
-				<span className="flex items-center gap-2">
-					{docsUrl && (
-						<a
-							href={docsUrl}
-							target="_blank"
-							rel="noreferrer"
-							onClick={(e) => e.stopPropagation()}
-							className="text-[10px] text-muted-foreground/60 underline-offset-2 hover:text-foreground hover:underline"
-						>
-							key ↗
-						</a>
-					)}
-					<span data-testid={`${testid}-status`} className="font-mono text-[11px] text-muted-foreground">
-						{keyStatusLine(status)}
-					</span>
-				</span>
-			</button>
-			{error && (
-				<p role="alert" data-testid={`${testid}-error`} className="pl-6 text-xs text-red-500">
-					{error}
-				</p>
-			)}
-		</div>
-	);
-}
-
-/** The Add-provider control — the table's last row, the app's shared
- *  dropdown look (portaled menu, the search + arrow-walk machine). */
-function AddProviderRow({
-	addable,
-	onPick,
-}: {
-	addable: ProviderKeyInfo[];
-	onPick: (p: ProviderKeyInfo) => void;
-}) {
-	const [open, setOpen] = useState(false);
-	const anchorRef = useRef<HTMLDivElement>(null);
-
-	useEffect(() => {
-		if (!open) return;
-		const onPointerDown = (e: PointerEvent) => {
-			const target = e.target as Node;
-			if (anchorRef.current?.contains(target)) return;
-			if (target instanceof Element && target.closest("[data-lh-menu]")) return;
-			if (target instanceof Element && target.closest('[role="dialog"]')) setOpen(false);
-		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.stopPropagation();
-				setOpen(false);
-			}
-		};
-		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [open]);
-
-	return (
-		<div ref={anchorRef} className="relative">
-			<button
-				type="button"
-				aria-expanded={open}
-				data-testid="add-provider"
-				onClick={() => setOpen((v) => !v)}
-				className="flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left font-ui text-xs text-muted-foreground transition-colors hover:bg-accent/50 hover:text-foreground"
-			>
-				<span>+ Add a provider</span>
-				{addable.length > 0 && <span className="font-mono text-[11px]">{addable.length}</span>}
-			</button>
-			{open && (
-				<MenuShell
-					anchorRef={anchorRef}
-					testid="add-provider-menu"
-					preferredSide="down"
-					menuClass="flex w-72 flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
-				>
-					{/* Close on pick (owner, fix wave): a chosen provider ends
-					    the dropdown — the paste row is the next step. */}
-					<ProviderMenuList
-						providers={addable}
-						onPick={(p) => {
-							setOpen(false);
-							onPick(p);
-						}}
-					/>
-				</MenuShell>
-			)}
-		</div>
-	);
-}
-
 export function KeysSection({
 	/** A deep-linked row to unfold on arrival (zero-keys wave): the
 	 *  dictation error's click lands here on DEEPGRAM_API_KEY. Followed
@@ -380,7 +153,7 @@ export function KeysSection({
 	const [loading, setLoading] = useState(true);
 	/** The unfolded row (its id), null = all folded. Seeded by the
 	 *  deep-link (initialRow) and re-followed when it retargets. */
-	const [openRow, setOpenRow] = useState<string | null>(initialRow ?? null);
+	const [openRow, setOpenRow] = useState<string | null>(initialRow === "DEEPGRAM_API_KEY" ? null : initialRow ?? null);
 	/** The paste editor for a freshly chosen Add-provider target. */
 	const [adding, setAdding] = useState<ProviderKeyInfo | null>(null);
 	const [addError, setAddError] = useState<string | null>(null);
@@ -398,7 +171,7 @@ export function KeysSection({
 			if (e.key !== "Escape") return;
 			// A language dropdown above this editor in the dismissal stack owns
 			// the first Escape; do not swallow it at document capture phase.
-			if (document.querySelector('[data-testid="dictation-language-menu"]')) return;
+			if (document.querySelector('[data-dictation-language-menu]')) return;
 			e.preventDefault();
 			e.stopPropagation();
 			setOpenRow(null);
@@ -436,7 +209,7 @@ export function KeysSection({
 	// same while-open pattern the dialog's section nav uses) unfolds the
 	// named row; a fresh mount seeds it via the useState initializer.
 	useEffect(() => {
-		if (initialRow !== undefined) setOpenRow(initialRow);
+		if (initialRow !== undefined && initialRow !== "DEEPGRAM_API_KEY") setOpenRow(initialRow);
 	}, [initialRow]);
 
 	async function saveKey(id: string, value: string): Promise<string | null> {
@@ -579,8 +352,16 @@ export function KeysSection({
 				<ClaudeCodeInstallationStatus />
 			</SettingsGroup>
 
-			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
-				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
+			<SettingsGroup label="Dictation" testid="group-dictation">
+				<DictationSettingsControl
+					deepgram={toolRows.find((status) => status.id === "DEEPGRAM_API_KEY")!}
+					onSaveDeepgram={(value) => saveKey("DEEPGRAM_API_KEY", value)}
+					onDeleteDeepgram={() => deleteKey("DEEPGRAM_API_KEY")}
+					initialRow={initialRow}
+				/>
+			</SettingsGroup>
+			<SettingsGroup label="Search" testid="group-search">
+				{toolRows.filter((status) => status.id !== "DEEPGRAM_API_KEY").map((status) => (
 					<KeyTableRow
 						key={status.id}
 						label={status.info?.label ?? status.id}
@@ -588,29 +369,13 @@ export function KeysSection({
 						status={status}
 						expanded={openRow === status.id}
 						onToggle={() => setOpenRow(openRow === status.id ? null : status.id)}
-						onSave={async (v) => {
-							const err = await saveKey(status.id, v);
-							if (!err) setOpenRow(null);
-							return err;
-						}}
+						onSave={async (value) => { const error = await saveKey(status.id, value); if (!error) setOpenRow(null); return error; }}
 						onCancel={() => setOpenRow(null)}
 						onDelete={() => deleteKey(status.id)}
 						testid={`key-${status.id.toLowerCase()}`}
 					/>
 				))}
-				{label === "Dictation" && <>
-					<DictationLanguageSetting />
-					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
-						Create a <a
-							href="https://console.deepgram.com/"
-							target="_blank"
-							rel="noreferrer"
-							className="underline underline-offset-2 hover:text-foreground"
-						>Deepgram API key</a> with the Member role or higher, then add it above.
-					</p>
-				</>}
-			</SettingsGroup>)}
-
+			</SettingsGroup>
 		</>
 	);
 }

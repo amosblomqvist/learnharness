@@ -9,7 +9,7 @@ import { fuzzyScore } from "@/src/core";
 export function SearchMenuList<T>({
 	items, itemKey, searchTerms, compare, prioritize, isSelected, onPick, renderItem,
 	searchTestid, listTestid, optionTestid, placeholder, ariaLabel, loading, empty,
-	disabled = false,
+	disabled = false, customItem,
 }: {
 	items: readonly T[] | undefined;
 	itemKey: (item: T) => string;
@@ -30,6 +30,8 @@ export function SearchMenuList<T>({
 	loading?: string;
 	empty: string;
 	disabled?: boolean;
+	/** Optional typed choice, included in the same keyboard navigation as catalog rows. */
+	customItem?: (query: string) => T | undefined;
 }) {
 	const [query, setQuery] = useState("");
 	const [menuIdx, setMenuIdx] = useState<number | null>(null);
@@ -42,7 +44,9 @@ export function SearchMenuList<T>({
 		listRef.current?.querySelector(`[data-idx="${menuIdx}"]`)?.scrollIntoView({ block: "nearest" });
 	}, [menuIdx]);
 
-	const results = (items ?? [])
+	const custom = customItem?.(query);
+	const choices = custom !== undefined && !(items ?? []).some((item) => itemKey(item) === itemKey(custom)) ? [...(items ?? []), custom] : items ?? [];
+	const results = choices
 		.map((item) => ({ item, score: fuzzyScore(query, ...searchTerms(item)) }))
 		.filter((result) => result.score !== null)
 		.sort(
