@@ -146,6 +146,29 @@ test("real conversation wiring inherits live Strong retention without changing t
 	piModels().deleteProvider(id);
 });
 
+test("an enlarged model window keeps the live slot cache policy", async () => {
+	const id = "context-cache-fixture";
+	const faux = createFauxCore({});
+	const entry = { ...faux.getModel(), provider: id, id: "model", contextWindow: 272_000 };
+	const seen: Array<{ contextWindow: number; retention: CacheRetention | undefined }> = [];
+	const stream: StreamFunction = (model, context, options) => {
+		seen.push({ contextWindow: model.contextWindow, retention: options?.cacheRetention });
+		return faux.streamSimple(model, context, options);
+	};
+	piModels().setProvider(createProvider({ id, models: [entry], auth: { apiKey: { name: "fixture", resolve: async () => ({ auth: {} }) } }, api: { stream, streamSimple: stream } }));
+	try {
+		faux.setResponses([fauxAssistantMessage([fauxText("one")]), fauxAssistantMessage([fauxText("two")])]);
+		let retention: CacheRetention = "long";
+		const engine = piEngineForSpec({ provider: id, id: entry.id, contextWindow: 872_000 }, true, undefined, () => retention);
+		await engine.streamFn(engine.model, context).result();
+		retention = "short";
+		await engine.streamFn(engine.model, context).result();
+		assert.deepEqual(seen, [{ contextWindow: 872_000, retention: "long" }, { contextWindow: 872_000, retention: "short" }]);
+	} finally {
+		piModels().deleteProvider(id);
+	}
+});
+
 test("slot source passes native values unchanged; freshness and in-flight snapshot apply to built-in AND custom dispatch", async () => {
 	for (const custom of [false, true]) {
 		const id = custom ? "cache-custom-fixture" : "cache-native-fixture";

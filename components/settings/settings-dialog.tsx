@@ -65,6 +65,20 @@ const SECTIONS = [
 	{ id: "general", label: "General" },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"];
+type WritableSection = "general" | "agent" | "models" | "appearance" | "graph" | "compaction";
+type PendingSectionWrite = { compose: (current: unknown) => object; optimistic: boolean };
+// A closed dialog can still have queued writes. A new dialog must wait
+// for those writes before loading a record on which new edits will build.
+const pendingSettingsWrites = new Map<Promise<void>, WritableSection>();
+
+/** Wait for all pending writes, or only those for the requested section. */
+export async function waitForPendingSettingsWrites(section?: WritableSection) {
+	for (;;) {
+		const writes = [...pendingSettingsWrites].filter(([, name]) => !section || name === section).map(([write]) => write);
+		if (!writes.length) return;
+		await Promise.all(writes);
+	}
+}
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -146,8 +160,16 @@ export function SettingsDialogBody({
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
+	// Separate confirmed server values from the visible pending edits. Writes
+	// replace whole sections, so edits for the same section must be rebased
+	// after the preceding response, not built from an older render.
+	const confirmedRecord = useRef<UserSettings | null>(null);
+	const visibleRecord = useRef<UserSettings | null>(null);
+	const sectionWrites = useRef<Partial<Record<WritableSection, PendingSectionWrite[]>>>({});
+	const agentWriteEpoch = useRef(0);
 	const [error, setError] = useState<string | null>(null);
 	const [fileAccessError, setFileAccessError] = useState<string | null>(null);
+	const fileAccessErrorRef = useRef<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
 	const contentRef = useRef<HTMLDivElement | null>(null);
@@ -194,15 +216,27 @@ export function SettingsDialogBody({
 	// (no record = factory everything), not a failure — the error state is
 	// a non-200 or a network throw only.
 	useEffect(() => {
-		fetch("/api/settings")
-			.then((r) =>
-				r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)),
-			)
-			.then((body: { settings: UserSettings | null; fileAccessError?: string }) => {
-				setRecord(body.settings ?? { version: CURRENT_SETTINGS_VERSION });
-				setFileAccessError(body.fileAccessError ?? null);
-			})
-			.catch(() => setRecord(null));
+		let live = true;
+		const load = async () => {
+			try {
+				await waitForPendingSettingsWrites();
+				if (!live) return;
+				const response = await fetch("/api/settings");
+				if (!response.ok) throw new Error(`status ${response.status}`);
+				const body = await response.json() as { settings: UserSettings | null; fileAccessError?: string };
+				if (!live) return;
+				const loaded = body.settings ?? { version: CURRENT_SETTINGS_VERSION };
+				confirmedRecord.current = loaded;
+				visibleRecord.current = loaded;
+				setRecord(loaded);
+				fileAccessErrorRef.current = body.fileAccessError ?? null;
+				setFileAccessError(fileAccessErrorRef.current);
+			} catch {
+				if (live) setRecord(null);
+			}
+		};
+		void load();
+		return () => { live = false; };
 	}, []);
 
 	// Escape closes — the layered-dismiss convention (Esc is dead for the
@@ -223,42 +257,97 @@ export function SettingsDialogBody({
 		return () => document.removeEventListener("keydown", onKey);
 	}, [onClose]);
 
-	/** ONE writer for the whole dialog: PUT the whole section, keep the
-	 *  record mirror in sync, surface route errors inline (a 400 is a
-	 *  schema mistake caught by the validation surface). */
+	/** PUTs replace whole sections. Serialize each section independently
+	 *  and apply functional edits to the last confirmed server value. */
 	const write = useCallback(
-		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
-			body: object,
+		<S extends WritableSection,>(
+			section: S,
+			change: object | ((current: UserSettings[S]) => object),
 		) => {
 			setError(null);
-			const res = await fetch(`/api/settings/${section}`, {
-				method: "PUT",
-				headers: { "content-type": "application/json" },
-				body: JSON.stringify(body),
+			if (section === "agent") agentWriteEpoch.current++;
+			const queue: PendingSectionWrite[] = sectionWrites.current[section] ?? (sectionWrites.current[section] = []);
+			const idle = queue.length === 0;
+			queue.push({
+				compose: typeof change === "function" ? (current) => change(current as UserSettings[S]) : () => change,
+				// Agent controls continue to show confirmed server state while
+				// their queued functional edits rebase on earlier saves.
+				optimistic: typeof change === "function" && section !== "agent",
 			});
-			if (!res.ok) {
-				const detail = (await res.json().catch(() => ({}))) as {
-					error?: string;
-				};
-				setError(`${section}: ${detail.error ?? res.status}`);
-				return;
-			}
-			// Server truth, never the request body (fix wave, owner repro):
-			// the models section clamps pinned thinking levels on write
-			// (bd68486) — a swap that rides an unsupported level lands
-			// CLAMPED in the record, and the writing surface must show the
-			// stored value in this same interaction, not the optimistic one.
-			const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
-			const stored = reply?.settings;
-			setFileAccessError(reply?.fileAccessError ?? null);
-			setRecord(
-				(prev) =>
-					stored ?? ({ ...(prev ?? {}), [section]: body }) as UserSettings,
+
+			const refreshVisibleSection = () => {
+				if (!confirmedRecord.current || !visibleRecord.current) return;
+				let value: unknown = confirmedRecord.current[section];
+				// Functional edits stay interactive while awaiting the server.
+				// Existing whole-section callers continue to show server truth.
+				if (queue.some((pending) => pending.optimistic)) {
+					for (const pending of queue) value = pending.compose(value);
+				}
+				const next = { ...visibleRecord.current, [section]: value } as UserSettings;
+				visibleRecord.current = next;
+				setRecord(next);
+			};
+			refreshVisibleSection();
+			if (!idle) return;
+
+			const drain = async () => {
+				while (queue.length) {
+					const body = queue[0]!.compose(confirmedRecord.current?.[section]);
+					const agentEpochAtSend = agentWriteEpoch.current;
+					try {
+						const res = await fetch(`/api/settings/${section}`, {
+							method: "PUT",
+							headers: { "content-type": "application/json" },
+							body: JSON.stringify(body),
+						});
+						if (!res.ok) {
+							const detail = (await res.json().catch(() => ({}))) as { error?: string };
+							setError(`${section}: ${detail.error ?? res.status}`);
+						} else {
+							const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
+							const stored = reply?.settings;
+							// Only this section belongs to this response: other sections
+							// may have newer writes or pending edits of their own.
+							const saved = stored && section in stored ? stored[section] : body;
+							confirmedRecord.current = { ...confirmedRecord.current, [section]: saved } as UserSettings;
+							// An unrelated save can repair corrupt settings into a fail-closed
+							// file policy. Mirror that policy only if no agent write has raced
+							// this response; its other agent fields may be stale.
+							if (stored && (section === "agent" || (agentWriteEpoch.current === agentEpochAtSend && !sectionWrites.current.agent?.length))) {
+								fileAccessErrorRef.current = reply?.fileAccessError ?? null;
+								setFileAccessError(fileAccessErrorRef.current);
+								if (section !== "agent") {
+									const syncFileAccess = (record: UserSettings | null): UserSettings | null => {
+										if (!record) return record;
+										const fileAccess = stored.agent?.fileAccess;
+										if (!record.agent && fileAccess === undefined) return record;
+										const agent = { ...record.agent };
+										if (fileAccess === undefined) delete agent.fileAccess;
+										else agent.fileAccess = fileAccess;
+										return { ...record, agent };
+									};
+									confirmedRecord.current = syncFileAccess(confirmedRecord.current);
+									visibleRecord.current = syncFileAccess(visibleRecord.current);
+								}
+							}
+							notifySettingsSaved(section);
+							if (section === "appearance") onAppearanceChange(body as AppearanceSettings);
+						}
+					} catch {
+						setError(`${section}: could not save`);
+					} finally {
+						if (section === "agent") agentWriteEpoch.current++;
+					}
+					queue.shift();
+					refreshVisibleSection();
+				}
+			};
+			const activeWrite = drain();
+			pendingSettingsWrites.set(activeWrite, section);
+			void activeWrite.then(
+				() => { pendingSettingsWrites.delete(activeWrite); },
+				() => { pendingSettingsWrites.delete(activeWrite); },
 			);
-			notifySettingsSaved(section);
-			if (section === "appearance")
-				onAppearanceChange(body as AppearanceSettings);
 		},
 		[onAppearanceChange],
 	);
@@ -381,6 +470,12 @@ export function SettingsDialogBody({
 									testid="section-agent"
 								>
 									<AgentSection
+										onSectionEdit={(edit) => void write("agent", (current) => {
+											const safeCurrent = fileAccessErrorRef.current
+												? { ...current, fileAccess: { restricted: true, folders: current?.fileAccess?.folders ?? [] } }
+												: current;
+											return edit(safeCurrent);
+										})}
 										agent={record.agent}
 										fileAccessError={fileAccessError}
 										models={record.models}
@@ -392,8 +487,8 @@ export function SettingsDialogBody({
 										onSectionChange={(next: AgentSettings) =>
 											void write("agent", next)
 										}
-										onCompactionChange={(next: CompactionSettings) =>
-											void write("compaction", next)
+										onCompactionChange={(change: (current: CompactionSettings | undefined) => CompactionSettings) =>
+											void write("compaction", change)
 										}
 									/>
 								</SettingsSection>

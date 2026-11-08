@@ -25,6 +25,12 @@ export interface ModelCatalogEntry {
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
 	/** Null for native CLI aliases whose effective limits are session-specific. */
 	contextWindow: number | null;
+	/** Account-advertised default and optional ceiling for explicit opt-in. */
+	defaultContextWindow?: number;
+	maxContextWindow?: number;
+	contextWindowSource?: "account";
+	/** Opaque account-and-model key for a persisted explicit window choice. */
+	contextWindowKey?: string;
 	maxTokens: number | null;
 }
 
