@@ -36,6 +36,7 @@ describe("healEncodedArguments — the GLM incident", () => {
 		const raw = {
 			statement: "Prove that every finite group of prime order is cyclic.",
 			mode: QUOTED("recall"), // the incident: every field valid BUT mode
+			surface: "abstract group of prime order, prove a structural property",
 			target: ["group-order"],
 			modelSolution: "Let |G| = p. Any x ≠ e generates a subgroup whose order divides p…",
 		};

@@ -151,7 +151,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 			)}
 			<MetadataPopover
 				concludeInput={input}
-				problemInput={(part.problemInput ?? {}) as { mode?: unknown; target?: unknown }}
+				problemInput={(part.problemInput ?? {}) as { mode?: unknown; surface?: unknown; target?: unknown }}
 			/>
 		</div>
 	);
@@ -164,7 +164,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
  * bg-card p-4 shadow-lg, opening BELOW the trigger — always); any scroll or
  * click outside closes it (plus Esc, claimed from the layered chain
  * per the popover law). Shows every field the agent filled in both the
- * problem call (mode, targets — names resolved lazily) and the
+ * problem call (mode, surface, targets — names resolved lazily) and the
  * conclude call (outcome, rung, miss class, retest). Statement and
  * modelSolution stay out — they are the visible card. The data keeps
  * the original SMALL register (text-xs rows, mono values — owner
@@ -175,7 +175,7 @@ function MetadataPopover({
 	problemInput,
 }: {
 	concludeInput: { outcome?: string; rung?: unknown; missClass?: unknown; retest?: unknown };
-	problemInput: { mode?: unknown; target?: unknown };
+	problemInput: { mode?: unknown; surface?: unknown; target?: unknown };
 }) {
 	const [open, setOpen] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
@@ -211,6 +211,7 @@ function MetadataPopover({
 	}, [open]);
 
 	const mode = typeof problemInput.mode === "string" ? problemInput.mode : "";
+	const surface = typeof problemInput.surface === "string" ? problemInput.surface : "";
 	const rung = typeof concludeInput.rung === "string" ? concludeInput.rung : "";
 	const miss = typeof concludeInput.missClass === "string" ? concludeInput.missClass : "";
 	const retest = typeof concludeInput.retest === "boolean" ? concludeInput.retest : undefined;
@@ -258,6 +259,8 @@ function MetadataPopover({
 				<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
 						<dt className="text-muted-foreground">Mode</dt>
 						<dd className="font-mono">{mode || "—"}</dd>
+						<dt className="text-muted-foreground">Surface</dt>
+						<dd>{surface || "—"}</dd>
 						<dt className="text-muted-foreground">Targets</dt>
 						<dd className="font-mono">
 							{targets.length === 0 ? (

@@ -39,11 +39,12 @@ import type { ToolResultMessage } from "@earendil-works/pi-ai";
 // The BYOK key-presence gate reads env-first (chat-flow.test.ts's idiom).
 process.env.OPENROUTER_API_KEY ??= "test-key-presence-gate";
 
-/** A valid problem pose — the slim schema: statement, mode, target,
- *  modelSolution (the commitment, which is also the reveal). */
+/** A valid problem pose — the slim schema: statement, mode, surface,
+ *  target, modelSolution (the commitment, which is also the reveal). */
 const POSE = {
 	statement: "Prove that every finite group of prime order is cyclic.",
 	mode: "recall",
+	surface: "abstract group of prime order, prove a structural property",
 	target: ["group-order"],
 	modelSolution: "Let |G| = p. Any x ≠ e generates a subgroup whose order divides p…",
 } as const;

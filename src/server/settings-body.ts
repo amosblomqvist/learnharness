@@ -25,9 +25,20 @@ import type {
 	GraphSettings,
 	ModelsSettings,
 	ModelSlot,
+	ReviewSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import {
+	BACKGROUND_MODEL_ROLES,
+	CACHE_RETENTIONS,
+	COMPACTION_THRESHOLD_FLOOR,
+	CUSTOM_MODEL_PIN_FLOOR,
+	EXTRACTION_CHUNK_TOKENS_FLOOR,
+	MODEL_SLOTS,
+	parseReviewSteps,
+	REVIEW_RETENTION_CEILING,
+	REVIEW_RETENTION_FLOOR,
+} from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
@@ -232,7 +243,7 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { mode?, background?, fontFamily?, proseFontSize?,
- *  sessionNameSerif?, mdRendering? } */
+ *  sessionNameSerif?, mdRendering?, reviewHeatmapColor? } */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -297,6 +308,11 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			rendering.italicColor = parsed.color ?? null;
 		}
 		if (Object.keys(rendering).length) settings.mdRendering = rendering;
+	}
+	if (raw.reviewHeatmapColor !== undefined) {
+		const parsed = parseHexOrNull(raw.reviewHeatmapColor, "reviewHeatmapColor");
+		if (parsed.error) return { ok: false, error: parsed.error };
+		settings.reviewHeatmapColor = parsed.color ?? null;
 	}
 	return { ok: true, settings };
 }
@@ -407,6 +423,50 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+/** review (scheduled practice): the new-item allowance and the FSRS
+ *  scheduler knobs (core/settings.ts ReviewSettings). Strict write side:
+ *  a present value outside its range rejects (the read side clamps — the
+ *  compaction discipline). Absent = factory at resolution. Replace-whole,
+ *  like every section. */
+export function parseReviewSettingsBody(body: unknown): SettingsBodyResult<ReviewSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: ReviewSettings = {};
+	if (raw.newPerDay !== undefined) {
+		if (typeof raw.newPerDay !== "number" || !Number.isInteger(raw.newPerDay) || raw.newPerDay < 0) {
+			return { ok: false, error: "newPerDay must be a whole number, 0 or more" };
+		}
+		settings.newPerDay = raw.newPerDay;
+	}
+	if (raw.desiredRetention !== undefined) {
+		const r = raw.desiredRetention;
+		if (typeof r !== "number" || !Number.isFinite(r) || r < REVIEW_RETENTION_FLOOR || r > REVIEW_RETENTION_CEILING) {
+			return { ok: false, error: `desiredRetention must be between ${REVIEW_RETENTION_FLOOR} and ${REVIEW_RETENTION_CEILING}` };
+		}
+		settings.desiredRetention = r;
+	}
+	if (raw.maximumIntervalDays !== undefined) {
+		const d = raw.maximumIntervalDays;
+		if (typeof d !== "number" || !Number.isInteger(d) || d < 1) {
+			return { ok: false, error: "maximumIntervalDays must be a whole number, 1 or more" };
+		}
+		settings.maximumIntervalDays = d;
+	}
+	for (const key of ["fuzz", "shortTerm"] as const) {
+		const v = raw[key];
+		if (v === undefined) continue;
+		if (typeof v !== "boolean") return { ok: false, error: `${key} must be true or false` };
+		settings[key] = v;
+	}
+	for (const key of ["learningSteps", "relearningSteps"] as const) {
+		if (raw[key] === undefined) continue;
+		const steps = parseReviewSteps(raw[key]);
+		if (!steps) return { ok: false, error: `${key} must be a list of steps like "1m", "10m", "1h", "2d"` };
+		settings[key] = steps;
+	}
+	return { ok: true, settings };
+}
+
 /** dictation: { language?: one of Nova-3's supported language codes } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
@@ -464,6 +524,7 @@ export const SETTINGS_SECTIONS = {
 	appearance: parseAppearanceSettingsBody,
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
+	review: parseReviewSettingsBody,
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,

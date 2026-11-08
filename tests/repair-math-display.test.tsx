@@ -151,7 +151,7 @@ describe("practice display surfaces", () => {
 	}
 
 	it("keeps a boundary-converted numeric statement raw and preserves prior dock passthrough", () => {
-		const raw = { statement: 17, mode: "recall", modelSolution: "Committed solution." };
+		const raw = { statement: 17, mode: "recall", surface: "a bare number", modelSolution: "Committed solution." };
 		const call = { type: "toolCall", id: "numeric_problem", name: "problem", arguments: raw };
 		const validated = validateToolArguments(
 			{ name: "problem", parameters: problemInputObject } as never,

@@ -26,6 +26,7 @@ import type {
 	SessionCheckpoint,
 	TurnUsage,
 	NotesSource,
+	ReviewEvent,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
 
@@ -137,6 +138,17 @@ export interface GraphStore {
 export interface SourceOrganizationStore {
 	read(): import("./source-organization.ts").SourceOrganization;
 	write(state: import("./source-organization.ts").SourceOrganization): void;
+}
+
+// ─── ReviewStore — the spaced-repetition log (data/review) ──────────────────
+// Append-only raw facts; memory state is derived (core/review.ts). The
+// sync seam (server/review.ts) dedupes by id before appending.
+
+export interface ReviewStore {
+	/** Append review lines (an empty list writes nothing). */
+	appendReviews(events: readonly ReviewEvent[]): void;
+	/** Valid review lines in append order. */
+	readReviews(): ReviewEvent[];
 }
 
 // ─── JobStore — background sub-agent jobs (data/jobs) ─────────────────────────

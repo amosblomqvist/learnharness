@@ -58,6 +58,7 @@ import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
+import { ProblemTally } from "@/components/problem-tally";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
@@ -73,6 +74,8 @@ import { CoverageRing } from "@/components/extraction-coverage";
 import { Button } from "@/components/ui/button";
 import {
 	activeProblemOf,
+	practiceTallyOf,
+	type PracticeTally,
 	pendingQuestionOf,
 	malformedQuestionsOf,
 	dismissedAnswer,
@@ -462,6 +465,8 @@ export function Chat({
 	// replaces the composer. Computed from the NATIVE record (the fold is
 	// the gate the tools themselves read), not the projected view.
 	const activeProblem = activeProblemOf(nativeMessages);
+	// The problem counter (2026-11-03): concluded problems by outcome.
+	const practiceTally = useMemo(() => practiceTallyOf(nativeMessages), [nativeMessages]);
 	const activeProblemRef = useRef(activeProblem);
 	activeProblemRef.current = activeProblem;
 
@@ -1382,6 +1387,9 @@ export function Chat({
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
+					{/* The problem counter (2026-11-03): practice sessions only,
+					    just left of the Practice tag. */}
+					{kind === "practice" && <ProblemTally tally={practiceTally} />}
 					{kind === "practice" ? (
 						<span
 							data-testid="phase-chip"
@@ -1696,6 +1704,7 @@ export function Chat({
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
 					onSaveQuestionDraft={(form) => { if (pending) saveQuestionDraft(pending.key, { form }); }}
 					practice={activeProblem}
+					practiceTally={practiceTally}
 					compactionRunning={compacting}
 					onSubmitThinking={submitThinking}
 					chatId={chatId}
@@ -1930,6 +1939,7 @@ function DockOverlay({
 	initialQuestionDraft,
 	onSaveQuestionDraft,
 	practice,
+	practiceTally,
 	compactionRunning,
 	onSubmitThinking,
 	requiresReveal,
@@ -1963,6 +1973,8 @@ function DockOverlay({
 	 *  {toolCallId, input} — dock ownership exactly like a pending
 	 *  question (the composer is replaced); null in teaching sessions. */
 	practice: { toolCallId: string; input: unknown } | null;
+	/** The session's problem counter, shown in the practice dock. */
+	practiceTally: PracticeTally;
 	/** (commit, text) — the practice dock's two submit lanes. */
 	onSubmitThinking: (text: string) => void;
 	/** Teach-phase pending question: arrives collapsed behind the reveal button (W5). */
@@ -2420,6 +2432,7 @@ function DockOverlay({
 									onSubmit={onSubmitThinking}
 									onEscape={dictationCancel}
 									compactionRunning={compactionRunning}
+									tally={practiceTally}
 								/>
 							) : (
 								composer

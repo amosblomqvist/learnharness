@@ -29,6 +29,10 @@ core tool surface must appear in real data here.
   coverage (93), sources (4), render-settings, positions.
 - `jobs/` — five records covering kind × status: research done + aborted by
   learner, demo done, visual done, pdf error.
+- `review/` — the spaced-repetition review log (2026-11-02), written by the
+  app's own backfill (`GET /api/review`) from the practice record above: two
+  lines (solved, dismissed) in the pre-`surface` shape, plus the stamped
+  `format.json`.
 - `settings.json` — the stamped settings record (version 1, model slots).
 
 ## Regenerating / extending

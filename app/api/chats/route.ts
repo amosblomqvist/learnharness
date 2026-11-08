@@ -1,6 +1,6 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
-import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
+import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, reviewBriefLines, stores, titleFromPrompt } from "@/src/server";
 import type { ChatListItem } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
@@ -65,7 +65,10 @@ export async function POST(req: Request) {
 		const chainLines = chainsForSelection(pickedNodes, stores.graphStore.readChains()).map((c) =>
 			formatChainLine(c, Object.fromEntries(byId)),
 		);
-		stores.chatStore.saveMessages(chat.id, [newGraphContextMessage(picks, chainLines)]);
+		// THE HISTORY BRIEF (2026-11-02): a practice session's picks carry
+		// their earlier practice into the agent's context (server/review.ts).
+		const history = kind === "practice" ? reviewBriefLines(picks.map((p) => p.id)) : [];
+		stores.chatStore.saveMessages(chat.id, [newGraphContextMessage(picks, chainLines, history)]);
 	}
 	return Response.json({ id: chat.id, title: chat.title });
 }
