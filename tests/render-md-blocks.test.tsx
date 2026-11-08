@@ -18,7 +18,7 @@ import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { ThinkingBlock, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { MermaidOverlay, SessionMermaidContext, chartSize } from "../components/session-overlay.tsx";
 import { PlanPopup } from "../components/plan-block.tsx";
-import { MarkdownCode, codeSource } from "../components/md-blocks.tsx";
+import { MarkdownCode, animationTitle, codeSource } from "../components/md-blocks.tsx";
 
 function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
@@ -71,6 +71,39 @@ describe("md-blocks — mermaid", () => {
 		assert.ok(!html.includes("graph TD"), "chart source is not leaked as text");
 		// No chat page mounted → no overlay context → no expand button.
 		assert.ok(!html.includes('data-testid="md-mermaid-expand"'), "expand hidden without a session context");
+	});
+});
+
+describe("md-blocks — inline animations (```animation fences)", () => {
+	const doc = '<!doctype html><html><head><title>Doc title</title></head><body><canvas id="c"></canvas><script>var t=0;</script></body></html>';
+
+	it("renders a sandboxed, replayable animation frame — never a code block", () => {
+		const html = render('```animation title="Ring all-reduce"\n' + doc + "\n```");
+		assert.ok(html.includes('data-testid="md-animation"'), "the animation block mounts");
+		assert.ok(!html.includes('data-streamdown="code-block"'), "animation fences must not render as code blocks");
+		const iframe = /<iframe[^>]*>/.exec(html)?.[0] ?? "";
+		assert.ok(iframe.includes('sandbox="allow-scripts"'), "scripts only");
+		assert.ok(!iframe.includes("allow-same-origin"), "never same-origin with the app");
+		assert.ok(html.includes("demo-resize"), "the auto-size/error bridge is injected");
+		assert.ok(html.includes("Ring all-reduce"), "the fence title captions the card");
+		assert.ok(html.includes('data-testid="demo-replay"'), "animations get a replay button");
+		assert.ok(/>animation<\/span>/.test(html), "labelled as an animation, not a demo");
+	});
+
+	it("shows a placeholder while the fence is still streaming", () => {
+		const html = renderToStaticMarkup(
+			<MessageResponse mode="streaming" isAnimating>{"```animation\n<!doctype html><html><body><scr"}</MessageResponse>,
+		);
+		assert.ok(html.includes('data-testid="md-animation"'), "the animation block mounts");
+		assert.ok(html.includes("Drawing animation"), "placeholder while streaming");
+		assert.ok(!html.includes("<iframe"), "no half-written document is run");
+	});
+
+	it("animationTitle: meta title, then <title>, then a default", () => {
+		assert.equal(animationTitle('title="Pipeline bubble"', doc), "Pipeline bubble");
+		assert.equal(animationTitle("title='Single quoted'", doc), "Single quoted");
+		assert.equal(animationTitle("", doc), "Doc title");
+		assert.equal(animationTitle("", "<body></body>"), "Animation");
 	});
 });
 

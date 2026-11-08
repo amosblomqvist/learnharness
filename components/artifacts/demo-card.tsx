@@ -1,10 +1,10 @@
 "use client";
 
 import { useContext, useEffect, useMemo, useRef, useState } from "react";
-import { DownloadIcon } from "lucide-react";
+import { DownloadIcon, RotateCcwIcon } from "lucide-react";
 import { Toggle } from "@/components/settings/controls";
 import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
-import { ChatActionsContext } from "@/components/chat";
+import { ChatActionsContext } from "@/components/chat-actions";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import type { ArtifactPartProps, DemoResult } from "@/src/core";
@@ -125,16 +125,25 @@ export function DemoOutputCard({
 	);
 }
 
-function DemoFrame({
+/** The sandboxed frame shared by tool-built demos and the teacher's inline
+ *  ```animation fences (md-blocks AnimationInline). `label` is the caption's
+ *  kind label; `replayable` adds a restart button that remounts the iframe
+ *  (an animation's "play again"). Without `messageId` the invert switch is
+ *  local-only. */
+export function DemoFrame({
 	title,
 	html,
 	messageId,
 	initialInverted = false,
+	label = "interactive demo",
+	replayable = false,
 }: {
 	title: string;
 	html: string;
 	messageId?: string;
 	initialInverted?: boolean;
+	label?: string;
+	replayable?: boolean;
 }) {
 	const actions = useContext(ChatActionsContext);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
@@ -157,6 +166,13 @@ function DemoFrame({
 		}).catch(() => {});
 	};
 	const srcDoc = useMemo(() => buildDemoSrcDoc(html), [html]);
+	// Replay: a new key remounts the iframe — the document restarts from
+	// scratch (its animation clock, its state); the error chip clears too.
+	const [run, setRun] = useState(0);
+	const replay = () => {
+		setState(INITIAL_DEMO_BRIDGE_STATE);
+		setRun((n) => n + 1);
+	};
 
 	useEffect(() => {
 		const onMessage = (event: MessageEvent) => {
@@ -177,11 +193,23 @@ function DemoFrame({
 			<div className="flex items-center justify-between gap-2">
 				<div className="flex min-w-0 items-baseline gap-2">
 					<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-						interactive demo
+						{label}
 					</span>
 					<span className="truncate text-xs font-medium tracking-wide text-foreground">{title}</span>
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">
+					{replayable && (
+						<button
+							type="button"
+							aria-label="Replay animation"
+							title="Replay"
+							onClick={replay}
+							data-testid="demo-replay"
+							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						>
+							<RotateCcwIcon className="size-3.5" />
+						</button>
+					)}
 					<Toggle
 						checked={inverted}
 						onChange={toggleInverted}
@@ -191,7 +219,7 @@ function DemoFrame({
 					/>
 					<button
 						type="button"
-						aria-label="Download demo as HTML"
+						aria-label={`Download ${label} as HTML`}
 						title="Download as HTML"
 						onClick={() => downloadFile(`${slugFilename(title)}.html`, html, "text/html")}
 						data-testid="demo-download"
@@ -205,10 +233,11 @@ function DemoFrame({
 				<DemoErrorChip
 					title={title}
 					message={state.error}
-					onSend={actions ? () => actions.sendText(`The demo "${title}" threw an error: ${state.error}`) : undefined}
+					onSend={actions ? () => actions.sendText(`The ${label} "${title}" threw an error: ${state.error}`) : undefined}
 				/>
 			)}
 			<iframe
+				key={run}
 				ref={iframeRef}
 				title={title}
 				// allow-scripts ONLY — no allow-same-origin: the demo can run code
