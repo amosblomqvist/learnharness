@@ -8,6 +8,16 @@ import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
+import { mdComponents } from "@/components/md-blocks";
+
+// An option row is a <button>, and Streamdown renders a Markdown link as a
+// <button> (its link-safety prompt). A link inside an option label would nest
+// a button in a button, which is invalid HTML. Options are for picking, not
+// for following links, so show link text as plain text.
+const optionMdComponents = {
+	...mdComponents,
+	a: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+};
 import { cn } from "@/lib/utils";
 import {
 	buildAnswer,
@@ -618,7 +628,7 @@ function QuestionDockForm({
 										)}
 									</span>
 									<span>
-										<ToolContentResponse>{opt.label}</ToolContentResponse>
+										<ToolContentResponse components={optionMdComponents}>{opt.label}</ToolContentResponse>
 										{kind !== "quiz" && opt.description && (
 											// Option subtext renders in Source Sans 3 (owner's mockup);
 											// the "I don't know" copy stays JetBrains Mono. QUIZ options render
@@ -627,7 +637,7 @@ function QuestionDockForm({
 											// records must not leak either. Same MessageResponse path as the
 											// label (owner, 2026-10-12): descriptions are full markdown —
 											// LaTeX included — not plain text.
-											<ToolContentResponse className="lh-prose block text-xs text-muted-foreground">
+											<ToolContentResponse components={optionMdComponents} className="lh-prose block text-xs text-muted-foreground">
 												{opt.description}
 											</ToolContentResponse>
 										)}
