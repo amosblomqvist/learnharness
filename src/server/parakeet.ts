@@ -10,8 +10,8 @@ import { createParakeetTranscriber } from "./parakeet-transcriber.ts";
 
 export const PARAKEET_ARCHIVE_URL =
 	"https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8.tar.bz2";
-export const PARAKEET_ARCHIVE_SHA256 = "5793d0fd397c5778d2cf2126994d58e9d56b1be7c04d13c7a15bb1b4eafb16bf";
-export const PARAKEET_ARCHIVE_BYTES = 487_170_055;
+export const PARAKEET_ARCHIVE_SHA256 = "1495e91b59d7fc53ddca91f3431758ec99f8fa253fdb0e1e851be0f72b14b0f9";
+export const PARAKEET_ARCHIVE_BYTES = 487_211_443;
 /** 10 minutes of 16 kHz mono 16-bit audio; the client stops dictation here. */
 export const PARAKEET_MAX_AUDIO_BYTES = 10 * 60 * 16_000 * 2;
 
