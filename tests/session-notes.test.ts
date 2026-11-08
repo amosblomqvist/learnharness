@@ -3,8 +3,11 @@ import { after, it } from "node:test";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { setTimeout as delay } from "node:timers/promises";
-import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai";
+import { setImmediate as nextTurn, setTimeout as delay } from "node:timers/promises";
+import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseFactory, type SimpleStreamOptions } from "@earendil-works/pi-ai";
+import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
+import { bgLlmSlots } from "../src/agent/subagents/bg-llm-semaphore.ts";
+import { completedWithin } from "./completion.ts";
 import { noteEvidence } from "../src/core/note-evidence.ts";
 import { noteDocumentHtml, noteTextHtml } from "../src/core/note-render.ts";
 import type { ChatRecord } from "../src/core/contracts/chat.ts";
@@ -375,6 +378,149 @@ it("composes a long lesson from all original passages through bounded calls, wit
 	assert.ok(calls > 1);
 	assert.deepEqual([...seen], ["first", "middle", "last"]);
 	assert.deepEqual(doc.sections[0]?.sourceIds, ["first", "middle", "last"]);
+});
+
+it("stops an unresponsive notes stream, releases its background slot, and ignores a late response", async () => {
+	const source = new AssistantMessageEventStream();
+	const controller = new AbortController();
+	const entered = Promise.withResolvers<AbortSignal>();
+	let usage = 0;
+	const writing = writeSessionNotes({
+		chatId: "stalled_writer", title: "Stalled writer", mode: "liveNotes", practice: false,
+		passages: [{ messageId: "m", topic: "A", text: "An explanation." }],
+		engine: { model: createFauxCore({}).getModel(), streamFn: (_model, _context, options) => {
+			entered.resolve(options!.signal!);
+			return source; // Deliberately never acknowledges cancellation.
+		} },
+		signal: controller.signal, onUsage: () => { usage++; },
+	});
+	const stopped = assert.rejects(completedWithin(writing, "stalled notes cancellation", 1000), { name: "AbortError" });
+	try {
+		const signal = await completedWithin(entered.promise, "notes request");
+		assert.equal(bgLlmSlots().active, 1);
+		controller.abort();
+		await stopped;
+		assert.ok(signal.aborted, "cancellation still reaches the underlying provider");
+		assert.equal(bgLlmSlots().active, 0, "a stalled provider cannot hold a background permit");
+	} finally {
+		const message = fauxAssistantMessage([fauxToolCall("submit_notes", {
+			overview: "Late response", sections: [{ heading: "A", sourceIds: ["m"], blocks: [{ kind: "paragraph", text: "Late notes" }] }],
+		})], { stopReason: "toolUse" });
+		source.push({ type: "done", reason: "toolUse", message });
+		source.end();
+		await writing.catch(() => {});
+	}
+	await delay(0);
+	assert.equal(usage, 0, "late provider events cannot update a stopped job");
+});
+
+it("times out stalled live notes without replacing saved notes or automatically retrying, then permits Update now", { timeout: 5000 }, async t => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	for (const manual of [false, true]) {
+		const chat: ChatRecord = {
+			id: "idle_notes_" + manual, title: "Idle notes", createdAt: "now", updatedAt: "now",
+			messages: [atTopic("a", "A", "First"), atTopic("b", "B", "Second")],
+		};
+		const previous = { document: sample, fingerprint: "previous", writtenAt: "before the stall" };
+		notesStore.change(chat.id, state => { state.liveNotesEnabled = true; state.liveNotes = previous; });
+		const source = new AssistantMessageEventStream();
+		const entered = Promise.withResolvers<AbortSignal>();
+		const faux = createFauxCore({});
+		faux.setResponses([fauxAssistantMessage([fauxToolCall("submit_notes", {
+			overview: "Fresh notes", sections: ["a", "b"].map(id => ({
+				heading: id, sourceIds: [id], blocks: [{ kind: "paragraph", text: "Updated explanation." }],
+			})),
+		})], { stopReason: "toolUse" })]);
+		let calls = 0;
+		const api = createSessionNotesService({
+			chatStore: { getChat: () => chat }, notesStore, writeNotes: writeSessionNotes,
+			engineFor: () => ({ model: faux.getModel(), streamFn: (model, context, options) => {
+				if (++calls > 1) return faux.streamSimple(model, context, options);
+				entered.resolve(options!.signal!);
+				return source;
+			} }),
+			printPdf: async () => { throw new Error("No PDF for live notes"); },
+		});
+		try {
+			if (manual) api.changeSessionNotes(chat.id, { action: "update-live-notes" });
+			else api.updateLiveNotes(chat.id);
+			const signal = await entered.promise;
+			api.updateLiveNotes(chat.id); // A new turn can queue an automatic follow-up during the stall.
+			t.mock.timers.tick(5 * 60_000 - 1);
+			assert.equal(signal.aborted, false);
+			t.mock.timers.tick(1);
+			assert.equal(signal.aborted, true);
+			t.mock.timers.tick(250);
+			await nextTurn();
+			const view = api.sessionNotes(chat.id, true);
+			assert.deepEqual(view.running, []);
+			assert.deepEqual(api.runningSessionNotes(), []);
+			assert.deepEqual(view.liveNotes, previous);
+			assert.match(view.error.liveNotes ?? "", /stopped responding/);
+			assert.equal(bgLlmSlots().active, 0);
+			api.updateLiveNotes(chat.id);
+			await nextTurn();
+			assert.equal(calls, 1, "refreshes and queued work must not restart the failed revision");
+			api.changeSessionNotes(chat.id, { action: "update-live-notes" });
+			await nextTurn();
+			assert.deepEqual(api.sessionNotes(chat.id).running, []);
+			assert.equal(calls, 2);
+			assert.equal(api.sessionNotes(chat.id).error.liveNotes, undefined);
+			assert.deepEqual(api.sessionNotes(chat.id).liveNotes?.document.sections.map(s => s.sourceIds[0]), ["a", "b"]);
+		} finally {
+			for (const run of api.runningSessionNotes()) api.abortSessionNotes(run.id);
+			const error = { ...fauxAssistantMessage([]), stopReason: "aborted" as const };
+			source.push({ type: "error", reason: "aborted", error });
+			source.end();
+			t.mock.timers.tick(250);
+			await nextTurn();
+		}
+	}
+});
+
+it("keeps a long notes response alive while headers, provider events, or streamed content show progress", { timeout: 5000 }, async t => {
+	t.mock.timers.enable({ apis: ["setTimeout"] });
+	const source = new AssistantMessageEventStream();
+	const entered = Promise.withResolvers<SimpleStreamOptions>();
+	const model = createFauxCore({}).getModel();
+	const controller = new AbortController();
+	const writing = writeSessionNotes({
+		chatId: "progressing_notes", title: "Long notes response", mode: "handout", practice: false,
+		passages: [{ messageId: "m", topic: "A", text: "An explanation." }],
+		engine: { model, streamFn: (_model, _context, options) => { entered.resolve(options!); return source; } },
+		signal: controller.signal, onUsage() {},
+	});
+	try {
+		const options = await entered.promise;
+		t.mock.timers.tick(4 * 60_000);
+		await options.onResponse?.({ status: 200, headers: {} }, model);
+		t.mock.timers.tick(4 * 60_000);
+		await options.onProviderStreamEvent?.({ type: "response.in_progress" }, model);
+		t.mock.timers.tick(4 * 60_000);
+		const partial = fauxAssistantMessage([]);
+		source.push({ type: "start", partial });
+		await nextTurn();
+		t.mock.timers.tick(4 * 60_000);
+		source.push({ type: "thinking_delta", contentIndex: 0, delta: "Still working", partial });
+		await nextTurn();
+		t.mock.timers.tick(4 * 60_000);
+		assert.equal(options.signal?.aborted, false, "the limit is inactivity, not total response duration");
+		const message = fauxAssistantMessage([fauxToolCall("submit_notes", {
+			overview: "Finished", sections: [{ heading: "A", sourceIds: ["m"], blocks: [{ kind: "paragraph", text: "Notes." }] }],
+		})], { stopReason: "toolUse" });
+		source.push({ type: "done", reason: "toolUse", message });
+		source.end();
+		assert.equal((await writing).sections[0]?.heading, "A");
+		t.mock.timers.tick(10 * 60_000);
+		assert.equal(options.signal?.aborted, false, "completed requests clear their timers");
+	} finally {
+		controller.abort();
+		const error = { ...fauxAssistantMessage([]), stopReason: "aborted" as const };
+		source.push({ type: "error", reason: "aborted", error });
+		source.end();
+		t.mock.timers.tick(250);
+		await writing.catch(() => {});
+	}
 });
 
 it("loads the notes prompt edited in Settings into the real writer and respects its switch", async () => {

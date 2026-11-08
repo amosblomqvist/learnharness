@@ -33,6 +33,8 @@ export interface SubagentRunOptions {
 	maxTurns: number;
 	/** Abort mid-model-call (the real-kill semantics). */
 	abortSignal?: AbortSignal;
+	/** Optional inactivity limit for each model request, reset by response activity. */
+	idleTimeoutMs?: number;
 	/** Money channel: one call per model request. */
 	onUsage?: (usage: Usage) => void;
 	/** Activity line per tool execution (job record progress). */
@@ -63,8 +65,24 @@ export function subagentEngine(role: ModelRole, override?: PiEngine): PiEngine {
 }
 
 export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRunOptions): Promise<SubagentRunResult> {
+	opts.abortSignal?.throwIfAborted();
 	const engine = subagentEngine(opts.role, opts.engine);
 	let turns = 0;
+	let interruption: Error | undefined;
+	let finished = false;
+	let idleTimer: ReturnType<typeof setTimeout> | undefined;
+	let abortTimer: ReturnType<typeof setTimeout> | undefined;
+	const interrupted = Promise.withResolvers<never>();
+	const clearIdleTimer = () => { clearTimeout(idleTimer); };
+	const responseActivity = () => {
+		clearIdleTimer();
+		if (opts.idleTimeoutMs === undefined || interruption || finished) return;
+		idleTimer = setTimeout(() => {
+			const error = new Error("The model stopped responding. Please try again.");
+			error.name = "TimeoutError";
+			interrupt(error);
+		}, opts.idleTimeoutMs);
+	};
 	// Debug recorder (owner, 2026-10-04): raw provider events per job run.
 	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, `job:${opts.role}`) : undefined;
 	const sessionId = randomUUID();
@@ -80,11 +98,25 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 			tools,
 			messages: opts.messages ?? [],
 		},
-		streamFn: backgroundCaptureStream(engine.streamFn, capture),
+		streamFn: backgroundCaptureStream(opts.idleTimeoutMs === undefined ? engine.streamFn : (model, context, options) => {
+			responseActivity();
+			return engine.streamFn(model, context, {
+				...options,
+				onResponse: async (response, nativeModel) => {
+					responseActivity();
+					await options?.onResponse?.(response, nativeModel);
+				},
+				onProviderStreamEvent: async (event, nativeModel) => {
+					responseActivity();
+					await options?.onProviderStreamEvent?.(event, nativeModel);
+				},
+			});
+		}, capture),
 		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
 		// 0.87.1: shouldStopAfterTurn → finishTurn (same call point; "end"
 		// exits before the steering poll, exactly the old boolean-true).
 		finishTurn: (turn) => {
+			if (interruption || finished) return { action: "end" };
 			turns++;
 			return turns >= opts.maxTurns || opts.shouldStop?.(turn.message, turn.toolResults) === true
 				? { action: "end" }
@@ -92,7 +124,20 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 		},
 	});
 
-	const onAbort = () => agent.abort();
+	function interrupt(error: Error) {
+		if (interruption || finished) return;
+		interruption = error;
+		clearIdleTimer();
+		agent.abort();
+		// Give cooperative providers time to finish their cancellation record,
+		// but never let an unresponsive stream hold the worker or its LLM slot.
+		abortTimer = setTimeout(() => interrupted.reject(error), 250);
+	}
+	const onAbort = () => {
+		const error = new Error("aborted");
+		error.name = "AbortError";
+		interrupt(error);
+	};
 	opts.abortSignal?.addEventListener("abort", onAbort, { once: true });
 
 	const before = opts.messages?.length ?? 0;
@@ -100,12 +145,20 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 	let errorMessage: string | undefined;
 	let aborted = false;
 	let runFailure: unknown;
+	let unsubscribe: (() => void) | undefined;
 
 	try {
-		agent.subscribe((event: AgentEvent) => {
+		unsubscribe = agent.subscribe((event: AgentEvent) => {
 			switch (event.type) {
+				case "message_start":
+					if (event.message.role === "assistant") responseActivity();
+					break;
+				case "message_update":
+					responseActivity();
+					break;
 				case "message_end":
 					if ((event.message as { role?: string }).role === "assistant") {
+						clearIdleTimer();
 						const m = event.message as AssistantMessage;
 						capture?.reply(m);
 						if (m.stopReason === "aborted") {
@@ -114,6 +167,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 								aborted = true;
 							break;
 						}
+						if (interruption) break;
 						if (!usageWasAdmitted(m.usage)) { if (m.stopReason === "error") errorMessage = m.errorMessage; break; }
 						step++;
 						opts.onUsage?.(m.usage);
@@ -124,20 +178,26 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 					}
 					break;
 				case "tool_execution_start":
-					opts.onToolStart?.(event.toolName, event.args);
+					if (!interruption) opts.onToolStart?.(event.toolName, event.args);
 					break;
 			}
 		});
-		if (opts.prompt !== undefined) await agent.prompt({
+		opts.abortSignal?.throwIfAborted();
+		const running = opts.prompt !== undefined ? agent.prompt({
 			role: "user",
 			content: opts.prompt,
 			timestamp: Date.now(),
-		});
-		else await agent.continue();
+		}) : agent.continue();
+		await Promise.race([running, interrupted.promise]);
+		if (interruption) throw interruption;
 	} catch (error) {
 		runFailure = error;
 		throw error;
 	} finally {
+		finished = true;
+		clearIdleTimer();
+		clearTimeout(abortTimer);
+		unsubscribe?.();
 		opts.abortSignal?.removeEventListener("abort", onAbort);
 		capture?.finish(runFailure);
 	}

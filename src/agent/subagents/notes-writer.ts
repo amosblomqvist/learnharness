@@ -16,6 +16,8 @@ import { runSubmitAgent } from "./submit-agent.ts";
 import { withBgLlmSlot } from "./bg-llm-semaphore.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 
+const NOTES_IDLE_TIMEOUT_MS = 5 * 60_000;
+
 interface Submission {
 	overview: string;
 	sections: WrittenSection[];
@@ -90,6 +92,7 @@ export async function writeSessionNotes(opts: {
 				chatId,
 				engine,
 				signal,
+				idleTimeoutMs: NOTES_IDLE_TIMEOUT_MS,
 				systemPrompt: instructions,
 				prompt: `${instruction}\nSession title: ${JSON.stringify(opts.title)}\nSource passages:\n${lines.map(l => JSON.stringify(l)).join("\n")}`,
 				toolName: "submit_notes",
