@@ -354,6 +354,13 @@ test("the bar offers Retry after a failed transcription and deep-links Settings 
 	await act(async () => { f.root.render(<DictationBar dictation={{ ...base, error: DICTATION_MODEL_MISSING }} />); });
 	await act(async () => { button().click(); });
 	assert.deepEqual(calls, ["clear"], "clears the error and leaves for Settings, never toggles");
+	calls.length = 0;
+	// A 409 keeps the audio for Retry, but the click still leaves for Settings:
+	// the label must announce what the click does.
+	await act(async () => { f.root.render(<DictationBar dictation={{ ...base, error: DICTATION_MODEL_MISSING, canRetry: true }} />); });
+	assert.equal(button().getAttribute("aria-label"), `Dictation failed: ${DICTATION_MODEL_MISSING}`);
+	await act(async () => { button().click(); });
+	assert.deepEqual(calls, ["clear"]);
 });
 
 test("a failed transcription survives finish(), unmount and navigation: the next page offers Retry", async () => {

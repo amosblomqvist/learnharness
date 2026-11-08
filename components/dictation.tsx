@@ -917,7 +917,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 							toggle();
 						}
 					}}
-					aria-label={canRetry ? "Retry transcription" : error ? `Dictation failed: ${error}` : "Start dictation"}
+					aria-label={canRetry && !keyless && !modelMissing ? "Retry transcription" : error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>
