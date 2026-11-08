@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { noteEvidence } from "../core/note-evidence.ts";
 import { emit } from "../core/events.ts";
 import { sumSteps } from "../core/prices.ts";
-import { noteSectionHeading, type NoteEdition, type NoteMode, type NotePassage, type NotesAction, type NotesRun, type NotesView } from "../core/session-notes.ts";
+import { HANDOUT_PDF_LAYOUT_VERSION, type NoteEdition, type NoteMode, type NotePassage, type NotesAction, type NotesRun, type NotesView } from "../core/session-notes.ts";
 import { accumulateJobUsage, piUsageToStep } from "../core/contracts/jobs.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import type { ChatRecord } from "../core/contracts/chat.ts";
@@ -124,10 +124,13 @@ export function createSessionNotesService(deps: NotesDependencies, work = new Ma
 		chat(id);
 		const bytes = deps.notesStore.handoutPdf(id);
 		if (!bytes) throw new NotesRequestError("This session has no handout PDF yet.", 404);
-		const document = deps.notesStore.read(id).handout?.document;
-		// Older PDFs already contain the duplicate numbers. Render their saved text locally.
-		if (document?.sections.some(section => noteSectionHeading(section.heading) !== section.heading))
-			return deps.printPdf(document);
+		const state = deps.notesStore.read(id);
+		if (state.handout && state.handoutPdfLayoutVersion !== HANDOUT_PDF_LAYOUT_VERSION) {
+			const refreshed = await deps.printPdf(state.handout.document);
+			chat(id);
+			deps.notesStore.refreshHandoutPdf(id, state.handout, refreshed);
+			return refreshed;
+		}
 		return bytes;
 	}
 	function discardSessionNotes(id: string) {

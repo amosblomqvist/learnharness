@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { PATHS } from "../../config.ts";
-import type { NoteEdition, SessionNotesRecord } from "../core/session-notes.ts";
+import { HANDOUT_PDF_LAYOUT_VERSION, type NoteEdition, type SessionNotesRecord } from "../core/session-notes.ts";
 import type { SessionNotesStore } from "../core/ports.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
 
@@ -21,6 +21,7 @@ interface StoredNotesV1 {
 	error: Partial<Record<"live" | "final", string>>;
 	usage: (Omit<SessionNotesRecord["usage"][number], "mode"> & { mode: "live" | "final" })[];
 	pdfFile?: string;
+	pdfLayoutVersion?: number;
 }
 function fromStoredNotes(record: StoredNotesV1): StoredNotes {
 	return {
@@ -36,6 +37,7 @@ function fromStoredNotes(record: StoredNotesV1): StoredNotes {
 		},
 		usage: record.usage.map(entry => ({ ...entry, mode: entry.mode === "live" ? "liveNotes" : "handout" })),
 		pdfFile: record.pdfFile,
+		...(record.pdfLayoutVersion !== undefined ? { handoutPdfLayoutVersion: record.pdfLayoutVersion } : {}),
 	};
 }
 function toStoredNotes(record: StoredNotes): StoredNotesV1 {
@@ -53,6 +55,7 @@ function toStoredNotes(record: StoredNotes): StoredNotesV1 {
 		},
 		usage: record.usage.map(entry => ({ ...entry, mode: entry.mode === "liveNotes" ? "live" : "final" })),
 		pdfFile: record.pdfFile,
+		...(record.handoutPdfLayoutVersion !== undefined ? { pdfLayoutVersion: record.handoutPdfLayoutVersion } : {}),
 	};
 }
 function folder(id: string) {
@@ -81,28 +84,37 @@ function pdfPath(id: string, file: string) {
 	if (!/^[a-f0-9-]{36}\.pdf$/.test(file)) throw new Error("Invalid handout file.");
 	return path.join(folder(id), file);
 }
+function writeHandoutPdf(id: string, edition: NoteEdition, bytes: Uint8Array, refreshOnly = false): boolean {
+	// Printing is async. Do not resurrect deleted notes or overwrite a handout
+	// published while an older edition was being re-typeset for download.
+	if (refreshOnly && JSON.stringify(read(id).handout) !== JSON.stringify(edition)) return false;
+	const file = randomUUID() + ".pdf";
+	fs.mkdirSync(folder(id), { recursive: true });
+	fs.writeFileSync(pdfPath(id, file), bytes, { flag: "wx" });
+	try {
+		change(id, s => {
+			if (!refreshOnly) {
+				s.handout = edition;
+				delete s.pendingHandout;
+				delete s.error.handout;
+			}
+			s.pdfFile = file;
+			s.handoutPdfLayoutVersion = HANDOUT_PDF_LAYOUT_VERSION;
+		});
+	} catch (error) {
+		fs.unlinkSync(pdfPath(id, file));
+		throw error;
+	}
+	for (const old of fs.readdirSync(folder(id))) {
+		if (old !== file && /^[a-f0-9-]{36}\.pdf$/.test(old)) fs.unlinkSync(pdfPath(id, old));
+	}
+	return true;
+}
 export const notesStore: SessionNotesStore = {
 	read,
 	change,
-	saveHandoutPdf(id, edition, bytes) {
-		const file = randomUUID() + ".pdf";
-		fs.mkdirSync(folder(id), { recursive: true });
-		fs.writeFileSync(pdfPath(id, file), bytes, { flag: "wx" });
-		try {
-			change(id, s => {
-				s.handout = edition;
-				s.pdfFile = file;
-				delete s.pendingHandout;
-				delete s.error.handout;
-			});
-		} catch (error) {
-			fs.unlinkSync(pdfPath(id, file));
-			throw error;
-		}
-		for (const old of fs.readdirSync(folder(id))) {
-			if (old !== file && /^[a-f0-9-]{36}\.pdf$/.test(old)) fs.unlinkSync(pdfPath(id, old));
-		}
-	},
+	saveHandoutPdf(id, edition, bytes) { writeHandoutPdf(id, edition, bytes); },
+	refreshHandoutPdf(id, edition, bytes) { return writeHandoutPdf(id, edition, bytes, true); },
 	handoutPdf(id: string): Buffer | null {
 		const file = read(id).pdfFile;
 		return file ? fs.readFileSync(pdfPath(id, file)) : null;

@@ -74,6 +74,8 @@ export interface SessionNotesStore {
 	read(chatId: string): SessionNotesRecord;
 	change(chatId: string, edit: (record: SessionNotesRecord) => void): void;
 	saveHandoutPdf(chatId: string, edition: NoteEdition, bytes: Uint8Array): void;
+	/** Refresh only the matching published edition's PDF; leave pending generation intact. */
+	refreshHandoutPdf(chatId: string, edition: NoteEdition, bytes: Uint8Array): boolean;
 	handoutPdf(chatId: string): Uint8Array | null;
 	delete(chatId: string): void;
 }

@@ -29,7 +29,7 @@ const schema = Type.Object({
 		Type.Object({
 			heading: text,
 			sourceIds: Type.Array(text, { minItems: 1 }),
-			blocks: Type.Array(Type.Object({ kind: Type.Union(noteBlockKinds.map(k => Type.Literal(k))), text }), {
+			blocks: Type.Array(Type.Object({ kind: Type.Union(noteBlockKinds.map(k => Type.Literal(k))), title: Type.Optional(text), text }), {
 				minItems: 1,
 			}),
 		}),
@@ -104,6 +104,8 @@ export async function writeSessionNotes(opts: {
 				validate: draft => {
 					for (const s of draft.sections) {
 						if (s.sourceIds.some(id => !allowed.has(id))) return "Use only supplied source IDs.";
+						if (s.blocks.some(block => block.kind === "example" && !block.title?.trim()))
+							return "Give every worked example a short, descriptive title.";
 						if (isLiveNotes && new Set(s.sourceIds.map(id => topics.get(id))).size !== 1)
 							return "Keep each live notes section within one source topic.";
 					}
@@ -114,7 +116,7 @@ export async function writeSessionNotes(opts: {
 					try {
 						for (const part of [
 							draft.overview,
-							...draft.sections.flatMap(s => [s.heading, ...s.blocks.map(b => b.text)]),
+							...draft.sections.flatMap(s => [s.heading, ...s.blocks.flatMap(b => [b.title ?? "", b.text])]),
 						])
 							noteTextHtml(part, true);
 					} catch {

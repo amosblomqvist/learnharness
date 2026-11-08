@@ -5,6 +5,8 @@ export const noteBlockKinds = ["paragraph", "key idea", "definition", "theorem",
 export type NoteBlockKind = (typeof noteBlockKinds)[number];
 export interface NoteBlock {
 	kind: NoteBlockKind;
+	/** Descriptive label for new notes; older saved blocks may omit it. */
+	title?: string;
 	text: string;
 }
 export interface WrittenSection {
@@ -45,11 +47,14 @@ export interface SessionNotesRecord {
 	liveNotes: NoteEdition | null;
 	handout: NoteEdition | null;
 	pendingHandout?: NoteEdition;
+	handoutPdfLayoutVersion?: number;
 	topics: Record<string, string>;
 	error: Partial<Record<NoteMode, string>>;
 	failedLiveNotes?: string;
 	usage: { at: string; mode: NoteMode; model: string; step: CallUsage }[];
 }
+/** Increment when cached handouts need to be typeset again from their saved text. */
+export const HANDOUT_PDF_LAYOUT_VERSION = 2;
 export interface NotesView {
 	liveNotesEnabled: boolean;
 	liveNotes: NoteEdition | null;
@@ -83,7 +88,7 @@ export function noteSectionHeading(heading: string): string {
 	return heading.trim().replace(/^(?:\d+(?:\.\d+)*[.)]\s+)+(?=\S)/, "");
 }
 export function noteSectionText(section: WrittenSection): string {
-	return [noteSectionHeading(section.heading), ...section.blocks.map(b => b.text)].join("\n");
+	return [noteSectionHeading(section.heading), ...section.blocks.flatMap(b => [b.title, b.text].filter(Boolean))].join("\n");
 }
 export function noteHref(chatId: string, mode: NoteMode, sectionId?: string): string {
 	return `/chat/${encodeURIComponent(chatId)}?notes=${mode}${sectionId ? `&section=${encodeURIComponent(sectionId)}` : ""}`;

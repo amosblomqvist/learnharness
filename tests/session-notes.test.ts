@@ -6,13 +6,14 @@ import path from "node:path";
 import { setImmediate as nextTurn, setTimeout as delay } from "node:timers/promises";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseFactory, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
+import { parseHTML } from "linkedom";
 import { bgLlmSlots } from "../src/agent/subagents/bg-llm-semaphore.ts";
 import { completedWithin } from "./completion.ts";
 import { noteEvidence } from "../src/core/note-evidence.ts";
 import { noteDocumentHtml, noteTextHtml } from "../src/core/note-render.ts";
 import type { ChatRecord } from "../src/core/contracts/chat.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
-import { noteHref, noteModeFromQuery, noteSectionHeading, type NoteDocument, type NoteIndexEntry, type NoteMode, type NotePassage } from "../src/core/session-notes.ts";
+import { HANDOUT_PDF_LAYOUT_VERSION, noteHref, noteModeFromQuery, noteSectionHeading, noteSectionText, type NoteDocument, type NoteIndexEntry, type NoteMode, type NotePassage } from "../src/core/session-notes.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-session-notes-"));
 process.env.LH_DATA_DIR = root;
@@ -224,6 +225,26 @@ it("numbers saved model headings once and preserves numbers that are part of the
 		assert.equal(noteSectionHeading(heading), heading);
 });
 
+it("keeps prose paragraphs and display equations separate, and labels both saved and newly titled examples safely", () => {
+	const doc: NoteDocument = { ...sample, sections: [{
+		...sample.sections[0]!, blocks: [
+			{ kind: "paragraph", text: "First paragraph.\n\nNext paragraph introduces\n$$x=1$$\nThe result." },
+			{ kind: "example", title: "Comparing $x^2$ <script>alert(1)</script>", text: "An explanation." },
+			{ kind: "example", text: "An older saved example without a title." },
+		],
+	}, { ...sample.sections[1]!, blocks: [{ kind: "example", title: "Another topic", text: "A different example." }] }] };
+	const { document } = parseHTML(noteDocumentHtml(doc));
+	assert.deepEqual([...document.querySelectorAll("section:first-of-type > p")].map(p => p.textContent), [
+		"First paragraph.", "Next paragraph introduces", "The result.",
+	]);
+	assert.equal(document.querySelectorAll("p .katex-display").length, 0);
+	assert.equal(document.querySelectorAll(".note-equation .katex-display").length, 1);
+	assert.deepEqual([...document.querySelectorAll(".note-example strong")].map(p => p.textContent), ["Example 1.1", "Example 1.2", "Example 2.1"]);
+	assert.equal(document.querySelectorAll("script").length, 0);
+	assert.match(document.querySelector(".note-block-title")!.textContent!, /<script>alert\(1\)<\/script>/);
+	assert.match(noteSectionText(doc.sections[0]!), /Comparing \$x\^2\$/);
+});
+
 it("downloads PDFs using the current session title, including Unicode and safe header characters", async () => {
 	const { stores } = await import("../src/server/index.ts");
 	const { GET } = await import("../app/api/chats/[id]/notes/pdf/route.ts");
@@ -255,7 +276,11 @@ it("repairs a legacy PDF from its saved text without another model run or changi
 	const document = { ...sample, sections: [{ ...sample.sections[0]!, heading: "8. Eigenvectors" }] };
 	const edition = { document, fingerprint: "old", writtenAt: "before" };
 	notesStore.saveHandoutPdf(chat.id, edition, Buffer.from("%PDF-old"));
-	notesStore.change(chat.id, state => { state.pendingHandout = { ...edition, fingerprint: "pending" }; });
+	notesStore.change(chat.id, state => {
+		delete state.handoutPdfLayoutVersion;
+		state.pendingHandout = { ...edition, fingerprint: "pending" };
+		state.error.handout = "A pending generation error";
+	});
 	let printed = 0;
 	const api = createSessionNotesService({
 		chatStore: { getChat: () => chat }, notesStore,
@@ -268,9 +293,63 @@ it("repairs a legacy PDF from its saved text without another model run or changi
 		},
 	});
 	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-corrected");
+	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-corrected");
 	assert.equal(printed, 1);
+	assert.equal(notesStore.read(chat.id).handoutPdfLayoutVersion, HANDOUT_PDF_LAYOUT_VERSION);
 	assert.equal(notesStore.read(chat.id).pendingHandout?.fingerprint, "pending");
 	assert.equal(notesStore.read(chat.id).handout?.fingerprint, "old");
+	assert.equal(notesStore.read(chat.id).error.handout, "A pending generation error");
+});
+
+it("refreshes an old PDF layout without touching its text, and preserves the old file if printing fails", async () => {
+	const chat: ChatRecord = { id: "old_layout", title: "Old layout", createdAt: "now", updatedAt: "now", messages: [] };
+	const edition = { document: sample, fingerprint: "published", writtenAt: "before" };
+	notesStore.saveHandoutPdf(chat.id, edition, Buffer.from("%PDF-old"));
+	notesStore.change(chat.id, state => { delete state.handoutPdfLayoutVersion; });
+	let fail = true;
+	const api = createSessionNotesService({
+		chatStore: { getChat: () => chat }, notesStore,
+		engineFor: () => { throw new Error("No model is needed"); },
+		writeNotes: async () => { throw new Error("Use saved text"); },
+		printPdf: async doc => {
+			assert.deepEqual(doc, sample);
+			if (fail) throw new Error("Printer unavailable");
+			return Buffer.from("%PDF-new-layout");
+		},
+	});
+	await assert.rejects(api.sessionNotesPdf(chat.id), /Printer unavailable/);
+	assert.equal(new TextDecoder().decode(notesStore.handoutPdf(chat.id)!), "%PDF-old");
+	assert.equal(notesStore.read(chat.id).handoutPdfLayoutVersion, undefined);
+	fail = false;
+	assert.equal(new TextDecoder().decode(await api.sessionNotesPdf(chat.id)), "%PDF-new-layout");
+	assert.deepEqual(notesStore.read(chat.id).handout, edition);
+	assert.deepEqual(notesStore.read(chat.id).usage, []);
+});
+
+it("does not replace a newer handout or recreate deleted notes when an older PDF refresh finishes", async () => {
+	for (const deleted of [false, true]) {
+		const chat: ChatRecord = { id: "refresh_race_" + deleted, title: "Refresh race", createdAt: "now", updatedAt: "now", messages: [] };
+		const edition = { document: sample, fingerprint: "published", writtenAt: "before" };
+		notesStore.saveHandoutPdf(chat.id, edition, Buffer.from("%PDF-old"));
+		notesStore.change(chat.id, state => { delete state.handoutPdfLayoutVersion; });
+		const rendering = Promise.withResolvers<Uint8Array>();
+		const api = createSessionNotesService({
+			chatStore: { getChat: () => chat }, notesStore,
+			engineFor: () => { throw new Error("No model is needed"); },
+			writeNotes: async () => { throw new Error("Use saved text"); },
+			printPdf: () => rendering.promise,
+		});
+		const download = api.sessionNotesPdf(chat.id);
+		if (deleted) notesStore.delete(chat.id);
+		else notesStore.saveHandoutPdf(chat.id, { ...edition, writtenAt: "newer", document: { ...sample, title: "New handout" } }, Buffer.from("%PDF-newer"));
+		rendering.resolve(Buffer.from("%PDF-refreshed-old"));
+		await download;
+		if (deleted) assert.equal(fs.existsSync(path.join(root, "notes", chat.id)), false);
+		else {
+			assert.equal(notesStore.read(chat.id).handout?.writtenAt, "newer");
+			assert.equal(new TextDecoder().decode(notesStore.handoutPdf(chat.id)!), "%PDF-newer");
+		}
+	}
 });
 
 it("resolves sections after later graph extraction and removes notes attachments but preserves retained graph tags on session deletion", async () => {
@@ -521,6 +600,23 @@ it("keeps a long notes response alive while headers, provider events, or streame
 		t.mock.timers.tick(250);
 		await writing.catch(() => {});
 	}
+});
+
+it("requires a descriptive title for newly generated examples and retains it in the saved document", async () => {
+	const faux = createFauxCore({});
+	const block = { kind: "example", text: "Substituting $x=2$ gives $x^2=4$." };
+	faux.setResponses([undefined, "Evaluating a square"].map(title => fauxAssistantMessage([fauxToolCall("submit_notes", {
+		overview: "Substitution.", sections: [{ heading: "Evaluate an expression", sourceIds: ["m"], blocks: [{ ...block, ...(title ? { title } : {}) }] }],
+	})], { stopReason: "toolUse" })));
+	let calls = 0;
+	const doc = await writeSessionNotes({
+		chatId: "example_title", title: "Substitution", mode: "handout", practice: false,
+		passages: [{ messageId: "m", topic: "substitution", text: "At x=2, x squared is 4." }],
+		engine: { model: faux.getModel(), streamFn: faux.streamSimple }, signal: new AbortController().signal,
+		onUsage: () => { calls++; },
+	});
+	assert.equal(calls, 2);
+	assert.equal(doc.sections[0]?.blocks[0]?.title, "Evaluating a square");
 });
 
 it("loads the notes prompt edited in Settings into the real writer and respects its switch", async () => {

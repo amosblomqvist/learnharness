@@ -18,7 +18,8 @@ function styles() {
 	return printStyles;
 }
 export function renderNotesPdf(document: NoteDocument): Promise<Uint8Array> {
+	const title = document.title.replace(/[&<>]/g, character => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;" })[character]!);
 	return printNotesPage(
-		`<!doctype html><html lang="en"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:"><style>${styles()}</style></head><body>${noteDocumentHtml(document)}</body></html>`,
+		`<!doctype html><html lang="en"><head><meta charset="utf-8"><title>${title}</title><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; font-src data:"><style>${styles()}</style></head><body>${noteDocumentHtml(document)}</body></html>`,
 	);
 }
