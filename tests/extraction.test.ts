@@ -858,6 +858,75 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		assert.deepEqual(await pipelineC.runExtraction(c.chatId), { nodes: 1, chains: 0 });
 	});
 
+	it("serialized audit: aborting a waiter does not let the run behind it audit while the run ahead still audits", async (t) => {
+		const a = fixtureChat();
+		const b = fixtureChat();
+		const c = fixtureChat();
+		const ledgers = memoryLedgers();
+
+		const single = (id: string, name: string, statement: string) => ({
+			propositions: [{ id, name, statement, aliases: [], messageId: "a1" }],
+			chains: [],
+		});
+
+		let gateOpen!: () => void;
+		const gate = new Promise<void>((resolve) => (gateOpen = resolve));
+		const settled: Promise<unknown>[] = [];
+		t.after(async () => {
+			gateOpen();
+			await Promise.allSettled(settled);
+		});
+		const pipelineA = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: submitModel("submit_findings", single("pa", "Alpha claim", "Alpha statement")),
+			auditor: gatedSubmitModel("submit_review", { links: [] }, gate),
+		});
+		const runA = pipelineA.runExtraction(a.chatId);
+		settled.push(runA);
+		await until(() => extractionStatuses().some((r) => r.chatId === a.chatId && r.phase === "auditing"));
+
+		const pipelineB = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: submitModel("submit_findings", single("pb", "Beta claim", "Beta statement")),
+			auditor: submitModel("submit_review", { links: [] }),
+		});
+		const runB = pipelineB.runExtraction(b.chatId);
+		settled.push(runB);
+		await until(() => extractionStatuses().some((r) => r.chatId === b.chatId && r.phase === "waiting"));
+
+		let cAuditorCalled = false;
+		let cSawAlphasMerge = false;
+		const pipelineC = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: submitModel("submit_findings", single("pc", "Gamma claim", "Gamma statement")),
+			auditor: submitModel("submit_review", { links: [] }, () => {
+				cAuditorCalled = true;
+				cSawAlphasMerge = ledgers.readNodes().some((n) => n.name === "Alpha claim");
+			}),
+		});
+		const runC = pipelineC.runExtraction(c.chatId);
+		settled.push(runC);
+		await until(() => extractionStatuses().some((r) => r.chatId === c.chatId && r.phase === "waiting"));
+
+		// Cancel B, the first run in line, while A still audits.
+		assert.equal(abortExtraction(b.chatId), true);
+		assert.deepEqual(await runB, { nodes: 0, chains: 0 });
+		await new Promise((resolve) => setTimeout(resolve, 50));
+
+		assert.ok(!cAuditorCalled, "C's auditor has not been invoked — A still holds the gate");
+		assert.equal(extractionStatuses().find((r) => r.chatId === c.chatId)?.phase, "waiting", "C still waits while A audits");
+
+		gateOpen();
+		assert.deepEqual(await runA, { nodes: 1, chains: 0 });
+		assert.deepEqual(await runC, { nodes: 1, chains: 0 });
+		assert.ok(cAuditorCalled);
+		assert.ok(cSawAlphasMerge, "C's auditor saw A's merged node — audit serialized after merge");
+		assert.equal(extractionStatuses().length, 0, "every run left the registry");
+	});
+
 	it("captures per-stage usage live, persists the run's usage into the chat record", async () => {
 		const { chatId } = fixtureChat();
 		const ledgers = memoryLedgers();
