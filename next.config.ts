@@ -10,7 +10,7 @@ const nextConfig: NextConfig = {
 	// Leave multipart headroom above the 25 MiB file allowance. This is a
 	// proxy buffer, not a rejection gate: the import route also bounds reads,
 	// validates actual file bytes and handles incomplete multipart bodies.
-	experimental: { proxyClientMaxBodySize: MAX_IMPORT_BODY_BYTES },
+	experimental: { proxyClientMaxBodySize: "100mb" },
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).

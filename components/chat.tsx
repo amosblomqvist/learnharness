@@ -52,7 +52,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, DumbbellIcon, PaperclipIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -60,6 +60,8 @@ import { SessionMessageNavigation } from "@/components/session-navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
+import { DocumentContextCard, type DocumentContextData } from "@/components/document-context-card";
+import { DocumentUploadModal } from "@/components/document-upload-modal";
 import { TopBar } from "@/components/top-bar";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
@@ -576,6 +578,7 @@ export function Chat({
 	catalogRef.current = catalog;
 	const [selectedModel, setSelectedModel] = useState<string | undefined>();
 	const [setupOpen, setSetupOpen] = useState(false);
+	const [docUploadModalOpen, setDocUploadModalOpen] = useState(false);
 	/** The last explicitly-sent draft (composer send): the
 	 *  refusal flow restores it into the composer, where it waits for the
 	 *  learner to re-send (Save never auto-sends, owner 2026-10-09).
@@ -1379,6 +1382,17 @@ export function Chat({
 					{/* Practice (owner, 2026-10-04): the coverage ring hides —
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
+					<Hint label="Tài liệu & đề thi đính kèm" side="bottom">
+						<button
+							type="button"
+							data-testid="topbar-document-upload"
+							onClick={() => setDocUploadModalOpen(true)}
+							className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground"
+						>
+							<PaperclipIcon className="size-3.5 text-primary" aria-hidden />
+							Tài liệu
+						</button>
+					</Hint>
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
@@ -1441,6 +1455,8 @@ export function Chat({
 										switch (part.type) {
 											case "data-graph-context":
 												return <GraphContextCard key={pi} data={part.data as GraphContextData} />;
+											case "data-document-context":
+												return <DocumentContextCard key={pi} data={part.data as DocumentContextData} />;
 											case "data-compaction":
 												return <CompactionMomentDivider key={pi} data={part.data as CompactionDividerData} />;
 											case "data-compaction-cut":
@@ -1755,8 +1771,10 @@ export function Chat({
 							nextProblem={nextReady}
 							onNext={sendNext}
 							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+							onAttach={() => setDocUploadModalOpen(true)}
 						/>
 					}
+					onAttach={() => setDocUploadModalOpen(true)}
 					onSubmitAnswer={(output) => {
 						if (!pending) return;
 						// THE ANSWER IS THE QUESTION CALL'S TOOL RESULT (fork 1, owner
@@ -1810,6 +1828,14 @@ export function Chat({
 				// Save only saves (owner ruling 2026-10-09): the draft went
 				// home into the composer at refusal time and STAYS there —
 				// the learner sends it themselves.
+			}}
+		/>
+		<DocumentUploadModal
+			isOpen={docUploadModalOpen}
+			onClose={() => setDocUploadModalOpen(false)}
+			chatId={chatId}
+			onDocumentsAdded={() => {
+				void adoptAppendOnly();
 			}}
 		/>
 		</ChatActionsContext.Provider>
@@ -1952,6 +1978,7 @@ function DockOverlay({
 	dictationCancel,
 	setupCta,
 	queuedSteers,
+	onAttach,
 }: {
 	pending: ReturnType<typeof pendingQuestionOf>;
 	initialQuestionDraft?: QuestionFormDraft;
@@ -2004,6 +2031,8 @@ function DockOverlay({
 	/** The persistent setup CTA (BYOK, owner 2026-09-22): the same pill
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
+	/** Open document upload modal */
+	onAttach?: () => void;
 }) {
 	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
@@ -2407,6 +2436,7 @@ function DockOverlay({
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}
+									onAttach={onAttach}
 								/>
 							) : practice ? (
 								<PracticeDock

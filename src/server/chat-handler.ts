@@ -48,7 +48,8 @@ import { applyParkedDismissal } from "./dismissal-park.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
-import { composeInstructions } from "../agent/teacher-agent.ts";
+import { getDocuments } from "./document-store.ts";
+import { composeInstructions, formatDocumentsForSystemPrompt } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
@@ -283,6 +284,20 @@ export async function handleChatInput(
 	try { conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong")); }
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
+	const chatDocs = await getDocuments(chatId);
+	const docSection = chatDocs.length > 0 ? formatDocumentsForSystemPrompt(chatDocs) : "";
+	const baseInstructions = composeInstructions(record.kind === "practice" ? "practice" : "teacher");
+	const totalSystemPrompt = docSection ? `${baseInstructions}\n\n---\n\n${docSection}` : baseInstructions;
+	const totalSystemTokens = Math.ceil(totalSystemPrompt.length / 4);
+
+	const limit = catalogContextLimits().get(modelIdForCompaction) ?? conversationEngine.model.contextWindow;
+	if (limit && totalSystemTokens >= limit) {
+		return Response.json(
+			{ error: "Tài liệu quá lớn, vượt giới hạn context window của mô hình" },
+			{ status: 400 },
+		);
+	}
+
 	await ensureCompacted(
 		{
 			chatStore: stores.chatStore,
@@ -292,9 +307,9 @@ export async function handleChatInput(
 			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
 			thresholdTokens: effectiveThresholdTokens(
 				effective.compaction?.thresholdTokens,
-				catalogContextLimits().get(modelIdForCompaction),
+				limit,
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			systemPromptTokens: totalSystemTokens,
 		},
 		chatId,
 	);
@@ -460,6 +475,7 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		documents: chatDocs,
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher
@@ -669,7 +685,7 @@ export async function handleChatInput(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: totalSystemTokens,
 						};
 					}, chatId);
 			},

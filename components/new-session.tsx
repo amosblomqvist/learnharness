@@ -11,10 +11,12 @@ import { SetupDialog } from "@/components/setup-dialog";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { StatsBar } from "@/components/stats-bar";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
-import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { ComposerActions, NodePickerControl, DocumentPickerControl } from "@/components/composer-actions";
+import { DocumentBadgeList } from "@/components/document-badge";
+import { DocumentUploadModal } from "@/components/document-upload-modal";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
-import type { ChatSettings, GraphSnapshot } from "@/src/core";
+import type { DocumentAttachmentMeta, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
  *  bar lifts — resolved nodes as the learner SAW them at pick time. */
@@ -47,17 +49,23 @@ export async function startDraftSession(
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
+	documents?: readonly DocumentAttachmentMeta[],
 ): Promise<string | null> {
 	const t = text.trim();
-	if (!t) return null;
-	// THE PICKS RIDE THE CREATE (owner round 10): a practice draft seeded
-	// from the pick bar creates its session WITH the graph context — the
-	// same contract as the home screen's practice send (the marker with
-	// [id] name: statement lines, target validation's truth set).
+	if (!t && (!documents || documents.length === 0)) return null;
+	const finalTitle = t || "Học tập dựa trên tài liệu & đề thi đính kèm";
 	return starter.start(
 		mode === "practice"
-			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			? {
+					title: finalTitle,
+					kind: "practice",
+					...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}),
+					...(documents && documents.length > 0 ? { documents: documents as any } : {}),
+				}
+			: {
+					title: finalTitle,
+					...(documents && documents.length > 0 ? { documents: documents as any } : {}),
+				},
 		fetchLike,
 		settingsIdentity,
 	);
@@ -79,6 +87,10 @@ export function DraftShell({
 	picks = [],
 	onOpenPicker,
 	onClearPicks,
+	attachedDocs = [],
+	onOpenDocUpload,
+	onClearDocs,
+	onRemoveDoc,
 	overlay,
 }: {
 	busy: boolean;
@@ -102,6 +114,11 @@ export function DraftShell({
 	picks?: DraftPick[];
 	onOpenPicker?: () => void;
 	onClearPicks?: () => void;
+	/** Attached documents for this draft session */
+	attachedDocs?: DocumentAttachmentMeta[];
+	onOpenDocUpload?: () => void;
+	onClearDocs?: () => void;
+	onRemoveDoc?: (id: string) => void;
 	/** THE PICKER SLOT (owner round 10b): the chain-table overlay hosts
 	 *  INSIDE the content column's relative container — the same law as
 	 *  the graph view (the overlay fills its column, never the sidebar).
@@ -124,7 +141,7 @@ export function DraftShell({
 	// round, owner 2026-10-01): the spoken text is deferred in the run's
 	// buffer — Enter must reach the finish-first send, not be gated out by
 	// an empty textarea. Nothing said → the send no-ops.
-	const canSend = text.trim().length > 0 || dictation.active;
+	const canSend = text.trim().length > 0 || dictation.active || attachedDocs.length > 0;
 	/* FINISH DICTATION FIRST (owner, 2026-10-01): stop the run, let the
 	 * last finals land through onChange, THEN call the parent's send —
 	 * which reads its REF mirror, so the post-await timing of React's
@@ -186,6 +203,13 @@ export function DraftShell({
 									picker={(picks.length > 0 || mode === "practice") && (
 										<NodePickerControl count={picks.length} onOpen={onOpenPicker} onClear={onClearPicks} />
 									)}
+									documents={
+										<DocumentPickerControl
+											count={attachedDocs.length}
+											onOpen={onOpenDocUpload}
+											onClear={onClearDocs}
+										/>
+									}
 									setup={setupCta}
 								/>
 								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
@@ -200,11 +224,19 @@ export function DraftShell({
 										inputRef={composerInputRef}
 										autoFocus
 										onEscape={dictation.active ? dictation.cancel : undefined}
-										// The opening question, same as the graph view's new-session
-										// input (owner refinement round, 2026-09-24) — no lesson has
-										// started yet, so the composer must not read like one is in
-										// flight.
-										placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
+										onAttach={onOpenDocUpload}
+										attachedDocs={
+											attachedDocs.length > 0 ? (
+												<DocumentBadgeList docs={attachedDocs} onRemove={onRemoveDoc} />
+											) : undefined
+										}
+										placeholder={
+											attachedDocs.length > 0
+												? "Mô tả mục tiêu học tập / thi cử của bạn (hoặc nhấn Gửi để bắt đầu)..."
+												: (mode === "practice"
+													? "What do you want to practice?"
+													: "What do you want to learn?")
+										}
 									/>
 								</div>
 								<StatsBar
@@ -218,35 +250,43 @@ export function DraftShell({
 				</div>
 			</div>
 			{/* The floating reopen toggle — pointer-events-none except the
-			    toggle itself (home's pattern), painted AFTER the overlay's
-			    column so nothing of it blocks the canvas area. */}
-			<header className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
-				<div className="pointer-events-auto">
-					<SidebarToggle />
-				</div>
-			</header>
+			    button, so the empty-state backdrop stays interactive. */}
+			<div className="pointer-events-none absolute left-3 top-3 z-30">
+				<SidebarToggle />
+			</div>
 		</div>
 	);
 }
 
-export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
+export function NewSession({
+	initialConfigured = true,
+	mode = "teach",
+}: {
+	initialConfigured?: boolean;
+	mode?: "teach" | "practice";
+}) {
 	const router = useRouter();
 	const [text, setText] = useState("");
-	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
-	 * finish-first send calls THIS send after the dictation flush — which
-	 * landed via setState and may not have re-rendered yet. The send reads
-	 * the mirror; every write keeps it current. */
-	const textRef = useRef("");
+	const [busy, setBusy] = useState(false);
+	const [startError, setStartError] = useState(false);
+	const starterRef = useRef<SessionStarter>(new SessionStarter());
+	const startingRef = useRef(false);
+	const textRef = useRef(text);
 	const applyText = (v: string) => {
 		textRef.current = v;
 		setText(v);
 	};
-	const [busy, setBusy] = useState(false);
-	const startingRef = useRef(false);
-	const starterRef = useRef(new SessionStarter());
-	const [startError, setStartError] = useState(false);
-	// THE PICK BAR (owner round 10): the draft's lifted pick set + the
-	// snapshot the standalone chain-table picker reads. Lazy — the graph
+
+	// Attached documents
+	const [attachedDocs, setAttachedDocs] = useState<DocumentAttachmentMeta[]>([]);
+	const attachedDocsRef = useRef<DocumentAttachmentMeta[]>([]);
+	const [uploadModalOpen, setUploadModalOpen] = useState(false);
+	const applyDocs = (next: DocumentAttachmentMeta[]) => {
+		attachedDocsRef.current = next;
+		setAttachedDocs(next);
+	};
+
+	// THE STANDALONE CHAIN PICKER (owner round 10): the snapshot
 	// is fetched on FIRST open only, then reused.
 	const [picks, setPicks] = useState<DraftPick[]>([]);
 	const picksRef = useRef<DraftPick[]>([]);
@@ -281,18 +321,16 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const [setupOpen, setSetupOpen] = useState(false);
 
 	const send = useCallback(() => {
-		const draft = textRef.current.trim();
+		const draft =
+			textRef.current.trim() ||
+			(attachedDocsRef.current.length > 0
+				? "Hãy hướng dẫn tôi học và ôn luyện toàn bộ kiến thức dựa trên các tài liệu bài giảng và đề thi đính kèm để làm tốt bài thi."
+				: "");
 		if (!draft || startingRef.current) return;
 		if (!configured) {
 			setSetupOpen(true);
 			return;
 		}
-		// The pre-send KEY guards (owner interlude, no-orphan-chats): guard
-		// BEFORE startDraftSession creates the record — a refused first
-		// send would otherwise leave an orphan error-shell chat in the
-		// sidebar. Zero providers opens connection setup; an unavailable
-		// selection with another provider opens the ordinary Strong picker.
-		// The server's admission gate remains the belt.
 		if (zeroKeys) {
 			setSetupOpen(true);
 			return;
@@ -305,8 +343,15 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		startingRef.current = true;
 		setBusy(true);
 		setStartError(false);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
-			starterRef.current, JSON.stringify(catalog?.slots.strong))
+		void startDraftSession(
+			draft,
+			fetch,
+			mode === "practice" ? "practice" : undefined,
+			mode === "practice" ? picksRef.current : undefined,
+			starterRef.current,
+			JSON.stringify(catalog?.slots.strong),
+			attachedDocsRef.current,
+		)
 			.then((target) => {
 				if (target) router.push(target);
 				else { startingRef.current = false; setBusy(false); }
@@ -330,11 +375,11 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				attachedDocs={attachedDocs}
+				onOpenDocUpload={() => setUploadModalOpen(true)}
+				onClearDocs={() => applyDocs([])}
+				onRemoveDoc={(id) => applyDocs(attachedDocsRef.current.filter((d) => d.id !== id))}
 				overlay={
-					// THE PICKER (owner round 10b): hosted INSIDE the content
-					// column — absolute inset-0 resolves to the column's relative
-					// container, the same confinement the graph view gives it;
-					// never over the sidebar or the traffic lights.
 					<ChainTableOverlay
 						open={pickerOpen}
 						nodes={snapshot?.propositions ?? []}
@@ -372,17 +417,18 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 					)
 				}
 			/>
-			{/* First-run setup: the send interception's landing surface — stage
-			    1 is the self-contained first-key screen (zero-keys wave). */}
+			<DocumentUploadModal
+				isOpen={uploadModalOpen}
+				onClose={() => setUploadModalOpen(false)}
+				onDocumentsAdded={(newDocs) => applyDocs([...attachedDocsRef.current, ...newDocs])}
+			/>
 			<SetupDialog
 				open={setupOpen}
 				onClose={() => setSetupOpen(false)}
 				onDone={() => {
 					setSetupOpen(false);
-					// Save only saves (owner ruling 2026-10-09): the draft
-					// waits in the composer; the learner sends it.
 				}}
-				/>
+			/>
 		</>
 	);
 }

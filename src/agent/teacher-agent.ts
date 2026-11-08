@@ -21,7 +21,8 @@ import { makeNarrationGuard, narrationGuardApplies, SEND_TO_USER_DELIVERY_RULE }
 import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
-import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
+import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL, type DocumentContextItem } from "../core/native-messages.ts";
+import type { ParsedDocument } from "../core/contracts/chat.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
@@ -123,6 +124,10 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** Attached course materials & exams (when provided for this session).
+	 * Formatted and appended to systemPrompt so providers can prefix-cache
+	 * static materials across all agent turns without wire re-transmission. */
+	documents?: readonly ParsedDocument[];
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -176,6 +181,44 @@ function makeQuestionStopper(kind: AgentKind) {
 	};
 }
 
+/** Format attached course materials and exams for system prompt injection.
+ * Wraps each document in XML tags with pedagogical instructions for the model. */
+export function formatDocumentsForSystemPrompt(docs: readonly ParsedDocument[]): string {
+	if (!docs || docs.length === 0) return "";
+	const lines = [
+		"# Course Materials & Past Exams (Attached by Learner)",
+		"",
+		"The learner has provided official course materials (lecture notes/slides) and past exam papers/formats.",
+		"Ground your teaching, definitions, notation, and problem structures on these materials.",
+		"",
+	];
+
+	for (const doc of docs) {
+		lines.push(`<document name="${doc.fileName}" category="${doc.category}">`);
+		if (doc.category === "exam") {
+			lines.push("<instruction>");
+			lines.push("This document contains exam problems and past test formats. Your goal is to guide the learner until they achieve mastery to solve these problems.");
+			lines.push("CRITICAL: Absolutely DO NOT solve exam problems directly or reveal answers/solutions directly to the learner.");
+			lines.push("Instead, guide the learner step-by-step through Socratic questioning, checks, and analogous practice problems so they arrive at the solutions themselves.");
+			lines.push("</instruction>");
+		} else {
+			lines.push("<instruction>");
+			lines.push("This document contains official course lecture notes and slides.");
+			lines.push("Use this as the primary reference for definitions, terminology, theorems, and recommended methodology.");
+			lines.push("Structure your explanations and plan around the progression in these slides.");
+			lines.push("</instruction>");
+		}
+		lines.push("<content>");
+		const text = doc.text.length > 50000 ? doc.text.slice(0, 50000) + "\n\n[...truncated...]" : doc.text;
+		lines.push(text);
+		lines.push("</content>");
+		lines.push("</document>");
+		lines.push("");
+	}
+
+	return lines.join("\n").trim();
+}
+
 function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[]) {
 	// Practice never reaches the role fallback (the handler ALWAYS injects
 	// the session's conversation engine — practice rides the same
@@ -187,7 +230,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const composedPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
-	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
+	const guardedPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
+	const docSection = opts.documents && opts.documents.length > 0
+		? "\n\n---\n\n" + formatDocumentsForSystemPrompt(opts.documents)
+		: "";
+	const systemPrompt = guardedPrompt + docSection;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
