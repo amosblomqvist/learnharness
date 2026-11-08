@@ -38,6 +38,7 @@ export async function POST(req: Request) {
 		stores.chatStore.saveSettings(chat.id, {
 			model: { provider: strong.model.provider, id: strong.model.id },
 			thinkingLevel: strong.thinkingLevel,
+			...(strong.fast ? { fast: true as const } : {}),
 		});
 	}
 	// The session's map context (owner, 2026-10-04): the picked

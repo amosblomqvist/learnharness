@@ -72,7 +72,7 @@ interface ModelsBody {
 	/** The three tiers' RESOLVED pins (BYOK: NULL per unset tier) — the
 	 *  PREFILL + "needed" marks (owner, 2026-09-22): pinned tiers open
 	 *  with their pick, unpinned tiers carry the mark. */
-	slots?: Record<ModelSlotName, { model: { provider: string; id: string }; thinkingLevel?: ThinkingLevel } | null>;
+	slots?: Record<ModelSlotName, { model: { provider: string; id: string }; thinkingLevel?: ThinkingLevel; fast?: true } | null>;
 }
 
 /** Pure: which stage the flow opens at — no keyed provider = keys first
@@ -241,6 +241,13 @@ function prefillLevels(body: ModelsBody | undefined): Partial<Record<ModelSlotNa
 	return levels;
 }
 
+/** A saved Fast pin rides Save untouched until its slot is re-picked. */
+function prefillFast(body: ModelsBody | undefined): Partial<Record<ModelSlotName, true>> {
+	const fast: Partial<Record<ModelSlotName, true>> = {};
+	for (const slot of SLOT_ORDER) if (body?.slots?.[slot]?.fast) fast[slot] = true;
+	return fast;
+}
+
 interface SetupDialogProps {
 	open: boolean;
 	onClose: () => void;
@@ -261,6 +268,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 	const connectionCloseRequested = useRef(false);
 	const [picked, setPicked] = useState(() => prefillFromSlots(catalog?.models ?? [], catalog?.slots));
 	const [levels, setLevels] = useState(() => prefillLevels(catalog));
+	const [fast, setFast] = useState(() => prefillFast(catalog));
 	const editedSlots = useRef(new Set<ModelSlotName>());
 	const [saving, setSaving] = useState(false);
 	const [error, setError] = useState<string | null>(null);
@@ -302,6 +310,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 		if (!catalog) return;
 		const pre = prefillFromSlots(catalog.models, catalog.slots);
 		const preLevels = prefillLevels(catalog);
+		const preFast = prefillFast(catalog);
 		// Fresh metadata is always used, but a response cannot reset an
 		// edited slot, including a level chosen while the request was pending.
 		setPicked((prev) => {
@@ -315,6 +324,13 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 			const next = { ...prev };
 			for (const slot of SLOT_ORDER) if (!editedSlots.current.has(slot)) {
 				if (preLevels[slot] !== undefined) next[slot] = preLevels[slot]; else delete next[slot];
+			}
+			return next;
+		});
+		setFast((prev) => {
+			const next = { ...prev };
+			for (const slot of SLOT_ORDER) if (!editedSlots.current.has(slot)) {
+				if (preFast[slot]) next[slot] = true; else delete next[slot];
 			}
 			return next;
 		});
@@ -414,6 +430,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 				...(catalog?.slots[slot]?.cacheRetention !== undefined ? { cacheRetention: catalog.slots[slot]!.cacheRetention } : {}),
 				model: { provider: picked[slot]!.provider, id: picked[slot]!.id },
 				...(level ? { thinkingLevel: level } : {}),
+				...(fast[slot] ? { fast: true as const } : {}),
 			};
 		}
 		const res = await fetch("/api/settings/models", {
@@ -552,10 +569,16 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 														models={slotCatalog}
 														effectiveId={entry?.id}
 														effectiveProvider={entry?.provider}
+														effectiveFast={fast[slot] === true && metadata?.fast !== undefined}
 														vision={slot === "vision"}
-														onPick={(m) => {
+														onPick={(m, pickedFast) => {
 															editedSlots.current.add(slot);
 															setPicked((prev) => ({ ...prev, [slot]: m }));
+															setFast((prev) => {
+																const next = { ...prev };
+																if (pickedFast) next[slot] = true; else delete next[slot];
+																return next;
+															});
 															// Auto-populate (chunk 2, owner: "populate
 															// everywhere"): no explicit level → the
 															// ordering's level for the fresh pick; an

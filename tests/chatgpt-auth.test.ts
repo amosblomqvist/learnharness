@@ -235,6 +235,24 @@ test("logout wins an in-flight refresh and retains only account/client/host mapp
 	} finally { f.service.close(); }
 });
 
+test("account catalog keeps the Fast (priority) service tier and its backend description, nothing else", async () => {
+	const tiers = (...t: unknown[]) => t;
+	const f = await loggedIn({ provider: async (target: string) => target.endsWith("/models") ? Response.json({ models: [
+		{ slug: "gpt-5", display_name: "Scratch model", visibility: "list", service_tiers: tiers({ id: "priority", name: "Fast", description: "2x speed, increased usage" }) },
+		{ slug: "gpt-5-flex", display_name: "Flex only", visibility: "list", service_tiers: tiers({ id: "flex", name: "Flex", description: "Cheaper" }) },
+		{ slug: "gpt-5-bare", display_name: "No description", visibility: "list", service_tiers: tiers({ id: "priority", name: "Fast" }) },
+		{ slug: "gpt-5-junk", display_name: "Junk tiers", visibility: "list", service_tiers: "priority" },
+	] }) : undefined });
+	try {
+		assert.deepEqual((await f.service.models()).models, [
+			{ id: "gpt-5", name: "Scratch model", fast: { description: "2x speed, increased usage" } },
+			{ id: "gpt-5-flex", name: "Flex only" },
+			{ id: "gpt-5-bare", name: "No description", fast: { description: "" } },
+			{ id: "gpt-5-junk", name: "Junk tiers" },
+		]);
+	} finally { f.service.close(); }
+});
+
 test("account catalog is scoped, visibility filtered, and cleared on disconnect", async () => {
 	const f = await loggedIn();
 	try {

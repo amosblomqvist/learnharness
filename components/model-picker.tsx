@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatSettings, ModelCatalogEntry, ModelCatalogResponse, ModelsSettings, UserSettings } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
-import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
+import { FastBolt, ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
 import { composeSlotModel } from "@/components/settings/agent-section";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
@@ -92,6 +92,8 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 		? session ? {
 				model: session.settings?.model ?? strong?.model,
 				thinkingLevel: session.settings?.thinkingLevel ?? strong?.thinkingLevel,
+				// Fast follows the model it was saved with (resolveConversationSpec).
+				...((session.settings?.model ? session.settings.fast : strong?.fast) ? { fast: true as const } : {}),
 			} : undefined
 		: strong;
 	const effectiveId = override?.model?.id;
@@ -104,6 +106,14 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 		(m) => m.id === effectiveId && m.provider === effectiveProvider,
 	);
 	const levels = entry?.supportedLevels ?? [];
+	// The stored Fast pin rides every write; the ⚡ shows only while the
+	// catalog still offers Fast (S5: the engine then runs standard).
+	const storedFast = override?.fast === true;
+	const fastShown = storedFast && entry?.fast !== undefined;
+	// A thinking edit re-sends the pin. A chat that inherits Strong's Fast
+	// copies it into its own record only while the catalog still offers it;
+	// the chat's own stored Fast (or a slot's) re-saves as an unchanged pin.
+	const carryFast = storedFast && (!chatId || session?.settings?.fast === true || fastShown);
 	// Legacy display (chunk 2 item 4, owner): a record with a model but no
 	// stored level shows the RESOLVED level — the ordering's first supported
 	// — because that is exactly what the engine build would run. Display-
@@ -206,16 +216,17 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	);
 
 	// One apply seam over both write paths: a pick names provider + id +
-	// level; chat mode writes the session's own record (any pick pins it),
-	// draft mode composes the strong slot (siblings preserved,
-	// replace-whole-section discipline).
+	// level + Fast; chat mode writes the session's own record (any pick pins
+	// it), draft mode composes the strong slot (siblings preserved,
+	// replace-whole-section discipline). Both replace the whole pin, so
+	// every caller passes the Fast it means to keep.
 	const apply = useCallback(
-		(provider: string, id: string, level: ThinkingLevel | undefined) => {
+		(provider: string, id: string, level: ThinkingLevel | undefined, fast: boolean) => {
 			if (chatId) {
-				void saveChat({ model: { provider, id }, thinkingLevel: level });
+				void saveChat({ model: { provider, id }, thinkingLevel: level, ...(fast ? { fast: true } : {}) });
 			} else {
 				// composeSlotModel's empty-string convention: no level = unset.
-				void save(composeSlotModel(models, "strong", provider, id, level ?? ""));
+				void save(composeSlotModel(models, "strong", provider, id, level ?? "", fast));
 			}
 		},
 		[chatId, models, save, saveChat],
@@ -241,16 +252,16 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 			const idx = effectiveLevel === undefined ? -1 : levels.indexOf(effectiveLevel);
 			const next = levels[(idx + 1) % levels.length];
 			if (next === undefined) return;
-			apply(effectiveProvider ?? "", effectiveId ?? "", next);
+			apply(effectiveProvider ?? "", effectiveId ?? "", next, carryFast);
 		};
 		window.addEventListener("lh:kbd-cycle-thinking", onCycleThinking);
 		return () => window.removeEventListener("lh:kbd-cycle-thinking", onCycleThinking);
-	}, [levels, effectiveLevel, effectiveProvider, effectiveId, apply]);
+	}, [levels, effectiveLevel, effectiveProvider, effectiveId, carryFast, apply]);
 
 	// Selecting a model (click and Enter share one path): keep the
 	// thinking level only when the new model supports it — otherwise
 	// drop it (a carry-over would 400 at the server's catalog gate).
-	const pickModel = (m: ModelCatalogEntry) => {
+	const pickModel = (m: ModelCatalogEntry, fast: boolean) => {
 		// Auto-populate (chunk 2, owner: "populate everywhere"): a fresh pick
 		// ALWAYS writes a level — the STORED one rides as-is (the write clamps
 		// server-side when the new model doesn't support it; the signal
@@ -260,7 +271,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 		// rides — it belongs to the OLD model; the fresh pick's level comes
 		// from the fresh model's own ladder.)
 		const nextLevel = populateLevel(storedLevel, m.supportedLevels);
-		apply(m.provider, m.id, nextLevel);
+		apply(m.provider, m.id, nextLevel, fast);
 	};
 
 	// Stale-while-revalidate on manual open too (⌘K covers the keyboard
@@ -275,7 +286,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	return (
 		<div ref={containerRef} className="relative flex items-center gap-1.5" data-testid="model-control">
 			<Hint
-				label={effectiveId ? `${effectiveProvider ? `${effectiveProvider}:` : ""}${effectiveId}` : "Model selector"}
+				label={effectiveId ? `${effectiveProvider ? `${effectiveProvider}:` : ""}${effectiveId}${fastShown ? " · Fast" : ""}` : "Model selector"}
 				action="open-model-picker"
 				side="bottom"
 			>
@@ -291,6 +302,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				className="flex items-center gap-1.5 rounded-full border bg-card/85 px-2.5 py-1 shadow-lg backdrop-blur transition-colors hover:border-border hover:bg-muted"
 			>
 				<span className="text-card-foreground">{effectiveId ? prettyModel(effectiveId) : "—"}</span>
+				{fastShown && <FastBolt />}
 				<span aria-hidden className="text-xs text-muted-foreground">▾</span>
 			</button>
 			</Hint>
@@ -342,6 +354,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 						models={catalog?.models}
 						effectiveId={effectiveId}
 						effectiveProvider={effectiveProvider}
+						effectiveFast={fastShown}
 						onPick={pickModel}
 						footer={
 							catalog && catalog.models.length === 0
@@ -364,7 +377,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 					<ThinkingMenuList
 						levels={catalog ? levels : []}
 						effectiveLevel={effectiveLevel}
-						onPick={(level) => apply(effectiveProvider ?? "", effectiveId ?? "", level as ThinkingLevel)}
+						onPick={(level) => apply(effectiveProvider ?? "", effectiveId ?? "", level as ThinkingLevel, carryFast)}
 						empty={catalog ? (effectiveId ? `${prettyModel(effectiveId)} has no thinking levels.` : "Pick a model first.") : "Loading…"}
 						footer="Levels this model actually supports"
 					/>

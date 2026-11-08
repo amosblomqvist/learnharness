@@ -15,6 +15,12 @@ const JWKS = `${ISSUER}/.well-known/jwks.json`;
 const SCOPES = ["openid", "profile", "email", "offline_access", "resource.invoke", "chatgpt.tokens.use.direct"];
 const REVOCATION_WARNING = "Account disconnected locally. Remote revocation could not be confirmed.";
 const random = () => crypto.randomBytes(32).toString("base64url");
+// Fast = the "priority" service tier (Codex's request value). Keep only its
+// backend description; every other catalog field stays dropped.
+const fastTier = (m) => {
+	const tier = Array.isArray(m.service_tiers) ? m.service_tiers.find((t) => t && t.id === "priority") : undefined;
+	return tier ? { fast: { description: typeof tier.description === "string" ? tier.description : "" } } : {};
+};
 const fail = (code) => Object.assign(new Error(code), { code });
 const publicError = (err) => ({
 	cancelled: "ChatGPT sign-in cancelled.",
@@ -423,7 +429,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			const body = await json(`${RESOURCE}/models`, { headers: { Authorization: `Bearer ${token.accessToken}` }, signal: AbortSignal.any([transportAbort.signal, AbortSignal.timeout(15000)]) });
 			authorized(false, undefined, token.epoch);
 			if (sequence !== catalogSequence || active()?.id !== token.accountId || !Array.isArray(body.models)) throw fail("catalog");
-			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => ({ id: m.slug, name: m.display_name }));
+			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => ({ id: m.slug, name: m.display_name, ...fastTier(m) }));
 			const changed = JSON.stringify(visible) !== JSON.stringify(catalog);
 			catalog = visible;
 			if (changed) authorityRevision++;

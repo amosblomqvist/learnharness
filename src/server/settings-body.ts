@@ -45,6 +45,7 @@ export function parseSettingsBody(body: unknown): SettingsBodyResult<ChatSetting
 	const raw = body as {
 		model?: { provider?: unknown; id?: unknown };
 		thinkingLevel?: unknown;
+		fast?: unknown;
 	};
 	const settings: ChatSettings = {};
 	if (raw.model !== undefined) {
@@ -63,6 +64,12 @@ export function parseSettingsBody(body: unknown): SettingsBodyResult<ChatSetting
 			return { ok: false, error: "thinkingLevel must be a string" };
 		}
 		settings.thinkingLevel = raw.thinkingLevel as ThinkingLevel;
+	}
+	// OpenAI Fast rides the model it is saved with; false is stored as absent.
+	if (raw.fast !== undefined) {
+		if (typeof raw.fast !== "boolean") return { ok: false, error: "fast must be a boolean" };
+		if (raw.fast && !settings.model) return { ok: false, error: "fast requires a model" };
+		if (raw.fast) settings.fast = true;
 	}
 	// Wave 7 killed the graph-context injection (owner: zero configuration
 	// beyond chat models — the prober reads its map through tools now); its
@@ -130,6 +137,11 @@ function parseRoleOverride(value: unknown, role: string): { ok: true; override: 
 			return { ok: false, error: `${role}.thinkingLevel must be a string` };
 		}
 		override.thinkingLevel = raw.thinkingLevel as ThinkingLevel;
+	}
+	if (raw.fast !== undefined) {
+		if (typeof raw.fast !== "boolean") return { ok: false, error: `${role}.fast must be a boolean` };
+		if (raw.fast && !override.model) return { ok: false, error: `${role}.fast requires a model` };
+		if (raw.fast) override.fast = true;
 	}
 	return { ok: true, override };
 }
