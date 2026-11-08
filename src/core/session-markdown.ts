@@ -169,6 +169,8 @@ export function messageMarkdown(
 		for (const text of userFacingTextOf((message as { content: unknown }).content)) {
 			parts.push(`### Learner${anchor}\n\n${text.trim()}`);
 		}
+		const attachments = (message as LhMessage & { attachments?: Array<{ name: string }> }).attachments ?? [];
+		if (attachments.length) parts.push(`### Learner attachments${anchor}\n\n${attachments.map((attachment) => `- \`${attachment.name.replace(/`/g, "\\`")}\``).join("\n")}`);
 	} else if (role === "assistant") {
 		for (const text of userFacingTextOf((message as { content: unknown }).content, ctx?.failedOutputCalls ?? failedOutputCallIds([message]))) {
 			parts.push(`### Teacher${anchor}\n\n${text.trim()}`);

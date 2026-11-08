@@ -11,7 +11,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { Composer, enterAction } from "../components/composer.tsx";
+import { ChatSessionComposer, Composer, enterAction } from "../components/composer.tsx";
 
 function render(
 	opts: { busy?: boolean; canSend?: boolean; placeholder?: string; nextProblem?: boolean } = {},
@@ -114,5 +114,15 @@ describe("enterAction", () => {
 	it("busy outranks the pause — steering and Stop keep their lanes", () => {
 		assert.equal(enterAction({ busy: true, canSend: false, nextProblem: true }), "stop");
 		assert.equal(enterAction({ busy: true, canSend: true, nextProblem: true }), "send");
+	});
+});
+
+
+describe("ChatSessionComposer attachments", () => {
+	it("enables sending an attachment without text and forwards the picker", () => {
+		const html = renderToStaticMarkup(<ChatSessionComposer busy={false} value="" revision={0} onChange={() => {}} onSend={() => {}} onStop={() => {}} sendAllowed dictationActive={false} hasAttachments attachmentControl={<span>Attach file</span>} />);
+		assert.match(html, /Attach file/);
+		assert.match(html, /aria-label="Send"/);
+		assert.doesNotMatch(html, /aria-label="Send"[^>]*\\sdisabled(?:=|\\s|>)/);
 	});
 });
