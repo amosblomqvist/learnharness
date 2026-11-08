@@ -6,6 +6,7 @@ import { downloadFile } from "@/components/artifacts/download";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import type { ArtifactPartProps, ImageSnapshot, ShowImageDetails } from "@/src/core";
 import { useImageSnapshot } from "./use-image-snapshot";
+import { useLocale } from "@/lib/i18n/provider";
 
 /**
  * The show_image card (issue #363): one of the learner's own images, as
@@ -47,12 +48,13 @@ export function imageSvgDocument(image: ImageSnapshot): string {
 }
 
 export function ImageCard({ part }: ArtifactPartProps) {
+	const { tl } = useLocale();
 	if (part.state !== "output-available") return <ToolCallCard part={part} />;
 	const image = part.output;
 	if (!isShowImageDetails(image)) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				Image shown, but it could not be displayed.
+				{tl("Image shown, but it could not be displayed.")}
 			</div>
 		);
 	}
@@ -60,13 +62,15 @@ export function ImageCard({ part }: ArtifactPartProps) {
 }
 
 function StoredImageCard({ details }: { details: ShowImageDetails }) {
+	const { tl } = useLocale();
 	const { image, failed } = useImageSnapshot(details.snapshotId);
-	if (!image) return <div className="my-4 text-sm text-muted-foreground" role="status">{failed ? "Image snapshot could not be loaded." : "Loading image…"}</div>;
+	if (!image) return <div className="my-4 text-sm text-muted-foreground" role="status">{failed ? tl("Image snapshot could not be loaded.") : tl("Loading image…")}</div>;
 	return <ImagePresentation image={{ ...image, path: details.path, caption: details.caption }} />;
 }
 
 /** Resolved presentation shared by inline display, download and fullscreen. */
 export function ImagePresentation({ image }: { image: ImageSnapshot & Pick<ShowImageDetails, "path" | "caption"> }) {
+	const { tl } = useLocale();
 	const overlay = useSessionMermaid();
 	const save = () => {
 		const bytes = Uint8Array.from(atob(image.data), (c) => c.charCodeAt(0));
@@ -91,7 +95,7 @@ export function ImagePresentation({ image }: { image: ImageSnapshot & Pick<ShowI
 			</div>
 			<figcaption className="mt-2 flex w-0 min-w-full items-start justify-between gap-2">
 				<div className="flex min-w-0 items-baseline gap-2">
-					<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">Image</span>
+					<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">{tl("Image")}</span>
 					{image.caption && (
 						<span className="text-sm text-muted-foreground" data-testid="image-caption">
 							{image.caption}
@@ -101,8 +105,8 @@ export function ImagePresentation({ image }: { image: ImageSnapshot & Pick<ShowI
 				<div className="flex shrink-0 items-center gap-1.5">
 					<button
 						type="button"
-						aria-label="Download image"
-						title="Download image"
+						aria-label={tl("Download image")}
+						title={tl("Download image")}
 						onClick={save}
 						data-testid="image-download"
 						className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -112,8 +116,8 @@ export function ImagePresentation({ image }: { image: ImageSnapshot & Pick<ShowI
 					{overlay && (
 						<button
 							type="button"
-							aria-label="Open image fullscreen"
-							title="Open fullscreen"
+							aria-label={tl("Open image fullscreen")}
+							title={tl("Open fullscreen")}
 							onClick={() => overlay.openFigure(imageSvgDocument(image), false)}
 							data-testid="image-open"
 							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

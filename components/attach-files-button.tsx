@@ -7,6 +7,7 @@ import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
+import { useLocale } from "@/lib/i18n/provider";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
  *  desktop bridge. Same validity rule as drops: a file without a usable
@@ -56,6 +57,7 @@ function useDesktopPaths(): boolean {
  * aria-disabled, not disabled, so the tooltip still shows.
  */
 export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HTMLDivElement | null> }) {
+	const { tl } = useLocale();
 	const pickerRef = useRef<HTMLInputElement>(null);
 	const desktop = useDesktopPaths();
 	const buttonRef = useRef<HTMLButtonElement>(null);
@@ -103,14 +105,14 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 		const choose = window.lh?.chooseAttachmentFolder;
 		setOpen(false);
 		setNotice("");
-		if (!choose) { setNotice(BROWSER_NOTICE); return; }
+		if (!choose) { setNotice(tl(BROWSER_NOTICE)); return; }
 		choosingFolder.current = true;
 		try {
 			const chosen = await choose();
 			if (chosen === null) return; // Native cancellation leaves the draft intact.
 			const path = directoryReferencePath(chosen);
 			if (editor?.isConnected && editor === editorRef.current) editor.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: [path] }));
-		} catch { setNotice("Could not choose a folder. Try again."); }
+		} catch { setNotice(tl("Could not choose a folder. Try again.")); }
 		finally { choosingFolder.current = false; }
 	};
 	return (
@@ -132,11 +134,11 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 					e.currentTarget.value = ""; // allow re-picking the same file
 				}}
 			/>
-			<Hint label={desktop ? "Attach files or a folder" : BROWSER_NOTICE}>
+			<Hint label={desktop ? tl("Attach files or a folder") : tl(BROWSER_NOTICE)}>
 				<button
 					ref={buttonRef}
 					type="button"
-					aria-label="Attach files"
+					aria-label={tl("Attach files")}
 					aria-disabled={!desktop}
 					aria-haspopup="menu"
 					aria-expanded={open}
@@ -148,7 +150,7 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				</button>
 			</Hint>
 			{(open || notice) && createPortal(<div ref={popupRef} role={open ? "menu" : "status"}
-				aria-label={open ? "Attach files or a folder" : undefined}
+				aria-label={open ? tl("Attach files or a folder") : undefined}
 				data-testid="attachment-popup"
 				style={{ position: "fixed", zIndex: 60, ...(placement ?? { left: 0, top: 0, visibility: "hidden" }), overflowY: "auto" }}
 				className={open ? "w-max rounded-lg border bg-card p-1 shadow-lg" : "w-64 rounded-lg border bg-card p-2 text-xs text-muted-foreground shadow-lg"}
@@ -160,9 +162,9 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				}}>
 				{open ? <>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-start text-xs hover:bg-accent"
-						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
+						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>{tl("Files")}</button>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-start text-xs hover:bg-accent"
-						onClick={() => { void chooseFolder(); }}>Folder</button>
+						onClick={() => { void chooseFolder(); }}>{tl("Folder")}</button>
 				</> : notice}
 			</div>, document.body)}
 		</div>

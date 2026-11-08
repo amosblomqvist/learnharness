@@ -11,6 +11,7 @@ import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { SvgImage } from "@/components/artifacts/svg-image";
 import { embedLearnerImage, type ArtifactPartProps, type VisualResult } from "@/src/core";
 import { useImageSnapshot } from "./use-image-snapshot";
+import { useLocale } from "@/lib/i18n/provider";
 
 /**
  * Visual artifact card (W6 → ack protocol): the tool part's output is the
@@ -51,6 +52,7 @@ export function VisualOutputCard({
 	messageId?: string;
 	initialInverted?: boolean;
 }) {
+	const { tl } = useLocale();
 	const result = output as VisualResult | undefined;
 	const snapshot = useImageSnapshot(result?.image?.snapshotId);
 	const svg = result?.image && snapshot.image ? embedLearnerImage(result.svg, snapshot.image) : result?.svg ?? "";
@@ -75,7 +77,7 @@ export function VisualOutputCard({
 	if (!result || typeof result.svg !== "string") {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				Figure completed, but the result could not be displayed.
+				{tl("Figure completed, but the result could not be displayed.")}
 			</div>
 		);
 	}
@@ -88,14 +90,14 @@ export function VisualOutputCard({
 		return (
 			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="visual-card-failed">
 				<div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-					Figure
+					{tl("Figure")}
 					<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">failed</span>
 				</div>
-				<p className="mt-2 text-sm text-muted-foreground">{result.notes ?? "The figure could not be drawn."}</p>
+				<p className="mt-2 text-sm text-muted-foreground">{result.notes ?? tl("The figure could not be drawn.")}</p>
 			</div>
 		);
 	}
-	if (result.image && !snapshot.image) return <div className="my-4 text-sm text-muted-foreground" role="status">{snapshot.failed ? "Image snapshot could not be loaded." : "Loading image…"}</div>;
+	if (result.image && !snapshot.image) return <div className="my-4 text-sm text-muted-foreground" role="status">{snapshot.failed ? tl("Image snapshot could not be loaded.") : tl("Loading image…")}</div>;
 	return (
 		/* NO CARD CHROME (owner round, 2026-10-07): the figure is document
 		   material — no border, no padding box. Image first, then the CAPTION
@@ -140,7 +142,7 @@ export function VisualOutputCard({
 					? "mt-2 flex w-0 min-w-full flex-wrap items-center justify-between gap-2"
 					: "mt-2 flex items-center justify-between gap-2"
 			}>
-				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Figure</div>
+				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{tl("Figure")}</div>
 				<div className={!invertible ? "ms-auto flex items-center gap-1.5" : "flex items-center gap-1.5"}>
 					{/* The invert affordance (owner round, 2026-10-07): the disc IS
 					    the half-filled contrast circle; the tooltip names it. */}
@@ -148,15 +150,15 @@ export function VisualOutputCard({
 						<Toggle
 							checked={inverted}
 							onChange={toggleInverted}
-							label="Invert figure brightness"
-							title="Invert colors"
+							label={tl("Invert figure brightness")}
+							title={tl("Invert colors")}
 							discIcon={<InvertDiscIcon className="size-3" />}
 						/>
 					)}
 					<button
 						type="button"
-						aria-label="Download figure as SVG"
-						title="Download as SVG"
+						aria-label={tl("Download figure as SVG")}
+						title={tl("Download as SVG")}
 						onClick={() => downloadFile("figure.svg", svg, "image/svg+xml")}
 						data-testid="visual-download"
 						className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -166,8 +168,8 @@ export function VisualOutputCard({
 					{overlay && (
 						<button
 							type="button"
-							aria-label="Open figure fullscreen"
-							title="Open fullscreen"
+							aria-label={tl("Open figure fullscreen")}
+							title={tl("Open fullscreen")}
 							onClick={() => overlay.openFigure(svg, shownInverted)}
 							data-testid="visual-open"
 							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"

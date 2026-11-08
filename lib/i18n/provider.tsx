@@ -9,14 +9,17 @@
 import { createContext, useCallback, useContext, useMemo, useState } from "react";
 import { DEFAULT_LOCALE, LOCALE_COOKIE, dirOf, type Locale } from "./locales.ts";
 import type { MessageKey } from "./messages/en.ts";
-import { formatNumber, translate, type MessageVars } from "./translate.ts";
+import { formatNumber, translate, translateLiteral, type MessageVars } from "./translate.ts";
 
 export type TFunction = (key: MessageKey, vars?: MessageVars) => string;
+export type TLFunction = (english: string, vars?: MessageVars) => string;
 
 interface LocaleContextValue {
 	locale: Locale;
 	dir: "ltr" | "rtl";
 	t: TFunction;
+	/** Literal-keyed translate: the English text is the key. */
+	tl: TLFunction;
 	setLocale: (next: Locale) => void;
 	formatNumber: (n: number, opts?: Intl.NumberFormatOptions) => string;
 }
@@ -25,6 +28,7 @@ const LocaleContext = createContext<LocaleContextValue>({
 	locale: DEFAULT_LOCALE,
 	dir: "ltr",
 	t: (key, vars) => translate(DEFAULT_LOCALE, key, vars),
+	tl: (english, vars) => translateLiteral(DEFAULT_LOCALE, english, vars),
 	setLocale: () => {},
 	formatNumber: (n, opts) => formatNumber(DEFAULT_LOCALE, n, opts),
 });
@@ -49,6 +53,7 @@ export function LocaleProvider({ initialLocale, children }: { initialLocale: Loc
 			locale,
 			dir: dirOf(locale),
 			t: (key, vars) => translate(locale, key, vars),
+			tl: (english, vars) => translateLiteral(locale, english, vars),
 			setLocale,
 			formatNumber: (n, opts) => formatNumber(locale, n, opts),
 		}),

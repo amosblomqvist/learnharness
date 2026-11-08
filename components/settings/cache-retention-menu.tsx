@@ -1,6 +1,7 @@
 "use client";
 
 import type { CacheRetention } from "@earendil-works/pi-ai";
+import { useLocale } from "@/lib/i18n/provider";
 
 const OPTIONS = [
 	{ value: undefined, compact: "default", label: "Pi default", description: "Leave the option unset. Pi’s normal behavior and environment override apply." },
@@ -17,10 +18,11 @@ export function CacheRetentionMenu({ value, onPick }: {
 	value: CacheRetention | undefined;
 	onPick: (value: CacheRetention | undefined) => void;
 }) {
+	const { tl } = useLocale();
 	return <>
 		<div className="border-b border-border px-2 pb-2">
-			<p className="text-card-foreground">Cache retention</p>
-			<p className="mt-1 text-muted-foreground">Controls the cache-retention preference sent to Pi. Support and duration depend on the provider and model. This does not guarantee a cache hit.</p>
+			<p className="text-card-foreground">{tl("Cache retention")}</p>
+			<p className="mt-1 text-muted-foreground">{tl("Controls the cache-retention preference sent to Pi. Support and duration depend on the provider and model. This does not guarantee a cache hit.")}</p>
 		</div>
 		{OPTIONS.map((option) => <button
 			key={option.value ?? "default"}

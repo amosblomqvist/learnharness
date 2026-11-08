@@ -8,6 +8,7 @@ import { formatTokens } from "@/components/usage-format";
 import { Hint } from "@/components/ui/hint";
 import { timeAgo } from "@/components/sidebar";
 import { resolveSettings } from "@/src/core";
+import { useLocale } from "@/lib/i18n/provider";
 
 /**
  * The extraction-coverage surfaces (extraction-UX redesign, owner-locked
@@ -183,6 +184,7 @@ export function CoverageMenuBody({
 	extracting: boolean;
 	onExtract: () => void;
 }) {
+	const { tl } = useLocale();
 	const busy = coverage.running || extracting;
 	const complete = coverage.uncoveredTokens === 0 && coverage.uncoveredCount === 0;
 	return (
@@ -190,10 +192,10 @@ export function CoverageMenuBody({
 			{busy ? (
 				<span className="flex items-center gap-1.5 text-muted-foreground" data-testid="ctx-coverage-running">
 					<span className="size-1.5 animate-pulse rounded-full bg-foreground/70" aria-hidden />
-					extracting…
+					{tl("extracting…")}
 				</span>
 			) : complete ? (
-				<span className="text-muted-foreground">fully extracted</span>
+				<span className="text-muted-foreground">{tl("fully extracted")}</span>
 			) : (
 				<span className="flex flex-col">
 					<span className="tabular-nums text-foreground">
@@ -211,7 +213,7 @@ export function CoverageMenuBody({
 				disabled={busy || complete}
 				className="flex items-center justify-center rounded-lg border px-2 py-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground disabled:opacity-40 disabled:hover:bg-transparent"
 			>
-				{busy ? "Running" : "Extract"}
+				{busy ? tl("Running") : tl("Extract")}
 			</button>
 		</div>
 	);
@@ -241,6 +243,7 @@ export function ringFill(uncoveredTokens: number, chunkTokens: number): number {
  * threshold/kill-switch re-read live).
  */
 export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refreshKey?: number }) {
+	const { tl } = useLocale();
 	const [graph, setGraph] = useState<GraphRead | null>(null);
 	const [coverage, setCoverage] = useState<SessionCoverage | null>(null);
 	const [open, setOpen] = useState(false);
@@ -301,7 +304,7 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 		<div ref={rootRef} className="lh-no-drag relative shrink-0">
 			<Hint
 				// Trimmed (owner, subtlety round 2026-09-25).
-				label="How much of this session isn't mapped yet"
+				label={tl("How much of this session isn't mapped yet")}
 				side="bottom"
 			>
 				<button
@@ -359,46 +362,47 @@ export function CoverageRingGlyph({ fill, running }: { fill: number; running: bo
  *  covered/uncovered tokens, message coverage, the threshold, the last
  *  fold's age. */
 export function CoverageRingDetail({ coverage, chunkTokens }: { coverage: SessionCoverage; chunkTokens: number }) {
+	const { tl } = useLocale();
 	return (
 		<>
 			<div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				Extraction coverage
+				{tl("Extraction coverage")}
 			</div>
 			<div className="flex flex-col gap-1 text-muted-foreground">
 				<div className="flex justify-between gap-2">
-					<span>Uncovered</span>
+					<span>{tl("Uncovered")}</span>
 					<span className="tabular-nums text-card-foreground">
 						{formatTokens(coverage.uncoveredTokens)} tokens
 					</span>
 				</div>
 				<div className="flex justify-between gap-2">
-					<span>Covered</span>
+					<span>{tl("Covered")}</span>
 					<span className="tabular-nums text-card-foreground">
 						{formatTokens(coverage.coveredTokens)} tokens
 					</span>
 				</div>
 				<div className="flex justify-between gap-2">
-					<span>Messages</span>
+					<span>{tl("Messages")}</span>
 					<span className="tabular-nums text-card-foreground">
 						{coverage.coveredCount} / {coverage.totalMessages}
 					</span>
 				</div>
 				<div className="flex justify-between gap-2">
-					<span>Chunk threshold</span>
+					<span>{tl("Chunk threshold")}</span>
 					<span className="tabular-nums text-card-foreground">
 						{formatTokens(chunkTokens)} tokens
 					</span>
 				</div>
 				<div className="flex justify-between gap-2">
-					<span>Last extraction</span>
+					<span>{tl("Last extraction")}</span>
 					<span className="tabular-nums text-card-foreground">
 						{coverage.lastFoldedAt ? timeAgo(coverage.lastFoldedAt) : "—"}
 					</span>
 				</div>
 				{coverage.running && (
 					<div className="flex justify-between gap-2" data-testid="coverage-ring-running">
-						<span>Status</span>
-						<span className="text-card-foreground">extracting…</span>
+						<span>{tl("Status")}</span>
+						<span className="text-card-foreground">{tl("extracting…")}</span>
 					</div>
 				)}
 			</div>
