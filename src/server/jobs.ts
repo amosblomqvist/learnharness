@@ -65,6 +65,7 @@ import {
 	type JobRecord,
 	type SteerMessage,
 } from "../core/contracts.ts";
+import { resolveJobInput } from "../core/job-input.ts";
 import type { TurnInput } from "../core/input-events.ts";
 import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, type LhMessage } from "../core/native-messages.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
@@ -142,7 +143,7 @@ export function setTurnRunner(run: TurnRunner): void {
 }
 
 /** chat-handler wires this at module init: its job runner's runJob. */
-export function setJobRespawn(respawn: JobRespawn): void {
+export function setJobRespawn(respawn: JobRespawn | undefined): void {
 	state().respawn = respawn;
 }
 
@@ -765,4 +766,46 @@ export function recoverStaleJobs(): void {
 export function listJobs(chatId: string): JobRecord[] {
 	if (process.env.NODE_ENV !== "test") recoverStaleJobs();
 	return stores.jobStore.listJobs(chatId);
+}
+
+
+export class JobRetryError extends Error {
+	constructor(message: string, readonly status: number) {
+		super(message);
+	}
+}
+
+/** Create and claim one successor without awaiting between reads and writes.
+ * Repeated requests name the failed attempt and return its saved successor.
+ * A new identity keeps result delivery and usage from the old attempt intact.
+ */
+export function retryDemoJob(chatId: string, jobId: string): JobRecord {
+	if (!/^[A-Za-z0-9_-]+$/.test(chatId) || !/^[A-Za-z0-9_-]+$/.test(jobId)) {
+		throw new JobRetryError("Invalid chatId or jobId", 400);
+	}
+	const chat = stores.chatStore.getChat(chatId);
+	const job = stores.jobStore.getJob(jobId);
+	if (!chat || !job || job.chatId !== chatId) throw new JobRetryError("Demo job not found", 404);
+	if (job.kind !== "demo" || job.status !== "error") {
+		throw new JobRetryError("Only a failed demo job can be retried", 409);
+	}
+	const successor = stores.jobStore.listJobs(chatId).find((candidate) => candidate.retryOf === job.id);
+	if (successor) return successor;
+	const input = resolveJobInput(job, chat.messages) as { title?: unknown; brief?: unknown } | null | undefined;
+	if (!input || typeof input.title !== "string" || !input.title.trim() || typeof input.brief !== "string" || !input.brief.trim()) {
+		throw new JobRetryError("The original demo request is unavailable", 409);
+	}
+	const respawn = state().respawn;
+	if (!respawn) throw new JobRetryError("The demo runner is unavailable. Try again shortly.", 503);
+	const next = stores.jobStore.createJob({
+		kind: "demo", chatId, toolCallId: job.toolCallId, retryOf: job.id,
+		input: { title: input.title, brief: input.brief },
+	});
+	try {
+		respawn(next.id);
+	} catch {
+		stores.jobStore.updateJob(next.id, { status: "error", activity: "failed", error: "The demo runner could not start" });
+		throw new JobRetryError("The demo runner could not start. Try again.", 503);
+	}
+	return stores.jobStore.getJob(next.id) ?? next;
 }

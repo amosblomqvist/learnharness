@@ -21,6 +21,8 @@ export interface JobRecord {
 	chatId: string;
 	/** The tool part this job fulfills. */
 	toolCallId: string;
+	/** The failed attempt this job retries. The original record stays intact. */
+	retryOf?: string;
 	/** Dispatch-time arguments, saved before spawn. Older jobs resolve from history. */
 	input?: unknown;
 	/** Session-owned delivery, independent of the worker's terminal outcome.
