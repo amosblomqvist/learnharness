@@ -21,7 +21,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ModelCatalogEntry } from "@/src/core";
-import { CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER, fuzzyScore, subscriptionLabel } from "@/src/core";
+import { BEDROCK_PROVIDER, CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER, fuzzyScore, subscriptionLabel } from "@/src/core";
 import { formatTokens } from "@/components/usage-format";
 import { SearchMenuList } from "./search-menu-list";
 
@@ -29,6 +29,10 @@ function priceLabel(cost: ModelCatalogEntry["cost"]): string {
 	if (!cost) return "Unpriced";
 	const fmt = (n: number) => `$${n < 1 ? n.toFixed(2).replace(/0$/, "") : n.toFixed(2)}`;
 	return `${fmt(cost.input)}/${fmt(cost.output)}`;
+}
+
+function isBedrockProfile(model: ModelCatalogEntry): boolean {
+	return model.provider === BEDROCK_PROVIDER.id && /^(?:us(?:-gov)?|eu|apac|global|au|ca|in|jp)\./.test(model.id);
 }
 
 /** The model dropdown body — fuzzy search + ranked list. `models ===
@@ -66,6 +70,7 @@ export function ModelMenuList({
 	const visionItems = vision
 		? models?.filter((m) => m.input.includes("image") || m.provider === CUSTOM_PROVIDER.id)
 		: models;
+	const profiledModels = new Set(models?.filter(isBedrockProfile).map((m) => m.id.slice(m.id.indexOf(".") + 1)));
 	return (
 		<>
 			<SearchMenuList
@@ -73,7 +78,9 @@ export function ModelMenuList({
 				itemKey={(m) => `${m.provider}/${m.id}`}
 				searchTerms={(m) => [m.provider, m.id, m.name]}
 				compare={(a, b) => a.id.localeCompare(b.id)}
-				prioritize={vision ? (m) => m.input.includes("image") : undefined}
+				prioritize={vision
+					? (m) => m.input.includes("image")
+					: (m) => m.provider !== BEDROCK_PROVIDER.id || !profiledModels.has(m.id)}
 				isSelected={(m) => m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider)}
 				onPick={onPick}
 				searchTestid="model-search"
@@ -90,11 +97,16 @@ export function ModelMenuList({
 						</span>
 					</span>
 					<span className="flex items-center justify-between gap-2 text-muted-foreground">
-						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}</span>
+						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider === BEDROCK_PROVIDER.id ? `Amazon Bedrock · ${isBedrockProfile(m) ? "Inference profile" : "Direct model"}` : m.provider} · {m.id}</span>
 						<span className="shrink-0 tabular-nums">{m.contextWindow === null ? "—" : formatTokens(m.contextWindow)}</span>
 					</span>
 				</>}
 			/>
+			{profiledModels.size > 0 && (
+				<div className="mt-1 border-t px-2 pt-1.5 text-xs text-muted-foreground">
+					Bedrock direct models may require an inference profile. Choose the geographic scope you intend to use.
+				</div>
+			)}
 			{footer && (
 				<div className="mt-1 border-t px-2 pt-1.5 text-xs text-muted-foreground">{footer}</div>
 			)}

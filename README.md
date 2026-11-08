@@ -55,6 +55,9 @@ Choose your models, then start a session with what you want to understand. You c
 
 See [Getting started](docs/getting-started.md) for model setup, dictation, files, and notes imports, and [context, caching, and costs](docs/compaction-accounting.md) for advanced cache preferences.
 
+**Amazon Bedrock:** Use a Bedrock API key or launch with your AWS profile and
+region. See the [Bedrock setup guide](docs/bedrock.md).
+
 All three platforms support in-app updates.
 
 ## Your keys, your data
