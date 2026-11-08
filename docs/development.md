@@ -13,15 +13,19 @@ npm ci                 # install the locked host dependencies
 npm run plugins:setup  # generate local SDKs and install locked source-plugin dependencies
 npm run dev            # Next development server, normally http://localhost:3000
 
-npm run build          # production Next build, including standalone output
+npm run build          # build/stage core plugins, then production Next standalone output
 npm start              # serve the production build with Next
 
 npm run desktop:dev    # Next dev + Electron pointed at localhost:3000
 ```
 
-`plugins:setup` prepares each source package under `plugins/`: it generates its ignored `.sdk/` when needed, then runs `npm ci`. Run it after a fresh checkout and again after public API or plugin lockfile changes. Root typecheck/build includes plugin sources, so CI uses the same preparation. It does not build plugin bundles, install/enable plugins in your learning-data directory, or populate `bundled-plugins/`.
+`plugins:setup` prepares each source package under `plugins/`: it generates its ignored `.sdk/` when needed, then runs `npm ci`. Run it after a fresh checkout and again after public API or plugin lockfile changes. Root typecheck/build includes plugin sources, so CI uses the same preparation. It does not build plugin bundles, install/enable plugins in your learning-data directory, or populate `core-plugins/`.
 
-For testing a plugin in the app, run `npm run build` in that plugin’s source directory and follow its README plus the [installation guide](plugin-authoring.md#package-and-installation). Generated `dist/`, `.sdk/` and `node_modules/` stay out of Git. Bundled-plugin distribution is not part of this source-testing checkpoint.
+`npm run plugins:build-core` builds the four IDs in `core-plugins.json` and stages complete app-owned packages in generated `core-plugins/<id>/`. `dev` and `build` run it automatically; `desktop:dev`, `desktop:dist` and `dev:fresh` use those entry points. Core code loads directly from this directory; restart the server after source edits/rebuilding (there is no plugin hot reload). Do not use raw `next dev`/`next build` without first staging core packages. Fresh checkouts need `plugins:setup` before these commands.
+
+For a community/developer plugin, build in its source directory and follow the [installation guide](plugin-authoring.md#package-and-installation). Generated `core-plugins/`, plugin `dist/`, `.sdk/` and `node_modules/` stay out of Git. UI Showcase remains a developer example, not a shipped core package. Never install a community package using a reserved core ID.
+
+Core data lives in `<learning data>/core-plugin-data/<id>/`; community code/data remains `<learning data>/plugins/<id>/{dist,data}/`. All newly discovered plugins start disabled. Core code is never copied into the learning-data directory, and switching to this layout does not migrate old development data.
 
 No API key is required just to start the UI. Configure a provider/connection and the strong, cheap and vision model slots in Settings before model-driven use. There are no factory model choices. OpenRouter is one supported API provider, **not a required gateway for all calls**. Existing sessions keep their explicit conversation model; background roles use their own settings resolution.
 

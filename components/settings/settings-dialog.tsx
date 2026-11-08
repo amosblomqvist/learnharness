@@ -71,7 +71,7 @@ const SECTIONS = [
 	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
 	{ id: "general", label: "General" },
 ] as const;
-type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | `plugin:${string}`;
+type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -240,13 +240,15 @@ export function SettingsDialogBody({
 	// Keep a deep link pending while discovery loads. Once discovery settles,
 	// disabled/uninstalled destinations return to management, never stale DOM.
 	const missingPlugin = activePluginId !== null && !activePlugin && !snapshot.loading;
+	const management = snapshot.plugins.find(plugin => plugin.info.id === activePluginId)?.info.origin === "core" ? "core-plugins" : "plugins";
 	useEffect(() => {
-		if (missingPlugin) setActive("plugins");
-	}, [missingPlugin]);
-	const selected = missingPlugin ? "plugins" : active;
+		if (missingPlugin) setActive(management);
+	}, [missingPlugin, management]);
+	const selected = missingPlugin ? management : active;
 	const navSections: { id: SectionId; label: string }[] = [
 		...SECTIONS,
-		{ id: "plugins", label: "Plugins" },
+		{ id: "core-plugins", label: "Core plugins" },
+		{ id: "plugins", label: "Community plugins" },
 		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
 	];
 
@@ -409,7 +411,7 @@ export function SettingsDialogBody({
 					className="min-w-0 flex-1 overflow-y-auto"
 					data-testid="settings-content"
 				>
-					{error && !activePluginId && selected !== "plugins" && (
+					{error && !activePluginId && selected !== "plugins" && selected !== "core-plugins" && (
 						<p
 							role="alert"
 							className="m-4 rounded-sm border border-red-500/40 px-3 py-2 text-xs text-red-500"
@@ -418,7 +420,7 @@ export function SettingsDialogBody({
 							{error}
 						</p>
 					)}
-					{selected === "plugins" ? <PluginsSection onOpenSettings={pluginId => setActive(`plugin:${pluginId}`)} />
+					{selected === "plugins" || selected === "core-plugins" ? <PluginsSection origin={selected === "core-plugins" ? "core" : "community"} onOpenSettings={pluginId => setActive(`plugin:${pluginId}`)} />
 						: activePlugin ? <PluginSettingsPage key={`${activePlugin.info.id}/${activePlugin.info.revision}`} plugin={activePlugin} />
 							: activePluginId !== null ? <p role="status" className="px-6 py-5 text-xs text-muted-foreground">Loading plugins…</p>
 								: record === undefined ? (

@@ -167,7 +167,7 @@ describe("bounded plugin question frontend", () => {
 		assert.equal(await model.send({ type: "answer", toolCallId: "call", answer: {} as never }), false);
 	});
 	it("renderer registrations are owner scoped, validated, receiver-bound and removed with activation", async () => {
-		const info = (id: string): PluginInfo => ({ id, enabled: true, status: "active", revision: "1", manifest: { apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.7", main: "index.js" } });
+		const info = (id: string): PluginInfo => ({ id, origin: "community", enabled: true, status: "active", revision: "1", manifest: { apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.7", main: "index.js" } });
 		const manager = new PluginFrontendManager({ fetch: async () => Response.json({}), pathname: () => "/", navigate() {}, async importModule() { return { activate(context) { const renderer = { id: "code", supportedContractVersions: [1], mountAnswerEditor() { assert.equal(this.id, "code"); return handle(); } }; context.registerQuestionRenderer(renderer); } }; } });
 		manager.reconcile([info("one"), info("two")]); await tick();
 		const registrations = manager.getSnapshot().questionRenderers!; assert.equal(registrations.length, 2);

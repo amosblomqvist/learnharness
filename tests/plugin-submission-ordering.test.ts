@@ -6,7 +6,7 @@ import type { PluginFrontendContext, PluginInfo, PluginSubmissionTarget, PluginS
 
 const target: PluginSubmissionTarget = { type: "text", sessionId: "chat", sessionKind: "teaching", channels: ["content"], surfaceTarget: {} as PluginSurfaceTarget };
 const tick = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
-const info = (id: string): PluginInfo => ({ id, enabled: true, status: "active", revision: "1", manifest: { apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.7", main: "index.js" } });
+const info = (id: string): PluginInfo => ({ id, origin: "community", enabled: true, status: "active", revision: "1", manifest: { apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.7", main: "index.js" } });
 function fixture() {
 	const contexts = new Map<string, PluginFrontendContext>();
 	const manager = new PluginFrontendManager({ fetch: async () => Response.json({}), pathname: () => "/", navigate() {}, importModule: async () => ({ activate(context) { contexts.set(context.manifest.id, context); } }) });

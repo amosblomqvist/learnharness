@@ -3,7 +3,7 @@ import { it } from "node:test";
 import { PluginFrontendManager, type PluginHost } from "../components/plugin-manager.ts";
 import type { PluginFrontendContext, PluginInfo } from "../src/core/plugins.ts";
 
-const info: PluginInfo = { id: "document-fixture", enabled: true, status: "active", revision: "1", manifest: {
+const info: PluginInfo = { id: "document-fixture", origin: "community", enabled: true, status: "active", revision: "1", manifest: {
 	apiVersion: 1, id: "document-fixture", name: "Documents", version: "1.0.0", minAppVersion: "0.4.1", main: "main.js",
 } };
 const result = { name: "lesson.csv", markdown: "subject,value\nphysics,3", notices: ["Fixture notice"] };

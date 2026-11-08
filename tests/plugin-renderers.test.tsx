@@ -24,7 +24,7 @@ function deferred<T>() {
 	const promise = new Promise<T>(yes => { resolve = yes; });
 	return { promise, resolve };
 }
-const packageInfo: PluginInfo = { id: "render-proof", enabled: true, status: "active", revision: "fixture-1", manifest: {
+const packageInfo: PluginInfo = { id: "render-proof", origin: "community", enabled: true, status: "active", revision: "fixture-1", manifest: {
 	apiVersion: 1, id: "render-proof", name: "Renderer proof", version: "1.0.0", minAppVersion: "0.3.7", main: "main.js",
 } };
 

@@ -247,19 +247,6 @@ test("backend edits are restart-only; stale module is not replaced by refresh or
 	assert.match(f.host.list()[0]!.error!, /Restart required/);
 });
 
-test("partial bundled installations block first loads and existing active backends", async t => {
-	const f = fixture(t); f.plugin();
-	await f.host.initialize(); await f.host.setEnabled("example", true);
-	const markers = path.join(f.root, "plugins-installing"); fs.mkdirSync(markers);
-	fs.writeFileSync(path.join(markers, "example.json"), "{}");
-	fs.writeFileSync(path.join(markers, "first-install.json"), "{}");
-	await f.host.refresh();
-	assert.equal(f.host.list().length, 2);
-	assert.equal(f.host.list().every(p => p.status === "error"), true);
-	await assert.rejects(f.host.call("example", "context"), status(409));
-	assert.match(f.host.list().find(p => p.id === "first-install")!.error!, /incomplete/);
-});
-
 test("dispose/disable abort cooperative pending activation and disposed host rejects all work", async t => {
 	const f = fixture(t);
 	f.plugin("example", {}, `exports.activate = async ctx => { ctx.handle('context', () => ctx); await new Promise(resolve => ctx.signal.addEventListener('abort', resolve, {once:true})); };`);

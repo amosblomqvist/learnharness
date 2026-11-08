@@ -122,6 +122,22 @@ test("bootstrap missing root stays missing, and unsafe package paths are per-pac
 	const rootLink = join(base, "link"); symlinkSync(root, rootLink); assert.throws(() => recoverPluginTaskRecords(rootLink), /Unsafe/);
 });
 
+test("core recovery uses only core-plugin-data, skips reserved community copies and includes disabled tasks", t => {
+	const base = fixture(t), root = join(base, "plugins"), core = { directory: join(base, "core-plugin-data"), ids: ["official", "missing"] };
+	const old = join(root, "official", "data", "tasks"); mkdirSync(old, { recursive: true }); writeFileSync(join(old, "broken.json"), "must not read legacy data");
+	const coreStore = createPluginTaskRecordStore(join(core.directory, "official", "tasks")); coreStore.save(record());
+	const community = createPluginTaskRecordStore(join(root, "other", "data", "tasks")); community.save(record());
+	assert.deepEqual(recoverPluginTaskRecords(root, core), {});
+	assert.equal(coreStore.get("task_one")?.status, "interrupted"); assert.equal(community.get("task_one")?.status, "interrupted");
+	assert.equal(readPluginTaskRecord(root, "official", "task_one", undefined, core)?.status, "interrupted");
+	assert.equal(readPluginTaskRecord(root, "official", undefined, "request_one", core)?.status, "interrupted");
+	assert.equal(readPluginTaskRecord(root, "missing", "task_one", undefined, core), null);
+	assert.equal(existsSync(join(core.directory, "missing")), false);
+	assert.equal(readFileSync(join(old, "broken.json"), "utf8"), "must not read legacy data");
+	const before = readFileSync(join(core.directory, "official", "tasks", "task_one.json"), "utf8");
+	recoverPluginTaskRecords(root, core); assert.equal(readFileSync(join(core.directory, "official", "tasks", "task_one.json"), "utf8"), before);
+});
+
 test("recovery refuses symlinks at every root/plugin/data/tasks component and at the task file", t => {
 	for (const component of ["root", "plugin", "data", "tasks", "file"]) {
 		const base = fixture(t); const root = join(base, "plugins"); const directory = join(root, "fixture-plugin", "data", "tasks");

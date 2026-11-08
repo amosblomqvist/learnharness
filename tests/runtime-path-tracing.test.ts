@@ -38,18 +38,16 @@ test("config opts out each mutable path producer, retaining the shipped prompt a
 test("plugin runtime and background capture paths never become deployment assets", () => {
 	for (const relative of ["src/server/plugins.ts", "src/agent/background-capture.ts"]) {
 		const { file, calls, ignored } = paths(relative);
-		const runtime = calls.filter(call => !(relative === "src/server/plugins.ts"
-			&& call.arguments.some(argument => ts.isStringLiteral(argument) && argument.text === "bundled-plugins")));
-		assert.equal(runtime.length, relative === "src/server/plugins.ts" ? 3 : 2);
+		const runtime = calls;
+		assert.equal(runtime.length, relative === "src/server/plugins.ts" ? 5 : 2);
 		for (const call of runtime) assert.ok(ignored(call), `Runtime path must not ship: ${call.getText(file)}`);
 	}
 });
 
 test("independent plugin-data and provider-debug filename producers retain their opt-outs", () => {
 	for (const [relative, matches, count] of [
-		["src/server/plugin-host.ts", (call: ts.CallExpression) => call.arguments.length === 2 && ts.isStringLiteral(call.arguments[1]!) && call.arguments[1]!.text === "data", 1],
-		["src/store/plugin-task-records.ts", (call: ts.CallExpression) => call.arguments.length === 3 && ts.isStringLiteral(call.arguments[2]!) && call.arguments[2]!.text === "data", 1],
-		["src/store/plugin-task-records.ts", (call: ts.CallExpression) => call.arguments.length === 4 && ts.isStringLiteral(call.arguments[3]!) && call.arguments[3]!.text === "tasks", 2],
+		["src/store/plugin-data-paths.ts", (_call: ts.CallExpression) => true, 3],
+		["src/store/plugin-task-records.ts", (call: ts.CallExpression) => call.arguments.length === 2 && ts.isStringLiteral(call.arguments[1]!) && call.arguments[1]!.text === "tasks", 2],
 		["src/server/plugin-inference.ts", (call: ts.CallExpression) => call.arguments.length === 2 && ts.isStringLiteral(call.arguments[1]!) && call.arguments[1]!.text === "usage.jsonl", 1],
 		["src/agent/provider-events.ts", (call: ts.CallExpression, file: ts.SourceFile) => call.arguments[0]?.getText(file) === "providerEventsDir.current", 1],
 	] as const) {

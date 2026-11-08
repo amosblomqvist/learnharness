@@ -14,7 +14,7 @@ import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, Plugin
 import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
 import type { ServerEvent } from "../core/events.ts";
-import { pendingBundledPluginIds } from "../store/plugin-installation.ts";
+import { safePluginDataDirectory } from "../store/plugin-data-paths.ts";
 
 /** Expected host/transport failure. Exceptions thrown by plugin handlers stay ordinary 500 errors. */
 export class PluginHostError extends Error {
@@ -36,6 +36,8 @@ export function isPluginHostError(error: unknown): error is { status: number; me
 
 export interface PluginHostDependencies {
 	directory: string;
+	/** App-owned flat built packages and a separate writable data root. */
+	core?: { directory: string; dataDirectory: string; ids: readonly string[] };
 	appVersion: string;
 	createServices(info: { manifest: PluginManifest; directory: string; dataDirectory: string; signal: AbortSignal; cleanup: (fn: PluginCleanup) => void }): {
 		learning: PluginLearningData; inference: PluginInference; agents: PluginAgentService; workers: PluginWorkerService;
@@ -142,9 +144,9 @@ function pluginRoot(directory: string): void {
 	const stat = fs.lstatSync(directory);
 	if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Unsafe plugin directory");
 }
-function snapshot(rootDirectory: string, id: string, appVersion: string): Package {
+function snapshot(rootDirectory: string, id: string, appVersion: string, origin: "core" | "community"): Package {
 	pluginRoot(rootDirectory);
-	const directory = path.join(/* turbopackIgnore: true */ rootDirectory, "dist");
+	const directory = origin === "core" ? rootDirectory : path.join(/* turbopackIgnore: true */ rootDirectory, "dist");
 	if (!exists(directory)) throw new Error("Missing plugin build: expected dist/manifest.json. Build the plugin into dist/ or install a built package there.");
 	pluginRoot(directory);
 	const files = new Map<string, Buffer>();
@@ -166,7 +168,7 @@ function snapshot(rootDirectory: string, id: string, appVersion: string): Packag
 	for (const entry of [manifest.main, manifest.backend, manifest.styles]) if (entry && !files.has(entry)) throw new Error(`Missing plugin entry: ${entry}`);
 	const hash = createHash("sha256");
 	for (const [file, bytes] of files) { hash.update(`${file.length}:${file}:${bytes.length}:`); hash.update(bytes); }
-	return { rootDirectory, directory, files, info: { id, manifest, enabled: false, status: "disabled", revision: hash.digest("hex") } };
+	return { rootDirectory, directory, files, info: { id, origin, manifest, enabled: false, status: "disabled", revision: hash.digest("hex") } };
 }
 const mimeTypes: Record<string, string> = {
 	".js": "text/javascript; charset=utf-8", ".css": "text/css; charset=utf-8", ".json": "application/json; charset=utf-8",
@@ -179,6 +181,17 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	// Installed packages/state are runtime inputs, not build-time dependencies.
 	const directory = path.resolve(/* turbopackIgnore: true */ deps.directory);
 	const stateFile = path.resolve(/* turbopackIgnore: true */ directory, "..", "plugins-state.json");
+	const core = deps.core ? { ...deps.core, ids: Object.freeze([...deps.core.ids]) } : undefined;
+	const coreIds = new Set(core?.ids ?? []);
+	if (core && (coreIds.size !== core.ids.length || core.ids.some(id => typeof id !== "string" || !PLUGIN_ID_PATTERN.test(id)))) throw new Error("Invalid core plugin catalog");
+	if (core) {
+		const code = path.resolve(/* turbopackIgnore: true */ core.directory);
+		const data = path.resolve(/* turbopackIgnore: true */ core.dataDirectory);
+		const relative = path.relative(code, data);
+		if (relative === "" || (!relative.startsWith(`..${path.sep}`) && relative !== ".." && !path.isAbsolute(relative))) throw new Error("Core plugin data must be outside app-owned code");
+	}
+	const coreData = core ? { directory: core.dataDirectory, ids: core.ids } : undefined;
+	let conflicts: { id: string; error: string }[] = [];
 	const packages = new Map<string, Package>();
 	const questionControllers = new WeakMap<QuestionDefinition, AbortController>();
 	const problemControllers = new WeakMap<NativePluginProblemDefinition, AbortController>();
@@ -228,9 +241,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		try {
 			if (manifest.backend) {
 				pluginRoot(pkg.rootDirectory);
-				const dataDirectory = path.join(/* turbopackIgnore: true */ pkg.rootDirectory, "data");
-				if (!exists(dataDirectory)) fs.mkdirSync(dataDirectory);
-				if (!fs.lstatSync(dataDirectory).isDirectory() || fs.lstatSync(dataDirectory).isSymbolicLink()) throw new Error("Unsafe plugin data directory");
+				const dataDirectory = safePluginDataDirectory(directory, manifest.id, coreData, true)!;
 				const services = deps.createServices({ manifest, directory: pkg.directory, dataDirectory, signal: activation.controller.signal, cleanup });
 				cleanup(() => services.agents.dispose());
 				cleanup(() => services.workers.dispose());
@@ -337,27 +348,30 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	}
 
 	async function discover(state: State): Promise<void> {
-		const pending = new Set(pendingBundledPluginIds(directory));
 		const installationErrors = deps.installationErrors ?? {};
 		const failed = (id: string) => Object.hasOwn(installationErrors, id);
-		const ids = new Set([...fs.readdirSync(/* turbopackIgnore: true */ directory), ...pending, ...Object.keys(installationErrors)]);
+		const communityIds = fs.readdirSync(/* turbopackIgnore: true */ directory).filter(id => {
+			const stat = fs.lstatSync(path.join(/* turbopackIgnore: true */ directory, id));
+			return stat.isDirectory() || stat.isSymbolicLink();
+		});
+		conflicts = communityIds.filter(id => coreIds.has(id)).sort().map(id => ({ id, error: `Community package ${id} was skipped: this ID is reserved for a Core plugin. Its files were not changed.` }));
+		const ids = new Set([...communityIds.filter(id => !coreIds.has(id)), ...coreIds, ...Object.keys(installationErrors)]);
 		for (const id of [...ids].sort()) {
-			const root = path.join(directory, id);
-			// Non-package files are ignored, but malformed package folders are visible.
-			if (!pending.has(id) && !failed(id) && !fs.lstatSync(root).isDirectory() && !fs.lstatSync(root).isSymbolicLink()) continue;
+			const origin = coreIds.has(id) ? "core" : "community";
+			const root = path.join(/* turbopackIgnore: true */ origin === "core" ? core!.directory : directory, id);
 			let candidate: Package;
 			try {
 				if (failed(id)) throw new Error(`Plugin startup failed: ${installationErrors[id]}`);
-				if (pending.has(id)) throw new Error("Bundled installation incomplete; retry installation before activation");
-				candidate = snapshot(root, id, deps.appVersion);
+				if (origin === "core") pluginRoot(core!.directory);
+				candidate = snapshot(root, id, deps.appVersion, origin);
 			} catch (e) {
-				candidate = { rootDirectory: root, directory: path.join(/* turbopackIgnore: true */ root, "dist"), files: new Map(), info: { id, enabled: false, status: "error", error: errorText(e), revision: "" }, blocked: true };
+				candidate = { rootDirectory: root, directory: origin === "core" ? root : path.join(/* turbopackIgnore: true */ root, "dist"), files: new Map(), info: { id, origin, enabled: false, status: "error", error: errorText(e), revision: "" }, blocked: true };
 			}
 			const current = packages.get(id);
 			// An unbuilt/invalid package has never admitted executable code. Its
 			// first valid build is ordinary discovery, not a code reload.
 			if (current && !(current.blocked && !current.info.manifest)) {
-				if (pending.has(id) || failed(id)) {
+				if (failed(id)) {
 					await deactivate(current); current.blocked = true; current.info.status = "error";
 					current.info.error = candidate.info.error;
 				} else if (candidate.info.revision !== current.info.revision || candidate.info.error !== undefined) {
@@ -524,6 +538,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					if (!live(pkg, activation) || activation.problems.get(typeId) !== definition) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`);
 				} };
 		},
+		conflicts(): { id: string; error: string }[] { assertOpen(); return conflicts.map(value => ({ ...value })); },
 		list(): PluginInfo[] {
 			assertOpen();
 			return [...packages.values()].map(({ info }) => ({ ...info, ...(info.manifest ? { manifest: { ...info.manifest } } : {}) })).sort((a, b) => a.id.localeCompare(b.id));
@@ -591,7 +606,10 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			const file = segments.join("/");
 			if (!(segments.length === 1 && (file === manifest.main || file === manifest.styles)) && !(segments.length > 1 && segments[0] === "assets")) throw new PluginHostError(404, "Plugin asset is not allowlisted");
 			if (segments.some(s => s === "data") || file === manifest.backend) throw new PluginHostError(404, "Private plugin file");
-			try { pluginRoot(pkg.rootDirectory); regularFile(pkg.directory, file); } catch { throw new PluginHostError(404, "Unknown or unsafe plugin asset"); }
+			try {
+				if (pkg.info.origin === "core") pluginRoot(core!.directory);
+				pluginRoot(pkg.rootDirectory); regularFile(pkg.directory, file);
+			} catch { throw new PluginHostError(404, "Unknown or unsafe plugin asset"); }
 			const bytes = pkg.files.get(file);
 			if (!bytes) throw new PluginHostError(404, "Unknown plugin asset");
 			return { bytes: Uint8Array.from(bytes), contentType: mimeTypes[path.extname(file).toLowerCase()] ?? "application/octet-stream" };

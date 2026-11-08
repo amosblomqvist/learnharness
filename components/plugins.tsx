@@ -8,7 +8,7 @@ import { PluginFrontendManager, type PluginHost, type PluginMount, type PluginSn
 import { createPluginUiStore, PluginUiHost } from "@/components/plugin-ui-host";
 import { BUILTIN_MERMAID_LANGUAGE, reservedToolRendererNames } from "@/components/plugin-renderers";
 
-const EMPTY: PluginSnapshot = { plugins: [], codeBlocks: [], toolRenderers: [], directory: "", loading: true, refreshing: false };
+const EMPTY: PluginSnapshot = { plugins: [], codeBlocks: [], toolRenderers: [], directory: "", conflicts: [], loading: true, refreshing: false };
 const emptySubscribe = () => () => {};
 const emptySnapshot = () => EMPTY;
 const PluginsContext = createContext<{ manager: PluginFrontendManager | null; snapshot: PluginSnapshot; uiStore: ReturnType<typeof createPluginUiStore> | null }>({ manager: null, snapshot: EMPTY, uiStore: null });

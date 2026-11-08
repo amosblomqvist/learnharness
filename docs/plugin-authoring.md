@@ -11,7 +11,7 @@ the released 0.4.1 app. Use documentation/types matching the target app, and set
 
 ## Quick start
 
-1. Open **Settings → Plugins** to find the writable plugins directory.
+1. Open **Settings → Community plugins** to find the writable plugins directory.
 2. Copy `examples/plugins/hello-plugin` there, keeping its folder name and `dist/`.
 3. Refresh the list, enable **Hello plugin**, and open its sidebar action.
 4. Edit the installed `hello-plugin/dist/` code and restart LearnHarness to load changes.
@@ -64,6 +64,8 @@ are intentionally part of API v1 and follow the app's pinned SDK, not arbitrary 
 
 ## Package and installation
 
+Community packages use this writable installation layout:
+
 ```text
 <learning data>/plugins/my-plugin/
   package.json       # optional authoring configuration
@@ -97,12 +99,21 @@ paths into source or data. Malformed/incompatible packages are reported without 
   Source-only projects and root-only manifests are not installable. There is no separate
   development registration, legacy-layout fallback, or hot code replacement.
 
-Official and external plugins use the same APIs and writable installation layout.
-The host can install/update flat built packages from app `bundled-plugins/<id>/` into
-`<learning data>/plugins/<id>/dist/` at startup, preserving sibling data and refusing
-external ID collisions. Editing managed installed code is not durable across startup
-updates. Source projects remain under repository `plugins/`; the selection and build
-staging of official packages is a separate distribution decision, not implied here.
+Core and community plugins use the same APIs, but have separate code/data locations.
+The app ships Flashcards, Coding Questions, Drawing Pad and Rich Code Blocks as flat
+built packages in app `core-plugins/<id>/`, loaded directly without a user-data code
+copy. Their writable settings/records live in `<learning data>/core-plugin-data/<id>/`.
+Always use `ctx.directory` for code and `ctx.dataDirectory` for writable records; do not
+infer one from the other. Core plugins update with the app and are managed in
+**Settings → Core plugins**; all four start disabled, existing explicit choices survive
+updates, and disabling never deletes data. Their IDs (`flashcards`, `coding-questions`,
+`drawing-pad`, `rich-code-blocks`) are reserved even if a core package is broken/missing.
+Conflicting community folders are skipped with a diagnostic and are not modified.
+
+Repository source stays in `plugins/`. `npm run plugins:build-core` builds the selected
+catalog in `core-plugins.json` and stages generated packages. UI Showcase remains a
+source/developer example, not a shipped core package. This build command never installs
+or enables a package in a learning-data directory.
 
 ## Frontend lifecycle and navigation
 
@@ -340,7 +351,7 @@ for lifetime, stacking, close and return-focus rules.
 ### Dedicated settings
 
 Every enabled plugin has a Settings page, including backend-only/no-settings plugins.
-Settings → Plugins manages packages; `ctx.app.openSettings()` and the view gear open
+Settings → Core plugins / Community plugins manages packages; `ctx.app.openSettings()` and the view gear open
 this plugin's page. Without a registration it shows `No settings available`.
 
 `registerSettings({rows})` returns an update/dispose widget handle. Alternatively,

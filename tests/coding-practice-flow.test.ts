@@ -14,9 +14,12 @@ process.env.LH_AUTH_FILE = path.join(root, "auth.json");
 process.env.OPENROUTER_API_KEY = "isolated-presence-only";
 const realFetch = globalThis.fetch;
 globalThis.fetch = async () => { throw Error("Unexpected external network"); };
-const dist = path.join(root, "data", "plugins", "coding-questions", "dist");
+// Exercise the same public backend API as a distinct community fixture; the
+// production core ID is reserved and must not load code from a data directory.
+const pluginId = "coding-questions-fixture";
+const dist = path.join(root, "data", "plugins", pluginId, "dist");
 fs.mkdirSync(dist, { recursive: true });
-fs.writeFileSync(path.join(dist, "manifest.json"), JSON.stringify({ apiVersion: 1, id: "coding-questions", name: "Coding questions", version: "0.1.0", minAppVersion: "0.4.1", backend: "backend.cjs" }));
+fs.writeFileSync(path.join(dist, "manifest.json"), JSON.stringify({ apiVersion: 1, id: pluginId, name: "Coding questions", version: "0.1.0", minAppVersion: "0.4.1", backend: "backend.cjs" }));
 fs.writeFileSync(path.join(dist, "backend.cjs"), "exports.activate = ctx => ctx.handle('context', () => ctx);");
 const { getPluginHost } = await import("../src/server/plugins.ts");
 const { handleChatRequest } = await import("../src/server/chat-handler.ts");
@@ -27,10 +30,10 @@ const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { activeProblemOf, modelSolutionForConclude, newUserMessage } = await import("../src/core/native-messages.ts");
 const { readPluginProblemSnapshot, readPluginProblemSubmission } = await import("../src/core/plugin-problems.ts");
 const host = await getPluginHost();
-await host.setEnabled("coding-questions", true);
+await host.setEnabled(pluginId, true);
 // This test crosses the real dynamic plugin boundary. Use the consumer's SDK
 // context type rather than equating two installations of TypeBox's generic types.
-const ctx = await host.call("coding-questions", "context") as Parameters<typeof activate>[0];
+const ctx = await host.call(pluginId, "context") as Parameters<typeof activate>[0];
 const unregister = activate(ctx);
 after(async () => { unregister(); await host.dispose(); globalThis.fetch = realFetch; fs.rmSync(root, { recursive: true, force: true }); });
 
@@ -46,7 +49,7 @@ test("real coding registration poses once, processes revisions before continuati
   assert.equal(teacher.problemTypes, undefined);
   assert.equal(prober.questionTypes, undefined);
   assert.equal(prober.problemTypes, undefined);
-  assert.equal(host.list()[0]!.error, undefined, "Question and problem can share local type ID code without a tool collision");
+  assert.equal(host.list().find(plugin => plugin.id === pluginId)!.error, undefined, "Question and problem can share local type ID code without a tool collision");
   const tool = pluginProblemTools(practice.problemTypes!, chat.id, { problemActive: false })[0]!;
   assert.equal(tool.name, "coding_problem");
   const input = {

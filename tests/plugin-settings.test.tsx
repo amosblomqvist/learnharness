@@ -13,7 +13,7 @@ import { InteractionLayersProvider } from "../components/interaction-layers.tsx"
 import { installModalDom } from "./modal-dom.ts";
 
 function info(id: string, enabled = true): PluginInfo {
-	return { id, enabled, status: enabled ? "active" : "disabled", revision: "one", manifest: {
+	return { id, origin: id === "schema" ? "core" : "community", enabled, status: enabled ? "active" : "disabled", revision: "one", manifest: {
 		apiVersion: 1, id, name: `Plugin ${id}`, version: "1.0.0", minAppVersion: "0.3.7",
 		...(id === "backend" ? { backend: "backend.cjs" } : { main: "main.js" }),
 	} };
@@ -43,7 +43,7 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		broken: { activate() { throw new Error("Fixture activation failed"); } },
 	};
 	const owner = createPluginWindowOwner({
-		fetch: async () => Response.json({ plugins: [info("schema"), info("custom"), info("backend"), info("loading"), info("broken"), info("disabled", false)], directory: "/fixtures/plugins" }),
+		fetch: async () => Response.json({ plugins: [info("schema"), info("custom"), info("backend"), info("loading"), info("broken"), info("disabled", false)], directory: "/fixtures/plugins", conflicts: [{ id: "schema", error: "Community schema skipped: reserved Core plugin ID" }] }),
 		importModule: async url => modules[decodeURIComponent(url.split("/")[3]!)]!,
 		pathname: () => "/", navigate() {},
 	});
@@ -62,9 +62,17 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		await act(async () => { root.render(shell(<SettingsDialogBody initialSection="plugin:schema" onClose={() => {}} />)); });
 		assert.ok(page()?.textContent?.includes("Feature enabled"), "deep link renders while core settings are pending");
 		const nav = document.querySelector('[data-testid="settings-nav"]')!;
-		assert.deepEqual([...nav.querySelectorAll("button")].map(button => button.textContent), ["Providers", "Agent", "Appearance", "Graph", "Keyboard", "General", "Plugins", "Plugin schema", "Plugin custom", "Plugin backend", "Plugin loading", "Plugin broken"]);
+		assert.deepEqual([...nav.querySelectorAll("button")].map(button => button.textContent), ["Providers", "Agent", "Appearance", "Graph", "Keyboard", "General", "Core plugins", "Community plugins", "Plugin schema", "Plugin custom", "Plugin backend", "Plugin loading", "Plugin broken"]);
 		assert.equal(nav.querySelectorAll("hr").length, 2);
 		assert.ok(nav.className.includes("overflow-y-auto"));
+		await click('[data-testid="settings-nav-core-plugins"]');
+		const corePage = page()!.textContent!;
+		assert.ok(corePage.includes("Plugin schema"));
+		for (const absent of ["Plugin custom", "trusted local code", "Refresh plugins", "/fixtures/plugins", "1.0.0", "reserved Core plugin ID"]) assert.ok(!corePage.includes(absent), absent);
+		await click('[data-testid="settings-nav-plugins"]');
+		assert.ok(page()!.textContent!.includes("Plugin custom")); assert.ok(!page()!.querySelector('[data-testid="plugin-schema"]'));
+		assert.ok(page()!.textContent!.includes("reserved Core plugin ID")); assert.ok(page()!.textContent!.includes("1.0.0"));
+		await click('[data-testid="settings-nav-plugin:schema"]');
 		await click('[data-testid="section-plugin-schema"] [role="switch"]');
 		assert.deepEqual(changes, [true]);
 		await click('[data-plugin-setting="validated"] [role="switch"]');
@@ -90,6 +98,11 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		assert.equal(document.querySelector('[data-testid="settings-nav-plugin:custom"]'), null);
 		await act(async () => { root.render(shell(<SettingsDialogBody initialSection="plugin:not-installed" onClose={() => {}} />)); });
 		assert.ok(page()?.querySelector('[data-testid="section-plugins"]'), "missing deep link falls back to management");
+
+		await act(async () => { root.render(shell(<SettingsDialogBody initialSection="plugin:schema" onClose={() => {}} />)); });
+		await act(async () => { owner.manager.reconcile([info("schema", false), info("backend")]); });
+		assert.ok(page()?.querySelector('[data-testid="section-core-plugins"]'), "disabled core settings return to Core management");
+		await act(async () => { owner.manager.reconcile([info("schema"), info("backend")]); });
 
 		// Backend app.openSettings uses a browser event bridge into this provider.
 		await act(async () => { root.render(shell(<SettingsDialogProvider><p>App</p></SettingsDialogProvider>)); });

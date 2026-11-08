@@ -38,6 +38,8 @@ export interface PluginManifest {
 }
 export interface PluginInfo {
 	id: string;
+	/** Host-owned package provenance; never read from a plugin manifest. */
+	origin: "core" | "community";
 	manifest?: PluginManifest;
 	enabled: boolean;
 	status: "disabled" | "active" | "error";
@@ -105,9 +107,9 @@ export interface PluginTools {
 }
 export interface PluginBackendContext {
 	readonly manifest: PluginManifest;
-	/** Absolute built-package directory: <plugins>/<id>/dist. */
+	/** Absolute code directory: app core-plugins/<id> or community plugins/<id>/dist. */
 	readonly directory: string;
-	/** Persistent records: <plugins>/<id>/data, outside the build output. */
+	/** Writable records: core-plugin-data/<id> or community plugins/<id>/data. */
 	readonly dataDirectory: string;
 	readonly signal: AbortSignal;
 	cleanup(dispose: PluginCleanup): void;

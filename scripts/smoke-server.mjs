@@ -28,6 +28,7 @@ import { spawn } from "node:child_process";
 import { probeEnv, verifyDemoRuntime } from "./smoke-demo-runtime.mjs";
 import { verifyProviderRuntime } from "./smoke-provider-runtime.mjs";
 import { createPluginSmokeFixture, verifyPluginServer } from "./smoke-plugin-runtime.mjs";
+import { verifyCorePlugins } from "./smoke-core-plugins.mjs";
 import { verifyCompressionRuntime } from "./smoke-compression-runtime.mjs";
 import { createRequire } from "node:module";
 import * as fs from "node:fs";
@@ -192,6 +193,7 @@ registerHooks({resolve(specifier,context,next){ const result=next(specifier,cont
 			if (status !== 200) throw new Error(`GET ${route} → ${status} (expected 200)`);
 			console.log(`[smoke-server] GET ${route} → 200`);
 		}
+		await verifyCorePlugins({ root: ROOT, standalone, dataDirectory: dataDir, url });
 		await verifyPluginServer(url, home);
 		if (BROWSER_MODE) {
 			const { verifyPluginBrowser } = await import("./smoke-plugin-browser.mjs");

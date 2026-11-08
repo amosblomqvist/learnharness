@@ -35,6 +35,7 @@ export interface PluginSnapshot {
 	readonly questionRenderers?: readonly QuestionRendererRegistration[];
 	readonly problemRenderers?: readonly ProblemRendererRegistration[];
 	directory: string;
+	conflicts: readonly { id: string; error: string }[];
 	loading: boolean;
 	refreshing: boolean;
 	error?: string;
@@ -130,7 +131,7 @@ export class PluginFrontendManager {
 	private disposed = false;
 	private started = false;
 	private shortcutPages = new Map<string, { read: () => PluginPageActionContext | undefined }>();
-	private snapshot: PluginSnapshot = { plugins: [], codeBlocks: [], toolRenderers: [], directory: "", loading: true, refreshing: false };
+	private snapshot: PluginSnapshot = { plugins: [], codeBlocks: [], toolRenderers: [], directory: "", conflicts: [], loading: true, refreshing: false };
 	constructor(private host: PluginHost) {}
 	getSnapshot = () => this.snapshot;
 	subscribe = (listener: () => void) => {
@@ -230,10 +231,10 @@ export class PluginFrontendManager {
 		if (this.disposed || this.mutations) return;
 		const generation = ++this.requestGeneration;
 		try {
-			const body = await this.json("/api/plugins") as { plugins: PluginInfo[]; directory: string };
+			const body = await this.json("/api/plugins") as { plugins: PluginInfo[]; directory: string; conflicts?: { id: string; error: string }[] };
 			if (this.disposed || generation !== this.requestGeneration) return;
 			this.reconcile(body.plugins);
-			this.publish({ directory: body.directory, loading: false, ...(clearError ? { error: undefined } : {}) });
+			this.publish({ directory: body.directory, conflicts: body.conflicts ?? [], loading: false, ...(clearError ? { error: undefined } : {}) });
 		} catch (error) {
 			if (generation === this.requestGeneration) this.publish({ loading: false, error: message(error) });
 		}
