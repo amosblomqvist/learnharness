@@ -76,6 +76,7 @@ import { useServerEvent, useServerResync } from "./server-events";
 import { TopBar } from "@/components/top-bar";
 import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
+import { rtlDir } from "@/components/text-direction";
 
 /** The sortable columns (owner ruling: all three — consistency). */
 export type ChainSortCol = "name" | "props" | "created";
@@ -325,6 +326,7 @@ export function ChainTableBody({
 					<input
 						ref={searchRef}
 						value={query}
+						dir={rtlDir(query)}
 						data-testid="chain-table-search"
 						onChange={(e) => onQuery(e.target.value)}
 						placeholder="Search nodes…"
@@ -444,7 +446,7 @@ export function ChainTableBody({
 								</button>
 								{onOrganizationChange && group.birth && group.kind !== null
 									? <EditableSourceName name={group.label ?? ""} muted={empty} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
-									: <span className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground/60" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
+									: <span dir={rtlDir(group.label)} className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground/60" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
 								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
 								<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
@@ -519,6 +521,7 @@ export function ChainTableBody({
 																))}
 																<span
 																	data-testid={`prop-chip-${id}`}
+																	dir={rtlDir(nameOf(id))}
 																	className="rounded border border-border/70 bg-muted/30 px-1.5 py-0.5"
 																>
 																	{nameOf(id)}
@@ -557,7 +560,7 @@ export function ChainTableBody({
 																testid={`prop-checkbox-${id}`}
 																label={`Select node ${node.name}`}
 															/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
-															<span className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
+															<span dir={rtlDir(node.statement)} className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
 																{node.statement}
 															</span>
 															<span className="w-14 shrink-0" />

@@ -55,6 +55,7 @@ import { select } from "d3-selection";
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 import type { Simulation, SimulationLinkDatum } from "d3-force";
 import { clusterHue, type Pt } from "./cluster-geometry.ts";
+import { rtlDir } from "./text-direction.ts";
 import {
 	CHARGE_STRENGTH,
 	CLUSTER_PULL_STRENGTH,
@@ -537,6 +538,16 @@ interface WorldSizes {
 	labelGap: number; // node edge → first label line, world units
 }
 
+/** Base direction of a wrapped label, once per wrap: labels re-wrap only at
+ *  geometry builds but draw every frame. Persian names need "rtl" or their
+ *  English words and punctuation land on the wrong side. */
+const labelDirections = new WeakMap<string[], CanvasDirection>();
+function labelDirection(lines: string[]): CanvasDirection {
+	let dir = labelDirections.get(lines);
+	if (!dir) labelDirections.set(lines, (dir = rtlDir(lines.join(" ")) ?? "ltr"));
+	return dir;
+}
+
 /** The pre-wrapped node name, centered below the node in WORLD units —
  *  identical geometry at rest and on hover, so hover only changes the
  *  color, nothing jumps. Lines are wrapped once per geometry build, never
@@ -552,6 +563,7 @@ function drawNameLines(
 	context.fillStyle = color;
 	context.textAlign = "center";
 	context.textBaseline = "top";
+	context.direction = labelDirection(lines);
 	const firstTop = y + world.nodeR + world.labelGap;
 	for (let i = 0; i < lines.length; i++) {
 		context.fillText(lines[i]!, x, firstTop + i * world.labelSize * LABEL_LINE_HEIGHT);
@@ -1726,6 +1738,7 @@ export class GraphCanvasRenderer {
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
 				ctx.fillStyle = `hsla(${rm.hue}, 55%, 78%, 0.85)`;
+				ctx.direction = labelDirection(rm.lines);
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
 					ctx.fillText(rm.lines[i]!, rm.cx, rm.cy + firstOffset + i * lineH);

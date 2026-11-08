@@ -118,10 +118,10 @@
 	   fonts: `font-mono`/`font-sans` utilities would otherwise fall to the
 	   SYSTEM stacks — a fourth font the app never chose — and streamdown's
 	   code-block chrome + mermaid-error + demo-card all use them. */
-	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
-	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-sans: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
+	--font-ui: var(--font-jetbrains), var(--font-vazirmatn), ui-monospace, SFMono-Regular, monospace;
+	--font-prose: var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
+	--font-mono: var(--font-jetbrains), var(--font-vazirmatn), ui-monospace, SFMono-Regular, monospace;
+	--font-sans: var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
 	/* The modular type ladder — each size carries its own line-height.
 	   Component sizes must pull from this ladder. (owner, typography
 	   round 4: the 10px rung is merged into 11 — one pixel apart was a
@@ -220,7 +220,10 @@ body {
    the whole list right as a block. Unlayered CSS beats the utility
    layer; :where keeps specificity zero. */
 .lh-prose :where(ul, ol) {
-	padding-left: 1.5rem;
+	/* Logical sides: the same 24px on the left in English, on the right in
+	   right-to-left lists (and none on the other side, where the nested
+	   [li_&]:pl-6 utility would otherwise add a second indent). */
+	padding-inline: 1.5rem 0;
 }
 
 /* Markdown headings render at the font's BLACK weight (owner ask,
@@ -320,6 +323,64 @@ body {
 }
 
 /* ============================================================
+ * Bidirectional text. components/text-direction.ts puts dir="rtl" on
+ * Persian/Arabic/Hebrew blocks and labels; the interface stays LTR.
+ * ============================================================ */
+
+/* RTL text aligns to its own start (the right), also under an ancestor that
+   hard-codes text-left, and sets in the reading font: no monospace font has
+   Persian letters, and inside the mono UI chrome Persian words came out
+   spaced by the mono font's wide spaces. In the base layer, so an element's
+   own utility (text-center, font-title, font-mono, …) still wins. */
+@layer base {
+	[dir="rtl"] {
+		text-align: start;
+		font-family: var(--font-prose);
+	}
+}
+
+/* An input's placeholder takes its own direction: inside a Persian
+   question's options, "Type your own answer…" keeps its ellipsis at the end. */
+[data-file-path-input]::before {
+	unicode-bidi: plaintext;
+}
+
+/* Cells align with their table, whatever their own dir: a column stays
+   even when one cell is English in a Persian table, or the reverse. This
+   also replaces the text-left Streamdown pins on header cells. */
+[data-streamdown="table"] :is(th, td) {
+	text-align: left;
+}
+[data-streamdown="table"][dir="rtl"] :is(th, td) {
+	text-align: right;
+}
+
+/* Code and math are LTR islands inside RTL text. Isolating them keeps the
+   punctuation at their edges in place: without it `useState()` reads
+   `()useState`, and KaTeX's inline boxes lay out right-to-left. A <code>
+   with its own dir (a Persian name in the delete dialogs) keeps it. */
+code:not([dir]),
+.katex {
+	direction: ltr;
+	unicode-bidi: isolate;
+}
+
+/* Free text that cannot carry a computed dir: each paragraph or line takes
+   its direction from its own first letters. Mermaid labels (HTML inside the
+   diagram's foreignObject, or SVG text) and the prompt editors. */
+svg[id^="lh-mermaid-"] :is(foreignObject *, text),
+textarea {
+	unicode-bidi: plaintext;
+}
+
+/* Code blocks stay LTR and left-aligned even inside an RTL list item. */
+pre,
+[data-streamdown="code-block"] {
+	direction: ltr;
+	text-align: left;
+}
+
+/* ============================================================
  * Chrome melt (owner wave, 2026-09-19) — tables and code blocks stop
  * being boxes: blocks read as part of the message. These rules override
  * streamdown's Tailwind utilities (utilities live in a cascade LAYER;
@@ -374,9 +435,10 @@ body {
 }
 /* Column separators: a hairline left rule on every cell but the first in
    its row (owner ask, 2026-09-19) — border-collapse merges it with the row
-   rules and the outer border, no doubled lines anywhere. */
+   rules and the outer border, no doubled lines anywhere. Logical side: the
+   right rule in an RTL table, whose first cell is the rightmost. */
 [data-streamdown="table"] :where(th, td):not(:first-child) {
-	border-left: 1px solid var(--border);
+	border-inline-start: 1px solid var(--border);
 }
 [data-streamdown="table-header"] {
 	background: transparent;
@@ -564,7 +626,7 @@ body {
    session-name-serif toggle overrides this var at runtime, so the
    .font-title utility must read it through var(), not carry a baked copy. */
 @theme {
-	--font-title: "lh-cmu", serif;
+	--font-title: "lh-cmu", var(--font-vazirmatn), serif;
 }
 
 /* Card enter (owner round, 2026-10-05): the transcript cards' one-shot

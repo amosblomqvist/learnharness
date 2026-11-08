@@ -5,6 +5,7 @@ import { useSessionMermaid } from "@/components/session-overlay";
 import { downloadFile } from "@/components/artifacts/download";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import type { ArtifactPartProps, ImageSnapshot, ShowImageDetails } from "@/src/core";
+import { rtlDir } from "@/components/text-direction";
 import { useImageSnapshot } from "./use-image-snapshot";
 
 /**
@@ -93,7 +94,7 @@ export function ImagePresentation({ image }: { image: ImageSnapshot & Pick<ShowI
 				<div className="flex min-w-0 items-baseline gap-2">
 					<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">Image</span>
 					{image.caption && (
-						<span className="text-sm text-muted-foreground" data-testid="image-caption">
+						<span dir={rtlDir(image.caption)} className="text-sm text-muted-foreground" data-testid="image-caption">
 							{image.caption}
 						</span>
 					)}

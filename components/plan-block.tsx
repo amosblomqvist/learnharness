@@ -16,6 +16,7 @@ import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/comp
 import type { PlanBlockData, PlanNodeStatus, PlanTree } from "@/src/core";
 import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * PLAN BLOCKS — the plan lives in the chat (wave 4): persisted
@@ -654,6 +655,7 @@ export function PlanDiagram({
 								x={w / 2}
 								y={y0 + i * LINE_H}
 								textAnchor="middle"
+								direction={rtlDir(line)}
 								className={monochrome ? MONO_TEXT : TEXT[status]}
 							>
 								{line}

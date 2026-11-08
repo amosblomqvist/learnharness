@@ -343,12 +343,13 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 	if (!alert) {
 		// Plain quote — Streamdown's own styling, restored by hand: overriding
 		// `blockquote` displaced its styled component (the classes below are
-		// its verbatim defaults), and bare <blockquote> rendered unstyled
-		// (owner report, 2026-10-07).
+		// its defaults), and bare <blockquote> rendered unstyled
+		// (owner report, 2026-10-07). Border and padding sit on the logical
+		// start side: the same left bar in English, the right one in RTL.
 		return (
 			<blockquote
 				{...rest}
-				className="my-4 border-l-4 border-muted-foreground/30 pl-4 text-muted-foreground italic"
+				className="my-4 border-s-4 border-muted-foreground/30 ps-4 text-muted-foreground italic"
 				data-streamdown="blockquote"
 			>
 				{children}
@@ -357,9 +358,10 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 	}
 	return (
 		<div
+			dir={rest.dir}
 			data-testid="md-callout"
 			data-alert-kind={alert.kind}
-			className="my-4 w-fit max-w-full border border-white px-4 py-3 [&> :first-child]:mt-0 [&> :last-child]:mb-0"
+			className="my-4 me-auto w-fit max-w-full border border-white px-4 py-3 [&> :first-child]:mt-0 [&> :last-child]:mb-0"
 		>
 			{alert.children}
 		</div>
@@ -377,7 +379,9 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 	const { children, node, ...rest } = props;
 	const ref = useRef<HTMLTableElement>(null);
 	return (
-		<div className="group/md relative my-4" data-testid="md-table">
+		// The wrapper takes the table's dir too: an RTL table hugs the right
+		// edge and its horizontal scroll starts there.
+		<div dir={rest.dir} className="group/md relative my-4" data-testid="md-table">
 			<CopyCorner
 				// Contained in the table's top-right corner (owner note, 2026-09-19:
 				// the old -top-3 lifted only half the 24px button above the 12px

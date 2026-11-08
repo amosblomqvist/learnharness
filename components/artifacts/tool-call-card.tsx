@@ -96,7 +96,7 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 						<div className="mb-1 font-medium uppercase tracking-wide text-muted-foreground">
 							Error
 						</div>
-						<pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-red-500">
+						<pre className="whitespace-pre-wrap break-all font-mono text-[11px] text-red-500 [unicode-bidi:plaintext]">
 							{p.errorText}
 						</pre>
 					</div>
@@ -105,7 +105,7 @@ export function ToolCallCard({ part }: ArtifactPartProps) {
 						<div className="mb-1 font-medium uppercase tracking-wide text-muted-foreground">
 							Output
 						</div>
-						<pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
+						<pre className="max-h-64 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed [unicode-bidi:plaintext]">
 							{out}
 						</pre>
 					</div>

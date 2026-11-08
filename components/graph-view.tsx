@@ -77,6 +77,7 @@ import { MenuShell } from "@/components/menu-shell.tsx";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { Hint } from "@/components/ui/hint";
+import { rtlDir } from "@/components/text-direction";
 import {
 	ARROW_LENGTH_LADDER,
 	CHARGE_RANGE,
@@ -425,7 +426,7 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 						<div key={run.startedAt} className="flex items-baseline justify-between gap-2 text-[11px]">
 							<span className="min-w-0 flex-1 truncate text-muted-foreground">
 								<span className="text-foreground/70">{timeAgo(run.startedAt)}</span>{" "}
-								{run.title}
+								<span dir={rtlDir(run.title)}>{run.title}</span>
 								{run.merged && (
 									<span className="text-muted-foreground">
 										{" "}
@@ -879,6 +880,7 @@ export function GraphChromeRow({
 						<input
 							ref={searchInputRef}
 							value={query}
+							dir={rtlDir(query)}
 							onChange={(e) => onQuery(e.target.value)}
 							placeholder="Search nodes…"
 							aria-label="Search nodes"
@@ -1604,7 +1606,7 @@ export function GraphView({
 				>
 					<Loader2Icon className="size-3.5 shrink-0 animate-spin" />
 					<span className="capitalize">{run.phase}</span>
-					<span className="max-w-48 truncate text-foreground">{run.title}</span>
+					<span dir={rtlDir(run.title)} className="max-w-48 truncate text-foreground">{run.title}</span>
 					<span className="tabular-nums">{Math.max(0, Math.round((Date.now() - run.startedAt) / 1000))}s</span>
 				</div>
 			))}
@@ -1621,8 +1623,8 @@ export function GraphView({
 					// over home.tsx's drag surface (2026-09-17).
 					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 				>
-					<div className="text-sm font-medium leading-snug">{selected.node.name}</div>
-					<div className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>
+					<div dir={rtlDir(selected.node.name)} className="text-sm font-medium leading-snug">{selected.node.name}</div>
+					<div dir={rtlDir(selected.node.statement)} className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>
 					{selected.sourceIds.length > 0 ? (
 						<div className="mt-3 flex flex-col gap-1">
 							<div className="text-xs text-muted-foreground">Sessions</div>

@@ -2,6 +2,7 @@
 
 import { ClipboardCheckIcon } from "lucide-react";
 import { parseProbeDoneInput, type ProbeDoneResult } from "@/src/core";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * The probe conclusion card (docs/archive/probe-teach-split.md §2): renders the
@@ -55,12 +56,12 @@ export function ProbeDoneCard({ part }: { part: { input?: unknown; output?: unkn
 				<div className="space-y-2">
 					{strands.map((s, i) => (
 						<div key={i} className="rounded-lg bg-background/60 px-3 py-2">
-							<div className="text-sm font-medium">{s.strand}</div>
-							<div className="mt-0.5 text-sm text-muted-foreground">{s.assessment}</div>
+							<div dir={rtlDir(s.strand)} className="text-sm font-medium">{s.strand}</div>
+							<div dir={rtlDir(s.assessment)} className="mt-0.5 text-sm text-muted-foreground">{s.assessment}</div>
 						</div>
 					))}
 					{assessment?.summary && (
-						<p className="px-1 text-sm text-muted-foreground">{assessment.summary}</p>
+						<p dir={rtlDir(assessment.summary)} className="px-1 text-sm text-muted-foreground">{assessment.summary}</p>
 					)}
 				</div>
 			) : (

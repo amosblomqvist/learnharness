@@ -37,6 +37,11 @@ describe("proposition candidate retrieval", () => {
 		assert.equal(search(proposition("p", "alpha ΑΒΓ"))[0]!.node.id, "n");
 	});
 
+	it("treats Arabic and Persian spellings of a word, and vowel-marked words, as the same word", () => {
+		const search = createPropositionCandidateSearch([node("n", "كتاب", "اين كتاب درباره‌ي فيزيك است")]);
+		assert.equal(search(proposition("p", "کِتاب فیزیک"))[0]?.node.id, "n");
+	});
+
 	it("shows a relevant alias with the complete canonical statement", () => {
 		const nodes = [node("n", "Legacy label", "The original assertion remains canonical.", ["An amber canoe travels upstream."])];
 		const proposed = [proposition("p", "An amber canoe travels upstream.")];

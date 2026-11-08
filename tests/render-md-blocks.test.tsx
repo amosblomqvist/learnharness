@@ -249,7 +249,7 @@ describe("md-blocks — the restored plain blockquote (owner round, 2026-10-07)"
 		const html = renderToStaticMarkup(
 			<MessageResponse mode="static">{"Before.\n\n> An ordinary quote.\n\nAfter."}</MessageResponse>,
 		);
-		assert.ok(html.includes("border-l-4"), "the left border is back");
+		assert.ok(html.includes("border-s-4"), "the start-side border is back (left in LTR, right in RTL)");
 		assert.ok(html.includes("text-muted-foreground italic"), "muted italic — the quote register");
 		assert.ok(!html.includes("md-callout"), "a plain quote is not a callout box");
 	});
