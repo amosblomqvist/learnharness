@@ -77,6 +77,18 @@ for (const extra of ["dist", path.join("node_modules", "electron")]) {
 	}
 }
 
+// 2d) sherpa-onnx finds its native package by a path relative to itself. Next
+// reaches it through a symlink at .next/node_modules/sherpa-onnx-node-<hash>,
+// and the Windows installer flattens that symlink into a real directory, so
+// "../sherpa-onnx-<platform>" must also exist beside the flattened copy.
+const nodeModules = path.join(STANDALONE, "node_modules");
+const hashedModules = path.join(STANDALONE, ".next", "node_modules");
+for (const name of exists(nodeModules) ? fs.readdirSync(nodeModules) : []) {
+	if (!name.startsWith("sherpa-onnx-") || name === "sherpa-onnx-node") continue;
+	copyTree(path.join(nodeModules, name), path.join(hashedModules, name));
+	console.log(`[build-server] placed ${name} beside the hashed sherpa-onnx-node`);
+}
+
 // 3) Sanity: the runtime-read prompt assets must be present (the teacher
 //    agent reads them from disk at request time).
 for (const asset of [
