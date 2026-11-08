@@ -1,0 +1,26 @@
+{
+  "piper": {
+    "version": "1.8.0",
+    "repository": "https://github.com/OHF-Voice/piper1-gpl",
+    "commit": "639388b6317fc4731e91d53da42aea68fd4166ff"
+  },
+  "espeak": {
+    "repository": "https://github.com/espeak-ng/espeak-ng",
+    "commit": "212928b394a96e8fd2096616bfd54e17845c48f6"
+  },
+  "sonic": {
+    "repository": "https://github.com/waywardgeek/sonic",
+    "commit": "fbf75c3d6d846bad3bb3d456cbc5d07d9fd8c104"
+  },
+  "onnxruntimeLinuxX64": {
+    "version": "1.22.0",
+    "url": "https://github.com/microsoft/onnxruntime/releases/download/v1.22.0/onnxruntime-linux-x64-1.22.0.tgz",
+    "bytes": 7798730,
+    "sha256": "8344d55f93d5bc5021ce342db50f62079daf39aaafb5d311a451846228be49b3"
+  },
+  "voiceRepositoryNotice": {
+    "url": "https://huggingface.co/rhasspy/piper-voices/raw/b4e358ffcb232591bf73a540e70f7de528e4174a/README.md",
+    "bytes": 497,
+    "sha256": "33e93643fce5180886300f9f0070eeeab8af148efb8e84361f8904def80fd9fb"
+  }
+}

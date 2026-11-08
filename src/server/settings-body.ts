@@ -1,3 +1,4 @@
+import { isSpeechVoiceId, type SpeechSettings } from "../core/speech.ts";
 /**
  * The shared settings-PUT body parsers — one seam per settings surface.
  * Extracted verbatim from the per-chat route (default-settings wave,
@@ -465,8 +466,24 @@ export const SETTINGS_SECTIONS = {
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
+	speech: parseSpeechSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;
+
+export function parseSpeechSettingsBody(body: unknown): SettingsBodyResult<SpeechSettings> {
+ const raw = asRecord(body);
+ if (!raw) return { ok: false, error: "Invalid JSON body" };
+ if (raw.engine !== undefined && raw.engine !== "piper") return { ok: false, error: "Unsupported speech engine" };
+ if (raw.voice !== undefined && !isSpeechVoiceId(raw.voice)) return { ok: false, error: "Unsupported speech voice" };
+ if (raw.automaticReading !== undefined && typeof raw.automaticReading !== "boolean") return { ok: false, error: "Invalid automatic reading preference" };
+ if (raw.playbackRate !== undefined && (typeof raw.playbackRate !== "number" || !Number.isFinite(raw.playbackRate) || raw.playbackRate < 0.75 || raw.playbackRate > 2)) return { ok: false, error: "Playback rate must be between 0.75 and 2" };
+ const settings: SpeechSettings = {};
+ if (raw.engine !== undefined) settings.engine = raw.engine as "piper";
+ if (raw.voice !== undefined) settings.voice = raw.voice as string;
+ if (raw.automaticReading !== undefined) settings.automaticReading = raw.automaticReading as boolean;
+ if (raw.playbackRate !== undefined) settings.playbackRate = raw.playbackRate as number;
+ return { ok: true, settings };
+}

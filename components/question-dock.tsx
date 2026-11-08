@@ -16,10 +16,7 @@ import {
 	CONFIDENCE_STOPS,
 	DEFAULT_CONFIDENCE_INDEX,
 	emptyDockSelection,
-	normalizeOptions,
 	resolveCorrect,
-	seededRandom,
-	shuffleOptions,
 	toolQuestionKind,
 	parseAskInput,
 	parseQuizInput,
@@ -39,6 +36,8 @@ import {
 	type Phase3,
 } from "@/src/core";
 import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-rail";
+import { visibleQuestionOptions, questionNarration } from "@/src/core";
+import { ReadAloud, useQuestionNarration } from "@/components/narration";
 
 /**
  * The question dock — a pending quiz/ask REPLACES the chat composer: the
@@ -63,6 +62,8 @@ import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-
 export interface QuestionDockProps {
 	toolName: "quiz" | "probe" | "ask_user_question" | "explain" | "recall";
 	toolCallId: string;
+	/** Native occurrence key when persisted tools reuse a call id. */
+	sourceKey?: string;
 	input: QuizToolInput | AskToolInput | ExplainToolInput;
 	/** Collapse state, owned by the DockOverlay (it drives the shell's height morph). */
 	expanded: boolean;
@@ -91,7 +92,7 @@ export interface QuestionDockProps {
 	 *  sits UNREVEALED — the reading-thinking field owns dictated speech
 	 *  during the reading; the dock reclaims on reveal. Default true (probe
 	 *  questions, predictions, old callers). */
-	dictationClaim?: boolean;
+	revealed?: boolean;
 	/** Compaction is running for this chat (owner round 14): the answer
 	 *  POST would block on the server's compaction gate — disable submit
 	 *  and say so in the hint row. The server registry is the real gate;
@@ -102,6 +103,7 @@ export interface QuestionDockProps {
 export function QuestionDock({
 	toolName,
 	toolCallId,
+	sourceKey,
 	input,
 	expanded,
 	reveal = false,
@@ -111,7 +113,7 @@ export function QuestionDock({
 	onSaveDraft,
 	onEscape,
 	phase = "probe",
-	dictationClaim = true,
+	revealed = true,
 	compactionRunning = false,
 }: QuestionDockProps) {
 	// The probe-phase names (owner, 2026-10-09) canonicalize onto their
@@ -156,6 +158,7 @@ export function QuestionDock({
 				<QuestionDockForm
 					toolName={toolName}
 					toolCallId={toolCallId}
+					sourceKey={sourceKey}
 					input={parsed}
 					phase={phase}
 					active={expanded}
@@ -163,7 +166,7 @@ export function QuestionDock({
 					initialDraft={initialDraft}
 					onSaveDraft={onSaveDraft}
 					onEscape={onEscape}
-					dictationClaim={dictationClaim}
+					revealed={revealed}
 					compactionRunning={compactionRunning}
 				/>
 			</div>
@@ -253,6 +256,7 @@ export function QuestionDockBar({
 function QuestionDockForm({
 	toolName,
 	toolCallId,
+	sourceKey,
 	input,
 	phase = "probe",
 	active,
@@ -260,7 +264,7 @@ function QuestionDockForm({
 	initialDraft,
 	onSaveDraft,
 	onEscape,
-	dictationClaim = true,
+	revealed = true,
 	compactionRunning = false,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
@@ -284,10 +288,9 @@ function QuestionDockForm({
 						? "multi-select"
 						: "single-select"
 						: "text";
-		const options = normalizeOptions(
+		const ordered = visibleQuestionOptions(kind, toolCallId,
 			(quizInput?.options ?? askInput?.options ?? []) as { label: string; value?: string }[],
 		);
-		const ordered = kind === "quiz" && options.length > 0 ? shuffleOptions(options, seededRandom(toolCallId)) : options;
 		const q: QuestionData = {
 			id: toolCallId,
 			kind,
@@ -315,6 +318,8 @@ function QuestionDockForm({
 		}
 		return q;
 	}, [toolCallId, kind, input]);
+	const narrationSource = useMemo(() => ({ id: `question:${sourceKey ?? toolCallId}`, markdown: questionNarration(qd), complete: true }), [sourceKey, toolCallId, qd]);
+	const removeNarration = useQuestionNarration(narrationSource, revealed);
 
 	// The selection state machine lives in question-core (pure, tested):
 	// single-select displaces, multi-select coexists — picking the ask
@@ -363,7 +368,7 @@ function QuestionDockForm({
 		),
 		// Released while a teach check sits unrevealed (owner 2026-10-03):
 		// the reading-thinking field owns dictated speech during the reading.
-		dictationClaim,
+		revealed,
 	);
 
 	const toggle = (idx: number) => setSel(toggleOption(selectMode, sel, idx));
@@ -375,6 +380,7 @@ function QuestionDockForm({
 
 	const submit = () => {
 		if (!canSubmit || compactionRunning) return;
+		removeNarration();
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while
 		 * a run is live with reasoning still in Deepgram's hands. Stop the
 		 * run, let the last finals land in the target field, and only then
@@ -563,6 +569,7 @@ function QuestionDockForm({
 			    Capped by the measured column (--dock-max-h; the old fixed 55dvh cut
 			    long questions short — owner round, 2026-10-05). */}
 			<div data-dock-scroll-area="" data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
+				{revealed && <ReadAloud className="mb-3" source={narrationSource} />}
 				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 					{toolName === "probe"
 						? "Probe"

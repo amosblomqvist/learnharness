@@ -84,6 +84,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		ipcMain: { on() {}, handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
+	const child = Object.assign(new EventEmitter(), { connected: false, send: () => order.push("shutdown"), kill: (signal: string) => order.push(signal) });
 	const context = createContext({
 		require: (id: string) => {
 			if (id === "electron") return electron;
@@ -103,13 +104,13 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		process: { argv: [], env: { LH_DEV_URL: "http://127.0.0.1:9000" }, platform: "darwin", on() {} },
 		__dirname: path.dirname(mainFile), URL,
 		setInterval: (callback: () => void, delay: number) => intervals.push({ callback, delay }),
-		setTimeout() {},
-		fixtureChild: { kill: (signal: string) => order.push(signal) },
+		setTimeout() {}, clearTimeout() {},
+		fixtureChild: child,
 	});
 	runInContext(mainSource, context, { filename: mainFile });
 	const run = (code: string) => runInContext(code, context);
 	return {
-		run, updater, windows, intervals, handles, settingsReads, order, app,
+		run, child, updater, windows, intervals, handles, settingsReads, order, app,
 		setSettings: (value: unknown) => { settings = JSON.stringify(value); },
 		setSettingsFailure: (value: string | Error) => { settings = value; },
 		setEnumerationFailure: (value: boolean) => { enumerationFails = value; },
@@ -228,9 +229,17 @@ describe("status observation never controls the updater", () => {
 		f.updater.emit("update-downloaded", { version: "0.3.8" }); await f.check();
 		assert.equal(f.state().status, "downloaded"); assert.equal(f.updater.checks, 0);
 		assert.equal(f.updater.autoDownload, true); assert.equal(f.updater.autoInstallOnAppQuit, true);
-		f.run("serverProcess = fixtureChild; installUpdateNow()");
+		await f.run("serverProcess = fixtureChild; installUpdateNow()");
 		assert.deepEqual(f.order, ["SIGTERM", "install"]);
 	});
+});
+
+it("Restart waits for speech shutdown acknowledgement before terminating server and installing",async()=>{
+ const f=fixture();f.run("setupAutoUpdater()");f.child.connected=true;
+ const installing=f.run("serverProcess = fixtureChild; installUpdateNow()");
+ assert.deepEqual(f.order,["shutdown"]);
+ f.child.emit("message",{channel:"lh:speech-shutdown-complete"});await installing;
+ assert.deepEqual(f.order,["shutdown","SIGTERM","install"]);
 });
 
 describe("startup, timer, trusted IPC and menu wiring", () => {
