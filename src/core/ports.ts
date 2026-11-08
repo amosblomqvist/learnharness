@@ -26,6 +26,7 @@ import type {
 	SessionCheckpoint,
 	TurnUsage,
 	NotesSource,
+	NotesImportProgress,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
 
@@ -100,7 +101,8 @@ export interface GraphStore {
 	 *  idempotent per startedAt. */
 
 	/** Upsert one imported-notes source record (config.SOURCES_FILE — a
-	 *  JSON map, not a ledger; an upsert keeps the existing usage log). */
+	 *  JSON map, not a ledger; an upsert keeps the existing usage log and
+	 *  resume progress). */
 	upsertSource(source: NotesSource): void;
 	/** Every notes source record, by id order-insensitive. */
 	readSources(): NotesSource[];
@@ -109,6 +111,10 @@ export interface GraphStore {
 	/** Append one run's usage to a source record — idempotent per
 	 *  startedAt, mirroring ChatRecord.extractions. */
 	appendSourceUsage(id: string, entry: ExtractionRunUsage): void;
+	/** Replace (or with null, clear) one source's resume progress. Called
+	 *  after every merged notes chunk — the notes door's coverage
+	 *  checkpoint. Unknown id is a no-op. */
+	writeSourceProgress(id: string, progress: NotesImportProgress | null): void;
 
 	/** The layout ledger (config.POSITIONS_FILE): nodeId → resting {x,y}.
 	 *  WRITTEN ONLY by the incremental settle after a merge (core/layout.ts

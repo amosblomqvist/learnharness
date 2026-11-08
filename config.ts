@@ -64,8 +64,8 @@ export const LEDGER_FILES = {
 	chains: path.join(PATHS.graph, "chains.jsonl"),
 	sessions: path.join(PATHS.graph, "sessions.jsonl"),
 	/** Per-message extraction coverage (contracts/graph.ts CoverageEntry;
-	 *  the checkpoint's replacement for chat extractions — notes keep
-	 *  sessions.jsonl, whole-file as they are). */
+	 *  the checkpoint's replacement for chat extractions — notes keep their
+	 *  per-chunk resume progress in sources.json instead). */
 	coverage: path.join(PATHS.graph, "coverage.jsonl"),
 } as const;
 

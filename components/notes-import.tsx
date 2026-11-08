@@ -20,6 +20,11 @@ export interface NotesImportResult {
 	missing?: string[];
 	provider?: string;
 	slots?: string[];
+	/** The file's stored progress already covered the whole unchanged text. */
+	skipped?: boolean;
+	/** Resume markers: first chunk this import ran and the file's chunk count. */
+	resumedFrom?: number;
+	chunksTotal?: number;
 	notice?: string;
 }
 
@@ -40,6 +45,11 @@ export function parseNotesImportResults(body: unknown, files: readonly File[]): 
 		if (!r.ok && typeof r.error !== "string") throw invalid();
 		for (const field of ["error", "code", "provider", "notice"] as const) if (r[field] !== undefined && typeof r[field] !== "string") throw invalid();
 		for (const field of ["missing", "slots"] as const) if (r[field] !== undefined && (!Array.isArray(r[field]) || !r[field]!.every((v) => typeof v === "string"))) throw invalid();
+		if (r.skipped !== undefined && typeof r.skipped !== "boolean") throw invalid();
+		for (const field of ["resumedFrom", "chunksTotal"] as const) {
+			const value = r[field];
+			if (value !== undefined && (!Number.isInteger(value) || value < 1)) throw invalid();
+		}
 	}
 	return body.results as NotesImportResult[];
 }

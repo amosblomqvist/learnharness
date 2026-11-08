@@ -42,6 +42,7 @@ import type {
 	GraphNode,
 	ExtractionRunUsage,
 	NotesSource,
+	NotesImportProgress,
 	Position,
 	ProvenancePoint,
 	CoverageEntry,
@@ -165,11 +166,15 @@ export const graphStore: GraphStore = {
 
 	// ── imported-notes bookkeeping (config.SOURCES_FILE — a JSON map) ──
 
-	/** Upsert: keeps the existing record's usage log when re-importing. */
+	/** Upsert: keeps the existing record's usage log and resume progress
+	 *  when re-importing (a re-run without those fields must not reset a
+	 *  partially extracted file back to line 0). */
 	upsertSource(source: NotesSource): void {
 		const all = readSourceMap();
 		const prev = all[source.id];
-		all[source.id] = prev ? { ...source, extractions: prev.extractions } : source;
+		all[source.id] = prev
+			? { ...source, extractions: prev.extractions, progress: source.progress ?? prev.progress }
+			: source;
 		writeSourceMap(all);
 	},
 	readSources(): NotesSource[] {
@@ -193,6 +198,17 @@ export const graphStore: GraphStore = {
 		source.extractions = source.extractions?.some((r) => r.startedAt === entry.startedAt)
 			? source.extractions
 			: [...(source.extractions ?? []), entry];
+		writeSourceMap(all);
+	},
+	/** The notes door's coverage checkpoint: one write per merged chunk
+	 *  (null clears — a changed file restarts from line 0). Unknown id is
+	 *  a no-op, like appendSourceUsage. */
+	writeSourceProgress(id: string, progress: NotesImportProgress | null): void {
+		const all = readSourceMap();
+		const source = all[id];
+		if (!source) return;
+		if (progress) source.progress = progress;
+		else delete source.progress;
 		writeSourceMap(all);
 	},
 

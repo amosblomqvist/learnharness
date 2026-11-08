@@ -21,6 +21,7 @@ import type {
 	ChatRecord,
 	ExtractionRunUsage,
 	ExtractionStageUsage,
+	NotesImportProgress,
 	SessionFindings,
 } from "../../core/contracts.ts";
 import { getGraph, mergeFindings, type DerivedGraph, type EmissionStats, type GraphDeps } from "../../core/graph.ts";
@@ -758,6 +759,21 @@ export interface NotesImportInput {
 	text: string;
 }
 
+/** What one notes import did — the merger's append stats for the chunks
+ *  THIS run extracted, plus the resume markers the transport surfaces
+ *  (the import notice line). */
+export interface NotesImportOutcome extends EmissionStats {
+	/** True when the file's stored progress already covered the whole
+	 *  unchanged text: no model call, no usage row, no source touch. */
+	skipped?: boolean;
+	/** 1-based chunk index this run started at (present only when the run
+	 *  resumed a partially extracted, unchanged file). */
+	resumedFrom?: number;
+	/** Total chunk count of the file as this run saw it (with
+	 *  `resumedFrom`, renders "continued from 4/12"). */
+	chunksTotal?: number;
+}
+
 /** A notes import did not finish. Earlier graph writes and billed usage are
  * retained; partialStats describe known merges, not an all-or-nothing result. */
 export class NotesImportError extends Error {
@@ -778,9 +794,11 @@ export interface ExtractionPipeline {
 	runExtraction(chatId: string): Promise<EmissionStats>;
 	/** The format-agnostic front door (2026-09-13): run the same pipeline
 	 *  over ONE raw notes file. The source id is deterministic per file
-	 *  path, so re-importing the same file re-runs extraction against the
-	 *  same source identity (mappings dedupe by it). */
-	importNotes(input: NotesImportInput): Promise<EmissionStats>;
+	 *  path, so re-importing the same file resolves to the same source
+	 *  identity — and resumes from that source's last merged chunk when
+	 *  the consumed prefix is unchanged (a fully covered, unchanged file
+	 *  is skipped with no model calls). */
+	importNotes(input: NotesImportInput): Promise<NotesImportOutcome>;
 }
 
 /** pi's per-step usage, flattened to the persisted CallUsage fields
@@ -1256,26 +1274,54 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		return `SOURCE (the author's personal notes): ${input.filePath}${part}\n\n${input.text}`;
 	}
 
+	/** The notes resume unit: the file's CONTENT lines. `text.split("\n")`
+	 *  yields a terminal "" sentinel for newline-terminated files; counting
+	 *  it as a line broke append detection (appending a line changed the
+	 *  sentinel's value, so the stored prefix never matched). Empty text has
+	 *  no content lines. */
+	function contentLines(text: string): string[] {
+		if (text.length === 0) return [];
+		const lines = text.split("\n");
+		return text.endsWith("\n") ? lines.slice(0, -1) : lines;
+	}
+
 	/** Chunk the notes text under the same budget the chat path uses
 	 * (owner, 2026-09-28: the whole-file-in-one-call design collapsed a
 	 * weak model — 26 propositions, structure bleed mid-emission).
 	 * Greedy by line, chars/4 like every other estimate in the app; a
-	 * single over-budget line rides alone (never split a line). */
-	function chunkNotes(text: string, budget: number): string[] {
+	 * single over-budget line rides alone (never split a line).
+	 *
+	 * Each chunk carries the number of SOURCE lines it consumes (blanks
+	 * included) — `chunk.split("\n")` cannot answer that: the greedy
+	 * accumulator drops leading blank lines from the chunk text, so a
+	 * checkpoint advanced by the text's line count would fall short and
+	 * re-extract merged content on resume. */
+	function chunkNotes(text: string, budget: number): Array<{ text: string; lines: number }> {
 		if (text.trim().length === 0) return [];
-		const out: string[] = [];
+		const out: Array<{ text: string; lines: number }> = [];
 		let current = "";
+		let lines = 0;
 		for (const line of text.split("\n")) {
 			const candidate = current.length === 0 ? line : current + "\n" + line;
 			if (current.length > 0 && Math.ceil(candidate.length / 4) > budget) {
-				out.push(current);
+				out.push({ text: current, lines });
 				current = line;
+				lines = 1;
 			} else {
 				current = candidate;
+				lines += 1;
 			}
 		}
-		if (current.trim().length > 0) out.push(current);
+		if (current.trim().length > 0) out.push({ text: current, lines });
 		return out;
+	}
+	/** sha256 the consumed leading lines, each with its "\n" terminator.
+	 *  Terminators make the digest unambiguous and let the run keep an
+	 *  incremental hasher (chunk lines are appended in order) instead of
+	 *  re-hashing the prefix after every chunk. */
+	function hashNotesLines(hasher: crypto.Hash, lines: readonly string[], from: number, to: number): crypto.Hash {
+		for (let i = from; i < to; i++) hasher.update(`${lines[i]}\n`);
+		return hasher;
 	}
 
 	async function notesExtract(
@@ -1316,11 +1362,27 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	// The notes auditor is the SAME identity-linker as the chat one (one
 	// schema now that attribution is gone) — audit() above, verbatim.
 
-	async function runNotesExtraction(input: { id: string; filePath: string; text: string; importedAt: string }): Promise<EmissionStats> {
+	async function runNotesExtraction(input: {
+		id: string;
+		filePath: string;
+		text: string;
+		importedAt: string;
+		/** Resume boundary from the source's stored progress: the leading
+		 *  lines already merged and how many chunks produced them. Absent =
+		 *  start at line 0. */
+		resume?: { linesDone: number; chunksDone: number };
+	}): Promise<NotesImportOutcome> {
 		const { id } = input;
 		// importNotes owns the source exclusion, including metadata and cleanup.
 		const t0 = performance.now();
-		const mergedStats: EmissionStats = { nodes: 0, chains: 0 };
+		const mergedStats: NotesImportOutcome = { nodes: 0, chains: 0 };
+		const lines = contentLines(input.text);
+		const startLine = input.resume?.linesDone ?? 0;
+		const baseChunks = input.resume?.chunksDone ?? 0;
+		// Running digest of the consumed prefix: seeded with everything an
+		// earlier run merged, advanced only after a chunk's checkpoint lands.
+		const consumed = hashNotesLines(crypto.createHash("sha256"), lines, 0, startLine);
+		let consumedUntil = startLine;
 		try {
 			// BYOK per-need gate (owner, 2026-09-22) + key presence
 			// (2026-09-25): same refusal as the chat front door — no
@@ -1331,10 +1393,34 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// whole large file. Abort mid-run keeps earlier chunks merged
 			// (same doctrine as chat batches).
 			const chunkTokens = deps.getChunkTokens?.() ?? FACTORY_SETTINGS.graph.extractionChunkTokens;
-			const chunks = chunkNotes(input.text, chunkTokens);
+			// RESUME: chunk only the lines the stored progress has not merged.
+			// Chunks are line-aligned, so linesDone is an exact boundary and
+			// the remaining split is recomputed under the CURRENT budget.
+			const chunks = chunkNotes(lines.slice(startLine).join("\n"), chunkTokens);
+			const totalChunks = baseChunks + chunks.length;
+			if (chunks.length > 0 && input.resume) {
+				mergedStats.resumedFrom = baseChunks + 1;
+				mergedStats.chunksTotal = totalChunks;
+			}
 			console.info(
-				`[extraction ${id}] notes pipeline start (${input.filePath}) — ${chunks.length} chunk(s) of ≤${chunkTokens} tok`,
+				`[extraction ${id}] notes pipeline start (${input.filePath}) — ` +
+					`${chunks.length} chunk(s) of ≤${chunkTokens} tok` +
+					(startLine > 0 || baseChunks > 0 ? `, resuming at line ${startLine} after ${baseChunks} chunk(s)` : ""),
 			);
+			// Nothing left to extract (fully covered, or whitespace-only from
+			// here): record completion so the next import skips before any
+			// model call. This is the one place progress is written without a
+			// merge — there is nothing to merge.
+			if (chunks.length === 0) {
+				const completion = hashNotesLines(crypto.createHash("sha256"), lines, 0, lines.length);
+				graphStore.writeSourceProgress(id, {
+					prefixHash: completion.digest("hex"),
+					linesDone: lines.length,
+					chunksDone: baseChunks,
+					updatedAt: new Date().toISOString(),
+				});
+				return mergedStats;
+			}
 			// PER-CHUNK JOBS (owner, 2026-09-28), SERIALIZED PER SOURCE (owner,
 			// 2026-09-30 evening): same law as the chat door — chunks run
 			// STRICTLY IN ORDER, each chunk's extractor continuing the
@@ -1345,7 +1431,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// the file actually chunked.
 			const settled: PromiseSettledResult<EmissionStats>[] = [];
 			for (const [chunkIndex, chunk] of chunks.entries()) {
-				const part = chunks.length > 1 ? { i: chunkIndex + 1, n: chunks.length } : undefined;
+				// Parts keep the FILE's numbering across runs (resume continues
+				// "4/12" rather than restarting "1/9").
+				const part = totalChunks > 1 ? { i: baseChunks + chunkIndex + 1, n: totalChunks } : undefined;
 				// Keep the actual signal after runJob tears down its registry row:
 				// usage persistence can throw and mask the body's AbortError.
 				let chunkSignal: AbortSignal | undefined;
@@ -1357,7 +1445,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 							chunkSignal = runningExtractions.get(jobKey)?.controller.signal;
 							const findings = await withExtractSlot(jobKey, async () => {
 								setPhase(jobKey, "extracting", "notes", input.filePath, part);
-								return notesExtract(jobKey, { ...input, text: chunk, part });
+								return notesExtract(jobKey, { ...input, text: chunk.text, part });
 							});
 							// SERIALIZED AUDIT (owner, 2026-09-28): audit + merge one
 							// at a time, process-wide — the auditor explores the graph
@@ -1367,13 +1455,29 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								setPhase(jobKey, "auditing", "notes", input.filePath, part);
 								const auditResult = await audit(jobKey, input.id, findings);
 								setPhase(jobKey, "merging", "notes", input.filePath, part);
+								// THE RESUME CHECKPOINT: the consumed prefix after this
+								// chunk. The merger writes it in its final step, only
+								// after the appends land, so an abort/failure keeps the
+								// previous boundary (this chunk re-runs next time).
+								const advanceTo = chunkIndex === chunks.length - 1 ? lines.length : consumedUntil + chunk.lines;
+								const probe = consumed.copy();
+								hashNotesLines(probe, lines, consumedUntil, advanceTo);
+								const progress: NotesImportProgress = {
+									prefixHash: probe.digest("hex"),
+									linesDone: advanceTo,
+									chunksDone: baseChunks + chunkIndex + 1,
+									updatedAt: new Date().toISOString(),
+								};
 								const merged = mergeFindings(
 									id,
 									findings,
 									auditResult,
 									{ chatStore, graphStore },
-									{ foldedAt: input.importedAt },
+									{ foldedAt: input.importedAt, progress },
 								);
+								// The checkpoint landed — advance the running digest.
+								hashNotesLines(consumed, lines, consumedUntil, advanceTo);
+								consumedUntil = advanceTo;
 								// Capture the committed merge BEFORE layout/usage can fail.
 								mergedStats.nodes += merged.nodes;
 								mergedStats.chains! += merged.chains ?? 0;
@@ -1398,12 +1502,20 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 						failure = aborted;
 					}
 					settled.push({ status: "rejected", reason: failure });
-					// Same source-wide-abort law as the chat door: stop the
-					// run; isolated failures keep going.
-					if (failure instanceof Error && failure.name === "AbortError") break;
+					// Notes chunks are a STRICT PREFIX chain (each continues the
+					// source digest, resume is a single line boundary): a gap
+					// cannot be checkpointed, so any failure — abort or stage
+					// error — ends the run. Later chunks stay unextracted and
+					// the next import resumes at this chunk.
+					break;
 				}
 			}
-			const stats = aggregateJobs(id, settled);
+			const stats: NotesImportOutcome = aggregateJobs(id, settled);
+			// Resume markers ride the returned stats (the transport's notice).
+			if (input.resume && chunks.length > 0) {
+				stats.resumedFrom = baseChunks + 1;
+				stats.chunksTotal = totalChunks;
+			}
 			// Completion is a chunk-status contract, never a node-count test.
 			// Zero findings (and an empty file after the readiness gate) are valid.
 			const rejected = settled.filter((r) => r.status === "rejected");
@@ -1428,17 +1540,51 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		}
 	}
 
-	/** Every explicit import processes the whole file. Identity, source digest,
-	 * auditor and usage history remain source-scoped; this is not exactly-once. */
-	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
+	/** The notes resume law (2026-11): the source id is the path, the
+	 *  checkpoint is the consumed prefix. Re-importing the same path
+	 *  resumes at the first unmerged chunk when that prefix is unchanged,
+	 *  skips entirely when the file is already fully covered, and restarts
+	 *  from line 0 when the consumed prefix changed. Identity, digest,
+	 *  auditor and usage stay source-scoped — not exactly-once across a
+	 *  changed file. */
+	async function importNotes(input: NotesImportInput): Promise<NotesImportOutcome> {
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
 		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
 		inFlight.add(id);
 		try {
+			const lines = contentLines(input.text);
+			const prev = graphStore.readSources().find((source) => source.id === id)?.progress;
+			let resume: { linesDone: number; chunksDone: number } | undefined;
+			if (prev) {
+				// Records are user-editable on disk: validate the shape AND the
+				// prefix before trusting a resume boundary. Counters must be
+				// nonnegative safe integers — a negative chunksDone would make
+				// resumedFrom 0, which the strict client parser rejects.
+				const valid =
+					typeof prev.prefixHash === "string" &&
+					Number.isSafeInteger(prev.linesDone) &&
+					Number.isSafeInteger(prev.chunksDone) &&
+					prev.linesDone >= 0 &&
+					prev.chunksDone >= 0 &&
+					prev.linesDone <= lines.length &&
+					hashNotesLines(crypto.createHash("sha256"), lines, 0, prev.linesDone).digest("hex") === prev.prefixHash;
+				if (valid && prev.linesDone >= lines.length) {
+					console.info(`[extraction ${id}] already extracted — unchanged (${prev.chunksDone} chunk(s)); skipping`);
+					return { nodes: 0, chains: 0, skipped: true };
+				}
+				if (valid && prev.linesDone > 0) resume = { linesDone: prev.linesDone, chunksDone: prev.chunksDone };
+				if (!valid) {
+					// Clear BEFORE the upsert: upsert preserves prior progress
+					// when the incoming record omits it, and a changed consumed
+					// prefix must restart from line 0 (old nodes stay, as before).
+					graphStore.writeSourceProgress(id, null);
+					console.info(`[extraction ${id}] consumed prefix changed — restarting from line 0`);
+				}
+			}
 			const importedAt = new Date().toISOString();
 			graphStore.upsertSource({ id, filePath: input.filePath, importedAt });
-			return await runNotesExtraction({ id, ...input, importedAt });
+			return await runNotesExtraction({ id, ...input, importedAt, resume });
 		} catch (err) {
 			if (err instanceof NotesImportError || err instanceof ModelsNotConfiguredError || err instanceof ProviderKeyMissingError) throw err;
 			throw new NotesImportError("failed", { nodes: 0, chains: 0 }, err instanceof Error ? err.message : String(err), { cause: err });
