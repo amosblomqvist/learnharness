@@ -8,7 +8,14 @@ import { describe, it } from "node:test";
 
 const source = fs.readFileSync(new URL("../scripts/build-server.mjs", import.meta.url), "utf8");
 const STANDALONE = path.join(".next", "standalone");
-const PROMPT = path.join("src", "agent", "system-prompt.md");
+const PROMPTS = [
+	"common.md",
+	"prober.md",
+	"teacher.md",
+	"practice.md",
+	path.join("shared", "teaching-base.md"),
+	path.join("shared", "teaching-mechanics.md"),
+].map((asset) => path.join("src", "agent", "prompts", asset));
 
 function withPayload(test: (fixture: {
 	root: string;
@@ -26,8 +33,8 @@ function withPayload(test: (fixture: {
 		write(path.join(STANDALONE, "server.js"));
 		write(path.join(".next", "static", "runtime.js"));
 		write(path.join("public", "asset.txt"));
-		write(path.join(STANDALONE, PROMPT));
-		write(path.join(STANDALONE, "src", "agent", "prompts", "teacher", "20-teaching.md"));
+		for (const prompt of PROMPTS) write(path.join(STANDALONE, prompt));
+		write(path.join(STANDALONE, "src", "agent", "prompts", "README.md"));
 		test({ root, write, run: () => spawnSync(process.execPath, [path.join(root, "scripts", "build-server.mjs")], {
 			cwd: root, encoding: "utf8", timeout: 10_000,
 		}) });
@@ -87,7 +94,7 @@ describe("desktop standalone payload", () => {
 
 	it("still refuses a missing runtime prompt asset", () => {
 		withPayload(({ root, run }) => {
-			fs.rmSync(path.join(root, STANDALONE, PROMPT));
+			fs.rmSync(path.join(root, STANDALONE, PROMPTS[0]!));
 			const result = run();
 			assert.equal(result.status, 1);
 			assert.match(String(result.stderr), /prompt asset missing/);

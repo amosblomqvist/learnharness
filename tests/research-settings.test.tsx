@@ -6,6 +6,11 @@ import { parseHTML } from "linkedom";
 import { AgentSection } from "../components/settings/agent-section.tsx";
 import type { AgentSettings } from "../src/core/index.ts";
 import { SEARCH_ENGINES } from "../src/core/search.ts";
+const emptyPromptEditors = {
+	editors: Object.fromEntries(["common", "prober", "teacher", "practice", "proberTeacherShared"].map((id) => [id, { text: "", defaultText: "" }])),
+	history: [],
+	migrationNotice: false,
+};
 
 it("keyless settings keep Research interactive while search-engine setup retains its own disabled state", async () => {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
@@ -16,7 +21,7 @@ it("keyless settings keep Research interactive while search-engine setup retains
 		"/api/search": { available: false, engine: null, reason },
 		"/api/keys": { keys: SEARCH_ENGINES.map(({ envVar }) => ({ id: envVar, present: false })) },
 		"/api/models": { models: [], slots: { strong: null, cheap: null, vision: null } },
-		"/api/settings/prompts": { prober: [], teacher: [], practice: [] },
+		"/api/settings/prompts": emptyPromptEditors,
 	};
 	for (const [key, value] of Object.entries({
 		window: dom.window,
@@ -80,7 +85,7 @@ it(`a ${label}-only key enables the engine menu and selecting ${label} saves the
 		"/api/search": { available: true, engine: id, reason: `search engine: ${id} (auto)` },
 		"/api/keys": { keys: [{ id: envVar, present: true }] },
 		"/api/models": { models: [], slots: { strong: null, cheap: null, vision: null } },
-		"/api/settings/prompts": { prober: [], teacher: [], practice: [] },
+		"/api/settings/prompts": emptyPromptEditors,
 	};
 	for (const [key, value] of Object.entries({
 		window: dom.window,

@@ -1425,22 +1425,9 @@ describe("persistTurn (native history, Wave B)", () => {
 	});
 });
 
-// ─── prompt composition hygiene (the README leak) ─────────────────────────────
+// ─── prompt composition ────────────────────────────────────────────────────────
 
 describe("prompt composition", () => {
-	it("loads ONLY numeric-prefix fragments — README.md never enters the system prompt", () => {
-		const instructions = composeInstructions("teacher");
-		assert.ok(!instructions.includes("Prompt fragments"), "README content must not leak");
-		assert.ok(!instructions.includes("Rules for adding a fragment"), "README content must not leak (rules)");
-		// every numeric fragment DOES compose, verbatim, after the base prompt
-		const base = fs.readFileSync("src/agent/system-prompt.md", "utf-8").trim();
-		assert.ok(instructions.startsWith(base), "base prompt first");
-		for (const f of fs.readdirSync("src/agent/prompts").filter((f) => /^\d+-[\w.-]+\.md$/.test(f)).sort()) {
-			const body = fs.readFileSync(`src/agent/prompts/${f}`, "utf-8").trim();
-			assert.ok(instructions.includes(body), `fragment ${f} must compose verbatim`);
-		}
-	});
-
 	it("the question principles compose into the teacher prompt; the probe's quick-measurement revision landed", () => {
 		const teacher = composeInstructions("teacher");
 		// the T2a doctrine fragment (user-locked wording 2026-09-15): verbatim presence
@@ -1512,17 +1499,8 @@ describe("prompt composition", () => {
 		);
 	});
 
-	it("guards prompt size — no fragment can silently balloon (the README-leak class)", () => {
-		// The wave-1 leak: README.md (815 bytes / ~200 tokens) rode into every
-		// teacher turn until the numeric-prefix filter stopped it. This guard
-		// catches the sibling failure mode — an accidental dump pasted into a
-		// fragment. Thresholds: largest real fragment is 40-demos.md at ~3.2k
-		// chars; 8k is generous headroom. Composed total ≤ 60k chars.
-		for (const f of fs.readdirSync("src/agent/prompts").filter((f) => /^\d+-[\w.-]+\.md$/.test(f))) {
-			const body = fs.readFileSync(`src/agent/prompts/${f}`, "utf-8").trim();
-			assert.ok(body.length <= 8_000, `fragment ${f} is ${body.length} chars — over the 8k guard`);
-		}
-		assert.ok(composeInstructions("teacher").length <= 60_000, "composed system prompt over the 60k guard");
+	it("keeps the composed teacher prompt within the context limit", () => {
+		assert.ok(composeInstructions("teacher").length <= 60_000, "composed teacher prompt over the 60k guard");
 	});
 });
 

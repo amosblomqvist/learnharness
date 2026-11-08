@@ -63,7 +63,6 @@ describe("sanitizeUserSettings", () => {
 					visualMaker: { thinkingLevel: "max" },
 				},
 				tools: { research: false, quiz: true },
-				prompts: { "system-prompt.md": true, "teacher/20-teaching.md": false },
 				search: { engine: "brave" },
 			},
 			models: {
@@ -100,7 +99,7 @@ describe("sanitizeUserSettings", () => {
 	it("wrong-typed fields DROP (resolve to factory), never crash", () => {
 		const out = sanitizeUserSettings({
 			general: { autoUpdate: "yes" },
-			agent: { tools: { research: "no" }, prompts: { "system-prompt.md": 1 }, models: { researcher: "fast" } },
+			agent: { tools: { research: "no" }, models: { researcher: "fast" } },
 			appearance: { mode: "sepia", sessionNameSerif: "true" },
 			graph: { enabled: 0 },
 		});

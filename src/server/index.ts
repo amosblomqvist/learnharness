@@ -17,20 +17,13 @@ export * from "./commit-positions.ts";
 export * from "./jobs.ts";
 export * from "./stores.ts";
 export { readRenderSettings, writeRenderSettings } from "../store/render-settings.ts";
-// The settings record + prompt overrides (settings-storage wave, 2026-09-19).
-// The *Record aliases keep the app/api/settings routes explicit about which
-// seam they touch (the raw record, not the chat-section convenience view).
+// The settings record remains separate from prompt text and history.
 export {
 	readSettings as readSettingsRecord,
 	writeSettings as writeSettingsRecord,
 	settingsStore,
 } from "../store/settings.ts";
-export { promptOverrides } from "../store/prompt-overrides.ts";
-export { isValidSegmentPath } from "../core/prompt-segments.ts";
-// The canonical segment discovery/resolution lives in the agent layer
-// (composition is an agent concern); the barrel re-exports it for the
-// routes — server→agent is the lawful direction (chat-handler precedent).
-export { effectivePromptSegments, allSegmentPaths, readPromptOverride } from "../agent/prompt-segments.ts";
+export * from "./prompt-editors.ts";
 
 // The auth/keys composition (auth-keys wave, 2026-09-19): the curated
 // key catalog + the env-reflecting store behind GET/PUT/DELETE /api/keys.

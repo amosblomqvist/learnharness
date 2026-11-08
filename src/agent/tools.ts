@@ -84,7 +84,7 @@ export const askUserQuestionTool: AgentTool<typeof askInputSchema> = {
 		"Ask the learner a single question and pause until they answer. NOT graded — there is no correct answer. " +
 		"Use when requirements are ambiguous, preferences are needed, a decision would materially affect the lesson, " +
 		"or you need an open-ended response. ONE question per turn: call a single ask_user_question, then end your " +
-		"turn — his answer determines the next.",
+		"turn — their answer determines the next.",
 	parameters: askInputSchema,
 	prepareArguments: prepareQuestionArguments,
 	executionMode: "sequential",
@@ -150,7 +150,7 @@ function quizDescription(delta: { name: "quiz" | "probe"; nodeId: boolean; types
 		"correct answer supplied by you, marks the learner's selection right/wrong, reveals the correct answer, and " +
 		"can show an explanation. Options-only: single-select or multi-select, plus an automatic 'I don't know' " +
 		"choice so the learner can signal a genuine gap instead of guessing. An always-present optional thinking " +
-		"field lets the learner attach his reasoning to ANY answer; it reaches you only when non-empty. " +
+		"field lets the learner attach their reasoning to ANY answer; it reaches you only when non-empty. " +
 		"No free-text answers — for non-graded questions use ask_user_question instead. " +
 		(delta.types
 			? "Every call declares `type` — the question's role in the teaching cycle; the field's own description says when each kind fires. "
@@ -160,7 +160,7 @@ function quizDescription(delta: { name: "quiz" | "probe"; nodeId: boolean; types
 			: "") +
 		"ONE question per turn: call a single " +
 		delta.name +
-		", then end your turn — his answer determines the next.";
+		", then end your turn — their answer determines the next.";
 	// Phase-correct shape: the teach example LEADS with the required pair
 	// (type, nodeId — the 2026-10-09 drop-order ruling); the probe example
 	// carries no phase metadata at all, exactly like the probe schema.
@@ -181,17 +181,17 @@ function quizDescription(delta: { name: "quiz" | "probe"; nodeId: boolean; types
  *  as recall (owner 2026-10-09). */
 function explainDescription(name: "explain" | "recall", nodeId: boolean): string {
 	return (
-		"Ask the learner to EXPLAIN something in his own words — a graded check with NO options: he types a free-text " +
+		"Ask the learner to EXPLAIN something in their own words — a graded check with NO options: they type a free-text " +
 		"answer. Unlike ask_user_question (no right answer), " +
 		name +
 		" always has one. THE COMMITMENT RULE: " +
-		"correctAnswer is the FULL correct answer in your own words, reasoning included, COMMITTED before he ever " +
-		"sees the question. When his answer returns, grade it strictly against the commitment — never revise it " +
-		"after seeing his words. He sees the committed answer on submit. " +
+		"correctAnswer is the FULL correct answer in your own words, reasoning included, COMMITTED before they ever " +
+		"see the question. When their answer returns, grade it strictly against the commitment — never revise it " +
+		"after seeing their words. They see the committed answer on submit. " +
 		(nodeId
 			? "Set `nodeId` (required) to the plan node this question is about — validated at call time against the session's plan map. "
 			: "") +
-		"ONE question per turn: call a single " + name + ", then end your turn — his answer determines the next."
+		"ONE question per turn: call a single " + name + ", then end your turn — their answer determines the next."
 	);
 }
 

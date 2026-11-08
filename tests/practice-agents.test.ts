@@ -21,7 +21,6 @@ import {
 import { CONCLUDE_ACK_TEXT } from "../src/core/contracts/chat.ts";
 import { concludeInputObject, concludeTool, createPracticeGate, problemTool, practiceTools } from "../src/agent/tools/practice.ts";
 import { composeInstructions, createPracticeAgent } from "../src/agent/teacher-agent.ts";
-import { allSegmentPaths } from "../src/agent/prompt-segments.ts";
 
 // ── fixtures ─────────────────────────────────────────────────────────────────
 
@@ -241,7 +240,7 @@ describe("the practice agent", () => {
 // ── persistent nudges (shipped defaults, no model calls) ──────────────────────
 
 describe("persistent practice nudges", () => {
-	const doctrine = readFileSync(new URL("../src/agent/prompts/practice/10-doctrine.md", import.meta.url), "utf8");
+	const doctrine = readFileSync(new URL("../src/agent/prompts/practice.md", import.meta.url), "utf8");
 	const normalizeWhitespace = (text: string) => text.replace(/\s+/g, " ").trim();
 	const approvedParagraphs = [
 		"- When a nudge does not land, reassess where the learner is stuck and offer only the next necessary piece of information. Do not jump to the full solution. Tentative answers, questions, and thinking aloud remain work in progress.",
@@ -379,7 +378,7 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		assert.match(prober, /Strands inform each other/);
 		assert.match(prober, /never descending into already-bracketed territory/);
 		// the confidence + thinking signals are wired into question selection
-		assert.match(prober, /the verdict, his confidence, and his thinking field together set where the next question should sit/);
+		assert.match(prober, /the verdict, their confidence, and their thinking field together set where the next question should sit/);
 	});
 
 	it("the SHARED formatting guide composes (owner, 2026-10-04 late): LaTeX delimiters in every setting", () => {
@@ -393,13 +392,9 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		assert.ok(prompt.indexOf("# The practice session") < prompt.indexOf("## Formatting"), "formatting rides as the appendix");
 	});
 
-	it("base precedes doctrine (00- sorts before 10-)", () => {
+	it("the practice source keeps its base before its doctrine", () => {
 		const prompt = composeInstructions("practice");
 		assert.ok(prompt.indexOf("The agent") < prompt.indexOf("# The practice session"));
 	});
 
-	it("the segment registry knows practice (override paths resolve)", () => {
-		assert.ok(allSegmentPaths().includes("practice/00-base.md"));
-		assert.ok(allSegmentPaths().includes("practice/10-doctrine.md"));
-	});
 });

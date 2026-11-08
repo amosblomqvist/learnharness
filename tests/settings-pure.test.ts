@@ -9,13 +9,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { appearanceVars, derivedPalette, resolveAppearance, staleVarNames } from "../components/settings/appearance.tsx";
 import {
-	PROMPT_IN_USE_HINT,
-	composePromptSwitch,
 	composeSearchEngine,
 	composeSlotModel,
 	composeTool,
 	composeQuizMechanics,
-	sectionedSegments,
 } from "../components/settings/agent-section.tsx";
 import { nextOverrides } from "../components/settings/keyboard-section.tsx";
 import { classifyKeys, keyStatusLine, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
@@ -144,11 +141,10 @@ describe("staleVarNames — the removal half of application (owner repro: resets
 });
 
 describe("agent section compose helpers — the replace-whole PUT body", () => {
-	it("composeTool carries the rest of the section verbatim", () => {
-		const before = { tools: { demo: false }, prompts: { "system-prompt.md": true } };
+	it("composeTool adds the requested tool while carrying other tools", () => {
+		const before = { tools: { demo: false } };
 		const after = composeTool(before, "visual", false);
 		assert.deepEqual(after.tools, { demo: false, visual: false });
-		assert.deepEqual(after.prompts, { "system-prompt.md": true }, "prompts untouched");
 	});
 
 	it("composeSlotModel: empty+empty REMOVES the slot (absent = factory pin)", () => {
@@ -195,10 +191,6 @@ describe("agent section compose helpers — the replace-whole PUT body", () => {
 		assert.deepEqual(composeSearchEngine(undefined, "brave").search, { engine: "brave" });
 	});
 
-	it("composePromptSwitch: on = explicit true, off = key REMOVED (absent = off)", () => {
-		assert.deepEqual(composePromptSwitch({ prompts: { a: true } }, "b", true).prompts, { a: true, b: true });
-		assert.deepEqual(composePromptSwitch({ prompts: { a: true, b: true } }, "b", false).prompts, { a: true });
-	});
 });
 
 describe("nextOverrides — the rebind persistence map", () => {
@@ -330,85 +322,18 @@ describe("first-run gate — slotsConfigured + setupStage (model-slots wave)", (
 	});
 });
 
-describe("sectionedSegments — actual per-agent prompt membership", () => {
-	// Each agent lists its own shared subset; the view lists their union ONCE.
-	const view = {
-		prober: [
-			{ path: "system-prompt.md", sourceText: "b", overrideText: null, enabled: false, shared: true },
-			{ path: "shared/10-personality.md", sourceText: "s1", overrideText: "custom", enabled: true, shared: true },
-			{ path: "prober/10-probe-doctrine.md", sourceText: "p1", overrideText: null, enabled: false, shared: false },
-		],
-		practice: [
-			{ path: "practice/00-base.md", sourceText: "r1", overrideText: null, enabled: false, shared: false },
-			{ path: "practice/10-doctrine.md", sourceText: "r2", overrideText: "practice custom", enabled: true, shared: false },
-			{ path: "shared/10-personality.md", sourceText: "s1", overrideText: "custom", enabled: true, shared: true },
-		],
-		teacher: [
-			{ path: "system-prompt.md", sourceText: "b", overrideText: null, enabled: false, shared: true },
-			{ path: "shared/20-question-tools.md", sourceText: "q", overrideText: null, enabled: false, shared: true },
-			{ path: "shared/10-personality.md", sourceText: "s1", overrideText: "custom", enabled: true, shared: true },
-			{ path: "teacher/05-method.md", sourceText: "t1", overrideText: null, enabled: false, shared: false },
-			{ path: "teacher/10-planning.md", sourceText: "t2", overrideText: null, enabled: false, shared: false },
-		],
-	};
-
-	it("the approved order: Teacher, Prober, Practice, Shared — Shared last", () => {
-		const ids = sectionedSegments(view).map((s) => s.id);
-		assert.deepEqual(ids, ["teacher", "prober", "practice", "shared"]);
-	});
-
-	it("shared chunks appear exactly ONCE across all sections (no duplication)", () => {
-		const all = sectionedSegments(view).flatMap((s) => s.segments.map((seg) => seg.path));
-		assert.equal(all.filter((p) => p === "system-prompt.md").length, 1);
-		assert.equal(all.filter((p) => p === "shared/10-personality.md").length, 1);
-		// every path unique — no chunk listed twice
-		assert.equal(new Set(all).size, all.length);
-	});
-
-	it("the Shared section holds the shared chunks in assembly order; the agents' sections hold their own", () => {
-		const [teacher, prober, practice, shared] = sectionedSegments(view);
-		assert.ok(teacher && prober && practice && shared, "all four sections present");
-		assert.deepEqual(teacher.segments.map((s) => s.path), ["teacher/05-method.md", "teacher/10-planning.md"]);
-		assert.deepEqual(prober.segments.map((s) => s.path), ["prober/10-probe-doctrine.md"]);
-		// assembly order: the base file first, then the shared fragments
-		assert.deepEqual(shared.segments.map((s) => s.path), ["system-prompt.md", "shared/20-question-tools.md", "shared/10-personality.md"]);
-		assert.deepEqual(practice.segments.map((s) => s.path), ["practice/00-base.md", "practice/10-doctrine.md"]);
-		assert.equal(practice.segments[1]!.overrideText, "practice custom");
-		assert.equal(practice.segments[1]!.enabled, true);
-		assert.ok(practice.segments.every((s) => s.usageHint === undefined));
-	});
-
-	it("labels each shared fragment from actual membership, independently of override state", () => {
-		const shared = sectionedSegments(view).at(-1)!;
-		assert.equal(shared.segments[0]!.usageHint, "Used by Teacher and Prober");
-		assert.equal(shared.segments[2]!.usageHint, "Used by Teacher, Prober and Practice");
-		assert.equal(shared.segments[2]!.enabled, true, "in-use state is not replaced by usage");
-		// A synthetic new path/membership proves there is no duplicated allowlist.
-		const fragment = { path: "shared/99-new.md", sourceText: "new", overrideText: null, enabled: false, shared: true };
-		const changed = { teacher: [fragment], prober: [fragment], practice: [fragment] };
-		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "Used by Teacher, Prober and Practice");
-		changed.practice = [];
-		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "Used by Teacher and Prober");
-		assert.equal(sectionedSegments({ teacher: [], prober: [], practice: [fragment] }).at(-1)!.segments[0]!.usageHint, "Used by Practice");
-	});
-
-	it("the indicator copy is pinned — it states WHICH VERSION IS IN USE (refined 2026-09-26)", () => {
-		assert.equal(PROMPT_IN_USE_HINT, "Your version is in use");
-	});
-});
 
 // ─── the quizzing-mechanics segmented control (owner 2026-09-27) ───────────
 
 describe("composeQuizMechanics (the segmented control's write)", () => {
 	it("free recall writes explain:true; multiple choice writes explain:false — nothing else moves", () => {
-		const before: AgentSettings = { tools: { research: false }, prompts: { teacher: true } } as AgentSettings;
+		const before: AgentSettings = { tools: { research: false } };
 		const free = composeQuizMechanics(before, "free");
 		assert.equal(free.tools?.explain, true);
 		const choice = composeQuizMechanics(before, "choice");
 		assert.equal(choice.tools?.explain, false);
 		for (const after of [free, choice]) {
 			assert.equal(after.tools?.research, false, "the research toggle carries verbatim");
-			assert.deepEqual(after.prompts, before.prompts, "the prompts map carries verbatim");
 		}
 	});
 });

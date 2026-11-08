@@ -26,7 +26,6 @@ describe("resolveSettings", () => {
 		const eff = resolveSettings(null);
 		assert.deepEqual(eff.general, { autoUpdate: true });
 		assert.deepEqual(eff.agent.tools, {});
-		assert.deepEqual(eff.agent.prompts, {});
 		assert.deepEqual(eff.agent.search, {});
 		// BYOK (owner, 2026-09-22): no factory floor — every role undefined,
 		// every slot null. No phantom ids anywhere.
@@ -55,7 +54,6 @@ describe("resolveSettings", () => {
 			agent: {
 				models: { researcher: { model: { provider: "openrouter", id: "qwen/qwen3.8-flash" } } },
 				tools: { research: false },
-				prompts: { "system-prompt.md": true },
 				search: { engine: "tavily" },
 			},
 			appearance: { mode: "light", proseFontSize: 20, mdRendering: { headingWeight: 600 } },
@@ -72,7 +70,6 @@ describe("resolveSettings", () => {
 		});
 		assert.deepEqual(eff.agent.search, { engine: "tavily" });
 		assert.deepEqual(eff.agent.tools, { research: false });
-		assert.deepEqual(eff.agent.prompts, { "system-prompt.md": true });
 		assert.equal(eff.appearance.mode, "light");
 		assert.equal(eff.appearance.proseFontSize, 20);
 		assert.equal(eff.appearance.mdRendering.headingWeight, 600);

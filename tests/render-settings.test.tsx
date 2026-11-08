@@ -222,10 +222,6 @@ describe("AgentSection (thin SSR)", () => {
 		assert.ok(tagOf(html, "toggle-tool-visual").includes('aria-checked="true"'), "visual still on");
 	});
 
-	it("prompts show the loading state under SSR (effects never fire)", () => {
-		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
-		assert.ok(html.includes("Loading prompt segments"));
-	});
 });
 
 describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", () => {

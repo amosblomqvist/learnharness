@@ -20,8 +20,6 @@ const DATA_ROOT = process.env.LH_DATA_DIR
 
 export const PATHS = {
 	root: ROOT,
-	/** Teacher system prompt — the agent's instructions (src/agent/). */
-	teacherPrompt: path.join(ROOT, "src", "agent", "system-prompt.md"),
 	data: DATA_ROOT,
 	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
 	chats: path.join(DATA_ROOT, "chats"),
@@ -96,37 +94,35 @@ export const RENDER_SETTINGS_FILE = path.join(PATHS.graph, "render-settings.json
 export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
 
 /**
- * THE USER SETTINGS RECORD (settings-storage wave, 2026-09-19): one
- * versioned, DELTA-shaped JSON blob at the data-dir seam holding every
- * non-secret product preference — general, agent (background
- * model/thinking overrides + tool toggles + prompt-override switches),
- * appearance, graph. Explicit user choices only: ABSENT keys resolve to the
- * factory defaults compiled into src/core/settings.ts (FACTORY_SETTINGS), so
- * a software update that adds a knob (new tool, new role, new appearance
- * field) needs no migration — old records simply lack the new keys. The
- * version field is a PRIVATE schema counter for breaking shape changes
- * only (field renamed/meaning changed), unrelated to the app release
- * version. Secrets (API keys, login tokens) NEVER live here — auth.json /
- * .env.local keep that role. (The `chat` default-settings section died
- * with per-session models, owner 2026-09-28 — sessions own their model
- * from birth, stamped from the strong slot.)
+ * User preferences that do not contain secrets. Prompt editor text and
+ * history use PROMPT_EDITOR_FILE, outside this record. Unset fields use
+ * defaults from src/core/settings.ts. The version tracks incompatible
+ * settings-record changes, not app releases. Provider secrets remain in
+ * auth.json and .env.local.
+ *
+ * Per-chat default model settings were removed on 2026-09-28. Each session
+ * now stores its model from creation, based on the strong model slot.
  */
 export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
 
 /**
- * User prompt-override files (settings-storage wave, 2026-09-19): the
- * per-segment system-prompt overrides mirroring the SOURCE layout
- * (src/agent/prompts/) — the shared base as prompts/system-prompt.md,
- * fragments as prompts/teacher/<file> / prompts/prober/<file>. File
- * PRESENCE alone is not the override: settings.json's agent.prompts map
- * (segmentPath → boolean) is the explicit switch, so a user can keep a
- * customized file on disk but run the source default to compare. The
- * segment list itself is ALWAYS derived from source at runtime (the
- * loader in src/store/prompt-overrides.ts) — code updates that add,
- * remove, or reorder fragments adapt automatically; an override keyed to
- * a vanished segment stops composing but stays on disk.
+ * Legacy per-fragment prompt edits remain here for one-time migration.
+ * New prompt text and history use `PROMPT_EDITOR_FILE`.
+ * The migration reads old files and settings switches once. It does not
+ * delete the old files, so a migration can preserve the user's saved text.
+ *
+ * `PROMPTS_OVERRIDE_DIR` also contains the new `editor.json` record.
+ * Prompt defaults ship under `src/agent/prompts/` in the app bundle.
+ *
+ * The old prompt editor used paths that mirrored source fragment names.
+ * The new editor stores five complete text values and separate history.
+ * These old files remain in place after migration.
+ *
+ * Keep this directory name stable while legacy installs can be upgraded.
  */
 export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
+/** User-edited role prompt texts and their saved history. */
+export const PROMPT_EDITOR_FILE = path.join(DATA_ROOT, "prompts", "editor.json");
 
 /**
  * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a

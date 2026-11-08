@@ -18,10 +18,8 @@
  *   and teacher stay chat-controlled, never settings-record-controlled;
  * - tool toggles: passed through as the delta map; consumers look up by
  *   tool id with absent → enabled (the honoring lives in the agent band);
- * - prompt switches: passed through; effective composition lives in
- *   src/store/prompt-overrides.ts (segment list derived from source).
+ * - prompt edits: loaded from the dedicated prompt-editor store by the server.
  */
-
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
@@ -78,8 +76,6 @@ export interface EffectiveSettings {
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
 		/** Delta map as stored — consumers resolve absent key → enabled. */
 		tools: Record<string, boolean>;
-		/** Delta map as stored — absent key → override off. */
-		prompts: Record<string, boolean>;
 		/** The search-engine preference as stored (search wave, 2026-09-20):
 		 *  passthrough delta — engine resolution (pin → auto → unavailable)
 		 *  lives in server/search.ts, where keys are visible. */
@@ -193,7 +189,6 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		agent: {
 			models,
 			tools: agent.tools ?? {},
-			prompts: agent.prompts ?? {},
 			search: agent.search ?? {},
 			graphTools: agent.graphTools ?? {},
 		},
