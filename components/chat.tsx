@@ -86,6 +86,7 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { useLocale } from "@/lib/i18n/provider";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -246,6 +247,7 @@ export function Chat({
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
 }) {
+	const { tl } = useLocale();
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
@@ -1320,8 +1322,8 @@ export function Chat({
 								}}
 								onBlur={() => void commitRename(titleDraft)}
 								spellCheck={false}
-								aria-label="Session title"
-								title="Rename this session"
+								aria-label={tl("Session title")}
+								title={tl("Rename this session")}
 								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
@@ -1333,7 +1335,7 @@ export function Chat({
 					<>
 						<Hint
 							// F2 renames (registry) — surfaced on the hover.
-							label="Rename session"
+							label={tl("Rename session")}
 							action="rename-session"
 							side="bottom"
 						>
@@ -1343,7 +1345,7 @@ export function Chat({
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-start font-title text-3xl tracking-tight transition-colors hover:bg-accent"
 						>
 							{titleText}
 							</button>
@@ -1357,7 +1359,7 @@ export function Chat({
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
 					{planTree && (
-						<Hint label="Open the full plan" side="bottom">
+						<Hint label={tl("Open the full plan")} side="bottom">
 <button
 							type="button"
 							data-testid="plan-chip"
@@ -1390,7 +1392,7 @@ export function Chat({
 							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
 						>
 							<DumbbellIcon className="size-3" />
-							Practice
+							{tl("Practice")}
 						</span>
 					) : (
 						<PhaseChip phase={phases.at(-1) ?? "probe"} />
@@ -1405,8 +1407,8 @@ export function Chat({
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
-									title="New session"
-									description="The teacher will open by probing what you already know."
+									title={tl("New session")}
+									description={tl("The teacher will open by probing what you already know.")}
 								/>
 							)}
 
@@ -1456,8 +1458,8 @@ export function Chat({
 														data-testid="practice-next-line"
 														className="my-4 flex items-center justify-center gap-1.5 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground"
 													>
-														<ArrowRightIcon className="size-3" />
-														Next problem
+														<ArrowRightIcon className="size-3 rtl-flip" />
+														{tl("Next problem")}
 													</div>
 												);
 											default:
@@ -1511,12 +1513,12 @@ export function Chat({
 										    inset (the band is the authorship mark against the agent's
 										    transparent prose). The "You" label stays — one register
 										    with the thinking labels. */
-										className="my-2 w-full border-l-[calc(3ch-14px)] border-muted-foreground/30 bg-card py-1 pl-[14px] pr-4 font-ui text-xs"
+										className="my-2 w-full border-s-[calc(3ch-14px)] border-muted-foreground/30 bg-card py-1 ps-[14px] pe-4 font-ui text-xs"
 									>
 												{/* The rail GROUPS (owner round 4, 2026-10-05): the YOU heading
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
-												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
+												<div className="font-medium uppercase tracking-wide text-muted-foreground">{tl("You")}</div>
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
@@ -1549,7 +1551,7 @@ export function Chat({
 												) {
 													return (
 														<SystemLine key={`retry-${pi}`} testId="tool-retry">
-															Retrying…
+															{tl("Retrying…")}
 														</SystemLine>
 													);
 												}
@@ -1591,7 +1593,7 @@ export function Chat({
 													case "tool-recall": {
 														const malformed = !busy && malformedQuestions.find(call => call.messageId === part.sourceMessageId && call.contentIndex === part.sourceContentIndex && call.toolCallId === part.toolCallId);
 														if (malformed) return <MalformedQuestion key={pi} disabled={!!pending || compacting}
-															reason={pending ? "Answer or discard the remaining question first." : undefined}
+															reason={pending ? tl("Answer or discard the remaining question first.") : undefined}
 															onRetry={() => {
 																draftRef.current = null;
 																void send({ type: "retry-question", messageId: malformed.messageId, contentIndex: malformed.contentIndex, toolCallId: malformed.toolCallId });
@@ -1653,15 +1655,15 @@ export function Chat({
 						    BEFORE beginTurn; the settle kick runs after endTurn). */}
 							{compacting && (
 								<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
-									<BrailleSpinner label="Compacting context" />
-									<Shimmer duration={1}>COMPACTING CONTEXT…</Shimmer>
+									<BrailleSpinner label={tl("Compacting context")} />
+									<Shimmer duration={1}>{tl("COMPACTING CONTEXT…")}</Shimmer>
 								</span>
 							)}
 							{(status === "submitted" || turnInFlight) && (
 								<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
-									<BrailleSpinner label="Thinking" />
+									<BrailleSpinner label={tl("Thinking")} />
 									<Shimmer duration={1}>
-										THINKING…
+										{tl("THINKING…")}
 									</Shimmer>
 								</span>
 							)}
@@ -1671,7 +1673,7 @@ export function Chat({
 									<span>Something went wrong: {error.message}</span>
 									{retryable && (
 										<Button variant="outline" size="xs" data-testid="retry-failed-turn" onClick={retryFailedTurn}>
-											Retry
+											{tl("Retry")}
 										</Button>
 									)}
 								</div>
@@ -1727,7 +1729,7 @@ export function Chat({
 										onClick={() => setSetupOpen(true)}
 										className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 									>
-										Set up your models
+										{tl("Set up your models")}
 									</button>
 								</div>
 							)
@@ -1754,7 +1756,7 @@ export function Chat({
 							// applies.
 							nextProblem={nextReady}
 							onNext={sendNext}
-							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+							placeholder={nextReady ? tl("Ask anything, or press Enter for the next one.") : undefined}
 						/>
 					}
 					onSubmitAnswer={(output) => {
@@ -2005,6 +2007,7 @@ function DockOverlay({
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
 }) {
+	const { tl } = useLocale();
 	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
 	// it DURING RENDER — the same value the after-paint effect used to read a
@@ -2464,13 +2467,13 @@ function DockOverlay({
 				    mid-question unmount), and widening past the floor fades it
 				    back in. */}
 				{pending && plan && (
-					<Hint label="Open the full plan" side="bottom">
+					<Hint label={tl("Open the full plan")} side="bottom">
 <button
 						type="button"
 						data-testid="plan-marginalia"
 						onClick={onOpenPlan}
 						style={{ left: `calc(50% + ${DOCK_W / 2 + MARGIN_GAP}px)` }}
-						className={`absolute bottom-5 right-4 top-0 cursor-pointer transition-[filter,opacity] duration-300 ease-out ${
+						className={`absolute bottom-5 end-4 top-0 cursor-pointer transition-[filter,opacity] duration-300 ease-out ${
 							expanded && flankW >= MARGIN_MIN_W
 								? "pointer-events-auto opacity-100 blur-0"
 								: "pointer-events-none opacity-0 blur-md"

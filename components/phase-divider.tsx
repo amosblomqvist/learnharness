@@ -1,5 +1,7 @@
 import type { Phase3 } from "@/src/core";
 
+import { useLocale } from "@/lib/i18n/provider";
+
 /**
  * The in-session phase presentation (owner, minimal-color round —
  * monochrome now): the header chip next to the session title, and the
@@ -39,6 +41,7 @@ const CHIP_LABEL: Record<Phase3, string> = {
  *  at all, so it is part of the drag surface instead of a carved-out
  *  target. */
 export function PhaseChip({ phase }: { phase: Phase3 }) {
+	const { tl } = useLocale();
 	return (
 		<span
 			data-testid="phase-chip"
@@ -46,7 +49,7 @@ export function PhaseChip({ phase }: { phase: Phase3 }) {
 			aria-hidden="true"
 			className="pointer-events-none flex shrink-0 select-none items-center text-xs font-medium uppercase tracking-wide text-muted-foreground"
 		>
-			{CHIP_LABEL[phase]}
+			{tl(CHIP_LABEL[phase])}
 		</span>
 	);
 }

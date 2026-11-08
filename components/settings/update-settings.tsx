@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { SettingsRow, Toggle } from "./controls.tsx";
+import { useLocale } from "@/lib/i18n/provider";
 
 /** Observational snapshot from electron/main.cjs; never updater permission. */
 export type UpdateState = {
@@ -44,13 +45,13 @@ export function useUpdateState() {
 	return { state, failed };
 }
 
-export function updateStatusText(state: UpdateState | null): string | null {
+export function updateStatusText(state: UpdateState | null, tl: (s: string, v?: Record<string, string | number>) => string = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => String(v?.[k] ?? ""))): string | null {
 	switch (state?.status) {
-		case "checking": return "Checking for updates…";
-		case "downloading": return state.version ? `Downloading version ${state.version}…` : "Downloading an update…";
-		case "up-to-date": return "No newer version was found at the last check.";
-		case "downloaded": return `${state.version ? `Version ${state.version}` : "An update"} is ready. It will install when you quit the app.`;
-		case "error": return UPDATE_ERROR;
+		case "checking": return tl("Checking for updates…");
+		case "downloading": return state.version ? tl("Downloading version {version}…", { version: state.version }) : tl("Downloading an update…");
+		case "up-to-date": return tl("No newer version was found at the last check.");
+		case "downloaded": return state.version ? tl("Version {version} is ready. It will install when you quit the app.", { version: state.version }) : tl("An update is ready. It will install when you quit the app.");
+		case "error": return tl(UPDATE_ERROR);
 		default: return null;
 	}
 }
@@ -68,13 +69,14 @@ export function UpdateSettings({
 	version?: string;
 	homepage?: string;
 }) {
+	const { tl } = useLocale();
 	const { state, failed } = useUpdateState();
 	const [checkFailed, setCheckFailed] = useState(false);
 	useEffect(() => setCheckFailed(false), [state]);
 	const active = state !== null && state.status !== "disabled";
 	const busy = state?.status === "checking" || state?.status === "downloading";
-	const status = state?.status === "downloaded" ? updateStatusText(state)
-		: failed || checkFailed ? UPDATE_ERROR : updateStatusText(state);
+	const status = state?.status === "downloaded" ? updateStatusText(state, tl)
+		: failed || checkFailed ? tl(UPDATE_ERROR) : updateStatusText(state, tl);
 	const releaseNotes = version && homepage ? `${homepage}/releases/tag/v${version}` : null;
 	const check = () => {
 		setCheckFailed(false);
@@ -90,22 +92,22 @@ export function UpdateSettings({
 					<>
 						{status && <span className="block" role="status" data-testid="update-status">{status}</span>}
 						{active && <span className="block">{MANUAL_UPDATE_HINT}</span>}
-						{releaseNotes && <a href={releaseNotes} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:text-foreground hover:underline" data-testid="release-notes">Release notes</a>}
+						{releaseNotes && <a href={releaseNotes} target="_blank" rel="noopener noreferrer" className="underline-offset-2 hover:text-foreground hover:underline" data-testid="release-notes">{tl("Release notes")}</a>}
 					</>
 				}
 			>
 				{active && (state.status === "downloaded" ? (
-					<Button type="button" size="xs" className="cursor-pointer" data-testid="update-restart" onClick={() => window.lh?.installUpdate?.()}>Restart</Button>
+					<Button type="button" size="xs" className="cursor-pointer" data-testid="update-restart" onClick={() => window.lh?.installUpdate?.()}>{tl("Restart")}</Button>
 				) : (
 					<Button type="button" size="xs" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" data-testid="update-check" disabled={busy} aria-busy={busy} onClick={check}>
-						{busy && <BrailleSpinner label={state.status === "downloading" ? "Downloading update" : "Checking for updates"} />}
+						{busy && <BrailleSpinner label={state.status === "downloading" ? tl("Downloading update") : tl("Checking for updates")} />}
 						Check for updates
 					</Button>
 				))}
 			</SettingsRow>
 			{active && (
-				<SettingsRow label="Automatic updates" hint={AUTO_UPDATE_HINT} testid="row-auto-update">
-					<Toggle checked={autoUpdate} label="auto update" onChange={onAutoUpdateChange} />
+				<SettingsRow label={tl("Automatic updates")} hint={AUTO_UPDATE_HINT} testid="row-auto-update">
+					<Toggle checked={autoUpdate} label={tl("auto update")} onChange={onAutoUpdateChange} />
 				</SettingsRow>
 			)}
 		</>

@@ -4,6 +4,7 @@ import { useEffect, useId, useRef, useState, useSyncExternalStore, type ChangeEv
 import { WaypointsIcon } from "lucide-react";
 import { Hint } from "@/components/ui/hint";
 import { createNotesImportQueue, EMPTY_IMPORT_QUEUE, notesPath } from "./notes-import-queue";
+import { useLocale } from "@/lib/i18n/provider";
 
 export { MAX_IMPORT_BYTES } from "@/lib/notes-import-limits.ts";
 export { notesPath } from "./notes-import-queue";
@@ -88,6 +89,7 @@ export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () 
 /** PR198's shared Files / Folder native picker. Unlike the donor, it remains
  * available while work is running; later selections join the SAME queue. */
 export function NotesImportControl({ importing, onImportFiles }: { importing: boolean; onImportFiles: (files: FileList | null) => void }) {
+	const { tl } = useLocale();
 	const filesRef = useRef<HTMLInputElement>(null);
 	const folderRef = useRef<HTMLInputElement>(null);
 	const [open, setOpen] = useState(false);
@@ -103,16 +105,16 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 			onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}>
 			<input ref={filesRef} type="file" multiple accept=".md,.markdown,.txt,.pdf" className="hidden" onChange={onChange} />
 			<input ref={folderRef} type="file" {...{ webkitdirectory: "" }} className="hidden" onChange={onChange} />
-			<Hint label="Extract files into the graph" side="bottom">
+			<Hint label={tl("Extract files into the graph")} side="bottom">
 				<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" data-testid="import-notes"
 					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent">
-					<WaypointsIcon className="size-3" />{importing ? "Extracting…" : "Extract files…"}
+					<WaypointsIcon className="size-3" />{importing ? tl("Extracting…") : tl("Extract files…")}
 				</button>
 			</Hint>
 			{open && (
-				<div role="menu" aria-label="Extract files into the graph" aria-describedby={hintId} className="absolute right-0 top-full z-50 mt-1 w-52 rounded-lg border bg-card p-1 shadow-lg">
-					<div role="none"><p id={hintId} className="px-2 py-1.5 text-xs leading-relaxed text-muted-foreground">For lessons, attach material to a session instead.</p></div>
-					{choices.map(([label, input]) => <button key={label} type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+				<div role="menu" aria-label={tl("Extract files into the graph")} aria-describedby={hintId} className="absolute end-0 top-full z-50 mt-1 w-52 rounded-lg border bg-card p-1 shadow-lg">
+					<div role="none"><p id={hintId} className="px-2 py-1.5 text-xs leading-relaxed text-muted-foreground">{tl("For lessons, attach material to a session instead.")}</p></div>
+					{choices.map(([label, input]) => <button key={label} type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-start text-xs hover:bg-accent"
 						onClick={() => { setOpen(false); input.current?.click(); }}>{label}</button>)}
 				</div>
 			)}

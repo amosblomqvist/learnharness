@@ -1,6 +1,7 @@
 "use client";
 
 import type { CompactionDetails } from "@/src/core";
+import { useLocale } from "@/lib/i18n/provider";
 
 /** What one divider carries: the marker's full model-facing content (the
  *  [SESSION HISTORY COMPACTED] header + the summary) and its details.
@@ -19,10 +20,11 @@ export interface CompactionDividerData {
  *  history was just summarized; the cut divider below carries the seam.
  *  Inert since release polish 2026-10-06 — plain text, no affordance. */
 export function CompactionMomentDivider({ data: _data }: { data: CompactionDividerData }) {
+	const { tl } = useLocale();
 	return (
 		<div className="flex w-full items-center justify-center py-1">
 			<span data-testid="compaction-divider" className="px-1.5 text-xs text-muted-foreground/70">
-				Context compacted
+				{tl("Context compacted")}
 			</span>
 		</div>
 	);

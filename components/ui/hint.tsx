@@ -3,6 +3,7 @@
 import * as React from "react"
 import { Tooltip, TooltipProvider, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip"
 import { bindingForAction, formatBinding, type KeyAction } from "@/src/core"
+import { useLocale } from "@/lib/i18n/provider"
 
 /**
  * The tooltip composition for icon and pill controls (tooltip wave, owner
@@ -44,11 +45,15 @@ export function hintText(label: string, action?: KeyAction, binding?: string): s
 }
 
 export function Hint({ label, action, binding, side = "top", children }: HintProps) {
+	const { dir } = useLocale()
+	// Physical sides mirror in RTL: a tooltip meant to sit toward the page edge
+	// of its control must follow the control when the layout flips.
+	const resolved = dir === "rtl" ? (side === "left" ? "right" : side === "right" ? "left" : side) : side
 	return (
 		<TooltipProvider>
 			<Tooltip>
 				<TooltipTrigger asChild>{children}</TooltipTrigger>
-				<TooltipContent side={side}>{hintText(label, action, binding)}</TooltipContent>
+				<TooltipContent side={resolved}>{hintText(label, action, binding)}</TooltipContent>
 			</Tooltip>
 		</TooltipProvider>
 	)

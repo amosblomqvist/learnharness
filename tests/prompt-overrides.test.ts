@@ -186,6 +186,7 @@ describe("the source-derived segment list", () => {
 				"shared/25-confidence.md",
 				"shared/30-learner-files.md",
 				"shared/40-formatting.md",
+				"shared/45-language.md",
 			],
 		);
 		assert.equal(teacher.some((s) => s.path === "teacher/05-method.md"), true);
@@ -421,6 +422,7 @@ describe("Practice settings API and effective prompt loading", () => {
 		assert.deepEqual(view.practice.map((s: { path: string }) => s.path), [
 			"practice/00-base.md", "practice/10-doctrine.md",
 			"shared/10-voice.md", "shared/15-accuracy.md", "shared/16-mental-model.md", "shared/40-formatting.md",
+			"shared/45-language.md",
 		]);
 		assert.ok(!view.practice.some((s: { path: string }) => s.path === "system-prompt.md"));
 	});

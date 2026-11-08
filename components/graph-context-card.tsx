@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useLocale } from "@/lib/i18n/provider";
 
 /**
  * The graph-context card (owner, 2026-10-04): the session's map pick —
@@ -21,6 +22,7 @@ export interface GraphContextData {
 }
 
 export function GraphContextCard({ data }: { data: GraphContextData }) {
+	const { tl } = useLocale();
 	const [open, setOpen] = useState(false);
 	const { propositions = [], chains = [] } = data ?? {};
 	const noun = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
@@ -30,10 +32,10 @@ export function GraphContextCard({ data }: { data: GraphContextData }) {
 				type="button"
 				data-testid="graph-context-toggle"
 				onClick={() => setOpen((v) => !v)}
-				className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border/70 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:text-foreground"
+				className="flex w-full cursor-pointer items-center gap-2 rounded-lg border border-dashed border-border/70 px-3 py-2 text-start text-xs text-muted-foreground transition-colors hover:text-foreground"
 			>
-				<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", open && "rotate-90")} />
-				<span className="font-medium">Graph context</span>
+				<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 transition-transform", open ? "rotate-90" : "rtl:rotate-180")} />
+				<span className="font-medium">{tl("Graph context")}</span>
 				<span className="min-w-0 flex-1 truncate">
 					{noun(propositions.length, "proposition", "propositions")}
 					{chains.length > 0 ? ` · ${noun(chains.length, "chain", "chains")}` : ""}

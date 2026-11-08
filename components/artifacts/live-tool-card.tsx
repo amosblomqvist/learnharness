@@ -5,6 +5,7 @@ import { BrailleSpinner } from "@/components/braille-spinner";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { toolActivityLabel } from "@/src/core";
 import type { ArtifactPartProps } from "@/src/core";
+import { useLocale } from "@/lib/i18n/provider";
 
 /**
  * The LIVE tool-input card (owner, streaming round 2026-10-01): what a
@@ -28,6 +29,7 @@ interface StreamingToolPart {
 }
 
 export function LiveToolCard({ part }: ArtifactPartProps) {
+	const { tl } = useLocale();
 	const p = part as StreamingToolPart;
 	const tool = p.type.replace(/^tool-/, "");
 	const inp = (p.input ?? {}) as Record<string, unknown>;
@@ -55,7 +57,7 @@ export function LiveToolCard({ part }: ArtifactPartProps) {
 				<ChevronRight className="size-3 shrink-0 opacity-50 transition-transform group-open:rotate-90" />
 			</summary>
 			<div className="mt-2 rounded-xl border bg-card p-3 text-xs">
-				<div className="mb-1 font-medium uppercase tracking-wide text-muted-foreground">Input (streaming)</div>
+				<div className="mb-1 font-medium uppercase tracking-wide text-muted-foreground">{tl("Input (streaming)")}</div>
 				<pre className="max-h-32 overflow-auto whitespace-pre-wrap break-all font-mono text-[11px] leading-relaxed">
 					{hasInput ? JSON.stringify(p.input, null, 2) : "…"}
 				</pre>

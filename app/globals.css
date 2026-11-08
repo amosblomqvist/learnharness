@@ -118,10 +118,10 @@
 	   fonts: `font-mono`/`font-sans` utilities would otherwise fall to the
 	   SYSTEM stacks — a fourth font the app never chose — and streamdown's
 	   code-block chrome + mermaid-error + demo-card all use them. */
-	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
-	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-sans: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
+	--font-ui: var(--font-jetbrains), var(--font-vazirmatn), ui-monospace, SFMono-Regular, monospace;
+	--font-prose: var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
+	--font-mono: var(--font-jetbrains), var(--font-vazirmatn), ui-monospace, SFMono-Regular, monospace;
+	--font-sans: var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
 	/* The modular type ladder — each size carries its own line-height.
 	   Component sizes must pull from this ladder. (owner, typography
 	   round 4: the 10px rung is merged into 11 — one pixel apart was a
@@ -220,7 +220,7 @@ body {
    the whole list right as a block. Unlayered CSS beats the utility
    layer; :where keeps specificity zero. */
 .lh-prose :where(ul, ol) {
-	padding-left: 1.5rem;
+	padding-inline-start: 1.5rem;
 }
 
 /* Markdown headings render at the font's BLACK weight (owner ask,
@@ -376,7 +376,7 @@ body {
    its row (owner ask, 2026-09-19) — border-collapse merges it with the row
    rules and the outer border, no doubled lines anywhere. */
 [data-streamdown="table"] :where(th, td):not(:first-child) {
-	border-left: 1px solid var(--border);
+	border-inline-start: 1px solid var(--border);
 }
 [data-streamdown="table-header"] {
 	background: transparent;
@@ -564,7 +564,7 @@ body {
    session-name-serif toggle overrides this var at runtime, so the
    .font-title utility must read it through var(), not carry a baked copy. */
 @theme {
-	--font-title: "lh-cmu", serif;
+	--font-title: "lh-cmu", var(--font-vazirmatn), serif;
 }
 
 /* Card enter (owner round, 2026-10-05): the transcript cards' one-shot
@@ -601,4 +601,42 @@ body {
 	background-color: var(--accent);
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
+}
+
+/* ── Persian (fa) / RTL ────────────────────────────────────────────────
+   Vazirmatn leads every stack when the UI language is Persian (it carries
+   Latin glyphs too). Code, math and diagrams stay left-to-right and keep
+   their own fonts: they are isolated islands inside RTL prose. */
+html[lang="fa"] {
+	--font-ui: var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
+	--font-prose: var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
+	--font-title: var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif;
+	/* Vazirmatn already has the weight range; lh-title weights still apply. */
+	letter-spacing: 0;
+}
+/* Mono-uppercase "quiet labels" use tracking-widest; tracking breaks the
+   joining of Arabic-script letters, so cancel it for fa. */
+html[lang="fa"] * {
+	letter-spacing: normal !important;
+}
+/* Code, math, diagrams, graphs and file paths are LTR islands. */
+html[dir="rtl"] pre,
+html[dir="rtl"] code,
+html[dir="rtl"] .katex,
+html[dir="rtl"] .katex-display,
+html[dir="rtl"] [data-streamdown="code-block"],
+html[dir="rtl"] .lh-ltr {
+	direction: ltr;
+	unicode-bidi: isolate;
+	text-align: left;
+}
+/* Directional glyphs (chevrons, arrows, back/forward) mirror in RTL.
+   Opt in with .rtl-flip; pictures and logos are never flipped. */
+html[dir="rtl"] .rtl-flip {
+	transform: scaleX(-1);
+}
+/* Text blocks follow the content's own direction, so a Persian answer sits
+   right-aligned and an English quote inside it stays readable. */
+.lh-prose :where(p, li, h1, h2, h3, h4, h5, h6, blockquote) {
+	unicode-bidi: plaintext;
 }

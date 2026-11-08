@@ -1,4 +1,5 @@
 import { cn } from "@/lib/utils";
+import { useLocale } from "@/lib/i18n/provider";
 
 /**
  * THE BRAILLE SPINNER (owner, minimal-color round): the one working-state
@@ -43,12 +44,13 @@ export function BrailleSpinner({
 	/** The accessible name of the state this spinner announces. */
 	label?: string;
 }) {
+	const { tl } = useLocale();
 	return (
 		<svg
 			viewBox="0 0 4 8"
 			data-testid="braille-spinner"
 			role="status"
-			aria-label={label}
+			aria-label={tl(label)}
 			className={cn("h-3 w-auto shrink-0 text-foreground", className)}
 		>
 			{FRAMES.map((frame, k) => (

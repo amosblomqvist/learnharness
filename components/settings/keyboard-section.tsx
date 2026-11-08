@@ -27,6 +27,7 @@ import {
 	type KeyScope,
 } from "@/src/core";
 import { SettingsRow } from "./controls.tsx";
+import { useLocale } from "@/lib/i18n/provider";
 
 const SCOPES: { scope: KeyScope; label: string }[] = [
 	{ scope: "global", label: "Global" },
@@ -48,6 +49,7 @@ export function nextOverrides(
 }
 
 export function KeyboardSection() {
+	const { tl } = useLocale();
 	const [overrides, setOverrides] = useState<Partial<Record<KeyAction, string>>>({});
 	const [rebinding, setRebinding] = useState<KeyAction | null>(null);
 	const [nonce, setNonce] = useState(0);
@@ -114,7 +116,7 @@ export function KeyboardSection() {
 									>
 										<span className="flex items-center gap-2">
 											<kbd className="rounded-sm border border-border bg-muted px-1.5 py-0.5 font-ui text-xs">
-												{rebinding === def.id ? "Press keys…" : formatBinding(effective)}
+												{rebinding === def.id ? tl("Press keys…") : formatBinding(effective)}
 											</kbd>
 											{def.displayOnly ? null : rebinding === def.id ? (
 												<button
@@ -155,7 +157,7 @@ export function KeyboardSection() {
 				);
 			})}
 			<div className="mt-1 flex items-center justify-between">
-				<span className="text-xs text-muted-foreground/70">Stored on this device (lh:keymap) — overrides only.</span>
+				<span className="text-xs text-muted-foreground/70">{tl("Stored on this device (lh:keymap) — overrides only.")}</span>
 				<button
 					type="button"
 					onClick={resetAll}

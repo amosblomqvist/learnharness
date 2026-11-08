@@ -16,7 +16,7 @@ export function ConnectionRow({ label, action, actionVariant, disabled, onAction
 export function ConnectionFooter({ leading, children, testid }: { leading?: React.ReactNode; children: React.ReactNode; testid?: string }) {
 	return <div className="mt-4 flex flex-wrap items-center justify-between gap-3" data-testid={testid}>
 		{leading}
-		<div className="ml-auto flex flex-wrap items-center justify-end gap-2">{children}</div>
+		<div className="ms-auto flex flex-wrap items-center justify-end gap-2">{children}</div>
 	</div>;
 }
 

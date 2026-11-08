@@ -7,6 +7,7 @@ import { Hint } from "@/components/ui/hint";
 import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
+import { useLocale } from "@/lib/i18n/provider";
 export { isDictationActive } from "@/components/dictation-state";
 
 /**
@@ -282,6 +283,7 @@ export type Dictation = {
  * question waits.
  */
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
+	const { tl } = useLocale();
 	const { getLanguage } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
 	const [error, setError] = useState<string | null>(null);
@@ -443,7 +445,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			language = await getLanguage();
 		} catch (e) {
 			if (gen !== genRef.current) return;
-			setError(e instanceof Error ? e.message : "Dictation language unavailable");
+			setError(e instanceof Error ? e.message : tl("Dictation language unavailable"));
 			cleanup();
 			return;
 		}
@@ -503,7 +505,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			if (gen !== genRef.current) return;
 			const msg =
 				e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
-					? "Microphone permission denied"
+					? tl("Microphone permission denied")
 					: e instanceof Error
 						? e.message
 						: "mic unavailable";
@@ -643,6 +645,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation }: { dictation: Dictation }) {
+	const { tl } = useLocale();
 	const { phase, error, levelRef, toggle, active, clearError } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
@@ -695,7 +698,7 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 		return (
 			<Hint
 				// The error line truncates in the button; its tooltip reveals it.
-				label={error ?? "Dictate"}
+				label={error ?? tl("Dictate")}
 				action={error ? undefined : "toggle-dictation"}
 				side="top"
 			>
@@ -709,12 +712,12 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 							toggle();
 						}
 					}}
-					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
+					aria-label={error ? `Dictation failed: ${error}` : tl("Start dictation")}
 					data-testid="dictation-toggle"
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>
 					<MicIcon className="size-3.5" />
-					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
+					<span className="max-w-full truncate">{error ?? tl("Dictate")}</span>
 				</button>
 			</Hint>
 		);
@@ -722,12 +725,12 @@ export function DictationBar({ dictation }: { dictation: Dictation }) {
 
 	return (
 		<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-bar">
-			<Hint label="Stop dictation (Esc)" side="top">
+			<Hint label={tl("Stop dictation (Esc)")} side="top">
 				<button
 					type="button"
 					onClick={toggle}
 					disabled={phase === "stopping"}
-					aria-label="Stop dictation"
+					aria-label={tl("Stop dictation")}
 					data-testid="dictation-toggle"
 					className="flex h-7 shrink-0 items-center gap-1.5 rounded-md bg-destructive/10 px-2 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
 				>

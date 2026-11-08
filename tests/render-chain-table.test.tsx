@@ -147,9 +147,9 @@ describe("ChainTableBody — THE shared TopBar + the lines law (owner, round 2)"
 		const sep = html.split("border-b border-border/60").length - 1;
 		assert.ok(sep >= 4, "header + 3 group rules");
 		// chain rows themselves carry NO border — their entire class list is
-		// the staircase law (pl-12 = aligned with the cluster's FOLDER icon);
+		// the staircase law (ps-12 = aligned with the cluster's FOLDER icon);
 		// the chip outlines' border-border/70 is an outline, not a row line
-		assert.ok(html.includes('class="flex items-center gap-1 py-1 pl-12 pr-3"'), "the chain row: staircase indent, no border");
+		assert.ok(html.includes('class="flex items-center gap-1 py-1 ps-12 pe-3"'), "the chain row: staircase indent, no border");
 	});
 
 	it("TREE THREADS: open folders/chains drop a vertical guide from their expander arrow down the children's edge (owner round 5)", () => {
@@ -159,12 +159,12 @@ describe("ChainTableBody — THE shared TopBar + the lines law (owner, round 2)"
 		assert.ok(open.includes('data-testid="cluster-thread-chat1"'), "the cluster thread");
 		assert.ok(open.includes('data-testid="chain-thread-c1"'), "the chain thread");
 		// the columns: the cluster arrow sits at 37px, the chain arrow at 73px
-		assert.ok(open.includes("left-[37px]"), "thread at the cluster arrow's column");
-		assert.ok(open.includes("left-[73px]"), "thread at the chain arrow's column");
+		assert.ok(open.includes("start-[37px]"), "thread at the cluster arrow's column");
+		assert.ok(open.includes("start-[73px]"), "thread at the chain arrow's column");
 		// the BRACKET LAW (owner round 6): each thread runs from its parent
 		// row's checkbox bottom edge (a visible gap below the arrow's stroke)
 		// to the LAST child row's checkbox bottom edge — live-measured anchors
-		assert.ok(open.includes("bottom-[8px] left-[37px] top-[23px]"), "cluster thread bracketed by checkbox bottoms");
+		assert.ok(open.includes("bottom-[8px] start-[37px] top-[23px]"), "cluster thread bracketed by checkbox bottoms");
 		assert.ok(open.includes("top-[22px]") && open.includes("bottom-[8px]"), "chain thread bracketed by checkbox bottoms");
 	});
 });
@@ -221,10 +221,10 @@ describe("ChainTableBody — chain rows (chips + connectors)", () => {
 		// THE ALIGNMENT STAIRCASE (owner ruling, round 4 — "double the
 		// indentation"): each level's checkbox sits under its parent's ICON
 		// slot, TWO columns (36px) past its own. Every column is 18px:
-		// clusters pl-3 (12) → chains pl-12 (48 = the folder icon) →
-		// statements pl-21 (84 = where a chain icon WOULD sit)
-		assert.ok(html.includes("pl-21"), "statements at the would-be chain-icon column");
-		assert.ok(html.includes("pl-12"), "chains aligned with the folder icon");
+		// clusters pl-3 (12) → chains ps-12 (48 = the folder icon) →
+		// statements ps-21 (84 = where a chain icon WOULD sit)
+		assert.ok(html.includes("ps-21"), "statements at the would-be chain-icon column");
+		assert.ok(html.includes("ps-12"), "chains aligned with the folder icon");
 		assert.ok(html.includes("h-5 w-3.5"), "the expander shares the checkbox's 14px width");
 	});
 });
@@ -294,7 +294,7 @@ describe("ChainTableBody — the floating selection bar (never shifts layout)", 
 			const bar = html.match(/<div[^>]*data-testid="chain-selection-bar"[^>]*>/)?.[0] ?? "";
 			const button = html.match(new RegExp(`<button[^>]*data-testid="${action}"[^>]*>`))?.[0] ?? "";
 			assert.match(bar, /rounded-full/); assert.match(button, /rounded-full/);
-			assert.match(bar, /py-2 pl-4 pr-2/, "keep text inset, match right inset to the vertical inset");
+			assert.match(bar, /py-2 ps-4 pe-2/, "keep text inset, match right inset to the vertical inset");
 			assert.equal(bar.includes(" px-4 "), false);
 		}
 	});

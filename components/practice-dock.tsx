@@ -8,6 +8,7 @@ import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { cn } from "@/lib/utils";
+import { useLocale } from "@/lib/i18n/provider";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -50,6 +51,7 @@ export interface PracticeDockProps {
 }
 
 export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onEscape, compactionRunning = false }: PracticeDockProps) {
+	const { tl } = useLocale();
 	const [thinking, setThinking] = useState("");
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
@@ -90,10 +92,10 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				type="button"
 				data-testid="practice-dock-bar"
 				onClick={onExpand}
-				className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-left text-sm text-muted-foreground transition-colors hover:text-foreground"
+				className="flex w-full cursor-pointer items-center gap-2 px-4 py-3 text-start text-sm text-muted-foreground transition-colors hover:text-foreground"
 			>
 				<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
-				<span className="font-medium">Problem</span>
+				<span className="font-medium">{tl("Problem")}</span>
 				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
 			</button>
 		);
@@ -107,7 +109,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 			    markdown + LaTeX rendered, capped by the measured column
 			    (--dock-max-h; the old fixed 40vh cut long problems short). */}
 			<div data-dock-scroll-area="" className="max-h-[var(--dock-max-h,40vh)] overflow-y-auto px-4 pt-3 pb-2">
-				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
+				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{tl("Problem")}</div>
 				<div className="lh-prose text-[15px]">
 					<ToolContentResponse>{input.statement}</ToolContentResponse>
 				</div>
@@ -144,7 +146,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 							submit();
 						}
 					}}
-					placeholder="Work here, think out loud."
+					placeholder={tl("Work here, think out loud.")}
 					className={cn(
 						"field-sizing-content lh-input max-h-64 min-h-16 w-full resize-none bg-transparent px-2.5 pb-2 outline-none placeholder:text-muted-foreground",
 					)}
@@ -154,7 +156,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 				    one p-1 row. Corner radii concentric: shell 16 − m-1.5 (6) =
 				    field 10 − p-1 (4) = button 6. */}
 				<div className="flex items-center justify-between gap-2 p-1">
-					<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
+					<span aria-hidden className="ps-1.5 text-xs text-muted-foreground">
 						{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
 					</span>
 					<Button
@@ -162,9 +164,9 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 						data-testid="practice-send"
 						disabled={thinking.trim().length === 0 || compactionRunning}
 						onClick={() => submit()}
-						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
+						className="ms-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>
-						Submit thinking
+						{tl("Submit thinking")}
 					</Button>
 				</div>
 			</div>

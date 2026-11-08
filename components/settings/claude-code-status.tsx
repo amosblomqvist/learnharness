@@ -4,17 +4,19 @@ import { CLAUDE_CODE_MINIMUM_VERSION, type ClaudeCodeStatus, type UserSettings }
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "./controls";
+import { useLocale } from "@/lib/i18n/provider";
 
-export function claudeCodeStatusLabel(status: ClaudeCodeStatus | null): string {
+export function claudeCodeStatusLabel(status: ClaudeCodeStatus | null, tl: (s: string, v?: Record<string, string | number>) => string = (s, v) => s.replace(/\{(\w+)\}/g, (_, k) => String(v?.[k] ?? ""))): string {
 	switch (status?.state) {
-		case "not-found": return "Not found";
-		case "meets-minimum": return `Version ${status.version} · meets minimum`;
-		case "update-required": return `Version ${status.version} · update required`;
-		default: return "Version could not be checked";
+		case "not-found": return tl("Not found");
+		case "meets-minimum": return tl("Version {version} · meets minimum", { version: status.version });
+		case "update-required": return tl("Version {version} · update required", { version: status.version });
+		default: return tl("Version could not be checked");
 	}
 }
 
 export function ClaudeCodeInstallationStatus() {
+	const { tl } = useLocale();
 	const [enabled, setEnabled] = useState(false);
 	const [loaded, setLoaded] = useState(false);
 	const [saving, setSaving] = useState(false);
@@ -40,7 +42,7 @@ export function ClaudeCodeInstallationStatus() {
 				setError(null);
 			}
 		} catch {
-			if (!controller.signal.aborted) setError("Could not load Claude Code settings.");
+			if (!controller.signal.aborted) setError(tl("Could not load Claude Code settings."));
 		}
 	}, []);
 	useEffect(() => {
@@ -66,7 +68,7 @@ export function ClaudeCodeInstallationStatus() {
 				notifySettingsSaved("claudeCode");
 			}
 		} catch {
-			if (!controller.signal.aborted) setError("Could not save Claude Code settings.");
+			if (!controller.signal.aborted) setError(tl("Could not save Claude Code settings."));
 		} finally {
 			if (!controller.signal.aborted) setSaving(false);
 		}
@@ -106,12 +108,12 @@ export function ClaudeCodeInstallationStatus() {
 		{error && <p role="alert" className="text-xs text-red-400">{error}</p>}
 		{enabled && <>
 			<div className="flex flex-wrap items-center gap-3">
-				<span role="status" className="text-xs text-muted-foreground">{busy ? "Checking…" : claudeCodeStatusLabel(status)}</span>
-				<Button type="button" size="xs" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" disabled={busy} onClick={() => void refresh()} data-testid="claude-code-check-again">Check again</Button>
+				<span role="status" className="text-xs text-muted-foreground">{busy ? tl("Checking…") : claudeCodeStatusLabel(status, tl)}</span>
+				<Button type="button" size="xs" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" disabled={busy} onClick={() => void refresh()} data-testid="claude-code-check-again">{tl("Check again")}</Button>
 			</div>
-			<p className="text-xs leading-relaxed text-muted-foreground"><strong className="font-medium">Install and authenticate Claude Code in your terminal, then select a Claude Code model here.</strong> LearnHarness starts it when needed—no background process required.</p>
-			<p className="text-xs leading-relaxed text-muted-foreground">Checks installation/version only—not authentication, model access, or quota. Claude Code controls billing. Requires v{CLAUDE_CODE_MINIMUM_VERSION}+. <a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">Setup ↗</a></p>
-			<p className="text-xs leading-relaxed text-muted-foreground">Verify AI claims independently—they may be inaccurate, incomplete, misleading, or outdated.</p>
+			<p className="text-xs leading-relaxed text-muted-foreground"><strong className="font-medium">{tl("Install and authenticate Claude Code in your terminal, then select a Claude Code model here.")}</strong> {tl("LearnHarness starts it when needed—no background process required.")}</p>
+			<p className="text-xs leading-relaxed text-muted-foreground">{tl("Checks installation/version only—not authentication, model access, or quota. Claude Code controls billing.")} {tl("Requires v{version}+.", { version: CLAUDE_CODE_MINIMUM_VERSION })} <a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">{tl("Setup")} ↗</a></p>
+			<p className="text-xs leading-relaxed text-muted-foreground">{tl("Verify AI claims independently—they may be inaccurate, incomplete, misleading, or outdated.")}</p>
 		</>}
 	</div>;
 }
