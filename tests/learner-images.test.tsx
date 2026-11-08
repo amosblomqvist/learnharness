@@ -490,7 +490,7 @@ describe("image cards", () => {
 
 	it("an annotated image shows no invert switch and never inverts", () => {
 		const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="200" height="100"><circle cx="50" cy="50" r="20"/></svg>';
-		const html = renderToStaticMarkup(<VisualOutputCard output={{ svg, image: { path: "/a.png", snapshotId: "0".repeat(64) } }} initialInverted />);
+		const html = renderToStaticMarkup(<VisualOutputCard output={{ svg, image: { path: "/a.png", snapshotId: "0".repeat(64) } }} initialPin />);
 		assert.ok(!html.includes("toggle-invert-figure-brightness"), "no invert switch");
 		assert.ok(!html.includes("hue-rotate"), "a pinned inversion is ignored for photos");
 		assert.match(html, /Image snapshot could not be loaded/);

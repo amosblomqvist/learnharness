@@ -7,7 +7,8 @@ import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
-import type { ArtifactPartProps, DemoResult } from "@/src/core";
+import { useArtifactInvert } from "@/components/artifacts/use-artifact-invert";
+import { toneFromCssColor, toneFromSamples, type ArtifactPartProps, type ArtifactTone, type DemoResult } from "@/src/core";
 
 /**
  * Demo artifact card (W6): while the part is input-available, a job activity
@@ -20,7 +21,15 @@ import type { ArtifactPartProps, DemoResult } from "@/src/core";
  * postMessage {type:"demo-resize",height} (parent sizes the iframe) and
  * window.onerror → {type:"demo-error",message} (error chip on the card, with
  * a "Send to teacher" button that feeds the error back into the lesson — the
- * fix loop).
+ * fix loop), plus {type:"demo-tone",samples} — so a demo drawn light
+ * auto-inverts in the dark app. After load (+2 frames, so canvases have
+ * drawn) the bridge samples eight points just inside the page edges: each
+ * is the first opaque background under that point (a canvas reports its
+ * own pixel, copied via drawImage so the demo's context is never touched),
+ * "media" for svg/img/video, or null for an empty edge (the card's white
+ * holder shows). The server-rendered iframe can load (and report) before
+ * the card hydrates, so the card also ASKS on mount
+ * ({type:"demo-tone-request"}).
  *
  * Bridge message handling is a pure function (reduceDemoBridgeState) so
  * tests cover it without a DOM.
@@ -44,6 +53,18 @@ window.addEventListener("load",post);
 window.addEventListener("error",function(e){send({type:"demo-error",message:e.message||String(e)})});
 setTimeout(post,50);
 setTimeout(post,400);
+var bg=function(el){for(var e=el;e;e=e.parentElement){var c=getComputedStyle(e).backgroundColor;if(c&&c!=="transparent"&&!/^rgba\(.*,\s*0\)$/.test(c))return c}return null};
+var px=document.createElement("canvas");px.width=px.height=1;var pg=px.getContext("2d",{willReadFrequently:true});
+var sample=function(x,y){var el=document.elementFromPoint(x,y);if(!el)return null;
+if(el.tagName==="CANVAS"){try{var r=el.getBoundingClientRect();pg.clearRect(0,0,1,1);pg.drawImage(el,Math.floor((x-r.left)*el.width/r.width),Math.floor((y-r.top)*el.height/r.height),1,1,0,0,1,1);var d=pg.getImageData(0,0,1,1).data;if(d[3]>0)return"rgba("+d[0]+","+d[1]+","+d[2]+","+(d[3]/255)+")"}catch(e){return"media"}return bg(el.parentElement)}
+if(el.closest("svg")||/^(IMG|VIDEO|PICTURE|IFRAME|OBJECT|EMBED)$/.test(el.tagName))return"media";
+return bg(el)};
+var tone=function(){try{var W=innerWidth,H=Math.min(innerHeight,document.documentElement.scrollHeight),xs=[2,W/2,W-3],ys=[2,H/2,H-3],s=[];
+for(var a=0;a<3;a++)for(var b=0;b<3;b++){if(a!==1||b!==1)s.push(sample(xs[a],ys[b]))}
+send({type:"demo-tone",samples:s})}catch(e){}};
+var loaded=false;
+window.addEventListener("load",function(){loaded=true;requestAnimationFrame(function(){requestAnimationFrame(tone)})});
+window.addEventListener("message",function(e){if(loaded&&e.source===parent&&e.data&&e.data.type==="demo-tone-request")tone()});
 })();</script>`;
 
 /** Inject the bridge before </body> (or at the end of a body-less document). */
@@ -55,9 +76,11 @@ export function buildDemoSrcDoc(html: string): string {
 export interface DemoBridgeState {
 	height: number | null;
 	error: string | null;
+	/** Whether the page was drawn light; null = not reported yet. */
+	tone: ArtifactTone | null;
 }
 
-export const INITIAL_DEMO_BRIDGE_STATE: DemoBridgeState = { height: null, error: null };
+export const INITIAL_DEMO_BRIDGE_STATE: DemoBridgeState = { height: null, error: null, tone: null };
 
 const MIN_HEIGHT = 80;
 const MAX_HEIGHT = 2400;
@@ -75,6 +98,16 @@ export function reduceDemoBridgeState(state: DemoBridgeState, data: unknown): De
 		const text = typeof message.message === "string" && message.message.trim() ? message.message : "unknown error";
 		return text === state.error ? state : { ...state, error: text };
 	}
+	if (message.type === "demo-tone") {
+		const { samples } = data as { samples?: unknown };
+		if (!Array.isArray(samples) || !samples.every((x) => x === null || typeof x === "string")) return state;
+		// An empty edge (or a transparent color) is the white holder showing.
+		const tones = (samples as (string | null)[]).map((x): ArtifactTone =>
+			x === null ? "light" : x === "media" ? "unknown" : (toneFromCssColor(x) ?? "light"),
+		);
+		const tone = toneFromSamples(tones);
+		return tone === state.tone ? state : { ...state, tone };
+	}
 	return state;
 }
 
@@ -89,16 +122,17 @@ export function DemoCard({ part }: ArtifactPartProps) {
 }
 
 /** The demo artifact — exported: the steer card renders the delivered
- *  result. `messageId` + `initialInverted` carry the PERSISTED invert
- *  switch (details.ui.inverted via the artifact-ui route, owner 2026-10-07). */
+ *  result. `messageId` + `initialPin` carry the PERSISTED invert switch
+ *  (details.ui.inverted via the artifact-ui route, owner 2026-10-07) —
+ *  absent = auto, following the rendered mode (auto-invert, 2026-10-29). */
 export function DemoOutputCard({
 	output,
 	messageId,
-	initialInverted = false,
+	initialPin,
 }: {
 	output: unknown;
 	messageId?: string;
-	initialInverted?: boolean;
+	initialPin?: boolean;
 }) {
 	const result = output as DemoResult | undefined;
 	if (!result || typeof result.html !== "string" || typeof result.title !== "string") {
@@ -121,7 +155,7 @@ export function DemoOutputCard({
 		);
 	}
 	return (
-		<DemoFrame title={result.title} html={result.html} messageId={messageId} initialInverted={initialInverted} />
+		<DemoFrame title={result.title} html={result.html} messageId={messageId} initialPin={initialPin} />
 	);
 }
 
@@ -129,33 +163,28 @@ function DemoFrame({
 	title,
 	html,
 	messageId,
-	initialInverted = false,
+	initialPin,
 }: {
 	title: string;
 	html: string;
 	messageId?: string;
-	initialInverted?: boolean;
+	initialPin?: boolean;
 }) {
 	const actions = useContext(ChatActionsContext);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
 	const [state, setState] = useState<DemoBridgeState>(INITIAL_DEMO_BRIDGE_STATE);
 	// Brightness inversion (owner, 2026-10-07): the switch state PERSISTS on
-	// the steer record (details.ui.inverted) — seeded here, written through
-	// the silent artifact-ui route on toggle. Without a chat page (tests,
-	// previews) the toggle stays local-only. The filter rides the iframe
-	// element, which carries the card's white backing, so one filter flips
-	// page + content together while hue-rotate(180deg) undoes invert's hue
-	// flip.
-	const [inverted, setInverted] = useState(initialInverted);
-	const toggleInverted = (next: boolean) => {
-		setInverted(next);
-		if (!actions?.chatId || !messageId) return;
-		void fetch(`/api/chats/${actions.chatId}/artifact-ui`, {
-			method: "POST",
-			headers: { "Content-Type": "application/json" },
-			body: JSON.stringify({ input: { messageId, inverted: next } }),
-		}).catch(() => {});
-	};
+	// the steer record (details.ui.inverted) as a pin — absent = auto: a demo
+	// whose page the bridge reports light shows inverted while the app
+	// renders dark (use-artifact-invert.ts, 2026-10-29). The filter rides
+	// the iframe element, which carries the card's white backing, so one
+	// filter flips page + content together while hue-rotate(180deg) undoes
+	// invert's hue flip.
+	const { inverted, held, toggle: toggleInverted } = useArtifactInvert({
+		initialPin,
+		tone: state.tone ?? "pending",
+		messageId,
+	});
 	const srcDoc = useMemo(() => buildDemoSrcDoc(html), [html]);
 
 	useEffect(() => {
@@ -166,6 +195,9 @@ function DemoFrame({
 			setState((prev) => reduceDemoBridgeState(prev, event.data));
 		};
 		window.addEventListener("message", onMessage);
+		// A report sent before hydration was lost — ask again. If the frame
+		// has not loaded yet, its own on-load report arrives after this.
+		iframeRef.current?.contentWindow?.postMessage({ type: "demo-tone-request" }, "*");
 		return () => window.removeEventListener("message", onMessage);
 	}, []);
 
@@ -221,7 +253,7 @@ function DemoFrame({
 				// the wheel (session scrolling stalls over the demo). With
 				// scrolling disabled the wheel chains straight to the session.
 				scrolling="no"
-				className="mt-2 w-full rounded-lg border bg-white"
+				className={`mt-2 w-full rounded-lg border bg-white${held ? " lh-artifact-hold" : ""}`}
 				// content-box: the bridge reports the CONTENT height — with the
 				// preflight's border-box the 2px border would eat into it and clip
 				// the bottom of the demo (smoke finding, 2026-10-07).
