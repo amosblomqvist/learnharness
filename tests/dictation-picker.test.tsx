@@ -43,6 +43,8 @@ async function fixture(failRead = false) {
 		failRead,
 		keys: [] as AuthKeyStatus[],
 		nextWrite: undefined as Promise<Response> | undefined,
+		/** GET /api/stt/methods (Settings → Providers → Dictation's method list). */
+		methods: { selected: null as string | null, configured: [] as string[], device: "webgpu", deepgram: false, models: [] as unknown[] },
 	};
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [name, value] of Object.entries({
@@ -54,6 +56,7 @@ async function fixture(failRead = false) {
 		cancelAnimationFrame: clearTimeout,
 		fetch: async (url: string, init?: RequestInit) => {
 			if (url === "/api/keys") return Response.json({ keys: state.keys, providers: [] });
+			if (url === "/api/stt/methods") return Response.json(state.methods);
 			if (url === "/api/settings") return state.failRead ? Response.json({}, { status: 500 }) : Response.json({ settings: state.record });
 			assert.equal(url, "/api/settings/dictation");
 			const body = JSON.parse(init!.body as string);
@@ -215,7 +218,7 @@ test("capture locks the row and dismisses an open language menu until capture en
 	assert(menu());
 });
 
-for (const source of ["none", "file", "env"] as const) test(`Language is below the full key row for ${source}-owned keys, including editing`, async () => {
+for (const source of ["none", "file", "env"] as const) test(`Language is above the full key row for ${source}-owned keys, including editing`, async () => {
 	const f = await fixture();
 	f.state.keys = [{
 		id: "DEEPGRAM_API_KEY", info: AUTH_KEYS.find((key) => key.id === "DEEPGRAM_API_KEY")!,
@@ -226,15 +229,16 @@ for (const source of ["none", "file", "env"] as const) test(`Language is below t
 	await f.render(<KeysSection />);
 	const group = byTest("group-dictation");
 	const rows = group.lastElementChild!.children;
-	assert.equal(rows[0]!.getAttribute("data-testid"), "key-deepgram_api_key");
-	assert.equal(rows[1]!.getAttribute("data-testid"), "row-dictation-language");
+	// Language first: it applies to Deepgram and to local models.
+	assert.equal(rows[0]!.getAttribute("data-testid"), "row-dictation-language");
+	assert.equal(rows[1]!.getAttribute("data-testid"), "key-deepgram_api_key");
 	assert.equal(rows[2]!.getAttribute("data-testid"), "dictation-setup-hint");
 	assert.equal(byTest("dictation-setup-hint").textContent, "Create a Deepgram API key with the Member role or higher, then add it above.");
 	assert.match(byTest("dictation-setup-hint").className, /text-muted-foreground/);
 	assert.equal(byTest("dictation-setup-hint").querySelector("a")!.href, "https://console.deepgram.com/");
 	assert.equal(byTest("dictation-setup-hint").querySelector("a")!.textContent, "Deepgram API key");
 	assert.equal(byTest("dictation-setup-hint").querySelectorAll("a").length, 1);
-	assert.match(rows[1]!.querySelector(".font-prose")!.className, /text-\(length:--lh-prose-size\)/);
+	assert.match(rows[0]!.querySelector(".font-prose")!.className, /text-\(length:--lh-prose-size\)/);
 	assert.equal(trigger().disabled, false, "language is independent of key ownership");
 	await click(byTest("key-deepgram_api_key-row"));
 	if (source !== "env") assert.ok(byTest("key-deepgram_api_key-editor"));
@@ -296,5 +300,58 @@ test("clearing each search restores the complete catalog order with Multilingual
 		await search(query);
 		await search("");
 		assert.deepEqual(order(), expected, `catalog order after clearing ${query}`);
+	}
+});
+
+// ─── Local models × Language (issue #15, PR #50) ─────────────────────────────
+
+async function keysWithModels(language: "en" | "pl" | "multi") {
+	const f = await fixture();
+	f.state.record = { ...f.state.record, dictation: { language } };
+	await act(async () => { notifySettingsSaved("dictation"); });
+	const model = (id: string, multilingual: boolean) => ({ id, name: id, repo: "", dtype: {}, sizeMb: 1, werPct: null, multilingual, state: "ready" });
+	f.state.methods = {
+		selected: "local:moonshine-tiny",
+		configured: ["local:moonshine-tiny", "local:whisper-base", "deepgram"],
+		device: "webgpu",
+		deepgram: true,
+		models: [model("moonshine-tiny", false), model("whisper-base", true)],
+	};
+	const { KeysSection } = await import("../components/settings/keys-section.tsx");
+	await f.render(<KeysSection />);
+	return f;
+}
+const method = (id: string) => byTest(`dictation-method-${id}`);
+
+test("a local model that can't take the Language is greyed out; the pick it holds stays", async () => {
+	const f = await keysWithModels("pl");
+	const english = method("local:moonshine-tiny");
+	assert.equal(english.getAttribute("aria-disabled"), "true");
+	assert.equal(english.getAttribute("aria-checked"), "true", "the existing pick is kept");
+	assert.match(english.textContent!, /Doesn't support Polish/);
+	assert.match(english.className, /opacity-40/);
+	const multilingual = method("local:whisper-base");
+	assert.equal(multilingual.getAttribute("aria-disabled"), null);
+	assert.equal(multilingual.disabled, false);
+	assert.equal(method("deepgram").getAttribute("aria-disabled"), null);
+	assert.match(byTest("dictation-model-moonshine-tiny").textContent!, /English only/);
+	assert.doesNotMatch(byTest("dictation-model-whisper-base").textContent!, /English only/);
+	assert.equal(f.state.writes.length, 0);
+});
+
+test("Multilingual greys out every local model (no language detection on device)", async () => {
+	await keysWithModels("multi");
+	assert.equal(method("local:moonshine-tiny").getAttribute("aria-disabled"), "true");
+	const whisper = method("local:whisper-base");
+	assert.equal(whisper.getAttribute("aria-disabled"), "true");
+	assert.equal(whisper.disabled, true, "not picked, so it can't be picked");
+	assert.match(whisper.textContent!, /Doesn't support automatic language detection/);
+	assert.equal(method("deepgram").getAttribute("aria-disabled"), null);
+});
+
+test("English keeps every local model selectable", async () => {
+	await keysWithModels("en");
+	for (const id of ["local:moonshine-tiny", "local:whisper-base", "deepgram"]) {
+		assert.equal(method(id).getAttribute("aria-disabled"), null, id);
 	}
 });

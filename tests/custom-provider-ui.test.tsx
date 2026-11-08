@@ -15,6 +15,7 @@ async function mount(setup = false) {
 	globalThis.fetch = async (input, init) => {
 		assert.equal(init?.method ?? "GET", "GET", "polish interactions must not save credentials/settings");
 		if (String(input).startsWith("/api/custom-provider")) return Response.json({ baseUrl: "http://fixture.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"fixture"' } });
+		if (String(input) === "/api/stt/methods") return Response.json({ selected: null, configured: [], device: "webgpu", deepgram: false, models: [] });
 		return Response.json({ keys: [], providers: [] });
 	};
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
