@@ -112,6 +112,7 @@ describe("parseAppearanceSettingsBody", () => {
 	it("parses every field; hex-or-null colors; clamps happen at sanitize, rejects here", () => {
 		const r = parseAppearanceSettingsBody({
 			mode: "light",
+			questionLayout: "side",
 			background: "#ffffff",
 			fontFamily: "Some Font",
 			proseFontSize: 20,
@@ -121,6 +122,7 @@ describe("parseAppearanceSettingsBody", () => {
 		assert.ok(r.ok);
 		assert.deepEqual(r.settings, {
 			mode: "light",
+			questionLayout: "side",
 			background: "#ffffff",
 			fontFamily: "Some Font",
 			proseFontSize: 20,
@@ -132,6 +134,8 @@ describe("parseAppearanceSettingsBody", () => {
 	it("rejects bad enums, ranges, and colors — with specific messages, never clamps", () => {
 		const cases: unknown[] = [
 			{ mode: "sepia" },
+			{ questionLayout: "left" },
+			{ questionLayout: true },
 			{ background: "blue" },
 			{ background: 42 },
 			{ fontFamily: "" },

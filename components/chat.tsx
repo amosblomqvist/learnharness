@@ -85,6 +85,7 @@ import {
 	questionNeedsReveal,
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
+import { useAppearance } from "@/components/settings/appearance";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
@@ -116,6 +117,33 @@ const GRADIENT_H = 96;
 // vs EXPAND_DIST absorbs trackpad drift.
 const COLLAPSE_DIST = 96;
 const EXPAND_DIST = 16;
+// The side dock (owner request 2026-11-07): on wide screens a pending
+// question moves to a RIGHT panel — the learner reads the teaching and
+// answers side by side, no scrolling between them. The transcript pads
+// right by the panel width so prose never hides under it; narrow screens
+// keep the bottom dock untouched.
+const SIDE_DOCK_W = 420;
+const SIDE_DOCK_MIN_VIEWPORT = 1280;
+// Drag-resize bounds (owner request 2026-11-07): the panel's left edge is
+// a drag handle; the chosen width persists per browser (a viewer
+// convenience, not shared state).
+const SIDE_DOCK_MIN_W = 320;
+const SIDE_DOCK_MAX_W = 760;
+const SIDE_DOCK_W_KEY = "lh-side-dock-w";
+
+/** True on viewports wide enough for the side dock. SSR-safe: false until
+ *  the media query reports after mount. */
+function useWideForSideDock(): boolean {
+	const [wide, setWide] = useState(false);
+	useEffect(() => {
+		const mq = window.matchMedia(`(min-width: ${SIDE_DOCK_MIN_VIEWPORT}px)`);
+		const sync = () => setWide(mq.matches);
+		sync();
+		mq.addEventListener("change", sync);
+		return () => mq.removeEventListener("change", sync);
+	}, []);
+	return wide;
+}
 
 /**
  * Server-sync channel for artifact renderers: the CENTRAL jobs poll in Chat
@@ -451,6 +479,35 @@ export function Chat({
 	}, []);
 
 	const pending = findPendingToolCall(messages, pendingQuestionOf(nativeMessages));
+	// Side dock (owner request 2026-11-07): a pending question rides the right
+	// panel per the layout setting — auto (wide viewports only), side, or
+	// bottom; practice problems keep the bottom dock.
+	const wideForSide = useWideForSideDock();
+	const { appearance: resolvedAppearance } = useAppearance();
+	const sideDock =
+		!!pending &&
+		(resolvedAppearance.questionLayout === "side" ||
+			(resolvedAppearance.questionLayout === "auto" && wideForSide));
+	// The panel's drag-resized width (owner request 2026-11-07), restored
+	// after mount (SSR has no localStorage) and clamped on every write.
+	const [sideW, setSideW] = useState(SIDE_DOCK_W);
+	useEffect(() => {
+		try {
+			const v = Number(localStorage.getItem(SIDE_DOCK_W_KEY));
+			if (v >= SIDE_DOCK_MIN_W && v <= SIDE_DOCK_MAX_W) setSideW(v);
+		} catch {
+			/* storage blocked — the default width stands */
+		}
+	}, []);
+	const onSideResize = useCallback((w: number) => {
+		const v = Math.round(Math.min(SIDE_DOCK_MAX_W, Math.max(SIDE_DOCK_MIN_W, w)));
+		setSideW(v);
+		try {
+			localStorage.setItem(SIDE_DOCK_W_KEY, String(v));
+		} catch {
+			/* storage blocked — the width still applies this session */
+		}
+	}, []);
 	const malformedQuestions = malformedQuestionsOf(nativeMessages);
 	// The abort handler reads the pending question from a ref (the window
 	// listener is mount-scoped; the value it needs is render-scoped).
@@ -1401,7 +1458,12 @@ export function Chat({
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
-					<ConversationContent className="min-h-full gap-0 p-0">
+					<ConversationContent
+						className="min-h-full gap-0 p-0"
+						// Side dock open → the prose column ends where the panel
+						// begins; nothing ever reads under it.
+						style={{ paddingRight: sideDock ? sideW : undefined }}
+					>
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
@@ -1692,6 +1754,9 @@ export function Chat({
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
 				<DockOverlay
+					side={sideDock}
+					sideWidth={sideW}
+					onSideResize={onSideResize}
 					pending={pending}
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
 					onSaveQuestionDraft={(form) => { if (pending) saveQuestionDraft(pending.key, { form }); }}
@@ -1926,6 +1991,9 @@ export function shouldStampGeometryMute(nextH: number, prevH: number, pending: b
 }
 
 function DockOverlay({
+	side = false,
+	sideWidth = SIDE_DOCK_W,
+	onSideResize,
 	pending,
 	initialQuestionDraft,
 	onSaveQuestionDraft,
@@ -1953,6 +2021,14 @@ function DockOverlay({
 	setupCta,
 	queuedSteers,
 }: {
+	/** Side-dock mode (owner request 2026-11-07): the pending question rides a
+	 *  right panel — always open, no scroll-fold, no reveal gate; the
+	 *  bottom-dock machinery stays for narrow viewports and the composer. */
+	side?: boolean;
+	/** The side panel's current width (drag-resized, clamped by the owner). */
+	sideWidth?: number;
+	/** Reports the dragged raw width; the owner clamps and persists. */
+	onSideResize?: (w: number) => void;
 	pending: ReturnType<typeof pendingQuestionOf>;
 	initialQuestionDraft?: QuestionFormDraft;
 	onSaveQuestionDraft: (draft: QuestionFormDraft) => void;
@@ -2019,7 +2095,11 @@ function DockOverlay({
 	// learner reads the teaching first and opens the check when ready. Once
 	// revealed, the normal collapse machine rules apply untouched.
 	const [revealed, setRevealed] = useState(false);
-	const revealPending = requiresReveal && !revealed;
+	// Side mode forces the open form (the panel's whole point is answering
+	// WHILE reading) — the fold state and the reveal gate only govern the
+	// bottom dock.
+	const effExpanded = side ? true : expanded;
+	const revealPending = requiresReveal && !revealed && !side;
 
 	const pendingId = pending?.key ?? null;
 	const initialPendingRef = useRef(pendingId);
@@ -2073,6 +2153,8 @@ function DockOverlay({
 	// replaces the composer and owns the band.
 	const pendingRef = useRef(!!pending || !!practice);
 	pendingRef.current = !!pending || !!practice;
+	const sideRef = useRef(side);
+	sideRef.current = side;
 	const requiresRevealRef = useRef(requiresReveal);
 	requiresRevealRef.current = requiresReveal;
 	const revealedRef = useRef(revealed);
@@ -2132,6 +2214,21 @@ function DockOverlay({
 	// learner back to the bottom. Composer mode may give space back.
 	const reserveRef = useRef(0);
 	const offer = useCallback((blockH: number) => {
+		// Side mode covers no transcript tail, but the READING ZONE needs
+		// one (owner request 2026-11-07): with a zero spacer the last line
+		// glued to the viewport's bottom edge — reserve ~20% of the column
+		// (owner tuned down from 40%, 2026-11-07) so the passage being read
+		// can be pulled up toward the mid-screen reading zone, like an
+		// editor's scroll-beyond-last-line.
+		if (sideRef.current) {
+			const col = scrollRef.current;
+			const next = col ? Math.round(col.clientHeight * 0.2) : 0;
+			if (Math.abs(next - reserveRef.current) > 1) {
+				reserveRef.current = next;
+				onReserve(next);
+			}
+			return;
+		}
 		const next = blockH + GRADIENT_H;
 		if (next <= reserveRef.current + 0.5 && pendingRef.current) return;
 		// Stamp growth at the source, including child-only field resizes, so
@@ -2139,7 +2236,7 @@ function DockOverlay({
 		if (shouldStampGeometryMute(next, reserveRef.current, pendingRef.current)) geometryAtRef.current = Date.now();
 		reserveRef.current = next;
 		onReserve(next);
-	}, [onReserve]);
+	}, [onReserve, scrollRef]);
 
 	// The overlay must not paint over the scroller's scrollbar (owner, scroll
 	// round 2): the scroller reserves symmetric gutters (scrollbar-gutter:
@@ -2152,7 +2249,7 @@ function DockOverlay({
 	const [sbInset, setSbInset] = useState(0);
 	useDockHeight({
 		scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-		expanded, enabled: !!pending || !!practice, mode, onScrollbarInset: setSbInset, onHeight: offer,
+		expanded: effExpanded, enabled: !!pending || !!practice, mode, onScrollbarInset: setSbInset, onHeight: offer,
 	});
 
 	// GROWTH MUTE (owner round, 2026-10-05 — the generation churn): during a
@@ -2233,7 +2330,7 @@ function DockOverlay({
 	// a focused button activates natively) — this listener claims only
 	// the dead case: plain focus with Enter doing nothing.
 	useEffect(() => {
-		if (!pending || expanded) return;
+		if (!pending || effExpanded) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Enter" || e.altKey) return;
 			if (e.shiftKey && !e.metaKey && !e.ctrlKey) return;
@@ -2253,13 +2350,15 @@ function DockOverlay({
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [pending, expanded]);
+	}, [pending, effExpanded]);
 
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (!el) return;
 		const onScroll = () => {
 			if (!pendingRef.current) return;
+			// Side mode has no fold machine: the panel never collapses.
+			if (sideRef.current) return;
 			// Resize mute (owner, resize round): a geometry change re-clamps
 			// scrollTop and the browser emits the clamp as a scroll event —
 			// reading the transient position folded the box to the bar for a
@@ -2305,20 +2404,20 @@ function DockOverlay({
 	// The fold's CONTENT fade (owner round, 2026-10-05): the shell height
 	// morphs, but the bar↔form content used to hard-swap. A WAAPI fade/rise
 	// on the toggle — no remount, so the question form's state survives.
-	const prevExpandedForFadeRef = useRef(expanded);
+	const prevExpandedForFadeRef = useRef(effExpanded);
 	useIsoLayoutEffect(() => {
-		if (prevExpandedForFadeRef.current === expanded) return;
-		prevExpandedForFadeRef.current = expanded;
+		if (prevExpandedForFadeRef.current === effExpanded) return;
+		prevExpandedForFadeRef.current = effExpanded;
 		contentRef.current?.animate(
 			[{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "translateY(0)" }],
 			{ duration: 160, easing: "cubic-bezier(0.2, 0.8, 0.2, 1)" },
 		);
-	}, [expanded]);
+	}, [effExpanded]);
 	// The height-morph key (components/dock-state-key.ts): the expanded
 	// term (the fold) belongs to EVERY docked variant — question AND
 	// practice (owner fix, 2026-10-06). Typing growth keeps the key and
 	// never animates; the fold/unfold morphs like teaching always has.
-	const stateKey = dockStateKey(mode, !!pending || !!practice, expanded);
+	const stateKey = dockStateKey(mode, !!pending || !!practice, effExpanded);
 	const prevRef = useRef<{ key: string; height: number } | null>(null);
 	useIsoLayoutEffect(() => {
 		const el = shellRef.current;
@@ -2350,10 +2449,42 @@ function DockOverlay({
 	});
 
 	return (
-		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
-			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
-			<div ref={blockRef} className="relative bg-background pb-5">
-				<div className={DOCK}>
+		<div
+			className={
+				side
+					? "pointer-events-none absolute inset-y-0 flex flex-col justify-end"
+					: "pointer-events-none absolute inset-x-0 bottom-0"
+			}
+			style={{ right: sbInset, width: side ? sideWidth : undefined }}
+		>
+			{/* The drag handle (owner request 2026-11-07): the panel's whole
+			    left edge resizes it — pointer capture keeps the drag alive
+			    off the strip; the owner clamps and persists the width. */}
+			{side && (
+				<div
+					data-testid="side-dock-resize"
+					role="separator"
+					aria-orientation="vertical"
+					aria-label="Resize the question panel"
+					onPointerDown={(e) => {
+						e.preventDefault();
+						const el = e.currentTarget;
+						const panelRight = (el.parentElement as HTMLElement).getBoundingClientRect().right;
+						el.setPointerCapture(e.pointerId);
+						const move = (ev: PointerEvent) => onSideResize?.(panelRight - ev.clientX);
+						el.addEventListener("pointermove", move);
+						el.addEventListener(
+							"pointerup",
+							() => el.removeEventListener("pointermove", move),
+							{ once: true },
+						);
+					}}
+					className="pointer-events-auto absolute inset-y-0 left-0 z-10 w-1.5 cursor-col-resize transition-colors hover:bg-border/70 active:bg-border"
+				/>
+			)}
+			{!side && <div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />}
+			<div ref={blockRef} className={side ? "relative pb-4" : "relative bg-background pb-5"}>
+				<div className={side ? "w-full px-3" : DOCK}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>
 					{setupCta}
@@ -2373,7 +2504,7 @@ function DockOverlay({
 							onChange={onReadingThinking}
 							onEscape={dictationCancel}
 							onOpen={
-								!expanded
+								!effExpanded
 									? () => {
 											void finishDictation().then(() => {
 												expandAndRevealRef.current();
@@ -2397,7 +2528,7 @@ function DockOverlay({
 									toolName={pending.tool as "quiz" | "probe" | "ask_user_question" | "explain" | "recall"}
 									toolCallId={pending.toolCallId}
 									input={pending.input as never}
-									expanded={expanded}
+									expanded={effExpanded}
 									reveal={revealPending}
 									phase={phase}
 									onExpand={expandAndReveal}
@@ -2451,7 +2582,10 @@ function DockOverlay({
 					    overlay is none by default. The isAtBottom/scrollToBottom
 					    context still reaches it — DockOverlay is a Conversation
 					    child. */}
-					<ConversationScrollButton className="pointer-events-auto bottom-full mb-2" />
+					{/* Side mode renders NO disc (owner request 2026-11-07): the
+					    reading zone means the learner scrolls freely; a floating
+					    ↓ beside the panel was just noise. */}
+					{!side && <ConversationScrollButton className="pointer-events-auto bottom-full mb-2" />}
 				</div>
 				{/* The plan marginalia (owner, plan-placement round): the bare
 				    diagram in the band's right flank — boundaless, meet-fitted, part
@@ -2463,7 +2597,7 @@ function DockOverlay({
 				    the flank; below MARGIN_MIN_W it FADES (never pops away — no
 				    mid-question unmount), and widening past the floor fades it
 				    back in. */}
-				{pending && plan && (
+				{pending && plan && !side && (
 					<Hint label="Open the full plan" side="bottom">
 <button
 						type="button"

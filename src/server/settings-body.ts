@@ -27,7 +27,7 @@ import type {
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, QUESTION_LAYOUTS, type QuestionLayout } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
@@ -242,6 +242,12 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			return { ok: false, error: "mode must be \"dark\" or \"light\"" };
 		}
 		settings.mode = raw.mode;
+	}
+	if (raw.questionLayout !== undefined) {
+		if (!QUESTION_LAYOUTS.includes(raw.questionLayout as QuestionLayout)) {
+			return { ok: false, error: `questionLayout must be one of ${QUESTION_LAYOUTS.join(", ")}` };
+		}
+		settings.questionLayout = raw.questionLayout as QuestionLayout;
 	}
 	if (raw.background !== undefined) {
 		const parsed = parseHexOrNull(raw.background, "background");
