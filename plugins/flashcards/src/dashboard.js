@@ -51,12 +51,12 @@ export function mountDashboard({ container, signal }) {
     scroll.append(svg); figure.append(chartTitle, scroll, element('figcaption', 'fc-chart-caption', caption)); charts.append(figure);
     return { title, svg };
   }
-  const due = chart('due', 'Scheduled due', 'Current scheduled due dates, not a forecast of future workload or repeat reviews.');
-  const activity = chart('activity', 'Scheduled reviews', 'Scheduled-review ratings recorded each day, not unique propositions.');
+  const due = chart('due', 'Scheduled due', 'Current scheduled due dates.');
+  const activity = chart('activity', 'Scheduled reviews', 'Scheduled review ratings recorded each day.');
   let disposed = false;
-  function renderChart(chart, values, kind) {
+  function renderChart(chart, values, kind, width) {
     const rows = Array.isArray(values) ? values : [];
-    const step = kind === 'due' ? 64 : 48, width = Math.max(step * rows.length, 320), baseline = 130;
+    const step = width / Math.max(rows.length, 1), baseline = 130;
     const maximum = Math.max(1, ...rows.map(row => count(row.count)));
     chart.svg.replaceChildren(); chart.svg.setAttribute('viewBox', `0 0 ${width} 184`);
     const descriptions = [];
@@ -67,8 +67,7 @@ export function mountDashboard({ container, signal }) {
       const detail = special || labels.full, value = count(row.count);
       descriptions.push(`${detail}: ${value}`);
       const group = svgElement('g', { 'data-day': row.day ?? 'overdue' });
-      const x = step * (index + .5), height = value / maximum * 104;
-      group.append(svgElement('title', {}, `${detail}: ${value}`));
+      const x = step * (index + .5), height = Math.max(1, value / maximum * 104);
       const bucket = kind === 'activity' ? 'activity' : special === 'Overdue' ? 'overdue' : special === 'Today' ? 'today' : 'future';
       // Palette hooks belong to bars, never their groups or foreground labels.
       group.append(svgElement('rect', { class: 'fc-chart-bar', 'data-bucket': bucket, x: x - step * .3, y: baseline - height, width: step * .6, height, fill: 'currentColor', opacity: '.6', rx: 2 }));
@@ -79,7 +78,7 @@ export function mountDashboard({ container, signal }) {
       group.append(dateText); chart.svg.append(group);
     }
     const accessible = `${chart.title}: ${descriptions.length ? descriptions.join('; ') : 'No data available.'}`;
-    chart.svg.setAttribute('aria-label', accessible); chart.svg.prepend(svgElement('title', {}, accessible));
+    chart.svg.setAttribute('aria-label', accessible);
   }
   function update(statistics) {
     if (disposed || signal.aborted) return;
@@ -90,7 +89,9 @@ export function mountDashboard({ container, signal }) {
       node.value.textContent = String(value); node.segment.style.width = `${total ? value / total * 100 : 0}%`;
       node.segment.title = `${node.label}: ${value}`;
     }
-    renderChart(due, statistics?.due, 'due'); renderChart(activity, statistics?.activity, 'activity');
+    // Equal-width cards must share SVG proportions so baselines and captions align.
+    const width = Math.max(320, Array.isArray(statistics?.due) ? statistics.due.length * 64 : 0, Array.isArray(statistics?.activity) ? statistics.activity.length * 48 : 0);
+    renderChart(due, statistics?.due, 'due', width); renderChart(activity, statistics?.activity, 'activity', width);
   }
   function dispose() {
     if (disposed) return;
