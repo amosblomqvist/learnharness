@@ -89,8 +89,8 @@ function question(kind: QuestionData["kind"] = "quiz"): QuestionData {
 }
 
 const quizBadges: Array<[string, Parameters<typeof buildAnswer>[1], string | undefined]> = [
-	["correct", { values: ["a"] }, "var(--color-green-500)"],
-	["incorrect", { values: ["b"] }, "var(--color-red-500)"],
+	["correct", { values: ["a"] }, "var(--lh-success)"],
+	["incorrect", { values: ["b"] }, "var(--lh-error)"],
 	["didn't know", { dontKnow: true }, undefined],
 ];
 for (const [label, submission, color] of quizBadges) {
@@ -127,9 +127,9 @@ function conclude(outcome?: string) {
 }
 
 for (const [outcome, label, color] of [
-	["solved", "Solved", "var(--color-green-500)"],
-	["solvedWithHints", "Solved with hints", "var(--color-amber-500)"],
-	["surrendered", "Surrendered", "var(--color-red-500)"],
+	["solved", "Solved", "var(--lh-success)"],
+	["solvedWithHints", "Solved with hints", "var(--lh-warning)"],
+	["surrendered", "Surrendered", "var(--lh-error)"],
 	["movedOn", "Moved on", undefined],
 ] as const) {
 	it(`ConcludeCard preserves the ${outcome} badge and surrounding content`, () => {

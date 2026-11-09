@@ -78,7 +78,7 @@ describe("status chrome speaks the theme tokens", () => {
 				}}
 			/>,
 		);
-		assert.match(out, /bg-success\/15[^"]*text-success|text-success[^"]*bg-success\/15/);
+		assert.match(out, /data-slot="status-badge"[^>]*color:var\(--lh-success\);background-color:color-mix\(in oklab, var\(--lh-success\) 15%, transparent\)/);
 		assert.doesNotMatch(out, /green-500/);
 	});
 });

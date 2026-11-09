@@ -163,7 +163,7 @@ function ColorOverrideRow({
 	value: string;
 	themeColor: string;
 	effective: string;
-	onCommit: (next: string) => void;
+	onCommit: (next: string) => boolean | Promise<boolean>;
 }) {
 	const { label, note } = COLOR_LABELS[colorKey];
 	const empty = `Empty = ${themeColor}`;

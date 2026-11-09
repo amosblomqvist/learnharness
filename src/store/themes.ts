@@ -8,11 +8,12 @@
 import fs from "node:fs";
 import path from "node:path";
 import { THEMES_DIR } from "../../config.ts";
+import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 import type { ThemeStore } from "../core/ports.ts";
 import { isBuiltinThemeId, isThemeId, sanitizeThemeFile, type Theme, type ThemeFile } from "../core/themes.ts";
 
 function fileFor(id: string): string {
-	return path.join(THEMES_DIR, `${id}.json`);
+	return path.join(/* turbopackIgnore: true */ THEMES_DIR, `${id}.json`);
 }
 
 function read(id: string): Theme | null {
@@ -45,14 +46,15 @@ export const themeStore: ThemeStore = {
 	readTheme: read,
 
 	writeTheme(id: string, theme: ThemeFile): void {
-		if (!isThemeId(id) || isBuiltinThemeId(id)) return;
+		if (!isThemeId(id) || isBuiltinThemeId(id)) throw new Error(`Invalid custom theme id "${id}"`);
 		fs.mkdirSync(THEMES_DIR, { recursive: true });
 		const file: ThemeFile = { name: theme.name, mode: theme.mode, colors: theme.colors };
-		fs.writeFileSync(fileFor(id), `${JSON.stringify(file, null, "\t")}\n`, "utf-8");
+		writeFileAtomicSync(fileFor(id), `${JSON.stringify(file, null, "\t")}\n`);
 	},
 
 	deleteTheme(id: string): void {
 		if (!isThemeId(id) || isBuiltinThemeId(id)) return;
 		fs.rmSync(fileFor(id), { force: true });
+		removeLeftoverTemps(fileFor(id));
 	},
 };

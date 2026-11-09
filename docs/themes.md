@@ -1,9 +1,14 @@
 # Themes
 
-**Settings → Appearance → Theme** sets every color in the app from one palette.
+**Settings → Appearance → Theme** sets the app's UI palette.
 LearnHarness ships eleven presets: Default (the original dark palette), Catppuccin
 Latte, Frappé, Macchiato and Mocha, Rosé Pine and Rosé Pine Dawn, Gruvbox Dark, Ivory, Pastel, and NvChad Onedark.
-Each theme declares whether it is dark or light, and the window chrome follows it.
+Each theme declares whether it is dark or light. The native window background
+follows the effective background, including your override; native control symbols
+choose a contrasting ink. Mermaid diagrams follow the theme's light/dark mode.
+Generated figures keep their own colors and existing inversion controls. Plugins
+that use the app's CSS tokens inherit them; plugin-specific palettes and artwork
+are not rewritten.
 
 ## Overriding single colors
 
@@ -70,3 +75,6 @@ in the desktop app). The id is a slug of the name; a name that collides with an
 existing theme gets a `-2`, `-3`… suffix. Preset ids are reserved.
 
 Removing the active custom theme switches back to Default and keeps your overrides.
+If the selected file is removed or becomes invalid outside the app, the UI falls
+back to Default; the next appearance save also repairs the saved selection, so
+font and other appearance edits remain available.

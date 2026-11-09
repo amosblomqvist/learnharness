@@ -58,6 +58,7 @@ describe("desktop development startup", () => {
 				requestSingleInstanceLock: () => false, quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {},
 			},
 			BrowserWindow: FakeWindow,
+			nativeTheme: { themeSource: "system" },
 			Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
 			ipcMain: { handle() {}, on() {} },
 			session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
@@ -85,6 +86,67 @@ describe("desktop development startup", () => {
 		respond();
 		await boot;
 		assert.deepEqual(loaded, [devUrl], "the window navigates once the server responds");
+	});
+});
+
+describe("desktop appearance boot and IPC", () => {
+	it("constructs light native chrome before renderer reporting and accepts appearance only from its exact main-frame origin", async () => {
+		const origin = "http://127.0.0.1:9000";
+		const handlers = new Map<string, (event: unknown, value: unknown) => void>();
+		const windows: FakeWindow[] = [];
+		class FakeWindow {
+			static getAllWindows() { return windows; }
+			static fromWebContents(sender: unknown) { return windows.find(win => win.webContents === sender); }
+			webContents = { on() {}, setWindowOpenHandler() {}, mainFrame: { url: origin } };
+			background: string | undefined;
+			overlay: unknown;
+			constructor(readonly options: { backgroundColor: string; titleBarOverlay: unknown }) { windows.push(this); }
+			loadURL() {} once() {} isDestroyed() { return false; }
+			setBackgroundColor(color: string) { this.background = color; }
+			setTitleBarOverlay(colors: unknown) { this.overlay = colors; }
+		}
+		const nativeTheme = { themeSource: "system" };
+		const chrome = mainRequire("./appearance-chrome.cjs");
+		let bootDirectory: string | undefined;
+		const context = {
+			require: (id: string) => {
+				if (id === "electron") return {
+					app: { setName() {}, getPath: () => "/fixture/shell", setPath() {}, requestSingleInstanceLock: () => false,
+						quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {} },
+					BrowserWindow: FakeWindow, nativeTheme,
+					Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
+					ipcMain: { handle() {}, on: (name: string, fn: (event: unknown, value: unknown) => void) => handlers.set(name, fn) },
+					session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+				};
+				if (id === "node:fs") return { mkdirSync() {}, appendFileSync() {} };
+				if (id === "./appearance-chrome.cjs") return { ...chrome, readAppearance: (directory: string) => {
+					bootDirectory = directory; return { mode: "light", background: "#faf9f5" };
+				} };
+				if (id === "./dev-server-readiness.cjs") return { waitForDevServer: async () => {} };
+				return mainRequire(id);
+			},
+			process: { platform: "win32", argv: [], env: { LH_DEV_URL: origin, LH_DATA_DIR: "/fixture/server-data" }, on() {} },
+			AbortController, URL, __dirname: dirname(mainFile),
+		};
+		runInNewContext(mainSource, context, { filename: mainFile });
+		await runInNewContext("main()", context);
+		assert.equal(bootDirectory, "/fixture/server-data");
+		assert.equal(nativeTheme.themeSource, "light");
+		const win = windows[0]!;
+		assert.equal(win.options.backgroundColor, "#faf9f5");
+		assert.deepEqual(JSON.parse(JSON.stringify(win.options.titleBarOverlay)), { color: "#faf9f5", symbolColor: "#1a1a1a" });
+		const report = handlers.get("lh:appearance")!;
+		const next = { mode: "dark", background: "#101010" };
+		report({ sender: win.webContents, senderFrame: { url: origin } }, next);
+		assert.equal(win.background, undefined, "subframes cannot repaint the window");
+		win.webContents.mainFrame.url = "https://untrusted.example";
+		report({ sender: win.webContents, senderFrame: win.webContents.mainFrame }, next);
+		assert.equal(win.background, undefined, "a navigated trusted window is not enough");
+		win.webContents.mainFrame.url = origin;
+		report({ sender: win.webContents, senderFrame: win.webContents.mainFrame }, next);
+		assert.equal(win.background, "#101010");
+		assert.equal(nativeTheme.themeSource, "system");
+		assert.deepEqual(win.overlay, { color: "#101010", symbolColor: "#e5e5e5" });
 	});
 });
 

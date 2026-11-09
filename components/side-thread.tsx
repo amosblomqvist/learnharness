@@ -63,7 +63,7 @@ function SideInputMeter({ levelRef }: { levelRef?: { current: number } }) {
 		return () => clearInterval(timer);
 	}, [levelRef]);
 	return <span data-testid="side-input-meter" role="meter" aria-label="Microphone input level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(level * 100)}
-		className="flex h-4 items-center gap-px text-red-500">
+		className="flex h-4 items-center gap-px text-error">
 		{[0.6, 1, 0.6].map((scale, index) => <span key={index} aria-hidden="true" className="w-0.5 rounded-full bg-current transition-[height] duration-75 motion-reduce:transition-none" style={{ height: 2 + 12 * scale * level }} />)}
 	</span>;
 }
@@ -164,7 +164,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 						aria-label={dictation.active ? "Stop side dictation" : "Start side dictation"} aria-pressed={dictation.active}
 						title={dictation.error ?? (dictation.active ? "Stop side dictation" : "Dictate side question")}
 						disabled={dictation.blocked || dictation.phase === "stopping"} onClick={dictation.toggle}
-						className={`flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${dictation.active ? "bg-red-500/15 text-red-500" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
+						className={`flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${dictation.active ? "bg-error/15 text-error" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
 						<Mic aria-hidden="true" className="size-3.5" />
 					</button></div>}
 					</div>

@@ -910,7 +910,7 @@ export function GraphView({
 	const interactions = useInteractionLayers();
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const cardRef = useRef<HTMLDivElement | null>(null);
-	const { resolvedMode } = useAppearance();
+	const { resolvedMode, colors } = useAppearance();
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
 	// The latest snapshot for the renderer's click callbacks (they are
@@ -1342,9 +1342,9 @@ export function GraphView({
 	// Feed #1 — data: positions + edges + clusters + resolved colors. Runs
 	// after the layout effect (same commit, declaration order) and after
 	// the construct effect, so the renderer exists and positions are fresh.
-	// resolvedMode re-runs it: the token hexes and the cluster lightness are
-	// per mode (the provider swaps the <html> class in a LAYOUT effect, so
-	// the computed tokens are already the new mode's when this one runs).
+	// Palette changes (including same-mode theme switches and overrides)
+	// must refresh the canvas's captured paint, not just DOM CSS. The
+	// provider applies tokens in a layout effect before this passive feed.
 	useEffect(() => {
 		const renderer = rendererRef.current;
 		const positions = posRef.current;
@@ -1370,7 +1370,7 @@ export function GraphView({
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, isEmpty, resolvedMode]);
+	}, [snapshot, isEmpty, resolvedMode, colors]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).

@@ -822,7 +822,7 @@ export function AgentSection({
 								return next.ok ? onSectionChange(next.settings) : false;
 							}}
 						/>
-						{workerConcurrencyError && <p role="alert" className="text-xs text-red-400">{workerConcurrencyError}</p>}
+						{workerConcurrencyError && <p role="alert" className="text-xs text-error">{workerConcurrencyError}</p>}
 					</div>
 				</SettingsRow>
 			</SettingsGroup>

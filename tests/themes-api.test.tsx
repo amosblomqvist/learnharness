@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 
 const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "lh-themes-"));
 process.env.LH_DATA_DIR = TMP_DATA;
@@ -22,7 +23,7 @@ const { THEMES_DIR } = await import("../config.ts");
 const { PUT: putSection } = await import("../app/api/settings/[section]/route.ts");
 const { GET: getThemes, POST: postTheme } = await import("../app/api/themes/route.ts");
 const { DELETE: deleteTheme } = await import("../app/api/themes/[id]/route.ts");
-const { readSettingsRecord, writeSettingsRecord, readThemeBoot } = await import("../src/server/index.ts");
+const { readSettingsRecord, writeSettingsRecord, readThemeBoot, themeStore } = await import("../src/server/index.ts");
 const { BUILTIN_THEMES, exportThemeFile, themeVars, effectiveColors } = await import("../src/core/index.ts");
 const { AppearanceProvider, appearanceVars, resolveAppearance } = await import("../components/settings/appearance.tsx");
 const { AppearanceSection } = await import("../components/settings/appearance-section.tsx");
@@ -46,9 +47,11 @@ const list = async () => ((await (await getThemes()).json()) as { themes: Theme[
 function renderSection(): string {
 	const { appearance, theme } = readThemeBoot();
 	return renderToStaticMarkup(
-		<AppearanceProvider initialAppearance={appearance} initialTheme={theme}>
-			<AppearanceSection appearance={appearance} onSectionChange={() => {}} />
-		</AppearanceProvider>,
+		<InteractionLayersProvider>
+			<AppearanceProvider initialAppearance={appearance} initialTheme={theme}>
+				<AppearanceSection appearance={appearance} onSectionChange={() => true} />
+			</AppearanceProvider>
+		</InteractionLayersProvider>,
 	);
 }
 const pressed = (html: string, id: string) => {
@@ -91,6 +94,22 @@ describe("picking a preset recolors the app and keeps my overrides", () => {
 		assert.equal(vars["--lh-success"], latte.colors.success);
 	});
 
+	for (const missing of ["deleted", "malformed"]) {
+		it(`an active ${missing} custom theme heals to Default while other appearance edits save`, async () => {
+			await post(ayu);
+			await put("appearance", { theme: "my-ayu", background: "#123456", codeLigatures: true });
+			if (missing === "deleted") fs.unlinkSync(path.join(THEMES_DIR, "my-ayu.json"));
+			else fs.writeFileSync(path.join(THEMES_DIR, "my-ayu.json"), "{truncated");
+			assert.equal(readThemeBoot().theme.id, "default");
+			const res = await put("appearance", { ...readSettingsRecord()!.appearance, proseFontSize: 20 });
+			assert.equal(res.status, 200);
+			assert.deepEqual(readSettingsRecord()!.appearance, {
+				theme: "default", background: "#123456", codeLigatures: true, proseFontSize: 20,
+			});
+			assert.equal((await put("appearance", { theme: "another-missing" })).status, 400, "new unknown selections still fail");
+		});
+	}
+
 	it("an unknown theme id is refused and the record is untouched", async () => {
 		const res = await put("appearance", { theme: "no-such-theme" });
 		assert.equal(res.status, 400);
@@ -100,6 +119,21 @@ describe("picking a preset recolors the app and keeps my overrides", () => {
 });
 
 describe("importing a theme file makes it a selectable card; a bad file leaves no trace", () => {
+	it("server first paint reads only the selected custom file, not the whole catalog", async t => {
+		await post(ayu);
+		await put("appearance", { theme: "my-ayu" });
+		t.mock.method(themeStore, "listThemes", () => { throw new Error("Must not enumerate for first paint"); });
+		assert.equal(readThemeBoot().theme.id, "my-ayu");
+	});
+
+	it("storage failure cannot return import success, and invalid store ids fail loudly", async t => {
+		for (const id of ["default", "../escape", "a-", "a".repeat(65)]) {
+			assert.throws(() => themeStore.writeTheme(id, mocha), /Invalid custom theme id/);
+		}
+		t.mock.method(themeStore, "writeTheme", () => { throw new Error("Synthetic disk failure"); });
+		await assert.rejects(post(ayu), /Synthetic disk failure/);
+		assert.equal(fs.existsSync(THEMES_DIR), false);
+	});
 	it("valid file → 201, on disk, listed after the presets, selectable", async () => {
 		const res = await post(ayu);
 		assert.equal(res.status, 201);
@@ -110,6 +144,21 @@ describe("importing a theme file makes it a selectable card; a bad file leaves n
 		assert.deepEqual(themes.map((t) => t.id), [...BUILTIN_THEMES.map((t) => t.id), "my-ayu"]);
 		assert.equal((await put("appearance", { theme: "my-ayu" })).status, 200);
 		assert.ok(pressed(renderSection(), "my-ayu"));
+	});
+
+	it("long names, truncation at a separator, and collisions always save valid selectable ids", async () => {
+		for (const name of ["a".repeat(100), `${"b".repeat(63)} c`, "Default"]) {
+			for (let n = 0; n < 3; n++) {
+				const res = await post({ ...ayu, name });
+				assert.equal(res.status, 201);
+				const { theme } = await res.json() as { theme: Theme };
+				assert.ok(theme.id.length <= 64);
+				assert.match(theme.id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/);
+				assert.ok(fs.existsSync(path.join(THEMES_DIR, `${theme.id}.json`)));
+				assert.equal((await put("appearance", { theme: theme.id })).status, 200);
+				assert.equal(readThemeBoot().theme.id, theme.id);
+			}
+		}
 	});
 
 	it("a file missing colors.error → 400 naming it, nothing written", async () => {
