@@ -87,6 +87,114 @@ function sharedCards(h) {
   h.state.revision++; h.notify();
 }
 
+test('manual creation uses icon-only plus controls directly left of deck and active-target gears, never cue or archive rows', async () => {
+  const h = await setup();
+  try {
+    openAll(h);
+    for (const [id, labels] of [['deck:d1', ['Create card', 'Deck actions']], ['deck:d2', ['Create card', 'Deck actions']], ['deck:d1:p:p1', ['Add cue', 'Proposition actions']], ['deck:d1:p:p1:cue:c1', ['Cue actions']]]) {
+      const buttons = [...rowNode(h, id).querySelectorAll('.fc-tree-more button')];
+      assert.deepEqual(buttons.map(button => button.getAttribute('aria-label')), labels);
+      for (const button of buttons) {
+        const handle = h.handles.find(handle => handle.kind === 'button' && !handle.disposed && handle.container.contains(button));
+        assert.equal(handle.props.iconOnly, true); assert.equal(handle.props.variant, 'ghost'); assert.equal(handle.props.size, 'icon-sm');
+        assert.ok(button.querySelector('svg'), 'creation and settings controls use real icons');
+      }
+    }
+    h.state.propositions[0].archived = true; h.state.revision++; h.notify(); await flush(); openAll(h);
+    const archived = rowNode(h, 'archive:p:p1');
+    assert.ok(!archived.querySelector('.fc-tree-more'), 'archived targets have neither creation controls nor gears');
+  } finally { h.dispose(); }
+});
+
+test('deck plus creates a named target and first cue together using the existing Markdown editor layout and reveals the saved card', async () => {
+  const h = await setup();
+  try {
+    click(h, 'Create card', rowNode(h, 'deck:d2'));
+    const dialog = document.querySelector('[role=dialog]'); assert.equal(dialog.getAttribute('aria-label'), 'Create card');
+    assert.deepEqual([...dialog.querySelectorAll('.fc-label')].map(node => node.textContent), ['Name', 'Question (Markdown)', 'Answer (Markdown)']);
+    assert.equal(dialog.querySelectorAll('textarea.fc-input').length, 2); assert.ok(!dialog.querySelector('select'));
+    const [name, question, answer] = dialog.querySelectorAll('.fc-field .fc-input');
+    change(name, 'My handwritten target'); change(question, 'A **question**?'); change(answer, '$x=1$');
+    assert.equal(operationCalls(h, 'create-card').length, 0);
+    click(h, 'Save', dialog); await flush();
+    assert.ok(!document.querySelector('[role=dialog]'));
+    const input = operationCalls(h, 'create-card')[0][1];
+    assert.equal(input.deckId, 'd2'); assert.equal(input.name, 'My handwritten target'); assert.equal(input.question, 'A **question**?'); assert.equal(input.answer, '$x=1$'); assert.ok(input.requestId);
+    const p = h.state.propositions.find(p => p.origin === 'manual'); assert.ok(p);
+    assert.ok(row(h, 'deck:d2').disclosure.expanded); assert.ok(row(h, `deck:d2:p:${p.id}`).disclosure.expanded);
+    assert.ok(rowNode(h, `deck:d2:p:${p.id}:cue:${p.cues[0].id}`));
+    assert.equal(operationCalls(h, 'preflight').length, 0); assert.equal(operationCalls(h, 'start-generation').length, 0); assert.equal(h.conversions.length, 0);
+    select(h, `deck:d2:p:${p.id}:cue:${p.cues[0].id}`); click(h, 'Practice selected'); await flush();
+    assert.ok(surfaceRoot(h).querySelector('.fc-review-card').textContent.includes('A **question**?'));
+    click(h, 'Reveal answer', surfaceRoot(h)); await flush();
+    assert.ok(surfaceRoot(h).querySelector('.fc-answer').textContent.includes('$x=1$'));
+  } finally { h.dispose(); }
+});
+
+test('target plus adds only a question and answer, preserving the target and showing shared cues in both memberships', async () => {
+  const h = await setup();
+  try {
+    sharedCards(h); await flush(); openAll(h);
+    const before = structuredClone(h.state.propositions[0]);
+    click(h, 'Add cue', rowNode(h, 'deck:d2:p:p1'));
+    const dialog = document.querySelector('[role=dialog]'); assert.equal(dialog.getAttribute('aria-label'), 'Add cue');
+    assert.deepEqual([...dialog.querySelectorAll('.fc-label')].map(node => node.textContent), ['Question (Markdown)', 'Answer (Markdown)']);
+    const [question, answer] = dialog.querySelectorAll('textarea'); change(question, 'Another question'); change(answer, 'Another answer');
+    click(h, 'Save', dialog); await flush();
+    const input = operationCalls(h, 'create-cue')[0][1]; assert.equal(input.propositionId, 'p1'); assert.equal(input.name, undefined); assert.ok(input.requestId);
+    const p = h.state.propositions[0]; assert.equal(p.cues.length, before.cues.length + 1);
+    for (const key of ['id', 'name', 'memberships', 'schedule']) assert.deepEqual(p[key], before[key]);
+    for (const deck of ['d1', 'd2']) assert.ok(rowNode(h, `deck:${deck}:p:p1:cue:${p.cues.at(-1).id}`));
+  } finally { h.dispose(); }
+});
+
+test('manual editor cancellation creates nothing and rejected blank saves retain editable fields', async () => {
+  const h = await setup();
+  try {
+    click(h, 'Create card', rowNode(h, 'deck:d2')); let dialog = document.querySelector('[role=dialog]');
+    click(h, 'Cancel', dialog); await flush(); assert.equal(operationCalls(h, 'create-card').length, 0);
+    click(h, 'Create card', rowNode(h, 'deck:d2')); dialog = document.querySelector('[role=dialog]');
+    const fields = [...dialog.querySelectorAll('.fc-input')]; change(fields[0], 'Keep my draft');
+    click(h, 'Save', dialog); await flush();
+    assert.ok(dialog.querySelector('[role=alert]').textContent.includes('blank')); assert.equal(fields[0].value, 'Keep my draft');
+    assert.equal(h.state.propositions.length, 1); assert.equal(h.state.decks[1].propositionIds.length, 0);
+    change(fields[1], 'Question'); change(fields[2], 'Answer'); click(h, 'Save', dialog); await flush();
+    assert.equal(h.state.propositions.length, 2); assert.ok(!document.querySelector('[role=dialog]'));
+  } finally { h.dispose(); }
+});
+
+test('manual save retries reuse their request ID after a lost accepted response and create only one target', async () => {
+  const h = await setup();
+  try {
+    const call = h.ctx.call; let loseResponse = true;
+    h.ctx.call = async (operation, input) => {
+      const result = await call(operation, input);
+      if (operation === 'create-card' && loseResponse) { loseResponse = false; throw new Error('Synthetic lost response'); }
+      return result;
+    };
+    click(h, 'Create card', rowNode(h, 'deck:d2')); const dialog = document.querySelector('[role=dialog]');
+    const fields = [...dialog.querySelectorAll('.fc-input')]; ['Target', 'Question', 'Answer'].forEach((value, i) => change(fields[i], value));
+    click(h, 'Save', dialog); await flush();
+    assert.equal(h.state.propositions.length, 2); assert.equal(fields[1].value, 'Question'); assert.ok(dialog.querySelector('[role=alert]').textContent.includes('lost response'));
+    click(h, 'Save', dialog); await flush();
+    const calls = operationCalls(h, 'create-card'); assert.equal(calls.length, 2); assert.equal(calls[0][1].requestId, calls[1][1].requestId);
+    assert.equal(h.state.propositions.length, 2); assert.ok(!document.querySelector('[role=dialog]'));
+  } finally { h.dispose(); }
+});
+
+test('late manual-save responses do not close a newer editor or navigate after their dialog is dismissed', async () => {
+  const h = await setup();
+  try {
+    openAll(h); const pending = deferred(); h.overrides['create-cue'] = () => pending.promise;
+    click(h, 'Add cue', rowNode(h, 'deck:d1:p:p1')); const old = document.querySelector('[role=dialog]');
+    const [question, answer] = old.querySelectorAll('textarea'); change(question, 'Question'); change(answer, 'Answer'); click(h, 'Save', old); await flush();
+    click(h, 'Cancel', old); click(h, 'Create card', rowNode(h, 'deck:d2')); const newer = document.querySelector('[role=dialog]');
+    const search = h.app.querySelector('input[type=search]'); search.value = 'preserve search';
+    pending.resolve({ state: structuredClone(h.state), propositionId: 'p1', cueId: 'late' }); await flush();
+    assert.equal(document.querySelector('[role=dialog]'), newer); assert.equal(newer.getAttribute('aria-label'), 'Create card'); assert.equal(search.value, 'preserve search');
+  } finally { h.dispose(); }
+});
+
 test('native library, host placements, explicit preflight and no navigation cancellation', async () => {
   const h = await setup();
   try {

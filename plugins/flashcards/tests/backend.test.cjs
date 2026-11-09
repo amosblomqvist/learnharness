@@ -125,6 +125,83 @@ function harness(t, initialGraph = graph('p1')) {
   return h;
 }
 
+test('manual creation atomically makes a local target and first cue in the chosen deck without graph writes or model calls', async t => {
+  const h = harness(t, graph()); await h.call('create-deck', { name: 'Handwritten' });
+  h.catalog.slots = {}; h.resolveCatalog = () => { throw new Error('Manual creation must not resolve a model'); };
+  const deckId = h.state().decks[0].id, graphBefore = structuredClone(h.graph);
+  const input = { deckId, name: '  My target  ', question: 'Question **Markdown**?', answer: '$x = 1$', requestId: 'manual-create' };
+  const created = await h.call('create-card', input), p = created.state.propositions[0];
+  assert.equal(p.id, created.propositionId); assert.equal(p.name, 'My target'); assert.equal(p.origin, 'manual'); assert.equal(p.archived, false);
+  assert.deepEqual(p.memberships, [deckId]); assert.deepEqual(created.state.decks[0].propositionIds, [p.id]);
+  assert.equal(p.cues.length, 1); assert.equal(p.cues[0].id, created.cueId); assert.equal(p.cues[0].question, input.question); assert.equal(p.cues[0].answer, input.answer);
+  assert.equal(p.schedule.state, 0); assert.equal(p.firstReviewedAt, null); assert.equal(p.learningCueId, null);
+  assert.deepEqual(created.state.statistics.states, { new: 1, learning: 0, review: 0, relearning: 0 });
+  assert.equal(h.workers.starts, 0); assert.equal(h.catalogReads, 0); assert.deepEqual(h.graph, graphBefore);
+  assert.deepEqual(fs.readdirSync(h.directory), ['flashcards.json'], 'manual content needs neither file sources nor task records');
+  h.activate(); assert.equal(h.state().propositions[0].archived, false);
+  await h.grade({ cueIds: [created.cueId] }, 1);
+  assert.equal(h.state().decks[0].newToday, 1); assert.equal(h.state().propositions[0].schedule.state, 1);
+  const another = await h.call('create-card', { ...input, requestId: 'another-intentional-create' });
+  assert.notEqual(another.propositionId, p.id, 'a deliberate new save creates a new target instead of matching labels');
+  await h.call('reorder', { kind: 'proposition', deckId, id: another.propositionId, direction: -1 });
+  assert.deepEqual(h.state().decks[0].propositionIds, [another.propositionId, p.id]);
+});
+
+test('manual add-cue works on graph, file and handwritten targets without resetting schedules, history, memberships or learning pins', async t => {
+  for (const origin of ['graph', 'file', 'manual']) {
+    const h = harness(t, origin === 'graph' ? graph('p1') : graph());
+    if (origin === 'graph') await h.generate(cards('p1', 'Existing cue'));
+    else if (origin === 'file') { const started = await h.startFile(fileInput()); await h.complete(started.tasks[0], fileResult(fileFact('File fact', 'Statement', 'Existing cue'))); }
+    else { await h.call('create-deck', { name: 'Manual' }); await h.call('create-card', { deckId: h.state().decks[0].id, name: 'Manual fact', question: 'Existing cue', answer: 'Existing answer', requestId: 'first' }); }
+    const id = h.state().propositions[0].id; await h.grade({ propositionIds: [id] }, 1);
+    const before = structuredClone(h.state().propositions[0]), reviews = h.disk().reviews;
+    const added = await h.call('create-cue', { propositionId: id, question: 'Alternate cue', answer: 'Alternate answer', requestId: 'append' });
+    const after = added.state.propositions.find(p => p.id === id);
+    assert.equal(added.propositionId, id); assert.equal(after.cues.at(-1).id, added.cueId);
+    assert.equal(after.cues.at(-1).latestRating, null); assert.equal(after.version, before.version + 1);
+    for (const key of ['schedule', 'firstReviewedAt', 'learningCueId', 'memberships']) assert.deepEqual(after[key], before[key], `${origin}: ${key}`);
+    assert.deepEqual(after.cues.slice(0, -1), before.cues); assert.deepEqual(h.disk().reviews, reviews);
+  }
+});
+
+test('manual creation receipts survive restart, editing and deletion; duplicate deliveries never add another target or cue', async t => {
+  const h = harness(t, graph()); await h.call('create-deck', { name: 'Manual' });
+  const create = { deckId: h.state().decks[0].id, name: 'Target', question: 'Question', answer: 'Answer', requestId: 'create-once' };
+  const first = await h.call('create-card', create), before = h.disk();
+  const repeated = await h.call('create-card', create); assert.equal(repeated.propositionId, first.propositionId); assert.equal(repeated.cueId, first.cueId); assert.deepEqual(h.disk(), before);
+  await assert.rejects(h.call('create-card', { ...create, answer: 'Different' }), /different work/);
+  const append = { propositionId: first.propositionId, question: 'Second', answer: 'Answer', requestId: 'append-once' };
+  const second = await h.call('create-cue', append);
+  await h.call('save-cue', { propositionId: first.propositionId, cueId: second.cueId, question: 'Edited', answer: 'Edited answer', version: h.state().propositions[0].version });
+  await h.call('delete-cue', { propositionId: first.propositionId, cueId: second.cueId, version: h.state().propositions[0].version });
+  h.activate(); const saved = h.disk();
+  const retry = await h.call('create-cue', append); assert.equal(retry.cueId, second.cueId); assert.deepEqual(h.disk(), saved);
+  const retryCreate = await h.call('create-card', create); assert.equal(retryCreate.propositionId, first.propositionId); assert.deepEqual(h.disk(), saved);
+  await assert.rejects(h.call('create-cue', { ...append, question: 'Changed request' }), /different work/);
+  assert.equal(h.state().propositions.length, 1); assert.equal(h.state().propositions[0].cues.length, 2);
+});
+
+test('manual writes reject blank content, missing destinations and archived graph targets without partial mutation', async t => {
+  const h = harness(t); await h.generate(cards('p1', 'Graph cue'));
+  const input = { deckId: h.state().decks[0].id, name: 'Name', question: 'Question', answer: 'Answer', requestId: 'new' }, before = h.disk();
+  for (const key of ['name', 'question', 'answer', 'requestId']) await assert.rejects(h.call('create-card', { ...input, [key]: '  ' }), /blank/);
+  await assert.rejects(h.call('create-card', { ...input, deckId: 'missing' }), /Deck not found/);
+  await assert.rejects(h.call('create-cue', { propositionId: 'missing', question: 'Q', answer: 'A', requestId: 'x' }), /Proposition not found/);
+  for (const key of ['question', 'answer', 'requestId']) await assert.rejects(h.call('create-cue', { propositionId: 'p1', question: 'Q', answer: 'A', requestId: 'x', [key]: '' }), /blank/);
+  h.graph.propositions = [];
+  await assert.rejects(h.call('create-cue', { propositionId: 'p1', question: 'Q', answer: 'A', requestId: 'x' }), /no longer|archived/);
+  assert.deepEqual(h.disk(), before);
+});
+
+test('manual atomic save failure leaves no empty target and a retry creates exactly one complete card', async t => {
+  const h = harness(t, graph()); await h.call('create-deck', { name: 'Manual' });
+  const input = { deckId: h.state().decks[0].id, name: 'Name', question: 'Question', answer: 'Answer', requestId: 'retry-save' }, before = h.disk();
+  const rename = t.mock.method(fs, 'renameSync', () => { throw new Error('Synthetic manual save failure'); });
+  await assert.rejects(h.call('create-card', input), /Synthetic manual save failure/); assert.deepEqual(h.disk(), before); assert.equal(h.state().propositions.length, 0);
+  rename.mock.restore(); await h.call('create-card', input); await h.call('create-card', input);
+  assert.equal(h.state().propositions.length, 1); assert.equal(h.state().propositions[0].cues.length, 1);
+});
+
 const fileFact = (name, statement, ...questions) => ({ name, statement, cards: questions.map(question => ({ question, answer: `Answer: ${question}` })) });
 const fileResult = (...facts) => ({ facts });
 const fileInput = () => ({ name: 'lesson.notes.md', markdown: 'UNIQUE SOURCE MARKDOWN\n\nThe original converted notes are retained separately.' });

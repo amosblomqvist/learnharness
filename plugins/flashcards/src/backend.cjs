@@ -19,6 +19,7 @@ const estimate = (input) => Math.ceil(Buffer.byteLength(instructions + JSON.stri
 const fingerprint = (input) => createHash('sha256').update(JSON.stringify(input)).digest('hex');
 const activeBatch = (s) => s.batches.findLast(b => ['running', 'cancelling'].includes(b.status));
 const memberships = (s, id) => s.decks.filter(d => d.propositionIds.includes(id)).map(d => d.id);
+const isLocal = p => p.origin === 'file' || p.origin === 'manual';
 const reviewConfiguration = s => fingerprint({ retention: s.retention, learningSteps: s.learningSteps, relearningSteps: s.relearningSteps, dayStart: s.dayStart, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
 const fail = (message) => { throw new Error(message); };
 function requiredText(value, label) { if (typeof value !== 'string' || !value.trim()) fail(`${label} must not be blank.`); return value; }
@@ -103,7 +104,7 @@ function activate(ctx) {
   const prop = (s, id) => Object.hasOwn(s.propositions, id) ? s.propositions[id] : fail('Proposition not found.');
   const deck = (s, id) => s.decks.find(d => d.id === id) ?? fail('Deck not found.');
   const fileSource = (s, id) => Object.hasOwn(s.fileSources ?? {}, id) ? s.fileSources[id] : fail('File source not found.');
-  function liveIds(s) { return new Set([...graphNow().propositions.map(p => p.id), ...Object.values(s.propositions).filter(p => p.origin === 'file').map(p => p.id)]); }
+  function liveIds(s) { return new Set([...graphNow().propositions.map(p => p.id), ...Object.values(s.propositions).filter(isLocal).map(p => p.id)]); }
   function ensureFileDeck(s, source) {
     let destination = s.decks.find(d => d.id === source.deckId);
     if (!destination) {
@@ -229,6 +230,38 @@ function activate(ctx) {
   register('get-catalog', () => ctx.inference.catalog());
   register('save-settings', patch => { change(s => { s.settings = validateSettings(patch, s.settings); }); return view(); });
   register('create-deck', ({ name }) => { change(s => s.decks.push({ id: randomUUID(), name: requiredText(name, 'Deck name').trim(), newLimit: 20, propositionIds: [] })); return view(); });
+  function createManualCard(input, newTarget) {
+    const requestId = requiredText(input.requestId, 'Request ID');
+    const question = requiredText(input.question, 'Question'), answer = requiredText(input.answer, 'Answer');
+    const destination = newTarget
+      ? { deckId: requiredText(input.deckId, 'Deck ID'), name: requiredText(input.name, 'Name').trim() }
+      : { propositionId: requiredText(input.propositionId, 'Target ID') };
+    const hash = fingerprint({ kind: newTarget ? 'create-card' : 'create-cue', ...destination, question, answer });
+    // Receipts live with their cue, including after edits/deletion, so a lost
+    // response can be retried without adding content or restoring tombstones.
+    for (const p of Object.values(store.get().propositions)) for (const cue of p.cues) {
+      if (cue.creation?.requestId !== requestId) continue;
+      if (cue.creation.hash !== hash) fail('This request ID was already used for different work.');
+      return { state: view(), propositionId: p.id, cueId: cue.id };
+    }
+    const created = change(s => {
+      let p;
+      if (newTarget) {
+        const d = deck(s, destination.deckId);
+        p = { id: `manual:${randomUUID()}`, origin: 'manual', name: destination.name, statement: '', cues: [], schedule: scheduler.createSchedule(), firstReviewedAt: null, learningCueId: null, version: 0 };
+        s.propositions[p.id] = p; d.propositionIds.push(p.id);
+      } else {
+        p = prop(s, destination.propositionId);
+        if (!isLocal(p) && !graphNow().propositions.some(node => node.id === p.id)) fail('The target is no longer in the graph.');
+      }
+      const cue = { id: randomUUID(), question, answer, latestRating: null, creation: { requestId, hash } };
+      p.cues.push(cue); p.version++;
+      return { propositionId: p.id, cueId: cue.id };
+    });
+    return { state: view(), ...created };
+  }
+  register('create-card', input => createManualCard(input, true));
+  register('create-cue', input => createManualCard(input, false));
   register('save-deck', patch => {
     change(s => {
       const d = deck(s, patch.id);
@@ -416,7 +449,7 @@ function activate(ctx) {
     const t = tickets.get(id) ?? fail('This review expired. Load the next card.');
     const s = store.get(), p = prop(s, t.propositionId);
     if (p.version !== t.version || reviewConfiguration(s.settings) !== t.settingsHash || scheduler.studyDay(now, s.settings.dayStart) !== t.day) fail('This review changed elsewhere. Load the next card.');
-    if (p.origin !== 'file' && !graphNow().propositions.some(n => n.id === p.id)) fail('The proposition is no longer in the graph.');
+    if (!isLocal(p) && !graphNow().propositions.some(n => n.id === p.id)) fail('The proposition is no longer in the graph.');
     const { ids } = scopeIds(s, t.scope);
     if (!ids.includes(p.id)) fail('The review selection changed. Load the next card.');
     const c = reviewCues(p, t.scope).find(c => c.id === t.cueId) ?? fail('This card is no longer available in the review selection.');

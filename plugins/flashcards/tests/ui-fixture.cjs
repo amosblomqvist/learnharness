@@ -25,6 +25,7 @@ function fixture(document) {
   };
   const overrides = {};
   let filePreflight;
+  const manualReceipts = new Map();
   const catalog = { slots: { cheap: { model: { provider: 'test', id: 'cheap' }, thinkingLevel: 'low' } } };
   const clone = value => JSON.parse(JSON.stringify(value));
   function handle(kind, container, props, signal, render, cleanup) {
@@ -84,6 +85,29 @@ function fixture(document) {
         const deck = state.decks.find(deck => deck.sourceId === input.sourceId);
         if (!deck) throw new Error('File source not found');
         return { state: clone(state), deckId: deck.id };
+      }
+      if (operation === 'create-card' || operation === 'create-cue') {
+        for (const key of ['question', 'answer', 'requestId', ...(operation === 'create-card' ? ['name'] : [])]) {
+          if (typeof input[key] !== 'string' || !input[key].trim()) throw new Error(`${key} must not be blank.`);
+        }
+        const signature = JSON.stringify([operation, input]), prior = manualReceipts.get(input.requestId);
+        if (prior) {
+          if (prior.signature !== signature) throw new Error('This request ID was already used for different work.');
+          return { state: clone(state), ...prior.ids };
+        }
+        let p;
+        if (operation === 'create-card') {
+          const deck = state.decks.find(d => d.id === input.deckId); if (!deck) throw new Error('Deck not found.');
+          p = { id: `manual:${input.requestId}`, origin: 'manual', name: input.name.trim(), statement: '', memberships: [deck.id], cues: [], schedule: { state: 0 }, firstReviewedAt: null, learningCueId: null, archived: false, version: 0 };
+          state.propositions.push(p); deck.propositionIds.push(p.id); state.statistics.states.new++;
+        } else {
+          p = state.propositions.find(p => p.id === input.propositionId);
+          if (!p || p.archived) throw new Error('Target unavailable.');
+        }
+        const cueId = `cue:${input.requestId}`;
+        p.cues.push({ id: cueId, question: input.question, answer: input.answer, latestRating: null }); p.version++; state.revision++;
+        const ids = { propositionId: p.id, cueId }; manualReceipts.set(input.requestId, { signature, ids });
+        return { state: clone(state), ...ids };
       }
       if (operation === 'next-review') return { ticket: { id: 't1', propositionId: 'p1', cueId: 'c1', question: 'Question **one**?', propositionName: 'Fact one' }, remaining: 1 };
       if (operation === 'reveal-review') return { answer: 'SECRET ANSWER', intervals: { 1: 60000, 2: 300000, 3: 600000, 4: 86400000 } };

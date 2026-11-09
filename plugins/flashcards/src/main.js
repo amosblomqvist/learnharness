@@ -127,9 +127,30 @@ export function activate(ctx) {
       }), ds, { variant: 'default' });
     });
   }
+  function cueFields(root, cue = {}) {
+    return {
+      question: field(root, 'Question (Markdown)', cue.question, 'textarea'),
+      answer: field(root, 'Answer (Markdown)', cue.answer, 'textarea'),
+    };
+  }
+  function createCard(deck, proposition, signal, onCreated) {
+    const requestId = uuid();
+    dialog(proposition ? 'Add cue' : 'Create card', signal, ({ root, actions, signal: ds, run, close }) => {
+      const name = proposition ? null : field(root, 'Name', '');
+      const { question, answer } = cueFields(root);
+      button(actions, 'Save', run(async () => {
+        const created = await ctx.call(proposition ? 'create-cue' : 'create-card', {
+          ...(proposition ? { propositionId: proposition.id } : { deckId: deck.id, name: name.value }),
+          question: question.value, answer: answer.value, requestId,
+        });
+        if (ds.aborted) return;
+        publish(created.state); close(); onCreated(created);
+      }), ds, { variant: 'default' });
+    });
+  }
   function editCue(proposition, cue, signal) {
     dialog('Edit cue', signal, ({ root, actions, signal: ds, run, close }) => {
-      const question = field(root, 'Question (Markdown)', cue.question, 'textarea'), answer = field(root, 'Answer (Markdown)', cue.answer, 'textarea');
+      const { question, answer } = cueFields(root, cue);
       button(actions, 'Save', run(async () => { if (await mutate('save-cue', { propositionId: proposition.id, cueId: cue.id, question: question.value, answer: answer.value, version: proposition.version }, ds)) close(); }), ds, { variant: 'default' });
     });
   }
@@ -141,6 +162,7 @@ export function activate(ctx) {
   }
   function previewCue(proposition, cue, archive, signal) {
     dialog(proposition.name, signal, ({ root, actions, signal: ds, close }) => {
+      root.classList.add('fc-preview-dialog');
       const card = el('div', 'fc-review-card fc-preview-card'), answer = el('div', 'fc-answer');
       markdown(card, cue.question, ds); markdown(answer, cue.answer, ds);
       card.append(answer); root.append(card);
@@ -248,13 +270,21 @@ export function activate(ctx) {
     tree = mountLibraryTree({ ctx, container: treeSlot, signal, button,
       onReview: scope => review.open(scope), onPractice: practice, onPreview: (p, cue, archive) => previewCue(p, cue, archive, signal),
       onEdit: (p, cue) => editCue(p, cue, signal), onDelete: (p, cue) => deleteCue(p, cue, signal),
+      onCreateCard: deck => createCard(deck, null, signal, created => revealCreatedCard(created, deck.id)),
+      onCreateCue: (p, deck) => createCard(deck, p, signal, created => revealCreatedCard(created, deck.id)),
       onDeckSettings: deck => editDeck(deck, snapshot, signal), onMemberships: p => memberships(p, snapshot, signal),
       onReorder: input => mutate('reorder', input, signal), onRename: (id, name) => mutate('save-deck', { id, name }, signal),
       onSelection: value => { selection = value; updateSelection(); }, onError: showError,
     });
-    const revealFileDeck = id => {
+    const revealDeck = (id, propositionId) => {
       if (signal.aborted || !id) return;
-      search.value = ''; tree.update(snapshot, ''); tree.revealDeck(id);
+      search.value = ''; tree.update(snapshot, ''); tree.revealDeck(id, propositionId);
+    };
+    const revealCreatedCard = (created, preferredDeckId) => {
+      if (signal.aborted) return;
+      const p = snapshot.propositions.find(p => p.id === created.propositionId);
+      if (!p) return;
+      revealDeck(p.memberships.includes(preferredDeckId) ? preferredDeckId : p.memberships[0], p.id);
     };
     fileInput.addEventListener('change', async () => {
       const files = [...(fileInput.files || [])]; fileInput.value = '';
@@ -270,15 +300,15 @@ export function activate(ctx) {
         if (preflight.existingSourceId) {
           const opened = await ctx.call('open-file-deck', { sourceId: preflight.existingSourceId });
           if (signal.aborted) return;
-          publish(opened.state); revealFileDeck(opened.deckId);
-        } else confirmFileGeneration(preflight, converted.notices, signal, state => revealFileDeck(state.batch?.deckId));
+          publish(opened.state); revealDeck(opened.deckId);
+        } else confirmFileGeneration(preflight, converted.notices, signal, state => revealDeck(state.batch?.deckId));
       } catch (cause) { if (!signal.aborted) showError(message(cause)); }
       finally { if (!signal.aborted) { filePreparing = false; fileStatus.textContent = ''; updateGenerationButtons(); } }
     }, { signal });
     const retryFileGeneration = async batchId => {
       try {
         const preflight = await ctx.call('preflight-file-retry', { batchId });
-        if (!signal.aborted) confirmFileGeneration(preflight, [], signal, state => revealFileDeck(state.batch?.deckId));
+        if (!signal.aborted) confirmFileGeneration(preflight, [], signal, state => revealDeck(state.batch?.deckId));
       } catch (cause) { if (!signal.aborted) showError(message(cause)); }
     };
     let batchScope = lifetime(signal);
