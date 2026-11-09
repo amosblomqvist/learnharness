@@ -45,6 +45,9 @@ export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";
 export * from "./dismissal-park.ts";
 export * from "./compaction.ts";
+// Aside threads (issue #16): the synchronous side-question service + the
+// /api/chats/[id]/asides route's composition.
+export * from "./asides.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
 export * from "./model-catalog.ts";
