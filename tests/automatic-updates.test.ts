@@ -13,7 +13,7 @@ const mainFile = fileURLToPath(new URL("../electron/main.cjs", import.meta.url))
 const mainSource = readFileSync(mainFile, "utf8");
 const mainRequire = createRequire(mainFile);
 
-function fixture({ packaged = true, updaterMissing = false } = {}) {
+function fixture({ packaged = true, updaterMissing = false, env = {} } = {}) {
 	let settings: string | Error = JSON.stringify({ version: 1, general: { autoUpdate: true } });
 	const settingsReads: string[] = [];
 	const order: string[] = [];
@@ -100,7 +100,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 			};
 			return mainRequire(id);
 		},
-		process: { argv: [], env: { LH_DEV_URL: "http://127.0.0.1:9000" }, platform: "darwin", on() {} },
+		process: { argv: [], env: { LH_DEV_URL: "http://127.0.0.1:9000", ...env }, platform: "darwin", on() {} },
 		__dirname: path.dirname(mainFile), URL,
 		setInterval: (callback: () => void, delay: number) => intervals.push({ callback, delay }),
 		setTimeout() {},
@@ -171,6 +171,21 @@ describe("automatic-update preference gate", () => {
 			assert.equal(f.state().status, "disabled");
 		});
 	}
+
+	it("LH_DISABLE_AUTOUPDATER=1 skips updater init entirely, even with updates ON", async () => {
+		const f = fixture({ env: { LH_DISABLE_AUTOUPDATER: "1" } });
+		f.setSettings({ general: { autoUpdate: true } });
+		f.run("setupAutoUpdater()"); await f.check(true); await f.check();
+		assert.equal(f.updater.checks, 0);
+		assert.equal(f.settingsReads.length, 0);
+		assert.equal(f.state().status, "disabled");
+	});
+
+	it("LH_DISABLE_AUTOUPDATER values other than 1 leave the updater on", async () => {
+		const f = fixture({ env: { LH_DISABLE_AUTOUPDATER: "0" } });
+		f.run("setupAutoUpdater()"); await f.check();
+		assert.equal(f.updater.checks, 1);
+	});
 });
 
 describe("status observation never controls the updater", () => {

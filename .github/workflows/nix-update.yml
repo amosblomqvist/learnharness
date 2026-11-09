@@ -1,0 +1,89 @@
+name: Nix release pin
+
+# Issue #76: the flake fetches the published AppImage pinned by
+# nix/release.json. When a release goes public, refresh that pin from the
+# release's own latest-linux.yml feed — its sha512 is already the base64
+# (SRI) form Nix accepts, so nothing is downloaded or re-hashed — and open
+# a PR for it.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+
+jobs:
+  update-release-json:
+    name: Update nix/release.json
+    if: >-
+      github.repository == 'amosblomqvist/learnharness' &&
+      !github.event.release.draft && !github.event.release.prerelease
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Push the pin branch and open the PR. The feed parser is plain node.
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      # Branch off the default branch, not the tag commit, so the pin PR
+      # merges cleanly against current main.
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+      - name: Download the release's Linux update feed
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" \
+            --pattern latest-linux.yml --output "$RUNNER_TEMP/latest-linux.yml"
+      - name: Pin the release's version and AppImage sha512
+        # latest-linux.yml is tiny machine-generated YAML: top-level version,
+        # files[].url/sha512 entries, legacy top-level path/sha512. Only that
+        # shape is parsed; anything unexpected fails closed.
+        env:
+          FEED: ${{ runner.temp }}/latest-linux.yml
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: |
+          node --input-type=module -e '
+            import fs from "node:fs";
+            const fail = (msg) => { console.error("::error::" + msg); process.exit(1); };
+            const lines = fs.readFileSync(process.env.FEED, "utf8").split(/\r?\n/);
+            let version = null;
+            const files = [];
+            let entry = null;
+            for (const line of lines) {
+              let m;
+              if ((m = line.match(/^version:\s*(.*)$/))) version = m[1].trim().replace(/^"|"$/g, "");
+              else if ((m = line.match(/^  - (\S+):\s*(.*)$/))) { entry = { [m[1]]: m[2].trim().replace(/^"|"$/g, "") }; files.push(entry); }
+              else if ((m = line.match(/^    (\S+):\s*(.*)$/)) && entry) entry[m[1]] = m[2].trim().replace(/^"|"$/g, "");
+            }
+            const tag = process.env.RELEASE_TAG ?? "";
+            if (!version || !/^\d+\.\d+\.\d+/.test(version)) fail("feed has no usable version: " + version);
+            if (tag.replace(/^v/, "") !== version) fail(`feed version ${version} does not match release tag ${tag}`);
+            const image = files.find((f) => typeof f.url === "string" && f.url.endsWith(".AppImage"));
+            const sha = image?.sha512;
+            if (typeof sha !== "string" || !/^[A-Za-z0-9+/]+={0,2}$/.test(sha) || Buffer.from(sha, "base64").length !== 64)
+              fail("feed has no AppImage entry with a base64 sha512");
+            fs.writeFileSync("nix/release.json", JSON.stringify({ version, sha512: sha }, null, 2) + "\n");
+            console.log(`nix/release.json -> ${version} (AppImage ${image.url}, sha512 ${sha.slice(0, 8)}…)`);
+          '
+      - name: Open a pull request for the new pin
+        # Skipped automatically when nix/release.json is unchanged (no diff).
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          branch: nix/release-pin-${{ github.event.release.tag_name }}
+          delete-branch: true
+          commit-message: "chore(nix): pin LearnHarness ${{ github.event.release.tag_name }}"
+          title: "chore(nix): pin LearnHarness ${{ github.event.release.tag_name }}"
+          body: |
+            Automated by the *Nix release pin* workflow (issue #76): reads the
+            version and the AppImage SHA-512 from the `${{ github.event.release.tag_name }}`
+            release's `latest-linux.yml` and updates `nix/release.json`, which `flake.nix`
+            fetches the AppImage by. Verify on a Nix machine: `nix run .` and `nix flake check`.

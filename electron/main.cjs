@@ -431,6 +431,9 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  *    local server — the pre-release verification drill (serve
  *    latest-mac.yml + zip + blockmap from any localhost HTTP dir and
  *    watch a real installed copy find/download/restart). Test-only seam.
+ *  - LH_DISABLE_AUTOUPDATER=1 (env): skips updater init ENTIRELY — set by
+ *    the Nix package (docs/desktop-release.md → NixOS), where Nix owns
+ *    the installed files and the updater could never replace them.
  *
  * Install path: the downloaded update applies on quit (autoInstallOnAppQuit
  * — Squirrel.Mac stages natively and swaps on relaunch). The renderer
@@ -507,6 +510,14 @@ function installUpdateNow() {
 function setupAutoUpdater() {
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
+		reportUpdateStatus("disabled");
+		return;
+	}
+	// Managed installs (the Nix package): the package manager owns the app
+	// files, so updater init is skipped entirely — checks/downloads could
+	// only ever fail against a read-only install.
+	if (process.env.LH_DISABLE_AUTOUPDATER === "1") {
+		log("auto-update: LH_DISABLE_AUTOUPDATER=1 — updater disabled");
 		reportUpdateStatus("disabled");
 		return;
 	}
