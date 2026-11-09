@@ -44,6 +44,12 @@ export interface PracticeToolContext {
 	 *  Each absent context (tests) = absent from the registry. */
 	graph?: GraphToolContext;
 	jobs?: JobToolContext;
+	/** RETENTION CAPTURE (issue #33): fired by every clean conclude with the
+	 *  conclude input and the concluded problem's pose (target ids ride the
+	 *  pose arguments). Wired by the composition root for sessions with
+	 *  explicit map picks; absent (tests, bare agents) = no capture. The
+	 *  hook's own failures are caught here — capture never breaks conclude. */
+	onConclude?: (conclude: ConcludeInput, problem: { toolCallId: string; input: unknown } | null) => void;
 }
 
 /** TURN-SCOPED GATE STATE (the BKT incident, 2026-10-05): the gates used
@@ -58,13 +64,19 @@ export interface PracticeToolContext {
  *  this closure — the intra-turn truth the record cannot hold yet. */
 export interface PracticeGate {
 	problemActive: boolean;
+	/** The active problem's POSE (result-aware activeProblemOf at seed;
+	 *  set again by a pose in this turn) — the concluded problem's targets
+	 *  for the retention capture ride its arguments. Null when the slot is
+	 *  free. */
+	activeProblem: { toolCallId: string; input: unknown } | null;
 }
 
 /** Seed the turn's gate from the record (result-aware activeProblemOf —
  *  only a cleanly-posed problem counts). */
 export function createPracticeGate(ctx: PracticeToolContext): PracticeGate {
 	const record = ctx.chatStore.getChat(ctx.chatId);
-	return { problemActive: record ? activeProblemOf(record.messages) !== null : false };
+	const active = record ? activeProblemOf(record.messages) : null;
+	return { problemActive: active !== null, activeProblem: active };
 }
 
 // ─── problem: the pose ───────────────────────────────────────────────────────
@@ -133,7 +145,7 @@ export function problemTool(
 			if (normalized.every((t, i) => t === target[i])) return healed as never;
 			return { ...(healed as Record<string, unknown>), target: normalized } as never;
 		},
-		execute: async (_toolCallId, input) => {
+		execute: async (toolCallId, input) => {
 			if (gate.problemActive) {
 				return invalidInputResult("problem", [
 					"a problem is already active — call conclude on it before posing the next one",
@@ -155,6 +167,10 @@ export function problemTool(
 				}
 			}
 			gate.problemActive = true;
+			// The retention capture's target source: the ACTIVE pose rides
+			// the gate (issue #33) — the seed already held any cross-turn
+			// pose; this records one posed inside this turn.
+			gate.activeProblem = { toolCallId, input };
 			return problemResult();
 		},
 	};
@@ -196,7 +212,10 @@ export const concludeInputObject = Type.Object({
 
 export type ConcludeInput = Static<typeof concludeInputObject>;
 
-export function concludeTool(gate: PracticeGate): AgentTool<typeof concludeInputObject> {
+export function concludeTool(
+	gate: PracticeGate,
+	onConclude?: PracticeToolContext["onConclude"],
+): AgentTool<typeof concludeInputObject> {
 	return {
 		name: "conclude",
 		label: "conclude",
@@ -209,11 +228,23 @@ export function concludeTool(gate: PracticeGate): AgentTool<typeof concludeInput
 		parameters: concludeInputObject,
 		prepareArguments: (args: unknown) => healEncodedArguments(args, concludeInputObject) as never,
 		executionMode: "sequential",
-		execute: async (_toolCallId, _input) => {
+		execute: async (_toolCallId, input) => {
 			if (!gate.problemActive) {
 				return invalidInputResult("conclude", ["no active problem to conclude — pose one first"]);
 			}
 			gate.problemActive = false;
+			// RETENTION CAPTURE (issue #33): the clean conclude hands its
+			// outcome + the concluded problem's pose to the hook. The gate's
+			// pose is cleared with the slot; capture failures are swallowed
+			// here — scheduling bookkeeping never breaks the conclusion.
+			if (onConclude) {
+				try {
+					onConclude(input, gate.activeProblem);
+				} catch (err) {
+					console.error("[practice] retention capture failed:", err);
+				}
+			}
+			gate.activeProblem = null;
 			return concludeResult();
 		},
 	};
@@ -237,7 +268,7 @@ export function practiceTools(ctx: PracticeToolContext): Record<string, AgentToo
 	// inner pass; the double heal is idempotent by construction.
 	return healToolRecord({
 		problem: problemTool(gate, ctx.graphNodes),
-		conclude: concludeTool(gate),
+		conclude: concludeTool(gate, ctx.onConclude),
 		read: readTool,
 		ls: lsTool,
 		find: findTool,
