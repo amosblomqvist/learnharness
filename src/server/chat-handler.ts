@@ -49,6 +49,7 @@ import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.t
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
+import { sourceDocumentsSegment } from "../agent/source-documents.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
@@ -294,7 +295,8 @@ export async function handleChatInput(
 				effective.compaction?.thresholdTokens,
 				catalogContextLimits().get(modelIdForCompaction),
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			systemPromptTokens: Math.ceil((composeInstructions(record.kind === "practice" ? "practice" : "teacher").length
+				+ (record.kind === "practice" ? 0 : sourceDocumentsSegment(record.sourceDocuments)?.length ?? 0)) / 4),
 		},
 		chatId,
 	);
@@ -460,6 +462,10 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		// Document-sourced sessions (issue #175): the record's staged
+		// documents ride the build opts; the prober/teacher composition
+		// appends the curriculum segment (agent/source-documents.ts).
+		sourceDocuments: record.sourceDocuments,
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher
@@ -669,7 +675,8 @@ export async function handleChatInput(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: Math.ceil((composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length
+								+ (freshRecord.kind === "practice" ? 0 : sourceDocumentsSegment(freshRecord.sourceDocuments)?.length ?? 0)) / 4),
 						};
 					}, chatId);
 			},

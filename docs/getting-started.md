@@ -25,6 +25,15 @@ Choose **Practice** for problems rather than a lesson. Start from selected graph
 
 Sessions are saved locally, including earlier messages when context is compacted. The [keyboard guide](keyboard.md) covers submission, focus, question controls, and cancellation.
 
+## Learn from your own documents
+
+Instead of describing what you want to learn, you can hand the teacher the material itself. On the home screen (Teach mode) or the **New session** draft, choose **Add documents** and pick Markdown, plain-text, or PDF files, then send a short goal — "teach me this paper" is enough. The agent reads the documents first, probes what you already understand of their topics, plans the lesson through their content, and teaches from them. Your text is a lens on emphasis and depth, not the syllabus: the documents define what the session covers.
+
+- Files are limited to **25 MB in total** per session, and PDFs to 1,000 pages. PDF conversion is local text extraction, not OCR: image-only pages are skipped, and scanned text can be inaccurate. A PDF with no extractable text is refused at creation, before any session exists.
+- Large PDFs make session creation slower — conversion happens while the session is being created.
+- The documents also feed your knowledge graph through the same extraction pipeline as [explicit imports](#extract-into-the-graph), in the background; the lesson itself reads a converted copy stored on your machine and does not wait for that extraction.
+- The session's top bar shows the source documents as read-only chips. This is a creation-time choice: documents cannot be added to or removed from an existing session, and practice sessions cannot be created from documents (practice draws from the graph the documents fed).
+
 ## Dictation
 
 1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).

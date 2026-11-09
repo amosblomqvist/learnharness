@@ -20,6 +20,8 @@ import { sendToUserApplies, sendToUserTool } from "./tools/send-to-user.ts";
 import { makeNarrationGuard, narrationGuardApplies, SEND_TO_USER_DELIVERY_RULE } from "./narration-guard.ts";
 import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
+import type { SourceDocumentRef } from "../core/contracts.ts";
+import { sourceDocumentsSegment } from "./source-documents.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
@@ -123,6 +125,12 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** Source documents attached at creation (issue #175): when present,
+	 *  the PROBER and TEACHER prompts get the document-sourced segment
+	 *  appended (source-documents.ts) — the documents define the
+	 *  curriculum. Practice never gets it: practice sessions draw from the
+	 *  graph, which the document's background import already feeds. */
+	sourceDocuments?: readonly SourceDocumentRef[];
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -187,7 +195,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const composedPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
-	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
+	// The document-sourced segment rides the same trailing-append seam as
+	// the narration rule (static prefix first, per-session state last).
+	const documentSegment = kind === "practice" ? null : sourceDocumentsSegment(opts.sourceDocuments);
+	const withDocuments = documentSegment ? `${composedPrompt}\n\n---\n\n${documentSegment}` : composedPrompt;
+	const systemPrompt = narrationGuard ? `${withDocuments}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : withDocuments;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).

@@ -37,6 +37,13 @@ export interface ChatRecord {
 	imageSnapshots?: Record<string, ImageSnapshot>;
 	/** The session's kind — absent = teach (pre-practice records). */
 	kind?: ChatKind;
+	/** Source documents attached at creation (issue #175, document-sourced
+	 *  sessions): the files were converted locally (PDF → Markdown) and
+	 *  staged as graph material — `path` is the converted text the read
+	 *  tool opens, `sourceId` the import pipeline's source identity. The
+	 *  DOCUMENT, not the goal text, defines such a session's curriculum.
+	 *  Absent = an ordinary goal-described session. */
+	sourceDocuments?: SourceDocumentRef[];
 	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
 	tree?: PlanTree;
 	/** Append-only usage log (observability, 2026-09): one entry per model
@@ -64,6 +71,23 @@ export interface ChatRecord {
 
 /** The chat record format this build writes and understands. */
 export const CURRENT_CHAT_VERSION = 1;
+
+/** One document attached when the session was created (issue #175). The
+ *  converted text lives under the data dir (agent-readable by path); the
+ *  graph accumulates the same text through the ordinary notes-import
+ *  pipeline under `sourceId`. Additive and optional — older readers keep
+ *  working, and the field survives their read-modify-writes. */
+export interface SourceDocumentRef {
+	/** The graph source id — "src_" + the path/name hash (the import
+	 *  pipeline's existing identity rule). */
+	sourceId: string;
+	/** The original file name (display label; also the graph source's
+	 *  identity key). */
+	name: string;
+	/** Absolute path of the converted Markdown material under the data
+	 *  dir — what the prompt points the read tool at. */
+	path: string;
+}
 
 /** The conversation agents' runtime model choice (model-control wave,
  *  2026-09-12): a per-chat override of config.ts's pinned prober/teacher

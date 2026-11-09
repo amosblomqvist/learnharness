@@ -14,6 +14,7 @@ import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
+import { SourceDocumentsPicker } from "@/components/session-documents";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
@@ -45,6 +46,7 @@ export async function startDraftSession(
 	fetchLike: typeof fetch,
 	mode?: "practice",
 	picks?: readonly DraftPick[],
+	documents?: readonly File[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
 ): Promise<string | null> {
@@ -54,10 +56,11 @@ export async function startDraftSession(
 	// from the pick bar creates its session WITH the graph context — the
 	// same contract as the home screen's practice send (the marker with
 	// [id] name: statement lines, target validation's truth set).
+	// Source documents (issue #175) ride the same create, teach only.
 	return starter.start(
 		mode === "practice"
 			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			: { title: t, ...(documents && documents.length > 0 ? { sourceDocuments: documents } : {}) },
 		fetchLike,
 		settingsIdentity,
 	);
@@ -79,13 +82,17 @@ export function DraftShell({
 	picks = [],
 	onOpenPicker,
 	onClearPicks,
+	documents = [],
+	onFiles,
 	overlay,
 }: {
 	busy: boolean;
 	text: string;
 	onChange: (v: string) => void;
 	onSend: () => void;
-	startError?: boolean;
+	/** The creation-failure alert: the fixed failure text, or the server's
+	 * own reason when it named one (a refused document conversion). */
+	startError?: string | boolean;
 	/** The practice draft (owner, 2026-10-04): ?mode=practice — the
 	 *  created session carries kind:"practice" and the copy changes
 	 *  (the practice agent opens; no probing). */
@@ -102,6 +109,10 @@ export function DraftShell({
 	picks?: DraftPick[];
 	onOpenPicker?: () => void;
 	onClearPicks?: () => void;
+	/** Source documents (issue #175, teach drafts): the chosen files +
+	 * the setter; riding the create like the picks. */
+	documents?: readonly File[];
+	onFiles?: (files: File[]) => void;
 	/** THE PICKER SLOT (owner round 10b): the chain-table overlay hosts
 	 *  INSIDE the content column's relative container — the same law as
 	 *  the graph view (the overlay fills its column, never the sidebar).
@@ -183,12 +194,19 @@ export function DraftShell({
 						<div className="bg-background pb-4">
 							<div className={DOCK}>
 								<ComposerActions
-									picker={(picks.length > 0 || mode === "practice") && (
-										<NodePickerControl count={picks.length} onOpen={onOpenPicker} onClear={onClearPicks} />
-									)}
+									picker={<>
+										{(picks.length > 0 || mode === "practice") && (
+											<NodePickerControl count={picks.length} onOpen={onOpenPicker} onClear={onClearPicks} />
+										)}
+										{/* Source documents (issue #175): the teach draft's
+										    curriculum picker (practice draws from the graph). */}
+										{mode === "teach" && onFiles && (
+											<SourceDocumentsPicker documents={documents} onFiles={onFiles} />
+										)}
+									</>}
 									setup={setupCta}
 								/>
-								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
+								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{typeof startError === "string" ? startError : OPENING_PROMPT_FAILURE}</p>}
 								<div data-attachment-composer="" className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
 									<Composer
 										busy={busy}
@@ -244,7 +262,16 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const [busy, setBusy] = useState(false);
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
-	const [startError, setStartError] = useState(false);
+	const [startError, setStartError] = useState<string | false>(false);
+	// Source documents (issue #175): chosen files + ref mirror (the send
+	// may run after a dictation-flush await), riding the create for teach
+	// drafts only.
+	const [documents, setDocuments] = useState<File[]>([]);
+	const documentsRef = useRef<File[]>([]);
+	const applyDocuments = (next: File[]) => {
+		documentsRef.current = next;
+		setDocuments(next);
+	};
 	// THE PICK BAR (owner round 10): the draft's lifted pick set + the
 	// snapshot the standalone chain-table picker reads. Lazy — the graph
 	// is fetched on FIRST open only, then reused.
@@ -306,15 +333,16 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setBusy(true);
 		setStartError(false);
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
+			mode === "teach" && documentsRef.current.length > 0 ? documentsRef.current : undefined,
 			starterRef.current, JSON.stringify(catalog?.slots.strong))
 			.then((target) => {
 				if (target) router.push(target);
 				else { startingRef.current = false; setBusy(false); }
 			})
-			.catch(() => {
+			.catch((err: unknown) => {
 				startingRef.current = false;
 				setBusy(false);
-				setStartError(true);
+				setStartError(err instanceof Error && err.message ? err.message : OPENING_PROMPT_FAILURE);
 			});
 	}, [router, configured, zeroKeys, catalog, mode]);
 
@@ -330,6 +358,8 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}
+				documents={documents}
+				onFiles={applyDocuments}
 				overlay={
 					// THE PICKER (owner round 10b): hosted INSIDE the content
 					// column — absolute inset-0 resolves to the column's relative

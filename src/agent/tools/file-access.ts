@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { PATHS } from "../../../config.ts";
 
 /** Learner-source policy seam, based on lickbot's #157. The server supplies
  * current preferences per operation; agents never import the settings store.
@@ -90,10 +91,17 @@ export function resolvePolicy(policy: FileAccessPolicy = fileAccessPolicy()): Re
 
 /** Accept only canonical source locations contained by the snapshot. Source
  * symlinks resolve before containment; a link cannot escape the chosen roots.
- * fs-shared runs its mandatory named AND canonical denials before this gate. */
+ * fs-shared runs its mandatory named AND canonical denials before this gate.
+ *
+ * The one restricted-mode exemption: the app's own staged session material
+ * (config PATHS.materials, issue #175) — the learner uploaded those
+ * documents precisely so the agent could read them, so the optional
+ * folder boundary never locks a document-sourced session out of its own
+ * curriculum. App-owned learning data, not a widening of the filesystem
+ * walk (ls/find roots are unchanged). */
 export function guardSourcePath(absolute: string, policy: ResolvedFileAccessPolicy = resolvePolicy()): string {
 	const real = realSourcePath(absolute);
-	if (policy.restricted && !policy.folders.some((folder) => isWithin(real, folder))) {
+	if (policy.restricted && !isWithin(real, PATHS.materials) && !policy.folders.some((folder) => isWithin(real, folder))) {
 		throw new Error(
 			`Access denied: ${absolute} is outside the allowed folders, or no allowed folders are available. ` +
 			"Use ls without a path to list allowed folders, or ask the learner to adjust File access in Settings → Agent → Tools.",
