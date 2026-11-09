@@ -160,18 +160,15 @@ export function browserServiceBinary(): string | null {
 }
 
 const BROWSER_SERVICE_TIMEOUT_MS = 15_000;
-let browserServiceProc: import("node:child_process").ChildProcess | null = null;
+/** The helper's CDP port: pending while it starts, null once it failed or
+ *  exited. Set before any await so a concurrent caller joins the same start. */
+let browserServicePort: Promise<number | null> | null = null;
 
 async function connectBrowserService(): Promise<import("puppeteer-core").Browser | null> {
 	const puppeteer = (await import("puppeteer-core")).default;
 	const { spawn } = await import("node:child_process");
-	let port: number | null = null;
 
-	if (browserServiceProc && browserServiceProc.exitCode === null) {
-		// Helper alive from a previous run — reuse its endpoint.
-		port = (browserServiceProc as { __cdpPort?: number }).__cdpPort ?? null;
-	}
-	if (port === null) {
+	if (!browserServicePort) {
 		const binary = browserServiceBinary();
 		if (!binary) return null;
 		// Packaged: execPath runs the bundled app (flag reaches main.cjs).
@@ -188,10 +185,14 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 			env: browserServiceSpawnEnv(process.env) as NodeJS.ProcessEnv,
 			stdio: ["ignore", "pipe", "pipe", "ipc"] as const,
 		});
-		browserServiceProc = proc;
-		port = await new Promise<number | null>((resolve) => {
+		const started: Promise<number | null> = new Promise((resolve) => {
 			let buf = "";
+			// A late exit of an old helper must not clear its replacement.
+			const release = () => {
+				if (browserServicePort === started) browserServicePort = null;
+			};
 			const timer = setTimeout(() => {
+				release();
 				proc.kill();
 				resolve(null);
 			}, BROWSER_SERVICE_TIMEOUT_MS);
@@ -206,15 +207,14 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 			proc.stdout!.on("data", onData);
 			proc.once("exit", () => {
 				clearTimeout(timer);
+				release();
 				resolve(null);
 			});
 		});
-		if (port === null) {
-			browserServiceProc = null;
-			return null;
-		}
-		(proc as { __cdpPort?: number }).__cdpPort = port;
+		browserServicePort = started;
 	}
+	const port = await browserServicePort;
+	if (port === null) return null;
 
 	try {
 		const version = await fetch(`http://127.0.0.1:${port}/json/version`);
