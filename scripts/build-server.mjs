@@ -82,6 +82,9 @@ for (const extra of ["dist", path.join("node_modules", "electron")]) {
 for (const asset of [
 	path.join("src", "agent", "system-prompt.md"),
 	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
+	// Lesson mode: the lesson agent's own fragment directory rides the same
+	// trace (the sweep is dir-based; this guard makes a new-dir miss loud).
+	path.join("src", "agent", "prompts", "lesson", "05-syllabus.md"),
 ]) {
 	if (!exists(path.join(STANDALONE, asset))) {
 		console.error(`[build-server] prompt asset missing from the trace: ${asset}`);
