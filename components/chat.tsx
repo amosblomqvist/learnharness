@@ -43,14 +43,18 @@ import {
 	messageAnchorId,
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
+	MAX_IMAGES_PER_MESSAGE,
 	type ChatInput,
 	type ChatSettings,
 	type LhMessage,
 	type ModelSlotName,
+	type UserImageAttachment,
 } from "@/src/core";
+import { type ComposerImage } from "@/components/composer-images";
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
+import { UserMessageImages } from "@/components/user-message-images";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -566,6 +570,59 @@ export function Chat({
 		textRef.current = v;
 		setComposerDraftRevision((revision) => revision + 1);
 	}, []);
+	/* THE IMAGE DRAFT (issue #96): paste/pick → upload → chips. The chips
+	 * are ordinary state (the composer re-renders per upload transition);
+	 * the ref mirror lets the attach path read the live count without a
+	 * state-updater side effect (StrictMode double-fires updaters). Cleared
+	 * on send; a refusal restores them with the text (the draftRef seam's
+	 * twin below). */
+	const [composerImages, setComposerImages] = useState<ComposerImage[]>([]);
+	const composerImagesRef = useRef<ComposerImage[]>([]);
+	composerImagesRef.current = composerImages;
+	const removeComposerImage = useCallback((key: string) => {
+		setComposerImages((current) => current.filter((image) => image.key !== key));
+	}, []);
+	const uploadComposerImage = useCallback(async (key: string, file: File) => {
+		const failed = (error: unknown) => {
+			setComposerImages((current) => current.map((image) => image.key === key ? {
+				...image,
+				state: { phase: "failed", error: error instanceof Error ? error.message : "The image could not be uploaded." },
+			} : image));
+		};
+		try {
+			const form = new FormData();
+			form.append("file", file);
+			const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}/images`, { method: "POST", body: form });
+			// The upload's answer: the REF (SHA-256 identity + provenance name)
+			// the send attaches; never the bytes.
+			const body = await res.json().catch(() => null) as {
+				snapshotId?: string; name?: string; mimeType?: string; width?: number; height?: number; error?: string;
+			} | null;
+			if (!res.ok || !body?.snapshotId || !/^[a-f0-9]{64}$/.test(body.snapshotId) || (body.mimeType !== "image/png" && body.mimeType !== "image/jpeg") || !Number.isInteger(body.width) || !Number.isInteger(body.height)) {
+				throw new Error(body?.error || "The image could not be uploaded.");
+			}
+			setComposerImages((current) => current.map((image) => image.key === key ? {
+				...image,
+				name: body.name ?? image.name,
+				state: { phase: "uploaded", snapshotId: body.snapshotId! },
+			} : image));
+		} catch (error) { failed(error); }
+	}, [chatId]);
+	const attachComposerImages = useCallback((files: File[]) => {
+		// The contract's per-message ceiling bounds the DRAFT too: extra
+		// picks past it are ignored, never silently queued for later.
+		const room = Math.max(0, MAX_IMAGES_PER_MESSAGE - composerImagesRef.current.length);
+		const picked = files.slice(0, room).map((file, index) => ({
+			key: `img_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}_${index}`,
+			name: file.name || "image",
+			state: { phase: "uploading" } as const,
+		}));
+		if (picked.length === 0) return;
+		setComposerImages((current) => [...current, ...picked]);
+		for (const [index, file] of files.slice(0, picked.length).entries()) {
+			void uploadComposerImage(picked[index]!.key, file);
+		}
+	}, [uploadComposerImage]);
 	const recordComposerText = useCallback((v: string) => {
 		textRef.current = v;
 	}, []);
@@ -582,6 +639,9 @@ export function Chat({
 	 *  Auto-continuations (probe answers) never set it — their refusal
 	 *  opens recovery with no replay. */
 	const draftRef = useRef<string | null>(null);
+	/** The draft seam's image twin (issue #96): the refs a refused send
+	 *  restores into the composer with the text. */
+	const draftImagesRef = useRef<UserImageAttachment[]>([]);
 	const openingDraftRef = useRef<string | null>(null);
 	const [openingError, setOpeningError] = useState(false);
 	const openingMountedRef = useRef(false);
@@ -676,6 +736,17 @@ export function Chat({
 			if (draftRef.current !== null) {
 				applyText(draftRef.current);
 				draftRef.current = null;
+			}
+			// The refused send's pictures come back too (issue #96): the
+			// snapshots are already stored — the restore is chip state only.
+			if (draftImagesRef.current.length > 0) {
+				const restored = draftImagesRef.current;
+				draftImagesRef.current = [];
+				setComposerImages(restored.map((ref, index) => ({
+					key: `img_restore_${Date.now().toString(36)}_${index}`,
+					name: ref.name,
+					state: { phase: "uploaded" as const, snapshotId: ref.snapshotId },
+				})));
 			}
 			clearError();
 			if (keyRefused && catalogRef.current?.providers.some((p) => p.keyPresent)) openModelPicker();
@@ -1214,7 +1285,15 @@ export function Chat({
 	const doSend = () => {
 		if (busy || pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		// IMAGES (issue #96): an image-only message sends; an upload still
+		// in flight holds the send (the chips settle in ~a second — sending
+		// mid-upload would silently split the draft).
+		const images = composerImages;
+		const uploading = images.some((image) => image.state.phase === "uploading");
+		const refs: UserImageAttachment[] = images.flatMap((image) =>
+			image.state.phase === "uploaded" ? [{ snapshotId: image.state.snapshotId, name: image.name }] : [],
+		);
+		if ((!t && refs.length === 0) || uploading) return;
 		if (zeroKeys) {
 			setSetupOpen(true);
 			return;
@@ -1223,16 +1302,21 @@ export function Chat({
 			openModelPicker();
 			return; // No optimistic send and no change to the learner's draft.
 		}
-		if (openingDraftRef.current !== null) {
+		// The opening-prompt flow is text-only (?prompt= cannot carry
+		// bytes): a draft with pictures takes the ordinary send — the first
+		// message of the session carries its images like any other.
+		if (openingDraftRef.current !== null && refs.length === 0) {
 			deliverOpeningPrompt(t);
 			return;
 		}
 		draftRef.current = t; // the refusal flow's preserve-and-replay seam
+		draftImagesRef.current = refs; // …and its image twin (issue #96)
 		applyText("");
-		void send({ type: "text", text: t });
+		setComposerImages([]);
+		void send({ type: "text", text: t, ...(refs.length > 0 ? { images: refs } : {}) });
 	};
 
-	/* STEER VS SEND (owner arc 2026-10-03): a send while a turn runs steers
+	/* STEER VS SEND (owner arc, 2026-10-03): a send while a turn runs steers
 	 * it — the quiet queue + the live agent's steering rail; the turn's own
 	 * stream lands the card when pi drains it. The branch is BUSY, not
 	 * turnInFlight: the own-stream case CLEARS turnInFlight (the local
@@ -1244,8 +1328,13 @@ export function Chat({
 	const doSteerOrSend = () => {
 		if (pending || compacting) return;
 		const t = textRef.current.trim();
-		if (!t) return;
+		const images = composerImages;
+		if (!t && images.length === 0) return;
 		if (busy) {
+			// Images are NOT steerable (v1, issue #96): the steer event has
+			// no image shape, so an image-bearing draft WAITS for the turn to
+			// settle — Enter is a no-op, never a drop and never a Stop.
+			if (images.length > 0) return;
 			applyText("");
 			void steer(t);
 			return;
@@ -1520,6 +1609,13 @@ export function Chat({
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
+												{/* The attached pictures (issue #96): one data part per
+												    message, projected by projectView — thumbnails resolve
+												    through the session's snapshot store, so a reloaded
+												    conversation renders identically. */}
+												{m.parts.filter((p) => p.type === "data-user-images").map((p) => (
+													<UserMessageImages key={p.id} images={p.data as UserImageAttachment[]} />
+												))}
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full">
@@ -1752,10 +1848,15 @@ export function Chat({
 							// The pause affordance (owner round 16): the placeholder
 							// IS the hint — empty state, exactly where Enter-on-empty
 							// applies.
-							nextProblem={nextReady}
-							onNext={sendNext}
-							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
-						/>
+						nextProblem={nextReady}
+						onNext={sendNext}
+						placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+						// The image draft (issue #96): chips + paste + picker,
+						// session-scoped (the upload route owns the bytes).
+						images={composerImages}
+						onAttachImages={attachComposerImages}
+						onRemoveImage={removeComposerImage}
+					/>
 					}
 					onSubmitAnswer={(output) => {
 						if (!pending) return;

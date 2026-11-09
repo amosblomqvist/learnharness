@@ -72,12 +72,23 @@ export async function loadLearnerImage(rawPath: string, signal?: AbortSignal): P
 	signal?.throwIfAborted();
 	const absolute = await checkLearnerImage(rawPath);
 	const bytes = await readBounded(absolute, signal);
+	const stored = await processLearnerImageBytes(bytes, signal);
+	return { path: absolute, ...stored };
+}
+
+/** The shared processing tail (issue #96 uploads ride it too): bound-check
+ *  the header, normalize off-thread, and stamp the SHA-256 snapshot
+ *  identity. Same bounds and output law as path-based learner images —
+ *  PNG/JPEG, ≤1600px per side, under 1 MiB of base64. */
+export async function processLearnerImageBytes(bytes: Uint8Array, signal?: AbortSignal): Promise<Omit<LearnerImage, "path">> {
+	signal?.throwIfAborted();
+	if (bytes.byteLength > MAX_LEARNER_IMAGE_BYTES) throw new Error("image exceeds 25 MiB; provide a smaller image");
 	const mime = detectSupportedImageMimeType(bytes);
-	if (!mime) throw new Error(`Not a supported image: ${absolute}`);
+	if (!mime) throw new Error("not a supported image (jpg, png, gif, webp, or bmp)");
 	checkImageDimensions(bytes, mime);
 	const stored = await normalize(bytes, signal);
 	signal?.throwIfAborted();
 	if (stored.mimeType !== "image/png" && stored.mimeType !== "image/jpeg") throw new Error("Unexpected stored image format");
 	const snapshotId = createHash("sha256").update(Buffer.from(stored.data, "base64")).digest("hex");
-	return { path: absolute, snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
+	return { snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
 }

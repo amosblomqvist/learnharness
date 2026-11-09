@@ -34,7 +34,7 @@
  */
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, ImageContent, Message, TextContent, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import {
@@ -42,6 +42,7 @@ import {
 	HANDOFF_TEXT,
 	NEXT_PROBLEM_TEXT,
 	THINKING_LABEL,
+	type ImageSnapshot,
 } from "./contracts/chat.ts";
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
@@ -91,12 +92,37 @@ declare module "@earendil-works/pi-agent-core" {
 	}
 }
 
+/** One image riding a learner user message (issue #96): a REFERENCE into
+ *  ChatRecord.imageSnapshots (SHA-256 identity), never the bytes — the
+ *  snapshot store owns those (same law as show_image/visual cards). The
+ *  model-facing projection (toLlmMessages) resolves refs into pi-ai
+ *  ImageContent parts when the active model accepts images, and flattens
+ *  to IMAGE_NOTE_TEXT otherwise; the view projection (projectView) turns
+ *  refs into thumbnail parts. */
+export interface UserImageAttachment {
+	/** SHA-256 identity in ChatRecord.imageSnapshots. */
+	snapshotId: string;
+	/** The original file name (paste or picker) — alt text + the honest note. */
+	name: string;
+}
+
+/** The model-facing text when an image cannot be delivered as image content
+ *  (the active model takes no image input, or the snapshot is gone) — the
+ *  bracket convention of injected session context (NEXT_PROBLEM_TEXT's kin). */
+export function imageNoteText(image: UserImageAttachment): string {
+	return `[image attached: ${image.name}]`;
+}
+
 /** A record message: a native pi message (or our marker) plus the record id. */
 export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | LhMarkerMessage) & {
 	id: string;
 	/** CLI-reported effective context budget, not a catalog model maximum.
 	 * App-only metadata: never transmitted as provider/model message content. */
 	cliContextWindow?: number;
+	/** Learner-authored image refs (issue #96) — user messages only. Strips
+	 * at the wire in toLlmMessages like `id`; the bytes live in the chat's
+	 * imageSnapshots, resolved per model turn. */
+	images?: UserImageAttachment[];
 };
 
 /** Latest response only: never borrow an older process/model's window when
@@ -178,13 +204,16 @@ export function newMessageId(): string {
 // ─── constructors (the input-event → native append mapping lives in
 //     core/input-events.ts; steers in core/contracts/jobs.ts) ─────────────────
 
-/** A learner-authored user message (text input, verdict note). */
-export function newUserMessage(text: string): LhMessage & UserMessage {
+/** A learner-authored user message (text input, verdict note). Images
+ *  (issue #96) are optional refs — empty text is valid when an image rides
+ *  along (the composer gates it; the server validates the refs). */
+export function newUserMessage(text: string, images?: UserImageAttachment[]): LhMessage & UserMessage {
 	return {
 		id: newMessageId(),
 		role: "user",
 		content: text,
 		timestamp: Date.now(),
+		...(images && images.length > 0 ? { images } : {}),
 	};
 }
 
@@ -551,6 +580,48 @@ export function pendingProblemDismissalOf(messages: readonly LhMessage[]): strin
 
 // ─── the one model-facing seam (the agent's convertToLlm) ────────────────────
 
+/** Per-turn image delivery options (issue #96): how user image refs resolve
+ *  at the wire. Wired by the agent builder from the ACTIVE engine's pi-ai
+ *  model metadata; the options-less call (compaction estimates, tests,
+ *  golden fixtures) is deliberately text-only — no bytes in token math. */
+export interface ToLlmOptions {
+	/** The active model accepts image input (pi-ai `Model.input` includes
+	 *  "image"). Absent/false: every ref flattens to its honest note text. */
+	vision?: boolean;
+	/** The record's snapshot store (ChatRecord.imageSnapshots) — resolves
+	 *  refs to bytes at the wire. Absent: no image can resolve. */
+	snapshots?: Readonly<Record<string, ImageSnapshot>>;
+}
+
+/** Resolve one user message's image refs (issue #96): vision-capable model
+ *  AND resolvable snapshot → a pi-ai ImageContent part per image (the
+ *  providers' native image block); anything else → the bracketed note.
+ *  Pure; never throws (a missing snapshot degrades to the note). */
+function userWireWithImages(
+	message: UserMessage,
+	images: readonly UserImageAttachment[],
+	options: ToLlmOptions | undefined,
+): UserMessage {
+	// The record's user content is a plain string; tolerate block arrays by
+	// folding their text — the wire rebuilds text + image parts regardless.
+	const text = typeof message.content === "string"
+		? message.content
+		: message.content.filter((block) => block.type === "text").map((block) => (block as TextContent).text).join("\n");
+	const notes: string[] = [];
+	const imageParts: ImageContent[] = [];
+	for (const image of images) {
+		const snapshot = options?.snapshots?.[image.snapshotId];
+		if (options?.vision && snapshot) imageParts.push({ type: "image", data: snapshot.data, mimeType: snapshot.mimeType });
+		else notes.push(imageNoteText(image));
+	}
+	const allText = [text, ...notes].filter((line) => line.length > 0).join("\n");
+	if (imageParts.length === 0) return { ...message, content: allText };
+	return {
+		...message,
+		content: [...(allText ? [{ type: "text", text: allText } satisfies TextContent] : []), ...imageParts],
+	};
+}
+
 /** The ids of every toolResult in the tail (for the dangling-call scan). */
 function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
 	const ids = new Set<string>();
@@ -569,6 +640,8 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
  *
  * - user / assistant / toolResult pass through VERBATIM — signatures,
  *   usage, provider stamps all native — minus our record-`id` field.
+ * - user image refs (issue #96) resolve per ToLlmOptions: image content
+ *   parts on a vision-capable model, the bracketed note text otherwise.
  * - markers flatten to a user message carrying their content (the
  *   canonical text single-sourced in core/contracts); plan blocks are
  *   UI-only and filtered.
@@ -580,7 +653,7 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
  * Contract (pi-agent-core): never throws — an unknown shape passes
  * through untouched rather than killing the loop.
  */
-export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
+export function toLlmMessages(messages: readonly AgentMessage[], options?: ToLlmOptions): Message[] {
 	// THE COMPACTION CUT (owner round 14, 2026-10-05): the ACTIVE marker
 	// (the newest — chained compactions rule last) names the first kept
 	// message; everything before it is replaced by the marker's content
@@ -638,9 +711,17 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			});
 			continue;
 		}
-		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
-		const { id: _id, cliContextWindow: _cliContextWindow, ...native } = m as LhMessage;
-		out.push(native as Message);
+		// Strip app-only id/CLI context/image-ref metadata: the wire carries
+		// the native shape only. A user message's image REFS (issue #96)
+		// resolve HERE — image content parts on a vision-capable model, the
+		// honest bracketed note otherwise (ToLlmOptions; absent options are
+		// deliberately text-only, see the type).
+		const { id: _id, cliContextWindow: _cliContextWindow, images: messageImages, ...native } = m as LhMessage;
+		out.push(
+			messageImages && messageImages.length > 0 && role === "user"
+				? userWireWithImages(native as UserMessage, messageImages, options)
+				: (native as Message),
+		);
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
 		// adding results for their unexecuted calls would leave orphans.

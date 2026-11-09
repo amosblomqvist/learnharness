@@ -22,6 +22,7 @@ import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
+import type { ImageSnapshot } from "../core/contracts.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
@@ -124,12 +125,18 @@ export interface AgentBuildOptions {
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
 	/** Native conversation identity: the existing persisted chat id, reused
-	 * across reconstructed prober, teacher, and practice Agents.
-	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
+	 *  across reconstructed prober, teacher, and practice Agents.
+	 *  Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
 	 *  (pre-normalization) append to data/debug/provider-events/
 	 *  <chatId>.jsonl via providerEventObserver — the GLM-truncation /
 	 *  DeepSeek-id incident layer. Absent or env-off → no observer. */
 	chatId?: string;
+	/** The record's image snapshot store (issue #96): resolves user image
+	 *  refs into image content parts at the model-facing seam. Snapshots
+	 *  only ever append per session, so the turn-start map never goes stale
+	 *  within a turn. Absent (tests, bare agents) → image refs flatten to
+	 *  their honest bracketed note, exactly like a non-vision model. */
+	imageSnapshots?: Readonly<Record<string, ImageSnapshot>>;
 }
 
 /**
@@ -239,7 +246,17 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// UI-only markers (plan-block) drop, the app's id fields strip, and
 		// an abort's dangling question call gets its INTERRUPTED result. It
 		// must never throw (pi's convertToLlm contract).
-		convertToLlm: toLlmMessages,
+		// IMAGES (issue #96): pi's convertToLlm signature is model-blind, so
+		// the delivery decision bakes in HERE, per turn, from the active
+		// engine's own metadata — a vision-capable model (pi-ai Model.input
+		// includes "image") gets native image content parts; anything else
+		// gets the honest bracketed note. Same seam, same single decision
+		// point, whether the images rode this turn's input or old history.
+		convertToLlm: (messages) =>
+			toLlmMessages(messages, {
+				vision: engine.model.input.includes("image"),
+				snapshots: opts.imageSnapshots,
+			}),
 		prepareRequest: (request) => {
 			if (opts.callPurpose) {
 				let learner = false, automatic = false;

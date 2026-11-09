@@ -453,6 +453,10 @@ export async function handleChatInput(
 		messages: asAgentMessages(agentMessages),
 		onUsage: collectUsage,
 		toolToggles: effective.agent.tools,
+		// The record's image snapshots (issue #96): the model-facing seam
+		// resolves user image refs against the session's own store. The
+		// turn-start copy is safe — snapshots only append per session.
+		imageSnapshots: record.imageSnapshots,
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
 		// LH_PROVIDER_EVENTS=1 (provider-events.ts); no-op otherwise.
 		chatId,

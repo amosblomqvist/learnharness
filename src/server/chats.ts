@@ -1,4 +1,5 @@
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
+import { processLearnerImageBytes } from "../agent/tools/learner-image.ts";
 import { isJobLive } from "../agent/subagents/aborts.ts";
 import { coverageOf } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
@@ -24,6 +25,29 @@ import { discardChatDeliveries } from "./jobs.ts";
 export const { createChat, getChat, listChats } = stores.chatStore;
 export { titleFromPrompt };
 export type { ChatDeleteMode, ChatDeletionStats } from "../core/graph-deletion.ts";
+
+/** One composer image upload (issue #96): process raw picture bytes through
+ *  the SAME shared learner-image pipeline (bounds, off-thread orientation
+ *  and metadata cleanup, ≤1600px / <1 MiB stored PNG/JPEG) and persist them
+ *  in the session's ChatRecord.imageSnapshots under their SHA-256 identity
+ *  — session-scoped dedupe comes with the store (a re-upload of the same
+ *  processed bytes is a no-op). Returns the ref a text input attaches.
+ *
+ *  Throws the pipeline's honest Error (size/type/dimensions) for the route
+ *  to map to its status code; unknown sessions are the caller's 404. */
+export async function attachChatImage(
+	chatId: string,
+	bytes: Uint8Array,
+): Promise<{ snapshotId: string; mimeType: "image/png" | "image/jpeg"; width: number; height: number }> {
+	const stored = await processLearnerImageBytes(bytes);
+	stores.chatStore.saveImageSnapshot(chatId, stored.snapshotId, stored);
+	return {
+		snapshotId: stored.snapshotId,
+		mimeType: stored.mimeType,
+		width: stored.width,
+		height: stored.height,
+	};
+}
 
 /** How long the wind-down wait may take before the caller gets a retryable
  *  503 (an aborted extraction ends at its next model-call boundary —

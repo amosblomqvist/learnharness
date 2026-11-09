@@ -29,7 +29,8 @@
  */
 
 import type { QuestionAnswerData } from "./question-core.ts";
-import type { LhMessage } from "./native-messages.ts";
+import type { ImageSnapshot } from "./contracts/chat.ts";
+import type { LhMessage, UserImageAttachment } from "./native-messages.ts";
 import {
 	activeProblemOf,
 	concludedByDismissalPair,
@@ -47,7 +48,7 @@ import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 
 /** One client-originated input event (the POST body's `input`). */
 export type ChatInput =
-	| { type: "text"; text: string }
+	| { type: "text"; text: string; /** Uploaded-image refs (issue #96) — text may be empty when present. */ images?: UserImageAttachment[] }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData }
 	| { type: "continue" }
 	/** The failed-turn retry (issue #110): the banner's Retry button. */
@@ -159,16 +160,49 @@ export function dismissAppends(record: { messages: LhMessage[] }, input: Dismiss
 /** A malformed input event (the honest 400 — the orphan-trap discipline). */
 export class ChatInputError extends Error {}
 
+/** The most images one message may carry (issue #96): a generous but finite
+ *  ceiling — the composer's picker/paste face enforces the same bound, and
+ *  the processed snapshot (≤1600px, <1 MiB) keeps each cheap for a vision
+ *  model. Absent pi-ai per-model limits here; the provider's own request
+ *  validation is the final word. */
+export const MAX_IMAGES_PER_MESSAGE = 8;
+
+/** Validate the text input's image refs off a request body (issue #96):
+ *  shape, identity, name, and count. EXISTENCE against the session's
+ *  snapshot store is inputAppends' job (it sees the record). */
+function parseImageAttachments(input: Record<string, unknown>): UserImageAttachment[] | undefined {
+	if (input.images === undefined || input.images === null) return undefined;
+	if (!Array.isArray(input.images)) throw new ChatInputError("text input images must be an array");
+	if (input.images.length === 0) return undefined;
+	if (input.images.length > MAX_IMAGES_PER_MESSAGE) {
+		throw new ChatInputError(`text input carries more than ${MAX_IMAGES_PER_MESSAGE} images`);
+	}
+	return input.images.map((image) => {
+		if (typeof image !== "object" || image === null) throw new ChatInputError("image attachment must be an object");
+		const { snapshotId, name } = image as Record<string, unknown>;
+		if (typeof snapshotId !== "string" || !/^[a-f0-9]{64}$/.test(snapshotId)) {
+			throw new ChatInputError("image attachment requires a valid snapshot id");
+		}
+		if (typeof name !== "string" || name.length === 0 || name.length > 200) {
+			throw new ChatInputError("image attachment requires a name (1–200 characters)");
+		}
+		return { snapshotId, name } satisfies UserImageAttachment;
+	});
+}
+
 /** Parse and validate an input event off a request body. */
 export function parseChatInput(input: unknown): ChatInput {
 	if (typeof input !== "object" || input === null) throw new ChatInputError("input must be an object");
 	const i = input as Record<string, unknown>;
 	switch (i.type) {
-		case "text":
-			if (typeof i.text !== "string" || (i.text as string).trim().length === 0) {
-				throw new ChatInputError("text input requires non-empty text");
-			}
-			return { type: "text", text: i.text };
+		case "text": {
+			const images = parseImageAttachments(i);
+			const textMissing = typeof i.text !== "string" || (i.text as string).trim().length === 0;
+			// An image-only message is a valid learner input (issue #96): the
+			// empty composer with attached pictures sends.
+			if (textMissing && !images) throw new ChatInputError("text input requires non-empty text");
+			return { type: "text", text: typeof i.text === "string" ? i.text : "", ...(images ? { images } : {}) };
+		}
 		case "answer":
 			if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
 				throw new ChatInputError("answer input requires toolCallId");
@@ -212,12 +246,23 @@ export function parseChatInput(input: unknown): ChatInput {
  * double-answering.
  */
 export function inputAppends(
-	record: { messages: LhMessage[]; kind?: string },
+	record: { messages: LhMessage[]; kind?: string; imageSnapshots?: Record<string, ImageSnapshot> },
 	input: ChatInput,
 ): LhMessage[] {
 	switch (input.type) {
 		case "text":
-			return [...dismissalConclusion(record), newUserMessage(input.text)];
+			// The image orphan-400 (issue #96), the answer discipline's twin:
+			// every ref must name a snapshot THIS session actually stores —
+			// anything else 400s honestly instead of appending a message
+			// whose pictures can never render or reach a model.
+			if (input.images) {
+				for (const image of input.images) {
+					if (!record.imageSnapshots?.[image.snapshotId]) {
+						throw new ChatInputError(`image attachment "${image.name}" is not stored in this session`);
+					}
+				}
+			}
+			return [...dismissalConclusion(record), newUserMessage(input.text, input.images)];
 		case "answer": {
 			const pending = danglingQuestionOf(record.messages);
 			if (!pending || pending.toolCallId !== input.toolCallId) {

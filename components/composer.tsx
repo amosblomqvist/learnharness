@@ -5,14 +5,16 @@ import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import { AttachImageButton, ComposerImageChips, composerImagesSendable, pastedImageFiles, type ComposerImage } from "@/components/composer-images";
 
 /**
- * The chat composer — content row ONLY (the persistent rounded shell lives in
+ * The chat composer — the content row (plus, when pictures are attached,
+ * the chips row above it; issue #96). The persistent rounded shell lives in
  * the chat view's overlay, so the shell can later morph chat → question
- * without remounting).
+ * without remounting.
  *
  * Corner-radius math (concentric with the shell): shell rounded-2xl (16px) −
- * row padding p-1.5 (6px) = button rounded-[10px] = 25% of the 40px button.
+ * form padding p-1.5 (6px) = button rounded-[10px] = 25% of the 40px button.
  */
 /** What one Enter press does, in precedence order: stop a busy stream,
  *  otherwise send the message, otherwise — practice sessions only — fire
@@ -58,6 +60,9 @@ export function ChatSessionComposer({
 	placeholder,
 	nextProblem,
 	onNext,
+	images,
+	onAttachImages,
+	onRemoveImage,
 }: {
 	busy: boolean;
 	value: string;
@@ -73,10 +78,20 @@ export function ChatSessionComposer({
 	placeholder?: string;
 	nextProblem?: boolean;
 	onNext?: () => void;
+	/** Attached pictures (issue #96) — absent on composers without a
+	 *  session to upload into (the new-session page). */
+	images?: readonly ComposerImage[];
+	/** Paste/pick entry: raw files; the owner runs the upload flow. */
+	onAttachImages?: (files: File[]) => void;
+	/** Chip removal, by the chip's local key. */
+	onRemoveImage?: (key: string) => void;
 }) {
 	const [draft, setDraft] = useState(value);
 	useLayoutEffect(() => { setDraft(value); }, [revision, value]);
-	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive);
+	// Images open the send lane too (issue #96): an image-only message is a
+	// real answer to a question like "show your derivation". Uploading
+	// pictures hold the lane closed until they settle.
+	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive || composerImagesSendable(images ?? []));
 	const applyDraft = useCallback((next: string) => {
 		setDraft(next);
 		onChange(next);
@@ -96,6 +111,9 @@ export function ChatSessionComposer({
 			placeholder={placeholder}
 			nextProblem={nextProblem}
 			onNext={onNext}
+			images={images}
+			onAttachImages={onAttachImages}
+			onRemoveImage={onRemoveImage}
 		/>
 	);
 }
@@ -113,6 +131,9 @@ export function Composer({
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
 	onNext,
+	images,
+	onAttachImages,
+	onRemoveImage,
 }: {
 	busy: boolean;
 	value: string;
@@ -138,6 +159,14 @@ export function Composer({
 	/** The signal's dispatcher (send({type:"next"})) — the chip and the
 	 *  empty-Enter share it. */
 	onNext?: () => void;
+	/** Attached pictures (issue #96): chips above the content row. Absent
+	 *  (the new-session composer) = no image affordances at all. */
+	images?: readonly ComposerImage[];
+	/** Paste/pick entry (issue #96): raw files upward; the owner runs the
+	 *  upload flow. Also gates the attach-image button's presence. */
+	onAttachImages?: (files: File[]) => void;
+	/** Chip removal, by the chip's local key. */
+	onRemoveImage?: (key: string) => void;
 }) {
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
@@ -150,12 +179,17 @@ export function Composer({
 	return (
 		<form
 			data-testid="composer"
-			className="flex items-end gap-1.5 p-1.5"
+			className="flex flex-col p-1.5"
 			onSubmit={(e) => {
 				e.preventDefault();
 				act();
 			}}
 		>
+			{/* The image chips row (issue #96): above the content row, so the
+			    path chips inside the text and the picture chips beside them
+			    stay one draft's two attachment kinds. */}
+			{images && images.length > 0 && <ComposerImageChips images={images} onRemove={(key) => onRemoveImage?.(key)} />}
+			<div className="flex items-end gap-1.5">
 			<PathInput
 				ref={editorRef}
 				value={value}
@@ -180,11 +214,21 @@ export function Composer({
 						act();
 					}
 				}}
+				onPaste={(e) => {
+					// IMAGE PASTE (issue #96): image clipboard items upload and
+					// join the draft as chips; the text paste itself is not
+					// touched (PathInput's own handler owns it — image-only
+					// pastes insert no text there, mixed ones keep their text).
+					if (!onAttachImages) return;
+					const files = pastedImageFiles(e.clipboardData);
+					if (files.length > 0) onAttachImages(files);
+				}}
 				placeholder={placeholder}
 				autoFocus={autoFocus}
 				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 			/>
 			<AttachFilesButton editorRef={editorRef} />
+			{onAttachImages && <AttachImageButton onFiles={onAttachImages} />}
 			{/* The button follows the text (owner report 2026-10-03): while
 				 a turn runs WITH text typed it stays the SEND affordance
 				 (click = steer — steering must be clickable, not Enter-only);
@@ -221,9 +265,11 @@ export function Composer({
 								: "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40",
 						)}
 					>
-						{busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5" />}
+				 {busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5" />}
 					</button>
 				)}
+			</div>
 		</form>
 	);
 }
+
