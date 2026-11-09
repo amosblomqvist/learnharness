@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
 import { CLAUDE_CODE_PROVIDER, sessionCacheHitRate, subscriptionLabels, subscriptionLabel, type cliContextWindowOf, type SessionPricing, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
@@ -77,10 +78,14 @@ export function StatsBar({
 	// Same dropdown discipline as the model control (owner, df4433f treatment,
 	// stats round 1): close on any pointerdown outside the bar or on Escape.
 	const barRef = useRef<HTMLDivElement>(null);
+	const summaryRef = useRef<HTMLButtonElement>(null);
+	const detailRef = useRef<HTMLDivElement>(null);
+	const [detailPos, setDetailPos] = useState<{ left: number; bottom: number } | null>(null);
 	useEffect(() => {
 		if (!open) return;
 		const onPointerDown = (e: PointerEvent) => {
-			if (barRef.current && !barRef.current.contains(e.target as Node)) setOpen(false);
+			const target = e.target as Node;
+			if (barRef.current && !barRef.current.contains(target) && !detailRef.current?.contains(target)) setOpen(false);
 		};
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
@@ -96,6 +101,29 @@ export function StatsBar({
 		return () => {
 			document.removeEventListener("pointerdown", onPointerDown);
 			document.removeEventListener("keydown", onKeyDown);
+		};
+	}, [open]);
+	// The popover renders in body: the dock sits inside the Conversation
+	// scroller, whose overflow clips both axes (#610). Centered on the
+	// button, kept 8px inside the window.
+	useLayoutEffect(() => {
+		if (!open) { setDetailPos(null); return; }
+		const place = () => {
+			const rect = summaryRef.current?.getBoundingClientRect();
+			const width = detailRef.current?.offsetWidth;
+			if (!rect || !width) return;
+			const centered = (rect.left + rect.right) / 2 - width / 2;
+			setDetailPos({
+				left: Math.max(8, Math.min(centered, window.innerWidth - 8 - width)),
+				bottom: window.innerHeight - rect.top + 6,
+			});
+		};
+		place();
+		window.addEventListener("resize", place);
+		window.addEventListener("scroll", place, true);
+		return () => {
+			window.removeEventListener("resize", place);
+			window.removeEventListener("scroll", place, true);
 		};
 	}, [open]);
 	// The picker reports its effective selection. CLI windows are session-
@@ -122,8 +150,8 @@ export function StatsBar({
 			// control wave caught this live: buttons rendered, clicks never landed).
 			className="pointer-events-auto relative flex items-center justify-between gap-3 px-3 pt-2 text-xs text-muted-foreground"
 		>
-			{/* The summary button + its popover: the popover anchors to this
-			    wrapper, CENTERED over the button itself (owner, stats round 2)
+			{/* The summary button + its popover: the popover is CENTERED over
+			    the button itself (owner, stats round 2)
 			    — not over the whole bar row, which made it line up oddly. The
 			    outside-close ref anchors HERE too (owner, round 3): on the whole
 			    bar it wrapped the model control, so clicking model/thinking never
@@ -138,6 +166,7 @@ export function StatsBar({
 				{/* No tooltip — the numbers describe themselves and the popover
 			    speaks on click (owner, subtlety round 2026-09-25). */}
 			<button
+				ref={summaryRef}
 				type="button"
 				onClick={() => setOpen((o) => !o)}
 				aria-expanded={open}
@@ -150,10 +179,12 @@ export function StatsBar({
 				<span aria-hidden>·</span>
 				<span data-testid="stats-cost">{costLabel}</span>
 			</button>
-				{open && (
+				{open && createPortal(
 					<div
+						ref={detailRef}
 						data-testid="stats-detail"
-						className="absolute bottom-full left-1/2 z-40 mb-1.5 w-72 -translate-x-1/2 rounded-xl border bg-card p-3 text-xs shadow-xl"
+						style={detailPos ?? { visibility: "hidden" }}
+						className="fixed z-[60] w-72 rounded-xl border bg-card p-3 text-xs text-muted-foreground shadow-xl"
 					>
 						<div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 							Session stats
@@ -209,7 +240,8 @@ export function StatsBar({
 								</ul>
 							</>
 						)}
-					</div>
+					</div>,
+					document.body,
 				)}
 			</div>
 			)}
