@@ -18,21 +18,23 @@ interactive circuits, playback, raw-SVG input or custom drawing toolbars.
 
 ## Transparent appearance
 
-Rendered SVGs have no plugin background: the transcript shows through. The shared
-**Ink color** dropdown offers **White** (default, for dark backgrounds) and
-**Black** (for light backgrounds). It applies to neutral text and linework in all
-three families, including the chemistry renderer's neutral carbon/hydrogen ink.
+Rendered SVGs have no plugin background: the transcript shows through. Neutral
+text and linework follow the app's **Text** color (`--foreground`), including Text
+color overrides, in all three families. This includes the chemistry renderer's
+neutral carbon/hydrogen ink. There is no separate Ink color setting.
 Colored atoms and explicitly colored diagram elements remain colored. Intentional
 white fills, authored gradients/patterns and functional masks are preserved, not
 blanket-erased or inverted. A background deliberately drawn inside a TikZ diagram
 is still part of that diagram; the plugin does not guess which shapes to delete.
 No blend modes or inversion filters are used.
 
-Changing ink updates mounted SVGs immediately without replacing them, compiling
-TeX again, or clearing the compiled SVG cache. The setting synchronizes between
-windows like the format toggles. Existing v1 settings without `inkColor` use White
-without rewriting the saved file on startup; the next accepted change persists
-the complete settings. Existing family choices remain unchanged.
+Theme and Text-color changes reach mounted SVGs immediately through inherited
+CSS variables, without replacing them, compiling TeX again, clearing the compiled
+SVG cache, or sending plugin settings requests. New cached mounts inherit the
+current Text color too. Existing v1 settings remain readable with or without the
+obsolete `inkColor` key; its value is ignored. Startup never rewrites the file.
+The next changed family toggle saves settings without that obsolete key while
+preserving the other family choices.
 
 ## TikZ sizing
 
@@ -195,14 +197,14 @@ is provided by this plugin.
   mounting, preventing small acyclic reference-amplification payloads. Text/font/
   style admission is restricted; only bundled TeX fonts or ordinary system families
   are selected. Never insert raw model HTML.
-- Rendered drawings are transparent with selectable White/Black neutral ink,
+- Rendered drawings are transparent with theme-inherited neutral ink,
   preserving aspect ratio. Chemistry/music fit available width; wide TikZ scrolls
   to retain math-size labels. Plugin-owned paint variables
   are applied only after sanitization and before the final expanded-output budget
   check. Mask luminance and intentional colors/fills are retained. No raw generated
   tree or interaction listener is mounted. Abort/disposal fences late results.
 - Settings are versioned, validated and atomically written in plugin-owned
-  `data/settings.json`. Only a changed family or ink choice is sent to the backend; unrelated
+  `data/settings.json`. Only a changed family toggle is sent to the backend; unrelated
   concurrent-window changes are retained. Accepted revisions synchronize live and
   reconnect reads cannot overwrite a newer accepted revision. Malformed/newer
   settings fail explicitly without rewriting the file. Disabling never deletes it.
@@ -222,7 +224,12 @@ The fixture does not start/restart LearnHarness, install into a real data
 directory, call a model or establish packaged-app/user functional acceptance.
 See `THIRD-PARTY.md` for pinned libraries and explicit static-browser adaptations.
 
-### Focused local checkpoint
+The browser fixture also changes the host Text token to non-black/white colors,
+including a same-mode override. It checks live and cached mounts without extra
+TeX work or settings requests, while retaining authored colors and rasterized mask
+alpha. This is plugin-fixture coverage, not a real LearnHarness installation test.
+
+### Historical black/white-ink checkpoint
 
 Strict plugin TypeScript checking, **16 unit tests**, direct `dist/` build and the
 real-Chrome disposable fixture passed. All six pictured examples rendered: SMILES,

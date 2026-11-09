@@ -1,17 +1,15 @@
 export const FAMILIES = ["chemicalStructures", "musicalNotation", "technicalDiagrams"] as const;
 export type Family = typeof FAMILIES[number];
 export type Language = "smiles" | "abc" | "tikz";
-export type InkColor = "white" | "black";
 export interface Settings {
   version: 1;
   revision: number;
   chemicalStructures: boolean;
   musicalNotation: boolean;
   technicalDiagrams: boolean;
-  inkColor: InkColor;
 }
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
-  version: 1, revision: 0, chemicalStructures: false, musicalNotation: false, technicalDiagrams: false, inkColor: "white",
+  version: 1, revision: 0, chemicalStructures: false, musicalNotation: false, technicalDiagrams: false,
 });
 export const LANGUAGES: Record<Family, Language> = {
   chemicalStructures: "smiles", musicalNotation: "abc", technicalDiagrams: "tikz",
@@ -39,22 +37,10 @@ export function parseSettings(value: unknown): Settings {
   if (!Number.isSafeInteger(record.revision) || (record.revision as number) < 0 || FAMILIES.some(key => typeof record[key] !== "boolean")) {
     throw new Error("Invalid Rich code blocks settings.");
   }
+  // Legacy v1 inkColor is accepted above but deliberately omitted: theme Text
+  // now owns neutral ink. Reads never rewrite disk; normal saves drop the key.
   return { version: 1, revision: record.revision as number, chemicalStructures: record.chemicalStructures as boolean,
-    musicalNotation: record.musicalNotation as boolean, technicalDiagrams: record.technicalDiagrams as boolean,
-    // Existing v1 files remain valid and are not rewritten just by reading them.
-    inkColor: "inkColor" in record ? parseInkColor(record.inkColor) : DEFAULT_SETTINGS.inkColor };
-}
-
-function parseInkColor(value: unknown): InkColor {
-  if (value !== "white" && value !== "black") throw new Error("Ink color must be white or black.");
-  return value;
-}
-
-export function parseInkChange(value: unknown): InkColor {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1 || !("inkColor" in value)) {
-    throw new Error("An inkColor value is required.");
-  }
-  return parseInkColor((value as Record<string, unknown>).inkColor);
+    musicalNotation: record.musicalNotation as boolean, technicalDiagrams: record.technicalDiagrams as boolean };
 }
 
 export function parseChange(value: unknown): { family: Family; enabled: boolean } {

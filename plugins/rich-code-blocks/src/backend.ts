@@ -2,7 +2,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { PluginBackendContext } from "learnharness-plugin-api";
-import { DEFAULT_SETTINGS, FAMILIES, INSTRUCTIONS, parseChange, parseInkChange, parseSettings, type Settings } from "./contract.ts";
+import { DEFAULT_SETTINGS, FAMILIES, INSTRUCTIONS, parseChange, parseSettings, type Settings } from "./contract.ts";
 
 export function activate(ctx: PluginBackendContext): () => void {
   const file = path.join(ctx.dataDirectory, "settings.json");
@@ -44,17 +44,11 @@ export function activate(ctx: PluginBackendContext): () => void {
     if (settings[family] === enabled) return { ...settings };
     return commit({ ...settings, revision: nextRevision(), [family]: enabled }, true);
   });
-  const unregisterInk = ctx.handle("set-ink-color", input => {
-    assertActive();
-    const inkColor = parseInkChange(input);
-    if (settings.inkColor === inkColor) return { ...settings };
-    return commit({ ...settings, revision: nextRevision(), inkColor });
-  });
   let disposed = false;
   return () => {
     if (disposed) return;
     disposed = true;
-    unregisterGet(); unregisterSave(); unregisterInk();
+    unregisterGet(); unregisterSave();
     instructionDisposers.splice(0).forEach(dispose => dispose());
   };
 }

@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import type { PluginCodeBlockRenderer, PluginFrontendContext, PluginNotification, PluginSettingsSchema } from "learnharness-plugin-api";
 import { activate } from "../src/main.ts";
-import { DEFAULT_SETTINGS, type Settings } from "../src/contract.ts";
+import { DEFAULT_SETTINGS } from "../src/contract.ts";
 
 function deferred<T>() { let resolve!: (value: T) => void; let reject!: (error: Error) => void; const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; }
 function fixture() {
@@ -21,7 +21,7 @@ function fixture() {
     onResync(fn: () => void) { reconnects.add(fn); return () => { reconnects.delete(fn); }; },
   } as unknown as PluginFrontendContext;
   return { controller, renderers, notifications, reconnects, calls, get schema() { return schema; }, activate: () => activate(ctx), cleanup: () => cleanup(),
-    publish(value: Settings) { notifications.forEach(fn => fn({ pluginId: "rich-code-blocks", topic: "settings-changed", data: value })); },
+    publish(value: unknown) { notifications.forEach(fn => fn({ pluginId: "rich-code-blocks", topic: "settings-changed", data: value })); },
     reconnect() { reconnects.forEach(fn => fn()); } };
 }
 const flush = () => new Promise(resolve => setImmediate(resolve));
@@ -29,7 +29,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 test("all-off registrations and accepted cross-window revisions alone control families and settings", async () => {
   const host = fixture(); const activation = host.activate(); await flush();
   assert.equal(host.calls[0]!.operation, "get-settings"); host.calls[0]!.result.resolve(DEFAULT_SETTINGS); const dispose = await activation;
-  assert.equal(host.renderers.size, 0); assert.deepEqual(host.schema!.rows.map(row => [row.label, row.value]), [["Chemical structures", false], ["Musical notation", false], ["Technical diagrams", false], ["Ink color", "white"]]);
+  assert.equal(host.renderers.size, 0); assert.deepEqual(host.schema!.rows.map(row => [row.label, row.value]), [["Chemical structures", false], ["Musical notation", false], ["Technical diagrams", false]]);
   const save = host.schema!.rows[0]!.onChange(true as never);
   assert.deepEqual(host.calls[1]!.input, { family: "chemicalStructures", enabled: true }); assert.equal(host.renderers.size, 0);
   host.calls[1]!.result.reject(new Error("disk failure")); await assert.rejects(Promise.resolve(save), /disk failure/);
@@ -43,26 +43,17 @@ test("all-off registrations and accepted cross-window revisions alone control fa
   dispose(); dispose(); assert.equal(host.renderers.size, 0); assert.equal(host.schema, undefined); assert.equal(host.notifications.size, 0); assert.equal(host.reconnects.size, 0);
 });
 
-test("ink changes use accepted revisions without replacing code-block registrations", async () => {
+test("legacy ink snapshots expose only family toggles and do not replace renderer registrations", async () => {
   const host = fixture(); const activation = host.activate(); await flush();
-  host.calls[0]!.result.resolve({ ...DEFAULT_SETTINGS, technicalDiagrams: true }); const dispose = await activation;
+  host.calls[0]!.result.resolve({ ...DEFAULT_SETTINGS, technicalDiagrams: true, inkColor: "black" }); const dispose = await activation;
   const renderer = host.renderers.get("tikz");
-  const row = host.schema!.rows.find(row => row.key === "inkColor")!;
-  assert.equal(row.type, "dropdown");
-  if (row.type === "dropdown") assert.deepEqual(row.options, [{ value: "white", label: "White" }, { value: "black", label: "Black" }]);
-  const failed = row.onChange("black" as never);
-  assert.deepEqual(host.calls[1]!.input, { inkColor: "black" }); assert.equal(host.calls[1]!.operation, "set-ink-color");
-  host.calls[1]!.result.reject(new Error("disk failure")); await assert.rejects(Promise.resolve(failed), /disk failure/);
-  assert.equal(host.schema!.rows.find(row => row.key === "inkColor")!.value, "white");
-  const accepted = host.schema!.rows.find(row => row.key === "inkColor")!.onChange("black" as never);
-  host.calls[2]!.result.resolve({ ...DEFAULT_SETTINGS, revision: 1, technicalDiagrams: true, inkColor: "black" }); await accepted;
-  assert.equal(host.schema!.rows.find(row => row.key === "inkColor")!.value, "black");
-  assert.equal(host.renderers.get("tikz"), renderer);
+  assert.deepEqual(host.schema!.rows.map(row => row.key), ["chemicalStructures", "musicalNotation", "technicalDiagrams"]);
   host.publish({ ...DEFAULT_SETTINGS, revision: 2, technicalDiagrams: true, inkColor: "white" });
-  assert.equal(host.schema!.rows.find(row => row.key === "inkColor")!.value, "white");
   assert.equal(host.renderers.get("tikz"), renderer);
-  host.publish({ ...DEFAULT_SETTINGS, revision: 1, technicalDiagrams: true, inkColor: "black" });
-  assert.equal(host.schema!.rows.find(row => row.key === "inkColor")!.value, "white");
+  assert.equal(host.schema!.rows.some(row => row.key === "inkColor"), false);
+  host.publish({ ...DEFAULT_SETTINGS, revision: 1, technicalDiagrams: false, inkColor: "black" });
+  assert.equal(host.renderers.get("tikz"), renderer, "older snapshots still cannot roll back family choices");
+  assert.equal(host.calls.length, 1, "no ink write or extra settings read is needed");
   dispose();
 });
 

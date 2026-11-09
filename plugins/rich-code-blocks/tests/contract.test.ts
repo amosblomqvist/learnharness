@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { CACHE_BYTES, CACHE_ENTRIES, DEFAULT_SETTINGS, INSTRUCTIONS, SOURCE_LIMITS, SVG_LIMIT, checkSource, checkSvgSize, parseChange, parseInkChange, parseSettings } from "../src/contract.ts";
+import { CACHE_BYTES, CACHE_ENTRIES, DEFAULT_SETTINGS, INSTRUCTIONS, SOURCE_LIMITS, SVG_LIMIT, checkSource, checkSvgSize, parseChange, parseSettings } from "../src/contract.ts";
 import { RenderCache } from "../src/render.ts";
 
 test("strict versioned settings/change contracts retain false and reject unknown or malformed fields", () => {
@@ -10,17 +10,14 @@ test("strict versioned settings/change contracts retain false and reject unknown
   for (const invalid of [null, {}, { family: "tikz", enabled: true }, { family: "musicalNotation", enabled: 0 }, { family: "musicalNotation", enabled: true, extra: false }]) assert.throws(() => parseChange(invalid));
 });
 
-test("ink settings accept existing v1 files and strictly validate the new choice", () => {
-  const { inkColor: _inkColor, ...legacy } = DEFAULT_SETTINGS;
-  assert.deepEqual(parseSettings(legacy), DEFAULT_SETTINGS);
-  assert.equal(parseSettings({ ...legacy, inkColor: "black" }).inkColor, "black");
-  for (const inkColor of [null, undefined, true, "auto", "White", "", 0]) {
-    assert.throws(() => parseSettings({ ...legacy, inkColor }));
-    assert.throws(() => parseInkChange({ inkColor }));
+test("v1 settings tolerate and discard obsolete inkColor without changing revisions or family choices", () => {
+  const settings = { ...DEFAULT_SETTINGS, revision: 4, chemicalStructures: true, technicalDiagrams: true };
+  assert.deepEqual(parseSettings(settings), settings);
+  for (const inkColor of ["white", "black", null, undefined, true, "auto", "", 0]) {
+    assert.deepEqual(parseSettings({ ...settings, inkColor }), settings);
   }
-  assert.equal(parseInkChange({ inkColor: "white" }), "white");
-  assert.equal(parseInkChange({ inkColor: "black" }), "black");
-  for (const input of [null, [], {}, "white", { inkColor: "white", enabled: true }]) assert.throws(() => parseInkChange(input));
+  assert.equal("inkColor" in DEFAULT_SETTINGS, false);
+  assert.throws(() => parseSettings({ ...settings, inkColour: "black" }), /Unknown/);
 });
 
 test("technical-diagram instructions cover the observed TeX authoring failures", () => {
