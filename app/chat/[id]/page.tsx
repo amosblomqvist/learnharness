@@ -29,6 +29,9 @@ export default async function ChatPage({
 				// derived app-side (core/view.ts projectView; GET serves the same
 				// native messages).
 				initialMessages={chat.messages}
+			// The reference shelf seed (issue #63): the record's references;
+			// the header chip owns edits after mount.
+			initialReferences={chat.references}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}
