@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
+import { CalendarClockIcon, CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -16,7 +16,7 @@ import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
 import { SessionStarter } from "@/components/start-session";
-import type { TurnUsage } from "@/src/core";
+import type { DueReview, TurnUsage } from "@/src/core";
 
 /**
  * Home — the knowledge graph is the main view, full-bleed edge to edge
@@ -24,6 +24,12 @@ import type { TurnUsage } from "@/src/core";
  * under the header and the new-session dock, both of which float over it
  * with no gradient scrims. Sessions live in the toggleable sidebar.
  */
+
+/** The review affordance's opening message (issue #33): the learner-voiced
+ * instruction the created practice session opens with — the due material
+ * itself rides the graph-context marker, not this text. */
+const REVIEW_OPENING_PROMPT = "Review my due material";
+
 export function Home({
 	initialConfigured,
 	rendering = true,
@@ -98,6 +104,48 @@ export function Home({
 	// The chain table is CONTROLLED off this id set (the lifted pick).
 	const pickedIds = useMemo(() => new Set(practiceProps.map((p) => p.id)), [practiceProps]);
 
+	/* DUE REVIEWS (issue #33, retention): fetched once per mount — the
+	 * count behind the review affordance. The ref mirror (the codebase's
+	 * dictation discipline) keeps the chip's send from reading a stale
+	 * closure; an unreachable route leaves home usable (no chip). */
+	const [dueReviews, setDueReviews] = useState<DueReview[] | null>(null);
+	const dueRef = useRef<DueReview[]>([]);
+	useEffect(() => {
+		let alive = true;
+		fetch("/api/graph/reviews")
+			.then((r) => r.json() as Promise<{ due?: DueReview[] }>)
+			.then((body) => {
+				if (!alive || !Array.isArray(body.due)) return;
+				dueRef.current = body.due;
+				setDueReviews(body.due);
+			})
+			.catch(() => {
+				/* unreachable — no review affordance */
+			});
+		return () => {
+			alive = false;
+		};
+	}, []);
+
+	/* The pre-send guards (owner interlude, no-orphan-chats): the models
+	 * case guards BEFORE creation; the key cases must too — a refused
+	 * first send would otherwise leave an orphan error-shell chat in the
+	 * sidebar (the 503 lands only after POST /api/chats already created
+	 * the record). Shared by the topic send and the review affordance;
+	 * the server's admission gate remains the belt. */
+	const guardsPass = () => {
+		if (!configured || zeroKeys) {
+			setSetupOpen(true);
+			return false;
+		}
+		const strong = catalog?.slots.strong?.model;
+		if (selectedModelUnavailable(catalog, strong ? `${strong.provider}:${strong.id}` : undefined)) {
+			openModelPicker();
+			return false; // Preserve the draft and never create an orphan session.
+		}
+		return true;
+	};
+
 	/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while a
 	 * run is live with the topic still deferred in the run's buffer — stop
 	 * the run, let the last finals land, THEN read the REF mirror (not the
@@ -115,26 +163,7 @@ export function Home({
 		if (!t || startingRef.current) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
-		if (!configured) {
-			setSetupOpen(true);
-			return;
-		}
-		// The pre-send KEY guards (owner interlude, no-orphan-chats): the
-		// models case guards BEFORE creation; the key cases must too — a
-		// refused first send would otherwise leave an orphan error-shell
-		// chat in the sidebar (the 503 lands only after POST /api/chats
-		// already created the record). Zero providers opens connection setup;
-		// an unavailable selection with another provider opens its ordinary
-		// picker. The server's admission gate remains the belt.
-		if (zeroKeys) {
-			setSetupOpen(true);
-			return;
-		}
-		const strong = catalog?.slots.strong?.model;
-		if (selectedModelUnavailable(catalog, strong ? `${strong.provider}:${strong.id}` : undefined)) {
-			openModelPicker();
-			return; // Preserve the draft and never create an orphan session.
-		}
+		if (!guardsPass()) return;
 		startingRef.current = true;
 		setBusy(true);
 		setStartError(false);
@@ -148,6 +177,33 @@ export function Home({
 				title: t,
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
+			}, fetch, JSON.stringify(catalog?.slots.strong));
+			router.push(target);
+		} catch {
+			startingRef.current = false;
+			setBusy(false);
+			setStartError(true);
+		}
+	};
+
+	/* REVIEW DUE MATERIAL (issue #33): one tap starts a practice session
+	 * whose explicit graph selection IS the due set — the SAME creation
+	 * path as a picked practice send (graphContext picks, kind practice),
+	 * never a new session kind. Its concludes then reschedule the due
+	 * propositions through the ordinary capture; the opening message is
+	 * the learner's voice, the marker carries the material. */
+	const startReview = async () => {
+		if (startingRef.current || dueRef.current.length === 0) return;
+		if (!guardsPass()) return;
+		startingRef.current = true;
+		setBusy(true);
+		setStartError(false);
+		try {
+			const propositions = dueRef.current.map((d) => ({ id: d.id, name: d.name, statement: d.statement }));
+			const target = await starterRef.current.start({
+				title: REVIEW_OPENING_PROMPT,
+				kind: "practice",
+				graphContext: { propositions },
 			}, fetch, JSON.stringify(catalog?.slots.strong));
 			router.push(target);
 		} catch {
@@ -218,15 +274,33 @@ export function Home({
 					    mode (it survives mode switches; only a practice
 					    send consumes it). Practice mode with nothing picked
 					    shows the pick HINT so the affordance is discoverable;
-					    teaching mode with nothing picked renders nothing. */}
+					    teaching mode with nothing picked renders nothing.
+					    The REVIEW chip (issue #33) joins the row when the
+					    retention ledger has due propositions — one tap
+					    starts the due review practice session. */}
 					<ComposerActions
-						picker={(practiceProps.length > 0 || mode === "practice") && (
-							<NodePickerControl
-								count={practiceProps.length}
-								onOpen={() => setChainSelectOpen(true)}
-								onClear={() => setPracticeProps([])}
-							/>
-						)}
+						picker={
+							<>
+								{(dueReviews?.length ?? 0) > 0 && (
+									<button
+										type="button"
+										data-testid="review-due-button"
+										onClick={() => void startReview()}
+										className="flex cursor-pointer items-center gap-1.5 rounded-full border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:bg-accent"
+									>
+										<CalendarClockIcon aria-hidden="true" className="size-3.5 text-muted-foreground" />
+										Review due material ({dueReviews!.length})
+									</button>
+								)}
+								{(practiceProps.length > 0 || mode === "practice") && (
+									<NodePickerControl
+										count={practiceProps.length}
+										onOpen={() => setChainSelectOpen(true)}
+										onClear={() => setPracticeProps([])}
+									/>
+								)}
+							</>
+						}
 						setup={zeroKeys ? (
 							<ZeroKeysPill inline onOpen={() => setSetupOpen(true)} />
 						) : (

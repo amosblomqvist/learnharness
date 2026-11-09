@@ -28,6 +28,7 @@ import type {
 	NotesSource,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
+import type { ReviewLedger, ReviewEntry } from "./retention.ts";
 
 // ─── ChatStore — the session record's home (data/chats) ─────────────────────
 
@@ -132,6 +133,28 @@ export interface GraphStore {
 		checkpoints?: SessionCheckpoint[];
 	}): void;
 }
+
+// ─── ReviewStore — the retention ledger (data/graph/reviews.json) ────────────
+
+/**
+ * Per-proposition spaced-repetition state (issue #33): the FSRS memory
+ * entry of every proposition the learner has practiced with explicit map
+ * picks. A JSON map, read-modify-write like sources.json — the pure folds
+ * live in core/retention.ts (due derivation, conclude→rating capture);
+ * this seam only persists. The graph-family format stamp versions the
+ * file alongside its siblings.
+ */
+export interface ReviewStore {
+	/** The whole ledger — propositionId → entry. An absent or corrupt file
+	 *  reads as {} ("nothing scheduled yet", the first-boot state). Invalid
+	 *  entries are skipped, never guessed at. */
+	readReviews(): ReviewLedger;
+	/** Replace the whole ledger (the caller computed the next map purely). */
+	writeReviews(reviews: ReviewLedger): void;
+}
+
+/** Re-export: the contract shapes ride the port's module (retention.ts). */
+export type { ReviewEntry };
 
 /** Separate from graph ledgers and source identity, for future shared views. */
 export interface SourceOrganizationStore {

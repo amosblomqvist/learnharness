@@ -137,6 +137,7 @@ Extraction is the construction writer, not the only mutation: source/session/nod
 | Conversations, plans, usage, image snapshots | `chats/*.json` |
 | Worker computation and delivery obligations | `jobs/*.json` |
 | Propositions, chains, checkpoints, coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
+| Per-proposition FSRS review states ([retention](retention.md)) | `graph/reviews.json` |
 | Sources, organization, positions, render preferences | JSON maps under `graph/` |
 | Preferences and prompt overrides | `settings.json`, `prompts/` |
 | Keys and custom-endpoint binding | Separate `auth.json`, selected by `LH_AUTH_FILE` |

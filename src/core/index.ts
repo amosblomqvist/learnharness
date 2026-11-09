@@ -85,6 +85,12 @@ export * from "./auth-keys.ts";
 // keyboard.ts: the shortcut registry + binding normalization (pure, browser-safe).
 export * from "./keyboard.ts";
 export * from "./coverage.ts";
+// fsrs.ts + retention.ts (issue #33, spaced repetition): the pure FSRS-4.5
+// scheduler and the review-ledger folds (due derivation, conclude→rating
+// capture). Pure, browser-safe — the home review affordance reads the
+// DueReview payload type through this barrel.
+export * from "./fsrs.ts";
+export * from "./retention.ts";
 // session-markdown.ts (2026-09-27 engine; first consumer 2026-10-06): the
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
