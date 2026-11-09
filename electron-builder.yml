@@ -87,6 +87,10 @@ extraResources:
   # Attribution/license for the bounded local Pi cutoff-selector port.
   - from: docs/compaction-accounting.md
     to: licenses/pi-compaction.md
+  # MIT notices and model provenance for on-device dictation (pi-voice port,
+  # Silero VAD, transcribe.cpp, koffi, opencc-js).
+  - from: docs/local-stt-licenses.md
+    to: licenses/local-stt.md
   # Copy from the PARENT dir (.next), not .next/standalone itself:
   # electron-builder hard-excludes a copy's root node_modules and the
   # default no-filter pattern is a literal path match (empirically both

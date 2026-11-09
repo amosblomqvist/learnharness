@@ -26,6 +26,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
 	AUTH_KEYS,
+	GROQ_KEY_ID,
 	CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
 	CUSTOM_PROVIDER,
@@ -40,7 +41,9 @@ import { ClaudeCodeInstallationStatus } from "./claude-code-status.tsx";
 import { ProviderMenuList } from "./model-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { DictationLanguageSetting } from "@/components/dictation-language";
+import { DictationLanguageRows } from "@/components/settings/dictation-local";
+import { DictationEngineSettings, DictationSetupHint } from "@/components/dictation-engine";
+import { GROQ_DICTATION_ROW } from "@/components/dictation-groq";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -368,7 +371,8 @@ function AddProviderRow({
 
 export function KeysSection({
 	/** A deep-linked row to unfold on arrival (zero-keys wave): the
-	 *  dictation error's click lands here on DEEPGRAM_API_KEY. Followed
+	 *  dictation error's click lands here on DEEPGRAM_API_KEY (Groq's
+	 *  lands on GROQ_DICTATION_ROW). Followed
 	 *  while mounted too — the settings dialog's while-open retarget
 	 *  pattern. undefined = nothing seeded. */
 	initialRow,
@@ -599,15 +603,26 @@ export function KeysSection({
 					/>
 				))}
 				{label === "Dictation" && <>
-					<DictationLanguageSetting />
-					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
-						Create a <a
-							href="https://console.deepgram.com/"
-							target="_blank"
-							rel="noreferrer"
-							className="underline underline-offset-2 hover:text-foreground"
-						>Deepgram API key</a> with the Member role or higher, then add it above.
-					</p>
+					{/* The same GROQ_API_KEY as Model API keys, with its own open-row id and no
+					    Delete: removing it here would also take Groq models away. */}
+					<KeyTableRow
+						label="Groq"
+						docsUrl="https://console.groq.com/keys"
+						status={statuses.find((status) => status.id === GROQ_KEY_ID)
+							?? { id: GROQ_KEY_ID, info: null, present: false, masked: null, source: "none", shadowedByEnv: false }}
+						expanded={openRow === GROQ_DICTATION_ROW}
+						onToggle={() => setOpenRow(openRow === GROQ_DICTATION_ROW ? null : GROQ_DICTATION_ROW)}
+						onSave={async (v) => {
+							const err = await saveKey(GROQ_KEY_ID, v);
+							if (!err) setOpenRow(null);
+							return err;
+						}}
+						onCancel={() => setOpenRow(null)}
+						testid="key-dictation-groq"
+					/>
+					<DictationEngineSettings />
+					<DictationLanguageRows />
+					<DictationSetupHint />
 				</>}
 			</SettingsGroup>)}
 

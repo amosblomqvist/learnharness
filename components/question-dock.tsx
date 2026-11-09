@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
+import { finishDictation, isDictationActive, isDictationRetained, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
 import { MalformedQuestion } from "@/components/malformed-question";
@@ -380,12 +380,19 @@ function QuestionDockForm({
 		 * run, let the last finals land in the target field, and only then
 		 * build the answer — the spoken reasoning is never lost to a
 		 * forgotten stop. The field values below come from the REF mirrors
-		 * because the flush lands via setState after an await. */
-		if (!isDictationActive()) {
+		 * because the flush lands via setState after an await.
+		 *
+		 * A Groq or Local upload that failed keeps its recording for Retry: finish
+		 * resolves false (and a recording already kept counts as unsent), so
+		 * the submit ABORTS and the draft stays, rather than sending the
+		 * answer without the spoken part. */
+		if (!isDictationActive() && !isDictationRetained()) {
 			doSubmit();
 			return;
 		}
-		void finishDictation().then(doSubmit);
+		void finishDictation().then((ok) => {
+			if (ok) doSubmit();
+		});
 	};
 	const doSubmit = () => {
 		if (!canSubmit) return;

@@ -25,6 +25,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
+import { defaultLocalPreferredLanguages } from "./local-stt.ts";
 import type { SearchEngineId } from "./search.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
@@ -189,6 +190,14 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		dictation: {
 			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
+			provider: record?.dictation?.provider ?? FACTORY_SETTINGS.dictation.provider,
+			groqModel: record?.dictation?.groqModel ?? FACTORY_SETTINGS.dictation.groqModel,
+			localModel: record?.dictation?.localModel ?? FACTORY_SETTINGS.dictation.localModel,
+			// Unset follows the dictation language.
+			localPreferredLanguages: record?.dictation?.localPreferredLanguages
+				?? defaultLocalPreferredLanguages(record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language),
+			localLanguage: record?.dictation?.localLanguage ?? FACTORY_SETTINGS.dictation.localLanguage,
+			localChineseOutput: record?.dictation?.localChineseOutput ?? FACTORY_SETTINGS.dictation.localChineseOutput,
 		},
 		agent: {
 			models,
