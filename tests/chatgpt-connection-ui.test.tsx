@@ -76,8 +76,8 @@ test("Providers is the first/default page; General closes the native group befor
  const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
  const ids = [...html.matchAll(/data-testid="settings-nav-([^"]+)"/g)].map((m) => m[1]);
  assert.deepEqual(ids, ["keys", "agent", "appearance", "graph", "keyboard", "general", "core-plugins", "plugins"]);
- assert.match(html, /settings-nav-keys[^>]*aria-current="true"/); assert.match(html, />Providers<\/button>/);
- assert.doesNotMatch(html, />Model providers<\/button>/);
+ assert.match(html, /settings-nav-keys[^>]*aria-current="true"/);
+ assert.equal(parseHTML(html).document.querySelector('[data-testid="settings-nav-keys"]')?.textContent, "Providers");
 });
 
 test("Providers has five ordered sections including External CLI; unknown variables stay masked/read-only at the end of Model API keys", async () => {
