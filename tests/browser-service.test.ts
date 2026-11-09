@@ -7,8 +7,12 @@
  * not in the suite.
  */
 import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import { describe, it } from "node:test";
-import { browserServiceSpawnEnv, parseBrowserServiceLine } from "../src/agent/subagents/headless.ts";
+import { setTimeout as sleep } from "node:timers/promises";
+import puppeteer from "puppeteer-core";
+import { browserServiceSpawnEnv, parseBrowserServiceLine, realHeadless } from "../src/agent/subagents/headless.ts";
 
 describe("browser-service helper (pure halves)", () => {
 	it("parses the handshake line into a port", () => {
@@ -38,5 +42,61 @@ describe("browser-service helper (pure halves)", () => {
 		browserServiceSpawnEnv(original);
 		assert.equal(original.ELECTRON_RUN_AS_NODE, "1");
 		assert.equal(original.KEEP, "yes");
+	});
+});
+
+describe("browser-service helper (shared across demo jobs)", () => {
+	const cp = createRequire(import.meta.url)("node:child_process");
+
+	async function withFakeHelpers(run: (helpers: EventEmitter[]) => Promise<void>) {
+		const realSpawn = cp.spawn;
+		const realFetch = globalThis.fetch;
+		const realConnect = puppeteer.connect;
+		const electron = Object.getOwnPropertyDescriptor(process.versions, "electron");
+		const helpers: EventEmitter[] = [];
+		cp.spawn = () => {
+			const proc = Object.assign(new EventEmitter(), {
+				stdout: new EventEmitter(), exitCode: null as number | null, kill() { return true; },
+			});
+			helpers.push(proc);
+			setTimeout(() => proc.stdout.emit("data", Buffer.from(`BROWSER_SERVICE_CDP ${9500 + helpers.length}\n`)), 10);
+			return proc;
+		};
+		syncBuiltinESMExports();
+		// A connected fake helper page lets runDemo settle and clean its temp dir
+		// without falling back to launching real Chrome.
+		const page = { target: () => ({ type: () => "page" }), on() {}, goto: async () => null };
+		globalThis.fetch = (async () => ({ json: async () => ({ webSocketDebuggerUrl: "ws://fake" }) })) as unknown as typeof fetch;
+		puppeteer.connect = (async () => ({ pages: async () => [page] })) as unknown as typeof puppeteer.connect;
+		Object.defineProperty(process.versions, "electron", { value: "test", configurable: true });
+		try {
+			await run(helpers);
+		} finally {
+			for (const helper of helpers) helper.emit("exit", 0);
+			cp.spawn = realSpawn;
+			syncBuiltinESMExports();
+			globalThis.fetch = realFetch;
+			puppeteer.connect = realConnect;
+			if (electron) Object.defineProperty(process.versions, "electron", electron);
+			else delete (process.versions as Record<string, unknown>).electron;
+		}
+	}
+
+	it("two demo jobs started together share one helper, and a new one starts after it exits", async () => {
+		await withFakeHelpers(async (helpers) => {
+			const runs = [
+				realHeadless.runDemo("<button>count</button>", { settleMs: 0 }),
+				realHeadless.runDemo("<input type=range>", { settleMs: 0 }),
+			];
+			while (helpers.length === 0) await sleep(10);
+			await sleep(200);
+			assert.equal(helpers.length, 1);
+
+			helpers[0]!.emit("exit", 0);
+			runs.push(realHeadless.runDemo("<p>next</p>", { settleMs: 0 }));
+			await sleep(200);
+			assert.equal(helpers.length, 2);
+			await Promise.all(runs);
+		});
 	});
 });
