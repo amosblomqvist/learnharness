@@ -26,6 +26,12 @@ export const PATHS = {
 	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
 	chats: path.join(DATA_ROOT, "chats"),
 	graph: path.join(DATA_ROOT, "graph"),
+	/** Converted session-source material (issue #175):
+	 *  data/graph/materials/<sourceId>.md — the Markdown a document-sourced
+	 *  session's prompt points the read tool at. App-owned learning data,
+	 *  deliberately readable by the agent even under restricted file
+	 *  access (the learner uploaded it for exactly this). */
+	materials: path.join(DATA_ROOT, "graph", "materials"),
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */
 	debug: path.join(DATA_ROOT, "debug"),

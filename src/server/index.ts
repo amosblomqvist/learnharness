@@ -16,6 +16,15 @@ export { joinPages } from "../agent/subagents/pdf-markdown.ts";
 // Shared upload plumbing (issue #175): one file-reading/bounding rule for
 // the notes import and document-sourced session creation.
 export { FormBodyLimitError, readBoundedForm, readNotesFile, MAX_PDF_PAGES, type NotesFile } from "./notes-file.ts";
+// Document-sourced sessions (issue #175): staging + background graph import
+// for the source documents a teaching session is created from.
+export {
+	sourceIdForFile,
+	materialPathFor,
+	stageSessionDocuments,
+	startDocumentExtraction,
+	type StagedDocument,
+} from "./session-documents.ts";
 export * from "./commit-positions.ts";
 export * from "./jobs.ts";
 export * from "./stores.ts";
