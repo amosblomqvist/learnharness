@@ -60,6 +60,32 @@ export interface ChatRecord {
 	 *  (the downgrade scenario) is REFUSED on read: a read-modify-write
 	 *  store must never rewrite what it doesn't understand. */
 	version?: number;
+	/** Aside threads (issue #16): quick clarification Q&As that NEVER enter
+	 *  `messages` — the main projection (toLlmMessages) and compaction
+	 *  operate on `messages` only, so asides are invisible to the teaching
+	 *  agents and to context accounting by construction. Additive optional:
+	 *  pre-aside records simply lack the field. */
+	asides?: AsideThread[];
+}
+
+// ─── Aside threads (issue #16 — the /btw side channel) ───────────────────────
+
+/** One exchange entry in an aside thread. Plain text only — aside answers
+ *  are v1 non-streaming, whole-reply strings, not native LhMessages. */
+export interface AsideMessage {
+	role: "user" | "assistant";
+	text: string;
+	/** ISO timestamp of when this half of the exchange was recorded. */
+	at: string;
+}
+
+/** A persistent aside thread. v1 uses ONE thread per session (the first
+ *  entry of ChatRecord.asides); the array leaves room for per-topic threads
+ *  without a schema change. */
+export interface AsideThread {
+	id: string;
+	createdAt: string;
+	messages: AsideMessage[];
 }
 
 /** The chat record format this build writes and understands. */
