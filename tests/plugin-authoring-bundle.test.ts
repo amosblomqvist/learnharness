@@ -131,6 +131,36 @@ it("refuses unsafe example contents, source symlinks and output symlinks without
 		assert.equal(fs.readFileSync(outside, "utf8"), "preserve");
 	});
 });
+it("rejects every curated source-file symlink before replacing existing outputs", () => {
+	for (const relative of ["skills/learnharness-plugins/SKILL.md", "package.json", "LICENSE", "docs/plugin-authoring.md", "skills/learnharness-plugins/README.md", "examples/plugins/hello-plugin/README.md", "examples/plugins/hello-plugin/dist/manifest.json", "examples/plugins/hello-plugin/dist/main.js", "scripts/build-plugin-types.mjs"]) fixture(root => {
+		const built = buildPluginAuthoring({ root });
+		const archive = fs.readFileSync(built.archive), skill = fs.readFileSync(path.join(built.directory, "SKILL.md"));
+		const external = fs.mkdtempSync(path.join(os.tmpdir(), "lh-authoring-external-file-"));
+		try {
+			const source = path.join(root, relative), target = path.join(external, path.basename(source));
+			fs.copyFileSync(source, target);
+			fs.unlinkSync(source); fs.symlinkSync(target, source);
+			assert.throws(() => buildPluginAuthoring({ root }), /Refusing.*symlink/, relative);
+			assert.deepEqual(fs.readFileSync(built.archive), archive, relative);
+			assert.deepEqual(fs.readFileSync(path.join(built.directory, "SKILL.md")), skill, relative);
+		} finally { fs.rmSync(external, { recursive: true, force: true }); }
+	});
+});
+it("rejects source ancestor-directory symlinks before replacing existing outputs", () => {
+	for (const relative of ["docs", "docs/archive", "skills", "skills/learnharness-plugins", "examples", "examples/plugins", "examples/plugins/hello-plugin", "examples/plugins/hello-plugin/dist", "scripts"]) fixture(root => {
+		const built = buildPluginAuthoring({ root });
+		const archive = fs.readFileSync(built.archive), skill = fs.readFileSync(path.join(built.directory, "SKILL.md"));
+		const external = fs.mkdtempSync(path.join(os.tmpdir(), "lh-authoring-external-directory-"));
+		try {
+			const source = path.join(root, relative), target = path.join(external, "source");
+			fs.cpSync(source, target, { recursive: true });
+			fs.rmSync(source, { recursive: true }); fs.symlinkSync(target, source, "dir");
+			assert.throws(() => buildPluginAuthoring({ root }), /Refusing.*symlink/, relative);
+			assert.deepEqual(fs.readFileSync(built.archive), archive, relative);
+			assert.deepEqual(fs.readFileSync(path.join(built.directory, "SKILL.md")), skill, relative);
+		} finally { fs.rmSync(external, { recursive: true, force: true }); }
+	});
+});
 it("ZIP writer refuses traversal, ambiguous paths and duplicate entries", () => {
 	for (const name of ["../escape", "learnharness-plugins/../escape", "learnharness-plugins/./a", "learnharness-plugins//a", "learnharness-plugins/a\\b", "/absolute"]) assert.throws(() => createAuthoringZip([{ name, data: Buffer.from("a") }]), /Invalid/);
 	assert.throws(() => createAuthoringZip([{ name: "learnharness-plugins/a", data: Buffer.from("a") }, { name: "learnharness-plugins/a", data: Buffer.from("b") }]), /Invalid/);

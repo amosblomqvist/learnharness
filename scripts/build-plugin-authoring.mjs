@@ -14,16 +14,33 @@ export const AUTHORING_DOCS = [
 export const AUTHORING_EXAMPLES = ["hello-plugin", "managed-agent", "teaching-extension"];
 export const AUTHORING_ZIP = "learnharness-plugins.zip";
 
-function files(directory, prefix = "") {
-	return fs.readdirSync(directory, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en")).flatMap(entry => {
+/** Admit every component below the intended source root before dereferencing it.
+ * Final-component checks alone miss linked parent directories. */
+function sourcePath(root, source, kind) {
+	root = path.resolve(root);
+	const filename = path.resolve(source), relative = path.relative(root, filename);
+	if (relative === ".." || relative.startsWith(".." + path.sep) || path.isAbsolute(relative)) throw Error(`Refusing authoring source outside root: ${filename}`);
+	let current = root;
+	const components = relative ? ["", ...relative.split(path.sep)] : [""];
+	for (let index = 0; index < components.length; index++) {
+		current = path.join(current, components[index]);
+		const stat = fs.lstatSync(current);
+		if (stat.isSymbolicLink()) throw Error(`Refusing authoring source symlink: ${current}`);
+		const directory = index < components.length - 1 || kind === "directory";
+		if (directory ? !stat.isDirectory() : !stat.isFile()) throw Error(`Refusing non-${directory ? "directory" : "file"} authoring source: ${current}`);
+	}
+	return filename;
+}
+function files(directory, prefix = "", root = directory) {
+	return fs.readdirSync(sourcePath(root, directory, "directory"), { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name, "en")).flatMap(entry => {
 		const relative = prefix + entry.name, filename = path.join(directory, entry.name);
 		if (entry.isSymbolicLink()) throw Error(`Refusing authoring symlink: ${filename}`);
 		if (entry.isDirectory()) {
 			if (["data", "node_modules", ".git"].includes(entry.name)) throw Error(`Refusing non-authoring directory: ${filename}`);
-			return files(filename, relative + "/");
+			return files(filename, relative + "/", root);
 		}
 		if (!entry.isFile() || /^(?:\.env(?:\..*)?|auth\.json|.*-credentials\.json.*)$/.test(entry.name)) throw Error(`Refusing non-authoring file: ${filename}`);
-		return [{ name: relative, data: fs.readFileSync(filename) }];
+		return [{ name: relative, data: fs.readFileSync(sourcePath(root, filename, "file")) }];
 	});
 }
 
@@ -58,14 +75,13 @@ export function createAuthoringZip(entries) {
 	return Buffer.concat([...local, directory, end]);
 }
 
-function copyFile(source, destination) {
-	if (!fs.lstatSync(source).isFile()) throw Error(`Refusing non-file authoring source: ${source}`);
+function copyFile(root, source, destination) {
+	const admitted = sourcePath(root, source, "file");
 	fs.mkdirSync(path.dirname(destination), { recursive: true });
-	fs.copyFileSync(source, destination);
+	fs.copyFileSync(admitted, destination);
 }
-function copyDirectory(source, destination) {
-	if (!fs.lstatSync(source).isDirectory()) throw Error(`Refusing non-directory authoring source: ${source}`);
-	for (const entry of files(source)) {
+function copyDirectory(root, source, destination) {
+	for (const entry of files(source, "", root)) {
 		const filename = path.join(destination, entry.name);
 		fs.mkdirSync(path.dirname(filename), { recursive: true }); fs.writeFileSync(filename, entry.data);
 	}
@@ -85,28 +101,28 @@ export function buildPluginAuthoring({ root = path.resolve(import.meta.dirname, 
 	const directory = path.join(base, standalone ? "plugin-authoring" : "dist/plugin-authoring");
 	const publicDirectory = path.join(base, "public", "plugin-authoring");
 	ownedOutput(root, directory); ownedOutput(root, publicDirectory);
-	const app = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"));
+	const app = JSON.parse(fs.readFileSync(sourcePath(root, path.join(root, "package.json"), "file"), "utf8"));
 	if (!/^\d+\.\d+\.\d+$/.test(app.version)) throw Error("Authoring requires a numeric app version");
 	const stage = fs.mkdtempSync(path.join(os.tmpdir(), "lh-authoring-"));
 	try {
-		copyFile(path.join(root, "LICENSE"), path.join(stage, "LICENSE"));
-		for (const filename of AUTHORING_DOCS) copyFile(path.join(root, "docs", filename), path.join(stage, "docs", filename));
+		copyFile(root, path.join(root, "LICENSE"), path.join(stage, "LICENSE"));
+		for (const filename of AUTHORING_DOCS) copyFile(root, path.join(root, "docs", filename), path.join(stage, "docs", filename));
 		for (const id of AUTHORING_EXAMPLES) {
 			const source = path.join(root, "examples", "plugins", id), destination = path.join(stage, "examples", "plugins", id);
-			copyFile(path.join(source, "README.md"), path.join(destination, "README.md"));
-			copyDirectory(path.join(source, "dist"), path.join(destination, "dist"));
-			const manifestPath = path.join(destination, "dist", "manifest.json"), manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+			copyFile(root, path.join(source, "README.md"), path.join(destination, "README.md"));
+			copyDirectory(root, path.join(source, "dist"), path.join(destination, "dist"));
+			const manifestPath = path.join(destination, "dist", "manifest.json"), manifest = JSON.parse(fs.readFileSync(sourcePath(stage, manifestPath, "file"), "utf8"));
 			if (manifest.id !== id || manifest.apiVersion !== 1) throw Error(`Invalid authoring example: ${id}`);
 			manifest.minAppVersion = app.version;
 			fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, "\t") + "\n");
 		}
 		// Maintainer tests remain in the checkout, not the installable examples.
-		const skill = fs.readFileSync(path.join(root, "skills", "learnharness-plugins", "SKILL.md"), "utf8").replaceAll("../../docs/", "./docs/").replaceAll("../../examples/", "./examples/");
+		const skill = fs.readFileSync(sourcePath(root, path.join(root, "skills", "learnharness-plugins", "SKILL.md"), "file"), "utf8").replaceAll("../../docs/", "./docs/").replaceAll("../../examples/", "./examples/");
 		fs.writeFileSync(path.join(stage, "SKILL.md"), skill);
-		copyFile(path.join(root, "skills", "learnharness-plugins", "README.md"), path.join(stage, "README.md"));
-		const types = spawnSync(process.execPath, [path.join(root, "scripts", "build-plugin-types.mjs"), path.join(stage, "types")], { cwd: root, stdio: "inherit" });
+		copyFile(root, path.join(root, "skills", "learnharness-plugins", "README.md"), path.join(stage, "README.md"));
+		const types = spawnSync(process.execPath, [sourcePath(root, path.join(root, "scripts", "build-plugin-types.mjs"), "file"), path.join(stage, "types")], { cwd: root, stdio: "inherit" });
 		if (types.error || types.status !== 0) throw Error(`Authoring API declaration emission failed: ${types.error ?? types.status}`);
-		const sdk = JSON.parse(fs.readFileSync(path.join(stage, "types", "package.json"), "utf8"));
+		const sdk = JSON.parse(fs.readFileSync(sourcePath(stage, path.join(stage, "types", "package.json"), "file"), "utf8"));
 		const metadata = { appVersion: app.version, pluginApiVersion: 1, sdkVersion: sdk.version };
 		fs.writeFileSync(path.join(stage, "bundle.json"), JSON.stringify(metadata, null, "\t") + "\n");
 		const entries = files(stage).map(entry => ({ ...entry, name: "learnharness-plugins/" + entry.name }));
