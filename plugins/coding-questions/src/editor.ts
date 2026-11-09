@@ -5,8 +5,10 @@ import { bracketMatching, indentUnit, LanguageDescription, syntaxHighlighting } 
 import { languages } from "@codemirror/language-data";
 import { oneDarkHighlightStyle } from "@codemirror/theme-one-dark";
 import type { PluginQuestionAnswerState, PluginQuestionEditorHandle, PluginQuestionEditorProps, PluginProblemEditorHandle, PluginProblemEditorProps } from "learnharness-plugin-api";
-import { isReady, normalizeLineEndings, type CodingPayload, type CodingQuestionPayload } from "./contract.ts";
+import { isReady, normalizeLineEndings, readTests, type CodingPayload, type CodingQuestionPayload } from "./contract.ts";
 import { supportsSyntaxDiagnostics, syntaxDiagnosticsExtension } from "./diagnostics.ts";
+import type { CodingTests } from "./test-result.ts";
+import { mountTestApproval, type TestApproval } from "./tests-view.ts";
 
 export function findLanguage(name: string): LanguageDescription | null {
   return LanguageDescription.matchLanguageName(languages, name.trim(), false);
@@ -106,24 +108,40 @@ function createCodeView(container: HTMLElement, language: string, code: string, 
 }
 
 type CodeEditorProps = Pick<PluginQuestionEditorProps, "answer" | "active" | "signal" | "onChange"> & {
-  readonly input: { payload: Pick<CodingPayload, "language" | "starterCode"> };
+  readonly input: { payload: Pick<CodingPayload, "language" | "starterCode" | "tests"> };
 };
+
+/** An invalid recipe is never run by the backend, so it needs no approval. */
+function approvableTests(payload: unknown): CodingTests | null {
+  try { return readTests(payload); }
+  catch { return null; }
+}
 
 function mountCodeEditor(container: HTMLElement, props: CodeEditorProps): PluginQuestionEditorHandle {
   let disposed = false;
   let active = props.active;
   const initialCode = props.answer.status === "empty" ? normalizeLineEndings(props.input.payload.starterCode ?? "") : codeFromAnswer(props.answer);
+  let approval: TestApproval | undefined;
   const publish = (code: string) => {
-    if (!disposed && !props.signal.aborted) props.onChange({ status: isReady(code) ? "ready" : "unready", value: code });
+    if (disposed || props.signal.aborted) return;
+    const ready = isReady(code) && (approval === undefined || approval.approved());
+    props.onChange({ status: ready ? "ready" : "unready", value: code });
   };
   const editor = createCodeView(container, props.input.payload.language, initialCode, active, code => {
     if (active) publish(code);
   });
+  const tests = approvableTests(props.input.payload);
+  if (tests) {
+    approval = mountTestApproval(container, tests, active, () => {
+      if (active) publish(editor.view.state.doc.toString());
+    });
+  }
   const dispose = () => {
     if (disposed) return;
     disposed = true;
     props.signal.removeEventListener("abort", dispose);
-    editor.dispose();
+    try { approval?.dispose(); }
+    finally { editor.dispose(); }
   };
   if (props.signal.aborted) dispose();
   else {
@@ -134,6 +152,7 @@ function mountCodeEditor(container: HTMLElement, props: CodeEditorProps): Plugin
     update(next) {
       if (disposed) return;
       active = next.active;
+      approval?.setActive(active);
       editor.update(codeFromAnswer(next.answer), active);
     },
     focus() { if (!disposed && active) editor.view.focus(); },

@@ -145,6 +145,26 @@ test("passes argv literally with no shell expansion and inherits environment", a
   assert.equal(actual.home, process.env.HOME);
 });
 
+test("removes saved API keys and other secret-like variables from the test environment", async (t) => {
+  const f = await fixture(t);
+  const injected = {
+    FIXTURE_API_KEY: "key", HF_TOKEN: "token", fixture_secret: "secret", DB_PASSWORD_FILE: "password",
+    FIXTURE_TOOLCHAIN_HOME: "/opt/toolchain", FIXTURE_KEYBOARD: "kept",
+  };
+  for (const [name, value] of Object.entries(injected)) {
+    const previous = process.env[name];
+    process.env[name] = value;
+    t.after(() => { if (previous === undefined) delete process.env[name]; else process.env[name] = previous; });
+  }
+  const source = `console.log(JSON.stringify(Object.fromEntries(${JSON.stringify(Object.keys(injected))}.map(name => [name, process.env[name] ?? null]))))`;
+  const result = await runTests({ ...f, tests: nodeTests(source) });
+  assert.equal(result.status, "passed");
+  assert.deepEqual(JSON.parse(result.stdout), {
+    FIXTURE_API_KEY: null, HF_TOKEN: null, fixture_secret: null, DB_PASSWORD_FILE: null,
+    FIXTURE_TOOLCHAIN_HOME: "/opt/toolchain", FIXTURE_KEYBOARD: "kept",
+  });
+});
+
 test("uses normal PATH lookup instead of requiring an absolute program", async (t) => {
   const f = await fixture(t);
   const result = await runTests({ ...f, tests: { program: path.basename(process.execPath), args: ["-e", "process.stdout.write('found')"], code: "" } });

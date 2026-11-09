@@ -42,9 +42,9 @@ const cleanup = activate({ui,
  registerProblemRenderer(value){problemRenderer=value;return ()=>{if(window.host.practice)window.host.unmount();problemRenderer=null}}
 });
 window.host={answer:{status:'empty'},active:true,publications:[],handle:null,controller:null,submits:0,reserved:[],records:[],
-mount({language='python',starterCode,modelSolution,answer={status:'empty'},practice=false}={}){
+mount({language='python',starterCode,modelSolution,answer={status:'empty'},practice=false,tests}={}){
  this.unmount();this.practice=practice;this.answer=answer;this.active=true;this.publications=[];this.controller=new AbortController();
- const payload={language,...(starterCode===undefined?{}:{starterCode})};
+ const payload={language,...(starterCode===undefined?{}:{starterCode}),...(tests===undefined?{}:{tests})};
  const input=practice?{statement:'Saved practice statement',mode:'composition',modelSolution,payload}:{question:'Test question',type:'predict',nodeId:'fixture',payload:{...payload,...(modelSolution===undefined?{}:{modelSolution})}};
  const props={input,chatId:'fixture',contractVersion:1,signal:this.controller.signal,active:true,
  ...(practice?{problemId:'practice-fixture',submission:answer}:{questionId:'question-'+Math.random(),variant:'teach',answer}),
@@ -545,6 +545,37 @@ try {
   await page.evaluate(()=>window.host.records[0].controller.abort());
   assert.equal(await page.$$eval('#practice-0 .cm-editor, #practice-0 .lh-coding-test-result, #practice-0 [data-fixture-badge]',nodes=>nodes.length),0);
   assert.equal(await page.$$eval('#practice-1 .cm-editor, #practice-1 [data-fixture-badge]',nodes=>nodes.length),2,'Aborting an old attempt does not dispose its successor');
+  // Test approval: the exact recipe is shown as text and gates readiness in both editors.
+  const recipe={program:'python3',args:['-','two words',''],code:'import answer\n<script>window.injected=1</script>\n'+Array.from({length:40},(_,i)=>`assert ${i} == ${i}`).join('\n')};
+  for(const practice of [false,true]){
+    await page.evaluate((recipe,practice)=>window.host.mount({practice,starterCode:'print(1)',modelSolution:'Hidden',tests:recipe}),recipe,practice);
+    assert.equal(await page.$eval('#editor .lh-coding-tests__heading',node=>node.textContent),'Tests that will run on this computer');
+    assert.equal(await page.$eval('#editor .lh-coding-tests__command',node=>node.textContent),"$ python3 - 'two words' ''");
+    assert.equal(await page.$eval('#editor .lh-coding-tests__code',node=>node.textContent),recipe.code);
+    assert.equal(await page.$$eval('#editor .lh-coding-tests script',nodes=>nodes.length),0,'Test code is text, never markup');
+    assert.ok(await page.$eval('#editor .lh-coding-tests',node=>!!(node.previousElementSibling?.compareDocumentPosition(node)&Node.DOCUMENT_POSITION_FOLLOWING)&&node.previousElementSibling.classList.contains('lh-coding-question')),'The approval sits below the code editor');
+    const box=await page.$eval('#editor .lh-coding-tests__code',node=>({scrolls:node.scrollHeight>node.clientHeight,overflow:getComputedStyle(node).overflowY}));
+    assert.ok(box.scrolls&&box.overflow==='auto','Long test code scrolls inside a fixed-height box');
+    assert.deepEqual(await state(),{status:'unready',value:'print(1)'},'Unticked tests keep the answer unready');
+    await page.click('#editor .lh-coding-tests__approval input');
+    assert.deepEqual(await state(),{status:'ready',value:'print(1)'});
+    await fillCode(' \n');
+    assert.equal((await state()).status,'unready','Approval never makes blank code ready');
+    await fillCode('print(2)');
+    assert.deepEqual(await state(),{status:'ready',value:'print(2)'});
+    await page.click('#editor .lh-coding-tests__approval input');
+    assert.deepEqual(await state(),{status:'unready',value:'print(2)'},'Unticking makes the answer unready again');
+    await page.evaluate(()=>window.host.update(window.host.answer,false));
+    assert.equal(await page.$eval('#editor .lh-coding-tests__approval input',node=>node.disabled),true,'Inactive editors cannot approve');
+    await page.evaluate(()=>window.host.update(window.host.answer,true));
+    assert.equal(await page.$eval('#editor .lh-coding-tests__approval input',node=>node.disabled),false);
+    if(!practice)await page.screenshot({path:path.join(evidence,'test-approval.png')});
+  }
+  await page.evaluate(()=>window.host.mount({starterCode:'print(1)',tests:{program:'python3',args:[],code:' \n'}}));
+  assert.equal(await page.$$eval('#editor .lh-coding-tests',nodes=>nodes.length),0,'An invalid recipe never runs, so it needs no approval');
+  assert.equal((await state()).status,'ready');
+  await page.evaluate(()=>window.host.unmount());
+  assert.equal(await page.$$eval('.lh-coding-tests',nodes=>nodes.length),0,'Unmount removes the approval section');
   await page.evaluate(()=>{window.host.mount({practice:true,language:'C++',starterCode:'int main() {}',modelSolution:'Hidden solution'});window.host.disable()});
   await page.waitForNetworkIdle();
   assert.equal(await page.$$eval('.cm-editor',nodes=>nodes.length),0);
