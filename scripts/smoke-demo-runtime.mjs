@@ -178,19 +178,29 @@ async function browserProbe(puppeteer) {
 		page.on("requestfailed", (req) => failures.push(`failed request: ${req.url()}`));
 		await page.setRequestInterception(true);
 		page.on("request", (req) => {
-			if (/^(file:|about:|data:)/.test(req.url())) void req.continue();
-			else { failures.push(`unexpected network request: ${req.url()}`); void req.abort(); }
+			// Demos load in memory like runDemo does, so nothing should ask for a file.
+			if (/^(about:|data:)/.test(req.url())) void req.continue();
+			else { failures.push(`unexpected request: ${req.url()}`); void req.abort(); }
 		});
-		const html = path.join(home, "demo.html");
-		fs.writeFileSync(html, '<!doctype html><meta charset="utf-8"><button id="increment">Increment</button><output id="count">0</output><script>document.querySelector("#increment").onclick = () => { document.querySelector("#count").textContent = "1"; };</script>');
-		await page.goto(pathToFileURL(html).href, { waitUntil: "load", timeout: 10_000 });
+		await page.setContent('<!doctype html><meta charset="utf-8"><button id="increment">Increment</button><output id="count">0</output><script>document.querySelector("#increment").onclick = () => { document.querySelector("#count").textContent = "1"; };</script>', { waitUntil: "load", timeout: 10_000 });
 		assert.equal(await page.$eval("#count", (element) => element.textContent), "0");
 		await page.click("#increment");
 		assert.equal(await page.$eval("#count", (element) => element.textContent), "1");
+		assert.deepEqual(failures, [], "demo console/page/network errors");
+		// A demo must not be able to read local files.
+		const canary = path.join(home, "canary.txt");
+		fs.writeFileSync(canary, "lh-demo-canary\n");
+		const leaked = await page.evaluate(async (url) => {
+			const viaFetch = async () => { try { return (await (await fetch(url)).text()).includes("lh-demo-canary"); } catch { return false; } };
+			const viaXhr = () => { try { const xhr = new XMLHttpRequest(); xhr.open("GET", url, false); xhr.send(); return xhr.responseText.includes("lh-demo-canary"); } catch { return false; } };
+			return { origin: location.origin, fetch: await viaFetch(), xhr: viaXhr() };
+		}, pathToFileURL(canary).href);
+		assert.deepEqual(leaked, { origin: "null", fetch: false, xhr: false }, "demo page could read a local file");
+		failures.length = 0; // the blocked reads above log expected errors
 		await page.goto("about:blank");
 		assert.equal(await page.$("#increment"), null, "page state was not cleared");
-		assert.deepEqual(failures, [], "demo console/page/network errors");
-		console.log("[smoke-demo-runtime] packaged browser-service: JS button 0 → 1, clean console/page, page reset ok (no Chrome fallback)");
+		assert.deepEqual(failures, [], "page reset console/page/network errors");
+		console.log("[smoke-demo-runtime] packaged browser-service: JS button 0 → 1, local file unreadable, clean console/page, page reset ok (no Chrome fallback)");
 	} catch (err) {
 		failed = true;
 		throw new Error(`browser-service probe failed at local CDP/browser interaction\n--- browser-service output ---\n${output}\n${errors}`, { cause: err });

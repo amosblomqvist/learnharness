@@ -1,8 +1,7 @@
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
-import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { standardFontsDir } from "./pdf-ops";
 
 /**
@@ -275,35 +274,75 @@ async function withBrowserPage<T>(fn: (page: import("puppeteer-core").Page) => P
 	}
 }
 
-/** A temp dir per invocation; removed in finally. */
-function tempDir(prefix: string): string {
-	return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+// ─── Isolated page loading ───────────────────────────────────────────────────
+// Demo HTML and fallback SVG markup are model output, so they are untrusted.
+// They load in memory on about:blank, which gives the document an opaque
+// origin like the learner's sandboxed iframe. A file:// document could read
+// any local file. As a second layer, requests for any other scheme (file:
+// included) are aborted while the page is loaded.
+
+const ISOLATED_PAGE_SCHEMES = new Set(["http:", "https:", "data:", "blob:", "about:"]);
+
+/** Request filter for isolated pages (pure; exported for tests). */
+export function isIsolatedPageRequestAllowed(url: string): boolean {
+	try {
+		return ISOLATED_PAGE_SCHEMES.has(new URL(url).protocol);
+	} catch {
+		return false;
+	}
+}
+
+type IsolatedPage = Pick<
+	import("puppeteer-core").Page,
+	"url" | "goto" | "setContent" | "setRequestInterception" | "on" | "off"
+>;
+
+/** Load untrusted markup in memory with the request filter on. Returns the
+ *  cleanup that turns the filter off again, since the helper's page is reused
+ *  across jobs. On failure it cleans up itself and rethrows. */
+export async function loadIsolatedPage(page: IsolatedPage, html: string): Promise<() => Promise<void>> {
+	const onRequest = (request: import("puppeteer-core").HTTPRequest) => {
+		const decision = isIsolatedPageRequestAllowed(request.url()) ? request.continue() : request.abort("accessdenied");
+		void decision.catch(() => {});
+	};
+	const cleanup = async () => {
+		page.off("request", onRequest);
+		await page.setRequestInterception(false).catch(() => {});
+	};
+	try {
+		// setContent keeps the current document's origin, so never write into
+		// anything but about:blank.
+		if (page.url() !== "about:blank") await page.goto("about:blank");
+		page.on("request", onRequest);
+		await page.setRequestInterception(true);
+		await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
+		return cleanup;
+	} catch (err) {
+		await cleanup();
+		throw err;
+	}
 }
 
 // ─── Demo execution ──────────────────────────────────────────────────────────
 
 async function runDemo(html: string, opts: RunDemoOptions = {}): Promise<DemoRunResult> {
 	const settleMs = opts.settleMs ?? 2000;
-	const dir = tempDir("lh-demo-");
-	const file = path.join(dir, "demo.html");
-	fs.writeFileSync(file, html, "utf-8");
-
 	const consoleErrors: string[] = [];
 	const pageErrors: string[] = [];
 	const failedRequests: string[] = [];
 	let probeResult: unknown;
 	let probed = false;
 
-	try {
-		await withBrowserPage(async (page) => {
+	await withBrowserPage(async (page) => {
 		page.on("console", (msg) => {
 			if (msg.type() === "error") consoleErrors.push(msg.text());
 		});
 		page.on("pageerror", (err) => pageErrors.push(err instanceof Error ? err.message : String(err)));
 		page.on("requestfailed", (req) => failedRequests.push(`${req.url()} (${req.failure()?.errorText ?? "failed"})`));
 
+		let cleanup: (() => Promise<void>) | undefined;
 		try {
-			await page.goto(pathToFileURL(file).href, { waitUntil: "load", timeout: 30_000 });
+			cleanup = await loadIsolatedPage(page, html);
 			await new Promise((resolve) => setTimeout(resolve, settleMs));
 			if (opts.probe) {
 				try {
@@ -315,15 +354,10 @@ async function runDemo(html: string, opts: RunDemoOptions = {}): Promise<DemoRun
 			}
 		} catch (err) {
 			pageErrors.push(err instanceof Error ? err.message : String(err));
+		} finally {
+			await cleanup?.();
 		}
-		});
-	} finally {
-		try {
-			fs.rmSync(dir, { recursive: true, force: true });
-		} catch {
-			/* best-effort cleanup */
-		}
-	}
+	});
 
 	return {
 		consoleErrors,
@@ -436,28 +470,20 @@ async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buff
 		if (opts.nativeOnly) throw error;
 		/* fall through to the browser path */
 	}
-	const dir = tempDir("lh-visual-");
-	const file = path.join(dir, "figure.html");
-	fs.writeFileSync(
-		file,
-		`<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#fff}svg{display:block}</style></head><body>${svg}</body></html>`,
-		"utf-8",
-	);
+	const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#fff}svg{display:block}</style></head><body>${svg}</body></html>`;
 
 	return withBrowserPage(async (page) => {
 		const { width, height } = svgViewport(svg, opts);
 		await page.setViewport({ width, height });
-		await page.goto(pathToFileURL(file).href, { waitUntil: "load", timeout: 30_000 });
-		const shot = (await page.screenshot({ fullPage: true, type: "png" })) as Buffer;
-		// Chrome's raw split-IDAT PNG is canonicalized before it reaches a
-		// provider (see providerSafePng) — the visual-maker feeds this exact
-		// buffer back to the vision model as its only way to "look".
-		return providerSafePng(Buffer.from(shot));
-	}).finally(() => {
+		const cleanup = await loadIsolatedPage(page, html);
 		try {
-			fs.rmSync(dir, { recursive: true, force: true });
-		} catch {
-			/* best-effort cleanup */
+			const shot = (await page.screenshot({ fullPage: true, type: "png" })) as Buffer;
+			// Chrome's raw split-IDAT PNG is canonicalized before it reaches a
+			// provider (see providerSafePng) — the visual-maker feeds this exact
+			// buffer back to the vision model as its only way to "look".
+			return providerSafePng(Buffer.from(shot));
+		} finally {
+			await cleanup();
 		}
 	});
 }
