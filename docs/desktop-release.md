@@ -103,7 +103,7 @@ Shell, native-module, packaging/updater, or Electron changes warrant focused pla
 
 ## Updates and website notification
 
-Packaged apps check at startup and every 24 hours by default, download automatically, and install on quit or Restart. **Settings → General** provides release notes, manual checks, status, and Automatic updates. Disabling automatic checks does not cancel downloads/staged installs; manual checks still download updates. Dev builds disable the updater. Errors go to `userData/logs/main.log`; `LH_UPDATE_FEED` is a test-only generic-feed override.
+Packaged apps check at startup and every 24 hours by default, download automatically, and install on quit or Restart. **Settings → General** provides release notes, manual checks, status, and Automatic updates. Disabling automatic checks does not cancel downloads/staged installs; manual checks still download updates. Dev builds disable the updater. Errors go to `userData/logs/main.log`; `LH_UPDATE_FEED` is a test-only generic-feed override; `LH_DISABLE_AUTOUPDATER=1` skips updater initialization entirely — set by the Nix package, where Nix owns the installed files.
 
 Sources: [`electron/main.cjs`](../electron/main.cjs), [`preload.cjs`](../electron/preload.cjs), [`update-settings.tsx`](../components/settings/update-settings.tsx).
 
