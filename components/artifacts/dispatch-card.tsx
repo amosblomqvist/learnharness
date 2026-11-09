@@ -28,6 +28,7 @@ const KIND_LABEL: Record<JobKind, string> = {
 
 export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: JobKind }) {
 	const jobs = useContext(JobsContext);
+	const ctx = useContext(ChatActionsContext);
 	const job = jobs.find((j) => j.toolCallId === toolCallId) ?? null;
 	const label = KIND_LABEL[kind];
 
@@ -47,6 +48,9 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 		return <DispatchRefusedCard label={label} line="needs a provider key" button="Add a key" />;
 	}
 	const failed = job.status === "error";
+	// The pump holds the result until the learner sends a message; Stop leaves
+	// the composer free, so without this line the chat looks idle.
+	const held = job.delivery?.status === "pending" && ctx?.questionState === "unusable";
 	return (
 		<div
 			className="flex items-center gap-2 text-xs text-muted-foreground"
@@ -55,6 +59,7 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 			{failed ? <XIcon className="size-3.5 text-red-500" /> : <CheckIcon className="size-3.5" />}
 			<span className="font-medium uppercase tracking-wide">{label}</span>
 			<span>{failed ? "failed" : "finished"}</span>
+			{held && <span data-testid="dispatch-held">· the tutor sees this after your next message</span>}
 		</div>
 	);
 }

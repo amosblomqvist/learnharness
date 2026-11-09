@@ -5,7 +5,9 @@
  * data/render-settings.json (config.RENDER_SETTINGS_FILE).
  *
  *   GET → 200 {settings} once saved, 200 null on first boot (client keeps
- *         in-memory defaults until the user changes something).
+ *         in-memory defaults until the user changes something), 500 when
+ *         the file exists but cannot be read (client saves nothing, so
+ *         the file is never overwritten with defaults).
  *   PUT → 200 {settings} (the sanitized copy actually persisted — the
  *         client may echo it to stay honest with clamped values).
  *

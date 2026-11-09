@@ -19,6 +19,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const order: string[] = [];
 	const intervals: { callback: () => void; delay: number }[] = [];
 	const handles = new Map<string, (event: unknown) => unknown>();
+	const listeners = new Map<string, (event: unknown) => void>();
 	const windows: FakeWindow[] = [];
 	let enumerationFails = false;
 	let userData = "/fixture/custom-user-data";
@@ -50,12 +51,19 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		}
 		isLoadingMainFrame() { return this.loading; }
 		setWindowOpenHandler() {}
-		getZoomFactor() { return 1; }
+		zoom = 1;
+		getZoomFactor() { return this.zoom; }
 	}
 	class FakeWindow extends EventEmitter {
 		webContents = new FakeWebContents();
 		minimized = false;
 		focused = false;
+		// titleBarStyle hidden: frame and content share one rectangle.
+		bounds = { x: 0, y: 0, width: 1440, height: 900 };
+		getBounds() { return this.bounds; }
+		setBounds(value: typeof this.bounds) { this.bounds = value; }
+		getContentBounds() { return this.bounds; }
+		setContentBounds(value: typeof this.bounds) { this.bounds = value; }
 		constructor() { super(); windows.push(this); }
 		loadURL() { this.webContents.loading = true; }
 		isMinimized() { return this.minimized; }
@@ -81,7 +89,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const electron = {
 		app, BrowserWindow: FakeWindow,
 		Menu: { buildFromTemplate: (value: typeof menu) => value, setApplicationMenu: (value: typeof menu) => { menu = value; } },
-		ipcMain: { on() {}, handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
+		ipcMain: { on: (channel: string, fn: (event: unknown) => void) => listeners.set(channel, fn), handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = createContext({
@@ -109,7 +117,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	runInContext(mainSource, context, { filename: mainFile });
 	const run = (code: string) => runInContext(code, context);
 	return {
-		run, updater, windows, intervals, handles, settingsReads, order, app,
+		run, updater, windows, intervals, handles, listeners, settingsReads, order, app,
 		setSettings: (value: unknown) => { settings = JSON.stringify(value); },
 		setSettingsFailure: (value: string | Error) => { settings = value; },
 		setEnumerationFailure: (value: boolean) => { enumerationFails = value; },
@@ -295,5 +303,22 @@ describe("startup, timer, trusted IPC and menu wiring", () => {
 		const f = fixture(); f.setSettings({ general: { autoUpdate: false } }); await f.run("main()");
 		f.windows[0]!.webContents.fails = true; f.windows[0]!.webContents.loading = false;
 		f.menuCheck(); assert.equal(f.updater.checks, 1);
+	});
+});
+
+describe("sidebar widen request", () => {
+	it("Ctrl+B in narrow window widens enough at every zoom step", async () => {
+		const f = fixture(); await f.run("main()");
+		const win = f.windows[0]!;
+		const threshold = f.run("SIDEBAR_AUTOCLOSE") as number;
+		for (const zoom of [...f.run("ZOOM_LADDER") as number[]]) for (const width of [640, threshold]) {
+			win.webContents.zoom = zoom; win.bounds = { x: 40, y: 30, width, height: 700 };
+			f.listeners.get("lh:expand-window")!({ sender: win.webContents });
+			// The renderer's narrow check reads innerWidth: content width in CSS px.
+			const innerWidth = Math.floor(win.bounds.width / zoom);
+			assert.ok(innerWidth >= threshold, `zoom ${zoom}, ${width} px window: innerWidth ${innerWidth} is still narrow, sidebar stays hidden`);
+			assert.deepEqual({ ...win.bounds, width }, { x: 40, y: 30, width, height: 700 }, "top-left and height stay fixed");
+			if (Math.floor(width / zoom) >= threshold) assert.equal(win.bounds.width, width, "already wide: no resize");
+		}
 	});
 });

@@ -10,6 +10,7 @@
  */
 
 import { useState, type ComponentPropsWithRef, type ReactNode } from "react";
+import { flushSync } from "react-dom";
 import { cn } from "@/lib/utils";
 
 /** A section block: pronounced mono heading + content. */
@@ -223,32 +224,30 @@ export function CommitInput({
 	testid?: string;
 	type?: "text" | "number";
 }) {
-	// The draft exists only while editing; a blur shows the record's value
-	// again — commit-on-blur/Enter (owner ruling), the field honest about
-	// what landed.
-	const [draft, setDraft] = useState(value);
-	const [editing, setEditing] = useState(false);
+	// The draft exists only while editing (null = not editing); a blur shows
+	// the record's value again — commit-on-blur/Enter (owner ruling), the
+	// field honest about what landed.
+	const [draft, setDraft] = useState<string | null>(null);
 	return (
 		<input
 			type={type}
-			value={editing ? draft : value}
+			value={draft ?? value}
 			placeholder={placeholder}
 			aria-label={ariaLabel}
 			data-testid={testid}
-			onChange={(e) => {
-				setEditing(true);
-				setDraft(e.target.value);
-			}}
+			onChange={(e) => setDraft(e.target.value)}
 			onBlur={() => {
-				if (!editing) return;
-				setEditing(false);
+				if (draft === null) return;
+				setDraft(null);
 				const next = draft.trim();
 				if (next !== value) onCommit(next);
 			}}
 			onKeyDown={(e) => {
 				if (e.key === "Enter") e.currentTarget.blur();
 				if (e.key === "Escape") {
-					setEditing(false);
+					// blur() runs onBlur before React re-renders; commit the
+					// discard first so onBlur sees the field as not editing.
+					flushSync(() => setDraft(null));
 					e.currentTarget.blur();
 				}
 			}}

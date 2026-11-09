@@ -31,6 +31,7 @@ const PROPS = {
 	onImportFiles: () => {},
 	settings: {} as GraphRenderSettings,
 	changeSettings: () => {},
+	settingsLoadFailed: false,
 	onOpenChains: () => {},
 };
 

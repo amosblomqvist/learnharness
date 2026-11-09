@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { findPendingToolCall } from "../src/core/pending.ts";
-import { danglingQuestionOf, pendingQuestionOf, newAnswerResult, newUserMessage, type LhMessage } from "../src/core/native-messages.ts";
+import { danglingQuestionOf, pendingQuestionOf, questionStateOf, newAnswerResult, newUserMessage, type LhMessage } from "../src/core/native-messages.ts";
 import { inputAppends } from "../src/core/input-events.ts";
 import { projectView } from "../src/core/view.ts";
 
@@ -99,6 +99,7 @@ test("only temporary successful question placeholders are excluded from client p
 	for (const tool of ["quiz", "probe", "ask_user_question", "explain", "recall"]) {
 		const own = { ...placeholder, toolName: tool };
 		assert.equal(pendingQuestionOf([message, own])?.toolCallId, "q");
+		assert.equal(questionStateOf([message, own]), "answerable", "question state agrees with the open question");
 		assert.equal(danglingQuestionOf([message, own]), null, "server/persisted policy does not change");
 	}
 	for (const result of [
@@ -110,6 +111,7 @@ test("only temporary successful question placeholders are excluded from client p
 		{ ...newAnswerResult("q", "quiz", { kind: "quiz", answers: [], dontKnow: true } as never), id: "c_answer" },
 	]) {
 		assert.equal(pendingQuestionOf([message, result]), null, "real answers, persisted results and failures still resolve the call");
+		assert.equal(questionStateOf([message, result]), "none");
 	}
 });
 

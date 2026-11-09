@@ -63,7 +63,7 @@
  * camera never moves.
  */
 
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
@@ -123,6 +123,41 @@ const CAMERA_STORAGE_KEY = "lh.graph.camera.v1";
 // src/core/render-settings.ts (shared with the server store + tests).
 
 type RenderSettings = GraphRenderSettings;
+
+// Edits made before the first GET settles show at once and queue up; the GET
+// result replays them on the saved copy, so one early slider move cannot
+// overwrite the server copy with defaults. Only `dirty` (a user edit exists)
+// saves. `failed` (the saved copy could not be read) keeps edits local and
+// never saves, for the same reason.
+type SettingsSync =
+	| { kind: "loading"; edits: ((s: RenderSettings) => RenderSettings)[] }
+	| { kind: "loaded"; dirty: boolean }
+	| { kind: "failed" };
+type SettingsState = { settings: RenderSettings; sync: SettingsSync };
+type SettingsAction =
+	| { type: "edit"; update: (s: RenderSettings) => RenderSettings }
+	| { type: "loaded"; raw: unknown }
+	| { type: "failed" };
+
+function settingsReducer(state: SettingsState, action: SettingsAction): SettingsState {
+	if (action.type === "edit") {
+		const settings = action.update(state.settings);
+		return {
+			settings,
+			sync: state.sync.kind === "loading"
+				? { kind: "loading", edits: [...state.sync.edits, action.update] }
+				: state.sync.kind === "loaded" ? { kind: "loaded", dirty: true } : state.sync,
+		};
+	}
+	if (state.sync.kind !== "loading") return state; // StrictMode's second GET: the first answer stands
+	if (action.type === "failed") return { settings: state.settings, sync: { kind: "failed" } };
+	const { edits } = state.sync;
+	return {
+		// raw is null when nothing is saved yet: the local copy (defaults plus the edits) is what saves
+		settings: action.raw === null ? state.settings : edits.reduce((s, edit) => edit(s), sanitizeRenderSettings(action.raw)),
+		sync: { kind: "loaded", dirty: edits.length > 0 },
+	};
+}
 
 /**
  * Pure filter predicate for the search panel: a node is visible when the
@@ -450,9 +485,11 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 function GraphSettingsControl({
 	settings,
 	changeSettings,
+	settingsLoadFailed,
 }: {
 	settings: GraphRenderSettings;
 	changeSettings: (update: (cur: RenderSettings) => RenderSettings) => void;
+	settingsLoadFailed: boolean;
 }) {
 	const [open, setOpen] = useState(false);
 	// Click anywhere outside (or Escape) closes the panel (2026-09-17) —
@@ -493,6 +530,11 @@ function GraphSettingsControl({
 				// distance from the panel's right border.
 				<div className="absolute right-0 top-full mt-2 flex max-h-[60vh] w-72 flex-col rounded-xl border bg-card/85 p-2.5 shadow-lg backdrop-blur">
 					<div className="flex flex-col gap-2 overflow-y-auto pr-2.5">
+							{settingsLoadFailed && (
+								<p className="text-[11px] text-muted-foreground" data-testid="graph-settings-load-failed">
+									Saved settings could not be loaded. Changes won't be saved. Reload to retry.
+								</p>
+							)}
 							{/* Size/zoom/region sliders: LADDER-mapped 0-100, step 10 (11
 							    stops, every DEFAULT dead-center at 50, every value a nice
 							    number — src/core/render-settings.ts). Physics keeps the
@@ -847,6 +889,7 @@ export function GraphChromeRow({
 	onImportFiles,
 	settings,
 	changeSettings,
+	settingsLoadFailed,
 	onOpenChains,
 }: {
 	isEmpty: boolean;
@@ -860,6 +903,7 @@ export function GraphChromeRow({
 	onImportFiles: (files: FileList | null) => void;
 	settings: GraphRenderSettings;
 	changeSettings: (update: (cur: RenderSettings) => RenderSettings) => void;
+	settingsLoadFailed: boolean;
 	/** Opens the chain table overlay (the chains-overlay plan,
 	 *  2026-09-29). */
 	onOpenChains: () => void;
@@ -917,7 +961,7 @@ export function GraphChromeRow({
 				// is a plain shrink-0 flex child — the panel itself positions
 				// within GraphSettingsControl's own relative root, unaffected.
 				<div className="graph-chrome-fade-in shrink-0">
-					<GraphSettingsControl settings={settings} changeSettings={changeSettings} />
+					<GraphSettingsControl settings={settings} changeSettings={changeSettings} settingsLoadFailed={settingsLoadFailed} />
 				</div>
 			)}
 		</>
@@ -957,26 +1001,19 @@ export function GraphView({
 	// Render settings: SERVER-persisted (data/render-settings.json via
 	// /api/graph/render-settings) — sizes AND the region/physics sections
 	// (user-facing since 2026-09-13; the dev-session era is over). Loaded
-	// once after mount; every user change saves back, debounced. Defaults
-	// render until the load resolves — a fraction of a second at worst.
-	const [settings, setSettings] = useState<GraphRenderSettings>(DEFAULT_RENDER_SETTINGS);
+	// once after mount; every user change saves back, debounced (never
+	// after a failed load). Defaults render until the load resolves — a
+	// fraction of a second at worst.
+	const [{ settings, sync }, dispatchSettings] = useReducer(settingsReducer, {
+		settings: DEFAULT_RENDER_SETTINGS,
+		sync: { kind: "loading", edits: [] },
+	});
 	// The two nested sections, unpacked for the renderer feed effects
 	// below (same names the old session state had).
 	const regionTuning = settings.regions;
 	const physicsTuning = settings.physics;
-	const settingsRef = useRef(settings);
-	settingsRef.current = settings;
-	// True once the user has moved a control this mount: the server copy
-	// must never clobber a (possibly newer) local change.
-	const userTouched = useRef(false);
-	// True once the initial GET settled — saves are held back until then,
-	// so merely mounting never PUTs defaults over the server copy.
-	const serverLoaded = useRef(false);
-	const savePending = useRef(false);
-	const changeSettings = (update: (cur: RenderSettings) => RenderSettings) => {
-		userTouched.current = true;
-		setSettings(update);
-	};
+	const changeSettings = (update: (cur: RenderSettings) => RenderSettings) =>
+		dispatchSettings({ type: "edit", update });
 	const saveToServer = (s: RenderSettings) => {
 		fetch("/api/graph/render-settings", {
 			method: "PUT",
@@ -986,33 +1023,18 @@ export function GraphView({
 	};
 	useEffect(() => {
 		fetch("/api/graph/render-settings")
-			.then((res) => (res.ok ? (res.json() as Promise<unknown>) : null))
-			.then((raw) => {
-				// Apply only if the user hasn't already moved a slider —
-				// if they outran the network, their change wins.
-				if (raw !== null && !userTouched.current) setSettings(sanitizeRenderSettings(raw));
+			.then(async (res) => {
+				if (!res.ok) throw new Error(`HTTP ${res.status}`);
+				dispatchSettings({ type: "loaded", raw: await res.json() });
 			})
-			.catch(() => {
-				// server unreachable → in-memory defaults keep working
-			})
-			.finally(() => {
-				serverLoaded.current = true;
-				// A change made during the fetch was held back — send now.
-				if (savePending.current) {
-					savePending.current = false;
-					saveToServer(settingsRef.current);
-				}
-			});
+			// in-memory defaults keep working, but must never save over the unread copy
+			.catch(() => dispatchSettings({ type: "failed" }));
 	}, []);
 	useEffect(() => {
-		if (!userTouched.current) return; // mount-run / server-apply: no save
-		if (!serverLoaded.current) {
-			savePending.current = true; // hold until the GET settles
-			return;
-		}
+		if (sync.kind !== "loaded" || !sync.dirty) return; // mount / server copy: no save
 		const id = setTimeout(() => saveToServer(settings), 400);
 		return () => clearTimeout(id);
-	}, [settings]);
+	}, [settings, sync]);
 
 	// The renderer instance lives across snapshot refetches and settings
 	// changes (its camera is never reset by either); `posRef` carries the
@@ -1584,6 +1606,7 @@ export function GraphView({
 					onImportFiles={onImportFiles}
 					settings={settings}
 					changeSettings={changeSettings}
+					settingsLoadFailed={sync.kind === "failed"}
 					onOpenChains={() => setChainsOpen(true)}
 				/>
 			</div>

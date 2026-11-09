@@ -1,14 +1,15 @@
 /**
  * Turn liveness registry unit tests (src/server/turn-liveness.ts): one turn
  * per chat, ever — begin/end round trip, double-begin rejection, restart
- * after end. The 30-minute stale-eviction TTL is not tested (it is a leak
- * guard, not a behavior). The lifecycle-emitter pins ride the same seams:
+ * after end, and a turn that runs past 30 minutes still owns its chat (no
+ * clock ever frees it). The lifecycle-emitter pins ride the same seams:
  * turn-started on the accepted begin only, turn-settled on the live end
  * only, and the registry already consistent when the listener runs.
  */
 
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, mock } from "node:test";
+import { runningWorkBlocker } from "../src/server/chats.ts";
 import { beginTurn, endTurn, isTurnRunning } from "../src/server/turn-liveness.ts";
 import { subscribe, type ServerEvent } from "../src/core/events.ts";
 import { rememberTurnFailure, settledTurnResponse } from "../src/server/turn-runs.ts";
@@ -34,6 +35,24 @@ describe("turn liveness registry", () => {
 		assert.equal(isTurnRunning(id), false, "cleared at finish");
 		assert.equal(beginTurn(id), true, "a new turn may start after the last ended");
 		endTurn(id);
+	});
+
+	it("a turn running past 30 minutes still owns its chat: no second turn, no delete", () => {
+		mock.timers.enable({ apis: ["Date"] });
+		const id = "chat_liveness_long_turn";
+		try {
+			assert.equal(beginTurn(id), true);
+			mock.timers.tick(31 * 60_000);
+			assert.equal(isTurnRunning(id), true, "still in flight after 31 minutes");
+			assert.equal(beginTurn(id), false, "a second turn is still rejected");
+			assert.equal(runningWorkBlocker(id)?.code, "turn_in_flight", "the chat cannot be deleted");
+			endTurn(id);
+			assert.equal(runningWorkBlocker(id), null, "deletable once the turn ends");
+			assert.equal(beginTurn(id), true, "a new turn may start after the long one ended");
+		} finally {
+			endTurn(id);
+			mock.timers.reset();
+		}
 	});
 });
 

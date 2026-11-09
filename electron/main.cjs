@@ -40,7 +40,7 @@ const net = require("node:net");
 const path = require("node:path");
 
 // Mirrors SIDEBAR_AUTOCLOSE in components/sidebar.tsx — keep in sync (the
-// renderer owns the number; this is the IPC widen target).
+// renderer owns the number, in CSS px; the IPC widen target scales it by zoom).
 const SIDEBAR_AUTOCLOSE = 928;
 
 const PRODUCT_NAME = "LearnHarness";
@@ -735,16 +735,18 @@ async function main() {
 	// the sidebar below SIDEBAR_AUTOCLOSE (928px); opening it again at that
 	// width asks the window to widen instead — the layout never has to
 	// accommodate a narrow window + open sidebar. Top-left stays fixed, the
-	// window grows right. No-op when already wide.
+	// window grows right. No-op when already wide. The renderer measures
+	// innerWidth in CSS px (content width / zoom), so the target is the
+	// content width that reaches the threshold at the current zoom.
 	// The renderer's first paint can race did-finish-load — it asks for
 	// the current factor itself (mirrors "lh:zoom" pushes).
 	ipcMain.handle("lh:zoom:get", (event) => BrowserWindow.fromWebContents(event.sender)?.webContents.getZoomFactor() ?? 1);
 	ipcMain.on("lh:expand-window", (event) => {
 		const win = BrowserWindow.fromWebContents(event.sender);
 		if (!win) return;
-		const { x, y, width, height } = win.getBounds();
-		const target = SIDEBAR_AUTOCLOSE;
-		if (width < target) win.setBounds({ x, y, width: target, height });
+		const { x, y, width, height } = win.getContentBounds();
+		const target = Math.ceil(SIDEBAR_AUTOCLOSE * win.webContents.getZoomFactor());
+		if (width < target) win.setContentBounds({ x, y, width: target, height });
 	});
 	reopenWindow = () => { chatgpt?.resume(); subscriptions?.resume(); return createWindow(url); };
 	app.on("activate", () => {

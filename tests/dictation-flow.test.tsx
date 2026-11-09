@@ -164,6 +164,20 @@ test("waits for the saved language; reconnect preserves it and finals still flus
 	assert.equal(Socket.all[2]!.language, "multi");
 });
 
+test("a speech socket that drops after Stop ends the run without reconnecting", async () => {
+	const f = await fixture("en");
+	await f.mount();
+	await act(async () => { f.dictation.toggle(); });
+	const first = Socket.all[0]!;
+	await act(async () => { first.open(); first.final("hi"); });
+	await act(async () => { f.dictation.stop(); });
+	await act(async () => { first.end(1011); });
+	assert.equal(Socket.all.length, 1);
+	assert.equal(f.dictation.phase, "idle");
+	assert.equal(f.dictation.error, null);
+	assert.deepEqual(f.state.appends, ["hi"]);
+});
+
 test("a failed save keeps the previous language, including a shortcut pressed while saving", async () => {
 	const f = await fixture();
 	await f.mount();

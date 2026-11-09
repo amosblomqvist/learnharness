@@ -62,7 +62,7 @@ import { ThinkingCard, type PracticeThinkingData } from "@/components/practice-c
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
-import type { LhViewMessage } from "@/src/core";
+import type { LhViewMessage, QuestionState } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
 	CompactionCutDivider,
@@ -75,6 +75,7 @@ import {
 	activeProblemOf,
 	pendingQuestionOf,
 	malformedQuestionsOf,
+	questionStateOf,
 	dismissedAnswer,
 	endsInFailedTurn,
 	findPendingToolCall,
@@ -132,6 +133,8 @@ export const ChatActionsContext = createContext<{
 	/** Opens the model setup dialog (BYOK, 2026-09-22): refused job cards
 	 *  deep-link into the same SetupDialog the send interception uses. */
 	openSetup: () => void;
+	/** Lets a finished job card say its result waits for the learner's next message. */
+	questionState: QuestionState;
 } | null>(null);
 
 /** The BYOK refusal envelope from the transport's error text: the
@@ -452,6 +455,7 @@ export function Chat({
 
 	const pending = findPendingToolCall(messages, pendingQuestionOf(nativeMessages));
 	const malformedQuestions = malformedQuestionsOf(nativeMessages);
+	const questionState = questionStateOf(nativeMessages);
 	// The abort handler reads the pending question from a ref (the window
 	// listener is mount-scoped; the value it needs is render-scoped).
 	const pendingRef = useRef(pending);
@@ -1262,6 +1266,7 @@ export function Chat({
 					void send({ type: "text", text: t });
 				},
 				openSetup: () => setSetupOpen(true),
+				questionState,
 			}}
 		>
 		<SessionMermaidContext.Provider
