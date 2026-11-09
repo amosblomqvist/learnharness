@@ -16,7 +16,9 @@ function icon(kind) {
 
 const settingsIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linejoin="round" aria-hidden="true"><polygon points="20,12 21.81,13.95 21.24,15.83 18.65,16.44 17.66,17.66 17.56,20.31 15.83,21.24 13.56,19.85 12,20 10.05,21.81 8.17,21.24 7.56,18.65 6.34,17.66 3.69,17.56 2.76,15.83 4.15,13.56 4,12 2.19,10.05 2.76,8.17 5.35,7.56 6.34,6.34 6.44,3.69 8.17,2.76 10.44,4.15 12,4 13.95,2.19 15.83,2.76 16.44,5.35 17.66,6.34 20.31,6.44 21.24,8.17 19.85,10.44"/><circle cx="12" cy="12" r="3"/></svg>';
 
-export function mountLibraryTree({ ctx, container, signal, button, onReview, onPractice, onPreview, onEdit, onDelete, onDeckSettings, onMemberships, onReorder, onRename, onSelection, onError }) {
+const plusIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+
+export function mountLibraryTree({ ctx, container, signal, button, onReview, onPreview, onEdit, onDelete, onCreateCard, onCreateCue, onDeckSettings, onMemberships, onReorder, onRename, onSelection, onError }) {
   const viewport = el('div', 'fc-tree-viewport');
   const inner = el('div', 'fc-tree-inner');
   const empty = el('p', 'fc-muted');
@@ -28,13 +30,15 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
   const propTokens = p => p.cues.filter(c => !c.deleted).map(c => cueToken(c.id));
   const leaves = p => { const ids = propTokens(p); return ids.length ? ids : [`proposition:${p.id}`]; };
   function selection() {
-    const cueIds = [], propositionIds = [];
+    const cueIds = [], propositionIds = [], emptyPropositionIds = [];
     for (const p of state?.propositions ?? []) {
       if (p.archived) continue;
       const cues = p.cues.filter(c => !c.deleted && selected.has(cueToken(c.id)));
       if (cues.length) { propositionIds.push(p.id); cueIds.push(...cues.map(c => c.id)); }
+      if (!propTokens(p).length && selected.has(`proposition:${p.id}`)) emptyPropositionIds.push(p.id);
     }
-    return { cueIds, propositionIds, count: selected.size };
+    const emptyDeckIds = (state?.decks ?? []).filter(d => selected.has(`deck:${d.id}`)).map(d => d.id);
+    return { cueIds, propositionIds, emptyPropositionIds, emptyDeckIds, count: selected.size };
   }
   const run = action => async () => { try { await action(); } catch (error) { if (live()) onError(error instanceof Error ? error.message : String(error)); } };
   function rowSelection(tokens, label) {
@@ -59,11 +63,10 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
     const { kind, deck, p, cue, archive } = record;
     if (archive) return [];
     const items = kind === 'deck' ? [
-      { key: 'practice', label: 'Practice anytime', disabled: !state.propositions.some(p => !p.archived && deck.propositionIds.includes(p.id) && p.cues.some(c => !c.deleted)), onSelect: run(() => onPractice({ deckIds: [deck.id] })) },
       { key: 'settings', label: 'Deck settings', onSelect: run(() => onDeckSettings(record.deck)) },
     ]
       : kind === 'proposition' ? [{ key: 'memberships', label: 'Decks…', onSelect: run(() => onMemberships(record.p)) }]
-      : [{ key: 'edit', label: 'Edit', onSelect: run(() => onEdit(record.p, record.cue)) }, { key: 'delete', label: 'Delete', onSelect: run(() => onDelete(record.p, record.cue)) }];
+      : [{ key: 'edit', label: 'Edit', onSelect: run(() => onEdit(record.p, record.cue)) }, { key: 'delete', label: 'Delete', disabled: ['running', 'cancelling'].includes(state.batch?.status), onSelect: run(() => onDelete(record.p, record.cue)) }];
     const ids = kind === 'deck' ? state.decks.map(d => d.id) : kind === 'proposition' ? deck.propositionIds.filter(id => state.propositions.some(p => p.id === id && !p.archived)) : p.cues.filter(c => !c.deleted).map(c => c.id);
     const id = kind === 'deck' ? deck.id : kind === 'proposition' ? p.id : cue.id;
     for (const direction of [-1, 1]) items.push({ key: direction === -1 ? 'up' : 'down', label: direction === -1 ? 'Move up' : 'Move down', disabled: !!query || ids.indexOf(id) + direction < 0 || ids.indexOf(id) + direction >= ids.length, onSelect: run(() => onReorder({ kind, id, ...(kind === 'proposition' ? { deckId: deck.id } : kind === 'cue' ? { propositionId: p.id } : {}), direction })) });
@@ -112,6 +115,10 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
       }
       if (!record.archive && record.kind !== 'archive') {
         const more = el('span', 'fc-tree-more'); root.append(more);
+        if (record.kind === 'deck' || record.kind === 'proposition') {
+          const label = record.kind === 'deck' ? 'Create card' : 'Add cue';
+          button(more, label, run(() => record.kind === 'deck' ? onCreateCard(record.deck) : onCreateCue(record.p, record.deck)), mountSignal, { icon: plusIcon, iconOnly: true, size: 'icon-sm', variant: 'ghost', title: label });
+        }
         const actionsLabel = `${record.kind === 'deck' ? 'Deck' : record.kind === 'proposition' ? 'Proposition' : 'Cue'} actions`;
         button(more, actionsLabel, () => { ctx.ui.openMenu(more, { label: actionsLabel, items: menuItems(record) }, { signal: mountSignal }); }, mountSignal, { icon: settingsIcon, iconOnly: true, size: 'icon-sm', variant: 'ghost', title: actionsLabel });
       }
@@ -186,9 +193,12 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
     update(next, search = '') { if (!live()) return; const q = search.toLocaleLowerCase().trim(); if (q !== query) searchFolds.clear(); query = q; state = next; render(); },
     selection,
     clearSelection() { if (!live()) return; selected.clear(); render(); },
-    revealDeck(id) {
-      if (!live() || !state?.decks.some(deck => deck.id === id)) return false;
-      query = ''; searchFolds.clear(); expanded.add(`deck:${id}`); render();
+    revealDeck(id, propositionId) {
+      const deck = state?.decks.find(deck => deck.id === id);
+      if (!live() || !deck) return false;
+      query = ''; searchFolds.clear(); expanded.add(`deck:${id}`);
+      if (propositionId && deck.propositionIds.includes(propositionId)) expanded.add(`deck:${id}:p:${propositionId}`);
+      render();
       // Only scroll plugin-owned content while focus remains in this library.
       if (container.closest('.fc-root')?.contains(document.activeElement)) {
         const node = [...inner.querySelectorAll('[data-fc-occurrence]')].find(node => node.dataset.fcOccurrence === `deck:${id}`);

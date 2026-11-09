@@ -144,6 +144,7 @@ try {
   await page.waitForSelector(previewDialog + ' table'); await shot('cue-preview');
   assert.equal(await page.$eval(previewDialog + ' .fc-dialog-heading', n => n.textContent), nodes[0].name);
   assert.equal(await page.$eval(previewDialog + ' .fc-preview-card', n => n.classList.contains('fc-review-card') && !!n.querySelector('.fc-answer .fc-markdown') && !n.querySelector('.fc-label')), true, 'Preview reuses review QA styling without extra labels');
+  assert.ok(await page.$eval(previewDialog + ' .fc-preview-card', n => { const b = n.getBoundingClientRect(); return b.height >= b.width * 9 / 16 - 1; }), 'Preview has the landscape minimum card shape');
   assert.equal(await page.$eval(previewDialog + ' button[data-variant=destructive]', n => n.textContent.trim()), 'Delete');
   await button(previewDialog, 'Edit');
   await page.waitForSelector('[role=dialog][aria-label="Edit cue"] textarea');
@@ -179,6 +180,7 @@ try {
     const frame = n.closest('[data-plugin-session-surface-frame]'); return { card: box(n), stage: box(n.closest('.fc-review-stage')), frame: box(frame), blur: getComputedStyle(frame).backdropFilter, header: box(document.querySelector('main header')) };
   });
   assert.ok(geometry.blur.includes('blur')); assert.ok(Math.abs(geometry.card.x + geometry.card.width / 2 - geometry.frame.x - geometry.frame.width / 2) < 2);
+  assert.ok(geometry.card.height >= geometry.card.width * 9 / 16 - 1, 'Question card has a landscape 16:9 minimum height');
   assert.ok(Math.abs(geometry.stage.y + geometry.stage.height / 2 - geometry.frame.y - geometry.frame.height / 2) < 2, 'Card and external controls centered as one stage');
   assert.equal(await page.$eval('.fc-review-card', n => !!n.querySelector('button,h2,.fc-review-remaining,.fc-shortcut')), false, 'Card contains only question/answer');
   assert.equal(await page.$eval('.fc-review-bottom', n => n.previousElementSibling.classList.contains('fc-review-card') && n.nextElementSibling.classList.contains('fc-review-footer')), true, 'Count sits directly between card and controls');
@@ -187,6 +189,7 @@ try {
   assert.equal(await page.$eval('.fc-review-stage', n => n === document.activeElement), true, 'Host focuses the opted-in visible region, not a hidden heading');
   await shot('review-question'); await page.keyboard.press('Space');
   await page.waitForSelector('.fc-answer .katex'); await page.waitForSelector('.fc-answer table'); await page.waitForSelector('.fc-answer svg');
+  assert.ok(await page.$eval('.fc-review-card', n => { const b = n.getBoundingClientRect(), answer = n.querySelector('.fc-answer').getBoundingClientRect(); return b.height >= b.width * 9 / 16 - 1 && answer.bottom <= b.bottom; }), 'Revealed rich content retains the minimum shape and fits inside the expanding card');
   await page.mouse.move(1, 1); await shot('review-revealed');
   const variants = await page.$$eval('.fc-review-footer .fc-actions button', ns => ns.map(n => n.getAttribute('data-variant'))); assert.deepEqual(variants, ['custom', 'custom', 'custom', 'custom']);
   const colors = await page.$$eval('.fc-review-footer .fc-actions button', ns => ns.map(n => { const s = getComputedStyle(n); return { text: s.color, background: s.backgroundColor, border: s.borderColor }; }));

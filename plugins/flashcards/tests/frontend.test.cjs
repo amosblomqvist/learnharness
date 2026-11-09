@@ -87,6 +87,114 @@ function sharedCards(h) {
   h.state.revision++; h.notify();
 }
 
+test('manual creation uses icon-only plus controls directly left of deck and active-target gears, never cue or archive rows', async () => {
+  const h = await setup();
+  try {
+    openAll(h);
+    for (const [id, labels] of [['deck:d1', ['Create card', 'Deck actions']], ['deck:d2', ['Create card', 'Deck actions']], ['deck:d1:p:p1', ['Add cue', 'Proposition actions']], ['deck:d1:p:p1:cue:c1', ['Cue actions']]]) {
+      const buttons = [...rowNode(h, id).querySelectorAll('.fc-tree-more button')];
+      assert.deepEqual(buttons.map(button => button.getAttribute('aria-label')), labels);
+      for (const button of buttons) {
+        const handle = h.handles.find(handle => handle.kind === 'button' && !handle.disposed && handle.container.contains(button));
+        assert.equal(handle.props.iconOnly, true); assert.equal(handle.props.variant, 'ghost'); assert.equal(handle.props.size, 'icon-sm');
+        assert.ok(button.querySelector('svg'), 'creation and settings controls use real icons');
+      }
+    }
+    h.state.propositions[0].archived = true; h.state.revision++; h.notify(); await flush(); openAll(h);
+    const archived = rowNode(h, 'archive:p:p1');
+    assert.ok(!archived.querySelector('.fc-tree-more'), 'archived targets have neither creation controls nor gears');
+  } finally { h.dispose(); }
+});
+
+test('deck plus creates a named target and first cue together using the existing Markdown editor layout and reveals the saved card', async () => {
+  const h = await setup();
+  try {
+    click(h, 'Create card', rowNode(h, 'deck:d2'));
+    const dialog = document.querySelector('[role=dialog]'); assert.equal(dialog.getAttribute('aria-label'), 'Create card');
+    assert.deepEqual([...dialog.querySelectorAll('.fc-label')].map(node => node.textContent), ['Name', 'Question (Markdown)', 'Answer (Markdown)']);
+    assert.equal(dialog.querySelectorAll('textarea.fc-input').length, 2); assert.ok(!dialog.querySelector('select'));
+    const [name, question, answer] = dialog.querySelectorAll('.fc-field .fc-input');
+    change(name, 'My handwritten target'); change(question, 'A **question**?'); change(answer, '$x=1$');
+    assert.equal(operationCalls(h, 'create-card').length, 0);
+    click(h, 'Save', dialog); await flush();
+    assert.ok(!document.querySelector('[role=dialog]'));
+    const input = operationCalls(h, 'create-card')[0][1];
+    assert.equal(input.deckId, 'd2'); assert.equal(input.name, 'My handwritten target'); assert.equal(input.question, 'A **question**?'); assert.equal(input.answer, '$x=1$'); assert.ok(input.requestId);
+    const p = h.state.propositions.find(p => p.origin === 'manual'); assert.ok(p);
+    assert.ok(row(h, 'deck:d2').disclosure.expanded); assert.ok(row(h, `deck:d2:p:${p.id}`).disclosure.expanded);
+    assert.ok(rowNode(h, `deck:d2:p:${p.id}:cue:${p.cues[0].id}`));
+    assert.equal(operationCalls(h, 'preflight').length, 0); assert.equal(operationCalls(h, 'start-generation').length, 0); assert.equal(h.conversions.length, 0);
+    select(h, `deck:d2:p:${p.id}:cue:${p.cues[0].id}`); click(h, 'Practice selected'); await flush();
+    assert.ok(surfaceRoot(h).querySelector('.fc-review-card').textContent.includes('A **question**?'));
+    click(h, 'Reveal answer', surfaceRoot(h)); await flush();
+    assert.ok(surfaceRoot(h).querySelector('.fc-answer').textContent.includes('$x=1$'));
+  } finally { h.dispose(); }
+});
+
+test('target plus adds only a question and answer, preserving the target and showing shared cues in both memberships', async () => {
+  const h = await setup();
+  try {
+    sharedCards(h); await flush(); openAll(h);
+    const before = structuredClone(h.state.propositions[0]);
+    click(h, 'Add cue', rowNode(h, 'deck:d2:p:p1'));
+    const dialog = document.querySelector('[role=dialog]'); assert.equal(dialog.getAttribute('aria-label'), 'Add cue');
+    assert.deepEqual([...dialog.querySelectorAll('.fc-label')].map(node => node.textContent), ['Question (Markdown)', 'Answer (Markdown)']);
+    const [question, answer] = dialog.querySelectorAll('textarea'); change(question, 'Another question'); change(answer, 'Another answer');
+    click(h, 'Save', dialog); await flush();
+    const input = operationCalls(h, 'create-cue')[0][1]; assert.equal(input.propositionId, 'p1'); assert.equal(input.name, undefined); assert.ok(input.requestId);
+    const p = h.state.propositions[0]; assert.equal(p.cues.length, before.cues.length + 1);
+    for (const key of ['id', 'name', 'memberships', 'schedule']) assert.deepEqual(p[key], before[key]);
+    for (const deck of ['d1', 'd2']) assert.ok(rowNode(h, `deck:${deck}:p:p1:cue:${p.cues.at(-1).id}`));
+  } finally { h.dispose(); }
+});
+
+test('manual editor cancellation creates nothing and rejected blank saves retain editable fields', async () => {
+  const h = await setup();
+  try {
+    click(h, 'Create card', rowNode(h, 'deck:d2')); let dialog = document.querySelector('[role=dialog]');
+    click(h, 'Cancel', dialog); await flush(); assert.equal(operationCalls(h, 'create-card').length, 0);
+    click(h, 'Create card', rowNode(h, 'deck:d2')); dialog = document.querySelector('[role=dialog]');
+    const fields = [...dialog.querySelectorAll('.fc-input')]; change(fields[0], 'Keep my draft');
+    click(h, 'Save', dialog); await flush();
+    assert.ok(dialog.querySelector('[role=alert]').textContent.includes('blank')); assert.equal(fields[0].value, 'Keep my draft');
+    assert.equal(h.state.propositions.length, 1); assert.equal(h.state.decks[1].propositionIds.length, 0);
+    change(fields[1], 'Question'); change(fields[2], 'Answer'); click(h, 'Save', dialog); await flush();
+    assert.equal(h.state.propositions.length, 2); assert.ok(!document.querySelector('[role=dialog]'));
+  } finally { h.dispose(); }
+});
+
+test('manual save retries reuse their request ID after a lost accepted response and create only one target', async () => {
+  const h = await setup();
+  try {
+    const call = h.ctx.call; let loseResponse = true;
+    h.ctx.call = async (operation, input) => {
+      const result = await call(operation, input);
+      if (operation === 'create-card' && loseResponse) { loseResponse = false; throw new Error('Synthetic lost response'); }
+      return result;
+    };
+    click(h, 'Create card', rowNode(h, 'deck:d2')); const dialog = document.querySelector('[role=dialog]');
+    const fields = [...dialog.querySelectorAll('.fc-input')]; ['Target', 'Question', 'Answer'].forEach((value, i) => change(fields[i], value));
+    click(h, 'Save', dialog); await flush();
+    assert.equal(h.state.propositions.length, 2); assert.equal(fields[1].value, 'Question'); assert.ok(dialog.querySelector('[role=alert]').textContent.includes('lost response'));
+    click(h, 'Save', dialog); await flush();
+    const calls = operationCalls(h, 'create-card'); assert.equal(calls.length, 2); assert.equal(calls[0][1].requestId, calls[1][1].requestId);
+    assert.equal(h.state.propositions.length, 2); assert.ok(!document.querySelector('[role=dialog]'));
+  } finally { h.dispose(); }
+});
+
+test('late manual-save responses do not close a newer editor or navigate after their dialog is dismissed', async () => {
+  const h = await setup();
+  try {
+    openAll(h); const pending = deferred(); h.overrides['create-cue'] = () => pending.promise;
+    click(h, 'Add cue', rowNode(h, 'deck:d1:p:p1')); const old = document.querySelector('[role=dialog]');
+    const [question, answer] = old.querySelectorAll('textarea'); change(question, 'Question'); change(answer, 'Answer'); click(h, 'Save', old); await flush();
+    click(h, 'Cancel', old); click(h, 'Create card', rowNode(h, 'deck:d2')); const newer = document.querySelector('[role=dialog]');
+    const search = h.app.querySelector('input[type=search]'); search.value = 'preserve search';
+    pending.resolve({ state: structuredClone(h.state), propositionId: 'p1', cueId: 'late' }); await flush();
+    assert.equal(document.querySelector('[role=dialog]'), newer); assert.equal(newer.getAttribute('aria-label'), 'Create card'); assert.equal(search.value, 'preserve search');
+  } finally { h.dispose(); }
+});
+
 test('native library, host placements, explicit preflight and no navigation cancellation', async () => {
   const h = await setup();
   try {
@@ -111,10 +219,10 @@ test('native library, host placements, explicit preflight and no navigation canc
     click(h, 'Pick nodes'); click(h, 'Generate'); await flush();
     assert.equal(h.calls.filter(([op]) => op === 'start-generation').length, 0);
     const confirmation = document.querySelector('[role=dialog]');
-    assert.ok(confirmation.textContent.includes('1 propositions'));
-    assert.ok(confirmation.textContent.includes('approximately 123 input tokens'));
-    assert.equal(/chunks?|Test model|preserving|Work continues/i.test(confirmation.textContent), false);
-    assert.equal(confirmation.querySelector('.fc-muted').textContent, 'Generation makes model calls and may incur costs.');
+    const summary = confirmation.querySelector('.fc-muted');
+    assert.equal(summary.textContent, '1 propositions (approximately 123 input tokens)');
+    assert.deepEqual([...confirmation.querySelectorAll('.fc-dialog > p:not(.fc-error)')].map(p => p.textContent), [summary.textContent], 'one muted summary paragraph, no separate token or cost-warning line');
+    assert.equal(/chunks?|Test model|preserving|Work continues|may incur costs| · /i.test(confirmation.textContent), false);
     click(h, 'Start', confirmation); await flush();
     assert.equal(h.calls.filter(([op]) => op === 'start-generation').length, 1);
     h.unmount(); h.notify(); h.resync(); await flush();
@@ -206,11 +314,14 @@ test('file confirmation uses exact converted Markdown, filename, notices and tok
     assert.equal(operationCalls(h, 'preflight').length, 0); assert.equal(operationCalls(h, 'start-generation').length, 0);
     const confirmation = document.querySelector('[role=dialog]'); assert.ok(confirmation);
     assert.equal(confirmation.getAttribute('aria-label'), 'Generate flashcards');
-    assert.ok(confirmation.textContent.includes(file.name)); assert.ok(confirmation.textContent.includes('321 input tokens'));
-    for (const notice of notices) assert.ok(confirmation.textContent.includes(notice));
+    const summary = confirmation.querySelector('.fc-file-name');
+    assert.equal(summary.textContent, `${file.name} (approximately 321 input tokens)`);
+    assert.ok(summary.classList.contains('fc-muted'), 'file summary uses the same muted body style as graph generation');
+    const paragraphs = [...confirmation.querySelectorAll('.fc-dialog > p:not(.fc-error)')];
+    assert.deepEqual(paragraphs.map(p => p.textContent), [summary.textContent, ...notices], 'filename and tokens share one paragraph; notices remain below it');
+    assert.ok(paragraphs.every(p => p.classList.contains('fc-muted')));
     assert.equal(confirmation.querySelector('img'), null, 'conversion notices are plain text');
-    assert.equal(/propositions|chunks|Test file model/.test(confirmation.textContent), false);
-    assert.ok(confirmation.textContent.includes('Generation makes model calls and may incur costs.'));
+    assert.equal(/propositions|chunks|Test file model|may incur costs/.test(confirmation.textContent), false);
     click(h, 'Start', confirmation); await flush();
     const starts = operationCalls(h, 'start-generation'); assert.equal(starts.length, 1);
     assert.equal(starts[0][1].preflightId, 'pf-file'); assert.match(starts[0][1].requestId, /\S+/);
@@ -299,10 +410,10 @@ test('context actions stay visible with stable handles, switch between all/selec
     const controls = h.handles.filter(handle => handle.kind === 'button' && actions.contains(handle.container));
     assert.equal(controls.length, 3, 'exactly two context actions and Clear');
     const [review, practice, clear] = controls;
-    const labels = () => [...actions.querySelectorAll('button')].map(button => button.textContent);
+    const labels = () => [...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label') || button.textContent);
     const assertStable = () => {
       assert.equal(actions.hidden, false); assert.ok(actions.isConnected);
-      assert.deepEqual(h.handles.filter(handle => handle.kind === 'button' && actions.contains(handle.container)), controls);
+      assert.deepEqual(h.handles.filter(handle => handle.kind === 'button' && handle.props.label !== 'Delete selected' && actions.contains(handle.container)), controls);
       assert.ok(controls.every(handle => !handle.disposed));
     };
     assertStable(); assert.deepEqual(labels(), ['Review all', 'Practice all', 'Clear']);
@@ -315,7 +426,7 @@ test('context actions stay visible with stable handles, switch between all/selec
     assert.equal(scopeActions.compareDocumentPosition(count.parentElement) & 4, 4);
     assert.notEqual(count.parentElement, actions); assert.equal(count.parentElement.contains(review.container), false);
     select(h, 'deck:d1');
-    assertStable(); assert.deepEqual(labels(), ['Review selected', 'Practice selected', 'Clear']);
+    assertStable(); assert.deepEqual(labels(), ['Review selected', 'Practice selected', 'Delete selected', 'Clear']);
     assert.equal(count.textContent, '1 selected'); assert.equal(clear.props.disabled, false);
     assert.equal(review.props.disabled, false); assert.equal(practice.props.disabled, false);
     assert.equal([...actions.querySelectorAll('button')].some(node => /^(Review|Practice) all$/.test(node.textContent)), false);
@@ -325,7 +436,7 @@ test('context actions stay visible with stable handles, switch between all/selec
     click(h, 'Clear'); await flush(); assertStable(); assert.deepEqual(labels(), ['Review all', 'Practice all', 'Clear']);
     assert.equal(count.textContent, '0 selected'); assert.equal(clear.props.disabled, true);
     change(h.app.querySelector('input[type=search]'), '');
-    select(h, 'deck:d2'); assertStable(); assert.deepEqual(labels(), ['Review selected', 'Practice selected', 'Clear']);
+    select(h, 'deck:d2'); assertStable(); assert.deepEqual(labels(), ['Review selected', 'Practice selected', 'Delete selected', 'Clear']);
     assert.equal(count.textContent, '1 selected'); assert.equal(review.props.disabled, true); assert.equal(practice.props.disabled, true);
     assert.equal(clear.props.disabled, false);
     const calls = h.calls.length; actions.querySelectorAll('button')[0].click(); actions.querySelectorAll('button')[1].click(); await flush();
@@ -378,7 +489,10 @@ test('deck practice is a once-through read-only snapshot with reveal gating and 
   try {
     sharedCards(h); await flush();
     const before = JSON.stringify(h.state), calls = h.calls.length;
-    menu(h, 'deck:d1'); click(h, 'Practice anytime', document.querySelector('[role=menu]')); await flush();
+    menu(h, 'deck:d1');
+    assert.equal(document.querySelector('[role=menu]').textContent.includes('Practice anytime'), false, 'practice belongs in the scope toolbar, not the gear menu');
+    document.querySelector('[role=menu]').remove();
+    select(h, 'deck:d1'); click(h, 'Practice selected'); await flush();
     const stage = surfaceRoot(h).querySelector('.fc-review-stage');
     assertInitialRegion(stage, 'Flashcard practice');
     const title = stage.querySelector('h2'), footer = stage.querySelector('.fc-review-footer'), bottom = stage.querySelector('.fc-review-bottom');
@@ -438,8 +552,8 @@ test('Practice selected uses exactly selected cues; Practice all deduplicates sh
     assert.ok(surfaceRoot(h).textContent.includes('1 card remaining'), 'shared cues appear only once');
     assert.equal(h.calls.length, calls);
     closeSurface(h);
-    menu(h, 'deck:d2'); click(h, 'Practice anytime', document.querySelector('[role=menu]')); await flush();
-    assert.ok(surfaceRoot(h).textContent.includes('1 card remaining'), 'deck gear uses its own membership scope');
+    select(h, 'deck:d2'); click(h, 'Practice selected'); await flush();
+    assert.ok(surfaceRoot(h).textContent.includes('1 card remaining'), 'deck selection uses its own membership scope');
   } finally { h.dispose(); }
 });
 
@@ -448,7 +562,7 @@ test('practice keeps its opening snapshot across library updates; empty practice
   try {
     select(h, 'deck:d2');
     const selected = [...h.app.querySelectorAll('button')].find(b => b.textContent === 'Practice selected'); assert.ok(selected.disabled);
-    menu(h, 'deck:d2'); const empty = [...document.querySelectorAll('[role=menu] button')].find(b => b.textContent === 'Practice anytime'); assert.ok(empty.disabled);
+    menu(h, 'deck:d2'); assert.equal(document.querySelector('[role=menu]').textContent.includes('Practice anytime'), false);
     document.querySelector('[role=menu]').remove();
     click(h, 'Clear'); select(h, 'deck:d1'); click(h, 'Practice selected'); await flush();
     h.state.propositions[0].cues[0].answer = 'CHANGED AFTER OPEN'; h.state.revision++; h.notify(); await flush();
@@ -680,28 +794,147 @@ test('cue menu editor retains failed drafts and sends version; preview and Archi
   } finally { h.dispose(); }
 });
 
+test('Delete selected is an icon-only trash control right of Review/Practice, visible only with selection, with cancellable checked cleanup', async () => {
+  const h = await setup();
+  try {
+    assert.equal(h.app.querySelector('[aria-label="Delete selected"]'), null);
+    select(h, 'deck:d1');
+    const actions = h.app.querySelector('.fc-scope-actions'), controls = [...actions.querySelectorAll('button')];
+    assert.deepEqual(controls.map(b => b.getAttribute('aria-label') || b.textContent), ['Review selected', 'Practice selected', 'Delete selected']);
+    assert.ok(controls[2].querySelector('svg')); assert.equal(controls[2].textContent, '');
+    click(h, 'Delete selected');
+    const confirmation = document.querySelector('[role=dialog]');
+    assert.equal(confirmation.getAttribute('aria-label'), 'Delete flashcards?');
+    assert.equal(confirmation.querySelector('input[type=checkbox]').checked, true);
+    assert.ok(confirmation.textContent.includes('Delete empty decks too'));
+    assert.ok(confirmation.querySelector('.fc-delete-description.fc-muted .fc-markdown'));
+    click(h, 'Cancel', confirmation); assert.equal(h.calls.some(([op]) => op === 'delete-content'), false);
+    click(h, 'Clear'); assert.equal(h.app.querySelector('[aria-label="Delete selected"]'), null);
+  } finally { h.dispose(); }
+});
+
+test('bulk deletion deduplicates shared content and removes only affected empty decks by default, or preserves them when unchecked', async () => {
+  for (const cleanup of [true, false]) {
+    const h = await setup();
+    try {
+      sharedCards(h); h.state.decks.push({ id: 'untouched', name: 'Unrelated empty', propositionIds: [], newLimit: 20, newToday: 0, due: 0 });
+      h.state.revision++; h.notify(); await flush(); select(h, 'deck:d1'); select(h, 'deck:d2');
+      click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
+      assert.ok(confirmation.textContent.includes('2 cues will be deleted'));
+      confirmation.querySelector('input[type=checkbox]').checked = cleanup;
+      click(h, 'Delete', confirmation); await flush();
+      const input = h.calls.findLast(([op]) => op === 'delete-content')[1];
+      assert.deepEqual(input.cueIds, ['c1', 'c2']); assert.equal(input.deleteEmptyDecks, cleanup);
+      assert.equal(h.state.propositions.length, 0);
+      assert.deepEqual(h.state.decks.map(d => d.id), cleanup ? ['untouched'] : ['d1', 'd2', 'untouched']);
+      assert.equal(confirmation.isConnected, false); assert.equal(h.app.querySelector('[aria-label="Delete selected"]'), null);
+    } finally { h.dispose(); }
+  }
+});
+
+test('deletion keeps the confirmed selection frozen and supports deleting an explicitly selected empty deck', async () => {
+  const h = await setup();
+  try {
+    sharedCards(h); await flush(); openAll(h); select(h, 'deck:d1:p:p1:cue:c1');
+    click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
+    click(h, 'Clear'); select(h, 'deck:d1:p:p1:cue:c2');
+    click(h, 'Delete', confirmation); await flush();
+    assert.deepEqual(h.calls.findLast(([op]) => op === 'delete-content')[1].cueIds, ['c1']);
+    assert.deepEqual(h.state.propositions[0].cues.map(c => c.id), ['c2']);
+    click(h, 'Clear'); h.state.decks.push({ id: 'empty', name: 'Empty', propositionIds: [], newLimit: 20, newToday: 0, due: 0 });
+    h.state.revision++; h.notify(); await flush(); select(h, 'deck:empty'); click(h, 'Delete selected');
+    const empty = document.querySelector('[role=dialog]'); click(h, 'Delete', empty); await flush();
+    assert.deepEqual(h.calls.findLast(([op]) => op === 'delete-content')[1].deckIds, ['empty']);
+    assert.equal(h.state.decks.some(d => d.id === 'empty'), false); assert.equal(h.state.propositions[0].cues.length, 1);
+  } finally { h.dispose(); }
+});
+
+test('deletion lost-response retries reuse the accepted request and options without affecting a newer dialog', async () => {
+  const h = await setup();
+  try {
+    let first = true;
+    h.overrides['delete-content'] = async input => {
+      delete h.overrides['delete-content']; const value = await h.ctx.call('delete-content', input);
+      if (first) { first = false; throw new Error('Response lost'); } return value;
+    };
+    select(h, 'deck:d1'); click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
+    const checkbox = confirmation.querySelector('input[type=checkbox]'); click(h, 'Delete', confirmation); await flush();
+    assert.ok(confirmation.textContent.includes('Response lost')); assert.equal(checkbox.disabled, true);
+    const firstInput = h.calls.find(([op]) => op === 'delete-content')[1];
+    click(h, 'Delete', confirmation); await flush();
+    assert.deepEqual(h.calls.findLast(([op]) => op === 'delete-content')[1], firstInput);
+    assert.equal(h.state.propositions.length, 0); assert.equal(confirmation.isConnected, false);
+    select(h, 'deck:d2'); click(h, 'Delete selected'); const old = document.querySelector('[role=dialog]'), pending = deferred();
+    h.overrides['delete-content'] = () => pending.promise; click(h, 'Delete', old); click(h, 'Cancel', old);
+    click(h, 'Create deck'); const newer = document.querySelector('[role=dialog]'); pending.resolve(structuredClone(h.state)); await flush();
+    assert.equal(newer.isConnected, true); assert.equal(newer.getAttribute('aria-label'), 'Create deck');
+  } finally { h.dispose(); }
+});
+
+test('active generation disables deletion in the toolbar, cue menu, preview, deck settings and an already open confirmation', async () => {
+  const h = await setup();
+  try {
+    openAll(h); select(h, 'deck:d1'); click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
+    h.state.batch = { id: 'running', status: 'running', chunks: [], completed: 0, total: 1, added: 0 }; h.state.revision++; h.notify(); await flush();
+    const deletion = [...confirmation.querySelectorAll('button')].find(b => b.textContent === 'Delete');
+    assert.equal(deletion.disabled, true); assert.ok(confirmation.textContent.includes('Wait for generation to finish or cancel'));
+    click(h, 'Cancel', confirmation);
+    assert.equal(h.app.querySelector('[aria-label="Delete selected"]').disabled, true);
+    const items = menu(h, 'deck:d1:p:p1:cue:c1'); assert.equal([...items.querySelectorAll('button')].find(b => b.textContent === 'Delete').disabled, true);
+    h.handles.findLast(handle => handle.kind === 'menu').dispose();
+    click(h, 'Question **one**?', rowNode(h, 'deck:d1:p:p1:cue:c1'));
+    const preview = document.querySelector('[role=dialog]'); assert.equal([...preview.querySelectorAll('button')].find(b => b.textContent === 'Delete').disabled, true);
+    click(h, 'Close', preview); click(h, 'Deck settings', menu(h, 'deck:d1'));
+    const settings = document.querySelector('[role=dialog]'); assert.equal([...settings.querySelectorAll('button')].find(b => b.textContent === 'Delete deck…').disabled, true);
+    assert.equal(h.calls.some(([op]) => op === 'delete-content'), false);
+  } finally { h.dispose(); }
+});
+
+test('stale deletion confirmation retains its error and never deletes content added after confirmation', async () => {
+  const h = await setup();
+  try {
+    select(h, 'deck:d1'); click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
+    h.state.propositions[0].cues.push({ id: 'later', question: 'Added later', answer: 'Later answer' }); h.state.revision++; h.notify(); await flush();
+    click(h, 'Delete', confirmation); await flush();
+    assert.ok(confirmation.textContent.includes('The library changed'));
+    assert.equal(confirmation.isConnected, true); assert.deepEqual(h.state.propositions[0].cues.map(c => c.id), ['c1', 'later']);
+    click(h, 'Cancel', confirmation);
+  } finally { h.dispose(); }
+});
+
+test('pending source-cleanup errors surface in the library and clear when recovery is acknowledged', async () => {
+  const h = await setup();
+  try {
+    h.state.cleanupError = 'Content was deleted, but saved-file cleanup is pending.'; h.notify(); await flush();
+    assert.ok(h.app.querySelector('.fc-error').textContent.includes('cleanup is pending'));
+    delete h.state.cleanupError; h.state.revision++; h.notify(); await flush();
+    assert.equal(h.app.querySelector('.fc-error').textContent, '');
+  } finally { h.dispose(); }
+});
+
 test('preview Delete is destructive but only the explicit confirmation deletes a cue', async () => {
   const h = await setup();
   try {
     openAll(h);
     const openPreview = () => { click(h, 'Question **one**?', rowNode(h, 'deck:d1:p:p1:cue:c1')); return document.querySelector('[role=dialog]'); };
-    const before = JSON.stringify(h.state), mutations = () => h.calls.filter(([op]) => op === 'delete-cue');
+    const before = JSON.stringify(h.state), mutations = () => h.calls.filter(([op]) => op === 'delete-content');
     let preview = openPreview(); assertPreview(preview);
     const deletion = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && preview.contains(handle.container) && handle.props.label === 'Delete');
     assert.equal(deletion.props.variant, 'destructive');
     click(h, 'Delete', preview);
     assert.equal(preview.isConnected, false);
-    let confirmation = document.querySelector('[role=dialog]'); assert.equal(confirmation.getAttribute('aria-label'), 'Delete cue?');
-    assert.ok(confirmation.textContent.includes('other cues and history are retained'));
+    let confirmation = document.querySelector('[role=dialog]'); assert.equal(confirmation.getAttribute('aria-label'), 'Delete flashcards?');
+    assert.ok(confirmation.textContent.includes('Past review statistics are kept'));
     assert.equal(mutations().length, 0); assert.equal(JSON.stringify(h.state), before);
     click(h, 'Cancel', confirmation); assert.equal(mutations().length, 0); assert.equal(JSON.stringify(h.state), before);
     preview = openPreview(); click(h, 'Delete', preview);
     confirmation = document.querySelector('[role=dialog]'); assert.equal(mutations().length, 0);
-    const confirmButton = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && confirmation.contains(handle.container) && handle.props.label === 'Delete cue');
+    const confirmButton = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && confirmation.contains(handle.container) && handle.props.label === 'Delete');
     assert.equal(confirmButton.props.variant, 'destructive');
-    click(h, 'Delete cue', confirmation); await flush();
-    assert.deepEqual(mutations().map(([, input]) => input), [{ propositionId: 'p1', cueId: 'c1', version: 1 }]);
-    assert.equal(h.state.propositions[0].cues[0].deleted, true);
+    click(h, 'Delete', confirmation); await flush();
+    assert.equal(mutations().length, 1);
+    assert.deepEqual(mutations()[0][1].cueIds, ['c1']); assert.equal(mutations()[0][1].deleteEmptyDecks, true);
+    assert.equal(h.state.propositions.length, 0); assert.deepEqual(h.state.decks.map(d => d.id), ['d2']);
     assert.equal(confirmation.isConnected, false);
     assert.equal(h.calls.some(([op]) => ['rate-review', 'reveal-review'].includes(op)), false);
   } finally { h.dispose(); }
@@ -1033,7 +1266,7 @@ test('every row menu uses an accessible icon-only gear with explicit icon geomet
   } finally { h.dispose(); }
 });
 
-test('memberships require one deck and deck deletion requires explicit replacement', async () => {
+test('memberships require one deck; deck deletion uses the shared content confirmation without replacement', async () => {
   const h = await setup();
   try {
     openAll(h); click(h, 'Decks…', menu(h, 'deck:d1:p:p1'));
@@ -1045,10 +1278,13 @@ test('memberships require one deck and deck deletion requires explicit replaceme
     click(h, 'Cancel', dialog);
     click(h, 'Deck settings', menu(h, 'deck:d1')); click(h, 'Delete deck…', document.querySelector('[role=dialog]'));
     const deletion = [...document.querySelectorAll('[role=dialog]')].at(-1);
-    assert.ok(deletion.querySelector('select'));
-    click(h, 'Delete deck', deletion); await flush();
-    assert.ok(deletion.textContent.includes('Choose a replacement deck'));
-    assert.equal(h.calls.some(([op]) => op === 'delete-deck'), false);
+    assert.equal(document.querySelectorAll('[role=dialog]').length, 1, 'settings is replaced by one confirmation');
+    assert.equal(deletion.getAttribute('aria-label'), 'Delete flashcards?'); assert.equal(deletion.querySelector('select'), null);
+    assert.equal(deletion.querySelector('input[type=checkbox]').checked, true);
+    assert.ok(deletion.querySelector('.fc-delete-description.fc-muted .fc-markdown'), 'explanation uses muted rendered body text');
+    click(h, 'Delete', deletion); await flush();
+    assert.deepEqual(h.calls.findLast(([op]) => op === 'delete-content')[1].deckIds, ['d1']);
+    assert.equal(h.state.propositions.length, 0); assert.deepEqual(h.state.decks.map(d => d.id), ['d2']);
   } finally { h.dispose(); }
 });
 
