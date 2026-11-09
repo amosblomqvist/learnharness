@@ -108,3 +108,11 @@ Packaged apps check at startup and every 24 hours by default, download automatic
 Sources: [`electron/main.cjs`](../electron/main.cjs), [`preload.cjs`](../electron/preload.cjs), [`update-settings.tsx`](../components/settings/update-settings.tsx).
 
 After stable publication, [`notify-website.yml`](../.github/workflows/notify-website.yml) dispatches the tag to the website using `WEBSITE_DISPATCH_TOKEN`. Drafts/prereleases do not trigger it. HTTP 204 means the website update was queued, not deployed or publicly verified.
+
+## NixOS
+
+[`flake.nix`](../flake.nix) wraps the published AppImage with nixpkgs `appimageTools` — nothing is built from source — for `x86_64-linux`, the only architecture the release pipeline publishes. It fetches the AppImage pinned by [`nix/release.json`](../nix/release.json): `{ version, sha512 }`, where the SHA-512 is the base64 (SRI) value from the release's own `latest-linux.yml`, in the form Nix accepts as-is.
+
+After each public release, [`nix-update.yml`](../.github/workflows/nix-update.yml) reads the new version and AppImage SHA-512 from that feed and opens a PR refreshing the pin; the release routine itself is unchanged. The wrapper sets `LH_DISABLE_AUTOUPDATER=1` because Nix owns the installed files — the built-in updater could never replace them, so NixOS users update by re-running against the refreshed pin (`nix run github:amosblomqvist/learnharness`).
+
+Verification needs a Nix machine: `nix run .` from a checkout (or the `github:` reference above) and `nix flake check`. The release workflow does not build or test the flake.
