@@ -280,13 +280,31 @@ function killServer() {
 	}, 3000);
 }
 
+/** Links leaving the app window may open only in a browser or mail client:
+ *  the same schemes chat markdown makes clickable. Other schemes (smb:,
+ *  file:, search-ms:, any app's custom handler) are dropped, and only the
+ *  scheme is logged. */
+const EXTERNAL_LINK_SCHEMES = new Set(["http:", "https:", "mailto:"]);
+function openExternalLink(target) {
+	let scheme = "unparseable";
+	try {
+		scheme = new URL(target).protocol;
+	} catch { /* logged below */ }
+	if (EXTERNAL_LINK_SCHEMES.has(scheme)) {
+		void shell.openExternal(target);
+		return;
+	}
+	log(`external link blocked (scheme ${scheme.slice(0, 40)})`);
+}
+
 /** Security posture (all defaults asserted explicitly; the guards are the
  *  checklist's own recommendations for localhost-app shells):
  *  - deny-by-default permission handler allowing only our loopback origin
  *    (groundwork for the mic/STT milestone — Electron auto-approves by
  *    default, we do not);
  *  - will-navigate pinned to the app origin; window.open always denied —
- *    external links go to the real browser via shell.openExternal. */
+ *    external links go to the real browser via shell.openExternal, for
+ *    http, https and mailto only (openExternalLink). */
 function createWindow(url) {
 	const win = new BrowserWindow({
 		width: 1440,
@@ -364,11 +382,11 @@ function createWindow(url) {
 	win.webContents.on("will-navigate", (event, target) => {
 		if (new URL(target).origin !== allowedOrigin()) {
 			event.preventDefault();
-			void shell.openExternal(target);
+			openExternalLink(target);
 		}
 	});
 	win.webContents.setWindowOpenHandler(({ url: target }) => {
-		void shell.openExternal(target);
+		openExternalLink(target);
 		return { action: "deny" };
 	});
 
