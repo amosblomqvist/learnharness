@@ -18,12 +18,12 @@ export function DeleteSourceBody({ sources, folders, deleteSessions, onDeleteSes
 		{sources.length > 0 && <p className="mt-2 text-sm text-muted-foreground" data-testid="source-deletion-contributions">
 			Removes these sources’ contributions to propositions and reasoning chains. Knowledge supported by other sources survives; knowledge supported only by these sources is removed.
 		</p>}
-		<p className="mt-2 text-xs text-muted-foreground">Imported source records are removed, but original files on disk are never changed. Selected folders are removed only when empty; folders needed by kept sessions remain.</p>
+		<p className="mt-2 text-xs text-muted-foreground">Imported source records are removed, but original files on disk are never changed. Tags are kept. Selected folders are removed only when they contain no tags or subfolders.</p>
 		{chats.length > 0 && <label className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/60 px-4 py-3">
 			<input type="checkbox" data-testid="delete-source-sessions" checked={deleteSessions} disabled={busy}
 				onChange={(e) => onDeleteSessions(e.target.checked)} className="mt-0.5 size-4 shrink-0 accent-primary" />
 			<span className="min-w-0"><span className="block text-sm">Also delete the {chats.length} selected {chats.length === 1 ? "session" : "sessions"}</span>
-				<span className="mt-1 block text-xs text-muted-foreground">Unchecked, conversations stay in their current folders and can be extracted again. Either way, their graph contributions and extraction coverage are cleared. Checking this also permanently deletes their messages and background jobs.</span>
+				<span className="mt-1 block text-xs text-muted-foreground">Unchecked, conversations keep their tags and can be extracted again. Either way, their graph contributions and extraction coverage are cleared. Checking this also permanently deletes their messages, session notes, PDFs, and background jobs.</span>
 			</span>
 		</label>}
 		{failure && <p role="alert" data-testid="source-delete-failure" className="mt-3 text-xs text-foreground">{failure}</p>}

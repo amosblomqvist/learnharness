@@ -10,6 +10,7 @@ import type { LhMessage } from "../native-messages.ts";
 import type { Phase3 } from "../phases.ts";
 import type { PlanNodeStatus, PlanTree } from "./plan.ts";
 import type { EmissionStats } from "./graph.ts";
+import type { SourceTag } from "../source-organization.ts";
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
@@ -288,6 +289,8 @@ export interface ChatSummary {
  *  split at exactly the record/liveness seam. */
 export interface ChatListItem extends ChatSummary {
 	busy: boolean;
+	/** Current tag metadata, joined from source organization for the sidebar. */
+	tags?: SourceTag[];
 	/** Live compaction liveness (turn-liveness's twin): true while a
 	 *  background context compaction holds the chat's model gate. The
 	 *  route attaches it from the compaction registry — never

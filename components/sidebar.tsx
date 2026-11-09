@@ -3,6 +3,8 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
+import { SourceTagDialog, TagMark } from "./tag-picker";
+import { TagsIcon } from "lucide-react";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
@@ -323,6 +325,21 @@ export function SessionRow({
 				    rule, finally applied to the picker too (owner, typography
 				    round): mono = chrome, Source Sans = human words. */}
 				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
+				{!!chat.tags?.length && (
+					<span className="my-0.5 flex min-w-0 items-center gap-1 text-[10px] leading-4 text-muted-foreground" aria-label="Session tags">
+						{chat.tags.slice(0, 2).map(tag => (
+							<span key={tag.id} title={tag.name} className="min-w-0 max-w-[6.5rem] rounded border border-border/60 px-1">
+								<TagMark tag={tag} />
+							</span>
+						))}
+						{chat.tags.length > 2 && (
+							<span className="shrink-0" title={chat.tags.slice(2).map(tag => tag.name).join(", ")}
+								aria-label={`${chat.tags.length - 2} more tags: ${chat.tags.slice(2).map(tag => tag.name).join(", ")}`}>
+								+{chat.tags.length - 2}
+							</span>
+						)}
+					</span>
+				)}
 				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
@@ -515,6 +532,7 @@ function SessionsSidebar() {
 		}, 250);
 	};
 	useServerEvent("chats-changed", scheduleEventRefresh);
+	useServerEvent("sources-changed", scheduleEventRefresh);
 	useServerEvent("turn-started", scheduleEventRefresh);
 	useServerEvent("turn-settled", scheduleEventRefresh);
 	useServerEvent("compaction-changed", scheduleEventRefresh);
@@ -548,6 +566,7 @@ function SessionsSidebar() {
 	   affordance at the bottom). The anchor is the row that was
 	   right-clicked — assigned into a ref before the state flip so the
 	   shell measures it on its first (hidden) pass. */
+	const [tagSession, setTagSession] = useState<string | null>(null);
 	const [ctxChatId, setCtxChatId] = useState<string | null>(null);
 	const ctxAnchorRef = useRef<HTMLElement | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -699,6 +718,9 @@ function SessionsSidebar() {
 				    labels room; teaching keeps the original draft route,
 				    practice carries its mode. */}
 				<div className="mx-3 mb-2 flex flex-col gap-1.5">
+					<Link href="/tags" aria-current={pathname === "/tags" ? "page" : undefined}
+						onClick={() => { if (open && window.matchMedia("(max-width: 48rem)").matches) toggle(); }}
+						className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider hover:bg-accent"><TagsIcon size={15} />Tags</Link>
 					<button
 						type="button"
 						data-testid="new-session"
@@ -894,6 +916,7 @@ function SessionsSidebar() {
 						>
 							Rename
 						</button>
+						<button type="button" className="rounded-lg px-2.5 py-1.5 text-left hover:bg-accent" onClick={() => { setTagSession(ctxChatId); setCtxChatId(null); }}>Edit tags…</button>
 						{/* Export as Markdown (owner, release polish 2026-10-06): the
 					    session-markdown engine's user-facing debut — same-origin
 						    anchor download; the route's Content-Disposition names the
@@ -935,6 +958,7 @@ function SessionsSidebar() {
 
 				{/* The two-option delete dialog (wave 6) — portaled to body
 				    by the component itself, lives here for state locality. */}
+				{tagSession && <SourceTagDialog ids={[tagSession]} close={() => setTagSession(null)} />}
 				<DeleteSessionDialog
 					chat={deleting}
 					onClose={() => setDeleting(null)}

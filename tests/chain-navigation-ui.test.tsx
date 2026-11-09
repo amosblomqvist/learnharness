@@ -8,7 +8,7 @@ import { ChainTableBody } from "../components/chain-table.tsx";
 import { chainRow, useChainNavigation } from "../components/chain-navigation.ts";
 import type { SourceDirectory } from "../src/core/index.ts";
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true });
+Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true });
 let focused: Element | undefined, scrolled = 0, selectedText = 0;
 dom.window.HTMLElement.prototype.focus = function () { focused = this; };
 dom.window.HTMLElement.prototype.scrollIntoView = function () { scrolled++; };
@@ -16,10 +16,10 @@ dom.window.HTMLInputElement.prototype.select = function () { selectedText++; };
 dom.window.HTMLElement.prototype.blur = function () { if (focused === this) focused = undefined; };
 Object.defineProperty(document, "activeElement", { configurable: true, get: () => focused ?? document.body });
 const directory: SourceDirectory = {
-	organization: { version: 1, folders: [
+	organization: { version: 2, folders: [
 		{ id: "outer", name: "Outer", parentId: null, createdAt: "2026-10-30" },
 		{ id: "inner", name: "Inner", parentId: "outer", createdAt: "2026-10-30" },
-	], placements: { a: { folderId: "inner" }, b: { folderId: null } } },
+	 ], tags: [{ id: "course", name: "Course", parentId: "inner" }], placements: { a: { tagIds: ["course"] }, b: {} } },
 	sources: [{ id: "a", kind: "notes", label: "Book A", createdAt: "2026-10-30" }, { id: "b", kind: "notes", label: "Book B", createdAt: "2026-10-30" }],
 };
 const nodes = ["n1", "n2", "n3"].map((id) => ({ id, name: id, statement: id, createdAt: "2026-10-30", aliases: [], provenance: [{ chatId: "a", messageId: "m" }] }));
@@ -33,8 +33,7 @@ function Harness() {
 	return <ChainTableBody keyboardActive={enabled} directory={directory} nodes={nodes} chains={[{ id: "argument", premises: ["n1"], conclusion: "n2", provenance: [], createdAt: "2026-10-30" }]}
 		sessions={{}} fileSources={{}} query={query} onQuery={updateQuery} sort={{ col: "name", dir: 1 }} onSort={() => {}} selection={new Set()}
 		expandedClusters={clusters} expandedChains={chains} onToggleCluster={(id) => updateClusters((p) => toggle(p, id))} onToggleChain={(id) => updateChains((p) => toggle(p, id))}
-		onToggleNodes={() => { throw new Error("Navigation must not select nodes"); }} onClear={() => {}} onDelete={() => {}} onClose={() => {}}
-		onOrganizationChange={async () => { throw new Error("Navigation must not mutate organization"); }} />;
+		onToggleNodes={() => { throw new Error("Navigation must not select nodes"); }} onClear={() => {}} onDelete={() => {}} onClose={() => {}} />;
 }
 async function mount() {
 	scrolled = 0; selectedText = 0; focused = undefined;
@@ -57,30 +56,34 @@ it("Find focuses/selects chains search, and Down enters results without changing
 	assert.equal(focused, search); assert.equal(selectedText, 1);
 	assert.equal((await key("ArrowLeft", search)).defaultPrevented, false); assert.equal(focused, search);
 	assert.equal((await key("ArrowDown", search)).defaultPrevented, true);
-	assert.deepEqual(activeKey(), ["source", "b"]); assert.equal(focused, active()); assert.ok(scrolled > 0);
+	assert.deepEqual(activeKey(), ["folder", "outer"]); assert.equal(focused, active()); assert.ok(scrolled > 0);
 	assert.equal(document.querySelectorAll('input[type="checkbox"]:checked').length, 0);
 });
-it("Right enters newly rendered children; Left focuses and collapses each parent through all four layers", async () => {
-	await mount(); await key("ArrowDown"); await key("ArrowDown"); assert.deepEqual(activeKey(), ["folder", "outer"]);
+it("Right enters newly rendered children; Left focuses and collapses each parent through folders, tags, sources, chains and propositions", async () => {
+	await mount(); await key("ArrowDown"); assert.deepEqual(activeKey(), ["folder", "outer"]);
 	await key("ArrowRight"); assert.deepEqual(activeKey(), ["folder", "inner"]);
-	await key("ArrowRight"); assert.deepEqual(activeKey(), ["source", "a"]);
-	await key("ArrowRight"); assert.deepEqual(activeKey(), ["chain", "a", "argument"]);
-	await key("ArrowRight"); assert.deepEqual(activeKey(), ["prop", "a", "argument", "n1"]);
-	await key("ArrowDown"); assert.deepEqual(activeKey(), ["prop", "a", "argument", "n2"]);
-	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["chain", "a", "argument"]); assert.equal(active()?.dataset.chainNavExpanded, "false");
+	await key("ArrowRight"); assert.deepEqual(activeKey(), ["tag", "course"]);
+	await key("ArrowRight"); assert.deepEqual(activeKey(), ["tag", "course", "source", "a"]);
+	await key("ArrowRight"); assert.deepEqual(activeKey(), ["tag", "course", "chain", "a", "argument"]);
+	await key("ArrowRight"); assert.deepEqual(activeKey(), ["tag", "course", "prop", "a", "argument", "n1"]);
+	await key("ArrowDown"); assert.deepEqual(activeKey(), ["tag", "course", "prop", "a", "argument", "n2"]);
+	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["tag", "course", "chain", "a", "argument"]); assert.equal(active()?.dataset.chainNavExpanded, "false");
 	assert.equal(document.querySelector('[data-testid="prop-row-n1"]'), null);
-	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["source", "a"]);
+	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["tag", "course", "source", "a"]);
+	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["tag", "course"]);
 	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["folder", "inner"]);
 	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["folder", "outer"]); assert.equal(active()?.dataset.chainNavExpanded, "false");
 });
 it("Up/Down skip expanded subtrees and pointer interaction establishes the active row", async () => {
-	await mount(); await key("ArrowDown"); await key("ArrowDown"); await key("ArrowRight");
-	await point('[data-testid="folder-row-outer"]'); await key("ArrowUp"); assert.deepEqual(activeKey(), ["source", "b"]);
-	await key("ArrowDown"); assert.deepEqual(activeKey(), ["folder", "outer"]); await key("ArrowDown"); assert.deepEqual(activeKey(), ["folder", "outer"]);
+	await mount(); await key("ArrowDown"); await key("ArrowRight");
+	await point('[data-testid="folder-row-outer"]'); await key("ArrowDown"); assert.deepEqual(activeKey(), ["untagged", "untagged"]);
+	await key("ArrowUp"); assert.deepEqual(activeKey(), ["folder", "outer"]);
 });
 it("search auto-expansion permits explicit collapse and resets for a new query", async () => {
 	await mount(); await act(async () => { setQuery("Book A"); });
-	await key("ArrowDown"); await key("ArrowRight"); await key("ArrowRight"); assert.deepEqual(activeKey(), ["source", "a"]);
+	await key("ArrowDown"); await key("ArrowRight"); await key("ArrowRight"); assert.deepEqual(activeKey(), ["tag", "course"]);
+	await key("ArrowRight"); assert.deepEqual(activeKey(), ["tag", "course", "source", "a"]);
+	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["tag", "course"]);
 	await key("ArrowLeft"); assert.deepEqual(activeKey(), ["folder", "inner"]); assert.equal(active()?.dataset.chainNavExpanded, "false");
 	assert.equal(document.querySelector('[data-testid="cluster-group-a"]'), null);
 	await act(async () => { setQuery("Book"); }); assert.ok(document.querySelector('[data-testid="cluster-group-a"]'));
@@ -96,16 +99,16 @@ it("a foreground menu/dialog keeps both Find and arrows, even if focus was left 
 	assert.equal(focused, document.querySelector('[data-testid="chain-table-search"]'));
 });
 it("removing the active row by filtering safely restarts on the first visible result", async () => {
-	await mount(); await key("ArrowDown"); assert.deepEqual(activeKey(), ["source", "b"]);
+	await mount(); await key("ArrowDown"); await key("ArrowDown"); assert.deepEqual(activeKey(), ["untagged", "untagged"]);
 	await act(async () => { setQuery("n2"); }); assert.equal(active(), null);
 	await key("ArrowDown"); assert.deepEqual(activeKey(), ["folder", "outer"]);
 });
-it("rename arrows stay in the input, and modal-owned keyboard focus disables both Find and navigation", async () => {
-	await mount(); await point('[data-source-drag-row="b"]');
-	await act(async () => { (document.querySelector('[data-source-drag-row="b"] button[title="Rename"]') as HTMLElement).click(); });
-	const input = document.querySelector('[data-testid="source-name-input"]')!;
-	for (const arrow of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) assert.equal((await key(arrow, input)).defaultPrevented, false);
-	assert.equal(focused, input); await act(async () => { setEnabled(false); });
+it("search input arrows remain native and modal-owned keyboard focus disables navigation", async () => {
+	await mount();
+	const input = document.querySelector('[data-testid="chain-table-search"]')!;
+	(input as HTMLElement).focus();
+	for (const arrow of ["ArrowLeft", "ArrowRight", "ArrowUp"]) assert.equal((await key(arrow, input)).defaultPrevented, false);
+	await act(async () => { setEnabled(false); });
 	await act(async () => { window.dispatchEvent(new dom.window.CustomEvent("lh:kbd-find")); }); assert.equal(focused, input);
 	assert.equal((await key("ArrowDown", document.querySelector('[data-testid="chain-table"]')!)).defaultPrevented, false);
 });
@@ -119,13 +122,13 @@ it("Space clicks only the focused row's enabled checkbox; text editing and check
 	const search = document.querySelector('[data-testid="chain-table-search"]')!;
 	assert.equal((await key(" ", search)).defaultPrevented, false);
 	assert.equal((await key(" ", document.querySelector('[data-testid="sort-name"]')!)).defaultPrevented, false);
-	await key("ArrowDown"); await key("ArrowRight"); await key("ArrowRight"); await key("ArrowRight");
-	assert.equal(activeKey()?.[0], "chain"); assert.equal((await key(" ")).defaultPrevented, false);
+	await key("ArrowRight"); await key("ArrowRight"); await key("ArrowRight"); await key("ArrowRight");
+	assert.equal(activeKey()?.[2], "chain"); assert.equal((await key(" ")).defaultPrevented, false);
 });
 it("blank space below the tree clears row highlighting and focus, without toggling checked entries", async () => {
 	await mount(); await key("ArrowDown"); assert.ok(active()); assert.equal(focused, active());
 	const checkbox = active()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!; checkbox.checked = true;
-	await point('[data-testid="source-root-drop"]'); assert.equal(active(), null); assert.equal(focused, undefined); assert.equal(checkbox.checked, true);
+	await point('[data-testid="chain-table-blank-space"]'); assert.equal(active(), null); assert.equal(focused, undefined); assert.equal(checkbox.checked, true);
 });
 it("programmatic focus waits for a just-created row to render, then highlights and scrolls it", async () => {
 	let addRow: () => void;

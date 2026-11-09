@@ -39,6 +39,19 @@ function render(chat: ChatListItem, active = false) {
 }
 
 describe("SessionRow", () => {
+	it("shows two compact tags under the title and gives the remaining names in the overflow label", () => {
+		const tags = ["MATH286", "Linear algebra", "School", "Semester 1"].map((name, i) => ({
+			id: "tag_" + i, name, parentId: null, createdAt: "now", color: "#114488", symbol: i === 0 ? "∑" : undefined,
+		}));
+		const html = render(item({ tags }));
+		assert.equal((html.match(/max-w-\[6\.5rem\]/g) ?? []).length, 2);
+		assert.match(html, /2 more tags: School, Semester 1/);
+		assert.match(html, />\+2</);
+		assert.match(html, /∑/);
+		assert.ok(html.indexOf("Test session") < html.indexOf("MATH286"));
+		assert.doesNotMatch(render(item({})), /Session tags/);
+	});
+
 	it("no phase strips, no phase colors — the retired decoration", () => {
 		const html = render(item({ phase: "teach" }));
 		assert.ok(!html.includes("phase-strip"), "strip removed by design (too busy)");

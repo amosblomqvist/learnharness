@@ -1,6 +1,6 @@
 # Prompt composition
 
-The runtime composes prompts for **prober**, **teacher** and **practice** agents. The source of truth is [`listSourceSegments` / `effectivePromptSegments`](../prompt-segments.ts); [`composeInstructions`](../teacher-agent.ts) selects effective text, trims each segment, drops empty segments and joins them with `\n\n---\n\n`. Non-fragment documentation such as this README never enters the prompt.
+The runtime composes prompts for **prober**, **teacher**, **practice**, and **notes writer** agents. The source of truth is [`listSourceSegments` / `effectivePromptSegments`](../prompt-segments.ts). The conversation agents and notes writer select effective text, trim each segment, drop empty segments, and join them with `\n\n---\n\n`. Non-fragment documentation such as this README never enters the prompt.
 
 ## Composition order
 
@@ -9,6 +9,7 @@ The runtime composes prompts for **prober**, **teacher** and **practice** agents
 | Prober | [`system-prompt.md`](../system-prompt.md) → sorted `prober/` fragments → sorted `shared/` fragments |
 | Teacher | `system-prompt.md` → sorted `teacher/` fragments → sorted `shared/` fragments |
 | Practice | sorted `practice/` fragments → the curated shared appendix below; **no teaching base** |
+| Notes writer | sorted `notes/` fragments |
 
 Directory discovery accepts only filenames matching `^\d+-[\w.-]+\.md$` and sorts them lexicographically by filename. Keep numeric prefixes consistently padded when order matters. The teaching base supplies the agent's purpose/philosophy; voice, accuracy, mental-model, question, confidence, file and formatting guidance are separate shared fragments. The teacher's method and planning/teaching doctrine live in its own directory; probing doctrine lives in `prober/`.
 
@@ -23,12 +24,13 @@ system-prompt.md
 prober/<fragment>.md
 teacher/<fragment>.md
 practice/<fragment>.md
+notes/<fragment>.md
 shared/<fragment>.md
 ```
 
 An override is effective only when **both** its `settings.json` → `agent.prompts[segmentPath]` switch is `true` **and** its file can be read. Absent/off switches and missing/unreadable files use source text. File presence alone does not enable anything. An enabled empty override contributes no text after trimming; it does not fall back to source.
 
-The normal turn handler passes the resolved switch map, so composition reads source/override text fresh for each newly constructed agent. Calls that omit `promptSwitches` use the source-only compositions cached at module initialization. Editing a file does not rewrite an already-running agent's instructions. There are no factory-enabled overrides.
+The normal turn handler and notes service pass the resolved switch map, so composition reads source/override text for each newly constructed agent. Notes generation uses the same override for live notes and handouts. Conversation-agent calls that omit `promptSwitches` use source-only compositions cached at module initialization. The notes writer reads the source for each run when switches are omitted. Editing a file takes effect on the next run. There are no factory-enabled overrides.
 
 The available segment list always comes from current source discovery. An override for a removed source segment stops composing but is not automatically deleted from disk. Shared segments use the same key across all agents that include them. Path grammar is defined in [`src/core/prompt-segments.ts`](../../core/prompt-segments.ts); override CRUD lives in [`src/store/prompt-overrides.ts`](../../store/prompt-overrides.ts), exposed by the settings prompt routes/UI. The agent-side reader is separate so agents do not import store adapters.
 

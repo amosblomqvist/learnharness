@@ -1,51 +1,105 @@
 import React, { act } from "react";
-(globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
-import { after, it } from "node:test";
+import { it } from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { ChainTableOverlay } from "../components/chain-table.tsx";
+import { TagsLibrary } from "../components/tags-library.tsx";
 import { ServerEventsProvider } from "../components/server-events.tsx";
-const dom = parseHTML("<html><head></head><body></body></html>");
-// linkedom omits selection; native browser behavior is covered by the UI check.
-dom.window.HTMLInputElement.prototype.select = function () {};
-Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true });
-const originalFetch = globalThis.fetch;
-after(() => { globalThis.fetch = originalFetch; });
+import { type SourceDirectory } from "../src/core/source-organization.ts";
 
-it("one Escape cancels inline source/folder editing without closing the overlay (document-root event delegation)", async () => {
-	let closed = 0, writes = 0, windowEscapes = 0;
+it("sends organization edits to Tags and lets a folder dialog be cancelled without writing", async () => {
+	const dom = parseHTML("<html><body><div id='app'></div></body></html>");
+	Object.assign(globalThis, {
+		React,
+		window: dom.window,
+		self: dom.window,
+		document: dom.document,
+		Element: dom.window.Element,
+		IS_REACT_ACT_ENVIRONMENT: true,
+	});
+	// linkedom omits the native dialog API. Browsers send cancel for Escape.
+	const proto = Object.getPrototypeOf(document.createElement("dialog"));
+	proto.showModal = function () {
+		this.setAttribute("open", "");
+	};
+	proto.close = function () {
+		this.removeAttribute("open");
+	};
+	const originalFetch = globalThis.fetch;
+	let writes = 0;
 	globalThis.fetch = async (_url, init) => {
 		if (init?.method === "POST") writes++;
-		return Response.json({ organization: { version: 1, folders: [], placements: {} }, sources: [{ id: "chat", kind: "chat", label: "Unextracted", createdAt: "2026-10-30" }] });
+		return Response.json({ organization: { version: 2, folders: [], placements: {} }, sources: [], notes: [] });
 	};
-	const root = createRoot(document);
-	const onWindow = () => { windowEscapes++; };
-	window.addEventListener("keydown", onWindow);
+	const root = createRoot(document.getElementById("app")!);
+	const render = (child: React.ReactNode) =>
+		act(async () => {
+			root.render(
+				<ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}>
+					{child}
+				</ServerEventsProvider>,
+			);
+		});
 	try {
-		await act(async () => { root.render(<html><head /><body><ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}>
-			<ChainTableOverlay open nodes={[]} chains={[]} sessions={{}} fileSources={{}} onClose={() => { closed++; }} />
-		</ServerEventsProvider></body></html>); });
-		for (const raw of ["null", "3", '"text"', "{"]) {
-			const drop = new dom.window.Event("drop", { bubbles: true, cancelable: true });
-			Object.defineProperty(drop, "dataTransfer", { value: { getData: () => raw } });
-			await act(async () => { document.querySelector('[data-testid="source-root-drop"]')!.dispatchEvent(drop); });
-		}
-		assert.equal(writes, 0, "malformed drag payloads cannot mutate organization");
-		const escape = async () => {
-			const input = document.querySelector('[data-testid="source-name-input"]')!;
-			assert.ok(input);
-			const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true }); Object.defineProperty(event, "key", { value: "Escape" });
-			await act(async () => { input.dispatchEvent(event); });
-			assert.equal(document.querySelector('[data-testid="source-name-input"]'), null);
-			assert.equal(closed, 0); assert.equal(writes, 0); assert.equal(windowEscapes, 0);
-		};
-		await act(async () => { (document.querySelector('button[title="Rename"]') as HTMLElement).click(); });
-		await escape();
-		await act(async () => { (document.querySelector('[data-testid="add-source-folder"]') as HTMLElement).click(); });
-		await escape();
-		const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true }); Object.defineProperty(event, "key", { value: "Escape" });
-		await act(async () => { document.querySelector('[data-testid="chain-table"]')!.dispatchEvent(event); });
-		assert.equal(closed, 1, "the next Escape closes the overlay normally"); assert.equal(windowEscapes, 0);
-	} finally { await act(async () => { root.unmount(); }); window.removeEventListener("keydown", onWindow); }
+		await render(<ChainTableOverlay open nodes={[]} chains={[]} sessions={{}} fileSources={{}} onClose={() => {}} />);
+		assert.equal(document.querySelector('a[href="/tags"]')?.textContent, "Organize in Tags");
+		assert.equal(document.querySelector('[data-testid="add-source-folder"]'), null);
+		await render(<TagsLibrary />);
+		const newFolder = document.querySelector<HTMLButtonElement>('button[aria-label="New folder"]');
+		assert.ok(newFolder);
+		await act(async () => {
+			newFolder.click();
+		});
+		const dialog = document.querySelector("dialog[open]");
+		assert.ok(dialog);
+		await act(async () => {
+			dialog.dispatchEvent(new dom.window.Event("cancel", { bubbles: false, cancelable: true }));
+		});
+		assert.equal(document.querySelector("dialog"), null);
+		assert.equal(writes, 0);
+	} finally {
+		await act(async () => {
+			root.unmount();
+		});
+		globalThis.fetch = originalFetch;
+	}
+});
+
+it("Tags lists active material through tags or Untagged, without retained-source rows or session moves", async () => {
+	const dom = parseHTML("<html><body><div id='app'></div></body></html>");
+	Object.assign(globalThis, { React, window: dom.window, self: dom.window, document: dom.document, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true });
+	const directory: SourceDirectory = {
+		organization: { version: 2, folders: [{ id: "school", name: "School", parentId: null, createdAt: "now" }],
+			tags: [{ id: "course", name: "Course", parentId: "school" }], placements: { lesson: { tagIds: ["course"] }, retained: { tagIds: ["course"] } } },
+		sources: [
+			{ id: "lesson", kind: "chat", label: "Tagged lesson", createdAt: "now" },
+			{ id: "retained", kind: "missing", label: "Deleted lesson", createdAt: null },
+			{ id: "book", kind: "notes", label: "Untagged book", createdAt: "now" },
+		],
+	};
+	const originalFetch = globalThis.fetch;
+	globalThis.fetch = async () => Response.json({ ...directory, notes: [] });
+	const root = createRoot(document.getElementById("app")!);
+	const click = async (name: string) => {
+		const button = [...document.querySelectorAll<HTMLButtonElement>("button")].find(b => b.textContent === name);
+		assert.ok(button, name); await act(async () => button.click());
+	};
+	try {
+		await act(async () => root.render(<ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}><TagsLibrary /></ServerEventsProvider>));
+		assert.match(document.querySelector("main")!.textContent!, /Tagged lesson/);
+		assert.doesNotMatch(document.querySelector("main")!.textContent!, /Deleted lesson|Saved graph material/);
+		await click("Untagged");
+		assert.match(document.querySelector("main")!.textContent!, /Untagged book/);
+		assert.doesNotMatch(document.querySelector("main")!.textContent!, /Tagged lesson/);
+		await click("School");
+		assert.match(document.querySelector("main")!.textContent!, /Tagged lesson/);
+		assert.doesNotMatch(document.querySelector("main")!.textContent!, /Untagged book/);
+		await click("Course");
+		const checkbox = document.querySelector<HTMLInputElement>('input[aria-label="Select Tagged lesson"]')!;
+		checkbox.checked = true;
+		await act(async () => checkbox.dispatchEvent(new dom.window.Event("click", { bubbles: true })));
+		assert.match(document.querySelector("main")!.textContent!, /Edit tags/);
+		assert.ok(![...document.querySelectorAll("button")].some(b => b.textContent === "Move"));
+	} finally { await act(async () => root.unmount()); globalThis.fetch = originalFetch; }
 });

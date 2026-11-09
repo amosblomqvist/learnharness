@@ -65,6 +65,8 @@ export async function runSubmitAgent<T>(opts: {
 	/** Turn budget for the loop (default 4 = retry-only; the auditor runs
 	 *  an exploration loop instead — 16). */
 	maxTurns?: number;
+	/** Optional per-request inactivity limit, independent of the turn budget. */
+	idleTimeoutMs?: number;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;
 	/** Weak-model argument heal at pi's prepareArguments seam (runs BEFORE
@@ -112,6 +114,7 @@ export async function runSubmitAgent<T>(opts: {
 			systemPrompt: opts.systemPrompt,
 			prompt: opts.prompt,
 			maxTurns: opts.maxTurns ?? 4,
+			idleTimeoutMs: opts.idleTimeoutMs,
 			abortSignal: opts.signal,
 			chatId: opts.chatId,
 			onAssistantMessage: (message, step) =>

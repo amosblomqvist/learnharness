@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
-import { MaximizeIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
+import { BookOpenIcon, MaximizeIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 // The placement engine — literally mermaid's: dagre-d3-es, the fork
 // mermaid 11 ships with (owner, plan-graph round 8: same engine as the
@@ -475,7 +475,7 @@ export function PlanDiagram({
 	edges,
 	statusOf,
 	glowId,
-	markerId,
+	markerId, noteNodes, onNote,
 	viewBoxOverride,
 	pad: padUnits,
 	textCapScale,
@@ -488,6 +488,8 @@ export function PlanDiagram({
 	statusOf: (id: string) => PlanNodeStatus;
 	glowId?: string | null;
 	markerId: string;
+	noteNodes?: ReadonlyMap<string, unknown>;
+	onNote?: (id: string) => void;
 	/** A windowed viewBox (the plan window) instead of the full extent. */
 	viewBoxOverride?: string;
 	/** Pads the viewBox by this many svg units so centered strokes and the
@@ -618,14 +620,22 @@ export function PlanDiagram({
 				// horizontally too now (text-first sizing round, 2026-10-07).
 				const h = layout.nodeH.get(n.id) ?? NODE_H;
 				const w = layout.nodeW.get(n.id) ?? NODE_W_MIN;
+				const hasNote = noteNodes?.has(n.id);
 				const y0 = (h - lines.length * LINE_H) / 2 + 10;
 				return (
 					<g
 						key={n.id}
+						role={hasNote ? "button" : undefined}
+						tabIndex={hasNote ? 0 : undefined}
+						aria-label={hasNote ? "Open notes for " + n.title : undefined}
+						className={hasNote ? "cursor-pointer" : undefined}
+						onClick={hasNote ? () => onNote?.(n.id) : undefined}
+						onKeyDown={e => { if (hasNote && (e.key === "Enter" || e.key === " ")) { e.preventDefault(); onNote?.(n.id); } }}
 						transform={`translate(${layout.x.get(n.id) ?? 0}, ${layout.y.get(n.id) ?? 0})`}
 						data-testid={`plan-node-${n.id}`}
 						data-status={status}
 					>
+						{hasNote && <title>Open notes for {n.title}</title>}
 						{/* Rectangular — no corner rounding (owner). */}
 						<rect
 							width={w}
@@ -648,6 +658,7 @@ export function PlanDiagram({
 								filter={`url(#${markerId}-glow)`}
 							/>
 						)}
+						{hasNote && <BookOpenIcon x={w - 15} y={3} width={12} height={12} aria-hidden="true" />}
 						{lines.map((line, i) => (
 							<text
 								key={i}
@@ -748,7 +759,7 @@ const POPUP_PAD = GLOW_REACH;
  * territory. Surface 80% + blur (owner decision): the transcript ghosts
  * through while the focus owns the session area.
  */
-export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessage[]; onClose: () => void }) {
+export function PlanPopup({ messages, onClose, noteNodes, onNote }: { messages: readonly PopupMessage[]; onClose: () => void; noteNodes?: ReadonlyMap<string, unknown>; onNote?: (id: string) => void }) {
 	const tree = useMemo(() => latestTree(messages), [messages]);
 	const statuses = useMemo(
 		() => (tree ? derivePlanStatuses(tree, messages as Parameters<typeof derivePlanStatuses>[1]) : null),
@@ -842,7 +853,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 	const dragRef = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
 	const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
 		if (e.button !== 0) return;
-		if ((e.target as HTMLElement).closest("button")) return;
+		if ((e.target as Element).closest("button, [role='button']")) return;
 		if (atFloor) return;
 		dragRef.current = { px: e.clientX, py: e.clientY, x: view.x, y: view.y, moved: false };
 		setPanning(true);
@@ -936,7 +947,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 										: "transform 180ms ease-out, opacity 160ms ease-out",
 							}}
 						>
-							<PlanDiagram
+							<PlanDiagram noteNodes={noteNodes} onNote={onNote}
 								nodes={tree.nodes}
 								edges={tree.edges}
 								statusOf={statusOf}

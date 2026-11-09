@@ -1,0 +1,34 @@
+{
+  "title": "Diagonalizing a matrix",
+  "overview": "A matrix can mix coordinates even when the underlying transformation acts by simple stretching. An eigenbasis reveals those directions. In that basis the transformation is diagonal, which turns repeated matrix multiplication into powers of scalars.",
+  "quickReference": {
+    "decisions": [
+      {"situation": "Find a direction preserved by a transformation", "approach": "Look for a nonzero vector satisfying $Av=\\lambda v$."},
+      {"situation": "Decide whether diagonalization is possible", "approach": "Find $n$ linearly independent eigenvectors over the chosen field."},
+      {"situation": "Compute repeated applications of a diagonalizable matrix", "approach": "Use $A^k=PD^kP^{-1}$ for positive integers $k$."}
+    ],
+    "essentials": [
+      {"title": "Eigenbasis", "text": "A basis consisting of eigenvectors."},
+      {"title": "Change of coordinates", "text": "$AP=PD$ and $A=PDP^{-1}$ when $P$ contains an eigenbasis."},
+      {"title": "Order matters", "text": "The eigenvalue in each diagonal position of $D$ must correspond to the eigenvector in that column of $P$."}
+    ]
+  },
+  "sections": [
+    {
+      "id": "eigenbasis", "heading": "Find the stretching directions", "sourceIds": ["m1"], "nodeIds": ["eigenvectors"],
+      "blocks": [
+        {"kind": "definition", "text": "An eigenvector of $A$ is a nonzero vector $v$ satisfying $Av=\\lambda v$. The scalar $\\lambda$ is its eigenvalue. An eigenbasis is a basis consisting of eigenvectors."},
+        {"kind": "paragraph", "text": "Being able to find one eigenvector tells us about a single direction. To describe every input using such directions, we need enough independent eigenvectors to span the space."}
+      ]
+    },
+    {
+      "id": "diagonalize", "heading": "Change coordinates", "sourceIds": ["m2", "m4"], "nodeIds": ["diagonalization"],
+      "blocks": [
+        {"kind": "theorem", "text": "An $n\\times n$ matrix over a field is diagonalizable over that field precisely when it has $n$ linearly independent eigenvectors there."},
+        {"kind": "method", "title": "Construct the diagonalization", "steps": ["Find an eigenbasis; diagonalization requires $n$ independent eigenvectors.", "Put those eigenvectors in the columns of $P$.", "Put their eigenvalues in the same order on the diagonal of $D$, then write $A=PDP^{-1}$."], "text": "Column by column, $AP=PD$. Since the columns form a basis, $P$ is invertible."},
+        {"kind": "example", "title": "An upper triangular matrix", "text": "For $A=\\begin{pmatrix}2&1\\\\0&3\\end{pmatrix}$, take $v_1=(1,0)^T$ and $v_2=(1,1)^T$. Multiplying gives $Av_1=2v_1$ and $Av_2=3v_2$. In this basis, $D=\\operatorname{diag}(2,3)$."},
+        {"kind": "paragraph", "text": "For a positive integer $k$, successive factors of $P^{-1}P$ cancel, leaving $A^k=PD^kP^{-1}$. Only the diagonal entries of $D$ need to be raised to the power $k$."}
+      ]
+    }
+  ]
+}

@@ -2,6 +2,8 @@
 
 import { useEffect, useId, useRef, useState, useSyncExternalStore, type ChangeEvent } from "react";
 import { WaypointsIcon } from "lucide-react";
+import type { TagChanges } from "@/src/core";
+import { ImportTagDialog } from "./import-tag-dialog";
 import { Hint } from "@/components/ui/hint";
 import { createNotesImportQueue, EMPTY_IMPORT_QUEUE, notesPath } from "./notes-import-queue";
 
@@ -44,11 +46,12 @@ export function parseNotesImportResults(body: unknown, files: readonly File[]): 
 	return body.results as NotesImportResult[];
 }
 
-export async function postNotesImport(files: readonly File[]): Promise<NotesImportResult[]> {
+export async function postNotesImport(files: readonly File[], tags?: ReadonlyMap<File, TagChanges>): Promise<NotesImportResult[]> {
 	const form = new FormData();
 	for (const file of files) {
 		form.append("files", file);
 		form.append("paths", notesPath(file));
+		if (tags) form.append("tagChanges", JSON.stringify(tags.get(file) ?? { add: [], remove: [] }));
 	}
 	const response = await fetch("/api/graph/import", { method: "POST", body: form });
 	let body: unknown;
@@ -77,23 +80,24 @@ export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () 
 	}, [snapshot.completion]);
 	return {
 		errors: snapshot.errors, notices: snapshot.notices, importing: snapshot.importing,
-		onImportFiles: (files: FileList | null) => {
+		onImportFiles: (files: FileList | readonly File[] | null, tags?: ReadonlyMap<File, TagChanges>) => {
 			if (!files || files.length === 0) return;
 			latest.current.onStart?.();
-			pageImportQueue.append(Array.from(files));
+			pageImportQueue.append(Array.from(files), tags);
 		},
 	};
 }
 
 /** PR198's shared Files / Folder native picker. Unlike the donor, it remains
  * available while work is running; later selections join the SAME queue. */
-export function NotesImportControl({ importing, onImportFiles }: { importing: boolean; onImportFiles: (files: FileList | null) => void }) {
+export function NotesImportControl({ importing, onImportFiles }: { importing: boolean; onImportFiles: (files: FileList | readonly File[] | null, tags?: ReadonlyMap<File, TagChanges>) => void }) {
 	const filesRef = useRef<HTMLInputElement>(null);
 	const folderRef = useRef<HTMLInputElement>(null);
 	const [open, setOpen] = useState(false);
 	const hintId = useId();
+	const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
 	const onChange = (event: ChangeEvent<HTMLInputElement>) => {
-		onImportFiles(event.target.files);
+		setSelectedFiles(Array.from(event.target.files ?? []).filter(file => !file.webkitRelativePath.split("/").slice(1).some(part => part.startsWith("."))));
 		event.target.value = "";
 	};
 	const choices = [["Files", filesRef], ["Folder", folderRef]] as const;
@@ -103,6 +107,7 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 			onKeyDown={(event) => { if (event.key === "Escape") setOpen(false); }}>
 			<input ref={filesRef} type="file" multiple accept=".md,.markdown,.txt,.pdf" className="hidden" onChange={onChange} />
 			<input ref={folderRef} type="file" {...{ webkitdirectory: "" }} className="hidden" onChange={onChange} />
+			{selectedFiles.length > 0 && <ImportTagDialog files={selectedFiles} close={() => setSelectedFiles([])} submit={tags => { onImportFiles(selectedFiles, tags); setSelectedFiles([]); }} />}
 			<Hint label="Extract files into the graph" side="bottom">
 				<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" data-testid="import-notes"
 					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent">

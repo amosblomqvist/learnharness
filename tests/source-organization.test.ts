@@ -1,97 +1,95 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { applyOrganizationAction, canMoveFolder, chainSourceDirectory, emptySourceOrganization, folderIsEmpty, parseOrganizationAction, parseSourceOrganization, placeImportedSource } from "../src/core/source-organization.ts";
+import { applyOrganizationAction, canMoveFolder, chainSourceDirectory, emptySourceOrganization, folderIsEmpty, parseOrganizationAction, parseSourceOrganization } from "../src/core/source-organization.ts";
 import { sourceFileLabel } from "../src/core/source-label.ts";
-
 let sequence = 0;
-const fresh = () => ({ id: `folder_${++sequence}`, createdAt: "2026-10-30T00:00:00Z" });
-const apply = (state: ReturnType<typeof emptySourceOrganization>, raw: unknown, ids = ["s1", "s2"]) => {
+const apply = (state: ReturnType<typeof emptySourceOrganization>, raw: unknown) => {
 	const action = parseOrganizationAction(raw);
-	assert.notEqual(action.action, "rename-source");
-	return applyOrganizationAction(state, action as Exclude<typeof action, { action: "rename-source" }>, new Set(ids), fresh());
+	if (action.action === "rename-source") throw new Error("Use the server rename path");
+	return applyOrganizationAction(state, action, new Set(["a", "b"]), { id: `item_${++sequence}`, createdAt: "now" });
 };
-
 it("labels remove only the final extension, retaining spelling, punctuation and ordering prefixes", () => {
 	for (const [path, label] of [["notes/09_chapter3normal.md", "09_chapter3normal"], ["My_Notes.v2.pdf", "My_Notes.v2"], ["x/a-b.txt", "a-b"], [".hidden", ".hidden"], ["README", "README"]]) assert.equal(sourceFileLabel(path!), label);
 });
-
-it("chains projection hides only explicitly marked practice sources without mutating source or organization data", () => {
-	const state = placeImportedSource(emptySourceOrganization(), "practice", "A/practice.md", fresh);
-	const sources = [
+it("migrates direct folder placements to stable General tags without mutating existing data or losing memberships", () => {
+	const legacy = { version: 1, folders: [
+		{ id: "school", name: "School", parentId: null, createdAt: "now" },
+		{ id: "course", name: "Course", parentId: "school", createdAt: "now", importPath: "School/Course" },
+	], tags: [{ id: "review", name: "Review", parentId: null }], placements: {
+		a: { folderId: "course", tagIds: ["review"], name: "Original title" }, b: { folderId: "course" }, c: { folderId: null },
+	} };
+	const before = structuredClone(legacy), migrated = parseSourceOrganization(legacy);
+	assert.deepEqual(legacy, before);
+	assert.deepEqual(parseSourceOrganization(legacy), migrated);
+	assert.deepEqual(parseSourceOrganization(migrated), migrated);
+	assert.equal(migrated.version, 2);
+	const general = migrated.tags!.find(t => t.name === "General")!;
+	assert.equal(general.parentId, "course");
+	assert.deepEqual(migrated.placements.a, { tagIds: ["review", general.id], name: "Original title" });
+	assert.deepEqual(migrated.placements.b, { tagIds: [general.id] });
+	assert.deepEqual(migrated.placements.c, {});
+	assert.deepEqual(migrated.folders, legacy.folders);
+	assert.doesNotMatch(JSON.stringify(migrated), /folderId/);
+});
+it("reuses an existing General tag in the same folder and avoids colliding with unrelated IDs", () => {
+	const folders = [{ id: "f", name: "Folder", parentId: null, createdAt: "now" }];
+	const legacy = { version: 1, folders, tags: [{ id: "existing", name: "General", parentId: "f" }], placements: { a: { folderId: "f", tagIds: ["existing"] } } };
+	const state = parseSourceOrganization(legacy);
+	assert.equal(state.tags!.length, 1);
+	assert.deepEqual(state.placements.a?.tagIds, ["existing"]);
+	const collision = parseSourceOrganization({ ...legacy, tags: [{ id: "tag_folder_f", name: "Other", parentId: null }], placements: { a: { folderId: "f" } } });
+	assert.equal(new Set(collision.tags!.map(t => t.id)).size, 2);
+	assert.notEqual(collision.placements.a?.tagIds![0], "tag_folder_f");
+});
+it("folders contain only tags and subfolders; removing a tag leaves material untagged without deleting it", () => {
+	let state = apply(emptySourceOrganization(), { action: "create-folder", name: "School", parentId: null });
+	const folder = state.folders[0]!.id;
+	state = apply(state, { action: "create-tag", name: "Math", parentId: folder });
+	const tag = state.tags![0]!.id;
+	state = apply(state, { action: "tag-sources", sourceIds: ["a", "b"], add: [tag], remove: [] });
+	assert.equal(folderIsEmpty(state, folder), false);
+	assert.throws(() => apply(state, { action: "delete-folder", id: folder }), /tags and subfolders/);
+	assert.throws(() => apply(state, { action: "move", kind: "source", id: "a", parentId: folder }), /Invalid move/);
+	state = apply(state, { action: "delete-tag", id: tag });
+	assert.deepEqual(state.placements, { a: { tagIds: [] }, b: { tagIds: [] } });
+	assert.equal(folderIsEmpty(state, folder), true);
+	state = apply(state, { action: "delete-folder", id: folder });
+	assert.deepEqual(state.folders, []);
+});
+it("moving a tag changes its hierarchy without changing material IDs or memberships; folder cycles remain invalid", () => {
+	let state = apply(emptySourceOrganization(), { action: "create-folder", name: "Outer", parentId: null });
+	const outer = state.folders[0]!.id;
+	state = apply(state, { action: "create-folder", name: "Inner", parentId: outer });
+	const inner = state.folders[1]!.id;
+	assert.equal(canMoveFolder(state, outer, inner), false);
+	assert.throws(() => apply(state, { action: "move", kind: "folder", id: outer, parentId: inner }), /descendants/);
+	state = apply(state, { action: "create-tag", name: "Course", parentId: inner });
+	const tag = state.tags![0]!.id;
+	state = apply(state, { action: "tag-sources", sourceIds: ["a"], add: [tag], remove: [] });
+	const placements = structuredClone(state.placements);
+	state = apply(state, { action: "update-tag", id: tag, name: "Course", parentId: null });
+	assert.deepEqual(state.placements, placements);
+	assert.equal(folderIsEmpty(state, inner), true);
+});
+it("chains projection hides only practice sessions and preserves the shared organization", () => {
+	const directory = { organization: emptySourceOrganization(), sources: [
 		{ id: "practice", kind: "chat" as const, chatKind: "practice" as const, label: "Practice", createdAt: "now" },
-		{ id: "teach", kind: "chat" as const, chatKind: "teach" as const, label: "Teach", createdAt: "now" },
-		{ id: "legacy", kind: "chat" as const, label: "Legacy teach", createdAt: "now" },
-		{ id: "notes", kind: "notes" as const, label: "Notes", createdAt: "now" },
-	];
-	const directory = { organization: state, sources }, before = structuredClone(directory);
-	const view = chainSourceDirectory(directory);
-	assert.deepEqual(view.sources.map((s) => s.id), ["teach", "legacy", "notes"]);
-	assert.equal(view.organization, state); assert.deepEqual(directory, before);
-	assert.equal(folderIsEmpty(view.organization, state.folders[0]!.id, new Set(sources.map((s) => s.id))), false);
+		{ id: "teach", kind: "chat" as const, label: "Teach", createdAt: "now" },
+		{ id: "retained", kind: "missing" as const, label: "Retained lesson", createdAt: null },
+	] };
+	const before = structuredClone(directory), view = chainSourceDirectory(directory);
+	assert.deepEqual(view.sources.map(s => s.id), ["teach", "retained"]);
+	assert.equal(view.organization, directory.organization);
+	assert.deepEqual(directory, before);
 });
-
-it("folder import builds only needed ancestors, distinguishing same basenames by source ID", () => {
-	let state = placeImportedSource(emptySourceOrganization(), "s1", "Course/Week 1/notes.md", fresh);
-	state = placeImportedSource(state, "s2", "Course/Week 2/notes.md", fresh);
-	assert.deepEqual(state.folders.map((f) => f.importPath), ["Course", "Course/Week 1", "Course/Week 2"]);
-	assert.notEqual(state.placements.s1?.folderId, state.placements.s2?.folderId);
-	assert.equal(state.folders[1]?.parentId, state.folders[0]?.id);
-	assert.deepEqual(parseSourceOrganization(state), state);
-});
-
-it("renames/moves preserve associations and re-import preserves individual names and placements", () => {
-	let state = placeImportedSource(emptySourceOrganization(), "s1", "Course/Sub/a.md", fresh);
-	const root = state.folders[0]!.id, sub = state.folders[1]!.id;
-	state = apply(state, { action: "rename-folder", id: sub, name: "Renamed" });
-	state = apply(state, { action: "move", kind: "folder", id: sub, parentId: null });
-	state = apply(state, { action: "move", kind: "source", id: "s1", parentId: root });
-	state.placements.s1!.name = "My title";
-	assert.equal(placeImportedSource(state, "s1", "Course/Sub/a.md", fresh), state);
-	state = placeImportedSource(state, "s2", "Course/Sub/b.md", fresh);
-	assert.equal(state.placements.s2?.folderId, sub);
-	assert.deepEqual(state.placements.s1, { folderId: root, name: "My title" });
-	assert.equal(state.folders.find((f) => f.id === sub)?.name, "Renamed");
-	assert.equal(state.folders.find((f) => f.id === sub)?.parentId, null);
-});
-
-it("reusing a moved subtree does not recreate unused deleted ancestors", () => {
-	let state = placeImportedSource(emptySourceOrganization(), "s1", "Course/Sub/a.md", fresh);
-	const root = state.folders[0]!.id, sub = state.folders[1]!.id;
-	state = apply(state, { action: "move", kind: "folder", id: sub, parentId: null });
-	state = apply(state, { action: "delete-folder", id: root });
-	state = placeImportedSource(state, "s2", "Course/Sub/b.md", fresh);
-	assert.equal(state.folders.length, 1);
-	assert.equal(state.placements.s2?.folderId, sub);
-});
-
-it("cycles and missing parents are refused; moving never changes a source key", () => {
-	let state = placeImportedSource(emptySourceOrganization(), "s1", "A/B/C/a.md", fresh);
-	const [a, b, c] = state.folders.map((f) => f.id);
-	assert.equal(canMoveFolder(state, a!, c!), false);
-	assert.equal(canMoveFolder(state, a!, a!), false);
-	assert.throws(() => apply(state, { action: "move", kind: "folder", id: a, parentId: c }), /descendants/);
-	assert.throws(() => apply(state, { action: "move", kind: "source", id: "s1", parentId: "missing" }), /no longer exists/);
-	state = apply(state, { action: "move", kind: "source", id: "s1", parentId: b });
-	assert.deepEqual(Object.keys(state.placements), ["s1"]);
-});
-
-it("only structurally empty folders can be removed; an empty source record still makes a folder nonempty", () => {
-	let state = placeImportedSource(emptySourceOrganization(), "s1", "A/B/a.md", fresh);
-	const a = state.folders[0]!.id, b = state.folders[1]!.id;
-	assert.equal(folderIsEmpty(state, b, new Set(["s1"])), false);
-	assert.throws(() => apply(state, { action: "delete-folder", id: b }), /Only empty/);
-	assert.throws(() => apply(state, { action: "delete-folder", id: a }), /Only empty/);
-	state = apply(state, { action: "move", kind: "source", id: "s1", parentId: null });
-	state = apply(state, { action: "delete-folder", id: b });
-	assert.equal(state.folders.length, 1);
-	assert.equal(state.placements.s1?.folderId, null);
-});
-
-it("action validation rejects invalid shapes, but trims nonempty names like session renaming", () => {
-	for (const raw of [null, [], {}, { action: "create-folder", name: "", parentId: null }, { action: "create-folder", name: "x" }, { action: "move", kind: "node", id: "x", parentId: null }, { action: "rename-source", id: "x", name: 4 }]) assert.throws(() => parseOrganizationAction(raw));
-	assert.deepEqual(parseOrganizationAction({ action: "rename-source", id: "s1", name: "  New name  " }), { action: "rename-source", id: "s1", name: "New name" });
-});
-
-it("corrupt/newer organization refuses instead of silently resetting or allowing cycles", () => {
-	for (const raw of [{ version: 2, folders: [], placements: {} }, { version: 1, folders: [{ id: "a", name: "A", parentId: "a", createdAt: "x" }], placements: {} }, { version: 1, folders: [], placements: { s: { folderId: "gone" } } }]) assert.throws(() => parseSourceOrganization(raw), /invalid or newer/);
+it("rejects invalid actions and corrupt or newer organization without silently dropping data", () => {
+	for (const raw of [null, [], {}, { action: "create-folder", name: "", parentId: null }, { action: "create-folder", name: "x" }, { action: "move", kind: "source", id: "x", parentId: null }, { action: "rename-source", id: "x", name: 4 }]) assert.throws(() => parseOrganizationAction(raw));
+	assert.deepEqual(parseOrganizationAction({ action: "rename-source", id: "a", name: "  New name  " }), { action: "rename-source", id: "a", name: "New name" });
+	for (const raw of [
+		{ version: 3, folders: [], placements: {} },
+		{ version: 1, folders: [{ id: "a", name: "A", parentId: "a", createdAt: "x" }], placements: {} },
+		{ version: 1, folders: [], placements: { a: { folderId: "gone" } } },
+		{ version: 2, folders: [], placements: { a: { folderId: null } } },
+		{ version: 2, folders: [], placements: { a: { tagIds: ["gone"] } } },
+	]) assert.throws(() => parseSourceOrganization(raw), /invalid or newer/);
 });

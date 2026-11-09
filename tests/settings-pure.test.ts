@@ -352,9 +352,9 @@ describe("sectionedSegments — actual per-agent prompt membership", () => {
 		],
 	};
 
-	it("the approved order: Teacher, Prober, Practice, Shared — Shared last", () => {
+	it("lists Notes writer with the agents and keeps Shared last", () => {
 		const ids = sectionedSegments(view).map((s) => s.id);
-		assert.deepEqual(ids, ["teacher", "prober", "practice", "shared"]);
+		assert.deepEqual(ids, ["teacher", "prober", "practice", "notes", "shared"]);
 	});
 
 	it("shared chunks appear exactly ONCE across all sections (no duplication)", () => {
@@ -366,7 +366,7 @@ describe("sectionedSegments — actual per-agent prompt membership", () => {
 	});
 
 	it("the Shared section holds the shared chunks in assembly order; the agents' sections hold their own", () => {
-		const [teacher, prober, practice, shared] = sectionedSegments(view);
+		const [teacher, prober, practice, , shared] = sectionedSegments(view);
 		assert.ok(teacher && prober && practice && shared, "all four sections present");
 		assert.deepEqual(teacher.segments.map((s) => s.path), ["teacher/05-method.md", "teacher/10-planning.md"]);
 		assert.deepEqual(prober.segments.map((s) => s.path), ["prober/10-probe-doctrine.md"]);

@@ -17,16 +17,16 @@ function request(names: string[], paths?: unknown[]) {
 	return new Request("http://localhost/api/graph/import", { method: "POST", body: form });
 }
 
-it("folder-relative identity separates duplicate basenames and builds nested organization", async () => {
+it("folder-relative identity separates duplicate basenames without creating organizational folders", async () => {
 	const called: string[] = [];
 	extraction.importNotes = async ({ filePath }) => { called.push(filePath); return { nodes: 0, chains: 0 }; };
+	const organization = stores.sourceOrganizationStore.read();
 	const paths = ["Course/Week 1/same.md", "Course/Week 2/same.md"];
 	const response = await POST(request(["same.md", "same.md"], paths)); assert.equal(response.status, 200);
 	assert.deepEqual(called, paths);
 	const { results } = await response.json();
 	assert.deepEqual(results.map((r: { filePath: string }) => r.filePath).sort(), [...paths].sort());
-	assert.deepEqual(stores.sourceOrganizationStore.read().folders.map((f) => f.importPath), ["Course", "Course/Week 1", "Course/Week 2"]);
-	assert.equal(Object.keys(stores.sourceOrganizationStore.read().placements).length, 2);
+	assert.deepEqual(stores.sourceOrganizationStore.read(), organization);
 });
 
 it("Chromium full relative multipart filenames and ordinary basename requests both remain valid", async () => {

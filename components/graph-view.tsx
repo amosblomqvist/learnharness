@@ -64,6 +64,8 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import type { TagChanges } from "@/src/core";
+import { GraphNotesLinks } from "./session-notes";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
@@ -857,7 +859,7 @@ export function GraphChromeRow({
 	noMatch: boolean;
 	importing: boolean;
 	searchInputRef: React.RefObject<HTMLInputElement | null>;
-	onImportFiles: (files: FileList | null) => void;
+	onImportFiles: (files: FileList | readonly File[] | null, tags?: ReadonlyMap<File, TagChanges>) => void;
 	settings: GraphRenderSettings;
 	changeSettings: (update: (cur: RenderSettings) => RenderSettings) => void;
 	/** Opens the chain table overlay (the chains-overlay plan,
@@ -1656,6 +1658,7 @@ export function GraphView({
 					) : (
 						<div className="mt-3 text-xs text-muted-foreground">No sessions recorded.</div>
 					)}
+					<GraphNotesLinks key={JSON.stringify([selected.node.id, selected.node.provenance])} nodeId={selected.node.id} />
 				</div>
 			)}
 			{/* The chain table overlay (chains-overlay plan, 2026-09-29):

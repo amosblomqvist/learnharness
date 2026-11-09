@@ -1,5 +1,7 @@
 "use client";
 
+import Link from "next/link";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
 import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
@@ -204,6 +206,7 @@ export function Home({
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>
+				<Link href="/tags" className="lh-no-drag pointer-events-auto rounded-md border bg-card px-2.5 py-1.5 text-xs hover:bg-accent md:hidden">Tags</Link>
 			</header>
 
 			{/* New session — same floating blob as the chat composer, docked

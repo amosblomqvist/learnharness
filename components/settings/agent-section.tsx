@@ -104,7 +104,7 @@ interface SegmentInfo {
 	shared: boolean;
 }
 
-type PromptView = Record<"teacher" | "prober" | "practice", SegmentInfo[]>;
+type PromptView = Record<"teacher" | "prober" | "practice", SegmentInfo[]> & { notes?: SegmentInfo[] };
 type PromptRow = SegmentInfo & { usageHint?: string };
 
 /** Compose: one tool toggled, the rest of the section carried verbatim.
@@ -226,20 +226,21 @@ export function sectionedSegments(view: PromptView): PromptSection[] {
 		{ id: "teacher", label: "Teacher" },
 		{ id: "prober", label: "Prober" },
 		{ id: "practice", label: "Practice" },
+		{ id: "notes", label: "Notes writer" },
 	] as const;
 	const shared = new Map<string, SegmentInfo>();
 	for (const { id } of agents) {
-		for (const segment of view[id]) {
+		for (const segment of view[id] ?? []) {
 			if (segment.shared && !shared.has(segment.path)) shared.set(segment.path, segment);
 		}
 	}
 	return [
-		...agents.map(({ id, label }) => ({ id, label, segments: view[id].filter((s) => !s.shared) })),
+		...agents.map(({ id, label }) => ({ id, label, segments: (view[id] ?? []).filter((s) => !s.shared) })),
 		{
 			id: "shared",
 			label: "Shared",
 			segments: [...shared.values()].map((segment) => {
-				const users = agents.filter(({ id }) => view[id].some((s) => s.path === segment.path)).map(({ label }) => label);
+				const users = agents.filter(({ id }) => view[id]?.some((s) => s.path === segment.path)).map(({ label }) => label);
 				const usage = users.length > 1 ? `${users.slice(0, -1).join(", ")} and ${users.at(-1)}` : users[0];
 				return { ...segment, usageHint: `Used by ${usage}` };
 			}),

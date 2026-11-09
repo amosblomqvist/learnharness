@@ -135,11 +135,18 @@ Extraction is the construction writer, not the only mutation: source/session/nod
 | Data | Files |
 | --- | --- |
 | Conversations, plans, usage, image snapshots | `chats/*.json` |
+| Live notes, handout editions, and their PDFs | `notes/<chatId>/record.json` and versioned PDF files alongside it |
 | Worker computation and delivery obligations | `jobs/*.json` |
 | Propositions, chains, checkpoints, coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
 | Sources, organization, positions, render preferences | JSON maps under `graph/` |
 | Preferences and prompt overrides | `settings.json`, `prompts/` |
 | Keys and custom-endpoint binding | Separate `auth.json`, selected by `LH_AUTH_FILE` |
+
+Source organization v2 uses folders for tags and subfolders only. Material membership is a set of tag IDs; Tags, graph browsing, and practice selection derive their views from that same set. The parser reads v1 direct folder placements as deterministic **General** tags within their original folders. Reads do not rewrite files; the next organization edit atomically persists v2. Existing v1 apps refuse that newer format. Imports retain their source identity/path and use explicitly selected tags. Retained graph sources keep their tags and display title after session deletion, but are omitted from the Tags session/file list.
+
+Notes use `handout` and `liveNotes` throughout the app. The [notes store](../src/store/session-notes.ts) translates the original v1 `final`/`live` fields at the storage boundary, preserving existing notes and PDFs without a migration. New notes links use the app names; the chat page also accepts the older query values.
+
+New handouts add a compact `quickReference` and ordered method `steps` to the saved document. Both fields are additive: older editions remain readable. The shared notes renderer supplies the reference page, procedure lists, and print layout; a PDF layout version refreshes cached PDFs from saved text without another model call. Adding the new reference content to an older handout requires regeneration.
 
 Adapters use synchronous filesystem operations. JSONL reads skip corrupt/invalid lines; graph derivation merges repeated assertions. Some replacements use temp-file rename, but ordinary whole-file writes are not database transactions. Same-event-loop serialization is not cross-process locking or crash atomicity. Use **one server owner per data/auth profile**.
 

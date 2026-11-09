@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, beforeEach, it } from "node:test";
-import type { GraphNode, SourceDirectory } from "../src/core/index.ts";
+import { parseSourceOrganization, type GraphNode, type SourceDirectory } from "../src/core/index.ts";
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-source-deletion-"));
 process.env.LH_DATA_DIR = root; process.env.LH_AUTH_FILE = path.join(root, "auth.json");
 fs.writeFileSync(process.env.LH_AUTH_FILE, "{}\n");
@@ -22,18 +22,18 @@ function node(id: string, sources: string[], aliases: string[] = []): GraphNode 
 	return { id, name: id, statement: `${id} statement`, aliases, createdAt: "2026-10-30", provenance: sources.map((chatId) => ({ chatId, messageId: "m" })) };
 }
 function folders(placements: Record<string, { folderId: string }>) {
-	stores.sourceOrganizationStore.write({ version: 1, folders: [
+	stores.sourceOrganizationStore.write(parseSourceOrganization({ version: 1, folders: [
 		{ id: "outer", name: "Outer", parentId: null, createdAt: "now" },
 		{ id: "inner", name: "Inner", parentId: "outer", createdAt: "now" },
 		{ id: "empty", name: "Empty", parentId: "outer", createdAt: "now" },
-	], placements });
+	], placements }));
 }
-it("removes zero-proposition imports and nested empty containers, leaving original files untouched", async () => {
+it("removes zero-proposition imports and structurally empty folders, preserving tags and original files", async () => {
 	book("zero"); folders({ zero: { folderId: "inner" } });
 	const original = path.join(root, "zero.md"); fs.writeFileSync(original, "original bytes");
 	const response = await remove(["zero"], ["outer", "inner", "empty"]); assert.equal(response.status, 200);
 	const result = await response.json() as SourceDirectory & { graphRevision: number };
-	assert.deepEqual(result.sources, []); assert.deepEqual(result.organization.folders, []); assert.deepEqual(result.organization.placements, {});
+	assert.deepEqual(result.sources, []); assert.deepEqual(result.organization.folders.map(f => f.id), ["outer", "inner"]); assert.deepEqual(result.organization.placements, {});
 	assert.equal(fs.readFileSync(original, "utf8"), "original bytes"); assert.equal(typeof result.graphRevision, "number");
 	assert.equal((await remove(["zero"], ["outer", "inner", "empty"])).status, 200, "retry is idempotent");
 });
@@ -61,7 +61,7 @@ it("purges only selected source contributions; shared identity, foreign aliases 
 	assert.deepEqual(stores.graphStore.readSources().map((s) => s.id), ["b"]);
 	assert.equal((await remove(["b"])).status, 200); assert.deepEqual(stores.graphStore.readNodes().map((n) => n.id), ["legacy"]);
 });
-it("kept conversations retain messages and folder placement but lose contributions and extraction marks", async () => {
+it("kept conversations retain messages and tags but lose contributions and extraction marks", async () => {
 	const chat = stores.chatStore.createChat("Kept session");
 	stores.chatStore.saveMessages(chat.id, [{ id: "m", role: "assistant", content: [{ type: "text", text: "Synthetic teaching prose." }], timestamp: 1 } as never]);
 	const before = stores.chatStore.getChat(chat.id)!;
@@ -76,7 +76,7 @@ it("kept conversations retain messages and folder placement but lose contributio
 	assert.equal(sessionCoverage(chat.id)?.coveredCount, 0); assert.equal(sessionCoverage(chat.id)?.uncoveredCount, 1);
 	assert.deepEqual(stores.graphStore.readCheckpoints(), []); assert.deepEqual(stores.graphStore.readNodes(), []);
 	const result = sourceDirectory.read(); assert.deepEqual(result.organization.folders.map((f) => f.id), ["outer", "inner"]);
-	assert.equal(result.organization.placements[chat.id]?.folderId, "inner"); assert.equal(result.sources[0]?.id, chat.id);
+	assert.deepEqual(result.organization.placements[chat.id]?.tagIds, ["tag_folder_inner"]); assert.equal(result.sources[0]?.id, chat.id);
 });
 it("deleting visible entries retains hidden practice conversations, graph contributions, coverage and their folder containers", async () => {
 	const practice = stores.chatStore.createChat("Hidden practice", "practice"); book("visible");
@@ -90,7 +90,7 @@ it("deleting visible entries retains hidden practice conversations, graph contri
 	assert.deepEqual(stores.graphStore.readNodes(), before.nodes);
 	assert.deepEqual(stores.graphStore.readCoverage(), before.coverage); assert.deepEqual(stores.graphStore.readCheckpoints(), before.checkpoints);
 	const directory = sourceDirectory.read();
-	assert.equal(directory.organization.placements[practice.id]?.folderId, "inner");
+	assert.deepEqual(directory.organization.placements[practice.id]?.tagIds, ["tag_folder_inner"]);
 	assert.deepEqual(directory.organization.folders.map((f) => f.id), ["outer", "inner"]);
 });
 
@@ -101,7 +101,7 @@ it("explicit session deletion uses existing cleanup, including jobs, while other
 	assert.equal((await remove([chat.id], ["outer", "inner", "empty"], true)).status, 200);
 	assert.equal(stores.chatStore.getChat(chat.id), null); assert.equal(stores.jobStore.getJob(job.id), null);
 	assert.deepEqual(stores.graphStore.readNodes()[0]?.provenance.map((p) => p.chatId), ["b"]);
-	assert.deepEqual(sourceDirectory.read().organization.folders, []);
+	assert.deepEqual(sourceDirectory.read().organization.folders.map(f => f.id), ["outer", "inner"]);
 });
 it("a swallowed session-unlink failure retains placement and folders, reports partial failure, and permits explicit retry", async () => {
 	const chat = stores.chatStore.createChat("Cannot unlink yet");
@@ -123,7 +123,8 @@ it("a swallowed session-unlink failure retains placement and folders, reports pa
 	} finally { stores.chatStore.deleteChat = deleteChat; }
 	assert.equal((await remove([chat.id, "zero"], ["outer", "inner", "empty"], true)).status, 200);
 	assert.equal(stores.chatStore.getChat(chat.id), null);
-	assert.deepEqual(sourceDirectory.read().organization, { version: 1, folders: [], placements: {} });
+	assert.deepEqual(sourceDirectory.read().organization.placements, {});
+	assert.equal(sourceDirectory.read().organization.tags?.[0]?.name, "General");
 });
 it("preflights every selected session's running turn/jobs before deleting any selected imports", async () => {
 	const chat = stores.chatStore.createChat("Busy"); book("a");
@@ -184,5 +185,5 @@ it("partial I/O failure is honest and retry cleans stale placement without touch
 	} finally { stores.sourceOrganizationStore.write = write; }
 	assert.deepEqual(stores.graphStore.readSources().map((s) => s.id), ["b"]);
 	assert.equal((await remove(["a"], ["outer", "inner", "empty"])).status, 200);
-	assert.deepEqual(sourceDirectory.read().organization.placements, {}); assert.deepEqual(sourceDirectory.read().organization.folders, []);
+	assert.deepEqual(sourceDirectory.read().organization.placements, {}); assert.deepEqual(sourceDirectory.read().organization.folders.map(f => f.id), ["outer", "inner"]);
 });

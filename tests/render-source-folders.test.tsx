@@ -9,11 +9,11 @@ import { DeleteSourceBody } from "../components/delete-source-dialog.tsx";
 import { sourceNameMatches } from "../components/source-folder-tree.tsx";
 import type { GraphNode, SourceDirectory } from "../src/core/index.ts";
 const directory: SourceDirectory = {
-	organization: { version: 1, folders: [
+	organization: { version: 2, folders: [
 		{ id: "f1", name: "Course", parentId: null, createdAt: "2026-10-30" },
 		{ id: "f2", name: "Week", parentId: "f1", createdAt: "2026-10-30" },
 		{ id: "empty", name: "Empty", parentId: null, createdAt: "2026-10-30" },
-	], placements: { notes: { folderId: "f2", name: "Named book" } } },
+	], tags: [{ id: "course", name: "Course tag", parentId: "f2" }], placements: { notes: { tagIds: ["course"], name: "Named book" } } },
 	sources: [
 		{ id: "chat", kind: "chat", label: "Not yet extracted", createdAt: "2026-10-29" },
 		{ id: "notes", kind: "notes", label: "Named book", filePath: "Course/Week/original.pdf", createdAt: "2026-10-29" },
@@ -23,35 +23,35 @@ const nodes: GraphNode[] = ["a", "b"].map((id) => ({ id, name: id, statement: id
 const base: Parameters<typeof ChainTableBody>[0] = {
 	nodes: [], chains: [], sessions: {}, fileSources: {}, query: "", onQuery() {}, sort: { col: "name", dir: 1 }, onSort() {}, selection: new Set(),
 	expandedClusters: new Set(), expandedChains: new Set(), onToggleCluster() {}, onToggleChain() {}, onToggleNodes() {}, onClear() {}, onDelete() {}, onClose() {},
-	directory, onOrganizationChange: async () => {},
+	directory,
 };
-const render = (props: Partial<typeof base> = {}) => renderToStaticMarkup(<ChainTableBody {...base} {...props} />);
+const render = (props: Partial<typeof base> = {}) => {
+	const expanded = new Set([JSON.stringify(["untagged", "untagged"]), JSON.stringify(["tag", "course"]), ...[...(props.expandedClusters ?? [])].map(id =>
+		id === "notes" ? JSON.stringify(["tag", "course", "source", "notes"]) : id === "chat" ? JSON.stringify(["untagged", "source", "chat"]) : id)]);
+	return renderToStaticMarkup(<ChainTableBody {...base} {...props} expandedClusters={expanded} />);
+};
 
 it("source inventory includes unextracted chats and zero-graph imported books; only real folders use folder icons", () => {
 	const html = render({ expandedClusters: new Set(["f1", "f2"]) });
 	assert.match(html, /Not yet extracted/); assert.match(html, /Named book/); assert.doesNotMatch(html, /original.pdf/);
 	assert.match(html, /lucide-book/); assert.match(html, /lucide-folder/);
-	assert.match(html, /data-testid="add-source-folder"/); assert.match(html, /data-testid="source-root-drop"/);
+	assert.doesNotMatch(html, /data-testid="add-source-folder"/); assert.match(html, /data-testid="chain-table-blank-space"/);
 	assert.doesNotMatch(html, /Top level/);
-	assert.match(html, /data-testid="folder-thread-f1"[^>]*style="left:37px"/);
-	assert.match(html, /data-testid="folder-thread-f2"[^>]*style="left:73px"/);
-	assert.match(html, /data-testid="source-separator-notes"[^>]*style="left:1px"/);
-	assert.match(html, /data-testid="folder-separator-f2"[^>]*style="left:37px"/);
 	assert.match(html, /data-testid="folder-icon-f2"[^>]*aria-expanded="true"/);
 	assert.match(html, /data-testid="source-icon-notes"[^>]*aria-expanded="false"/);
-	assert.match(html, /data-testid="cluster-group-notes"[^>]*style="margin-left:72px"/);
+	assert.match(html, /data-testid="cluster-group-notes"[^>]*style="margin-left:108px"/);
 	assert.doesNotMatch(html, /No matching chains/);
 });
-it("nested folders aggregate unique graph member counts, keep three-column sorting and expose root placement", () => {
+it("nested folders aggregate unique graph member counts, keep three-column sorting and show explicit tag membership", () => {
 	const html = render({ nodes, expandedClusters: new Set(["f1", "f2", "notes"]), selectedSources: new Set(["notes"]), selectedFolders: new Set(["f1", "f2"]) });
 	assert.match(html, /data-testid="folder-checkbox-f1"[^>]*checked/); assert.match(html, /data-testid="folder-checkbox-f2"[^>]*checked/);
 	assert.match(html, /data-testid="sort-name"/); assert.match(html, /data-testid="sort-props"/); assert.match(html, /data-testid="sort-created"/);
-	assert.match(html, /lucide-book-open/); assert.match(html, /draggable="true"/);
+	assert.match(html, /lucide-book-open/); assert.doesNotMatch(html, /draggable="true"/);
 });
 it("collapsed folders have no dangling rail, while expanded folders reuse the source/chain bracket grammar", () => {
 	assert.doesNotMatch(render(), /data-testid="folder-thread-/);
 	const html = render({ expandedClusters: new Set(["f1"]) });
-	assert.match(html, /data-testid="folder-thread-f1"[^>]*bottom-\[8px\][^>]*top-\[23px\]/);
+	assert.match(html, /data-testid="folder-thread-f1"/);
 	assert.doesNotMatch(html, /data-testid="folder-thread-f2"/);
 });
 it("re-import record dates do not change existing graph groups' Created dates", () => {
@@ -112,24 +112,24 @@ it("empty names and book icons use stronger matching dimming in both trees and e
 		const { document } = parseHTML(render({ selectMode, nodes, expandedClusters: new Set(["f1", "f2", ...(open ? ["chat", "notes"] : [])]) }));
 		const empty = document.querySelector('[data-testid="cluster-checkbox-chat"]')!.closest('[data-chain-nav-row]')!;
 		const populated = document.querySelector('[data-testid="cluster-checkbox-notes"]')!.closest('[data-chain-nav-row]')!;
-		assert.match(empty.querySelector('[title="Rename"]')!.className, /text-muted-foreground\/60/);
+		assert.match(empty.querySelector("span.font-medium")!.className, /text-muted-foreground\/60/);
 		const emptyIcon = empty.querySelector('[data-source-icon]')!;
 		assert.equal(emptyIcon.classList.contains("text-muted-foreground/60"), true);
 		assert.equal(emptyIcon.getAttribute("aria-expanded"), String(open));
 		assert.equal(emptyIcon.querySelector("svg")!.classList.contains("lucide-book-open"), open);
 		assert.equal(populated.querySelector('[data-source-icon]')!.classList.contains("text-muted-foreground/60"), false);
-		assert.doesNotMatch(populated.querySelector('[title="Rename"]')!.className, /text-muted-foreground/);
+		assert.doesNotMatch(populated.querySelector("span.font-medium")!.className, /text-muted-foreground/);
 		assert.doesNotMatch(empty.className, /opacity-|text-muted-foreground/);
-		assert.equal(empty.getAttribute("draggable"), "true");
+		assert.equal(empty.getAttribute("draggable"), null);
 		if (!selectMode) assert.equal(empty.querySelector("input")!.hasAttribute("disabled"), false);
-		const folderName = document.querySelector('[data-testid="folder-row-f1"] [title="Rename"]')!;
+		const folderName = document.querySelector('[data-testid="folder-row-f1"] span.font-medium')!;
 		assert.doesNotMatch(folderName.className, /text-muted-foreground/);
 		assert.equal(document.querySelector('[data-testid="folder-icon-f1"]')!.classList.contains("text-muted-foreground/60"), false);
 		const filtered = parseHTML(render({ selectMode, nodes, query: "Named book" })).document;
-		const name = filtered.querySelector('[data-testid="cluster-checkbox-notes"]')!.closest('[data-chain-nav-row]')!.querySelector('[title="Rename"]')!;
+		const name = filtered.querySelector('[data-testid="cluster-checkbox-notes"]')!.closest('[data-chain-nav-row]')!.querySelector("span.font-medium")!;
 		assert.doesNotMatch(name.className, /text-muted-foreground/);
 	}
-	const readOnly = parseHTML(render({ onOrganizationChange: undefined })).document;
+	const readOnly = parseHTML(render()).document;
 	assert.match(readOnly.querySelector('[data-testid="cluster-checkbox-chat"]')!.closest('[data-chain-nav-row]')!.textContent!, /Not yet extracted/);
 	assert.match(readOnly.querySelector('[data-testid="cluster-checkbox-chat"]')!.closest('[data-chain-nav-row]')!.innerHTML, /text-sm font-medium text-muted-foreground\/60/);
 });

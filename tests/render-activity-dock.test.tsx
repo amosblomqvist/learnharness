@@ -34,6 +34,29 @@ function job(over: Partial<ActivityFeed["jobs"][number]> = {}): ActivityFeed["jo
 }
 
 describe("activity dock pure layer", () => {
+	it("renders notes writers with their own abort identity, elapsed time, usage, and server pricing", () => {
+		const feed: ActivityFeed = {
+			jobs: [], extractions: [],
+			notes: [{
+				id: "handoutc1", chatId: "c1", mode: "handout", title: "Notes lesson", startedAt: NOW - 5000,
+				activity: "Composing handout", costUsd: 0.02, contextLimit: 64000,
+				usage: {
+					...step(100, 20), model: "faux:notes", steps: 1,
+					cacheReadTokens: 30, lastStep: { ...step(100, 20), cacheReadTokens: 30 },
+				},
+			}],
+		};
+		const [blob] = toBlobs(feed);
+		assert.equal(blob?.process, "notes");
+		assert.equal(blob?.id, "handoutc1");
+		assert.equal(blob?.cost, 0.02);
+		assert.deepEqual(blob?.context, { used: 150, limit: 64000 });
+		const html = renderToStaticMarkup(<ActivitySection feed={feed} />);
+		assert.match(html, /activity-blob-notes/);
+		assert.match(html, /Composing handout/);
+		assert.match(html, /End Notes writer in Notes lesson/);
+	});
+
 	it("merges jobs + extractions oldest-first (the stable blob order)", () => {
 		const feed: ActivityFeed = {
 			jobs: [job({ id: "new", createdAt: new Date(NOW - 10_000).toISOString() })],

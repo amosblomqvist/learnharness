@@ -9,7 +9,7 @@ import { MinimalHome } from "../components/minimal-home.tsx";
 import { ServerEventsProvider } from "../components/server-events.tsx";
 import type { GraphNode, SourceDirectory } from "../src/core/index.ts";
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
+Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, Element: dom.window.Element, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
 // linkedom does not implement native checkbox activation. Preserve click
 // dispatch while supplying the browser's pre-click checked-state transition.
 const nativeClick = dom.window.HTMLInputElement.prototype.click;
@@ -17,7 +17,7 @@ dom.window.HTMLInputElement.prototype.click = function () { if (this.type === "c
 let root: Root | undefined, host: HTMLDivElement | undefined;
 const originalFetch = globalThis.fetch;
 afterEach(async () => { await act(async () => { root?.unmount(); }); root = undefined; host?.remove(); globalThis.fetch = originalFetch; });
-const directory = (): SourceDirectory => ({ organization: { version: 1, folders: [], placements: {} }, sources: ["a", "b"].map((id) => ({ id, kind: "notes", label: `${id} book`, createdAt: "now" })) });
+const directory = (): SourceDirectory => ({ organization: { version: 2, folders: [], placements: {} }, sources: ["a", "b"].map((id) => ({ id, kind: "notes", label: `${id} book`, createdAt: "now" })) });
 async function mount(children: React.ReactNode) {
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 	await update(children);
@@ -62,7 +62,7 @@ it("clearing ordinary source selection does not clear the caller's independent p
 	await click("chain-clear"); assert.equal(document.querySelector('[data-testid="chain-selection-bar"]'), null); assert.equal(changes, 0);
 });
 const practiceDirectory = (): SourceDirectory => ({
-	organization: { version: 1, folders: [{ id: "f", name: "Mixed folder", parentId: null, createdAt: "now" }], placements: { a: { folderId: "f" }, b: { folderId: "f" }, practice: { folderId: "f" } } },
+	organization: { version: 2, folders: [{ id: "f", name: "Mixed folder", parentId: null, createdAt: "now" }], tags: [{ id: "course", name: "Course", parentId: "f" }], placements: { a: { tagIds: ["course"] }, b: { tagIds: ["course"] }, practice: { tagIds: ["course"] } } },
 	sources: [...directory().sources, { id: "practice", kind: "chat", chatKind: "practice", label: "Hidden practice", createdAt: "now" }],
 });
 const sourceNode = (id: string, source: string): GraphNode => ({ id, name: id, statement: id, aliases: [], createdAt: "now", provenance: [{ chatId: source, messageId: "m" }] });
@@ -125,6 +125,7 @@ it("folder selection, counts and confirmed source deletion exclude hidden practi
 	await click("folder-checkbox-f");
 	assert.equal(document.querySelector('[data-testid="chain-selected-summary"]')!.textContent, "2 sources · 1 folder");
 	await click("folder-icon-f");
+	await click("tag-icon-course");
 	assert.equal(document.querySelector('[data-testid="cluster-checkbox-practice"]'), null);
 	for (const id of ["a", "b"]) assert.equal(document.querySelector<HTMLInputElement>(`[data-testid="cluster-checkbox-${id}"]`)!.checked, true);
 	await click("chain-delete");
