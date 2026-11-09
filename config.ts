@@ -78,9 +78,13 @@ export const SOURCES_FILE = path.join(PATHS.graph, "sources.json");
 /** Presentation-only source names/folder placement; never extraction identity. */
 export const SOURCE_ORGANIZATION_FILE = path.join(PATHS.graph, "source-organization.json");
 /** The layout ledger (read-modify-write like sources.json): nodeId →
- *  {x,y} resting positions from the incremental settle (core/layout.ts).
- *  Carries an updatedAt stamp for future live-physics conflict handling. */
+ * {x,y} resting positions from the incremental settle (core/layout.ts).
+ * Carries an updatedAt stamp for future live-physics conflict handling. */
 export const POSITIONS_FILE = path.join(PATHS.graph, "positions.json");
+/** The retention ledger (issue #33, read-modify-write like sources.json):
+ * propositionId → FSRS review state (src/core/retention.ts ReviewEntry).
+ * Written by practice-session conclude capture; read for due surfacing. */
+export const REVIEWS_FILE = path.join(PATHS.graph, "reviews.json");
 
 /**
  * Graph render settings (the settings-panel controls): one small JSON blob,
@@ -90,9 +94,9 @@ export const RENDER_SETTINGS_FILE = path.join(PATHS.graph, "render-settings.json
 
 /** The graph-family FORMAT STAMP sidecar (schema-versioning wave,
  *  2026-10-10): one version for the whole family — the four JSONL ledgers,
- *  sources.json, render-settings.json. LAZY v1: absent = v1; the first
- *  graph-family write creates it. positions.json is REBUILDABLE and rides
- *  along unversioned by design (owner ruling). */
+ *  sources.json, render-settings.json, reviews.json. LAZY v1: absent = v1;
+ *  the first graph-family write creates it. positions.json is REBUILDABLE
+ *  and rides along unversioned by design (owner ruling). */
 export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
 
 /**
