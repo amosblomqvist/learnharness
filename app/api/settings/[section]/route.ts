@@ -30,7 +30,7 @@
  * lands here.
  */
 
-import type { AgentSettings, ChatSettings, ModelsSettings } from "@/src/core";
+import { isBuiltinThemeId, type AgentSettings, type AppearanceSettings, type ChatSettings, type ModelsSettings } from "@/src/core";
 import {
 	SETTINGS_SECTIONS,
 	allSegmentPaths,
@@ -41,6 +41,7 @@ import {
 	promptOverrides,
 	readSettingsRecord,
 	refreshWorkerRequestAdmission,
+	themeStore,
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
@@ -85,6 +86,19 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 		const verdict = validateModelsSettings(parsed.settings as ModelsSettings, record.models);
 		if (!verdict.ok) {
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
+		}
+	}
+	// A newly selected theme must exist. A saved theme whose file vanished
+	// already renders as Default: heal that unchanged reference on write,
+	// rather than trapping unrelated font/size/ligature edits behind a 400.
+	if (section === "appearance") {
+		const appearance = parsed.settings as AppearanceSettings;
+		const theme = appearance.theme;
+		if (theme !== undefined && !isBuiltinThemeId(theme) && themeStore.readTheme(theme) === null) {
+			if (theme !== record.appearance?.theme) {
+				return Response.json({ error: `unknown theme "${theme}"` }, { status: 400 });
+			}
+			appearance.theme = "default";
 		}
 	}
 	if (section === "agent") {

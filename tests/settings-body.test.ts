@@ -125,7 +125,7 @@ describe("parseAgentSettingsBody", () => {
 describe("parseAppearanceSettingsBody", () => {
 	it("parses every field; hex-or-null colors; clamps happen at sanitize, rejects here", () => {
 		const r = parseAppearanceSettingsBody({
-			mode: "light",
+			theme: "catppuccin-latte",
 			background: "#ffffff",
 			fontFamily: "Some Font",
 			proseFontSize: 20,
@@ -134,7 +134,7 @@ describe("parseAppearanceSettingsBody", () => {
 		});
 		assert.ok(r.ok);
 		assert.deepEqual(r.settings, {
-			mode: "light",
+			theme: "catppuccin-latte",
 			background: "#ffffff",
 			fontFamily: "Some Font",
 			proseFontSize: 20,
@@ -145,7 +145,7 @@ describe("parseAppearanceSettingsBody", () => {
 
 	it("rejects bad enums, ranges, and colors — with specific messages, never clamps", () => {
 		const cases: unknown[] = [
-			{ mode: "sepia" },
+			{ theme: "Sepia!" },
 			{ background: "blue" },
 			{ background: 42 },
 			{ fontFamily: "" },
@@ -165,8 +165,28 @@ describe("parseAppearanceSettingsBody", () => {
 		assert.ok(parseAppearanceSettingsBody({ mdRendering: { headingWeight: 100 } }));
 		assert.ok(parseAppearanceSettingsBody({ mdRendering: { headingWeight: 900 } }));
 		assert.ok(parseAppearanceSettingsBody({ background: "#abc" }));
-		// null = "the mode's default" — explicit, valid
+		// null = "the theme's color" — explicit, valid
 		assert.ok(parseAppearanceSettingsBody({ background: null, fontFamily: null }));
+	});
+
+	it("accepts a theme id and color overrides, rejects bad values", () => {
+		const ok = parseAppearanceSettingsBody({ theme: "rose-pine-dawn", colors: { warning: "#f0f0f0", error: null } });
+		assert.ok(ok.ok);
+		assert.deepEqual(ok.ok && ok.settings, { theme: "rose-pine-dawn", colors: { warning: "#f0f0f0", error: null } });
+		const badTheme = parseAppearanceSettingsBody({ theme: "Rosé Pine" });
+		assert.equal(badTheme.ok, false);
+		assert.match(!badTheme.ok ? badTheme.error : "", /theme must be a theme id/);
+		const unknownColor = parseAppearanceSettingsBody({ colors: { sepia: "#000000" } });
+		assert.equal(unknownColor.ok, false);
+		assert.match(!unknownColor.ok ? unknownColor.error : "", /unknown color "sepia"/);
+		assert.equal(parseAppearanceSettingsBody({ colors: { error: "red" } }).ok, false);
+		assert.equal(parseAppearanceSettingsBody({ colors: "red" }).ok, false);
+	});
+
+	it("drops the light-mode wave's mode/lightBackground like any unknown key", () => {
+		const ok = parseAppearanceSettingsBody({ mode: "light", lightBackground: "#f0f0f0" });
+		assert.ok(ok.ok);
+		assert.deepEqual(ok.ok && ok.settings, {});
 	});
 
 	it("rejects non-object bodies and non-object mdRendering", () => {

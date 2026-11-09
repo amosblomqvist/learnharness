@@ -422,7 +422,7 @@ export function SettingsDialogBody({
 					{error && !activePluginId && selected !== "plugins" && selected !== "core-plugins" && (
 						<p
 							role="alert"
-							className="m-4 rounded-sm border border-red-500/40 px-3 py-2 text-xs text-red-500"
+							className="m-4 rounded-sm border border-error/40 px-3 py-2 text-xs text-error"
 							data-testid="settings-error"
 						>
 							{error}

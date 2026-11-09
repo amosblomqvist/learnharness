@@ -92,7 +92,7 @@ test("healthy management has only controls, quiet Manage, destructive action lef
 	assert.equal(dialog().querySelector("h2")?.textContent, "Grok");
 	assert(!dialog().querySelector("select")); assert(!dialog().textContent?.includes("Add accounts"));
 	assert(!dialog().querySelector('[data-testid="subscription-privacy-notice"]')); assert(!maybeButton("Reconnect", dialog())); assert(!maybeButton("Sign in again", dialog()));
-	assert.equal(footer().firstElementChild, button("Disconnect", dialog())); assert.match(button("Disconnect", dialog()).className, /text-red/);
+	assert.equal(footer().firstElementChild, button("Disconnect", dialog())); assert.match(button("Disconnect", dialog()).className, /text-error/);
 	assert.equal(footer().lastElementChild?.lastElementChild, button("Close", dialog()));
 	await click(toggle()); assert.deepEqual(f.calls.consent, [["xai", false]]); assert.equal(f.statuses.find((s) => s.providerId === "github-copilot")!.allowBackgroundUse, true);
 	await click(button("Disconnect", dialog())); assert.equal(f.calls.disconnect.length, 0);

@@ -139,8 +139,9 @@ export function Toggle({
 			className={cn(
 				"relative h-4.5 w-8 shrink-0 rounded-full border border-border transition-colors",
 				// Owner (2026-09-20): on is a gray track with a WHITE disc (a full-white
-				// track was too loud); off stays the muted track.
-				checked ? "bg-muted-foreground" : "bg-muted",
+				// track was too loud); off stays the muted track. Theme wave: the on
+				// track is the theme accent (Default's accent IS that gray).
+				checked ? "bg-(--lh-accent)" : "bg-muted",
 				disabled && "cursor-not-allowed",
 			)}
 		>
