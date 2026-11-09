@@ -1,5 +1,5 @@
 import { getGraph } from "../core/graph.ts";
-import { noteSectionHeading, noteSectionText, type NoteIndexEntry, type NoteMode } from "../core/session-notes.ts";
+import { noteQuickReferenceText, noteSectionHeading, noteSectionText, type NoteIndexEntry, type NoteMode } from "../core/session-notes.ts";
 import { stores } from "./stores.ts";
 import { sourceDirectory } from "./source-organization.ts";
 
@@ -40,7 +40,11 @@ export function noteIndex(nodeId?: string, sessionIds?: string[]): NoteIndexEntr
 					heading: noteSectionHeading(section.heading),
 					text: nodeId
 						? ""
-						: [i === 0 ? edition.document.overview : "", noteSectionText(section)].filter(Boolean).join("\n"),
+						: [
+							i === 0 ? edition.document.overview : "",
+							i === 0 && edition.document.quickReference ? noteQuickReferenceText(edition.document.quickReference) : "",
+							noteSectionText(section),
+						].filter(Boolean).join("\n"),
 				});
 			}
 			// Prefer the published edition for evidence already available there.

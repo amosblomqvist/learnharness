@@ -3,11 +3,13 @@ import { Type } from "typebox";
 import type { PiEngine } from "../models.ts";
 import {
 	noteBlockKinds,
+	noteQuickReferenceText,
 	noteSectionHeading,
 	noteSectionText,
 	type NoteDocument,
 	type NoteMode,
 	type NotePassage,
+	type NoteQuickReference,
 	type WrittenSection,
 } from "../../core/session-notes.ts";
 import { noteTextHtml } from "../../core/note-render.ts";
@@ -20,6 +22,7 @@ const NOTES_IDLE_TIMEOUT_MS = 5 * 60_000;
 
 interface Submission {
 	overview: string;
+	quickReference?: NoteQuickReference;
 	sections: WrittenSection[];
 }
 const text = Type.String({ minLength: 1 });
@@ -29,12 +32,22 @@ const schema = Type.Object({
 		Type.Object({
 			heading: text,
 			sourceIds: Type.Array(text, { minItems: 1 }),
-			blocks: Type.Array(Type.Object({ kind: Type.Union(noteBlockKinds.map(k => Type.Literal(k))), title: Type.Optional(text), text }), {
+			blocks: Type.Array(Type.Object({
+				kind: Type.Union(noteBlockKinds.map(k => Type.Literal(k))), title: Type.Optional(text),
+				steps: Type.Optional(Type.Array(text, { minItems: 1 })), text,
+			}), {
 				minItems: 1,
 			}),
 		}),
 		{ minItems: 1 },
 	),
+});
+const handoutSchema = Type.Object({
+	...schema.properties,
+	quickReference: Type.Object({
+		decisions: Type.Array(Type.Object({ situation: text, approach: text }), { maxItems: 6 }),
+		essentials: Type.Array(Type.Object({ title: text, text }), { minItems: 1, maxItems: 6 }),
+	}),
 });
 interface EvidenceLine {
 	ids: string[];
@@ -84,7 +97,7 @@ export async function writeSessionNotes(opts: {
 	);
 	const limit = Math.max(1200, Math.min(96_000, Math.floor((engine.model.contextWindow - 2000) * 1.4)));
 	const isLiveNotes = mode === "liveNotes";
-	const submit = (lines: EvidenceLine[], instruction: string) => {
+	const submit = (lines: EvidenceLine[], instruction: string, handout = false) => {
 		const allowed = new Set(lines.flatMap(line => line.ids));
 		return withBgLlmSlot(signal, () =>
 			runSubmitAgent<Submission>({
@@ -97,15 +110,21 @@ export async function writeSessionNotes(opts: {
 				prompt: `${instruction}\nSession title: ${JSON.stringify(opts.title)}\nSource passages:\n${lines.map(l => JSON.stringify(l)).join("\n")}`,
 				toolName: "submit_notes",
 				toolDescription: "Submit the overview and supported lecture-note sections.",
-				parameters: schema,
+				parameters: handout ? handoutSchema : schema,
 				fill: input => input,
 				neverSubmitted: "The notes writer did not submit notes.",
 				onStep: (usage, model) => opts.onUsage(usage, model),
 				validate: draft => {
+					const reference = handout ? draft.quickReference : undefined;
+					if (handout && !reference) return "Include the handout's quick reference.";
+					if (reference && noteQuickReferenceText(reference).trim().split(/\s+/).length > 250)
+						return "Keep the quick reference within 250 words so it fits on the first page.";
 					for (const s of draft.sections) {
 						if (s.sourceIds.some(id => !allowed.has(id))) return "Use only supplied source IDs.";
 						if (s.blocks.some(block => block.kind === "example" && !block.title?.trim()))
 							return "Give every worked example a short, descriptive title.";
+						if (handout && s.blocks.some(block => block.kind === "method" && !block.steps?.length))
+							return "Put each method's ordered procedure in steps, with its supporting explanation in text.";
 						if (isLiveNotes && new Set(s.sourceIds.map(id => topics.get(id))).size !== 1)
 							return "Keep each live notes section within one source topic.";
 					}
@@ -116,7 +135,11 @@ export async function writeSessionNotes(opts: {
 					try {
 						for (const part of [
 							draft.overview,
-							...draft.sections.flatMap(s => [s.heading, ...s.blocks.flatMap(b => [b.title ?? "", b.text])]),
+							...(reference ? [
+								...reference.decisions.flatMap(row => [row.situation, row.approach]),
+								...reference.essentials.flatMap(item => [item.title, item.text]),
+							] : []),
+							...draft.sections.flatMap(s => [s.heading, ...s.blocks.flatMap(b => [b.title ?? "", ...(b.steps ?? []), b.text])]),
 						])
 							noteTextHtml(part, true);
 					} catch {
@@ -153,7 +176,8 @@ export async function writeSessionNotes(opts: {
 		sources,
 		isLiveNotes
 			? "Write concise live notes sections, one per supplied topic."
-			: "Compose one finished handout. Choose its logical order, combine revisited concepts, and write an overview of the whole lesson.",
+			: "Compose one finished handout. Choose its logical order, combine revisited concepts, and write a short overview. Include a compact quick reference for the first page, and use ordered steps for methods with supporting explanation below.",
+		!isLiveNotes,
 	);
 	const used = new Set<string>();
 	const sections = written.sections.map(section => {
@@ -175,5 +199,5 @@ export async function writeSessionNotes(opts: {
 			...(graphNodeIds.length ? { graphNodeIds: [...new Set(graphNodeIds)] } : {}),
 		};
 	});
-	return { title: opts.title, overview: written.overview, sections };
+	return { title: opts.title, overview: written.overview, ...(!isLiveNotes && written.quickReference ? { quickReference: written.quickReference } : {}), sections };
 }

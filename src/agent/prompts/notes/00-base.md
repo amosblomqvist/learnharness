@@ -7,6 +7,15 @@ integrate the new insight into its section. For a handout, start over from the t
 material. Order ideas by what the reader needs first, merge repeated explanations, and open with a
 short overview that explains the relationship between the main ideas.
 
+For a finished handout, make the first page a quick reference. Keep the overview to about 60 words.
+In `quickReference.decisions`, give up to six brief situation/approach pairs answering "Which method
+should I use?" Include the conditions that distinguish the methods. Leave this list empty when the
+lesson does not teach a choice of approaches. In `quickReference.essentials`, give up to six essential
+formulas, definitions, or results with short titles and their necessary conditions. Keep the entire
+quick reference within 250 words, preferably closer to 200; use compact inline TeX, not derivations
+or worked examples. Everything on this page must also be supported by the lesson sections. Do not
+add a quick reference to live notes or intermediate evidence summaries.
+
 Give each section a descriptive heading and cite the supplied message IDs that support it. Use the
 exact IDs from the source. Write headings without section numbers or Markdown heading markers. The
 notes renderer supplies section numbers. Write plain paragraphs with inline `$...$` or display
@@ -14,6 +23,11 @@ notes renderer supplies section numbers. Write plain paragraphs with inline `$..
 and applicability in the same block as a result. Use prose for the connective reasoning and an
 example block for a short example actually worked in the lesson. Proofs and derivations earn their
 space by explaining a result the learner encountered.
+
+For each handout method, put the procedure in `steps`: short, ordered actions the learner can follow.
+Include applicability and prerequisites in the first step. Do not type step numbers; the renderer
+numbers them. Use the method's `text` for the supporting explanation or derivation shown below the
+steps, without repeating the procedure as a paragraph. Preserve steps when condensing evidence.
 
 Make each worked example one complete example block: state the problem, explain the method,
 show the essential steps, and finish with the result. Do not split successive stages of the same

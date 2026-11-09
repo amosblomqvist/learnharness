@@ -7,6 +7,8 @@ export interface NoteBlock {
 	kind: NoteBlockKind;
 	/** Descriptive label for new notes; older saved blocks may omit it. */
 	title?: string;
+	/** Ordered procedure, followed by the supporting explanation in text. */
+	steps?: string[];
 	text: string;
 }
 export interface WrittenSection {
@@ -22,7 +24,13 @@ export interface NoteSection extends WrittenSection {
 export interface NoteDocument {
 	title: string;
 	overview: string;
+	/** New handouts include a reference page; older handouts and live notes may omit it. */
+	quickReference?: NoteQuickReference;
 	sections: NoteSection[];
+}
+export interface NoteQuickReference {
+	decisions: { situation: string; approach: string }[];
+	essentials: { title: string; text: string }[];
 }
 export interface NoteEdition {
 	fingerprint: string;
@@ -54,7 +62,7 @@ export interface SessionNotesRecord {
 	usage: { at: string; mode: NoteMode; model: string; step: CallUsage }[];
 }
 /** Increment when cached handouts need to be typeset again from their saved text. */
-export const HANDOUT_PDF_LAYOUT_VERSION = 2;
+export const HANDOUT_PDF_LAYOUT_VERSION = 3;
 export interface NotesView {
 	liveNotesEnabled: boolean;
 	liveNotes: NoteEdition | null;
@@ -88,7 +96,13 @@ export function noteSectionHeading(heading: string): string {
 	return heading.trim().replace(/^(?:\d+(?:\.\d+)*[.)]\s+)+(?=\S)/, "");
 }
 export function noteSectionText(section: WrittenSection): string {
-	return [noteSectionHeading(section.heading), ...section.blocks.flatMap(b => [b.title, b.text].filter(Boolean))].join("\n");
+	return [noteSectionHeading(section.heading), ...section.blocks.flatMap(b => [b.title, ...(b.steps ?? []), b.text].filter(Boolean))].join("\n");
+}
+export function noteQuickReferenceText(reference: NoteQuickReference): string {
+	return [
+		...reference.decisions.flatMap(row => [row.situation, row.approach]),
+		...reference.essentials.flatMap(item => [item.title, item.text]),
+	].join("\n");
 }
 export function noteHref(chatId: string, mode: NoteMode, sectionId?: string): string {
 	return `/chat/${encodeURIComponent(chatId)}?notes=${mode}${sectionId ? `&section=${encodeURIComponent(sectionId)}` : ""}`;

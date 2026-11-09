@@ -40,6 +40,7 @@ const result = (id: string, toolCallId: string, toolName: string, details: unkno
 const sample: NoteDocument = JSON.parse(
 	fs.readFileSync(new URL("./fixtures/session-notes-diagonalization.json", import.meta.url), "utf8"),
 );
+const sampleReference = { ...sample.quickReference! };
 function passageNotes(passages: NotePassage[]): NoteDocument {
 	return {
 		...sample,
@@ -225,6 +226,32 @@ it("numbers saved model headings once and preserves numbers that are part of the
 		assert.equal(noteSectionHeading(heading), heading);
 });
 
+it("renders a safe reference page and ordered procedures before their explanations, while accepting older documents", () => {
+	const doc: NoteDocument = {
+		...sample,
+		quickReference: {
+			decisions: [{ situation: "Compare <img src=x>", approach: "Use $x^2$." }],
+			essentials: [{ title: "<script>Formula</script>", text: "$x^2=4$ when $x=2$." }],
+		},
+		sections: [{ ...sample.sections[0]!, blocks: [{ kind: "method", steps: ["Set $x=2$.", "Compute <b>$x^2$</b>."], text: "Why this works." }] }],
+	};
+	const { document } = parseHTML(noteDocumentHtml(doc));
+	assert.equal(document.querySelectorAll(".note-reference-page table tbody tr").length, 1);
+	assert.equal(document.querySelectorAll(".note-reference-results .katex").length, 2);
+	assert.equal(document.querySelectorAll("script, img, b").length, 0);
+	const content = document.querySelector(".note-method .note-content")!;
+	assert.equal(content.firstElementChild?.tagName, "OL");
+	assert.equal(content.querySelectorAll("li").length, 2);
+	assert.equal(content.parentElement?.nextElementSibling?.textContent, "Why this works.");
+	assert.match(noteSectionText(doc.sections[0]!), /Set \$x=2\$\.\nCompute/);
+	const older: NoteDocument = { title: "Saved handout", overview: "An overview.", sections: [{
+		...sample.sections[0]!, blocks: [{ kind: "method", text: "An existing unnumbered procedure." }],
+	}] };
+	const legacy = parseHTML(noteDocumentHtml(older)).document;
+	assert.equal(legacy.querySelectorAll(".note-reference-page, ol").length, 0);
+	assert.match(legacy.querySelector("article")!.textContent!, /existing unnumbered procedure/);
+});
+
 it("keeps prose paragraphs and display equations separate, and labels both saved and newly titled examples safely", () => {
 	const doc: NoteDocument = { ...sample, sections: [{
 		...sample.sections[0]!, blocks: [
@@ -391,6 +418,9 @@ it("resolves sections after later graph extraction and removes notes attachments
 	assert.deepEqual(library.sources, directory.sources);
 	assert.equal(Object.hasOwn(directory, "notes"), false);
 	assert.deepEqual(new Set(library.notes.map((n: NoteIndexEntry) => n.chatId)), new Set([session.id, practice.id]));
+	const indexed = noteIndex(undefined, [session.id]);
+	assert.match(indexed[0]!.text, /Decide whether diagonalization is possible/);
+	assert.match(indexed[1]!.text, /Find an eigenbasis; diagonalization requires/);
 	const tag = sourceDirectory.change({ action: "create-tag", name: "Linear algebra", parentId: null }).createdTagId!;
 	sourceDirectory.change({ action: "tag-sources", sourceIds: [session.id, practice.id], add: [tag], remove: [] });
 	const { GET: getChats } = await import("../app/api/chats/route.ts");
@@ -424,17 +454,19 @@ it("composes a long lesson from all original passages through bounded calls, wit
 			.split("\n")
 			.map(line => JSON.parse(line) as { ids: string[]; text: string });
 		const ids = [...new Set(input.flatMap(p => p.ids))];
+		if (text.startsWith("Compose")) assert.ok(input.every(p => p.text.includes("Use the eigenbasis.")), "evidence summaries retain procedure steps");
 		for (const id of ids) seen.add(id);
 		calls++;
 		return fauxAssistantMessage(
 			[
 				fauxToolCall("submit_notes", {
 					overview: "One coherent summary.",
+					...(text.startsWith("Compose") ? { quickReference: sampleReference } : {}),
 					sections: [
 						{
 							heading: "Shared mechanism",
 							sourceIds: ids,
-							blocks: [{ kind: "definition", text: "$Av=\\lambda v$." }],
+							blocks: [{ kind: "method", steps: ["Use the eigenbasis."], text: "$Av=\\lambda v$." }],
 						},
 					],
 				}),
@@ -457,6 +489,7 @@ it("composes a long lesson from all original passages through bounded calls, wit
 	assert.ok(calls > 1);
 	assert.deepEqual([...seen], ["first", "middle", "last"]);
 	assert.deepEqual(doc.sections[0]?.sourceIds, ["first", "middle", "last"]);
+	assert.deepEqual(doc.quickReference, sample.quickReference);
 });
 
 it("stops an unresponsive notes stream, releases its background slot, and ignores a late response", async () => {
@@ -546,6 +579,7 @@ it("times out stalled live notes without replacing saved notes or automatically 
 			assert.equal(calls, 2);
 			assert.equal(api.sessionNotes(chat.id).error.liveNotes, undefined);
 			assert.deepEqual(api.sessionNotes(chat.id).liveNotes?.document.sections.map(s => s.sourceIds[0]), ["a", "b"]);
+			assert.equal(api.sessionNotes(chat.id).liveNotes?.document.quickReference, undefined);
 		} finally {
 			for (const run of api.runningSessionNotes()) api.abortSessionNotes(run.id);
 			const error = { ...fauxAssistantMessage([]), stopReason: "aborted" as const };
@@ -585,7 +619,7 @@ it("keeps a long notes response alive while headers, provider events, or streame
 		t.mock.timers.tick(4 * 60_000);
 		assert.equal(options.signal?.aborted, false, "the limit is inactivity, not total response duration");
 		const message = fauxAssistantMessage([fauxToolCall("submit_notes", {
-			overview: "Finished", sections: [{ heading: "A", sourceIds: ["m"], blocks: [{ kind: "paragraph", text: "Notes." }] }],
+			overview: "Finished", quickReference: sampleReference, sections: [{ heading: "A", sourceIds: ["m"], blocks: [{ kind: "paragraph", text: "Notes." }] }],
 		})], { stopReason: "toolUse" });
 		source.push({ type: "done", reason: "toolUse", message });
 		source.end();
@@ -606,7 +640,7 @@ it("requires a descriptive title for newly generated examples and retains it in 
 	const faux = createFauxCore({});
 	const block = { kind: "example", text: "Substituting $x=2$ gives $x^2=4$." };
 	faux.setResponses([undefined, "Evaluating a square"].map(title => fauxAssistantMessage([fauxToolCall("submit_notes", {
-		overview: "Substitution.", sections: [{ heading: "Evaluate an expression", sourceIds: ["m"], blocks: [{ ...block, ...(title ? { title } : {}) }] }],
+		overview: "Substitution.", quickReference: sampleReference, sections: [{ heading: "Evaluate an expression", sourceIds: ["m"], blocks: [{ ...block, ...(title ? { title } : {}) }] }],
 	})], { stopReason: "toolUse" })));
 	let calls = 0;
 	const doc = await writeSessionNotes({
@@ -617,6 +651,35 @@ it("requires a descriptive title for newly generated examples and retains it in 
 	});
 	assert.equal(calls, 2);
 	assert.equal(doc.sections[0]?.blocks[0]?.title, "Evaluating a square");
+});
+
+it("requires a compact reference and ordered methods in new handouts, and validates their TeX", async () => {
+	const good = {
+		overview: "Evaluate by substitution.",
+		quickReference: { decisions: [], essentials: [{ title: "Square", text: "At $x=2$, $x^2=4$." }] },
+		sections: [{ heading: "Substitution", sourceIds: ["m"], blocks: [{ kind: "method", steps: ["Substitute $x=2$.", "Square to obtain $4$."], text: "Use the supplied value in the expression." }] }],
+	};
+	const invalid = [
+		{ ...good, quickReference: undefined },
+		{ ...good, quickReference: { decisions: [], essentials: [{ title: "Too long", text: "word ".repeat(251) }] } },
+		{ ...good, quickReference: { decisions: [], essentials: [{ title: "Invalid", text: "$\\invalidcommand$" }] } },
+		{ ...good, sections: [{ ...good.sections[0], blocks: [{ ...good.sections[0]!.blocks[0], steps: undefined }] }] },
+		{ ...good, sections: [{ ...good.sections[0], blocks: [{ ...good.sections[0]!.blocks[0], steps: ["$\\invalidcommand$"] }] }] },
+	];
+	for (const draft of invalid) {
+		const faux = createFauxCore({});
+		faux.setResponses([draft, good].map(value => fauxAssistantMessage([fauxToolCall("submit_notes", JSON.parse(JSON.stringify(value)))], { stopReason: "toolUse" })));
+		let calls = 0;
+		const doc = await writeSessionNotes({
+			chatId: "reference_and_steps", title: "Substitution", mode: "handout", practice: false,
+			passages: [{ messageId: "m", topic: "substitution", text: "At x=2, x squared is 4." }],
+			engine: { model: faux.getModel(), streamFn: faux.streamSimple }, signal: new AbortController().signal,
+			onUsage: () => { calls++; },
+		});
+		assert.equal(calls, 2);
+		assert.deepEqual(doc.quickReference, good.quickReference);
+		assert.deepEqual(doc.sections[0]?.blocks[0]?.steps, good.sections[0]!.blocks[0]!.steps);
+	}
 });
 
 it("loads the notes prompt edited in Settings into the real writer and respects its switch", async () => {
@@ -646,7 +709,7 @@ it("loads the notes prompt edited in Settings into the real writer and respects 
 				assert.equal(ctx.messages.find(message => message.role === "system")?.content,
 					enabled ? override : view.notes[0].sourceText.trim());
 				return fauxAssistantMessage([fauxToolCall("submit_notes", {
-					overview: "An overview.", sections: [{
+					overview: "An overview.", quickReference: sampleReference, sections: [{
 						heading: "1. Eigenvectors", sourceIds: ["m1"], blocks: [{ kind: "definition", text: "A direction preserved." }],
 					}],
 				})], { stopReason: "toolUse" });

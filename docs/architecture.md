@@ -146,6 +146,8 @@ Source organization v2 uses folders for tags and subfolders only. Material membe
 
 Notes use `handout` and `liveNotes` throughout the app. The [notes store](../src/store/session-notes.ts) translates the original v1 `final`/`live` fields at the storage boundary, preserving existing notes and PDFs without a migration. New notes links use the app names; the chat page also accepts the older query values.
 
+New handouts add a compact `quickReference` and ordered method `steps` to the saved document. Both fields are additive: older editions remain readable. The shared notes renderer supplies the reference page, procedure lists, and print layout; a PDF layout version refreshes cached PDFs from saved text without another model call. Adding the new reference content to an older handout requires regeneration.
+
 Adapters use synchronous filesystem operations. JSONL reads skip corrupt/invalid lines; graph derivation merges repeated assertions. Some replacements use temp-file rename, but ordinary whole-file writes are not database transactions. Same-event-loop serialization is not cross-process locking or crash atomicity. Use **one server owner per data/auth profile**.
 
 Chats and graph-family files have separate version guards; absent stamps read as v1, and newer versions are refused. Positions are rebuildable and unstamped. Settings have their own version/sanitization policy. Format counters are not app versions. Golden fixtures exercise compatibility. Graph-store initialization removes retired ledgers, so importing stores is not a universally read-only inspection method.
