@@ -22,7 +22,7 @@ const { handleChatRequest } = await import("../src/server/chat-handler.ts");
 const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { chatStore } = await import("../src/store/chats.ts");
 const { SessionModel } = await import("../components/session-core.ts");
-const { pendingQuestionOf, danglingQuestionOf, hasUnresolvedQuestion, malformedQuestionsOf, newUserMessage, newAnswerResult, needsContinuation, nativeInputCause } = await import("../src/core/native-messages.ts");
+const { pendingQuestionOf, danglingQuestionOf, questionStateOf, malformedQuestionsOf, newUserMessage, newAnswerResult, needsContinuation, nativeInputCause } = await import("../src/core/native-messages.ts");
 const { findPendingToolCall } = await import("../src/core/pending.ts");
 const { projectView } = await import("../src/core/view.ts");
 const { parseQuestionInput } = await import("../src/core/tool-parts.ts");
@@ -71,7 +71,7 @@ for (const stopReason of ["error", "aborted"]) for (const input of [partial, val
 		assert.equal(findPendingToolCall(projectView(messages), pendingQuestionOf(messages)), null);
 		assert.equal(danglingQuestionOf(messages), null);
 		assert.equal(malformedQuestionsOf(messages).length, 0, "existing failure Retry/new-message path owns recovery");
-		assert.ok(hasUnresolvedQuestion(messages), "unblocking the composer must not authorize a background wake");
+		assert.equal(questionStateOf(messages), "unusable", "unblocking the composer must not authorize a background wake");
 		assert.equal(needsContinuation(messages), false);
 		assert.equal(endsInFailedTurn(messages), stopReason === "error");
 		assert.throws(() => inputAppends({ messages }, { type: "answer", toolCallId: "bad", answer: {} as never }));
@@ -95,7 +95,7 @@ test("actual compatible adapter EOF → loop → settlement retains failure but 
 	assert.equal(requests, 1);
 	assert.match(JSON.stringify(messages.at(-1)), /Stream ended without finish_reason/);
 	assert.equal(messages.at(-1)?.role, "assistant");
-	assert.ok(hasUnresolvedQuestion(messages));
+	assert.equal(questionStateOf(messages), "unusable");
 	assert.equal(pendingQuestionOf(messages), null);
 });
 

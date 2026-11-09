@@ -22,6 +22,7 @@ import { DispatchCard } from "../components/artifacts/dispatch-card.tsx";
 import { JobsContext } from "../components/jobs-context.ts";
 import { ChatActionsContext } from "../components/chat.tsx";
 import type { JobRecord } from "../src/core/contracts.ts";
+import type { QuestionState } from "../src/core/native-messages.ts";
 import { AnsweredCard } from "../components/answered-card.tsx";
 import {
 	buildAnswer,
@@ -115,10 +116,10 @@ describe("DispatchCard — the BYOK refusal tone (owner, 2026-09-22)", () => {
 		updatedAt: new Date().toISOString(),
 		...over,
 	});
-	const inJobs = (jobs: JobRecord[]) => (
+	const inJobs = (jobs: JobRecord[], questionState: QuestionState = "none") => (
 		<JobsContext.Provider value={jobs}>
 			<ChatActionsContext.Provider
-				value={{ chatId: "c1", syncFromServer: async () => {}, sendText: () => {}, openSetup: () => {} }}
+				value={{ chatId: "c1", syncFromServer: async () => {}, sendText: () => {}, openSetup: () => {}, questionState }}
 			>
 				<DispatchCard toolCallId="t1" kind="research" />
 			</ChatActionsContext.Provider>
@@ -159,6 +160,37 @@ describe("DispatchCard — the BYOK refusal tone (owner, 2026-09-22)", () => {
 	it("a finished worker reads finished, independently of delivery", () => {
 		const html = renderToStaticMarkup(inJobs([job({ status: "done", error: undefined })]));
 		assert.ok(html.includes("finished"));
+	});
+
+	describe("the held result", () => {
+		const done = (over: Partial<JobRecord> = {}) =>
+			job({ status: "done", error: undefined, delivery: { kind: "result", status: "pending" }, ...over });
+		const HELD = "· the tutor sees this after your next message";
+
+		it("a finished job with pending delivery says so while the stopped question holds it", () => {
+			const html = renderToStaticMarkup(inJobs([done()], "unusable"));
+			assert.ok(html.includes('data-testid="dispatch-held"'));
+			assert.ok(html.includes(HELD));
+			assert.ok(html.indexOf("finished") < html.indexOf(HELD));
+		});
+
+		it("a failed job with pending delivery says so too", () => {
+			const failed = done({ status: "error", error: "model timed out" });
+			assert.ok(renderToStaticMarkup(inJobs([failed], "unusable")).includes("dispatch-held"));
+		});
+
+		it("says nothing when no question holds the result", () => {
+			assert.ok(!renderToStaticMarkup(inJobs([done()], "none")).includes("dispatch-held"));
+		});
+
+		it("says nothing while the tutor is still writing the question", () => {
+			assert.ok(!renderToStaticMarkup(inJobs([done()], "streaming")).includes("dispatch-held"));
+		});
+
+		it("says nothing once the result is delivered", () => {
+			const delivered = done({ delivery: { kind: "result", status: "delivered" } });
+			assert.ok(!renderToStaticMarkup(inJobs([delivered], "unusable")).includes("dispatch-held"));
+		});
 	});
 });
 
