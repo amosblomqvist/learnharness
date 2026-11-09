@@ -40,7 +40,7 @@ Provider-specific setup and limitations: [Claude Code](claude-code.md), [custom 
 
 ### Subscription connections in web/dev
 
-`npm run dev` and `npm start` support ChatGPT, GitHub Copilot, Grok, and Antigravity sign-in. `desktop:dev` uses those same dev-server connections; packaged desktop has a separate main-process credential owner/private transport. Subscription routes do not fall back to API-key billing.
+`npm run dev` and `npm start` support ChatGPT, GitHub Copilot, Grok, and Antigravity sign-in. `desktop:dev` uses those same dev-server connections; packaged desktop has a separate main-process credential owner/private transport. Subscription routes do not fall back to API-key billing. Antigravity sends a client version in its User-Agent that Google requires to be recent; if requests are rejected as "no longer supported", set `LH_ANTIGRAVITY_VERSION` (format `x.y.z`) to a current Antigravity version.
 
 Web/dev writes `chatgpt-credentials.json`, `github-copilot-credentials.json`, `xai-credentials.json`, and `antigravity-credentials.json` **beside `LH_AUTH_FILE`**, in the repo by default—not under `data/` or a global Pi profile. Git/build exclusions cover these files and their write temporaries. Refresh serialization is process-local: use one server per credential directory.
 

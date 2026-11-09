@@ -25,7 +25,12 @@ const ANTIGRAVITY_SCOPES = [
 	"https://www.googleapis.com/auth/experimentsandconfigs",
 ];
 
-const ANTIGRAVITY_VERSION = "1.23.2";
+const ANTIGRAVITY_DEFAULT_VERSION = "2.29.0";
+/** Google rejects client versions below a moving minimum; LH_ANTIGRAVITY_VERSION (x.y.z only) lets it be raised without a rebuild. */
+function antigravityVersion() {
+	const override = process.env.LH_ANTIGRAVITY_VERSION;
+	return override && /^\d+\.\d+\.\d+$/.test(override) ? override : ANTIGRAVITY_DEFAULT_VERSION;
+}
 const ANTIGRAVITY_SYSTEM_INSTRUCTION = "You are Antigravity, a powerful agentic AI coding assistant designed by the Google DeepMind team working on Advanced Agentic Coding.";
 const CONTINUATION_TEXT = "Please continue based on the conversation and tool outputs above.";
 
@@ -411,7 +416,7 @@ function antigravityHeaders(token, extraHeaders) {
 		Authorization: `Bearer ${token}`,
 		"Content-Type": "application/json",
 		Accept: "text/event-stream",
-		"User-Agent": `antigravity/${ANTIGRAVITY_VERSION} darwin/arm64`,
+		"User-Agent": `antigravity/${antigravityVersion()} darwin/arm64`,
 		"X-Goog-Api-Client": "google-cloud-sdk vscode_cloudshelleditor/0.1",
 	};
 	if (extraHeaders && typeof extraHeaders === "object") {
@@ -433,7 +438,7 @@ async function discoverProjectAndModels(token, fetchFn = globalThis.fetch, signa
 			headers: {
 				Authorization: `Bearer ${token}`,
 				"Content-Type": "application/json",
-				"User-Agent": `antigravity/${ANTIGRAVITY_VERSION} darwin/arm64`,
+				"User-Agent": `antigravity/${antigravityVersion()} darwin/arm64`,
 			},
 			body: JSON.stringify({
 				metadata: {
@@ -463,7 +468,7 @@ async function discoverProjectAndModels(token, fetchFn = globalThis.fetch, signa
 			headers: {
 				Authorization: `Bearer ${token}`,
 				"Content-Type": "application/json",
-				"User-Agent": `antigravity/${ANTIGRAVITY_VERSION} darwin/arm64`,
+				"User-Agent": `antigravity/${antigravityVersion()} darwin/arm64`,
 			},
 			body: JSON.stringify({ project: projectId }),
 			signal,
@@ -808,9 +813,20 @@ function extractTools(context) {
 	return [...byName.values()];
 }
 
+/** Claude (Anthropic behind Antigravity) rejects tool ids outside ^[a-zA-Z0-9_-]+$, but history
+ * from other providers carries ids like Copilot's "call_…|<base64>". Rewrite deterministically so a
+ * call and its result keep the same id; the hash suffix avoids collisions between long shared prefixes. */
+function claudeToolId(id) {
+	const raw = String(id);
+	if (/^[a-zA-Z0-9_-]{1,64}$/.test(raw)) return raw;
+	const digest = createHash("sha256").update(raw).digest("hex").slice(0, 16);
+	return `${raw.replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 47)}_${digest}`;
+}
+
 function convertMessagesToContents(context, model) {
 	const contents = [];
 	const isClaudeModel = Boolean(model?.id?.startsWith("claude-"));
+	const toolId = (id) => (isClaudeModel ? claudeToolId(id) : String(id));
 	const pushTurn = (role, parts) => {
 		if (!parts || parts.length === 0) return;
 		const last = contents[contents.length - 1];
@@ -868,7 +884,7 @@ function convertMessagesToContents(context, model) {
 						functionCall: {
 							name: block.name,
 							args: block.arguments && typeof block.arguments === "object" ? block.arguments : {},
-							...(block.id ? { id: String(block.id) } : {}),
+							...(block.id ? { id: toolId(block.id) } : {}),
 						},
 						...(isSameModel && block.thoughtSignature ? { thoughtSignature: block.thoughtSignature } : {}),
 					});
@@ -885,7 +901,7 @@ function convertMessagesToContents(context, model) {
 					functionResponse: {
 						name: msg.toolName || "tool",
 						response: msg.isError ? { error: responseText } : { output: responseText },
-						...(msg.toolCallId ? { id: String(msg.toolCallId) } : {}),
+						...(msg.toolCallId ? { id: toolId(msg.toolCallId) } : {}),
 					},
 				},
 			]);
@@ -1280,6 +1296,8 @@ module.exports = {
 	ANTIGRAVITY_ALLOWED_ORIGINS,
 	ANTIGRAVITY_MODELS,
 	getAntigravityRequestModelId,
+	antigravityVersion,
+	convertMessagesToContents,
 	mapDiscoveredModelsToCatalogIds,
 	stableProjectId,
 	antigravityProvider,
