@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { BookOpenIcon, DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -327,9 +327,13 @@ export function SessionRow({
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
-			    the teaching rows and reads cleaner. */}
+			    the teaching rows and reads cleaner. Lesson sessions carry the
+			    same-pattern book tag (lesson mode). */}
 			{(chat.kind ?? "teach") === "practice" && (
 				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
+			)}
+			{(chat.kind ?? "teach") === "lesson" && (
+				<BookOpenIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Lesson session" />
 			)}
 		</button>
 	);
@@ -423,7 +427,14 @@ function SessionsSidebar() {
 		const q = query.trim();
 		let list = chats;
 		if (list && kindFilter !== "all") {
-			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
+			// Lesson sessions ride the TEACHING filter (lesson mode): they
+			// are teaching-side sessions (extraction, plan map); a separate
+			// filter lane is not warranted — the row's book tag tells them
+			// apart.
+			list = list.filter((c) => {
+				const k = c.kind ?? "teach";
+				return kindFilter === "teach" ? k === "teach" || k === "lesson" : k === kindFilter;
+			});
 		}
 		if (!list) return list;
 		if (!q) return list;

@@ -24,7 +24,7 @@ export default async function NewSessionPage({
 	return (
 		<NewSession
 			initialConfigured={slotsConfigured(readSettingsRecord()?.models)}
-			mode={mode === "practice" ? "practice" : "teach"}
+			mode={mode === "practice" ? "practice" : mode === "lesson" ? "lesson" : "teach"}
 		/>
 	);
 }

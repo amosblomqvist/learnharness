@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
+import { BookOpenIcon, CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -91,8 +91,11 @@ export function Home({
 	 *  practice switch — practice creates a kind:"practice" session and
 	 *  may carry proposition picks from the chain table (the chip above
 	 *  the composer opens the picker; the picks seed the opening prompt).
-	 *  Not enforcing any input format — the picks are a convenience. */
-	const [mode, setMode] = useState<"teach" | "practice">("teach");
+	 *  Not enforcing any input format — the picks are a convenience.
+	 *  LESSON MODE: the middle pill — lesson creates a kind:"lesson"
+	 *  session (the lesson agent from turn 1: brief calibration, a
+	 *  syllabus, then section documents with one exit ticket each). */
+	const [mode, setMode] = useState<"teach" | "lesson" | "practice">("teach");
 	const [practiceProps, setPracticeProps] = useState<{ id: string; name: string; statement: string }[]>([]);
 	const [chainSelectOpen, setChainSelectOpen] = useState(false);
 	// The chain table is CONTROLLED off this id set (the lifted pick).
@@ -145,10 +148,10 @@ export function Home({
 			// before the learner's first user message, propositions + the
 			// chains among them); the prompt stays the learner's own words.
 			const target = await starterRef.current.start({
-				title: t,
-				...(mode === "practice" ? { kind: "practice" } : {}),
-				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
-			}, fetch, JSON.stringify(catalog?.slots.strong));
+					title: t,
+					...(mode === "practice" || mode === "lesson" ? { kind: mode } : {}),
+					...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
+				}, fetch, JSON.stringify(catalog?.slots.strong));
 			router.push(target);
 		} catch {
 			startingRef.current = false;
@@ -299,7 +302,7 @@ export function Home({
 						turns={[] as TurnUsage[]}
 						leadingSlot={
 							<div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="home-mode-switch">
-								{(["teach", "practice"] as const).map((m) => (
+								{(["teach", "lesson", "practice"] as const).map((m) => (
 									<button
 										key={m}
 										type="button"
@@ -313,7 +316,8 @@ export function Home({
 										}
 									>
 										{m === "practice" ? <DumbbellIcon aria-hidden="true" className="size-3" /> : null}
-										{m === "teach" ? "Teach" : "Practice"}
+										{m === "lesson" ? <BookOpenIcon aria-hidden="true" className="size-3" /> : null}
+										{m === "teach" ? "Teach" : m === "lesson" ? "Lesson" : "Practice"}
 									</button>
 								))}
 							</div>

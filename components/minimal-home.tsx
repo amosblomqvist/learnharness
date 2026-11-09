@@ -129,7 +129,10 @@ export function MinimalHome({
 	const notesImport = useNotesImport({ onFinish: readState });
 	const { importing, onImportFiles } = notesImport;
 
-	const teachSessions = chats.filter((c) => c.kind === "teach").length;
+	// Lesson sessions count as teaching sessions (lesson mode): they are
+	// teaching-side sessions — extraction, plan map, prose — and the quiet
+	// summary keeps its two lanes.
+	const teachSessions = chats.filter((c) => c.kind === "teach" || c.kind === "lesson").length;
 	const practiceSessions = chats.filter((c) => c.kind === "practice").length;
 
 	return (
