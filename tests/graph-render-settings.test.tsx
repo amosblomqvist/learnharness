@@ -20,11 +20,12 @@ const SNAPSHOT = {
 let releaseGet: () => void;
 let getGate: Promise<void>;
 let puts: any[] = [];
+let getReply: () => Response;
 const fetchStub = async (url: string, init?: RequestInit) => {
 	if (url === "/api/graph/render-settings") {
 		if (init?.method === "PUT") { puts.push(JSON.parse(init.body as string)); return Response.json({}); }
 		await getGate;
-		return Response.json(SAVED);
+		return getReply();
 	}
 	if (url === "/api/graph") return Response.json(SNAPSHOT);
 	if (url === "/api/graph/status") return Response.json({ runs: [] });
@@ -54,8 +55,9 @@ const { ServerEventsProvider } = await import("../components/server-events.tsx")
 let root: Root | undefined;
 const wait = (ms: number) => act(async () => { await new Promise((r) => setTimeout(r, ms)); });
 const SAVE_DEBOUNCE_PLUS_SLACK = 700;
-async function mount() {
+async function mount(reply = () => Response.json(SAVED)) {
 	puts = [];
+	getReply = reply;
 	getGate = new Promise<void>((r) => (releaseGet = r));
 	const host = document.createElement("div");
 	document.body.appendChild(host);
@@ -69,14 +71,15 @@ afterEach(async () => { await act(async () => { root?.unmount(); }); root = unde
 const sliderOf = (label: string) =>
 	[...document.querySelectorAll("label")].find((l) => l.textContent!.startsWith(label))!.querySelector("input")! as HTMLInputElement;
 const shown = (label: string) => sliderOf(label).parentElement!.querySelector("span span")!.textContent;
+const moveSlider = (label: string, value: string) => act(async () => {
+	Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sliderOf(label)), "value")!.set!.call(sliderOf(label), value);
+	sliderOf(label).dispatchEvent(new win.Event("input", { bubbles: true }));
+});
+const loadFailedNotice = () => document.querySelector('[data-testid="graph-settings-load-failed"]');
 
 it("keeps the saved graph settings when a slider moves before they finish loading", async () => {
 	await mount();
-	const setter = Object.getOwnPropertyDescriptor(Object.getPrototypeOf(sliderOf("Edge width")), "value")!.set!;
-	await act(async () => {
-		setter.call(sliderOf("Edge width"), "70");
-		sliderOf("Edge width").dispatchEvent(new win.Event("input", { bubbles: true }));
-	});
+	await moveSlider("Edge width", "70");
 	const movedEdgeWidth = shown("Edge width");
 	await act(async () => { releaseGet(); });
 	await wait(SAVE_DEBOUNCE_PLUS_SLACK);
@@ -94,4 +97,24 @@ it("sends no save when nothing was touched", async () => {
 	await wait(SAVE_DEBOUNCE_PLUS_SLACK);
 	assert.equal(shown("Node size"), "12");
 	assert.equal(puts.length, 0);
+});
+
+it("saves nothing and says so when the saved graph settings fail to load", async () => {
+	await mount(() => Response.json({ error: "read failed" }, { status: 500 }));
+	await act(async () => { releaseGet(); });
+	const edgeWidthBefore = shown("Edge width");
+	await moveSlider("Edge width", "70");
+	await wait(SAVE_DEBOUNCE_PLUS_SLACK);
+	assert.deepEqual(puts, []);
+	assert.notEqual(shown("Edge width"), edgeWidthBefore);
+	assert.equal(loadFailedNotice()?.textContent, "Saved settings could not be loaded. Changes won't be saved. Reload to retry.");
+});
+
+it("saves the first change when no graph settings are saved yet", async () => {
+	await mount(() => Response.json(null));
+	await act(async () => { releaseGet(); });
+	await moveSlider("Edge width", "70");
+	await wait(SAVE_DEBOUNCE_PLUS_SLACK);
+	assert.equal(puts.length, 1);
+	assert.equal(loadFailedNotice(), null);
 });
