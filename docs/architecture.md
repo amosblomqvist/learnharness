@@ -91,6 +91,8 @@ This is single-process coordination over JSON files, not a transactional queue o
 
 [`learner-image.ts`](../src/agent/tools/learner-image.ts) stores processed bytes under SHA-256 identities in `ChatRecord.imageSnapshots`, deduplicated per session. Cards and annotation SVGs reference snapshots, so moving the original does not break saved results. Session-scoped image reads resolve references; SVG downloads embed their image. The annotator edits a placeholder href, not base64, and uses static native rendering. Ordinary visual SVGs retain their existing behavior. Offline regression tests exercise snapshot storage, display, and payload delivery, not model-driven annotation quality.
 
+Composer image uploads (issue #96) ride the same machinery: `POST /api/chats/:id/images` processes one pasted or picked picture through the shared pipeline and stores the snapshot; the sent user message carries only refs (SHA-256 ids plus the original file name), never bytes. `toLlmMessages` resolves those refs against the active engine's pi-ai model metadata — native image content parts when the model accepts images, an honest bracketed note otherwise — and `projectView` folds them into transcript thumbnails read from the snapshot store.
+
 ## Knowledge graph and imports
 
 The graph records objective propositions and jointly-entailing reasoning chains, not learner understanding levels. Construction is post-hoc and independent of the lesson plan:
