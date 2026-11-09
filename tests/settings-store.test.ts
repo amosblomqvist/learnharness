@@ -25,7 +25,7 @@ fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
 const { SETTINGS_FILE } = await import("../config.ts");
 const { readSettings, writeSettings } = await import("../src/store/settings.ts");
 const { resolveSettings } = await import("../src/core/settings-resolution.ts");
-const { parseCompactionSettingsBody } = await import("../src/server/settings-body.ts");
+const { parseCompactionSettingsBody, parseAppearanceSettingsBody } = await import("../src/server/settings-body.ts");
 
 after(() => fs.rmSync(directory, { recursive: true, force: true }));
 
@@ -44,6 +44,23 @@ describe("the settings store", () => {
 		writeSettings({ version: 1, agent: { tools: { research: false } } });
 		assert.equal("workerRequestConcurrency" in JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")).agent, false);
 		assert.equal(resolveSettings(readSettings()).agent.workerRequestConcurrency, 8);
+	});
+
+	it("code ligatures persist in either state; omitted and invalid existing settings resolve OFF", () => {
+		assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, false);
+		for (const codeLigatures of [true, false]) {
+			const parsed = parseAppearanceSettingsBody({ codeLigatures, proseFontSize: 20 });
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, appearance: parsed.settings });
+			assert.deepEqual(readSettings()?.appearance, { codeLigatures, proseFontSize: 20 });
+			assert.equal(JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")).appearance.codeLigatures, codeLigatures);
+			assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, codeLigatures);
+		}
+		for (const appearance of [{ proseFontSize: 20 }, { proseFontSize: 20, codeLigatures: "true" }]) {
+			fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: 1, appearance }));
+			assert.deepEqual(readSettings()?.appearance, { proseFontSize: 20 });
+			assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, false);
+		}
 	});
 
 	it("reads null on first boot (no record)", () => {

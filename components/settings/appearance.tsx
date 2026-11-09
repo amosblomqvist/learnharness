@@ -30,6 +30,7 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 		background: delta?.background ?? f.background,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
+		codeLigatures: delta?.codeLigatures ?? f.codeLigatures,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
 		mdRendering: {
 			headingWeight: delta?.mdRendering?.headingWeight ?? f.mdRendering.headingWeight,
@@ -83,6 +84,9 @@ export function appearanceVars(a: ReturnType<typeof resolveAppearance>): Record<
 	// The ONE documented reading-size variable (typography round 4): prose,
 	// inputs, and session titles all read it, so one setProperty moves them.
 	vars["--lh-prose-size"] = `${a.proseFontSize}px`;
+	// Code surfaces opt in to this token; never change prose or UI shaping.
+	// "normal" permits the font's behavior rather than forcing glyph joining.
+	vars["--lh-code-ligatures"] = a.codeLigatures ? "normal" : "none";
 	// Session names: CMU Serif by default; the toggle swaps the title font
 	// to the prose family — covers chat.tsx + new-session.tsx titles with
 	// zero component edits (they use the .font-title utility).

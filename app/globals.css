@@ -331,6 +331,14 @@ body {
    background #141414 and read as raised — owner note, chrome-melt tweaks
    2026-09-19) plus a subtle hairline outline. (md-blocks renders its own
    hover copy corner.) */
+/* Shared code-only policy. font-variant-ligatures survives Tailwind's
+   code/pre font-feature-settings reset; prose and rendered diagrams do not
+   consume this token. The fallback also disables code ligatures before the
+   Appearance provider loads an existing profile. */
+[data-streamdown="inline-code"],
+[data-streamdown="code-block"] :is(pre, code) {
+	font-variant-ligatures: var(--lh-code-ligatures, none);
+}
 /* Inline code shares only the block surface, keeping its inline geometry. */
 [data-streamdown="inline-code"],
 [data-streamdown="code-block"] {

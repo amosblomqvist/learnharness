@@ -409,6 +409,8 @@ export interface AppearanceSettings {
 	/** Reading font size in px (12–24, default 16). Headings render as
 	 *  multiples of this, so one knob scales the document coherently. */
 	proseFontSize?: number;
+	/** Permit normal font ligatures in code (including inline code and code editors). Default false; prose is unaffected. */
+	codeLigatures?: boolean;
 	/** Session names in CMU Serif (default true — today's look). */
 	sessionNameSerif?: boolean;
 	mdRendering?: MdRenderingSettings;
@@ -514,6 +516,7 @@ export interface FactorySettings {
 		background: string | null;
 		fontFamily: string | null;
 		proseFontSize: number;
+		codeLigatures: boolean;
 		sessionNameSerif: boolean;
 		mdRendering: {
 			headingWeight: number;
@@ -535,6 +538,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		background: null, // the dark default (#141414) lives in the mode's derivation curve
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
+		codeLigatures: false,
 		sessionNameSerif: true,
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
 	},
@@ -776,6 +780,8 @@ function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	if (typeof raw.proseFontSize === "number" && Number.isFinite(raw.proseFontSize)) {
 		out.proseFontSize = clamp(Math.round(raw.proseFontSize), PROSE_FONT_MIN, PROSE_FONT_MAX);
 	}
+	const codeLigatures = boolOrDrop(raw.codeLigatures);
+	if (codeLigatures !== undefined) out.codeLigatures = codeLigatures;
 	const sessionNameSerif = boolOrDrop(raw.sessionNameSerif);
 	if (sessionNameSerif !== undefined) out.sessionNameSerif = sessionNameSerif;
 	if (raw.mdRendering !== undefined) out.mdRendering = sanitizeMdRendering(raw.mdRendering);

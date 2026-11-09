@@ -274,6 +274,13 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
+			<SettingsRow label="Code ligatures" testid="row-code-ligatures">
+				<Toggle
+					checked={resolved.codeLigatures}
+					label="Code ligatures"
+					onChange={(on) => onSectionChange({ ...appearance, codeLigatures: on })}
+				/>
+			</SettingsRow>
 			<SettingsRow label="Session names in serif" testid="row-session-serif">
 				<Toggle
 					checked={appearance?.sessionNameSerif ?? true}
