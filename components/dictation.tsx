@@ -284,6 +284,12 @@ export type Dictation = {
 export function useDictation({ append }: { append: (text: string) => void }): Dictation {
 	const { getLanguage } = useDictationLanguage();
 	const [phase, setPhase] = useState<DictationPhase>("idle");
+	/** Socket handlers outlive the render that made them: they read the live phase here. */
+	const phaseRef = useRef<DictationPhase>("idle");
+	const moveTo = useCallback((next: DictationPhase) => {
+		phaseRef.current = next;
+		setPhase(next);
+	}, []);
 	const [error, setError] = useState<string | null>(null);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
@@ -355,7 +361,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				ws.close();
 			} catch {}
 		}
-		setPhase("idle");
+		moveTo("idle");
 		// The finish() waiters ride until NOW — post-flush, post-teardown:
 		// a submit path resuming after `await finishDictation()` reads the
 		// target field with the dictated tail already in it.
@@ -363,7 +369,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// Pre-mint for the next run (mitigation D) — best-effort; a keyless
 		// page just doesn't warm.
 		if (warmNext) warmTokens.refresh();
-	}, []);
+	}, [moveTo]);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
@@ -381,7 +387,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				// faster-than-realtime sends.
 				for (const frame of pendingRef.current) ws.send(frame);
 				pendingRef.current = [];
-				setPhase("recording");
+				moveTo("recording");
 			});
 			ws.addEventListener("message", (ev) => {
 				if (gen !== genRef.current) return;
@@ -401,9 +407,11 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 			});
 			ws.addEventListener("close", (ev) => {
 				if (gen !== genRef.current) return;
-				if (ev.code === 1000) {
+				if (ev.code === 1000 || phaseRef.current === "stopping") {
 					// Our own CloseStream landing: finalize now — the stop path's
-					// safety net stays as the no-close backstop only.
+					// safety net stays as the no-close backstop only. Any close
+					// after Stop ends the run too: a reconnect would flip the
+					// phase back to "recording" with the mic already off.
 					cleanup();
 					return;
 				}
@@ -427,13 +435,13 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 				}
 			});
 		},
-		[cleanup],
+		[cleanup, moveTo],
 	);
 
 	const start = useCallback(async () => {
 		setDictationActive(true);
 		setError(null);
-		setPhase("connecting");
+		moveTo("connecting");
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
@@ -525,12 +533,12 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
 		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getLanguage]);
+	}, [openSocket, cleanup, getLanguage, moveTo]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
 		if (phase !== "recording" && phase !== "connecting") return;
-		setPhase("stopping");
+		moveTo("stopping");
 
 		// Mic dies FIRST — no more audio enqueues (dictate pattern). The
 		// per-run nodes die with it; the AudioContext stays (mitigation C).
@@ -557,7 +565,7 @@ export function useDictation({ append }: { append: (text: string) => void }): Di
 		} else {
 			cleanup();
 		}
-	}, [phase, cleanup]);
+	}, [phase, cleanup, moveTo]);
 
 	const cancel = useCallback(() => {
 		if (phase === "idle") return;
