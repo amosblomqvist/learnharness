@@ -684,8 +684,8 @@ export function danglingQuestionOf(
  * draft/reset key; this never changes stored ids or the answer wire. */
 export function pendingQuestionOf(messages: readonly LhMessage[]): PendingQuestion | null {
 	// turn_end includes the temporary questionResult acknowledgement. The
-	// view ignores it too: it is NOT the learner's answer. Exclude it only
-	// from client authority, leaving persisted/server result policy intact.
+	// view ignores it too: it is NOT the learner's answer. Only the client
+	// tail carries it, so persisted/server result policy stays intact.
 	const question = questionCallsOf(messages.filter(message => !isLiveQuestionPlaceholder(message))).find(call => call.status === "answerable");
 	if (!question) return null;
 	let occurrences = 0;
@@ -707,7 +707,7 @@ export function pendingQuestionOf(messages: readonly LhMessage[]): PendingQuesti
 
 /** Only the transient c_ result with the questionResult contract qualifies.
  * Real answers have details; errors/aborts remain resolving results. A saved
- * null result is not reinterpreted by this client-only compatibility seam. */
+ * null result is not reinterpreted: only the client tail holds c_ ids. */
 function isLiveQuestionPlaceholder(message: LhMessage): boolean {
 	return message.role === "toolResult" && message.id.startsWith("c_") &&
 		!message.isError && message.details === null &&
@@ -745,9 +745,10 @@ export type QuestionState = "none" | "answerable" | "streaming" | "unusable";
 
 /** One answer to "is there a question?" for every reader. Background wakes
  * must still wait for an explicit learner action when a question is unusable:
- * releasing the composer is not permission to retry. Hold while not "none". */
+ * releasing the composer is not permission to retry. Hold while not "none".
+ * The live placeholder is no answer here either; server lists never hold one. */
 export function questionStateOf(messages: readonly LhMessage[]): QuestionState {
-	const calls = questionCallsOf(messages);
+	const calls = questionCallsOf(messages.filter(message => !isLiveQuestionPlaceholder(message)));
 	if (calls.some(call => call.status === "answerable")) return "answerable";
 	if (calls.some(call => call.status === "streaming")) return "streaming";
 	return calls.length > 0 ? "unusable" : "none";
