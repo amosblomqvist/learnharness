@@ -44,7 +44,7 @@ function createChat(title: string, kind?: Exclude<ChatKind, "teach">): ChatRecor
 		messages: [],
 		// Practice/lesson sessions carry the marker; teach stays ABSENT
 		// (absence reads as teach — pre-practice records never migrate).
-		...(kind !== undefined && kind !== "teach" ? { kind } : {}),
+		...(kind !== undefined ? { kind } : {}),
 	};
 	fs.mkdirSync(PATHS.chats, { recursive: true });
 	writeChat(record);

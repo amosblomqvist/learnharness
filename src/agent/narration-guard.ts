@@ -21,7 +21,9 @@ export function narrationGuardApplies(
 	model: { provider: string; id: string },
 	toolsOverridden: boolean,
 ): boolean {
-	return kind === "teacher" && sendToUserApplies(kind, model, toolsOverridden);
+	// Lesson is a teaching-side agent (exposition-first documents) — the
+	// same Claude delivery guard as the teacher's applies.
+	return (kind === "teacher" || kind === "lesson") && sendToUserApplies(kind, model, toolsOverridden);
 }
 
 export function isNarrationBlock(block: { type: string; thinkingSignature?: string }): boolean {
