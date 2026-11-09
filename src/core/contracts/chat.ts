@@ -60,6 +60,28 @@ export interface ChatRecord {
 	 *  (the downgrade scenario) is REFUSED on read: a read-modify-write
 	 *  store must never rewrite what it doesn't understand. */
 	version?: number;
+	/** Session references (issue #63): an optional grounding shelf the user
+	 *  adds/removes during the session's life. Additive and absent on older
+	 *  records (absence = none). NOT notes-import and NOT curriculum
+	 *  definition — a reference only grounds the agents' answers (the
+	 *  per-turn prompt segment, src/agent/prompt-segments.ts); nothing is
+	 *  imported into the graph and nothing shapes the plan. */
+	references?: SessionReference[];
+}
+
+/** One shelf entry (issue #63): a local file path or an http(s) URL the
+ *  agents are told to consult. Written replace-whole by
+ *  PUT /api/chats/[id]/references (the per-chat settings route's
+ *  convention); the id is the stable removal key, not a graph identity. */
+export interface SessionReference {
+	id: string;
+	kind: "file" | "url";
+	/** kind "file": a local path (admitted under the file-access guards at
+	 *  add time and re-checked per read). kind "url": an http(s) URL. */
+	value: string;
+	/** Optional display label; absent = derived at render. */
+	name?: string;
+	addedAt: string;
 }
 
 /** The chat record format this build writes and understands. */

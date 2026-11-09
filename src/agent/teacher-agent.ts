@@ -5,7 +5,7 @@ import { providerEventObserver } from "./provider-events.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import { PATHS } from "../../config.ts";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
-import { effectivePromptSegments } from "./prompt-segments.ts";
+import { effectivePromptSegments, sessionReferencesSegment } from "./prompt-segments.ts";
 import {
 	askUserQuestionTool,
 	createProberTools,
@@ -22,6 +22,7 @@ import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
+import type { SessionReference } from "../core/contracts.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
@@ -126,10 +127,17 @@ export interface AgentBuildOptions {
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
-	 *  (pre-normalization) append to data/debug/provider-events/
-	 *  <chatId>.jsonl via providerEventObserver — the GLM-truncation /
-	 *  DeepSeek-id incident layer. Absent or env-off → no observer. */
+	 * (pre-normalization) append to data/debug/provider-events/
+	 * <chatId>.jsonl via providerEventObserver — the GLM-truncation /
+	 * DeepSeek-id incident layer. Absent or env-off → no observer. */
 	chatId?: string;
+	/** The session's reference shelf (issue #63), read fresh from the record
+	 *  per turn. Non-empty ⇒ a grounding segment (prompt-segments.ts
+	 *  sessionReferencesSegment) composes after the static prompt — SAME
+	 *  wording for prober, teacher, and practice. Absent/empty ⇒ nothing
+	 *  (byte-identical composition; agents are stateless per turn, so a
+	 *  shelf change lands on the next turn by construction). */
+	references?: readonly SessionReference[];
 }
 
 /**
@@ -187,7 +195,12 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const composedPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
-	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
+	let systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
+	// Session references (issue #63): the shelf's grounding segment rides as
+	// a trailing segment when present — every agent kind, appended AFTER the
+	// static doctrine so the (cacheable) prefix is unchanged without it.
+	const referencesSegment = sessionReferencesSegment(opts.references ?? []);
+	if (referencesSegment) systemPrompt = `${systemPrompt}\n\n---\n\n${referencesSegment}`;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).

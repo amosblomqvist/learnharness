@@ -31,6 +31,7 @@ import fs from "node:fs";
 import path from "node:path";
 import { PATHS, PROMPTS_OVERRIDE_DIR } from "../../config.ts";
 import { FRAGMENT_RE, isValidSegmentPath, type PromptAgent, type PromptSegmentInfo } from "../core/prompt-segments.ts";
+import type { SessionReference } from "../core/contracts.ts";
 
 const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
 
@@ -131,4 +132,34 @@ export function allSegmentPaths(): string[] {
 		for (const segment of listSourceSegments(agent)) paths.add(segment.path);
 	}
 	return [...paths].sort();
+}
+
+// ─── Session references (issue #63) ──────────────────────────────────────────
+
+/** The per-session grounding shelf's prompt segment (issue #63) — a DYNAMIC
+ *  segment, unlike the static-file segments above: composed per turn from
+ *  ChatRecord.references and appended to every agent's instructions (see
+ *  teacher-agent.ts baseAgentOptions) exactly when the shelf is non-empty.
+ *
+ *  Honest about the toolset (the investigation record, 2026-11-09): the
+ *  conversation agents have NO direct web_fetch — web_fetch belongs to the
+ *  researcher sub-agent (src/agent/tools/web.ts), reachable only through
+ *  the async research dispatch, whose input is a question the URL rides
+ *  in. The wording says so instead of pretending a fetch tool exists.
+ *  File values point IN PLACE (the path-attachment doctrine: no upload,
+ *  no copy) — the read tool for text/images, the pdf dispatch for PDFs,
+ *  all under the ordinary file-access guards. */
+export function sessionReferencesSegment(references: readonly SessionReference[]): string | null {
+	if (references.length === 0) return null;
+	const lines = references.map((reference) => {
+		const label = reference.name ? `${reference.name} — ${reference.value}` : reference.value;
+		return reference.kind === "file"
+			? `- ${label} (use the read tool for text and image files; use the pdf tool for PDFs)`
+			: `- ${label} (you have no direct fetch tool: dispatch the research tool with a question about this page — the researcher can fetch it, and fetching needs no search key)`;
+	});
+	return [
+		"Reference materials for this session (consult them when precision matters; cite the source when you use them):",
+		...lines,
+		"These ground your explanations and problems in the learner's chosen sources; the learner's goal still sets the direction. Ordinary file-access guards apply to file reads.",
+	].join("\n");
 }
