@@ -211,6 +211,7 @@ export function SettingsDialogBody({
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (e.key === "Escape") {
+				if (e.target instanceof Element && e.target.closest("[data-prompt-editor-dialog], [data-prompt-view-dialog], [data-prompt-comparison-dialog]")) return;
 				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
 				// at the document level — the window chain (dictation →
 				// abort) must not also act. One Esc, one action.

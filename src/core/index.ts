@@ -39,6 +39,7 @@ export * from "./plan-tree.ts";
 export * from "./phases.ts";
 export * from "./pending.ts";
 export * from "./prompt-editor.ts";
+export * from "./prompt-diff.ts";
 export * from "./math-delims.ts";
 // Wave B (owner-approved 2026-09-26): the native record (LhMessage), the
 // and the input-events contract — all

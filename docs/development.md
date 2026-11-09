@@ -26,6 +26,7 @@ npm start              # serve the production build with Next
 Prompt defaults ship in `src/agent/prompts/`. Settings → Agent provides five prompt editors: Common, Prober, Teacher, Practice, and Prober/Teacher shared. The app composes each role prompt from its role text, applicable shared text, and Common last. Background-worker prompts and tool descriptions stay separate.
 
 Edits save after a short pause. Distinct custom versions stay in local history until the user deletes them. The history view supports comparison with the current editor, restore, selected deletion, month deletion, and clear all. Reset to shipped default changes the active text and keeps history.
+The raw editor shows source line numbers. History comparisons support unified and side-by-side layouts, with changed words highlighted in both.
 
 User edits and history live in `<data root>/prompts/editor.json`. The app migrates changed legacy prompt fragments once and leaves the old files in place.
 
