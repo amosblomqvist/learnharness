@@ -25,6 +25,15 @@ Choose **Practice** for problems rather than a lesson. Start from selected graph
 
 Sessions are saved locally, including earlier messages when context is compacted. The [keyboard guide](keyboard.md) covers submission, focus, question controls, and cancellation.
 
+## Ask an aside
+
+**Ask aside**, next to the composer, opens a small side thread for quick clarifications — checking a definition, a notation, or your own understanding — without putting them into the lesson. Answers are short and direct; the tutoring agent never sees the thread, the plan is untouched, and the questions never count against the lesson's context.
+
+- One question at a time; the reply arrives in the panel when it completes.
+- Asides wait while a reply is being written — ask after the current reply.
+- The side agent can read your local files (read-only) when the question is about them, under the same file-access guards as the lesson.
+- The thread is saved with the session and survives reloads. Its model usage appears in Session stats, but not in the lesson transcript.
+
 ## Dictation
 
 1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).

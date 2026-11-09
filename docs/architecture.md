@@ -47,6 +47,8 @@ Pi seeds the system prompt/tools at construction; that synthetic system message 
 
 Settlement persists new native messages, plan snapshots, and usage, including partial output on abort. Failed input writes refuse inference; failed reply writes are surfaced before the terminal and do not masquerade as successful empty turns. Cleanup releases liveness. A memory-only failure notice can inform reattaching views without fabricating saved transcript content.
 
+**Aside threads** (issue #16): quick clarification Q&As live in `ChatRecord.asides` — a separate thread, never `messages`. [`server/asides.ts`](../src/server/asides.ts) answers one synchronously (`POST /api/chats/[id]/asides`) with a one-shot sub-agent over a bounded snapshot (the last 12 user-facing messages plus the current plan — [`core/asides.ts`](../src/core/asides.ts)), using the chat's conversation engine and read-only file tools. Because every model-facing and accounting fold — `toLlmMessages`, compaction's estimates and summaries — operates on the record's native `messages` only, asides are excluded from main model context and from compaction accounting by construction; aside usage rides the turns log keyed by the thread id. The route refuses (409) while a main turn holds liveness; a main turn does not refuse during an aside, since aside persistence replaces only the `asides` field over a fresh record read.
+
 ### Streaming and recovery
 
 [`pi/ui-stream.ts`](../src/server/pi/ui-stream.ts) emits native agent events. Partial-message updates replace a slot; they are not accumulated text deltas. Replay retains settled events and the latest in-flight updates, with coalesced live fan-out. Tool IDs are uniquified against history so persistence, answer routing, and provider context agree.
@@ -134,7 +136,7 @@ Extraction is the construction writer, not the only mutation: source/session/nod
 
 | Data | Files |
 | --- | --- |
-| Conversations, plans, usage, image snapshots | `chats/*.json` |
+| Conversations, plans, usage, image snapshots, aside threads | `chats/*.json` |
 | Worker computation and delivery obligations | `jobs/*.json` |
 | Propositions, chains, checkpoints, coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
 | Sources, organization, positions, render preferences | JSON maps under `graph/` |

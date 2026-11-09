@@ -26,6 +26,7 @@ import type {
 	SessionCheckpoint,
 	TurnUsage,
 	NotesSource,
+	AsideThread,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
 
@@ -47,6 +48,11 @@ export interface ChatStore {
 	saveImageSnapshot(id: string, snapshotId: string, image: ImageSnapshot): void;
 	/** Persist the session plan tree (plan tools call this in execute). */
 	saveTree(id: string, tree: PlanTree): void;
+	/** Persist the record's aside threads (issue #16) — replace-whole on
+	 *  the asides field over a FRESH record read (the saveTree discipline:
+	 *  concurrent message writes survive; updatedAt deliberately not
+	 *  bumped — an aside is not main conversation activity). */
+	saveAsides(id: string, asides: AsideThread[]): void;
 	/** Append one usage entry to the record's turn log (the money channel,
 	 * 2026-09): idempotent per turn id — each request carries its own, so
 	 * a turn persisted twice appends once while continuation turns (which

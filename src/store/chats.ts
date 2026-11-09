@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { AsideThread, ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -86,7 +86,7 @@ function listChats(): ChatSummary[] {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, asides: _asides, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -226,6 +226,21 @@ function saveTree(id: string, tree: PlanTree): void {
 	writeChat(record);
 }
 
+/** Persist the record's aside threads (issue #16). Replace-whole on the
+ *  asides field over a FRESH record read — the saveTree/saveSettings
+ *  discipline: a concurrent messages write (a settling turn) survives,
+ *  because this write swaps only its own field. SILENT by the events law
+ *  (the SILENCE LAW comment at createChat): the aside route emits
+ *  record-changed after its own write; updatedAt deliberately not bumped
+ *  — an aside is side-channel activity, not main conversation flow, and
+ *  sidebar order must not churn on it. */
+function saveAsides(id: string, asides: AsideThread[]): void {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	record.asides = asides;
+	writeChat(record);
+}
+
 export const chatStore: ChatStore = {
 	createChat,
 	getChat,
@@ -233,6 +248,7 @@ export const chatStore: ChatStore = {
 	saveMessages,
 	saveImageSnapshot,
 	saveTree,
+	saveAsides,
 	saveSettings,
 	renameChat,
 	deleteChat,

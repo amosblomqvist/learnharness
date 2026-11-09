@@ -29,6 +29,9 @@ export default async function ChatPage({
 				// derived app-side (core/view.ts projectView; GET serves the same
 				// native messages).
 				initialMessages={chat.messages}
+			// Aside threads (issue #16): the side panel's seed; the panel is
+			// refreshed from the record on every record-changed notification.
+			initialAsides={chat.asides ?? []}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={slotsConfigured(record?.models)}
 			initialPrompt={prompt}

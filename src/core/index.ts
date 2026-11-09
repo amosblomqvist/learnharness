@@ -45,6 +45,10 @@ export * from "./math-delims.ts";
 // pure logic, browser-safe.
 export * from "./native-messages.ts";
 export * from "./compaction.ts";
+// Aside threads (issue #16): the side channel's pure folds — bounded
+// session excerpt + prompt builder. Browser-safe (the panel renders the
+// record's asides; the server answers them).
+export * from "./asides.ts";
 export * from "./input-events.ts";
 export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
 export type { FilePathPart } from "./file-paths.ts";

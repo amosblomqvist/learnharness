@@ -43,6 +43,7 @@ import {
 	messageAnchorId,
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
+	type AsideThread,
 	type ChatInput,
 	type ChatSettings,
 	type LhMessage,
@@ -86,6 +87,7 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { AsidePanel } from "@/components/aside-panel";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -222,10 +224,14 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	initialAsides = [],
 }: {
 	chatId: string;
 	title: string;
 	initialMessages: LhMessage[];
+	/** The record's aside threads (issue #16) — seed for the side panel;
+	 *  refreshed by syncFromServer on every record-changed notification. */
+	initialAsides?: AsideThread[];
 	/** Memory-only settlement notice supplied on reopening. */
 	initialError?: string;
 	/** The session kind (practice sessions, owner 2026-10-04): practice
@@ -274,6 +280,47 @@ export function Chat({
 	// the composer, shows the pre-first-chunk shimmer, and drives the 1500ms
 	// record poll that adopts at settle if the stream can't attach.
 	const [turnInFlight, setTurnInFlight] = useState(initiallyInFlight ?? false);
+
+	// ── Aside threads (issue #16): the record's side channel ──
+	// Seeded by the page render, refreshed by syncFromServer (the
+	// record-changed SSE carries another view's ask), and appended locally
+	// by our own ask. NEVER touches the transcript: the panel renders this
+	// state, not messages.
+	const [asides, setAsides] = useState<AsideThread[]>(initialAsides);
+	const [asideAsking, setAsideAsking] = useState(false);
+	const [asideError, setAsideError] = useState<string | null>(null);
+	const askAsideSubmit = useCallback(
+		async (text: string) => {
+			setAsideError(null);
+			setAsideAsking(true);
+			try {
+				const res = await fetch(`/api/chats/${chatId}/asides`, {
+					method: "POST",
+					headers: { "Content-Type": "application/json" },
+					body: JSON.stringify({ text }),
+				});
+				if (!res.ok) {
+					const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+					throw new Error(
+						typeof body?.error === "string" && body.error ? body.error : `The aside failed (${res.status}).`,
+					);
+				}
+				const body = (await res.json()) as { thread?: AsideThread };
+				const thread = body.thread;
+				if (thread) {
+					setAsides((prev) => {
+						const idx = prev.findIndex((t) => t.id === thread.id);
+						return idx === -1 ? [...prev, thread] : prev.with(idx, thread);
+					});
+				}
+			} catch (err) {
+				setAsideError((err as Error).message);
+			} finally {
+				setAsideAsking(false);
+			}
+		},
+		[chatId],
+	);
 
 	// Session title: click-to-rename (owner, 2026-09-17). Clicking the header
 	// title opens edit mode with everything selected — typing replaces, arrows
@@ -789,9 +836,12 @@ export function Chat({
 	const syncFromServer = useCallback(async () => {
 		const res = await fetch(`/api/chats/${chatId}`);
 		if (!res.ok) return;
-		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[]; pricing?: SessionPricing; turnError?: string };
+		const record = (await res.json()) as { messages?: LhMessage[]; turns?: TurnUsage[]; pricing?: SessionPricing; turnError?: string; asides?: AsideThread[] };
 		if (Array.isArray(record.turns)) setTurns(record.turns);
 		setPricing(record.pricing);
+		// Aside threads (issue #16): the same canonical record carries them;
+		// the panel's state stays current across views and reloads.
+		if (Array.isArray(record.asides)) setAsides(record.asides);
 		if (!Array.isArray(record.messages)) return;
 		setMessages(record.messages, record.turnError);
 		// The continuation seam (contracts.ts protocol §4): a job result
@@ -1715,6 +1765,15 @@ export function Chat({
 					dictationSlot={<DictationBar dictation={dictation} />}
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
+					asideSlot={
+						<AsidePanel
+							thread={asides[asides.length - 1] ?? null}
+							busy={busy}
+							asking={asideAsking}
+							error={asideError}
+							onAsk={(t) => void askAsideSubmit(t)}
+						/>
+					}
 					setupCta={
 						zeroKeys ? (
 							<ZeroKeysPill onOpen={() => setSetupOpen(true)} />
@@ -1952,6 +2011,7 @@ function DockOverlay({
 	dictationCancel,
 	setupCta,
 	queuedSteers,
+	asideSlot,
 }: {
 	pending: ReturnType<typeof pendingQuestionOf>;
 	initialQuestionDraft?: QuestionFormDraft;
@@ -2001,6 +2061,9 @@ function DockOverlay({
 	/** The queued-steer indicator's lines (composer steering, 2026-10-03):
 	 *  already filtered by visibleQueuedSteers — only undrained steers. */
 	queuedSteers: QueuedSteerLine[];
+	/** The aside panel (issue #16): rendered above the shell, inside the
+	 *  measured body — its height rides the dock's existing reserve. */
+	asideSlot?: React.ReactNode;
 	/** The persistent setup CTA (BYOK, owner 2026-09-22): the same pill
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
@@ -2357,6 +2420,12 @@ function DockOverlay({
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>
 					{setupCta}
+					{/* The aside panel (issue #16): the side-question thread —
+					    rendered above the shell like the queued-steer lines,
+					    inside the measured body so its open/closed height rides
+					    the dock's existing reserve machinery. Muted by design:
+					    a secondary channel, never the lesson. */}
+					{asideSlot}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet
 					    one-liners above the shell - right-aligned to where its corner
 					    rounding starts, truncated, no background, no container. A
