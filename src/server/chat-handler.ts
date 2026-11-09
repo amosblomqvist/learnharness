@@ -1,5 +1,6 @@
 import type { Usage } from "@earendil-works/pi-ai";
 import {
+	createLessonAgent,
 	createPracticeAgent,
 	createProberAgent,
 	createTeacherAgent,
@@ -289,12 +290,12 @@ export async function handleChatInput(
 			engine: piEngineForSpec(conversation, true, undefined, retentionForSlot("strong")),
 			canStart: () => connectionBackgroundAllowed(conversation.provider),
 			modelId: modelIdForCompaction,
-			kind: record.kind === "practice" ? "practice" : hasProbeDone(record.messages) ? "teach" : "probe",
+			kind: record.kind === "practice" ? "practice" : record.kind === "lesson" ? "lesson" : hasProbeDone(record.messages) ? "teach" : "probe",
 			thresholdTokens: effectiveThresholdTokens(
 				effective.compaction?.thresholdTokens,
 				catalogContextLimits().get(modelIdForCompaction),
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : record.kind === "lesson" ? "lesson" : "teacher").length / 4),
 		},
 		chatId,
 	);
@@ -466,6 +467,13 @@ export async function handleChatInput(
 	// split, no plan/question/job tools; the whole registry is
 	// problem + conclude. buildAgent stays honored (the test seam is
 	// uniform across kinds).
+	// LESSON BRANCH (lesson mode): a kind:"lesson" session builds the
+	// lesson agent from turn 1 — no prober→teacher split either, but the
+	// registry is the teacher's verbatim (quizzing per mechanic, ask, fs,
+	// show_image, plan_init, jobs); only the doctrine differs (section
+	// documents + one exit ticket each). Selected BEFORE the
+	// hasProbeDone branch — a lesson never runs a prober, so probe_done
+	// is never required.
 	const constructed: TeachingAgent = buildAgent
 		? buildAgent({ ...agentOpts, teaching })
 		: record.kind === "practice"
@@ -489,6 +497,19 @@ export async function handleChatInput(
 							searchAvailable,
 						},
 						...(graphToolsEnabled(effective) ? { graph: { chatStore: stores.chatStore, graphStore: stores.graphStore } } : {}),
+					},
+					agentOpts,
+				)
+			: record.kind === "lesson"
+			? createLessonAgent(
+					{
+						chatId,
+						chatStore: stores.chatStore,
+						jobStore: stores.jobStore,
+						spawn: (job, input) => void jobRunner.runJob(job.id, input),
+						// Same registry-drop signal as the teacher's: no live
+						// engine = no research tool in the lesson agent's registry.
+						searchAvailable,
 					},
 					agentOpts,
 				)
@@ -607,7 +628,9 @@ export async function handleChatInput(
 				// extraction, its auditor — dies with the master switch.
 				// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
 				// no extraction, no graph, no coverage (v1: the session itself
-				// is the deliverable).
+				// is the deliverable). LESSON prose EXTRACTS like teach prose
+				// (the section documents are the mode's primary content) —
+				// kind "lesson" passes this gate unchanged.
 				if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && extractionEnabled(effective.graph)) {
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares
@@ -664,12 +687,12 @@ export async function handleChatInput(
 							engine: kickEngine,
 							canStart: () => connectionBackgroundAllowed(spec.provider),
 							modelId: kickModelId,
-							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
+							kind: freshRecord.kind === "practice" ? "practice" : freshRecord.kind === "lesson" ? "lesson" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
 							thresholdTokens: effectiveThresholdTokens(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : freshRecord.kind === "lesson" ? "lesson" : "teacher").length / 4),
 						};
 					}, chatId);
 			},
