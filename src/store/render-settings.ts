@@ -16,14 +16,17 @@ import { DEFAULT_RENDER_SETTINGS, sanitizeRenderSettings, type GraphRenderSettin
 import { assertGraphFormat, ensureGraphFormat } from "./graph-format.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
 
-/** The persisted settings, or null when no file exists yet (first boot). */
+/** The persisted settings, or null when no file exists yet (first boot).
+ *  Any other read error throws: null would let the next save overwrite
+ *  settings that are still on disk. */
 export function readRenderSettings(): GraphRenderSettings | null {
 	assertGraphFormat(); // honest refusal on a newer-stamped data dir
 	let raw: string;
 	try {
 		raw = fs.readFileSync(RENDER_SETTINGS_FILE, "utf-8");
-	} catch {
-		return null; // never booted / unreadable → caller uses defaults
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; // never booted → caller uses defaults
+		throw error;
 	}
 	try {
 		return sanitizeRenderSettings(JSON.parse(raw));
