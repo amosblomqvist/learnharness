@@ -15,6 +15,7 @@ delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
 await fs.writeFile(process.env.LH_AUTH_FILE, "{}", { mode: 0o600 });
 const require = createRequire(import.meta.url);
 const { SCOPES } = require("../electron/chatgpt.cjs");
+const { antigravityProvider } = require("../electron/antigravity-provider.cjs");
 const { createWebSubscriptionOwner, webSubscriptionOwner, webSubscriptionsEnabled } = await import("../src/server/web-subscriptions.ts");
 const { subscriptionControlsResponse, subscriptionBrowserResponse } = await import("../src/server/web-subscription-http.ts");
 const chat = await import("../src/agent/chatgpt-bridge.ts");
@@ -28,9 +29,9 @@ globalThis.fetch = async (input) => {
 	return Response.json({ models: [{ slug: model.id, display_name: "Fixture ChatGPT", visibility: "list" }] });
 };
 const copilot = githubCopilotProvider().getModels()[0]!;
-const credentials = (id: string): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires: Date.now() + 3600000, ...(id === "github-copilot" ? { availableModelIds: [copilot.id] } : {}) });
+const credentials = (id: string): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : id === "antigravity" ? "fixture-antigravity-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires: Date.now() + 3600000, ...(id === "github-copilot" ? { availableModelIds: [copilot.id] } : id === "antigravity" ? { projectId: "fixture-project" } : {}) });
 await fs.writeFile(path.join(directory, "chatgpt-credentials.json"), JSON.stringify({ version: 1, hostId: "fixture-host", allowBackgroundUse: true, activeId: "fixture-account", registrations: [{ id: "fixture-account", clientId: "oaiapp_fixture", issuer: "https://auth.openai.com", subject: "fixture-subject", email: "fixture@example.invalid", tokens: { accessToken: "fixture-chatgpt-access", refreshToken: "fixture-chatgpt-refresh", idToken: "fixture-id-token", scopes: SCOPES, expiresAt: Date.now() + 3600000 } }] }), { mode: 0o600 });
-for (const id of ["github-copilot", "xai"]) await fs.writeFile(path.join(directory, `${id}-credentials.json`), JSON.stringify({ version: 1, allowBackgroundUse: true, connectionId: "00000000-0000-4000-8000-000000000001", credential: credentials(id) }), { mode: 0o600 });
+for (const id of ["github-copilot", "xai", "antigravity"]) await fs.writeFile(path.join(directory, `${id}-credentials.json`), JSON.stringify({ version: 1, allowBackgroundUse: true, connectionId: "00000000-0000-4000-8000-000000000001", credential: credentials(id) }), { mode: 0o600 });
 function request(command?: Record<string, unknown>, origin = "http://192.168.1.10:3000") {
 	return new Request(`${origin}/api/subscriptions`, { method: command ? "POST" : "GET", headers: { host: new URL(origin).host, origin, "sec-fetch-site": "same-origin", "x-learnharness-subscriptions": "1", "content-type": "application/json" }, ...(command ? { body: JSON.stringify(command) } : {}) });
 }
@@ -38,7 +39,7 @@ after(async () => { webSubscriptionOwner().close(); globalThis.fetch = originalF
 
 test("ordinary web restores configured sibling credentials, private runtime leases work for LAN-owned requests", async () => {
 	await refreshConnectionCatalog();
-	assert(chat.chatGPTConnected()); assert(native.nativeSubscriptionConnected("github-copilot")); assert(native.nativeSubscriptionConnected("xai"));
+	assert(chat.chatGPTConnected()); assert(native.nativeSubscriptionConnected("github-copilot")); assert(native.nativeSubscriptionConnected("xai")); assert(native.nativeSubscriptionConnected("antigravity"));
 	assert.equal((await chat.chatGPTLease(chat.chatGPTScope(model.id), false)).accessToken, "fixture-chatgpt-access");
 	const xaiModel = native.nativeSubscriptionModels().find((entry) => entry.provider === "xai-subscription")!;
 	assert.equal((await native.subscriptionLease(native.subscriptionScope("xai", xaiModel.id), false)).apiKey, "fixture-xai-access");
@@ -90,10 +91,10 @@ test("HTTP controls reject cross-origin, simple-form and private credential oper
 
 function fakeSDK(login: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>) {
 	const factory = (id: string) => {
-		const provider = id === "xai" ? xaiProvider() : githubCopilotProvider();
+		const provider = id === "xai" ? xaiProvider() : id === "antigravity" ? antigravityProvider({ disableLoopback: true }) : githubCopilotProvider();
 		return { ...provider, auth: { oauth: { ...provider.auth.oauth!, login: (interaction: ProviderAuthInteraction) => login(id, interaction), refresh: async () => credentials(id) } } };
 	};
-	return { createModels, githubCopilotProvider: () => factory("github-copilot"), xaiProvider: () => factory("xai") };
+	return { createModels, githubCopilotProvider: () => factory("github-copilot"), xaiProvider: () => factory("xai"), antigravityProvider: () => factory("antigravity") };
 }
 test("device browser actions preserve complete URLs privately, are origin-bound, one-use and cancellation-bound", async () => {
 	const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "lh-web-action-"));
