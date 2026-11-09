@@ -1663,6 +1663,45 @@ export async function verifyPluginBrowser(url, options = {}) {
 	return evidence;
 }
 
+/** Observe the real Chat shell, including transient inserted/removed preparation UI.
+ * The caller may hold a public interceptor RPC to inspect the pending state; no
+ * app module imports, host mutations or permanent browser globals are needed. */
+export async function observeSilentSubmissionPresentation(page) {
+	const audit = await page.evaluateHandle(() => {
+		const shell = document.querySelector('[data-attachment-composer]');
+		if (!shell) throw new Error("Native submission shell is missing");
+		const violations = [];
+		const inspect = node => {
+			if (!(node instanceof Element)) return;
+			if (/Preparing submission/.test(node.textContent ?? "")) violations.push("preparation label");
+			if (node.parentElement === shell && node.matches('[role="status"]')) violations.push("preparation progress row");
+			if (node.matches('[role="status"]') && [...node.querySelectorAll("button")].some(button => button.textContent.trim() === "Cancel")) violations.push("preparation Cancel");
+		};
+		const record = records => {
+			for (const change of records) {
+				if (change.type === "characterData") inspect(change.target.parentElement);
+				for (const node of change.addedNodes) inspect(node);
+			}
+		};
+		inspect(shell);
+		const observer = new MutationObserver(record);
+		observer.observe(shell, { childList: true, subtree: true, characterData: true });
+		return { shell, violations, observer, record, height: shell.getBoundingClientRect().height };
+	});
+	return async ({ unchangedHeight = false } = {}) => {
+		try {
+			const result = await audit.evaluate(state => {
+				state.record(state.observer.takeRecords()); state.observer.disconnect();
+				return { violations: state.violations, beforeHeight: state.height, afterHeight: state.shell.getBoundingClientRect().height, connected: state.shell.isConnected };
+			});
+			assert.equal(result.connected, true, "Preparation must retain the actual native shell");
+			assert.deepEqual(result.violations, [], "Preparation must not insert a status label or Cancel control, even transiently");
+			if (unchangedHeight) assert.ok(Math.abs(result.beforeHeight - result.afterHeight) <= 1, `Silent pending preparation must not expand the shell: ${JSON.stringify(result)}`);
+			return result;
+		} finally { await audit.dispose(); }
+	};
+}
+
 /** Bounded, independent native-session extension proof. All plugin state is
  * observed through its public RPC; the host is driven only by native controls.
  * No app module imports, React/store hooks, pending-question seeding or forged
@@ -1810,8 +1849,10 @@ async function verifySessionExtensions({ page, evidence, admissionCall: call, op
 	await page.waitForFunction(selector => !document.querySelector(selector)?.disabled, {}, send);
 	const postsBeforeFailure = evidence.requests.filter(entry => entry.method === "POST" && new URL(entry.url).pathname === "/api/chat").length;
 	await page.locator(`${composer} [contenteditable="true"]`).fill("Retained native draft after hook failure");
+	const finishPresentationAudit = await observeSilentSubmissionPresentation(page);
 	await page.locator(send).click();
 	await page.waitForFunction(() => document.querySelector("main")?.textContent.includes("session fixture fail closed"));
+	evidence.sessionExtensions.push({ label: "silent preparation retains visible errors", ...await finishPresentationAudit() });
 	assert.equal(await page.$eval(`${composer} [contenteditable="true"]`, input => input.textContent), "Retained native draft after hook failure");
 	assert.equal(evidence.requests.filter(entry => entry.method === "POST" && new URL(entry.url).pathname === "/api/chat").length, postsBeforeFailure, "Failed interception must stop before native POST");
 	let state = await status(); assert.equal(accepted(state).length, 0); assert.equal(hooks(state).length, 1);

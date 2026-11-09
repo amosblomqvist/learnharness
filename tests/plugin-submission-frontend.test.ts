@@ -24,6 +24,65 @@ test("reserves before dictation finalization, captures final input/history and n
 	assert.equal(calls, 1); attempt.cancel(); assert.equal(runner.occupied, false);
 });
 
+test("no hooks skip history access but retain payload validation, detachment, reservation and acknowledgment", async () => {
+	const runner = new PluginSubmissionRunner(); let historyReads = 0;
+	const history = [{ id: "u", role: "user", timestamp: 0, get content() { historyReads++; throw new Error("Unused history was copied"); } }] as unknown as LhMessage[];
+	const attempt = runner.begin(target, [], () => true)!;
+	assert.notEqual(attempt.target, target); assert.ok(Object.isFrozen(attempt.target));
+	assert.equal(attempt.target.surfaceTarget, target.surfaceTarget);
+	assert.equal(runner.occupied, true);
+	assert.equal(runner.begin(target, [], () => true), null);
+	const original = { type: "text" as const, content: { text: "kept", images: [] } };
+	const captured = await attempt.finalize(() => original);
+	const prepared = await attempt.prepare(captured, history);
+	assert.ok(prepared && prepared.type === "text");
+	original.content.text = "newer edit";
+	assert.equal(prepared.content.text, "kept"); assert.ok(Object.isFrozen(prepared.content));
+	assert.equal(historyReads, 0);
+	attempt.deliver(); assert.equal(runner.occupied, true); assert.equal(runner.preparing, false);
+	attempt.accepted(); assert.equal(runner.occupied, false);
+	const invalid = runner.begin(target, [], () => true)!;
+	await assert.rejects(invalid.prepare({ ...input, extra: true } as PluginSubmission, history), /Unexpected or missing/);
+	assert.equal(historyReads, 0); invalid.refused();
+	const wrongType = runner.begin(target, [], () => true)!;
+	await assert.rejects(wrongType.prepare({ type: "thinking", content: { text: "wrong", images: [] } }, history), /Submission type cannot change/);
+	wrongType.refused(); assert.equal(runner.occupied, false);
+});
+
+test("no-hook finalization still rejects stale targets and disposal and releases its reservation", async () => {
+	for (const dispose of [false, true]) {
+		const runner = new PluginSubmissionRunner(), done = deferred<void>(); let current = true;
+		const attempt = runner.begin(target, [], () => current)!;
+		const pending = attempt.finalize(async () => { await done.promise; return input; });
+		if (dispose) runner.dispose(); else current = false;
+		done.resolve(); await assert.rejects(pending, { name: "AbortError" });
+		assert.equal(runner.occupied, false);
+	}
+});
+
+test("real hooks receive one complete detached frozen history before the first hook and share its original timing", async () => {
+	const gate = deferred<void>(), entered = deferred<void>(); let reads = 0, calls = 0;
+	const live = [{ type: "text", text: "before" }, { type: "image", mimeType: "image/png", data: "synthetic-original" }];
+	const history = [{ id: "u", role: "user", timestamp: 0, get content() { reads++; return live; } }] as unknown as LhMessage[];
+	let firstHistory: unknown;
+	const first = owner(async (_value, context) => {
+		calls++; assert.equal(reads, 1); firstHistory = context.messages;
+		assert.notEqual(context.messages, history); assert.ok(Object.isFrozen(context.messages));
+		assert.ok(Object.isFrozen(context.messages[0]!.content));
+		entered.resolve(); await gate.promise;
+	});
+	const second = { ...owner((_value, context) => {
+		calls++; assert.equal(context.messages, firstHistory); assert.equal(reads, 1);
+		const saved = context.messages[0]!.content as unknown as typeof live;
+		assert.equal(saved[0]!.text, "before"); assert.equal(saved[1]!.data, "synthetic-original");
+		assert.ok(Object.isFrozen(saved)); assert.ok(Object.isFrozen(saved[1]));
+	}), pluginId: "z-second" };
+	const runner = new PluginSubmissionRunner(), attempt = runner.begin(target, [second, first], () => true)!;
+	const pending = attempt.prepare(input, history); await entered.promise;
+	live[0]!.text = "after"; live[1]!.data = "newer image";
+	gate.resolve(); await pending; assert.equal(calls, 2); assert.equal(reads, 1); attempt.accepted();
+});
+
 test("target change during finalization never captures or intercepts a replacement", async () => {
 	const runner = new PluginSubmissionRunner(), final = deferred<void>(); let current = true, calls = 0;
 	const attempt = runner.begin(target, [owner(() => { calls++; })], () => current)!;

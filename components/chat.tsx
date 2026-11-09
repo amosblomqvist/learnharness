@@ -2043,7 +2043,6 @@ export function Chat({
 					onPreparePluginQuestion={preparePluginQuestion}
 					preparing={submissionRunner.occupied}
 					preparationStatus={<>
-						{submissionRunner.preparing && <div role="status" className="flex items-center justify-between gap-3 px-4 py-2 text-sm">Preparing submission…<Button type="button" variant="ghost" onClick={submissionRunner.cancel}>Cancel</Button></div>}
 						{preparationError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{preparationError}</p>}
 					</>}
 					pluginQuestion={pendingPlugin}

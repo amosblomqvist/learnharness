@@ -116,11 +116,17 @@ and native/custom practice submissions:
    preparation/delivery lease on acknowledgment/refusal, **not** model-stream completion.
    Fresh busy steers may prepare while earlier accepted work streams.
 
-Preparing UI shows `Preparing submission…` / Cancel. Pre-POST cancellation ignores late hook
-results, retains drafts/final dictated text, and works even if a hook ignores its signal.
+Preparation is silent: no progress row, label, spinner or preparation Cancel control is
+rendered. Existing submission-disabled states and preparation errors remain. Internal
+pre-POST cancellation (for example view disposal or interceptor unregistration) ignores late
+hook results, retains drafts/final dictated text, and works even if a hook ignores its signal.
+When no interceptors were captured, no history snapshot is allocated; payload validation,
+target capture, reservation and eligibility checks still run. With interceptors, the complete
+detached/frozen history snapshot is captured before the first hook, at the same preparation
+boundary, and shared by the ordered hooks.
 Failure uses `Could not prepare submission ({plugin name}): {message}. Your input has been kept.`
-Once POST starts, preserve native accepted-delivery/turn-abort semantics; Cancel is no longer
-preparation cancellation. Clear only captured draft revisions at confirmed boundaries;
+Once POST starts, preserve native accepted-delivery/turn-abort semantics; preparation
+cancellation no longer applies. Clear only captured draft revisions at confirmed boundaries;
 newer edits remain. Host never clears plugin-private material: its acceptance observer does.
 
 - Model Retry/Continue, malformed-question retry, control-only Next and silent dismissal
