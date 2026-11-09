@@ -121,7 +121,7 @@ export interface PluginBackendContext {
 	createBackgroundTool<T extends TSchema>(context: PluginToolContext, definition: PluginBackgroundTool<T>): AgentTool<T>;
 	registerInstructions(contribution: PluginInstructions): () => void;
 	registerTools(contribution: PluginTools): () => void;
-	/** Host-owned native probe/teach question tools; no plugin execution/grading hook. */
+	/** Host-owned native probe/teach lifecycle with optional plugin validation and grading. */
 	registerQuestionType<Q extends TSchema, A extends TSchema>(definition: PluginQuestionTypeDefinition<Q, A>): () => void;
 	/** Alternative practice poses share the native active-problem/conclude lifecycle. */
 	registerProblemType<Q extends TSchema, S extends TSchema>(definition: PluginProblemTypeDefinition<Q, S>): () => void;

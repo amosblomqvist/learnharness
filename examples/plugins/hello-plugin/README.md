@@ -1,6 +1,6 @@
 # Hello plugin
 
-Copy this directory into the plugins directory shown in **Settings → Plugins**,
+Copy this directory into the plugins directory shown in **Settings → Community plugins**,
 keeping the `hello-plugin/` folder and its required `dist/manifest.json`. No build is
 needed. Refresh and enable **Hello plugin**. Edit runtime files in `dist/` and restart
 LearnHarness after changing loaded code. Persistent data, if added, belongs in sibling

@@ -1,6 +1,6 @@
 # Managed agent example
 
-Copy this directory into the plugins directory shown in **Settings → Plugins**,
+Copy this directory into the plugins directory shown in **Settings → Community plugins**,
 keeping the `managed-agent/` folder and its required `dist/manifest.json`. No build is
 needed. Refresh and enable **Managed agent example**. Edit runtime files in `dist/`
 and restart LearnHarness after changing loaded code. Preserve sibling `managed-agent/data/`
@@ -28,7 +28,8 @@ and demonstration notes in `data/notes.jsonl`; the host persists plugin-owned ag
 records separately from learning chats. No core learning data or model defaults are
 written. There are no unrelated configurable settings or automatic runs.
 
-Offline example UI/contract checks (no provider requests):
+Maintainer check **from a LearnHarness repository checkout with its dependencies
+installed** (no provider requests; not a command supplied by the downloaded skill):
 
 ```sh
 node --test examples/plugins/example-ui.test.js

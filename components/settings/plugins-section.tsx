@@ -15,11 +15,25 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 	return <SettingsSection title={core ? "Core plugins" : "Community plugins"} testid={core ? "section-core-plugins" : "section-plugins"}>
 		{!core && <>
 		<p className="font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING}</p>
-		<p className="text-xs text-muted-foreground">Plugins are disabled by default. Place a plugin’s built package in its dist/ folder inside the writable plugins directory, then refresh. Optional source files and persistent data/ live alongside dist/.</p>
 		{snapshot.directory && <div><p className="text-xs text-muted-foreground">Plugins directory</p><code className="mt-1 block break-all text-xs select-text">{snapshot.directory}</code></div>}
 		<div><Button variant="outline" size="sm" disabled={!manager || snapshot.refreshing || snapshot.plugins.some(plugin => plugin.busy)} onClick={() => void manager?.refresh()}>
 			{snapshot.refreshing ? "Refreshing…" : "Refresh plugins"}
 		</Button></div>
+		<details data-testid="plugin-install-help" className="text-xs text-muted-foreground">
+			<summary className="cursor-pointer text-foreground">How to install a plugin</summary>
+			<ol className="mt-2 list-decimal space-y-2 pl-5">
+				<li>Place the built package in the writable plugins directory as <code>&lt;plugin-id&gt;/dist/manifest.json</code>, with its bundles and assets inside <code>dist/</code>.</li>
+				<li>Select Refresh plugins, then enable the plugin. New plugins are disabled by default.</li>
+				<li>Restart LearnHarness after changing loaded code. Refresh discovers packages; it does not hot-reload code.</li>
+				<li>Keep persistent <code>data/</code> beside <code>dist/</code> and preserve it when updating. Optional source files also live beside <code>dist/</code>.</li>
+			</ol>
+		</details>
+		<div data-testid="plugin-authoring-help" className="space-y-2 border-t border-border/60 pt-3">
+			<h3 className="text-xs uppercase tracking-widest">Build a plugin</h3>
+			<p className="font-prose text-sm text-muted-foreground">Download the complete authoring skill for your coding agent, including documentation, examples and API types.</p>
+			<Button variant="outline" size="sm" asChild><a href="/plugin-authoring/learnharness-plugins.zip" download={`learnharness-plugins-${process.env.LH_VERSION ?? "authoring"}.zip`} data-testid="download-plugin-authoring">Download authoring skill</a></Button>
+			<p className="text-xs text-muted-foreground">Extract the ZIP and give your coding agent the whole <code>learnharness-plugins/</code> folder. Ask it to read <code>SKILL.md</code>, or place the whole folder in its supported skills directory. Nothing is installed automatically.</p>
+		</div>
 		{snapshot.conflicts.map(conflict => <p role="alert" key={conflict.id} className="break-words text-xs text-destructive">{conflict.error}</p>)}
 		</>}
 		{snapshot.error && <p role="alert" className="text-xs text-destructive">{snapshot.error}</p>}

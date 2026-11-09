@@ -2,7 +2,8 @@
 
 Custom **practice problem types** share the native practice lifecycle, not teaching
 questions, a second lifecycle, a separate conclusion tool or a new assessment system.
-This describes the current checkout, including additions beyond released 0.4.1. Public types live in
+This describes the matching source/build. Match the target app using the downloaded skill's
+`bundle.json`; API v1 alone does not identify every available capability. Public types live in
 `src/core/plugin-problems.ts` and the type-only `learnharness-plugin-api` SDK.
 
 ## Shared lifecycle

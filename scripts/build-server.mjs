@@ -12,8 +12,8 @@
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { spawnSync } from "node:child_process";
 import { validateCorePackages } from "./build-core-plugins.mjs";
+import { buildPluginAuthoring } from "./build-plugin-authoring.mjs";
 
 const ROOT = path.resolve(import.meta.dirname, "..");
 const STANDALONE = path.join(ROOT, ".next", "standalone");
@@ -79,23 +79,9 @@ try {
 	process.exit(1);
 }
 
-// Ship authoring material and generated API types, not the application source or
-// development toolchain. The examples have no credentials or populated data/.
-const authoring = path.join(STANDALONE, "plugin-authoring");
-for (const file of [
-	"plugin-authoring.md", "plugin-architecture.md", "plugin-question-contract.md",
-	"plugin-problem-contract.md", "plugin-session-extension-contract.md", "plugin-tree-contract.md",
-	"plugin-view-context.md", "dialog-overlay-contract.md", "archive/plugin-implementation-history.md",
-]) {
-	copyTree(path.join(ROOT, "docs", file), path.join(authoring, "docs", file));
-}
-copyTree(path.join(ROOT, "examples", "plugins"), path.join(authoring, "examples", "plugins"));
-copyTree(path.join(ROOT, "skills", "learnharness-plugins"), path.join(authoring, "skills", "learnharness-plugins"));
-const types = spawnSync(process.execPath, [path.join(ROOT, "scripts", "build-plugin-types.mjs"), path.join(authoring, "types")], { cwd: ROOT, stdio: "inherit" });
-if (types.error || types.status !== 0) {
-	console.error("[build-server] plugin API declaration emission failed", types.error ?? types.status);
-	process.exit(1);
-}
+// Reassemble from current source, never reuse a potentially stale dev download.
+// Ship the complete portable skill plus its static ZIP; no application toolchain.
+buildPluginAuthoring({ root: ROOT, standalone: true });
 
 // 2c) Payload curation (2026-10-11): the trace sweep can copy repo-root
 // plugins/ (authoring sources/tests), dist/ (previous installers), and the development Electron

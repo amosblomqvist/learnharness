@@ -25,9 +25,12 @@ In a checkout, public types are under `src/core/`: `plugins.ts`, `plugin-ui.ts`,
 `plugin-submissions.ts`, `plugin-view-context.ts`, `plugin-tree.ts`.
 These paths are repository-relative. Use **type-only** imports, never private runtime
 modules. Emit portable declarations with `node scripts/build-plugin-types.mjs`.
-Without a checkout, use the target app's `plugin-authoring/` docs/types/examples bundle;
-do not invent host imports. API v1 additions in this checkout exceed released 0.4.1:
-check actual host compatibility rather than copying a stale `minAppVersion`.
+Without a checkout, download the complete authoring skill from **Settings → Community
+plugins → Download authoring skill**. Keep its root `SKILL.md`, `docs/`, `examples/`
+and `types/` together; use the included SDK rather than running repository build scripts.
+Read `bundle.json` for the producing app/API/SDK versions. API v1 can gain capabilities:
+check actual host compatibility rather than copying a stale `minAppVersion`. The exported
+examples conservatively require the producing app version; older targets need verification.
 
 ## Choose a starting point
 

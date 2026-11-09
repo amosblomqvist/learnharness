@@ -1,7 +1,8 @@
 # Plugin question tools — API v1 contract
 
 Custom teaching questions share the native question lifecycle. This contract describes
-the current checkout, including additions beyond released 0.4.1. Exact types live in
+the matching source/build. Match the target app using the downloaded skill's `bundle.json`;
+API v1 alone does not identify every available capability. Exact types live in
 `src/core/plugin-questions.ts` and the matching type-only SDK. For practice, use the
 separate [problem contract](plugin-problem-contract.md), not teaching enrollment.
 

@@ -2,7 +2,7 @@
 
 This is the host-maintainer map. Start with the [authoring guide](plugin-authoring.md)
 for plugin code and use feature contracts for normative public behavior. It describes
-the current checkout, including additions beyond released 0.4.1; it is not a release
+the matching source/build's API v1; it is not a release
 verification report.
 
 ## Boundaries and ownership

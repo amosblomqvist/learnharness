@@ -627,7 +627,7 @@ describe("plugin frontend surface and native importer", () => {
 			const gear = document.querySelector<HTMLButtonElement>('[aria-label="Settings for Plugin fixture"]')!;
 			assert.ok(gear);
 			assert.equal(gear.nextElementSibling?.getAttribute("role"), "switch", "gear sits immediately left of toggle");
-			assert.equal(document.querySelector('[data-testid="section-plugins"] a'), null, "management does not list plugin views");
+			assert.equal(document.querySelector('[data-testid="section-plugins"] a[href^="/plugins/"]'), null, "management does not list plugin views");
 			assert.equal(document.body.textContent?.includes("Run fixture"), false, "management does not list actions");
 			await click(gear); assert.equal(settingsMounts, 1);
 			assert.ok(document.body.textContent?.includes("Fixture custom settings"), "plugin settings work despite core fetch failure");
@@ -684,7 +684,18 @@ describe("plugin frontend surface and native importer", () => {
 	});
 	it("Settings explains trusted local code, broad access, restart recovery and directory install/refresh", () => {
 		const html = renderToStaticMarkup(<PluginsSection />);
-		for (const copy of ["trusted local code", "broad file and network access", "not sandboxed", "restarting LearnHarness", "disabled by default", "writable plugins directory", "Refresh plugins"]) assert.ok(html.includes(copy), copy);
+		for (const copy of ["trusted local code", "broad file and network access", "not sandboxed", "restarting LearnHarness", "disabled by default", "writable plugins directory", "Refresh plugins", "How to install a plugin", "Build a plugin", "Download authoring skill", "Nothing is installed automatically", "it does not hot-reload code"]) assert.ok(html.includes(copy), copy);
+		const document = parseHTML(html).document;
+		const help = document.querySelector('[data-testid="plugin-install-help"]')!;
+		assert.equal(help.hasAttribute("open"), false);
+		assert.equal(help.querySelector("summary")?.textContent, "How to install a plugin");
+		assert.equal(help.contains(document.querySelector('[data-testid="plugin-authoring-help"]')), false);
+		const download = document.querySelector('[data-testid="download-plugin-authoring"]')!;
+		assert.equal(download.tagName, "A");
+		assert.equal(download.getAttribute("href"), "/plugin-authoring/learnharness-plugins.zip");
+		assert.equal(download.hasAttribute("download"), true);
+		const core = renderToStaticMarkup(<PluginsSection origin="core" />);
+		for (const text of ["How to install a plugin", "Build a plugin", "Download authoring skill", "Refresh plugins"]) assert.equal(core.includes(text), false, text);
 	});
 	it("native ESM wrapper is a public module, with no dynamic evaluation or bundled import escape hatch", async () => {
 		const script = await readFile(new URL("../public/plugin-loader.js", import.meta.url), "utf8");

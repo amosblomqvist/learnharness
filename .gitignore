@@ -14,6 +14,8 @@ SCOPE.md
 # raw real-data import sources (user directive 2026-09-13: never commit)
 real-data-extraction/
 dist/
+# Generated offline authoring-skill download (dev/build preparation).
+/public/plugin-authoring/
 
 # Generated app-owned plugin packages and transactional staging.
 /core-plugins/

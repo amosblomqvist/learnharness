@@ -1,7 +1,8 @@
 # Session extensions: submissions, images and page-body surfaces
 
-Current API v1 contract; use documentation/types matching the target app. This checkout
-includes additions beyond released 0.4.1. Exact types live in `src/core/plugin-submissions.ts`
+Current API v1 contract for the matching source/build; use documentation/types matching
+the target app. Use the downloaded skill's `bundle.json` to identify the app;
+API v1 alone does not identify every available capability. Exact types live in `src/core/plugin-submissions.ts`
 and `plugin-ui.ts`. Custom practice submissions additionally follow the
 [problem contract](plugin-problem-contract.md).
 

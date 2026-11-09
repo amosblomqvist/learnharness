@@ -30,7 +30,9 @@ function withPayload(test: (fixture: {
 	};
 	try {
 		write(path.join("scripts", "build-server.mjs"), source);
+		write("scripts/build-plugin-authoring.mjs", fs.readFileSync(new URL("../scripts/build-plugin-authoring.mjs", import.meta.url), "utf8"));
 		write("package.json", JSON.stringify({ version: "0.4.1" }));
+		write("LICENSE", "AGPL-3.0-only fixture");
 		write("core-plugins.json", fs.readFileSync(new URL("../core-plugins.json", import.meta.url), "utf8"));
 		write("scripts/build-core-plugins.mjs", fs.readFileSync(new URL("../scripts/build-core-plugins.mjs", import.meta.url), "utf8"));
 		write("src/core/plugins.ts", fs.readFileSync(new URL("../src/core/plugins.ts", import.meta.url), "utf8"));
@@ -43,14 +45,17 @@ function withPayload(test: (fixture: {
 		write(path.join("scripts", "plugin-loader.cjs"), "exports.load = () => {};\n");
 		// Declaration generation is tested separately. This fixture tests payload
 		// curation, not the TypeScript compiler or the full application sources.
-		write(path.join("scripts", "build-plugin-types.mjs"), `import fs from 'node:fs'; import path from 'node:path'; fs.mkdirSync(process.argv[2], {recursive:true}); fs.writeFileSync(path.join(process.argv[2], 'index.d.ts'), 'export interface Example {}');`);
+		write(path.join("scripts", "build-plugin-types.mjs"), `import fs from 'node:fs'; import path from 'node:path'; fs.mkdirSync(process.argv[2], {recursive:true}); fs.writeFileSync(path.join(process.argv[2], 'index.d.ts'), 'export interface Example {}'); fs.writeFileSync(path.join(process.argv[2], 'package.json'), JSON.stringify({version:'1.0.0'}));`);
 		write(path.join("public", "plugin-loader.js"), "export {};\n");
 		for (const file of AUTHORING_DOCS) {
 			write(path.join("docs", file), fs.readFileSync(new URL(`../docs/${file}`, import.meta.url), "utf8"));
 		}
-		write(path.join("examples", "plugins", "hello-plugin", "dist", "manifest.json"));
-		write(path.join("examples", "plugins", "hello-plugin", "dist", "main.js"));
-		write(path.join("skills", "learnharness-plugins", "SKILL.md"), fs.readFileSync(new URL("../skills/learnharness-plugins/SKILL.md", import.meta.url), "utf8"));
+		for (const id of ["hello-plugin", "managed-agent", "teaching-extension"]) {
+			write(`examples/plugins/${id}/README.md`, fs.readFileSync(new URL(`../examples/plugins/${id}/README.md`, import.meta.url), "utf8"));
+			write(`examples/plugins/${id}/dist/manifest.json`, JSON.stringify({ apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.7", main: "main.js" }));
+			write(`examples/plugins/${id}/dist/main.js`, "export function activate() {};");
+		}
+		for (const file of ["SKILL.md", "README.md"]) write(`skills/learnharness-plugins/${file}`, fs.readFileSync(new URL(`../skills/learnharness-plugins/${file}`, import.meta.url), "utf8"));
 		write(path.join(STANDALONE, "server.js"));
 		write(path.join(".next", "static", "runtime.js"));
 		write(path.join("public", "asset.txt"));
@@ -124,7 +129,7 @@ describe("desktop standalone payload", () => {
 			for (const file of runtime) assert.ok(fs.existsSync(path.join(root, STANDALONE, file)), file);
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, ".next", "static", "runtime.js")));
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, "public", "asset.txt")));
-			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/docs/plugin-tree-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/dist/manifest.json", "plugin-authoring/examples/plugins/hello-plugin/dist/main.js", "plugin-authoring/skills/learnharness-plugins/SKILL.md"]) {
+			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/docs/plugin-tree-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/dist/manifest.json", "plugin-authoring/examples/plugins/hello-plugin/dist/main.js", "plugin-authoring/SKILL.md", "plugin-authoring/README.md", "plugin-authoring/bundle.json", "public/plugin-authoring/learnharness-plugins.zip"]) {
 				assert.ok(fs.existsSync(path.join(root, STANDALONE, asset)), asset);
 			}
 		});
@@ -135,7 +140,7 @@ describe("desktop standalone payload", () => {
 			const result = run();
 			assert.equal(result.status, 0, String(result.stderr));
 			const authoring = path.join(root, STANDALONE, "plugin-authoring");
-			const files = [...AUTHORING_DOCS.map(file => `docs/${file}`), "skills/learnharness-plugins/SKILL.md"];
+			const files = [...AUTHORING_DOCS.map(file => `docs/${file}`), "SKILL.md", "README.md"];
 			const headings = (text: string) => {
 				const seen = new Map<string, number>();
 				return [...text.matchAll(/^#{1,6} (.+)$/gm)].map(([, heading]) => {

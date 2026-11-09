@@ -5,14 +5,18 @@ LearnHarness's Node server with filesystem/network access; frontends run in the 
 page. Install only code you trust. The API does not expose provider credentials or
 relax Electron renderer isolation.
 
-This guide describes the current checkout's API v1, including additions not present in
-the released 0.4.1 app. Use documentation/types matching the target app, and set
-`minAppVersion` to a version that actually supplies every capability you use.
+This guide describes the matching source/build's API v1. API v1 can gain capabilities
+without changing its API number. Use documentation/types matching the target app, and
+set `minAppVersion` to a version that actually supplies every capability you use.
+The downloaded skill's `bundle.json` identifies its producing app, API and SDK versions;
+these are separate numbers, not interchangeable compatibility guarantees.
 
 ## Quick start
 
 1. Open **Settings → Community plugins** to find the writable plugins directory.
-2. Copy `examples/plugins/hello-plugin` there, keeping its folder name and `dist/`.
+   Without a checkout, select **Download authoring skill** and extract the whole ZIP.
+2. Copy `examples/plugins/hello-plugin` from the extracted skill (or checkout) there,
+   keeping its folder name and `dist/`.
 3. Refresh the list, enable **Hello plugin**, and open its sidebar action.
 4. Edit the installed `hello-plugin/dist/` code and restart LearnHarness to load changes.
    Refresh discovers packages; it does not hot-reload admitted JavaScript.
@@ -30,9 +34,18 @@ no-build `examples/plugins/` packages are smaller starting points:
 Model-using examples may incur cost when explicitly run. These examples are authoring
 material, not automatically enabled plugins or a commitment to bundle every feature.
 
-Packaged apps include matching docs, examples, a coding-agent skill and generated
-API types in `plugin-authoring/` beside the standalone server in app resources.
-That directory is read-only material, **not** the writable installed plugins directory.
+**Download authoring skill** works offline and supplies one self-contained
+`learnharness-plugins/` folder with root `SKILL.md`, README, version metadata, docs,
+examples and generated API types. Give your coding agent the whole folder and ask it
+to read `SKILL.md`; for automatic discovery, place the whole folder in that agent's
+supported skills directory. Locations/reload rules vary by agent. LearnHarness does
+not install or configure agents, and copying only `SKILL.md` loses its references.
+The exported examples require at least the producing app version; choosing older
+minimums for your own plugin requires checking its capabilities on those older apps.
+
+Packaged apps also retain the expanded matching skill in `plugin-authoring/` beside
+the standalone server in app resources. That is read-only authoring material, **not**
+the writable installed plugins directory. Do not install the entire skill as a plugin.
 
 ## Choose the extension point
 
@@ -58,8 +71,12 @@ Exact public types are in `src/core/plugins.ts`, `plugin-ui.ts`, `plugin-agents.
 `plugin-view-context.ts` and `plugin-tree.ts` (all under `src/core/`). Use **type-only**
 imports, never runtime imports of private host modules. The portable type-only SDK is
 emitted by `node scripts/build-plugin-types.mjs`. Repository TypeScript plugins use a
-local `.sdk/` and `npm run sdk`; outside a checkout, copy packaged
-`plugin-authoring/types/` into `.sdk/` before dependency installation. Pi native types
+local `.sdk/` and `npm run sdk`; outside a checkout, copy the extracted skill's
+`types/` into `.sdk/` before dependency installation. For example,
+use `"learnharness-plugin-api": "file:./.sdk"` in your development dependencies and
+`import type { PluginFrontendContext } from "learnharness-plugin-api"` in TypeScript.
+Supply the SDK package's declared peers when typechecking; do not import it at runtime.
+Building the SDK requires a checkout; using the downloaded SDK does not. Pi native types
 are intentionally part of API v1 and follow the app's pinned SDK, not arbitrary Pi versions.
 
 ## Package and installation
