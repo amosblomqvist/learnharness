@@ -47,13 +47,13 @@ describe("floating/docked raw side conversation", () => {
 		assert.ok(doc.querySelector('[aria-label="Float side conversation"]'));
 		assert.ok(doc.querySelector('[title="Unpin to float"] svg.lucide-pin-off'));
 	});
-	it("places the side microphone inside the input and makes its recording state red", () => {
+	it("places the side microphone inside the input and uses the error token while recording", () => {
 		const dictation = { phase: "idle" as const, active: false, blocked: false, error: null, toggle() {}, finish: async () => {} };
 		const idle = render(state, dictation);
 		assert.ok(idle.querySelector("textarea")!.parentElement!.querySelector('[aria-label="Start side dictation"]'));
 		const active = render(state, { ...dictation, phase: "recording", active: true });
 		assert.equal(active.querySelector('[data-testid="side-dictation-toggle"]')!.getAttribute("aria-pressed"), "true");
-		assert.ok(active.querySelector('[data-testid="side-dictation-toggle"]')!.classList.contains("text-red-500"));
+		assert.ok(active.querySelector('[data-testid="side-dictation-toggle"]')!.classList.contains("text-error"));
 	});
 	it("keeps failed partial replies and offers an explicit retry", () => {
 		const doc = render({ ...state, messages: [...state.messages, { id: "failed", role: "assistant", text: "Partial…", error: "Request failed", at: "" }] });

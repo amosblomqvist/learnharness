@@ -211,13 +211,13 @@ export function Composer({
 				 a wide green NEXT PROBLEM — the affordance IS the button
 				 (click and Enter share one lane), and typing anything
 				 returns the regular send. The green is the app's correct-
-				 answer register (answered-card's green-500/600). */}
+				 answer register (answered-card's success token). */}
 				{nextProblem && !busy && !canSend ? (
 					<button
 						type="submit"
 						data-testid="next-problem-button"
 						aria-label="Next problem"
-						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-green-600 px-4 font-ui text-xs font-medium uppercase tracking-wide text-white transition-colors hover:bg-green-500"
+						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-success px-4 font-ui text-xs font-medium uppercase tracking-wide text-background transition-colors hover:bg-success/85"
 					>
 						Next problem
 						<ArrowRightIcon className="size-4" />

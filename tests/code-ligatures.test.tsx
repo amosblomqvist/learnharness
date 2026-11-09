@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { it } from "node:test";
 import { parseHTML } from "linkedom";
-import { FACTORY_SETTINGS, resolveSettings, sanitizeUserSettings, type AppearanceSettings } from "../src/core/index.ts";
+import { DEFAULT_THEME, FACTORY_SETTINGS, resolveSettings, sanitizeUserSettings, type AppearanceSettings } from "../src/core/index.ts";
 import { parseAppearanceSettingsBody } from "../src/server/settings-body.ts";
 import { AppearanceProvider, appearanceVars, resolveAppearance, useAppearance } from "../components/settings/appearance.tsx";
 import { AppearanceSection } from "../components/settings/appearance-section.tsx";
@@ -41,12 +41,12 @@ it("invalid writes are rejected; invalid historical disk values are dropped, nev
 });
 
 it("the appearance mapping changes ONLY the shared code token, normal permits rather than forces ligatures", () => {
-  const off = appearanceVars(resolveAppearance(undefined));
-  const on = appearanceVars(resolveAppearance({ codeLigatures: true }));
+  const off = appearanceVars(resolveAppearance(undefined), DEFAULT_THEME);
+  const on = appearanceVars(resolveAppearance({ codeLigatures: true }), DEFAULT_THEME);
   assert.equal(off["--lh-code-ligatures"], "none");
   assert.equal(on["--lh-code-ligatures"], "normal");
   assert.deepEqual(on, { ...off, "--lh-code-ligatures": "normal" });
-  assert.deepEqual(appearanceVars(resolveAppearance({ codeLigatures: false })), off);
+  assert.deepEqual(appearanceVars(resolveAppearance({ codeLigatures: false }), DEFAULT_THEME), off);
 });
 
 it("native inline/fenced code and both CodeMirror modes opt in without changing prose or diagrams", () => {
@@ -70,8 +70,8 @@ it("the Appearance switch preserves siblings, applies immediately through the pr
     window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
     IS_REACT_ACT_ENVIRONMENT: true,
     fetch: async (url: string) => {
-      assert.equal(url, "/api/settings");
-      return new Response(JSON.stringify({ settings: { appearance: { proseFontSize: 20, fontFamily: "Georgia" } } }));
+      assert.equal(url, "/api/themes");
+      return Response.json({ themes: [DEFAULT_THEME] });
     },
   })) {
     previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key));
@@ -87,7 +87,7 @@ it("the Appearance switch preserves siblings, applies immediately through the pr
   const toggle = () => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Code ligatures"]')!;
   const token = () => document.documentElement.style.getPropertyValue("--lh-code-ligatures");
   try {
-    await act(async () => root.render(<InteractionLayersProvider><AppearanceProvider><Panel /></AppearanceProvider></InteractionLayersProvider>));
+    await act(async () => root.render(<InteractionLayersProvider><AppearanceProvider initialAppearance={{ proseFontSize: 20, fontFamily: "Georgia" }} initialTheme={DEFAULT_THEME}><Panel /></AppearanceProvider></InteractionLayersProvider>));
     assert.equal(toggle().getAttribute("aria-checked"), "false");
     assert.equal(token(), "none");
     assert.equal(document.querySelectorAll('[data-testid="row-code-ligatures"]').length, 1);

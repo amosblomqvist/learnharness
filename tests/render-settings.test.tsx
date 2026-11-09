@@ -11,10 +11,13 @@ import React from "react";
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { parseHTML } from "linkedom";
 import { renderToStaticMarkup as renderStatic } from "react-dom/server";
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section.tsx";
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
+import { AppearanceProvider } from "../components/settings/appearance.tsx";
+import { BUILTIN_THEMES, resolveTheme, THEME_COLOR_KEYS, type AppearanceSettings, type Theme } from "../src/core/index.ts";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
 import type { GraphSettings } from "../src/core/index.ts";
@@ -47,6 +50,39 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		assert.ok(html.includes("the app"));
 		assert.ok(!html.includes("settings-backdrop"));
 		assert.ok(!html.includes("settings-dialog"));
+	});
+
+	it("built-in navigation uses the agreed decorative Lucide icons without changing labels or selection", () => {
+		const { document } = parseHTML(renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />));
+		const expected = [
+			["keys", "Providers", "key"],
+			["agent", "Agent", "bot"],
+			["appearance", "Appearance", "palette"],
+			["graph", "Graph", "waypoints"],
+			["keyboard", "Keyboard", "keyboard"],
+			["general", "General", "settings"],
+			["core-plugins", "Core plugins", "plug"],
+			["plugins", "Community plugins", "puzzle"],
+		];
+		assert.ok(document.querySelector('[data-testid="settings-nav"]')!.classList.contains("w-48"), "approved 192px sidebar leaves room for the icon and Community plugins label");
+		assert.ok(document.querySelector('[data-testid="settings-dialog"]')!.classList.contains("w-[920px]"), "overall dialog width is unchanged");
+		const buttons = [...document.querySelectorAll('[data-testid="settings-nav"] button')];
+		assert.deepEqual(buttons.map(button => button.textContent), expected.map(([, label]) => label));
+		for (const [id, label, iconName] of expected) {
+			const button = document.querySelector(`[data-testid="settings-nav-${id}"]`)!;
+			assert.equal(button.textContent, label);
+			assert.equal(button.getAttribute("aria-current"), String(id === "keys"));
+			const icons = button.querySelectorAll("svg");
+			assert.equal(icons.length, 1);
+			const icon = icons[0]!;
+			assert.ok(icon.classList.contains(`lucide-${iconName}`), `${id}: agreed icon`);
+			assert.ok(icon.classList.contains("size-3.5"));
+			assert.ok(icon.classList.contains("shrink-0"));
+			assert.equal(icon.getAttribute("aria-hidden"), "true");
+			assert.equal(icon.getAttribute("focusable"), "false");
+			assert.equal(icon.getAttribute("stroke"), "currentColor", "inherits the themed row color");
+			assert.equal(icon.querySelector("title"), null, "icon must not add a second accessible label");
+		}
 	});
 
 	it("the dialog frame: role=dialog + the ✕ + the six-section nav, Providers first and General last", () => {
@@ -323,32 +359,81 @@ describe("KeysSection (thin SSR)", () => {
 	});
 });
 
+/** The section as the app mounts it: under the provider the layout feeds
+ *  from the record (the active theme resolved server-side). */
+function renderAppearance(appearance: AppearanceSettings | undefined, customs: Theme[] = []): string {
+	const theme = resolveTheme(appearance?.theme, customs);
+	return renderToStaticMarkup(
+		<AppearanceProvider initialAppearance={appearance} initialTheme={theme}>
+			<AppearanceSection appearance={appearance} onSectionChange={() => {}} />
+		</AppearanceProvider>,
+	);
+}
+
 describe("AppearanceSection (thin SSR)", () => {
-	it("mode is rendered DISABLED — dark-only this wave, no lying control", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => true} />);
-		assert.ok(tagOf(html, "select-mode").includes("disabled"), "mode select disabled");
-		assert.ok(html.includes("Coming soon"));
-		// The whole row dims, graph-view style (the control never adds its own).
-		assert.ok(tagOf(html, "row-mode").includes("opacity-40"), "mode row dims whole");
+	it("each preview is outlined in its own theme's border, so a theme matching the page still shows", () => {
+		const html = renderAppearance({ theme: "rose-pine-dawn" });
+		for (const t of BUILTIN_THEMES) {
+			const start = html.indexOf(`data-testid="theme-card-${t.id}"`);
+			const card = html.slice(start, html.indexOf("</button>", start));
+			assert.ok(card.includes(`border-color:${t.colors.border}`), t.id);
+		}
 	});
 
-	it("hex inputs carry the factory placeholders; prose size resolves against the factory", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => true} />);
-		assert.ok(html.includes(`placeholder="#141414"`));
-		// The reading font is the searchable dropdown now (font-menu
-		// wave): its trigger shows the factory family; the emphasis
-		// inks' empty state is "same as text" (the old hexes died with
-		// the factory token change).
+	it("the theme grid lists every preset; the stored theme is pressed", () => {
+		const html = renderAppearance({ theme: "catppuccin-latte" });
+		for (const t of BUILTIN_THEMES) assert.ok(html.includes(`data-testid="theme-card-${t.id}"`), t.id);
+		assert.ok(tagOf(html, "theme-card-catppuccin-latte").includes('aria-pressed="true"'));
+		for (const t of BUILTIN_THEMES.filter((t) => t.id !== "catppuccin-latte")) {
+			assert.ok(tagOf(html, `theme-card-${t.id}`).includes('aria-pressed="false"'), t.id);
+		}
+		assert.equal((html.match(/lucide-check/g) ?? []).length, 1, "one check, on the selected card");
+		assert.match(html, /Catppuccin Latte · light · sets every color below/);
+		assert.ok(html.includes('data-testid="theme-import"'));
+		assert.ok(html.includes('data-testid="theme-export"'));
+		assert.ok(!html.includes("theme-remove-"), "presets cannot be removed");
+	});
+
+	it("absent theme = the Default card pressed", () => {
+		const html = renderAppearance(undefined);
+		assert.ok(tagOf(html, "theme-card-default").includes('aria-pressed="true"'));
+	});
+
+	it("an imported theme gets a custom card with a remove button", () => {
+		const custom: Theme = { ...BUILTIN_THEMES[0]!, id: "my-ayu", name: "My Ayu", builtin: false };
+		const html = renderAppearance({ theme: "my-ayu" }, [custom]);
+		assert.ok(tagOf(html, "theme-card-my-ayu").includes('aria-pressed="true"'));
+		assert.ok(html.includes('data-testid="theme-remove-my-ayu"'));
+		assert.match(html, />custom</);
+	});
+
+	it("the Colors block has one override row per theme color, hinting the theme's own hex", () => {
+		const mocha = BUILTIN_THEMES.find((t) => t.id === "catppuccin-mocha")!;
+		const html = renderAppearance({ theme: "catppuccin-mocha" });
+		for (const key of THEME_COLOR_KEYS) assert.ok(html.includes(`data-testid="row-color-${key}"`), key);
+		for (const id of ["input-background", "input-bold-color", "input-italic-color", "input-color-warning"]) {
+			assert.ok(html.includes(`data-testid="${id}"`), id);
+		}
+		assert.match(html, new RegExp(`Empty = ${mocha.colors.warning}`));
+		assert.ok(tagOf(html, "input-color-surface").includes(`placeholder="${mocha.colors.surface}"`));
+		assert.ok(html.includes('data-testid="colors-reset"'));
+	});
+
+	it("an override shows in its input and its swatch; the theme stays the hint", () => {
+		const html = renderAppearance({ theme: "catppuccin-mocha", background: "#101010", colors: { warning: "#fab387" } });
+		assert.ok(tagOf(html, "input-background").includes('value="#101010"'));
+		assert.ok(tagOf(html, "input-color-warning").includes('value="#fab387"'));
+		assert.ok(tagOf(html, "swatch-warning").includes("#fab387"));
+		assert.match(html, /Empty = #1e1e2e/, "the background hint is Mocha's, not the override");
+	});
+
+	it("typography keeps its rows; prose size resolves against the factory", () => {
+		const html = renderAppearance(undefined);
 		assert.ok(html.includes('data-testid="font-trigger"'));
-		assert.equal((html.match(/Empty = same as text/g) ?? []).length, 2);
+		assert.ok(html.includes('data-testid="row-prose-size"'));
+		assert.ok(html.includes('data-testid="row-heading-weight"'));
 		assert.ok(html.includes("16px"));
-	});
-
-	it("a set background shows in the input, not the placeholder", () => {
-		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={{ background: "#1a1a2e" }} onSectionChange={() => true} />,
-		);
-		assert.ok(html.includes(`value="#1a1a2e"`));
+		assert.ok(!html.includes('data-testid="row-mode"'), "the mode row is gone — the theme declares it");
 	});
 });
 

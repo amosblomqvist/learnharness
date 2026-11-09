@@ -224,7 +224,7 @@ test("email-only connected selector and Manage remain responsive; account select
 test("Disconnect is the quiet red left-footer action below identity; confirmation Cancel never forgets", async () => {
  assert.deepEqual(CHATGPT_DISCONNECT_COPY, { title: "Disconnect account?", body: "This removes the saved account and its credentials from this device." });
  const f = fixture(connected()); await mount(); await click(button("Manage…"));
- assert.equal(byTest("chatgpt-account-actions").textContent, "Disconnect"); assert.match(byTest("chatgpt-disconnect").className, /text-red/);
+ assert.equal(byTest("chatgpt-account-actions").textContent, "Disconnect"); assert.match(byTest("chatgpt-disconnect").className, /text-error/);
  assert.equal(byTest("chatgpt-account-footer").firstElementChild, byTest("chatgpt-account-actions"));
  assert.equal(byTest("chatgpt-account-footer").lastElementChild?.lastElementChild, button("Close"));
  assert(!byTest("chatgpt-account-footer").contains(byTest("chatgpt-add-accounts")));
@@ -367,7 +367,7 @@ test("signed-out legacy accounts remain manageable/forgettable without pretendin
 test("unconfirmed provider outcome is exactly the approved concise dismissible warning, never permanent red success/navigation advice", async () => {
  const f = fixture(connected(), { disconnect: async () => { const result = { ...disconnected(), accounts: [], error: warning }; f.push(result); return result; } });
  await mount(); await click(button("Manage…")); await confirmDisconnect();
- const alert = byTest("chatgpt-revocation-warning"); assert.equal(alert.textContent, warning); assert.doesNotMatch(alert.className, /text-red/);
+ const alert = byTest("chatgpt-revocation-warning"); assert.equal(alert.textContent, warning); assert.doesNotMatch(alert.className, /text-error/);
  assert(!document.querySelector('[data-testid="chatgpt-disconnect"]')); assert(byTest("chatgpt-login"));
  await click(button("Dismiss", byTest("chatgpt-account-dialog"))); assert(!document.querySelector('[role="alert"]'));
  assert(!document.body.textContent?.includes("ChatGPT Settings"));

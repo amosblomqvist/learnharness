@@ -133,6 +133,14 @@ export const SETTINGS_FILE = path.join(/* turbopackIgnore: true */ DATA_ROOT, "s
 export const PROMPTS_OVERRIDE_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "prompts");
 
 /**
+ * Imported custom themes (theme wave, 2026-11-04): one `<id>.json` per
+ * theme (core/themes.ts ThemeFile shape), written by POST /api/themes and
+ * listed beside the built-in presets. The settings record names the
+ * active one by id (appearance.theme).
+ */
+export const THEMES_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "themes");
+
+/**
  * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a
  * flat {VAR: value} JSON map — the SAME file the Electron app has always
  * hand-edited (owner decision: option A, zero migration). Desktop main.cjs

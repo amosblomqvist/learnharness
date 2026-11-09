@@ -16,7 +16,7 @@ export function PluginWorkerResultSurface({ label, status, text, children, prese
 	presentation?: "collapsed" | "card" | "plain";
 }) {
 	const icon = status === "succeeded" ? <CheckIcon aria-hidden="true" className="size-3.5" />
-		: status === "failed" ? <XIcon aria-hidden="true" className="size-3.5 text-red-500" />
+		: status === "failed" ? <XIcon aria-hidden="true" className="size-3.5 text-error" />
 			: <CircleX aria-hidden="true" className="size-3.5" />;
 	const tooltip = `${label}: ${status}`;
 	const heading = <>

@@ -815,7 +815,7 @@ export function ChainTableOverlay({
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
 				style={registerInteraction ? { zIndex: 100 + layer.order } : undefined}
 			>
-				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
+				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-error">{directoryFailure}</p>}
 				<ChainTableBody
 					pickerChrome={pickerChrome}
 					keyboardActive={keyboardActive && !deleteOpen}

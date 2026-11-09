@@ -84,9 +84,9 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 					(answer.dontKnow ? (
 						<StatusBadge text="didn't know" />
 					) : answer.correct ? (
-						<StatusBadge text="correct" color="var(--color-green-500)" />
+						<StatusBadge text="correct" color="var(--lh-success)" />
 					) : (
-						<StatusBadge text="incorrect" color="var(--color-red-500)" />
+						<StatusBadge text="incorrect" color="var(--lh-error)" />
 					))}
 			</div>
 			<div className="mb-3 font-medium">
@@ -110,10 +110,10 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 								key={opt.index}
 								className={cn(
 									"flex items-center gap-2 rounded-lg border px-3 py-1.5",
-									sel && key && "border-green-500/60 bg-green-500/10",
-									sel && !key && isQuiz && "border-red-500/60 bg-red-500/10",
+									sel && key && "border-success/60 bg-success/10",
+									sel && !key && isQuiz && "border-error/60 bg-error/10",
 									sel && !isQuiz && "border-primary bg-accent",
-									!sel && key && "border-green-500/40",
+									!sel && key && "border-success/40",
 								)}
 							>
 								{isQuiz && (
@@ -124,9 +124,9 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 										data-mark={sel && key ? "check" : sel && !key ? "x" : !sel && key ? "check" : undefined}
 										className={cn(
 											"flex shrink-0 items-center",
-											sel && key && "text-green-500",
-											sel && !key && "text-red-500",
-											!sel && key && "text-green-500",
+											sel && key && "text-success",
+											sel && !key && "text-error",
+											!sel && key && "text-success",
 										)}
 									>
 										{/* Owner round 8: a touch smaller than the text (size-4→size-3.5,

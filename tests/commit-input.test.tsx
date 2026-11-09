@@ -6,7 +6,7 @@ import { parseHTML } from "linkedom";
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { HostDialog } from "../components/host-dialog.tsx";
 import { installModalDom } from "./modal-dom.ts";
-import type { AgentSettings, AppearanceSettings, CompactionSettings, GraphSettings, PluginSettingsSchema, UserSettings } from "../src/core/index.ts";
+import { BUILTIN_THEMES, DEFAULT_THEME, type AgentSettings, type AppearanceSettings, type CompactionSettings, type GraphSettings, type PluginSettingsSchema, type UserSettings } from "../src/core/index.ts";
 
 let CommitInput: typeof import("../components/settings/controls.tsx").CommitInput;
 let AppearanceSection: typeof import("../components/settings/appearance-section.tsx").AppearanceSection;
@@ -57,7 +57,7 @@ async function fixture(run: (f: {
 		Element: dom.window.Element, Node: dom.window.Node, CustomEvent: dom.window.CustomEvent,
 		IS_REACT_ACT_ENVIRONMENT: true,
 		getSelection: () => ({ anchorNode: null, focusNode: null, anchorOffset: 0, focusOffset: 0 }),
-		fetch: ((...args) => fetcher(...args)) as typeof fetch,
+		fetch: ((...args) => String(args[0]) === "/api/themes" ? Promise.resolve(Response.json({ themes: BUILTIN_THEMES })) : fetcher(...args)) as typeof fetch,
 	};
 	const saved = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
 	Object.assign(globalThis, globals);
@@ -388,7 +388,7 @@ it("Settings ACK authority survives close/reopen and protects the live appearanc
 		return ++writes === 1 ? first.promise : second.promise;
 	});
 	function Probe() { settings = useSettingsDialog(); liveSize = useAppearance().appearance.proseFontSize; return null; }
-	await f.render(<AppearanceProvider><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
+	await f.render(<AppearanceProvider initialAppearance={stored.appearance} initialTheme={DEFAULT_THEME}><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
 	await act(async () => settings.open("appearance"));
 	let input = f.input('[data-testid="input-prose-size"]');
 	await f.type(input, "16"); await f.key(input, "Escape");
@@ -418,7 +418,7 @@ it("a newer nonappearance acknowledgement applies its full canonical live appear
 		return section === "appearance" ? appearanceSave.promise : generalSave.promise;
 	});
 	function Probe() { settings = useSettingsDialog(); liveSize = useAppearance().appearance.proseFontSize; return null; }
-	await f.render(<AppearanceProvider><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
+	await f.render(<AppearanceProvider initialAppearance={stored.appearance} initialTheme={DEFAULT_THEME}><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
 	await act(async () => settings.open("appearance"));
 	const input = f.input('[data-testid="input-prose-size"]');
 	await f.type(input, "16"); await f.key(input, "Escape");
@@ -442,16 +442,16 @@ for (const arrival of ["before", "after", "failure-after"] as const) {
 		f.setFetch(async (url, init) => {
 			if (init?.method === "PUT") return save.promise;
 			assert.equal(String(url), "/api/settings");
-			return ++reads === 3 ? reopenedRead.promise : Response.json({ settings: old });
+			return ++reads === 2 ? reopenedRead.promise : Response.json({ settings: old });
 		});
 		function Probe() { settings = useSettingsDialog(); liveSize = useAppearance().appearance.proseFontSize; return null; }
-		await f.render(<AppearanceProvider><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
+		await f.render(<AppearanceProvider initialAppearance={old.appearance} initialTheme={DEFAULT_THEME}><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
 		await act(async () => settings.open("appearance"));
 		const input = f.input('[data-testid="input-prose-size"]');
 		await f.type(input, "20"); await f.key(input, "Escape");
 		await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="settings-close"]')!.click());
 		await act(async () => settings.open("appearance"));
-		assert.equal(reads, 3);
+		assert.equal(reads, 2, "provider is seeded by SSR, only the dialogs read settings");
 		if (arrival === "before") {
 			await act(async () => reopenedRead.resolve(Response.json({ settings: old })));
 			assert.equal(f.input('[data-testid="input-prose-size"]').value, "12");
@@ -466,22 +466,23 @@ for (const arrival of ["before", "after", "failure-after"] as const) {
 	}));
 }
 
-it("startup appearance loading cannot undo a newer canonical live save", async () => fixture(async f => {
+it("server appearance refresh cannot undo a newer canonical live save", async () => fixture(async f => {
 	const { SettingsDialogProvider, useSettingsDialog } = await import("../components/settings/settings-dialog.tsx");
 	const { AppearanceProvider, useAppearance } = await import("../components/settings/appearance.tsx");
-	const initialRead = deferred<Response>();
 	let settings!: ReturnType<typeof useSettingsDialog>, liveSize = 0, reads = 0;
 	f.setFetch(async (url, init) => {
 		if (init?.method === "PUT") return Response.json({ settings: { version: 1, appearance: { proseFontSize: 20 } } });
 		assert.equal(String(url), "/api/settings");
-		return ++reads === 1 ? initialRead.promise : Response.json({ settings: { version: 1, appearance: { proseFontSize: 12 } } });
+		reads++;
+		return Response.json({ settings: { version: 1, appearance: { proseFontSize: 12 } } });
 	});
 	function Probe() { settings = useSettingsDialog(); liveSize = useAppearance().appearance.proseFontSize; return null; }
-	await f.render(<AppearanceProvider><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
+	await f.render(<AppearanceProvider initialAppearance={{ proseFontSize: 12 }} initialTheme={DEFAULT_THEME}><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
+	assert.equal(reads, 0, "no startup settings GET can race a canonical save");
 	await act(async () => settings.open("appearance"));
 	const input = f.input('[data-testid="input-prose-size"]');
 	await f.type(input, "20"); await f.key(input, "Escape");
 	assert.equal(input.value, "20"); assert.equal(liveSize, 20);
-	await act(async () => initialRead.resolve(Response.json({ settings: { version: 1, appearance: { proseFontSize: 12 } } })));
+	await f.render(<AppearanceProvider initialAppearance={{ proseFontSize: 12 }} initialTheme={DEFAULT_THEME}><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
 	assert.equal(input.value, "20"); assert.equal(liveSize, 20);
 }));
