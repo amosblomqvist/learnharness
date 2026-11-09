@@ -76,6 +76,8 @@ See the [documentation index](docs/README.md) for all guides, [development](docs
 
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 
+Security vulnerabilities: report privately as described in [SECURITY.md](SECURITY.md), not in public issues.
+
 ## License
 
 [AGPL-3.0](LICENSE)
