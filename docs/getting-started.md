@@ -21,6 +21,8 @@ Choose **Teach** and describe what you want to understand. The agent probes your
 
 Use the thinking fields to explain your reasoning, uncertainty, or reaction—not only your selected answer. You can type or dictate. Your confidence is self-reported, not an independent assessment.
 
+Choose **Lesson** to be taught a topic as a readable, source-friendly document. The lesson agent opens with up to three brief calibration questions (or none), presents a **syllabus** you can ask to change, then teaches **section by section**: each section is a structured document — a motivating guess, connected exposition, a worked example, a key point, a takeaway — closed by **one exit-ticket check**. Steer in ordinary words ("simpler", "go deeper", "skip ahead", "more examples"); the lesson re-renders or restructures to match, and attached files and PDFs are read where they're cited. Pick **Teach** when you want the probe-first, one-step-one-check Socratic arc; pick **Lesson** when you want to read the material as a coherent document with checks woven in (study tools that generate documents typically leave their quizzes as separate artifacts — here the graded checks sit inside the flowing document, each tagged to the syllabus section it verifies).
+
 Choose **Practice** for problems rather than a lesson. Start from selected graph material or describe material directly. Submit your thinking as you work; the model's committed solution is revealed when the problem concludes. Use **Next problem** when ready to continue.
 
 Sessions are saved locally, including earlier messages when context is compacted. The [keyboard guide](keyboard.md) covers submission, focus, question controls, and cancellation.
