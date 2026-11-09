@@ -54,6 +54,8 @@ import { MermaidOverlay, SessionMermaidContext } from "@/components/session-over
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
+import type { SourceDocumentRef } from "@/src/core";
+import { SourceDocumentsChips } from "@/components/session-documents";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
@@ -222,6 +224,7 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	sourceDocuments,
 }: {
 	chatId: string;
 	title: string;
@@ -232,6 +235,9 @@ export function Chat({
 	 *  renders no phase chip (no probe→teach arc applies) and a Practice
 	 *  tag rides the header instead. */
 	kind?: "teach" | "practice";
+	/** Source documents attached at creation (issue #175): read-only chips
+	 *  in the top bar name the session's curriculum. */
+	sourceDocuments?: readonly SourceDocumentRef[];
 	initialPrompt?: string;
 	/** A teacher turn is running server-side but attached to no client
 	 * (navigated away mid-turn, returned while in flight). */
@@ -1372,6 +1378,11 @@ export function Chat({
 						</button>
 </Hint>
 					)}
+					{/* Source documents (issue #175): read-only chips naming the
+					    documents this session was created from (hover shows the
+					    staged converted copy's path). Teach sessions only — the
+					    creation route never stages documents on practice. */}
+					<SourceDocumentsChips documents={sourceDocuments ?? []} />
 					{/* The extraction ring (owner-locked redesign, 2026-09-24): fills
 					    with uncovered vs the chunk threshold, pulses while a run is in
 					    flight, vanishes when the graph is off. Click → the exact

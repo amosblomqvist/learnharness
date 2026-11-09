@@ -15,6 +15,7 @@ import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import { SourceDocumentsPicker } from "@/components/session-documents";
 import { SessionStarter } from "@/components/start-session";
 import type { TurnUsage } from "@/src/core";
 
@@ -62,7 +63,18 @@ export function Home({
 	const [busy, setBusy] = useState(false);
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
-	const [startError, setStartError] = useState(false);
+	const [startError, setStartError] = useState<string | false>(false);
+	/* Source documents (issue #175, teach mode): the chosen files ride the
+	 * CREATE request as multipart — the server converts and stages them as
+	 * the session's curriculum. Ref mirror like the topic: the send may run
+	 * after a dictation-flush await. Switching to practice drops them
+	 * (documents define a teaching session, not a practice one). */
+	const [documents, setDocuments] = useState<File[]>([]);
+	const documentsRef = useRef<File[]>([]);
+	const applyDocuments = (next: File[]) => {
+		documentsRef.current = next;
+		setDocuments(next);
+	};
 	/* Run end focuses the topic input (owner, 2026-10-01): the hands are on
 	 * the keyboard from the stop. Falling edge only; this surface's only
 	 * dictation target IS this textarea, so no case-split is needed. */
@@ -144,16 +156,18 @@ export function Home({
 			// graph-context marker as message[0] (a separate custom message
 			// before the learner's first user message, propositions + the
 			// chains among them); the prompt stays the learner's own words.
+			// Source documents (issue #175) ride the same create, teach only.
 			const target = await starterRef.current.start({
 				title: t,
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
+				...(mode === "teach" && documentsRef.current.length > 0 ? { sourceDocuments: documentsRef.current } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
 			router.push(target);
-		} catch {
+		} catch (err) {
 			startingRef.current = false;
 			setBusy(false);
-			setStartError(true);
+			setStartError(err instanceof Error ? err.message : OPENING_PROMPT_FAILURE);
 		}
 	};
 
@@ -220,13 +234,21 @@ export function Home({
 					    shows the pick HINT so the affordance is discoverable;
 					    teaching mode with nothing picked renders nothing. */}
 					<ComposerActions
-						picker={(practiceProps.length > 0 || mode === "practice") && (
-							<NodePickerControl
-								count={practiceProps.length}
-								onOpen={() => setChainSelectOpen(true)}
-								onClear={() => setPracticeProps([])}
-							/>
-						)}
+						picker={<>
+							{(practiceProps.length > 0 || mode === "practice") && (
+								<NodePickerControl
+									count={practiceProps.length}
+									onOpen={() => setChainSelectOpen(true)}
+									onClear={() => setPracticeProps([])}
+								/>
+							)}
+							{/* Source documents (issue #175): teach mode's
+							    curriculum picker — chosen files list as chips
+							    and ride the create. Practice drops the set. */}
+							{mode === "teach" && (
+								<SourceDocumentsPicker documents={documents} onFiles={applyDocuments} />
+							)}
+						</>}
 						setup={zeroKeys ? (
 							<ZeroKeysPill inline onOpen={() => setSetupOpen(true)} />
 						) : (
@@ -242,7 +264,7 @@ export function Home({
 							)
 						)}
 					/>
-					{startError && <p role="alert" className="mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
+					{startError && <p role="alert" className="mb-2 text-sm text-destructive">{startError}</p>}
 					<form
 						data-attachment-composer=""
 						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
@@ -304,7 +326,12 @@ export function Home({
 										key={m}
 										type="button"
 										data-testid={`home-mode-${m}`}
-										onClick={() => setMode(m)}
+										onClick={() => {
+										setMode(m);
+										// Documents define a teaching session's curriculum —
+										// switching to practice drops the chosen set.
+										if (m !== "teach" && documentsRef.current.length > 0) applyDocuments([]);
+									}}
 										className={
 											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
 											(mode === m
