@@ -40,6 +40,9 @@ export * from "./keys.ts";
 export * from "./search.ts";
 export { authStore } from "../store/auth.ts";
 export * from "./settings-body.ts";
+// The session-references PUT seam (issue #63): parse + source-access
+// admission for the shelf route (app/api/chats/[id]/references).
+export * from "./references.ts";
 export { fileAccessConfigurationError } from "./file-access.ts";
 export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";

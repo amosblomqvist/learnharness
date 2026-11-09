@@ -41,6 +41,18 @@ The teacher can show a local raster image or request an annotated visual based o
 
 File tools are read-only but have broad filesystem access under the server's user; they are not confined to a selected folder. The sensitive-path guard blocks known credential/private locations, not all sensitive content. Review what you make available: file content read by an agent may be sent to its configured model provider. See [file-access boundaries](architecture.md#file-access-and-external-services).
 
+## Session references
+
+A session can also carry a small **reference shelf**: the **References** chip in the session header opens a panel where you add local file paths or http(s) URLs and remove them at any time. Every agent in the session — prober, teacher, and practitioner — is told to consult these when precision matters and cite them when used. A change takes effect from the next reply, like a model change.
+
+What each way of bringing material in is for:
+
+- **Per-message attachments (the composer's paperclip):** a one-off. The quoted path lands in that single message; the agent reads it if that message's work needs it. Later messages do not see it again.
+- **Session references (the header shelf):** persistent grounding for the whole session. Files stay in place — nothing is uploaded, and adding a path does not grant any permission beyond the existing file-access guards (protected locations are refused at add time and re-checked on every read). URL references are fetched indirectly: the conversation agents have no direct fetch tool, so they dispatch the background researcher, which can fetch a given URL without a search key.
+- **Notes import (the graph's Extract files):** bulk extraction. Whole files become propositions and chains in your knowledge graph, independent of any session. See [Extract into the graph](#extract-into-the-graph).
+
+References ground explanations and problems; they do not define what is taught. The plan still comes from your goal, nothing is imported into the graph, and — unlike a document-sourced curriculum, where chosen documents shape the session's whole arc — the shelf only steers answers toward your sources.
+
 ## Extract into the graph
 
 For lessons, attach material to a session instead. Use the graph's **Extract files… → Files** or **Folder** picker for Markdown, plain text, or PDFs. This is a separate import flow, not the session's path attachments. Each supported file is uploaded for processing; folders organize imported sources.

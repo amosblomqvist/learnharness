@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SessionReference, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -86,7 +86,7 @@ function listChats(): ChatSummary[] {
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, references: _references, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -187,6 +187,18 @@ function saveSettings(id: string, settings: ChatSettings): void {
 	writeChat(record);
 }
 
+/** Persist the session's reference shelf (issue #63) — replace-whole, the
+ *  saveSettings convention: the panel sends the complete desired list, so
+ *  a stale client can never resurrect a removed reference. Same as a model
+ *  change: no updatedAt bump, silent under the events law (not a list-shape
+ *  mutation), effective at the next turn's construction by design. */
+function saveReferences(id: string, references: SessionReference[]): void {
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	record.references = references;
+	writeChat(record);
+}
+
 /** Rename a session (the header's click-to-edit title, 2026-09-17). Like
  * saveSettings, a rename is NOT conversation activity: updatedAt stays put
  * so sidebar order never churns. Same fallback as createChat — the empty
@@ -234,6 +246,7 @@ export const chatStore: ChatStore = {
 	saveImageSnapshot,
 	saveTree,
 	saveSettings,
+	saveReferences,
 	renameChat,
 	deleteChat,
 	appendTurnUsage,

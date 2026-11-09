@@ -460,6 +460,10 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		// The session's reference shelf (issue #63), read fresh per turn —
+		// the same next-turn semantics as a model change; a mid-turn shelf
+		// edit lands on the following turn's construction.
+		references: record.references,
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher

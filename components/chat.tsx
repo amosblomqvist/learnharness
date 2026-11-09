@@ -50,10 +50,11 @@ import {
 } from "@/src/core";
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
+import { ReferencesChip } from "@/components/references-panel";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
-import type { PlanBlockData } from "@/src/core";
+import type { PlanBlockData, SessionReference } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
@@ -222,6 +223,7 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	initialReferences,
 }: {
 	chatId: string;
 	title: string;
@@ -233,6 +235,9 @@ export function Chat({
 	 *  tag rides the header instead. */
 	kind?: "teach" | "practice";
 	initialPrompt?: string;
+	/** The session's reference shelf seed (issue #63) — the record's
+	 *  references; the header chip owns edits after mount. */
+	initialReferences?: SessionReference[];
 	/** A teacher turn is running server-side but attached to no client
 	 * (navigated away mid-turn, returned while in flight). */
 	initiallyInFlight?: boolean;
@@ -1372,6 +1377,10 @@ export function Chat({
 						</button>
 </Hint>
 					)}
+					{/* The reference shelf (issue #63): the Plan chip's language —
+					    a session-level chip opening a small panel. Grounds all of
+					    the session's agents; both session kinds. */}
+					<ReferencesChip chatId={chatId} initialReferences={initialReferences} />
 					{/* The extraction ring (owner-locked redesign, 2026-09-24): fills
 					    with uncovered vs the chunk threshold, pulses while a run is in
 					    flight, vanishes when the graph is off. Click → the exact
