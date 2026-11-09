@@ -697,6 +697,12 @@ for (const expiry of ["dispose", "leave"] as const) {
 			stale.update({ label: "Too late" }); stale.dispose();
 		});
 		assert.equal(f.store.getSnapshot().length, 0); assert.equal(f.controller.getTopLayer(), null); assert.equal(closes, 0);
+		if (expiry === "leave") await f.render({ active: true });
+		await f.open("Replacement menu parent", anchor);
+		await act(async () => otherUi.openMenu(anchor, { items: [], onClose() { closes++; } }, { signal: caller.signal }));
+		assert.equal(document.querySelectorAll('[role="menu"]').length, 1, "the exact reused anchor has no expired registration");
+		await act(async () => otherUi.openMenu(anchor, { items: [] }, { signal: caller.signal }));
+		assert.equal(document.querySelectorAll('[role="menu"]').length, 0); assert.equal(closes, 1);
 	}));
 }
 

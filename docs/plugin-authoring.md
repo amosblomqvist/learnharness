@@ -274,6 +274,14 @@ plugin owns values and persistence; feed accepted values back through `update`.
 Mount methods take a container before props; `openMenu` takes an anchor. See the types
 for complete signatures. Callbacks may be async; errors surface rather than count as success.
 
+Calling `openMenu` again from the same UI owner with the exact same anchor element
+closes the existing menu instead of stacking another one, even before it renders.
+The existing menu's latest `onClose` runs once; the closing call returns an inert
+handle and does not use its incoming props or callback. Other UI owners and anchors
+remain independent. Outside clicks (including other buttons), menu actions and Escape
+keep their existing dismissal rules; only Escape restores anchor focus. Explicit
+handle disposal and caller/plugin/surface expiry remain disposal, without `onClose`.
+
 **Writing controls.** Model/thinking pickers use the host catalog without changing core
 defaults or choosing fallback models. Their compact typography is self-contained. The
 standalone composer is a bare input; the standard preset frames only text entry, with

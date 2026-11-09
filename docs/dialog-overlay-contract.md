@@ -115,6 +115,18 @@ A layer's visual position is not its lifetime ownership. For example, unloading 
 | Content-area views | Existing Graph/Practice Chains browser, expanded diagrams/figures, expanded full plan | Preserve current bounds, sidebar interaction and visuals. Register interaction ownership without viewport-modal isolation. Correct misleading modal semantics without changing presentation. |
 | Inline/noninteractive UI | Activity disclosure, notifications/update banner, drag preview | Do not make these modal layers. |
 
+### Plugin menu repeated-anchor toggle
+
+Subsequent human-approved amendment: within the same plugin UI owner, repeated
+`openMenu` calls for the exact same anchor element toggle the existing menu closed,
+synchronously even before React mounts it. Closing invokes the existing menu's latest
+`onClose` once and returns an inert handle for the repeated call; its incoming props
+and callback do not create a new menu. Different owners and anchors retain their
+existing behavior. Outside clicks (including another button), action dismissal,
+Escape-only anchor focus return and error/async behavior are unchanged. Caller,
+plugin and owning-surface expiry or explicit disposal clear the anchor registration
+without synthesizing `onClose`; stale handles cannot affect a later menu.
+
 ### New plugin knowledge picker
 
 The picker reuses the existing Chains interface and translucent/blurred appearance. The later human-approved presentation is origin-sensitive: opening from a plugin/native page or session surface uses a main-content-pane `view`, excluding the sidebar and leaving sidebar interaction available, like native Chains. Opening from a dialog, Settings or another modal ancestor uses the full-window modal presentation, with its painted parent and background/sidebar inactive. The host captures the actual invocation owner and bounds; plugins do not guess a context or supply a public origin option. Navigation away from an originating page or expiry of the exact owner/widget closes pending and open pickers; merely covering a live origin retains mounted state. A global-modal origin follows its actual modal/widget lifetime, not an unrelated background pathname. This supersedes the original always-full-window plugin-picker policy.

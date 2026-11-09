@@ -100,7 +100,9 @@ export function createPluginUiStore() {
 				try { if (onError) onError(error); else console.error("Plugin UI failed", error); }
 				catch (reportError) { console.error("Plugin UI error reporter failed", reportError); }
 			};
-			function mount<Props>(container: HTMLElement, props: Props, options: PluginWidgetOptions, render: (props: Props, runtime: Runtime) => ReactNode, nativeSignal?: AbortSignal, surface = false, validate?: (props: Props) => void, contentRecords: readonly string[] = []): PluginWidgetHandle<Props> {
+			// Identity is this UI owner's exact element, not a plugin id or selector.
+			const menus = new WeakMap<HTMLElement, { close(): boolean }>();
+			function mount<Props>(container: HTMLElement, props: Props, options: PluginWidgetOptions, render: (props: Props, runtime: Runtime) => ReactNode, nativeSignal?: AbortSignal, surface = false, validate?: (props: Props) => void, contentRecords: readonly string[] = [], onMount?: (runtime: Runtime, current: () => Props) => void): PluginWidgetHandle<Props> {
 				const scope = new AbortController();
 				const target = container.ownerDocument.createElement("div");
 				target.dataset.pluginUiWidget = "";
@@ -159,6 +161,7 @@ export function createPluginUiStore() {
 				if (lifetime.aborted || options.signal.aborted || nativeSignal?.aborted) { disposed = true; scope.abort(); }
 				else {
 					validate?.(current);
+					onMount?.(runtime, () => current);
 					container.append(target);
 					lifetime.addEventListener("abort", dispose, { once: true });
 					options.signal.addEventListener("abort", dispose, { once: true });
@@ -212,8 +215,27 @@ export function createPluginUiStore() {
 					// A menu is an anchored interactive child, not another visual stack
 					// sibling. It cannot outlive its surface and reportal to the body.
 					if (lifetime.aborted || options.signal.aborted || !anchor.isConnected) return { update() {}, dispose() {} };
+					const existing = menus.get(anchor);
+					if (existing) { existing.close(); return { update() {}, dispose() {} }; }
 					const owner = [...snapshot].reverse().find(entry => entry.surface && entry.target.contains(anchor));
-					return mount(anchor.ownerDocument.body, props, options, (props, runtime) => <PluginMenu anchor={anchor} {...props} runtime={runtime} />, owner?.runtime.signal);
+					let closeMenu = () => false;
+					return mount(anchor.ownerDocument.body, props, options, (props, runtime) => <PluginMenu anchor={anchor} {...props} runtime={runtime} closeMenu={closeMenu} />, owner?.runtime.signal, false, undefined, [], (runtime, current) => {
+						let closing = false;
+						const forget = () => { if (menus.get(anchor) === menu) menus.delete(anchor); };
+						const menu = { close() {
+							if (closing || runtime.signal.aborted) return false;
+							closing = true;
+							// Release before callbacks: reentrant opens own a fresh entry, and
+							// disposing this old widget must not erase their registration.
+							forget();
+							invoke(current().onClose, runtime.report);
+							runtime.dispose();
+							return true;
+						} };
+						closeMenu = menu.close;
+						menus.set(anchor, menu); // Before publish, including synchronous subscribers.
+						runtime.signal.addEventListener("abort", forget, { once: true });
+					});
 				},
 				openDialog: (props, options) => {
 					const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -259,15 +281,12 @@ export function PluginUiHost({ store }: { store: PluginUiStore }) {
 	))}</>;
 }
 
-function PluginMenu({ anchor, items, label, preferredSide = "down", onClose, runtime }: PluginMenuProps & { anchor: HTMLElement; runtime: Runtime }) {
+function PluginMenu({ anchor, items, label, preferredSide = "down", closeMenu, runtime }: PluginMenuProps & { anchor: HTMLElement; runtime: Runtime; closeMenu(): boolean }) {
 	const root = useRef<HTMLDivElement>(null);
 	const anchorRef = useRef(anchor);
 	const controller = useInteractionLayers();
-	const closing = useRef(false);
 	const close = (reason: CloseReason = "action"): CloseOutcome => {
-		if (closing.current || runtime.signal.aborted) return "closed";
-		closing.current = true;
-		invoke(onClose, runtime.report); runtime.dispose();
+		if (!closeMenu()) return "closed";
 		const owner = controller.ownerOf(anchor);
 		if (reason === "escape" && isInteractionElementVisible(anchor) && (!owner || controller.isLayerEligible(owner.id))) anchor.focus();
 		return "closed";
