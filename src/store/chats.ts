@@ -16,7 +16,7 @@ import type { ChatStore } from "../core/ports.ts";
 import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
-import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
+import { activeProblemOf, questionStateOf } from "../core/native-messages.ts";
 import { phaseAt3Lh } from "../core/phases.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
@@ -105,10 +105,10 @@ function listChats(): ChatSummary[] {
 						// accepted — docs/archive/probe-teach-split.md §4), pending question
 						// from the native dangling-call scan. Wave D: both folds read
 						// the NATIVE record (core/phases.ts phaseAt3Lh +
-						// native-messages.ts danglingQuestionOf). Liveness (busy) is
+						// native-messages.ts questionStateOf). Liveness (busy) is
 						// NOT record-derived — the API route merges it (ChatListItem).
 						phase: phaseAt3Lh(messages),
-						pendingQuestion: danglingQuestionOf(messages) !== null,
+						pendingQuestion: questionStateOf(messages) === "answerable",
 						// Practice: a posed problem with no conclude (the sidebar's
 						// "Problem waiting"); false on teaching sessions, which
 						// have no problem tool.

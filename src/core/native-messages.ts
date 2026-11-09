@@ -741,10 +741,16 @@ export function questionCallsOf(messages: readonly LhMessage[]): QuestionCall[] 
 	return [];
 }
 
-/** Background wakes must still wait for an explicit learner action when a
- * question is unusable. Releasing the composer is not permission to retry. */
-export function hasUnresolvedQuestion(messages: readonly LhMessage[]): boolean {
-	return questionCallsOf(messages).length > 0;
+export type QuestionState = "none" | "answerable" | "streaming" | "unusable";
+
+/** One answer to "is there a question?" for every reader. Background wakes
+ * must still wait for an explicit learner action when a question is unusable:
+ * releasing the composer is not permission to retry. Hold while not "none". */
+export function questionStateOf(messages: readonly LhMessage[]): QuestionState {
+	const calls = questionCallsOf(messages);
+	if (calls.some(call => call.status === "answerable")) return "answerable";
+	if (calls.some(call => call.status === "streaming")) return "streaming";
+	return calls.length > 0 ? "unusable" : "none";
 }
 
 /** Client placeholders are loop acknowledgements, not learner answers. */
