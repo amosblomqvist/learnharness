@@ -9,9 +9,9 @@
  *   appearance edits restyle the chat LIVE behind the dialog). Escape,
  *   backdrop, and ✕ all close. Modal-only — /settings redirects, so
  *   nothing links into a dead surface.
- * - Left section nav in the app's mono chrome (text-only, session-list
- *   language — active = bg-accent), no icons, matching the minimal-color
- *   doctrine.
+ * - Left section nav in the app's mono chrome, with small decorative
+ *   Lucide icons for the built-in sections; active = bg-accent. Icons
+ *   inherit the row's color, without a separate palette.
  * - The dialog is surface-agnostic by construction: the sections talk to
  *   /api/settings* and localStorage only, so this shell can be re-mounted
  *   as a true OS window in the Electron round with near-zero churn.
@@ -33,6 +33,7 @@ import {
 	type ReactNode,
 	type RefObject,
 } from "react";
+import { BotIcon, KeyIcon, KeyboardIcon, PaletteIcon, PlugIcon, PuzzleIcon, SettingsIcon, WaypointsIcon, type LucideIcon } from "lucide-react";
 import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
@@ -64,12 +65,12 @@ import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
  *  prose is out; only the keyboard note stays (storage location is a
  *  real question users ask). */
 const SECTIONS = [
-	{ id: "keys", label: "Providers" },
-	{ id: "agent", label: "Agent" },
-	{ id: "appearance", label: "Appearance" },
-	{ id: "graph", label: "Graph" },
-	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
-	{ id: "general", label: "General" },
+	{ id: "keys", label: "Providers", icon: KeyIcon },
+	{ id: "agent", label: "Agent", icon: BotIcon },
+	{ id: "appearance", label: "Appearance", icon: PaletteIcon },
+	{ id: "graph", label: "Graph", icon: WaypointsIcon },
+	{ id: "keyboard", label: "Keyboard", icon: KeyboardIcon, hint: "Stored on this device" },
+	{ id: "general", label: "General", icon: SettingsIcon },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 
@@ -247,10 +248,10 @@ export function SettingsDialogBody({
 		if (missingPlugin) setActive(management);
 	}, [missingPlugin, management]);
 	const selected = missingPlugin ? management : active;
-	const navSections: { id: SectionId; label: string }[] = [
+	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = [
 		...SECTIONS,
-		{ id: "core-plugins", label: "Core plugins" },
-		{ id: "plugins", label: "Community plugins" },
+		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
+		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },
 		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
 	];
 
@@ -380,12 +381,12 @@ export function SettingsDialogBody({
 			</header>
 
 			<div className="flex min-h-0 flex-1">
-				{/* Left nav — text-only, the session-list mono language,
+				{/* Left nav — mono labels and theme-inherited decorative icons,
 					    active = bg-accent. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex min-h-0 w-44 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
+					className="flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
 				>
 					{navSections.map((s, index) => (
 						<div key={s.id} className="shrink-0">
@@ -394,14 +395,15 @@ export function SettingsDialogBody({
 								type="button"
 								data-testid={`settings-nav-${s.id}`}
 								aria-current={selected === s.id}
-								className={`w-full break-words rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
+								className={`flex w-full items-center gap-2 break-words rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
 									selected === s.id
 										? "bg-accent text-foreground"
 										: "text-muted-foreground hover:bg-accent hover:text-foreground"
 								}`}
 								onClick={() => setActive(s.id)}
 							>
-								{s.label}
+								{s.icon && <s.icon aria-hidden="true" focusable="false" className="size-3.5 shrink-0" />}
+								<span className="min-w-0">{s.label}</span>
 							</button>
 							{s.id === "plugins" && <hr className="my-2 border-border" />}
 						</div>

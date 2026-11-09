@@ -11,6 +11,7 @@ import React from "react";
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { parseHTML } from "linkedom";
 import { renderToStaticMarkup as renderStatic } from "react-dom/server";
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section.tsx";
@@ -49,6 +50,39 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		assert.ok(html.includes("the app"));
 		assert.ok(!html.includes("settings-backdrop"));
 		assert.ok(!html.includes("settings-dialog"));
+	});
+
+	it("built-in navigation uses the agreed decorative Lucide icons without changing labels or selection", () => {
+		const { document } = parseHTML(renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />));
+		const expected = [
+			["keys", "Providers", "key"],
+			["agent", "Agent", "bot"],
+			["appearance", "Appearance", "palette"],
+			["graph", "Graph", "waypoints"],
+			["keyboard", "Keyboard", "keyboard"],
+			["general", "General", "settings"],
+			["core-plugins", "Core plugins", "plug"],
+			["plugins", "Community plugins", "puzzle"],
+		];
+		assert.ok(document.querySelector('[data-testid="settings-nav"]')!.classList.contains("w-48"), "approved 192px sidebar leaves room for the icon and Community plugins label");
+		assert.ok(document.querySelector('[data-testid="settings-dialog"]')!.classList.contains("w-[920px]"), "overall dialog width is unchanged");
+		const buttons = [...document.querySelectorAll('[data-testid="settings-nav"] button')];
+		assert.deepEqual(buttons.map(button => button.textContent), expected.map(([, label]) => label));
+		for (const [id, label, iconName] of expected) {
+			const button = document.querySelector(`[data-testid="settings-nav-${id}"]`)!;
+			assert.equal(button.textContent, label);
+			assert.equal(button.getAttribute("aria-current"), String(id === "keys"));
+			const icons = button.querySelectorAll("svg");
+			assert.equal(icons.length, 1);
+			const icon = icons[0]!;
+			assert.ok(icon.classList.contains(`lucide-${iconName}`), `${id}: agreed icon`);
+			assert.ok(icon.classList.contains("size-3.5"));
+			assert.ok(icon.classList.contains("shrink-0"));
+			assert.equal(icon.getAttribute("aria-hidden"), "true");
+			assert.equal(icon.getAttribute("focusable"), "false");
+			assert.equal(icon.getAttribute("stroke"), "currentColor", "inherits the themed row color");
+			assert.equal(icon.querySelector("title"), null, "icon must not add a second accessible label");
+		}
 	});
 
 	it("the dialog frame: role=dialog + the ✕ + the six-section nav, Providers first and General last", () => {
