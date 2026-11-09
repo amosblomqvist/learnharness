@@ -268,6 +268,50 @@ try {
   assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('cached').querySelector('.rich-code-blocks--rendered')).color), 'rgb(18, 52, 86)', 'New cache mounts use the current theme Text color.');
   assert.equal(await page.evaluate(() => window.texPosts), postsBeforeColors, 'Ink-only changes retain the compiled SVG cache.');
   assert.equal(await page.evaluate(() => new Set([...document.querySelectorAll('svg [id]')].map(node => node.id)).size === document.querySelectorAll('svg [id]').length), true, "Repeated cached SVG must have mount-unique IDs.");
+  // Observed authoring failure patterns: each corrected block must pass the
+  // real worker and SVG sanitizer; its unsupported variant stays readable.
+  const authoringCases = [
+    { id: 'commutative-authoring', source: String.raw`\usepackage{tikz-cd}
+\begin{document}
+\begin{tikzcd}
+A \arrow[r,"f"] \arrow[d,"g"'] & B \arrow[d,"h"] \\
+C \arrow[r,"k"'] & D
+\end{tikzcd}
+\end{document}`, invalid: source => source.replace('\\begin{document}', '\\begin{document}\\[').replace('\\end{document}', '\\]\\end{document}') },
+    { id: 'free-body-authoring', source: String.raw`\usepackage{tikz}
+\usepackage{amsmath}
+\begin{document}
+\begin{tikzpicture}[>=stealth,thick]
+\draw (-0.6,-0.4) rectangle (0.6,0.4);
+\node at (0,0) {block};
+\draw[->] (0,0.4)--(0,1.4) node[above] {$N$};
+\draw[->] (0,-0.4)--(0,-1.4) node[below] {$mg$};
+\draw[->] (0.6,0)--(1.6,0) node[right] {$F_{\text{app}}$};
+\draw[->] (-0.6,0)--(-1.6,0) node[left] {$f_k$};
+\draw (-1.8,-0.55)--(1.8,-0.55);
+\end{tikzpicture}
+\end{document}`, invalid: source => source.replace('\\usepackage{amsmath}', '') },
+    { id: 'plot-authoring', source: String.raw`\usepackage{pgfplots}
+\pgfplotsset{compat=1.16}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[axis lines=middle,xlabel={$x$},ylabel={$y$},xmin=-2.5,xmax=2.5,ymin=-0.5,ymax=5,domain=-2:2,samples=80]
+\addplot[blue,thick] {x^2};
+\end{axis}
+\end{tikzpicture}
+\end{document}`, invalid: source => source.replace('compat=1.16', 'compat=1.18') },
+  ];
+  const authoringProof = [];
+  for (const { id, source, invalid } of authoringCases) {
+    const unsupported = invalid(source);
+    const failure = await render(id + '-unsupported', 'tikz', unsupported);
+    assert.match(failure.error, /TeX engine render failed/, id);
+    assert.equal(failure.source, unsupported, 'Failed source stays intact; no automatic repairs.');
+    const corrected = await render(id, 'tikz', source);
+    assert.ok(corrected.svg && corrected.paths > 0 && corrected.width > 0 && corrected.height > 0, `${id}: ${JSON.stringify(corrected)}`);
+    authoringProof.push({ id, failure, corrected });
+  }
+  await page.screenshot({ path: path.join(evidence, 'tikz-authoring-regressions.png'), fullPage: true });
   const dirty = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" onload="window.pwned=1"><script>window.pwned=2</script><style>@import url(https://example.invalid/a.css);</style><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">bad</div></foreignObject><image href="https://example.invalid/x.png"/><a href="javascript:alert(1)"><text>link</text></a><animate attributeName="x"/><defs><path id="shape" d="M0 0L10 10"/></defs><use xlink:href="#shape"/><use href="https://example.invalid/a.svg#x"/><path d="M0 0L2 2" onclick="window.pwned=3" style="fill:url(https://example.invalid/f);stroke:red;filter:url(https://example.invalid/filter)"/><text font-family="cmr10" style="font-size:12px;position:fixed">safe &lt;script&gt;</text></svg>`;
   const sanitized = await page.evaluate(dirty => {
     const svg=sanitizeSvg(dirty,'Safety fixture');document.body.append(svg);
@@ -322,7 +366,7 @@ try {
   assert.equal(await page.evaluate(() => host.mounts.size), 0);
   assert.deepEqual(errors, []); assert.deepEqual(consoleErrors, []);
   assert.ok(network.every(url => url.startsWith(base + '/') || url.startsWith('data:')), `Unexpected network: ${network.filter(url => !url.startsWith(base + '/'))}`);
-  const report = { timings, chemicalLabels, sizingProof, wideProof, inkProof, switchedInk, overrideInk, paletteProof, initialColors, textColors, referenceProof, cachedMs: cached.ms, timeout, heartbeatTicks: ticks, recoveredMs: recovered.ms, fontProof, requests, network, errors, consoleErrors };
+  const report = { timings, authoringProof, chemicalLabels, sizingProof, wideProof, inkProof, switchedInk, overrideInk, paletteProof, initialColors, textColors, referenceProof, cachedMs: cached.ms, timeout, heartbeatTicks: ticks, recoveredMs: recovered.ms, fontProof, requests, network, errors, consoleErrors };
   fs.writeFileSync(path.join(evidence, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ evidence, timings: Object.fromEntries(Object.entries(timings).map(([name,result])=>[name,Math.round(result.ms)])), cachedMs: Math.round(cached.ms), timeoutMs: Math.round(timeout.ms), heartbeatTicks: ticks, recoveredMs: Math.round(recovered.ms), bundledFontRequests: fontProof.requests.length, requests: requests.length, pageErrors: errors.length }, null, 2));
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

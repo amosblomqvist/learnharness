@@ -16,7 +16,7 @@ export function activate(ctx: PluginBackendContext): () => void {
   const updateInstructions = () => {
     instructionDisposers.splice(0).forEach(dispose => dispose());
     for (const family of FAMILIES) if (settings[family]) {
-      instructionDisposers.push(ctx.registerInstructions({ agents: ["teacher", "practice"], text: INSTRUCTIONS[family] }));
+      instructionDisposers.push(ctx.registerInstructions({ agents: ["prober", "teacher", "practice"], text: INSTRUCTIONS[family] }));
     }
   };
   const assertActive = () => { if (ctx.signal.aborted) throw new Error("Rich code blocks is disabled."); };

@@ -21,7 +21,7 @@ function fixture(directory: string) {
   return { controller, handlers, instructions, events, activate: () => activate(ctx), call: (name: string, input?: unknown) => handlers.get(name)!(input) };
 }
 
-test("all-off startup is nonwriting; only accepted toggles contribute exact teacher/practice prompts and survive restart", () => {
+test("all-off startup is nonwriting; only accepted toggles contribute exact prober/teacher/practice prompts and survive restart", () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "lh-rich-backend-"));
   const directory = path.join(temporary, "data");
   try {
@@ -33,7 +33,7 @@ test("all-off startup is nonwriting; only accepted toggles contribute exact teac
       const accepted = parseSettings(host.call("set-family", { family, enabled: true }));
       assert.equal(accepted[family], true);
       assert.ok([...host.instructions].some(value => value.text === INSTRUCTIONS[family]));
-      assert.ok([...host.instructions].every(value => JSON.stringify(value.agents) === '["teacher","practice"]'));
+      assert.ok([...host.instructions].every(value => JSON.stringify(value.agents) === '["prober","teacher","practice"]'));
     }
     assert.equal(host.instructions.size, 3);
     assert.equal(host.events.length, 3);
@@ -51,6 +51,9 @@ test("all-off startup is nonwriting; only accepted toggles contribute exact teac
     second.call("set-family", { family: "chemicalStructures", enabled: false });
     const next = parseSettings(second.call("set-family", { family: "musicalNotation", enabled: false }));
     assert.equal(next.technicalDiagrams, true); assert.equal(next.chemicalStructures, false); assert.equal(next.revision, 5);
+    assert.deepEqual([...second.instructions], [{ agents: ["prober", "teacher", "practice"], text: INSTRUCTIONS.technicalDiagrams }]);
+    second.call("set-family", { family: "technicalDiagrams", enabled: false });
+    assert.equal(second.instructions.size, 0, "Disabling every family removes every role's instructions.");
     second.controller.abort(); assert.throws(() => second.call("set-family", { family: "technicalDiagrams", enabled: false }));
     disposeSecond();
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }

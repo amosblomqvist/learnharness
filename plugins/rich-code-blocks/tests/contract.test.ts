@@ -22,15 +22,20 @@ test("v1 settings tolerate and discard obsolete inkColor without changing revisi
 
 test("technical-diagram instructions cover the observed TeX authoring failures", () => {
   const instructions = INSTRUCTIONS.technicalDiagrams;
-  assert.match(instructions, /self-contained TeX with \\begin\{document\} and \\end\{document\}/);
-  assert.match(instructions, /already supplies the standalone document class: never include \\documentclass or \\documentstyle/);
-  assert.match(instructions, /Before \\begin\{document\}, explicitly load all packages/);
+  assert.match(instructions, /one self-contained TeX document/);
+  assert.match(instructions, /supplies the standalone document class: never include \\documentclass or \\documentstyle/);
+  assert.match(instructions, /package and library declarations before \\begin\{document\}, then the diagram, then \\end\{document\}/);
   for (const name of ["tikz", "circuitikz", "tikz-cd", "pgfplots", "amsmath"]) {
     assert.ok(instructions.includes(`\\usepackage{${name}}`), `Missing explicit package declaration: ${name}`);
   }
   assert.match(instructions, /\\text\{\.\.\.\} or aligned equations, also load \\usepackage\{amsmath\}/);
-  assert.match(instructions, /\\usetikzlibrary in that same preamble/);
-  assert.match(instructions, /available, not automatically loaded; do not rely on declarations from another block/);
+  assert.match(instructions, /\\usetikzlibrary in the preamble/);
+  assert.match(instructions, /never rely on declarations from another block/);
+  assert.ok(instructions.includes("Do not wrap the diagram in \\[...\\], $$...$$, or an equation environment."));
+  assert.match(instructions, /tikzcd cells already use math mode/);
+  assert.match(instructions, /bundled PGFPlots version is 1\.16/);
+  assert.ok(instructions.includes("\\pgfplotsset{compat=1.16}"));
+  assert.match(instructions, /do not request 1\.18 or another newer version/);
 });
 
 test("UTF-8 source/output bounds are enforced without trimming valid payloads", () => {

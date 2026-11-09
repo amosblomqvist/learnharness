@@ -11,7 +11,8 @@ It turns higher-level notation into **static SVG**:
 
 Enable the plugin, then enable only the families wanted in its dedicated Settings
 page. Enabled families alone register renderers and add short system instructions
-to teacher/practice (not prober). Disabling a family restores ordinary readable
+to prober, teacher, and practice agents, including the probing phase at the start
+of a teaching session. Disabling a family restores ordinary readable
 code fences. Prompt changes apply to future turns, not an already-running model
 request. There are no subarea toggles, per-family prompt editors, simulations,
 interactive circuits, playback, raw-SVG input or custom drawing toolbars.
@@ -106,6 +107,7 @@ Physics/free-body diagrams and geometry use general TikZ:
 
 ````markdown
 ```tikz
+\usepackage{tikz}
 \begin{document}
 \begin{tikzpicture}
   \draw (0,0) rectangle (1,1);
@@ -164,8 +166,12 @@ load its needed packages and TikZ libraries before `\begin{document}`, then clos
 with `\end{document}`. Bundled packages are available, not automatically loaded;
 declarations in another block do not carry over. In particular, load
 `\usepackage{amsmath}` for math labels using `\text{...}` or aligned equations.
-These requirements are also included in the teacher/practice system instructions
-when technical diagrams are enabled. Upstream also includes supporting
+Place the diagram environment directly inside `document`, without an outer
+`\[...\]`, `$$...$$`, or `equation` wrapper. TikZ node labels can use `$...$`;
+`tikzcd` cells already use math mode. The bundled PGFPlots version is **1.16**:
+use `\pgfplotsset{compat=1.16}`, not `compat=1.18` or a newer version.
+These requirements are also included in the prober/teacher/practice system
+instructions when technical diagrams are enabled. Upstream also includes supporting
 math/array/3D/chemfig packages, but those are not additional advertised families.
 No raw SVG/HTML/JS, shell, remote resource, uploaded data-file or audio input path
 is provided by this plugin.
