@@ -52,7 +52,7 @@ if (exists(leakedData)) {
 // (the DEV BYOK key store, 0600) byte-identical into the DMG (caught in
 // the 2026-10-08 payload audit; excluded in next.config.ts — this guard
 // makes a regression loud instead of silent).
-const subscriptionSecrets = fs.readdirSync(STANDALONE).filter((name) => /^(chatgpt|github-copilot|xai)-credentials\.json/.test(name));
+const subscriptionSecrets = fs.readdirSync(STANDALONE).filter((name) => /^(chatgpt|github-copilot|xai|antigravity)-credentials\.json/.test(name));
 for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]) {
 	if (exists(path.join(STANDALONE, secret))) {
 		console.error(`[build-server] REFUSING: standalone contains ${secret} — dev secrets would ship in the app.`);

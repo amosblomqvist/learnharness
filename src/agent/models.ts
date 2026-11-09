@@ -22,6 +22,7 @@ import { createClaudeCodeProvider } from "./claude-code/provider.ts";
 import { streamClaudeCode } from "./claude-code/stream.ts";
 import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
+import { antigravityProvider } from "../../electron/antigravity-provider.cjs";
 
 /** App identity is immutable and shared by Models and every native Agent.
  * Agent's default Pi attribution otherwise overrides the Models identity. */
@@ -93,6 +94,7 @@ export function piModels() {
 		}
 		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
 	}
+	collection.setProvider(antigravityProvider());
 	providerSource?.sync(collection);
 	return collection;
 }
