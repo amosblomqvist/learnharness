@@ -967,6 +967,26 @@ describe("mid-turn navigation (turn liveness + write-ahead)", () => {
 		await drainRunning(chat.id);
 	});
 
+	it("a throw while building the agent does not lock the chat: the next request is accepted", async () => {
+		const { engine } = scriptedTeacher(defaultLesson);
+		const chat = createConfiguredChat("Test: agent setup throws");
+		createdChats.push(chat.id);
+		const errors = console.error;
+		console.error = () => {};
+		try {
+			await handleChatRequest(post(chat.id, { type: "text", text: "teach me the solar system" }), () => {
+				throw new Error("agent setup failed");
+			}).catch(() => undefined);
+		} finally {
+			console.error = errors;
+		}
+		assert.equal(isTurnRunning(chat.id), false, "a turn that never started is not in flight");
+
+		const retry = await handleChatRequest(post(chat.id, { type: "text", text: "teach me the solar system" }), agentFactory(engine));
+		assert.equal(retry.status, 200, "the chat accepts the next turn instead of answering 409");
+		await drainRunning(chat.id);
+	});
+
 	it("write-ahead: the learner's answer is durable BEFORE the turn finishes", async () => {
 		const { engine } = scriptedTeacher(defaultLesson);
 		const chat = createConfiguredChat("Test: write-ahead");
