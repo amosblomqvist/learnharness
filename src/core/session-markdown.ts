@@ -44,7 +44,14 @@ export interface MarkdownContext {
 	failedOutputCalls?: ReadonlySet<string>;
 }
 
-function markdownContext(messages: ReadonlyArray<LhMessage>): MarkdownContext {
+/**
+ * The session traversal context: the tool-call map (call id → name +
+ * arguments) plus the failed-output scan, over a message list. Exported
+ * (issue #11) so the Anki evidence extractor rides the SAME traversal the
+ * markdown blocks render from — the practice join (conclude outcome from
+ * call args, reveal via problemInputForConclude) must not fork.
+ */
+export function markdownContext(messages: ReadonlyArray<LhMessage>): MarkdownContext {
 	const calls: MarkdownContext["calls"] = new Map();
 	for (const message of messages) {
 		if ((message as { role?: string }).role !== "assistant") continue;
