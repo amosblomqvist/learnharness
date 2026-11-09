@@ -25,7 +25,7 @@ const { writeSettings } = await import("../src/store/settings.ts");
 const { graphStore } = await import("../src/store/graph.ts");
 const { writeRenderSettings } = await import("../src/store/render-settings.ts");
 const { ensureGraphFormat } = await import("../src/store/graph-format.ts");
-const { promptOverrides } = await import("../src/store/prompt-overrides.ts");
+const { writePromptEditorRecord } = await import("../src/store/prompt-editor.ts");
 const { authStore } = await import("../src/store/auth.ts");
 const { sourceOrganizationStore } = await import("../src/store/source-organization.ts");
 
@@ -91,10 +91,11 @@ describe("failed saves leave the old file whole", () => {
 			() => sourceOrganizationStore.write({ version: 1, folders: [{ id: "fld_a", name: "A", parentId: null, createdAt: "2026-10-31T00:00:00.000Z" }], placements: {} }));
 	});
 
-	it("prompt edit", (t) => {
-		assertAllOrNothing(t, path.join(config.PROMPTS_OVERRIDE_DIR, "system-prompt.md"),
-			() => promptOverrides.writeOverride("system-prompt.md", "old prompt"),
-			() => promptOverrides.writeOverride("system-prompt.md", "new prompt"));
+	it("prompt editor data", (t) => {
+		const record = (text: string) => ({ schemaVersion: 1 as const, initialized: true as const, migrationNotice: false, texts: { common: text }, history: [] });
+		assertAllOrNothing(t, config.PROMPT_EDITOR_FILE,
+			() => writePromptEditorRecord(record("old prompt")),
+			() => writePromptEditorRecord(record("new prompt")));
 	});
 
 	it("auth keys", (t) => {
@@ -120,7 +121,7 @@ describe("Windows sharing violations: per-writer compatibility policy (modeled)"
 			fs.unlinkSync(config.GRAPH_FORMAT_FILE);
 			return { file: config.GRAPH_FORMAT_FILE, save: ensureGraphFormat };
 		} },
-		{ name: "prompt override", fallback: true, prepare: () => ({ file: path.join(config.PROMPTS_OVERRIDE_DIR, "system-prompt.md"), save: () => promptOverrides.writeOverride("system-prompt.md", "compatible prompt") }) },
+		{ name: "prompt editor", fallback: true, prepare: () => ({ file: config.PROMPT_EDITOR_FILE, save: () => writePromptEditorRecord({ schemaVersion: 1, initialized: true, migrationNotice: false, texts: { common: "compatible prompt" }, history: [] }) }) },
 		{ name: "auth", fallback: false, prepare: () => ({ file: config.AUTH_FILE, save: () => authStore.setAuthVar("KEEP", "must not land") }) },
 		{ name: "source deletion", fallback: false, prepare: () => ({ file: config.SOURCES_FILE, save: () => graphStore.deleteSources(new Set(["src_policy"])) }) },
 		{ name: "ledger rewrite", fallback: false, prepare: () => ({ file: config.LEDGER_FILES.chains, save: () => graphStore.rewriteLedgers({ chains: [] }) }) },

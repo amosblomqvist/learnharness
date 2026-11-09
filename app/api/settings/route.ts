@@ -14,11 +14,12 @@
  * (core/settings-resolution.ts resolveSettings — browser-safe).
  */
 
-import { settingsStore, fileAccessConfigurationError } from "@/src/server";
+import { settingsStore, fileAccessConfigurationError, initializePromptEditors } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
+	initializePromptEditors();
 	const fileAccessError = fileAccessConfigurationError();
 	return Response.json({ settings: settingsStore.readSettings(), ...(fileAccessError ? { fileAccessError } : {}) });
 }

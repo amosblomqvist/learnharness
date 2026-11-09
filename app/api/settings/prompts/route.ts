@@ -1,30 +1,26 @@
-/**
- * GET /api/settings/prompts — the system-prompt segment view
- * (settings-storage wave, 2026-09-19): the effective prompt segments for
- * Teacher, Prober and Practice, derived from SOURCE at runtime (src/agent/prompts — the
- * list adapts when the code ships/renames/removes fragments), each with
- * its source text, override text (if a file exists), and effective switch
- * state (settings record's agent.prompts map AND file presence).
- *
- *   GET → 200 {prober: SegmentInfo[], teacher: SegmentInfo[], practice: SegmentInfo[]}
- *   SegmentInfo = {path, sourceText, overrideText, enabled, shared}
- *
- * Shared usage is discoverable by path membership in these lists. The
- * shared base appears in Teacher and Prober, NOT Practice; Practice has
- * its own base and a subset of shared fragments. Writes: the switches go
- * through PUT /api/settings/agent; the TEXT goes through
- * PUT/DELETE /api/settings/prompts/[...segment].
- */
-
-import { effectivePromptSegments, readSettingsRecord } from "@/src/server";
+import { PROMPT_EDITOR_IDS, type PromptEditorId } from "@/src/core";
+import { getPromptEditors, savePromptEditor } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
 export async function GET() {
-	const switches = readSettingsRecord()?.agent?.prompts ?? {};
-	return Response.json({
-		prober: effectivePromptSegments("prober", switches),
-		teacher: effectivePromptSegments("teacher", switches),
-		practice: effectivePromptSegments("practice", switches),
-	});
+	try {
+		return Response.json(getPromptEditors());
+	} catch (error) {
+		console.error("[prompt editors] could not load", error);
+		return Response.json({ error: "Could not load prompt editors" }, { status: 500 });
+	}
+}
+
+export async function PUT(request: Request) {
+	const body = await request.json().catch(() => null) as { editor?: unknown; text?: unknown } | null;
+	if (!body || !PROMPT_EDITOR_IDS.includes(body.editor as PromptEditorId) || typeof body.text !== "string") {
+		return Response.json({ error: "body must be {editor: supported editor, text: string}" }, { status: 400 });
+	}
+	try {
+		return Response.json(savePromptEditor(body.editor as PromptEditorId, body.text));
+	} catch (error) {
+		console.error("[prompt editors] could not save", error);
+		return Response.json({ error: "Could not save prompt editor" }, { status: 500 });
+	}
 }

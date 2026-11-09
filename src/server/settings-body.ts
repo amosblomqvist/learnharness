@@ -134,7 +134,7 @@ function parseRoleOverride(value: unknown, role: string): { ok: true; override: 
 	return { ok: true, override };
 }
 
-/** A boolean map (tools / prompts switches): every value must be boolean. */
+/** A boolean map for tool switches. */
 function parseBooleanMap(value: unknown, field: string): { map?: Record<string, boolean>; error?: string } {
 	if (value === undefined) return {};
 	const raw = asRecord(value);
@@ -147,9 +147,8 @@ function parseBooleanMap(value: unknown, field: string): { map?: Record<string, 
 	return { map: out };
 }
 
-/** agent: { models?, tools?, prompts? } — model/thinking validity against
- *  the catalog is checked by the route (validateChatSettings discipline);
- *  prompt switch-on membership is checked by the route (needs the store). */
+/** agent: { models?, tools? } — model/thinking validity against the
+ *  catalog is checked by the route (validateChatSettings discipline). */
 export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -186,9 +185,6 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		}
 		settings.tools = tools.map;
 	}
-	const prompts = parseBooleanMap(raw.prompts, "prompts");
-	if (prompts.error) return { ok: false, error: prompts.error };
-	if (prompts.map) settings.prompts = prompts.map;
 	if (raw.search !== undefined) {
 		const search = asRecord(raw.search);
 		if (!search) return { ok: false, error: "search must be an object" };

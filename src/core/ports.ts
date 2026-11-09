@@ -189,29 +189,6 @@ export interface SettingsStore {
 	writeSettings(settings: UserSettings): void;
 }
 
-// ─── PromptOverrideStore — per-segment system-prompt overrides (2026-09-19) ──
-
-/**
- * User text overriding ONE source prompt segment (the shared base or one
- * numeric fragment), stored at the data-dir seam mirroring the source
- * layout (config.PROMPTS_OVERRIDE_DIR). File presence is NOT the override:
- * the settings record's agent.prompts switch is the explicit on/off, so a
- * user can keep a customized file on disk while running the source default.
- * The segment LIST is always derived from source at runtime — see the
- * adapter (src/store/prompt-overrides.ts) for the loader rules.
- */
-export interface PromptOverrideStore {
-	/** Every override path currently on disk ("system-prompt.md",
-	 *  "teacher/20-teaching.md", ...), POSIX-relative, sorted. */
-	listOverrides(): string[];
-	/** The override text, or null when the path has no file. */
-	readOverride(segmentPath: string): string | null;
-	/** Persist override text for a segment path (creates parents). */
-	writeOverride(segmentPath: string, text: string): void;
-	/** Remove the override file, if present (switches are untouched — an
-	 *  on-switch with no file composes the source default, inert). */
-	deleteOverride(segmentPath: string): void;
-}
 
 // ─── AuthStore — BYOK provider keys (auth-keys wave, 2026-09-19) ────────────
 

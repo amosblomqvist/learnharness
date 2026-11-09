@@ -3,9 +3,9 @@ import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-age
 import { invalidInputResult, questionResult } from "./tool-execute.ts";
 import { providerEventObserver } from "./provider-events.ts";
 import type { Usage } from "@earendil-works/pi-ai";
-import { PATHS } from "../../config.ts";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
-import { effectivePromptSegments } from "./prompt-segments.ts";
+import { DEFAULT_PROMPT_EDITORS } from "./prompt-defaults.ts";
+import { composePrompt, type PromptEditorTexts } from "../core/prompt-editor.ts";
 import {
 	askUserQuestionTool,
 	createProberTools,
@@ -26,68 +26,19 @@ import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 /**
- * The two teaching-side agents (docs/archive/probe-teach-split.md): the PROBER and
- * the TEACHER. Same transcript, different prompts and tool sets; the
- * chat-handler constructs ONE per request off the transcript's seam
- * (probe_done = teacher) — the STATELESS per-turn engine (docs/
- * docs/archive/pi-engine-swap.md §2): the persisted record is the source of truth, the
- * agent is rebuilt from it every POST and discarded at turn end.
- *
- * Engines are injectable so tests can pass a scripted faux engine and drive
- * deterministic lessons (see tests/chat-flow.test.ts).
- *
- * System prompts are COMPOSED per agent: system-prompt.md (the shared base:
- * agent, voice, philosophy, accuracy) + every numeric-prefix fragment in
- * that agent's directory (src/agent/prompts/prober/ or
- * src/agent/prompts/teacher/), in sorted filename order, then the shared/
- * fragments as a trailing appendix (question tools, learner files,
- * formatting) — the 2026-09-27 reorder: the agent's job and method lead,
- * the mechanics trail. Joined with `---` separators.
- *
- * ONLY numeric-prefix files load — the loader enforces the convention, so
- * non-fragment documentation (README.md, …) can live in the directories
- * without ever leaking into the model's prompt.
+ * The app builds a fresh agent for each turn. The prompt uses one role text,
+ * the Prober/Teacher shared text when applicable, and the text common to all
+ * learner-facing roles. Settings can supply the user's current editor texts.
  */
-
-/** Which agent's prompt directory to compose. Practice (2026-10-04)
- *  composes ONLY its own directory — see prompt-segments.ts. */
 export type AgentKind = "prober" | "teacher" | "practice";
 
-// P2 (2026-09-19): segment discovery + override resolution live in ONE
-// canonical place now — src/store/prompt-overrides.ts (listSourceSegments
-// mirrors this loader's rules, shared/ included). The agent imports it for
-// the static-file seam; the local fragment discovery helpers are retired.
-
-/** Exported for tests: assert what composes into the model's prompt.
- *  Composition order: shared base → shared/ fragments (both agents, the
- *  sources-v1 seam for cross-agent doctrine) → the agent's own fragments.
- *
- *  P2 reconciliation (2026-09-19): composition is DELEGATED to the store
- *  module's effectivePromptSegments — one canonical segment-discovery
- *  rule (its listSourceSegments mirrors this loader's, now including
- *  shared/) — so per-segment OVERRIDES ride the same path: a segment
- *  whose switch is ON and whose override file exists composes the
- *  override text instead of the source. `switches` is the settings
- *  record's agent.prompts map (absent key = off), threaded per turn via
- *  AgentBuildOptions.promptSwitches; a switches-less call composes pure
- *  source (byte-identical to the pre-refactor loader — pinned in
- *  tests/prompt-overrides.test.ts). Overrides are a static-file read
- *  through config paths, not request state — the store import carries no
- *  chat/job machinery. */
-export function composeInstructions(kind: AgentKind, switches?: Record<string, boolean>): string {
-	const segments = effectivePromptSegments(kind, switches ?? {});
-	return segments
-		.map((s) => (s.enabled ? s.overrideText! : s.sourceText))
-		.map((t) => t.trim())
-		.filter(Boolean)
-		.join("\n\n---\n\n");
+export function composeInstructions(kind: AgentKind, editors: PromptEditorTexts = DEFAULT_PROMPT_EDITORS): string {
+	return composePrompt(kind, editors);
 }
 
-// The switch-free source composition, cached per kind (module-load once).
-// With promptSwitches provided, baseAgentOptions composes FRESH per turn —
-// an override file written while its switch is ON must flip the next
-// turn's composition; the cache serves only the switches-less path.
-const composedInstructions: Record<AgentKind, string> = {
+// Shipped defaults are composed once. A turn with saved editor text uses
+// the same pure composition function with its captured settings snapshot.
+const defaultComposedInstructions: Record<AgentKind, string> = {
 	prober: composeInstructions("prober"),
 	teacher: composeInstructions("teacher"),
 	practice: composeInstructions("practice"),
@@ -117,12 +68,8 @@ export interface AgentBuildOptions {
 	 *  THE DEFINITIVE toggleable set is TOGGLEABLE_TOOLS (job tools only);
 	 *  the filtering is generic, but writes validate against the list). */
 	toolToggles?: EnabledTools;
-	/** Per-segment system-prompt override SWITCHES (the settings record's
-	 *  agent.prompts map, absent key = off — same keys the settings routes
-	 *  and effectivePromptSegments use). Provided → the prompt composes
-	 *  fresh per turn, honoring enabled overrides (switch on + file
-	 *  exists); absent → the cached pure-source composition. */
-	promptSwitches?: Record<string, boolean>;
+	/** Current user-edited prompt texts, captured when the turn starts. */
+	promptTexts?: PromptEditorTexts;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -184,9 +131,9 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
 	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
-	const composedPrompt = opts.promptSwitches
-		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+	const composedPrompt = opts.promptTexts
+		? composeInstructions(kind, opts.promptTexts)
+		: defaultComposedInstructions[kind]!;
 	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is

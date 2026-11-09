@@ -53,9 +53,9 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 			label: "probe_done",
 			description:
 				"Conclude the probing phase and hand off to the teaching phase. Call this ONCE, when the probe is " +
-				"complete: every strand the lesson depends on is bracketed (a floor he reliably gets right AND a " +
-				"ceiling where it runs out), and his learning goal is concrete. The input IS the learner assessment — " +
-				"one strand per dependency the lesson will rest on, with your read of where his edge sits on it " +
+				"complete: every strand the lesson depends on is bracketed (a floor the learner reliably gets right AND a " +
+				"ceiling where it runs out), and the learner's goal is concrete. The input IS the learner assessment — " +
+				"one strand per dependency the lesson will rest on, with your read of where the learner's edge sits on it " +
 				"(floor, ceiling, misconceptions, what to build from). It streams to the learner live and becomes " +
 				"the handoff artifact the teacher plans from. Refused while a question is still open, and after " +
 				"the probe is already concluded. After it succeeds, say your closing sentence and end your turn.",
@@ -70,7 +70,7 @@ export function probeDoneTool(ctx: ProbeDoneContext): Record<string, AgentTool<a
 					return {
 						ok: false,
 						error:
-							"A question is still open — resolve it (or let him answer) before concluding the probe. " +
+							"A question is still open — resolve it (or let the learner answer) before concluding the probe. " +
 							"probe_done only fires with no question outstanding.",
 					};
 				}

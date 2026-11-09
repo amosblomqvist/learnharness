@@ -19,19 +19,18 @@ const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const TSX_LOADER = path.join(REPO_ROOT, "node_modules", "tsx", "dist", "loader.mjs");
 
 describe("LH_DATA_DIR seam", () => {
-	it("relocates data/chats/graph under LH_DATA_DIR, keeps prompts ROOT-anchored", async () => {
+	it("relocates mutable prompt data and keeps defaults ROOT-anchored", async () => {
 		const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-seam-"));
 		process.env.LH_DATA_DIR = dir;
 		try {
-			const { PATHS, ROOT } = await import("../config.ts");
+			const { PATHS, PROMPT_EDITOR_FILE, ROOT } = await import("../config.ts");
 			assert.equal(PATHS.data, dir, "PATHS.data resolves the env value (resolved absolute)");
 			assert.equal(PATHS.chats, path.join(dir, "chats"));
 			assert.equal(PATHS.graph, path.join(dir, "graph"));
-			assert.equal(
-				PATHS.teacherPrompt,
-				path.join(ROOT, "src", "agent", "system-prompt.md"),
-				"read-only prompt assets stay bundle-anchored on purpose",
-			);
+			assert.equal(PROMPT_EDITOR_FILE, path.join(dir, "prompts", "editor.json"));
+			const { DEFAULT_PROMPT_EDITORS } = await import("../src/agent/prompt-defaults.ts");
+			assert.ok(DEFAULT_PROMPT_EDITORS.prober.length > 0);
+			assert.equal(ROOT, REPO_ROOT);
 		} finally {
 			delete process.env.LH_DATA_DIR;
 		}

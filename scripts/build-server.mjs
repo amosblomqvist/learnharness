@@ -77,14 +77,18 @@ for (const extra of ["dist", path.join("node_modules", "electron")]) {
 	}
 }
 
-// 3) Sanity: the runtime-read prompt assets must be present (the teacher
-//    agent reads them from disk at request time).
+// 3) Sanity: runtime-read prompt defaults must be present in the bundle.
 for (const asset of [
-	path.join("src", "agent", "system-prompt.md"),
-	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
+	"common.md",
+	"prober.md",
+	"teacher.md",
+	"practice.md",
+	path.join("shared", "teaching-base.md"),
+	path.join("shared", "teaching-mechanics.md"),
 ]) {
-	if (!exists(path.join(STANDALONE, asset))) {
-		console.error(`[build-server] prompt asset missing from the trace: ${asset}`);
+	const file = path.join("src", "agent", "prompts", asset);
+	if (!exists(path.join(STANDALONE, file))) {
+		console.error(`[build-server] prompt asset missing from the trace: ${file}`);
 		process.exit(1);
 	}
 }

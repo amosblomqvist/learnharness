@@ -27,6 +27,7 @@ import {
 	type TeacherToolContext,
 } from "../src/agent/tools.ts";
 import { TOGGLEABLE_TOOLS } from "../src/core/pending.ts";
+import { proberGraphTools } from "../src/agent/tools/graph.ts";
 import { jobStore } from "../src/store/jobs.ts";
 import { probeQuizInputSchema, quizInputObject, quizInputProblems } from "../src/core/question-core.ts";
 import { chatStore } from "../src/store/chats.ts";
@@ -464,12 +465,14 @@ describe("tool descriptions carry mechanics only, no question-craft", () => {
 			assert.ok(!tool.description.includes("near-miss"), `${name} drops the doctrine (now in the shared prompt)`);
 		}
 	});
-	it("the craft now lives in the shared prompt chunk (both agents compose it)", async () => {
-		const shared = await fs.promises.readFile(
-			path.join(PATHS.root, "src/agent/prompts/shared/20-question-tools.md"),
-			"utf-8",
-		);
-		assert.ok(shared.includes("asymmetry"), "the option craft moved here, not deleted");
-		assert.ok(shared.includes("TRANSCRIBED SPEECH"), "the dictation-leniency note lives here");
+	it("uses gender-neutral wording in learner-facing tool descriptions", () => {
+		const chatId = newChat("Gender-neutral tool descriptions");
+		const probeDone = createProberTools({ chatId, chatStore, deliver: () => {}, jobStore, spawn: () => {} }).probe_done;
+		const listSessions = proberGraphTools({ chatStore, graphStore: undefined as never }).list_sessions;
+		assert.ok(probeDone);
+		assert.ok(listSessions);
+		for (const tool of [probeDone, listSessions]) {
+			assert.doesNotMatch(tool.description, /\b(?:he|him|his|she|her|hers)\b/i);
+		}
 	});
 });

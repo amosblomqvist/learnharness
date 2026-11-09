@@ -10,8 +10,7 @@
  *
  * Mechanics-only descriptions (the doctrine ruling, 2026-10-04): the tool
  * descriptions carry WHAT to pass and WHAT happens — the theory, the
- * commit-before-pose law, the hint ladder all live in the system prompt
- * (prompts/practice/10-doctrine.md).
+ * commit-before-pose law, and the hint ladder live in `prompts/practice.md`.
  */
 
 import { Type, type Static } from "typebox";

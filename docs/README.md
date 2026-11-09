@@ -13,7 +13,7 @@
 
 - [Development](development.md) — setup, configuration, safe local work, debugging, and checks.
 - [Architecture](architecture.md) — runtime flows, storage, and integration boundaries.
-- [Prompt composition](../src/agent/prompts/README.md) — source fragments and user overrides.
+- [Prompt source and editing](../src/agent/prompts/README.md) — shipped prompt text, editor groups, composition, and history.
 - [Tool-content recovery](tool-content-recovery.md) — display-only recovery of model-authored escaping defects.
 - [Desktop builds and releases](desktop-release.md) — packaging, release gates, and updates.
 

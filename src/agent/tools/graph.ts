@@ -49,7 +49,7 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
 			description:
 				"List the sessions of the learner's persistent knowledge graph — every chat or imported-notes file that ever contributed a proposition, most recent first. The map is organized into birth-session clusters (propositions grouped by the session they were first learned in), and session names are those clusters' labels. " +
 				"Each line: the session's name, kind (chat/file), how many propositions were born in it, its dates, and its id — use that id with list_propositions. " +
-				"Reading this first shows what he has already covered and when, before you probe anything.",
+				"Reading this first shows what the learner has already covered and when, before you probe anything.",
 			parameters: listSessionsInput,
 			execute: serverExecute("list_sessions", listSessionsInput, async (): Promise<string> => {
 				const sessions = graphSessionIndex(deps);

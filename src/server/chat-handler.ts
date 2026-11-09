@@ -49,6 +49,7 @@ import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.t
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
+import { getCurrentPromptTexts } from "./prompt-editors.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
@@ -235,6 +236,7 @@ export async function handleChatInput(
 	// write-ahead persist (nothing durable changes), and every downstream
 	// resolution (jobs/extraction gate per-need on their own tiers).
 	const effective = effectiveSettings();
+	const promptTexts = getCurrentPromptTexts();
 	const conversation = resolveConversationSpec(record.settings, effective.models.strong);
 	if (!conversation) {
 		const envelope = modelsNotConfigured(["strong"]);
@@ -294,7 +296,7 @@ export async function handleChatInput(
 				effective.compaction?.thresholdTokens,
 				catalogContextLimits().get(modelIdForCompaction),
 			),
-			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4),
+			systemPromptTokens: Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher", promptTexts).length / 4),
 		},
 		chatId,
 	);
@@ -456,10 +458,7 @@ export async function handleChatInput(
 		// Debug (owner, 2026-10-04): teacher/prober raw provider events under
 		// LH_PROVIDER_EVENTS=1 (provider-events.ts); no-op otherwise.
 		chatId,
-		// The prompt-override switches (P2, 2026-09-19): same resolution
-		// point as the tool delta — the agent layer composes the system
-		// prompt fresh per turn, swapping in any enabled override segments.
-		promptSwitches: effective.agent.prompts,
+		promptTexts,
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher
@@ -669,7 +668,7 @@ export async function handleChatInput(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher", getCurrentPromptTexts()).length / 4),
 						};
 					}, chatId);
 			},

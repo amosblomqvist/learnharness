@@ -43,6 +43,11 @@ function catalog(connected = true): ModelCatalogResponse {
 }
 function Reader() { snapshot = useModelCatalog(); return null; }
 function setup(onClose = () => {}, onDone = (_models: ModelsSettings) => {}) { return <SetupDialog open onClose={onClose} onDone={onDone} />; }
+const emptyPromptEditors = {
+	editors: Object.fromEntries(["common", "prober", "teacher", "practice", "proberTeacherShared"].map((id) => [id, { text: "", defaultText: "" }])),
+	history: [],
+	migrationNotice: false,
+};
 function installFetch() {
 	requests = []; writes = [];
 	globalThis.fetch = async (input, init) => {
@@ -50,7 +55,7 @@ function installFetch() {
 		if (path === "/api/models") { const request = deferred<Response>(); requests.push(request); return request.promise; }
 		if (path === "/api/settings/models") { writes.push(JSON.parse(String(init?.body))); return Response.json({ settings: { models: writes.at(-1) } }); }
 		if (path === "/api/keys") return Response.json({ providers: [provider], keys: [] });
-		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [], practice: [] });
+		if (path === "/api/settings/prompts") return Response.json(emptyPromptEditors);
 		if (path === "/api/search") return Response.json({ available: false, engine: null, reason: "fixture" });
 		throw new Error(`Unexpected request ${path}`);
 	};
