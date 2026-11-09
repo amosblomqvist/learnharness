@@ -34,10 +34,27 @@
  * record (a call's part projects into the same view boundary).
  *
  * Pure: only browser-safe core helpers — safe on server, client, and tests.
+ *
+ * LESSON MODE (kind "lesson") is an ADDITIVE derivation: the fold takes
+ * the session kind, and a lesson starts at "plan" — there is no probe
+ * phase (no probe_done ever fires; brief calibration precedes the
+ * syllabus inside the plan phase). The plan→teach seam is UNCHANGED: the
+ * first nodeId-tagged quiz/explain call (the lesson's first exit
+ * ticket) flips the session to "teach" — the labels render "Syllabus" →
+ * "Lesson" (components/phase-divider.tsx). Teach/practice outputs are
+ * byte-identical to the kind-less fold (kind defaults to "teach").
  */
+
+import type { ChatKind } from "./contracts/chat.ts";
 
 /** The three phases of a session, as the picker / header / dividers see them. */
 export type Phase3 = "probe" | "plan" | "teach";
+
+/** The fold's starting phase: lesson sessions open in "plan" (no probe);
+ *  every other kind opens in "probe". */
+function initialPhase(kind: ChatKind): Phase3 {
+	return kind === "lesson" ? "plan" : "probe";
+}
 
 /**
  * Minimal structural slice of a UI message for the phase scan: parts with
@@ -59,9 +76,11 @@ function taggedNodeId(input: unknown): boolean {
 	);
 }
 
-/** The phase at `upToIndex` (inclusive; default: the last message). */
-export function phaseAt3(messages: readonly PhaseMessage[], upToIndex?: number): Phase3 {
-	let phase: Phase3 = "probe";
+/** The phase at `upToIndex` (inclusive; default: the last message). The
+ *  kind only sets the fold's start (lesson = "plan"); the seams are the
+ *  same for every kind. */
+export function phaseAt3(messages: readonly PhaseMessage[], upToIndex?: number, kind: ChatKind = "teach"): Phase3 {
+	let phase: Phase3 = initialPhase(kind);
 	const last = Math.min(upToIndex ?? messages.length - 1, messages.length - 1);
 	for (let i = 0; i <= last; i++) {
 		phase = advance(phase, messages[i]?.parts);
@@ -144,9 +163,9 @@ export function teachStepIndex(
  * 0..i each time (quadratic); this is the same derivation, linear.
  * out[i] === phaseAt3(messages, i) for every i.
  */
-export function phaseTimeline(messages: readonly PhaseMessage[]): Phase3[] {
+export function phaseTimeline(messages: readonly PhaseMessage[], kind: ChatKind = "teach"): Phase3[] {
 	const out: Phase3[] = [];
-	let phase: Phase3 = "probe";
+	let phase: Phase3 = initialPhase(kind);
 	for (let i = 0; i < messages.length; i++) {
 		phase = advance(phase, messages[i]?.parts);
 		out.push(phase);
@@ -162,9 +181,9 @@ import { probeDoneResultIds, type LhMessage } from "./native-messages.ts";
  *  NATIVE record. probe→plan advances at the probe_done call's clean
  *  toolResult; plan→teach at the assistant message carrying the first
  *  nodeId-tagged quiz CALL (mirrors the view fold — same seam, native
- *  shape). */
-export function phaseAt3Lh(messages: readonly LhMessage[], upToIndex?: number): Phase3 {
-	let phase: Phase3 = "probe";
+ *  shape). Lesson records fold with kind "lesson" (start at "plan"). */
+export function phaseAt3Lh(messages: readonly LhMessage[], upToIndex?: number, kind: ChatKind = "teach"): Phase3 {
+	let phase: Phase3 = initialPhase(kind);
 	const last = Math.min(upToIndex ?? messages.length - 1, messages.length - 1);
 	const concluded = probeDoneResultIds(messages.slice(0, last + 1));
 	for (let i = 0; i <= last; i++) {

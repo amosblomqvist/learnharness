@@ -105,9 +105,11 @@ function listChats(): ChatSummary[] {
 						// accepted — docs/archive/probe-teach-split.md §4), pending question
 						// from the native dangling-call scan. Wave D: both folds read
 						// the NATIVE record (core/phases.ts phaseAt3Lh +
-						// native-messages.ts danglingQuestionOf). Liveness (busy) is
+						// native-messages.ts danglingQuestionOf). Lesson records fold
+						// with their kind (start at "plan" — no probe phase).
+						// Liveness (busy) is
 						// NOT record-derived — the API route merges it (ChatListItem).
-						phase: phaseAt3Lh(messages),
+						phase: phaseAt3Lh(messages, undefined, summary.kind ?? "teach"),
 						pendingQuestion: danglingQuestionOf(messages) !== null,
 						// Practice: a posed problem with no conclude (the sidebar's
 						// "Problem waiting"); false on teaching sessions, which

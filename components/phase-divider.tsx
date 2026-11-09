@@ -1,4 +1,4 @@
-import type { Phase3 } from "@/src/core";
+import type { ChatKind, Phase3 } from "@/src/core";
 
 /**
  * The in-session phase presentation (owner, minimal-color round —
@@ -24,11 +24,22 @@ import type { Phase3 } from "@/src/core";
  * phase; work-state is the sidebar row's spinner.
  */
 
-/** Header-chip labels: the phases as the learner thinks of them. */
+/** Header-chip labels: the phases as the learner thinks of them. Lesson
+ *  sessions read the same Phase3 seam as their own arc (lesson mode):
+ *  plan renders "Syllabus" (calibration + the table of contents), teach
+ *  renders "Lesson" (section documents + exit tickets); probe never
+ *  occurs — a lesson folds from "plan". */
 const CHIP_LABEL: Record<Phase3, string> = {
 	probe: "Probing",
 	plan: "Planning",
 	teach: "Teaching",
+};
+
+/** The lesson-mode reading of the same phases. */
+const CHIP_LABEL_LESSON: Record<Phase3, string> = {
+	probe: "Probing",
+	plan: "Syllabus",
+	teach: "Lesson",
 };
 
 /** The header label: the phase as a quiet flat tag (owner,
@@ -38,7 +49,7 @@ const CHIP_LABEL: Record<Phase3, string> = {
  *  tooltip, not selectable, not interactive in any way — no pointer events
  *  at all, so it is part of the drag surface instead of a carved-out
  *  target. */
-export function PhaseChip({ phase }: { phase: Phase3 }) {
+export function PhaseChip({ phase, kind = "teach" }: { phase: Phase3; kind?: ChatKind }) {
 	return (
 		<span
 			data-testid="phase-chip"
@@ -46,7 +57,7 @@ export function PhaseChip({ phase }: { phase: Phase3 }) {
 			aria-hidden="true"
 			className="pointer-events-none flex shrink-0 select-none items-center text-xs font-medium uppercase tracking-wide text-muted-foreground"
 		>
-			{CHIP_LABEL[phase]}
+			{(kind === "lesson" ? CHIP_LABEL_LESSON : CHIP_LABEL)[phase]}
 		</span>
 	);
 }
@@ -59,12 +70,14 @@ export function PhaseChip({ phase }: { phase: Phase3 }) {
  * Null for probe (defensive — the fold never emits a probe transition
  * after the start).
  */
-export function PhaseDivider({ phase, nodeCount }: { phase: Phase3; nodeCount?: number }) {
+export function PhaseDivider({ phase, nodeCount, kind = "teach" }: { phase: Phase3; nodeCount?: number; kind?: ChatKind }) {
 	if (phase === "probe") return null;
 	const label =
 		phase === "plan" && nodeCount
-			? `Plan · ${nodeCount} node${nodeCount === 1 ? "" : "s"}`
-			: CHIP_LABEL[phase];
+			? kind === "lesson"
+				? `Syllabus · ${nodeCount} section${nodeCount === 1 ? "" : "s"}`
+				: `Plan · ${nodeCount} node${nodeCount === 1 ? "" : "s"}`
+			: (kind === "lesson" ? CHIP_LABEL_LESSON : CHIP_LABEL)[phase];
 	return (
 		<div className="my-4 flex w-full items-center gap-3" data-testid={`phase-divider-${phase}`}>
 			<span className="h-0 flex-1 border-t-2 border-dotted border-border/50" aria-hidden />

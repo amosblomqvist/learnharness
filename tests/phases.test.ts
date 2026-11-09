@@ -229,3 +229,55 @@ test("phaseAt3 + phaseAt3Lh: a tagged explain CALL is the plan→teach seam too"
 		"the two folds agree on the explain mechanic",
 	);
 });
+
+// ─── lesson mode (kind "lesson") — the additive derivation ──────────────────
+// A lesson folds from "plan" (no probe phase — calibration + syllabus live
+// in the plan phase) and flips plan→teach at the FIRST tagged exit ticket
+// (the same seam as teach mode). Teach/practice outputs are unchanged.
+
+test("lesson fold: starts at plan; the first tagged check is the seam; no probe_done exists", () => {
+	const opening = [user("teach me the chain rule")];
+	assert.equal(phaseAt3(opening, undefined, "lesson"), "plan", "a lesson opens in the syllabus phase");
+	assert.equal(phaseAt3Lh([], undefined, "lesson"), "plan", "an empty lesson record is plan");
+
+	const askCalibration = [
+		...opening,
+		{
+			id: "a_ask",
+			role: "assistant" as const,
+			parts: [{ type: "tool-ask_user_question", input: { question: "How much calculus have you seen?" } } as never],
+		},
+	];
+	assert.equal(phaseAt3(askCalibration, undefined, "lesson"), "plan", "ask_user_question calibration never flips the phase");
+
+	const presented = [...askCalibration, assistantTool("plan_init", "output-available", PLAN_OK), user("go ahead")];
+	assert.equal(phaseAt3(presented, undefined, "lesson"), "plan", "the presented syllabus + go-ahead stay plan");
+
+	const exitTicket = [...presented, assistantQuiz({ question: "q", nodeId: "chain-rule-intuition", correctAnswer: "a", type: "check" })];
+	assert.equal(phaseAt3(exitTicket, undefined, "lesson"), "teach", "the first tagged exit ticket is the seam");
+
+	// The native fold agrees (the lesson agent's persisted shape).
+	assert.equal(
+		phaseAt3Lh(
+			[assistantQuizCall({ question: "q", nodeId: "chain-rule-intuition", correctAnswer: "a", type: "check" })],
+			undefined,
+			"lesson",
+		),
+		"teach",
+	);
+	// An untagged quiz never flips a lesson (defensive — the schema requires
+	// nodeId on teach quizzes; calibration rides ask_user_question).
+	assert.equal(
+		phaseAt3([...presented, assistantQuiz({ question: "q", correctAnswer: "a" })], undefined, "lesson"),
+		"plan",
+	);
+});
+
+test("lesson fold: teach/practice outputs are unchanged (the kind default is teach)", () => {
+	const messages = [user("teach me"), assistantTool("probe_done", "output-available", DONE_ASSESSMENT), assistantQuiz({ question: "q", nodeId: "n1", correctAnswer: "a" })];
+	assert.equal(phaseAt3(messages), phaseAt3(messages, undefined, "teach"));
+	assert.equal(phaseAt3(messages), "teach");
+	// A lesson fold of a TEACH transcript still starts at plan — the kind
+	// comes from the record, never inferred from the transcript.
+	assert.equal(phaseAt3(messages, undefined, "lesson"), "teach", "probe_done is harmless in a lesson fold (never fires)");
+});
