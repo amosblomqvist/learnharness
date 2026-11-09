@@ -16,16 +16,13 @@
  * "no running turn" sees durable record truth. Failed settlement also
  * retains its small notice before unregistering, so late attachments do
  * not mistake an unsaved reply for success. The per-chat
- * 409 guard means a chatId can hold at most one handle, and beginTurn's
- * 30-minute TTL bounds the pathological never-settling case the same way
- * it does for the liveness map: if onFinish never fires, the stale entry
- * is overwritten by the next turn's registration (Map.set) and garbage
- * collected — no unbounded leak beyond the same pathology turn-liveness
- * already accepts.
+ * 409 guard means a chatId can hold at most one handle. A turn whose
+ * onFinish never fires keeps its handle, and its chat stays busy, until
+ * the app restarts (see turn-liveness.ts).
  *
  * App-quit mid-turn (the process dying with an un-persisted turn) is the
  * SAME residual as before the wave: the registry is memory-only, the
- * write-ahead record + liveness TTL recovery cover the next mount.
+ * write-ahead record + mount continuation cover the next mount.
  */
 
 import type { PiTurnHandle } from "./pi/ui-stream.ts";

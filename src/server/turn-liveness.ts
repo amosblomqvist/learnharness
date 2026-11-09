@@ -15,9 +15,11 @@
  *
  * Still ephemeral BY DESIGN: a process restart clears it, so there are no
  * stale flags to clean up — a crashed turn recovers via the write-ahead
- * record + mount continuation on the next visit. The TTL is a leak guard for
- * the pathological case where onFinish never fires (it runs even on aborts);
- * chat turns are minutes at most, so 30 minutes is far on the safe side.
+ * record + mount continuation on the next visit. There is no clock: a turn
+ * owns its chat until endTurn, however long it runs, because freeing it
+ * while it still runs would allow a second turn and a delete mid-turn. The
+ * limit: a turn whose agent ignores Stop never settles, so its chat stays
+ * busy until the app restarts.
  */
 
 import { emit } from "../core/events.ts";
@@ -33,7 +35,6 @@ function registry(): Map<string, number> {
 }
 
 const inFlight = registry();
-const MAX_TURN_MS = 30 * 60_000;
 
 /**
  * Mark a turn as starting. Returns false if one is already running for the
@@ -61,17 +62,7 @@ export function endTurn(chatId: string): void {
 	if (inFlight.delete(chatId)) emit("turn-settled", { chatId });
 }
 
-/** True while the chat's turn is in flight; lazily evicts stale entries.
- * The eviction path is DELIBERATELY event-free: it is a leak guard for a
- * turn whose onFinish never fired (itself pathological), it runs lazily
- * from a read, and emitting from a read is a side-effect smell. Silence
- * here is a choice, not an oversight. */
+/** True from beginTurn until endTurn, however long the turn runs. */
 export function isTurnRunning(chatId: string): boolean {
-	const since = inFlight.get(chatId);
-	if (since === undefined) return false;
-	if (Date.now() - since > MAX_TURN_MS) {
-		inFlight.delete(chatId);
-		return false;
-	}
-	return true;
+	return inFlight.has(chatId);
 }
