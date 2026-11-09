@@ -33,7 +33,7 @@
  */
 
 import type { AssistantMessage, ToolResultMessage } from "@earendil-works/pi-ai";
-import type { LhMarkerMessage, LhMessage } from "./native-messages.ts";
+import type { LhMarkerMessage, LhMessage, UserImageAttachment } from "./native-messages.ts";
 import { modelSolutionForConclude, PRACTICE_CONCLUDE_TOOL, problemInputForConclude, SEND_TO_USER_TOOL, sendToUserText } from "./native-messages.ts";
 import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
@@ -187,7 +187,13 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 				typeof content === "string"
 					? [content]
 					: content.filter((c) => c.type === "text").map((c) => (c as { text: string }).text);
-			out.push({ id: m.id, role: "user", parts: texts.map(textPart) });
+			const parts = texts.map(textPart);
+			// The learner's attached pictures (issue #96): one data part
+			// carrying the refs — the bubble resolves them into thumbnails
+			// through the session's snapshot store (like image cards).
+			const images = (m as LhMessage & { images?: UserImageAttachment[] }).images;
+			if (images && images.length > 0) parts.push({ type: "data-user-images", id: `ui_${m.id}`, data: images });
+			out.push({ id: m.id, role: "user", parts });
 			continue;
 		}
 
