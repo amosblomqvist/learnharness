@@ -25,7 +25,7 @@ function fixture(document) {
   };
   const overrides = {};
   let filePreflight;
-  const manualReceipts = new Map();
+  const manualReceipts = new Map(), deletionReceipts = new Map();
   const catalog = { slots: { cheap: { model: { provider: 'test', id: 'cheap' }, thinkingLevel: 'low' } } };
   const clone = value => JSON.parse(JSON.stringify(value));
   function handle(kind, container, props, signal, render, cleanup) {
@@ -115,7 +115,29 @@ function fixture(document) {
       if (operation === 'save-settings') { state.settings = { ...state.settings, ...input }; if (state.settings.thinkingOverride === null) delete state.settings.thinkingOverride; }
       if (operation === 'save-deck') Object.assign(state.decks.find(d => d.id === input.id), input);
       if (operation === 'save-cue') { Object.assign(state.propositions[0].cues[0], { question: input.question, answer: input.answer }); state.propositions[0].version++; }
-      if (operation === 'delete-cue') { const p = state.propositions.find(p => p.id === input.propositionId); p.cues.find(c => c.id === input.cueId).deleted = true; p.version++; }
+      if (operation === 'delete-content') {
+        const signature = JSON.stringify(input), prior = deletionReceipts.get(input.requestId);
+        if (prior) {
+          if (prior !== signature) throw new Error('This request ID was already used for different work.');
+          return clone(state);
+        }
+        if (['running', 'cancelling'].includes(state.batch?.status)) throw new Error('Wait for generation to finish or cancel it before deleting content.');
+        if (input.revision !== state.revision) throw new Error('The library changed. Reload and confirm the deletion again.');
+        const whole = new Set(input.propositionIds ?? []), cues = new Set(input.cueIds ?? []), affected = new Set(input.deckIds ?? []);
+        for (const d of state.decks) if (affected.has(d.id)) for (const id of d.propositionIds) whole.add(id);
+        const touched = new Set();
+        for (const p of state.propositions) if (whole.has(p.id) || p.cues.some(c => cues.has(c.id))) {
+          touched.add(p.id);
+          for (const id of p.memberships) affected.add(id);
+          p.cues = whole.has(p.id) ? [] : p.cues.filter(c => !cues.has(c.id)); p.version++;
+          if (!p.cues.some(c => c.id === p.learningCueId)) p.learningCueId = null;
+          if (!p.cues.length) for (const d of state.decks) d.propositionIds = d.propositionIds.filter(id => id !== p.id);
+        }
+        state.propositions = state.propositions.filter(p => !touched.has(p.id) || p.cues.length);
+        if (input.deleteEmptyDecks) state.decks = state.decks.filter(d => !affected.has(d.id) || d.propositionIds.length);
+        deletionReceipts.set(input.requestId, signature); state.revision++;
+        return clone(state);
+      }
       if (operation === 'set-memberships') state.propositions[0].memberships = input.deckIds;
       if (operation === 'reorder') {
         const list = input.kind === 'deck' ? state.decks : input.kind === 'proposition' ? state.decks.find(d => d.id === input.deckId).propositionIds : state.propositions.find(p => p.id === input.propositionId).cues;

@@ -125,6 +125,179 @@ function harness(t, initialGraph = graph('p1')) {
   return h;
 }
 
+test('content deletion is global and permanent, preserves surviving schedules and history, and cleans only affected empty decks', async t => {
+  const h = harness(t, graph('p1', 'p2'));
+  await h.generate(cards('p1', 'Remove one', 'Remove two'), cards('p2', 'Keep'));
+  await h.call('create-deck', { name: 'Shared' }); await h.call('create-deck', { name: 'Unrelated empty deck' });
+  const shared = h.state().decks.find(d => d.name === 'Shared'), unrelated = h.state().decks.find(d => d.name === 'Unrelated empty deck');
+  await h.call('set-memberships', { propositionId: 'p1', deckIds: [h.state().decks[0].id, shared.id] });
+  await h.grade({ propositionIds: ['p1'] }, 1);
+  const p = h.state().propositions.find(p => p.id === 'p1'), history = h.disk().reviews, graphBefore = structuredClone(h.graph), starts = h.workers.starts;
+  const removed = p.cues.find(c => c.id === p.learningCueId);
+  await h.call('delete-content', { revision: h.state().revision, cueIds: [removed.id, removed.id], deleteEmptyDecks: true, requestId: 'remove-one' });
+  const surviving = h.state().propositions.find(p => p.id === 'p1');
+  assert.deepEqual(surviving.schedule, p.schedule); assert.equal(surviving.learningCueId, null);
+  assert.deepEqual(surviving.memberships, p.memberships); assert.equal(surviving.cues.length, 1); assert.equal(surviving.version, p.version + 1);
+  assert.equal(JSON.stringify(h.disk()).includes(removed.question), false, 'no deleted question/answer tombstone is retained');
+  await h.call('delete-content', { revision: h.state().revision, propositionIds: ['p1'], deleteEmptyDecks: true, requestId: 'remove-target' });
+  assert.equal(h.state().propositions.some(p => p.id === 'p1'), false);
+  assert.equal(h.state().decks.some(d => d.id === shared.id), false);
+  assert.equal(h.state().decks.some(d => d.id === unrelated.id), true, 'unrelated empty decks are untouched');
+  assert.deepEqual(h.state().decks[0].propositionIds, ['p2']); assert.deepEqual(h.disk().reviews, history);
+  assert.equal(h.state().statistics.activity.at(-1).count, 1); assert.equal(h.state().statistics.states.learning, 0);
+  assert.deepEqual(h.graph, graphBefore); assert.equal(h.workers.starts, starts);
+  h.activate(); assert.equal(JSON.stringify(h.disk()).includes('Remove two'), false);
+});
+
+test('content deletion can retain emptied containers; direct deck deletion removes its shared contents without a replacement', async t => {
+  const h = harness(t); await h.generate(cards('p1', 'Only cue'));
+  await h.call('create-deck', { name: 'Shared' });
+  const deckIds = h.state().decks.map(d => d.id);
+  await h.call('set-memberships', { propositionId: 'p1', deckIds });
+  await h.call('delete-content', { revision: h.state().revision, deckIds: [deckIds[0]], deleteEmptyDecks: false, requestId: 'retain-decks' });
+  assert.equal(h.state().propositions.length, 0); assert.deepEqual(h.state().decks.map(d => d.id), deckIds);
+  assert.ok(h.state().decks.every(d => d.propositionIds.length === 0));
+  await h.call('delete-deck', { id: deckIds[0] });
+  assert.deepEqual(h.state().decks.map(d => d.id), [deckIds[1]], 'selected empty deck is deleted, unrelated empty decks survive');
+});
+
+test('content deletion validates the whole selection and stale snapshots atomically and safely retries a lost response', async t => {
+  const h = harness(t); await h.generate(cards('p1', 'One', 'Two'));
+  const before = h.disk(), cueId = h.state().propositions[0].cues[0].id;
+  const input = { revision: h.state().revision, cueIds: [cueId], deleteEmptyDecks: true, requestId: 'delete-once' };
+  for (const patch of [{ cueIds: [cueId, 'missing'] }, { propositionIds: ['missing'] }, { deckIds: ['missing'] }, { cueIds: 'wrong' }, { cueIds: null }, { cueIds: [] }, { deleteEmptyDecks: 'yes' }, { requestId: '' }, { revision: input.revision - 1 }]) {
+    await assert.rejects(h.call('delete-content', { ...input, ...patch })); assert.deepEqual(h.disk(), before);
+  }
+  const rename = t.mock.method(fs, 'renameSync', () => { throw new Error('Deletion save unavailable'); });
+  try { await assert.rejects(h.call('delete-content', input), /Deletion save unavailable/); }
+  finally { rename.mock.restore(); }
+  assert.deepEqual(h.disk(), before); assert.equal(h.state().propositions[0].cues.length, 2);
+  await h.call('delete-content', input); const accepted = h.disk();
+  h.activate(); await h.call('delete-content', input); assert.deepEqual(h.disk(), accepted, 'same request cannot delete more content or fail as stale');
+  await assert.rejects(h.call('delete-content', { ...input, deleteEmptyDecks: false }), /different work/);
+});
+
+test('legacy tombstones are purged on activation without losing text-free manual creation receipts or past review statistics', async t => {
+  const h = harness(t); await h.generate(cards('p1', 'Keep active', 'LEGACY_SECRET_QUESTION'));
+  await h.call('create-deck', { name: 'Manual deck' });
+  const request = { deckId: h.state().decks[1].id, name: 'LEGACY_SECRET_TARGET', question: 'LEGACY_MANUAL_QUESTION', answer: 'LEGACY_MANUAL_ANSWER', requestId: 'legacy-create' };
+  const created = await h.call('create-card', request); await h.grade({ propositionIds: [created.propositionId] });
+  const old = h.disk(), history = structuredClone(old.reviews);
+  old.propositions.p1.cues[1].deleted = true;
+  const manual = old.propositions[created.propositionId].cues[0], receipt = old.creationReceipts[0];
+  manual.creation = { requestId: receipt.requestId, hash: receipt.hash }; manual.deleted = true; delete old.creationReceipts;
+  old.reviews[0].question = manual.question; old.reviews[0].answer = manual.answer;
+  h.dispose(); fs.writeFileSync(path.join(h.directory, 'flashcards.json'), JSON.stringify(old)); h.activate();
+  const migrated = h.disk(), text = JSON.stringify(migrated);
+  for (const secret of ['LEGACY_SECRET_QUESTION', 'LEGACY_SECRET_TARGET', 'LEGACY_MANUAL_QUESTION', 'LEGACY_MANUAL_ANSWER']) assert.equal(text.includes(secret), false, secret);
+  assert.equal(h.state().propositions.length, 1); assert.deepEqual(h.disk().reviews, history);
+  assert.equal(h.state().decks.some(d => d.id === request.deckId), true, 'migration does not remove containers');
+  assert.equal((await h.call('create-card', request)).propositionId, created.propositionId);
+  assert.deepEqual(h.disk(), migrated, 'retry never restores a physically deleted manual card');
+  h.activate(); assert.deepEqual(h.disk(), migrated, 'migration runs only once');
+});
+
+test('file source data follows its deck, not its last target; deleted decks cannot reopen or regenerate from old retry records', async t => {
+  const h = harness(t, graph()), input = fileInput(), { tasks, batch } = await h.startFile(input);
+  await h.complete(tasks[0], fileResult(fileFact('Local', 'Local statement', 'Local cue')));
+  const p = h.state().propositions[0], sourceFile = path.join(h.directory, 'sources', `${batch.sourceId}.md`);
+  await h.call('delete-content', { revision: h.state().revision, propositionIds: [p.id], deleteEmptyDecks: false, requestId: 'keep-file-deck' });
+  assert.equal(fs.readFileSync(sourceFile, 'utf8'), input.markdown); assert.ok(h.disk().fileSources[batch.sourceId]);
+  const reads = h.catalogReads, starts = h.workers.starts;
+  const duplicate = await h.call('preflight-file', input); assert.equal(duplicate.existingSourceId, batch.sourceId);
+  const opened = await h.call('open-file-deck', { sourceId: batch.sourceId }); assert.equal(opened.deckId, batch.deckId);
+  assert.equal(h.state().propositions.length, 0); assert.equal(h.catalogReads, reads); assert.equal(h.workers.starts, starts);
+  await h.call('delete-deck', { id: batch.deckId });
+  assert.equal(fs.existsSync(sourceFile), false); assert.equal(h.disk().fileSources[batch.sourceId], undefined);
+  await assert.rejects(h.call('open-file-deck', { sourceId: batch.sourceId }), /File source not found/);
+  const fresh = await h.call('preflight-file', input); assert.ok(fresh.id); assert.equal(fresh.existingSourceId, undefined);
+  assert.equal(h.state().decks.length, 0); assert.equal(h.workers.starts, starts, 'upload still requires fresh confirmation');
+});
+
+test('all deletion entry points reject active and cancelling generation; cancelled late results never restore deleted content', async t => {
+  const h = harness(t); await h.generate(cards('p1', 'Original'));
+  const p = h.state().propositions[0], deckId = h.state().decks[0].id;
+  const [task] = await h.start(['p1']);
+  const checkBlocked = async () => {
+    const before = h.disk();
+    await assert.rejects(h.call('delete-content', { cueIds: [p.cues[0].id], revision: h.state().revision, deleteEmptyDecks: true, requestId: randomUUID() }), /generation to finish or cancel/);
+    await assert.rejects(h.call('delete-deck', { id: deckId }), /generation to finish or cancel/);
+    await assert.rejects(h.call('delete-cue', { propositionId: p.id, cueId: p.cues[0].id, version: p.version }), /generation to finish or cancel/);
+    assert.deepEqual(h.disk(), before);
+  };
+  await checkBlocked(); await h.call('cancel-generation', { batchId: h.state().batch.id }); await checkBlocked();
+  await h.complete(task, result(cards('p1', 'Late cue')));
+  assert.equal(h.state().batch.status, 'cancelled');
+  await h.call('delete-deck', { id: deckId }); h.activate(); await h.call('resume-results');
+  assert.equal(h.state().propositions.length, 0); assert.equal(h.state().decks.length, 0);
+});
+
+test('failed saved-source cleanup is durable and retryable without restoring content, metadata, or model work', async t => {
+  const h = harness(t, graph()), input = fileInput(), { tasks, batch } = await h.startFile(input);
+  await h.complete(tasks[0], fileResult(fileFact('Local', 'Local statement', 'Secret file cue')));
+  const sourceFile = path.join(h.directory, 'sources', `${batch.sourceId}.md`), unlink = fs.unlinkSync;
+  const failure = t.mock.method(fs, 'unlinkSync', filename => {
+    if (filename === sourceFile) throw new Error('Synthetic source cleanup unavailable');
+    return unlink(filename);
+  });
+  const deletion = { deckIds: [batch.deckId], revision: h.state().revision, deleteEmptyDecks: true, requestId: 'cleanup-retry' };
+  try { await assert.rejects(h.call('delete-content', deletion), /cleanup is pending/); }
+  finally { failure.mock.restore(); }
+  assert.equal(h.state().decks.length, 0); assert.equal(h.state().propositions.length, 0); assert.equal(h.disk().fileSources[batch.sourceId], undefined);
+  assert.deepEqual(h.disk().pendingSourceRemovals, [batch.sourceId]); assert.equal(fs.existsSync(sourceFile), true);
+  await h.call('delete-content', deletion); assert.equal(fs.existsSync(sourceFile), false); assert.equal(h.disk().pendingSourceRemovals, undefined);
+  assert.equal(h.state().cleanupError, undefined); assert.equal(h.workers.starts, 1);
+  h.activate(); await h.call('delete-content', deletion); assert.equal(h.state().decks.length, 0);
+});
+
+test('activation completes pending source cleanup after its final metadata write failed, without replaying the deletion', async t => {
+  const h = harness(t, graph()), { tasks, batch } = await h.startFile(fileInput());
+  await h.complete(tasks[0], fileResult(fileFact('Local', 'Local statement', 'Local cue')));
+  const deletion = { deckIds: [batch.deckId], revision: h.state().revision, deleteEmptyDecks: true, requestId: 'cleanup-after-crash' };
+  let writes = 0; const rename = fs.renameSync;
+  const failure = t.mock.method(fs, 'renameSync', (...args) => {
+    if (++writes === 2) throw new Error('Cleanup marker save unavailable');
+    return rename(...args);
+  });
+  try { await assert.rejects(h.call('delete-content', deletion), /cleanup is pending/); }
+  finally { failure.mock.restore(); }
+  assert.equal(fs.existsSync(path.join(h.directory, 'sources', `${batch.sourceId}.md`)), false);
+  assert.deepEqual(h.disk().pendingSourceRemovals, [batch.sourceId]);
+  h.activate(); const recovered = h.disk();
+  assert.equal(recovered.pendingSourceRemovals, undefined); assert.equal(h.state().decks.length, 0); assert.equal(h.state().propositions.length, 0);
+  await h.call('delete-content', deletion); assert.deepEqual(h.disk(), recovered); assert.equal(h.workers.starts, 1);
+});
+
+test('deleting an emptied original file deck removes its source assets but preserves local targets moved to other decks', async t => {
+  const h = harness(t, graph()), input = fileInput(), { tasks, batch } = await h.startFile(input);
+  await h.complete(tasks[0], fileResult(fileFact('Moved fact', 'Moved statement', 'Moved cue')));
+  const p = h.state().propositions[0]; await h.grade({ propositionIds: [p.id] });
+  await h.call('create-deck', { name: 'Keep moved fact' }); const keep = h.state().decks.find(d => d.id !== batch.deckId);
+  await h.call('set-memberships', { propositionId: p.id, deckIds: [keep.id] });
+  const progress = h.state().propositions[0].schedule;
+  await h.call('delete-deck', { id: batch.deckId }); h.activate();
+  assert.equal(h.state().propositions[0].archived, false); assert.deepEqual(h.state().propositions[0].schedule, progress);
+  assert.deepEqual(h.state().propositions[0].memberships, [keep.id]); assert.equal(h.state().statistics.states.review, 1);
+  assert.equal(h.disk().fileSources[batch.sourceId], undefined);
+  assert.equal(fs.existsSync(path.join(h.directory, 'sources', `${batch.sourceId}.md`)), false);
+  assert.ok((await h.call('preflight-file', input)).id); assert.equal(h.state().decks.length, 1);
+});
+
+test('activation forgets legacy orphaned file sources rather than recreating deleted decks, without deleting moved targets', async t => {
+  const h = harness(t, graph()), input = fileInput(), { tasks, batch } = await h.startFile(input);
+  await h.complete(tasks[0], fileResult(fileFact('Moved', 'Moved statement', 'Moved cue')));
+  await h.call('create-deck', { name: 'Surviving deck' }); const keep = h.state().decks.find(d => d.id !== batch.deckId);
+  const p = h.state().propositions[0]; await h.call('set-memberships', { propositionId: p.id, deckIds: [keep.id] });
+  h.dispose(); const old = h.disk(); old.decks = old.decks.filter(d => d.id !== batch.deckId);
+  fs.writeFileSync(path.join(h.directory, 'flashcards.json'), JSON.stringify(old)); h.activate();
+  assert.equal(h.disk().fileSources[batch.sourceId], undefined); assert.equal(h.disk().pendingSourceRemovals, undefined);
+  assert.equal(fs.existsSync(path.join(h.directory, 'sources', `${batch.sourceId}.md`)), false);
+  assert.equal(h.state().propositions[0].id, p.id); assert.equal(h.state().propositions[0].archived, false);
+  assert.ok((await h.call('preflight-file', input)).id);
+  await assert.rejects(h.call('open-file-deck', { sourceId: batch.sourceId }), /File source not found/);
+  assert.deepEqual(h.state().decks.map(d => d.id), [keep.id]);
+});
+
 test('manual creation atomically makes a local target and first cue in the chosen deck without graph writes or model calls', async t => {
   const h = harness(t, graph()); await h.call('create-deck', { name: 'Handwritten' });
   h.catalog.slots = {}; h.resolveCatalog = () => { throw new Error('Manual creation must not resolve a model'); };
@@ -178,7 +351,7 @@ test('manual creation receipts survive restart, editing and deletion; duplicate 
   const retry = await h.call('create-cue', append); assert.equal(retry.cueId, second.cueId); assert.deepEqual(h.disk(), saved);
   const retryCreate = await h.call('create-card', create); assert.equal(retryCreate.propositionId, first.propositionId); assert.deepEqual(h.disk(), saved);
   await assert.rejects(h.call('create-cue', { ...append, question: 'Changed request' }), /different work/);
-  assert.equal(h.state().propositions.length, 1); assert.equal(h.state().propositions[0].cues.length, 2);
+  assert.equal(h.state().propositions.length, 1); assert.equal(h.state().propositions[0].cues.length, 1);
 });
 
 test('manual writes reject blank content, missing destinations and archived graph targets without partial mutation', async t => {
@@ -300,7 +473,7 @@ test('file facts stay live in empty graphs for filtered review, limits, shared s
   assert.deepEqual(h.graph, graph());
 });
 
-test('identical files reopen renamed decks without catalog access; missing collections restore facts without resetting review progress', async t => {
+test('identical files reopen renamed decks without catalog access; deleting the deck forgets its source and preserves only review statistics', async t => {
   const h = harness(t, graph()), input = { name: '../../original.notes.md', markdown: 'Same converted source.' };
   const { tasks } = await h.startFile(input);
   await h.complete(tasks[0], fileResult(fileFact('Local', 'Local statement', 'Local cue')));
@@ -312,32 +485,33 @@ test('identical files reopen renamed decks without catalog access; missing colle
   assert.equal(h.catalogReads, reads); assert.deepEqual(h.disk(), before);
   const opened = await h.call('open-file-deck', { sourceId: source.id });
   assert.equal(opened.deckId, source.deckId); assert.equal(opened.state.decks[0].name, 'My renamed collection');
-  await h.call('create-deck', { name: 'Replacement' });
-  const replacement = h.state().decks.find(d => d.name === 'Replacement');
-  await h.call('delete-deck', { id: source.deckId, replacementDeckId: replacement.id });
-  assert.deepEqual(await h.call('preflight-file', input), { existingSourceId: source.id, name: input.name });
-  const progress = h.state().propositions[0].schedule, reviews = h.disk().reviews;
-  const restored = await h.call('open-file-deck', { sourceId: source.id });
-  const deck = restored.state.decks.find(d => d.id === source.deckId);
-  assert.equal(deck.name, 'My renamed collection'); assert.equal(deck.newLimit, 7); assert.deepEqual(deck.propositionIds, [p.id]);
-  assert.deepEqual(restored.state.propositions[0].schedule, progress); assert.deepEqual(h.disk().reviews, reviews); assert.equal(h.workers.starts, 1);
-  assert.deepEqual(fs.readdirSync(path.join(h.directory, 'sources')), [`${source.id}.md`], 'no user filename becomes a path');
+  const reviews = h.disk().reviews;
+  await h.call('delete-deck', { id: source.deckId });
+  await assert.rejects(h.call('open-file-deck', { sourceId: source.id }), /File source not found/);
+  h.catalog.slots.cheap = { model: { provider: 'mock', id: 'cheap' }, thinkingLevel: 'off' };
+  assert.ok((await h.call('preflight-file', input)).id);
+  assert.equal(h.state().decks.length, 0); assert.equal(h.state().propositions.length, 0);
+  assert.deepEqual(h.disk().reviews, reviews); assert.equal(h.workers.starts, 1);
+  assert.deepEqual(fs.readdirSync(path.join(h.directory, 'sources')), []);
 });
 
-test('same-source exact statements and questions collapse across chunks, preserving edits, tombstones and one schedule; changed content is a new source', async t => {
+test('same-source exact statements and questions collapse across chunks; deletion waits for completion and changed content is a new source', async t => {
   const h = harness(t, graph()), input = chunkedFile();
-  await h.call('save-settings', { chunkBudget: 1400 });
+  await h.call('save-settings', { chunkBudget: 300 });
   const { tasks } = await h.startFile(input); assert.ok(tasks.length > 1);
   await h.complete(tasks[0], fileResult(fileFact('Original name', '  Shared statement  ', 'Original cue', 'Deleted cue')));
   let p = h.state().propositions[0];
   await h.call('save-cue', { propositionId: p.id, cueId: p.cues[0].id, question: 'Manual cue', answer: 'Manual answer', version: p.version });
-  p = h.state().propositions[0]; await h.call('delete-cue', { propositionId: p.id, cueId: p.cues[1].id, version: p.version });
+  p = h.state().propositions[0];
+  await assert.rejects(h.call('delete-cue', { propositionId: p.id, cueId: p.cues[1].id, version: p.version }), /generation to finish or cancel/);
   await h.grade({ propositionIds: [p.id] });
   const before = h.state().propositions[0], history = h.disk().reviews;
   for (const task of tasks.slice(1)) await h.complete(task, fileResult(fileFact('Do not rename', 'Shared statement', 'Manual cue', 'Deleted cue', 'New cue')));
   assert.equal(h.state().propositions.length, 1);
   p = h.state().propositions[0]; assert.equal(p.name, 'Original name'); assert.deepEqual(p.schedule, before.schedule); assert.deepEqual(p.cues.slice(0, 2), before.cues);
   assert.equal(p.cues.length, 3); assert.deepEqual(h.disk().reviews, history);
+  await h.call('delete-cue', { propositionId: p.id, cueId: p.cues[1].id, version: p.version });
+  assert.equal(h.state().propositions[0].cues.length, 2); assert.equal(JSON.stringify(h.disk()).includes('Deleted cue'), false);
   const changed = await h.startFile({ ...input, markdown: input.markdown + 'Changed.' });
   for (const task of changed.tasks) await h.complete(task, fileResult(fileFact('Independent', 'Shared statement', 'Other-source cue')));
   assert.equal(Object.keys(h.disk().fileSources).length, 2); assert.equal(h.state().decks.length, 2); assert.equal(h.state().propositions.length, 2);
@@ -346,14 +520,14 @@ test('same-source exact statements and questions collapse across chunks, preserv
 
 test('file retries cover only failed source spans with current settings and cannot replay spans applied by any retry', async t => {
   const h = harness(t, graph()), input = chunkedFile();
-  await h.call('save-settings', { chunkBudget: 1400 });
+  await h.call('save-settings', { chunkBudget: 300 });
   const { tasks, batch } = await h.startFile(input); assert.equal(tasks.length, 2);
   await h.complete(tasks[0], null, 'failed');
   await h.complete(tasks[1], fileResult(fileFact('Accepted', 'Accepted original fact', 'Keep this cue')));
   assert.equal(h.state().batch.status, 'partial'); assert.deepEqual(h.state().batch.failedChunkIds, [batch.chunks[0].id]); assert.deepEqual(h.state().batch.failedTargetIds, []);
   const accepted = h.state().propositions[0]; await h.grade({ propositionIds: [accepted.id] });
   const progress = h.state().propositions[0].schedule;
-  await h.call('save-settings', { chunkBudget: 1200, thinkingOverride: 'low' });
+  await h.call('save-settings', { chunkBudget: 150, thinkingOverride: 'low' });
   const retry = await h.call('preflight-file-retry', { batchId: batch.id }); assert.equal(retry.kind, 'file'); assert.ok(retry.chunkCount > 1);
   await h.call('start-generation', { preflightId: retry.id, requestId: 'retry-failed-file' }); await flush();
   const retried = h.state().batch; assert.equal(retried.sourceId, batch.sourceId); assert.equal(retried.deckId, batch.deckId);
@@ -477,7 +651,7 @@ test('reordering skips deleted cues and archived propositions', async t => {
   assert.deepEqual(h.state().decks[0].propositionIds, ['p3', 'p2', 'p1']);
 });
 
-test('packing includes complete immediate chains and active/deleted cues, not recursive context', () => {
+test('packing includes complete immediate chains and only active cues, never deleted-card backlog or recursive context', () => {
   const g = graph('a', 'b', 'c', 'd', 'e', 'f', 'g');
   g.chains = [{ id: 'ab-c', premises: ['a', 'b'], conclusion: 'c' },
     { id: 'cd-e', premises: ['c', 'd'], conclusion: 'e' }, { id: 'ef-g', premises: ['e', 'f'], conclusion: 'g' }];
@@ -489,12 +663,46 @@ test('packing includes complete immediate chains and active/deleted cues, not re
   assert.deepEqual(input.chains.map(c => c.id), ['ab-c', 'cd-e']);
   assert.deepEqual(new Set(input.propositions.map(p => p.id)), new Set(['a', 'b', 'c', 'd', 'e']));
   assert.deepEqual(input.chains[0].premises, ['a', 'b']);
-  assert.deepEqual(input.cards, [{ propositionId: 'c', active: [{ question: 'Manual cue', answer: 'Edited answer' }], deleted: [{ question: 'Deleted cue', answer: 'Old answer' }] }]);
+  assert.deepEqual(input.cards, [{ propositionId: 'c', active: [{ question: 'Manual cue', answer: 'Edited answer' }] }]);
+  assert.equal(JSON.stringify(input).includes('Deleted cue'), false);
+  assert.equal(JSON.stringify(input).includes('Old answer'), false);
   assert.equal(input.sources[0].label, 'Source lesson');
   assert.throws(() => pack(g, [], state), /Select at least one/);
   assert.throws(() => pack(g, ['missing'], state), /no longer in the graph/);
   assert.throws(() => pack({ ...g, propositions: g.propositions.filter(p => p.id !== 'b') }, ['c'], state), /Incomplete reasoning chain: b/);
-  assert.throws(() => pack(g, ['c'], { ...state, settings: { ...state.settings, chunkBudget: estimate(input) - 1 } }), /needs approximately/);
+  assert.deepEqual(pack(g, ['c'], { ...state, settings: { ...state.settings, chunkBudget: 1 } }), [input], 'an indivisible target rides alone, outside context does not consume its budget');
+});
+
+test('graph chunks budget selected target text only, independent of immediate chains and active card context', () => {
+  const g = graph('p1', 'p2', 'context');
+  g.propositions[2].statement = 'Neighboring context '.repeat(1000);
+  g.chains = [{ id: 'joint', premises: ['p1', 'context'], conclusion: 'p2' }];
+  const targetTokens = p => Math.ceil(`${p.name}\n${p.statement}`.length / 4);
+  const budget = targetTokens(g.propositions[0]) + targetTokens(g.propositions[1]);
+  const state = { settings: { ...defaults(), chunkBudget: budget }, propositions: {
+    p1: { cues: [{ question: 'Active', answer: 'Long answer '.repeat(500) }, { question: 'Deleted', answer: 'Deleted text '.repeat(500), deleted: true }] },
+  } };
+  const before = JSON.stringify(state), [combined] = pack(g, ['p1', 'p2'], state);
+  assert.deepEqual(combined.targets, ['p1', 'p2']);
+  assert.ok(estimate(combined) > 4000, 'the full request is larger than the source budget and still packs');
+  assert.equal(combined.propositions.length, 3); assert.equal(combined.cards[0].active.length, 1); assert.equal(Object.hasOwn(combined.cards[0], 'deleted'), false);
+  assert.equal(JSON.stringify(combined).includes('Deleted text'), false);
+  const split = pack(g, ['p1', 'p2'], { ...state, settings: { ...state.settings, chunkBudget: budget - 1 } });
+  assert.deepEqual(split.map(input => input.targets), [['p1'], ['p2']]);
+  assert.equal(JSON.stringify(state), before);
+});
+
+test('graph preflight estimates the full request and enforces the model context independently of the source budget', async t => {
+  const h = harness(t);
+  await h.call('save-settings', { chunkBudget: 1 });
+  const [input] = pack(h.graph, ['p1'], { settings: { ...defaults(), chunkBudget: 1 }, propositions: {} });
+  const tokens = estimate(input);
+  h.catalog.models[0].contextWindow = tokens + 256 + 1024;
+  const plan = await h.call('preflight', { propositionIds: ['p1'] });
+  assert.equal(plan.chunkCount, 1); assert.equal(plan.estimatedTokens, tokens); assert.ok(tokens > 1);
+  h.catalog.models[0].contextWindow--;
+  await assert.rejects(h.call('preflight', { propositionIds: ['p1'] }), /cannot fit this context and an output allowance/);
+  assert.equal(h.workers.starts, 0);
 });
 
 test('generation applies only accepted terminal success; invalid submissions repair and zero cards create no deck', async t => {
@@ -523,8 +731,8 @@ test('independent chunks accept successful work despite another failure', async 
   const g = graph('p1', 'p2');
   for (const p of g.propositions) p.statement = 'Context '.repeat(200);
   const h = harness(t, g);
-  const [single] = pack(g, ['p1'], { settings: { ...defaults(), chunkBudget: 100000 }, propositions: {} });
-  await h.call('save-settings', { chunkBudget: estimate(single) + 10 });
+  const p = g.propositions[0];
+  await h.call('save-settings', { chunkBudget: Math.ceil(`${p.name}\n${p.statement}`.length / 4) });
   const tasks = await h.start(['p1', 'p2']);
   assert.equal(tasks.length, 2);
   await h.complete(tasks[0], result(cards(tasks[0].input.targets[0], 'Accepted cue')));
@@ -537,7 +745,7 @@ test('independent chunks accept successful work despite another failure', async 
   assert.deepEqual(h.state().batch.failedTargetIds, tasks[1].input.targets);
 });
 
-test('regeneration supplies existing/deleted context and preserves manual edits, memberships and schedule', async t => {
+test('regeneration supplies active context only and preserves manual edits, memberships and schedule without a deleted-question blacklist', async t => {
   const h = harness(t);
   await h.generate(cards('p1', 'Original', 'Do not recreate'));
   let p = h.state().propositions[0];
@@ -551,14 +759,15 @@ test('regeneration supplies existing/deleted context and preserves manual edits,
   const before = h.state().propositions[0];
   const [task] = await h.start(['p1']);
   assert.deepEqual(task.input.cards[0].active, [{ question: 'Manually edited', answer: 'Manual answer' }]);
-  assert.equal(task.input.cards[0].deleted[0].question, 'Do not recreate');
-  assert.throws(() => h.workers.stage(task.id, result(cards('p1', 'Do not recreate'))), /Duplicate or deleted/);
-  await h.complete(task, result(cards('p1', 'Distinct new cue')));
+  assert.equal(Object.hasOwn(task.input.cards[0], 'deleted'), false);
+  assert.equal(JSON.stringify(task.input).includes('Do not recreate'), false);
+  assert.throws(() => h.workers.stage(task.id, result(cards('p1', 'Manually edited'))), /Duplicate question/);
+  await h.complete(task, result(cards('p1', 'Do not recreate', 'Distinct new cue')));
   const after = h.state().propositions[0];
   assert.deepEqual(after.schedule, before.schedule);
   assert.deepEqual(after.memberships, before.memberships);
   assert.equal(after.firstReviewedAt, before.firstReviewedAt);
-  assert.deepEqual(after.cues.slice(0, 2), before.cues);
+  assert.deepEqual(after.cues.slice(0, before.cues.length), before.cues);
   assert.equal(after.cues.length, 3);
   assert.equal(h.disk().reviews.length, 1);
 });

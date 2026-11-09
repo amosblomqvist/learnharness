@@ -18,7 +18,7 @@ const settingsIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor"
 
 const plusIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
 
-export function mountLibraryTree({ ctx, container, signal, button, onReview, onPractice, onPreview, onEdit, onDelete, onCreateCard, onCreateCue, onDeckSettings, onMemberships, onReorder, onRename, onSelection, onError }) {
+export function mountLibraryTree({ ctx, container, signal, button, onReview, onPreview, onEdit, onDelete, onCreateCard, onCreateCue, onDeckSettings, onMemberships, onReorder, onRename, onSelection, onError }) {
   const viewport = el('div', 'fc-tree-viewport');
   const inner = el('div', 'fc-tree-inner');
   const empty = el('p', 'fc-muted');
@@ -30,13 +30,15 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
   const propTokens = p => p.cues.filter(c => !c.deleted).map(c => cueToken(c.id));
   const leaves = p => { const ids = propTokens(p); return ids.length ? ids : [`proposition:${p.id}`]; };
   function selection() {
-    const cueIds = [], propositionIds = [];
+    const cueIds = [], propositionIds = [], emptyPropositionIds = [];
     for (const p of state?.propositions ?? []) {
       if (p.archived) continue;
       const cues = p.cues.filter(c => !c.deleted && selected.has(cueToken(c.id)));
       if (cues.length) { propositionIds.push(p.id); cueIds.push(...cues.map(c => c.id)); }
+      if (!propTokens(p).length && selected.has(`proposition:${p.id}`)) emptyPropositionIds.push(p.id);
     }
-    return { cueIds, propositionIds, count: selected.size };
+    const emptyDeckIds = (state?.decks ?? []).filter(d => selected.has(`deck:${d.id}`)).map(d => d.id);
+    return { cueIds, propositionIds, emptyPropositionIds, emptyDeckIds, count: selected.size };
   }
   const run = action => async () => { try { await action(); } catch (error) { if (live()) onError(error instanceof Error ? error.message : String(error)); } };
   function rowSelection(tokens, label) {
@@ -61,11 +63,10 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
     const { kind, deck, p, cue, archive } = record;
     if (archive) return [];
     const items = kind === 'deck' ? [
-      { key: 'practice', label: 'Practice anytime', disabled: !state.propositions.some(p => !p.archived && deck.propositionIds.includes(p.id) && p.cues.some(c => !c.deleted)), onSelect: run(() => onPractice({ deckIds: [deck.id] })) },
       { key: 'settings', label: 'Deck settings', onSelect: run(() => onDeckSettings(record.deck)) },
     ]
       : kind === 'proposition' ? [{ key: 'memberships', label: 'Decks…', onSelect: run(() => onMemberships(record.p)) }]
-      : [{ key: 'edit', label: 'Edit', onSelect: run(() => onEdit(record.p, record.cue)) }, { key: 'delete', label: 'Delete', onSelect: run(() => onDelete(record.p, record.cue)) }];
+      : [{ key: 'edit', label: 'Edit', onSelect: run(() => onEdit(record.p, record.cue)) }, { key: 'delete', label: 'Delete', disabled: ['running', 'cancelling'].includes(state.batch?.status), onSelect: run(() => onDelete(record.p, record.cue)) }];
     const ids = kind === 'deck' ? state.decks.map(d => d.id) : kind === 'proposition' ? deck.propositionIds.filter(id => state.propositions.some(p => p.id === id && !p.archived)) : p.cues.filter(c => !c.deleted).map(c => c.id);
     const id = kind === 'deck' ? deck.id : kind === 'proposition' ? p.id : cue.id;
     for (const direction of [-1, 1]) items.push({ key: direction === -1 ? 'up' : 'down', label: direction === -1 ? 'Move up' : 'Move down', disabled: !!query || ids.indexOf(id) + direction < 0 || ids.indexOf(id) + direction >= ids.length, onSelect: run(() => onReorder({ kind, id, ...(kind === 'proposition' ? { deckId: deck.id } : kind === 'cue' ? { propositionId: p.id } : {}), direction })) });

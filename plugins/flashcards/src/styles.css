@@ -24,6 +24,7 @@
 .fc-root .fc-markdown > :first-child { margin-top: 0; }
 .fc-root .fc-markdown > :last-child { margin-bottom: 0; }
 .fc-root .fc-selection-actions { justify-content: space-between; gap: 8px 16px; padding: 0 12px 8px; }
+.fc-root .fc-delete-selected { display: inline-flex; color: var(--muted-foreground, #888); }
 .fc-root .fc-selection-summary { display: flex; align-items: center; gap: 8px; margin-left: auto; white-space: nowrap; }
 .fc-root .fc-selection-summary > .fc-muted { min-width: 10ch; text-align: right; }
 .fc-root .fc-tree-viewport { overflow-x: auto; }
@@ -92,6 +93,8 @@
 .fc-dialog { min-width: 0; }
 .fc-dialog .fc-dialog-heading { font-size: 16px; font-weight: 600; margin: 0 0 18px; }
 .fc-dialog .fc-actions { margin-top: 14px; }
+.fc-dialog .fc-delete-description { margin-bottom: 12px; }
+.fc-dialog .fc-delete-description .fc-markdown { color: inherit; }
 .fc-settings { padding: 12px 0; }
 .fc-root .fc-model-settings { display: grid; gap: 16px; margin-top: 18px; }
 .fc-root .fc-model-overrides { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 10px; }
