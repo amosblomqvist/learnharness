@@ -190,6 +190,21 @@ export class ProviderKeyMissingError extends Error {
 	}
 }
 
+/** Confirmed daily free-tier quota exhaustion (2026-11-03): the code the import
+ * route stamps on a failed result and the client queue stops on. */
+export const QUOTA_EXHAUSTED_CODE = "quota_exhausted" as const;
+/** Appears only in the daily-limit refusal, never in a plain auth/500/503 failure. */
+const QUOTA_EXHAUSTED_MARKER = "free-models-per-day";
+/** What the learner sees for the file that hit the exhaustion. */
+export const QUOTA_EXHAUSTED_MESSAGE = "Daily free model quota exhausted. Wait for reset or configure another model/provider.";
+/** What the learner sees for queued files never dispatched after it. */
+export const QUOTA_UNATTEMPTED_MESSAGE = "Not attempted (daily quota exhausted).";
+/** The marker sits in the message even when the gateway re-wrapped the upstream
+ * 429 as a 500/503 and extraction wrapped that again (each wrapper copies it). */
+export function isQuotaExhaustedError(error: unknown): boolean {
+	return error instanceof Error && error.message.includes(QUOTA_EXHAUSTED_MARKER);
+}
+
 export const CACHE_RETENTIONS = ["none", "short", "long"] as const satisfies readonly CacheRetention[];
 
 /** One slot's stored state. BYOK (owner, 2026-09-22): the WRITE side
@@ -376,6 +391,16 @@ export interface AgentSettings {
 	fileAccess?: FileAccessSettings;
 }
 
+/** The rendered-markdown alignments: the four the settings row offers, in
+ *  its button order. Tests pin the set. */
+export const MD_TEXT_ALIGNS = ["left", "center", "right", "justify"] as const;
+export type MdTextAlign = (typeof MD_TEXT_ALIGNS)[number];
+
+/** Center's reading-column TEXT widths in px; medium (700px) is the line length
+ *  common in note-taking apps. Tests pin the set. */
+export const MD_CENTER_WIDTHS = { small: 560, medium: 700, large: 880 } as const;
+export type MdCenterWidth = keyof typeof MD_CENTER_WIDTHS;
+
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
 export interface MdRenderingSettings {
 	/** Heading font weight (100–900, default 900). CSS resolves the nearest
@@ -385,6 +410,12 @@ export interface MdRenderingSettings {
 	boldColor?: string | null;
 	/** Color for *italic* spans (default #ffffff). */
 	italicColor?: string | null;
+	/** Alignment of rendered transcript markdown: replies, job briefs, reasoning (default
+	 *  left; docks and cards keep normal alignment). Center narrows the column, text stays left. */
+	textAlign?: MdTextAlign;
+	/** Center's column width (default medium). Inert under any other
+	 *  alignment; kept so switching back to Center restores it. */
+	centerWidth?: MdCenterWidth;
 }
 
 /** Appearance settings — mode, colors, type, markdown emphasis. */
@@ -502,11 +533,7 @@ export interface FactorySettings {
 		fontFamily: string | null;
 		proseFontSize: number;
 		sessionNameSerif: boolean;
-		mdRendering: {
-			headingWeight: number;
-			boldColor: string | null;
-			italicColor: string | null;
-		};
+		mdRendering: Required<MdRenderingSettings>;
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
@@ -522,7 +549,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
 		sessionNameSerif: true,
-		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
+		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null, textAlign: "left", centerWidth: "medium" },
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000 },
@@ -745,6 +772,11 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 	}
 	if (r.boldColor !== undefined) out.boldColor = sanitizeHexOrNull(r.boldColor);
 	if (r.italicColor !== undefined) out.italicColor = sanitizeHexOrNull(r.italicColor);
+	// Unknown alignment drops (the factory left resumes) — lenient read side.
+	if ((MD_TEXT_ALIGNS as readonly unknown[]).includes(r.textAlign)) out.textAlign = r.textAlign as MdTextAlign;
+	if (typeof r.centerWidth === "string" && Object.hasOwn(MD_CENTER_WIDTHS, r.centerWidth)) {
+		out.centerWidth = r.centerWidth as MdCenterWidth;
+	}
 	return out;
 }
 

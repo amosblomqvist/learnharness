@@ -49,6 +49,7 @@ For lessons, attach material to a session instead. Use the graph's **Extract fil
 - PDF conversion is local text extraction, not OCR. Image-only pages are skipped and counted; scanner text can be inaccurate. Check the import's notices.
 - Imported text then goes through model-based proposition/chain extraction. Local PDF conversion does not make the whole import offline.
 - Completed chunks survive later failures. Retry is explicit and reprocesses the file; unchanged content is not automatically skipped. The file queue does not survive a page reload.
+- If the provider's daily free-model quota runs out, the import stops at that file. Files not yet started are listed as "Not attempted (daily quota exhausted)" and are not retried for you. Pick them again after the quota resets or after switching to another model or provider.
 
 The graph stores propositions and reasoning chains with source provenance, **not mastery scores**. A proposition's presence is not proof that you understood or retained it. Automatic session extraction can be disabled independently of graph rendering.
 

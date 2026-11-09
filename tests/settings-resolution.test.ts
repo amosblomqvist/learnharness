@@ -42,6 +42,8 @@ describe("resolveSettings", () => {
 		assert.equal(eff.appearance.proseFontSize, 16);
 		assert.equal(eff.appearance.sessionNameSerif, true);
 		assert.equal(eff.appearance.mdRendering.headingWeight, 900);
+		assert.equal(eff.appearance.mdRendering.textAlign, "left");
+		assert.equal(eff.appearance.mdRendering.centerWidth, "medium");
 		// wave 7 collapse: the master switch ONLY + the redesign's chunk
 		// budget — absent record resolves the factory 4096 (halved back
 		// from the digest-era 8192, owner, 2026-10-13)
@@ -58,7 +60,7 @@ describe("resolveSettings", () => {
 				prompts: { "system-prompt.md": true },
 				search: { engine: "tavily" },
 			},
-			appearance: { mode: "light", proseFontSize: 20, mdRendering: { headingWeight: 600 } },
+			appearance: { mode: "light", proseFontSize: 20, mdRendering: { headingWeight: 600, textAlign: "justify", centerWidth: "large" } },
 			graph: { enabled: false },
 		};
 		const eff = resolveSettings(record);
@@ -76,6 +78,8 @@ describe("resolveSettings", () => {
 		assert.equal(eff.appearance.mode, "light");
 		assert.equal(eff.appearance.proseFontSize, 20);
 		assert.equal(eff.appearance.mdRendering.headingWeight, 600);
+		assert.equal(eff.appearance.mdRendering.textAlign, "justify");
+		assert.equal(eff.appearance.mdRendering.centerWidth, "large");
 		// wave 7 collapse: the section IS the master switch (absent budget
 		// field = factory 4096 — a pre-redesign record resolves cleanly).
 		assert.deepEqual(eff.graph, { enabled: false, rendering: true, extractionChunkTokens: 4096 });

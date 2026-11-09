@@ -1,8 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { test } from "node:test";
+import { recoverDocumentLayout } from "../src/core/content-reader.ts";
 import { repairMathForDisplay, restoreMathEscapes, transformMathDelimiters } from "../src/core/math-delims.ts";
 
 const math = String.raw;
+/** The recorded real-world **Q:** line, escaped two layers deep (fixture, never edited). */
+const twoLayerFailedQuestion = () => readFileSync(new URL("./fixtures/tool-rendering/escaped-fence-two-layer.txt", import.meta.url), "utf8").replace(/\r?\n$/, "");
 test("document paragraphs and display framing recover without interpreting n-commands as newlines", () => {
 	const source = math`First.\n\nSecond: $\nabla f\neq0$.\n\n$$\n\frac{1}{2}\n$$`;
 	assert.equal(repairMathForDisplay(source), "First.\n\nSecond: " + math`$\nabla f\neq0$.` + "\n\n$$\n" + math`\frac{1}{2}` + "\n$$");
@@ -106,6 +110,19 @@ test("legacy compatibility and recovery share code barriers, including tilde and
 	const comment = "$60% " + math`\n\n` + "\nx$";
 	assert.equal(repairMathForDisplay(comment), comment);
 });
+test("escaped fenced code blocks recover with physical newlines and language tags", () => {
+	const sqlQuestion =
+		"Consider the following SQL query:\\n\\n```sql\\nSELECT *\\nFROM users u\\nLEFT JOIN orders o ON u.id = o.user_id\\nWHERE o.status = 'PENDING';\\n```\\n\\nWhat is the behavioral impact of the `WHERE o.status = 'PENDING'` clause on this `LEFT JOIN`?";
+	const expectedSql =
+		"Consider the following SQL query:\n\n```sql\nSELECT *\nFROM users u\nLEFT JOIN orders o ON u.id = o.user_id\nWHERE o.status = 'PENDING';\n```\n\nWhat is the behavioral impact of the `WHERE o.status = 'PENDING'` clause on this `LEFT JOIN`?";
+	assert.equal(repairMathForDisplay(sqlQuestion), expectedSql);
+	assert.equal(repairMathForDisplay(expectedSql), expectedSql);
+
+	const isolatedFence = "```python\\ndef solve(n):\\n    return n * 2\\n```";
+	const expectedPython = "```python\ndef solve(n):\n    return n * 2\n```";
+	assert.equal(repairMathForDisplay(isolatedFence), expectedPython);
+	assert.equal(repairMathForDisplay(expectedPython), expectedPython);
+});
 test("recovery converges after one pass, including multiple debris characters", () => {
 	for (const source of ["$\forall x,\theta+\to$", math`First.\n\n$$\nJ=\\frac{1}{2}+60\\%\n$$`,
 		math`$\begin{pmatrix}a&b\\c&d\end{pmatrix}$`, "```text\n\\(\nabla\\)\n```", "$\nabla f$",
@@ -113,4 +130,103 @@ test("recovery converges after one pass, including multiple debris characters", 
 		const once = repairMathForDisplay(source);
 		assert.equal(repairMathForDisplay(once), once);
 	}
+});
+test("two-layer escaped SQL fence from the failed LEFT JOIN question recovers physical newlines", () => {
+	const raw = twoLayerFailedQuestion();
+	// exact failed capture: one physical line with ten tokens of TWO literal backslashes + n
+	assert.ok(!raw.includes("\n"));
+	assert.equal(raw.match(/\\\\n/g)?.length, 10);
+	assert.equal(raw.match(/(?<!\\)\\n/g)?.length ?? 0, 0); // no single-layer tokens mixed in
+	const expected = raw.replace(/\\\\n/g, "\n");
+	assert.ok(expected.includes("**Q:** Question: Consider the following SQL query:\n\n```sql\nSELECT *\nFROM users u\nLEFT JOIN orders o ON u.id =\no.user_id\nWHERE o.status = 'PENDING';\n```\n\nWhat is the behavioral impact of the WHERE clause on this LEFT JOIN?"));
+	assert.equal(recoverDocumentLayout(raw), expected);
+	assert.equal(repairMathForDisplay(raw), expected);
+	// idempotence: recovery converges after one pass
+	assert.equal(recoverDocumentLayout(expected), expected);
+	assert.equal(repairMathForDisplay(expected), expected);
+});
+test("two-layer recovery keeps paths, known n-commands and longer literal backslash runs intact", () => {
+	// every encoded newline here is TWO literal backslashes + n (second JSON layer)
+	const raw = math`Path C:\\new\\notes and \\nu stay;\\n\\n` + "```sql\\\\nSELECT 1\\\\n```" + math`\\n\\nEnd.`;
+	const expected = math`Path C:\\new\\notes and \\nu stay;` + "\n\n```sql\nSELECT 1\n```" + "\n\nEnd.";
+	assert.equal(recoverDocumentLayout(raw), expected);
+	assert.equal(recoverDocumentLayout(expected), expected);
+	// a two-layer fence body keeps runs longer than the delimiter factor literal
+	const code = "Text:\\\\n\\\\n```py\\\\n" + 'print("' + "\\\\\\\\n" + '")' + "\\\\n```\\\\nend";
+	const recoveredCode = recoverDocumentLayout(code);
+	assert.ok(recoveredCode.includes("```py\n" + 'print("' + "\\\\\\\\n" + '")\n```'));
+	assert.ok(recoveredCode.includes("Text:\n\n"));
+	assert.equal(recoverDocumentLayout(recoveredCode), recoveredCode);
+});
+test("literal double-backslash n tokens without a two-layer fence stay literal", () => {
+	const prose = math`Write \\n in JSON for a newline; see C:\\new\\notes.`;
+	assert.equal(recoverDocumentLayout(prose), prose);
+	assert.equal(repairMathForDisplay(prose), prose);
+});
+test("two-layer fence recovery leaves native math row separators byte-identical in the same document", () => {
+	const raw = twoLayerFailedQuestion();
+	const fence = "```sql\nSELECT *\nFROM users u\nLEFT JOIN orders o ON u.id =\no.user_id\nWHERE o.status = 'PENDING';\n```";
+	// native (one-backslash begin/end) environments whose row separator `\\` is
+	// followed by an n-leading cell must never be reinterpreted by the fence factor
+	const matrices = [
+		math`$\begin{pmatrix}a&b\\n&d\end{pmatrix}$`,
+		math`$\begin{pmatrix}a&b\\node&d\end{pmatrix}$`,
+		math`$\begin{pmatrix}a&b\\nx&d\end{pmatrix}$`,
+		math`$\begin{pmatrix}a&b\\nope&d\end{pmatrix}$`,
+		"$$\n" + math`\begin{pmatrix}a&b\\n&d\end{pmatrix}` + "\n$$",
+		...["matrix", "bmatrix", "aligned"].map(env => math`$\begin{${env}}a&b\\n&d\end{${env}}$`),
+	];
+	for (const matrix of matrices) {
+		const doc = raw + "\n\n" + matrix;
+		const out = recoverDocumentLayout(doc);
+		assert.ok(out.includes(fence), "SQL fence not recovered");
+		assert.ok(out.includes(matrix), `native math mutated: ${JSON.stringify(out)}`);
+		assert.equal(recoverDocumentLayout(out), out, "not idempotent");
+		const repaired = repairMathForDisplay(doc);
+		assert.ok(repaired.includes(fence), "repairMathForDisplay lost the SQL fence");
+		assert.ok(repaired.includes(matrix), `repairMathForDisplay mutated math: ${JSON.stringify(repaired)}`);
+		assert.equal(repairMathForDisplay(repaired), repaired, "repairMathForDisplay not idempotent");
+	}
+});
+test("escaped-fence matching stays linear on very long backslash runs", () => {
+	const run = "\\".repeat(100_000);
+	const timed = <T>(work: () => T) => { const start = performance.now(); const value = work(); return { value, ms: performance.now() - start }; };
+	// A closed two-layer fence whose body holds one huge run: the run stays
+	// literal and must not be retried from every position inside it.
+	const layered = "```sql\\\\nSELECT 1;" + run + "x\\\\n```";
+	const closed = timed(() => recoverDocumentLayout(layered));
+	assert.equal(closed.value, "```sql\nSELECT 1;" + run + "x\n```");
+	// An opener that is never closed: the matcher has to give up quickly.
+	const unclosed = "```sql\\n" + run + "x";
+	const open = timed(() => recoverDocumentLayout(unclosed));
+	assert.equal(open.value, unclosed);
+	// Linear time is a few tens of ms here; the quadratic form took 8-16 s.
+	// The bound is generous so a slow machine cannot flake it.
+	assert.ok(closed.ms < 3000, `closed fence took ${Math.round(closed.ms)} ms`);
+	assert.ok(open.ms < 3000, `unclosed fence took ${Math.round(open.ms)} ms`);
+});
+test("two-layer recovery keeps UNC and quoted Windows paths while the fence still recovers", () => {
+	// A UNC share starts with two backslashes and a host that may begin with n;
+	// it is real text, not an escaped newline, even though a layered fence is present.
+	const fence = "```sh\\\\nls\\\\n```";
+	const recovered = "\n\n```sh\nls\n```";
+	for (const prose of [
+		math`Open \\nas01\share`,
+		math`Map the drive to \\nas01\share\backup`,
+		math`Say ("\\nas01\share")`,
+		math`Open "C:\\new\\notes" or (C:\\new)`,
+	]) {
+		const raw = prose + math` then run:\\n\\n` + fence;
+		const expected = prose + " then run:" + recovered;
+		assert.equal(recoverDocumentLayout(raw), expected, prose);
+		assert.equal(repairMathForDisplay(raw), expected, prose);
+		assert.equal(recoverDocumentLayout(expected), expected, `${prose} (idempotence)`);
+	}
+});
+test("two-layer recovery still turns n-words after a double-backslash token into newlines", () => {
+	// The same shapes without a path: a following word, or a word that merely
+	// starts like a host name, is the start of the next line.
+	const fence = "```sh\\\\nls\\\\n```";
+	const raw = math`Next:\\nnas01 is up.\\nSELECT\\nFROM ok.\\n\\n` + fence;
+	assert.equal(recoverDocumentLayout(raw), "Next:\nnas01 is up.\nSELECT\nFROM ok.\n\n```sh\nls\n```");
 });

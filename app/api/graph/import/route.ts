@@ -21,9 +21,13 @@ import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } 
 import { MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits.ts";
 import {
 	emit,
+	isQuotaExhaustedError,
 	ModelsNotConfiguredError,
 	PROVIDER_KEY_MISSING_CODE,
 	ProviderKeyMissingError,
+	QUOTA_EXHAUSTED_CODE,
+	QUOTA_EXHAUSTED_MESSAGE,
+	QUOTA_UNATTEMPTED_MESSAGE,
 	type EmissionStats,
 } from "@/src/core";
 
@@ -38,8 +42,8 @@ interface ImportResult {
 	error?: string;
 	/** The machine discriminator when ok:false is a config refusal — the
 	 * BYOK models refusal (owner, 2026-09-22) or the provider-key refusal
-	 * (2026-09-25); the client can open the setup/keys flow off it. */
-	code?: "models_not_configured" | (typeof PROVIDER_KEY_MISSING_CODE);
+	 * (2026-09-25) — or confirmed daily quota exhaustion (2026-11-03). */
+	code?: "models_not_configured" | (typeof PROVIDER_KEY_MISSING_CODE) | (typeof QUOTA_EXHAUSTED_CODE);
 	missing?: string[];
 	/** The key-refusal specifics (provider_key_missing only). */
 	provider?: string;
@@ -139,8 +143,10 @@ export async function POST(request: Request) {
 	}
 	const results: ImportResult[] = [];
 	const queue = files.map((file, requestIndex) => ({ file, requestIndex, filePath: paths[requestIndex]! }));
+	let quotaExhausted = false;
 	const workers = Array.from({ length: Math.min(3, files.length) }, async () => {
 		for (;;) {
+			if (quotaExhausted) return;
 			const next = queue.shift();
 			if (!next) return;
 			const { file, requestIndex, filePath } = next;
@@ -157,6 +163,16 @@ export async function POST(request: Request) {
 				if (err instanceof ModelsNotConfiguredError) {
 					results.push({ filePath, ok: false, requestIndex, outcome: "failed", error: err.envelope.error,
 						code: "models_not_configured", missing: err.envelope.missing });
+				} else if (isQuotaExhaustedError(err)) {
+					// CONFIRMED daily quota exhaustion — even when the gateway
+					// re-wrapped the upstream 429 as 500/503 and extraction
+					// re-wrapped that in a NotesImportError: keep the honest
+					// outcome and partial stats, stop dispatching the rest.
+					quotaExhausted = true;
+					results.push({ filePath, ok: false, requestIndex,
+						outcome: err instanceof NotesImportError ? err.outcome : "failed",
+						...(err instanceof NotesImportError ? { stats: err.partialStats } : {}),
+						error: QUOTA_EXHAUSTED_MESSAGE, code: QUOTA_EXHAUSTED_CODE });
 				} else if (err instanceof ProviderKeyMissingError) {
 					results.push({ filePath, ok: false, requestIndex, outcome: "failed", error: err.envelope.error,
 						code: PROVIDER_KEY_MISSING_CODE, provider: err.envelope.provider, slots: err.envelope.slots });
@@ -170,5 +186,13 @@ export async function POST(request: Request) {
 		}
 	});
 	await Promise.all(workers);
+	// Confirmed exhaustion: files still queued were never attempted — report
+	// them as distinct unattempted rows so every requested file has exactly
+	// one correctly attributed result.
+	if (quotaExhausted) {
+		for (const { filePath, requestIndex } of queue) {
+			results.push({ filePath, requestIndex, outcome: "failed", ok: false, error: QUOTA_UNATTEMPTED_MESSAGE, code: QUOTA_EXHAUSTED_CODE });
+		}
+	}
 	return Response.json({ results });
 }

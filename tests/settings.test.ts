@@ -14,6 +14,7 @@ import {
 	FACTORY_SETTINGS,
 	BACKGROUND_MODEL_ROLES,
 	isHexColor,
+	isQuotaExhaustedError,
 	sanitizeUserSettings,
 } from "../src/core/settings.ts";
 
@@ -149,6 +150,32 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(out.appearance?.mdRendering?.italicColor, null);
 	});
 
+	it("mdRendering.textAlign: the four alignments pass, anything else drops (factory left)", () => {
+		for (const good of ["left", "center", "right", "justify"]) {
+			const out = sanitizeUserSettings({ appearance: { mdRendering: { textAlign: good } } });
+			assert.ok(out);
+			assert.equal(out.appearance?.mdRendering?.textAlign, good, good);
+		}
+		for (const bad of ["middle", "start", "LEFT", "", 1, null]) {
+			const out = sanitizeUserSettings({ appearance: { mdRendering: { textAlign: bad } } });
+			assert.ok(out);
+			assert.equal(out.appearance?.mdRendering?.textAlign, undefined, JSON.stringify(bad));
+		}
+	});
+
+	it("mdRendering.centerWidth: small/medium/large pass, anything else drops (factory medium)", () => {
+		for (const good of ["small", "medium", "large"]) {
+			const out = sanitizeUserSettings({ appearance: { mdRendering: { centerWidth: good } } });
+			assert.ok(out);
+			assert.equal(out.appearance?.mdRendering?.centerWidth, good, good);
+		}
+		for (const bad of ["huge", "Medium", "700", 700, "", null, "toString"]) {
+			const out = sanitizeUserSettings({ appearance: { mdRendering: { centerWidth: bad } } });
+			assert.ok(out);
+			assert.equal(out.appearance?.mdRendering?.centerWidth, undefined, JSON.stringify(bad));
+		}
+	});
+
 	it("empty strings/whitespace fontFamily → null (Source Sans 3); wrong-type → null too (the default)", () => {
 		for (const bad of ["", "   ", 12, { name: "x" }]) {
 			const out = sanitizeUserSettings({ appearance: { fontFamily: bad } });
@@ -218,5 +245,30 @@ describe("sanitizeUserSettings", () => {
 			"extractor",
 			"auditor",
 		]);
+	});
+});
+
+describe("isQuotaExhaustedError (the confirmed daily-quota classifier)", () => {
+	const DAILY = 'upstream rate_limit [429]: {"error":{"message":"Rate limit exceeded: free-models-per-day. Add 10 credits to unlock 1000 free model requests per day","code":429}}';
+
+	it("matches the daily marker in the message, however the gateway wrapped it", () => {
+		assert.equal(isQuotaExhaustedError(new Error(DAILY)), true);
+		assert.equal(isQuotaExhaustedError(new Error(`503: auth_unavailable: last upstream error: ${DAILY}`)), true);
+	});
+
+	it("never matches a per-minute or other 429, a generic 500/503, or a non-error value", () => {
+		for (const text of [
+			'upstream rate_limit [429]: {"error":{"message":"Rate limit exceeded: free-models-per-min","code":429}}',
+			"429 Too Many Requests: rate limit exceeded, retry after 20s",
+			"Rate limit exceeded: tokens-per-day",
+			"500 Internal Server Error",
+			"503: auth_unavailable: no auth available",
+		]) {
+			assert.equal(isQuotaExhaustedError(new Error(text)), false, text);
+			assert.equal(isQuotaExhaustedError(new Error("import failed", { cause: new Error(text) })), false, `${text} (as a cause)`);
+		}
+		for (const value of [DAILY, { message: DAILY }, null, undefined, 429]) {
+			assert.equal(isQuotaExhaustedError(value), false, "only Error instances are inspected");
+		}
 	});
 });

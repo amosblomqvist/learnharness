@@ -12,8 +12,10 @@ import React from "react";
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import fs from "node:fs";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MessageResponse } from "../components/ai-elements/message.tsx";
+import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
+import { Reasoning, ReasoningContent } from "../components/ai-elements/reasoning.tsx";
 import { MermaidError } from "../components/mermaid-error.tsx";
 import { transformMathDelimiters, healOverescapedCommands } from "../src/core/math-delims.ts";
 
@@ -444,3 +446,59 @@ describe("over-escaped command heal — doubled backslashes in tool args (owner 
 	});
 });
 
+describe("text alignment — the markdown-only hook (appearance.mdRendering.textAlign)", () => {
+	/** The Streamdown root's opening tag — the element the alignment hook rides. */
+	const rootTag = (html: string, marker: string) => {
+		const i = html.indexOf(marker);
+		assert.ok(i >= 0, `missing ${marker}`);
+		return html.slice(html.lastIndexOf("<", i), html.indexOf(">", i) + 1);
+	};
+
+	it("message markdown roots carry .lh-md (alongside .lh-prose)", () => {
+		const html = render("plain paragraph");
+		const tag = rootTag(html, "lh-prose");
+		assert.match(tag, /\blh-md\b/);
+	});
+
+	it("reasoning markdown roots carry .lh-md too (reasoning follows the setting)", () => {
+		const html = renderToStaticMarkup(
+			<Reasoning open><ReasoningContent>{"thinking it through"}</ReasoningContent></Reasoning>,
+		);
+		assert.match(html, /class="[^"]*\blh-md\b[^"]*"/);
+	});
+
+	it("tool content (docks and cards) opts out: no .lh-md, so it keeps its normal alignment", () => {
+		const html = renderToStaticMarkup(<ToolContentResponse>{"A question with **bold** text."}</ToolContentResponse>);
+		const tag = rootTag(html, "lh-prose");
+		assert.doesNotMatch(tag, /\blh-md\b/);
+		assert.ok(html.includes("bold"), "the markdown still renders");
+	});
+
+	it("explicit GFM column alignment stays an INLINE style (it outranks the setting)", () => {
+		const html = render("| a | b |\n|:-:|--:|\n| 1 | 2 |");
+		assert.ok(html.includes("text-align:center"), "the :-: column keeps its center");
+		assert.ok(html.includes("text-align:right"), "the --: column keeps its right");
+	});
+
+	it("tables: the last column reserves the copy button's corner so hover never covers cell text", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		const gutter = css.match(/\[data-streamdown="table"\] :where\(th, td\):last-child \{[^}]*padding-right: ([\d.]+)rem;/);
+		assert.ok(gutter, "the last column's cells carry a right gutter");
+		// The button is 4px in (right-1) and 24px wide (size-6): its left edge is 28px from the corner.
+		const blocks = fs.readFileSync("components/md-blocks.tsx", "utf-8");
+		assert.match(blocks, /className="absolute top-1 right-1 z-10"\s+label="Copy table"/);
+		assert.match(blocks, /className="flex size-6 items-center justify-center/);
+		assert.ok(Number(gutter[1]) * 16 >= 4 + 24, "the gutter is at least the button's inset plus its width");
+	});
+
+	it("lists: the aligned-edge indent rule follows the prose indent, so it wins at equal specificity", () => {
+		const css = fs.readFileSync("app/globals.css", "utf-8");
+		const prose = css.indexOf(".lh-prose :where(ul, ol)");
+		assert.ok(prose >= 0 && css.indexOf(".lh-md :where(ul, ol)") > prose);
+	});
+
+	it("tables: header cells are text-left by Streamdown's own class, which the pin rule relies on", () => {
+		const header = render("| a | b |\n|---|---|\n| 1 | 2 |").match(/<th[^>]*data-streamdown="table-header-cell"[^>]*>/)?.[0] ?? "";
+		assert.match(header, /\btext-left\b/);
+	});
+});

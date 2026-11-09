@@ -173,7 +173,7 @@ describe("practice display surfaces", () => {
 		assert.doesNotThrow(() => { expanded = renderToStaticMarkup(dock(input)); });
 		const { document } = parseHTML(expanded);
 		assert.equal(document.querySelector(".lh-prose")!.innerHTML,
-			parseHTML(renderToStaticMarkup(<MessageResponse>{input.statement}</MessageResponse>)).document.firstElementChild!.outerHTML,
+			parseHTML(renderToStaticMarkup(<MessageResponse aligned={false}>{input.statement}</MessageResponse>)).document.firstElementChild!.outerHTML,
 			"non-string values pass through exactly as before, without string coercion or a new fallback");
 		const collapsed = renderToStaticMarkup(dock(input, false));
 		assert.match(collapsed, /data-testid="practice-dock-bar"/);

@@ -1,7 +1,8 @@
-import * as fs from "node:fs";
+import fs from "node:fs"; // default import: the object tests patch with mock.method
+import { syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
-import { after, describe, it } from "node:test";
+import { after, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 const testData = fs.mkdtempSync(path.join(os.tmpdir(), "lh-cli-catalog-data-"));
 process.env.LH_DATA_DIR = testData;
@@ -31,6 +32,7 @@ const { readSettings, writeSettings } = await import("../src/store/settings.ts")
 const { SETTINGS_FILE } = await import("../config.ts");
 const { effectiveSettings } = await import("../src/server/stores.ts");
 const { providerKeyPresent } = await import("../src/server/keys.ts");
+const { getClaudeBinary } = await import("../src/agent/claude-code/binary.ts");
 
 // The model-control wave (2026-09-12): pi-ai owns the registry — these pins
 // hold our projection + validation honest against the shipped catalog, and
@@ -339,22 +341,41 @@ describe("pi thinking truth (pinned against pi-ai upgrades)", () => {
 		assert.throws(() => piEngineFor("prober"), /no configured model for role "prober"/);
 	});
 });
-/** Runs fn with PATH and HOME pointed at a temp dir, so the CLI lookup only
- *  finds a claude binary when installed is true. */
+/** Runs fn with the Claude CLI lookup isolated from the host, so a `claude`
+ *  is found only when installed is true. PATH, HOME and npm_config_prefix point
+ *  at a temp dir, but the resolver also probes absolute fallback dirs
+ *  (/opt/homebrew/bin, /usr/local/bin) that no env var redirects, so a CLI
+ *  installed on the host would leak into the "missing" cases. Those dirs are
+ *  hidden by patching the executable probe the resolver really calls
+ *  (fs.accessSync) to report any `claude` outside the temp dir as absent.
+ *  Production lookup code and its fallback dirs are untouched, and no
+ *  executable is ever run. Everything is undone in `finally`, so a failed
+ *  assertion cannot leak the patch or the env into later tests. */
 function withClaudeInstalled(installed: boolean, fn: () => void, enabled = true): void {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-catalog-"));
 	const saved = { PATH: process.env.PATH, HOME: process.env.HOME, npm_config_prefix: process.env.npm_config_prefix };
 	const settings = readSettings();
-	writeSettings({ ...(settings ?? { version: 1 }), claudeCode: { enabled } });
-
-	if (installed) fs.writeFileSync(path.join(dir, "claude"), "#!/bin/sh\n", { mode: 0o755 });
-	process.env.PATH = dir;
-	process.env.HOME = dir;
-	delete process.env.npm_config_prefix;
-
+	const realAccessSync = fs.accessSync;
+	let probe: { mock: { restore(): void } } | undefined;
 	try {
+		writeSettings({ ...(settings ?? { version: 1 }), claudeCode: { enabled } });
+		if (installed) fs.writeFileSync(path.join(dir, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+		process.env.PATH = dir;
+		process.env.HOME = dir;
+		delete process.env.npm_config_prefix;
+		probe = mock.method(fs, "accessSync", (...args: Parameters<typeof realAccessSync>) => {
+			const candidate = String(args[0]);
+			if (path.basename(candidate) === "claude" && !candidate.startsWith(dir + path.sep)) {
+				throw Object.assign(new Error(`ENOENT: hidden host candidate ${candidate}`), { code: "ENOENT" });
+			}
+			return Reflect.apply(realAccessSync, fs, args);
+		});
+		// binary.ts reads fs through a namespace import; sync the ESM view of the patch.
+		syncBuiltinESMExports();
 		fn();
 	} finally {
+		probe?.mock.restore();
+		syncBuiltinESMExports();
 		for (const [name, value] of Object.entries(saved)) {
 			if (value === undefined) delete process.env[name];
 			else process.env[name] = value;
@@ -414,5 +435,36 @@ describe("the claude-code provider (native CLI authentication, no LearnHarness k
 			assert(!modelCatalog().models.some((m) => m.provider === "claude-code"));
 			assert.equal(validateChatSettings({ model: { provider: "claude-code", id: "sonnet" } }).ok, false);
 		}, false);
+	});
+
+	it("the missing-CLI isolation hides a claude found through a resolver fallback dir, then restores the real probe", () => {
+		// A host-style install: reachable only through the npm-prefix fallback dir, outside
+		// the helper's temp dir. (A decoy keeps this independent of what the host has installed.)
+		const decoy = fs.mkdtempSync(path.join(os.tmpdir(), "claude-decoy-"));
+		fs.mkdirSync(path.join(decoy, "bin"));
+		const decoyBinary = path.join(decoy, "bin", "claude");
+		fs.writeFileSync(decoyBinary, "#!/bin/sh\n", { mode: 0o755 });
+		const saved = { PATH: process.env.PATH, HOME: process.env.HOME, npm_config_prefix: process.env.npm_config_prefix };
+		try {
+			process.env.PATH = "";
+			process.env.HOME = decoy;
+			process.env.npm_config_prefix = decoy;
+			assert.equal(getClaudeBinary(), decoyBinary, "control: the fallback-dir binary is discoverable");
+			withClaudeInstalled(false, () => {
+				process.env.npm_config_prefix = decoy;
+				assert.equal(getClaudeBinary(), null);
+				assert.equal(providerKeyPresent("claude-code"), false);
+				assert.equal(catalogProviders().find((p) => p.id === "claude-code")?.keyPresent, false);
+			});
+			assert.equal(getClaudeBinary(), decoyBinary, "the real probe is restored afterwards");
+			assert.throws(() => withClaudeInstalled(false, () => assert.fail("assertion inside the helper")), /assertion inside the helper/);
+			assert.equal(getClaudeBinary(), decoyBinary, "the probe is restored even when fn throws");
+		} finally {
+			for (const [name, value] of Object.entries(saved)) {
+				if (value === undefined) delete process.env[name];
+				else process.env[name] = value;
+			}
+			fs.rmSync(decoy, { recursive: true, force: true });
+		}
 	});
 });

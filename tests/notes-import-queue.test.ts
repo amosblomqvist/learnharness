@@ -126,3 +126,62 @@ it("synchronous transport failures settle one wave once without reentrant pump r
 	assert.equal(calls, 4); assert.equal(queue.getSnapshot().completion, 1); assert.equal(queue.getSnapshot().importing, false);
 	assert.equal(queue.getSnapshot().errors.length, 4);
 });
+
+const QUOTA_MESSAGE = "Daily free model quota exhausted. Wait for reset or configure another model/provider.";
+const quotaResult = (name: string): NotesImportResult => ({ requestIndex: 0, filePath: name, ok: false, outcome: "failed", error: QUOTA_MESSAGE, code: "quota_exhausted" });
+const failureResult = (name: string, error: string, code?: string): NotesImportResult => ({ requestIndex: 0, filePath: name, ok: false, outcome: "failed", error, ...(code ? { code } : {}) });
+
+it("confirmed quota_exhausted stops dispatch, lets in-flight settle, drains pending as unattempted, completes, and a fresh selection works", async () => {
+	const calls: { file: File; resolve: (rows: NotesImportResult[]) => void; reject: (error: Error) => void }[] = [];
+	const queue = createNotesImportQueue(async (files) => new Promise((resolve, reject) => { assert.equal(files.length, 1); calls.push({ file: files[0]!, resolve, reject }); }));
+	queue.append([file("a.md"), file("quota.md"), file("b.md"), file("c.md"), file("d.md")]);
+	assert.equal(calls.length, 3, "three-wide dispatch");
+	calls[1]!.resolve([quotaResult("quota.md")]); await tick();
+	assert.equal(calls.length, 3, "no new dispatch after confirmed quota exhaustion");
+	assert.equal(queue.getSnapshot().importing, true, "in-flight a.md/b.md still settle honestly");
+	calls[0]!.resolve([success("a.md")]); calls[2]!.resolve([success("b.md")]); await tick();
+	assert.equal(queue.getSnapshot().importing, false, "drained pending lets the cycle complete");
+	assert.equal(queue.getSnapshot().completion, 1);
+	assert.deepEqual(queue.getSnapshot().errors, [
+		`quota.md: ${QUOTA_MESSAGE}`,
+		"c.md: Not attempted (daily quota exhausted).",
+		"d.md: Not attempted (daily quota exhausted).",
+	], "unattempted files are reported distinctly from the attempted quota failure");
+	queue.append([file("f.md")]);
+	assert.equal(calls.length, 4, "a fresh selection dispatches again");
+	calls[3]!.resolve([success("f.md")]); await tick();
+	assert.equal(queue.getSnapshot().importing, false);
+	assert.equal(queue.getSnapshot().completion, 2);
+	assert.deepEqual(queue.getSnapshot().errors, [], "fresh selection clears the drained cycle's errors");
+});
+
+it("the internal quota_exhausted code is never printed, while other config refusals keep their code line", async () => {
+	const queue = createNotesImportQueue(async (files) => [files[0]!.name === "q.md"
+		? quotaResult("q.md")
+		: { ...failureResult("k.md", "No OpenRouter key is set — add one in Settings → Keys", "provider_key_missing"), provider: "openrouter", slots: ["strong"] }]);
+	queue.append([file("q.md"), file("k.md")]);
+	await tick();
+	const errors = queue.getSnapshot().errors;
+	assert.equal(errors.some((error) => error.includes("quota_exhausted")), false, "no raw quota code anywhere");
+	assert.equal(errors[0], `q.md: ${QUOTA_MESSAGE}`);
+	assert.equal(errors[1], "k.md: No OpenRouter key is set — add one in Settings → Keys\nprovider_key_missing — openrouter — strong", "other codes are unchanged");
+});
+
+it("a selection appended while quota-stopped work is still settling is drained as unattempted, never dispatched", async () => {
+	const calls: { file: File; resolve: (rows: NotesImportResult[]) => void }[] = [];
+	const queue = createNotesImportQueue(async (files) => new Promise((resolve) => { calls.push({ file: files[0]!, resolve }); }));
+	queue.append([file("a.md"), file("q.md"), file("b.md"), file("c.md")]);
+	assert.equal(calls.length, 3);
+	calls[1]!.resolve([quotaResult("q.md")]); await tick();
+	queue.append([file("late.md")]);
+	assert.equal(calls.length, 3, "late.md is not dispatched after quota exhaustion");
+	await tick();
+	calls[0]!.resolve([success("a.md")]); calls[2]!.resolve([success("b.md")]); await tick();
+	assert.equal(queue.getSnapshot().importing, false);
+	assert.equal(queue.getSnapshot().completion, 1);
+	assert.deepEqual(queue.getSnapshot().errors, [
+		`q.md: ${QUOTA_MESSAGE}`,
+		"c.md: Not attempted (daily quota exhausted).",
+		"late.md: Not attempted (daily quota exhausted).",
+	]);
+});

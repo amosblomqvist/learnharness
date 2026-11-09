@@ -162,3 +162,59 @@ test("historical ambiguous options and absent/invalid original calls retain thei
 	renderToStaticMarkup(<AnsweredCard answer={answer} />);
 	assert.deepEqual(answer, before);
 });
+
+test("escaped fenced code blocks render as syntax-highlighted code blocks with copy affordance", () => {
+	const sqlQuestion =
+		"Consider the following SQL query:\\n\\n```sql\\nSELECT *\\nFROM users u\\nLEFT JOIN orders o ON u.id = o.user_id\\nWHERE o.status = 'PENDING';\\n```\\n\\nWhat is the behavioral impact of the `WHERE o.status = 'PENDING'` clause on this `LEFT JOIN`?";
+	const document = dom(render(sqlQuestion));
+	const codeBlocks = document.querySelectorAll('[data-testid="md-code"]');
+	assert.equal(codeBlocks.length, 1);
+	const block = codeBlocks[0]!;
+	assert.ok(block.querySelector('[data-testid="md-copy"]'));
+	assert.equal(block.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	const text = block.textContent ?? "";
+	assert.ok(text.includes("SELECT *"));
+	assert.ok(text.includes("FROM users u"));
+	assert.ok(text.includes("WHERE o.status = 'PENDING';"));
+	assert.ok(!text.includes("\\n"));
+});
+
+test("two-layer escaped SQL fence from the failed LEFT JOIN question renders as a code block in dock and history", () => {
+	// recorded real-world input: one physical line, ten tokens of TWO literal backslashes + n
+	const rawLine = readFileSync(new URL("./fixtures/tool-rendering/escaped-fence-two-layer.txt", import.meta.url), "utf8").replace(/\r?\n$/, "");
+	assert.ok(!rawLine.includes("\n"));
+	assert.equal(rawLine.match(/\\\\n/g)?.length, 10);
+	const recovered = repairMathForDisplay(rawLine);
+	assert.ok(recovered.includes("```sql\nSELECT *\nFROM users u\nLEFT JOIN orders o ON u.id =\no.user_id\nWHERE o.status = 'PENDING';\n```"));
+	assert.equal(repairMathForDisplay(recovered), recovered);
+
+	// shared ToolContentResponse surface (used by both QuestionDock and AnsweredCard)
+	const document = dom(render(rawLine));
+	const blocks = document.querySelectorAll('[data-testid="md-code"]');
+	assert.equal(blocks.length, 1);
+	const block = blocks[0]!;
+	assert.ok(block.querySelector('[data-testid="md-copy"]')); // static presence only; live clipboard is NOT verified from static markup
+	assert.equal(block.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	const text = block.textContent ?? "";
+	assert.ok(!text.includes("\\n"));
+	// each source line is its own rendered code row (physical newlines, not literal \\n text)
+	assert.deepEqual([...block.querySelectorAll("code > span.block")].map(n => n.textContent ?? ""),
+		["SELECT *", "FROM users u", "LEFT JOIN orders o ON u.id =", "o.user_id", "WHERE o.status = 'PENDING';"]);
+	assert.equal(dom(render(recovered)).querySelectorAll('[data-testid="md-code"]').length, 1);
+});
+
+test("two-layer SQL fence plus native n-row matrix keeps the code block and both matrix rows in every surface", () => {
+	const rawLine = readFileSync(new URL("./fixtures/tool-rendering/escaped-fence-two-layer.txt", import.meta.url), "utf8").replace(/\r?\n$/, "");
+	const matrix = String.raw`$\begin{pmatrix}a&b\\n&d\end{pmatrix}$`;
+	const matrixBody = String.raw`\begin{pmatrix}a&b\\n&d\end{pmatrix}`;
+	const doc = rawLine + "\n\n" + matrix;
+
+	// shared ToolContentResponse surface
+	const html = render(doc);
+	const document = dom(html);
+	assert.equal(document.querySelectorAll('[data-testid="md-code"]').length, 1);
+	assert.equal(document.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	assert.ok(tex(html).includes(matrixBody)); // KaTeX received the original TeX byte-for-byte
+	assert.equal(document.querySelectorAll("mtr").length, 2); // both array rows render
+	assert.equal(document.querySelectorAll(".katex-error").length, 0);
+});
