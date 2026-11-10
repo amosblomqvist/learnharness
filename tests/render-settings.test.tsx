@@ -11,9 +11,13 @@ import React from "react";
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
+import { renderToStaticMarkup as renderStatic } from "react-dom/server";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { TOGGLE_TOOLS, AgentSection } from "../components/settings/agent-section.tsx";
 import { AppearanceSection, GraphSection } from "../components/settings/appearance-section.tsx";
+import { AppearanceProvider } from "../components/settings/appearance.tsx";
+import { BUILTIN_THEMES, resolveTheme, THEME_COLOR_KEYS, type AppearanceSettings, type Theme } from "../src/core/index.ts";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
 import type { GraphSettings } from "../src/core/index.ts";
@@ -22,6 +26,10 @@ import { KEYBOARD_ACTIONS } from "../src/core/index.ts";
 import { DictationLanguageSetting } from "../components/dictation-language.tsx";
 import { SettingsMenuTrigger } from "../components/settings/controls.tsx";
 import { SubscriptionConnections } from "../components/settings/subscription-connections.tsx";
+
+function renderToStaticMarkup(node: React.ReactNode) {
+	return renderStatic(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
+}
 
 /** The full opening tag of the element carrying a testid — attribute
  *  order in React output is not contractual, so assertions run on the
@@ -42,6 +50,39 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		assert.ok(html.includes("the app"));
 		assert.ok(!html.includes("settings-backdrop"));
 		assert.ok(!html.includes("settings-dialog"));
+	});
+
+	it("built-in navigation uses the agreed decorative Lucide icons without changing labels or selection", () => {
+		const { document } = parseHTML(renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />));
+		const expected = [
+			["keys", "Providers", "key"],
+			["agent", "Agent", "bot"],
+			["appearance", "Appearance", "palette"],
+			["graph", "Graph", "waypoints"],
+			["keyboard", "Keyboard", "keyboard"],
+			["general", "General", "settings"],
+			["core-plugins", "Core plugins", "plug"],
+			["plugins", "Community plugins", "puzzle"],
+		];
+		assert.ok(document.querySelector('[data-testid="settings-nav"]')!.classList.contains("w-48"), "approved 192px sidebar leaves room for the icon and Community plugins label");
+		assert.ok(document.querySelector('[data-testid="settings-dialog"]')!.classList.contains("w-[920px]"), "overall dialog width is unchanged");
+		const buttons = [...document.querySelectorAll('[data-testid="settings-nav"] button')];
+		assert.deepEqual(buttons.map(button => button.textContent), expected.map(([, label]) => label));
+		for (const [id, label, iconName] of expected) {
+			const button = document.querySelector(`[data-testid="settings-nav-${id}"]`)!;
+			assert.equal(button.textContent, label);
+			assert.equal(button.getAttribute("aria-current"), String(id === "keys"));
+			const icons = button.querySelectorAll("svg");
+			assert.equal(icons.length, 1);
+			const icon = icons[0]!;
+			assert.ok(icon.classList.contains(`lucide-${iconName}`), `${id}: agreed icon`);
+			assert.ok(icon.classList.contains("size-3.5"));
+			assert.ok(icon.classList.contains("shrink-0"));
+			assert.equal(icon.getAttribute("aria-hidden"), "true");
+			assert.equal(icon.getAttribute("focusable"), "false");
+			assert.equal(icon.getAttribute("stroke"), "currentColor", "inherits the themed row color");
+			assert.equal(icon.querySelector("title"), null, "icon must not add a second accessible label");
+		}
 	});
 
 	it("the dialog frame: role=dialog + the ✕ + the six-section nav, Providers first and General last", () => {
@@ -66,8 +107,8 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 describe("the shared settings dropdown trigger", () => {
 	it("Agent, Appearance and dictation use the same compact dark mono trigger", () => {
 		const surfaces = [
-			[renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />), "slot-model-strong"],
-			[renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />), "font-trigger"],
+			[renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />), "slot-model-strong"],
+			[renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => true} />), "font-trigger"],
 			[renderToStaticMarkup(<DictationLanguageSetting />), "dictation-language"],
 		] as const;
 		for (const [html, id] of surfaces) {
@@ -110,8 +151,40 @@ describe("Providers settings-label typography", () => {
 });
 
 describe("AgentSection (thin SSR)", () => {
+	it("reasoning token estimation is an accessible Context toggle, off by default and reflecting saved choices", () => {
+		for (const includeReasoning of [undefined, false, true]) {
+			const html = renderToStaticMarkup(<AgentSection
+				agent={undefined} models={undefined} graph={undefined}
+				compaction={includeReasoning === undefined ? undefined : { thresholdTokens: 120_000, includeReasoning }}
+				onSectionChange={() => {}} onModelsChange={() => {}} onCompactionChange={() => {}}
+			/>);
+			const context = html.split('data-testid="group-context"')[1]?.split('data-testid="group-prompts"')[0] ?? "";
+			const toggle = tagOf(context, "toggle-include-reasoning-in-token-estimates-openai-responses-only-");
+			assert.ok(toggle.includes('role="switch"'));
+			assert.ok(toggle.includes(`aria-checked="${includeReasoning === true}"`));
+			assert.ok(toggle.includes('aria-label="Include reasoning in token estimates (OpenAI Responses only)"'));
+			assert.ok(context.includes(">Include reasoning in token estimates (OpenAI Responses only)</span>"));
+			assert.ok(context.includes("Off uses the original text-based estimate."));
+			assert.ok(context.indexOf('data-testid="compaction-row-threshold"') < context.indexOf('data-testid="compaction-row-reasoning"'),
+				"the opt-in sits below the threshold within Context");
+		}
+	});
+	it("Models exposes worker concurrency with exact help text and an unset default of 8", () => {
+		const render = (agent: { workerRequestConcurrency?: number } | undefined) => renderToStaticMarkup(
+			<AgentSection agent={agent} models={undefined} graph={undefined} compaction={undefined} onSectionChange={() => true} onModelsChange={() => {}} onCompactionChange={() => true} />,
+		);
+		const html = render(undefined);
+		assert.ok(html.includes("Concurrent worker requests"));
+		assert.ok(html.includes("Maximum simultaneous background-worker model requests. Direct conversations are not limited."));
+		const input = tagOf(html, "input-worker-request-concurrency");
+		for (const attribute of ['type="number"', 'min="1"', 'step="1"', 'placeholder="8"', 'value=""']) assert.ok(input.includes(attribute), attribute);
+		assert.ok(!input.includes('max="'), "no arbitrary ceiling");
+		assert.ok(html.indexOf('data-testid="worker-request-concurrency-row"') < html.indexOf('data-testid="group-tools"'), "row belongs to Models");
+		assert.ok(tagOf(render({ workerRequestConcurrency: 23 }), "input-worker-request-concurrency").includes('value="23"'));
+	});
+
 	it("renders the three model SLOT rows (slots-only, fix wave: unpicked reads —, no Default option)", () => {
-		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
+		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
 		for (const slot of ["strong", "cheap", "vision"]) {
 			assert.ok(html.includes(`data-testid="slot-row-${slot}"`), slot);
 			// The shared model-picker dropdown as the opened menu (owner,
@@ -137,14 +210,14 @@ describe("AgentSection (thin SSR)", () => {
 	});
 
 	it("the search-engine row renders with its live reason (search wave 2026-09-20)", () => {
-		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
+		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
 		assert.ok(html.includes('data-testid="search-engine-row"'), "the row");
 		assert.ok(html.includes('data-testid="search-engine-trigger"'), "the trigger");
 		// SSR: /api/search never fired → no reason line yet, trigger reads Automatic
 		assert.ok(html.includes("Automatic"), "unset engine reads Automatic");
 		// the explicit preference shows the chosen engine in the trigger
 		const html2 = renderToStaticMarkup(
-			<AgentSection agent={{ search: { engine: "tavily" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+			<AgentSection agent={{ search: { engine: "tavily" } }} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />,
 		);
 		assert.ok(html2.includes("Tavily"), "pinned engine visible in the trigger");
 		const exa = renderToStaticMarkup(
@@ -164,7 +237,7 @@ describe("AgentSection (thin SSR)", () => {
 	it("the prober graph-tools row: FIRST in the Tools group, default ON, its own key (wave 7)", () => {
 		// Default state: graph on, graphTools absent → ON, the describing
 		// hint rides (the search-row hint discipline).
-		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
+		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
 		const toolsGroup = html.split('data-testid="group-tools"')[1] ?? "";
 		const rows = [...toolsGroup.matchAll(/data-testid="(graph-tools-row|tool-row-\w+)"/g)].map((m) => m[1]);
 		assert.equal(rows[0], "graph-tools-row", "graph tools is the FIRST row of the Tools group");
@@ -177,7 +250,7 @@ describe("AgentSection (thin SSR)", () => {
 
 	it("graph disabled dims the graph-tools row with the honest hint (the predicate composes)", () => {
 		const html = renderToStaticMarkup(
-			<AgentSection agent={undefined} models={undefined} graph={{ enabled: false }} onSectionChange={() => {}} onModelsChange={() => {}} />,
+			<AgentSection agent={undefined} models={undefined} graph={{ enabled: false }} onSectionChange={() => true} onModelsChange={() => {}} />,
 		);
 		const row = html.split('data-testid="graph-tools-row"')[1]?.split('data-testid="tool-row-')[0] ?? "";
 		assert.ok(row.includes("opacity-40"), "row dims when the graph is off");
@@ -187,7 +260,7 @@ describe("AgentSection (thin SSR)", () => {
 
 	it("an explicit graphTools off shows stored-off (the record never lies)", () => {
 		const html = renderToStaticMarkup(
-			<AgentSection agent={{ graphTools: { enabled: false } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+			<AgentSection agent={{ graphTools: { enabled: false } }} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />,
 		);
 		const row = html.split('data-testid="graph-tools-row"')[1] ?? "";
 		assert.ok(row.includes('aria-checked="false"'), "stored-off renders off");
@@ -195,12 +268,12 @@ describe("AgentSection (thin SSR)", () => {
 
 	it("renders the owner's FINAL tool list — research, demo, visual, pdf", () => {
 		assert.deepEqual([...TOGGLE_TOOLS], ["research", "demo", "visual", "pdf"]);
-		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
+		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
 		for (const id of TOGGLE_TOOLS) assert.ok(html.includes(`data-testid="tool-row-${id}"`), id);
 	});
 
 	it("tools default ON (absent key = enabled)", () => {
-		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
+		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
 		for (const id of TOGGLE_TOOLS) {
 			assert.ok(tagOf(html, `toggle-tool-${id}`).includes('aria-checked="true"'), `${id} defaults on`);
 		}
@@ -211,7 +284,7 @@ describe("AgentSection (thin SSR)", () => {
 			<AgentSection
 				agent={{ tools: { demo: false } }}
 				models={{ strong: { model: { provider: "zai", id: "glm-4.7-flash" } } }}
-				onSectionChange={() => {}}
+				onSectionChange={() => true}
 				onModelsChange={() => {}}
 			/>,
 		);
@@ -223,7 +296,7 @@ describe("AgentSection (thin SSR)", () => {
 	});
 
 	it("prompts show the loading state under SSR (effects never fire)", () => {
-		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
+		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
 		assert.ok(html.includes("Loading prompt segments"));
 	});
 });
@@ -237,7 +310,7 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 	// auto-extraction trigger, resolved through the same core resolver the
 	// server uses (the 4096-fallback fix).
 	it("renders the master-switch row — EXTRACTION since 2026-10-06 (the data channel, renamed when rendering split off)", () => {
-		const html = renderToStaticMarkup(<GraphSection graph={undefined} onSectionChange={() => {}} />);
+		const html = renderToStaticMarkup(<GraphSection graph={undefined} onSectionChange={() => true} />);
 		assert.ok(html.includes('data-testid="graph-row-enabled"'));
 		assert.ok(html.includes(">Extraction<"), "the row names the DATA channel, not 'Graph'");
 		assert.ok(!html.includes("graph-row-embedding"), "the dead rungs render nothing");
@@ -248,22 +321,22 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 	});
 
 	it("a stored off record shows the extraction switch off", () => {
-		const html = renderToStaticMarkup(<GraphSection graph={{ enabled: false }} onSectionChange={() => {}} />);
+		const html = renderToStaticMarkup(<GraphSection graph={{ enabled: false }} onSectionChange={() => true} />);
 		assert.ok(tagOf(html, "toggle-extraction-enabled").includes('aria-checked="false"'));
 	});
 
 	it("the GRAPH RENDERING row (2026-10-06): display-only — absent record = factory ON, stored off shows off", () => {
-		const html = renderToStaticMarkup(<GraphSection graph={undefined} onSectionChange={() => {}} />);
+		const html = renderToStaticMarkup(<GraphSection graph={undefined} onSectionChange={() => true} />);
 		assert.ok(html.includes('data-testid="graph-row-rendering"'));
 		assert.ok(html.includes(">Graph rendering<"));
 		assert.ok(tagOf(html, "toggle-graph-rendering-enabled").includes('aria-checked="true"'), "the home defaults to the canvas");
-		const off = renderToStaticMarkup(<GraphSection graph={{ rendering: false }} onSectionChange={() => {}} />);
+		const off = renderToStaticMarkup(<GraphSection graph={{ rendering: false }} onSectionChange={() => true} />);
 		assert.ok(tagOf(html, "toggle-extraction-enabled").includes('aria-checked="true"'), "rendering off does NOT touch extraction");
 		assert.ok(tagOf(off, "toggle-graph-rendering-enabled").includes('aria-checked="false"'));
 	});
 
 	it("the chunk-budget row: unset shows EMPTY with the factory placeholder + hint — one truth with the trigger", () => {
-		const html = renderToStaticMarkup(<GraphSection graph={undefined} onSectionChange={() => {}} />);
+		const html = renderToStaticMarkup(<GraphSection graph={undefined} onSectionChange={() => true} />);
 		const input = tagOf(html, "input-chunk-tokens");
 		assert.ok(input.includes('placeholder="4096"'), "the placeholder IS the resolved factory default");
 		assert.ok(!/value="\d/.test(input), "unset renders EMPTY, not a materialized 4096");
@@ -272,7 +345,7 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 
 	it("a stored budget shows its value and denominates the hint", () => {
 		const html = renderToStaticMarkup(
-			<GraphSection graph={{ enabled: true, extractionChunkTokens: 6000 }} onSectionChange={() => {}} />,
+			<GraphSection graph={{ enabled: true, extractionChunkTokens: 6000 }} onSectionChange={() => true} />,
 		);
 		assert.ok(tagOf(html, "input-chunk-tokens").includes('value="6000"'));
 		assert.ok(html.includes(">6000 tok</"));
@@ -286,32 +359,81 @@ describe("KeysSection (thin SSR)", () => {
 	});
 });
 
+/** The section as the app mounts it: under the provider the layout feeds
+ *  from the record (the active theme resolved server-side). */
+function renderAppearance(appearance: AppearanceSettings | undefined, customs: Theme[] = []): string {
+	const theme = resolveTheme(appearance?.theme, customs);
+	return renderToStaticMarkup(
+		<AppearanceProvider initialAppearance={appearance} initialTheme={theme}>
+			<AppearanceSection appearance={appearance} onSectionChange={() => {}} />
+		</AppearanceProvider>,
+	);
+}
+
 describe("AppearanceSection (thin SSR)", () => {
-	it("mode is rendered DISABLED — dark-only this wave, no lying control", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(tagOf(html, "select-mode").includes("disabled"), "mode select disabled");
-		assert.ok(html.includes("Coming soon"));
-		// The whole row dims, graph-view style (the control never adds its own).
-		assert.ok(tagOf(html, "row-mode").includes("opacity-40"), "mode row dims whole");
+	it("each preview is outlined in its own theme's border, so a theme matching the page still shows", () => {
+		const html = renderAppearance({ theme: "rose-pine-dawn" });
+		for (const t of BUILTIN_THEMES) {
+			const start = html.indexOf(`data-testid="theme-card-${t.id}"`);
+			const card = html.slice(start, html.indexOf("</button>", start));
+			assert.ok(card.includes(`border-color:${t.colors.border}`), t.id);
+		}
 	});
 
-	it("hex inputs carry the factory placeholders; prose size resolves against the factory", () => {
-		const html = renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => {}} />);
-		assert.ok(html.includes(`placeholder="#141414"`));
-		// The reading font is the searchable dropdown now (font-menu
-		// wave): its trigger shows the factory family; the emphasis
-		// inks' empty state is "same as text" (the old hexes died with
-		// the factory token change).
+	it("the theme grid lists every preset; the stored theme is pressed", () => {
+		const html = renderAppearance({ theme: "catppuccin-latte" });
+		for (const t of BUILTIN_THEMES) assert.ok(html.includes(`data-testid="theme-card-${t.id}"`), t.id);
+		assert.ok(tagOf(html, "theme-card-catppuccin-latte").includes('aria-pressed="true"'));
+		for (const t of BUILTIN_THEMES.filter((t) => t.id !== "catppuccin-latte")) {
+			assert.ok(tagOf(html, `theme-card-${t.id}`).includes('aria-pressed="false"'), t.id);
+		}
+		assert.equal((html.match(/lucide-check/g) ?? []).length, 1, "one check, on the selected card");
+		assert.match(html, /Catppuccin Latte · light · sets every color below/);
+		assert.ok(html.includes('data-testid="theme-import"'));
+		assert.ok(html.includes('data-testid="theme-export"'));
+		assert.ok(!html.includes("theme-remove-"), "presets cannot be removed");
+	});
+
+	it("absent theme = the Default card pressed", () => {
+		const html = renderAppearance(undefined);
+		assert.ok(tagOf(html, "theme-card-default").includes('aria-pressed="true"'));
+	});
+
+	it("an imported theme gets a custom card with a remove button", () => {
+		const custom: Theme = { ...BUILTIN_THEMES[0]!, id: "my-ayu", name: "My Ayu", builtin: false };
+		const html = renderAppearance({ theme: "my-ayu" }, [custom]);
+		assert.ok(tagOf(html, "theme-card-my-ayu").includes('aria-pressed="true"'));
+		assert.ok(html.includes('data-testid="theme-remove-my-ayu"'));
+		assert.match(html, />custom</);
+	});
+
+	it("the Colors block has one override row per theme color, hinting the theme's own hex", () => {
+		const mocha = BUILTIN_THEMES.find((t) => t.id === "catppuccin-mocha")!;
+		const html = renderAppearance({ theme: "catppuccin-mocha" });
+		for (const key of THEME_COLOR_KEYS) assert.ok(html.includes(`data-testid="row-color-${key}"`), key);
+		for (const id of ["input-background", "input-bold-color", "input-italic-color", "input-color-warning"]) {
+			assert.ok(html.includes(`data-testid="${id}"`), id);
+		}
+		assert.match(html, new RegExp(`Empty = ${mocha.colors.warning}`));
+		assert.ok(tagOf(html, "input-color-surface").includes(`placeholder="${mocha.colors.surface}"`));
+		assert.ok(html.includes('data-testid="colors-reset"'));
+	});
+
+	it("an override shows in its input and its swatch; the theme stays the hint", () => {
+		const html = renderAppearance({ theme: "catppuccin-mocha", background: "#101010", colors: { warning: "#fab387" } });
+		assert.ok(tagOf(html, "input-background").includes('value="#101010"'));
+		assert.ok(tagOf(html, "input-color-warning").includes('value="#fab387"'));
+		assert.ok(tagOf(html, "swatch-warning").includes("#fab387"));
+		assert.match(html, /Empty = #1e1e2e/, "the background hint is Mocha's, not the override");
+	});
+
+	it("typography keeps its rows; prose size resolves against the factory", () => {
+		const html = renderAppearance(undefined);
 		assert.ok(html.includes('data-testid="font-trigger"'));
-		assert.equal((html.match(/Empty = same as text/g) ?? []).length, 2);
+		assert.ok(html.includes('data-testid="row-prose-size"'));
+		assert.ok(html.includes('data-testid="row-heading-weight"'));
 		assert.ok(html.includes("16px"));
-	});
-
-	it("a set background shows in the input, not the placeholder", () => {
-		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={{ background: "#1a1a2e" }} onSectionChange={() => {}} />,
-		);
-		assert.ok(html.includes(`value="#1a1a2e"`));
+		assert.ok(!html.includes('data-testid="row-mode"'), "the mode row is gone — the theme declares it");
 	});
 });
 

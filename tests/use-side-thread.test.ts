@@ -1,0 +1,75 @@
+import assert from "node:assert/strict";
+import { describe, it } from "node:test";
+import { sideThreadReducer as reduce, type SideThreadState } from "../components/use-side-thread.ts";
+import type { SideChatThread } from "../src/core/contracts/chat.ts";
+
+const anchor = { kind: "composer" as const };
+const thread: SideChatThread = { id: "side_lesson", anchor: { messageId: "lesson", partId: "lesson-t0", blockIndex: 0, blockText: "Explanation" },
+	open: true, createdAt: "2026-11-05T00:00:00Z", messages: [{ id: "ask", role: "user", text: "Why?", at: "2026-11-05T00:00:01Z" }] };
+const open = (): SideThreadState => reduce(null, { type: "open", segmentId: "lesson", anchor, thread })!;
+
+describe("one durable side companion", () => {
+	it("opens the existing segment conversation, never a new selection-specific thread", () => {
+		const first = open();
+		assert.equal(first.threadId, "side_lesson");
+		assert.equal(first.messages.length, 1);
+		const docked = reduce(first, { type: "mode", mode: "panel" });
+		const quoted = reduce(docked, { type: "open", segmentId: "lesson", anchor, passage: { text: "Selected words", sourceMessageId: "lesson" } })!;
+		assert.equal(quoted.threadId, first.threadId);
+		assert.equal(quoted.mode, "panel");
+		assert.equal(quoted.messages, first.messages);
+		assert.equal(quoted.pendingPassage?.text, "Selected words");
+	});
+	it("keeps a newly selected passage through reconnects until that question is accepted", () => {
+		const passage = { text: "For the next question", sourceMessageId: "lesson" };
+		let state = reduce(open(), { type: "open", segmentId: "lesson", anchor, passage });
+		state = reduce(state, { type: "snapshot", thread, answering: true, text: "An earlier answer" });
+		state = reduce(state, { type: "text", threadId: thread.id, text: "An earlier answer continues" });
+		assert.deepEqual(state?.pendingPassage, passage);
+		state = reduce(state, { type: "accepted", threadId: thread.id });
+		assert.equal(state?.pendingPassage, undefined);
+	});
+	it("keeps docking when switching to the current step, with separate histories", () => {
+		const docked = reduce(open(), { type: "mode", mode: "panel" });
+		const next = reduce(docked, { type: "open", segmentId: "next", anchor })!;
+		assert.equal(next.mode, "panel"); assert.equal(next.threadId, "side_next"); assert.deepEqual(next.messages, []);
+		assert.equal(docked?.messages, thread.messages);
+	});
+	it("uses replacement text snapshots, not appended duplicate deltas", () => {
+		let state = reduce(open(), { type: "start", threadId: thread.id });
+		state = reduce(state, { type: "text", threadId: thread.id, text: "One" });
+		state = reduce(state, { type: "text", threadId: thread.id, text: "One sentence." });
+		assert.equal(state?.streamText, "One sentence.");
+		assert.equal(state?.answering, true);
+	});
+	it("never lets a detached stream overwrite the newly opened thread", () => {
+		const next = reduce(open(), { type: "open", segmentId: "next", anchor });
+		assert.equal(reduce(next, { type: "text", threadId: thread.id, text: "STALE" }), next);
+		assert.equal(reduce(next, { type: "done", thread }), next);
+		assert.equal(reduce(next, { type: "error", threadId: thread.id, error: "STALE" }), next);
+	});
+	it("closing only drops the view; reopening still has its durable history", () => {
+		assert.equal(reduce(open(), { type: "close" }), null);
+		assert.deepEqual(open().messages, thread.messages);
+	});
+	it("can float again after docking, without discarding the conversation", () => {
+		const state = reduce(reduce(open(), { type: "mode", mode: "panel" }), { type: "mode", mode: "popover" });
+		assert.deepEqual(state?.messages, thread.messages);
+		assert.equal(state?.mode, "popover");
+	});
+	it("does not let an obsolete cutoff hide new answers in an older thread", () => {
+		const updated = { ...thread, contextSnapshot: thread.messages, messages: [...thread.messages, {
+			id: "reply", role: "assistant" as const, text: "A late answer.", at: "2026-11-05T00:00:02Z",
+		}] };
+		const state = reduce(open(), { type: "done", thread: updated })!;
+		assert.equal(state.messages.length, 2);
+		assert.equal(state.answering, false);
+		assert.equal(Object.hasOwn(state, "contextFrozen"), false);
+	});
+	it("keeps a failed manually submitted question available rather than silently losing it", () => {
+		const failed = reduce(open(), { type: "error", threadId: thread.id, error: "No model", question: "Why?" });
+		assert.equal(failed?.failedQuestion, "Why?");
+		assert.equal(failed?.answering, false);
+		assert.equal(reduce(failed, { type: "start", threadId: thread.id })?.error, undefined);
+	});
+});

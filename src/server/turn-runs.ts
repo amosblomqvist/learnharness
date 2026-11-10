@@ -16,12 +16,13 @@
  * "no running turn" sees durable record truth. Failed settlement also
  * retains its small notice before unregistering, so late attachments do
  * not mistake an unsaved reply for success. The per-chat
- * 409 guard means a chatId can hold at most one handle, and beginTurn's
- * 30-minute TTL bounds the pathological never-settling case the same way
- * it does for the liveness map: if onFinish never fires, the stale entry
- * is overwritten by the next turn's registration (Map.set) and garbage
- * collected — no unbounded leak beyond the same pathology turn-liveness
- * already accepts.
+ * 409 guard means a chatId can hold at most one handle. Private preparation
+ * registers one stable outer handle before awaiting its callback, then
+ * delegates to the real teacher without replacing that registry entry.
+ * Preparation cannot expire while executing; once handed off, beginTurn's
+ * ordinary 30-minute teacher TTL bounds the pathological never-settling
+ * case. A later accepted turn overwrites the stale handle (Map.set), and
+ * owner-fenced cleanup cannot unregister that successor.
  *
  * App-quit mid-turn (the process dying with an un-persisted turn) is the
  * SAME residual as before the wave: the registry is memory-only, the
@@ -65,8 +66,10 @@ export function registerTurn(chatId: string, handle: PiTurnHandle): void {
 	runs().set(chatId, handle);
 }
 
-/** Unregister at settle — chat-handler's onFinish, LAST (after endTurn). */
-export function unregisterTurn(chatId: string): void {
+/** Unregister at settle — LAST (after endTurn). Preparation passes its
+ * stable outer handle as a fence; ordinary callers retain the default. */
+export function unregisterTurn(chatId: string, ownerHandle?: PiTurnHandle): void {
+	if (ownerHandle && runs().get(chatId) !== ownerHandle) return;
 	runs().delete(chatId);
 }
 

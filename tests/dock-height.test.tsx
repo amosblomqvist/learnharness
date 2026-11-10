@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { QuestionDock } from "../components/question-dock.tsx";
-import { PracticeDock } from "../components/practice-dock.tsx";
 
-const dom = parseHTML("<html><body></body></html>");
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+// Linkedom omits compatMode; browser-loaded KaTeX expects standards mode.
+Object.defineProperty(dom.document, "compatMode", { value: "CSS1Compat" });
 Object.assign(globalThis, {
 	window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
 	IS_REACT_ACT_ENVIRONMENT: true,
@@ -30,7 +30,11 @@ Object.assign(globalThis, {
 		overflowY: el.style.overflowY || (el.classList.contains("overflow-y-auto") ? "auto" : "visible"),
 	}),
 });
-// Import after installing window so the hook uses its browser layout effect.
+// Install browser globals before importing any UI: the shared Markdown/plugin
+// renderer graph can transitively import chat.tsx and dock-height.ts. A static
+// dock import would select the hook's SSR effect before this setup ever runs.
+const { QuestionDock } = await import("../components/question-dock.tsx");
+const { PracticeDock } = await import("../components/practice-dock.tsx");
 const { dockHeightBudget, syncDockHeight, useDockHeight, forwardDockWheel } = await import("../components/dock-height.ts");
 
 const normal = {
@@ -90,9 +94,10 @@ Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", { configu
 Object.defineProperty(dom.window.HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return Number(this.dataset.scrollHeight ?? 0); } });
 
 const ignoreHeight = () => {};
-function Fixture({ expanded = true, practice = false, enabled = true, inspected, onHeight = ignoreHeight }: {
+function Fixture({ expanded = true, practice = false, enabled = true, inspected, onHeight = ignoreHeight, onLayout }: {
 	expanded?: boolean; practice?: boolean; enabled?: boolean; inspected?: (block: HTMLDivElement) => void;
 	onHeight?: (height: number) => void;
+	onLayout?: () => void;
 }) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const blockRef = useRef<HTMLDivElement>(null);
@@ -102,7 +107,7 @@ function Fixture({ expanded = true, practice = false, enabled = true, inspected,
 	const contentRef = useRef<HTMLDivElement>(null);
 	const [inset, setInset] = useState(0);
 	useDockHeight({ scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-		expanded, enabled, mode: practice ? "practice:p1" : "question:q1", onScrollbarInset: setInset, onHeight });
+		expanded, enabled, mode: practice ? "practice:p1" : "question:q1", onScrollbarInset: setInset, onHeight, onLayout });
 	// Like DockOverlay's later morph/reserve layout effect: constraints must
 	// already be applied in this same commit, not an after-paint correction.
 	useLayoutEffect(() => { if (blockRef.current) inspected?.(blockRef.current); });
@@ -217,6 +222,71 @@ describe("measured question/practice DOM and observer lifecycle", () => {
 			assert.notEqual(part(host, "content"), oldContent);
 			assert.ok(observers.at(-1)!.elements.has(part(host, "content")));
 		});
+	});
+	it("notifies the morph after constraints for child-only growth, even during a height animation", async () => {
+		await withFixture(async (host, render) => {
+			const measuredCaps: string[] = [];
+			const reserves: number[] = [];
+			await render({ onLayout: () => measuredCaps.push(part(host, "shell").style.maxHeight), onHeight: h => reserves.push(h) });
+			const before = measuredCaps.length;
+			const previousReserve = reserves.at(-1);
+			animating = true;
+			try {
+				// Late editor/preparation DOM changes: no Fixture/parent render.
+				sizes.content = sizes.content! + 150;
+				sizes.column = 500;
+				await act(async () => observers.at(-1)!.callback());
+				assert.equal(measuredCaps.length, before + 1);
+				assert.equal(measuredCaps.at(-1), "408px", "constraints precede the opening retarget notification");
+				assert.equal(part(host, "block").style.getPropertyValue("--dock-max-h"), "56px");
+				assert.equal(reserves.at(-1), previousReserve, "mid-morph reserve remains suppressed");
+			} finally { animating = false; }
+		});
+	});
+	it("ignores queued callbacks from replaced observers and after unmount", async () => {
+		let old: TestObserver;
+		let current: TestObserver;
+		let count = 0;
+		await withFixture(async (_host, render) => {
+			const onLayout = () => { count++; };
+			await render({ onLayout });
+			old = observers.at(-1)!;
+			await render({ practice: true, onLayout });
+			current = observers.at(-1)!;
+			const before = count;
+			await act(async () => old.callback());
+			assert.equal(count, before);
+			await act(async () => current.callback());
+			assert.equal(count, before + 1);
+		});
+		const before = count;
+		await act(async () => current!.callback());
+		assert.equal(count, before);
+	});
+	it("disconnects on Activity hide, retains the DOM, and reconnects on show", async () => {
+		resetSizes();
+		const host = document.createElement("div"); document.body.append(host);
+		const root = createRoot(host);
+		let count = 0;
+		const onLayout = () => { count++; };
+		const render = async (hidden: boolean) => {
+			await act(async () => root.render(<React.Activity mode={hidden ? "hidden" : "visible"}><Fixture onLayout={onLayout} /></React.Activity>));
+		};
+		try {
+			await render(false);
+			const content = part(host, "content");
+			const old = observers.at(-1)!;
+			await render(true);
+			assert.equal(old.disconnected, true);
+			assert.equal(part(host, "content"), content);
+			const before = count;
+			await act(async () => old.callback());
+			assert.equal(count, before);
+			await render(false);
+			assert.notEqual(observers.at(-1), old);
+			assert.equal(part(host, "content"), content);
+			assert.ok(count > before);
+		} finally { await act(async () => root.unmount()); host.remove(); }
 	});
 	it("keeps the DOM synchronizer deterministic when observed again with the same dimensions", async () => {
 		await withFixture(async (host, render) => {
