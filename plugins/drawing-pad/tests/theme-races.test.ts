@@ -20,7 +20,8 @@ const bundle = await build({ stdin: { contents: `export {activate} from ${JSON.s
         probe.exports.push(captured);if(probe.exportWait)await probe.exportWait;
         return {type:'image',mimeType:'image/png',data:'controlled-png'};};` }));
     builder.onLoad({ filter: /\/src\/sheet\.ts$/ }, () => ({ loader: "js", contents: `
-      export const mountSheet=(_container,_ctx,sheets,state)=>{Object.assign(globalThis.__drawingThemeRace,{sheets,state});
+      export const mountSheet=(_container,_ctx,sheets,state,input)=>{const probe=globalThis.__drawingThemeRace;Object.assign(probe,{sheets,state});
+        probe.mounts.push({input,draft:state.draft});
         return {flush(){},dispose(){},canUseEditingShortcuts(){return false},canUndo(){return false},undo(){},togglePenEraser(){},selectHand(){}};};` }));
   } }] });
 const { activate } = await import(`data:text/javascript;base64,${Buffer.from(bundle.outputFiles[0]!.text).toString("base64")}`) as {
@@ -40,6 +41,7 @@ async function fixture(kind: "teaching" | "practice" = "practice") {
   let schema!: PluginSettingsSchema;
   const owner = new AbortController(), errors: unknown[][] = [];
   const probe = { palette: { key: "dark", mode: "dark" }, renders: [] as Render[], exports: [] as Capture[],
+    mounts: [] as { input: unknown; draft: Draft | undefined }[],
     sheets: undefined as Sheets | undefined, state: undefined as SessionSheet | undefined, exportWait: undefined as Promise<void> | undefined,
     render(draft: Draft, signal: AbortSignal) {
       const pending = { ...deferred<Raster>(), draft, signal }; this.renders.push(pending);
@@ -90,15 +92,52 @@ async function fixture(kind: "teaching" | "practice" = "practice") {
     notify(value: unknown) { for (const fn of notifications) fn({ pluginId: "drawing-pad", topic: "settings-changed", data: value }); },
     setPoseRead(read: typeof poseRead) { poseRead = read; },
     async theme(key: string, mode: string) { probe.palette = { key, mode }; for (const fn of observers) fn(); await settle(); },
-    async submit() { return interceptor.intercept({ type: "text", content: { text: "controlled", images: [] } }, {
-      sessionId: "s", signal: owner.signal, messages: [], onAccepted() {},
-    } as never); },
+    async toggle(input: unknown = { type: "text" }) { await actions.get("draw")!.run({ surface: "session", surfaceTarget: {} as never, sessionId: "s", kind,
+      view: { messages: [], input } } as never); },
+    async submit(accept = false) {
+      const accepted: (() => void)[] = [];
+      const result = await interceptor.intercept({ type: "text", content: { text: "controlled", images: [] } }, {
+        sessionId: "s", signal: owner.signal, messages: [], onAccepted(fn: () => void) { accepted.push(fn); },
+      } as never);
+      if (accept) for (const fn of accepted) fn();
+      return result;
+    },
     async dispose() {
       off(); await settle(); assert.equal(observers.size, 0); console.error = previousError;
       for (const [name, descriptor] of originals) { if (descriptor) Object.defineProperty(globalThis, name, descriptor); else Reflect.deleteProperty(globalThis, name); }
     },
   };
 }
+it("the first open after a closed teaching drawing is accepted discards its empty raster before mounting the new input", async () => {
+  const f = await fixture("teaching");
+  try {
+    const original = f.state.draft!;
+    await f.toggle(); // Close with unfinished ink; closing must retain it.
+    assert.equal(f.state.draft, original);
+    await f.submit(true);
+    assert.equal(f.state.draft!.id, original.id); assert.equal(f.state.draft!.strokes.length, 0);
+    const next = { type: "answer", question: { id: "Q2", question: "NEXT QUESTION", occurrence: { messageId: "m-Q2", contentIndex: 0, toolCallId: "Q2", toolName: "quiz" } } };
+    await f.toggle(next);
+    assert.equal(f.probe.mounts.at(-1)!.draft, undefined, "the first mount must prepare Q2, not reuse Q1's accepted empty raster");
+    assert.equal(f.probe.mounts.at(-1)!.input, next);
+    assert.equal(original.strokes.length, 1, "already captured attempts remain immutable");
+  } finally { await f.dispose(); }
+});
+it("a genuine reopen preserves unfinished original work and newer edits protected from an older acceptance", async () => {
+  const f = await fixture("teaching");
+  try {
+    const captured = f.sheets.capture(f.state)!;
+    f.sheets.update(f.state, [...captured.draft.strokes, ...captured.draft.strokes]);
+    f.sheets.setPan(f.state, { x: 17, y: -23 });
+    const latest = f.state.draft!;
+    await f.toggle(); f.sheets.accepted(captured);
+    await f.toggle({ type: "text" });
+    assert.equal(f.probe.mounts.at(-1)!.draft, latest); assert.equal(f.state.draft, latest);
+    assert.equal(latest.reference!.question, "ORIGINAL"); assert.equal(latest.background, "reference-dark");
+    assert.equal(latest.strokes.length, 2); assert.deepEqual(f.state.pan, { x: 17, y: -23 });
+    assert.equal(f.sheets.pending(f.state), true);
+  } finally { await f.dispose(); }
+});
 it("DP-IR-1: a mode change during practice pose synchronization waits for the current raster at capture, then freezes that attempt", async () => {
   const f = await fixture(), pose = deferred<{ sessionId: string; poses: string[] }>(), exporting = deferred<void>();
   try {

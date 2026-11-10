@@ -52,7 +52,7 @@ import { claimPreparingTurn, type TurnPreparation } from "./turn-preparation.ts"
 import { applyParkedDismissal } from "./dismissal-park.ts";
 import { sideConversationEntries } from "../core/side-chat.ts";
 import { sideChats, type SideChatService } from "./side-chat.ts";
-import { SIDE_CONTEXT_BUDGET_ERROR, sideBudgetRetryDrops } from "./side-context-budget.ts";
+import { SIDE_CONTEXT_BUDGET_ERROR, sideBudgetRetryDrops, sideContextWindow } from "./side-context-budget.ts";
 import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.ts";
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion, pendingPluginQuestionOf, pluginQuestionCallsOf, questionCallsOf } from "../core/native-messages.ts";
@@ -365,11 +365,22 @@ export async function handleChatInput(
 	const contextWindow = catalogContextLimits().get(modelIdForCompaction);
 	const thresholdTokens = effectiveThresholdTokens(effective.compaction?.thresholdTokens, contextWindow);
 	const systemPromptTokens = Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4);
-	// The configured threshold triggers compaction, not a smaller-model cap.
-	// Unknown windows use that configured budget, never an invented window.
-	const contextBudget = contextWindow === undefined ? thresholdTokens : Math.max(1, contextWindow - Math.min(COMPACTION_RESERVE_TOKENS, conversationEngine.model.maxTokens));
 	const estimateModel = effective.compaction.includeReasoning ? conversationEngine.model : undefined;
-	const fitsSideContext = (messages: readonly LhMessage[]) => projectedContextTokens(messages.filter((message) => (message as { role: string }).role !== "system"), systemPromptTokens, estimateModel) <= contextBudget;
+	const fitsSideContext = (messages: readonly LhMessage[]) => {
+		const live = messages.filter((message) => (message as { role: string }).role !== "system");
+		// Hard admission is not the compaction trigger. CLI capacity comes from
+		// this request's latest matching session report, never catalog placeholders.
+		// Re-resolve at every gate: new responses/compaction can invalidate it.
+		// Retry's transient SDK prefix omits ALL tail failures. Keep the saved
+		// history in the metadata-only view so omission cannot revive a report
+		// invalidated by a genuine provider failure. New live responses win.
+		const saved = conversation.provider === CLAUDE_CODE_PROVIDER ? stores.chatStore.getChat(chatId)?.messages ?? [] : [];
+		const savedIds = new Set(saved.map((message) => message.id));
+		const reportHistory = saved.length ? [...saved, ...live.filter((message) => !savedIds.has(message.id))] : live;
+		const window = sideContextWindow(reportHistory, conversationEngine.model, contextWindow, input.type === "retry");
+		const budget = window === undefined ? thresholdTokens : Math.max(1, window - Math.min(COMPACTION_RESERVE_TOKENS, conversationEngine.model.maxTokens));
+		return projectedContextTokens(live, systemPromptTokens, estimateModel) <= budget;
+	};
 	const sideBudgetError = () => new Error(SIDE_CONTEXT_BUDGET_ERROR);
 	const beforeCompaction = record.messages;
 	await ensureCompacted(

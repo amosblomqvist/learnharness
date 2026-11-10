@@ -425,12 +425,12 @@ export async function verifyPluginBrowser(url, options = {}) {
 	};
 	const waitStaticFormatted = async scope => {
 		await page.waitForFunction(selector => {
-			const output = document.querySelector(selector), svg = output?.querySelector('[data-testid="md-mermaid"] svg'), image = output?.querySelector('img[alt="Static image proof"]');
+			const output = document.querySelector(selector), svg = output?.querySelector('[data-testid="md-mermaid"] svg');
 			const highlighted = [...(output?.querySelectorAll('[data-streamdown="code-block"] code span') ?? [])].some(span => span.textContent.includes("const") && (span.style.color || span.style.getPropertyValue("--shiki-light") || span.style.getPropertyValue("--shiki-dark")));
 			return output?.querySelectorAll(".katex").length >= 2 && !output.querySelector(".katex-error") && output.querySelector("table")?.textContent.includes("Static table proof")
 				&& output.querySelector('[data-testid="md-callout"][data-alert-kind="important"]')?.textContent.includes("Static callout proof")
 				&& highlighted && svg?.querySelector("path,rect,polygon") && svg.textContent.includes("Static start") && svg.getBoundingClientRect().width > 0
-				&& image?.complete && image.naturalWidth === 48 && image.naturalHeight === 24;
+				&& output.textContent.includes("[Image blocked: Static image proof]") && !output.querySelector("img");
 		}, { timeout: timeoutMs }, markdownOutput(scope));
 	};
 	const assertStaticFormatted = async (scope, customBaseline) => {
@@ -444,13 +444,12 @@ export async function verifyPluginBrowser(url, options = {}) {
 			highlightedTokens: [...output.querySelectorAll('[data-streamdown="code-block"] code span')].filter(span => span.style.color || span.style.getPropertyValue("--shiki-light") || span.style.getPropertyValue("--shiki-dark")).length,
 			builtInCustomFence: [...output.querySelectorAll("pre")].some(pre => pre.textContent.includes("Static registered-language fence stays built-in.")),
 			svgNodes: output.querySelector('[data-testid="md-mermaid"] svg')?.childElementCount,
-			image: { src: output.querySelector("img").src, naturalWidth: output.querySelector("img").naturalWidth },
+			image: { blocked: output.textContent.includes("[Image blocked: Static image proof]"), count: output.querySelectorAll("img").length },
 		}));
 		assert.equal(snapshot.strong, "bold proof"); assert.equal(snapshot.emphasis, "italic proof"); assert.equal(snapshot.builtInCustomFence, true);
-		assert.equal(new URL(snapshot.image.src).origin, base); assert.equal(new URL(snapshot.image.src).pathname, `${PLUGIN}/assets/assets/markdown-proof.svg`);
+		assert.deepEqual(snapshot.image, { blocked: true, count: 0 });
+		assert.deepEqual(evidence.requests.filter(request => new URL(request.url).pathname === `${PLUGIN}/assets/assets/markdown-proof.svg`), [], "Even same-origin plugin Markdown images must not initiate requests");
 		const dialogs = await page.$$eval('[role="dialog"]', nodes => nodes.length);
-		await page.locator(`${markdownOutput(scope)} img[alt="Static image proof"]`).click();
-		assert.equal(await page.$$eval('[role="dialog"]', nodes => nodes.length), dialogs, "Static images do not add expansion/zoom dialogs");
 		const link = await page.$eval(`${markdownOutput(scope)} a[href="#static-markdown-${scope}-anchor"]`, anchor => ({ href: anchor.href, target: anchor.target, rel: anchor.rel }));
 		assert.equal(link.target, "_blank"); assert.equal(link.rel, "noopener noreferrer");
 		const originalUrl = page.url();
@@ -660,7 +659,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await markdownDialogOrigin.dispose();
 		assert.equal(await page.$$eval('[data-smoke-markdown-scope="dialog"]', nodes => nodes.length), 0);
 		await health();
-		evidence.assertions.push("Public ctx.ui.mountMarkdown uses native prose/math/highlighting/table/callout/Mermaid/image rendering in ordinary view and public dialog without auxiliary controls or plugin code-block widgets; links navigate normally; invalid Mermaid source is immediately visible; updates, abort, idempotent disposal and remount preserve plugin-owned DOM");
+		evidence.assertions.push("Public ctx.ui.mountMarkdown uses native prose/math/highlighting/table/callout/Mermaid rendering and refuses Markdown images without requests in ordinary view and public dialog without auxiliary controls or plugin code-block widgets; links navigate normally; invalid Mermaid source is immediately visible; updates, abort, idempotent disposal and remount preserve plugin-owned DOM");
 
 		evidence.stage = "controlled knowledge bubble and full-content shared picker";
 		await assertKnowledge("initial controlled empty value", [], 0);

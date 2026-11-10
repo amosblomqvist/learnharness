@@ -1,5 +1,5 @@
 import { isPluginHostError } from "./plugin-host.ts";
-import { desktopAPIAuthorized } from "./desktop-access.ts";
+import { apiRequestRefusal } from "./desktop-access.ts";
 import type { PluginFrontendContext, PluginInfo } from "../core/plugins.ts";
 
 /** Thin HTTP adapter, separately injectable so its tests never boot plugins. */
@@ -60,12 +60,13 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
 }
 
 /** This one streamed route must avoid Proxy's silently truncated body clone.
- * Preserve the identical desktop capability check before ANY params/body/host
+ * Preserve the identical mode-aware API policy before ANY params/body/host
  * work, including unsupported methods and framework-style OPTIONS responses. */
 export function createPluginDocumentRoute(transport: Pick<ReturnType<typeof createPluginTransport>, "convertDocument">) {
-	const refusal = (request: Request) => desktopAPIAuthorized(request.headers) ? undefined : json({
-		error: "Desktop API access requires the trusted LearnHarness window.",
-	}, 403);
+	const refusal = (request: Request) => {
+		const error = apiRequestRefusal(request);
+		return error ? json({ error }, 403) : undefined;
+	};
 	const unsupported = (request: Request) => refusal(request) ?? new Response(null, { status: 405 });
 	return {
 		async POST(request: Request, context: { params: Promise<{ id: string }> }) {

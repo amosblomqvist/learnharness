@@ -207,7 +207,19 @@ export interface ResearchToolInput {
 
 export interface ResearchResult {
 	brief: string;
+	/** Rendered as links, so only http(s) URLs belong here (isWebSourceUrl).
+	 *  Records saved before that rule may still hold other schemes. */
 	sources: { title: string; url: string }[];
+}
+
+/** True for http(s) URLs: the only research sources that become links. */
+export function isWebSourceUrl(url: string): boolean {
+	try {
+		const { protocol } = new URL(url);
+		return protocol === "http:" || protocol === "https:";
+	} catch {
+		return false;
+	}
 }
 
 export interface DemoToolInput {

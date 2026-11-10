@@ -1,14 +1,15 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { desktopAPIAuthorized } from "./src/server/desktop-access.ts";
+import { apiRequestRefusal } from "./src/server/desktop-access.ts";
 
 /** Protects API methods, including SSE and spending/settings routes. The one
- * streamed document route enforces the identical all-method capability check
+ * streamed document route enforces the identical all-method request policy
  * inside its handler, avoiding Next's silently truncated Proxy body clone.
  * No public callback or worker bypass: legitimate self-HTTP still needs the capability. */
 export function proxy(request: NextRequest) {
-	if (!desktopAPIAuthorized(request.headers)) {
+	const refusal = apiRequestRefusal(request);
+	if (refusal) {
 		return NextResponse.json(
-			{ error: "Desktop API access requires the trusted LearnHarness window." },
+			{ error: refusal },
 			{ status: 403, headers: { "Cache-Control": "no-store" } },
 		);
 	}

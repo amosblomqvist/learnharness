@@ -48,6 +48,9 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     sheets.observePoses(state, acceptedPoseKeys(context.view.messages), !hadState);
     if (wasOpen) { if (open?.session === state) close(open); return; }
     if (open) close(open);
+    // Acceptance can empty a sheet while it is closed. Apply the same empty-
+    // sheet policy as close before deciding whether this mount needs a reference.
+    sheets.dropUntouched(state);
     const pad: OpenPad = { session: state, controller: new AbortController(), closed: false };
     open = pad;
     try {
