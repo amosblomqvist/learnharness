@@ -13,7 +13,7 @@ concurrency:
 
 jobs:
   source-helper:
-    name: Shipping first-capture telemetry (${{ matrix.os }})
+    name: Frame-scheduling mechanism telemetry (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "26"
-      - name: Preserve pinned first-capture driver outside checkout
+      - name: Preserve pinned frame-scheduling pair outside checkout
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -49,7 +49,8 @@ jobs:
           fs.mkdirSync(root, {recursive: true});
           // Git blob bytes avoid Windows worktree CRLF conversion.
           const files = [
-            {source: 'scripts/diagnose-first-capture.mjs', name: 'first-capture.mjs', sha256: 'b0cc92dece6e216670bb7f3aa8b05f339e2d232c7c207d18c0a39f69e1d47bdb'},
+            {source: 'scripts/diagnose-frame-scheduling.mjs', name: 'frame-scheduling.mjs', sha256: '49a0914c6a6d8be432035359dd60df80a099c62d067a330afe4f876e874eec6e'},
+            {source: 'scripts/diagnose-frame-entry.cjs', name: 'frame-entry.cjs', sha256: '45fec0b94a3182df3392154ea78c30dbc716d5dce56449f2cd50c55c67591013'},
           ];
           for (const file of files) {
             const bytes = execFileSync('git', ['show', `HEAD:${file.source}`]);
@@ -63,9 +64,9 @@ jobs:
           fs.writeFileSync(path.join(root, 'metadata.json'), JSON.stringify({
             baseline, diagnosticCommit: process.env.GITHUB_SHA, files,
             platform: process.platform, node: process.versions.node,
-            purpose: 'One original capture at existing shipping default, not a timeout fix or release clearance.',
+            purpose: 'Same pending first capture: sham IPC then one backgroundThrottling transition, scratch-only mechanism test, NOT production repair or release clearance.',
             warmupProtocolTimeoutMs: 10000, shippingDefaultExpectedMs: 180000, maximumHelpersPerOS: 2,
-            observer: false, retries: false, forcedErrors: false,
+            shamAtMs: 10000, transitionAtMs: 20000, ackDeadlineMs: 1500, retries: false, forcedErrors: false,
           }, null, 2) + '\n');
           fs.appendFileSync(process.env.GITHUB_ENV, [
             ['DIAG_ROOT', root],
@@ -87,25 +88,25 @@ jobs:
       - name: Materialize the locked Electron binary (lazy installer)
         run: |
           node --input-type=commonjs -e 'const fs = require("node:fs"); const runtime = require("electron"); if (!fs.existsSync(runtime)) throw new Error("Locked Electron executable missing"); console.log("Locked Electron executable: " + runtime);'
-      - name: Measure one original response at shipping default (not a release gate)
+      - name: Observe one pending capture across sham and setting (not a release gate)
         run: |
           set -o pipefail
           runtime="$GITHUB_WORKSPACE/node_modules/electron/dist/electron"
           if [[ "$RUNNER_OS" == "Windows" ]]; then runtime="$runtime.exe"; fi
           if [[ "$RUNNER_OS" == "Linux" ]]; then
-            xvfb-run -a node "$DIAG_ROOT/first-capture.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --out "$DIAG_ROOT/first-capture-output" 2>"$DIAG_ROOT/first-capture.stderr.log" | tee "$DIAG_ROOT/first-capture.stdout.ndjson"
+            xvfb-run -a node "$DIAG_ROOT/frame-scheduling.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --out "$DIAG_ROOT/frame-output" 2>"$DIAG_ROOT/frame.stderr.log" | tee "$DIAG_ROOT/frame.stdout.ndjson"
           else
-            node "$DIAG_ROOT/first-capture.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --out "$DIAG_ROOT/first-capture-output" 2>"$DIAG_ROOT/first-capture.stderr.log" | tee "$DIAG_ROOT/first-capture.stdout.ndjson"
+            node "$DIAG_ROOT/frame-scheduling.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --out "$DIAG_ROOT/frame-output" 2>"$DIAG_ROOT/frame.stderr.log" | tee "$DIAG_ROOT/frame.stdout.ndjson"
           fi
       - name: Preserve telemetry and synthetic captures, including failures
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: svg-first-capture-${{ matrix.os }}
+          name: svg-frame-scheduling-${{ matrix.os }}
           if-no-files-found: warn
           retention-days: 7
           path: |
             ${{ runner.temp }}/lh-svg-diagnostic/metadata.json
             ${{ runner.temp }}/lh-svg-diagnostic/*.stdout.ndjson
             ${{ runner.temp }}/lh-svg-diagnostic/*.stderr.log
-            ${{ runner.temp }}/lh-svg-diagnostic/first-capture-output/**
+            ${{ runner.temp }}/lh-svg-diagnostic/frame-output/**
