@@ -18,6 +18,10 @@
 
 LearnHarness uses AI agents to plan and teach lessons from your current understanding to your goal. It builds a detailed picture of what you understand and how you reason. That picture is updated as you learn.
 
+## Personal fork
+
+This repository is a personal-use fork of [LearnHarness](https://github.com/amosblomqvist/learnharness) by Amos Blomqvist, licensed under AGPL-3.0. The upstream license, copyright notices, and attribution are unchanged. The fork adds course packs: import a folder of numbered chapter notes on your own machine, study and practice from those files, and schedule reviews. The notes are not part of this repository. See [NOTICE](NOTICE) and [Course packs](docs/fork/course-pack.md) (日本語: [コースパック](docs/fork/course-pack.ja.md)).
+
 Instead of just giving you an explanation, it uses your answers and thinking to decide what you need next. Teaching builds understanding one reasoning step at a time. Practice makes it usable. A persistent knowledge graph carries it across sessions.
 
 ![LearnHarness teaching session](docs/assets/teaching-session.png)
@@ -81,5 +85,7 @@ Security vulnerabilities: report privately as described in [SECURITY.md](SECURIT
 ## License
 
 [AGPL-3.0](LICENSE)
+
+Upstream LearnHarness remains AGPL-3.0-only, copyright Amos Blomqvist. This fork is a modification of that work. If you distribute the fork, the AGPL obligations apply to the whole application, including these course-pack changes. Do not distribute the imported notes; they are not licensed for redistribution. Details are in [NOTICE](NOTICE).
 
 The app is free and open forever. If we ever charge for anything, it will be for convenience — managed keys, hosting — never for features you can run locally.

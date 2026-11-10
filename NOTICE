@@ -1,0 +1,76 @@
+LearnHarness personal fork
+=========================
+
+This program is a modified version of LearnHarness.
+
+Original project: https://github.com/amosblomqvist/learnharness
+Copyright: Amos Blomqvist
+License: GNU Affero General Public License version 3 (see LICENSE)
+Upstream version imported here: 0.5.0 (commit da08cb5f7d098598ba963c6689b22054c9f2a5a3)
+
+The original license, copyright notices, and attribution are preserved.
+Modifications in this fork are also under AGPL-3.0-only.
+
+What changed
+------------
+
+- Course packs. A course source is a folder of numbered chapter directories,
+  each with a Readme.md and optional images. The first preset is
+  liquidslr/system-design-notes. The preset is a pointer, not a copy.
+- Importer. Reads a local folder, or downloads a GitHub archive at runtime
+  into the app data directory (LH_DATA_DIR). Re-runs are idempotent: unchanged
+  chapters are skipped; changed chapters are copied again. Review cards and
+  linked session ids are kept. Chapters that disappear upstream are marked
+  absent instead of deleted.
+- Course page at /courses. Chapter status is not started, learning, review
+  due, or mastered. Status comes from linked teaching/practice sessions and
+  SM-2 cards. The knowledge graph is not a mastery store; a separate flag
+  shows when a chapter's notes have propositions in the graph.
+- Study and practice open ordinary LearnHarness sessions. The opening message
+  quotes the copied chapter file so the existing measure, plan, teach, and
+  practice flow can read it. The system-design preset's practice prompt uses
+  requirements, estimation, high-level design, deep dive, and wrap-up.
+- Reviews use SM-2 (ease, interval, repetitions). Headings in the chapter
+  (## ) are separate review cards. There is a today queue. Grades are
+  explicit. Practice-session outcomes are not written back into the cards.
+- Optional graph extraction calls the existing notes importer for changed
+  chapters. It is off unless you ask, because it uses your model.
+
+What this fork does not include
+-------------------------------
+
+The system-design-notes repository has no license and summarizes a
+copyrighted book (Alex Xu, System Design Interview). Its text and images are
+not vendored, committed, copied into fixtures, or embedded in prompts.
+Tests use short original placeholder chapters under tests/fixtures/course-pack.
+
+Personal use and distribution
+-----------------------------
+
+This fork is for personal use. Nothing here publishes a GitHub mirror or
+opens a pull request upstream.
+
+If you ever distribute this program, AGPL-3.0 applies to the whole
+application, including the course-pack changes: you must provide the
+corresponding source to users who interact with it over a network. Do not
+redistribute the imported notes. Those files stay in the user's local app
+data and are not covered by this project's license.
+
+Sync from upstream
+------------------
+
+The upstream remote is the public LearnHarness repository:
+
+    git remote add upstream https://github.com/amosblomqvist/learnharness.git
+    git fetch upstream
+    git merge upstream/main
+
+Do not push to upstream. A local safety setting is:
+
+    git remote set-url --push upstream DISABLE_PUSH_DO_NOT_PUBLISH
+
+Prefer upstream changes outside the course-pack files when a merge conflicts.
+The fork's additions are concentrated in src/core/course.ts,
+src/server/course-import.ts, src/server/course-paths.ts, src/server/courses.ts,
+src/store/courses.ts, app/courses, app/api/courses, components/course-pack.tsx,
+docs/fork, and this NOTICE.

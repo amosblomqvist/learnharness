@@ -89,3 +89,6 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// Course packs (personal fork): pure chapter detection, SM-2, and status.
+// Filesystem copies stay in the store/server layers.
+export * from "./course.ts";

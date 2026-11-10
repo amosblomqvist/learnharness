@@ -166,3 +166,11 @@ File/PDF/visual images share image postprocessing. Search supports Tavily, Brave
 ## Verification starting points
 
 Tests use injected engines/ports, fake transports, and renderer seams. Start with `chat-flow`, `session-core`, `turn-recovery`, `job-delivery-recovery`, `extraction`, `notes-import-route`, `practice-flow`, `prompt-overrides`, and `golden-fixtures` under `tests/`. Fixture checks establish their exercised contracts, not live account entitlements, teaching quality, or cross-process durability. Commands and runtime prerequisites belong in [Development](development.md#checks).
+
+## Course packs (personal fork)
+
+Course packs are a fork addition. A course source is a directory of numbered chapter folders whose chapter file is `Readme.md`. Detection, SM-2 scheduling, and chapter status live in `src/core/course.ts`. The server copies markdown and images into `LH_DATA_DIR/courses/` and records review cards in `courses/index.json`. That copy is local app data, the same seam as chats and the graph, and it is not a git dependency.
+
+Changed chapters can be sent through the existing `importNotes` pipeline. The graph still stores propositions, not mastery, so chapter status comes from linked session records and review cards. `inGraph` is only a flag that those propositions exist. Teaching and practice sessions are ordinary chats: the opening message quotes the copied chapter path, and the existing measure, plan, teach, and practice agents run from there.
+
+See [Course packs](fork/course-pack.md).
