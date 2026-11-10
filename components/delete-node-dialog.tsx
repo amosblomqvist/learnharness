@@ -1,8 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createPortal } from "react-dom";
-import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { HostDialog } from "@/components/host-dialog";
 
 /** The 409 extraction_running line (owner phrasing, node interlude):
  *  the server's error names the extraction; the ACTIVITY DOCK is the
@@ -36,6 +35,7 @@ export function DeleteNodeBody({
 	failure,
 	onClose,
 	onRun,
+	renderFrame,
 }: {
 	/** One node (the canvas context menu) or many (the chain table's
 	 *  selection). One names it alone; many pluralize the title and
@@ -46,8 +46,9 @@ export function DeleteNodeBody({
 	failure: { code: string; error: string } | null;
 	onClose: () => void;
 	onRun: () => void;
+	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 }) {
-	return (
+	const frame = (
 		<div
 			role="dialog"
 			aria-modal="true"
@@ -134,6 +135,7 @@ export function DeleteNodeBody({
 			</div>
 		</div>
 	);
+	return renderFrame ? renderFrame(frame) : frame;
 }
 
 export function DeleteNodeDialog({
@@ -160,9 +162,6 @@ export function DeleteNodeDialog({
 }) {
 	const [busy, setBusy] = useState(false);
 	const hasItems = Boolean(nodes?.length || folders.length);
-	const backdropDismiss = useBackdropDismiss(() => {
-		if (!busy) onClose();
-	});
 	const [failure, setFailure] = useState<{ code: string; error: string } | null>(null);
 
 	// Fresh state per dialog: closing resets.
@@ -172,23 +171,6 @@ export function DeleteNodeDialog({
 			setFailure(null);
 		}
 	}, [hasItems]);
-
-	// Esc closes (claimed — a dialog Esc must not also abort a turn).
-	useEffect(() => {
-		if (!hasItems) return;
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				// THE ONE-ESC LAW (keyboard round 2026-10-06): claim at the
-				// document level — a window-level stopPropagation cannot stop
-				// the earlier-registered global window listener.
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKeyDown);
-		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [hasItems, onClose]);
 
 	// Sequential full deaths — never parallel (the store's revision
 	// counter and the sweep must observe them in order). A failure STOPS
@@ -236,20 +218,16 @@ export function DeleteNodeDialog({
 
 	if (!hasItems) return null;
 
-	return createPortal(
-		<div
-			className="fixed inset-0 z-50 flex items-center justify-center bg-background/80"
-			{...backdropDismiss}
-		>
-			<DeleteNodeBody
+	return <DeleteNodeBody
 				nodes={nodes ?? []}
 				folders={folders}
 				busy={busy}
 				failure={failure}
 				onClose={onClose}
 				onRun={() => void run()}
-			/>
-		</div>,
-		document.body,
-	);
+				renderFrame={(frame) => <HostDialog open frame={frame} onClose={() => {
+					if (busy) return "blocked";
+					onClose(); return "closed";
+				}} backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80" }}>{frame.props.children}</HostDialog>}
+			/>;
 }

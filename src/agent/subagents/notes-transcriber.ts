@@ -2,7 +2,7 @@ import { randomUUID } from "node:crypto";
 import type { AssistantMessage, Message, Usage } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../models.ts";
 import { processImage, type SupportedImageMimeType } from "../image-processing/index.ts";
-import { withBgLlmSlot } from "./bg-llm-semaphore.ts";
+import { workerRequestStream } from "../worker-request-admission.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 import type { PdfPage } from "./pdf-markdown.ts";
 import { pdfInfo, type PdfPageInfo } from "./pdf-ops.ts";
@@ -18,8 +18,8 @@ import { streamOnce } from "./pdf-reader.ts";
  * the pages that text can't carry — picture-only or empty (scans, vector
  * handwriting exports), or text pages that are math- or image-heavy or
  * text-poor (the pdf-reader's flagged-page signals). One call per page,
- * each under the shared background-LLM semaphore, so a long scan never
- * floods the provider.
+ * three pages at a time, each request behind the app-wide worker admission,
+ * so a long scan never floods the provider.
  * Runs as the pdfReader role (vision slot) — no role of its own.
  *
  * Aborts propagate; any other failed page call fails the transcription
@@ -108,6 +108,16 @@ export async function visionPages(pdfPath: string, pages: readonly PdfPage[]): P
 		.map((page) => page.number);
 }
 
+/** Pages rendered and transcribed at once: at most this many page images in
+ *  memory. Model requests themselves also pass the app-wide worker admission. */
+const PAGE_CONCURRENCY = 3;
+
+/** The engine with its requests behind the app-wide worker admission, like
+ *  every other background worker's. */
+function admitted(engine: PiEngine): PiEngine {
+	return { ...engine, streamFn: workerRequestStream(engine.streamFn) };
+}
+
 /** A PDF as Markdown under `--- Page N ---` markers (joinPages' format):
  *  each `needed` page transcribed from its render (its converted text rides
  *  along as a hint), every other text page as converted. A model without
@@ -120,27 +130,31 @@ export async function transcribePdf(pdfPath: string, pages: readonly PdfPage[], 
 	// The first failed page stops its siblings: no spend after a doomed run.
 	const siblings = new AbortController();
 	const signal = opts.signal ? AbortSignal.any([opts.signal, siblings.signal]) : siblings.signal;
-	const pageOpts = { ...opts, signal };
-	const bodies = await Promise.all(pages.map(async (page): Promise<string> => {
-		const text = page.kind === "text" ? page.markdown : "";
-		if (!want.has(page.number)) return text;
-		try {
-			// Render inside the permit: at most three page images in memory.
-			return await withBgLlmSlot(signal, async () => {
-				signal.throwIfAborted();
-				const [rendered] = await headless.renderPdfPages(pdfPath, [page.number], { dpi: RENDER_DPI });
-				if (!rendered) return text;
-				const image = await processImage(rendered.png, "image/png", { resizeOptions: opts.engine.model.inputLimits?.images?.resize });
-				signal.throwIfAborted();
-				if (!image.ok) return text;
-				const context = text.trim()
-					? `Page ${page.number} of ${pages.length}. Extracted text (may be garbled or incomplete):\n${text}`
-					: `Page ${page.number} of ${pages.length}. No text could be extracted from this page.`;
-				return transcribeOne(image, context, pageOpts);
-			});
-		} catch (err) {
-			siblings.abort();
-			throw err;
+	const pageOpts = { ...opts, engine: admitted(opts.engine), signal };
+	const bodies = pages.map((page) => (page.kind === "text" ? page.markdown : ""));
+	const queue = pages.flatMap((page, i) => (want.has(page.number) ? [i] : []));
+	const transcribePage = async (i: number): Promise<void> => {
+		const page = pages[i]!;
+		const text = bodies[i]!;
+		signal.throwIfAborted();
+		const [rendered] = await headless.renderPdfPages(pdfPath, [page.number], { dpi: RENDER_DPI });
+		if (!rendered) return;
+		const image = await processImage(rendered.png, "image/png", { resizeOptions: opts.engine.model.inputLimits?.images?.resize });
+		signal.throwIfAborted();
+		if (!image.ok) return;
+		const context = text.trim()
+			? `Page ${page.number} of ${pages.length}. Extracted text (may be garbled or incomplete):\n${text}`
+			: `Page ${page.number} of ${pages.length}. No text could be extracted from this page.`;
+		bodies[i] = await transcribeOne(image, context, pageOpts);
+	};
+	await Promise.all(Array.from({ length: Math.min(PAGE_CONCURRENCY, queue.length) }, async () => {
+		for (let next = queue.shift(); next !== undefined; next = queue.shift()) {
+			try {
+				await transcribePage(next);
+			} catch (err) {
+				siblings.abort();
+				throw err;
+			}
 		}
 	}));
 	return pages
@@ -156,5 +170,5 @@ export async function transcribeImage(bytes: Uint8Array, mimeType: SupportedImag
 	const image = await processImage(bytes, mimeType, { resizeOptions: opts.engine.model.inputLimits?.images?.resize });
 	opts.signal?.throwIfAborted();
 	if (!image.ok) throw new Error(image.message);
-	return withBgLlmSlot(opts.signal, () => transcribeOne(image, "An image of the learner's notes.", opts));
+	return transcribeOne(image, "An image of the learner's notes.", { ...opts, engine: admitted(opts.engine) });
 }

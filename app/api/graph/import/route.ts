@@ -2,17 +2,21 @@
  * POST /api/graph/import — the format-agnostic front door's transport
  * (vision §1, 2026-09-13): raw personal-notes files in, one extraction run
  * per file through the SAME pipeline the sessions use. Multipart form data
- * (field "files", any text format — the extractor is format-agnostic); the
- * pipeline mints a deterministic source id per file path, persists the
- * source record (the file's provenance + the run's usage), and runs
+ * (field "files"); the pipeline mints a deterministic source id per file
+ * path, persists the source record (the file's provenance + the run's usage),
+ * and runs
  * extractor → auditor → merger over the raw text.
  *
- * A PDF (spotted by its %PDF- header, not its name) is converted to
- * Markdown first; an unreadable or over-long PDF is refused before any
- * model call or source record. The pipeline's vision pass (issue #285)
- * then reads the pages text can't carry — picture-only, math-heavy, or
- * text-poor — so scans are transcribed rather than skipped. An image
- * (also sniffed by content) is transcribed whole.
+ * Only filename extensions listed in lib/notes-import-limits.ts are taken
+ * (text, PDF, and the images the vision pass reads). Among those files, an
+ * image (sniffed by content) is transcribed whole by the pipeline's vision
+ * pass (issue #285); a PDF (spotted by its %PDF- header) is converted to
+ * Markdown, and the vision pass then reads the pages text can't carry —
+ * picture-only, math-heavy, or text-poor — so scans are transcribed rather
+ * than skipped. Other files are decoded as UTF-8 unless a zero byte in
+ * their first 8 KiB causes refusal. This is a binary-file heuristic, not
+ * complete text or encoding validation. These refusals, and unreadable or
+ * over-long PDFs, occur before any source record or model call.
  *
  * Small concurrency cap: the model calls are the slow part, and a burst of
  * 25 simultaneous runs would trip provider rate limits — a 3-wide worker
@@ -21,7 +25,8 @@
  * /api/graph/status, as with session runs.
  */
 import { convertPdf, detectSupportedImageMimeType, extraction, NotesImportError, sourceDirectory } from "@/src/server";
-import { MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits.ts";
+import { IMAGE_IMPORT_EXTENSIONS, IMPORT_EXTENSIONS, MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, UNSUPPORTED_TYPE_MESSAGE, validNotesPath } from "@/lib/notes-import-limits.ts";
+import { FormBodyLimitError, readBoundedFormData } from "@/lib/bounded-form-data.ts";
 import {
 	emit,
 	ModelsNotConfiguredError,
@@ -57,14 +62,18 @@ const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 type NotesImportInput = Parameters<typeof extraction.importNotes>[0];
 type NotesFile = { kind: "notes"; input: NotesImportInput; notice?: string } | { kind: "refused"; error: string };
 
-/** A PDF keeps its converted pages AND its bytes (the vision pass renders
- * the pages text can't carry); an image goes to the vision pass whole; any
- * other file is read as text, as before. */
+/** An image goes to the vision pass whole; a PDF keeps its converted pages
+ * AND its bytes (the vision pass renders the pages text can't carry); any
+ * other accepted file is read as text. */
 async function readNotesFile(file: File, filePath: string): Promise<NotesFile> {
+	if (!IMPORT_EXTENSIONS.test(file.name) && !IMAGE_IMPORT_EXTENSIONS.test(file.name)) return { kind: "refused", error: UNSUPPORTED_TYPE_MESSAGE };
 	const bytes = new Uint8Array(await file.arrayBuffer());
 	const mimeType = detectSupportedImageMimeType(bytes);
 	if (mimeType) return { kind: "notes", input: { filePath, image: bytes, mimeType } };
-	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) return { kind: "notes", input: { filePath, text: new TextDecoder().decode(bytes) } };
+	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) {
+		if (bytes.subarray(0, 8192).includes(0)) return { kind: "refused", error: "This file isn't plain text." };
+		return { kind: "notes", input: { filePath, text: new TextDecoder().decode(bytes) } };
+	}
 	// pdfjs takes over (detaches) the buffer it reads; the vision pass needs
 	// these bytes intact, so the converter gets a copy.
 	const pdf = await convertPdf(bytes.slice(), MAX_PDF_PAGES);
@@ -78,48 +87,12 @@ async function readNotesFile(file: File, filePath: string): Promise<NotesFile> {
 	}
 }
 
-class ImportBodyLimitError extends Error {}
-
-/** Bound actual body bytes before multipart parsing, including requests without
- * a trustworthy Content-Length. Next's proxy may truncate first; parsing that
- * incomplete body is a separate, handled refusal, never a partial import. */
-async function readImportForm(request: Request): Promise<FormData> {
-	if (Number(request.headers.get("content-length")) > MAX_IMPORT_BODY_BYTES) {
-		void request.body?.cancel().catch(() => undefined);
-		throw new ImportBodyLimitError();
-	}
-	const reader = request.body?.getReader();
-	if (!reader) throw new SyntaxError("Missing import body");
-	const chunks: Uint8Array[] = [];
-	let bytes = 0;
-	try {
-		for (;;) {
-			const { done, value } = await reader.read();
-			if (done) break;
-			bytes += value.byteLength;
-			if (bytes > MAX_IMPORT_BODY_BYTES) throw new ImportBodyLimitError();
-			chunks.push(value);
-		}
-		const body = new Uint8Array(bytes);
-		let offset = 0;
-		for (const chunk of chunks) {
-			body.set(chunk, offset);
-			offset += chunk.byteLength;
-		}
-		return await new Response(body, { headers: { "Content-Type": request.headers.get("content-type") ?? "" } }).formData();
-	} finally {
-		// Do not wait for a tee's other consumer to finish before refusing an upload.
-		void reader.cancel().catch(() => undefined);
-		reader.releaseLock();
-	}
-}
-
 export async function POST(request: Request) {
 	let form: FormData;
 	try {
-		form = await readImportForm(request);
+		form = await readBoundedFormData(request, MAX_IMPORT_BODY_BYTES);
 	} catch (err) {
-		const oversized = err instanceof ImportBodyLimitError;
+		const oversized = err instanceof FormBodyLimitError;
 		return Response.json({ results: [] as ImportResult[], error: oversized
 			? "Import request is too large. Select fewer files."
 			: "Could not read the upload. It may be incomplete; please select the files again." }, { status: oversized ? 413 : 400 });

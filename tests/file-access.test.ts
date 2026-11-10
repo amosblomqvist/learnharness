@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, beforeEach, describe, it } from "node:test";
 import React from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { createCanvas } from "@napi-rs/canvas";
 import { createFauxCore } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -306,7 +306,7 @@ describe("settings parsing and UI", () => {
 		assert.deepEqual(composeFileRestriction(on, false).fileAccess, { restricted: false, folders: ["~/Study"] });
 	});
 	it("SSR makes OFF, empty ON, editable folders and fail-closed errors explicit", () => {
-		const render = (agent?: Parameters<typeof AgentSection>[0]["agent"], fileAccessError?: string) => renderToStaticMarkup(React.createElement(AgentSection, { agent, fileAccessError, models: undefined, graph: undefined, compaction: undefined, onSectionChange: () => {}, onModelsChange: () => {}, onCompactionChange: () => {} }));
+		const render = (agent?: Parameters<typeof AgentSection>[0]["agent"], fileAccessError?: string) => renderToStaticMarkup(React.createElement(AgentSection, { agent, fileAccessError, models: undefined, graph: undefined, compaction: undefined, onSectionChange: () => true, onModelsChange: () => {}, onCompactionChange: () => true }));
 		const off = render();
 		assert.match(off, /Broad local source access/);
 		assert.match(off, /aria-checked="false"[^>]*aria-label="Restrict to listed folders"/);

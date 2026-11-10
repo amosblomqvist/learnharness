@@ -1,29 +1,38 @@
 import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
-import { afterEach, it } from "node:test";
+import { after, afterEach, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { ChainTableOverlay } from "../components/chain-table.tsx";
 import { MinimalHome } from "../components/minimal-home.tsx";
 import { ServerEventsProvider } from "../components/server-events.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 import type { GraphNode, SourceDirectory } from "../src/core/index.ts";
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
+Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
+const restoreDom = installModalDom(dom);
+after(restoreDom);
 // linkedom does not implement native checkbox activation. Preserve click
 // dispatch while supplying the browser's pre-click checked-state transition.
 const nativeClick = dom.window.HTMLInputElement.prototype.click;
 dom.window.HTMLInputElement.prototype.click = function () { if (this.type === "checkbox") this.checked = !this.checked; nativeClick.call(this); };
 let root: Root | undefined, host: HTMLDivElement | undefined;
 const originalFetch = globalThis.fetch;
-afterEach(async () => { await act(async () => { root?.unmount(); }); root = undefined; host?.remove(); globalThis.fetch = originalFetch; });
+afterEach(async () => {
+	await act(async () => { root?.unmount(); }); root = undefined;
+	// FocusScope dispatches its unmount event after React cleanup.
+	await new Promise(resolve => setTimeout(resolve, 5));
+	host?.remove(); globalThis.fetch = originalFetch;
+});
 const directory = (): SourceDirectory => ({ organization: { version: 1, folders: [], placements: {} }, sources: ["a", "b"].map((id) => ({ id, kind: "notes", label: `${id} book`, createdAt: "now" })) });
 async function mount(children: React.ReactNode) {
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 	await update(children);
 }
 async function update(children: React.ReactNode) {
-	await act(async () => { root!.render(<ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}>{children}</ServerEventsProvider>); });
+	await act(async () => { root!.render(<InteractionLayersProvider><ServerEventsProvider connect={() => ({ close() {}, onOpen() {}, onEvent() {} })}>{children}</ServerEventsProvider></InteractionLayersProvider>); });
 }
 async function click(id: string) {
 	const element = document.querySelector<HTMLElement>(`[data-testid="${id}"]`); assert.ok(element, id);

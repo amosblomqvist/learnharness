@@ -2000,8 +2000,8 @@ describe("the chunked pipeline (extraction coverage)", () => {
 describe("per-chunk parallel jobs (owner, 2026-09-28)", () => {
 	const sleep = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
 
-	/** 8 single-line chunks: one line per chunk under a tiny budget — a
-	 *  fan-out wide enough to see both the 3-slot semaphore and the queue. */
+	/** 8 single-line chunks: one line per chunk under a tiny budget — enough
+	 *  to pin source-local ordering independently of request admission. */
 	const wideText = () =>
 		Array.from({ length: 8 }, (_, i) => `note ${i}: ${"x".repeat(90)}`).join("\n");
 
@@ -2091,8 +2091,8 @@ describe("per-chunk parallel jobs (owner, 2026-09-28)", () => {
 		// SERIALIZED PER SOURCE (owner, 2026-09-30 evening): one source's
 		// chunks run strictly in order — each extractor continues the
 		// digest of every earlier merge, so the peak within one source is
-		// ONE concurrent extract. (Cross-source runs still parallelize;
-		// the 3-permit semaphore still caps those.)
+		// ONE concurrent extract. Cross-source runs still parallelize;
+		// their model requests share the configured worker admission pool.
 		assert.equal(extractPeak, 1, "one source, one extract at a time — strict order");
 		assert.equal(auditPeak, 1, "audits serialize behind the gate — never two at once");
 		// Identical findings in every chunk, one merge PER chunk (jobs are
