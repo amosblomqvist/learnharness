@@ -13,12 +13,12 @@ concurrency:
 
 jobs:
   source-helper:
-    name: SVG telemetry (${{ matrix.os }})
+    name: Native readback telemetry (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
-        # Counterbalance two existing cases; no new option sweep or product edit.
-        os: [ubuntu-24.04]
+        # Two owned source helpers per OS; no product edit or release gate change.
+        os: [windows-2025, ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     defaults:
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "26"
-      - name: Preserve pinned telemetry harness outside checkout
+      - name: Preserve two pinned native telemetry files outside checkout
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -48,24 +48,28 @@ jobs:
           const root = path.join(process.env.RUNNER_TEMP, 'lh-svg-diagnostic');
           fs.mkdirSync(root, {recursive: true});
           // Git blob bytes avoid Windows worktree CRLF conversion.
-          const bytes = execFileSync('git', ['show', 'HEAD:scripts/diagnose-svg-screenshot.mjs']);
-          const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
-          assert.equal(sha256, '749be3c60d4856bc41b5dbcd326b31ab8466d3aa4f813681b915d272160883c7');
-          const harness = path.join(root, 'svg-matrix.mjs');
-          fs.writeFileSync(harness, bytes);
+          const files = [
+            {source: 'scripts/diagnose-native-readback.mjs', name: 'native-readback.mjs', sha256: 'a263ecb51799702c31fb2c6c4d70e8663499954a49b467cea0fabe266042135e'},
+            {source: 'scripts/diagnose-native-observer.cjs', name: 'native-observer.cjs', sha256: 'ae8a6874a1e231b75fa5c233a806d4f95bec0f4ae82c54b62e4918d7f33c57fc'},
+          ];
+          for (const file of files) {
+            const bytes = execFileSync('git', ['show', `HEAD:${file.source}`]);
+            assert.equal(crypto.createHash('sha256').update(bytes).digest('hex'), file.sha256);
+            fs.writeFileSync(path.join(root, file.name), bytes);
+          }
           const data = path.join(root, 'data');
           fs.mkdirSync(data, {recursive: true});
           const auth = path.join(root, 'empty-auth.json');
           fs.writeFileSync(auth, '{}\n');
           fs.writeFileSync(path.join(root, 'metadata.json'), JSON.stringify({
-            baseline, diagnosticCommit: process.env.GITHUB_SHA, sha256,
+            baseline, diagnosticCommit: process.env.GITHUB_SHA, files,
             platform: process.platform, node: process.versions.node,
-            purpose: 'Diagnostic telemetry only. Classify per-case NDJSON, not job success. Original release gate unchanged.',
-            screenshotProtocolTimeoutMs: 10000, afterFailureProbeTimeoutMs: 1500,
-            freshDisplaySequences: [['production-passive', 'production-script'], ['production-script', 'production-passive']],
+            purpose: 'Native frame/readback diagnostic only. Original failure remains a failure even if a later control recovers; never a release gate.',
+            screenshotProtocolTimeoutMs: 10000, nativeIPCDeadlineMs: 1500, maximumHelpersPerOS: 2,
+            harnessOnlyForcedControls: false,
           }, null, 2) + '\n');
           fs.appendFileSync(process.env.GITHUB_ENV, [
-            ['DIAG_ROOT', root], ['DIAG_HARNESS', harness],
+            ['DIAG_ROOT', root],
             ['TMPDIR', root], ['TEMP', root], ['TMP', root],
             ['LH_DATA_DIR', data], ['LH_AUTH_FILE', auth],
           ].map(([key, value]) => `${key}=${value}\n`).join(''));
@@ -84,21 +88,25 @@ jobs:
       - name: Materialize the locked Electron binary (lazy installer)
         run: |
           node --input-type=commonjs -e 'const fs = require("node:fs"); const runtime = require("electron"); if (!fs.existsSync(runtime)) throw new Error("Locked Electron executable missing"); console.log("Locked Electron executable: " + runtime);'
-      - name: Collect counterbalanced existing SVG cases (not a release gate)
+      - name: Collect bounded native readback controls (not a release gate)
         run: |
           set -o pipefail
           runtime="$GITHUB_WORKSPACE/node_modules/electron/dist/electron"
-          xvfb-run -a node "$DIAG_HARNESS" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --app-entry "$GITHUB_WORKSPACE" --cases production-passive,production-script 2>"$DIAG_ROOT/passive-first.stderr.log" | tee "$DIAG_ROOT/passive-first.stdout.ndjson"
-          xvfb-run -a node "$DIAG_HARNESS" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --app-entry "$GITHUB_WORKSPACE" --cases production-script,production-passive 2>"$DIAG_ROOT/script-first.stderr.log" | tee "$DIAG_ROOT/script-first.stdout.ndjson"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then runtime="$runtime.exe"; fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run -a node "$DIAG_ROOT/native-readback.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --observer "$DIAG_ROOT/native-observer.cjs" --out "$DIAG_ROOT/readback-output" 2>"$DIAG_ROOT/readback.stderr.log" | tee "$DIAG_ROOT/readback.stdout.ndjson"
+          else
+            node "$DIAG_ROOT/native-readback.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --observer "$DIAG_ROOT/native-observer.cjs" --out "$DIAG_ROOT/readback-output" 2>"$DIAG_ROOT/readback.stderr.log" | tee "$DIAG_ROOT/readback.stdout.ndjson"
+          fi
       - name: Preserve telemetry and synthetic captures, including failures
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: svg-source-helper-${{ matrix.os }}
+          name: svg-native-readback-${{ matrix.os }}
           if-no-files-found: warn
           retention-days: 7
           path: |
             ${{ runner.temp }}/lh-svg-diagnostic/metadata.json
             ${{ runner.temp }}/lh-svg-diagnostic/*.stdout.ndjson
             ${{ runner.temp }}/lh-svg-diagnostic/*.stderr.log
-            ${{ runner.temp }}/lh-svg-diagnostic/lh-svg-matrix-*/**/capture.png
+            ${{ runner.temp }}/lh-svg-diagnostic/readback-output/**
