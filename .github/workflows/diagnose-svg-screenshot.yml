@@ -30,7 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
         with:
-          fetch-depth: 2
+          fetch-depth: 1
           persist-credentials: false
       - uses: actions/setup-node@v7
         with:
@@ -69,9 +69,13 @@ jobs:
           ].map(([key, value]) => `${key}=${value}\n`).join(''));
           NODE
       - name: Use exact frozen release source (no diagnostic product edits)
-        run: |
-          git checkout --detach a917e2ee2981fd534aa61a1ed62bfb7b413f2ec4
-          test "$(git rev-parse HEAD)" = a917e2ee2981fd534aa61a1ed62bfb7b413f2ec4
+        uses: actions/checkout@v7
+        with:
+          ref: a917e2ee2981fd534aa61a1ed62bfb7b413f2ec4
+          fetch-depth: 1
+          persist-credentials: false
+      - name: Assert frozen source identity
+        run: test "$(git rev-parse HEAD)" = a917e2ee2981fd534aa61a1ed62bfb7b413f2ec4
       - name: Install locked dependencies only (no plugin setup, fonts or build)
         # Include dev dependencies despite the production runtime environment.
         run: npm ci --include=dev
