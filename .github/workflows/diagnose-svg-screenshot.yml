@@ -17,8 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Linux completed its seven cases; only Windows needs the import retry.
-        os: [windows-2025]
+        # Counterbalance two existing cases; no new option sweep or product edit.
+        os: [ubuntu-24.04]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     defaults:
@@ -62,6 +62,7 @@ jobs:
             platform: process.platform, node: process.versions.node,
             purpose: 'Diagnostic telemetry only. Classify per-case NDJSON, not job success. Original release gate unchanged.',
             screenshotProtocolTimeoutMs: 10000, afterFailureProbeTimeoutMs: 1500,
+            freshDisplaySequences: [['production-passive', 'production-script'], ['production-script', 'production-passive']],
           }, null, 2) + '\n');
           fs.appendFileSync(process.env.GITHUB_ENV, [
             ['DIAG_ROOT', root], ['DIAG_HARNESS', harness],
@@ -83,16 +84,12 @@ jobs:
       - name: Materialize the locked Electron binary (lazy installer)
         run: |
           node --input-type=commonjs -e 'const fs = require("node:fs"); const runtime = require("electron"); if (!fs.existsSync(runtime)) throw new Error("Locked Electron executable missing"); console.log("Locked Electron executable: " + runtime);'
-      - name: Collect seven-case SVG telemetry (not a release gate)
+      - name: Collect counterbalanced existing SVG cases (not a release gate)
         run: |
           set -o pipefail
           runtime="$GITHUB_WORKSPACE/node_modules/electron/dist/electron"
-          if [[ "$RUNNER_OS" == "Windows" ]]; then runtime="$runtime.exe"; fi
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            xvfb-run -a node "$DIAG_HARNESS" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --app-entry "$GITHUB_WORKSPACE" 2>"$DIAG_ROOT/matrix.stderr.log" | tee "$DIAG_ROOT/matrix.stdout.ndjson"
-          else
-            node "$DIAG_HARNESS" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --app-entry "$GITHUB_WORKSPACE" 2>"$DIAG_ROOT/matrix.stderr.log" | tee "$DIAG_ROOT/matrix.stdout.ndjson"
-          fi
+          xvfb-run -a node "$DIAG_HARNESS" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --app-entry "$GITHUB_WORKSPACE" --cases production-passive,production-script 2>"$DIAG_ROOT/passive-first.stderr.log" | tee "$DIAG_ROOT/passive-first.stdout.ndjson"
+          xvfb-run -a node "$DIAG_HARNESS" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --app-entry "$GITHUB_WORKSPACE" --cases production-script,production-passive 2>"$DIAG_ROOT/script-first.stderr.log" | tee "$DIAG_ROOT/script-first.stdout.ndjson"
       - name: Preserve telemetry and synthetic captures, including failures
         if: always()
         uses: actions/upload-artifact@v7
@@ -102,6 +99,6 @@ jobs:
           retention-days: 7
           path: |
             ${{ runner.temp }}/lh-svg-diagnostic/metadata.json
-            ${{ runner.temp }}/lh-svg-diagnostic/matrix.stdout.ndjson
-            ${{ runner.temp }}/lh-svg-diagnostic/matrix.stderr.log
+            ${{ runner.temp }}/lh-svg-diagnostic/*.stdout.ndjson
+            ${{ runner.temp }}/lh-svg-diagnostic/*.stderr.log
             ${{ runner.temp }}/lh-svg-diagnostic/lh-svg-matrix-*/**/capture.png
