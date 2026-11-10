@@ -437,6 +437,23 @@ test("image/file-only paste prevents native insertion without deleting selected 
 	assert.equal(f.root.querySelectorAll(`[${PATH_SOURCE_ATTRIBUTE}]`).length, 1);
 });
 
+test("pasted image uploads insert a real file chip, preserve text, and participate in undo", async () => {
+	const original = globalThis.fetch;
+	const file = new File(["synthetic bytes"], "clipboard.png", { type: "image/png" });
+	try {
+		globalThis.fetch = async () => Response.json({ path: "C:\\learn\\clipboard-images\\pasted-image-123.png" });
+		const f = await fixture("Explain this ");
+		f.select(f.value.length);
+		const paste = await f.event("paste", { clipboardData: { items: [{ kind: "file", type: "image/png", getAsFile: () => file }], getData: () => "" } });
+		assert.equal(paste.defaultPrevented, true);
+		assert.match(f.value, /^Explain this /);
+		assert.match(f.value, /pasted-image-123.png/);
+		assert.equal(f.root.querySelectorAll(`[${PATH_SOURCE_ATTRIBUTE}]`).length, 1);
+		await f.event("keydown", { key: "z", ctrlKey: true });
+		assert.equal(f.value, "Explain this ");
+	} finally { globalThis.fetch = original; }
+});
+
 test("empty clipboard text stays a no-op before, during and after IME with a chip selected", async () => {
 	const source = "a `/course/notes.pdf` z";
 	const f = await fixture(source);

@@ -14,6 +14,7 @@ import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
+import { imagePastePending, useImagePastePending } from "@/components/pasted-images";
 import { AttachFilesButton } from "@/components/attach-files-button";
 import { SessionStarter } from "@/components/start-session";
 import type { TurnUsage } from "@/src/core";
@@ -36,6 +37,7 @@ export function Home({
 }) {
 	const router = useRouter();
 	const [topic, setTopic] = useState("");
+	const pastingImage = useImagePastePending();
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
 	 * dictation flush lands via setState, invisible to a closure that
@@ -104,6 +106,7 @@ export function Home({
 	 * state closure) and run. Applies before the setup/key guards too, so
 	 * an intercepted draft is the complete one. */
 	const start = () => {
+		if (imagePastePending()) return;
 		if (!dictation.active) {
 			void begin();
 			return;
@@ -111,6 +114,7 @@ export function Home({
 		void dictation.finish().then(() => begin());
 	};
 	const begin = async () => {
+		if (imagePastePending()) return;
 		const t = topicRef.current.trim();
 		if (!t || startingRef.current) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
@@ -284,7 +288,7 @@ export function Home({
 					<button
 						type="submit"
 						aria-label="Start session"
-						disabled={(!topic.trim() && !dictation.active) || busy}
+						disabled={(!topic.trim() && !dictation.active) || busy || pastingImage}
 						className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
 					>
 						<CornerDownLeftIcon className="size-5" />

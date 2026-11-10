@@ -4,6 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { FilePathChip } from "./file-path-chip";
 import { cn } from "../lib/utils";
+import { clipboardImages, savePastedImages } from "./pasted-images";
 import {
 	adjacentPathRange, atomicPathRange, clampPathSelection, insertFilePaths,
 	normalizePathEdit, normalizePathInputValue, pathInputStaticRange, PathInputHistory, readPathInput, readPathSelection, renderPathInput,
@@ -42,6 +43,7 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 	const callbacks = React.useRef({ onValueChange, singleLine });
 	const composing = React.useRef(false);
 	const [chips, setChips] = React.useState<ChipHost[]>([]);
+	const [pasteStatus, setPasteStatus] = React.useState("");
 	// Keep this text child immutable: SSR/hydration gets the complete draft,
 	// while subsequent React renders leave the browser-owned editable DOM alone.
 	const initial = React.useRef({ value: normalizePathInputValue(value, singleLine), autoFocus, singleLine });
@@ -174,6 +176,16 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 		function paste(event: ClipboardEvent) {
 			if (event.defaultPrevented) return;
 			event.preventDefault();
+			const images = callbacks.current.singleLine ? [] : clipboardImages(event.clipboardData);
+			if (images.length) {
+				setPasteStatus("Saving pasted image…");
+				void savePastedImages(images).then((paths) => {
+					if (!mounted) return;
+					stage(paths);
+					setPasteStatus("");
+				}).catch((error) => { if (mounted) setPasteStatus(error instanceof Error ? error.message : "Image paste failed."); });
+				return;
+			}
 			const text = event.clipboardData?.getData("text/plain") ?? "";
 			// Image/file/HTML-only clipboard contents are not text replacement.
 			if (text === "") return;
@@ -299,5 +311,6 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			onCompositionEnd={onCompositionEnd}
 		>{initial.current.value}</div>
 		{chips.map(({ host, path }) => createPortal(<FilePathChip path={path} contentEditable={false} />, host))}
+		{pasteStatus && <span role="status" className="block px-2 text-xs text-muted-foreground">{pasteStatus}</span>}
 	</>;
 });

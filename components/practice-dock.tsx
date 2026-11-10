@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
+import { imagePastePending, useImagePastePending } from "@/components/pasted-images";
 import { cn } from "@/lib/utils";
 
 /**
@@ -51,6 +52,7 @@ export interface PracticeDockProps {
 
 export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmit, onEscape, compactionRunning = false }: PracticeDockProps) {
 	const [thinking, setThinking] = useState("");
+	const pastingImage = useImagePastePending();
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
 	// the tail, never a stale closure.
@@ -69,6 +71,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 	);
 
 	const submit = () => {
+		if (imagePastePending()) return;
 		if (compactionRunning) return;
 		const text = thinkingRef.current.trim();
 		if (text.length === 0) return;
@@ -160,7 +163,7 @@ export function PracticeDock({ problemCallId, input, expanded, onExpand, onSubmi
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={thinking.trim().length === 0 || compactionRunning}
+						disabled={thinking.trim().length === 0 || compactionRunning || pastingImage}
 						onClick={() => submit()}
 						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>
