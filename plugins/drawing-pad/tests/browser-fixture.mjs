@@ -42,7 +42,7 @@ function setTheme(mode, colors = {}) {
   html.style.setProperty("--ring", palette["muted-foreground"]);
 }
 setTheme("dark");
-const histories = new Map(), attempts = [], markdownLog = [], errors = [], calls = [], heldMarkdown = [], heldDecodes = [];
+const histories = new Map(), attempts = [], markdownLog = [], errors = [], calls = [], heldMarkdown = [], heldDecodes = [], heldPoseReads = [];
 const nativeDecode = HTMLImageElement.prototype.decode;
 HTMLImageElement.prototype.decode = function () {
   const decode = nativeDecode.call(this);
@@ -110,7 +110,9 @@ const ctx = {
     }
     if (name === "get-session-poses") {
       if (window.fixture.failLifecycle) throw new Error("Fixture lifecycle read failure");
-      return { sessionId: value.sessionId, poses: acceptedPoseKeys(histories.get(value.sessionId) ?? []) };
+      const response = { sessionId: value.sessionId, poses: acceptedPoseKeys(histories.get(value.sessionId) ?? []) };
+      if (window.fixture.holdPoseReads) return new Promise(resolve => heldPoseReads.push(() => resolve(response)));
+      return response;
     }
     throw new Error(`Unexpected operation ${name}`);
   },
@@ -199,6 +201,10 @@ function submissionFor() {
 window.fixture = {
   errors, calls, attempts, markdownLog, mathSeen: false, diagramSeen: false, holdMarkdown: false, placement: undefined, failSetting: false, failLifecycle: false,
   releaseMarkdown() { for (const render of heldMarkdown.splice(0)) render(); },
+  pendingMarkdown() { return heldMarkdown.length; },
+  holdPoseReads: false,
+  pendingPoseReads() { return heldPoseReads.length; },
+  releasePoseReads() { window.fixture.holdPoseReads = false; for (const resolve of heldPoseReads.splice(0)) resolve(); },
   fontFetchMode: "normal", pendingFontFetches: 0, abortedFontFetches: 0,
   async fontCssProbe() {
     const root = document.createElement("div"); root.className = "drawing-pad-reference"; root.textContent = "Font probe"; document.body.append(root);

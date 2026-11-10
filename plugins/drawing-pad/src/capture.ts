@@ -47,7 +47,7 @@ async function waitForReference(root: HTMLElement, slots: readonly HTMLElement[]
   });
 }
 export async function captureBackground(root: HTMLElement | undefined, slots: readonly HTMLElement[], width: number, height: number,
-  background: string, signal: AbortSignal, frozenSize?: { width: number; height: number; pixelRatio: number }): Promise<Omit<Draft, "id" | "revision" | "strokes" | "hasInk">> {
+  background: string, signal: AbortSignal, frozenSize?: { width: number; height: number; pixelRatio: number }): Promise<Omit<Draft, "id" | "revision" | "strokes" | "hasInk" | "color">> {
   signal.throwIfAborted();
   if (width <= 0 || height <= 0) throw new Error("The drawing sheet is not visible.");
   const pixelRatio = frozenSize?.pixelRatio ?? Math.min(window.devicePixelRatio || 1, 2);

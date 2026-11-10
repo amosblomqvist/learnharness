@@ -31,7 +31,7 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
       if (current && [...sheets.sessions.values()].some(state => state.draft && state.draft.palette !== appPalette().key))
         void refreshPalette().catch(report);
     }
-  }, state => { if (open?.session === state) close(open); });
+  }, state => { if (open?.session === state) close(open); }, activeInk);
   function close(pad: OpenPad): void {
     if (pad.closed) return;
     pad.closed = true;
@@ -127,7 +127,8 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     const next = parseSettings(value);
     if (current && next.revision <= current.revision) return;
     current = next; sheets.setImageScale(next.imageScale);
-    if (appPalette().key === appliedPalette) sheets.setColor(activeInk());
+    if (appPalette().key === appliedPalette && [...sheets.sessions.values()].every(state => !state.draft || state.draft.palette === appliedPalette))
+      sheets.setColor(activeInk());
     else void refreshPalette().catch(report);
     if (settings) settings.update({ rows: rows(next) });
     else settings = ctx.registerSettings({ rows: rows(next) });
@@ -215,12 +216,17 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
         const state = sheets.sessions.get(context.sessionId);
         if (!state) return;
         context.signal.throwIfAborted();
-        await abortable(refreshPalette(), context.signal);
         if (open?.session === state) open.mounted?.flush();
         if (state.kind === "practice") {
           sheets.observePoses(state, acceptedPoseKeys(context.messages));
           await refreshPoses(state, context.signal);
         }
+        // Pose reads and palette rendering are asynchronous. Recheck the live
+        // palette after the last await, immediately before freezing the attempt.
+        do {
+          await abortable(refreshPalette(), context.signal);
+          paletteController.signal.throwIfAborted();
+        } while (appPalette().key !== appliedPalette || (state.draft && state.draft.palette !== appliedPalette));
         context.signal.throwIfAborted();
         const captured = sheets.capture(state);
         if (!captured) return;

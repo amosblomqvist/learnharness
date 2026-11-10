@@ -92,7 +92,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
       if (canvas.width !== pixelsWide) canvas.width = pixelsWide;
       if (canvas.height !== pixelsHigh) canvas.height = pixelsHigh;
       const history = active && activeDraftId === draft.id ? [...draft.strokes, active] : draft.strokes;
-      paintInk(canvas, width, height, history, sheets.color, origin);
+      paintInk(canvas, width, height, history, draft.color, origin);
     }
   };
   const point = (event: PointerEvent): Point => {
@@ -141,7 +141,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
       if (active && active.tool !== nextTool) flush();
       if (!active) { start(sample); continue; }
       const next = point(sample);
-      if (active.tool === "pen") paintSegment(canvas.getContext("2d")!, active.points.at(-1)!, next, sheets.color);
+      if (active.tool === "pen") paintSegment(canvas.getContext("2d")!, active.points.at(-1)!, next, state.draft.color);
       active.points.push(next);
     }
     const draft = state.draft;

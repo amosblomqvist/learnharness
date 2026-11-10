@@ -8,6 +8,8 @@ export interface Draft {
   /** Raster of the reference alone; empty on blank sheets. No viewport baked in. */
   background: string;
   backgroundColor: string;
+  /** Ink paired with this raster, independent of other pending sheet repaints. */
+  color: string;
   /** Original learner-visible content and the palette used for this raster. */
   reference?: Reference;
   palette?: string;
@@ -37,7 +39,8 @@ export class Sheets {
   private nextId = 0;
   private readonly listeners = new Set<() => void>();
   private readonly signatures = new WeakMap<Draft, string>();
-  constructor(private readonly changed: () => void, private readonly newProblem: (session: SessionSheet) => void) {}
+  constructor(private readonly changed: () => void, private readonly newProblem: (session: SessionSheet) => void,
+    private readonly currentColor: () => string = () => this.color) {}
   onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
   private publish(): void { this.changed(); for (const listener of this.listeners) listener(); }
   session(id: string, kind: SessionSheet["kind"]): SessionSheet {
@@ -50,9 +53,10 @@ export class Sheets {
     return state;
   }
   setColor(color: string): void {
-    if (this.color === color) return;
+    if (this.color === color && [...this.sessions.values()].every(state => !state.draft || state.draft.color === color)) return;
     this.color = color;
-    for (const state of this.sessions.values()) if (state.draft) state.draft = { ...state.draft, revision: state.draft.revision + 1 };
+    for (const state of this.sessions.values()) if (state.draft && state.draft.color !== color)
+      state.draft = { ...state.draft, color, revision: state.draft.revision + 1 };
     this.publish();
   }
   /** Atomically pair re-rendered reference backgrounds with their matching ink.
@@ -65,8 +69,8 @@ export class Sheets {
       const draft = state.draft, background = backgrounds.get(state);
       if (!draft) continue;
       const repaint = background?.id === draft.id && draft.palette !== palette;
-      if (recolor || repaint) {
-        state.draft = { ...draft, ...(repaint ? { background: background.background,
+      if (repaint || (draft.palette === palette && draft.color !== color)) {
+        state.draft = { ...draft, color, ...(repaint ? { background: background.background,
           backgroundColor: background.backgroundColor, palette } : {}), revision: draft.revision + 1 };
         changed = true;
       }
@@ -75,8 +79,8 @@ export class Sheets {
   }
   /** Delivery resolution is not a drawing edit and does not trigger practice resends. */
   setImageScale(imageScale: number): void { this.imageScale = imageScale; }
-  create(state: SessionSheet, sheet: Omit<Draft, "id" | "revision" | "strokes" | "hasInk">): Draft {
-    const draft = { ...sheet, id: ++this.nextId, revision: 0, strokes: [], hasInk: false };
+  create(state: SessionSheet, sheet: Omit<Draft, "id" | "revision" | "strokes" | "hasInk" | "color">): Draft {
+    const draft = { ...sheet, color: this.currentColor(), id: ++this.nextId, revision: 0, strokes: [], hasInk: false };
     state.draft = draft;
     state.pan = { x: 0, y: 0 };
     this.publish();
@@ -100,7 +104,7 @@ export class Sheets {
     if (!draft?.hasInk) return "";
     const cached = this.signatures.get(draft);
     if (cached !== undefined) return cached;
-    const ink = inkSignature(draft.strokes, this.color);
+    const ink = inkSignature(draft.strokes, draft.color);
     const signature = ink ? `${draft.id}:${draft.palette ?? ""}:${ink}` : "";
     this.signatures.set(draft, signature);
     return signature;
@@ -113,7 +117,7 @@ export class Sheets {
     const draft = state.draft;
     if (!draft) return undefined;
     const signature = this.signature(state);
-    return { session: state, draft, color: this.color, imageScale: this.imageScale, signature,
+    return { session: state, draft, color: draft.color, imageScale: this.imageScale, signature,
       sendImage: !!signature && (state.kind === "teaching" || signature !== state.sentSignature) };
   }
   accepted(captured: Capture): void {

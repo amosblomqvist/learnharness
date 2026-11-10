@@ -725,6 +725,46 @@ try {
   assert.equal(images(await call("submit", { accept: false }))[0].data, themedPNG);
   await button("Undo"); assert.equal(await ink(), 0);
   group("live mode/palette re-rasterization retains original Markdown, stroke geometry/Undo, pan, dimensions and coherent PNG colors");
+  // DP-IR-1: change mode inside the backend pose await, then hold the new
+  // reference render. The actual built exporter must not bypass that raster.
+  await page.reload({ waitUntil: "networkidle0" }); await page.waitForFunction(() => window.fixtureReady); await setScale(100);
+  const raceProblem = { ...problem, problem: { ...problem.problem, occurrence: occurrence("palette-pose") } };
+  await call("setHistory", "palette-pose", pose("palette-pose"));
+  await call("navigate", "palette-pose", "practice", raceProblem); await open(); await stroke();
+  await run(() => { window.fixture.holdPoseReads = true; window.fixture.raceSubmitDone = false;
+    window.fixture.raceSubmit = window.fixture.submit({ accept: false }).then(result => { window.fixture.raceSubmitDone = true; return result; }); });
+  await page.waitForFunction(() => window.fixture.pendingPoseReads() === 1);
+  await run(() => { window.fixture.holdMarkdown = true; }); await call("setTheme", "light");
+  await page.waitForFunction(() => window.fixture.pendingMarkdown() > 0); await call("releasePoseReads");
+  await page.evaluate(() => new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+  assert.equal(await run(() => window.fixture.raceSubmitDone), false);
+  await run(() => { window.fixture.holdMarkdown = false; window.fixture.releaseMarkdown(); });
+  const racedSubmission = await run(() => window.fixture.raceSubmit);
+  assert.equal(images(racedSubmission).length, 1); assert.deepEqual(await inkRGB(), [0, 0, 0]);
+  await assertPalettePNG(images(racedSubmission)[0].data, [239, 241, 245], [0, 0, 0], [76, 79, 105]);
+  group("DP-IR-1: theme changes during asynchronous practice pose reads wait for the matching raster before built PNG export");
+
+  // DP-IR-2: keep the old problem's repaint pending while a replacement sheet
+  // completes its own light capture. That new paper must immediately draw black.
+  await page.reload({ waitUntil: "networkidle0" }); await page.waitForFunction(() => window.fixtureReady); await setScale(100);
+  await call("setHistory", "palette-reset", pose("palette-old"));
+  await call("navigate", "palette-reset", "practice", { ...problem, problem: { ...problem.problem, occurrence: occurrence("palette-old") } });
+  await open(); await stroke();
+  await run(() => { window.fixture.holdMarkdown = true; }); await call("setTheme", "light");
+  await page.waitForFunction(() => window.fixture.pendingMarkdown() > 0);
+  await call("setHistory", "palette-reset", pose("palette-new")); await call("event", "record-changed");
+  await page.waitForFunction(() => !document.querySelector(".drawing-pad-ink"));
+  await run(() => { window.fixture.holdMarkdown = false; });
+  await call("setInput", { ...problem, problem: { statement: "NEW PROBLEM: compute $2+2$.", occurrence: occurrence("palette-new") } });
+  await open(); await stroke();
+  assert.deepEqual(await inkRGB(), [0, 0, 0], "fresh light paper cannot inherit the obsolete dark draft's ink");
+  assert.equal(await run(() => getComputedStyle(document.querySelector(".drawing-pad-paper")).backgroundColor), "rgb(239, 241, 245)");
+  const replacementReference = await bg(); await panBy(65, -35, "right"); const replacementPosition = await refPosition();
+  await call("releaseMarkdown"); await page.waitForFunction(() => !document.querySelector(".drawing-pad-reference"));
+  assert.equal(await bg(), replacementReference); assert.deepEqual(await refPosition(), replacementPosition); assert.deepEqual(await inkRGB(), [0, 0, 0]);
+  const replacementPNG = images(await call("submit", { accept: false }))[0]; assert.ok(replacementPNG);
+  await assertPalettePNG(replacementPNG.data, [239, 241, 245], [0, 0, 0], [76, 79, 105]);
+  group("DP-IR-2: a new problem's fresh light raster/black ink are atomic even while an obsolete original-reference repaint remains pending");
   assert.deepEqual(await run(() => window.fixture.errors), []); assert.deepEqual(denied, []); assert.deepEqual(errors, []);
   await call("dispose"); assert.equal(await page.$("#pad"), null);
   await page.reload({ waitUntil: "networkidle0" }); await page.waitForFunction(() => window.fixtureReady); await open(); assert.equal(await ink(), 0);
