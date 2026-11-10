@@ -161,14 +161,20 @@ export function browserServiceBinary(): string | null {
 const BROWSER_SERVICE_TIMEOUT_MS = 15_000;
 let browserServiceProc: import("node:child_process").ChildProcess | null = null;
 
-async function connectBrowserService(): Promise<import("puppeteer-core").Browser | null> {
+type ConnectedBrowserService = {
+	browser: import("puppeteer-core").Browser;
+	proc: import("node:child_process").ChildProcess;
+};
+
+async function connectBrowserService(): Promise<ConnectedBrowserService | null> {
 	const puppeteer = (await import("puppeteer-core")).default;
 	const { spawn } = await import("node:child_process");
 	let port: number | null = null;
+	let proc = browserServiceProc;
 
-	if (browserServiceProc && browserServiceProc.exitCode === null) {
+	if (proc && proc.exitCode === null) {
 		// Helper alive from a previous run — reuse its endpoint.
-		port = (browserServiceProc as { __cdpPort?: number }).__cdpPort ?? null;
+		port = (proc as { __cdpPort?: number }).__cdpPort ?? null;
 	}
 	if (port === null) {
 		const binary = browserServiceBinary();
@@ -181,17 +187,18 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 			path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".."),
 			"--browser-service",
 		];
-		const proc = spawn(binary, appArgs, {
+		proc = spawn(binary, appArgs, {
 			// Cast: the sanitizer is pure over a loose record; NODE_ENV is
 			// always present in a real process.env.
 			env: browserServiceSpawnEnv(process.env) as NodeJS.ProcessEnv,
 			stdio: ["ignore", "pipe", "pipe", "ipc"] as const,
 		});
 		browserServiceProc = proc;
+		const startingProc = proc;
 		port = await new Promise<number | null>((resolve) => {
 			let buf = "";
 			const timer = setTimeout(() => {
-				proc.kill();
+				startingProc.kill();
 				resolve(null);
 			}, BROWSER_SERVICE_TIMEOUT_MS);
 			const onData = (chunk: Buffer) => {
@@ -202,8 +209,8 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 					resolve(parseBrowserServiceLine(line));
 				}
 			};
-			proc.stdout!.on("data", onData);
-			proc.once("exit", () => {
+			startingProc.stdout!.on("data", onData);
+			startingProc.once("exit", () => {
 				clearTimeout(timer);
 				resolve(null);
 			});
@@ -215,54 +222,56 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 		(proc as { __cdpPort?: number }).__cdpPort = port;
 	}
 
+	if (!proc) return null;
 	try {
 		const version = await fetch(`http://127.0.0.1:${port}/json/version`);
 		const info = (await version.json()) as { webSocketDebuggerUrl?: string };
 		if (!info.webSocketDebuggerUrl) return null;
 		// connect ≠ launch: browser.close() below merely disconnects — the
 		// helper stays resident for the next job (IPC-owned lifetime).
-		return await puppeteer.connect({
+		const browser = await puppeteer.connect({
 			browserWSEndpoint: info.webSocketDebuggerUrl,
 			defaultViewport: null,
 		});
+		return { browser, proc };
 	} catch {
 		return null;
 	}
 }
 
-/** Serialized helper-page use: the helper owns ONE page target (Electron's
- *  CDP has no Target.createTarget — pages must be windows the helper made),
- *  so concurrent jobs queue here instead of fighting over one webContents. */
+/** Serialize acquisition, page use and invalidation together: the helper owns
+ * ONE page target. Queued jobs must acquire after the previous job retires or
+ * discards its helper, never capture a Browser while a handshake is pending. */
 let helperPageChain: Promise<unknown> = Promise.resolve();
 
 async function withBrowserPage<T>(fn: (page: import("puppeteer-core").Page) => Promise<T>): Promise<T> {
 	// Helper first (owner ruling 2026-10-10: the app's own Chromium primary,
 	// system Chrome fallback) — deterministic across users, zero install.
-	const helper = await connectBrowserService();
-	if (helper) {
-		const run = async (): Promise<T> => {
-			const pages = await helper.pages();
-			const page = pages.find((p) => p.target().type() === "page");
-			if (!page) throw new Error("browser service: no page target");
-			try {
-				return await fn(page);
-			} catch (error) {
-				if (error instanceof IsolatedPageCleanupError) {
-					// A failed retirement must never leave a live untrusted document
-					// on the shared target. The next job starts a fresh owned helper.
-					browserServiceProc?.kill();
-					browserServiceProc = null;
-				}
-				throw error;
-			} finally {
-				// Drop all page state (JS heap, listeners) between jobs.
-				await page.goto("about:blank").catch(() => {});
+	const run = async (): Promise<{ value: T } | null> => {
+		const helper = await connectBrowserService();
+		if (!helper) return null;
+		const pages = await helper.browser.pages();
+		const page = pages.find((p) => p.target().type() === "page");
+		if (!page) throw new Error("browser service: no page target");
+		try {
+			return { value: await fn(page) };
+		} catch (error) {
+			if (error instanceof IsolatedPageCleanupError) {
+				// A failed retirement must never leave a live untrusted document
+				// on the shared target. The next job starts a fresh owned helper.
+				helper.proc.kill();
+				if (browserServiceProc === helper.proc) browserServiceProc = null;
 			}
-		};
-		const next = helperPageChain.then(run, run);
-		helperPageChain = next.catch(() => {});
-		return next;
-	}
+			throw error;
+		} finally {
+			// Drop all page state (JS heap, listeners) between jobs.
+			await page.goto("about:blank").catch(() => {});
+		}
+	};
+	const next = helperPageChain.then(run, run);
+	helperPageChain = next.catch(() => {});
+	const result = await next;
+	if (result) return result.value;
 
 	// Chrome fallback: per-job launch, close on the way out (old semantics).
 	const puppeteer = (await import("puppeteer-core")).default;
