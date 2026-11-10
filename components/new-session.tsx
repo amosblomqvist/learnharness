@@ -43,7 +43,7 @@ const DOCK = "mx-auto w-full max-w-[46rem] px-4";
 export async function startDraftSession(
 	text: string,
 	fetchLike: typeof fetch,
-	mode?: "practice",
+	mode?: "practice" | "lesson",
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
@@ -54,10 +54,14 @@ export async function startDraftSession(
 	// from the pick bar creates its session WITH the graph context — the
 	// same contract as the home screen's practice send (the marker with
 	// [id] name: statement lines, target validation's truth set).
+	// Lesson drafts carry the kind marker (the lesson agent from turn 1);
+	// graph picks stay the practice send's affordance.
 	return starter.start(
 		mode === "practice"
 			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			: mode === "lesson"
+				? { title: t, kind: "lesson" }
+				: { title: t },
 		fetchLike,
 		settingsIdentity,
 	);
@@ -88,8 +92,10 @@ export function DraftShell({
 	startError?: boolean;
 	/** The practice draft (owner, 2026-10-04): ?mode=practice — the
 	 *  created session carries kind:"practice" and the copy changes
-	 *  (the practice agent opens; no probing). */
-	mode?: "teach" | "practice";
+	 *  (the practice agent opens; no probing). Lesson drafts
+	 *  (?mode=lesson) carry kind:"lesson" — the lesson agent opens
+	 *  with calibration and a syllabus. */
+	mode?: "teach" | "lesson" | "practice";
 	/** The first-run CTA (fix wave chunk B): the same "Set up your models"
 	 *  affordance home carries, rendered above the draft shell — passed by
 	 *  NewSession, which owns the configured state and the SetupDialog. */
@@ -170,11 +176,13 @@ export function DraftShell({
 						<Conversation className="h-full min-w-0 flex-1" initial="instant">
 							<ConversationContent className="min-h-full gap-0 p-0">
 								<ConversationEmptyState
-									title={mode === "practice" ? "New practice session" : "New session"}
+									title={mode === "practice" ? "New practice session" : mode === "lesson" ? "New lesson" : "New session"}
 									description={
 										mode === "practice"
 											? "Pick nodes from your knowledge graph, describe what you want to practice, or bring your own problem."
-											: "The teacher will open by probing what you already know."
+											: mode === "lesson"
+												? "Describe a topic; the lesson opens with a short syllabus, then teaches it section by section."
+												: "The teacher will open by probing what you already know."
 									}
 								/>
 							</ConversationContent>
@@ -229,7 +237,7 @@ export function DraftShell({
 	);
 }
 
-export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
+export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "lesson" | "practice" }) {
 	const router = useRouter();
 	const [text, setText] = useState("");
 	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
@@ -305,7 +313,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		startingRef.current = true;
 		setBusy(true);
 		setStartError(false);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
+		void startDraftSession(draft, fetch, mode === "practice" || mode === "lesson" ? mode : undefined, mode === "practice" ? picksRef.current : undefined,
 			starterRef.current, JSON.stringify(catalog?.slots.strong))
 			.then((target) => {
 				if (target) router.push(target);

@@ -20,7 +20,7 @@ This reference describes the [repository source](README.md#about-these-docs). Se
 
 ## Conversations and turns
 
-A **conversation** is a durable `ChatRecord` with native `LhMessage[]`, settings, optional plan, and usage logs. Missing `kind` means teaching; `practice` selects the practitioner. An **engine** is the resolved Pi model, stream function, and thinking level. An application **turn** constructs a fresh native Pi `Agent` from saved history; it can make several model calls and execute tools. It is not an HTTP connection or a single generation.
+A **conversation** is a durable `ChatRecord` with native `LhMessage[]`, settings, optional plan, and usage logs. Missing `kind` means teaching; `practice` selects the practitioner; `lesson` (lesson mode) selects the lesson agent from turn 1 — a content-forward variant: no prober phase, `plan_init` is the syllabus (one node = one section), each section is an expository document closed by one node-tagged exit-ticket check. The syllabus is generated eagerly; each section's content is written lazily, just before the learner reads it, with the checks and steering adapting the arc. Lesson prose extracts into the graph like teaching prose. An **engine** is the resolved Pi model, stream function, and thinking level. An application **turn** constructs a fresh native Pi `Agent` from saved history; it can make several model calls and execute tools. It is not an HTTP connection or a single generation.
 
 ```mermaid
 flowchart LR
@@ -63,6 +63,7 @@ Question drafts survive optimistic unmount in memory. Uncertain submissions reco
 | --- | --- | --- |
 | Prober | `probe` or `recall`, `ask_user_question`, `probe_done` | Read-only files, research/PDF dispatch; gated graph readers |
 | Teacher | `quiz` or `explain`, `ask_user_question`, `plan_init` | Read-only files, research/PDF/demo/visual dispatch; `show_image` |
+| Lesson | `quiz` or `explain`, `ask_user_question`, `plan_init` (the teacher's registry verbatim; its own doctrine in `prompts/lesson/`) | Same as the teacher's |
 | Practitioner | `problem`, `conclude` | Read-only files, research/PDF dispatch; gated graph readers |
 
 Mechanic choices, settings toggles, and readiness affect availability. Practice side tools are composed separately from teaching toggles. Claude-family agents can receive `send_to_user`. Argument healing precedes semantic validation; invalid calls return errors the model can correct.
@@ -70,6 +71,8 @@ Mechanic choices, settings toggles, and readiness affect availability. Practice 
 Question tools validate and execute server-side, returning a synthetic terminating placeholder. It stops a clean question pose, including mixed tool batches, but is not saved. The actual learner answer becomes the call's result later. The browser shuffles options and grades select questions; free recall exposes the committed answer for model judgment. Sibling pending questions are answered without inference until the last is resolved.
 
 A matching successful `probe_done` result selects the teacher and queues a fresh-agent handoff. A bare/refused call does not. Planning begins at that seam; displayed teaching begins at the first node-tagged `quiz`/`explain`, not `plan_init`. The plan is a validated Mermaid DAG, replaceable through `plan_init`. Current/visited positions derive from tagged calls, not grades. Waiting for the learner's natural reply to the plan is prompt doctrine, not an acceptance transaction.
+
+Lesson sessions skip the probe seam entirely (the handler builds the lesson agent from turn 1 on `kind`), and their phase fold starts at "plan" — the same first-tagged-call seam flips a lesson to "teach" when its first exit ticket is posed. Lesson-mode checks deviate deliberately from the per-step check cadence: one check per section (a methodology proposal, not a change to teach mode). A v2 research note, not implemented: hedge claims that fewer than three sources support when teaching across multiple attached sources ("fact quorum"). Document-sourced sessions (open PR #623) and the reference shelf (open PR #613) compose naturally with lesson mode once merged — the lesson's source-reading doctrine (structure first, spans on demand, cite the source) is written against the same attached-material path.
 
 Practice uses the same turn/persistence/recovery path, not a separate problem-set service. [`tools/practice.ts`](../src/agent/tools/practice.ts) commits a statement and solution with `problem`; `conclude` records the outcome and reveals that solution. A turn-scoped gate enforces one active problem. The post-conclusion pause is doctrine, not a terminating `conclude` result. Next adds an explicit marker. Practice outcomes are session evidence, not graph mastery; ordinary practice settlement skips extraction.
 

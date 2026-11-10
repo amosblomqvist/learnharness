@@ -50,8 +50,10 @@ import { usageWasAdmitted } from "./subscription-request-cycle.ts";
  */
 
 /** Which agent's prompt directory to compose. Practice (2026-10-04)
- *  composes ONLY its own directory — see prompt-segments.ts. */
-export type AgentKind = "prober" | "teacher" | "practice";
+ *  composes ONLY its own directory — see prompt-segments.ts. Lesson
+ *  (lesson mode) composes the teaching base + lesson/ fragments + the
+ *  shared appendix, like the teacher. */
+export type AgentKind = "prober" | "teacher" | "practice" | "lesson";
 
 // P2 (2026-09-19): segment discovery + override resolution live in ONE
 // canonical place now — src/store/prompt-overrides.ts (listSourceSegments
@@ -91,6 +93,7 @@ const composedInstructions: Record<AgentKind, string> = {
 	prober: composeInstructions("prober"),
 	teacher: composeInstructions("teacher"),
 	practice: composeInstructions("practice"),
+	lesson: composeInstructions("lesson"),
 };
 
 // Money channel (wave 4): the chat-handler passes a per-turn collector;
@@ -177,11 +180,11 @@ function makeQuestionStopper(kind: AgentKind) {
 }
 
 function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[]) {
-	// Practice never reaches the role fallback (the handler ALWAYS injects
-	// the session's conversation engine — practice rides the same
-	// conversation-spec resolution as teaching); the cast keeps AgentKind
-	// ("practice" is not a ModelRole) honest about that.
-	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
+	// Practice/lesson never reach the role fallback (the handler ALWAYS
+	// injects the session's conversation engine — both ride the same
+	// conversation-spec resolution as teaching); the narrowing keeps
+	// AgentKind ("practice"/"lesson" are not ModelRoles) honest about that.
+	const engine = opts.engine ?? piEngineFor(kind === "prober" ? "prober" : "teacher");
 	const stopper = makeQuestionStopper(kind);
 	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
 	const composedPrompt = opts.promptSwitches
@@ -346,8 +349,32 @@ export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOp
 	return baseAgentOptions("practice", opts, Object.values(tools));
 }
 
+/**
+ * The LESSON AGENT (lesson mode): built from turn 1 of a kind:"lesson"
+ * session — no prober→teacher split. Content-forward teaching: a short
+ * calibration (≤3 questions, ask_user_question — the quiz tool's nodeId
+ * requires the syllabus's tree, so pre-syllabus questions ride ask),
+ * then plan_init IS the syllabus (one node = one section), then per
+ * section an expository document closed by ONE nodeId-tagged
+ * type:"check" exit ticket. The registry is the teacher's verbatim
+ * (createTeacherTools — quizzing per the armed mechanic, ask, read-only
+ * files, show_image, plan_init, the job tools); only the doctrine
+ * (prompts/lesson/) differs. The question stopper applies unchanged; the
+ * Claude narration guard applies like the teacher's.
+ */
+export function createLessonAgent(
+	// Optional like the teacher's: without ctx the tools fall back to the
+	// validation-free bare question set (tests, bare agents).
+	ctx?: TeacherToolContext,
+	opts: AgentBuildOptions = {},
+) {
+	const tools = opts.tools ?? (ctx ? createTeacherTools(ctx, opts.toolToggles) : bareQuestionTools());
+	return baseAgentOptions("lesson", opts, Object.values(tools));
+}
+
 export type ProberAgent = ReturnType<typeof createProberAgent>;
 export type TeacherAgent = ReturnType<typeof createTeacherAgent>;
 export type PracticeAgent = ReturnType<typeof createPracticeAgent>;
-export type TeachingAgent = ProberAgent | TeacherAgent | PracticeAgent;
+export type LessonAgent = ReturnType<typeof createLessonAgent>;
+export type TeachingAgent = ProberAgent | TeacherAgent | PracticeAgent | LessonAgent;
 

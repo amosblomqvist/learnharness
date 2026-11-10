@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatKind, ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -34,7 +34,7 @@ function chatFile(id: string): string {
  *  phase, busy, pendingQuestion) is already announced by turn-started /
  *  turn-settled, which the sidebar refetches on. Silence here is law,
  *  not oversight. */
-function createChat(title: string, kind?: "practice"): ChatRecord {
+function createChat(title: string, kind?: Exclude<ChatKind, "teach">): ChatRecord {
 	const now = new Date().toISOString();
 	const record: ChatRecord = {
 		id: `chat_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`,
@@ -42,9 +42,9 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
 		createdAt: now,
 		updatedAt: now,
 		messages: [],
-		// Practice sessions carry the marker; teach stays ABSENT (absence
-		// reads as teach — pre-practice records never migrate).
-		...(kind === "practice" ? { kind: "practice" as const } : {}),
+		// Practice/lesson sessions carry the marker; teach stays ABSENT
+		// (absence reads as teach — pre-practice records never migrate).
+		...(kind !== undefined ? { kind } : {}),
 	};
 	fs.mkdirSync(PATHS.chats, { recursive: true });
 	writeChat(record);
@@ -105,9 +105,11 @@ function listChats(): ChatSummary[] {
 						// accepted — docs/archive/probe-teach-split.md §4), pending question
 						// from the native dangling-call scan. Wave D: both folds read
 						// the NATIVE record (core/phases.ts phaseAt3Lh +
-						// native-messages.ts danglingQuestionOf). Liveness (busy) is
+						// native-messages.ts danglingQuestionOf). Lesson records fold
+						// with their kind (start at "plan" — no probe phase).
+						// Liveness (busy) is
 						// NOT record-derived — the API route merges it (ChatListItem).
-						phase: phaseAt3Lh(messages),
+						phase: phaseAt3Lh(messages, undefined, summary.kind ?? "teach"),
 						pendingQuestion: danglingQuestionOf(messages) !== null,
 						// Practice: a posed problem with no conclude (the sidebar's
 						// "Problem waiting"); false on teaching sessions, which

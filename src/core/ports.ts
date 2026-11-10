@@ -11,6 +11,7 @@
 
 import type { LhMessage } from "./native-messages.ts";
 import type {
+	ChatKind,
 	ChatRecord,
 	ImageSnapshot,
 	ChatSettings,
@@ -33,9 +34,9 @@ import type { UserSettings } from "./settings.ts";
 
 export interface ChatStore {
 	/** Create a session record (persisted immediately). */
-	/** Create a session record; kind "practice" marks a practice session
-	 *  (absent = teach, the default). */
-	createChat(title: string, kind?: "practice"): ChatRecord;
+	/** Create a session record; kind "practice"/"lesson" marks the
+	 *  non-default session kinds (absent = teach, the default). */
+	createChat(title: string, kind?: Exclude<ChatKind, "teach">): ChatRecord;
 	/** The full record, or null if unknown id / corrupt file. */
 	getChat(id: string): ChatRecord | null;
 	/** All sessions, newest activity first (the sidebar's list view). */

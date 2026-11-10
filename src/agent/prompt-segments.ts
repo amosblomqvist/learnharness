@@ -124,10 +124,10 @@ export function effectivePromptSegments(
 	});
 }
 
-/** Every known segment path across both agents (route validation). */
+/** Every known segment path across the agents (route validation). */
 export function allSegmentPaths(): string[] {
 	const paths = new Set<string>();
-	for (const agent of ["prober", "teacher", "practice"] as const) {
+	for (const agent of ["prober", "teacher", "practice", "lesson"] as const) {
 		for (const segment of listSourceSegments(agent)) paths.add(segment.path);
 	}
 	return [...paths].sort();

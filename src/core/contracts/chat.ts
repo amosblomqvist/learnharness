@@ -24,8 +24,12 @@ import type { EmissionStats } from "./graph.ts";
 /** The session's kind (practice sessions, owner 2026-10-04): "teach" is
  *  the default and ABSENT on pre-practice records (no migration — absence
  *  reads as teach); "practice" marks an adaptive-practice session — the
- *  practice agent, its two tools, no extraction, no graph writes. */
-export type ChatKind = "teach" | "practice";
+ *  practice agent, its two tools, no extraction, no graph writes.
+ *  "lesson" (lesson mode): a content-forward teaching session — the
+ *  lesson agent from turn 1 (no prober phase), a section-structured
+ *  syllabus via plan_init, one exit-ticket check per section; lesson
+ *  prose EXTRACTS into the graph like teach prose. */
+export type ChatKind = "teach" | "practice" | "lesson";
 
 export interface ChatRecord {
 	id: string;

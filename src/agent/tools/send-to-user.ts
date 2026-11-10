@@ -4,14 +4,16 @@ import { SEND_TO_USER_TOOL } from "../../core/native-messages.ts";
 import { CLAUDE_CODE_PROVIDER } from "../claude-code/constants.ts";
 import { serverExecute } from "../tool-execute.ts";
 
-/** One availability rule for the tool and its teacher-only delivery guard.
- * Practice uses ordinary final prose; explicit registries remain caller-owned. */
+/** One availability rule for the tool and its teacher-side delivery guard.
+ *  Lesson (lesson mode) is a teaching-side agent — it delivers documents
+ *  through the same channel. Practice uses ordinary final prose; explicit
+ *  registries remain caller-owned. */
 export function sendToUserApplies(
 	kind: string,
 	model: { provider: string; id: string },
 	toolsOverridden: boolean,
 ): boolean {
-	return (kind === "prober" || kind === "teacher") && !toolsOverridden &&
+	return (kind === "prober" || kind === "teacher" || kind === "lesson") && !toolsOverridden &&
 		(model.provider === CLAUDE_CODE_PROVIDER || model.id.toLowerCase().includes("claude"));
 }
 

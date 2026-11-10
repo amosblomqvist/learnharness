@@ -52,7 +52,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, BookOpenIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { SessionFind } from "@/components/session-find";
@@ -63,7 +63,7 @@ import { GraphContextCard, type GraphContextData } from "@/components/graph-cont
 import { TopBar } from "@/components/top-bar";
 import type { ArtifactPartProps, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
-import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
+import { PhaseChip, PhaseDivider, planNodeCount } from "@/components/phase-divider";
 import {
 	CompactionCutDivider,
 	CompactionMomentDivider,
@@ -230,8 +230,9 @@ export function Chat({
 	initialError?: string;
 	/** The session kind (practice sessions, owner 2026-10-04): practice
 	 *  renders no phase chip (no probe→teach arc applies) and a Practice
-	 *  tag rides the header instead. */
-	kind?: "teach" | "practice";
+	 *  tag rides the header instead. Lesson mode: a Lesson tag rides the
+	 *  header and the phase arc reads Syllabus → Lesson. */
+	kind?: "teach" | "lesson" | "practice";
 	initialPrompt?: string;
 	/** A teacher turn is running server-side but attached to no client
 	 * (navigated away mid-turn, returned while in flight). */
@@ -515,7 +516,7 @@ export function Chat({
 	// A pending question can never precede its phase's seam in the transcript (the teacher's turn
 	// ends at the question call), so the session's current phase IS the
 	// question's phase.
-	const requiresReveal = pending !== null && questionNeedsReveal(pending.tool, pending.input, phaseAt3(messages));
+	const requiresReveal = pending !== null && questionNeedsReveal(pending.tool, pending.input, phaseAt3(messages, undefined, kind));
 
 	/* The READING-THINKING channel (owner 2026-10-03): a draft field for
 	 * thinking while reading the teaching prose, mounted while a check waits
@@ -555,7 +556,12 @@ export function Chat({
 	// The phase at every message (one linear fold): the transcript draws a
 	// color-coded dotted divider at each boundary; the header chip reads the
 	// session's current phase.
-	const phases = useMemo(() => phaseTimeline(messages), [messages]);
+	const phases = useMemo(() => phaseTimeline(messages, kind), [messages, kind]);
+	/* Lesson mode: the Syllabus divider rides the FIRST assistant group —
+	 * a lesson starts in "plan" (calibration + the syllabus live there), so
+	 * unlike teach mode there is no probe-handoff marker to pin the divider
+	 * to. The teach seam below (first tagged exit ticket) closes the arc. */
+	const firstAssistantIndex = useMemo(() => messages.findIndex((m) => m.role === "assistant"), [messages]);
 
 	const [composerDraftRevision, setComposerDraftRevision] = useState(0);
 	/* The composer draft ref is synchronous, so sends and dictation flushes
@@ -1382,7 +1388,7 @@ export function Chat({
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
-					{kind === "practice" ? (
+									{kind === "practice" ? (
 						<span
 							data-testid="phase-chip"
 							data-phase="practice"
@@ -1393,7 +1399,22 @@ export function Chat({
 							Practice
 						</span>
 					) : (
-						<PhaseChip phase={phases.at(-1) ?? "probe"} />
+						<>
+							{/* Lesson mode: a quiet Lesson tag beside the phase arc —
+							    the Practice-tag pattern; the arc itself reads
+							    Syllabus → Lesson (phase-divider's lesson labels). */}
+							{kind === "lesson" && (
+								<span
+									data-testid="kind-tag"
+									aria-hidden="true"
+									className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
+								>
+									<BookOpenIcon className="size-3" />
+									Lesson
+								</span>
+							)}
+							<PhaseChip phase={phases.at(-1) ?? "probe"} kind={kind} />
+						</>
 					)}
 				</TopBar>
 
@@ -1486,12 +1507,24 @@ export function Chat({
 									message with content — a replacement ternary swallowed the entire
 									first lesson block (the Lacan session, 2026-09-27). */}
 									{m.role === "assistant" &&
-									mi > 0 &&
-									phases[mi] === "teach" &&
-									phases[mi - 1] !== "teach" &&
-									teachStepIndex(m.parts) === -1 ? (
-										<PhaseDivider key={`teach-${m.id || `m-${mi}`}`} phase="teach" />
-									) : null}
+										mi > 0 &&
+										phases[mi] === "teach" &&
+										phases[mi - 1] !== "teach" &&
+										teachStepIndex(m.parts) === -1 ? (
+											<PhaseDivider key={`teach-${m.id || `m-${mi}`}`} phase="teach" kind={kind} />
+										) : null}
+										{/* The LESSON plan seam (lesson mode): the Syllabus divider
+										    rides the first assistant group — everything from the
+										    session's opening through the syllabus's presentation is
+										    the "plan" phase; the first exit ticket closes it below. */}
+										{m.role === "assistant" && kind === "lesson" && mi === firstAssistantIndex ? (
+											<PhaseDivider
+												key={`lesson-syllabus-${m.id || `m-${mi}`}`}
+												phase="plan"
+												kind="lesson"
+												nodeCount={planNodeCount(m)}
+											/>
+										) : null}
 									{m.role === "user" ? (
 										/* THE DOCUMENT ROW (owner round, 2026-10-05): no right-aligned
 										    bubble — the transcript reads as a document. User text is a
@@ -1572,7 +1605,7 @@ export function Chat({
 														);
 													case "step-start":
 														if (teachBoundary)
-															return <PhaseDivider key={`teach-step-${pi}`} phase="teach" />;
+															return <PhaseDivider key={`teach-step-${pi}`} phase="teach" kind={kind} />;
 														return pi > 0 ? <Separator key={pi} className="my-3" /> : null;
 													case "data-plan-block":
 														// The plan in the chat (wave 4): a frozen snapshot

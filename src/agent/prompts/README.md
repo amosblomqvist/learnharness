@@ -1,6 +1,6 @@
 # Prompt composition
 
-The runtime composes prompts for **prober**, **teacher** and **practice** agents. The source of truth is [`listSourceSegments` / `effectivePromptSegments`](../prompt-segments.ts); [`composeInstructions`](../teacher-agent.ts) selects effective text, trims each segment, drops empty segments and joins them with `\n\n---\n\n`. Non-fragment documentation such as this README never enters the prompt.
+The runtime composes prompts for **prober**, **teacher**, **lesson** and **practice** agents. The source of truth is [`listSourceSegments` / `effectivePromptSegments`](../prompt-segments.ts); [`composeInstructions`](../teacher-agent.ts) selects effective text, trims each segment, drops empty segments and joins them with `\n\n---\n\n`. Non-fragment documentation such as this README never enters the prompt.
 
 ## Composition order
 
@@ -8,7 +8,10 @@ The runtime composes prompts for **prober**, **teacher** and **practice** agents
 |---|---|
 | Prober | [`system-prompt.md`](../system-prompt.md) → sorted `prober/` fragments → sorted `shared/` fragments |
 | Teacher | `system-prompt.md` → sorted `teacher/` fragments → sorted `shared/` fragments |
+| Lesson | `system-prompt.md` → sorted `lesson/` fragments → sorted `shared/` fragments (the full appendix — no allowlist) |
 | Practice | sorted `practice/` fragments → the curated shared appendix below; **no teaching base** |
+
+Lesson mode (kind `lesson`) composes the teaching base and the shared register like the teacher, but its own `lesson/` directory carries the doctrine: the syllabus (`plan_init` is the table of contents — one node = one section), section documents (guess-opener → connected exposition → worked example → key-point callout → takeaway), one exit-ticket check per section (`nodeId` + `type: "check"`), brief calibration (≤3 `ask_user_question` questions or none — never a probe), source reading (structure first, spans on demand, cite the source, stay grounded), and steering. The base's measure-first doctrine is explicitly suspended there; pinned by `tests/lesson-prompts.test.ts`.
 
 Directory discovery accepts only filenames matching `^\d+-[\w.-]+\.md$` and sorts them lexicographically by filename. Keep numeric prefixes consistently padded when order matters. The teaching base supplies the agent's purpose/philosophy; voice, accuracy, mental-model, question, confidence, file and formatting guidance are separate shared fragments. The teacher's method and planning/teaching doctrine live in its own directory; probing doctrine lives in `prober/`.
 
@@ -22,6 +25,7 @@ Source files are the default instructions. User override files mirror segment ke
 system-prompt.md
 prober/<fragment>.md
 teacher/<fragment>.md
+lesson/<fragment>.md
 practice/<fragment>.md
 shared/<fragment>.md
 ```
@@ -35,6 +39,7 @@ The available segment list always comes from current source discovery. An overri
 ## Phases and tool contracts
 
 - Teaching sessions start with the prober. A successful `probe_done` call **and matching result** select the teacher on later turns; a bare/refused call does not. The teacher plans and teaches with its own tool registry. The displayed plan → teach boundary is the first tagged `quiz`/`explain` call, not simply `plan_init`.
+- Lesson sessions (kind `lesson`) use the lesson prompt from turn one — no prober, no `probe_done`. `plan_init` is the syllabus; each section document ends with one tagged check. Calibration rides `ask_user_question` (the quizzing tool's `nodeId` requires the syllabus's tree, so pre-syllabus graded questions are structurally refused).
 - Practice sessions use the practice prompt from turn one. `problem` commits a solution before posing; `conclude` reveals it. The doctrine requires a pause after conclusion until the learner explicitly moves on. This is a conversational agent, not the retired problem-set generation/grading pipeline.
 - Prompt instructions are not a substitute for structural validation. For example, `plan_init` can rewrite the map, and the conclude pause is doctrine rather than a terminating execute result. Read the actual registry and schemas before describing a behavior as enforced.
 

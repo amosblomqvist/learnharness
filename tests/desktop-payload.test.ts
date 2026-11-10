@@ -28,6 +28,9 @@ function withPayload(test: (fixture: {
 		write(path.join("public", "asset.txt"));
 		write(path.join(STANDALONE, PROMPT));
 		write(path.join(STANDALONE, "src", "agent", "prompts", "teacher", "20-teaching.md"));
+		// Lesson mode: the lesson agent's fragment directory rides the same
+		// trace (the script's prompt-asset sanity list grew with it).
+		write(path.join(STANDALONE, "src", "agent", "prompts", "lesson", "05-syllabus.md"));
 		test({ root, write, run: () => spawnSync(process.execPath, [path.join(root, "scripts", "build-server.mjs")], {
 			cwd: root, encoding: "utf8", timeout: 10_000,
 		}) });
