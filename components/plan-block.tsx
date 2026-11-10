@@ -529,11 +529,8 @@ export function PlanDiagram({
 			viewBox={viewBoxOverride ?? `${ox - pad} ${oy - pad} ${vbW} ${vbH}`}
 			className={`block ${fill ? "h-full w-full" : `h-auto${naturalSize ? "" : " w-full"}`}${textCapScale ? " mx-auto" : ""}`}
 			style={{
-				// The READING font (owner, 2026-09-26) — via the runtime var, NOT
-				// the font-prose utility: @theme inline bakes the literal into
-				// utilities (the --font-title trap), which would freeze the
-				// graph at Source Sans 3 and ignore the Appearance reading-font
-				// override. var(--font-prose) rides it.
+				// The READING font (owner, 2026-09-26) — the same runtime token
+				// consumed by font-prose, so Appearance changes reach SVG text.
 				fontFamily: "var(--font-prose)",
 				...(textCapScale
 					? { maxWidth: `${Math.round(vbW * textCapScale * 100) / 100}px` }
