@@ -13,20 +13,14 @@ import type { EmissionStats } from "./graph.ts";
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
-/** One persisted session: data/chats/<id>.json. Wave B (owner-approved
- * 2026-09-26): the stored messages are pi-NATIVE history (LhMessage — the
- * agent loop's own shapes, provider/model/usage/thinkingSignature stamped
- * by pi) — the canonical session record IS the agent state; replay is
- * `state.messages = record.messages` + continue(). The client-shaped view
- * is the client's own grouping fold (core/view.ts, Wave D) — a pending quiz
- * is an unanswered question tool call, which is exactly what makes
- * resume-mid-question free. */
-/** The session's kind (practice sessions, owner 2026-10-04): "teach" is
- *  the default and ABSENT on pre-practice records (no migration — absence
- *  reads as teach); "practice" marks an adaptive-practice session — the
- *  practice agent, its two tools, no extraction, no graph writes. */
+/** Session kind: teach is the default when a saved record omits kind.
+ * Practice uses the adaptive-practice agent without teaching extraction or
+ * graph writes. Reading an absent kind does not require a record migration. */
 export type ChatKind = "teach" | "practice";
 
+/** One persisted native session under data/chats/<id>.json. Messages retain
+ * native agent history; transcript rendering groups them into a separate view.
+ * Usage, images, plan state and side conversations are session-owned records. */
 export interface ChatRecord {
 	id: string;
 	title: string;
@@ -35,22 +29,17 @@ export interface ChatRecord {
 	messages: LhMessage[];
 	/** Session-local processed pictures; artifact records carry references only. */
 	imageSnapshots?: Record<string, ImageSnapshot>;
-	/** The session's kind — absent = teach (pre-practice records). */
+	/** The session's kind; an absent field reads as teach. */
 	kind?: ChatKind;
-	/** The session's plan tree (vision §2) — written by plan tools via saveTree. */
+	/** The session's plan tree, written by the native plan tools. */
 	tree?: PlanTree;
-	/** Append-only usage log (observability, 2026-09): one entry per model
-	 * turn. DELIBERATELY a parallel log, not per-message metadata — the client
-	 * re-POSTs its message list every turn and its copies never carry
-	 * server-stamped fields, so anything inside message objects gets clobbered
-	 * by the next persist. Keyed by messageId so the transcript view can fold
-	 * each entry onto its message; aggregates are folds over this log
-	 * (core/prices.ts). */
+	/** Append-only usage log, separate from message history: one entry per billed
+	 * turn, deduplicated by request identity. messageId associates usage with the
+	 * transcript; token/cost aggregates are computed from the log at read time. */
 	turns?: TurnUsage[];
-	/** Append-only background-extraction usage log (2026-09 observability):
-	 *  one entry per finished pipeline run on THIS chat — extraction is real
-	 *  spend too. Same parallel-log discipline as `turns` (nothing rides
-	 *  inside messages). Keyed by startedAt; idempotent appends. */
+	/** Append-only background-extraction usage for this chat, separate from
+	 * messages. Finished runs include failed runs with usage; appends are
+	 * idempotent by startedAt. */
 	extractions?: ExtractionRunUsage[];
 	/** Per-chat model/thinking overrides for the conversation agents. */
 	settings?: ChatSettings;
@@ -58,28 +47,22 @@ export interface ChatRecord {
 	 * shares one thread. Every main request appends new raw exchanges across
 	 * all threads; already-recorded teacher history is never rewritten. */
 	sideChats?: SideChatThread[];
-	/** SCHEMA STAMP (schema-versioning wave, owner 2026-10-10): LAZY v1 —
-	 *  existing records stay unstamped (absence reads as v1); every write
-	 *  stamps the current version. A record stamped NEWER than this build
-	 *  (the downgrade scenario) is REFUSED on read: a read-modify-write
-	 *  store must never rewrite what it doesn't understand. */
+	/** Schema version. Absence denotes version 1; writes stamp the current
+	 * supported version. Reads refuse records stamped newer than this build
+	 * so a downgraded app cannot rewrite an unsupported record. */
 	version?: number;
 }
 
 /** The chat record format this build writes and understands. */
 export const CURRENT_CHAT_VERSION = 2;
 
-/** The conversation agents' runtime model choice (model-control wave,
- *  2026-09-12): a per-chat override of config.ts's pinned prober/teacher
- *  spec. Absent fields fall back to config; written by the model picker
- *  (PUT /api/chats/[id]/settings) and read at turn composition — the
- *  agents are stateless per turn, so a change takes effect on the next
- *  turn by construction. Background sub-agents are NEVER overridden
- *  (config-pinned: they're infrastructure, not conversation). */
+/** Per-session model and thinking choices for native conversation agents.
+ * Each absent field falls back independently to the strong model slot; no
+ * configured model means conversation work is unavailable. Choices resolve
+ * when composing a turn, not midway through an active request. Background
+ * worker roles use their own model resolution. */
 export interface ChatSettings {
-	/** pi-ai catalog coordinates: the provider that owns the model. Only
-	 *  "openrouter" is configured today; the field exists so a second
-	 *  provider needs no schema change. */
+	/** Explicit provider-qualified model coordinates from the host catalog. */
 	model?: { provider: string; id: string };
 	/** pi thinking level — must be in the chosen model's supported list
 	 *  (getSupportedThinkingLevels; enforced by the settings route). */
@@ -169,26 +152,24 @@ export interface SideChatMessage {
 export interface SideChatThread {
 	id: string;
 	anchor: SideChatAnchor;
-	/** Window state (open window vs. the one-line closed bar). */
+	/** Saved open/closed state for this thread. */
 	open: boolean;
 	createdAt: string;
 	messages: SideChatMessage[];
-	/** Legacy one-shot cutoff, retained when reading earlier development
-	 * records. New delivery uses immutable native update entries instead. */
+	/** Compatibility snapshot retained when reading records that use a one-shot
+	 * context cutoff. Current delivery uses immutable native update entries. */
 	contextSnapshot?: SideChatMessage[];
 }
 
-/** One model call's token accounting — the SDK's LanguageModelUsage
- * flattened to the fields we persist (undefined = provider didn't report;
- * renderers show absent, never zero). */
+/** Persisted token accounting for one model call. Undefined means the
+ * provider did not report that field; absence must not be interpreted as zero. */
 export interface CallUsage {
 	/** Pi-normalized fresh input tokens; cache buckets are disjoint. */
 	inputTokens: number | undefined;
 	outputTokens: number | undefined;
 	/** Cached input tokens READ (billed at the cache-read rate, if any). */
 	cacheReadTokens: number | undefined;
-	/** Input tokens written to the cache this call (OpenRouter bills writes
-	 * for some providers; undefined = not reported/not billed). */
+	/** Input tokens written to the cache this call; undefined when not reported. */
 	cacheWriteTokens: number | undefined;
 	/** Subset of cacheWriteTokens written with one-hour retention. Missing
 	 * on older logs; new native captures explicitly record zero if absent. */
@@ -197,15 +178,13 @@ export interface CallUsage {
 	reasoningTokens: number | undefined;
 }
 
-/** One billing turn: one full invocation of the teacher (a client turn or a
- * wake turn — same handler, same log). A turn with tool calls spans several
- * agent steps, and each step bills separately. Capture lands at the persist
- * seam (server); cost is INFERRED at read time from core/prices.ts. */
+/** Usage for one native conversation-handler invocation, including user and
+ * wake turns. A tool-using turn may span several separately billed model calls.
+ * Accounting is captured when the turn persists; cost is estimated from the
+ * recorded calls and model catalog at read time. */
 export interface TurnUsage {
-	/** Unique per REQUEST (turn): one invocation of the handler — the
-	 *  idempotency key for the append-only log. Continuation turns share a
-	 *  response message id (the SDK coalesces them); keying on messageId
-	 *  would swallow their usage. */
+	/** Request identity for one handler invocation and the append-only log's
+	 * idempotency key. Distinct from the transcript association in messageId. */
 	id: string;
 	/** The assistant message the turn produced — provenance, keys this
 	 *  entry to the transcript (the block this turn "belongs" to). */
@@ -310,16 +289,10 @@ export interface PlanBlockData {
 	edges: Array<{ from: string; to: string }>;
 }
 
-/** The list view's shape (messageCount instead of full messages) + the
- *  per-session status the picker renders. `phase` and `pendingQuestion`
- *  derive from the stored record (tree + messages); the store computes
- *  them in listChats. Liveness (`busy`) is NOT record-derived — the API
- *  route merges it in (see ChatListItem).
- *
- *  Phase semantics (three phases, event-driven — docs/archive/probe-teach-split.md
- *  §4): probe ends at the concluded probe_done, plan ends at the successful
- *  plan_init; derived from the transcript (core/phases.ts phaseAt3).
- */
+/** Saved-session summary with a message count instead of full history.
+ * Phase and pending-input flags derive from native transcript events.
+ * Live turn/compaction state is added separately in ChatListItem, not
+ * inferred from the saved record. */
 export interface ChatSummary {
 	id: string;
 	title: string;
@@ -328,32 +301,24 @@ export interface ChatSummary {
 	/** Normalized kind (absent record field reads as teach). */
 	kind: ChatKind;
 	messageCount: number;
-	/** The session's current phase, derived from the stored plan tree. */
+	/** Transcript-derived phase: probe ends at successful probe_done completion;
+	 * plan ends at the first node-tagged teaching question call, not its answer. */
 	phase: Phase3;
 	/** An unanswered quiz/ask question is waiting for the learner. */
 	pendingQuestion: boolean;
-	/** Practice sessions (2026-10-04): a posed problem with no conclude —
-	 *  the sidebar meta's "Problem waiting". False on teaching sessions. */
+	/** A practice problem is posed but not concluded. False on teaching sessions. */
 	pendingProblem: boolean;
-	/** The record's model-control settings — rides the list payload via the
-	 *  summary spread (the picker never needs it from here; the full record
-	 *  is its source). */
+	/** Saved per-session model/thinking choices included in the list payload. */
 	settings?: ChatSettings;
 }
 
-/** The sidebar's session row: a summary + live liveness. The chats list
- *  route attaches `busy` from the turn-liveness registry ONLY — a running
- *  teach turn (owner, minimal-color round: background jobs no longer
- *  count; the sidebar's Background agents section is their channel, and
- *  the row spinner means exactly "a turn is in flight"). The store itself
- *  can't see liveness (import law: store never imports server), hence the
- *  split at exactly the record/liveness seam. */
+/** Session-list row combining a saved summary with live server state.
+ * busy means a native conversation turn is in flight; detached background
+ * jobs do not make the session busy. These flags are not persisted status. */
 export interface ChatListItem extends ChatSummary {
 	busy: boolean;
-	/** Live compaction liveness (turn-liveness's twin): true while a
-	 *  background context compaction holds the chat's model gate. The
-	 *  route attaches it from the compaction registry — never
-	 *  record-derived (the marker persists, the RUN is ephemeral). */
+	/** True while background context compaction holds the chat's model gate.
+	 * Supplied by the live compaction registry, not by saved compaction markers. */
 	compacting: boolean;
 }
 

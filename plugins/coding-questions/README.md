@@ -11,7 +11,17 @@ LearnHarness's user permissions and inherited environment: they can access files
 network, and installed programs. A temporary working directory, timeout, and output
 limits are operational safeguards, not security isolation. Use only with code you trust.
 
-## Requirements and installation
+## Core plugin and requirements
+
+Enable Coding questions in **Settings → Core plugins**. Its code ships and updates
+with the app; writable plugin files live under
+`<learning data>/core-plugin-data/coding-questions/`. This source project is reference
+material, not an installable Community copy. `coding-questions` is a reserved Core ID,
+even when disabled or missing. A Community fork needs its own manifest/folder ID and
+must reconsider conflicting contribution/type IDs, tool names and fence names;
+changing the package ID alone does not rename `coding_question` or `coding_problem`.
+Do not install this build into a Community `plugins/coding-questions/` folder.
+
 
 Requires a matching LearnHarness build with the public native-question grading API
 (`registerQuestionType` with `gradeAnswer`), `registerQuestionRenderer`, the practice APIs
@@ -19,8 +29,8 @@ Requires a matching LearnHarness build with the public native-question grading A
 `ctx.ui.mountBadge`/`ctx.ui.mountMarkdown`. Both registrations are required for this version.
 Exact placement of Test output and teaching Model solution uses the optional answered/
 submitted `footerContainer` slots; compatible hosts without these slots keep a readable
-body fallback. The manifest's `minAppVersion: 0.4.1` is only the numeric baseline:
-the released 0.4.1 app does **not** provide these newer APIs.
+body fallback. The manifest's `minAppVersion` is only a numeric baseline, not proof that a host
+provides every required capability. Use matching host documentation and types.
 
 Runtimes, compilers, shells, and any required libraries must already be installed on
 the user's machine. This plugin bundles none of them and installs nothing. Programs
@@ -28,18 +38,11 @@ resolve through the app process's **PATH**, which may differ from an interactive
 terminal, or through an explicit executable path supplied by the teacher. There is no
 version-checker tool, runtime catalog, package installer, or per-language runner table.
 
-Build the package as below. The output is this project's **`dist/`**, containing
-`manifest.json`, `main.js`, `backend.cjs`, `styles.css`, and `assets/`. For distribution,
-copy those **`dist/` contents** into `<learning data>/plugins/coding-questions/dist/`,
-not directly into `coding-questions/`. Do not distribute source, `node_modules`, or data.
-Alternatively keep this source project at `<learning data>/plugins/coding-questions/`
-and build in that workspace: the host always finds `dist/manifest.json` there.
-No separate development registration is needed; a root-only manifest is not loaded.
-Refresh Settings → Plugins after installation, then enable **Coding questions**.
-Restart LearnHarness when replacing already loaded code. Build cleanup replaces only
-`dist/` and refuses symlinked `dist/` or misplaced `dist/data/`; preserve persistent
-sibling `coding-questions/data/` during replacement. App-bundled official distribution
-is a separate host packaging step.
+The plugin-only build writes directly to this project's **`dist/`**, containing
+`manifest.json`, `main.js`, `backend.cjs`, `styles.css`, `assets/` and license notices.
+Cleanup replaces only `dist/` and refuses symlinked `dist/` or misplaced `dist/data/`;
+sibling `data/` is preserved. Building does not install, enable or update the Core
+plugin. App packaging is a separate host operation.
 
 ## Question and test contract
 
@@ -168,7 +171,7 @@ dismissal, and stops the run before returning. A stale confirmation cannot stop 
 skip a successor question. Normal overlay/dictation Escape priority remains intact.
 Process-tree termination is best-effort:
 POSIX process groups are killed, but a process that creates a separate session may
-survive; Windows tree termination uses `taskkill` and has not been verified. Escaped
+survive; Windows tree termination uses `taskkill`; platform behavior needs native testing. Escaped
 processes cannot keep the runner waiting indefinitely on inherited output pipes after
 the deadline or cancellation. Files written outside the run directory are not removed.
 
@@ -279,75 +282,66 @@ and thinking use **host in-memory drafts**: folding/remounting while the session
 lives retains drafts, but model destruction, reload, and app restart need not. The
 plugin has no custom durable answer store, backend RPCs, views, or settings.
 
-## Development and verification
+## Development
 
-From this directory, with the matching LearnHarness checkout installed:
+In the extracted authoring kit, copy the shared **kit-root `types/` contents** into
+this project's `.sdk/` **before dependency setup**. From `plugins/coding-questions/`:
 
 ```sh
-npm run sdk                  # matching public declarations into ignored .sdk/
-npm ci --ignore-scripts
-npm run typecheck            # strict public SDK consumer, skipLibCheck=false
-npm test                     # includes real local Node processes and 30-second limits
+mkdir -p .sdk
+cp -R ../../types/. .sdk/
+```
+
+In a LearnHarness source checkout instead, `npm run sdk` generates `.sdk/` using
+`../../scripts/build-plugin-types.mjs`. That command is **checkout-only**; the
+extracted kit does not include the host generator. The SDK is type-only and is never
+imported at runtime.
+
+Set up development dependencies separately, including the SDK's declared
+peer dependencies/types. Neither this source reference nor LearnHarness installs them
+automatically. With dependencies already available, the build-only command is:
+
+```sh
 npm run build
-npm run test:browser          # real Chrome, built plugin and disposable local fixture
 ```
 
-Alternatively copy matching packaged `plugin-authoring/types/` contents into `.sdk/`.
-The runtime plugin never imports the SDK. The build bundles JavaScript dependencies,
-emits ESM frontend/CommonJS backend and local `assets/` chunks, and includes third-party
-license notices. No host package/configuration changes or runtime installs are required.
+The build bundles JavaScript dependencies, emits ESM frontend/CommonJS backend and
+local `assets/` chunks, and includes third-party license notices. It needs no private
+host imports or host app build.
 
-Browser tests use `CHROME_PATH` or the usual macOS/Linux Chrome paths. A packaged-native
-smoke requires `LH_STANDALONE` pointing to an **existing matching verified host with
-question grading, practice registrations and answered header/footer slots**;
-it copies that payload to disposable storage without rebuilding or mutating the source:
+## Tests and boundaries
+
+After SDK/dependency setup, these are plugin-only checks:
 
 ```sh
-LH_STANDALONE=/path/to/verified/standalone npm run test:native
+npm run typecheck            # strict public SDK consumer, skipLibCheck=false
+npm test                     # real local Node processes, including timeout cases
+npm run build
+npm run test:browser          # built plugin in a disposable Chrome fixture
 ```
 
-All verification uses temporary learner/auth directories and loopback or faux model fixtures,
-never real learner data/accounts or paid provider calls. Earlier nongrading or pre-practice-API
-host payloads are not compatible verification targets for this version.
+Unit tests cover contracts, parser diagnostics, runner bytes/arguments/environment,
+workspace cleanup, launch errors, output limits, timeout/cancellation, registration
+and result parsing. They execute real trusted test programs; they are not sandboxed.
+The browser fixture covers editing keys, drafts, saved teaching/practice presentation,
+badges, output/solution disclosures and cleanup. It requires local Chrome/Chromium
+(`CHROME_PATH` or a supported default path) and mocks the host, including Markdown
+mounts. It does not exercise actual host submission authority, Markdown rendering,
+practice continuation or native conclusion. Those need checkout host integration tests,
+not just this exported project.
 
-Coverage includes contract/catalog and nine-language parser diagnostics; exact answer
-and stdin bytes; literal arguments and inherited environment; fresh workspace cleanup;
-launch failures; nonzero exits; output caps/Unicode boundaries; timeout/abort, inherited
-pipes, and escaped-session settlement; public grader registration; result parsing;
-editor keyboard/readiness/selection/fold behavior; heading-slot badge alignment and
-older-host fallback; Why-matched typography, text-only hover, quiet Enter/Space toggles,
-silent-run hiding and whitespace/truncation preservation; matching code-block frames and
-scrolling; required model-solution schema, hidden pending solution, exact public Markdown
-arguments, preserved visible question before code in historical and graded answers,
-independent open/close, saved history, footer ordering and mount/abort cleanup. Practice
-coverage additionally exercises separate public registration and schemas, real repeated
-runner observations and cancellation, controlled submission props without question-only
-fields, retained editor state, independent saved attempts, hidden committed solution,
-footer ordering, body fallback and per-attempt abort isolation. Host practice tests cover
-processing/save/continuation and native conclusion, including footer replay/failure cleanup.
-An isolated actual-host/faux-agent integration also activates the real coding backend,
-poses through coding_problem, runs real installed Node tests for three accepted attempts,
-checks one continuation per attempt and no auto-conclusion on passing tests, then verifies
-native conclude reveals the original committed solution.
-These browser checks use a disposable host fixture; they are not a packaged-app or
-real-provider proof of coding practice.
-Focused host tests cover slot-generation isolation, readonly SDK capabilities and actual
-host Markdown rendering of model code plus explanation. The native harness covers genuine teacher prediction/check
-turns, passing and failing semantic tests using installed Node, a missing-program run
-error, canonical/model-facing grading, separate thinking channels, read-only code,
-collapsed escaped output, and disabled-plugin occurrence-bound dismissal. No real
-microphone, OS IME, paid provider, real-model correctness, signed installer, full Electron
-window, or Windows/Linux runtime behavior is claimed.
+`npm run test:native` is a checkout-oriented teaching harness. It requires built plugin
+files, an already built matching host in `LH_STANDALONE`, local Chrome and the checkout's
+macOS Electron Node runtime. The host must supply question grading, practice registrations
+and answered header/footer slots. The harness copies the host into disposable storage
+and uses faux-agent traffic and installed Node test programs; it does not cover practice
+turns. Its fixture installs a Community `coding-questions` package, an admission assumption
+incompatible with the reserved Core ID on a Core-packaged host. It is not a portable
+Core smoke test or an instruction to install a Community duplicate.
 
-The teaching packaged-native harness has been updated for the quiet controls and model
-solution, but has **not been run for this UI/practice increment** against a new matching
-host payload. It does not exercise coding-practice turns.
-Earlier grading/header native proof does not establish this increment's native runtime
-proof. No application build, packaging, notarization, or installation is part of this
-plugin change. Development verification uses focused host tests and the built-plugin
-browser fixture; the fixture's Markdown spy is complemented by a real host Markdown
-integration test. Slow-run busy-dismiss and stale-confirmation paths retain their existing
-focused host coverage.
+Fixture checks do not establish real-provider correctness, microphone/IME behavior,
+physical Electron-window UX, signed-installer behavior or cross-platform execution.
+Use synthetic data and loopback fixtures, never real learner profiles or paid providers.
 
 ## API boundary
 
@@ -363,5 +357,24 @@ separate metadata. Unavailable/disabled behavior and
 safe dismissal remain host-owned. If the API cannot support a required behavior, stop
 and request an explicit host fix.
 
-Licensed AGPL-3.0-only. Built packages include `THIRD-PARTY-LICENSES.txt` for bundled
+## Source reading route
+
+- [`src/contract.ts`](src/contract.ts): separate teaching/practice definitions,
+  schemas and model-facing execution instructions.
+- [`src/backend.ts`](src/backend.ts) → [`src/runner.ts`](src/runner.ts): public
+  grading/processing hooks, process execution, cancellation and cleanup.
+- [`src/main.ts`](src/main.ts) → [`src/editor.ts`](src/editor.ts),
+  [`src/diagnostics.ts`](src/diagnostics.ts) and [`src/question-view.ts`](src/question-view.ts):
+  renderer registration, controlled editors, advisory syntax and saved prompts.
+- [`src/result-view.ts`](src/result-view.ts), [`src/solution-view.ts`](src/solution-view.ts)
+  and [`src/disclosure.ts`](src/disclosure.ts): bounded header/footer mounts and cleanup.
+- [`scripts/build.mjs`](scripts/build.mjs) and [`tests/`](tests/): bundles, licenses and fixtures.
+
+See the [example map](../../docs/plugin-examples.md),
+[authoring guide](../../docs/plugin-authoring.md) and
+[API reference](../../docs/plugin-api/README.md).
+
+## License
+
+AGPL-3.0-only. Built packages include `THIRD-PARTY-LICENSES.txt` for bundled
 CodeMirror/Lezer and supporting libraries.

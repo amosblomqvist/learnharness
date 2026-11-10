@@ -253,6 +253,7 @@ Maintain tests at each actual boundary:
   including real input owners and inline/overflow top-bar actions.
 - Durable agent/task state, accepted-result preservation and fallback delivery recovery.
 - Portable SDK compilation and curated authoring docs/examples/type payload.
+- Complete generated API-reference coverage and canonical official-source export fidelity.
 
 Run root tests/typecheck/lint and relevant plugin tests. Production checks additionally
 needs a clean-checkout build, curated standalone/privacy audit and isolated packaged
@@ -261,6 +262,28 @@ throwaway learner/auth directories and loopback providers rather than live accou
 replacing the installed app. Relevant tools include `build-plugin-types.mjs`,
 `build-server.mjs`, `smoke-plugin-runtime.mjs`, `smoke-plugin-browser.mjs` and
 `smoke-server.mjs` under `scripts/`.
+
+### Maintaining the authoring reference
+
+The [API reference](plugin-api/README.md) is generated Markdown, not a second hand-written
+schema. Edit canonical public-contract JSDoc and behavioral guides, then regenerate from
+the matching declarations in a source checkout with its existing dependencies:
+
+```sh
+node scripts/build-plugin-types.mjs dist/plugin-sdk
+node scripts/build-plugin-api-reference.mjs dist/plugin-sdk docs/plugin-api
+```
+
+`tests/plugin-api-reference.test.ts` independently inventories SDK exports and checks
+the committed reference against fresh generation, including overloads, nested methods
+and referenced local supporting types. Context methods are callable host capabilities;
+the type-only SDK does not expose the host's implementation helpers at runtime.
+
+`npm run plugins:build-authoring` generates its reference directly from the staged SDK
+and exports the canonical official projects without their local builds/dependencies/data.
+Bundle tests check source-file identity, privacy/path admission, deterministic archives
+and self-contained links. Keep the API reference, [example map](plugin-examples.md) and
+project README instructions consistent when adding a capability or source example.
 
 ## Non-goals
 

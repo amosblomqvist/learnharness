@@ -1,4 +1,6 @@
-/** Plugin API v1. Browser-safe contracts; runtime code is trusted local code. */
+/** Plugin API v1. Browser-safe contracts; runtime code is trusted local code.
+ * The portable SDK is type-only: use supplied context objects at runtime, not
+ * runtime imports of these source helpers/constants or private host modules. */
 import type { AssistantMessage, AssistantMessageEvent, Context, SimpleStreamOptions, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
@@ -21,6 +23,7 @@ export type * from "./plugin-submissions.ts";
 
 export const PLUGIN_API_VERSION = 1 as const;
 export const PLUGIN_ID_PATTERN = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+/** Release activation/mount resources; the host accepts synchronous or async cleanup. */
 export type PluginCleanup = () => void | Promise<void>;
 export interface PluginManifest {
 	apiVersion: 1;
@@ -63,13 +66,21 @@ export interface PluginGraphFileData {
 	"render-settings.json": unknown;
 	"format.json": unknown;
 }
+/** Fresh read-only access to saved native learning records. Multiple reads are not
+ * a cross-file transaction; keep plugin-derived data in plugin-owned storage. */
 export interface PluginLearningData {
+	/** Learning-data root, not a credential directory or permission to write core files. */
 	readonly directory: string;
+	/** List saved session summaries with current busy/compacting flags; no model work. */
 	listSessions(): ChatListItem[];
+	/** Read a complete saved native session, or null when absent. Invalid IDs throw.
+	 * Transcripts preserve learner answers/thinking not represented by the graph. */
 	getSession(id: string): ChatRecord | null;
-	/** Raw graph records and projections, without a second query language. */
+	/** Read the current graph projection and raw records, without a second query
+	 * language. This is not a complete learner-response transcript. */
 	graph(): GraphSnapshot;
-	/** Read graph ledger/metadata JSON using the host's current file interpretation. */
+	/** Read graph ledger/metadata JSON using the host's current file interpretation.
+	 * Host validation/version guards apply; unknown file names throw. */
 	readGraphFile<K extends keyof PluginGraphFileData>(name: K): PluginGraphFileData[K];
 }
 /** Host owns credentials and transport; plugins configure generation only. */
@@ -85,9 +96,21 @@ export interface PluginInferenceRequest {
 	options?: PluginInferenceOptions;
 	signal?: AbortSignal;
 }
+/** Host-authenticated model calls, which can incur cost. Explicit model/purpose and
+ * existing consent/quota policy apply; no silent model or API-key fallback. Usage
+ * is recorded under plugin data, not in a core chat. Activation abort scopes calls. */
 export interface PluginInference {
+	/** Return a detached last-known host catalog without refreshing accounts or
+	 * choosing a model. Rejects if unavailable or activation has been cancelled. */
 	catalog(): Promise<ModelCatalogResponse>;
+	/** Stream native assistant events for one request, not a managed tool loop.
+	 * Setup/validation failures throw during iteration; transport/error/abort states
+	 * can arrive as terminal native error events. Honor request.signal and inspect
+	 * the terminal message rather than treating partial text as success. */
 	stream(request: PluginInferenceRequest): AsyncIterable<AssistantMessageEvent>;
+	/** Consume a request and return its terminal native assistant message, including
+	 * error/aborted stopReason. Setup/validation failures can reject; a resolved
+	 * message is not necessarily successful. Caller/activation cancellation applies. */
 	complete(request: PluginInferenceRequest): Promise<AssistantMessage>;
 }
 export type PluginAgentKind = "prober" | "teacher" | "practice";
@@ -103,42 +126,81 @@ export interface PluginToolContext {
 /** A fresh native Pi loadout per conversation turn; no private app imports. */
 export interface PluginTools {
 	agents: PluginAgentKind[];
+	/** Create fresh native tools for the matching turn's frozen chat/agent context.
+	 * Factory/admission errors omit this plugin's contribution for that turn rather
+	 * than replacing host tools. Honor each tool execution's cancellation signal. */
 	create(context: PluginToolContext): AgentTool<any>[];
 }
+/** Backend activation scope, once per enabled plugin per server, not per window.
+ * Trusted Node code must cooperate with cancellation; no forced process isolation. */
 export interface PluginBackendContext {
 	readonly manifest: PluginManifest;
 	/** Absolute code directory: app core-plugins/<id> or community plugins/<id>/dist. */
 	readonly directory: string;
 	/** Writable records: core-plugin-data/<id> or community plugins/<id>/data. */
 	readonly dataDirectory: string;
+	/** Aborted when this backend activation ends. Recheck after awaits before
+	 * plugin-owned side effects; abort does not force-stop arbitrary code. */
 	readonly signal: AbortSignal;
+	/** Register resource cleanup for deactivation, also supported as activate's
+	 * return value. A cleanup registered after expiry is still invoked. */
 	cleanup(dispose: PluginCleanup): void;
+	/** Read-only native learning records; not a programmable core-data write API. */
 	learning: PluginLearningData;
+	/** Host-authenticated raw model requests, scoped to activation; can incur cost. */
 	inference: PluginInference;
+	/** Persistent plugin conversations, not native data/chats sessions. */
 	agents: PluginAgentService;
+	/** Durable bounded tasks, independent of frontend views; can incur model cost. */
 	workers: PluginWorkerService;
-	/** Returns a native Pi tool: acknowledge dispatch now, deliver the result later. */
+	/** Return a native Pi tool bound to this conversation turn. It acknowledges
+	 * worker acceptance immediately and delivers the terminal result later through
+	 * native job/steer handling. Host-derived identity forces background purpose;
+	 * task outcome and later formatting/delivery are separate. */
 	createBackgroundTool<T extends TSchema>(context: PluginToolContext, definition: PluginBackgroundTool<T>): AgentTool<T>;
+	/** Add system-prompt text for selected native agent kinds, without replacing host
+	 * prompts. Invalid contributions throw; unregister affects future turns only. */
 	registerInstructions(contribution: PluginInstructions): () => void;
+	/** Add fresh tool factories for selected native agent kinds, preserving built-ins.
+	 * Invalid registration throws; per-turn factory/collision errors omit this
+	 * plugin's contribution. Returned unregister affects future turns. */
 	registerTools(contribution: PluginTools): () => void;
-	/** Host-owned native probe/teach lifecycle with optional plugin validation and grading. */
+	/** Register a type in the host-owned native probe/teach lifecycle with optional
+	 * plugin validation/grading. Invalid/duplicate definitions throw; returned
+	 * unregister removes availability and aborts this definition's scope. */
 	registerQuestionType<Q extends TSchema, A extends TSchema>(definition: PluginQuestionTypeDefinition<Q, A>): () => void;
-	/** Alternative practice poses share the native active-problem/conclude lifecycle. */
+	/** Register alternative practice poses sharing the native active-problem/conclude
+	 * lifecycle. Invalid/duplicate definitions throw; returned unregister removes
+	 * availability and aborts this definition's scope, not saved history. */
 	registerProblemType<Q extends TSchema, S extends TSchema>(definition: PluginProblemTypeDefinition<Q, S>): () => void;
-	/** JSON-compatible operation results, not arbitrary HTTP endpoints. */
+	/** Register a named operation for this plugin's frontend call bridge. Inputs and
+	 * results must be JSON-compatible; validate input in the handler. Invalid or
+	 * duplicate names throw. Returns unregister; this is not an arbitrary HTTP API. */
 	handle(name: string, handler: (input: unknown) => unknown | Promise<unknown>): () => void;
+	/** Live app hints and plugin-scoped notifications, not a durable event log. */
 	events: {
+		/** Observe supported app events until unsubscribe or activation cleanup.
+		 * Listener failures are isolated. Re-read state when needed; turn-settled
+		 * follows turn persistence, not completion of asynchronous extraction. */
 		on(listener: (event: ServerEvent) => void): () => void;
+		/** Notify this plugin's frontend listeners in connected windows with JSON data.
+		 * Invalid topics throw while active; expired activations emit nothing. No
+		 * persistence, replay or acknowledgement of frontend handling is supplied. */
 		emit(topic: string, data?: unknown): void;
 	};
 }
 export interface PluginBackendModule {
+	/** Initialize server-scoped registrations/resources; optionally return cleanup.
+	 * Activation failures mark this plugin as errored. Modules remain cached, so
+	 * put activation side effects here rather than at module top level. */
 	activate(context: PluginBackendContext): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export interface PluginView {
 	id: string;
 	name: string;
-	/** The host owns the shell. Abort scopes any UI mounted inside this view. */
+	/** Mount only the view body; the host owns title/top bar/actions. Departure,
+	 * replacement or disable aborts this mount signal. Return sync/async cleanup
+	 * and scope child UI to this signal, not merely to the longer activation. */
 	mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export type * from "./plugin-view-context.ts";
@@ -162,6 +224,9 @@ export interface PluginAction {
 	/** Opt in without creating chrome. Scope/default are captured at registration. */
 	readonly shortcut?: import("./plugin-shortcuts.ts").PluginActionShortcut;
 	disabled?: boolean | ((context: PluginActionContext) => boolean);
+	/** Execute for the actual invocation placement/page. The host prevents repeat
+	 * invocation while busy and reports thrown/rejected errors. Session view data
+	 * is captured once before invocation and remains detached across awaits. */
 	run(context: PluginActionContext): void | Promise<void>;
 }
 /** Registration alone never creates chrome. Each placement is explicit. */
@@ -179,6 +244,9 @@ export interface PluginCodeBlockProps {
 }
 export interface PluginCodeBlockRenderer {
 	language: string;
+	/** Render this fence into the supplied container; return sync/async cleanup.
+	 * Replacement/unregister/disable aborts block.signal. Failed/missing renderers
+	 * fall back to readable source; host-only mountMarkdown does not use this hook. */
 	mount(container: HTMLElement, block: PluginCodeBlockProps): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export interface PluginToolRenderProps {
@@ -198,48 +266,109 @@ export interface PluginToolRenderer {
 	toolName: string;
 	/** Later worker results collapse by default; rich results may opt into a card or unframed shell. */
 	backgroundPresentation?: "collapsed" | "card" | "plain";
+	/** Render native tool input/result state; return sync/async cleanup. Replacement,
+	 * unregister or disable aborts tool.signal; errors fall back to readable results.
+	 * Presentation alone does not create pending learner input or run a tool. */
 	mount(container: HTMLElement, tool: PluginToolRenderProps): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
+/** Frontend activation scope, once per enabled plugin per window. Registrations,
+ * subscriptions and UI expire with this activation; backend work is server-owned. */
 export interface PluginFrontendContext {
 	readonly manifest: PluginManifest;
+	/** Aborted when this window's activation ends. Use shorter per-mount signals
+	 * for view widgets and cooperative async work. */
 	readonly signal: AbortSignal;
+	/** Register sync/async resource cleanup for deactivation; late registrations
+	 * are still invoked. An activation may also return a cleanup function. */
 	cleanup(dispose: PluginCleanup): void;
+	/** Register a plugin-owned body view with host chrome. Invalid/duplicate IDs
+	 * throw; returned unregister removes the view without deleting plugin data. */
 	registerView(view: PluginView): () => void;
+	/** Register an invokable action and optional shortcut, but no button placement.
+	 * Invalid/duplicate registrations throw. Returns unregister; shortcut scope and
+	 * default are captured here, not changed by refreshActions. */
 	registerAction(action: PluginAction): () => void;
+	/** Place an already registered action in explicit host chrome. Invalid targets
+	 * or duplicate placement IDs throw. Returns unregister for this placement only. */
 	placeAction(placement: PluginActionPlacement): () => void;
 	/** Explicitly notify the host when dynamic action enabled state changes. */
 	refreshActions(): void;
+	/** Register learner-input preparation under this plugin's identity. Invalid or
+	 * duplicate definitions throw; returned unregister aborts its captured scope.
+	 * Acceptance, retry and draft-retention rules remain host-owned. */
 	registerSubmissionInterceptor(definition: PluginSubmissionInterceptor): () => void;
 	/** Notify the host when plugin-owned pending submission input changes. */
 	refreshSubmissions(): void;
+	/** Register a lazy settings-body mount; returns unregister. Only one settings
+	 * registration is allowed per activation. Mount signal scopes its child UI. */
 	registerSettings(mount: PluginView["mount"]): () => void;
+	/** Register controlled settings rows; returns a shallow-update/dispose handle.
+	 * Invalid schemas or duplicate settings registrations throw. The plugin owns
+	 * persistence and must publish accepted values after saves. */
 	registerSettings(schema: import("./plugin-ui.ts").PluginSettingsSchema): import("./plugin-ui.ts").PluginWidgetHandle<import("./plugin-ui.ts").PluginSettingsSchema>;
+	/** Register either a lazy custom mount (unregister function) or controlled schema
+	 * (widget handle); neither form loads or saves plugin settings automatically. */
 	registerSettings(settings: PluginSettingsRegistration): (() => void) | import("./plugin-ui.ts").PluginWidgetHandle<import("./plugin-ui.ts").PluginSettingsSchema>;
+	/** Controlled host widgets/overlays; accessing an unavailable UI host throws. */
 	readonly ui: import("./plugin-ui.ts").PluginUi;
+	/** Register a fence-language renderer; reserved/duplicate claims throw. Returns
+	 * unregister, which aborts existing renderer mounts as well as removing the hook. */
 	registerCodeBlock(renderer: PluginCodeBlockRenderer): () => void;
+	/** Register native tool-result presentation; reserved/duplicate claims throw.
+	 * Returns unregister, which aborts existing mounts. Does not register a tool. */
 	registerToolRenderer(renderer: PluginToolRenderer): () => void;
-	/** Owner-scoped slots inside the host question card. */
+	/** Register owner-scoped slots inside the host question card. Contract versions
+	 * must match saved/live questions; invalid/duplicate registrations throw.
+	 * Returns unregister; host question identity/acceptance remains authoritative. */
 	registerQuestionRenderer(renderer: PluginQuestionRenderer): () => void;
+	/** Register owner-scoped practice submission presentation for supported contract
+	 * versions. Invalid/duplicate registrations throw. Returns unregister; does not
+	 * pose, process or conclude a problem by rendering it. */
 	registerProblemRenderer(renderer: PluginProblemRenderer): () => void;
+	/** Invoke this plugin's named backend operation with JSON-compatible input and
+	 * resolve its result. Rejects on serialization, transport, backend or activation
+	 * failure. T is a caller annotation, not runtime validation; no caller signal or
+	 * arbitrary HTTP access is exposed. Disabling scopes the frontend request. */
 	call<T = unknown>(operation: string, input?: unknown): Promise<T>;
 	/** Pure, in-memory PDF/UTF-8 conversion; no learning/model/storage side effects.
 	 * Automatically activation-scoped; caller cancellation is optional and cooperative. */
 	readonly documents: {
+		/** Convert a browser File to Markdown plus notices without saving it. PDF
+		 * signature/suffix selects PDF conversion (no OCR); otherwise strict UTF-8.
+		 * Busy, invalid, empty or over-limit input rejects with Error, never truncated
+		 * success. Caller cancellation preserves signal.reason while activation is
+		 * live; cancellation is cooperative, not a hard execution deadline. */
 		toMarkdown(file: File, options?: { signal?: AbortSignal }): Promise<{ name: string; markdown: string; notices: string[] }>;
 	};
-	/** Live-only notifications. Re-read state on resync; no implied durable replay. */
+	/** Observe this plugin's live-only notifications; returns unsubscribe and expires
+	 * with activation. Re-read state on resync; no implied durable replay. */
 	onNotification(listener: (event: PluginNotification) => void): () => void;
+	/** Observe live supported app events, excluding plugin-message notifications.
+	 * Returns unsubscribe; activation expiry also ends delivery. Events are hints,
+	 * not durable replay or completion of asynchronous extraction. */
 	onAppEvent(listener: (event: ServerEvent) => void): () => void;
+	/** Re-read authoritative state after connection resync; missed events are not
+	 * replayed. Returns unsubscribe and expires with this activation. */
 	onResync(listener: () => void): () => void;
+	/** Host navigation in this window; openView/openSettings target this plugin.
+	 * Navigation methods are inert after activation expiry and do not await mounts. */
 	app: {
+		/** Read the current host pathname, not a captured invocation-page snapshot. */
 		pathname(): string;
+		/** Navigate to a native session by ID; does not create or run a session. */
 		openSession(id: string): void;
+		/** Navigate to the host home page. */
 		openHome(): void;
+		/** Navigate to this plugin's registered view ID, not another plugin's view. */
 		openView(id: string): void;
+		/** Open this plugin's dedicated Settings page, not package management. */
 		openSettings(): void;
 	};
 }
 export interface PluginFrontendModule {
+	/** Initialize window-scoped registrations/resources; optionally return cleanup.
+	 * Thrown/rejected activation tears down this generation and reports an error.
+	 * Module code remains cached; put side effects here, not at module top level. */
 	activate(context: PluginFrontendContext): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 

@@ -7,8 +7,10 @@ description: Build, inspect, or debug trusted-local LearnHarness plugins using t
 
 ## Read the matching contract
 
-Start with the [authoring guide](../../docs/plugin-authoring.md), then read only the
-contracts relevant to the task:
+Start with the [authoring guide and documentation map](../../docs/plugin-authoring.md),
+then use the [complete API reference](../../docs/plugin-api/README.md) for exact
+signatures, members and linked data/event types. Read the feature contracts relevant
+to the task:
 
 | Area | Reference |
 | --- | --- |
@@ -29,16 +31,20 @@ Without a checkout, download the complete authoring skill from **Settings → Co
 plugins → Download authoring skill**. Keep its root `SKILL.md`, `docs/`, `examples/`
 and `types/` together, including the portable `tools/`; use the included SDK rather than running repository build scripts.
 Read `bundle.json` for the producing app/API/SDK versions. API v1 can gain capabilities:
-check actual host compatibility rather than copying a stale `minAppVersion`. The exported
-examples conservatively require the producing app version; older targets need verification.
+check actual host compatibility rather than copying a stale `minAppVersion`. Exported
+Hello/recipe distributions conservatively require the producing app version; canonical
+official source manifests remain unchanged. Older targets need capability verification.
 
 ## Choose a starting point
 
-[No-build examples](../../examples/plugins/) include `hello-plugin` (view/settings),
-`managed-agent` (persistent conversations) and `teaching-extension` (native tools,
-renderers, detached workers). Repository `plugins/` contains larger feature source
-projects; inspect them as examples, not private APIs or a promise of bundled availability.
-Model-using examples may incur cost when explicitly run.
+Begin with [Hello](../../examples/plugins/hello-plugin/README.md) for the smallest
+view/settings plugin. The [example reading routes](../../docs/plugin-examples.md)
+lead to the canonical UI Showcase, Drawing Pad, Coding Questions, Flashcards and Rich
+Code Blocks source projects included in the skill. Use them as real-world public-API
+references, not private host APIs. Core project IDs are reserved: do not install unchanged
+Community copies. The example guide distinguishes standalone build prerequisites from
+checkout-dependent tests. Managed Agent and Teaching Extension are focused recipes,
+not the primary starting points. Model-using recipes may incur cost when explicitly run.
 
 ## Build and install
 

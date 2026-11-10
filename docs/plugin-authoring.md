@@ -11,6 +11,26 @@ set `minAppVersion` to a version that actually supplies every capability you use
 The downloaded skill's `bundle.json` identifies its producing app, API and SDK versions;
 these are separate numbers, not interchangeable compatibility guarantees.
 
+## Documentation map
+
+| Need | Read |
+| --- | --- |
+| First plugin and installation | [Quick start](#quick-start), then [package layout](#package-and-installation) |
+| Every public signature, property and supporting type | [Complete API reference](plugin-api/README.md) |
+| Real projects and source reading routes | [Examples](plugin-examples.md) |
+| Teaching questions and grading | [Question contract](plugin-question-contract.md) |
+| Practice problems and processing | [Problem contract](plugin-problem-contract.md) |
+| Submission interception, images and surfaces | [Session extensions](plugin-session-extension-contract.md) |
+| Current session snapshots and drafts | [View context](plugin-view-context.md) |
+| Controlled trees | [Tree contract](plugin-tree-contract.md) |
+| Modal, menu, focus and Escape rules | [Interaction contract](dialog-overlay-contract.md) |
+| Host ownership and implementation boundaries | [Architecture](plugin-architecture.md) |
+
+The API reference is generated from the same public contracts as the portable SDK.
+It indexes every public type and declared member, including overloads and referenced
+local data/event types. Guides explain behavior and recovery; reference signatures
+explain the exact shapes. Neither requires importing private app runtime modules.
+
 ## Quick start
 
 The primary source-development workflow is to **clone into the app's plugins directory
@@ -39,19 +59,22 @@ LearnHarness itself runs no npm commands. Builds must preserve sibling `data/`.
 For a new plugin, download and extract **Download authoring skill**, then give the whole
 `learnharness-plugins/` folder to your coding agent and ask it to read `SKILL.md`. Its README
 explains agent setup. The included SDK works without a LearnHarness checkout; plugin
-build tools/dependencies are installed separately. The three included no-build examples
-can be [installed directly](#install-a-prebuilt-package):
+build tools/dependencies are installed separately.
 
-| Example | Demonstrates |
-| --- | --- |
-| `hello-plugin` | Frontend view, actions and plugin settings |
-| `managed-agent` | Frontend/backend bridge and persistent interactive agents |
-| `teaching-extension` | Additive instructions, native tools, renderers and a detached worker |
+Start with **Hello** for the smallest plugin. Then use [the example reading routes](plugin-examples.md)
+to explore **UI Showcase**, **Drawing Pad**, **Coding Questions**, **Flashcards** and
+**Rich Code Blocks**. The skill includes their actual source projects, not parallel
+example implementations. Managed Agent and Teaching Extension are focused recipes for
+capabilities the larger projects do not demonstrate as directly.
 
-Model-using examples may incur cost when explicitly run. These examples are authoring
-material, not automatically installed plugins. Keep the complete skill folder together;
-do not install it as a plugin. The exported examples require at least the producing app
-version identified by `bundle.json`.
+Hello and the two focused recipes include no-build distributions that can be
+[installed directly](#install-a-prebuilt-package); their exported manifests require the
+producing app version in `bundle.json`. Official source-reference manifests remain
+unchanged. Four official projects are Core plugins with reserved IDs: read their code,
+not instructions to install unchanged Community copies. UI Showcase is a Community
+developer gallery. Model-using recipes may incur cost when explicitly run. Nothing is
+installed automatically; keep the skill together and never install the entire skill as
+a plugin.
 
 ## Choose the extension point
 
@@ -72,7 +95,8 @@ version identified by `bundle.json`.
 | Call models, run conversations or bounded tasks | Backend `ctx.inference`, `ctx.agents`, `ctx.workers` below |
 
 Feature contracts define lifecycle and acceptance rules; this guide is the entry point.
-Exact public types are in `src/core/plugins.ts`, `plugin-ui.ts`, `plugin-agents.ts`,
+Browse the [complete API reference](plugin-api/README.md) for exact signatures and
+cross-linked types. The canonical public contracts are in `src/core/plugins.ts`, `plugin-ui.ts`, `plugin-agents.ts`,
 `plugin-workers.ts`, `plugin-questions.ts`, `plugin-problems.ts`, `plugin-submissions.ts`,
 `plugin-view-context.ts` and `plugin-tree.ts` (all under `src/core/`). Use **type-only**
 imports, never runtime imports of private host modules. The portable type-only SDK is

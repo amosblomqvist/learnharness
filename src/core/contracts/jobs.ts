@@ -60,14 +60,11 @@ export interface JobRecord {
 	plugin?: PluginJobMetadata;
 }
 
-/** A sub-agent run's accumulated usage — the same accounting shape as a
- * chat turn (contracts/chat.ts CallUsage), flattened to one running total
- * plus a step count. Token fields are optional exactly like CallUsage: a
- * field NO model call reported stays undefined — absent is not zero (the
- * money-channel doctrine; cost renders "—", never $0). */
+/** Accumulated model usage for one worker run: token totals plus a call
+ * count, with optional per-call accounting. As with CallUsage, a token field
+ * no call reported remains undefined; missing usage must not imply zero cost. */
 export interface JobUsage {
-	/** The model that ran the sub-agent, provider-qualified ("provider:id" —
-	 *  model slots wave, 2026-09-20; matches Pi catalog lookup keys). */
+	/** Provider-qualified model identity (provider:id) for catalog lookup. */
 	model: string;
 	/** Running totals summed over the run's model calls so far. */
 	inputTokens: number | undefined;
@@ -81,12 +78,9 @@ export interface JobUsage {
 	calls?: CallUsage[];
 	/** How many model calls the run has made (each bills separately). */
 	steps: number;
-	/** The MOST RECENT model call's accounting (2026-09 dock contract): the
-	 *  per-blob context line reads last-step input+output against the
-	 *  model's LIVE catalog limit (server-joined onto the activity feed —
-	 *  never the cumulative totals, never a client-side table). Absent
-	 *  until the first call completes; absent provider fields stay absent
-	 *  (never zero). */
+	/** Most recent completed model call's accounting, used for current context
+	 * usage rather than cumulative totals. Absent until a call completes;
+	 * unreported provider fields remain undefined. */
 	lastStep?: CallUsage;
 }
 

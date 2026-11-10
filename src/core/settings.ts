@@ -197,16 +197,15 @@ export class ProviderKeyMissingError extends Error {
 
 export const CACHE_RETENTIONS = ["none", "short", "long"] as const satisfies readonly CacheRetention[];
 
-/** One slot's stored state. BYOK (owner, 2026-09-22): the WRITE side
- *  requires model (a level alone can never run — no factory floor); the
- *  sanitizer keeps whatever is on disk, but RESOLUTION treats a slot
- *  without a model as unset (inert level, no phantom default). */
+/** Stored model-slot preferences. A slot is configured only when model is
+ * present; sanitized level-only records can be retained but resolve as unset.
+ * A thinking level alone does not select an implicit fallback model. */
 export interface ModelSlot {
 	/** Native Pi preference. Absent leaves Pi/environment behavior unchanged. */
 	cacheRetention?: CacheRetention;
-	/** The model swap: both coordinates or neither. */
+	/** Configured model coordinates; provider and id must be supplied together. */
 	model?: { provider: string; id: string };
-	/** The thinking budget swap. */
+	/** Optional thinking level used with this slot's configured model. */
 	thinkingLevel?: ThinkingLevel;
 }
 

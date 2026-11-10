@@ -31,7 +31,7 @@ try {
 			"@earendil-works/pi-ai": pkg.dependencies["@earendil-works/pi-ai"], typebox: pkg.dependencies.typebox,
 		},
 	}, null, "\t") + "\n");
-	fs.writeFileSync(path.join(stage, "README.md"), "# LearnHarness plugin API v1 — local types\n\nGenerated from the public source contracts. Type-only imports; no runtime exports.\nIn the complete authoring skill, read ../docs/plugin-authoring.md and ../bundle.json for the matching app version. The standalone SDK contains types only, not the complete skill or a development toolchain. Supply the peer dependencies declared in package.json when typechecking. This is not a published npm package.\n");
+	fs.writeFileSync(path.join(stage, "README.md"), "# LearnHarness plugin API v1 — local types\n\nGenerated from the public source contracts. Type-only imports; no runtime exports.\nIn the complete authoring skill, read ../docs/plugin-authoring.md for the documentation map, ../docs/plugin-api/README.md for the complete API reference, and ../bundle.json for the matching app version. The standalone SDK contains types only, not the complete skill or a development toolchain. Supply the peer dependencies declared in package.json when typechecking. This is not a published npm package.\n");
 	fs.mkdirSync(output, { recursive: true });
 	fs.cpSync(stage, output, { recursive: true });
 	console.log("[plugin-types] declarations ready:", output);

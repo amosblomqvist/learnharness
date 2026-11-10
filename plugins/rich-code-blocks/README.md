@@ -1,6 +1,6 @@
 # Rich code blocks
 
-An optional official LearnHarness plugin using only the public plugin API.
+An optional Core LearnHarness plugin using only the public plugin API.
 It turns higher-level notation into **static SVG**:
 
 | Initially-off setting | Fence | Content |
@@ -9,9 +9,10 @@ It turns higher-level notation into **static SVG**:
 | Musical notation | `abc` | One complete ABC tune; no audio |
 | Technical diagrams | `tikz` | TikZ, CircuitikZ, tikz-cd and PGFPlots |
 
-Enable the plugin, then enable only the families wanted in its dedicated Settings
-page. Enabled families alone register renderers and add short system instructions
-to prober, teacher, and practice agents, including the probing phase at the start
+Enable the plugin in **Settings → Core plugins**, then enable only the families
+wanted in its dedicated Settings page. Enabled families alone register renderers
+and add short system instructions to prober, teacher, and practice agents, including
+the probing phase at the start
 of a teaching session. Disabling a family restores ordinary readable
 code fences. Prompt changes apply to future turns, not an already-running model
 request. There are no subarea toggles, per-family prompt editors, simulations,
@@ -41,44 +42,51 @@ preserving the other family choices.
 
 TikZ diagrams scale as a whole so the engine's normal 10-point labels match the
 surrounding chat LaTeX size (`1.21em`, matching KaTeX). At the default 16 px reading
-size, normal labels are approximately **19.4 px**, rather than the previous
-**13.3 px**. Text-relative SVG width follows surrounding font-size changes without
-replacing the SVG or recompiling TeX. Authored relative font sizes (including
+size, normal labels are approximately **19.4 px**. Text-relative SVG width follows
+surrounding font-size changes without replacing the SVG or recompiling TeX. Authored relative font sizes (including
 subscripts), diagram proportions and the original tight viewBox are preserved.
 Wide TikZ diagrams scroll horizontally within their own wrapper instead of
-shrinking their labels. Existing **12 px padding** and centering are unchanged;
-no extra margins or blank drawing space are introduced. Chemistry and music
-retain their previous natural sizing and fit-to-width behavior.
+shrinking their labels. The wrapper uses **12 px padding** and centering without
+extra margins or blank drawing space. Chemistry and music use natural sizing
+and fit-to-width behavior.
 
-## Source/build/install layout
+## Core plugin and source reference
 
-This repository's authoring project is **`plugins/rich-code-blocks/`**. Build here:
+The app supplies and updates this plugin's code; writable preferences live under
+`<learning data>/core-plugin-data/rich-code-blocks/`. This source project is reference
+material, not an installable Community copy. `rich-code-blocks` is a reserved Core ID
+even when disabled or missing. A Community fork needs its own manifest/folder ID and
+must reconsider conflicting contribution, tool and fence names, including `smiles`,
+`abc` and `tikz`. A new plugin ID does not make duplicate fence registrations coexist.
+Do not install this build into a Community `plugins/rich-code-blocks/` folder.
+
+## Development
+
+In the extracted authoring kit, copy the shared **kit-root `types/` contents** into
+`.sdk/` **before dependency setup**. From `plugins/rich-code-blocks/`:
 
 ```sh
-npm ci --ignore-scripts
-npm run typecheck
-npm test
-npm run build
-npm run test:browser
+mkdir -p .sdk
+cp -R ../../types/. .sdk/
 ```
 
-The portable type-only SDK is `.sdk/`. In the matching app checkout, refresh it
-with `npm run sdk`; outside the checkout, copy matching packaged authoring types
-into `.sdk/` before installing development dependencies. Runtime code does not
-import host implementation modules.
+In a matching LearnHarness source checkout instead, `npm run sdk` generates `.sdk/`
+using `../../scripts/build-plugin-types.mjs`. That command is **checkout-only** and
+does not work in the extracted kit. Imports from the SDK are type-only; runtime
+code does not import host implementation modules.
+
+Set up development dependencies separately, including the SDK's declared
+peer dependencies/types. With dependencies already available, the build-only command is:
+
+```sh
+npm run build
+```
 
 Build output goes directly into this project's **`dist/`**, not `dist/<id>/`.
-Build cleanup refuses symlinked `dist/` and misplaced `dist/data/` and never
-removes the workspace root or persistent sibling `data/`.
-
-A separately authorized installation copies the **contents** of this built
-`dist/` into `<learning data>/plugins/rich-code-blocks/dist/`. Keep persistent
-state at sibling `<learning data>/plugins/rich-code-blocks/data/`, never inside
-`dist/`, and preserve it during updates. No runtime dependency install, registration,
-development/normal mode, profile, legacy fallback or migration is involved.
-Already-admitted code changes require the app's normal restart lifecycle.
-Building this project does **not** install it, restart an app/server, stage an
-official release, or enable any format.
+It bundles JavaScript and local TeX/WASM/fonts and copies license notices. Cleanup
+refuses symlinked `dist/` and misplaced `dist/data/` and preserves sibling `data/`.
+Building does not install, enable or update the Core plugin, build/restart the host,
+or enable any notation family.
 
 ## Examples
 
@@ -219,51 +227,51 @@ This remains trusted-local plugin code, not a sandbox for arbitrary third-party
 plugins. Static output sanitization and an isolated TeX Worker do not authorize
 arbitrary JS execution or weaken Electron/host isolation.
 
-## Verification boundaries
+## Tests and boundaries
 
-`npm test` exercises small contracts, settings, lifecycle, cache and Worker bounds.
-`npm run test:browser` starts only a disposable loopback fixture and a temporary
-Chrome profile to exercise built bundles, static SVG admission and actual library
-rendering/timing. A development-only KaTeX dependency supplies real reference math
-for font-parity checks; its code/fonts are not shipped in the plugin build.
-The fixture does not start/restart LearnHarness, install into a real data
-directory, call a model or establish packaged-app/user functional acceptance.
-See `THIRD-PARTY.md` for pinned libraries and explicit static-browser adaptations.
+After SDK/dependency setup, these checks use the plugin project, not a host checkout:
 
-The browser fixture also changes the host Text token to non-black/white colors,
-including a same-mode override. It checks live and cached mounts without extra
-TeX work or settings requests, while retaining authored colors and rasterized mask
-alpha. This is plugin-fixture coverage, not a real LearnHarness installation test.
+```sh
+npm run typecheck
+npm test
+npm run build
+npm run test:browser
+```
 
-### Historical black/white-ink checkpoint
+Unit tests exercise contracts, settings, lifecycle, cache and Worker bounds, including
+output-cleanup guards. The browser script requires local Chrome/Chromium (`CHROME_PATH`
+or a supported default path), built `dist/` files and the project's test dependencies.
+It starts a disposable loopback fixture and temporary Chrome profile to exercise
+actual libraries, SVG admission, timeout/cancellation, font sizing, live/cached theme
+changes, authored colors and rasterized mask alpha. A development-only KaTeX dependency
+supplies reference math; its code/fonts are not shipped in the plugin build.
 
-Strict plugin TypeScript checking, **16 unit tests**, direct `dist/` build and the
-real-Chrome disposable fixture passed. All six pictured examples rendered: SMILES,
-ABC, basic TikZ/free-body geometry, CircuitikZ, tikz-cd and a PGFPlots function.
-On this machine the small examples measured roughly **14 ms / 18 ms / 77–555 ms**
-(SMILES / ABC / TikZ); cached plot remount was about **1 ms**. These are fixture
-measurements, not general performance guarantees or packaged-app measurements.
+The fixture mocks the host; it does not start/restart LearnHarness, install into a real
+data directory, call a model or establish packaged-app/user functional acceptance.
+This project has no `test:native` script. Real app integration and platform-specific
+behavior require separate host checks.
 
-A genuinely nonterminating TeX macro was forcibly stopped at about **10 seconds**,
-with **500** page heartbeat ticks continuing; the next diagram rendered in about
-**58 ms**. The fixture checked incomplete/disabled source, invalid/oversized input,
-active cancellation, disable cleanup, cached mount-unique IDs, visible chemical
-labels, TeX ampersand/less-than labels, and actual TeX-authored script/image and
-reference-amplification attempts. The amplified reference graph was refused before
-mounting. SVG root/self cycles were also refused. Four bundled font files actually
-loaded, and the run had **zero page errors or off-origin requests**. Both dark/light
-fixture screenshots were captured and visually inspected with White ink on dark
-and Black ink on light. Browser checks also proved transparent backgrounds for all
-six examples, stable mounted SVG identities and no TeX work/cache eviction on ink
-changes, preserved atom/TikZ colors and white fills, and actual raster alpha for
-shared-definition and gradient masks under both ink choices. TikZ sizing checks
-compare all four technical-diagram examples against actual KaTeX at 16 px and
-20 px surrounding text, verify unchanged padding and chemistry/music widths, and
-confirm a wide diagram scrolls without shrinking normal labels or subscripts.
-Font-size changes reused the existing SVGs without sending any TeX jobs.
+## Source reading route
 
-The build also preserves complete GPLv3 and Apache-2.0 texts and the relevant
-PyDvi/ColorBrewer notices alongside the other upstream licenses. This checkpoint
-is **not** real-app installation, packaged Electron, human functional acceptance,
-commit, push, or release verification. Official release source/licensing delivery
-and build-selection/staging remain separate from this plugin build.
+- [`src/main.ts`](src/main.ts) and [`src/backend.ts`](src/backend.ts): settings
+  synchronization, conditional fence registrations and additive agent instructions.
+- [`src/contract.ts`](src/contract.ts): family policy, source/output/cache limits
+  and validated settings.
+- [`src/render.ts`](src/render.ts) → [`src/tex-runner.ts`](src/tex-runner.ts) →
+  [`src/tex-worker.ts`](src/tex-worker.ts): lazy rendering, serial work, cancellation
+  and Worker lifetime.
+- [`src/svg.ts`](src/svg.ts) and [`src/appearance.ts`](src/appearance.ts): static
+  SVG admission, local reference handling and theme-aware paint/sizing.
+- [`scripts/build.mjs`](scripts/build.mjs), [`licenses/`](licenses/) and
+  [`tests/`](tests/): local assets, upstream adaptations, notices and fixtures.
+
+See the [example map](../../docs/plugin-examples.md),
+[authoring guide](../../docs/plugin-authoring.md) and
+[API reference](../../docs/plugin-api/README.md).
+
+## License
+
+AGPL-3.0-only. See [`LICENSE`](LICENSE), [`THIRD-PARTY.md`](THIRD-PARTY.md) and
+[`licenses/`](licenses/) for pinned libraries, static-browser adaptations and upstream
+licenses/notices. The build preserves complete GPLv3 and Apache-2.0 texts and the
+relevant PyDvi/ColorBrewer notices alongside the other upstream licenses.

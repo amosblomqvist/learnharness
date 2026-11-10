@@ -42,12 +42,10 @@ import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
 import type { PlanBlockData } from "./contracts/chat.ts";
 
-/** A view part — the loose part vocabulary the renderers consume (the same
- *  shape names the pre-Wave-D UIMessage dialect used, so the renderer
- *  switch and the phase/pending scanners transplant unchanged). The common
- *  fields are optional-typed so the pre-Wave-D renderer code compiles
- *  against it with minimal casts; anything else stays `unknown` through
- *  the index signature. */
+/** One projected transcript part consumed by host renderers and phase/input
+ * scanners. type selects the part vocabulary; common fields are optional
+ * because text, tools and data parts carry different payloads. Additional
+ * fields remain unknown through the index signature and require narrowing. */
 export interface LhViewPart extends Record<string, unknown> {
 	type: string;
 	id?: string;

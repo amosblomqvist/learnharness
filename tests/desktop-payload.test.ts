@@ -7,6 +7,7 @@ import * as path from "node:path";
 import { describe, it } from "node:test";
 import { createPluginHost } from "../src/server/plugin-host.ts";
 import { createPluginSmokeFixture } from "../scripts/smoke-plugin-runtime.mjs";
+import { seedAuthoringReferenceFixture } from "./helpers/plugin-authoring-fixture.ts";
 
 const source = fs.readFileSync(new URL("../scripts/build-server.mjs", import.meta.url), "utf8");
 const STANDALONE = path.join(".next", "standalone");
@@ -14,7 +15,7 @@ const PROMPT = path.join("src", "agent", "system-prompt.md");
 const AUTHORING_DOCS = [
 	"plugin-authoring.md", "plugin-architecture.md", "plugin-question-contract.md",
 	"plugin-problem-contract.md", "plugin-session-extension-contract.md", "plugin-tree-contract.md",
-	"plugin-view-context.md", "dialog-overlay-contract.md",
+	"plugin-view-context.md", "dialog-overlay-contract.md", "plugin-examples.md",
 ];
 
 function withPayload(test: (fixture: {
@@ -29,6 +30,7 @@ function withPayload(test: (fixture: {
 		fs.writeFileSync(target, content);
 	};
 	try {
+		seedAuthoringReferenceFixture(root);
 		write(path.join("scripts", "build-server.mjs"), source);
 		write("scripts/build-plugin-authoring.mjs", fs.readFileSync(new URL("../scripts/build-plugin-authoring.mjs", import.meta.url), "utf8"));
 		write("scripts/install-plugin-local.mjs", fs.readFileSync(new URL("../scripts/install-plugin-local.mjs", import.meta.url), "utf8"));
@@ -130,7 +132,7 @@ describe("desktop standalone payload", () => {
 			for (const file of runtime) assert.ok(fs.existsSync(path.join(root, STANDALONE, file)), file);
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, ".next", "static", "runtime.js")));
 			assert.ok(fs.existsSync(path.join(root, STANDALONE, "public", "asset.txt")));
-			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/docs/plugin-tree-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/dist/manifest.json", "plugin-authoring/examples/plugins/hello-plugin/dist/main.js", "plugin-authoring/SKILL.md", "plugin-authoring/README.md", "plugin-authoring/bundle.json", "plugin-authoring/tools/install-plugin-local.mjs", "public/plugin-authoring/learnharness-plugins.zip"]) {
+			for (const asset of ["scripts/plugin-loader.cjs", "public/plugin-loader.js", "plugin-authoring/docs/plugin-authoring.md", "plugin-authoring/docs/plugin-question-contract.md", "plugin-authoring/docs/plugin-session-extension-contract.md", "plugin-authoring/docs/plugin-tree-contract.md", "plugin-authoring/types/index.d.ts", "plugin-authoring/examples/plugins/hello-plugin/dist/manifest.json", "plugin-authoring/examples/plugins/hello-plugin/dist/main.js", "plugin-authoring/SKILL.md", "plugin-authoring/README.md", "plugin-authoring/bundle.json", "plugin-authoring/tools/install-plugin-local.mjs", "plugin-authoring/docs/plugin-api/README.md", "plugin-authoring/plugins/flashcards/src/backend.cjs", "plugin-authoring/plugins/ui-showcase/src/gallery.ts", "public/plugin-authoring/learnharness-plugins.zip"]) {
 				assert.ok(fs.existsSync(path.join(root, STANDALONE, asset)), asset);
 			}
 		});
@@ -142,7 +144,7 @@ describe("desktop standalone payload", () => {
 			assert.equal(result.status, 0, String(result.stderr));
 			const authoring = path.join(root, STANDALONE, "plugin-authoring");
 			assert.equal(fs.existsSync(path.join(authoring, "docs/archive")), false);
-			const files = [...AUTHORING_DOCS.map(file => `docs/${file}`), "SKILL.md", "README.md"];
+			const files = [...AUTHORING_DOCS.map(file => `docs/${file}`), ...fs.readdirSync(path.join(authoring, "docs/plugin-api")).map(file => `docs/plugin-api/${file}`), "SKILL.md", "README.md"];
 			const headings = (text: string) => {
 				const seen = new Map<string, number>();
 				return [...text.matchAll(/^#{1,6} (.+)$/gm)].map(([, heading]) => {

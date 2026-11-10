@@ -1,10 +1,19 @@
 # Drawing Pad
 
-A trusted-local LearnHarness plugin for drawing over read-only question references.
-Requires the public session-view context API documented at `docs/plugin-view-context.md`
-(host commit `1b4b470`) and scoped plugin action shortcuts (`b651ca6a`) on the
-plugin-architecture branch. App version 0.4.1 alone does not imply these unreleased
-host capabilities are present.
+A trusted-local Core LearnHarness plugin for drawing over read-only question references.
+Requires the public [session-view context](../../docs/plugin-view-context.md),
+[scoped action shortcuts](../../docs/plugin-authoring.md#action-shortcuts), surfaces
+and learner-submission interception APIs. A version number alone does not establish
+capabilities; use host documentation/types matching the target app.
+
+## Core plugin and source reference
+
+Enable Drawing Pad in **Settings → Core plugins**. The app supplies and updates its
+code; writable preferences live under `<learning data>/core-plugin-data/drawing-pad/`.
+This source project is reference material, not an installable Community copy.
+`drawing-pad` is a reserved Core ID even when disabled or missing. A Community fork
+needs its own manifest/folder ID and a review of conflicting contribution, tool and
+fence names. Do not install this build into a Community `plugins/drawing-pad/` folder.
 
 ## Behavior
 
@@ -141,67 +150,89 @@ No runtime host imports, native DOM scraping, global key hook, polling, inferenc
 core-record writes, app replacement, or installer are included. Keyboard bindings
 are declared on public plugin actions; the host owns dispatch and Escape.
 
-## Development (plugin only)
+## Development
+
+In the extracted authoring kit, copy the shared **kit-root `types/` contents** into
+`.sdk/` **before dependency setup**. From `plugins/drawing-pad/`:
 
 ```sh
-npm run sdk
-npm install
-npm run typecheck
+mkdir -p .sdk
+cp -R ../../types/. .sdk/
+```
+
+In a LearnHarness source checkout instead, `npm run sdk` generates `.sdk/` via
+`../../scripts/build-plugin-types.mjs`. It is **checkout-only**, not a command available
+in the extracted kit. Runtime code does not import the SDK.
+
+Set up development dependencies separately, including the SDK's declared
+peer dependencies/types. With dependencies already available, build without a host checkout:
+
+```sh
+npm run build
+```
+
+The build writes `dist/` directly, bundles runtime dependencies and includes license
+notices. It refuses symlinked output or misplaced `dist/data/` and preserves sibling
+`data/`. It does not build the host or install, enable or update the Core plugin.
+
+## Tests and boundaries
+
+After SDK/dependency setup, plugin-only checks are:
+
+```sh
+npm run typecheck            # strict SDK consumer, skipLibCheck=false
 npm test
+```
+
+Unit tests cover settings, public reference projection, stroke/state/geometry logic,
+accepted-pose tracking, submission transformation, font parsing, frontend lifetimes
+and build-output guards. Host capabilities are mocked; these are not native host or
+hardware tests.
+
+The browser fixture is **checkout-only**: it imports private host modules and assets
+not supplied in the authoring kit, and requires the checkout's dependencies plus
+local Chrome (`CHROME_PATH` or the harness default). In that environment:
+
+```sh
 npm run test:browser
 npm run build
-# Exercise the actual distributable, not just the source module:
 npm run test:browser -- --built
-# Optional disposable fixture for manual browser inspection; Ctrl+C stops it:
+# Optional fixture for manual inspection; Ctrl+C stops it:
 npm run test:browser -- --built --serve
 ```
 
-The build writes `dist/` directly and refuses symlinked output or `dist/data`. It bundles
-all runtime dependencies and includes notices. `data/` is never distributed or removed
-by the build. No host app build is part of these commands. Tests use disposable data
-and a browser fixture, never a real learning profile or paid provider. Fixture proof
-is not installed-app, real-tablet, microphone, or provider verification.
+The fixture uses actual host Markdown/math/Mermaid and action/shortcut/Keyboard
+components. Surface shells, preference fields, submission acceptance and event
+transport remain adapters, not an installed app. It inspects canvas pixels and
+composite PNGs, export limits, camera-independent geometry, practice image suppression,
+remount/cancellation cleanup, fonts, shortcuts and right-drag/pen gestures. `--built`
+loads `dist/main.js`; source-mode tests do not regenerate the bundle.
 
-Installation, when separately authorized: built files belong in
-`<learning-data>/plugins/drawing-pad/dist/`, with persistent preferences beside that at
-`drawing-pad/data/`. Copying/updating a plugin does not authorize replacing the app.
+Use disposable data and loopback fixtures, not real learning profiles or paid providers.
+These checks do not establish real-tablet, installed-app, microphone, real-model or
+cross-platform behavior. This project has no `test:native` script.
 
-## Verification boundary
+## Source reading route
 
-Local verification includes strict SDK-consumer TypeScript (`skipLibCheck: false`),
-81 unit tests, a plugin-only bundle build, targeted ESLint, and 50 browser assertion
-groups. Browser capture uses the **actual host `HostMarkdown` pipeline**, including
-KaTeX and asynchronous Mermaid, in a disposable loopback fixture. Shortcuts use the
-actual host action manager, dispatcher, conflict resolver, interaction-layer controller,
-and Keyboard settings component. A test-only React context adapter supplies that
-manager without mounting Next's router/SSE providers. The surface shell, plugin
-preference fields, submission acceptance and event transport remain fixture adapters,
-not a running/installed LearnHarness app. Assertions inspect real canvas
-pixels and decoded composite PNGs, unchanged practice-image suppression, pressure-pen
-and held eraser events, reset/export races, cancellation, resync and cleanup. Remount
-regressions cover initial mount/abort/remount with delayed cleanup registration,
-retained background/ink/Undo, and flushing an active stroke during remount. Font
-regressions verify nested relative imports, embedded used-font bytes, unchanged live
-stylesheets/dark body/top-bar colors, HTML font response refusal, and fetch cancellation.
-World-coordinate regressions cover fixed native content width even for fresh narrow-window
-captures, narrowing/widening without scaling, the 24px bottom-center anchor with retained
-Hand-pan offsets, remote ink erasing/Undo, camera-independent PNG bytes,
-minimal blank-sheet crops, full-surface top-strip drawing behind compact controls,
-transparent toolbar padding and clickable buttons, retina density, the 2000-pixel cap, and scale preferences
-without content edits or unwanted practice resends. Shortcut regressions cover all
-four default bindings, Hand selection/repeated selection and Hand → Pen, visible
-Keyboard settings rows and Rebind/Clear/Reset, native text Undo, gesture/closed-pad
-guards, and foreground blockers. Right-drag regressions cover all selected tools,
-unchanged PNG bytes and Undo history, outside-canvas release, releasing Right with
-Left still held, pointer cancellation/lost capture, remounts, and pending acceptance.
-Headless Chrome's native text Undo command is attached to a real key event and remains
-subject to preventDefault. `--built` runs the same proof against `dist/main.js` and
-checks shortcut registrations up front, detecting stale distributions.
-No provider/API requests or off-origin traffic are allowed. No real-tablet hardware,
-installed-app integration, real model transport, microphone, or cross-OS proof is claimed.
+- [`src/main.ts`](src/main.ts): contextual actions/shortcuts, surface ownership,
+  settings and submission interception.
+- [`src/reference.ts`](src/reference.ts) and [`src/poses.ts`](src/poses.ts):
+  host-selected input projection and accepted-pose occurrence tracking.
+- [`src/state.ts`](src/state.ts) and [`src/submission.ts`](src/submission.ts):
+  session sheets, captured revisions, acknowledgment and image attachment.
+- [`src/sheet.ts`](src/sheet.ts), [`src/strokes.ts`](src/strokes.ts) and
+  [`src/geometry.ts`](src/geometry.ts): plugin-owned gestures and world/export geometry.
+- [`src/capture.ts`](src/capture.ts) and [`src/fonts.ts`](src/fonts.ts):
+  cancellation-aware reference capture and font resources.
+- [`src/backend.ts`](src/backend.ts), [`src/settings.ts`](src/settings.ts),
+  [`scripts/build.mjs`](scripts/build.mjs) and [`tests/`](tests/): preferences,
+  validation, packaging and fixtures.
 
-These checks do not rebuild or replace the host app, submit real learner answers, or
-call a model. The host pins installed plugin bundles for its process lifetime: after
-updating an installed bundle, restart the host to load it. A browser refresh alone
-still uses the pinned bundle. Build before copying `dist/`: source edits and successful
-source-mode tests do not regenerate distributable files.
+See the [example map](../../docs/plugin-examples.md),
+[authoring guide](../../docs/plugin-authoring.md) and
+[API reference](../../docs/plugin-api/README.md).
+
+## License
+
+AGPL-3.0-only. See [`LICENSE`](LICENSE) and [`THIRD-PARTY.md`](THIRD-PARTY.md)
+for the bundled capture library's attribution.

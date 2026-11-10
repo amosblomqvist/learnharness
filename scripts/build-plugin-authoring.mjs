@@ -9,9 +9,12 @@ import { crc32 } from "node:zlib";
 export const AUTHORING_DOCS = [
 	"plugin-authoring.md", "plugin-architecture.md", "plugin-question-contract.md",
 	"plugin-problem-contract.md", "plugin-session-extension-contract.md", "plugin-tree-contract.md",
-	"plugin-view-context.md", "dialog-overlay-contract.md",
+	"plugin-view-context.md", "dialog-overlay-contract.md", "plugin-examples.md",
 ];
 export const AUTHORING_EXAMPLES = ["hello-plugin", "managed-agent", "teaching-extension"];
+export const AUTHORING_PROJECTS = ["flashcards", "coding-questions", "drawing-pad", "rich-code-blocks", "ui-showcase"];
+const PROJECT_FILES = [".gitignore", "README.md", "LICENSE", "THIRD-PARTY.md", "FSRS-LICENSE.txt", "manifest.json", "package.json", "package-lock.json", "tsconfig.json"];
+const PROJECT_DIRECTORIES = ["src", "scripts", "tests", "licenses"];
 export const AUTHORING_ZIP = "learnharness-plugins.zip";
 
 /** Admit every component below the intended source root before dereferencing it.
@@ -44,7 +47,7 @@ function files(directory, prefix = "", root = directory) {
 	});
 }
 
-/** Deterministic ZIP32, stored entries: this text-only kit is small (~0.5 MiB).
+/** Deterministic ZIP32, stored entries: the offline kit contains documentation and canonical source references.
  * Fixed DOS date, UTF-8 names and regular-file attributes; no platform zip executable. */
 export function createAuthoringZip(entries) {
 	if (entries.length > 65535) throw Error("Too many authoring ZIP entries");
@@ -103,7 +106,7 @@ export function buildPluginAuthoring({ root = path.resolve(import.meta.dirname, 
 	ownedOutput(root, directory); ownedOutput(root, publicDirectory);
 	const app = JSON.parse(fs.readFileSync(sourcePath(root, path.join(root, "package.json"), "file"), "utf8"));
 	if (!/^\d+\.\d+\.\d+$/.test(app.version)) throw Error("Authoring requires a numeric app version");
-	const stage = fs.mkdtempSync(path.join(os.tmpdir(), "lh-authoring-"));
+	const stage = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), "lh-authoring-")));
 	try {
 		copyFile(root, path.join(root, "LICENSE"), path.join(stage, "LICENSE"));
 		copyFile(root, path.join(root, "scripts", "install-plugin-local.mjs"), path.join(stage, "tools", "install-plugin-local.mjs"));
@@ -117,12 +120,20 @@ export function buildPluginAuthoring({ root = path.resolve(import.meta.dirname, 
 			manifest.minAppVersion = app.version;
 			fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, "\t") + "\n");
 		}
-		// Maintainer tests remain in the checkout, not the installable examples.
+		// Export canonical source references, never local builds, SDKs, dependencies or learner data.
+		for (const id of AUTHORING_PROJECTS) {
+			const source = sourcePath(root, path.join(root, "plugins", id), "directory"), destination = path.join(stage, "plugins", id);
+			for (const filename of PROJECT_FILES) if (fs.lstatSync(path.join(source, filename), { throwIfNoEntry: false })) copyFile(root, path.join(source, filename), path.join(destination, filename));
+			for (const dirname of PROJECT_DIRECTORIES) if (fs.lstatSync(path.join(source, dirname), { throwIfNoEntry: false })) copyDirectory(root, path.join(source, dirname), path.join(destination, dirname));
+			for (const filename of ["README.md", "LICENSE", "manifest.json", "package.json", "package-lock.json"]) sourcePath(stage, path.join(destination, filename), "file");
+		}
 		const skill = fs.readFileSync(sourcePath(root, path.join(root, "skills", "learnharness-plugins", "SKILL.md"), "file"), "utf8").replaceAll("../../docs/", "./docs/").replaceAll("../../examples/", "./examples/");
 		fs.writeFileSync(path.join(stage, "SKILL.md"), skill);
 		copyFile(root, path.join(root, "skills", "learnharness-plugins", "README.md"), path.join(stage, "README.md"));
 		const types = spawnSync(process.execPath, [sourcePath(root, path.join(root, "scripts", "build-plugin-types.mjs"), "file"), path.join(stage, "types")], { cwd: root, stdio: "inherit" });
 		if (types.error || types.status !== 0) throw Error(`Authoring API declaration emission failed: ${types.error ?? types.status}`);
+		const reference = spawnSync(process.execPath, [sourcePath(root, path.join(root, "scripts", "build-plugin-api-reference.mjs"), "file"), path.join(stage, "types"), path.join(stage, "docs", "plugin-api")], { cwd: root, stdio: "inherit" });
+		if (reference.error || reference.status !== 0) throw Error(`Authoring API reference generation failed: ${reference.error ?? reference.status}`);
 		const sdk = JSON.parse(fs.readFileSync(sourcePath(stage, path.join(stage, "types", "package.json"), "file"), "utf8"));
 		const metadata = { appVersion: app.version, pluginApiVersion: 1, sdkVersion: sdk.version };
 		fs.writeFileSync(path.join(stage, "bundle.json"), JSON.stringify(metadata, null, "\t") + "\n");
