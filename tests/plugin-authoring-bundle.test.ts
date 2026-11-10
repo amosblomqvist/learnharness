@@ -60,6 +60,8 @@ function fixture(run: (root: string) => void) {
 	};
 	try {
 		write("package.json", JSON.stringify({ version: "9.8.7" }));
+		write("scripts/install-plugin-local.mjs", fs.readFileSync(path.join(source, "scripts/install-plugin-local.mjs"), "utf8"));
+		write("docs/archive/plugin-implementation-history.md", "REPOSITORY_ONLY_HISTORY_SENTINEL");
 		write("LICENSE", fs.readFileSync(path.join(source, "LICENSE"), "utf8"));
 		for (const doc of AUTHORING_DOCS) write(`docs/${doc}`, fs.readFileSync(path.join(source, "docs", doc), "utf8"));
 		for (const file of ["SKILL.md", "README.md"]) write(`skills/learnharness-plugins/${file}`, fs.readFileSync(path.join(source, "skills/learnharness-plugins", file), "utf8"));
@@ -76,7 +78,9 @@ it("produces the complete rooted skill, matching versions, current example layou
 	assert.deepEqual(built.metadata, { appVersion: "9.8.7", pluginApiVersion: 1, sdkVersion: "1.0.0" });
 	const entries = unzip(fs.readFileSync(built.archive));
 	assert.equal(entries.size, built.entries);
-	for (const name of ["SKILL.md", "README.md", "LICENSE", "bundle.json", "types/index.d.ts", ...AUTHORING_DOCS.map((doc: string) => `docs/${doc}`)]) assert.ok(entries.has(`learnharness-plugins/${name}`), name);
+	assert.equal(entries.has("learnharness-plugins/docs/archive/plugin-implementation-history.md"), false);
+	assert.deepEqual(entries.get("learnharness-plugins/tools/install-plugin-local.mjs"), fs.readFileSync(path.join(root, "scripts/install-plugin-local.mjs")));
+	for (const name of ["SKILL.md", "README.md", "LICENSE", "bundle.json", "tools/install-plugin-local.mjs", "types/index.d.ts", ...AUTHORING_DOCS.map((doc: string) => `docs/${doc}`)]) assert.ok(entries.has(`learnharness-plugins/${name}`), name);
 	const skill = entries.get("learnharness-plugins/SKILL.md")!.toString();
 	assert.match(skill, /\(\.\/docs\/plugin-authoring.md\)/); assert.match(skill, /\(\.\/examples\/plugins\/\)/);
 	assert.doesNotMatch(skill, /\.\.\/\.\.\//);
@@ -90,12 +94,13 @@ it("produces the complete rooted skill, matching versions, current example layou
 	}
 	for (const [name, bytes] of entries) {
 		assert.doesNotMatch(name, /(?:^|\/)(?:data|node_modules|skills|unrelated)\//);
-		assert.doesNotMatch(name, /auth\.json|not-authoring|example-ui\.test/);
+		assert.doesNotMatch(name, /auth\.json|not-authoring|example-ui\.test|\/archive\//);
 		assert.equal(bytes.includes(Buffer.from("AUTHORING_PRIVATE_SENTINEL_9b1f")), false);
 		assert.deepEqual(bytes, fs.readFileSync(path.join(built.directory, name.slice("learnharness-plugins/".length))));
 	}
 	// All Markdown links, including example README links, stay inside this extracted skill.
 	for (const [name, bytes] of entries) if (name.endsWith(".md")) {
+		assert.doesNotMatch(bytes.toString(), /human-approved|commit closeout|UI-polish amendment|uncommitted|archive\/plugin-implementation-history|REPOSITORY_ONLY_HISTORY_SENTINEL|20\d\d-\d\d-\d\d/i, name);
 		for (const [, href] of bytes.toString().matchAll(/\[[^\]]+\]\(([^)\s]+)\)/g)) {
 			if (!href || /^(?:https?:|mailto:|#)/.test(href)) continue;
 			const target = path.posix.normalize(path.posix.join(path.posix.dirname(name), href.split("#")[0]!));
@@ -132,7 +137,7 @@ it("refuses unsafe example contents, source symlinks and output symlinks without
 	});
 });
 it("rejects every curated source-file symlink before replacing existing outputs", () => {
-	for (const relative of ["skills/learnharness-plugins/SKILL.md", "package.json", "LICENSE", "docs/plugin-authoring.md", "skills/learnharness-plugins/README.md", "examples/plugins/hello-plugin/README.md", "examples/plugins/hello-plugin/dist/manifest.json", "examples/plugins/hello-plugin/dist/main.js", "scripts/build-plugin-types.mjs"]) fixture(root => {
+	for (const relative of ["skills/learnharness-plugins/SKILL.md", "package.json", "LICENSE", "docs/plugin-authoring.md", "skills/learnharness-plugins/README.md", "examples/plugins/hello-plugin/README.md", "examples/plugins/hello-plugin/dist/manifest.json", "examples/plugins/hello-plugin/dist/main.js", "scripts/build-plugin-types.mjs", "scripts/install-plugin-local.mjs"]) fixture(root => {
 		const built = buildPluginAuthoring({ root });
 		const archive = fs.readFileSync(built.archive), skill = fs.readFileSync(path.join(built.directory, "SKILL.md"));
 		const external = fs.mkdtempSync(path.join(os.tmpdir(), "lh-authoring-external-file-"));
@@ -147,7 +152,7 @@ it("rejects every curated source-file symlink before replacing existing outputs"
 	});
 });
 it("rejects source ancestor-directory symlinks before replacing existing outputs", () => {
-	for (const relative of ["docs", "docs/archive", "skills", "skills/learnharness-plugins", "examples", "examples/plugins", "examples/plugins/hello-plugin", "examples/plugins/hello-plugin/dist", "scripts"]) fixture(root => {
+	for (const relative of ["docs", "skills", "skills/learnharness-plugins", "examples", "examples/plugins", "examples/plugins/hello-plugin", "examples/plugins/hello-plugin/dist", "scripts"]) fixture(root => {
 		const built = buildPluginAuthoring({ root });
 		const archive = fs.readFileSync(built.archive), skill = fs.readFileSync(path.join(built.directory, "SKILL.md"));
 		const external = fs.mkdtempSync(path.join(os.tmpdir(), "lh-authoring-external-directory-"));

@@ -264,12 +264,11 @@ Dialogs share headerless/X presentation within their modal bounds. `onClose` is 
 not an async veto. Abort/programmatic disposal follows normal handle cleanup. Shared
 Escape/focus ownership follows the [interaction contract](dialog-overlay-contract.md).
 
-## 9. Verification
+## 9. Testing
 
 Cover ordering/immutable transforms, readiness, final speech publication, stale occurrence/
 model/view/registration, cancellation retaining drafts, busy fallback once-only interception,
 acknowledgment uncertainty, native image bytes/UI/model channels and unsupported engines.
 Surface checks include exact bounds, retained covered state, one-Escape ownership, focus return,
-page expiry, modal ordering, owner-scoped cleanup and late mounts. Packaged checks need isolated
-storage/providers; component fixtures alone are not release proof. Original test counts and
-browser evidence are preserved in the [implementation archive](archive/plugin-implementation-history.md#session-extension-checkpoints).
+page expiry, modal ordering, owner-scoped cleanup and late mounts. Use isolated storage
+and controlled providers when exercising the plugin in the app.

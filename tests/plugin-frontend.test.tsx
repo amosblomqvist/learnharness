@@ -594,7 +594,8 @@ describe("plugin frontend surface and native importer", () => {
 		const saved = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
 		Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
 			fetch: async () => { throw new Error("Core settings unavailable"); }, IS_REACT_ACT_ENVIRONMENT: true });
-		let activated = 0, settingsMounts = 0, settingsCleanups = 0, activeSources = 0, enabled = true;
+		let activated = 0, settingsMounts = 0, settingsCleanups = 0, activeSources = 0, enabled = true, refreshPosts = 0;
+		let pendingRefresh: ReturnType<typeof deferred<Response>> | undefined;
 		const actions: string[] = [], events: ServerEvent[] = [];
 		const f = fixture({ activate(ctx) {
 			activated++;
@@ -603,6 +604,7 @@ describe("plugin frontend surface and native importer", () => {
 			ctx.registerSettings(child => { settingsMounts++; child.textContent = "Fixture custom settings"; return () => { settingsCleanups++; }; });
 			ctx.onAppEvent(event => { events.push(event); });
 		} }, { fetch: async (_url, init) => {
+			if (init?.method === "POST") { refreshPosts++; if (pendingRefresh) return pendingRefresh.promise; }
 			if (init?.method === "PUT") enabled = JSON.parse(String(init.body)).enabled;
 			return Response.json({ plugins: [info("fixture", { enabled, status: enabled ? "active" : "disabled" })], directory: "/fixture/writable/plugins" });
 		} });
@@ -623,6 +625,27 @@ describe("plugin frontend surface and native importer", () => {
 			await act(async () => { root.render(<React.StrictMode><AppRouterContext.Provider value={router}><PathnameContext.Provider value="/plugins/fixture/overview"><ServerEventsProvider connect={connect}><PluginsProvider><SettingsDialogBody initialSection="plugins" onClose={() => {}} /></PluginsProvider></ServerEventsProvider></PathnameContext.Provider></AppRouterContext.Provider></React.StrictMode>); });
 			assert.equal(activated, 1); assert.equal(activeSources, 1); assert.equal(settingsMounts, 0);
 			assert.ok(document.body.textContent?.includes("/fixture/writable/plugins"));
+			const ids = [...document.querySelectorAll('[data-testid]')].map(node => node.getAttribute("data-testid"));
+			assert.ok(ids.indexOf("plugin-install-help") < ids.indexOf("plugin-authoring-help"));
+			assert.ok(ids.indexOf("plugin-authoring-help") < ids.indexOf("plugin-directory"));
+			assert.ok(ids.indexOf("plugin-directory") < ids.indexOf("plugin-fixture"));
+			const refresh = document.querySelector<HTMLButtonElement>('[aria-label="Refresh plugins"]')!;
+			assert.ok(document.querySelector('[data-testid="plugin-directory"]')?.contains(refresh));
+			assert.equal(refresh.textContent, "");
+			assert.equal(refresh.disabled, false);
+			pendingRefresh = deferred<Response>();
+			await click(refresh);
+			assert.equal(refresh.getAttribute("aria-busy"), "true");
+			assert.equal(refresh.disabled, true);
+			assert.ok(refresh.querySelector("svg.animate-spin"));
+			await click(refresh); assert.equal(refreshPosts, 1, "pending refresh cannot duplicate POSTs");
+			await act(async () => { pendingRefresh!.resolve(Response.json({ error: "Synthetic refresh failure" }, { status: 500 })); await tick(); });
+			assert.equal(refresh.disabled, false);
+			assert.equal(refresh.getAttribute("aria-busy"), "false");
+			assert.ok(document.querySelector('[data-testid="section-plugins"] [role="alert"]')?.textContent?.includes("Synthetic refresh failure"));
+			pendingRefresh = undefined;
+			await click(refresh); assert.equal(refreshPosts, 2);
+			assert.equal(document.querySelector('[data-testid="section-plugins"] [role="alert"]'), null);
 			assert.equal(document.querySelector('nav[aria-label="Plugin views"]'), null, "enabled plugin views do not create automatic navigation");
 			const gear = document.querySelector<HTMLButtonElement>('[aria-label="Settings for Plugin fixture"]')!;
 			assert.ok(gear);
@@ -684,7 +707,7 @@ describe("plugin frontend surface and native importer", () => {
 	});
 	it("Settings explains trusted local code, broad access, restart recovery and directory install/refresh", () => {
 		const html = renderToStaticMarkup(<PluginsSection />);
-		for (const copy of ["trusted local code", "broad file and network access", "not sandboxed", "restarting LearnHarness", "disabled by default", "writable plugins directory", "Refresh plugins", "How to install a plugin", "Build a plugin", "Download authoring skill", "Nothing is installed automatically", "it does not hot-reload code"]) assert.ok(html.includes(copy), copy);
+		for (const copy of ["trusted local code", "broad file and network access", "not sandboxed", "restarting LearnHarness", "disabled by default", "Refresh plugins", "How to install a plugin", "Build a plugin", "Download authoring skill", "npm run build", "Prebuilt packages", "Preserve", "data/"]) assert.ok(html.includes(copy), copy);
 		const document = parseHTML(html).document;
 		const help = document.querySelector('[data-testid="plugin-install-help"]')!;
 		assert.equal(help.hasAttribute("open"), false);
@@ -694,6 +717,13 @@ describe("plugin frontend surface and native importer", () => {
 		assert.equal(download.tagName, "A");
 		assert.equal(download.getAttribute("href"), "/plugin-authoring/learnharness-plugins.zip");
 		assert.equal(download.hasAttribute("download"), true);
+		assert.equal(document.querySelector('[data-testid="plugin-authoring-help"]')?.querySelectorAll("p").length, 1);
+		assert.equal(document.querySelector('[data-testid="plugin-authoring-help"] p')?.textContent, "Download the authoring skill for your coding agent.");
+		const refresh = document.querySelector('[aria-label="Refresh plugins"]')!;
+		assert.equal(refresh.textContent, "");
+		assert.equal(refresh.hasAttribute("disabled"), true, "no provider means disabled");
+		assert.ok(refresh.querySelector('svg[aria-hidden="true"]'));
+		assert.ok(document.querySelector('[data-testid="plugin-directory"]')?.contains(refresh));
 		const core = renderToStaticMarkup(<PluginsSection origin="core" />);
 		for (const text of ["How to install a plugin", "Build a plugin", "Download authoring skill", "Refresh plugins"]) assert.equal(core.includes(text), false, text);
 	});

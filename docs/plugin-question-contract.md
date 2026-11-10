@@ -255,12 +255,10 @@ Fallback respects reveal pacing, shows safe saved Markdown/status, disables subm
 and exposes recovery dismissal. Copy: `Preparing question…`, `Question unavailable`,
 `Dismiss question`, `Could not sync the saved session.` / `Retry syncing`.
 
-## 9. Verification
+## 9. Testing
 
 Tests should cover ledger-attested poses/mixed batches, stream suppression, canonical
 reconnect/adoption, exact occurrences, schemas/local references, unavailable/incompatible
 states, grading cancellation/save order, duplicate/legacy bypasses, editor generations,
-drafts, keyboard/IME, speech delivery and host fallback. Portable SDK and isolated packaged
-browser checks complement unit/component tests; fixtures do not establish real microphone,
-OS IME, provider or installer behavior. Historical counts/evidence are in the
-[implementation archive](archive/plugin-implementation-history.md#teaching-question-checkpoints).
+drafts, keyboard/IME, speech delivery and host fallback. Typecheck against the portable SDK
+and exercise the plugin in an isolated app profile as well as unit/component fixtures.

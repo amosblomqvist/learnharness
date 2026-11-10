@@ -44,8 +44,9 @@ forward compatibility or change the host's compatibility rules.
 ## What's included
 
 - `SKILL.md`: coding-agent entry point and guardrails.
-- `docs/`: authoring guide, feature contracts and host-maintainer references.
-  `docs/archive/` contains historical evidence, not current compatibility promises.
+- `docs/`: the canonical authoring guide, feature contracts and host architecture.
+- `tools/install-plugin-local.mjs`: a dependency-free helper for outside-workspace
+  installation. The authoring guide documents the explicit-path npm command.
 - `examples/plugins/`: Hello plugin, Managed agent and Teaching extension.
 - `types/`: the local `learnharness-plugin-api` type-only package. It has no runtime
   exports; TypeScript projects must supply its declared peer dependencies during
@@ -53,6 +54,6 @@ forward compatibility or change the host's compatibility rules.
 - `bundle.json`: version information for these exact materials.
 - `LICENSE`: the existing LearnHarness AGPL license, including for the example code.
 
-Keep these directories together. Build tools and repository-only maintainer tests
+Keep these directories together. Bundlers and repository-only maintainer tests
 are not included. Plugin builds, coding-agent setup and any paid/model work remain
 separate actions under your control.

@@ -104,7 +104,7 @@ not its answer keys/explanation/committed answer. The complete history remains a
 separately without artificial filtering. Reveal/collapse flags **describe** the host UI:
 unrevealed question data is still inspectable, but a read never opens/reveals the question.
 A consumer deciding what to render as a learner reference must use the supplied flags
-and its own approved product behavior, not pretend that inspectable data is already visible.
+and its own product behavior, not pretend that inspectable data is already visible.
 
 ## Snapshot, identity, and lifetime
 
@@ -132,7 +132,7 @@ request microphone access, persist drafts, invoke submission interceptors, proce
 submit, acknowledge, or send a model request. It reports current typed/published values,
 not a forced flush of pending speech.
 
-## Host implementation and verification
+## Host implementation and testing
 
 `components/chat.tsx` supplies its existing native history, projected transcript, current
 session metadata and shared submission-target factories. Its native dock publishes a
@@ -142,9 +142,8 @@ editor value and availability. Cleanup is generation-owned. No second history pa
 independent shuffle, DOM inspection, global store, polling, or product-plugin dependency
 is introduced.
 
-Tests cover portable SDK readonly/discriminated types, complete context copying, custom
-payloads/editor states, unavailable input, real native input-owner reads, untrimmed drafts,
-cleanup, inline/overflow action freshness, async capture stability, disabled predicates,
-and capture-error containment. Browser diagnostics exercise real host top-bar actions,
-`DockOverlay`, native/custom inputs and the snapshot helper with in-memory data; they are
-not a packaged-app, real-provider, or actual plugin-installation proof.
+Test readonly/discriminated SDK types, complete context copying, custom payloads/editor
+states, unavailable input, native input-owner reads, untrimmed drafts, cleanup,
+inline/overflow action freshness, async capture stability, disabled predicates and
+capture-error containment. Exercise the plugin's actual top-bar actions and native/custom
+inputs in an isolated app profile.

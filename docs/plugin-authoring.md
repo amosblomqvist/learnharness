@@ -13,17 +13,34 @@ these are separate numbers, not interchangeable compatibility guarantees.
 
 ## Quick start
 
-1. Open **Settings → Community plugins** to find the writable plugins directory.
-   Without a checkout, select **Download authoring skill** and extract the whole ZIP.
-2. Copy `examples/plugins/hello-plugin` from the extracted skill (or checkout) there,
-   keeping its folder name and `dist/`.
-3. Refresh the list, enable **Hello plugin**, and open its sidebar action.
-4. Edit the installed `hello-plugin/dist/` code and restart LearnHarness to load changes.
-   Refresh discovers packages; it does not hot-reload admitted JavaScript.
+The primary source-development workflow is to **clone into the app's plugins directory
+and build there**. No LearnHarness repository clone is required.
 
-LearnHarness runs no npm commands. For a TypeScript project, build before refreshing.
-The repository's `plugins/` projects demonstrate bundled production features; the
-no-build `examples/plugins/` packages are smaller starting points:
+1. Open **Settings → Community plugins** and copy the plugins directory path.
+2. Clone the plugin's repository into `<plugins-directory>/<plugin-id>`. The folder
+   name must match `id` in its manifest, which may differ from the repository name.
+3. Follow the project's dependency setup, then run `npm run build` in that folder.
+   The build writes directly to its `dist/`; no additional installation step is needed.
+4. Refresh the list and enable the plugin. Restart LearnHarness after changing
+   already-loaded code; Refresh discovers packages, not hot-reloaded JavaScript.
+
+For a project that provides a lockfile and build script:
+
+```sh
+git clone <repository-url> "<plugins-directory>/my-plugin"
+cd "<plugins-directory>/my-plugin"
+npm ci
+npm run build
+```
+
+Only build code you trust: dependency installation and build scripts execute local code.
+LearnHarness itself runs no npm commands. Builds must preserve sibling `data/`.
+
+For a new plugin, download and extract **Download authoring skill**, then give the whole
+`learnharness-plugins/` folder to your coding agent and ask it to read `SKILL.md`. Its README
+explains agent setup. The included SDK works without a LearnHarness checkout; plugin
+build tools/dependencies are installed separately. The three included no-build examples
+can be [installed directly](#install-a-prebuilt-package):
 
 | Example | Demonstrates |
 | --- | --- |
@@ -32,20 +49,9 @@ no-build `examples/plugins/` packages are smaller starting points:
 | `teaching-extension` | Additive instructions, native tools, renderers and a detached worker |
 
 Model-using examples may incur cost when explicitly run. These examples are authoring
-material, not automatically enabled plugins or a commitment to bundle every feature.
-
-**Download authoring skill** works offline and supplies one self-contained
-`learnharness-plugins/` folder with root `SKILL.md`, README, version metadata, docs,
-examples and generated API types. Give your coding agent the whole folder and ask it
-to read `SKILL.md`; for automatic discovery, place the whole folder in that agent's
-supported skills directory. Locations/reload rules vary by agent. LearnHarness does
-not install or configure agents, and copying only `SKILL.md` loses its references.
-The exported examples require at least the producing app version; choosing older
-minimums for your own plugin requires checking its capabilities on those older apps.
-
-Packaged apps also retain the expanded matching skill in `plugin-authoring/` beside
-the standalone server in app resources. That is read-only authoring material, **not**
-the writable installed plugins directory. Do not install the entire skill as a plugin.
+material, not automatically installed plugins. Keep the complete skill folder together;
+do not install it as a plugin. The exported examples require at least the producing app
+version identified by `bundle.json`.
 
 ## Choose the extension point
 
@@ -131,6 +137,59 @@ Repository source stays in `plugins/`. `npm run plugins:build-core` builds the s
 catalog in `core-plugins.json` and stages generated packages. UI Showcase remains a
 source/developer example, not a shipped core package. This build command never installs
 or enables a package in a learning-data directory.
+
+### Install a prebuilt package
+
+Copy/extract the plugin so its built files occupy
+`<plugins-directory>/<plugin-id>/dist/manifest.json` and sibling bundles/assets. The
+included no-build examples already have the `<plugin-id>/dist/` layout: copy an example's
+whole folder, refresh the list and enable it. No Node/npm setup is required for those
+examples. Do not add an extra nested `dist/<plugin-id>/` layer.
+
+When updating an existing plugin, replace only its `dist/` and preserve sibling `data/`.
+Restart LearnHarness to load updates to already-loaded code.
+
+### Develop outside the plugins directory
+
+Keep the same project layout and build locally. Either copy the completed `dist/` into
+`<plugins-directory>/<plugin-id>/dist/`, or use the portable local installer.
+
+1. Copy `tools/install-plugin-local.mjs` from the extracted authoring skill into your
+   project's `scripts/install-plugin-local.mjs`. In a LearnHarness checkout the same
+   helper lives at `scripts/install-plugin-local.mjs`.
+2. Add this script to the plugin's `package.json`, alongside its existing `build` script:
+
+   ```json
+   {
+     "scripts": {
+       "install:local": "npm run build && node scripts/install-plugin-local.mjs"
+     }
+   }
+   ```
+
+3. From the plugin project, supply the directory shown in Settings:
+
+   ```sh
+   npm run install:local -- "<plugins-directory>"
+   ```
+
+The command builds first. If the build fails, installation does not run. The helper uses
+only Node built-ins, checks the built manifest/entry files, and installs under the
+manifest's plugin ID. The supplied plugins directory must already exist. It does not
+infer a profile or save configuration. The host still decides app compatibility and
+reserved-ID admission when you refresh.
+
+For updates, the helper stages a complete replacement before moving the previous `dist/`
+aside; stale assets are removed rather than merged. If replacement fails, it restores the
+previous package. If rollback itself fails, the error reports the preserved backup path.
+Sibling `data/`, source files and enablement choices are untouched. Symlinked roots,
+package entries or target paths and misplaced `dist/data/` are refused. Non-distributable
+`data/`, `node_modules/`, `.git/` and credential files do not belong in `dist/`.
+
+If source and installed `dist/` are already the same directory, the helper reports an
+in-place build without copying. For that workflow, prefer plain `npm run build`.
+Refresh/enable a new plugin afterwards; restart LearnHarness for already-loaded code.
+The command does not automatically enable plugins or restart the app.
 
 ## Frontend lifecycle and navigation
 
@@ -595,7 +654,7 @@ Standalone tasks appear in Background agents as **plugin name · worker definiti
 without an invented session link; linked background-tool tasks do not duplicate rows.
 END cancels computing/queued work, not a completed result or pending delivery.
 
-## Events, recovery and verification
+## Events, recovery and testing
 
 Backend `ctx.events.on` / frontend `ctx.onAppEvent` observe supported app events.
 `turn-settled` follows turn persistence, not completion of asynchronous extraction.
@@ -607,7 +666,7 @@ Before distributing, check types, built package layout, disabled discovery, enab
 restart, cleanup/late awaits, missing-renderer fallback and data-preserving updates. Test
 native lifecycle paths your feature uses, not only its isolated UI. Prefer disposable
 profiles and loopback providers; do not overwrite an installed app just to test a plugin.
-See [host architecture and verification seams](plugin-architecture.md#verification).
+See [host architecture and testing seams](plugin-architecture.md#testing).
 
 ## Deliberate limits
 
