@@ -27,10 +27,13 @@ import { activeProblemOf } from "../../core/native-messages.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
 import { concludeResult, invalidInputResult, problemResult } from "../tool-execute.ts";
 import { healEncodedArguments, healToolRecord } from "./heal.ts";
+import type { LearningResourceSearch } from "../../core/learning-resources.ts";
+import { learningResourceTools } from "./learning-resources.ts";
 
 
 /** The record-reading context the gates need (the plan-tools idiom). */
 export interface PracticeToolContext {
+	learningResources?: LearningResourceSearch;
 	chatId: string;
 	chatStore: { getChat(id: string): { messages: LhMessage[]; kind?: string } | null };
 	/** The WHOLE-graph node list, read fresh per pose (owner round 9 — the
@@ -242,6 +245,7 @@ export function practiceTools(ctx: PracticeToolContext): Record<string, AgentToo
 		ls: lsTool,
 		find: findTool,
 		grep: grepTool,
+		...learningResourceTools(ctx.learningResources),
 		...(jobs?.research ? { research: jobs.research } : {}),
 		...(jobs ? { pdf: jobs.pdf! } : {}),
 		...(ctx.graph ? proberGraphTools(ctx.graph) : {}),
