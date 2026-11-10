@@ -13,12 +13,12 @@ concurrency:
 
 jobs:
   source-helper:
-    name: Frame-scheduling mechanism telemetry (${{ matrix.os }})
+    name: Public SVG production-entry-point test (${{ matrix.os }})
     strategy:
       fail-fast: false
       matrix:
         # Two owned source helpers per OS; no product edit or release gate change.
-        os: [windows-2025, ubuntu-24.04]
+        os: [windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 10
     defaults:
@@ -36,7 +36,7 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: "26"
-      - name: Preserve pinned frame-scheduling pair outside checkout
+      - name: Preserve pinned public-entry-point test outside checkout
         run: |
           node --input-type=module <<'NODE'
           import assert from 'node:assert/strict';
@@ -49,8 +49,7 @@ jobs:
           fs.mkdirSync(root, {recursive: true});
           // Git blob bytes avoid Windows worktree CRLF conversion.
           const files = [
-            {source: 'scripts/diagnose-frame-scheduling.mjs', name: 'frame-scheduling.mjs', sha256: '49a0914c6a6d8be432035359dd60df80a099c62d067a330afe4f876e874eec6e'},
-            {source: 'scripts/diagnose-frame-entry.cjs', name: 'frame-entry.cjs', sha256: '45fec0b94a3182df3392154ea78c30dbc716d5dce56449f2cd50c55c67591013'},
+            {source: 'scripts/diagnose-public-svg.mjs', name: 'public-svg.mjs', sha256: '72e7a91603cfb59eb21a4e98b686e6268b7d51ae123b1e9ad997aa9ee36abfba'},
           ];
           for (const file of files) {
             const bytes = execFileSync('git', ['show', `HEAD:${file.source}`]);
@@ -64,9 +63,9 @@ jobs:
           fs.writeFileSync(path.join(root, 'metadata.json'), JSON.stringify({
             baseline, diagnosticCommit: process.env.GITHUB_SHA, files,
             platform: process.platform, node: process.versions.node,
-            purpose: 'Same pending first capture: sham IPC then one backgroundThrottling transition, scratch-only mechanism test, NOT production repair or release clearance.',
-            warmupProtocolTimeoutMs: 10000, shippingDefaultExpectedMs: 180000, maximumHelpersPerOS: 2,
-            shamAtMs: 10000, transitionAtMs: 20000, ackDeadlineMs: 1500, retries: false, forcedErrors: false,
+            purpose: 'q28 single Windows public production-entry-point test; stop after result to choose implementation/scope. NOT release clearance.',
+            shippingDefaultExpectedMs: 180000, maximumHelpersPerOS: 1,
+            nativeOnlyMustReject: true, forbidSystemChrome: true, activeFileGuard: true, cleanNextJob: true, retries: false, forcedErrors: false,
           }, null, 2) + '\n');
           fs.appendFileSync(process.env.GITHUB_ENV, [
             ['DIAG_ROOT', root],
@@ -88,25 +87,21 @@ jobs:
       - name: Materialize the locked Electron binary (lazy installer)
         run: |
           node --input-type=commonjs -e 'const fs = require("node:fs"); const runtime = require("electron"); if (!fs.existsSync(runtime)) throw new Error("Locked Electron executable missing"); console.log("Locked Electron executable: " + runtime);'
-      - name: Observe one pending capture across sham and setting (not a release gate)
+      - name: Test real public SVG fallback and separate active guard (one helper)
         run: |
           set -o pipefail
           runtime="$GITHUB_WORKSPACE/node_modules/electron/dist/electron"
           if [[ "$RUNNER_OS" == "Windows" ]]; then runtime="$runtime.exe"; fi
-          if [[ "$RUNNER_OS" == "Linux" ]]; then
-            xvfb-run -a node "$DIAG_ROOT/frame-scheduling.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --out "$DIAG_ROOT/frame-output" 2>"$DIAG_ROOT/frame.stderr.log" | tee "$DIAG_ROOT/frame.stdout.ndjson"
-          else
-            node "$DIAG_ROOT/frame-scheduling.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --out "$DIAG_ROOT/frame-output" 2>"$DIAG_ROOT/frame.stderr.log" | tee "$DIAG_ROOT/frame.stdout.ndjson"
-          fi
+          node "$DIAG_ROOT/public-svg.mjs" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --out "$DIAG_ROOT/public-output" 2>"$DIAG_ROOT/public.stderr.log" | tee "$DIAG_ROOT/public.stdout.ndjson"
       - name: Preserve telemetry and synthetic captures, including failures
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: svg-frame-scheduling-${{ matrix.os }}
+          name: svg-public-entrypoint-${{ matrix.os }}
           if-no-files-found: warn
           retention-days: 7
           path: |
             ${{ runner.temp }}/lh-svg-diagnostic/metadata.json
             ${{ runner.temp }}/lh-svg-diagnostic/*.stdout.ndjson
             ${{ runner.temp }}/lh-svg-diagnostic/*.stderr.log
-            ${{ runner.temp }}/lh-svg-diagnostic/frame-output/**
+            ${{ runner.temp }}/lh-svg-diagnostic/public-output/**
