@@ -38,7 +38,7 @@ Every custom-engine image-bearing request attempts delivery even when discovery 
 
 ## Editing, credentials, and recovery
 
-Nonsecret configuration lives in `settings.json.customProvider`; saved keys and an internal binding live in `auth.json`. Authorization requires matching binding IDs, URL, and mode. A crash between auth/settings writes leaves the provider disabled rather than sending a key to a mismatched endpoint. Keyless also needs a valid nonsecret binding but never resolves a key. Missing private storage can initialize; malformed/unreadable storage fails closed without overwrite.
+Nonsecret configuration lives in `settings.json.customProvider`; saved keys and an internal binding live in the encrypted `auth.enc.json` ([key storage](development.md#byok-key-storage-authencjson)). Authorization requires matching binding IDs, URL, and mode. A crash between auth/settings writes leaves the provider disabled rather than sending a key to a mismatched endpoint. Keyless also needs a valid nonsecret binding but never resolves a key. Missing private storage can initialize; malformed, unreadable or undecryptable storage fails closed without overwrite.
 
 If authorization is interrupted, reload and explicitly reconnect. An environment key changing endpoints does not authorize a shadowed saved key for that new URL. Disconnect prevents a latent environment key from reviving the provider. These are crash/restart guards, not a power-loss/fsync transaction guarantee.
 

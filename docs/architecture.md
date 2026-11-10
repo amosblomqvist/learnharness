@@ -139,7 +139,7 @@ Extraction is the construction writer, not the only mutation: source/session/nod
 | Propositions, chains, checkpoints, coverage | `graph/{nodes,chains,sessions,coverage}.jsonl` |
 | Sources, organization, positions, render preferences | JSON maps under `graph/` |
 | Preferences and prompt overrides | `settings.json`, `prompts/` |
-| Keys and custom-endpoint binding | Separate `auth.json`, selected by `LH_AUTH_FILE` |
+| Keys and custom-endpoint binding | Separate encrypted `auth.enc.json`, beside `LH_AUTH_FILE` ([BYOK key storage](development.md#byok-key-storage-authencjson)) |
 
 Adapters use synchronous filesystem operations. JSONL reads skip corrupt/invalid lines; graph derivation merges repeated assertions. Some replacements use temp-file rename, but ordinary whole-file writes are not database transactions. Same-event-loop serialization is not cross-process locking or crash atomicity. Use **one server owner per data/auth profile**.
 

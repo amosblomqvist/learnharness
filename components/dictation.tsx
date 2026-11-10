@@ -104,7 +104,7 @@ export const METER_CELLS = 48;
 export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
 
 /** The client-authored KEYLESS line (zero-keys wave, owner 2026-09-25):
- * the token route's raw 503 message is dev-speak ("add it to auth.json
+ * the token route's raw 503 message is dev-speak ("add it in Settings → Keys
  * (desktop) or .env.local (dev)") — the surface says the short truth
  * instead. Exported for pins; the errored idle button's click recognizes
  * it and deep-links Settings → Keys → the Deepgram row. */

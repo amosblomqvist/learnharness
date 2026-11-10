@@ -28,13 +28,25 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 | Variable | Purpose |
 | --- | --- |
 | `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts; default repo `data/`. |
-| `LH_AUTH_FILE` | Keys/custom-endpoint binding; default repo-root `auth.json`, outside `data/`. |
+| `LH_AUTH_FILE` | Locates the key store: the encrypted `auth.enc.json` lives beside it; `auth.json` itself is only a plaintext hand-edit inbox. Default repo-root `auth.json`, outside `data/`. |
+| `LH_AUTH_MASTER_KEY` | Optional base64 32-byte master key for the key store; overrides the OS credential store, which is then never touched. For tests, CI, headless Linux and scratch profiles. |
 | Provider API-key variables | Optional, selected-provider dependent; UI names are in `src/core/auth-keys.ts`. |
 | `TAVILY_API_KEY`, `BRAVE_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `OLLAMA_API_KEY` | Optional search adapters. Without a Settings pin, the first keyed engine wins: Tavily → Brave → Exa → Firecrawl → Ollama. A pinned engine requires its own key; no silent fallback. Ollama search is hosted at ollama.com, not a local model server. Page fetching is independent; research can fetch known URLs without a search key. |
 | `DEEPGRAM_API_KEY` | Optional dictation token minting. |
 | `CHROME_PATH` | Chrome/Chromium executable fallback for demo verification; Electron's browser helper is primary. No extra Chromium is downloaded. |
 
-Ordinary Next development can read `.env.local`. Real environment keys take precedence over saved keys. Saved auth is restrictive-permission plaintext, not an encrypted vault. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.
+Ordinary Next development can read `.env.local`. Real environment keys take precedence over saved keys. Saved keys are encrypted at rest ([below](#byok-key-storage-authencjson)); environment variables and `.env.local` stay plaintext. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.
+
+### BYOK key storage (`auth.enc.json`)
+
+Keys saved in Settings, including the custom-endpoint key and its binding, go through one store (`src/store/auth.ts`).
+
+- **Where.** The encrypted file sits next to `LH_AUTH_FILE` with the same basename plus `.enc.json`, so `auth.json` → `auth.enc.json` (packaged: `userData/auth.enc.json`). It is `{ "version": 1, "alg": "aes-256-gcm", "entries": { VAR: { iv, tag, ct } } }`, base64 fields. Each value gets a fresh random 12-byte IV, and the env-var name is the GCM AAD, so entries cannot be swapped between names. Writes are atomic (temp + rename) at mode 0600. The learner file tools, build exclusions and payload checks treat it like `auth.json`.
+- **Master key.** A random 32-byte key lives in the OS credential store through `@napi-rs/keyring`: service `LearnHarness`, account `auth-master-key`, base64 value (Windows Credential Manager, macOS Keychain, Linux Secret Service). It is created on the first write and cached in memory per process. `LH_AUTH_MASTER_KEY` (base64, 32 bytes) overrides it, and the keyring is then never touched. `LH_AUTH_KEYRING_ACCOUNT` overrides the account name (smoke tests only). Under `NODE_ENV=test` the native keyring is never loaded: the default backend is a process-local in-memory one, a test that shares a store across processes sets `LH_AUTH_MASTER_KEY`, and the store tests inject fakes.
+- **No silent plaintext fallback.** With no key source, writes throw and `/api/keys` answers 500 with a readable message. Reads return `{}` and log one warning.
+- **Hand-edit inbox.** A plaintext `auth.json` at `LH_AUTH_FILE` is still accepted: on the first store access and on every read, its entries are imported into the encrypted store (the plaintext value wins over an existing encrypted one, since a hand-edit is newer intent), then the file is overwritten with random bytes, fsynced and unlinked (a symlink is only unlinked, never its target). If no key source is available the plaintext file is left untouched, with a warning, so no key is ever deleted without being re-stored. The overwrite is best-effort: on SSDs, journaling or copy-on-write file systems and synced folders, older copies of the plaintext may survive.
+- **Threat model.** This protects against file exfiltration: backups, cloud sync, copying the data directory, accidentally bundling or committing the file. It does **not** protect against malware running as the same OS user, which can ask the credential store for the master key just as the app does. Subscription sign-in credentials (`*-credentials.json`) are separate stores and are not covered.
+- **Reset.** If the encrypted file exists but the master key is missing or wrong (a new OS account, a wiped keychain, a different `LH_AUTH_MASTER_KEY`), the store reads as empty and writes refuse rather than clobber entries it cannot decrypt. Delete `auth.enc.json` and re-enter your keys to reset.
 
 Provider-specific setup and limitations: [Claude Code](claude-code.md), [custom endpoints](custom-providers.md), [context/cost accounting](compaction-accounting.md).
 
@@ -50,7 +62,7 @@ This is **trusted local/shared development**, not multi-user hosting. Same-origi
 
 ## Safe local work
 
-Use a disposable data root and a separate empty `{}` auth file:
+Use a disposable data root and a separate auth location (nothing needs to exist there yet):
 
 ```sh
 LH_DATA_DIR=/absolute/path/to/scratch/data \
@@ -58,7 +70,7 @@ LH_AUTH_FILE=/absolute/path/to/scratch/auth.json \
 npm run dev -- --port 3001
 ```
 
-These variables isolate app records/saved keys, **not every external effect**. Ambient keys still win; subscription files follow the auth directory; Claude Code can use its native profile. File tools have broad read access under the server's user, subject to the [path guard](architecture.md#file-access-and-external-services). A scratch data root is not a filesystem or credential sandbox. Use synthetic fixtures/fake providers for automated reproduction and avoid personal files or ambient credentials.
+A scratch `LH_AUTH_FILE` gets its own `auth.enc.json` but, unless `LH_AUTH_MASTER_KEY` is also set, still uses the real OS credential store for its master key. These variables isolate app records/saved keys, **not every external effect**. Ambient keys still win; subscription files follow the auth directory; Claude Code can use its native profile. File tools have broad read access under the server's user, subject to the [path guard](architecture.md#file-access-and-external-services). A scratch data root is not a filesystem or credential sandbox. Use synthetic fixtures/fake providers for automated reproduction and avoid personal files or ambient credentials.
 
 Do not commit `.env.local`, credentials, or learning records. Do not copy a personal profile into a fixture. Avoid separate writers against live profiles; store initialization and maintenance scripts can mutate data or invoke model stages. Inspect scripts before using them. See [storage and compatibility](architecture.md#storage-and-notifications) before changing formats.
 

@@ -62,7 +62,7 @@ Chats, graph records, settings, and credentials live on your machine. Packaged d
 | Windows | `%APPDATA%\LearnHarness\data` |
 | Linux | `$XDG_CONFIG_HOME/LearnHarness/data`, or `~/.config/LearnHarness/data` |
 
-API-key files sit beside `data`, not inside it. They are plaintext with restrictive file permissions, not an encrypted vault. Keep complete profiles private; do not share credential files or raw debug captures in bug reports.
+Saved API keys sit beside `data`, not inside it, in `auth.enc.json`: encrypted (AES-256-GCM) with a key held in your operating system's credential store (Windows Credential Manager, macOS Keychain, Linux Secret Service), so a copied or backed-up profile does not expose them. This does not stop software running as your own OS user, and sign-in credentials for subscription connections are stored separately. Keep complete profiles private; do not share credential files or raw debug captures in bug reports. See [BYOK key storage](development.md#byok-key-storage-authencjson) for recovery and headless setups.
 
 **Local storage does not mean local-only processing.** Configured models, subscription/CLI services, web research, and dictation can receive content. A local custom model is a separate setup choice, not an offline guarantee for other enabled services.
 

@@ -24,8 +24,8 @@ jobs/<job-id>.json        Background work records; delivered artifacts also appe
 ```
 
 `settings.json`, downloaded models, caches, and provider debug logs are not needed
-to interpret learning history. `auth.json` is normally one directory above data;
-do not read it. Imported-note paths, research URLs, and artifact references are not
+to interpret learning history. `auth.json` / `auth.enc.json` are normally one directory above data;
+do not read them. Imported-note paths, research URLs, and artifact references are not
 automatically followed by the readers.
 
 ## A session record

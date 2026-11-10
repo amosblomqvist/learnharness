@@ -41,6 +41,10 @@ for (const varName of [
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-server-keys-"));
 const AUTH = path.join(TMP, "auth.json");
 process.env.LH_AUTH_FILE = AUTH;
+// The store is encrypted at rest: a throwaway master key keeps the suite off the
+// real OS keyring (the plaintext auth.json written below is the hand-edit inbox,
+// absorbed + wiped on first access).
+process.env.LH_AUTH_MASTER_KEY = Buffer.alloc(32, 7).toString("base64");
 
 // The file BEFORE first boot: a shadowed OpenRouter (env will differ) + an
 // unknown var that must survive every write and surface as a generic row.

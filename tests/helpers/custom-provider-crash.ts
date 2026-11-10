@@ -1,6 +1,6 @@
 /** Child-process fixture: owned profile only; every upstream fetch is synthetic. */
 import fs from "node:fs";
-import { AUTH_FILE, SETTINGS_FILE } from "../../config.ts";
+import { AUTH_ENC_FILE, SETTINGS_FILE } from "../../config.ts";
 const [mode, action = "key", fault = "none"] = process.argv.slice(2);
 const requests: { url: string; authorization: string | null }[] = [];
 globalThis.fetch = async (url, init) => {
@@ -12,7 +12,7 @@ const rename = fs.renameSync;
 const read = fs.readFileSync;
 let authRenames = 0;
 fs.renameSync = (...args: Parameters<typeof rename>) => {
-	if (args[1] === AUTH_FILE) {
+	if (args[1] === AUTH_ENC_FILE) {
 		authRenames++;
 		if (fault === "auth-before-rename" || (fault === "double-io" && authRenames > 1)) throw new Error("fixture auth I/O failure");
 		rename(...args);
@@ -24,7 +24,7 @@ fs.renameSync = (...args: Parameters<typeof rename>) => {
 	return rename(...args);
 };
 fs.readFileSync = ((...args: Parameters<typeof read>) => {
-	if (args[0] === AUTH_FILE && fault === "unreadable") throw Object.assign(new Error("fixture unreadable auth"), { code: "EACCES" });
+	if (args[0] === AUTH_ENC_FILE && fault === "unreadable") throw Object.assign(new Error("fixture unreadable auth"), { code: "EACCES" });
 	return read(...args);
 }) as typeof read;
 await import("../../src/server/keys.ts");

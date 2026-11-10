@@ -2,7 +2,7 @@
  * Server-side persistence for THE user settings record (settings-storage
  * wave, 2026-09-19): data/settings.json (config.SETTINGS_FILE), under the
  * LH_DATA_DIR seam — read-modify-write, NOT a ledger. Non-secret product
- * preferences only; secrets stay in auth.json / .env.local.
+ * preferences only; secrets stay in the auth store / .env.local.
  *
  * This adapter OWNS the lazy migrations:
  *  1. schema-version bumps (CURRENT_SETTINGS_VERSION) slot in here — the

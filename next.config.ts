@@ -25,8 +25,9 @@ const nextConfig: NextConfig = {
 	// SECRETS (2026-10-08, caught in the payload audit): the same sweep
 	// ships the repo-root auth.json — the DEV BYOK key store — byte-identical
 	// into the DMG (the packaged app never reads it: the shell passes
-	// LH_AUTH_FILE → userData). Excluded here; build-server.mjs also REFUSES
-	// to package any standalone still containing it. .env* belt-and-braces
+	// LH_AUTH_FILE → userData). Its encrypted successor auth.enc.json is
+	// excluded the same way. Excluded here; build-server.mjs also REFUSES
+	// to package any standalone still containing either. .env* belt-and-braces
 	// the same class. Next also copies loaded bare .env after tracing;
 	// the build-server refusal remains required even with these excludes.
 	//
@@ -53,6 +54,7 @@ const nextConfig: NextConfig = {
 		"*": [
 			"**/data/**/*",
 			"auth.json",
+			"auth.enc.json",
 			"chatgpt-credentials.json*",
 			"github-copilot-credentials.json*",
 			"xai-credentials.json*",
@@ -91,6 +93,15 @@ const nextConfig: NextConfig = {
 			// Wave E stage 2: resvg rasterizes visual-maker SVGs natively; same
 			// per-platform-binary story as the canvas above (one per build).
 			"node_modules/@resvg/resvg-js-*/**/*",
+			// BYOK key store (auth-encryption change): src/store/auth.ts loads
+			// @napi-rs/keyring through createRequire — invisible to the tracer —
+			// and the library picks its platform binary
+			// (@napi-rs/keyring-<platform>-<arch>[-abi]) with a dynamic
+			// optional-dep require. Same per-OS story as canvas/resvg: npm
+			// installs only the current platform's binary package, so the glob
+			// below resolves to exactly one .node per build.
+			"node_modules/@napi-rs/keyring/**/*",
+			"node_modules/@napi-rs/keyring-*/**/*",
 			"node_modules/@earendil-works/pi-ai/dist/providers/data/**/*",
 			// Public native OAuth factories load these flows through variable imports.
 			// Electron main uses the same standalone SDK; the offline runtime gate
@@ -118,6 +129,7 @@ const nextConfig: NextConfig = {
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@silvia-odwyer/photon-node", // CJS loads its adjacent WASM from disk
 		"@resvg/resvg-js", // native binding — same
+		"@napi-rs/keyring", // native binding (OS credential store) — same
 	],
 };
 

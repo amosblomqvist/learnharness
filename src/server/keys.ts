@@ -33,7 +33,7 @@
  * provider keys from process.env NATIVELY at every request
  * (auth/context.js's defaultProviderAuthContext reads live env), so
  * deletion is the one mechanism that hides keys from every consumer —
- * model engines included. Only the file store (auth.json) counts; the
+ * model engines included. Only the file store (the auth store) counts; the
  * fill-gap still reflects file keys so a fresh user can add keys
  * mid-session and the engines see them with no restart. Unset switch =
  * today's behavior, byte-for-byte.
@@ -106,7 +106,7 @@ export function initAuthEnv(): void {
 		// THE FRESH-USER SWITCH: delete every managed env var (re-run on
 		// every call — a reintroduced var never resurrects). realEnv stays
 		// EMPTY (nothing counts as env); the fill-gap below then reflects
-		// auth.json keys so engines still see mid-session additions.
+		// auth-store keys so engines still see mid-session additions.
 		for (const name of managed) {
 			delete process.env[name];
 		}

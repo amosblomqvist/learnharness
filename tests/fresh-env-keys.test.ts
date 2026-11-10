@@ -1,6 +1,6 @@
 /**
  * LH_IGNORE_ENV_KEYS=1 — the fresh-user switch (owner, interlude,
- * 2026-09-22): env keys invisible app-wide; only auth.json counts.
+ * 2026-09-22): env keys invisible app-wide; only stored keys count.
  *
  * This file is deliberately its OWN PROCESS under node:test: the switch
  * is BOOT-TIME (initAuthEnv deletes the managed env vars once per
@@ -46,6 +46,10 @@ for (const varName of [
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-fresh-env-keys-"));
 const AUTH = path.join(TMP, "auth.json");
 process.env.LH_AUTH_FILE = AUTH;
+// The store is encrypted at rest: a throwaway master key keeps the suite off the
+// real OS keyring (the plaintext auth.json written below is the hand-edit inbox,
+// absorbed + wiped on first access).
+process.env.LH_AUTH_MASTER_KEY = Buffer.alloc(32, 7).toString("base64");
 
 // The file BEFORE first boot: one file-only key.
 fs.writeFileSync(AUTH, JSON.stringify({ OPENAI_API_KEY: "sk-file-fresh-file-fresh" }));
@@ -79,7 +83,7 @@ describe("the fresh-user switch (boot under LH_IGNORE_ENV_KEYS=1)", () => {
 		assert.equal(process.env.OPENROUTER_API_KEY, undefined, "deleted from process.env at boot");
 	});
 
-	it("the env copy of a file-backed var is deleted; the FILE value is what fills the env (only auth.json counts)", () => {
+	it("the env copy of a file-backed var is deleted; the FILE value is what fills the env (only stored keys count)", () => {
 		assert.equal(process.env.OPENAI_API_KEY, "sk-file-fresh-file-fresh", "the env copy died; the fill-gap reflected the file value");
 		assert.equal(authStore.authVars().OPENAI_API_KEY, "sk-file-fresh-file-fresh");
 	});

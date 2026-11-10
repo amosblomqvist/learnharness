@@ -13,6 +13,8 @@ dist/
 
 # dev auth/keys store (auth-keys wave): repo-root auth.json — secrets never committed
 auth.json
+# its encrypted successor (AES-256-GCM, beside auth.json) — never committed either
+auth.enc.json
 chatgpt-credentials.json*
 github-copilot-credentials.json*
 xai-credentials.json*
