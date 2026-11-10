@@ -17,7 +17,7 @@ const entry=arg('--app-entry',null);
 const require=createRequire(path.join(root,'package.json'));
 const {default:puppeteer}=await import(pathToFileURL(require.resolve('puppeteer-core')).href);
 const {tsImport}=await import(pathToFileURL(require.resolve('tsx/esm/api')).href);
-const {renderSvgOnPage,loadIsolatedPage,runDemoOnPage}=await tsImport(path.join(root,'src/agent/subagents/headless.ts'),import.meta.url);
+const {renderSvgOnPage,loadIsolatedPage,runDemoOnPage}=await tsImport(pathToFileURL(path.join(root,'src/agent/subagents/headless.ts')).href,import.meta.url);
 const {probeEnv,stopBrowserService}=await import(pathToFileURL(path.join(root,'scripts/smoke-demo-runtime.mjs')).href);
 const base=fs.mkdtempSync(path.join(os.tmpdir(),'lh-svg-matrix-'));
 console.log(JSON.stringify({event:'diagnosis-only',root,runtime,entry,home:base,node:process.versions.node,puppeteer:JSON.parse(fs.readFileSync(path.join(root,'node_modules/puppeteer-core/package.json'))).version}));

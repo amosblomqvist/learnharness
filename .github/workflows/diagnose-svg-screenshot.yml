@@ -17,7 +17,8 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-2025, ubuntu-24.04]
+        # Linux completed its seven cases; only Windows needs the import retry.
+        os: [windows-2025]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 20
     defaults:
@@ -49,7 +50,7 @@ jobs:
           // Git blob bytes avoid Windows worktree CRLF conversion.
           const bytes = execFileSync('git', ['show', 'HEAD:scripts/diagnose-svg-screenshot.mjs']);
           const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
-          assert.equal(sha256, '0b21298c9c0a2108f0e6ce3d4eff7856ba777b7d112e6b45e2acf5399f398718');
+          assert.equal(sha256, '749be3c60d4856bc41b5dbcd326b31ab8466d3aa4f813681b915d272160883c7');
           const harness = path.join(root, 'svg-matrix.mjs');
           fs.writeFileSync(harness, bytes);
           const data = path.join(root, 'data');
