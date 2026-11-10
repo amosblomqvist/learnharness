@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { PathInput } from "@/components/path-input";
+import { imagePastePending, useImagePastePending } from "@/components/pasted-images";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { cn } from "@/lib/utils";
@@ -321,6 +322,7 @@ function QuestionDockForm({
 	// "Other…" row in a multi-select must never clear already-picked
 	// options, and picking an option must never clear a typed custom answer.
 	const [sel, setSel] = useState<DockSelection>(() => initialDraft?.selection ?? emptyDockSelection());
+	const pastingImage = useImagePastePending();
 	// The learner's transfer channel — thinking, never "a note".
 	const [thinking, setThinking] = useState(initialDraft?.thinking ?? "");
 	const [other, setOther] = useState(initialDraft?.other ?? "");
@@ -374,6 +376,7 @@ function QuestionDockForm({
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
 	const submit = () => {
+		if (imagePastePending()) return;
 		if (!canSubmit || compactionRunning) return;
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while
 		 * a run is live with reasoning still in Deepgram's hands. Stop the
@@ -917,7 +920,7 @@ function QuestionDockForm({
 						</span>
 						<Button
 							type="submit"
-							disabled={!canSubmit || compactionRunning}
+						disabled={!canSubmit || compactionRunning || pastingImage}
 							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 						>
 							Submit answer
