@@ -1,8 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState, type KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { DICTATION_LANGUAGES, type DictationLanguage } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
+import { useInteractionLayers } from "@/components/interaction-layers";
 import { Hint } from "@/components/ui/hint";
 import { SettingsMenuTrigger, SettingsRow } from "@/components/settings/controls";
 import { SearchMenuList } from "@/components/settings/search-menu-list";
@@ -26,31 +27,27 @@ function DictationLanguagePicker({ preference, disabled }: {
 	const { language, saving, error, load, save } = preference;
 	const [open, setOpen] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement>(null);
+	const interactions = useInteractionLayers();
 	const label = DICTATION_LANGUAGES.find((item) => item.code === language)?.label ?? "—";
 
 	useEffect(() => { if (disabled) setOpen(false); }, [disabled]);
 	useEffect(() => {
 		if (!open) return;
 		const onPointerDown = (event: PointerEvent) => {
+			const popup = interactions.getTopLayer();
+			if (popup?.kind !== "popup" || popup.anchorRef?.current !== triggerRef.current || !interactions.isElementEligible(popup.rootRef.current)) return;
 			const target = event.target as Element;
 			if (target instanceof Element && target.closest('[data-testid="dictation-language-menu"]')) return;
 			if (!triggerRef.current?.contains(target)) setOpen(false);
 		};
 		document.addEventListener("pointerdown", onPointerDown);
 		return () => document.removeEventListener("pointerdown", onPointerDown);
-	}, [open]);
-	const closeOnEscape = (event: ReactKeyboardEvent) => {
-		if (event.key !== "Escape") return;
-		event.preventDefault();
-		event.stopPropagation();
-		setOpen(false);
-		triggerRef.current?.focus();
-	};
+	}, [open, interactions]);
 	const pick = async (code: DictationLanguage) => {
 		if (disabled || saving || language === undefined) return;
 		if (await save(code)) {
 			setOpen(false);
-			triggerRef.current?.focus();
+			if (interactions.isElementEligible(triggerRef.current) || interactions.isPopupOrigin(triggerRef.current)) triggerRef.current?.focus();
 		}
 	};
 
@@ -63,7 +60,6 @@ function DictationLanguagePicker({ preference, disabled }: {
 				aria-label={`Dictation language: ${label}`}
 				aria-expanded={open && !disabled}
 				disabled={disabled || saving}
-				onKeyDown={(event) => { if (open) closeOnEscape(event); }}
 				onClick={() => {
 					setOpen((value) => !value);
 					if (language === undefined) void load().catch(() => {});
@@ -74,11 +70,11 @@ function DictationLanguagePicker({ preference, disabled }: {
 		{open && !disabled && <MenuShell
 			anchorRef={triggerRef}
 			testid="dictation-language-menu"
+			onClose={(reason) => { setOpen(false); if (reason === "escape") triggerRef.current?.focus(); return "closed"; }}
 			preferredSide="down"
 			menuClass="flex w-72 max-w-[calc(100vw-1rem)] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 		>
 			<div onKeyDown={(event) => {
-				closeOnEscape(event);
 				if (event.key === "Enter") {
 					// Empty search results must not submit the composer, but a
 					// focused option button still needs Enter's native click.

@@ -4,6 +4,7 @@ import test from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { StatsBar } from "../components/stats-bar.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import type { ModelCatalogResponse, TurnUsage } from "../src/core/index.ts";
 
 (globalThis as Record<string, unknown>).React = React;
@@ -28,7 +29,7 @@ test("cache hit rate appears only inside expanded session stats, follows the ses
 		steps: [{ inputTokens: 100, outputTokens: 100_000, cacheReadTokens: read,
 			cacheWriteTokens: write, reasoningTokens: 90_000 }],
 	});
-	const render = (turns: TurnUsage[]) => root.render(<StatsBar chatId="fixture" turns={turns} contextTokens={42_000} />);
+	const render = (turns: TurnUsage[]) => root.render(<InteractionLayersProvider><StatsBar chatId="fixture" turns={turns} contextTokens={42_000} /></InteractionLayersProvider>);
 	const cacheRow = () => host.querySelector('[data-testid="stats-cache-hit-rate"]');
 	const summary = () => host.querySelector<HTMLButtonElement>('[data-testid="stats-summary"]')!;
 	try {

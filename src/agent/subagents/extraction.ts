@@ -14,7 +14,6 @@ import {
 } from "../../core/settings.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
-import { withBgLlmSlot } from "./bg-llm-semaphore.ts";
 import type {
 	AuditVerdicts,
 	CallUsage,
@@ -620,9 +619,8 @@ function runAuditor(
  *  2026-09-19) until wave 7 killed the embedder seam wholesale (this
  *  interlude) — birth-session clusters need no post-merge pass. The
  *  phases tell the truth about what the job is actually waiting on.
- *  "queued" (owner, 2026-09-28): the global extract semaphore — 3
- *  concurrent extractor calls process-wide; the job is waiting for an
- *  extract slot, not for the model.
+ *  Worker-request admission happens inside the model stream; the old
+ *  extraction-wide "queued" phase is retained only for type compatibility.
  *  "waiting" (owner 2026-09-28): the serialized-audit gate — the job's
  *  audit+merge critical section is queued behind another job's; the
  *  extractor is done but the auditor may not start until the graph is
@@ -676,10 +674,6 @@ interface LhExtractionGlobal {
 	 *  process-wide. globalThis for the same module-instance reason as
 	 *  the run registries. */
 	__lhAuditLock?: { tail: Promise<void> };
-	/** The EXTRACT SEMAPHORE (owner, 2026-09-28): 3 concurrent extractor
-	 *  calls process-wide — the provider-facing rate stance (the import
-	 *  route's old 3-wide pool doctrine, now global). Per-chunk jobs fan
-	 *  out in parallel but queue here. */
 }
 
 /** THE RUN REGISTRIES live on globalThis, not module level — the
@@ -918,7 +912,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			return await critical();
 		} finally {
 			if (onAbort && signal && !signal.aborted) signal.removeEventListener("abort", onAbort);
-			release();
+			// A cancelled waiter leaves promptly, but may not release its chain
+			// link before its predecessor: successors still owe that earlier hold.
+			void prev.then(release, release);
 		}
 	}
 
@@ -1008,18 +1004,6 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		);
 		console.info(`[extraction ${jobKey}] auditor done in ${Math.round(performance.now() - t0)}ms`);
 		return auditResult;
-	}
-
-
-	/** THE EXTRACT SLOT (unified 2026-09-29): extraction chunk jobs run
-	 *  under the SHARED background-LLM semaphore — one process-wide pool
-	 *  of 3 permits (see bg-llm-semaphore.ts). The
-	 *  job's registry-row signal kills a queued ticket (dead-ticket
-	 *  handoff). The audit side needs no slot: audits already serialize
-	 *  behind their own global lock. */
-	async function withExtractSlot<T>(jobKey: string, critical: () => Promise<T>): Promise<T> {
-		const signal = runningExtractions.get(jobKey)?.controller.signal;
-		return withBgLlmSlot(signal, critical);
 	}
 
 		/** Append the run's usage record to the chat's extractions log — success
@@ -1148,9 +1132,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// 2026-09-30 evening): every batch is its own job — registry row,
 			// because each batch's extractor continues the source's digest
 			// (everything the earlier batches merged). Cross-source runs stay
-			// parallel; the 3-slot extract semaphore still caps concurrent
-			// extracts process-wide ("queued"); audits serialize through the
-			// process-wide gate ("waiting"). A batch that fails is ISOLATED
+			// parallel; individual worker requests share process-wide admission.
+			// Audits serialize through the separate consistency gate ("waiting").
+			// A batch that fails is ISOLATED
 			// (its messages stay uncovered — honestly re-runnable); its
 			// siblings keep merging.
 			const settled: PromiseSettledResult<EmissionStats>[] = [];
@@ -1175,11 +1159,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 							const batchIds = new Set(
 								messages.filter((m) => messageViewLines(m, m.id, failedOutputCalls).length > 0).map((m) => m.id),
 							);
-							setPhase(jobKey, "queued", "chat", undefined, part);
-							const findings = await withExtractSlot(jobKey, async () => {
-								setPhase(jobKey, "extracting", "chat", undefined, part);
-								return extract(jobKey, chatId, view, batchIds);
-							});
+							setPhase(jobKey, "extracting", "chat", undefined, part);
+							const findings = await extract(jobKey, chatId, view, batchIds);
 							// SERIALIZED AUDIT (owner, 2026-09-28): audit + merge are the
 							// graph-mutating critical section — one job at a time,
 							// process-wide, so the auditor explores the graph as it
@@ -1339,8 +1320,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// 2026-09-30 evening): same law as the chat door — chunks run
 			// STRICTLY IN ORDER, each chunk's extractor continuing the
 			// source's digest (everything earlier chunks merged). Cross-source
-			// runs stay parallel; the semaphore caps concurrent extracts
-			// process-wide; audits serialize through the gate as before. The
+			// runs stay parallel; individual worker requests share admission,
+			// while audits serialize through the consistency gate. The
 			// part rides the registry entry (feed suffix "· i/N") only when
 			// the file actually chunked.
 			const settled: PromiseSettledResult<EmissionStats>[] = [];
@@ -1353,12 +1334,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 					settled.push({
 						status: "fulfilled",
 						value: await runJob({ id, kind: "notes", label: input.filePath, part }, async (jobKey) => {
-							setPhase(jobKey, "queued", "notes", input.filePath, part);
+							setPhase(jobKey, "extracting", "notes", input.filePath, part);
 							chunkSignal = runningExtractions.get(jobKey)?.controller.signal;
-							const findings = await withExtractSlot(jobKey, async () => {
-								setPhase(jobKey, "extracting", "notes", input.filePath, part);
-								return notesExtract(jobKey, { ...input, text: chunk, part });
-							});
+							const findings = await notesExtract(jobKey, { ...input, text: chunk, part });
 							// SERIALIZED AUDIT (owner, 2026-09-28): audit + merge one
 							// at a time, process-wide — the auditor explores the graph
 							// as it stands AFTER every earlier job's merge. Reacquired

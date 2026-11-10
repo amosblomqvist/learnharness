@@ -162,7 +162,8 @@ describe("provider-neutral raw agent loops", { concurrency: false }, () => {
 						assert.ok(!Object.hasOwn(options, key), `${loop} stream must not supply ${key}`);
 					}
 					assert.equal(options.reasoning, "medium");
-					assert.equal(options.signal, signal);
+					assert.ok(options.signal instanceof AbortSignal, "admission supplies a request-scoped cancellation signal");
+					assert.equal(signal.aborted, false, "finishing a model request must not abort its caller");
 					assert.equal(typeof options.onProviderStreamEvent, "function");
 				}
 				assert.match(JSON.stringify(requests[2]!.context), /image\/png/);
