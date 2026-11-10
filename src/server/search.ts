@@ -211,6 +211,47 @@ export function ollamaProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
 	};
 }
 
+/** SearXNG: GET {instance}/search?q=…&format=json on a self-hosted,
+ *  keyless instance — the configured value is the base URL, not a secret.
+ *  The page size is the instance's own setting (no per-request count), so
+ *  rows are sliced to `count`. Wire shape: {results: [{title, url,
+ *  content, engine}]} where `content` is the snippet. Error bodies are
+ *  never echoed (they can carry the query). */
+export function searxngProvider(baseUrl: string, fetchFn: FetchLike = fetch): SearchProvider {
+	return {
+		id: "searxng",
+		async search(query: string, count: number): Promise<SearchHit[]> {
+			let url: URL;
+			try {
+				url = new URL(`${baseUrl.trim().replace(/\/+$/, "")}/search`);
+			} catch {
+				throw new Error("SearXNG URL is not a valid http(s) address");
+			}
+			if (url.protocol !== "http:" && url.protocol !== "https:") {
+				throw new Error("SearXNG URL is not a valid http(s) address");
+			}
+			url.searchParams.set("q", query);
+			url.searchParams.set("format", "json");
+			const resp = await fetchFn(url.toString(), {
+				headers: { accept: "application/json" },
+				signal: AbortSignal.timeout(30_000),
+			});
+			if (!resp.ok) throw new Error(`SearXNG search API ${resp.status}`);
+			const data = await searchJson(resp, "SearXNG");
+			if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown }).results)) {
+				throw new Error("SearXNG search API returned an invalid response");
+			}
+			return (data as { results: unknown[] }).results
+				.slice(0, Math.max(1, Math.floor(count)))
+				.flatMap((result): SearchHit[] => {
+					if (!result || typeof result !== "object") return [];
+					const row = result as { title?: unknown; url?: unknown; content?: unknown };
+					return searchHit(row.title, row.url, row.content);
+				});
+		},
+	};
+}
+
 /** Match Exa's bounded result contract for the other new adapters. */
 function searchHit(title: unknown, url: unknown, snippet: unknown): SearchHit[] {
 	if (typeof url !== "string" || !url.trim()) return [];
@@ -254,10 +295,12 @@ export function resolveSearchEngineFor(
 	const pinnedKey = pinned ? keys[pinned] ?? null : null;
 	if (pinned) {
 		if (!pinnedKey) {
+			const missing = pinned === "searxng" ? "instance URL" : "API key";
+			const variable = pinned === "searxng" ? "variable" : "key";
 			return {
 				available: false,
 				engine: null,
-				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${SEARCH_ENGINES.find((e) => e.id === pinned)?.envVar} key`,
+				reason: `search engine is set to "${pinned}" but its ${missing} is missing — set the ${SEARCH_ENGINES.find((e) => e.id === pinned)?.envVar} ${variable}`,
 				key: null,
 			};
 		}
@@ -270,7 +313,7 @@ export function resolveSearchEngineFor(
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key",
+		reason: "no search engine configured — set a search API key (Tavily, Brave, Exa, Firecrawl, Ollama) or point SEARXNG_URL at an instance",
 		key: null,
 	};
 }
@@ -308,6 +351,8 @@ export function searchProvider(): SearchProvider | null {
 			return firecrawlProvider(resolved.key);
 		case "ollama":
 			return ollamaProvider(resolved.key);
+		case "searxng":
+			return searxngProvider(resolved.key);
 		default:
 			return null;
 	}

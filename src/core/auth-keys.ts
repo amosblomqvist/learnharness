@@ -66,6 +66,12 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models.",
 		docsUrl: "https://ollama.com/settings/keys",
 	},
+	{
+		id: "SEARXNG_URL",
+		label: "SearXNG",
+		description: "Self-hosted, keyless web search — the value is the instance base URL (e.g. http://127.0.0.1:8080). Setting it activates the engine.",
+		docsUrl: "https://docs.searxng.org/",
+	},
 ] as const;
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
@@ -203,6 +209,20 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
+		case "SEARXNG_URL": {
+			// The value is an instance base URL, not a secret: an http(s) URL
+			// with no whitespace (truncated pastes and paths that would break
+			// the /search append are rejected here, not at query time).
+			if (!/\s/.test(value)) {
+				try {
+					const parsed = new URL(value);
+					if (parsed.protocol === "http:" || parsed.protocol === "https:") return { ok: true };
+				} catch {
+					/* fall through to the shape error */
+				}
+			}
+			return { ok: false, error: `${id} must be an http(s) URL — the SearXNG instance base URL` };
+		}
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}

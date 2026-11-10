@@ -35,6 +35,10 @@ export const SEARCH_ENGINES = [
 	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
 	{ id: "firecrawl", label: "Firecrawl", envVar: "FIRECRAWL_API_KEY" },
 	{ id: "ollama", label: "Ollama", envVar: "OLLAMA_API_KEY" },
+	// Keyless: the variable holds the self-hosted instance base URL, so the
+	// same "value present = engine live" rule applies. Appended last so the
+	// approved Automatic order above is unchanged (a pin still wins).
+	{ id: "searxng", label: "SearXNG", envVar: "SEARXNG_URL" },
 ] as const;
 
 export type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];

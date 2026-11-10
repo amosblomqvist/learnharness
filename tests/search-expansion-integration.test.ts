@@ -79,7 +79,7 @@ for (const { id, envVar, url, header, prefix, payload } of engines) {
 
 it("all five saved keys follow the approved Automatic order as keys are removed", () => {
 	for (const { id, envVar } of SEARCH_ENGINES) {
-		const fake = id === "tavily" ? "tvly-fake-key-1234567890" : id === "firecrawl" ? "fc-fake-key-1234567890" : `${id}-fake-key-1234567890`;
+		const fake = id === "tavily" ? "tvly-fake-key-1234567890" : id === "firecrawl" ? "fc-fake-key-1234567890" : id === "searxng" ? "http://127.0.0.1:8080/" : `${id}-fake-key-1234567890`;
 		assert.equal(saveKey(envVar, fake).ok, true);
 	}
 	for (const { id, envVar } of SEARCH_ENGINES) {
