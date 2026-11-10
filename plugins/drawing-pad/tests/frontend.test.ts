@@ -6,20 +6,30 @@ function fixture() {
   const signal = new AbortController(), notifications = new Set<(event: PluginNotification) => void>(), events = new Set<(event: unknown) => void>(), resyncs = new Set<() => void>();
   const actions = new Map<string, PluginAction>(); let schema: PluginSettingsSchema | undefined, surface: PluginSurfaceProps | undefined;
   let closes = 0, disposedSettings = 0;
-  let read: () => unknown | Promise<unknown> = () => ({ revision: 0, inkColor: "#facc15" });
+  let saved = { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 };
+  const calls: { name: string; value: unknown }[] = [];
+  let read: () => unknown | Promise<unknown> = () => ({ ...saved });
   const ctx = {
     manifest: { id: "drawing-pad" }, signal: signal.signal, cleanup() {},
     registerAction(action: PluginAction) { actions.set(action.id, action); return () => { actions.delete(action.id); }; },
     placeAction() { return () => {}; }, registerSubmissionInterceptor() { return () => {}; }, refreshActions() {}, refreshSubmissions() {},
     registerSettings(value: PluginSettingsSchema) { schema = value; return { update(value: PluginSettingsSchema) { schema = value; }, dispose() { disposedSettings++; schema = undefined; } }; },
-    async call(name: string) { if (name === "get-settings") return await read(); if (name === "set-ink-color") return { revision: 1, inkColor: "#ffffff", imageScale: 50 }; if (name === "set-image-scale") return { revision: 3, inkColor: "#ffffff", imageScale: 25 }; throw new Error(name); },
+    async call(name: string, value: unknown) {
+      calls.push({ name, value });
+      if (name === "get-settings") return await read();
+      if (name === "set-ink-color" || name === "set-image-scale") {
+        saved = { ...saved, ...(value as Partial<typeof saved>), revision: saved.revision + 1 };
+        return { ...saved };
+      }
+      throw new Error(name);
+    },
     onNotification(fn: (event: PluginNotification) => void) { notifications.add(fn); return () => notifications.delete(fn); },
     onAppEvent(fn: (event: unknown) => void) { events.add(fn); return () => events.delete(fn); },
     onResync(fn: () => void) { resyncs.add(fn); return () => resyncs.delete(fn); },
     app: { pathname: () => "/opaque-path" },
     ui: { openSurface(_target: unknown, props: PluginSurfaceProps) { surface = props; return { update() {}, dispose() { closes++; surface = undefined; } }; } },
   } as unknown as PluginFrontendContext;
-  return { ctx, actions, signal, notifications, events, resyncs,
+  return { ctx, actions, signal, notifications, events, resyncs, calls,
     schema: () => schema, surface: () => surface, closes: () => closes, disposedSettings: () => disposedSettings,
     setRead(fn: typeof read) { read = fn; },
     notify(value: unknown) { for (const fn of notifications) fn({ pluginId: "drawing-pad", topic: "settings-changed", data: value }); },
@@ -28,23 +38,32 @@ function fixture() {
 it("frontend activates without browser globals and registers controlled color and scale settings", async () => {
   const f = fixture(), off = await activate(f.ctx);
   try {
-    assert.equal(f.actions.get("draw")!.name, "Draw"); assert.equal(f.schema()!.rows.length, 2);
-    const row = f.schema()!.rows[0]!; assert.equal(row.type, "text"); assert.equal(row.label, "Ink color"); assert.equal(row.value, "#facc15");
-    assert.ok(row.validate?.("invalid" as never));
-    const scale = f.schema()!.rows[1]!; assert.equal(scale.type, "number"); assert.equal(scale.label, "Image scale"); assert.equal(scale.value, 50);
+    assert.equal(f.actions.get("draw")!.name, "Draw"); assert.equal(f.schema()!.rows.length, 3);
+    assert.deepEqual(f.schema()!.rows.map(row => [row.type, row.label, row.value]), [
+      ["text", "Dark mode ink color", "#ffffff"], ["text", "Light mode ink color", "#000000"], ["number", "Image scale", 50],
+    ]);
+    for (const [index, key, color] of [[0, "darkInkColor", "#123456"], [1, "lightInkColor", "#abcdef"]] as const) {
+      const row = f.schema()!.rows[index]!;
+      assert.ok(row.validate?.("invalid" as never)); assert.equal(row.validate?.(color as never), undefined);
+      await row.onChange(color as never);
+      assert.deepEqual(f.calls.at(-1), { name: "set-ink-color", value: { [key]: color } });
+      assert.equal(f.schema()!.rows[index]!.value, color);
+    }
+    const scale = f.schema()!.rows[2]!;
     assert.ok(scale.validate?.(0 as never)); assert.equal(scale.validate?.(25 as never), undefined);
-    await scale.onChange(25 as never); assert.equal(f.schema()!.rows[1]!.value, 25);
+    await scale.onChange(25 as never); assert.equal(f.schema()!.rows[2]!.value, 25);
+    assert.deepEqual(f.schema()!.rows.slice(0, 2).map(row => row.value), ["#123456", "#abcdef"]);
   } finally { off(); }
 });
 it("older settings notifications/reads cannot replace a newer accepted value", async () => {
   const f = fixture(), off = await activate(f.ctx);
   try {
-    f.notify({ revision: 2, inkColor: "#ffffff", imageScale: 25 }); f.notify({ revision: 1, inkColor: "#000000", imageScale: 100 });
-    assert.equal(f.schema()!.rows[1]!.value, 25);
-    assert.equal(f.schema()!.rows[0]!.value, "#ffffff");
-    f.setRead(() => ({ revision: 0, inkColor: "#facc15" }));
+    f.notify({ revision: 2, darkInkColor: "#123456", lightInkColor: "#abcdef", imageScale: 25 });
+    f.notify({ revision: 1, darkInkColor: "#000000", lightInkColor: "#ffffff", imageScale: 100 });
+    assert.deepEqual(f.schema()!.rows.map(row => row.value), ["#123456", "#abcdef", 25]);
+    f.setRead(() => ({ revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 }));
     for (const fn of f.resyncs) fn(); await new Promise<void>(resolve => queueMicrotask(resolve));
-    assert.equal(f.schema()!.rows[0]!.value, "#ffffff"); assert.equal(f.schema()!.rows[1]!.value, 25);
+    assert.deepEqual(f.schema()!.rows.map(row => row.value), ["#123456", "#abcdef", 25]);
   } finally { off(); }
 });
 it("Draw declares the approved session shortcut and keyboard invocation toggles the same surface", async () => {
@@ -79,6 +98,6 @@ it("late initial settings after activation cancellation cannot create UI registr
   const f = fixture(); let finish!: (value: unknown) => void;
   f.setRead(() => new Promise(resolve => { finish = resolve; }));
   const activating = activate(f.ctx); await new Promise<void>(resolve => queueMicrotask(resolve));
-  f.signal.abort(); finish({ revision: 0, inkColor: "#facc15" }); const off = await activating;
+  f.signal.abort(); finish({ revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 }); const off = await activating;
   assert.equal(f.actions.size, 0); assert.equal(f.schema(), undefined); off();
 });

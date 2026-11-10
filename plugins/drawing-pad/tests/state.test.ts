@@ -24,7 +24,7 @@ it("teaching late acceptance cannot erase newer strokes or recoloring", () => {
   const { sheets, state } = fixture(); sheets.update(state, [stroke()]); const captured = sheets.capture(state)!;
   sheets.update(state, [...state.draft!.strokes, stroke(50)]); sheets.accepted(captured);
   assert.equal(state.draft!.strokes.length, 2);
-  const recolor = sheets.capture(state)!; sheets.setColor("#ffffff"); sheets.accepted(recolor);
+  const recolor = sheets.capture(state)!; sheets.setColor("#ff0000"); sheets.accepted(recolor);
   assert.equal(state.draft!.strokes.length, 2);
 });
 it("practice keeps strokes and undo after acceptance and suppresses unchanged resends", () => {
@@ -84,9 +84,9 @@ it("camera position belongs to each session and resets only with a new sheet/pro
 it("color changes recolor all held sheets and count as practice changes", () => {
   const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); sheets.accepted(sheets.capture(state)!);
   const other = sheets.session("b", "teaching"); sheets.create(other, blank); sheets.update(other, [stroke(50)]);
-  const before = other.draft!.revision; sheets.setColor("#ffffff");
+  const before = other.draft!.revision; sheets.setColor("#ff0000");
   assert.equal(sheets.pending(state), true); assert.equal(other.draft!.revision, before + 1);
-  assert.equal(sheets.capture(other)!.color, "#ffffff");
+  assert.equal(sheets.capture(other)!.color, "#ff0000");
 });
 it("navigation reuse returns the same per-session sheet, never another session's ink", () => {
   const { sheets, state } = fixture(); sheets.update(state, [stroke()]);
@@ -118,6 +118,31 @@ it("explicit Clear drops undo but retains the displayed reference until reopenin
 it("closing a fully erased sheet preserves its undo history", () => {
   const { sheets, state } = fixture(); sheets.update(state, [stroke(), { tool: "eraser", points: [{ x: 10, y: 10, pressure: .5 }] }]);
   sheets.dropUntouched(state); assert.equal(state.draft!.strokes.length, 2); sheets.undo(state); assert.equal(sheets.pending(state), true);
+});
+it("palette replacement merges into the newest strokes and preserves reference geometry, camera and attempt snapshots", () => {
+  const { sheets, state } = fixture(); sheets.update(state, [stroke()]);
+  const before = sheets.capture(state)!, old = state.draft!;
+  sheets.setPan(state, { x: 42, y: -17 }); sheets.update(state, [...old.strokes, stroke(80)]);
+  sheets.setPalette("#000000", "light", new Map([[state, { id: old.id, background: "light-reference", backgroundColor: "#ffffff" }]]));
+  const next = sheets.capture(state)!;
+  assert.equal(next.draft.background, "light-reference"); assert.equal(next.color, "#000000");
+  assert.equal(next.draft.strokes.length, 2); assert.deepEqual(state.pan, { x: 42, y: -17 });
+  assert.deepEqual([next.draft.id, next.draft.width, next.draft.height, next.draft.pixelRatio], [old.id, old.width, old.height, old.pixelRatio]);
+  assert.equal(before.draft.background, old.background); assert.equal(before.color, "#ffffff");
+  sheets.accepted(before); assert.equal(state.draft!.strokes.length, 2);
+});
+it("background palette edits count as changed practice images even with identical configured ink", () => {
+  const { sheets, state } = fixture("practice"); sheets.update(state, [stroke()]); sheets.accepted(sheets.capture(state)!);
+  const draft = state.draft!;
+  sheets.setPalette(sheets.color, "different-palette", new Map([[state, { id: draft.id, background: "new-reference", backgroundColor: "#202020" }]]));
+  assert.equal(sheets.pending(state), true); const next = state.draft;
+  sheets.setPalette(sheets.color, "different-palette", new Map()); assert.equal(state.draft, next);
+});
+it("a late reference repaint cannot replace a new problem's sheet", () => {
+  const { sheets, state } = fixture("practice"), old = state.draft!;
+  sheets.create(state, { ...blank, background: "new-problem" });
+  sheets.setPalette(sheets.color, "light", new Map([[state, { id: old.id, background: "old-problem-repaint", backgroundColor: "#ffffff" }]]));
+  assert.equal(state.draft!.background, "new-problem");
 });
 it("sheet change listeners unsubscribe and disposal loses window-owned drafts", () => {
   const { sheets, state } = fixture(); let calls = 0; const off = sheets.onChange(() => calls++);

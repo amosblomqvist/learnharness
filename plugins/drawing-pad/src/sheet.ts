@@ -6,6 +6,7 @@ import { referenceFor, mountReference } from "./reference.ts";
 import { referenceBounds, viewOrigin } from "./geometry.ts";
 import { paintInk, paintSegment, type Point, type Stroke } from "./strokes.ts";
 import type { SessionSheet, Sheets } from "./state.ts";
+import { appPalette } from "./theme.ts";
 
 export interface MountedSheet {
   flush(): void;
@@ -76,6 +77,9 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     status.textContent = failure ?? (preparing ? "Preparing drawing sheet…" : "");
     paper.hidden = !draft || preparing || !!failure;
     if (draft) {
+      // Keep the previous raster and its ink readable until the new palette
+      // is ready to replace them together.
+      paper.style.backgroundColor = draft.backgroundColor;
       const width = viewport.clientWidth, height = viewport.clientHeight;
       if (!width || !height) return;
       const origin = viewOrigin(width, height, state.pan, draft.height), bounds = referenceBounds(draft.width, draft.height);
@@ -183,10 +187,14 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
         root.append(reference);
         referenceMount = mountReference(reference, ctx, content, signal); slots = referenceMount.slots;
       }
-      const sheet = await captureBackground(reference, slots, width, height, getComputedStyle(root).backgroundColor, signal);
+      let palette: string, sheet: Awaited<ReturnType<typeof captureBackground>>;
+      do {
+        palette = appPalette().key;
+        sheet = await captureBackground(reference, slots, width, height, getComputedStyle(root).backgroundColor, signal);
+      } while (palette !== appPalette().key);
       if (disposed || signal.aborted) return;
       preparing = false;
-      sheets.create(state, sheet);
+      sheets.create(state, { ...sheet, reference: content, palette });
     } catch (error) {
       if (!disposed && !signal.aborted) {
         preparing = false; failure = `Could not prepare the drawing background. ${error instanceof Error ? error.message : ""} Close and reopen Draw to try again.`;

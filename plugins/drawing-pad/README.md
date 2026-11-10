@@ -54,7 +54,12 @@ fence names. Do not install this build into a Community `plugins/drawing-pad/` f
 - Clear removes ink/undo history but keeps the displayed background. Closing/reopening
   an untouched or explicitly cleared sheet captures a fresh reference. An erased sheet
   with undo history retains its original background until cleared/reset.
-- Existing work retains its frozen reference and geometry when reopened/resized.
+- Existing work retains its original reference content and geometry when reopened/resized.
+  Live app theme/palette changes re-rasterize that same saved learner-visible reference,
+  never substitute later question/input content, and recolor ink for the active app mode.
+  Original strokes, dimensions, and Hand-pan position are preserved. The selected app
+  theme (`html.light`/`html.dark`), not the OS color preference, controls the palette.
+  Already submitted images remain unchanged.
   Export tightly crops the union of the complete reference and all visible (not erased)
   ink, including off-screen work, with 24 CSS pixels of padding. A blank reference
   contributes no artificial canvas rectangle. No toolbar or camera/viewport extent is
@@ -108,9 +113,12 @@ ignores held-key repeats/IME input. There is no separate hard-coded Undo listene
 
 Settings → Drawing Pad:
 
-- **Ink color**: default `#facc15`; enter exactly six hex digits prefixed with `#`.
-  Case-insensitive input is saved lowercase. Successful saves recolor held ink,
-  including retained practice sheets; submitted images never change.
+- **Dark mode ink color**: default **white** (`#ffffff`).
+- **Light mode ink color**: default **black** (`#000000`).
+  Both fields require exactly six hex digits prefixed with `#`; case-insensitive input
+  is saved lowercase. Each preference is independent. Successful saves recolor held ink
+  when that app theme mode is active, including retained practice sheets; switching
+  app modes selects the corresponding saved ink color. Submitted images never change.
 - **Image scale**: default **50%**; a numeric percentage greater than 0 and at most 100.
   Scales the uncapped export raster (including its captured device-pixel density)
   **before** applying the fixed 2000 × 2000 cap. At 50%, a 1000 × 600 raster becomes
@@ -119,9 +127,10 @@ Settings → Drawing Pad:
   resends. Each submission attempt freezes its scale. Very small scales that produce
   no visible ink refuse export and retain the drawing rather than sending a blank PNG.
 
-The backend stores only `{revision, inkColor, imageScale}` in its own
-`data/settings.json`. Existing color-only preferences read as 50% without an eager
-rewrite. Invalid/write-failed values are not published as saved settings.
+The backend stores only `{revision, darkInkColor, lightInkColor, imageScale}` in its
+own `data/settings.json`. `set-ink-color` accepts exactly one `{darkInkColor}` or
+`{lightInkColor}` field per call; there is no legacy `inkColor` alias. Invalid/write-failed
+values are not published as saved settings.
 
 ## Public-API boundary
 

@@ -1,4 +1,5 @@
-import { DEFAULT_INK_COLOR, DEFAULT_IMAGE_SCALE } from "./settings.ts";
+import { DEFAULT_DARK_INK_COLOR, DEFAULT_IMAGE_SCALE } from "./settings.ts";
+import type { Reference } from "./reference.ts";
 import { inkSignature, visibleStrokes, type Stroke, type Tool } from "./strokes.ts";
 
 export interface Draft {
@@ -7,6 +8,9 @@ export interface Draft {
   /** Raster of the reference alone; empty on blank sheets. No viewport baked in. */
   background: string;
   backgroundColor: string;
+  /** Original learner-visible content and the palette used for this raster. */
+  reference?: Reference;
+  palette?: string;
   width: number;
   height: number;
   pixelRatio: number;
@@ -28,7 +32,7 @@ export interface Capture { session: SessionSheet; draft: Draft; signature: strin
 /** Window-owned only. No storage, navigation parsing, or host input reconstruction. */
 export class Sheets {
   readonly sessions = new Map<string, SessionSheet>();
-  color = DEFAULT_INK_COLOR;
+  color = DEFAULT_DARK_INK_COLOR;
   imageScale = DEFAULT_IMAGE_SCALE;
   private nextId = 0;
   private readonly listeners = new Set<() => void>();
@@ -50,6 +54,24 @@ export class Sheets {
     this.color = color;
     for (const state of this.sessions.values()) if (state.draft) state.draft = { ...state.draft, revision: state.draft.revision + 1 };
     this.publish();
+  }
+  /** Atomically pair re-rendered reference backgrounds with their matching ink.
+   * Merge into the latest draft so work drawn during rasterization is retained. */
+  setPalette(color: string, palette: string, backgrounds: ReadonlyMap<SessionSheet, { id: number; background: string; backgroundColor: string }>): void {
+    const recolor = this.color !== color;
+    let changed = recolor;
+    this.color = color;
+    for (const state of this.sessions.values()) {
+      const draft = state.draft, background = backgrounds.get(state);
+      if (!draft) continue;
+      const repaint = background?.id === draft.id && draft.palette !== palette;
+      if (recolor || repaint) {
+        state.draft = { ...draft, ...(repaint ? { background: background.background,
+          backgroundColor: background.backgroundColor, palette } : {}), revision: draft.revision + 1 };
+        changed = true;
+      }
+    }
+    if (changed) this.publish();
   }
   /** Delivery resolution is not a drawing edit and does not trigger practice resends. */
   setImageScale(imageScale: number): void { this.imageScale = imageScale; }
@@ -79,7 +101,7 @@ export class Sheets {
     const cached = this.signatures.get(draft);
     if (cached !== undefined) return cached;
     const ink = inkSignature(draft.strokes, this.color);
-    const signature = ink ? `${draft.id}:${ink}` : "";
+    const signature = ink ? `${draft.id}:${draft.palette ?? ""}:${ink}` : "";
     this.signatures.set(draft, signature);
     return signature;
   }

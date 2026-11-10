@@ -28,10 +28,11 @@ try {
       builder.onResolve({ filter: /^node:crypto$/ }, args => ({ path: args.path, external: true, sideEffects: false }));
     } }] });
   assert.doesNotMatch(fs.readFileSync(path.join(evidence, "fixture.js"), "utf8"), /(?:from\s*|import\s*)["']node:/, "the fixture must not retain any Node runtime import");
-  const html = `<!doctype html><html><head><meta charset="utf-8"><link rel="stylesheet" href="/plugin.css"><link rel="stylesheet" href="/katex/katex.min.css"><link rel="stylesheet" href="/styles/capture-parent.css"><style>
-    *{box-sizing:border-box} body{margin:0;background:#141414;color:#e6e6e6;font-family:monospace} #bar{height:48px;display:flex;gap:12px;padding:8px 240px;background:#1c1c1c} button{font:inherit;font-size:12px;padding:6px 10px;background:#1c1c1c;color:#e6e6e6;border:1px solid #434343;border-radius:6px;cursor:pointer} button[data-variant=secondary]{background:#434343}button:disabled{opacity:.4}button svg{display:block;width:16px;height:16px}
-    #sidebar{position:fixed;left:0;top:48px;width:220px;bottom:0;background:#1c1c1c}#pad{position:fixed;left:220px;top:48px;right:0;bottom:0;background:#141414}#close-pad{position:absolute;right:12px;top:10px;z-index:10}#settings{position:fixed;inset:150px 300px;background:#1c1c1c;z-index:50;padding:24px}.lh-prose{font-family:serif;font-size:16px;line-height:1.5}.lh-prose p{margin:0 0 8px}#settings[hidden]{display:none}
-    </style></head><body><div id="bar"><button id="draw">Loading</button><button id="settings-open">Settings</button></div><aside id="sidebar">Fixture sidebar</aside><div id="settings" hidden><label>Ink color <input id="ink"></label><label>Image scale (%) <input id="image-scale" type="number"></label><p id="setting-error"></p><button id="blur-target">Done editing</button></div><script type="module" src="/fixture.js"></script></body></html>`;
+  const html = `<!doctype html><html class="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="/plugin.css"><link rel="stylesheet" href="/katex/katex.min.css"><link rel="stylesheet" href="/styles/capture-parent.css"><style>
+    html.dark{color-scheme:dark}html.light{color-scheme:light}
+    *{box-sizing:border-box} body{margin:0;background:var(--background);color:var(--foreground);font-family:monospace} #bar{height:48px;display:flex;gap:12px;padding:8px 240px;background:var(--card)} button{font:inherit;font-size:12px;padding:6px 10px;background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:6px;cursor:pointer} button[data-variant=secondary]{background:var(--border)}button:disabled{opacity:.4}button svg{display:block;width:16px;height:16px}input{background:var(--background);color:var(--foreground);border:1px solid var(--border)}
+    #sidebar{position:fixed;left:0;top:48px;width:220px;bottom:0;background:var(--card)}#pad{position:fixed;left:220px;top:48px;right:0;bottom:0;background:var(--background)}#close-pad{position:absolute;right:12px;top:10px;z-index:10}#settings{position:fixed;inset:150px 300px;background:var(--card);z-index:50;padding:24px}.lh-prose{font-family:serif;font-size:16px;line-height:1.5}.lh-prose p{margin:0 0 8px}#settings[hidden]{display:none}
+    </style></head><body><div id="bar"><button id="draw">Loading</button><button id="settings-open">Settings</button></div><aside id="sidebar">Fixture sidebar</aside><div id="settings" hidden><label>Dark mode ink color <input id="dark-ink"></label><label>Light mode ink color <input id="light-ink"></label><label>Image scale (%) <input id="image-scale" type="number"></label><p id="setting-error"></p><button id="blur-target">Done editing</button></div><script type="module" src="/fixture.js"></script></body></html>`;
   server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://fixture");
     let file, type;
@@ -102,6 +103,17 @@ try {
     await page.keyboard.type(String(value)); await page.click("#blur-target");
     await page.waitForFunction(value => window.fixture.saved().imageScale === value, {}, value); await page.keyboard.press("Escape");
   };
+  const setInk = async (mode, value) => {
+    const selector = `#${mode}-ink`, key = `${mode}InkColor`;
+    await call("showSettings"); await page.$eval(selector, field => { field.focus(); field.select(); });
+    await page.keyboard.type(value); await page.click("#blur-target");
+    await page.waitForFunction((key, value) => window.fixture.saved()[key] === value, {}, key, value.toLowerCase()); await page.keyboard.press("Escape");
+  };
+  const inkRGB = () => run(() => {
+    const canvas = document.querySelector(".drawing-pad-ink"), pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    for (let i = 0; i < pixels.length; i += 4) if (pixels[i + 3] === 255) return [...pixels.slice(i, i + 3)];
+    return [];
+  });
   const images = result => result?.content?.images ?? result?.answer?.images ?? result?.answerImages ?? result?.submissionImages ?? [];
   const pngSize = data => page.evaluate(async data => { const image = new Image(); image.src = `data:image/png;base64,${data}`; await image.decode(); return [image.naturalWidth, image.naturalHeight]; }, data);
   const pose = (id, custom = false) => [{ role: "assistant", id: `m-${id}`, content: [{ type: "toolCall", id, name: custom ? "code_problem" : "problem", arguments: { modelSolution: "NEVER CAPTURE SOLUTION" } }] },
@@ -191,16 +203,16 @@ try {
     const image = new Image(); image.src = `data:image/png;base64,${data}`; await image.decode();
     const canvas = document.createElement("canvas"); canvas.width = image.width; canvas.height = image.height;
     const c = canvas.getContext("2d"); c.drawImage(image, 0, 0); const p = c.getImageData(0, 0, canvas.width, canvas.height).data;
-    let referencePixels = 0, yellowPixels = 0, toolbarPixels = 0;
+    let referencePixels = 0, whitePixels = 0, toolbarPixels = 0;
     for (let y = 0; y < canvas.height; y++) for (let x = 0; x < canvas.width; x++) {
       const i = (y * canvas.width + x) * 4, nonBackground = p[i] !== 20 || p[i + 1] !== 20 || p[i + 2] !== 20;
       if (y < 24 && nonBackground) toolbarPixels++;
-      if (y >= 24 && nonBackground && !(p[i] === 250 && p[i + 1] === 204 && p[i + 2] === 21)) referencePixels++;
-      if (p[i] === 250 && p[i + 1] === 204 && p[i + 2] === 21 && p[i + 3] === 255) yellowPixels++;
+      if (y >= 24 && nonBackground && !(p[i] === 255 && p[i + 1] === 255 && p[i + 2] === 255)) referencePixels++;
+      if (p[i] === 255 && p[i + 1] === 255 && p[i + 2] === 255 && p[i + 3] === 255) whitePixels++;
     }
-    return { referencePixels, yellowPixels, toolbarPixels };
+    return { referencePixels, whitePixels, toolbarPixels };
   }, images(accepted)[0].data);
-  assert.ok(bitmap.referencePixels > 100); assert.ok(bitmap.yellowPixels > 100); assert.equal(bitmap.toolbarPixels, 0);
+  assert.ok(bitmap.referencePixels > 100); assert.ok(bitmap.whitePixels > 100); assert.equal(bitmap.toolbarPixels, 0);
   group("teaching refusal/cancel retention, real PNG export, acceptance clears");
 
   await stroke(); await call("submit", { defer: true }); await stroke(-.2); const newer = await ink(); await call("ack");
@@ -281,15 +293,13 @@ try {
   await open(); assert.equal(await ink(), 0); assert.ok((await run(() => window.fixture.markdownLog)).includes(p2.problem.statement));
   group("failed poses retain work; an accepted new problem closes/resets and reopens fresh");
 
-  await stroke(); await call("submit"); await call("showSettings"); await page.$eval("#ink", field => { field.focus(); field.select(); }); await page.keyboard.type("#FFFFFF"); await page.click("#blur-target");
-  await page.waitForFunction(() => window.fixture.saved().inkColor === "#ffffff"); await page.keyboard.press("Escape");
+  await stroke(); await call("submit"); await setInk("dark", "#12AB34");
   assert.equal(await label(), "Draw (unsent)");
-  const white = await run(() => { const c = document.querySelector(".drawing-pad-ink"), p = c.getContext("2d").getImageData(0, 0, c.width, c.height).data;
-    for (let i = 0; i < p.length; i += 4) if (p[i + 3] === 255) return [p[i], p[i + 1], p[i + 2]]; return []; });
-  assert.deepEqual(white, [255, 255, 255]);
-  await call("showSettings"); await page.$eval("#ink", field => { field.focus(); field.select(); }); await page.keyboard.type("#abc"); await page.click("#blur-target");
-  assert.equal(await run(() => window.fixture.saved().inkColor), "#ffffff"); assert.match(await run(() => document.querySelector("#setting-error").textContent), /six-digit/);
-  await call("notifySettings", { revision: 0, inkColor: "#facc15" }); assert.equal(await run(() => window.fixture.saved().inkColor), "#ffffff");
+  assert.deepEqual(await inkRGB(), [18, 171, 52]);
+  await call("showSettings"); await page.$eval("#dark-ink", field => { field.focus(); field.select(); }); await page.keyboard.type("#abc"); await page.click("#blur-target");
+  assert.equal(await run(() => window.fixture.saved().darkInkColor), "#12ab34"); assert.match(await run(() => document.querySelector("#setting-error").textContent), /six-digit/);
+  await call("notifySettings", { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 });
+  assert.deepEqual(await inkRGB(), [18, 171, 52]); assert.equal(await run(() => window.fixture.saved().darkInkColor), "#12ab34");
   await page.keyboard.press("Escape");
   group("hex setting validates, normalizes and recolors retained ink as a new practice change");
 
@@ -634,6 +644,87 @@ try {
   await run(() => { window.fixture.fontFetchMode = "normal"; }); await open();
   assert.deepEqual(await pageStyles(), stylesBefore);
   group("closing during font embedding aborts font fetches and reopening recovers without stylesheet mutation");
+
+  // Keep the theme checks scoped to one saved reference rather than re-capturing
+  // every retained sheet from the independent lifecycle groups above.
+  await page.reload({ waitUntil: "networkidle0" }); await page.waitForFunction(() => window.fixtureReady);
+  await setScale(100);
+  const inkGeometry = () => run(() => {
+    const canvas = document.querySelector(".drawing-pad-ink"), pixels = canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data;
+    let hash = 2166136261, count = 0;
+    for (let i = 3; i < pixels.length; i += 4) { hash = Math.imul(hash ^ pixels[i], 16777619); if (pixels[i]) count++; }
+    return { width: canvas.width, height: canvas.height, alphaHash: hash >>> 0, count };
+  });
+  const assertPalettePNG = async (data, background, inkColor, foreground) => {
+    const pixels = await page.evaluate(async (data, inkColor, foreground) => {
+      const image = new Image(); image.src = `data:image/png;base64,${data}`; await image.decode();
+      const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+      const context = canvas.getContext("2d"); context.drawImage(image, 0, 0);
+      const rgba = context.getImageData(0, 0, canvas.width, canvas.height).data;
+      let ink = 0, reference = 0;
+      for (let i = 0; i < rgba.length; i += 4) {
+        if (rgba[i + 3] !== 255) continue;
+        if (inkColor.every((value, channel) => rgba[i + channel] === value)) ink++;
+        if (foreground.every((value, channel) => rgba[i + channel] === value)) reference++;
+      }
+      return { corner: [...rgba.slice(0, 4)], ink, reference };
+    }, data, inkColor, foreground);
+    assert.deepEqual(pixels.corner, [...background, 255]); assert.ok(pixels.ink > 100); assert.ok(pixels.reference >= 20, `Reference foreground pixels: ${JSON.stringify(pixels)}`);
+  };
+  const changeTheme = async (mode, colors) => {
+    const previous = await bg(); await call("setTheme", mode, colors);
+    await page.waitForFunction(previous => document.querySelector(".drawing-pad-background")?.src !== previous, { timeout: 30000 }, previous);
+    await waitForSheet();
+  };
+  assert.deepEqual(await run(() => [window.fixture.saved().darkInkColor, window.fixture.saved().lightInkColor]), ["#ffffff", "#000000"]);
+  await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "light" }]);
+  await call("navigate", "theme-reference", "teaching", question); await open(); await stroke();
+  assert.equal(await run(() => matchMedia("(prefers-color-scheme: light)").matches && document.documentElement.classList.contains("dark")), true);
+  assert.deepEqual(await inkRGB(), [255, 255, 255]);
+  const darkDefaultPNG = images(await call("submit", { accept: false }))[0].data;
+  await assertPalettePNG(darkDefaultPNG, [20, 20, 20], [255, 255, 255], [230, 230, 230]);
+  group("app dark mode uses default WHITE ink and dark PNG palette even when the OS prefers light");
+
+  await panBy(100, -60, "right");
+  const themedPosition = await refPosition(), themedGeometry = await inkGeometry(), themedSize = await pngSize(darkDefaultPNG);
+  const themeLogStart = (await run(() => window.fixture.markdownLog)).length;
+  const originalMarkdown = [question.question.question, question.question.context, "$9$", "$6$"];
+  await call("setInput", { ...question, question: { ...question.question, question: "LATER INPUT MUST NOT REPLACE THE SAVED REFERENCE", context: "LATER CONTEXT", options: [] } });
+  const assertOriginalRetained = async () => {
+    assert.deepEqual(await refPosition(), themedPosition); assert.deepEqual(await inkGeometry(), themedGeometry);
+    const log = (await run(() => window.fixture.markdownLog)).slice(themeLogStart);
+    assert.ok(log.length >= 4); assert.deepEqual(log.slice(-4), originalMarkdown);
+    assert.ok(log.every(text => originalMarkdown.includes(text)), "re-theming must only remount the original saved learner-visible Markdown");
+    assert.deepEqual(await pngSize(images(await call("submit", { accept: false }))[0].data), themedSize);
+  };
+  await page.emulateMediaFeatures([{ name: "prefers-color-scheme", value: "dark" }]);
+  await changeTheme("light");
+  assert.equal(await run(() => matchMedia("(prefers-color-scheme: dark)").matches && document.documentElement.classList.contains("light")), true);
+  assert.deepEqual(await inkRGB(), [0, 0, 0]);
+  await assertOriginalRetained();
+  await assertPalettePNG(images(await call("submit", { accept: false }))[0].data, [239, 241, 245], [0, 0, 0], [76, 79, 105]);
+  assert.deepEqual(await run(() => [document.body, document.querySelector(".drawing-pad-root"), document.querySelector("#bar"), document.querySelector("#draw")].map(node => getComputedStyle(node).backgroundColor)),
+    ["rgb(239, 241, 245)", "rgb(239, 241, 245)", "rgb(230, 233, 239)", "rgb(230, 233, 239)"]);
+  group("app light mode uses default BLACK ink and light reference/export/chrome despite a dark OS preference");
+
+  await setInk("dark", "#12AB34"); assert.deepEqual(await inkRGB(), [0, 0, 0], "inactive-mode preference does not recolor the active light sheet");
+  await setInk("light", "#7654AB"); assert.deepEqual(await inkRGB(), [118, 84, 171]);
+  assert.deepEqual(await run(() => window.fixture.calls.filter(call => call.name === "set-ink-color").slice(-2).map(call => call.value)),
+    [{ darkInkColor: "#12ab34" }, { lightInkColor: "#7654AB" }]);
+  await assertPalettePNG(images(await call("submit", { accept: false }))[0].data, [239, 241, 245], [118, 84, 171], [76, 79, 105]);
+  await changeTheme("dark"); assert.deepEqual(await inkRGB(), [18, 171, 52]); await assertOriginalRetained();
+  assert.deepEqual(await run(() => [window.fixture.saved().darkInkColor, window.fixture.saved().lightInkColor]), ["#12ab34", "#7654ab"]);
+  await assertPalettePNG(images(await call("submit", { accept: false }))[0].data, [20, 20, 20], [18, 171, 52], [230, 230, 230]);
+  group("dark/light ink preferences save independently, normalize, and select the active app mode on held ink");
+
+  await changeTheme("dark", { background: "#202838", foreground: "#f0eadb", card: "#293245", border: "#506077", "muted-foreground": "#b0b8ca" });
+  await assertOriginalRetained();
+  await assertPalettePNG(images(await call("submit", { accept: false }))[0].data, [32, 40, 56], [18, 171, 52], [240, 234, 219]);
+  const themedPNG = images(await call("submit", { accept: false }))[0].data;
+  await close(); await open(); assert.deepEqual(await refPosition(), themedPosition); assert.deepEqual(await inkGeometry(), themedGeometry);
+  assert.equal(images(await call("submit", { accept: false }))[0].data, themedPNG);
+  await button("Undo"); assert.equal(await ink(), 0);
+  group("live mode/palette re-rasterization retains original Markdown, stroke geometry/Undo, pan, dimensions and coherent PNG colors");
   assert.deepEqual(await run(() => window.fixture.errors), []); assert.deepEqual(denied, []); assert.deepEqual(errors, []);
   await call("dispose"); assert.equal(await page.$("#pad"), null);
   await page.reload({ waitUntil: "networkidle0" }); await page.waitForFunction(() => window.fixtureReady); await open(); assert.equal(await ink(), 0);

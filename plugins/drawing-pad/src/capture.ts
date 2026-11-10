@@ -47,10 +47,10 @@ async function waitForReference(root: HTMLElement, slots: readonly HTMLElement[]
   });
 }
 export async function captureBackground(root: HTMLElement | undefined, slots: readonly HTMLElement[], width: number, height: number,
-  background: string, signal: AbortSignal): Promise<Omit<Draft, "id" | "revision" | "strokes" | "hasInk">> {
+  background: string, signal: AbortSignal, frozenSize?: { width: number; height: number; pixelRatio: number }): Promise<Omit<Draft, "id" | "revision" | "strokes" | "hasInk">> {
   signal.throwIfAborted();
   if (width <= 0 || height <= 0) throw new Error("The drawing sheet is not visible.");
-  const pixelRatio = Math.min(window.devicePixelRatio || 1, 2);
+  const pixelRatio = frozenSize?.pixelRatio ?? Math.min(window.devicePixelRatio || 1, 2);
   if (!root) return { background: "", backgroundColor: background, width: 0, height: 0, pixelRatio };
   const canvas = document.createElement("canvas");
   const context = canvas.getContext("2d");
@@ -68,14 +68,15 @@ export async function captureBackground(root: HTMLElement | undefined, slots: re
         changed = false;
         await waitForReference(root, slots, signal);
         const fontEmbedCSS = await referenceFontCSS(root, signal);
-        svg = await abortable(toSvg(root, { fontEmbedCSS, width: root.clientWidth, height: root.scrollHeight,
-          style: { position: "static", left: "0", top: "0", height: `${root.scrollHeight}px`, maxHeight: "none", overflow: "visible" } }), signal);
+        const width = frozenSize?.width ?? root.clientWidth, height = frozenSize?.height ?? root.scrollHeight;
+        svg = await abortable(toSvg(root, { fontEmbedCSS, width, height,
+          style: { position: "static", left: "0", top: "0", width: `${width}px`, height: `${height}px`, maxHeight: "none", overflow: "visible" } }), signal);
       } while (changed);
     } finally { observer.disconnect(); }
     const image = new Image(); image.src = svg!;
     await abortable(image.decode(), signal);
     // Freeze the reference at its rendered CSS-pixel size. Never fit it to a viewport.
-    width = root.clientWidth; height = root.scrollHeight;
+    width = frozenSize?.width ?? root.clientWidth; height = frozenSize?.height ?? root.scrollHeight;
     canvas.width = Math.max(1, Math.round(width * pixelRatio));
     canvas.height = Math.max(1, Math.round(height * pixelRatio));
     context.fillStyle = background; context.fillRect(0, 0, canvas.width, canvas.height);

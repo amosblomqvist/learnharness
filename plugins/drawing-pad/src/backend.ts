@@ -27,10 +27,11 @@ export function activate(ctx: PluginBackendContext): () => void {
     const record = ctx.learning.getSession(input.sessionId);
     return { sessionId: input.sessionId, poses: record?.kind === "practice" ? acceptedPoseKeys(record.messages) : [] };
   });
-  const persist = (change: Partial<Pick<Settings, "inkColor" | "imageScale">>) => {
+  const persist = (change: Partial<Pick<Settings, "darkInkColor" | "lightInkColor" | "imageScale">>) => {
     assertActive();
     const next = { ...settings, ...change, revision: settings.revision + 1 };
-    if (next.inkColor === settings.inkColor && next.imageScale === settings.imageScale) return { ...settings };
+    if (next.darkInkColor === settings.darkInkColor && next.lightInkColor === settings.lightInkColor &&
+      next.imageScale === settings.imageScale) return { ...settings };
     if (settings.revision === Number.MAX_SAFE_INTEGER) throw new Error("Settings revision limit reached.");
     fs.mkdirSync(ctx.dataDirectory, { recursive: true });
     const temporary = path.join(ctx.dataDirectory, `.settings-${randomUUID()}.tmp`);
@@ -42,7 +43,7 @@ export function activate(ctx: PluginBackendContext): () => void {
     ctx.events.emit("settings-changed", { ...settings });
     return { ...settings };
   };
-  const set = ctx.handle("set-ink-color", input => { assertActive(); return persist({ inkColor: parseColorChange(input) }); });
+  const set = ctx.handle("set-ink-color", input => { assertActive(); return persist(parseColorChange(input)); });
   const scale = ctx.handle("set-image-scale", input => { assertActive(); return persist({ imageScale: parseImageScaleChange(input) }); });
   return () => {
     if (disposed) return;

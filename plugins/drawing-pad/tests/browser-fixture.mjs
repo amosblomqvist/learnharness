@@ -25,7 +25,23 @@ window.fetch = (input, init) => {
 
 const controller = new AbortController(), cleanup = [], notifications = new Set(), events = new Set(), resyncs = new Set();
 let action, interceptor, settingsSchema, surface, currentSession = "teach", currentKind = "teaching", input = { type: "text" }, off;
-let savedSettings = { revision: 0, inkColor: "#facc15", imageScale: 50 }, pathname = "/opaque/teach", holdExportAck = [];
+let savedSettings = { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 }, pathname = "/opaque/teach", holdExportAck = [];
+const palettes = {
+  dark: { background: "#141414", foreground: "#e6e6e6", card: "#1c1c1c", border: "#434343", "muted-foreground": "#8d8d8d", accent: "#2a2a2a" },
+  light: { background: "#eff1f5", foreground: "#4c4f69", card: "#e6e9ef", border: "#ccd0da", "muted-foreground": "#6c6f85", accent: "#dce0e8" },
+};
+function setTheme(mode, colors = {}) {
+  if (!(mode in palettes)) throw new Error(`Unknown fixture theme ${mode}`);
+  const html = document.documentElement, palette = { "lh-accent": "#8d8d8d", "lh-error": "#ef4444", "lh-success": "#22c55e", "lh-warning": "#f59e0b", ...palettes[mode], ...colors };
+  html.classList.remove("dark", "light"); html.classList.add(mode);
+  for (const [key, value] of Object.entries(palette)) html.style.setProperty(`--${key}`, value);
+  for (const key of ["card-foreground", "popover-foreground", "primary", "secondary-foreground", "accent-foreground", "lh-line-strong", "lh-ink-strong", "lh-ink-italic", "lh-ink-code"]) html.style.setProperty(`--${key}`, palette.foreground);
+  for (const key of ["popover", "secondary", "muted"]) html.style.setProperty(`--${key}`, palette.card);
+  html.style.setProperty("--primary-foreground", palette.background);
+  html.style.setProperty("--input", palette.border);
+  html.style.setProperty("--ring", palette["muted-foreground"]);
+}
+setTheme("dark");
 const histories = new Map(), attempts = [], markdownLog = [], errors = [], calls = [], heldMarkdown = [], heldDecodes = [];
 const nativeDecode = HTMLImageElement.prototype.decode;
 HTMLImageElement.prototype.decode = function () {
@@ -56,15 +72,18 @@ function handleButton(container, initial) {
   render(); return { update(next) { props = { ...props, ...next }; render(); }, dispose() { button.remove(); } };
 }
 function showSettings() {
-  const panel = document.querySelector("#settings"), field = document.querySelector("#ink");
+  const panel = document.querySelector("#settings"), field = document.querySelector("#dark-ink");
   if (panel.hidden) settingsLayerOff = layers.register({ id: "settings", kind: "modal", rootRef: { current: panel } });
-  panel.hidden = false; field.value = settingsSchema.rows[0].value; document.querySelector("#image-scale").value = settingsSchema.rows[1].value; field.focus();
+  panel.hidden = false;
+  for (const [index, selector] of [[0, "#dark-ink"], [1, "#light-ink"], [2, "#image-scale"]]) document.querySelector(selector).value = settingsSchema.rows[index].value;
+  field.focus();
 }
 function updateSettings(schema) {
   settingsSchema = schema;
-  const field = document.querySelector("#ink");
-  if (document.activeElement !== field) field.value = schema.rows[0].value;
-  const scale = document.querySelector("#image-scale"); if (document.activeElement !== scale) scale.value = schema.rows[1].value;
+  for (const [index, selector] of [[0, "#dark-ink"], [1, "#light-ink"], [2, "#image-scale"]]) {
+    const field = document.querySelector(selector);
+    if (document.activeElement !== field) field.value = schema.rows[index].value;
+  }
 }
 const ctx = {
   manifest: { id: "drawing-pad" }, signal: controller.signal,
@@ -79,8 +98,13 @@ const ctx = {
     if (name === "get-settings") return clone(savedSettings);
     if (name === "set-ink-color" || name === "set-image-scale") {
       if (window.fixture.failSetting) throw new Error("Fixture write failure");
-      savedSettings = { ...savedSettings, revision: savedSettings.revision + 1,
-        ...(name === "set-ink-color" ? { inkColor: value.inkColor.toLowerCase() } : { imageScale: value.imageScale }) };
+      let change;
+      if (name === "set-ink-color") {
+        const keys = Object.keys(value ?? {}), key = keys[0];
+        if (keys.length !== 1 || !["darkInkColor", "lightInkColor"].includes(key) || !/^#[0-9a-f]{6}$/i.test(value[key])) throw new Error("Expected exactly one theme ink color");
+        change = { [key]: value[key].toLowerCase() };
+      } else change = { imageScale: value.imageScale };
+      savedSettings = { ...savedSettings, ...change, revision: savedSettings.revision + 1 };
       for (const fn of notifications) fn({ pluginId: "drawing-pad", topic: "settings-changed", data: clone(savedSettings) });
       return clone(savedSettings);
     }
@@ -231,12 +255,12 @@ window.fixture = {
     refresh(); return result;
   },
   ack() { for (const fn of holdExportAck.splice(0)) fn(); refresh(); },
-  showSettings,
+  showSettings, setTheme,
   saved() { return clone(savedSettings); },
   actionManager() { return manager; },
   showKeyboard() {
     keyboardOff?.(); const panel = document.createElement("section"); panel.id = "keyboard-panel"; panel.setAttribute("role", "dialog");
-    panel.style.cssText = "position:fixed;inset:60px 30px 30px 260px;overflow:auto;background:#222;padding:24px;z-index:100";
+    panel.style.cssText = "position:fixed;inset:60px 30px 30px 260px;overflow:auto;background:var(--card);color:var(--foreground);padding:24px;z-index:100";
     document.body.append(panel); const root = createRoot(panel);
     const unregister = layers.register({ id: "fixture-keyboard", kind: "modal", rootRef: { current: panel } });
     root.render(React.createElement(KeyboardSection));
@@ -248,7 +272,7 @@ window.fixture = {
   resetBindings() { saveOverrides({}); },
   blockShortcut(kind) {
     blockerOff?.(); const root = document.createElement("div"); root.textContent = "Fixture foreground blocker";
-    root.style.cssText = "position:fixed;top:100px;left:400px;width:250px;height:80px;background:#222;z-index:100";
+    root.style.cssText = "position:fixed;top:100px;left:400px;width:250px;height:80px;background:var(--card);color:var(--foreground);z-index:100";
     root.setAttribute("data-plugin-shortcut-owner", "foreign-plugin"); mounts.append(root);
     const unregister = layers.register({ id: "fixture-blocker", kind, rootRef: { current: root } });
     blockerOff = () => { unregister(); root.remove(); blockerOff = undefined; };
@@ -264,9 +288,9 @@ window.addEventListener("keydown", event => {
   window.fixture.keyEvents.push({ binding: eventBinding(event), invoked, prevented: event.defaultPrevented });
 }, { signal: controller.signal });
 document.querySelector("#settings-open").onclick = showSettings;
-for (const [index, selector] of [[0, "#ink"], [1, "#image-scale"]]) document.querySelector(selector).onblur = async event => {
+for (const [index, selector] of [[0, "#dark-ink"], [1, "#light-ink"], [2, "#image-scale"]]) document.querySelector(selector).onblur = async event => {
   if (!settingsSchema) return;
-  const value = index === 0 ? event.target.value : Number(event.target.value), row = settingsSchema.rows[index], error = row.validate?.(value);
+  const value = index === 2 ? Number(event.target.value) : event.target.value, row = settingsSchema.rows[index], error = row.validate?.(value);
   const message = document.querySelector("#setting-error");
   if (error) { message.textContent = error; return; }
   try { await row.onChange(value); message.textContent = ""; event.target.value = settingsSchema.rows[index].value; }
