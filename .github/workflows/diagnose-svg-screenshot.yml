@@ -1,0 +1,97 @@
+name: Diagnose SVG screenshot (not a release gate)
+
+on:
+  push:
+    branches: [diagnostics/svg-screenshot-060]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: diagnose-svg-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  source-helper:
+    name: SVG telemetry (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-2025, ubuntu-24.04]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 20
+    defaults:
+      run:
+        shell: bash
+    env:
+      NEXT_TELEMETRY_DISABLED: "1"
+      LH_IGNORE_ENV_KEYS: "1"
+      NODE_ENV: production
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 2
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+      - name: Preserve pinned telemetry harness outside checkout
+        run: |
+          node --input-type=module <<'NODE'
+          import assert from 'node:assert/strict';
+          import fs from 'node:fs';
+          import path from 'node:path';
+          import crypto from 'node:crypto';
+          const baseline = 'a917e2ee2981fd534aa61a1ed62bfb7b413f2ec4';
+          const root = path.join(process.env.RUNNER_TEMP, 'lh-svg-diagnostic');
+          fs.mkdirSync(root, {recursive: true});
+          const bytes = fs.readFileSync('scripts/diagnose-svg-screenshot.mjs');
+          const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
+          assert.equal(sha256, '0b21298c9c0a2108f0e6ce3d4eff7856ba777b7d112e6b45e2acf5399f398718');
+          const harness = path.join(root, 'svg-matrix.mjs');
+          fs.writeFileSync(harness, bytes);
+          const data = path.join(root, 'data');
+          fs.mkdirSync(data, {recursive: true});
+          const auth = path.join(root, 'empty-auth.json');
+          fs.writeFileSync(auth, '{}\n');
+          fs.writeFileSync(path.join(root, 'metadata.json'), JSON.stringify({
+            baseline, diagnosticCommit: process.env.GITHUB_SHA, sha256,
+            platform: process.platform, node: process.versions.node,
+            purpose: 'Diagnostic telemetry only. Classify per-case NDJSON, not job success. Original release gate unchanged.',
+            screenshotProtocolTimeoutMs: 10000, afterFailureProbeTimeoutMs: 1500,
+          }, null, 2) + '\n');
+          fs.appendFileSync(process.env.GITHUB_ENV, [
+            ['DIAG_ROOT', root], ['DIAG_HARNESS', harness],
+            ['TMPDIR', root], ['TEMP', root], ['TMP', root],
+            ['LH_DATA_DIR', data], ['LH_AUTH_FILE', auth],
+          ].map(([key, value]) => `${key}=${value}\n`).join(''));
+          NODE
+      - name: Use exact frozen release source (no diagnostic product edits)
+        run: |
+          git checkout --detach a917e2ee2981fd534aa61a1ed62bfb7b413f2ec4
+          test "$(git rev-parse HEAD)" = a917e2ee2981fd534aa61a1ed62bfb7b413f2ec4
+      - name: Install locked dependencies only (no plugin setup, fonts or build)
+        # Include dev dependencies despite the production runtime environment.
+        run: npm ci --include=dev
+      - name: Collect seven-case SVG telemetry (not a release gate)
+        run: |
+          set -o pipefail
+          runtime="$GITHUB_WORKSPACE/node_modules/electron/dist/electron"
+          if [[ "$RUNNER_OS" == "Windows" ]]; then runtime="$runtime.exe"; fi
+          if [[ "$RUNNER_OS" == "Linux" ]]; then
+            xvfb-run -a node "$DIAG_HARNESS" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --app-entry "$GITHUB_WORKSPACE" 2>"$DIAG_ROOT/matrix.stderr.log" | tee "$DIAG_ROOT/matrix.stdout.ndjson"
+          else
+            node "$DIAG_HARNESS" --checkout "$GITHUB_WORKSPACE" --runtime "$runtime" --app-entry "$GITHUB_WORKSPACE" 2>"$DIAG_ROOT/matrix.stderr.log" | tee "$DIAG_ROOT/matrix.stdout.ndjson"
+          fi
+      - name: Preserve telemetry and synthetic captures, including failures
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: svg-source-helper-${{ matrix.os }}
+          if-no-files-found: warn
+          retention-days: 7
+          path: |
+            ${{ runner.temp }}/lh-svg-diagnostic/metadata.json
+            ${{ runner.temp }}/lh-svg-diagnostic/matrix.stdout.ndjson
+            ${{ runner.temp }}/lh-svg-diagnostic/matrix.stderr.log
+            ${{ runner.temp }}/lh-svg-diagnostic/lh-svg-matrix-*/**/capture.png
