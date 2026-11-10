@@ -711,7 +711,9 @@ describe("plugin frontend surface and native importer", () => {
 		const document = parseHTML(html).document;
 		const help = document.querySelector('[data-testid="plugin-install-help"]')!;
 		assert.equal(help.hasAttribute("open"), false);
-		assert.equal(help.querySelector("summary")?.textContent, "How to install a plugin");
+		const trigger = help.querySelector("summary")!;
+		assert.equal(trigger.textContent, "How to install a plugin");
+		for (const style of ["list-none", "text-muted-foreground", "underline", "underline-offset-2", "hover:text-foreground", "[&::-webkit-details-marker]:hidden"]) assert.ok(trigger.classList.contains(style), style);
 		assert.equal(help.contains(document.querySelector('[data-testid="plugin-authoring-help"]')), false);
 		const download = document.querySelector('[data-testid="download-plugin-authoring"]')!;
 		assert.equal(download.tagName, "A");

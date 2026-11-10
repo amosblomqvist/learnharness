@@ -16,7 +16,7 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 		{!core && <>
 		<p className="font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING}</p>
 		<details data-testid="plugin-install-help" className="text-xs text-muted-foreground">
-			<summary className="cursor-pointer text-foreground">How to install a plugin</summary>
+			<summary className="w-fit cursor-pointer list-none text-muted-foreground underline underline-offset-2 hover:text-foreground [&::-webkit-details-marker]:hidden">How to install a plugin</summary>
 			<ol className="mt-2 list-decimal space-y-2 pl-5">
 				<li>Clone or copy the plugin into the directory below, using its plugin ID as the folder name.</li>
 				<li>For source projects, follow the repository’s dependency setup and run <code>npm run build</code>. Prebuilt packages already contain <code>dist/manifest.json</code> and need no build.</li>
