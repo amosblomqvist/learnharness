@@ -28,6 +28,7 @@
 		"@earendil-works/pi-ai": "1.4.0",
 		"@modelcontextprotocol/sdk": "1.32.1",
 		"@mozilla/readability": "^0.6.0",
+		"@napi-rs/keyring": "^2.1.2",
 		"@radix-ui/react-use-controllable-state": "^1.2.6",
 		"@resvg/resvg-js": "^2.6.2",
 		"@rive-app/react-webgl2": "^4.32.1",

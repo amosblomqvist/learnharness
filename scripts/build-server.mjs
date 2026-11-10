@@ -49,11 +49,12 @@ if (exists(leakedData)) {
 
 // 2b) Safety: the repo's dev SECRETS must never ride along either — the
 // same trace sweep that catches data/ shipped the repo-root auth.json
-// (the DEV BYOK key store, 0600) byte-identical into the DMG (caught in
+// (the DEV BYOK key store, 0600; auth.enc.json is its encrypted successor)
+// byte-identical into the DMG (caught in
 // the 2026-10-08 payload audit; excluded in next.config.ts — this guard
 // makes a regression loud instead of silent).
 const subscriptionSecrets = fs.readdirSync(STANDALONE).filter((name) => /^(chatgpt|github-copilot|xai)-credentials\.json/.test(name));
-for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]) {
+for (const secret of ["auth.json", "auth.enc.json", ...subscriptionSecrets, ".env", ".env.local"]) {
 	if (exists(path.join(STANDALONE, secret))) {
 		console.error(`[build-server] REFUSING: standalone contains ${secret} — dev secrets would ship in the app.`);
 		console.error("             Check outputFileTracingExcludes in next.config.ts.");

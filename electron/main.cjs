@@ -16,9 +16,10 @@
  *     read-only and native .node/dylib can't dlopen from one);
  *   - all mutable state under userData (never inside the .app bundle —
  *     translocated apps are read-only);
- *   - keys ride the child's ENV, never argv; auth.json (BYOK) is a flat
- *     {VAR: value} JSON map, plaintext, mode 0600 — server-managed since
- *     the auth-keys wave (2026-09-19): the child reads/writes it DIRECTLY
+ *   - keys ride the child's ENV, never argv; the BYOK store is a flat
+ *     {VAR: value} map, encrypted at rest in userData/auth.enc.json (AES-256-GCM,
+ *     master key in the OS credential store — src/store/auth.ts), mode 0600 —
+ *     server-managed since the auth-keys wave (2026-09-19): the child reads/writes it DIRECTLY
  *     (LH_AUTH_FILE below) and reflects values into its own env. The old
  *     spawn-time env injection retired with that wave — a copy made here
  *     would shadow every settings-page key change until restart.
@@ -53,6 +54,9 @@ const PRODUCT_NAME = "LearnHarness";
 // "LearnHarness-dev".
 app.setName(PRODUCT_NAME);
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
+// The encrypted BYOK store the server keeps beside it (src/store/auth.ts);
+// AUTH_FILE is only the legacy/hand-edit plaintext inbox now.
+const AUTH_ENC_FILE = () => path.join(app.getPath("userData"), "auth.enc.json");
 const DATA_DIR = () => path.join(app.getPath("userData"), "data");
 
 /** The packaged standalone server (extraResources → Resources/server).
@@ -113,7 +117,7 @@ if (process.argv.includes("--browser-service")) {
 	// Dev shell (LH_DEV_URL) runs BESIDE the packaged app, not instead of it:
 	// its own userData so (a) the single-instance lock — checked below — doesn't
 	// silently kill it, and (b) it never reads/writes the real app's
-	// localStorage, auth.json, or logs. Must run before the lock check.
+	// localStorage, BYOK keys, or logs. Must run before the lock check.
 	if (process.env.LH_DEV_URL) {
 		app.setPath("userData", `${app.getPath("userData")}-dev`);
 	}
@@ -170,7 +174,8 @@ function freePort() {
 	});
 }
 
-/** BYOK keys: auth.json in userData, flat {VAR: value} map, 0600 —
+/** BYOK keys: auth.enc.json in userData (encrypted, flat {VAR: value} map,
+ *  0600; LH_AUTH_FILE below names its plaintext inbox auth.json) —
  *  SERVER-MANAGED since the auth-keys wave (2026-09-19). This shell no
  *  longer reads or injects it: the child gets LH_AUTH_FILE below and does
  *  its own read/reflect/write, so a key saved in the settings page takes
@@ -678,7 +683,15 @@ async function main() {
 		});
 		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
-		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
+		const hasEnc = fs.existsSync(AUTH_ENC_FILE());
+		const hasLegacy = fs.existsSync(AUTH_FILE());
+		log(
+			`data dir: ${DATA_DIR()}${
+				hasEnc || hasLegacy
+					? ` · auth.enc.json: ${hasEnc ? "present" : "absent"} · legacy auth.json: ${hasLegacy ? "present (will be encrypted and removed by the server)" : "absent"}`
+					: " · auth.enc.json + auth.json: ABSENT (no BYOK keys yet)"
+			}`,
+		);
 		await startServer(new URL(url).port);
 		await waitUntilUp(url);
 		log(`server up: ${url}`);

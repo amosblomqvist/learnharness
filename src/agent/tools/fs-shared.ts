@@ -2,7 +2,7 @@ import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AUTH_FILE } from "../../../config.ts";
+import { AUTH_FILE, authEncFileFor } from "../../../config.ts";
 import { comparisonPath, guardSourcePath, isWithin, realSourcePath as realOrMissing, resolvePolicy, type ResolvedFileAccessPolicy } from "./file-access.ts";
 
 /**
@@ -86,22 +86,30 @@ const SENSITIVE_HOME_PATHS = [
 /** Templates are deliberately included: their names do not guarantee safe contents. */
 const ENV_FILE = /^\.env(\..*)?$/i;
 const SUBSCRIPTION_FILES = ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json"];
-// Match the actual writers in store/auth.ts and electron/{chatgpt,subscription-store}.cjs.
+// Match the actual writers in store/auth.ts (the encrypted store's temps are the generic `<file>.tmp-<uuid>`, matched below) and electron/{chatgpt,subscription-store}.cjs.
 const CREDENTIAL_TEMP = /^(?:\.auth\.json\.tmp-\d+|(?:chatgpt|github-copilot|xai)-credentials\.json\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp)$/i;
 const ATOMIC_TEMP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
-function credentialFiles(authFile: string): string[] {
-	return [authFile, ...SUBSCRIPTION_FILES.map((name) => path.join(/* turbopackIgnore: true */ path.dirname(authFile), name))];
+/** The auth store's two files: the encrypted store and the plaintext hand-edit inbox. */
+function authStoreFiles(authFile: string): string[] {
+	return [authFile, authEncFileFor(authFile)];
 }
 
-function isCredentialTemp(absolute: string, directory: string, authBasename: string): boolean {
+function credentialFiles(authFile: string): string[] {
+	return [...authStoreFiles(authFile), ...SUBSCRIPTION_FILES.map((name) => path.join(/* turbopackIgnore: true */ path.dirname(authFile), name))];
+}
+
+function isCredentialTemp(absolute: string, directory: string, authBasenames: string[]): boolean {
 	const file = comparisonPath(absolute);
 	if (path.relative(comparisonPath(directory), path.dirname(file)) !== "") return false;
 	const name = path.basename(file);
-	const prefix = `${authBasename}.tmp-`;
-	return CREDENTIAL_TEMP.test(name) ||
-		(name.toLowerCase().startsWith(prefix.toLowerCase()) && ATOMIC_TEMP_UUID.test(name.slice(prefix.length)));
+	return CREDENTIAL_TEMP.test(name) || authBasenames.some((authBasename) => {
+		const prefix = `${authBasename}.tmp-`;
+		return name.toLowerCase().startsWith(prefix.toLowerCase()) && ATOMIC_TEMP_UUID.test(name.slice(prefix.length));
+	});
 }
+
+const authBasenames = (authFile: string): string[] => authStoreFiles(authFile).map((p) => path.basename(comparisonPath(p)));
 
 /** String-only check, also usable with synthetic home/credential locations.
  *  The runtime guard below additionally resolves both sources and protected roots.
@@ -111,7 +119,7 @@ export function isSensitivePath(absolute: string, home: string = os.homedir(), a
 	return ENV_FILE.test(path.basename(file)) ||
 		SENSITIVE_HOME_PATHS.some((p) => isWithin(file, path.join(home, p), true)) ||
 		credentialFiles(authFile).some((p) => isWithin(file, p)) ||
-		isCredentialTemp(file, path.dirname(authFile), path.basename(comparisonPath(authFile)));
+		isCredentialTemp(file, path.dirname(authFile), authBasenames(authFile));
 }
 
 /** An unrelated inaccessible/broken protected root must not break ordinary
@@ -160,7 +168,7 @@ function sourcePathCheck(home = os.homedir()): (absolute: string) => boolean {
 	const credentialDir = protectedRealPath(path.dirname(AUTH_FILE));
 	return (absolute) => isSensitivePath(absolute, home) ||
 		homeRoots.some((p) => isWithin(absolute, p, true)) ||
-		files.some((p) => isWithin(absolute, p)) || isCredentialTemp(absolute, credentialDir, path.basename(comparisonPath(AUTH_FILE)));
+		files.some((p) => isWithin(absolute, p)) || isCredentialTemp(absolute, credentialDir, authBasenames(AUTH_FILE));
 }
 
 function checkedSourcePath(absolute: string, denied: (absolute: string) => boolean): string {

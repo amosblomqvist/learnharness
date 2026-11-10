@@ -6,8 +6,8 @@
  * a revoked key looks fine until a real call fails; that trade was chosen
  * over phoning providers).
  *
- * The store itself is the long-standing flat {VAR: value} auth.json map
- * (see config.AUTH_FILE): keys are identified BY their environment-variable
+ * The store itself is the long-standing flat {VAR: value} auth map,
+ * encrypted at rest (see config.AUTH_ENC_FILE, src/store/auth.ts): keys are identified BY their environment-variable
  * name — the same name consumers read today (OPENROUTER_API_KEY, …), so the
  * catalog id IS the file key and the env var, one name everywhere.
  *

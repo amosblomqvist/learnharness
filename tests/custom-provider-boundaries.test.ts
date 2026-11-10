@@ -3,11 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, beforeEach, test, mock } from "node:test";
+import { readEncAuth, TEST_MASTER_KEY, writeEncAuth } from "./helpers/auth-enc.ts";
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "lh-custom-boundaries-"));
 const originalEnv = process.env;
 const originalFetch = globalThis.fetch;
-process.env = { ...(originalEnv.NODE_TEST_CONTEXT ? { NODE_TEST_CONTEXT: originalEnv.NODE_TEST_CONTEXT } : {}), ...(originalEnv.NODE_OPTIONS ? { NODE_OPTIONS: originalEnv.NODE_OPTIONS } : {}), NODE_ENV: "test", HOME: scratch, LH_DATA_DIR: scratch, LH_AUTH_FILE: path.join(scratch, "auth.json"), LH_IGNORE_ENV_KEYS: "1" };
+process.env = { ...(originalEnv.NODE_TEST_CONTEXT ? { NODE_TEST_CONTEXT: originalEnv.NODE_TEST_CONTEXT } : {}), ...(originalEnv.NODE_OPTIONS ? { NODE_OPTIONS: originalEnv.NODE_OPTIONS } : {}), NODE_ENV: "test", HOME: scratch, LH_DATA_DIR: scratch, LH_AUTH_FILE: path.join(scratch, "auth.json"), LH_AUTH_MASTER_KEY: TEST_MASTER_KEY, LH_IGNORE_ENV_KEYS: "1" };
 const route = await import("../app/api/custom-provider/route.ts");
 const keys = await import("../src/server/keys.ts");
 const { authEnvRecord } = await import("../src/core/auth-env.ts");
@@ -28,7 +29,7 @@ beforeEach(() => {
 	mock.restoreAll();
 	process.env.LH_IGNORE_ENV_KEYS = "1";
 	delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
-	fs.writeFileSync(path.join(scratch, "auth.json"), "{}"); seed();
+	fs.rmSync(path.join(scratch, "auth.enc.json"), { force: true }); seed();
 	requests = [];
 	globalThis.fetch = async (url, options) => {
 		requests.push({ url: String(url), authorization: new Headers(options?.headers).get("authorization") });
@@ -88,7 +89,7 @@ test("changing destination cannot silently reuse an existing credential", async 
 test("same-URL unbound development key needs existing explicit reuse consent", async () => {
 	seed({ baseUrl: "http://old/v1", authMode: "apiKey", models: [{ id: "m" }] }, "legacy-key");
 	const { CUSTOM_AUTH_BINDING } = await import("../src/core/custom-provider-auth.ts");
-	const file = path.join(scratch, "auth.json"); const map = JSON.parse(fs.readFileSync(file, "utf8")); delete map[CUSTOM_AUTH_BINDING]; fs.writeFileSync(file, JSON.stringify(map));
+	const file = path.join(scratch, "auth.enc.json"); const map = readEncAuth(file); delete map[CUSTOM_AUTH_BINDING]; writeEncAuth(file, map);
 	assert.equal((await get().json()).keyReuseRequired, true);
 	assert.equal((await mutate({ baseUrl: "http://old/v1", authMode: "apiKey" })).status, 400); assert.equal(requests.length, 0);
 	assert.equal((await mutate({ baseUrl: "http://old/v1", authMode: "apiKey", reuseKey: true })).status, 200);
@@ -98,7 +99,7 @@ test("generic custom/reserved key writes cannot bypass the atomic binding seam",
 	const ordinary = await import("../app/api/keys/[id]/route.ts");
 	const { CUSTOM_AUTH_BINDING } = await import("../src/core/custom-provider-auth.ts");
 	const { authStore } = await import("../src/store/auth.ts");
-	const before = fs.readFileSync(path.join(scratch, "auth.json"), "utf8");
+	const before = fs.readFileSync(path.join(scratch, "auth.enc.json"), "utf8");
 	for (const id of [CUSTOM_PROVIDER.envVar, CUSTOM_AUTH_BINDING]) {
 		const context = { params: Promise.resolve({ id }) };
 		assert.equal((await ordinary.PUT(new Request("http://localhost", { method: "PUT", body: JSON.stringify({ value: "bypass" }) }), context)).status, 404);
@@ -106,7 +107,7 @@ test("generic custom/reserved key writes cannot bypass the atomic binding seam",
 		assert.equal(keys.saveKey(id, "bypass").ok, false); assert.throws(() => keys.deleteKey(id));
 		assert.throws(() => authStore.setAuthVar(id, "bypass")); assert.throws(() => authStore.deleteAuthVar(id));
 	}
-	assert.equal(fs.readFileSync(path.join(scratch, "auth.json"), "utf8"), before);
+	assert.equal(fs.readFileSync(path.join(scratch, "auth.enc.json"), "utf8"), before);
 	assert.ok(!keys.keyStatuses().some(row => row.id === CUSTOM_AUTH_BINDING)); assert.equal(process.env[CUSTOM_AUTH_BINDING], undefined);
 });
 test("same target can retain its effective key", async () => {

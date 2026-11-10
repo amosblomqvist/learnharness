@@ -20,7 +20,11 @@
 #
 #   LH_DATA_DIR     → .fresh-data/ (wiped each launch unless --keep)
 #   LH_AUTH_FILE    → .fresh-data/auth.json (NEVER the repo-root auth.json
-#                     — that file may symlink the real keys)
+#                     — that file may symlink the real keys); the encrypted
+#                     store lands beside it as .fresh-data/auth.enc.json
+#   LH_AUTH_MASTER_KEY → a throwaway key kept in .fresh-data/.master-key, so
+#                     the simulator never reads or writes the real OS
+#                     credential store (wiped with the data dir)
 #   LH_IGNORE_ENV_KEYS=1
 #
 # Safe to rerun. The data dir is disposable scratch — never copy it back.
@@ -86,13 +90,19 @@ mkdir -p "$DATA_DIR"
 
 export LH_DATA_DIR="$DATA_DIR"
 export LH_AUTH_FILE="$DATA_DIR/auth.json"
+KEY_FILE="$DATA_DIR/.master-key"
+if [ ! -f "$KEY_FILE" ]; then
+	(umask 077 && node -e 'process.stdout.write(require("node:crypto").randomBytes(32).toString("base64"))' > "$KEY_FILE")
+fi
+LH_AUTH_MASTER_KEY="$(cat "$KEY_FILE")"
+export LH_AUTH_MASTER_KEY
 export LH_IGNORE_ENV_KEYS=1
 export PORT
 
 echo "── fresh-user instance ─────────────────────────────────"
 echo "  URL      : http://localhost:$PORT"
 echo "  data dir : $DATA_DIR ($( [ "$KEEP" = "true" ] && echo 'kept across runs' || echo 'wiped next launch unless --keep' ))"
-echo "  keys     : env keys hidden (LH_IGNORE_ENV_KEYS=1), auth.json empty"
+echo "  keys     : env keys hidden (LH_IGNORE_ENV_KEYS=1), stored keys empty"
 echo "─────────────────────────────────────────────────────────"
 
 cd "$ROOT"

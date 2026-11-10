@@ -35,7 +35,7 @@ function capture(url: unknown, init?: RequestInit) {
 const context = (messages: Message[] = [{ role: "user", content: "synthetic", timestamp: 0 }]) => normalizeContext({ messages });
 const run = (engine: ReturnType<typeof piEngineForSpec>, messages?: Message[]) => engine.streamFn(engine.model, context(messages), {}).result();
 beforeEach(() => {
-	requests = []; fs.writeFileSync(path.join(scratch, "auth.json"), "{}"); configure();
+	requests = []; fs.rmSync(path.join(scratch, "auth.enc.json"), { force: true }); configure();
 	globalThis.fetch = async (url, init) => { capture(url, init); return answer(); };
 });
 after(() => { process.env = originalEnv; globalThis.fetch = originalFetch; fs.rmSync(scratch, { recursive: true, force: true }); });

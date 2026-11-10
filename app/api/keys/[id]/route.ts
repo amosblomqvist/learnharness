@@ -14,6 +14,11 @@
  * (absent key = success). Writable ids are the CURATED CATALOG ∪ THE
  * MODEL-PROVIDER env vars (provider-keys interlude); anything else is 404
  * — unknown file vars are preserved, not editable.
+ *
+ * STORE FAILURES are 500s with a readable {error}: the encrypted store
+ * (src/store/auth.ts) throws when no master-key source is available or when
+ * auth.enc.json cannot be decrypted (it refuses to overwrite it) — never a
+ * silent plaintext fallback.
  */
 import { isWritableAuthKey } from "@/src/server";
 import { deleteKey, saveKey } from "@/src/server";
@@ -36,9 +41,13 @@ export async function PUT(req: Request, { params }: Params) {
 	if (!body || typeof body !== "object" || Array.isArray(body) || typeof (body as { value?: unknown }).value !== "string") {
 		return Response.json({ error: "body must be {value: string}" }, { status: 400 });
 	}
-	const result = saveKey(id, (body as { value: string }).value);
-	if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
-	return Response.json({ status: result.status });
+	try {
+		const result = saveKey(id, (body as { value: string }).value);
+		if (!result.ok) return Response.json({ error: result.error }, { status: 400 });
+		return Response.json({ status: result.status });
+	} catch (err) {
+		return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+	}
 }
 
 export async function DELETE(_req: Request, { params }: Params) {
@@ -46,5 +55,9 @@ export async function DELETE(_req: Request, { params }: Params) {
 	if (!isWritableAuthKey(id)) {
 		return Response.json({ error: `unknown key "${id}"` }, { status: 404 });
 	}
-	return Response.json({ status: deleteKey(id) });
+	try {
+		return Response.json({ status: deleteKey(id) });
+	} catch (err) {
+		return Response.json({ error: err instanceof Error ? err.message : String(err) }, { status: 500 });
+	}
 }

@@ -106,7 +106,7 @@ export const GRAPH_FORMAT_FILE = path.join(PATHS.graph, "format.json");
  * field) needs no migration — old records simply lack the new keys. The
  * version field is a PRIVATE schema counter for breaking shape changes
  * only (field renamed/meaning changed), unrelated to the app release
- * version. Secrets (API keys, login tokens) NEVER live here — auth.json /
+ * version. Secrets (API keys, login tokens) NEVER live here — the auth store /
  * .env.local keep that role. (The `chat` default-settings section died
  * with per-session models, owner 2026-09-28 — sessions own their model
  * from birth, stamped from the strong slot.)
@@ -129,19 +129,30 @@ export const SETTINGS_FILE = path.join(DATA_ROOT, "settings.json");
 export const PROMPTS_OVERRIDE_DIR = path.join(DATA_ROOT, "prompts");
 
 /**
- * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a
- * flat {VAR: value} JSON map — the SAME file the Electron app has always
- * hand-edited (owner decision: option A, zero migration). Desktop main.cjs
- * passes LH_AUTH_FILE pointing at userData/auth.json (mode 0600); in dev
- * (no Electron) the default is the repo-root auth.json (gitignored, same
- * pattern as .env.local — a worktree may symlink it to the master copy).
- * The SERVER reads/writes this file directly at call time (no restart to
- * change a key); it reflects the values into process.env at boot with
- * FILL-GAP precedence — real environment variables (incl. .env.local in
- * dev) always win (src/server/keys.ts). Hand-edits still work: the file is
- * re-read from disk on every API access. Secrets NEVER go in settings.json
- * — this file keeps that role, alongside .env.local.
+ * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19; encrypted at rest since
+ * the auth-encryption change): BYOK provider keys, a flat {VAR: value} map.
+ * Persistence is AES-256-GCM in AUTH_ENC_FILE (auth.enc.json, next to
+ * AUTH_FILE — same directory and basename + ".enc.json"); the data key
+ * lives in the OS credential store (src/store/auth.ts has the full story).
+ * AUTH_FILE itself is now only the plaintext HAND-EDIT INBOX: a user who
+ * creates auth.json by hand has it absorbed into the encrypted store and
+ * securely wiped on the next access. Desktop main.cjs passes LH_AUTH_FILE
+ * pointing at userData/auth.json (so the encrypted file is
+ * userData/auth.enc.json); in dev (no Electron) the default is the
+ * repo-root auth.json / auth.enc.json (both gitignored, same pattern as
+ * .env.local). The SERVER reads/writes the store directly at call time (no
+ * restart to change a key); it reflects the values into process.env at
+ * boot with FILL-GAP precedence — real environment variables (incl.
+ * .env.local in dev) always win (src/server/keys.ts). Secrets NEVER go in
+ * settings.json — this store keeps that role; env vars and .env.local stay
+ * plaintext by the user's choice.
  */
 export const AUTH_FILE = process.env.LH_AUTH_FILE
 	? path.resolve(process.env.LH_AUTH_FILE)
 	: path.join(ROOT, "auth.json");
+
+/** The encrypted store beside an auth file: same directory, same basename,
+ *  `.enc.json` extension (auth.json → auth.enc.json). */
+export const authEncFileFor = (authFile: string): string =>
+	path.join(path.dirname(authFile), `${path.parse(authFile).name}.enc.json`);
+export const AUTH_ENC_FILE = authEncFileFor(AUTH_FILE);
