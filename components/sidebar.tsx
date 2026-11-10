@@ -705,10 +705,10 @@ function SessionsSidebar() {
 					</Hint>
 				</div>
 
-				{/* Two doors, STACKED (owner round 8, 2026-10-05 — was a
-				    half/half row): full-width rows read cleaner and give the
-				    labels room; teaching keeps the original draft route,
-				    practice carries its mode. */}
+				{/* Three doors, STACKED (owner round 8, 2026-10-05 — was a
+					    half/half row): full-width rows read cleaner and give the
+					    labels room; teaching keeps the original draft route,
+					    practice and lesson carry their modes. */}
 				<div className="mx-3 mb-2 flex flex-col gap-1.5">
 					<button
 						type="button"
@@ -729,6 +729,16 @@ function SessionsSidebar() {
 						<DumbbellIcon className="size-3" />
 						Practice
 						<span className="sr-only">create a new practice session</span>
+					</button>
+					<button
+						type="button"
+						data-testid="new-session-lesson"
+						onClick={() => router.push("/chat/new?mode=lesson")}
+						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<BookOpenIcon className="size-3" />
+						Lesson
+						<span className="sr-only">create a new lesson session</span>
 					</button>
 				</div>
 
