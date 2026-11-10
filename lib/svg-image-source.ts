@@ -19,4 +19,3 @@ export function svgImageSource(svg: string): string {
 		},
 	);
 }
-
