@@ -14,7 +14,11 @@ afterEach(async () => { await cleanup?.(); cleanup = undefined; });
 
 /** No native DataTransfer/Selection in linkedom. These shims exercise React's
  * real bubbling handlers and the editor's logical caret contract, not OS drag. */
-async function fixture({ desktop = true, claimed = true } = {}) {
+async function fixture({ desktop = true, claimed = true, onContentRoot }: {
+	desktop?: boolean;
+	claimed?: boolean;
+	onContentRoot?: (element: HTMLElement | null) => void;
+} = {}) {
 	const { window: win, document: doc } = parseHTML("<html><body><div id='root'></div></body></html>");
 	let active: Element = doc.body;
 	Object.defineProperty(doc, "activeElement", { get: () => active });
@@ -57,7 +61,7 @@ async function fixture({ desktop = true, claimed = true } = {}) {
 		useDictationTarget((text) => appends.push(text), claimed);
 		return <>
 			<aside data-testid="sidebar">Sidebar</aside>
-			<FilePathDropZone>
+			<FilePathDropZone onContentRoot={onContentRoot}>
 				<form onSubmit={(event) => { event.preventDefault(); submits++; }}>
 					<PathInput data-testid="editor" value={value} onValueChange={(next) => { value = next; draw(); }} onKeyDown={() => { keys++; }} />
 					<button type="button" data-testid="elsewhere">Elsewhere</button>
@@ -246,6 +250,18 @@ test("nested enter/leave depth keeps the drop overlay until the zone is left; no
 	await act(async () => { f.doc.querySelector<HTMLElement>('[aria-label="Dismiss attachment notice"]')!.click(); });
 	assert.equal(f.status, "");
 	f.assertPathOnly();
+});
+
+test("the host content root reports the real main column and clears on unmount", async () => {
+	const seen: (HTMLElement | null)[] = [];
+	const f = await fixture({ onContentRoot: (element) => { seen.push(element); } });
+	const main = f.doc.querySelector<HTMLElement>("main")!;
+	assert.equal(seen.length, 1);
+	assert.equal(seen[0], main);
+	assert.equal(main.contains(f.doc.querySelector('[data-testid="sidebar"]')), false);
+	await cleanup!();
+	cleanup = undefined;
+	assert.deepEqual(seen, [main, null]);
 });
 
 test("production AppShell places the sidebar outside its content-only drop zone", () => {

@@ -59,14 +59,44 @@ async function openDocument(filePath: string) {
 	return openBytes(new Uint8Array(await fs.readFile(filePath)));
 }
 
-async function openBytes(data: Uint8Array) {
+type PdfLoadingTask = Pick<import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentLoadingTask, "promise" | "destroy">;
+type PdfTaskLoader = (data: Uint8Array, signal?: AbortSignal) => PdfLoadingTask | Promise<PdfLoadingTask>;
+
+async function loadBytes(data: Uint8Array, signal?: AbortSignal): Promise<PdfLoadingTask> {
+	signal?.throwIfAborted();
 	const pdfjs = await loadPdfjs();
+	signal?.throwIfAborted();
 	// The legacy build in plain node runs on a main-thread fake worker (no
 	// workerSrc needed); teardown is the loading task's destroy().
 	// verbosity 0 = errors only — scanned PDFs (JBIG2 XObjects) otherwise
 	// flood the log with per-page warnings (live-smoke finding 2026-09-19).
-	const task = pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
-	return { doc: await task.promise, task };
+	return pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
+}
+
+async function openBytes(data: Uint8Array, signal?: AbortSignal, loadTask: PdfTaskLoader = loadBytes) {
+	signal?.throwIfAborted();
+	const loadingTask = await loadTask(data, signal);
+	let destruction: Promise<void> | undefined;
+	const destroy = () => destruction ??= Promise.resolve().then(() => loadingTask.destroy()).finally(() => {
+		signal?.removeEventListener("abort", onAbort);
+	});
+	const onAbort = () => { void destroy().catch(() => {}); };
+	signal?.addEventListener("abort", onAbort, { once: true });
+	// Covers cancellation while the loader itself was pending.
+	if (signal?.aborted) onAbort();
+	try {
+		// Do not race this promise against abort: opening and teardown must both
+		// settle before the caller can release conversion capacity.
+		const doc = await loadingTask.promise;
+		signal?.throwIfAborted();
+		return { doc, task: { destroy } };
+	} catch (error) {
+		// Failed opens own a loading task too. Cleanup is best effort, without
+		// replacing the parse error (or the caller's cancellation reason).
+		await destroy().catch(() => {});
+		signal?.throwIfAborted();
+		throw error;
+	}
 }
 
 /** Concatenate a page's text items into a body string. */
@@ -180,23 +210,49 @@ export type PdfConversion =
 	/** Broken, encrypted, or not a PDF at all: pdfjs could not read it. */
 	| { kind: "unreadable" };
 
+function isAbortError(error: unknown): boolean {
+	return error instanceof Error && error.name === "AbortError";
+}
+
+/** Server-internal loading-task seam for lifecycle tests, not a plugin capability.
+ * Both injected and default loaders use the same conversion and cleanup path. */
+export function createPdfConverter(loadTask: PdfTaskLoader = loadBytes) {
+	return async (data: Uint8Array, maxPages: number, options?: { signal?: AbortSignal }): Promise<PdfConversion> => {
+		const signal = options?.signal;
+		let opened: Awaited<ReturnType<typeof openBytes>> | undefined;
+		let result: PdfConversion | undefined;
+		let failure: unknown;
+		try {
+			opened = await openBytes(data, signal, loadTask);
+			signal?.throwIfAborted();
+			result = opened.doc.numPages > maxPages
+				? { kind: "too-long", pageCount: opened.doc.numPages }
+				: { kind: "converted", pages: await documentToMarkdown(opened.doc, undefined, signal) };
+		} catch (error) {
+			failure = error;
+		} finally {
+			try {
+				await opened?.task.destroy();
+			} catch (error) {
+				if (!signal?.aborted && !isAbortError(failure)) throw error;
+			}
+		}
+		// Also observe aborts arriving during final teardown. Never disguise
+		// cancellation as a corrupt PDF, even when destroy rejects on abort.
+		signal?.throwIfAborted();
+		if (isAbortError(failure)) throw failure;
+		return result ?? { kind: "unreadable" };
+	};
+}
+
+const defaultPdfConverter = createPdfConverter();
+
 /** An uploaded PDF's pages as Markdown (the notes import's door). The page
- *  cap is checked before any page is read. */
-export async function convertPdf(data: Uint8Array, maxPages: number): Promise<PdfConversion> {
-	let opened: Awaited<ReturnType<typeof openBytes>>;
-	try {
-		opened = await openBytes(data);
-	} catch {
-		return { kind: "unreadable" };
-	}
-	try {
-		if (opened.doc.numPages > maxPages) return { kind: "too-long", pageCount: opened.doc.numPages };
-		return { kind: "converted", pages: await documentToMarkdown(opened.doc) };
-	} catch {
-		return { kind: "unreadable" };
-	} finally {
-		await opened.task.destroy();
-	}
+ * cap is checked before any page is read. Cancellation is cooperative: pdfjs's
+ * Node fake worker cannot interrupt synchronous parsing/formatting. The promise
+ * waits for opening/conversion and best-effort destruction, not a hard deadline. */
+export async function convertPdf(data: Uint8Array, maxPages: number, options?: { signal?: AbortSignal }): Promise<PdfConversion> {
+	return defaultPdfConverter(data, maxPages, options);
 }
 
 /** A page's Markdown, or "" for a page with no text (the agent renders those). */

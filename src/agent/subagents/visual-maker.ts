@@ -6,6 +6,7 @@ import { Type } from "typebox";
 import { piEngineFor, type PiEngine, type ThinkingLevel } from "../models.ts";
 import { providerEventObserver, type ProviderEventObserver } from "../provider-events.ts";
 import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
+import { workerRequestStream } from "../worker-request-admission.ts";
 import type { VisualResult } from "../../core/contracts.ts";
 import type { LearnerImage } from "../tools/learner-image.ts";
 import type { PdfFigureImage, PdfFigureSource } from "../tools/pdf-figure.ts";
@@ -220,7 +221,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	const reasoning = engine.level;
 	const sessionId = randomUUID();
 	const capture = createBackgroundCapture({ role: "visualMaker", runId: sessionId, sourceId: opts.chatId });
-	const streamEngine = { ...engine, streamFn: backgroundCaptureStream(engine.streamFn, capture) };
+	const streamEngine = { ...engine, streamFn: backgroundCaptureStream(workerRequestStream(engine.streamFn), capture) };
 	/** The picture being annotated; in PDF mode crop_page replaces it. */
 	let learnerImage: LearnerImage | PdfFigureImage | undefined = input.image ?? pdf?.pageImage;
 	const systemPrompt = pdf

@@ -4,8 +4,9 @@
  * dedup: the chat-handler spawn hook never creates two jobs for the same
  * tool part. Implements core/ports.ts JobStore. Idioms: sync fs, id-guarded
  * filenames, JSON with tab indentation. Writes are small and rare (activity
- * line updates); the read-modify-write sections in the runner contain no
- * awaits, so they are atomic within the single-threaded event loop.
+ * line updates); read-modify-write sections contain no awaits. Plugin-linked
+ * jobs require atomic replacement before linkage is acknowledged. Native jobs
+ * retain the Windows held-file compatibility fallback (owner integration q22).
  */
 
 import * as fs from "node:fs";
@@ -18,11 +19,27 @@ import type { JobRecord } from "../core/contracts.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 /** Background jobs (data/jobs). Not in config.ts PATHS (orchestrator-owned). */
-const JOBS_DIR = path.join(PATHS.data, "jobs");
+const JOBS_DIR = path.join(/* turbopackIgnore: true */ PATHS.data, "jobs");
 
 function jobFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid job id: ${id}`);
-	return path.join(JOBS_DIR, `${id}.json`);
+	return path.join(/* turbopackIgnore: true */ JOBS_DIR, `${id}.json`);
+}
+
+/** Use the shared retry/cleanup law, but never truncate a plugin-linked job.
+ * Metadata also makes a builtin job strict: accepted plugin linkage must stay
+ * readable even when its worker is native. A malformed/missing plugin identity
+ * cannot grant plugin-kind jobs permission to fall back in place. */
+function writeJob(record: JobRecord): void {
+	const strict = record.kind === "plugin" || record.plugin !== undefined;
+	writeFileAtomicSync(jobFile(record.id), JSON.stringify(record, null, "\t"), {
+		allowInPlaceFallback: !strict,
+		...(strict ? { mode: 0o600 } : {}),
+	});
+	if (strict && process.platform !== "win32") {
+		const directory = fs.openSync(JOBS_DIR, "r");
+		try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
+	}
 }
 
 /** Writes announce on the events channel AFTER the write lands (the
@@ -41,16 +58,17 @@ function createJob(init: CreateJobInit): JobRecord {
 		activity: init.activity ?? "starting",
 		createdAt: now,
 		updatedAt: now,
+		...(init.plugin ? { plugin: init.plugin } : {}),
 	};
 	fs.mkdirSync(JOBS_DIR, { recursive: true });
-	writeFileAtomicSync(jobFile(record.id), JSON.stringify(record, null, "\t"), { allowInPlaceFallback: true });
+	writeJob(record);
 	emit("jobs-changed", { chatId: init.chatId });
 	return record;
 }
 
 function getJob(id: string): JobRecord | null {
 	try {
-		return JSON.parse(fs.readFileSync(jobFile(id), "utf-8")) as JobRecord;
+		return JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ jobFile(id), "utf-8")) as JobRecord;
 	} catch {
 		return null;
 	}
@@ -63,7 +81,7 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 	const record = getJob(id);
 	if (!record) return null;
 	const next: JobRecord = { ...record, ...patch, updatedAt: patch.updatedAt ?? new Date().toISOString() };
-	writeFileAtomicSync(jobFile(id), JSON.stringify(next, null, "\t"), { allowInPlaceFallback: true });
+	writeJob(next);
 	// EVERY write, not just status flips: progress-line updates must reach
 	// the dispatch cards (the view debounces the fetch bursts). A missing id
 	// wrote nothing and stays silent.
@@ -76,7 +94,7 @@ function listJobs(chatId: string): JobRecord[] {
 	try {
 		fs.mkdirSync(JOBS_DIR, { recursive: true });
 		return fs
-			.readdirSync(JOBS_DIR)
+			.readdirSync(/* turbopackIgnore: true */ JOBS_DIR)
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getJob(f.slice(0, -5)))
 			.filter((j): j is JobRecord => j !== null && j.chatId === chatId)

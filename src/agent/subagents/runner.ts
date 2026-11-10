@@ -4,10 +4,12 @@ import {
 	accumulateJobUsage,
 	buildSubagentSteer,
 	isSubagentFailure,
+	isWebSourceUrl,
 	piUsageToStep,
+	isBuiltinJobKind,
 	type DemoResult,
 	type DemoToolInput,
-	type JobKind,
+	type BuiltinJobKind,
 	type JobRecord,
 	type JobUsage,
 	type PdfResult,
@@ -120,7 +122,7 @@ interface LoopContext {
 
 /** The kind→role table (model slots wave, 2026-09-20): which ModelRole's
  * engine each sub-agent kind runs — the engineFor injection key. */
-const KIND_ROLE: Record<JobKind, ModelRole> = {
+const KIND_ROLE: Record<BuiltinJobKind, ModelRole> = {
 	research: "researcher",
 	demo: "demoBuilder",
 	visual: "visualMaker",
@@ -170,7 +172,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 	 *  tests swap scripted engines without touching deps), then the injected
 	 *  settings-resolved engineFor. undefined = the BYOK chain came up
 	 *  empty (owner, 2026-09-22) — runJob refuses below, honestly. */
-	function pickEngine(kind: JobKind): PiEngine | undefined {
+	function pickEngine(kind: BuiltinJobKind): PiEngine | undefined {
 		const testOverride: Record<string, { current?: PiEngine } | undefined> = {
 			researcher: researchModelOverride,
 			demoBuilder: demoModelOverride,
@@ -181,7 +183,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 	}
 
 	const KIND_RUNNERS: Record<
-		JobKind,
+		BuiltinJobKind,
 		(jobId: string, engine: PiEngine, input: JobToolInput | undefined, loop: LoopContext) => Promise<void>
 	> = {
 		research: (jobId, engine, input, loop) => runResearchJob(jobId, engine, input, loop),
@@ -196,7 +198,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			console.error(`[job ${jobId}] not found — nothing to run`);
 			return;
 		}
-		if (job.status !== "running") return; // already finished / re-run after crash recovery
+		if (job.status !== "running" || !isBuiltinJobKind(job.kind)) return; // plugin tasks never enter the core runner
 		const run = KIND_RUNNERS[job.kind];
 		if (!run) {
 			console.error(`[job ${jobId}] unknown kind: ${job.kind}`);
@@ -572,8 +574,10 @@ function hostOf(url: string | undefined): string {
 	}
 }
 
-/** Sources for the result: markdown links cited in the brief, else fetched URLs. */
-function parseSources(brief: string, fetchedUrls: string[]): ResearchResult["sources"] {
+/** Sources for the result: markdown links cited in the brief, else fetched
+ * URLs. Fetched URLs are recorded before the fetch tool validates their scheme;
+ * only http(s) sources may become links, including in previously saved jobs. */
+export function parseSources(brief: string, fetchedUrls: string[]): ResearchResult["sources"] {
 	const sources: ResearchResult["sources"] = [];
 	const seen = new Set<string>();
 	for (const match of brief.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g)) {
@@ -585,7 +589,7 @@ function parseSources(brief: string, fetchedUrls: string[]): ResearchResult["sou
 	}
 	if (sources.length === 0) {
 		for (const url of fetchedUrls) {
-			if (seen.has(url)) continue;
+			if (seen.has(url) || !isWebSourceUrl(url)) continue;
 			seen.add(url);
 			sources.push({ title: hostOf(url), url });
 		}
