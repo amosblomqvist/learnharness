@@ -330,11 +330,12 @@ export function createProberTools(
 				// Job dispatch in the probe phase (owner ruling, 2026-09-20):
 				// research + pdf are ALWAYS available in every phase — the
 				// prober can verify facts or read learner PDFs while assessing.
-				// demo/visual stay teach-phase-only (they need the lesson's plan
-				// context). Same user-toggle filtering as the teacher; research
+				// Precise figures are available during questions too. Interactive
+				// demos remain teaching-only. Same user-toggle filtering; research
 				// remains available without a search-provider key.
 				...(jobs.research ? { research: jobs.research } : {}),
 				pdf: jobs.pdf!,
+				visual: jobs.visual!,
 				// The map reader (wave 7): present only when the settings gate
 				// opened.
 				...(ctx.graphStore

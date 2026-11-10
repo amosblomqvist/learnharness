@@ -342,7 +342,7 @@ export function bareQuestionTools(): Record<string, AgentTool<any>> {
  * Practice uses ordinary final prose, not the explicit output tool.
  */
 export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOptions = {}) {
-	const tools = opts.tools ?? practiceTools(ctx);
+	const tools = opts.tools ?? practiceTools({ ...ctx, visualEnabled: opts.toolToggles?.visual !== false });
 	return baseAgentOptions("practice", opts, Object.values(tools));
 }
 
