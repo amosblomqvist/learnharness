@@ -9,6 +9,8 @@
 - [Context, caching, and costs](compaction-accounting.md) — understand the session meters and advanced cache preferences.
 - [Learning-data skill](../skills/learnharness/SKILL.md) — a read-only guide and standalone readers for local learning records.
 
+- [Learning-resource referral prototype](learning-resources.md) — proposed torque referral tool, scope and source attribution.
+
 ## Development and maintenance
 
 - [Development](development.md) — setup, configuration, safe local work, debugging, and checks.

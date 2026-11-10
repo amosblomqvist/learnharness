@@ -34,6 +34,7 @@ import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
+import { createLearningResourceSearch } from "./learning-resources.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
 import {
@@ -64,6 +65,8 @@ import {
 } from "../core/input-events.ts";
 import { steerDelivered } from "../core/contracts.ts";
 import type {CallUsage} from "../core/contracts.ts";
+
+const learningResources = createLearningResourceSearch();
 
 /**
  * One chat turn over the server-owned native record. Framework-free (plain
@@ -471,6 +474,7 @@ export async function handleChatInput(
 		: record.kind === "practice"
 			? createPracticeAgent(
 					{
+						learningResources,
 						chatId,
 						chatStore: stores.chatStore,
 						// TARGET VALIDATION (owner round 9): the practice tools read the
@@ -495,6 +499,7 @@ export async function handleChatInput(
 			: teaching
 			? createTeacherAgent(
 					{
+						learningResources,
 						chatId,
 						chatStore: stores.chatStore,
 						jobStore: stores.jobStore,
@@ -507,6 +512,7 @@ export async function handleChatInput(
 				)
 			: createProberAgent(
 					{
+						learningResources,
 						chatId,
 						chatStore: stores.chatStore,
 						deliver: (steer) => void deliverJobResult(steer),
