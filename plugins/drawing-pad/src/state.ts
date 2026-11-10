@@ -59,6 +59,15 @@ export class Sheets {
       state.draft = { ...state.draft, color, revision: state.draft.revision + 1 };
     this.publish();
   }
+  /** Accepted preferences can recolor already-current sheets without waiting
+   * for unrelated reference work. Older rasters retain their own paired ink. */
+  setInkForPalette(color: string, palette: string): void {
+    let changed = false;
+    for (const state of this.sessions.values()) if (state.draft?.palette === palette && state.draft.color !== color) {
+      state.draft = { ...state.draft, color, revision: state.draft.revision + 1 }; changed = true;
+    }
+    if (changed) this.publish();
+  }
   /** Atomically pair re-rendered reference backgrounds with their matching ink.
    * Merge into the latest draft so work drawn during rasterization is retained. */
   setPalette(color: string, palette: string, backgrounds: ReadonlyMap<SessionSheet, { id: number; background: string; backgroundColor: string }>): void {

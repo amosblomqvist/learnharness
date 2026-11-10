@@ -127,9 +127,10 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     const next = parseSettings(value);
     if (current && next.revision <= current.revision) return;
     current = next; sheets.setImageScale(next.imageScale);
-    if (appPalette().key === appliedPalette && [...sheets.sessions.values()].every(state => !state.draft || state.draft.palette === appliedPalette))
-      sheets.setColor(activeInk());
-    else void refreshPalette().catch(report);
+    const palette = appPalette();
+    sheets.setInkForPalette(activeInk(), palette.key);
+    if (palette.key !== appliedPalette || [...sheets.sessions.values()].some(state => state.draft && state.draft.palette !== palette.key))
+      void refreshPalette().catch(report);
     if (settings) settings.update({ rows: rows(next) });
     else settings = ctx.registerSettings({ rows: rows(next) });
   }

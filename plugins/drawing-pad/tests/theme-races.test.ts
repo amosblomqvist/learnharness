@@ -3,7 +3,7 @@ import { it } from "node:test";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
-import type { PluginAction, PluginFrontendContext, PluginNotification } from "learnharness-plugin-api";
+import type { PluginAction, PluginFrontendContext, PluginNotification, PluginSettingsSchema } from "learnharness-plugin-api";
 import type { Capture, Draft, SessionSheet, Sheets } from "../src/state.ts";
 
 const project = fileURLToPath(new URL("../", import.meta.url));
@@ -36,6 +36,8 @@ type Raster = Pick<Draft, "background" | "backgroundColor">;
 type Render = ReturnType<typeof deferred<Raster>> & { draft: Draft; signal: AbortSignal };
 async function fixture(kind: "teaching" | "practice" = "practice") {
   const observers = new Set<() => void>(), actions = new Map<string, PluginAction>();
+  const notifications = new Set<(event: PluginNotification) => void>();
+  let schema!: PluginSettingsSchema;
   const owner = new AbortController(), errors: unknown[][] = [];
   const probe = { palette: { key: "dark", mode: "dark" }, renders: [] as Render[], exports: [] as Capture[],
     sheets: undefined as Sheets | undefined, state: undefined as SessionSheet | undefined, exportWait: undefined as Promise<void> | undefined,
@@ -59,8 +61,10 @@ async function fixture(kind: "teaching" | "practice" = "practice") {
   let poseRead = () => Promise.resolve({ sessionId: "s", poses: [] as string[] });
   const ctx = {
     manifest: { id: "drawing-pad" }, signal: owner.signal, cleanup() {}, refreshActions() {}, refreshSubmissions() {},
-    app: { pathname: () => "/controlled-session" }, onNotification(_fn: (event: PluginNotification) => void) { return () => {}; },
-    onAppEvent() { return () => {}; }, onResync() { return () => {}; }, registerSettings() { return { update() {}, dispose() {} }; },
+    app: { pathname: () => "/controlled-session" }, onNotification(fn: (event: PluginNotification) => void) { notifications.add(fn); return () => notifications.delete(fn); },
+    onAppEvent() { return () => {}; }, onResync() { return () => {}; }, registerSettings(value: PluginSettingsSchema) {
+      schema = value; return { update(value: PluginSettingsSchema) { schema = value; }, dispose() {} };
+    },
     registerAction(value: PluginAction) { actions.set(value.id, value); return () => actions.delete(value.id); }, placeAction() { return () => {}; },
     registerSubmissionInterceptor(value: typeof interceptor) { interceptor = value; return () => {}; },
     ui: { openSurface(_target: unknown, props: { content: (container: HTMLElement, signal: AbortSignal) => unknown }) {
@@ -82,7 +86,8 @@ async function fixture(kind: "teaching" | "practice" = "practice") {
     sheets.update(state, [{ tool: "pen", points: [{ x: 20, y: 20, pressure: .5 }, { x: 100, y: 100, pressure: .5 }] }]);
   };
   create();
-  return { probe, sheets, state, create, errors,
+  return { probe, sheets, state, create, errors, schema: () => schema,
+    notify(value: unknown) { for (const fn of notifications) fn({ pluginId: "drawing-pad", topic: "settings-changed", data: value }); },
     setPoseRead(read: typeof poseRead) { poseRead = read; },
     async theme(key: string, mode: string) { probe.palette = { key, mode }; for (const fn of observers) fn(); await settle(); },
     async submit() { return interceptor.intercept({ type: "text", content: { text: "controlled", images: [] } }, {
@@ -125,5 +130,31 @@ it("DP-IR-2: a fresh new-problem sheet pairs its current background and ink desp
     assert.equal(retained.draft.reference!.question, "NEW PROBLEM"); assert.equal(retained.draft.strokes.length, 1);
     assert.deepEqual(f.state.pan, { x: 18, y: -24 });
     assert.deepEqual([retained.draft.width, retained.draft.height, retained.draft.pixelRatio], [600, 100, 1]);
+  } finally { await f.dispose(); }
+});
+it("DP-IR-3: accepted active-mode ink immediately recolors a current draft despite obsolete rendering and its failure", async () => {
+  const f = await fixture();
+  try {
+    await f.theme("light", "light"); assert.equal(f.probe.renders.length, 1);
+    f.sheets.observePoses(f.state, ["new-problem"]); f.create("light", "#ffffff", "NEW PROBLEM");
+    f.sheets.setPan(f.state, { x: 17, y: -23 });
+    const before = f.sheets.capture(f.state)!;
+    assert.equal(before.color, "#000000");
+    f.notify({ revision: 1, darkInkColor: "#ffffff", lightInkColor: "#7654ab", imageScale: 50 });
+    assert.equal(f.schema().rows[1]!.value, "#7654ab");
+    const accepted = f.sheets.capture(f.state)!;
+    assert.equal(accepted.color, "#7654ab", "accepted current-mode ink cannot wait on an obsolete reference render");
+    assert.equal(accepted.draft.color, "#7654ab"); assert.equal(accepted.draft.revision, before.draft.revision + 1);
+    assert.equal(before.color, "#000000"); assert.equal(before.draft.color, "#000000", "existing attempts remain immutable");
+    f.probe.renders[0]!.reject(new Error("Obsolete old-reference render failed")); await settle();
+    f.sheets.setPan(f.state, { x: 18, y: -24 }); await settle();
+    const retained = f.sheets.capture(f.state)!;
+    assert.equal(retained.color, "#7654ab"); assert.equal(retained.draft.backgroundColor, "#ffffff");
+    assert.equal(retained.draft.id, before.draft.id); assert.equal(retained.draft.reference!.question, "NEW PROBLEM");
+    assert.equal(retained.draft.strokes.length, 1); assert.deepEqual(f.state.pan, { x: 18, y: -24 });
+    f.sheets.accepted(before); assert.equal(f.sheets.pending(f.state), true, "accepting older black ink cannot mark newly recolored work sent");
+    const revision = retained.draft.revision;
+    f.notify({ revision: 2, darkInkColor: "#123456", lightInkColor: "#7654ab", imageScale: 50 }); await settle();
+    assert.equal(f.sheets.capture(f.state)!.color, "#7654ab"); assert.equal(f.state.draft!.revision, revision, "inactive-mode preferences do not edit the current draft");
   } finally { await f.dispose(); }
 });

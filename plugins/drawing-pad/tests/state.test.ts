@@ -144,6 +144,22 @@ it("a late reference repaint cannot replace a new problem's sheet", () => {
   sheets.setPalette(sheets.color, "light", new Map([[state, { id: old.id, background: "old-problem-repaint", backgroundColor: "#ffffff" }]]));
   assert.equal(state.draft!.background, "new-problem");
 });
+it("accepted ink recolors only current-palette drafts, preserving older raster pairs and immutable attempts", () => {
+  let ink = "#ffffff", changes = 0;
+  const sheets = new Sheets(() => changes++, () => {}, () => ink);
+  const old = sheets.session("old", "teaching"); sheets.create(old, { ...blank, palette: "dark" }); sheets.update(old, [stroke()]);
+  const oldDraft = old.draft;
+  ink = "#000000";
+  const current = sheets.session("current", "practice"); sheets.create(current, { ...blank, palette: "light", backgroundColor: "#ffffff" });
+  sheets.update(current, [stroke()]); const captured = sheets.capture(current)!;
+  sheets.setInkForPalette("#7654ab", "light");
+  assert.equal(sheets.capture(current)!.color, "#7654ab"); assert.equal(current.draft!.revision, captured.draft.revision + 1);
+  assert.equal(old.draft, oldDraft); assert.equal(sheets.capture(old)!.color, "#ffffff");
+  assert.equal(captured.color, "#000000"); assert.equal(captured.draft.color, "#000000");
+  const acceptedDraft = current.draft, beforeNoop = changes;
+  sheets.setInkForPalette("#7654ab", "light"); assert.equal(current.draft, acceptedDraft); assert.equal(changes, beforeNoop);
+  sheets.accepted(captured); assert.equal(sheets.pending(current), true);
+});
 it("sheet change listeners unsubscribe and disposal loses window-owned drafts", () => {
   const { sheets, state } = fixture(); let calls = 0; const off = sheets.onChange(() => calls++);
   sheets.update(state, [stroke()]); off(); sheets.clear(state); assert.equal(calls, 1);
