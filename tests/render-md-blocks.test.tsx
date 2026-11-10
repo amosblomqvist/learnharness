@@ -13,7 +13,9 @@ import React from "react";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+const renderToStaticMarkup = (node: React.ReactNode) => renderMarkup(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { ThinkingBlock, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { MermaidOverlay, SessionMermaidContext, chartSize } from "../components/session-overlay.tsx";
@@ -28,7 +30,7 @@ describe("md-blocks — code", () => {
 	it("inline code passes through with the house inline styling", () => {
 		const html = render("a `term` b");
 		assert.ok(html.includes('data-streamdown="inline-code"'), "inline code keeps the inline-code path");
-		assert.match(html, /a <code class="rounded px-1\.5 py-0\.5 font-mono text-sm"[^>]*>term<\/code> b/, "inline semantics, spacing and typography stay intact");
+		assert.match(html, /a <code class="rounded px-1\.5 py-0\.5 font-mono text-sm text-\(--lh-ink-code\)"[^>]*>term<\/code> b/, "inline semantics, spacing and typography stay intact, in the theme's code ink");
 		assert.ok(!html.includes("bg-muted"), "inline code no longer uses the question-card surface");
 	});
 
@@ -126,18 +128,25 @@ describe("md-blocks — codeSource (pure)", () => {
 describe("session-scoped overlays (chrome-melt wave, 2026-09-19)", () => {
 	it("mermaid overlay mounts inside the session area — absolute (not fixed), 80% + blur, closeable", () => {
 		const html = renderToStaticMarkup(<MermaidOverlay chart="graph TD\nA --> B" onClose={() => {}} />);
-		assert.match(html, /class="absolute inset-0[^"]*z-40/, "absolute inset-0 z-40 — scoped, not fullscreen");
+		assert.match(html, /class="[^"]*absolute inset-0[^"]*z-40/, "absolute inset-0 — scoped, not fullscreen");
+		assert.match(html, /style="z-index:100"/, "native view participates in the shared ordered local paint stack");
+		assert.ok(html.includes("pointer-events-auto"), "the frame opts into hit testing inside the transparent stack");
 		assert.ok(html.includes("bg-background/80"), "80% background: the transcript ghosts through");
 		assert.ok(html.includes("backdrop-blur"), "blur surface");
 		assert.ok(!html.includes("fixed inset-0"), "never fixed — the drag bar stays uncovered");
 		assert.ok(html.includes('data-testid="mermaid-overlay-close"'), "the close X is present");
-		assert.match(html, /role="dialog"/, "dialog semantics for Esc/aria");
+		assert.match(html, /role="region"/, "nonmodal content-area semantics");
+		assert.ok(!html.includes("aria-modal"), "does not claim viewport-modal isolation");
 	});
 
 	it("the plan popup is session-scoped the same way, and its chart is hidden until the first fit (no top-left flash)", () => {
 		const html = renderToStaticMarkup(<PlanPopup messages={[]} onClose={() => {}} />);
 		assert.match(html, /data-testid="plan-popup"/);
-		assert.match(html, /class="absolute inset-0[^"]*z-40/, "absolute inset-0 z-40 — scoped, not fullscreen");
+		assert.match(html, /role="region"/);
+		assert.ok(!html.includes("aria-modal"));
+		assert.match(html, /class="[^"]*absolute inset-0[^"]*z-40/, "absolute inset-0 — scoped, not fullscreen");
+		assert.match(html, /style="z-index:100"/, "plan views share the ordered local paint stack");
+		assert.ok(html.includes("pointer-events-auto"), "the frame remains interactive inside the transparent stack");
 		assert.ok(html.includes("bg-background/80"), "80% background");
 		assert.ok(html.includes("backdrop-blur"), "blur surface");
 		assert.ok(!html.includes("fixed inset-0"), "never fixed — the drag bar stays uncovered");
@@ -195,9 +204,10 @@ describe("md-blocks — key-idea callouts (GitHub alerts, owner round 2026-10-07
 		assert.ok(html.includes('data-alert-kind="important"'), "the kind is recorded");
 		assert.match(html, /ALL X is done through Y\./, "the prose survives");
 		assert.ok(!html.includes("[!IMPORTANT]"), "the marker line never leaks as text");
-		// The owner's minimal law: sharp corners (no rounded), white stroke,
-		// no background, no label, no icon — and the box hugs its text.
-		assert.match(html, /border-white/, "white stroke");
+		// The owner's minimal law: sharp corners (no rounded), white stroke
+		// (the strong line ink — white in dark), no background, no label, no
+		// icon — and the box hugs its text.
+		assert.match(html, /border-line-strong/, "strong-ink stroke");
 		assert.match(html, /w-fit/, "width: fit-content — the hug");
 		assert.ok(!html.includes("rounded"), "sharp corners — no rounding anywhere");
 		assert.ok(!html.includes("bg-card") && !html.includes("bg-background"), "transparent — no background");

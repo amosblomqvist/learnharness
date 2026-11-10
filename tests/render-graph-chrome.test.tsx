@@ -14,7 +14,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createElement } from "react";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { GraphChromeRow, GraphView } from "../components/graph-view.tsx";
 import type { GraphRenderSettings } from "../components/graph-canvas.ts";
 import { ServerEventsProvider } from "../components/server-events.tsx";

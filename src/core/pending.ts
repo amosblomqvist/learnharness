@@ -118,7 +118,7 @@ function findPending(messages: UIMessage[], names: readonly string[], authority?
 		const msg = messages[m]!;
 		for (let p = 0; p < msg.parts.length; p++) {
 			const part = msg.parts[p]!;
-			if (isToolUIPart(part) && part.state === "input-available") {
+			if (isToolUIPart(part) && !part.pluginQuestion && part.state === "input-available") {
 				const tool = part.type.slice("tool-".length);
 				if (!names.includes(tool)) continue;
 				if (typeof authority === "object") {

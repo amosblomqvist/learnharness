@@ -9,7 +9,7 @@
  * control together) and the control itself locks — the row owns the dim.
  */
 
-import { useState, type ComponentPropsWithRef, type ReactNode } from "react";
+import { useLayoutEffect, useRef, useState, type ComponentPropsWithRef, type ReactNode } from "react";
 import { cn } from "@/lib/utils";
 
 /** A section block: pronounced mono heading + content. */
@@ -139,8 +139,9 @@ export function Toggle({
 			className={cn(
 				"relative h-4.5 w-8 shrink-0 rounded-full border border-border transition-colors",
 				// Owner (2026-09-20): on is a gray track with a WHITE disc (a full-white
-				// track was too loud); off stays the muted track.
-				checked ? "bg-muted-foreground" : "bg-muted",
+				// track was too loud); off stays the muted track. Theme wave: the on
+				// track is the theme accent (Default's accent IS that gray).
+				checked ? "bg-(--lh-accent)" : "bg-muted",
 				disabled && "cursor-not-allowed",
 			)}
 		>
@@ -202,6 +203,31 @@ export function ThinSelect({
 	);
 }
 
+/** Shared graph/settings range control; the label and value stay paired. */
+export function SettingsSlider({ label, min, max, step, value, display, onChange, disabled, showLabel = true }: {
+	label: string;
+	min?: number;
+	max?: number;
+	step?: number;
+	value: number;
+	display?: string;
+	/** SettingsRow supplies the visible label when false. */
+	showLabel?: boolean;
+	onChange: (value: number) => void;
+	disabled?: boolean;
+}) {
+	return <label className={`flex flex-col gap-1${disabled ? " opacity-40" : ""}`}>
+		<span className="flex items-center justify-between text-[11px] text-muted-foreground">
+			{showLabel && label}<span className="tabular-nums">{display ?? value}</span>
+		</span>
+		<input type="range" aria-label={label} min={min} max={max} step={step} value={value} disabled={disabled}
+			onChange={(e) => onChange(Number(e.target.value))} className="h-1.5 w-full accent-primary" />
+	</label>;
+}
+
+/** Internal acknowledgement: false retains a rejected/unsaved draft. */
+export type SettingsCommitResult = boolean | Promise<boolean>;
+
 /** A thin hex/text input committing on blur + Enter (settings pace, not
  *  typing pace — every commit is a section PUT). */
 export function CommitInput({
@@ -211,6 +237,10 @@ export function CommitInput({
 	ariaLabel,
 	testid,
 	type = "text",
+	disabled,
+	min,
+	max,
+	step,
 }: {
 	/** "" = unset (the factory default). Mirrors the STORED record —
 	 *  after a clamped/normalized commit this flows back and the field
@@ -218,37 +248,78 @@ export function CommitInput({
 	 *  displaying "-5" while 12 was stored). */
 	value: string;
 	placeholder?: string;
-	onCommit: (next: string) => void;
+	onCommit: (next: string) => SettingsCommitResult;
 	ariaLabel: string;
 	testid?: string;
 	type?: "text" | "number";
+	disabled?: boolean;
+	min?: number;
+	max?: number;
+	step?: number;
 }) {
-	// The draft exists only while editing; a blur shows the record's value
-	// again — commit-on-blur/Enter (owner ruling), the field honest about
-	// what landed.
-	const [draft, setDraft] = useState(value);
-	const [editing, setEditing] = useState(false);
+	// Keep the native editing buffer: number inputs can display an incomplete
+	// token while exposing value="" and badInput=true. Writing a controlled
+	// value back on blur/render would erase text we cannot reconstruct.
+	const [initialValue] = useState(value);
+	const [, renderAcknowledgement] = useState(0);
+	const input = useRef<HTMLInputElement>(null);
+	const dirty = useRef(false);
+	const revision = useRef(0);
+	const latestCommit = useRef(0);
+	const pending = useRef(new Set<number>());
+	useLayoutEffect(() => {
+		if (!dirty.current && input.current && input.current.value !== value) {
+			input.current.value = value;
+		}
+	});
+
+	const commit = async (element: HTMLInputElement) => {
+		if (disabled || !dirty.current || element.validity?.badInput) return;
+		const version = revision.current;
+		if (pending.current.has(version)) return;
+		const next = element.value.trim();
+		if (next === value && pending.current.size === 0) {
+			dirty.current = false;
+			renderAcknowledgement((n) => n + 1);
+			return;
+		}
+		const ticket = ++latestCommit.current;
+		pending.current.add(version);
+		try {
+			const accepted = await onCommit(next);
+			if (accepted && input.current === element && revision.current === version && latestCommit.current === ticket) {
+				dirty.current = false;
+				// Reconcile even when normalization accepted the old canonical value.
+				renderAcknowledgement((n) => n + 1);
+			}
+		} catch {
+			// Domain adapters own error presentation; a rejected save keeps text.
+		} finally {
+			pending.current.delete(version);
+		}
+	};
 	return (
 		<input
+			ref={input}
 			type={type}
-			value={editing ? draft : value}
+			defaultValue={initialValue}
 			placeholder={placeholder}
 			aria-label={ariaLabel}
 			data-testid={testid}
-			onChange={(e) => {
-				setEditing(true);
-				setDraft(e.target.value);
+			disabled={disabled}
+			min={min}
+			max={max}
+			step={step}
+			onInput={() => {
+				dirty.current = true;
+				revision.current++;
 			}}
-			onBlur={() => {
-				if (!editing) return;
-				setEditing(false);
-				const next = draft.trim();
-				if (next !== value) onCommit(next);
-			}}
+			onBlur={(e) => { void commit(e.currentTarget); }}
 			onKeyDown={(e) => {
 				if (e.key === "Enter") e.currentTarget.blur();
 				if (e.key === "Escape") {
-					setEditing(false);
+					e.preventDefault();
+					e.stopPropagation();
 					e.currentTarget.blur();
 				}
 			}}

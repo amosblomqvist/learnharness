@@ -1,7 +1,7 @@
 /**
- * SCHEMA STAMPS (schema-versioning wave, owner 2026-10-10): LAZY v1 for
- * chats (record.version, stamped at the write choke point) and the graph
- * family (data/graph/format.json sidecar — ledgers, sources,
+ * SCHEMA STAMPS: chats use lazy v2 for side-conversation semantics, with
+ * unstamped/v1 records readable. The graph family remains v1
+ * (schema-versioning wave, owner 2026-10-10) (data/graph/format.json sidecar — ledgers, sources,
  * render-settings; positions deliberately unversioned, rebuildable).
  * Honest refusal: records stamped NEWER than this build are refused on
  * read (the downgrade scenario) — never misparsed, never rewritten.
@@ -32,11 +32,11 @@ test.after(() => {
 
 // ── chats: lazy stamp at the write choke point ──────────────────────────────
 
-test("chats: createChat stamps version 1 on disk", () => {
+test("chats: createChat stamps version 2 on disk", () => {
 	const r = chatStore.createChat("stamp test");
-	assert.equal(r.version, 1, "the in-memory twin is stamped");
+	assert.equal(r.version, 2, "the in-memory twin is stamped");
 	const onDisk = JSON.parse(fs.readFileSync(path.join(TMP_DATA, "chats", `${r.id}.json`), "utf8"));
-	assert.equal(onDisk.version, 1, "the record carries the stamp");
+	assert.equal(onDisk.version, 2, "the record carries the stamp");
 });
 
 test("chats: an UNSTAMPED legacy record reads fine (absence = v1) and is stamped by its next write", () => {
@@ -51,7 +51,7 @@ test("chats: an UNSTAMPED legacy record reads fine (absence = v1) and is stamped
 	assert.ok(r, "unstamped record reads (lazy v1)");
 	chatStore.saveMessages(id, []);
 	const onDisk = JSON.parse(fs.readFileSync(path.join(TMP_DATA, "chats", `${id}.json`), "utf8"));
-	assert.equal(onDisk.version, 1, "the write choke point stamped it");
+	assert.equal(onDisk.version, 2, "the write choke point upgraded the legacy stamp");
 });
 
 test("chats: a NEWER-stamped record is refused honestly (the downgrade scenario)", () => {
