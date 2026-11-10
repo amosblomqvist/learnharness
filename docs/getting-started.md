@@ -7,7 +7,7 @@ Download LearnHarness from [learnharness.ai](https://learnharness.ai) or [GitHub
 Open **Settings → Providers** and configure a connection:
 
 - **Provider API keys:** use your own account and pay that provider's rates.
-- **Subscription connections:** ChatGPT, GitHub Copilot, and Grok use their respective sign-in flows and account limits. They do not silently fall back to API-key billing.
+- **Subscription connections:** ChatGPT, GitHub Copilot, and Grok use their respective sign-in flows and account limits. They do not silently fall back to API-key billing. Sign-in and model requests follow the system proxy. `HTTPS_PROXY` or `HTTP_PROXY`, when set, is used as well.
 - **[Claude Code](claude-code.md):** use a separately installed and authenticated CLI. Its own configuration controls routing and billing; this is not a subscription-only guarantee.
 - **[Custom endpoint](custom-providers.md):** connect one OpenAI-compatible server, including a local model server. LearnHarness does not install or download models.
 

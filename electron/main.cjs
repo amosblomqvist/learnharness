@@ -32,6 +32,7 @@ const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cj
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
+const { prepareOutboundProxy, serverProxyEnv } = require("./outbound-proxy.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -136,6 +137,9 @@ if (process.argv.includes("--browser-service")) {
 }
 
 let serverProcess = null;
+// OS proxy URL for the child when HTTP(S)_PROXY is unset. Env proxies are
+// applied inside startServer via serverProxyEnv.
+let desktopProxyEnv = {};
 let chatgpt = null;
 let chatgptChild = null;
 let subscriptions = null;
@@ -212,6 +216,10 @@ function startServer(port) {
 				cwd: path.dirname(serverEntry()),
 				env: {
 					...process.env,
+					// The child is a new Node 24 process. The flag is what makes
+					// its fetch (Grok/Copilot/API calls) honor HTTP(S)_PROXY.
+					...serverProxyEnv(process.env),
+					...desktopProxyEnv,
 					ELECTRON_RUN_AS_NODE: "1",
 					NODE_ENV: "production",
 					PORT: String(port),
@@ -654,6 +662,9 @@ async function main() {
 	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
 	if (!devUrl) {
 		desktopAPISecret = randomBytes(32).toString("hex");
+		// Before provider login. Main-process fetch cannot see NODE_USE_ENV_PROXY
+		// set this late; session.fetch follows the OS proxy instead.
+		desktopProxyEnv = await prepareOutboundProxy(session.defaultSession);
 		const ownedOrigin = new URL(url).origin;
 		// All URLs, not only /api: remove the header again on external redirects.
 		session.defaultSession.webRequest.onBeforeSendHeaders({ urls: ["<all_urls>"] }, (details, callback) => {
