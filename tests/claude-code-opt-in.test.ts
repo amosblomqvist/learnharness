@@ -60,7 +60,7 @@ test("default off even with an installed binary; section writes toggle availabil
 	assert(!modelCatalog().models.some((m) => m.provider === "claude-code"));
 	assert.equal((await save({ enabled: true })).status, 200);
 	assert.equal(claudeCodeEnabled(), true); assert.equal(claudeCodeAvailable(), true);
-	assert.equal(modelCatalog().models.filter((m) => m.provider === "claude-code").length, 3);
+	assert.equal(modelCatalog().models.filter((m) => m.provider === "claude-code").length, 4);
 	assert.equal((await save({ enabled: false })).status, 200);
 	assert.equal(claudeCodeAvailable(), false);
 	assert(!modelCatalog().models.some((m) => m.provider === "claude-code"));
