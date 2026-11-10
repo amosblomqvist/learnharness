@@ -34,6 +34,8 @@ import {
   type PluginConfig,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
+import { SvgImage } from "@/components/artifacts/svg-image";
+import { svgContentParts } from "@/components/svg-content";
 import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -398,6 +400,16 @@ MessageResponse.displayName = "MessageResponse";
 /** Recovery is a tool-text presentation concern, not a shape/answer-data
  * transform. Ordinary assistant/user prose keeps MessageResponse unchanged. */
 export function ToolContentResponse({ children, ...props }: MessageResponseProps) {
+  if (typeof children === "string") {
+    const parts = svgContentParts(children);
+    if (parts.some((part) => part.kind === "svg")) {
+      return <div className={cn("min-w-0", props.className)}>{parts.map((part, index) =>
+        part.kind === "svg"
+          ? <SvgImage key={index} svg={part.value} alt={/<title(?:\s[^>]*)?>([\s\S]*?)<\/title>/i.exec(part.value)?.[1]?.replace(/<[^>]*>/g, "").trim() || "Question figure"} className="my-2 block h-auto max-w-full" />
+          : <MessageResponse key={index} {...props}>{repairMathForDisplay(part.value)}</MessageResponse>
+      )}</div>;
+    }
+  }
   return (
     <MessageResponse {...props}>
       {typeof children === "string" ? repairMathForDisplay(children) : children}
