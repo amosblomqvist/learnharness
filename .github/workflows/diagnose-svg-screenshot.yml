@@ -42,10 +42,12 @@ jobs:
           import fs from 'node:fs';
           import path from 'node:path';
           import crypto from 'node:crypto';
+          import {execFileSync} from 'node:child_process';
           const baseline = 'a917e2ee2981fd534aa61a1ed62bfb7b413f2ec4';
           const root = path.join(process.env.RUNNER_TEMP, 'lh-svg-diagnostic');
           fs.mkdirSync(root, {recursive: true});
-          const bytes = fs.readFileSync('scripts/diagnose-svg-screenshot.mjs');
+          // Git blob bytes avoid Windows worktree CRLF conversion.
+          const bytes = execFileSync('git', ['show', 'HEAD:scripts/diagnose-svg-screenshot.mjs']);
           const sha256 = crypto.createHash('sha256').update(bytes).digest('hex');
           assert.equal(sha256, '0b21298c9c0a2108f0e6ce3d4eff7856ba777b7d112e6b45e2acf5399f398718');
           const harness = path.join(root, 'svg-matrix.mjs');
@@ -73,6 +75,9 @@ jobs:
       - name: Install locked dependencies only (no plugin setup, fonts or build)
         # Include dev dependencies despite the production runtime environment.
         run: npm ci --include=dev
+      - name: Materialize the locked Electron binary (lazy installer)
+        run: |
+          node --input-type=commonjs -e 'const fs = require("node:fs"); const runtime = require("electron"); if (!fs.existsSync(runtime)) throw new Error("Locked Electron executable missing"); console.log("Locked Electron executable: " + runtime);'
       - name: Collect seven-case SVG telemetry (not a release gate)
         run: |
           set -o pipefail
