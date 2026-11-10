@@ -4,6 +4,7 @@ import {
 	accumulateJobUsage,
 	buildSubagentSteer,
 	isSubagentFailure,
+	isWebSourceUrl,
 	piUsageToStep,
 	isBuiltinJobKind,
 	type DemoResult,
@@ -563,8 +564,10 @@ function hostOf(url: string | undefined): string {
 	}
 }
 
-/** Sources for the result: markdown links cited in the brief, else fetched URLs. */
-function parseSources(brief: string, fetchedUrls: string[]): ResearchResult["sources"] {
+/** Sources for the result: markdown links cited in the brief, else fetched
+ * URLs. Fetched URLs are recorded before the fetch tool validates their scheme;
+ * only http(s) sources may become links, including in previously saved jobs. */
+export function parseSources(brief: string, fetchedUrls: string[]): ResearchResult["sources"] {
 	const sources: ResearchResult["sources"] = [];
 	const seen = new Set<string>();
 	for (const match of brief.matchAll(/\[([^\]]+)\]\((https?:\/\/[^)\s]+)\)/g)) {
@@ -576,7 +579,7 @@ function parseSources(brief: string, fetchedUrls: string[]): ResearchResult["sou
 	}
 	if (sources.length === 0) {
 		for (const url of fetchedUrls) {
-			if (seen.has(url)) continue;
+			if (seen.has(url) || !isWebSourceUrl(url)) continue;
 			seen.add(url);
 			sources.push({ title: hostOf(url), url });
 		}

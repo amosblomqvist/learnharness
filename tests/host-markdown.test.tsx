@@ -76,7 +76,7 @@ async function fixture(frontend?: PluginFrontendModule) {
 	};
 }
 
-it("SSRs the real host message pipeline with the same prose, math, code, callouts, tables and images, without controls", () => {
+it("SSRs the real host message pipeline with prose, math, code, callouts, tables and blocked Markdown images, without controls", () => {
 	assert.equal(typeof window, "undefined"); assert.equal(typeof document, "undefined");
 	const html = renderToStaticMarkup(<HostMarkdown text={source} />);
 	const { document: doc } = parseHTML(`<html><body>${html}</body></html>`);
@@ -88,9 +88,9 @@ it("SSRs the real host message pipeline with the same prose, math, code, callout
 	assert.equal(doc.querySelectorAll(".katex").length, 3); assert.ok(doc.querySelector(".katex-display")); assert.equal(doc.querySelector(".katex-error"), null);
 	const block = doc.querySelector("[data-streamdown='code-block-body']")!;
 	assert.ok(block.textContent?.includes("const answer = 42;")); assert.match(block.innerHTML, /counter-reset:line 3/);
-	const image = doc.querySelector("img")!;
-	assert.equal(image.getAttribute("src"), "https://example.invalid/image.png"); assert.equal(image.getAttribute("alt"), "Alt text");
-	assert.equal(image.getAttribute("title"), "Image title"); assert.equal(image.getAttribute("class"), "max-w-full rounded-lg");
+	assert.equal(doc.querySelector("img, link[rel='preload'][as='image']"), null);
+	assert.ok(doc.body.textContent?.includes("[Image blocked: Alt text]"));
+	assert.ok(!html.includes("https://example.invalid/image.png"));
 	const link = doc.querySelector("a")!; assert.equal(link.getAttribute("href"), "https://example.invalid/page");
 	assert.equal(link.getAttribute("target"), "_blank"); assert.equal(link.getAttribute("rel"), "noopener noreferrer");
 	noControls(doc);
@@ -127,20 +127,17 @@ it("keeps invalid Mermaid heading/message and source visible with no disclosure 
 	assert.match(interactive, /<details/); assert.match(interactive, /Show diagram source/); assert.match(interactive, />Retry</);
 });
 
-it("images retain passive load/error fallback and dimensional styling, never mounting download controls", async () => {
+it("blocks remote, same-origin and relative Markdown images before mounting any image or preload", async () => {
 	const f = await fixture();
 	try {
-		await f.render(<HostMarkdown text={'![Available](https://example.invalid/one.png)\n\n<img src="https://example.invalid/two.png" alt="Dimensioned" width="80" height="60">'} />);
-		const images = document.querySelectorAll("img"); assert.equal(images.length, 2);
-		await act(async () => images[0]!.dispatchEvent(new window.Event("load", { bubbles: false })));
-		assert.equal(document.querySelector("[data-streamdown='image-fallback']"), null); noControls(document);
-		await act(async () => images[0]!.dispatchEvent(new window.Event("error", { bubbles: false })));
-		assert.ok(images[0]!.classList.contains("hidden")); assert.equal(document.querySelector("[data-streamdown='image-fallback']")?.textContent, "Image not available");
-		await act(async () => images[1]!.dispatchEvent(new window.Event("error", { bubbles: false })));
-		assert.equal(images[1]!.getAttribute("width"), "80"); assert.equal(images[1]!.getAttribute("height"), "60"); assert.ok(!images[1]!.classList.contains("hidden"));
-		assert.equal(document.querySelectorAll("[data-streamdown='image-fallback']").length, 1); noControls(document);
-		await act(async () => images[0]!.dispatchEvent(new window.Event("load", { bubbles: false })));
-		assert.ok(!images[0]!.classList.contains("hidden")); assert.equal(document.querySelector("[data-streamdown='image-fallback']"), null);
+		for (const url of ["https://example.invalid/one.png", "http://localhost/image.png", "/image.png", "./image.png", "//example.invalid/image.png"]) {
+			await f.render(<HostMarkdown text={`![Markdown](${url})\n\n<img src="${url}" alt="Dimensioned" width="80" height="60">`} />);
+			assert.equal(document.querySelector("img, link[rel='preload'][as='image']"), null, url);
+			assert.ok(document.body.textContent?.includes("[Image blocked: Markdown]"), url);
+			assert.ok(document.body.textContent?.includes("[Image blocked: Dimensioned]"), url);
+			assert.equal(document.querySelector("[data-streamdown='image-fallback']"), null);
+			noControls(document);
+		}
 	} finally { await f.close(); }
 });
 

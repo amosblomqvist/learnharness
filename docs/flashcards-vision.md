@@ -22,7 +22,7 @@ The hierarchy is:
 
 The proposition is the knowledge target. Each cue is a different situation or demand that should bring that proposition to mind. Each cue corresponds to its own flashcard, containing just two content fields: **question** and **answer**.
 
-Both fields support the app's standard built-in rich rendering: Markdown, mathematical notation, syntax-highlighted code blocks, tables, callouts, Mermaid diagrams, images, and normal typography. Two fields does not mean plain-text-only fields. Reuse the host rendering stack through its supported static Markdown mount rather than copying private components, bundling another native renderer, or disguising flashcards as worker-result widgets.
+Both fields support the app's standard built-in rich rendering: Markdown, mathematical notation, syntax-highlighted code blocks, tables, callouts, Mermaid diagrams, and normal typography. Markdown image URLs are refused by the shared host pipeline; native image and SVG artifact cards are separate. Two fields does not mean plain-text-only fields. Reuse the host rendering stack through its supported static Markdown mount rather than copying private components, bundling another native renderer, or disguising flashcards as worker-result widgets.
 
 The approved shared renderer displays static content without auxiliary copy/download/retry/expand/zoom/disclosure controls and without registered plugin code-block widgets. Ordinary links retain their normal behavior. The host implementation is verified and exposes a general static Markdown mount with standard update/disposal and per-mount cancellation. Question and answer rendering use that public contract.
 
