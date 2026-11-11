@@ -99,7 +99,14 @@ export async function runResearcherAgent(prompt: string, opts: ResearcherRunOpti
 		prompt,
 		engine: opts.engine,
 		systemPrompt: INSTRUCTIONS,
-		maxTurns: 12,
+		// 14 turns of headroom, and a tool-less finalize turn if the model
+		// spends them all searching (2026-11-11: "list every certification…"
+		// questions exhausted 12 turns and returned an empty brief).
+		maxTurns: 14,
+		finalizePrompt:
+			"You have used all of your research turns. Write the final brief NOW in the required format " +
+			"(Summary / Findings / Sources / Gaps) using only what you already gathered. Do not call tools — " +
+			"if something is still uncertain, say so under Gaps.",
 		abortSignal: opts.abortSignal,
 		onUsage: opts.onUsage,
 		onToolStart: opts.onToolStart,
