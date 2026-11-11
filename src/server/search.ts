@@ -9,7 +9,7 @@
  *    store or env — env wins, keyed via server/keys.ts keyValue).
  *  - Setting a key is ALL the user does — auto-detection: explicit
  *    agent.search.engine pins the preference (when several keys are
- *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama);
+ *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama → SearXNG);
  *    without a pin, the first keyed engine wins.
  *  - An explicit choice does NOT silently fall back to another engine:
  *    engine pinned but its key missing = honestly unavailable (reason
@@ -211,6 +211,43 @@ export function ollamaProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
 	};
 }
 
+/** Self-hosted SearXNG: GET {base}/search?q=…&format=json. The configured
+ *  value is the instance base URL (a path prefix is kept), not a secret —
+ *  the URL is the user's own choice, like the custom model endpoint, so a
+ *  loopback/LAN instance is allowed (web_fetch keeps its own SSRF guard).
+ *  SearXNG has no result-count parameter: the first page is trimmed to
+ *  `count`. format=json must be enabled in the instance's settings.yml
+ *  (search.formats); otherwise it answers 403, reported as such. */
+export function searxngProvider(baseUrl: string, fetchFn: FetchLike = fetch): SearchProvider {
+	return {
+		id: "searxng",
+		async search(query: string, count: number): Promise<SearchHit[]> {
+			const base = new URL(baseUrl.trim());
+			const url = new URL(`${base.pathname.replace(/\/+$/, "")}/search`, base);
+			url.searchParams.set("q", query);
+			url.searchParams.set("format", "json");
+			const resp = await fetchFn(url.toString(), {
+				headers: { accept: "application/json" },
+				signal: AbortSignal.timeout(30_000),
+			});
+			if (resp.status === 403) throw new Error("SearXNG search API 403 (is format=json enabled in the instance's search.formats?)");
+			if (!resp.ok) throw new Error(`SearXNG search API ${resp.status}`);
+			const data = await searchJson(resp, "SearXNG");
+			if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown }).results)) {
+				throw new Error("SearXNG search API returned an invalid response");
+			}
+			const limit = Math.max(1, Math.floor(count));
+			return (data as { results: unknown[] }).results
+				.flatMap((result): SearchHit[] => {
+					if (!result || typeof result !== "object") return [];
+					const row = result as { title?: unknown; url?: unknown; content?: unknown };
+					return searchHit(row.title, row.url, row.content);
+				})
+				.slice(0, limit);
+		},
+	};
+}
+
 /** Match Exa's bounded result contract for the other new adapters. */
 function searchHit(title: unknown, url: unknown, snippet: unknown): SearchHit[] {
 	if (typeof url !== "string" || !url.trim()) return [];
@@ -257,7 +294,7 @@ export function resolveSearchEngineFor(
 			return {
 				available: false,
 				engine: null,
-				reason: `search engine is set to "${pinned}" but its API key is missing — set the ${SEARCH_ENGINES.find((e) => e.id === pinned)?.envVar} key`,
+				reason: `search engine is set to "${pinned}" but its ${pinned === "searxng" ? "instance URL" : "API key"} is missing — set the ${SEARCH_ENGINES.find((e) => e.id === pinned)?.envVar} key`,
 				key: null,
 			};
 		}
@@ -270,7 +307,7 @@ export function resolveSearchEngineFor(
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key",
+		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key, or a SearXNG instance URL",
 		key: null,
 	};
 }
@@ -308,6 +345,8 @@ export function searchProvider(): SearchProvider | null {
 			return firecrawlProvider(resolved.key);
 		case "ollama":
 			return ollamaProvider(resolved.key);
+		case "searxng":
+			return searxngProvider(resolved.key);
 		default:
 			return null;
 	}

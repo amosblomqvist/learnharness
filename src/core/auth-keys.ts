@@ -66,6 +66,12 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models.",
 		docsUrl: "https://ollama.com/settings/keys",
 	},
+	{
+		id: "SEARXNG_URL",
+		label: "SearXNG",
+		description: "Base URL of your own SearXNG instance (e.g. http://127.0.0.1:8888) — not a key. Its JSON output format must be enabled. Setting it activates search.",
+		docsUrl: "https://docs.searxng.org/admin/settings/settings_search.html",
+	},
 ] as const;
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
@@ -172,7 +178,8 @@ export type KeyShapeResult = { ok: true } | { ok: false; error: string };
  * TRIMMED first (paste hygiene); empty-after-trim always fails.
  *
  * CURATED keys carry family rules (Tavily's tvly-… and Firecrawl's fc-…
- * prefixes; Brave, Exa, Ollama and Deepgram use length floors + paste hygiene only).
+ * prefixes; Brave, Exa, Ollama and Deepgram use length floors + paste hygiene only;
+ * SEARXNG_URL is an instance base URL, so it gets a URL-shape check instead).
  * MODEL-PROVIDER keys use genericProviderKeyGuard below instead (families
  * vary by provider — only paste hygiene applies; owner spec: min length
  * ~12, no whitespace). OPENROUTER_API_KEY moved to the generic guard with
@@ -200,12 +207,31 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 			return value.startsWith("fc-")
 				? nonEmpty(20)
 				: { ok: false, error: `${id} must start with "fc-" (Firecrawl's key format)` };
+		case "SEARXNG_URL":
+			return searxngUrlShape(value);
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}
+}
+
+/** SearXNG's "key" is the instance base URL: http(s) only, no embedded
+ *  credentials (fetch rejects them), no query/fragment (the adapter
+ *  appends /search?…). A path prefix (https://host/searxng) is allowed. */
+function searxngUrlShape(value: string): KeyShapeResult {
+	const fail = { ok: false as const, error: "SEARXNG_URL must be an http(s) base URL such as http://127.0.0.1:8888, without credentials, query or fragment" };
+	if (!value || /\s/.test(value)) return fail;
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return fail;
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return fail;
+	if (url.username || url.password || url.search || url.hash) return fail;
+	return { ok: true };
 }
 
 /** The generic truncation guard for MODEL-PROVIDER keys (families vary —

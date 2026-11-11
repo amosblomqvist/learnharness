@@ -9,7 +9,7 @@ import { after, it } from "node:test";
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-exa-"));
 process.env.LH_DATA_DIR = path.join(dir, "data");
 process.env.LH_AUTH_FILE = path.join(dir, "auth.json");
-for (const name of ["TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY"]) delete process.env[name];
+for (const name of ["TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY", "SEARXNG_URL"]) delete process.env[name];
 
 const { saveKey, keyStatuses } = await import("../src/server/keys.ts");
 const { writeSettings } = await import("../src/store/settings.ts");

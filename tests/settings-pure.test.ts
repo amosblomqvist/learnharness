@@ -307,6 +307,7 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 			"EXA_API_KEY",
 			"FIRECRAWL_API_KEY",
 			"OLLAMA_API_KEY",
+			"SEARXNG_URL",
 		]);
 		assert.ok(out.toolRows[0]!.present);
 		assert.ok(!out.toolRows[1]!.present);
