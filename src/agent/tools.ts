@@ -393,6 +393,7 @@ export function teachQuizToolFor(ctx: Pick<PlanToolContext, "chatId" | "chatStor
 }
 
 export interface TeacherToolContext extends PlanToolContext {
+	videoOptions?: () => { enabled: boolean; maxDurationSeconds: number };
 	/** Job-tool wiring (sub-agent dispatch): the job store + the runner's
 	 *  spawn seam. The composition root injects both. */
 	jobStore: JobStore;
@@ -463,7 +464,7 @@ export function createTeacherTools(
 			// only, always on — it shows the learner their own file.
 			show_image: createShowImageTool(ctx),
 			...planTools(ctx),
-			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
+			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable, videoOptions: ctx.videoOptions }),
 		},
 		withoutMechanics(enabled),
 		),

@@ -14,6 +14,7 @@ const runtime = path.join(root, "runtime", "v0.1.1-rc2");
 const binary = path.join(runtime, "raea", "bin", process.platform === "win32" ? "raea.exe" : "raea");
 const controllers = ((globalThis as typeof globalThis & { __lhVideoControllers?: Map<string, AbortController> }).__lhVideoControllers ??= new Map());
 export const videoSupported = () => asset !== undefined;
+export const videoEnabled = () => stores.settingsStore.readSettings()?.agent?.tools?.teaching_video !== false;
 export const videoDownloadInfo = () => asset ? { downloadMiB: asset.downloadMiB, disk: asset.disk } : null;
 export const runtimeInstalled = () => {
   try { return fs.lstatSync(binary).isFile() && !fs.lstatSync(runtime).isSymbolicLink(); } catch { return false; }
@@ -68,21 +69,27 @@ async function install(signal: AbortSignal): Promise<void> {
     try { fs.renameSync(stage, runtime); } catch (error) { if (!runtimeInstalled()) throw error; }
   } finally { await fsp.rm(stage, { recursive: true, force: true }); }
 }
-function composition(plan: VideoPlan): string {
+export function composition(plan: VideoPlan, theme: "dark" | "light" = "dark"): string {
   // JSON is parsed as data, never interpolated as JSX or JavaScript source.
   const data = JSON.stringify(JSON.stringify({ ...plan, scenes: plan.scenes.map(scene => ({ ...scene, drawOrder: videoPaintOrder(scene.elements) })) }));
   const frames = Math.ceil(plan.scenes.reduce((n, scene) => n + scene.seconds, 0) * 24);
+  const palette = theme === "light"
+    ? { background: "#f5f7fb", ink: "#142238", text: { blue: "#10498f", yellow: "#654900", white: "#142238", green: "#14532d", red: "#8b2029" }, shape: { blue: "#c6def9", yellow: "#f4e2a8", white: "#d7e0ef", green: "#c6ebd2", red: "#f8d5d8" } }
+    : { background: "#10162c", ink: "#f8f9ff", text: { blue: "#9bd1ff", yellow: "#ffe087", white: "#f8f9ff", green: "#a5efbd", red: "#ffb3b9" }, shape: { blue: "#19416c", yellow: "#59410a", white: "#48536b", green: "#16512e", red: "#681f2b" } };
   return `import React from 'react';
 import {AbsoluteFill,Composition,registerRoot,useCurrentFrame} from 'raea';
 const plan=JSON.parse(${data});
-const colors={blue:'#70bcff',yellow:'#ffe087',white:'#f8f9ff',green:'#8fe0b0',red:'#ff9696'};
+const palette=${JSON.stringify(palette)};
 function Scene(){const frame=useCurrentFrame(); let offset=0; let scene=plan.scenes[plan.scenes.length-1]; let local=0; for(const s of plan.scenes){local=frame-offset;offset+=s.seconds*24;if(frame<offset){scene=s;break;}}
-return <AbsoluteFill style={{backgroundColor:'#10162c',color:'#f8f9ff',fontFamily:'sans-serif'}}><div style={{position:'absolute',left:40,top:25,fontSize:42,fontWeight:700}}>{scene.heading}</div>{scene.drawOrder.map(i=>{const e=scene.elements[i];return <div key={i} style={{position:'absolute',left:e.x*896,top:90+e.y*320,width:e.width*896,height:e.height*320,color:colors[e.color],backgroundColor:e.kind==='text'?'transparent':colors[e.color],borderRadius:e.kind==='circle'?'50%':e.kind==='rect'?8:0,fontSize:28,overflow:'hidden',opacity:Math.min(1,Math.max(0,(local-i*(scene.seconds*24*.3/Math.max(1,scene.elements.length)))/8))}}>{e.kind==='text'?e.text:''}</div>})}<div style={{position:'absolute',left:40,bottom:24,fontSize:26}}>{scene.caption}</div></AbsoluteFill>}
+return <AbsoluteFill style={{backgroundColor:palette.background,color:palette.ink,fontFamily:'sans-serif'}}><div style={{position:'absolute',left:40,top:25,fontSize:42,fontWeight:700}}>{scene.heading}</div>{scene.drawOrder.map(i=>{const e=scene.elements[i];return <div key={i} style={{position:'absolute',left:e.x*896,top:90+e.y*320,width:e.width*896,height:e.height*320,color:palette.text[e.color],backgroundColor:e.kind==='text'?'transparent':palette.shape[e.color],borderRadius:e.kind==='circle'?'50%':e.kind==='rect'?8:0,fontSize:28,overflow:'hidden',opacity:Math.min(1,Math.max(0,(local-i*(scene.seconds*24*.3/Math.max(1,scene.elements.length)))/8))}}>{e.kind==='text'?e.text:''}</div>})}<div style={{position:'absolute',left:40,bottom:24,fontSize:26}}>{scene.caption}</div></AbsoluteFill>}
 registerRoot(()=> <Composition id="lesson" component={Scene} width={896} height={504} fps={24} durationInFrames={${frames}} />);`;
 }
 export async function startVideo(id: string, chatId: string, download: boolean, retry = false): Promise<void> {
   const job = stores.jobStore.getJob(id);
   if (!job || job.chatId !== chatId || job.kind !== "video" || !stores.chatStore.getChat(chatId)) throw new Error("Video not found");
+  const agent = stores.settingsStore.readSettings()?.agent;
+  if (agent?.tools?.teaching_video === false) throw new Error("Explainer videos are disabled in Settings.");
+  const theme = agent?.video?.theme ?? "dark";
   if (!videoSupported()) throw new Error("Video rendering is not available on this platform.");
   if (!validVideoPlan(job.input)) throw new Error("Invalid saved video plan");
   if (!runtimeInstalled() && !download) throw new Error("Runtime download needs your approval.");
@@ -103,7 +110,7 @@ export async function startVideo(id: string, chatId: string, download: boolean, 
       await fsp.mkdir(path.join(root, "media"), { recursive: true });
       work = await fsp.mkdtemp(path.join(root, "render-"));
       const source = path.join(work, "scene.tsx"); const output = path.join(work, "video.mp4");
-      await fsp.writeFile(source, composition(job.input as VideoPlan));
+      await fsp.writeFile(source, composition(job.input as VideoPlan, theme));
       await run(binary, ["render", source, "-o", output], work, AbortSignal.any([controller.signal, AbortSignal.timeout(180_000)]), { NODE_ENV: "production", RAEA_OFFLINE: "1", RAEA_NO_TREE: "1", RAEA_ENV_FILE: path.join(work, "env"), RAEA_CACHE: path.join(work, "cache"), ...(process.platform === "win32" ? { SystemRoot: process.env.SystemRoot || "C:\\Windows", TEMP: work, TMP: work } : {}), ...((process.platform === "win32" || process.platform === "linux") && process.env.WGPU_BACKEND === "vulkan" ? { WGPU_BACKEND: "vulkan" } : {}) });
       controller.signal.throwIfAborted();
       if (controllers.get(id) !== controller || !stores.jobStore.getJob(id)) return;

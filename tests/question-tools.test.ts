@@ -260,7 +260,7 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 		// are built on graded questions — the wedge danger), as are the
 		// learner-fs set, plan tools, and probe_done. The settings WRITE side
 		// validates against this list (settings-body).
-		assert.deepEqual(TOGGLEABLE_TOOLS, ["research", "demo", "visual", "pdf"]);
+		assert.deepEqual(TOGGLEABLE_TOOLS, ["research", "demo", "visual", "pdf", "teaching_video"]);
 	});
 
 	it("createProberTools: absent record = full set; explicit false drops exactly that tool; probe_done survives everything", () => {
@@ -299,6 +299,7 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 
 		const noResearch = Object.keys(createTeacherTools(ctx, { research: false })).sort();
 		assert.deepEqual(noResearch, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "show_image", "teaching_video", "visual"]);
+		assert.deepEqual(Object.keys(createTeacherTools(ctx, { teaching_video: false })).sort(), full.filter((name) => name !== "teaching_video"));
 
 		// absent = enabled: an empty record and undefined behave identically
 		assert.deepEqual(

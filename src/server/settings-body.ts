@@ -155,6 +155,13 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: AgentSettings = {};
+	if (raw.video !== undefined) {
+		const video = asRecord(raw.video);
+		if (!video) return { ok: false, error: "video must be an object" };
+		if (video.maxDurationSeconds !== undefined && video.maxDurationSeconds !== 10 && video.maxDurationSeconds !== 15 && video.maxDurationSeconds !== 25) return { ok: false, error: "video.maxDurationSeconds must be 10, 15, or 25" };
+		if (video.theme !== undefined && video.theme !== "dark" && video.theme !== "light") return { ok: false, error: "video.theme must be dark or light" };
+		settings.video = { ...(video.maxDurationSeconds !== undefined ? { maxDurationSeconds: video.maxDurationSeconds as 10 | 15 | 25 } : {}), ...(video.theme !== undefined ? { theme: video.theme as "dark" | "light" } : {}) };
+	}
 	if (raw.workerRequestConcurrency !== undefined) {
 		if (typeof raw.workerRequestConcurrency !== "number" || !Number.isSafeInteger(raw.workerRequestConcurrency) || raw.workerRequestConcurrency <= 0) {
 			return { ok: false, error: "workerRequestConcurrency must be a positive, safely representable whole number" };

@@ -387,6 +387,13 @@ export function AgentSection({
 	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" | "cache" } | null>(null);
 	const [advancedModels, setAdvancedModels] = useState(false);
 	const [workerConcurrencyError, setWorkerConcurrencyError] = useState<string | null>(null);
+	const [videoSaving, setVideoSaving] = useState(false);
+	const videoSavingRef = useRef(false);
+	const saveVideo = async (next: AgentSettings) => {
+		if (videoSavingRef.current) return;
+		videoSavingRef.current = true; setVideoSaving(true);
+		try { await onSectionChange(next); } finally { videoSavingRef.current = false; setVideoSaving(false); }
+	};
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
 	const interactions = useInteractionLayers();
 
@@ -994,6 +1001,22 @@ export function AgentSection({
 						</SettingsRow>
 					);
 				})()}
+			</SettingsGroup>
+
+			<SettingsGroup label="Explainer videos" testid="group-explainer-videos">
+				<SettingsRow label="Explainer videos" hint="Allow the teacher to create videos. Turning this off stops new renders; videos already rendering can finish." testid="video-enabled-row">
+					<Toggle checked={agent?.tools?.teaching_video ?? true} disabled={videoSaving} label="Explainer videos" onChange={(on) => void saveVideo(composeTool(agent, "teaching_video", on))} />
+				</SettingsRow>
+				<SettingsRow label="Maximum video length" hint="Applies to new video plans. Existing videos and plans stay unchanged." testid="video-duration-row">
+					<select aria-label="Maximum video length" disabled={videoSaving} value={agent?.video?.maxDurationSeconds ?? 25} onChange={(event) => void saveVideo({ ...agent, video: { ...agent?.video, maxDurationSeconds: Number(event.target.value) as 10 | 15 | 25 } })} className="rounded-sm border border-border bg-background px-2 py-1 text-sm">
+						<option value={10}>10 seconds</option><option value={15}>15 seconds</option><option value={25}>25 seconds</option>
+					</select>
+				</SettingsRow>
+				<SettingsRow label="Video theme" hint="Used when a video is rendered. Existing videos stay unchanged." testid="video-theme-row">
+					<select aria-label="Video theme" disabled={videoSaving} value={agent?.video?.theme ?? "dark"} onChange={(event) => void saveVideo({ ...agent, video: { ...agent?.video, theme: event.target.value as "dark" | "light" } })} className="rounded-sm border border-border bg-background px-2 py-1 text-sm">
+						<option value="dark">Dark</option><option value="light">Light</option>
+					</select>
+				</SettingsRow>
 			</SettingsGroup>
 
 			<SettingsGroup label="Context" testid="group-context">

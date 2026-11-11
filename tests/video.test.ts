@@ -12,8 +12,10 @@ process.env.LH_DATA_DIR = path.join(profile, "data");
 process.env.LH_AUTH_FILE = path.join(profile, "auth.json");
 after(() => fs.rmSync(profile, { recursive: true, force: true }));
 const { stores } = await import("../src/server/stores.ts");
-const { startVideo, cancelVideo, runtimeInstalled, videoFile, videoIsLive } = await import("../src/server/video/render.ts");
+const { startVideo, cancelVideo, runtimeInstalled, videoFile, videoIsLive, composition } = await import("../src/server/video/render.ts");
 const { GET } = await import("../app/api/video/route.ts");
+const { parseAgentSettingsBody } = await import("../src/server/settings-body.ts");
+const { sanitizeUserSettings } = await import("../src/core/settings.ts");
 const plan = { title: "Slopes", scenes: [
   { heading: "Average", caption: "Two points", seconds: 2, elements: [{ kind: "text", x: 0, y: 0, width: 1, height: .2, color: "white", text: "<script>${hostile}</script>" }] },
   { heading: "Instantaneous", caption: "A limit", seconds: 2, elements: [] },
@@ -54,6 +56,42 @@ test("teacher video dispatch persists one local plan without a background model 
   assert.equal(calls, 1); assert.equal(job?.status, "done"); assert.equal(job?.delivery, undefined); assert.deepEqual(job?.input, plan);
 });
 
+test("video settings validate, sanitize and preserve defaults", () => {
+  assert.deepEqual(parseAgentSettingsBody({ tools: { teaching_video: false }, video: { maxDurationSeconds: 10, theme: "light" } }), { ok: true, settings: { tools: { teaching_video: false }, video: { maxDurationSeconds: 10, theme: "light" } } });
+  assert.equal(parseAgentSettingsBody({ video: { maxDurationSeconds: 11 } }).ok, false);
+  assert.equal(parseAgentSettingsBody({ video: { theme: "custom" } }).ok, false);
+  assert.deepEqual(sanitizeUserSettings({ version: 1, agent: { video: { maxDurationSeconds: 99, theme: "bad" } } })?.agent?.video, {});
+});
+
+test("new video plans respect current enable and duration settings", async () => {
+  let options = { enabled: true, maxDurationSeconds: 10 }; let spawned = 0;
+  const tool = jobTools({ chatId: chat.id, jobStore: stores.jobStore, spawn: () => { spawned++; }, videoOptions: () => options }).teaching_video!;
+  assert.match(tool.description, /10 seconds total/);
+  const longPlan = { ...plan, scenes: Array(3).fill({ ...plan.scenes[0], seconds: 5 }) };
+  await assert.rejects(tool.execute("too-long", longPlan), /10-second limit/);
+  options = { enabled: false, maxDurationSeconds: 25 };
+  await assert.rejects(tool.execute("disabled", plan), /disabled/);
+  assert.equal(spawned, 0);
+  options = { enabled: true, maxDurationSeconds: 25 };
+  await tool.execute("allowed", longPlan); assert.equal(spawned, 1);
+});
+
+test("fixed dark and light themes keep text readable on every shape", () => {
+  const rgbLuminance = (hex: string) => {
+    const rgb = [1, 3, 5].map(i => parseInt(hex.slice(i, i + 2), 16) / 255).map(v => v <= 0.04045 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4);
+    return 0.2126 * rgb[0]! + 0.7152 * rgb[1]! + 0.0722 * rgb[2]!;
+  };
+  for (const theme of ["dark", "light"] as const) {
+    const source = composition(plan as never, theme);
+    const encoded = source.match(/const palette=(\{[^\n]+\});/)?.[1]; assert.ok(encoded);
+    const palette = JSON.parse(encoded) as { background: string; ink: string; text: Record<string, string>; shape: Record<string, string> };
+    for (const text of [palette.ink, ...Object.values(palette.text)]) for (const background of [palette.background, ...Object.values(palette.shape)]) {
+      const [a, b] = [rgbLuminance(text), rgbLuminance(background)].sort((x, y) => y - x);
+      assert.ok((a! + 0.05) / (b! + 0.05) >= 4.5, `${theme} ${text} on ${background}`);
+    }
+  }
+});
+
 test("download requires consent, cancellation stops it, bad bytes cannot install", { skip: !videoRuntime(process.platform, process.arch) }, async () => {
   const oldFetch = globalThis.fetch; let count = 0; let bad = false;
   globalThis.fetch = (async (_url, options) => { count++; if (bad) return new Response("bad bytes"); return new Response(new ReadableStream({ start(c) { options?.signal?.addEventListener("abort", () => c.error(new Error("aborted")), { once: true }); } })); }) as typeof fetch;
@@ -71,4 +109,19 @@ test("media is chat-scoped, supports seeking, and refuses symlinks", async () =>
   const res = await GET(req(job.id, chat.id, "bytes=4-11")); assert.equal(res.status, 206); assert.equal(res.headers.get("content-range"), "bytes 4-11/64"); assert.equal((await res.arrayBuffer()).byteLength, 8);
   assert.equal((await GET(req(job.id, chat.id, "bytes=100-"))).status, 416); assert.equal((await GET(req(job.id, "other"))).status, 404);
   const other = draft(); stores.jobStore.updateJob(other.id, { result: { video: true } }); if (process.platform !== "win32") { fs.symlinkSync(file, videoFile(other.id)); assert.equal((await GET(req(other.id, chat.id))).status, 404); }
+});
+
+test("disabling videos blocks new renders but leaves saved media playable", async () => {
+  const job = draft(); const file = videoFile(job.id);
+  fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, Buffer.alloc(64, 7));
+  stores.jobStore.updateJob(job.id, { result: { video: true } });
+  stores.settingsStore.writeSettings({ version: 1, agent: { tools: { teaching_video: false }, video: { theme: "light", maxDurationSeconds: 10 } } });
+  try {
+    await assert.rejects(startVideo(job.id, chat.id, true, true), /disabled/i);
+    assert.equal(stores.jobStore.getJob(job.id)?.status, "done");
+    const status = await GET(new Request(`http://localhost/api/video?id=${job.id}&chatId=${chat.id}`));
+    assert.equal((await status.json()).enabled, false);
+    const media = await GET(new Request(`http://localhost/api/video?id=${job.id}&chatId=${chat.id}&media=1`, { headers: { Range: "bytes=0-7" } }));
+    assert.equal(media.status, 206); assert.equal((await media.arrayBuffer()).byteLength, 8);
+  } finally { stores.settingsStore.writeSettings({ version: 1 }); }
 });

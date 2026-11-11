@@ -279,6 +279,17 @@ describe("AgentSection (thin SSR)", () => {
 		}
 	});
 
+	it("explainer video controls show defaults and saved preferences", () => {
+		const defaults = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
+		assert.ok(defaults.includes('data-testid="group-explainer-videos"'));
+		assert.ok(tagOf(defaults, "toggle-explainer-videos").includes('aria-checked="true"'));
+		assert.match(defaults, /<option value="25" selected="">25 seconds<\/option>/);
+		const saved = renderToStaticMarkup(<AgentSection agent={{ tools: { teaching_video: false }, video: { maxDurationSeconds: 10, theme: "light" } }} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
+		assert.ok(tagOf(saved, "toggle-explainer-videos").includes('aria-checked="false"'));
+		assert.match(saved, /<option value="10" selected="">10 seconds<\/option>/);
+		assert.match(saved, /<option value="light" selected="">Light<\/option>/);
+	});
+
 	it("an overridden SLOT shows its model in the trigger, tools carry the delta", () => {
 		const html = renderToStaticMarkup(
 			<AgentSection

@@ -764,6 +764,7 @@ export async function handleChatInput(
 						chatId,
 						chatStore: stores.chatStore,
 						jobStore: stores.jobStore,
+						videoOptions: () => { const agent = stores.settingsStore.readSettings()?.agent; return { enabled: agent?.tools?.teaching_video !== false, maxDurationSeconds: agent?.video?.maxDurationSeconds ?? 25 }; },
 						spawn: (job, input) => {
 							if (job.kind === "video") {
 								if (runtimeInstalled() && videoSupported()) void startVideo(job.id, job.chatId, false).catch(error => stores.jobStore.updateJob(job.id, { status: "error", error: String(error), activity: "video failed" }));

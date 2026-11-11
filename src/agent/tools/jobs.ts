@@ -20,6 +20,7 @@ import { videoSchema, validVideoPlan, type VideoPlan } from "../../core/video.ts
 /** What the job tools need at execute time (injected by the composition root). */
 export interface JobToolContext {
 	chatId: string;
+	videoOptions?: () => { enabled: boolean; maxDurationSeconds: number };
 	/** Creates the job record (deduped by toolCallId). */
 	jobStore: JobStore;
 	/** Fire the background runner for a fresh job — fire-and-forget. The
@@ -141,16 +142,20 @@ const PDF_DESCRIPTION =
  * existing user-toggle filtering still applies outside this registry.
  */
 export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
+	const videoMaxSeconds = ctx.videoOptions?.().maxDurationSeconds ?? 25;
 	return {
 		teaching_video: {
 			name: "teaching_video",
 			label: "teaching_video",
-			description: "Create a short silent explainer video from 2–5 scenes. Use only when a video helps explain a concept or the learner asks for one. Supply meaningful heading, caption and diagram elements. Coordinates are normalized from 0 to 1 within the diagram area: x/y are the top-left of each box, width/height are its size. Text is left-aligned within its box, not stretched across it. For a list, put each value in a separate text element at explicit evenly spaced coordinates; use its text color to distinguish the compared, discarded, kept or found values. Do not put an entire list in one text element or use separate highlight shapes with guessed positions. If using a shape behind a label, give both exactly the same box coordinates. Check every highlight covers only its intended values. Shapes paint behind text. Text and formulas are plain text. Video rendering happens locally and may require the learner to approve a one-time runtime download. Continue teaching; do not claim it has finished.",
+			description: `Create a short silent explainer video from 2–5 scenes, at most ${videoMaxSeconds} seconds total. Use only when a video helps explain a concept or the learner asks for one. Supply meaningful heading, caption and diagram elements. Coordinates are normalized from 0 to 1 within the diagram area: x/y are the top-left of each box, width/height are its size. Text is left-aligned within its box, not stretched across it. For a list, put each value in a separate text element at explicit evenly spaced coordinates; use its text color to distinguish the compared, discarded, kept or found values. Do not put an entire list in one text element or use separate highlight shapes with guessed positions. If using a shape behind a label, give both exactly the same box coordinates. Check every highlight covers only its intended values. Shapes paint behind text. Text and formulas are plain text. Video rendering happens locally and may require the learner to approve a one-time runtime download. Continue teaching; do not claim it has finished.`,
 			parameters: videoSchema,
 			execute: serverExecute("teaching_video", videoSchema, (input, { toolCallId }) => {
 				if (!validVideoPlan(input)) throw new Error("Invalid video plan");
 				const existing = ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId);
 				if (!existing) {
+					const options = ctx.videoOptions?.() ?? { enabled: true, maxDurationSeconds: 25 };
+					if (!options.enabled) throw new Error("Explainer videos are disabled in Settings.");
+					if (input.scenes.reduce((sum, scene) => sum + scene.seconds, 0) > options.maxDurationSeconds) throw new Error(`Video exceeds the ${options.maxDurationSeconds}-second limit in Settings.`);
 					const job = ctx.jobStore.createJob({ kind: "video", chatId: ctx.chatId, toolCallId, input });
 					ctx.jobStore.updateJob(job.id, { status: "done", activity: "ready to render" });
 					ctx.spawn(job, input);

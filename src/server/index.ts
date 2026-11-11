@@ -65,5 +65,5 @@ export { claudeCodeInstallationResponse } from "./claude-code.ts";
 // No import side effects; the boot sync lives in stores.ts.
 export * from "./custom-provider.ts";
 export { stores } from "./stores.ts";
-export { cancelVideo, runtimeInstalled, startVideo, videoFile, videoSupported, videoDownloadInfo } from "./video/render.ts";
+export { cancelVideo, runtimeInstalled, startVideo, videoFile, videoSupported, videoDownloadInfo, videoEnabled } from "./video/render.ts";
 export { customProviderGet, customProviderMutation } from "./custom-provider-http.ts";

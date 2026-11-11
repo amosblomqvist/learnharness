@@ -349,6 +349,8 @@ export interface DictationSettings {
 
 /** Agent settings — everything about the non-conversation machinery. */
 export interface AgentSettings {
+	/** Preferences for newly generated explainer videos. */
+	video?: { maxDurationSeconds?: 10 | 15 | 25; theme?: "dark" | "light" };
 	/** Maximum simultaneous background-worker model requests (default 8).
 	 *  Direct conversations bypass this limit. Positive safe integers only:
 	 *  no arbitrary ceiling, rounding, or clamping. */
@@ -723,6 +725,12 @@ function sanitizeBooleanMap(raw: unknown): Record<string, boolean> | undefined {
 
 function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	const out: AgentSettings = {};
+	if (raw.video !== null && typeof raw.video === "object" && !Array.isArray(raw.video)) {
+		const video = raw.video as Record<string, unknown>;
+		out.video = {};
+		if (video.maxDurationSeconds === 10 || video.maxDurationSeconds === 15 || video.maxDurationSeconds === 25) out.video.maxDurationSeconds = video.maxDurationSeconds;
+		if (video.theme === "dark" || video.theme === "light") out.video.theme = video.theme;
+	}
 	// Invalid disk values drop: absence resolves to 8, never a silent clamp.
 	if (typeof raw.workerRequestConcurrency === "number" && Number.isSafeInteger(raw.workerRequestConcurrency) && raw.workerRequestConcurrency > 0) {
 		out.workerRequestConcurrency = raw.workerRequestConcurrency;
