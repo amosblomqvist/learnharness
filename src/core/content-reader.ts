@@ -23,22 +23,32 @@ type LiteralRange = { start: number; end: number; escapedFence?: true };
  * denote layout; even runs before n remain literal source. */
 function escapedFenceRanges(text: string, native: LiteralRange[]): LiteralRange[] {
 	if (!text.includes("\\n") || !/`{3,}|~{3,}/.test(text)) return [];
-	const lines: Array<{ start: number; end: number; escaped: boolean }> = [];
+	const lines: Array<{ start: number; end: number }> = [];
 	let start = 0;
-	for (const match of text.matchAll(/\r?\n|(\\+)(r\\n|n)?/g)) {
+	for (const match of text.matchAll(/\r\n?|\n|(\\+)(r\\n|n)?/g)) {
 		if (match[1] && (!match[2] || match[1].length % 2 === 0)) continue;
 		const boundary = match.index + (match[1] ? match[1].length - 1 : 0);
-		lines.push({ start, end: boundary, escaped: !!match[1] });
+		lines.push({ start, end: boundary });
 		start = match.index + match[0].length;
 	}
-	lines.push({ start, end: text.length, escaped: false });
+	lines.push({ start, end: text.length });
 	const ranges: LiteralRange[] = [];
+	const protect = (start: number, end: number, complete: boolean) => {
+		const fenceStart = start + /^ {0,3}/.exec(text.slice(start, start + 3))![0].length;
+		// Preserve enclosing native literals, including a native opener at
+		// this same offset. Backticks INSIDE the virtual fence are code, not
+		// independent inline ranges that can expose its body to layout repair.
+		if (!native.some(literal => literal.start <= fenceStart && literal.end > start &&
+			(literal.start < start || literal.end > end))) {
+			ranges.push({ start, end, ...(complete ? { escapedFence: true as const } : {}) });
+		}
+	};
 	let opening: { start: number; fence: string } | undefined;
 	for (const line of lines) {
 		const value = text.slice(line.start, line.end);
 		if (!opening) {
 			const match = /^[ ]{0,3}(`{3,}|~{3,})(.*)$/.exec(value);
-			if (!line.escaped || !match || (match[1]![0] === "`" && match[2]!.includes("`"))) continue;
+			if (!match || (match[1]![0] === "`" && match[2]!.includes("`"))) continue;
 			// Never enter an outer native fence or inline literal example. An
 			// inline-code range beginning HERE may be the escaped fence itself.
 			if (native.some(range => range.start < line.start && range.end > line.start)) continue;
@@ -47,12 +57,13 @@ function escapedFenceRanges(text: string, native: LiteralRange[]): LiteralRange[
 		}
 		const close = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/.exec(value)?.[1];
 		if (!close || close[0] !== opening.fence[0] || close.length < opening.fence.length) continue;
-		const range = { start: opening.start, end: line.end, escapedFence: true as const };
-		// A candidate cannot cut across an independently protected literal.
-		if (!native.some(literal => literal.start < range.end && literal.end > range.start &&
-			(literal.start < range.start || literal.end > range.end))) ranges.push(range);
+		protect(opening.start, line.end, true);
 		opening = undefined;
 	}
+	// Rejected profiles must be opaque to the generic layout decoder too:
+	// physical openers may have encoded bodies, and an unfinished fence
+	// protects the remainder just like an unfinished native Markdown fence.
+	if (opening) protect(opening.start, text.length, false);
 	return ranges;
 }
 
@@ -70,7 +81,9 @@ function literalRanges(text: string): LiteralRange[] {
 		} else if (node.children) pending.push(...node.children);
 	}
 	const encoded = escapedFenceRanges(text, ranges);
-	return [...ranges.filter(range => !encoded.some(fence => fence.start <= range.start && fence.end >= range.end)), ...encoded]
+	// Native inline ranges/openers starting INSIDE a virtual code section
+	// cannot extend beyond its close and swallow following prose either.
+	return [...ranges.filter(range => !encoded.some(fence => fence.start <= range.start && range.start < fence.end)), ...encoded]
 		.sort((a, b) => a.start - b.start);
 }
 

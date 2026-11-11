@@ -77,6 +77,49 @@ test("invalid, mixed and unsupported encoding profiles stay unrepaired", () => {
 	]) assert.equal(repairMathForDisplay(source), source, source);
 });
 
+test("mixed fences after encoded prose cannot fall through the general layout decoder", () => {
+	const reported = "~~~python\n" + String.raw`print('\n')\n~~~`;
+	assert.equal(repairMathForDisplay(String.raw`Read this.\n\n` + reported), "Read this.\n\n" + reported);
+	const before = String.raw`Read this.\n\n$\nu+\nabla f$.\n\n`;
+	const after = String.raw`\n\nAfter $\nu$.`;
+	const recoveredBefore = "Read this.\n\n" + String.raw`$\nu+\nabla f$.` + "\n\n";
+	const recoveredAfter = "\n\nAfter " + String.raw`$\nu$.`;
+	for (const marker of ["```", "~~~"]) {
+		for (const code of [
+			marker + "python\n" + String.raw`print('\n')\n` + marker,
+			marker + "python\r\n" + String.raw`print('\n')\n` + marker,
+			marker + "python\r" + String.raw`print('\n')\n` + marker,
+			marker + "python\\n" + String.raw`print('\n')` + "\n" + marker,
+		]) {
+			const source = before + code + after;
+			assert.equal(readContentSpans(source).map(span => span.raw).join(""), source);
+			const recovered = repairMathForDisplay(source);
+			assert.equal(recovered, recoveredBefore + code + recoveredAfter);
+			assert.equal(repairMathForDisplay(recovered), recovered);
+		}
+	}
+});
+
+test("a mixed fence owns inner code backticks even when native inline parsing crosses its close", () => {
+	const code = "~~~python\n" + String.raw`print('\n')\n` + "`literal" + String.raw`\n~~~`;
+	const source = String.raw`Read this.\n\n` + code + String.raw`\n\nAfter ` + "`";
+	assert.equal(repairMathForDisplay(source), "Read this.\n\n" + code + "\n\nAfter `");
+});
+
+test("unterminated fences after encoded prose keep the entire rejected code section opaque", () => {
+	for (const code of [
+		"```python\\nprint(\"\\n\")",
+		"~~~python\n" + String.raw`print('\n')\nno closing fence`,
+		"```python\\n" + String.raw`print('\n')\n$\nu$\n\nmore code`,
+	]) {
+		const source = String.raw`Read this.\n\n` + code;
+		assert.equal(readContentSpans(source).map(span => span.raw).join(""), source);
+		const recovered = repairMathForDisplay(source);
+		assert.equal(recovered, "Read this.\n\n" + code);
+		assert.equal(repairMathForDisplay(recovered), recovered);
+	}
+});
+
 test("valid encoding is structural evidence, not a language-specific semantic proof", () => {
 	// Explicit human-selected policy: single-quoted code escapes can be
 	// indistinguishable from misplaced layout escapes. No language guessing.
