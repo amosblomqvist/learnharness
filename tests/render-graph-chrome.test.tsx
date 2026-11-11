@@ -15,7 +15,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createElement } from "react";
 import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
-import { GraphChromeRow, GraphView } from "../components/graph-view.tsx";
+import { GraphChromeRow, GraphView, NodeCardText } from "../components/graph-view.tsx";
 import type { GraphRenderSettings } from "../components/graph-canvas.ts";
 import { ServerEventsProvider } from "../components/server-events.tsx";
 
@@ -75,5 +75,40 @@ describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => 
 			createElement(GraphChromeRow, { ...PROPS, isEmpty: false, query: "zzz", noMatch: false }),
 		);
 		assert.ok(!quiet.includes("No matching nodes."));
+	});
+});
+
+/** The node detail card renders its name and statement like other tool
+ *  content, so math no longer shows as raw dollars. NodeCardText is the
+ *  seam: the card itself only mounts from GraphView's click state. */
+describe("node detail card text", () => {
+	const render = (name: string, statement: string) => renderToStaticMarkup(createElement(NodeCardText, { name, statement }));
+	const formulas = (html: string) => html.split('class="katex"').length - 1;
+
+	it("renders math in the name and in the statement", () => {
+		const html = render(String.raw`Euler's formula $e^{ix}$`, String.raw`For real $x$, $e^{ix}=\cos x+i\sin x$.`);
+		assert.equal(formulas(html), 3);
+		assert.ok(!html.includes("$"), "no raw dollar delimiters remain");
+		assert.ok(html.includes("For real"), "the surrounding prose survives");
+	});
+
+	it("renders a display block in the statement as display math", () => {
+		const html = render("Gaussian integral", "Over the real line:\n\n$$\n" + String.raw`\int_{-\infty}^{\infty}e^{-x^2}\,dx=\sqrt{\pi}` + "\n$$");
+		assert.equal(formulas(html), 1);
+		assert.ok(html.includes("katex-display"));
+	});
+
+	it("leaves plain text as plain text", () => {
+		const statement = "The maximum ratio of broad money a bank can create from each unit of base money.";
+		const html = render("Money multiplier", statement);
+		assert.equal(formulas(html), 0);
+		assert.ok(html.includes("Money multiplier") && html.includes(statement));
+	});
+
+	it("keeps the card's own type rather than the chat prose font and size", () => {
+		const html = render("Name", "Statement");
+		assert.equal(html.split("[--font-prose:var(--font-ui)]").length - 1, 2, "both lines stay in the UI font");
+		assert.match(html, /class="[^"]*font-medium[^"]*\[--lh-prose-size:var\(--text-sm\)\][^"]*"/, "the name keeps its size and weight");
+		assert.match(html, /class="[^"]*text-muted-foreground[^"]*\[--lh-prose-size:var\(--text-xs\)\][^"]*"/, "the statement keeps its size and colour");
 	});
 });
