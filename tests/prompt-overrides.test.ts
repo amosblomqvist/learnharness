@@ -123,6 +123,8 @@ describe("isValidSegmentPath (the mirror-layout discipline)", () => {
 			"teacher/", // bare dir
 			"teacher/sub/10-x.md", // nested (not the mirror layout)
 			"prober\\10-x.md", // backslash
+			"teacher/1-..md", // dot-only fragment name
+			"teacher/1-...md", // dot-only fragment name
 		]) {
 			assert.equal(isValidSegmentPath(bad), false, bad);
 		}
