@@ -14,8 +14,9 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createElement } from "react";
+import { parseHTML } from "linkedom";
 import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
-import { GraphChromeRow, GraphView, NodeCardText } from "../components/graph-view.tsx";
+import { GraphChromeRow, GraphView, NodeCardText, observeNodeCardPosition } from "../components/graph-view.tsx";
 import type { GraphRenderSettings } from "../components/graph-canvas.ts";
 import { ServerEventsProvider } from "../components/server-events.tsx";
 
@@ -105,10 +106,83 @@ describe("node detail card text", () => {
 		assert.ok(html.includes("Money multiplier") && html.includes(statement));
 	});
 
+	it("uses the shared Markdown and image-safety policy without changing the source fields", () => {
+		const source = {
+			name: "**Meaning** $x$",
+			statement: "A [reference](https://example.invalid/) and `literal` code.\n\n| Value | Meaning |\n| --- | --- |\n| $x$ | Variable |\n\n![untrusted](https://example.invalid/image.png)",
+		};
+		const before = structuredClone(source);
+		const html = render(source.name, source.statement);
+		const { document } = parseHTML(html);
+		assert.equal(document.querySelector("strong")?.textContent, "Meaning");
+		assert.equal(document.querySelector('[data-streamdown="inline-code"]')?.textContent, "literal");
+		assert.ok(document.querySelector("table"), "ordinary Markdown tables use the shared renderer");
+		assert.equal(document.querySelector("img"), null, "node content cannot load a remote image");
+		assert.ok(html.includes("[Image blocked: untrusted]"));
+		assert.deepEqual(source, before);
+	});
+
 	it("keeps the card's own type rather than the chat prose font and size", () => {
 		const html = render("Name", "Statement");
 		assert.equal(html.split("[--font-prose:var(--font-ui)]").length - 1, 2, "both lines stay in the UI font");
 		assert.match(html, /class="[^"]*font-medium[^"]*\[--lh-prose-size:var\(--text-sm\)\][^"]*"/, "the name keeps its size and weight");
 		assert.match(html, /class="[^"]*text-muted-foreground[^"]*\[--lh-prose-size:var\(--text-xs\)\][^"]*"/, "the statement keeps its size and colour");
+	});
+});
+
+describe("node detail card placement", () => {
+	it("remeasures late content and container changes, then disconnects on cleanup", () => {
+		const previous = globalThis.ResizeObserver;
+		const observed: Element[] = [];
+		let notify: () => void = () => { throw new Error("observer not created"); };
+		let disconnected = false;
+		globalThis.ResizeObserver = class {
+			constructor(callback: () => void) { notify = callback; }
+			observe(element: Element) { observed.push(element); }
+			disconnect() { disconnected = true; }
+		} as unknown as typeof ResizeObserver;
+		try {
+			const card = { offsetWidth: 320, offsetHeight: 164, style: { left: "", top: "", visibility: "hidden" } };
+			const container = { clientWidth: 600, clientHeight: 560 };
+			const cleanup = observeNodeCardPosition(card as HTMLDivElement, container as HTMLDivElement, { x: 300, y: 500 });
+			assert.deepEqual(observed, [card, container]);
+			assert.deepEqual(card.style, { left: "140px", top: "324px", visibility: "visible" });
+			// A diagram/plugin can finish after the initial layout effect. Keep
+			// the same 12px node gap instead of leaving its bottom off-screen.
+			card.offsetHeight = 308;
+			notify();
+			assert.equal(card.style.top, "180px");
+			assert.equal(Number.parseInt(card.style.top) + card.offsetHeight, 488);
+			container.clientWidth = 360;
+			notify();
+			assert.equal(card.style.left, "32px", "container resize retains the existing horizontal clamp");
+			container.clientHeight = 900;
+			notify();
+			assert.equal(card.style.top, "512px", "a taller container has room below the node again");
+			cleanup();
+			assert.equal(disconnected, true, "selection changes/unmount release both observations");
+		} finally {
+			if (previous === undefined) Reflect.deleteProperty(globalThis, "ResizeObserver");
+			else globalThis.ResizeObserver = previous;
+		}
+	});
+
+	it("retains initial below-node placement and edge clamps without an observer", () => {
+		const previous = globalThis.ResizeObserver;
+		Reflect.deleteProperty(globalThis, "ResizeObserver");
+		try {
+			const card = { offsetWidth: 320, offsetHeight: 100, style: { left: "", top: "", visibility: "hidden" } };
+			const container = { clientWidth: 600, clientHeight: 560 };
+			const cleanup = observeNodeCardPosition(card as HTMLDivElement, container as HTMLDivElement, { x: 10, y: 30 });
+			assert.deepEqual(card.style, { left: "8px", top: "42px", visibility: "visible" });
+			cleanup();
+			card.offsetHeight = 700;
+			observeNodeCardPosition(card as HTMLDivElement, container as HTMLDivElement, { x: 590, y: 500 })();
+			assert.equal(card.style.left, "272px");
+			assert.equal(card.style.top, "8px", "oversized content keeps the existing top-margin clamp");
+		} finally {
+			if (previous === undefined) Reflect.deleteProperty(globalThis, "ResizeObserver");
+			else globalThis.ResizeObserver = previous;
+		}
 	});
 });

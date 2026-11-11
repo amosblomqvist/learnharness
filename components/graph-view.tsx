@@ -917,6 +917,33 @@ export function NodeCardText({ name, statement }: Pick<GraphNode, "name" | "stat
 	);
 }
 
+/** Keep the existing placement policy as static Markdown finishes rendering:
+ * diagrams, plugin blocks and font reflow can resize a card after selection. */
+export function observeNodeCardPosition(card: HTMLDivElement, container: HTMLDivElement, anchor: { x: number; y: number }): () => void {
+	const place = () => {
+		const width = card.offsetWidth;
+		const height = card.offsetHeight;
+		const margin = 8;
+		const gap = 12;
+		const left = Math.min(
+			Math.max(anchor.x - width / 2, margin),
+			Math.max(container.clientWidth - width - margin, margin),
+		);
+		let top = anchor.y + gap;
+		if (top + height > container.clientHeight - margin) {
+			top = Math.max(anchor.y - gap - height, margin);
+		}
+		card.style.left = `${left}px`;
+		card.style.top = `${top}px`;
+		card.style.visibility = "visible";
+	};
+	place();
+	const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(place);
+	observer?.observe(card);
+	observer?.observe(container);
+	return () => observer?.disconnect();
+}
+
 export function GraphView({
 	chainSelectOpen = false,
 	practiceSelection,
@@ -1430,28 +1457,14 @@ export function GraphView({
 	}, [physicsTuning, isEmpty]);
 
 	// Position the detail card: below the clicked node, flipped above near
-	// the bottom edge, clamped horizontally. Imperative (ref + layout effect,
-	// before paint) because the flip needs the card's measured height.
+	// the bottom edge, clamped horizontally. Measure before paint, then keep
+	// the same placement policy when rich content or the container resizes.
 	useLayoutEffect(() => {
 		const card = cardRef.current;
 		const container = containerRef.current;
 		if (!selected || !card || !container) return;
-		const width = card.offsetWidth;
-		const height = card.offsetHeight;
-		const margin = 8;
-		const gap = 12;
-		const left = Math.min(
-			Math.max(selected.anchor.x - width / 2, margin),
-			Math.max(container.clientWidth - width - margin, margin),
-		);
-		let top = selected.anchor.y + gap;
-		if (top + height > container.clientHeight - margin) {
-			top = Math.max(selected.anchor.y - gap - height, margin);
-		}
-		card.style.left = `${left}px`;
-		card.style.top = `${top}px`;
-		card.style.visibility = "visible";
-	}, [selected]);
+		return observeNodeCardPosition(card, container, selected.anchor);
+	}, [selected, isEmpty]);
 
 	return (
 		<div className="relative h-full w-full">
