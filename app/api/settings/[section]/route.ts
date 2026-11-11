@@ -40,6 +40,7 @@ import {
 	fileAccessConfigurationError,
 	promptOverrides,
 	readSettingsRecord,
+	refreshWorkerRequestAdmission,
 	themeStore,
 	validateChatSettings,
 	validateModelsSettings,
@@ -87,12 +88,17 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
 		}
 	}
-	// Theme wave (2026-11-04): the active theme must exist — a preset or
-	// an imported file. (A theme deleted LATER resolves to Default.)
+	// A newly selected theme must exist. A saved theme whose file vanished
+	// already renders as Default: heal that unchanged reference on write,
+	// rather than trapping unrelated font/size/ligature edits behind a 400.
 	if (section === "appearance") {
-		const theme = (parsed.settings as AppearanceSettings).theme;
+		const appearance = parsed.settings as AppearanceSettings;
+		const theme = appearance.theme;
 		if (theme !== undefined && !isBuiltinThemeId(theme) && themeStore.readTheme(theme) === null) {
-			return Response.json({ error: `unknown theme "${theme}"` }, { status: 400 });
+			if (theme !== record.appearance?.theme) {
+				return Response.json({ error: `unknown theme "${theme}"` }, { status: 400 });
+			}
+			appearance.theme = "default";
 		}
 	}
 	if (section === "agent") {
@@ -139,6 +145,9 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// along untouched (other sections, unknown keys — sanitize preserves).
 	const next = { ...record, [section]: sectionOut };
 	const stored = writeSettingsRecord(next);
+	// Only a successful durable write changes admission. Increasing the
+	// limit immediately drains queued requests; decreasing never cancels active work.
+	refreshWorkerRequestAdmission();
 	const fileAccessError = fileAccessConfigurationError();
 	return Response.json({ settings: stored, ...(fileAccessError ? { fileAccessError } : {}) });
 }

@@ -42,9 +42,8 @@ function formatSize(bytes: number): string {
 	return bytes >= 1024 ? `${(bytes / 1024).toFixed(1)}KB` : `${bytes}B`;
 }
 
-/** Slice + truncate the text body, pi's continuation-notice style. Shared
- *  with epub_read (a chapter pages exactly like a file). */
-export function readTextSlice(text: string, offset: number | undefined, limit: number | undefined): string {
+/** Slice + truncate the text body, pi's continuation-notice style. */
+function readTextSlice(text: string, offset: number | undefined, limit: number | undefined): string {
 	const allLines = text.split("\n");
 	const totalLines = allLines.length;
 	const startLine = offset ? Math.max(0, offset - 1) : 0;

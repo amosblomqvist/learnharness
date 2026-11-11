@@ -445,6 +445,32 @@ describe("teach-check reveal (W5 phase separation)", () => {
 		assert.match(html, /Open/, "a clear reveal action");
 	});
 
+	it("renders math in the collapsed teach-check teaser", () => {
+		const html = renderToStaticMarkup(
+			<QuestionDock
+				toolName="quiz"
+				toolCallId="math-teaser"
+				input={{
+					...quizInput,
+					question: String.raw`A gas occupies
+\(4.0\,\text{L}\) at \(3.0\,\text{atm}\) and \(400\,\text{K}\). The temperature is
+changed and the final volume must be calculated from the combined gas law.`,
+				} as never}
+				expanded={false}
+				reveal
+				onExpand={() => {}}
+				onSubmit={() => {}}
+			/>,
+		);
+		const bar = html.match(/<button[^>]*data-testid="teach-check-reveal"[\s\S]*?<\/button>/)?.[0];
+		assert.ok(bar, "the collapsed check invitation is rendered");
+		assert.ok(bar.includes('class="katex"'), "math in the teaser renders through KaTeX");
+		assert.ok(!bar.includes("textL") && !bar.includes("textatm"), "LaTeX commands are not shown as plain text");
+		assert.ok(bar.includes("whitespace-nowrap"), "the teaser prevents rendered text from wrapping");
+		assert.ok(bar.includes("data-preview-line") && !bar.includes("text-ellipsis"), "the measured line uses one explicit continuation marker, not a second CSS ellipsis");
+		assert.ok(!bar.includes("<br"), "source newlines are flattened rather than rendered as forced line breaks");
+	});
+
 	it("probe questions keep the plain collapsed bar (no invitation copy)", () => {
 		const html = renderToStaticMarkup(
 				<QuestionDock
@@ -457,6 +483,7 @@ describe("teach-check reveal (W5 phase separation)", () => {
 				/>,
 		);
 		assert.ok(html.includes('data-testid="question-dock-bar"'), "the scroll-collapse strip");
+		assert.match(html, /data-testid="question-dock-bar"[^>]*items-center/, "label and actions are vertically centered beside the fixed-height teaser");
 		assert.ok(!html.includes("Check your understanding"), "no invitation copy outside teach phase");
 		assert.match(html, /Answer/, "the strip keeps its Answer affordance");
 	});
@@ -508,6 +535,20 @@ describe("probe-done card", () => {
 			<ProbeDoneCard part={{ state: "input-available", input: { assessment: validAssessment } } as never} />,
 		);
 		assert.match(html, /modal logic basics/);
+	});
+
+	it("renders math in the strand, assessment, and summary", () => {
+		const html = renderToStaticMarkup(
+			<ProbeDoneCard part={{ state: "output-available", input: { assessment: {
+				strands: [{ strand: "Compare $x$", assessment: "Understands $y$" }],
+				summary: "Review\n\n$$\nz=1\n$$",
+			} }, output: { ok: true } }} />,
+		);
+		assert.equal((html.match(/class="katex"/g) ?? []).length, 3);
+		assert.ok(html.includes("katex-display"), "display math in the summary renders as display math");
+		assert.match(html, /Compare/);
+		assert.match(html, /Understands/);
+		assert.match(html, /Review/);
 	});
 
 	it("a REJECTED assessment (the stringified live shape) renders the retry note, never the garbage", () => {

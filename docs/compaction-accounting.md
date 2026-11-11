@@ -56,9 +56,53 @@ Saved input counts are Pi-normalized **fresh input**, disjoint from cache bucket
 
 Compaction summarizes older context for future requests; original messages remain stored. The next-request estimate is separate from the displayed last-call measurement: it anchors on reported usage, estimates later messages, and falls back to active-transcript/system-prompt heuristics. The trigger is the smaller of the configured threshold and catalog window minus reserve. Unknown catalog windows use the configured threshold alone; CLI display metadata does not change that trigger.
 
-[`src/core/compaction.ts`](../src/core/compaction.ts) ports cutoff selection and sizing heuristics from **@earendil-works/pi-coding-agent 1.4.0**, without a coding-agent dependency. It walks backward to an approximate **20,000-token retained tail**, selecting a valid user/assistant boundary and preserving preceding calls when trailing results require them. Text/thinking/tool names/arguments use characters ÷ 4; images get a fixed 1,200-token allowance. Whole messages can overshoot; this is not an exact size guarantee, and encrypted signatures are not measured or stripped.
+[`src/core/compaction.ts`](../src/core/compaction.ts) ports cutoff selection and default sizing heuristics from **@earendil-works/pi-coding-agent 1.4.0**, without a coding-agent dependency. It walks backward to an approximate **20,000-token retained tail**, selecting a valid user/assistant boundary and preserving preceding calls when trailing results require them. Text/thinking/tool names/arguments use characters ÷ 4; images get a fixed 1,200-token allowance. Whole messages can overshoot; this is not an exact size guarantee, and encrypted signatures are not measured or stripped.
 
 LearnHarness retains its own educational summary prompt, plan continuity, scheduling, authorization, and persistence. A cut dropping no history does not summarize. Requests include the latest summary once, then the retained transcript; later summaries receive the prior summary once plus newly superseded material. Unresolved cutoffs retain the existing full-history fallback. Output-limit (`length`) summaries fail rather than checkpointing incomplete output.
+
+### Optional reasoning-aware estimates (OpenAI Responses only)
+
+Under **Settings → Agent → Context**, immediately below the compaction threshold,
+**Include reasoning in token estimates (OpenAI Responses only)** enables a
+reasoning-aware extension to the native heuristic. It defaults **off**, including
+for existing settings without `compaction.includeReasoning`. Changes apply to
+future compaction checks, not a compaction already in progress, and do not recut
+existing summaries.
+
+The readable-content heuristic can substantially undercount a retained tail
+containing opaque reasoning, even when provider usage correctly triggers
+compaction. With the option on, saved response-level output usage supplies a
+**floor** on the readable-content estimate for assistant responses that:
+
+- use `openai-responses` and match the selected model's API, provider, and model ID;
+- contain at least one thinking block with a nonempty `thinkingSignature`, even
+  when readable thinking is empty;
+- have valid positive safe-integer output usage and are not errored or aborted.
+
+Output usage already includes reasoning: it is charged **once per response**, not
+per thinking block, and is not added to the readable estimate. The estimator
+never converts ciphertext length to tokens or uses context-wide input/total
+usage as a per-message size. Other models, APIs (including OpenRouter's Chat
+Completions route), unsigned messages, and unusable output readings retain the
+original heuristic.
+
+The option affects retained-tail cutoff selection and next-request estimates in
+both the turn-start gate and background settle check, including the fallback
+immediately after compaction invalidates the previous provider-usage anchor.
+Provider-reported usage anchors otherwise remain unchanged. Saved output usage
+is a replay-size proxy, not an exact measurement of the next request: neither
+mode guarantees a measured 20k tail. The threshold, recent-tail budget, and
+assistant/tool/question boundary rules are unchanged.
+
+This option does **not** add thinking text to the summarizer's input, strip
+signatures, rewrite saved history, or change the conversation meter. Regression
+coverage: [reasoning accounting](../tests/compaction-reasoning.test.ts),
+[both service entrypoints and an identical-snapshot on/off comparison](../tests/compaction-service.test.ts),
+[settings persistence/defaults](../tests/settings-store.test.ts), and
+[Settings toggle](../tests/render-settings.test.tsx). The comparison uses a fixed
+synthetic summary and saved usage; it does not measure real provider input.
+
+### Implementation references
 
 Implementation: [`server/compaction.ts`](../src/server/compaction.ts), [`context-usage.ts`](../src/core/context-usage.ts), [`server/pricing.ts`](../src/server/pricing.ts). Regressions: `compaction-native-parity`, `context-usage`, `pricing-native-parity`, `subscription-usage`, and `session-cache-hit-rate` under `tests/`, plus CLI/custom-provider suites.
 

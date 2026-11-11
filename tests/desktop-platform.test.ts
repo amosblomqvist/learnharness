@@ -41,6 +41,115 @@ function windowOptions(platform: string, env: Record<string, string> = {}, repor
 	return JSON.parse(JSON.stringify(win.options));
 }
 
+describe("desktop development startup", () => {
+	it("does not open the window until the development server responds", async () => {
+		const devUrl = "http://localhost:3000";
+		const loaded: string[] = [];
+		let respond: (() => void) | undefined;
+		class FakeWindow {
+			static getAllWindows() { return []; }
+			webContents = { on() {}, setWindowOpenHandler() {} };
+			loadURL(url: string) { loaded.push(url); }
+			once() {}
+		}
+		const electron = {
+			app: {
+				setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {},
+				requestSingleInstanceLock: () => false, quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {},
+			},
+			BrowserWindow: FakeWindow,
+			nativeTheme: { themeSource: "system" },
+			Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
+			ipcMain: { handle() {}, on() {} },
+			session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		};
+		const context = {
+			require: (id: string) => {
+				if (id === "electron") return electron;
+				if (id === "node:fs") return { mkdirSync() {}, appendFileSync() {} };
+				if (id === "./dev-server-readiness.cjs") return { waitForDevServer: (url: string, options: { signal: AbortSignal }) => {
+					assert.equal(url, devUrl);
+					assert.equal(options.signal.aborted, false);
+					return new Promise<void>(resolve => { respond = resolve; });
+				} };
+				return mainRequire(id);
+			},
+			process: { platform: "linux", argv: [], env: { LH_DEV_URL: devUrl }, on() {} },
+			AbortController,
+			__dirname: dirname(mainFile),
+		};
+		runInNewContext(mainSource, context, { filename: mainFile });
+		const boot = runInNewContext("main()", context) as Promise<void>;
+		await new Promise<void>(resolve => setImmediate(resolve));
+		assert.deepEqual(loaded, [], "a slow server must not leave a failed navigation in the window");
+		assert.ok(respond, "startup probes the configured development server");
+		respond();
+		await boot;
+		assert.deepEqual(loaded, [devUrl], "the window navigates once the server responds");
+	});
+});
+
+describe("desktop appearance boot and IPC", () => {
+	it("constructs light native chrome before renderer reporting and accepts appearance only from its exact main-frame origin", async () => {
+		const origin = "http://127.0.0.1:9000";
+		const handlers = new Map<string, (event: unknown, value: unknown) => void>();
+		const windows: FakeWindow[] = [];
+		class FakeWindow {
+			static getAllWindows() { return windows; }
+			static fromWebContents(sender: unknown) { return windows.find(win => win.webContents === sender); }
+			webContents = { on() {}, setWindowOpenHandler() {}, mainFrame: { url: origin } };
+			background: string | undefined;
+			overlay: unknown;
+			constructor(readonly options: { backgroundColor: string; titleBarOverlay: unknown }) { windows.push(this); }
+			loadURL() {} once() {} isDestroyed() { return false; }
+			setBackgroundColor(color: string) { this.background = color; }
+			setTitleBarOverlay(colors: unknown) { this.overlay = colors; }
+		}
+		const nativeTheme = { themeSource: "system" };
+		const chrome = mainRequire("./appearance-chrome.cjs");
+		let bootDirectory: string | undefined;
+		const context = {
+			require: (id: string) => {
+				if (id === "electron") return {
+					app: { setName() {}, getPath: () => "/fixture/shell", setPath() {}, requestSingleInstanceLock: () => false,
+						quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {} },
+					BrowserWindow: FakeWindow, nativeTheme,
+					Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
+					ipcMain: { handle() {}, on: (name: string, fn: (event: unknown, value: unknown) => void) => handlers.set(name, fn) },
+					session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+				};
+				if (id === "node:fs") return { mkdirSync() {}, appendFileSync() {} };
+				if (id === "./appearance-chrome.cjs") return { ...chrome, readAppearance: (directory: string) => {
+					bootDirectory = directory; return { mode: "light", background: "#faf9f5" };
+				} };
+				if (id === "./dev-server-readiness.cjs") return { waitForDevServer: async () => {} };
+				return mainRequire(id);
+			},
+			process: { platform: "win32", argv: [], env: { LH_DEV_URL: origin, LH_DATA_DIR: "/fixture/server-data" }, on() {} },
+			AbortController, URL, __dirname: dirname(mainFile),
+		};
+		runInNewContext(mainSource, context, { filename: mainFile });
+		await runInNewContext("main()", context);
+		assert.equal(bootDirectory, "/fixture/server-data");
+		assert.equal(nativeTheme.themeSource, "light");
+		const win = windows[0]!;
+		assert.equal(win.options.backgroundColor, "#faf9f5");
+		assert.deepEqual(JSON.parse(JSON.stringify(win.options.titleBarOverlay)), { color: "#faf9f5", symbolColor: "#1a1a1a" });
+		const report = handlers.get("lh:appearance")!;
+		const next = { mode: "dark", background: "#101010" };
+		report({ sender: win.webContents, senderFrame: { url: origin } }, next);
+		assert.equal(win.background, undefined, "subframes cannot repaint the window");
+		win.webContents.mainFrame.url = "https://untrusted.example";
+		report({ sender: win.webContents, senderFrame: win.webContents.mainFrame }, next);
+		assert.equal(win.background, undefined, "a navigated trusted window is not enough");
+		win.webContents.mainFrame.url = origin;
+		report({ sender: win.webContents, senderFrame: win.webContents.mainFrame }, next);
+		assert.equal(win.background, "#101010");
+		assert.equal(nativeTheme.themeSource, "system");
+		assert.deepEqual(win.overlay, { color: "#101010", symbolColor: "#e5e5e5" });
+	});
+});
+
 describe("desktop window chrome", () => {
 	it("macOS keeps the proven traffic lights and does not enable WCO", () => {
 		const options = windowOptions("darwin");

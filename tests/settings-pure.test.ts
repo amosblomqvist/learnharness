@@ -16,13 +16,14 @@ import {
 	composeSearchEngine,
 	composeSlotModel,
 	composeTool,
+	composeWorkerRequestConcurrency,
 	composeQuizMechanics,
 	sectionedSegments,
 } from "../components/settings/agent-section.tsx";
 import { nextOverrides } from "../components/settings/keyboard-section.tsx";
 import { classifyKeys, keyStatusLine, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
 import type { AgentSettings, AuthKeyStatus, ModelsSettings } from "../src/core";
-import { slotsConfigured } from "../src/core";
+import { resolveSettings, slotsConfigured } from "../src/core";
 import { setupStage } from "../components/setup-dialog.tsx";
 
 const mocha = BUILTIN_THEMES.find((t) => t.id === "catppuccin-mocha")!;
@@ -89,6 +90,13 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-heading-weight"], "700");
 		assert.equal(vars["--lh-ink-strong"], "#ff0000");
 		assert.equal(vars["--lh-ink-italic"], "#00ff00");
+	});
+
+	it("sessionNameSerif false alone: only the title token changes", () => {
+		const factory = appearanceVars(resolveAppearance(undefined), DEFAULT_THEME);
+		assert.deepEqual(appearanceVars(resolveAppearance({ sessionNameSerif: false }), DEFAULT_THEME), {
+			...factory, "--font-title": "var(--font-prose)",
+		});
 	});
 });
 
@@ -158,6 +166,35 @@ describe("Colors block compose helpers — overrides in their two homes", () => 
 });
 
 describe("agent section compose helpers — the replace-whole PUT body", () => {
+	it("worker concurrency commits exact whole values, preserving every sibling without mutation", () => {
+		const before: AgentSettings = {
+			workerRequestConcurrency: 3,
+			models: { auditor: { thinkingLevel: "high" } }, tools: { research: false },
+			prompts: { "system-prompt.md": true }, search: { engine: "brave" }, graphTools: { enabled: false },
+		};
+		for (const [draft, value] of [["1", 1], ["8", 8], ["8.0", 8], ["1e1", 10], ["10e-1", 1], ["10.5e1", 105], ["100000", 100000], [String(Number.MAX_SAFE_INTEGER), Number.MAX_SAFE_INTEGER]] as const) {
+			const next = composeWorkerRequestConcurrency(before, draft);
+			assert.ok(next.ok, draft);
+			assert.deepEqual(next.settings, { ...before, workerRequestConcurrency: value });
+		}
+		assert.equal(before.workerRequestConcurrency, 3, "input record is not mutated");
+		for (const draft of ["", "   "]) {
+			const reset = composeWorkerRequestConcurrency(before, draft);
+			assert.ok(reset.ok);
+			const { workerRequestConcurrency: _drop, ...siblings } = before;
+			assert.deepEqual(reset.settings, siblings);
+			assert.equal(resolveSettings({ version: 1, agent: reset.settings }).agent.workerRequestConcurrency, 8);
+		}
+	});
+
+	it("worker concurrency rejects invalid drafts, including fractions rounded away by Number", () => {
+		for (const draft of ["0", "-1", "1.5", "1e-1", "8.0000000000000001", "99999999999999.99999", "9007199254740992", "1e999999", "1e", "NaN", "Infinity", "hello", "0x10"]) {
+			const result = composeWorkerRequestConcurrency(undefined, draft);
+			assert.equal(result.ok, false, draft);
+			if (!result.ok) assert.match(result.error, /positive, safely representable whole number/);
+		}
+	});
+
 	it("composeTool carries the rest of the section verbatim", () => {
 		const before = { tools: { demo: false }, prompts: { "system-prompt.md": true } };
 		const after = composeTool(before, "visual", false);

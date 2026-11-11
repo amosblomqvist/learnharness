@@ -1,12 +1,15 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore } from "react";
+import { cloneElement, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { PaperclipIcon } from "lucide-react";
 import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
+import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers } from "./interaction-layers";
+import { INTERACTION_LAYER_Z_BASE } from "./host-dialog";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
  *  desktop bridge. Same validity rule as drops: a file without a usable
@@ -46,6 +49,29 @@ function useDesktopPaths(): boolean {
 	return useSyncExternalStore(noSubscribe, () => Boolean(window.lh?.getPathForFile), () => false);
 }
 
+/** The choice menu owns Escape with the same layer law as MenuShell, while
+ * retaining its paperclip/composer-specific geometry. Mount separately so a
+ * closed button remains safe in standalone/static renders. Notices are passive. */
+function AttachmentPopup({ anchorRef, rootRef, open, close, children }: {
+	anchorRef: RefObject<HTMLButtonElement | null>; rootRef: RefObject<HTMLDivElement | null>;
+	open: boolean; close(): void; children: ReactElement<{ style?: CSSProperties }>;
+}) {
+	const controller = useInteractionLayers();
+	const owner = controller.ownerOf(anchorRef.current);
+	const layer = useInteractionLayer({ kind: "popup", enabled: open, rootRef, anchorRef, ownerId: owner?.id,
+		onClose: reason => {
+			close();
+			if (reason === "escape" && controller.isPopupOrigin(anchorRef.current)) anchorRef.current?.focus();
+			return "closed";
+		},
+	});
+	const portal = controller.getPortalContainer(anchorRef.current, owner?.id);
+	if (!portal) return null;
+	return createPortal(<InteractionLayerOwner.Provider value={open ? layer.id : owner?.id ?? null}>
+		{cloneElement(children, { style: { ...children.props.style, zIndex: INTERACTION_LAYER_Z_BASE + (open ? layer.order : owner?.order ?? 0) } })}
+	</InteractionLayerOwner.Provider>, portal);
+}
+
 /**
  * The attach button (issue #285): the picker's twin of a file drop — files
  * stay where they are and only their quoted paths enter the draft, at the
@@ -56,6 +82,7 @@ function useDesktopPaths(): boolean {
  * aria-disabled, not disabled, so the tooltip still shows.
  */
 export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HTMLDivElement | null> }) {
+	const controller = useOptionalInteractionLayers();
 	const pickerRef = useRef<HTMLInputElement>(null);
 	const desktop = useDesktopPaths();
 	const buttonRef = useRef<HTMLButtonElement>(null);
@@ -86,17 +113,17 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 		window.addEventListener("resize", place);
 		return () => { observer?.disconnect(); window.removeEventListener("scroll", place, true); window.removeEventListener("resize", place); };
 	}, [open, notice]);
-	useEffect(() => { if (open && positioned) popupRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [open, positioned]);
+	useEffect(() => { if (open && positioned && isInteractionScopeEligible(popupRef.current, controller)) popupRef.current?.querySelector<HTMLButtonElement>("button")?.focus(); }, [open, positioned, controller]);
 	useEffect(() => {
 		if (!open && !notice) return;
 		const dismissOutside = (event: PointerEvent) => {
-			if (event.target instanceof Node && !popupRef.current?.contains(event.target) && !buttonRef.current?.contains(event.target)) {
+			if (isInteractionScopeEligible(popupRef.current, controller) && event.target instanceof Node && !popupRef.current?.contains(event.target) && !buttonRef.current?.contains(event.target)) {
 				setOpen(false); setNotice("");
 			}
 		};
 		document.addEventListener("pointerdown", dismissOutside);
 		return () => document.removeEventListener("pointerdown", dismissOutside);
-	}, [open, notice]);
+	}, [open, notice, controller]);
 	const chooseFolder = async () => {
 		if (choosingFolder.current) return;
 		const editor = editorRef.current;
@@ -115,10 +142,7 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 	};
 	return (
 		<div className="relative shrink-0"
-			onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget) && !popupRef.current?.contains(event.relatedTarget)) setOpen(false); }}
-			onKeyDown={(event) => {
-				if (event.key === "Escape" && open) { event.preventDefault(); event.stopPropagation(); setOpen(false); buttonRef.current?.focus(); }
-			}}>
+			onBlur={(event) => { if (isInteractionScopeEligible(popupRef.current ?? buttonRef.current, controller) && !event.currentTarget.contains(event.relatedTarget) && !popupRef.current?.contains(event.relatedTarget)) setOpen(false); }}>
 			<input
 				ref={pickerRef}
 				type="file"
@@ -147,7 +171,7 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 					<PaperclipIcon className="size-4" />
 				</button>
 			</Hint>
-			{(open || notice) && createPortal(<div ref={popupRef} role={open ? "menu" : "status"}
+			{(open || notice) && <AttachmentPopup anchorRef={buttonRef} rootRef={popupRef} open={open} close={() => setOpen(false)}><div ref={popupRef} role={open ? "menu" : "status"}
 				aria-label={open ? "Attach files or a folder" : undefined}
 				data-testid="attachment-popup"
 				style={{ position: "fixed", zIndex: 60, ...(placement ?? { left: 0, top: 0, visibility: "hidden" }), overflowY: "auto" }}
@@ -164,7 +188,7 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
 						onClick={() => { void chooseFolder(); }}>Folder</button>
 				</> : notice}
-			</div>, document.body)}
+			</div></AttachmentPopup>}
 		</div>
 	);
 }

@@ -36,6 +36,20 @@ describe("parseGeneralSettingsBody", () => {
 });
 
 describe("parseAgentSettingsBody", () => {
+	it("worker concurrency accepts positive safe integers only; absent resets to the default", () => {
+		for (const value of [1, 8, 100_000, Number.MAX_SAFE_INTEGER]) {
+			assert.deepEqual(parseAgentSettingsBody({ workerRequestConcurrency: value, tools: { research: false } }), {
+				ok: true, settings: { workerRequestConcurrency: value, tools: { research: false } },
+			});
+		}
+		for (const value of [0, -1, 1.5, Number.MAX_SAFE_INTEGER + 1, NaN, Infinity, -Infinity, "8", "", null, true, [], {}]) {
+			const result = parseAgentSettingsBody({ workerRequestConcurrency: value });
+			assert.equal(result.ok, false, String(value));
+			if (!result.ok) assert.match(result.error, /workerRequestConcurrency.*positive.*safely representable whole number/);
+		}
+		assert.deepEqual(parseAgentSettingsBody({ workerRequestConcurrency: undefined }), { ok: true, settings: {} });
+	});
+
 	it("models: valid roles with model pair and/or thinkingLevel; unknown role is a 400 with the list", () => {
 		const r = parseAgentSettingsBody({
 			models: {
@@ -50,7 +64,7 @@ describe("parseAgentSettingsBody", () => {
 		});
 		const bad = parseAgentSettingsBody({ models: { teacher: {} } });
 		assert.equal(bad.ok, false);
-		if (!bad.ok) assert.match(bad.error, /unknown role "teacher" \(supported: researcher, demoBuilder, visualMaker, extractor, auditor\)/);
+		if (!bad.ok) assert.match(bad.error, /unknown role "teacher" \(supported: researcher, demoBuilder, visualMaker, extractor, auditor, sideQuestion\)/);
 		const malformed = parseAgentSettingsBody({ models: { researcher: { model: { provider: 1, id: "x" } } } });
 		assert.equal(malformed.ok, false);
 	});
@@ -238,6 +252,13 @@ describe("parseGraphSettingsBody", () => {
 });
 
 describe("parseCompactionSettingsBody (owner round 14)", () => {
+	it("rejects non-boolean reasoning choices rather than silently changing the estimator", () => {
+		for (const includeReasoning of ["true", "false", 0, 1, null, [], {}]) {
+			const result = parseCompactionSettingsBody({ includeReasoning });
+			assert.ok(!result.ok);
+			assert.match(result.error, /includeReasoning must be true or false/);
+		}
+	});
 	it("parses a threshold; absent = the empty section (factory default at resolution)", () => {
 		const r = parseCompactionSettingsBody({ thresholdTokens: 120000 });
 		assert.ok(r.ok);

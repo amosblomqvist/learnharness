@@ -55,6 +55,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import type { CacheRetention } from "@earendil-works/pi-ai";
 import { CacheRetentionMenu, cacheRetentionLabel } from "./cache-retention-menu.tsx";
 import { MenuShell } from "@/components/menu-shell";
+import { useInteractionLayers } from "@/components/interaction-layers";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
 import { useModelCatalog } from "@/components/model-catalog";
@@ -135,6 +136,37 @@ export function composeAddFolder(agent: AgentSettings | undefined, folder: strin
 /** Removing the last folder NEVER changes the restriction switch. */
 export function composeRemoveFolder(agent: AgentSettings | undefined, folder: string): AgentSettings {
 	return { ...agent, fileAccess: { restricted: agent?.fileAccess?.restricted ?? false, folders: (agent?.fileAccess?.folders ?? []).filter((f) => f !== folder) } };
+}
+
+/** Parse the numeric draft and compose the WHOLE agent section. Empty
+ *  removes the override; invalid input never writes, rounds, or clamps.
+ *  Pure — exported for tests. */
+export function composeWorkerRequestConcurrency(
+	agent: AgentSettings | undefined,
+	value: string,
+): { ok: true; settings: AgentSettings } | { ok: false; error: string } {
+	const next = { ...agent };
+	const draft = value.trim();
+	if (draft === "") {
+		delete next.workerRequestConcurrency;
+		return { ok: true, settings: next };
+	}
+	const invalid = { ok: false as const, error: "Enter a positive, safely representable whole number." };
+	const concurrency = Number(draft);
+	if (!Number.isSafeInteger(concurrency) || concurrency <= 0) return invalid;
+	// Preserve native decimal/exponent syntax, but check fractional digits
+	// BEFORE accepting Number's result: e.g. 8.0000000000000001 rounds to 8.
+	// Trailing coefficient zeroes cancel negative decimal places exactly;
+	// this needs no arbitrary-precision arithmetic or unbounded powers.
+	const decimal = draft.match(/^\+?(\d+(?:\.\d*)?|\.\d+)(?:e([+-]?\d+))?$/i);
+	if (!decimal) return invalid;
+	const mantissa = decimal[1]!;
+	const fractionalPlaces = mantissa.split(".")[1]?.length ?? 0;
+	const coefficient = mantissa.replace(".", "");
+	const trailingZeroes = coefficient.length - coefficient.replace(/0+$/, "").length;
+	if (Number(decimal[2] ?? 0) - fractionalPlaces + trailingZeroes < 0) return invalid;
+	next.workerRequestConcurrency = concurrency;
+	return { ok: true, settings: next };
 }
 
 /** The quizzing mechanics (owner 2026-09-27): a segmented control, not a
@@ -330,11 +362,11 @@ export function AgentSection({
 	 *  behavior, not an agent-section key; owner round 14, Agent tab). */
 	compaction: CompactionSettings | undefined;
 	/** Writes the composed WHOLE agent section (replace-PUT discipline). */
-	onSectionChange: (next: AgentSettings) => void;
+	onSectionChange: (next: AgentSettings) => boolean | Promise<boolean>;
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
-	onCompactionChange: (next: CompactionSettings) => void;
+	onCompactionChange: (next: CompactionSettings) => boolean | Promise<boolean>;
 }) {
 	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
 	const catalog = body?.models;
@@ -354,7 +386,9 @@ export function AgentSection({
 	 *  row), which kind. */
 	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" | "cache" } | null>(null);
 	const [advancedModels, setAdvancedModels] = useState(false);
+	const [workerConcurrencyError, setWorkerConcurrencyError] = useState<string | null>(null);
 	const menuAnchorRef = useRef<HTMLSpanElement>(null);
+	const interactions = useInteractionLayers();
 
 	const refreshSearch = () =>
 		fetch("/api/search")
@@ -419,6 +453,8 @@ export function AgentSection({
 	useEffect(() => {
 		if (openMenu === null) return;
 		const onPointerDown = (e: PointerEvent) => {
+			const testid = openMenu.target === "search" ? "search-engine-menu" : `slot-${openMenu.kind}-menu-${openMenu.target}`;
+			if (!interactions.isElementEligible(document.querySelector<HTMLElement>(`[data-testid="${testid}"]`))) return;
 			const target = e.target as Node;
 			if (menuAnchorRef.current?.contains(target)) return;
 			if (target instanceof Element && target.closest("[data-lh-menu]")) return;
@@ -427,19 +463,9 @@ export function AgentSection({
 			}
 			// else: outside the dialog — the dialog's own close handles it.
 		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.stopPropagation();
-				setOpenMenu(null);
-			}
-		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [openMenu]);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [openMenu, interactions]);
 
 	async function saveSegment(path: string, text: string) {
 		setSegmentStatus(null);
@@ -620,6 +646,7 @@ export function AgentSection({
 	// Resolved through the SAME core resolver the server's effective
 	// settings use (the GraphSection precedent): the hint and placeholder
 	// report exactly the number the trigger waits for.
+	const resolvedAgent = resolveSettings(agent === undefined ? null : { version: 1, agent }).agent;
 	const resolvedCompaction = resolveSettings(
 		compaction === undefined ? null : { version: 1, compaction },
 	).compaction;
@@ -665,12 +692,6 @@ export function AgentSection({
 							<span
 								ref={thisMenuOpen ? menuAnchorRef : undefined}
 								className={`relative flex items-center gap-2 ${advancedModels ? "shrink-0" : ""}`}
-								onKeyDown={(event) => {
-									// Portal events bubble here too: close this menu, not the dialog.
-									if (thisMenuOpen === "cache" && event.key === "Escape") {
-										event.preventDefault(); event.stopPropagation(); setOpenMenu(null);
-									}
-								}}
 							>
 								{slot !== "strong" && <><ChatGPTBackgroundAccess provider={coord?.provider} /><NativeSubscriptionBackgroundAccess provider={coord?.provider} /></>}
 								<MenuTrigger
@@ -709,6 +730,7 @@ export function AgentSection({
 									preferredSide="down"
 									anchorTestid={`slot-cache-${slot}`}
 									testid={`slot-cache-menu-${slot}`}
+									onClose={() => { setOpenMenu(null); return "closed"; }}
 									menuClass="flex w-80 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 								>
 									<CacheRetentionMenu value={override?.cacheRetention} onPick={(value) => {
@@ -721,6 +743,7 @@ export function AgentSection({
 										preferredSide="down"
 											anchorTestid={`slot-model-${slot}`}
 										testid={`slot-model-menu-${slot}`}
+										onClose={() => { setOpenMenu(null); return "closed"; }}
 										menuClass="flex w-[22rem] flex-col rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										<ModelMenuList
@@ -749,6 +772,7 @@ export function AgentSection({
 										preferredSide="down"
 											anchorTestid={`slot-thinking-${slot}`}
 										testid={`slot-thinking-menu-${slot}`}
+										onClose={() => { setOpenMenu(null); return "closed"; }}
 										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										<ThinkingMenuList
@@ -767,6 +791,40 @@ export function AgentSection({
 						</SettingsRow>
 					);
 				})}
+				<SettingsRow
+					label="Concurrent worker requests"
+					hint="Maximum simultaneous background-worker model requests. Direct conversations are not limited."
+					testid="worker-request-concurrency-row"
+				>
+					<div
+						className="flex flex-col items-end gap-1"
+						onChangeCapture={() => setWorkerConcurrencyError(null)}
+						onBlurCapture={(event) => {
+							// Browsers expose incomplete numeric input (e.g. "1e")
+							// as an empty value. It is INVALID, not a blank reset.
+							if (event.target instanceof HTMLInputElement && event.target.validity.badInput) {
+								event.stopPropagation();
+								setWorkerConcurrencyError("Enter a positive, safely representable whole number.");
+							}
+						}}
+					>
+						<CommitInput
+							type="number"
+							min={1}
+							step={1}
+							value={String(agent?.workerRequestConcurrency ?? "")}
+							placeholder={String(resolvedAgent.workerRequestConcurrency)}
+							ariaLabel="Concurrent worker requests"
+							testid="input-worker-request-concurrency"
+							onCommit={(value) => {
+								const next = composeWorkerRequestConcurrency(agent, value);
+								setWorkerConcurrencyError(next.ok ? null : next.error);
+								return next.ok ? onSectionChange(next.settings) : false;
+							}}
+						/>
+						{workerConcurrencyError && <p role="alert" className="text-xs text-error">{workerConcurrencyError}</p>}
+					</div>
+				</SettingsRow>
 			</SettingsGroup>
 
 			<SettingsGroup label="Tools" testid="group-tools">
@@ -917,6 +975,7 @@ export function AgentSection({
 										preferredSide="down"
 											anchorTestid="search-engine-trigger"
 										testid="search-engine-menu"
+										onClose={() => { setOpenMenu(null); return "closed"; }}
 										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										{engineOption("auto", "Automatic", engine === null, null, () => {
@@ -953,19 +1012,29 @@ export function AgentSection({
 							// Empty = factory default (the budget row's discipline):
 							// absence is the unset for numbers.
 							if (v === "") {
-								onCompactionChange({ ...compaction, thresholdTokens: undefined });
-								return;
+								return onCompactionChange({ ...compaction, thresholdTokens: undefined });
 							}
 							const n = Number(v);
-							if (!Number.isFinite(n) || n <= 0) return; // bad input: no write
+							if (!Number.isFinite(n) || n <= 0) return false; // bad input: no write
 							// Mirror the server floor (anti-churn: each compaction
 							// keeps a ~20k-token tail); no ceiling — the effective
 							// trigger is min(threshold, contextWindow − 16k) anyway.
-							onCompactionChange({
+							return onCompactionChange({
 								...compaction,
 								thresholdTokens: Math.max(COMPACTION_THRESHOLD_FLOOR, Math.round(n)),
 							});
 						}}
+					/>
+				</SettingsRow>
+				<SettingsRow
+					label="Include reasoning in token estimates (OpenAI Responses only)"
+					hint="Use saved output-token usage to account for replayed reasoning on matching OpenAI Responses models. Off uses the original text-based estimate."
+					testid="compaction-row-reasoning"
+				>
+					<Toggle
+						label="Include reasoning in token estimates (OpenAI Responses only)"
+						checked={resolvedCompaction.includeReasoning}
+						onChange={(includeReasoning) => onCompactionChange({ ...compaction, includeReasoning })}
 					/>
 				</SettingsRow>
 			</SettingsGroup>

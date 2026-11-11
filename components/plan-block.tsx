@@ -16,6 +16,7 @@ import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/comp
 import type { PlanBlockData, PlanNodeStatus, PlanTree } from "@/src/core";
 import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
+import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
 
 /**
  * PLAN BLOCKS — the plan lives in the chat (wave 4): persisted
@@ -528,11 +529,8 @@ export function PlanDiagram({
 			viewBox={viewBoxOverride ?? `${ox - pad} ${oy - pad} ${vbW} ${vbH}`}
 			className={`block ${fill ? "h-full w-full" : `h-auto${naturalSize ? "" : " w-full"}`}${textCapScale ? " mx-auto" : ""}`}
 			style={{
-				// The READING font (owner, 2026-09-26) — via the runtime var, NOT
-				// the font-prose utility: @theme inline bakes the literal into
-				// utilities (the --font-title trap), which would freeze the
-				// graph at Source Sans 3 and ignore the Appearance reading-font
-				// override. var(--font-prose) rides it.
+				// The READING font (owner, 2026-09-26) — the same runtime token
+				// consumed by font-prose, so Appearance changes reach SVG text.
 				fontFamily: "var(--font-prose)",
 				...(textCapScale
 					? { maxWidth: `${Math.round(vbW * textCapScale * 100) / 100}px` }
@@ -757,24 +755,11 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 	);
 	const statusOf = (id: string): PlanNodeStatus => (statuses ? derivedNodeStatus(statuses, id) : "upcoming");
 
-	// Esc closes — claimed at the DOCUMENT level (THE ONE-ESC LAW, owner
-	// keyboard round 2026-10-06): a surfaced layer's Esc is exactly one
-	// action. The window-level chain (dictation cancel → abort) is the
-	// fallback for when NOTHING is surfaced; a window listener here could
-	// never stop it — same-node listeners all fire — which was the
-	// plan-open-while-dictating double-act (Esc closed the plan AND
-	// cancelled the dictation).
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose]);
+	const rootRef = useRef<HTMLDivElement>(null);
+	const layer = useInteractionLayer({
+		kind: "view", enabled: true, rootRef,
+		onClose: () => { onClose(); return "closed"; },
+	});
 
 	// ── pan/zoom viewport (harvested semantics: fit floor = the default) ──
 	const viewportRef = useRef<HTMLDivElement>(null);
@@ -880,14 +865,17 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 	const markerId = useId().replace(/[^a-zA-Z0-9-]/g, "");
 
 	return (
+		<InteractionLayerOwner.Provider value={layer.id}>
 		<div
+			ref={rootRef}
 			data-testid="plan-popup"
 			// SESSION-SCOPED (absolute, not fixed): the chat page mounts this
 			// INSIDE the session-area div — below the drag bar, right of the
 			// sidebar. 80% + blur: the transcript ghosts through.
-			className="absolute inset-0 z-40 flex flex-col bg-background/80 p-4 backdrop-blur-sm"
-			role="dialog"
-			aria-modal="true"
+			className="pointer-events-auto absolute inset-0 z-40 flex flex-col bg-background/80 p-4 backdrop-blur-sm"
+			// Ranked inside the session's bounded view stack, below app modals.
+			style={{ zIndex: 100 + layer.order }}
+			role="region"
 			aria-label="The full plan"
 			onClick={(e) => {
 				if (e.target === e.currentTarget) onClose();
@@ -991,5 +979,6 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 				)}
 			</div>
 		</div>
+		</InteractionLayerOwner.Provider>
 	);
 }

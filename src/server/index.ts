@@ -7,7 +7,6 @@
 export * from "./chat-handler.ts";
 export * from "./events-stream.ts";
 export * from "./chats.ts";
-export * from "./attachments.ts";
 export * from "./graph.ts";
 export * from "./source-organization.ts";
 export * from "./source-deletion.ts";
@@ -16,7 +15,9 @@ export { convertPdf } from "../agent/subagents/pdf-ops.ts";
 export { joinPages } from "../agent/subagents/pdf-markdown.ts";
 export * from "./commit-positions.ts";
 export * from "./jobs.ts";
+export { prepareSubmissionImages, prepareSubmissionImageChannels } from "./submission-images.ts";
 export * from "./stores.ts";
+export { refreshWorkerRequestAdmission } from "../agent/worker-request-admission.ts";
 export { readRenderSettings, writeRenderSettings } from "../store/render-settings.ts";
 // The settings record + prompt overrides (settings-storage wave, 2026-09-19).
 // The *Record aliases keep the app/api/settings routes explicit about which
@@ -48,11 +49,17 @@ export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";
 export * from "./dismissal-park.ts";
 export * from "./compaction.ts";
+export { sideChats, createSideChatService, type SideChatService, type SideChatDeps, type SideStreamEvent } from "./side-chat.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";
+export { abortPluginWorkerActivity } from "./plugin-worker-activity.ts";
 export * from "./model-catalog.ts";
 export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
 export { sessionCost } from "./pricing.ts";
+export { initializePlugins, getPluginHost, getPluginAgentContributions, getPluginQuestionTypeResolver, pluginTransport } from "./plugins.ts";
+export { createPluginDocumentRoute } from "./plugin-transport.ts";
+export { pluginProblemAvailabilityOf, type ProblemTypeResolver } from "./plugin-problems.ts";
+export { pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, preparePluginQuestionDismissal, type QuestionTypeResolver } from "./plugin-questions.ts";
 export { claudeCodeInstallationResponse } from "./claude-code.ts";
 // The custom endpoint module (registers into piModels() + probes for models).
 // No import side effects; the boot sync lives in stores.ts.

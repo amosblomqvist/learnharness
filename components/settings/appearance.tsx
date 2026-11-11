@@ -51,6 +51,7 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 		colors: delta?.colors ?? f.colors,
 		fontFamily: delta?.fontFamily ?? f.fontFamily,
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
+		codeLigatures: delta?.codeLigatures ?? f.codeLigatures,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
 		mdRendering: {
 			headingWeight: delta?.mdRendering?.headingWeight ?? f.mdRendering.headingWeight,
@@ -84,6 +85,9 @@ export function appearanceVars(
 	// The ONE documented reading-size variable (typography round 4): prose,
 	// inputs, and session titles all read it, so one setProperty moves them.
 	vars["--lh-prose-size"] = `${a.proseFontSize}px`;
+	// Code surfaces opt in to this token; never change prose or UI shaping.
+	// "normal" permits the font's behavior rather than forcing glyph joining.
+	vars["--lh-code-ligatures"] = a.codeLigatures ? "normal" : "none";
 	// Session names: CMU Serif by default; the toggle swaps the title font
 	// to the prose family — covers chat.tsx + new-session.tsx titles with
 	// zero component edits (they use the .font-title utility).
@@ -173,11 +177,15 @@ export function AppearanceProvider({
 		const root = document.documentElement;
 		root.classList.toggle("dark", mode === "dark");
 		root.classList.toggle("light", mode === "light");
-	}, [mode]);
+	}, [mode, initialTheme.mode]);
 
 	// The vars apply on every change — stringified as the change signal.
 	const vars = useMemo(() => appearanceVars(appearance, activeTheme), [appearance, activeTheme]);
-	const key = useMemo(() => JSON.stringify(vars), [vars]);
+	// A refreshed server layout can rewrite <html>'s class/style while the
+	// mounted provider retains a newer local save. Reapply that live state
+	// when the server-rendered palette changes, even within the same mode.
+	const serverKey = JSON.stringify(themeVars(effectiveColors(initialTheme, initialAppearance), initialTheme.mode));
+	const key = useMemo(() => JSON.stringify([vars, serverKey]), [vars, serverKey]);
 	// REMOVAL is half the job (owner repro, fix wave): a later write that
 	// OMITS a var (empty font = factory, serif toggle back on) must clear
 	// the previously-set inline value or the stale one wins forever. Every
@@ -222,6 +230,8 @@ export function AppearanceProvider({
 	}, [refreshThemes]);
 
 	const onAppearanceChange = useCallback((next: AppearanceSettings | undefined) => {
+		// There is no startup settings GET to race this save: the layout
+		// seeds the record synchronously into the provider's initial state.
 		setDelta(next);
 	}, []);
 

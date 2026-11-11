@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { AttachmentRecord, ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -22,7 +22,7 @@ import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
-	return path.join(PATHS.chats, `${id}.json`);
+	return path.join(/* turbopackIgnore: true */ PATHS.chats, `${id}.json`);
 }
 
 /** THE SILENCE LAW (push S6, 2026-10-02): chats-changed announces ONLY
@@ -63,7 +63,7 @@ function writeChat(record: ChatRecord): void {
 function getChat(id: string): ChatRecord | null {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(fs.readFileSync(chatFile(id), "utf-8"));
+		parsed = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ chatFile(id), "utf-8"));
 	} catch {
 		return null;
 	}
@@ -82,11 +82,11 @@ function listChats(): ChatSummary[] {
 	try {
 		fs.mkdirSync(PATHS.chats, { recursive: true });
 		return fs
-			.readdirSync(PATHS.chats)
+			.readdirSync(/* turbopackIgnore: true */ PATHS.chats)
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, sideChats: _sideChats, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -132,6 +132,8 @@ function listChats(): ChatSummary[] {
 function saveMessages(id: string, messages: LhMessage[]): void {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
+	// Side-delivery watermarks are part of the appended native entries,
+	// so input + updates commit together without mutating thread history.
 	record.messages = messages;
 	record.updatedAt = new Date().toISOString();
 	writeChat(record);
@@ -216,59 +218,6 @@ function deleteChat(id: string): boolean {
 	}
 }
 
-/** Append attachment records — the files are already on disk (store/
- *  attachments.ts). Not conversation activity: updatedAt stays put. */
-function addAttachments(id: string, attachments: AttachmentRecord[]): void {
-	const record = getChat(id);
-	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.attachments = [...(record.attachments ?? []), ...attachments];
-	writeChat(record);
-}
-
-/** Detach (soft-remove) or restore one attachment record; idempotent —
- *  detaching twice keeps the first time. Null (no write) when the id isn't
- *  on the chat. Not conversation activity: updatedAt stays put. */
-function setAttachmentDetached(id: string, attachmentId: string, detached: boolean): AttachmentRecord | null {
-	const record = getChat(id);
-	if (!record) throw new Error(`Chat not found: ${id}`);
-	const attachments = record.attachments ?? [];
-	const index = attachments.findIndex((a) => a.id === attachmentId);
-	if (index === -1) return null;
-	const current = attachments[index]!;
-	let updated: AttachmentRecord;
-	if (detached) {
-		updated = current.detachedAt ? current : { ...current, detachedAt: new Date().toISOString() };
-	} else {
-		const { detachedAt: _detachedAt, ...rest } = current;
-		updated = rest;
-	}
-	record.attachments = attachments.map((a, i) => (i === index ? updated : a));
-	writeChat(record);
-	return updated;
-}
-
-/** Every attachment blob some chat record names — the sweep's live set.
- *  Reads the raw JSON, NOT getChat/listChats: a record this build refuses
- *  (newer schema) or can't project still holds its files. */
-function referencedAttachmentFiles(): Set<string> {
-	const files = new Set<string>();
-	let names: string[] = [];
-	try {
-		names = fs.readdirSync(PATHS.chats).filter((f) => f.endsWith(".json"));
-	} catch {
-		return files;
-	}
-	for (const name of names) {
-		try {
-			const record = JSON.parse(fs.readFileSync(path.join(PATHS.chats, name), "utf-8")) as { attachments?: Array<{ file?: unknown }> };
-			for (const a of record.attachments ?? []) if (typeof a.file === "string") files.add(a.file);
-		} catch {
-			// Unreadable record: nothing to learn from it.
-		}
-	}
-	return files;
-}
-
 /** Persist the session plan tree (plan tools call this in execute). */
 function saveTree(id: string, tree: PlanTree): void {
 	const record = getChat(id);
@@ -277,6 +226,21 @@ function saveTree(id: string, tree: PlanTree): void {
 	// Deliberately does NOT bump updatedAt: tree mutations piggyback on the
 	// turn's saveMessages, and sidebar ordering shouldn't churn on tree edits.
 	writeChat(record);
+}
+
+/** Side-question threads (2026-11-02): one synchronous read-modify-write,
+ *  so a concurrent turn's saveMessages (which re-reads the record) never
+ *  loses a thread and a thread write never loses messages. Null when the
+ *  chat is gone (a side answer finishing after session deletion). Silent
+ *  and not conversation activity, like saveSettings. */
+function updateSideChats(id: string, update: (threads: SideChatThread[]) => SideChatThread[]): SideChatThread[] | null {
+	const record = getChat(id);
+	if (!record) return null;
+	const next = update(record.sideChats ?? []);
+	if (next.length > 0) record.sideChats = next;
+	else delete record.sideChats;
+	writeChat(record);
+	return next;
 }
 
 export const chatStore: ChatStore = {
@@ -289,9 +253,7 @@ export const chatStore: ChatStore = {
 	saveSettings,
 	renameChat,
 	deleteChat,
-	addAttachments,
-	setAttachmentDetached,
-	referencedAttachmentFiles,
 	appendTurnUsage,
 	appendExtractionUsage,
+	updateSideChats,
 };

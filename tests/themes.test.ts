@@ -52,6 +52,8 @@ describe("theme files — the import validator", () => {
 		assert.equal(themeIdFromName("Rosé Pine Moon"), "rose-pine-moon");
 		assert.equal(themeIdFromName("  My   Ayu!! "), "my-ayu");
 		assert.equal(themeIdFromName("!!!"), "");
+		assert.equal(themeIdFromName(`${"a".repeat(63)} b`), "a".repeat(63), "trim after truncation");
+		assert.equal(themeIdFromName("a".repeat(100)), "a".repeat(64));
 	});
 });
 

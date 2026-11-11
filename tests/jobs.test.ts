@@ -10,7 +10,7 @@
  *      CONTINUES — no turn break at the call), a job record exists, and the
  *      test runner (fake deliver) produces the steer
  *   4. runner completion: a fake researcher model (web_search call → final
- *      text brief, globalThis.fetch stubbed) → the job stores the result,
+ *      text brief, safeFetchOverride stubbed) → the job stores the result,
  *      the steer carries the brief + sources, the fake deliver flips the
  *      job done
  *   5. runner failure: a model that throws → the failure steer still fires
@@ -19,13 +19,8 @@
  *      happy path (fires the injected turn runner, flips the job), pending-
  *      quiz deferral, 409 retry, idempotent redelivery
  *
- * Hermetic: LH_DATA_DIR → a temp dir, set BEFORE the first import of the
- * app modules (the seam is env-at-module-load, see
- * tests/data-dir-seam.test.ts), so every app-module import is dynamic.
- * Without it the wake tests resolve the developer's own strong slot — a
- * subscription provider with no live connection parks every steer and
- * the awaited deliveries never settle. Created chat/job files are still
- * removed in finally blocks / the after() hook (tests/chat-flow.test.ts).
+ * Cleanup follows tests/chat-flow.test.ts: created chat/job files removed in
+ * finally blocks / the after() hook.
  */
 
 import assert from "node:assert/strict";
@@ -34,39 +29,28 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type AssistantMessage, type FauxResponseStep } from "@earendil-works/pi-ai";
-import type { SteerInput } from "../src/core/input-events.ts";
-import type {
-	DemoResult,
-	JobUsage,
-	PdfResult,
-	ResearchResult,
-	SteerMessage,
-	VisualResult,
-} from "../src/core/contracts.ts";
-import type { TurnRunner } from "../src/server/jobs.ts";
-import type { ModelSlotName } from "../src/core/settings.ts";
-import type { PiEngine } from "../src/agent/models.ts";
-import type { SearchProvider } from "../src/core/search.ts";
-import type { LhMessage } from "../src/core/native-messages.ts";
-
-const TMP_DATA = fs.mkdtempSync(path.join(os.tmpdir(), "lh-jobs-"));
-process.env.LH_DATA_DIR = TMP_DATA;
-after(() => fs.rmSync(TMP_DATA, { recursive: true, force: true }));
-
-const {
+import {
 	accumulateJobUsage,
 	buildAbortSteer,
 	buildSubagentSteer,
 	isSubagentFailure,
 	steerDelivered,
+	type DemoResult,
+	type JobUsage,
+	type PdfResult,
+	type ResearchResult,
+	type SubagentArtifactData,
+	type SteerMessage,
+	type VisualResult,
 	buildProbeHandoffSteer,
-} = await import("../src/core/contracts.ts");
-const { composeInstructions, createTeacherAgent } = await import("../src/agent/teacher-agent.ts");
-const { createTeacherTools } = await import("../src/agent/tools.ts");
-const { webTools } = await import("../src/agent/tools/web.ts");
-const { handleChatRequest } = await import("../src/server/chat-handler.ts");
-const { runningTurn } = await import("../src/server/turn-runs.ts");
-const {
+} from "../src/core/contracts.ts";
+import { composeInstructions, createTeacherAgent } from "../src/agent/teacher-agent.ts";
+import { createTeacherTools } from "../src/agent/tools.ts";
+import { webTools } from "../src/agent/tools/web.ts";
+import { safeFetchOverride } from "../src/agent/tools/safe-fetch.ts";
+import { handleChatRequest } from "../src/server/chat-handler.ts";
+import { runningTurn } from "../src/server/turn-runs.ts";
+import {
 	abortJob,
 	deliverJobResult,
 	noteSteersDurable,
@@ -75,21 +59,26 @@ const {
 	recoverStaleJobs,
 	registerLiveAgent,
 	setJobRespawn,
-	setTurnRunner: setRawTurnRunner,
+	setTurnRunner as setRawTurnRunner,
+	type TurnRunner,
 	settleSteers,
 	steerLiveChat,
 	unregisterLiveAgent,
-} = await import("../src/server/jobs.ts");
-const { registerJobAbort, unregisterJobAbort } = await import("../src/agent/subagents/aborts.ts");
-const { beginTurn, endTurn } = await import("../src/server/turn-liveness.ts");
-const { persistTurn } = await import("../src/server/turn-service.ts");
-const { chatStore } = await import("../src/store/chats.ts");
-const { jobStore } = await import("../src/store/jobs.ts");
-const { createJobRunner, pdfModelOverride, researchModelOverride } = await import("../src/agent/subagents/runner.ts");
-const { providerKeyMissing } = await import("../src/core/settings.ts");
-const { PATHS } = await import("../config.ts");
-const { projectView: projectNative } = await import("../src/core/view.ts");
-const { subscribe } = await import("../src/core/events.ts");
+} from "../src/server/jobs.ts";
+import { isJobLive, registerJobAbort, unregisterJobAbort } from "../src/agent/subagents/aborts.ts";
+import { beginTurn, endTurn, isTurnRunning } from "../src/server/turn-liveness.ts";
+import { persistTurn } from "../src/server/turn-service.ts";
+import { chatStore } from "../src/store/chats.ts";
+import { jobStore } from "../src/store/jobs.ts";
+import { createJobRunner, pdfModelOverride, researchModelOverride } from "../src/agent/subagents/runner.ts";
+import { providerKeyMissing, type ModelSlotName } from "../src/core/settings.ts";
+import type { PiEngine } from "../src/agent/models.ts";
+import type { SearchProvider } from "../src/core/search.ts";
+import { PATHS } from "../config.ts";
+import { projectView as projectNative } from "../src/core/view.ts";
+import { subscribe } from "../src/core/events.ts";
+import type { LhMessage } from "../src/core/native-messages.ts";
+import type { SteerInput, TurnInput } from "../src/core/input-events.ts";
 
 const JOBS_DIR = path.join(PATHS.data, "jobs");
 
@@ -653,8 +642,7 @@ describe("research runner (async protocol §3)", () => {
 		const delivery = fakeDeliver();
 		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, searchProvider: () => null });
 		const fetched: string[] = [];
-		const realFetch = globalThis.fetch;
-		globalThis.fetch = (async (source) => {
+		safeFetchOverride.current = (async (source) => {
 			fetched.push(String(source));
 			assert.equal(String(source), url);
 			return new Response("Synthetic verified source content", { headers: { "content-type": "text/plain" } });
@@ -667,7 +655,7 @@ describe("research runner (async protocol §3)", () => {
 			await runner.runJob(job.id);
 		} finally {
 			researchModelOverride.current = undefined;
-			globalThis.fetch = realFetch;
+			safeFetchOverride.current = undefined;
 		}
 		assert.deepEqual(fetched, [url]);
 		const done = jobStore.getJob(job.id)!;

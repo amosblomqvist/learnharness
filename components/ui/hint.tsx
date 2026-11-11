@@ -6,7 +6,7 @@ import { bindingForAction, formatBinding, type KeyAction } from "@/src/core"
 
 /**
  * The tooltip composition for icon and pill controls (tooltip wave, owner
- * 2026-09-25; subtlety round same day). The styled Radix tooltip carries
+ * 2026-09-25; subtlety round same day). The styled passive tooltip carries
  * the label, with the control's shortcut appended in parentheses when
  * it has one ("Dictate (⌘D)") — the owner call: the em-dash suffix read
  * as too much air.

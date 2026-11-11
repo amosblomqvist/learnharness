@@ -13,17 +13,8 @@ interface SessionCreation {
 export class SessionStarter {
 	private created?: { identity: string; id: string };
 
-	/** `attach` uploads the draft's context files once the chat exists —
-	 *  BEFORE navigation (File objects can't cross it); only their ids ride
-	 *  the opening-prompt handover. An upload failure throws with the
-	 *  session kept, so the retry reuses it and uploads only what's left. */
-	async start(
-		body: SessionCreation,
-		fetchLike: typeof fetch,
-		settingsIdentity?: string,
-		attach?: { identity: string; upload: (chatId: string) => Promise<string[]> },
-	): Promise<string> {
-		const identity = JSON.stringify([body, settingsIdentity, attach?.identity ?? ""]);
+	async start(body: SessionCreation, fetchLike: typeof fetch, settingsIdentity?: string): Promise<string> {
+		const identity = JSON.stringify([body, settingsIdentity]);
 		if (this.created?.identity !== identity) {
 			if (this.created) clearOpeningPrompt(this.created.id);
 			this.created = undefined;
@@ -37,8 +28,7 @@ export class SessionStarter {
 			if (typeof result.id !== "string" || !/^[A-Za-z0-9_-]+$/.test(result.id)) throw new Error(OPENING_PROMPT_FAILURE);
 			this.created = { identity, id: result.id };
 		}
-		const attachmentIds = attach ? await attach.upload(this.created.id) : undefined;
-		if (!stashOpeningPrompt(this.created.id, body.title, false, attachmentIds)) throw new Error(OPENING_PROMPT_FAILURE);
+		if (!stashOpeningPrompt(this.created.id, body.title)) throw new Error(OPENING_PROMPT_FAILURE);
 		return `/chat/${this.created.id}`;
 	}
 }

@@ -7,14 +7,10 @@ const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), 
 const nextConfig: NextConfig = {
 	// Public build metadata only; no new runtime Electron version API.
 	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
-	// proxy.ts guards every /api route, and Next buffers proxied bodies up to
-	// this limit (default 10MB) — beyond it the route sees a TRUNCATED body.
-	// One limit serves both uploaders; leave multipart headroom above each
-	// file allowance. Notes import: 25 MiB files (the route also bounds reads,
-	// validates bytes and handles incomplete multipart bodies). Session
-	// attachments: one file per request, ATTACHMENT_MAX_BYTES (50MB,
-	// core/contracts/chat.ts) + slack.
-	experimental: { proxyClientMaxBodySize: Math.max(MAX_IMPORT_BODY_BYTES, 51 * 1024 * 1024) },
+	// Leave multipart headroom above the 25 MiB file allowance. This is a
+	// proxy buffer, not a rejection gate: the import route also bounds reads,
+	// validates actual file bytes and handles incomplete multipart bodies.
+	experimental: { proxyClientMaxBodySize: MAX_IMPORT_BODY_BYTES },
 	// Desktop target (Electron wrapper, 2026-09-17): standalone output = a
 	// self-contained .next/standalone/server.js the Electron shell spawns
 	// on 127.0.0.1. Harmless for plain web deploys (extra build output).
@@ -89,6 +85,9 @@ const nextConfig: NextConfig = {
 			"node_modules/@napi-rs/canvas-*/**/*",
 			// Pi-compatible image resizing runs in an unbundled worker. Photon
 			// loads its colocated WASM through Node, also in packaged Electron.
+			// Side questions (2026-11-02): the side model's base prompt is read
+			// from disk per ask — a directory no agent-composition read names.
+			"src/agent/prompts/side-chat/*.md",
 			"src/agent/image-processing/*.mjs",
 			"src/agent/image-processing/LICENSE",
 			"node_modules/@silvia-odwyer/photon-node/**/*",

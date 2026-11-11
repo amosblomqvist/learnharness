@@ -100,16 +100,13 @@
 }
 
 @theme inline {
-	/* Fonts: chrome = JetBrains Mono, prose = Source Sans 3, titles = CMU
-	   Serif bold. The JetBrains/SourceSans variables attach in app/layout.tsx.
-	   (owner, typography round) The Tailwind defaults are ALIASED to the app
-	   fonts: `font-mono`/`font-sans` utilities would otherwise fall to the
-	   SYSTEM stacks — a fourth font the app never chose — and streamdown's
-	   code-block chrome + mermaid-error + demo-card all use them. */
+	/* Chrome/code = JetBrains Mono; sans surfaces follow the reading font
+	   (Source Sans 3 by default). The loading-face variables attach in
+	   app/layout.tsx. Keep the sans alias pointed at the RUNTIME prose token,
+	   not the loading face, so font-sans also honors Appearance changes. */
 	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
 	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-sans: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
+	--font-sans: var(--font-prose);
 	/* The modular type ladder — each size carries its own line-height.
 	   Component sizes must pull from this ladder. (owner, typography
 	   round 4: the 10px rung is merged into 11 — one pixel apart was a
@@ -117,12 +114,9 @@
 	   legibility floor; quiet labels get their quiet from color +
 	   tracking, not a notch of size. Reading prose = the 16px rung via
 	   --lh-prose-size.) */
-	/* --font-title lives in the NON-inline @theme below: inline tokens get
-	   their literal values baked into the utilities (.font-title{font-family:
-	   lh-cmu,serif}), which made the appearance "session names in serif"
-	   toggle write a runtime --font-title no consumer ever read (owner, fix
-	   wave: toggle looked dead). Non-inline emits :root { --font-title: … }
-	   and the utility reads var(--font-title) — appearance overrides win. */
+	/* --font-prose and --font-title live in the NON-inline @theme below:
+	   their utilities must read the runtime variables, not bake in the
+	   defaults and bypass the Appearance reading-font/serif overrides. */
 	--text-xs: 11px;
 	--text-xs--line-height: 1.4;
 	--text-sm: 12.5px;
@@ -323,6 +317,14 @@ body {
    background #141414 and read as raised — owner note, chrome-melt tweaks
    2026-09-19) plus a subtle hairline outline. (md-blocks renders its own
    hover copy corner.) */
+/* Shared code-only policy. font-variant-ligatures survives Tailwind's
+   code/pre font-feature-settings reset; prose and rendered diagrams do not
+   consume this token. The fallback also disables code ligatures before the
+   Appearance provider loads an existing profile. */
+[data-streamdown="inline-code"],
+[data-streamdown="code-block"] :is(pre, code) {
+	font-variant-ligatures: var(--lh-code-ligatures, none);
+}
 /* Inline code shares only the block surface, keeping its inline geometry. */
 [data-streamdown="inline-code"],
 [data-streamdown="code-block"] {
@@ -535,11 +537,22 @@ body {
 .lh-electron {
 	--lh-zoom: 1;
 }
+.lh-electron[data-lh-platform="darwin"] {
+	/* Shared with floating-panel clearance; physical dimensions, before zoom. */
+	--lh-traffic-lights-width: 92px;
+	--lh-traffic-lights-height: 60px;
+}
 .lh-electron[data-lh-platform="darwin"] .lh-lights-gutter {
-	padding-left: calc(92px / var(--lh-zoom));
+	padding-left: calc(var(--lh-traffic-lights-width) / var(--lh-zoom));
 }
 .lh-electron[data-lh-platform="darwin"] .lh-closed-toggle {
-	margin-left: calc(92px / var(--lh-zoom));
+	margin-left: calc(var(--lh-traffic-lights-width) / var(--lh-zoom));
+}
+/* Picker headers have no sidebar-reopen control. Clear only the portion of
+   the physical traffic-light gutter that actually overlaps their pane;
+   an open sidebar already moves the main pane beyond the native buttons. */
+.lh-electron[data-lh-platform="darwin"] .lh-native-window-clearance {
+	padding-left: calc(0.75rem + max(0px, calc(92px / var(--lh-zoom) - var(--lh-header-left, 0px))));
 }
 
 /* Windows/Linux Window Controls Overlay: Chromium publishes the usable
@@ -559,10 +572,26 @@ body {
 	max-width: max(0px, calc(100% - 5.5rem - var(--lh-wco-right, 0px)));
 }
 
-/* --font-title deliberately NOT @theme inline (see comment above): the
-   session-name-serif toggle overrides this var at runtime, so the
-   .font-title utility must read it through var(), not carry a baked copy. */
+/* A closed graph rail starts below the floating toggle/native lights band.
+   Like the existing light gutter, its physical clearance survives desktop zoom. */
+.lh-electron[data-lh-platform="darwin"] .lh-plugin-graph-closed {
+	top: max(2.75rem, calc(44px / var(--lh-zoom)));
+}
+
+/* Plugin action lists scroll without adding visible chrome to the graph rail. */
+.lh-plugin-scroll {
+	scrollbar-width: none;
+	overscroll-behavior: contain;
+}
+.lh-plugin-scroll::-webkit-scrollbar {
+	display: none;
+}
+
+/* Runtime font contracts: Appearance overrides the reading family and,
+   independently, whether titles use serif or the reading family. Non-inline
+   utilities read these vars; Source Sans 3 remains the default/loading face. */
 @theme {
+	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
 	--font-title: "lh-cmu", serif;
 }
 

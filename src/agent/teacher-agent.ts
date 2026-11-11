@@ -14,22 +14,19 @@ import {
 	type ProberToolContext,
 	type TeacherToolContext,
 } from "./tools.ts";
-import { practiceTools, type PracticeToolContext } from "./tools/practice.ts";
+import { practiceTools, createPracticeGate, type PracticeGate, type PracticeToolContext } from "./tools/practice.ts";
+import { pluginProblemTools, isPluginProblemPoseAcknowledgment, type NativePluginProblemContribution } from "./plugin-problem-tools.ts";
 import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
 import { sendToUserApplies, sendToUserTool } from "./tools/send-to-user.ts";
 import { makeNarrationGuard, narrationGuardApplies, SEND_TO_USER_DELIVERY_RULE } from "./narration-guard.ts";
-import {
-	attachmentImageParts,
-	attachmentsPromptSection,
-	attachmentTools,
-	type SessionAttachment,
-} from "./tools/attachments.ts";
 import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
-import { QUESTION_TOOLS, type EnabledTools } from "../core/pending.ts";
+import { QUESTION_TOOLS, TOGGLEABLE_TOOLS, type EnabledTools } from "../core/pending.ts";
+import type { PluginToolContext } from "../core/plugins.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
+import { PluginQuestionLedger, type NativePluginQuestionContribution } from "./plugin-question-tools.ts";
 
 /**
  * The two teaching-side agents (docs/archive/probe-teach-split.md): the PROBER and
@@ -58,6 +55,13 @@ import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 /** Which agent's prompt directory to compose. Practice (2026-10-04)
  *  composes ONLY its own directory — see prompt-segments.ts. */
 export type AgentKind = "prober" | "teacher" | "practice";
+
+/** Reserve conversation builtins even when role/mechanics/settings gates hide them.
+ * New builtin names must join this catalog; actual turn tools are reserved too. */
+export const CONVERSATION_TOOL_NAMES = Object.freeze([
+	...QUESTION_TOOLS, ...TOGGLEABLE_TOOLS, "probe_done", "read", "ls", "find", "grep",
+	"plan_init", "list_sessions", "list_propositions", "problem", "conclude", sendToUserTool.name,
+] as const);
 
 // P2 (2026-09-19): segment discovery + override resolution live in ONE
 // canonical place now — src/store/prompt-overrides.ts (listSourceSegments
@@ -99,17 +103,6 @@ const composedInstructions: Record<AgentKind, string> = {
 	practice: composeInstructions("practice"),
 };
 
-/** The full system prompt of one turn: the composed doctrine, then the session-attachments section.
- *  The section goes last so the doctrine prefix stays cacheable. */
-export function systemPromptFor(
-	kind: AgentKind,
-	opts: { promptSwitches?: Record<string, boolean>; attachments?: readonly SessionAttachment[] } = {},
-): string {
-	const instructions = opts.promptSwitches ? composeInstructions(kind, opts.promptSwitches) : composedInstructions[kind]!;
-	const section = attachmentsPromptSection(opts.attachments ?? []);
-	return section ? `${instructions}\n\n---\n\n${section}` : instructions;
-}
-
 // Money channel (wave 4): the chat-handler passes a per-turn collector;
 // every model call's usage lands in the chat record's turns log
 // (ChatStore.appendTurnUsage). The narrow param keeps the seam honest.
@@ -125,9 +118,24 @@ export interface AgentBuildOptions {
 	messages?: AgentMessage[];
 	/** Money channel: one call per model request. */
 	onUsage?: StepUsageCollector;
+	/** Append-only reference updates before each already-scheduled internal
+	 * model call. Does not schedule an extra call or interrupt live output. */
+	contextUpdates?: (messages: readonly AgentMessage[]) => AgentMessage[];
+	/** Validate the actual selected context after prepared/queued messages
+	 * join, before dispatch. Throws through the SDK's normal failed-response
+	 * lifecycle, never through the conversion seam. */
+	validateContext?: (messages: readonly AgentMessage[]) => void;
 	/** Tests may pass a bare tool registry to drive deterministic flows.
 	 *  An explicit registry is NEVER toggle-filtered — the caller owns it. */
 	tools?: Record<string, AgentTool<any>>;
+	/** Server-owned per-turn resolver. Additive only; explicit tools test overrides
+	 * bypass contributions entirely. No conversation identity means no factory call. */
+	pluginContributions?: (context: PluginToolContext, reservedToolNames: readonly string[]) => {
+		instructions: readonly string[];
+		tools: readonly AgentTool<any>[];
+		questionTypes?: readonly NativePluginQuestionContribution[];
+		problemTypes?: readonly NativePluginProblemContribution[];
+	};
 	/** The resolved per-user tool toggles (core/pending EnabledTools — the
 	 *  2026-09-19 P2 bridge: Platform's chat-handler passes
 	 *  effective.agent.tools; the factories drop any tool explicitly false.
@@ -147,12 +155,6 @@ export interface AgentBuildOptions {
 	 *  <chatId>.jsonl via providerEventObserver — the GLM-truncation /
 	 *  DeepSeek-id incident layer. Absent or env-off → no observer. */
 	chatId?: string;
-	/** The session's ACTIVE context attachments, paths resolved (2026-10-29):
-	 *  the system prompt's manifest section, the scoped pdf_* / epub_*
-	 *  readers (joined to every kind's registry unless an explicit `tools`
-	 *  registry is passed), and inline images for vision models.
-	 *  Absent/empty = none. */
-	attachments?: readonly SessionAttachment[];
 }
 
 /**
@@ -199,7 +201,8 @@ function makeQuestionStopper(kind: AgentKind) {
 	};
 }
 
-function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[]) {
+function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[], nodeExists?: (nodeId: string) => boolean,
+	practice?: { gate: PracticeGate; graphNodes: PracticeToolContext["graphNodes"] }) {
 	// Practice never reaches the role fallback (the handler ALWAYS injects
 	// the session's conversation engine — practice rides the same
 	// conversation-spec resolution as teaching); the cast keeps AgentKind
@@ -207,12 +210,32 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const engine = opts.engine ?? piEngineFor(kind as "prober" | "teacher");
 	const stopper = makeQuestionStopper(kind);
 	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
-	const composedPrompt = systemPromptFor(kind, opts);
-	const systemPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
-	const sessionTools = opts.tools === undefined ? Object.values(healToolRecord(attachmentTools(opts.attachments ?? []))) : [];
-	const attachedImages = engine.model.input?.includes("image")
-		? attachmentImageParts(opts.attachments ?? [], engine.model)
-		: null;
+	const narrationHooks = narrationGuard ? makeNarrationGuard() : undefined;
+	const composedPrompt = opts.promptSwitches
+		? composeInstructions(kind, opts.promptSwitches)
+		: composedInstructions[kind]!;
+	const builtinPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
+	// Bind native read and preserve the kind/model-aware Claude output gate
+	// before resolving additive plugins. Explicit registries remain caller-owned.
+	const builtinTools = [
+		...tools.map((tool) => tool.name === "read" && tool.execute === readTool.execute
+			? { ...tool, execute: createReadTool(engine.model).execute as AgentTool<any>["execute"] }
+			: tool),
+		...(sendToUserApplies(kind, engine.model, opts.tools !== undefined)
+			? [withArgumentHeal(sendToUserTool)]
+			: []),
+	];
+	const contributions = opts.tools === undefined && opts.chatId && opts.pluginContributions
+		? opts.pluginContributions({ chatId: opts.chatId, agent: kind }, [...CONVERSATION_TOOL_NAMES, ...builtinTools.map(tool => tool.name)])
+		: undefined;
+	const questionLedger = contributions?.questionTypes?.length && opts.chatId
+		? new PluginQuestionLedger(contributions.questionTypes, opts.chatId, nodeExists) : undefined;
+	const problemTools = kind === "practice" && practice && opts.chatId
+		? pluginProblemTools(contributions?.problemTypes ?? [], opts.chatId, practice.gate, practice.graphNodes) : [];
+	// Never replace the builtin prompt or tools, or mutate an already-running Agent.
+	const systemPrompt = contributions?.instructions.length
+		? [builtinPrompt, ...contributions.instructions].join("\n\n---\n\n")
+		: builtinPrompt;
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).
@@ -225,32 +248,28 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			systemPrompt,
 			model: engine.model,
 			thinkingLevel: engine.level,
-			// Conditional registry inclusion, like the graph-tool gates: when
-			// closed, neither the tool nor its usage instructions reach the model.
-			// Match Claude across providers (including OpenRouter), not the API
-			// transport. Explicit test registries remain caller-owned.
-			tools: [
-				...tools.map((tool) => tool.name === "read" && tool.execute === readTool.execute
-					? { ...tool, execute: createReadTool(engine.model).execute as AgentTool<any>["execute"] }
-					: tool),
-				...sessionTools,
-				...(sendToUserApplies(kind, engine.model, opts.tools !== undefined)
-					? [withArgumentHeal(sendToUserTool)]
-					: []),
-			],
+			tools: contributions ? [...builtinTools, ...contributions.tools, ...(questionLedger?.tools ?? []), ...problemTools] : builtinTools,
 			messages: opts.messages ?? [],
 		},
 		streamFn: engine.streamFn,
 		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
-		// Narration-marked thinking is not learner-facing delivery. The
-		// paired hooks track successful output before allowing its question.
-		...(narrationGuard ? makeNarrationGuard() : {}),
+		// Both policies share the SDK hook: preserve delivered-prose tracking
+		// and exact plugin occurrence binding rather than overwriting either.
+		...(questionLedger || narrationHooks ? {
+			...narrationHooks,
+			beforeToolCall: async (context: import("@earendil-works/pi-agent-core").BeforeToolCallContext) => {
+				const guarded = await narrationHooks?.beforeToolCall?.(context);
+				if (guarded?.block) return guarded;
+				questionLedger?.validatedCall(context);
+				return undefined;
+			},
+		} : {}),
 		// 0.87.1: shouldStopAfterTurn → finishTurn. Same call point (after
 		// tool results attach, before turn_end) and `{ action: "end" }` still
 		// exits BEFORE the steering poll — the parked-marker stranding our
 		// Wave C registerLiveAgent-before-runPiTurn design depends on.
 		// undefined preserves normal scheduling (the old boolean false).
-		finishTurn: (turn) => (stopper(turn) ? { action: "end" } : undefined),
+		finishTurn: (turn) => (turn.toolResults.some(result => questionLedger?.isAcknowledgment(result) || (kind === "practice" && isPluginProblemPoseAcknowledgment(result))) || stopper(turn) ? { action: "end" } : undefined),
 		// Wave C (2026-09-26, owner correction same day): markers handed to a
 		// live run drain from pi's STEERING queue — the lesson loop is one
 		// continuous teach→quiz→teach run, so delivery must inject at turn
@@ -265,11 +284,11 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// UI-only markers (plan-block) drop, the app's id fields strip, and
 		// an abort's dangling question call gets its INTERRUPTED result. It
 		// must never throw (pi's convertToLlm contract).
-		// Attached images ride the message they were sent with — vision
-		// models only, processed for the model like every other image; for
-		// the rest the ids just strip (the manifest names it).
-		convertToLlm: async (messages) =>
-			toLlmMessages(messages, attachedImages ? { attachmentParts: await attachedImages(messages) } : {}),
+		convertToLlm: toLlmMessages,
+		...(opts.contextUpdates ? { prepareNextTurnWithContext: ({ context }: { context: { messages: AgentMessage[] } }) => {
+			const messages = opts.contextUpdates!(context.messages);
+			return messages.length ? { messages } : undefined;
+		} } : {}),
 		prepareRequest: (request) => {
 			if (opts.callPurpose) {
 				let learner = false, automatic = false;
@@ -287,8 +306,14 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 				else if (learner) opts.callPurpose.background = false;
 			}
 			opts.requestCycle?.prepare(request);
+			try { opts.validateContext?.(request.context.messages); }
+			catch (error) {
+				opts.requestCycle?.rejectLocalRequest();
+				throw error;
+			}
 		},
 	});
+	questionLedger?.bind(agent);
 	if (opts.onUsage) {
 		agent.subscribe((event: AgentEvent) => {
 			if (event.type === "message_end" && event.message.role === "assistant" && "usage" in event.message) {
@@ -328,7 +353,9 @@ export function createTeacherAgent(
 	opts: AgentBuildOptions = {},
 ) {
 	const tools = opts.tools ?? (ctx ? createTeacherTools(ctx, opts.toolToggles) : bareQuestionTools());
-	return baseAgentOptions("teacher", opts, Object.values(tools));
+	return baseAgentOptions("teacher", opts, Object.values(tools), ctx
+		? nodeId => ctx.chatStore.getChat(ctx.chatId)?.tree?.nodes.some(node => node.id === nodeId) ?? false
+		: undefined);
 }
 
 /** The bare teach question set (tests, bare agents): quiz with the shared
@@ -372,8 +399,10 @@ export function bareQuestionTools(): Record<string, AgentTool<any>> {
  * Practice uses ordinary final prose, not the explicit output tool.
  */
 export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOptions = {}) {
-	const tools = opts.tools ?? practiceTools(ctx);
-	return baseAgentOptions("practice", opts, Object.values(tools));
+	// Explicit test registries bypass all builtin construction and contributions.
+	if (opts.tools !== undefined) return baseAgentOptions("practice", opts, Object.values(opts.tools));
+	const gate = createPracticeGate(ctx);
+	return baseAgentOptions("practice", opts, Object.values(practiceTools(ctx, gate)), undefined, { gate, graphNodes: ctx.graphNodes });
 }
 
 export type ProberAgent = ReturnType<typeof createProberAgent>;

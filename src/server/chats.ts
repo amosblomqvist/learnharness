@@ -4,11 +4,11 @@ import { coverageOf } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
 import { titleFromPrompt } from "../core/contracts.ts";
 import { graphRevision } from "./graph.ts";
-import { removeBlobsUnreferenced } from "../store/attachments.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 import { discardChatDeliveries } from "./jobs.ts";
+import { sideChats } from "./side-chat.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -150,12 +150,10 @@ function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatD
 
 function finishChatRecordDeletion(chatId: string): number {
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
-	const blobs = (stores.chatStore.getChat(chatId)?.attachments ?? []).map((a) => a.file);
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
-		// Shared blobs stay while another session still attaches them.
-		if (blobs.length > 0) removeBlobsUnreferenced(blobs, stores.chatStore.referencedAttachmentFiles());
+		sideChats.stopAll(chatId); // a running side answer has nowhere left to land
 	}
 	return jobsRemoved;
 }

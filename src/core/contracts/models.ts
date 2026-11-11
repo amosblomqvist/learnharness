@@ -17,9 +17,7 @@ export interface ModelCatalogEntry {
 	provider: string;
 	reasoning: boolean;
 	input: ("text" | "image")[];
-	/** The thinking levels this model actually accepts (pi's
-	 * thinkingLevelMap — e.g. GLM-5.3-flash: low|high|max). The thinking
-	 * picker lists exactly these; anything else is a lie. */
+	/** Thinking levels accepted by this model, as reported by the host catalog. */
 	supportedLevels: ThinkingLevel[];
 	/** Null when LearnHarness cannot estimate prices for this connection. */
 	cost: { input: number; output: number; cacheRead: number; cacheWrite: number } | null;
@@ -28,57 +26,50 @@ export interface ModelCatalogEntry {
 	maxTokens: number | null;
 }
 
-/** The conversation agents' resolved default (BYOK, owner 2026-09-22): the
- *  chat's model override over the STRONG slot — one controller, so one
- *  default. thinkingLevel is optional: unset resolves from the baked
- *  DEFAULT_THINKING_ORDER at engine build. */
+/** Conversation default resolved from the strong slot, used for new sessions
+ * and as fallback for sessions without their own choices. An omitted thinking
+ * level is selected from the host's supported-level preference at engine build. */
 export interface CatalogDefaults {
 	model: { provider: string; id: string };
 	thinkingLevel?: ThinkingLevel;
 }
 
-/** One background role's RESOLVED pin (BYOK, owner 2026-09-22): what that
- *  role actually runs today — role override → tier slot → NOTHING. NULL
- *  = the role's chain is empty (the per-need gates refuse its work); the
- *  settings UI shows "not configured" from it. */
+/** Resolved model choice per background role: role override, then its assigned
+ * tier slot. Null means no model is configured and work requiring that role
+ * is unavailable; there is no implicit factory model fallback. */
 export type RolePins = Record<
 	BackgroundModelRole,
 	{ model: { provider: string; id: string }; thinkingLevel?: ThinkingLevel } | null
 >;
 
-/** One slot tier's RESOLVED pin (BYOK, owner 2026-09-22): NULL = the tier
- *  holds no model. The settings UI captions each slot row with it and the
- *  picker pre-fills from it. */
+/** Resolved model choice for each slot tier. Null means that tier has no model;
+ * configured entries include optional thinking and cache-retention preferences. */
 export type SlotPins = Record<ModelSlotName, (ModelSlot & { model: { provider: string; id: string } }) | null>;
 
 /** GET /api/models response. */
 export interface ModelCatalogResponse {
 	models: ModelCatalogEntry[];
-	/** The conversation agents' resolved default — NULL when the
-	 *  conversation chain is empty (no factory floor; the turn gate
-	 *  refuses with 503 models_not_configured). */
+	/** Strong-slot conversation default, or null when no default model is
+	 * configured. A session's explicit model choice resolves separately. */
 	defaults: CatalogDefaults | null;
-	/** The six background roles' resolved pins (same resolution the agent
-	 *  factories use — src/server/stores.ts effectiveSettings); NULL per
-	 *  role = chain empty. */
+	/** Resolved background-role models, using the same resolution as execution.
+	 * Each unconfigured role is null. */
 	rolePins: RolePins;
-	/** The three slot tiers' resolved pins: role override → slot at tier
-	 *  granularity; effectiveSettings().models verbatim, NULL per unset
-	 *  tier. */
+	/** Resolved strong/cheap/vision slot choices, null for each unset tier.
+	 * Per-role overrides are represented in rolePins, not in these slot values. */
 	slots: SlotPins;
-	/** Providers with a PRESENT key, and which env var gates each — the
-	 *  model slots wave's federation surface (2026-09-20): the picker lists
-	 *  models from these providers' pi-ai catalogs only. Keyless providers
-	 *  are simply absent (the Keys page is the discovery surface, same
-	 *  discipline as the search engines). */
+	/** Provider/connection rows with availability flags, including disconnected
+	 * providers where exposed by the host. This is not a guarantee that each
+	 * provider has currently selectable models; inspect models and keyPresent. */
 	providers: CatalogProvider[];
 }
 
 /** One row of the providers surface. */
 export interface CatalogProvider {
 	id: string;
-	/** The gating env var; empty for subscription and file-configured routes. */
+	/** Credential environment-variable name; empty for subscription/native CLI routes. */
 	envVar: string;
-	/** Whether credentials are present (and custom references resolve). */
+	/** Host credential/connection availability flag, not a remote health check.
+	 * Custom keyless connections can be available without an API key. */
 	keyPresent: boolean;
 }

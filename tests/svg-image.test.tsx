@@ -3,7 +3,9 @@ import React, { act, useState } from "react";
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+const renderToStaticMarkup = (node: React.ReactNode) => renderMarkup(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { VisualOutputCard } from "../components/artifacts/visual-card.tsx";
@@ -168,7 +170,7 @@ it("the fullscreen button opens the same SVG image and inversion; download keeps
 		);
 	}
 	try {
-		await act(async () => root.render(<Harness />));
+		await act(async () => root.render(<InteractionLayersProvider><Harness /></InteractionLayersProvider>));
 		await act(async () => { host.querySelector('[data-testid="visual-open"]')!.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
 		const inline = assertImageBoundary(host.querySelector('[data-testid="visual-svg"]')!, displaySvg);
 		const overlayHolder = host.querySelector("[data-lh-overlay-chart]")!;

@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import fs from "node:fs";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { describe, it } from "node:test";
 import { FontMenuList, customFamilyFor, fontMenuResults } from "../components/settings/model-menu";
 import {
@@ -114,7 +114,7 @@ describe("FontMenuList (thin SSR)", () => {
 describe("the appearance section's font control (thin SSR)", () => {
 	it("the reading-font row renders the dropdown TRIGGER — the old free-text input is gone", () => {
 		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={undefined} onSectionChange={() => {}} />,
+			<AppearanceSection appearance={undefined} onSectionChange={() => true} />,
 		);
 		assert.ok(html.includes('data-testid="font-trigger"'), "the trigger");
 		assert.ok(html.includes(DEFAULT_READING_FONT), "unset shows the factory family");
@@ -126,7 +126,7 @@ describe("the appearance section's font control (thin SSR)", () => {
 
 	it("a stored family shows in the trigger (the record never lies)", () => {
 		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={{ fontFamily: "Georgia" }} onSectionChange={() => {}} />,
+			<AppearanceSection appearance={{ fontFamily: "Georgia" }} onSectionChange={() => true} />,
 		);
 		assert.ok(html.includes("Georgia"));
 	});
@@ -149,7 +149,7 @@ describe("the emphasis-ink factory ruling (globals.css)", () => {
 
 	it("the bold and italic override rows' empty-state hints name the text color", () => {
 		const html = renderToStaticMarkup(
-			<AppearanceSection appearance={undefined} onSectionChange={() => {}} />,
+			<AppearanceSection appearance={undefined} onSectionChange={() => true} />,
 		);
 		const text = html.match(/data-testid="row-color-text"[\s\S]*?Empty = (#[0-9a-f]{6})/)?.[1];
 		assert.ok(text, "the text row's hint");

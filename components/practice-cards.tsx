@@ -1,7 +1,7 @@
 "use client";
 
 import { ToolContentResponse } from "@/components/ai-elements/message";
-import { cn } from "@/lib/utils";
+import { StatusBadge } from "@/components/ui/status-badge";
 import type { ArtifactPartProps } from "@/src/core";
 
 /**
@@ -25,6 +25,8 @@ import { createPortal } from "react-dom";
 
 import { ThinkingBlock } from "@/components/thinking-block";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
+import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
+import { useInteractionLayers } from "@/components/interaction-layers";
 
 /* TARGET NAMES (owner round 17, 2026-10-06): targets are normalized to
  * opaque node ids at the record seam (owner round 9 — the mastery trace
@@ -53,6 +55,7 @@ export interface PracticeThinkingData {
 	/** Legacy records (pre 2026-10-05) carry the old two-lane flag; ignored. */
 	commit?: boolean;
 	text: string;
+	images?: readonly Readonly<import("@earendil-works/pi-ai").ImageContent>[];
 }
 
 export function ProblemCard({ part }: ArtifactPartProps) {
@@ -85,12 +88,10 @@ const OUTCOME_LABEL: Record<string, string> = {
  * green (the "correct" twin), solved-with-hints amber (succeeded with
  * cost), surrendered red (the problem beat the learner), moved on muted
  * (the agent's call, not a verdict against him). */
-const OUTCOME_CHIP: Record<string, string> = {
-	solved: "bg-success/15 text-success",
-	solvedWithHints: "bg-warning/15 text-warning",
-	movedOn: "bg-muted text-muted-foreground",
-	surrendered: "bg-error/15 text-error",
-	dismissed: "bg-muted text-muted-foreground",
+const OUTCOME_COLOR: Record<string, string | undefined> = {
+	solved: "var(--lh-success)",
+	solvedWithHints: "var(--lh-warning)",
+	surrendered: "var(--lh-error)",
 };
 
 export function ConcludeCard({ part }: ArtifactPartProps) {
@@ -124,9 +125,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				Concluded
 				{(OUTCOME_LABEL[outcome] ?? "") !== "" && outcome !== "dismissed" && (
-					<span className={cn("rounded px-1.5 py-0.5", OUTCOME_CHIP[outcome] ?? OUTCOME_CHIP.movedOn)}>
-						{OUTCOME_LABEL[outcome]}
-					</span>
+					<StatusBadge text={OUTCOME_LABEL[outcome] ?? ""} color={OUTCOME_COLOR[outcome]} />
 				)}
 			</div>
 			{/* The verdict — plain prose under the heading, no 'Verdict:' label
@@ -180,6 +179,8 @@ function MetadataPopover({
 	const [open, setOpen] = useState(false);
 	const triggerRef = useRef<HTMLButtonElement | null>(null);
 	const rootRef = useRef<HTMLDivElement | null>(null);
+	const panelRef = useRef<HTMLDivElement | null>(null);
+	const interactions = useInteractionLayers();
 	// The portal's anchor (owner fix, 2026-10-06): the box is placed from
 	// the trigger's viewport rect AT OPEN TIME — any scroll closes the
 	// box, so there is nothing to track.
@@ -200,15 +201,15 @@ function MetadataPopover({
 		};
 	}, [open, targets.length, names]);
 
-	usePopoverDismiss(rootRef, open, () => setOpen(false));
+	const popupLayer = usePopoverDismiss(rootRef, open, () => setOpen(false), { layerRootRef: panelRef });
 	// ANY scroll closes it (owner law): capture-phase, so every scroller
 	// in the tree counts — the transcript's own scroll included.
 	useEffect(() => {
 		if (!open) return;
-		const close = () => setOpen(false);
+		const close = () => { if (interactions.isElementEligible(panelRef.current)) setOpen(false); };
 		window.addEventListener("scroll", close, { capture: true, passive: true });
 		return () => window.removeEventListener("scroll", close, { capture: true });
-	}, [open]);
+	}, [open, interactions]);
 
 	const mode = typeof problemInput.mode === "string" ? problemInput.mode : "";
 	const rung = typeof concludeInput.rung === "string" ? concludeInput.rung : "";
@@ -245,6 +246,7 @@ function MetadataPopover({
 				anchor &&
 				createPortal(
 					<div
+						ref={panelRef}
 						data-testid="metadata-box"
 						// PORTALED TO BODY (owner fix, 2026-10-06): the transcript's
 						// MessageContent boxes carry overflow-hidden — an absolutely
@@ -252,8 +254,8 @@ function MetadataPopover({
 						// cut-off bug). A fixed-position portal sits on top of
 						// EVERYTHING, the dialogs' law. Node-card info-box register;
 						// opening BELOW the trigger — always.
-						style={{ position: "fixed", top: anchor.top, left: anchor.left }}
-						className="z-50 w-80 max-w-[calc(100vw-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
+						style={{ position: "fixed", top: anchor.top, left: anchor.left, zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
+						className="w-80 max-w-[calc(100vw-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 					>
 				<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
 						<dt className="text-muted-foreground">Mode</dt>
@@ -283,7 +285,7 @@ function MetadataPopover({
 						<dd className="font-mono">{retest === undefined ? "—" : retest ? "yes" : "no"}</dd>
 					</dl>
 					</div>,
-					document.body,
+					interactions.getPortalContainer(triggerRef.current)!,
 				)}
 		</div>
 	);
@@ -294,5 +296,5 @@ export function ThinkingCard({ data }: { data: PracticeThinkingData }) {
 	// 50%-italic quote block on expand. Legacy records' commit flag is
 	// deliberately unread (one lane now). A TRANSCRIPT row (owner round,
 	// 2026-10-07): full-width band + rail, arriving expanded.
-	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} defaultOpen />;
+	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} images={data.images} defaultOpen />;
 }

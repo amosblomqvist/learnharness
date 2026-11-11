@@ -24,12 +24,13 @@ const KIND_LABEL: Record<JobKind, string> = {
 	demo: "Demo agent",
 	visual: "Figure agent",
 	pdf: "PDF reader",
+	plugin: "Plugin worker",
 };
 
 export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: JobKind }) {
 	const jobs = useContext(JobsContext);
 	const job = jobs.find((j) => j.toolCallId === toolCallId) ?? null;
-	const label = KIND_LABEL[kind];
+	const label = kind === "plugin" ? job?.plugin?.label || job?.plugin?.toolName || KIND_LABEL.plugin : KIND_LABEL[kind];
 
 	if (!job || job.status === "running") {
 		return <DispatchActivityCard job={job} label={label} />;

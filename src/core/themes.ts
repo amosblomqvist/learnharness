@@ -116,8 +116,8 @@ export function themeIdFromName(name: string): string {
 		.replace(/[̀-ͯ]/g, "")
 		.toLowerCase()
 		.replace(/[^a-z0-9]+/g, "-")
-		.replace(/^-+|-+$/g, "")
-		.slice(0, 64);
+		.slice(0, 64)
+		.replace(/^-+|-+$/g, "");
 }
 
 /** Valid theme ids: the slug grammar themeIdFromName produces. */

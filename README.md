@@ -35,8 +35,6 @@ Instead of just giving you an explanation, it uses your answers and thinking to 
 
 The agent can also research questions in the background, create visual explanations, show your own images in the lesson and mark them up with arrows and labels, and build interactive demonstrations.
 
-**Bring your own material.** Attach images, PDFs, or EPUBs to a session with **Add context**, or any time from the **Files** chip in the session's top bar, where you can also remove a file and undo the removal. The agent reads books and papers the way a coding agent reads a codebase: structure first, then only the pages or chapters the lesson needs.
-
 ## Knowledge that carries forward
 
 What you are taught accumulates as propositions and reasoning chains: individual claims and the premises that lead to them. The graph shows this structure, with links back to the source sessions. You can also import notes.
@@ -70,13 +68,18 @@ All three platforms support in-app updates.
 
 ```bash
 npm ci
+npm run plugins:setup
 npm run dev        # http://localhost:3000
 npm test           # fixtures and fake providers
 ```
 
 See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), [themes](docs/themes.md) for the theme file format, and [desktop builds and releases](docs/desktop-release.md).
 
+For trusted local plugins, start with the [authoring guide and capability map](docs/plugin-authoring.md). It links the question, practice-problem, submission, view-context and UI contracts. Use [`examples/plugins/`](examples/plugins/) for small runnable templates, [`plugins/`](plugins/) for feature source projects, and the [host architecture](docs/plugin-architecture.md) for internals.
+
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
+
+Security vulnerabilities: report privately as described in [SECURITY.md](SECURITY.md), not in public issues.
 
 ## License
 

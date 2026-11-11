@@ -7,9 +7,12 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { NativeSubscriptionConnection, NativeSubscriptionUIProvider, SubscriptionConnections, COPILOT_POLICY_NOTICE, emptySubscriptionStatus } from "../components/settings/subscription-connections.tsx";
 import { ChatGPTUIProvider } from "../components/settings/chatgpt-connection.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 import type { NativeSubscriptionControlBridge, NativeSubscriptionProviderId, NativeSubscriptionStatus } from "../src/core/contracts/subscriptions.ts";
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
+installModalDom(dom);
 let root: Root | undefined, host: HTMLDivElement | undefined;
 function deferred() { let resolve!: () => void; const promise = new Promise<void>((done) => { resolve = done; }); return { promise, resolve }; }
 function fixture(connected = false) {
@@ -33,7 +36,7 @@ function fixture(connected = false) {
 }
 async function mount() {
 	host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-	await act(async () => root!.render(<NativeSubscriptionUIProvider><NativeSubscriptionConnection providerId="github-copilot" /><NativeSubscriptionConnection providerId="xai" /></NativeSubscriptionUIProvider>));
+	await act(async () => root!.render(<InteractionLayersProvider><NativeSubscriptionUIProvider><NativeSubscriptionConnection providerId="github-copilot" /><NativeSubscriptionConnection providerId="xai" /></NativeSubscriptionUIProvider></InteractionLayersProvider>));
 }
 function maybeButton(text: string, scope: ParentNode = document) { return [...scope.querySelectorAll<HTMLButtonElement>("button")].find((element) => element.textContent === text); }
 function button(text: string, scope: ParentNode = document) { const found = maybeButton(text, scope); assert(found, `missing button ${text}`); return found; }
@@ -76,10 +79,10 @@ for (const phase of ["notice", "connection"] as const) test(`cancelling the nati
 	await click(button("Cancel", dialog())); assert(!dialog()); assert.deepEqual(f.calls.login, []); assert.deepEqual(f.calls.consent, []); assert.equal(f.calls.cancel, 0);
 	await connectionStep("xai"); assert.equal(toggle().getAttribute("aria-checked"), "true");
 });
-test("native step transition moves keyboard focus into the new connection controls", async () => {
+test("native step transition uses the heading rather than an action as default focus", async () => {
 	const original = HTMLElement.prototype.focus, focused: HTMLElement[] = [];
 	HTMLElement.prototype.focus = function () { focused.push(this); };
-	try { fixture(); await mount(); await connectionStep("xai"); assert.equal(focused.at(-1), toggle()); }
+	try { fixture(); await mount(); await connectionStep("xai"); assert.equal(focused.at(-1), dialog().querySelector("h2")); }
 	finally { HTMLElement.prototype.focus = original; }
 });
 test("healthy management has only controls, quiet Manage, destructive action left and Close right", async () => {

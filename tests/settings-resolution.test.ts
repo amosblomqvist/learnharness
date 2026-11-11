@@ -17,11 +17,25 @@ import {
 	resolveModelSpec,
 	resolveRoleSpec,
 	resolveSettings,
+	resolveSideQuestionSpec,
 	resolveSlot,
 } from "../src/core/settings-resolution.ts";
-import { BACKGROUND_MODEL_ROLES, type UserSettings } from "../src/core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, sanitizeUserSettings, type UserSettings } from "../src/core/settings.ts";
 
 describe("resolveSettings", () => {
+	it("worker concurrency defaults to 8, honors overrides, and returns to 8 after invalid disk values drop", () => {
+		for (const record of [null, { version: 1 }, { version: 1, agent: {} }]) {
+			assert.equal(resolveSettings(record).agent.workerRequestConcurrency, 8);
+		}
+		for (const value of [1, 17, Number.MAX_SAFE_INTEGER]) {
+			assert.equal(resolveSettings({ version: 1, agent: { workerRequestConcurrency: value } }).agent.workerRequestConcurrency, value);
+		}
+		for (const value of [0, 1.5, "8", null, Number.MAX_SAFE_INTEGER + 1]) {
+			const record = sanitizeUserSettings({ version: 1, agent: { workerRequestConcurrency: value } });
+			assert.equal(resolveSettings(record).agent.workerRequestConcurrency, 8);
+		}
+	});
+
 	it("null record (first boot): non-model knobs land on factory defaults; every model view is EMPTY", () => {
 		const eff = resolveSettings(null);
 		assert.deepEqual(eff.general, { autoUpdate: true });
@@ -239,6 +253,21 @@ describe("resolveConversationSpec (the turn gate's chain)", () => {
 			thinkingLevel: undefined,
 		});
 	});
+});
+
+describe("resolveSideQuestionSpec", () => {
+	const strong = { model: { provider: "openrouter", id: "strong-1" }, thinkingLevel: "high" as const };
+	it("defaults to the chat's own model, then the strong slot", () => {
+		assert.deepEqual(resolveSideQuestionSpec({ model: { provider: "anthropic", id: "chat-m" } }, { version: 1, models: { strong } } as UserSettings),
+			{ provider: "anthropic", id: "chat-m", thinkingLevel: "high" });
+		assert.deepEqual(resolveSideQuestionSpec(undefined, { version: 1, models: { strong } } as UserSettings),
+			{ provider: "openrouter", id: "strong-1", thinkingLevel: "high" });
+	});
+	it("lets the agent.models.sideQuestion override win field by field", () => {
+		const record = { version: 1, models: { strong }, agent: { models: { sideQuestion: { thinkingLevel: "low" } } } } as UserSettings;
+		assert.deepEqual(resolveSideQuestionSpec(undefined, record), { provider: "openrouter", id: "strong-1", thinkingLevel: "low" });
+	});
+	it("is null with no model anywhere", () => { assert.equal(resolveSideQuestionSpec(undefined, null), null); });
 });
 
 describe("the graph channel gates (the wave's seam honoring)", () => {
