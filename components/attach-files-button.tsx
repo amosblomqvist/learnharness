@@ -73,13 +73,14 @@ function AttachmentPopup({ anchorRef, rootRef, open, close, children }: {
 }
 
 /**
- * The attach button (issue #285): the picker's twin of a file drop — files
- * stay where they are and only their quoted paths enter the draft, at the
- * caret of `editorRef` (a PathInput root). Any file type; the agent reads
- * what it can. Desktop only: a browser File has no local path, so there the
- * button explains instead (the drop zone's notice). The separate native
- * folder choice returns the directory itself, including an empty directory.
- * aria-disabled, not disabled, so the tooltip still shows.
+ * The attach button (issue #285): files become quoted path chips at the caret
+ * of `editorRef` (a PathInput root). Two sources, one chip shape:
+ *  - desktop: the files stay where they are; the bridge resolves their paths.
+ *  - browser (web build, 2026-11-11): a File has no path, so the bytes are
+ *    POSTed to /api/attachments, stored in the app data dir, and the returned
+ *    server paths are chipped. Folder uploads keep their relative path.
+ * Any file type; the agent reads what it can. aria-disabled, not disabled, so
+ * the tooltip still shows while an upload is in flight.
  */
 export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HTMLDivElement | null> }) {
 	const controller = useOptionalInteractionLayers();
@@ -90,6 +91,8 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 	const choosingFolder = useRef(false);
 	const [open, setOpen] = useState(false);
 	const [notice, setNotice] = useState("");
+	const [uploading, setUploading] = useState(false);
+	const folderRef = useRef<HTMLInputElement>(null);
 	const [placement, setPlacement] = useState<ReturnType<typeof attachmentPopupPlacement> | null>(null);
 	const positioned = placement !== null;
 	// Like MenuShell, portal to body with viewport-capped, reanchored placement.
@@ -124,6 +127,39 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 		document.addEventListener("pointerdown", dismissOutside);
 		return () => document.removeEventListener("pointerdown", dismissOutside);
 	}, [open, notice, controller]);
+	const handlePicked = async (files: FileList | null) => {
+		const list = Array.from(files ?? []);
+		if (list.length === 0) return;
+		if (desktop) {
+			const resolve = window.lh?.getPathForFile;
+			const { paths } = resolve ? pathsForFiles(list, resolve) : { paths: [] };
+			if (paths.length > 0) editorRef.current?.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
+			return;
+		}
+		// Web build: no local path exists, so copy the bytes to the server and
+		// chip the paths it answers with (folder uploads keep their relative path).
+		setOpen(false);
+		setNotice("");
+		setUploading(true);
+		try {
+			const form = new FormData();
+			for (const file of list) form.append("files", file, file.name);
+			form.append("paths", JSON.stringify(list.map((file) => (file as File & { webkitRelativePath?: string }).webkitRelativePath || file.name)));
+			const response = await fetch("/api/attachments", { method: "POST", body: form });
+			const payload = (await response.json().catch(() => null)) as { paths?: string[]; error?: string; skipped?: number } | null;
+			const paths = payload?.paths ?? [];
+			if (!response.ok || paths.length === 0) {
+				setNotice(payload?.error ?? "Upload failed. Try again.");
+				return;
+			}
+			editorRef.current?.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
+			if (payload?.skipped) setNotice(`${payload.skipped} file${payload.skipped === 1 ? "" : "s"} skipped.`);
+		} catch {
+			setNotice("Upload failed. Try again.");
+		} finally {
+			setUploading(false);
+		}
+	};
 	const chooseFolder = async () => {
 		if (choosingFolder.current) return;
 		const editor = editorRef.current;
@@ -149,23 +185,27 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				multiple
 				hidden
 				data-testid="attach-files-input"
-				onChange={(e) => {
-					const resolve = window.lh?.getPathForFile;
-					const { paths } = resolve ? pathsForFiles(Array.from(e.currentTarget.files ?? []), resolve) : { paths: [] };
-					if (paths.length > 0) editorRef.current?.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
-					e.currentTarget.value = ""; // allow re-picking the same file
-				}}
+				onChange={(e) => { void handlePicked(e.currentTarget.files); }}
 			/>
-			<Hint label={desktop ? "Attach files or a folder" : BROWSER_NOTICE}>
+			<input
+				ref={folderRef}
+				type="file"
+				multiple
+				hidden
+				data-testid="attach-folder-input"
+				{...{ webkitdirectory: "" }}
+				onChange={(e) => { void handlePicked(e.currentTarget.files); }}
+			/>
+			<Hint label={uploading ? "Uploading…" : desktop ? "Attach files or a folder" : "Upload files or a folder"}>
 				<button
 					ref={buttonRef}
 					type="button"
 					aria-label="Attach files"
-					aria-disabled={!desktop}
+					aria-disabled={uploading}
 					aria-haspopup="menu"
 					aria-expanded={open}
 					data-testid="attach-files"
-					onClick={() => { if (desktop) { setNotice(""); setOpen(!open); } }}
+					onClick={() => { if (!uploading) { setNotice(""); setOpen(!open); } }}
 					className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
 				>
 					<PaperclipIcon className="size-4" />
@@ -186,7 +226,8 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
 						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-						onClick={() => { void chooseFolder(); }}>Folder</button>
+						onClick={() => { setOpen(false); if (desktop) void chooseFolder(); else folderRef.current?.click(); }}>Folder</button>
+					{!desktop && <div className="px-2 pb-1 pt-1 text-[10px] leading-snug text-muted-foreground">Uploads a copy to the server; the agent reads it from there.</div>}
 				</> : notice}
 			</div></AttachmentPopup>}
 		</div>
