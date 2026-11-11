@@ -14,7 +14,7 @@ export const pluginInfo = (id = "fixture"): PluginInfo => ({
 });
 
 /** In-memory plugins/fetch only: never opens a real data directory or provider. */
-export async function mountPluginChrome(frontend: PluginFrontendModule, children: ReactNode) {
+export async function mountPluginChrome(frontend: PluginFrontendModule, children: ReactNode, { strictMode = false }: { strictMode?: boolean } = {}) {
 	const dom = parseHTML("<html><head></head><body><div id='root'></div></body></html>");
 	const globals = {
 		window: dom.window, self: dom.window, document: dom.document, innerWidth: 900, innerHeight: 700,
@@ -56,7 +56,8 @@ export async function mountPluginChrome(frontend: PluginFrontendModule, children
 	const router = { bfcacheId: "fixture", back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, async prefetch() {} };
 	const root = createRoot(document.querySelector("#root")!);
 	const render = async (content: ReactNode) => {
-		await act(async () => { root.render(<InteractionLayersProvider><AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><PluginsProvider>{content}</PluginsProvider></ServerEventsProvider></AppRouterContext.Provider></InteractionLayersProvider>); });
+		const tree = <InteractionLayersProvider><AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><PluginsProvider>{content}</PluginsProvider></ServerEventsProvider></AppRouterContext.Provider></InteractionLayersProvider>;
+		await act(async () => { root.render(strictMode ? <React.StrictMode>{tree}</React.StrictMode> : tree); });
 	};
 	try { await render(children); }
 	catch (error) {
