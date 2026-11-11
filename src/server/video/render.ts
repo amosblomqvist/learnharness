@@ -4,17 +4,17 @@ import * as path from "node:path";
 import { createHash } from "node:crypto";
 import { spawn } from "node:child_process";
 import { PATHS } from "../../../config.ts";
-import { validVideoPlan, type VideoPlan } from "../../core/video.ts";
+import { validVideoPlan, videoPaintOrder, videoRuntime, type VideoPlan } from "../../core/video.ts";
 import { stores } from "../stores.ts";
 
-const RELEASE = "https://github.com/shinyobjectz/raea/releases/download/v0.1.1-rc2/raea-0.1.1-rc2-macos-arm64.tar.gz";
-const SHA256 = "562665a143cb81d0ebcb18e723fe0e64f40ae55c0f91b3014cc46f726e2b45e3";
-const SIZE = 317870789;
+const RELEASE = "https://github.com/shinyobjectz/raea/releases/download/v0.1.1-rc2/";
+const asset = videoRuntime(process.platform, process.arch);
 const root = path.join(PATHS.data, "video");
 const runtime = path.join(root, "runtime", "v0.1.1-rc2");
-const binary = path.join(runtime, "raea", "bin", "raea");
+const binary = path.join(runtime, "raea", "bin", process.platform === "win32" ? "raea.exe" : "raea");
 const controllers = ((globalThis as typeof globalThis & { __lhVideoControllers?: Map<string, AbortController> }).__lhVideoControllers ??= new Map());
-export const videoSupported = () => process.platform === "darwin" && process.arch === "arm64";
+export const videoSupported = () => asset !== undefined;
+export const videoDownloadInfo = () => asset ? { downloadMiB: asset.downloadMiB, disk: asset.disk } : null;
 export const runtimeInstalled = () => {
   try { return fs.lstatSync(binary).isFile() && !fs.lstatSync(runtime).isSymbolicLink(); } catch { return false; }
 };
@@ -38,11 +38,12 @@ function run(command: string, args: string[], cwd: string, signal: AbortSignal, 
 }
 async function install(signal: AbortSignal): Promise<void> {
   if (runtimeInstalled()) return;
+  if (!asset) throw new Error("Video rendering is not available on this platform.");
   await fsp.mkdir(path.dirname(runtime), { recursive: true });
   const stage = await fsp.mkdtemp(path.join(path.dirname(runtime), ".install-"));
-  const archive = path.join(stage, "release.tar.gz");
+  const archive = path.join(stage, asset.archive);
   try {
-    const response = await fetch(RELEASE, { signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]) });
+    const response = await fetch(RELEASE + asset.archive, { signal: AbortSignal.any([signal, AbortSignal.timeout(600_000)]) });
     if (!response.ok || !response.body) { await response.body?.cancel(); throw new Error(`Download failed (${response.status})`); }
     const file = await fsp.open(archive, "wx", 0o600);
     const hash = createHash("sha256"); let size = 0;
@@ -52,34 +53,37 @@ async function install(signal: AbortSignal): Promise<void> {
         const { done, value: chunk } = await reader.read();
         if (done) break;
         size += chunk.length;
-        if (size > SIZE) throw new Error("Runtime download exceeds expected size");
+        if (size > asset.size) throw new Error("Runtime download exceeds expected size");
         hash.update(chunk); await file.writeFile(chunk);
       } } catch (error) { await reader.cancel().catch(() => {}); throw error; } finally { reader.releaseLock(); }
     } finally { await file.close(); }
-    if (size !== SIZE || hash.digest("hex") !== SHA256) throw new Error("Runtime download checksum mismatch");
-    await run("/usr/bin/tar", ["-xzf", archive, "-C", stage], stage, AbortSignal.any([signal, AbortSignal.timeout(120_000)]), { NODE_ENV: "production" });
+    if (size !== asset.size || hash.digest("hex") !== asset.sha256) throw new Error("Runtime download checksum mismatch");
+    const systemRoot = process.env.SystemRoot || "C:\\Windows";
+    const tar = process.platform === "win32" ? path.join(systemRoot, "System32", "tar.exe") : "/usr/bin/tar";
+    const env = process.platform === "win32" ? { NODE_ENV: "production" as const, SystemRoot: systemRoot } : { NODE_ENV: "production" as const };
+    await run(tar, [process.platform === "win32" ? "-xf" : "-xzf", archive, "-C", stage], stage, AbortSignal.any([signal, AbortSignal.timeout(120_000)]), env);
     await fsp.rm(archive);
-    await fsp.access(path.join(stage, "raea", "bin", "raea"));
+    await fsp.access(path.join(stage, "raea", "bin", process.platform === "win32" ? "raea.exe" : "raea"));
     signal.throwIfAborted();
     try { fs.renameSync(stage, runtime); } catch (error) { if (!runtimeInstalled()) throw error; }
   } finally { await fsp.rm(stage, { recursive: true, force: true }); }
 }
 function composition(plan: VideoPlan): string {
   // JSON is parsed as data, never interpolated as JSX or JavaScript source.
-  const data = JSON.stringify(JSON.stringify(plan));
+  const data = JSON.stringify(JSON.stringify({ ...plan, scenes: plan.scenes.map(scene => ({ ...scene, drawOrder: videoPaintOrder(scene.elements) })) }));
   const frames = Math.ceil(plan.scenes.reduce((n, scene) => n + scene.seconds, 0) * 24);
   return `import React from 'react';
 import {AbsoluteFill,Composition,registerRoot,useCurrentFrame} from 'raea';
 const plan=JSON.parse(${data});
 const colors={blue:'#70bcff',yellow:'#ffe087',white:'#f8f9ff',green:'#8fe0b0',red:'#ff9696'};
 function Scene(){const frame=useCurrentFrame(); let offset=0; let scene=plan.scenes[plan.scenes.length-1]; let local=0; for(const s of plan.scenes){local=frame-offset;offset+=s.seconds*24;if(frame<offset){scene=s;break;}}
-return <AbsoluteFill style={{backgroundColor:'#10162c',color:'#f8f9ff',fontFamily:'sans-serif'}}><div style={{position:'absolute',left:40,top:25,fontSize:42,fontWeight:700}}>{scene.heading}</div>{scene.elements.map((e,i)=><div key={i} style={{position:'absolute',left:e.x*896,top:90+e.y*320,width:e.width*896,height:e.height*320,color:colors[e.color],backgroundColor:e.kind==='text'?'transparent':colors[e.color],borderRadius:e.kind==='circle'?'50%':e.kind==='rect'?8:0,fontSize:28,overflow:'hidden',opacity:Math.min(1,Math.max(0,(local-i*(scene.seconds*24*.3/Math.max(1,scene.elements.length)))/8))}}>{e.kind==='text'?e.text:''}</div>)}<div style={{position:'absolute',left:40,bottom:24,fontSize:26}}>{scene.caption}</div></AbsoluteFill>}
+return <AbsoluteFill style={{backgroundColor:'#10162c',color:'#f8f9ff',fontFamily:'sans-serif'}}><div style={{position:'absolute',left:40,top:25,fontSize:42,fontWeight:700}}>{scene.heading}</div>{scene.drawOrder.map(i=>{const e=scene.elements[i];return <div key={i} style={{position:'absolute',left:e.x*896,top:90+e.y*320,width:e.width*896,height:e.height*320,color:colors[e.color],backgroundColor:e.kind==='text'?'transparent':colors[e.color],borderRadius:e.kind==='circle'?'50%':e.kind==='rect'?8:0,fontSize:28,overflow:'hidden',opacity:Math.min(1,Math.max(0,(local-i*(scene.seconds*24*.3/Math.max(1,scene.elements.length)))/8))}}>{e.kind==='text'?e.text:''}</div>})}<div style={{position:'absolute',left:40,bottom:24,fontSize:26}}>{scene.caption}</div></AbsoluteFill>}
 registerRoot(()=> <Composition id="lesson" component={Scene} width={896} height={504} fps={24} durationInFrames={${frames}} />);`;
 }
 export async function startVideo(id: string, chatId: string, download: boolean, retry = false): Promise<void> {
   const job = stores.jobStore.getJob(id);
   if (!job || job.chatId !== chatId || job.kind !== "video" || !stores.chatStore.getChat(chatId)) throw new Error("Video not found");
-  if (!videoSupported()) throw new Error("Video rendering currently supports macOS on Apple Silicon.");
+  if (!videoSupported()) throw new Error("Video rendering is not available on this platform.");
   if (!validVideoPlan(job.input)) throw new Error("Invalid saved video plan");
   if (!runtimeInstalled() && !download) throw new Error("Runtime download needs your approval.");
   if (controllers.has(id)) return;
@@ -100,7 +104,7 @@ export async function startVideo(id: string, chatId: string, download: boolean, 
       work = await fsp.mkdtemp(path.join(root, "render-"));
       const source = path.join(work, "scene.tsx"); const output = path.join(work, "video.mp4");
       await fsp.writeFile(source, composition(job.input as VideoPlan));
-      await run(binary, ["render", source, "-o", output], work, AbortSignal.any([controller.signal, AbortSignal.timeout(180_000)]), { NODE_ENV: "production", RAEA_OFFLINE: "1", RAEA_NO_TREE: "1", RAEA_ENV_FILE: path.join(work, "env"), RAEA_CACHE: path.join(work, "cache") });
+      await run(binary, ["render", source, "-o", output], work, AbortSignal.any([controller.signal, AbortSignal.timeout(180_000)]), { NODE_ENV: "production", RAEA_OFFLINE: "1", RAEA_NO_TREE: "1", RAEA_ENV_FILE: path.join(work, "env"), RAEA_CACHE: path.join(work, "cache"), ...(process.platform === "win32" ? { SystemRoot: process.env.SystemRoot || "C:\\Windows", TEMP: work, TMP: work } : {}), ...((process.platform === "win32" || process.platform === "linux") && process.env.WGPU_BACKEND === "vulkan" ? { WGPU_BACKEND: "vulkan" } : {}) });
       controller.signal.throwIfAborted();
       if (controllers.get(id) !== controller || !stores.jobStore.getJob(id)) return;
       const stat = await fsp.lstat(output);

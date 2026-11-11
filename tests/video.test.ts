@@ -4,7 +4,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { test, after } from "node:test";
 import { setTimeout as pause } from "node:timers/promises";
-import { validVideoPlan } from "../src/core/video.ts";
+import { validVideoPlan, videoPaintOrder, videoRuntime } from "../src/core/video.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
 
 const profile = fs.mkdtempSync(path.join(os.tmpdir(), "lh-video-test-"));
@@ -29,6 +29,22 @@ test("scene plans reject paths, unbounded values and non-finite coordinates", ()
   assert(!validVideoPlan({ ...plan, scenes: Array(6).fill(plan.scenes[0]) }));
 });
 
+test("runtime selection pins official platform-specific assets and rejects unsupported hosts", () => {
+  assert.equal(videoRuntime("darwin", "arm64")?.size, 317870789);
+  assert.equal(videoRuntime("linux", "x64")?.sha256, "cbcc68d9c671414114429b33110d914730414a2884fa1eb081523ef65115f4fe");
+  assert.equal(videoRuntime("win32", "x64")?.archive, "raea-0.1.1-rc2-windows-x86_64.zip");
+  assert.equal(videoRuntime("darwin", "x64"), undefined);
+  assert.equal(videoRuntime("linux", "arm64"), undefined);
+});
+
+test("background shapes cannot cover labels even when the teacher puts text first", () => {
+  const label = { ...plan.scenes[0]!.elements[0]!, kind: "text" as const, color: "white" as const };
+  const shape = { kind: "rect" as const, x: 0, y: 0, width: 1, height: .2, color: "blue" as const };
+  const source = [label, shape];
+  assert.deepEqual(videoPaintOrder(source), [1, 0]);
+  assert.deepEqual(source, [label, shape]);
+});
+
 test("teacher video dispatch persists one local plan without a background model or delivery", async () => {
   let calls = 0;
   const tools = jobTools({ chatId: chat.id, jobStore: stores.jobStore, spawn: () => { calls++; } });
@@ -38,7 +54,7 @@ test("teacher video dispatch persists one local plan without a background model 
   assert.equal(calls, 1); assert.equal(job?.status, "done"); assert.equal(job?.delivery, undefined); assert.deepEqual(job?.input, plan);
 });
 
-test("download requires consent, cancellation stops it, bad bytes cannot install", { skip: process.platform !== "darwin" || process.arch !== "arm64" }, async () => {
+test("download requires consent, cancellation stops it, bad bytes cannot install", { skip: !videoRuntime(process.platform, process.arch) }, async () => {
   const oldFetch = globalThis.fetch; let count = 0; let bad = false;
   globalThis.fetch = (async (_url, options) => { count++; if (bad) return new Response("bad bytes"); return new Response(new ReadableStream({ start(c) { options?.signal?.addEventListener("abort", () => c.error(new Error("aborted")), { once: true }); } })); }) as typeof fetch;
   try {

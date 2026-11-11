@@ -1,6 +1,6 @@
 import { Readable } from "node:stream";
 import * as fs from "node:fs";
-import { stores, cancelVideo, runtimeInstalled, startVideo, videoFile, videoSupported } from "@/src/server";
+import { stores, cancelVideo, runtimeInstalled, startVideo, videoFile, videoSupported, videoDownloadInfo } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 function lookup(req: Request) {
@@ -10,7 +10,7 @@ function lookup(req: Request) {
 }
 export async function GET(req: Request) {
   const item = lookup(req); if (!item) return new Response("Not found", { status: 404 });
-  if (new URL(req.url).searchParams.get("media") !== "1") return Response.json({ supported: videoSupported(), installed: runtimeInstalled() });
+  if (new URL(req.url).searchParams.get("media") !== "1") return Response.json({ supported: videoSupported(), installed: runtimeInstalled(), download: videoDownloadInfo() });
   if (item.job.status !== "done" || !(item.job.result as {video?: boolean} | undefined)?.video) return new Response("Not found", { status: 404 });
   let fd: number;
   try { fd = fs.openSync(videoFile(item.id), fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0)); } catch { return new Response("Not found", { status: 404 }); }
