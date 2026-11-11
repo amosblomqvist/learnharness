@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, normalizeContext, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { streamSimple as streamCodex } from "@earendil-works/pi-ai/api/openai-codex-responses";
 import { APP_IDENTITY, piEngineForSpec, type PiEngine } from "../src/agent/models.ts";
+import { createPluginWorkerService } from "../src/agent/plugin-workers.ts";
 import { createProberAgent, createTeacherAgent, createPracticeAgent, type AgentBuildOptions } from "../src/agent/teacher-agent.ts";
 import { runSubagent } from "../src/agent/subagents/pi-run.ts";
 import { healToolRecord } from "../src/agent/tools/heal.ts";
+import type { ModelCatalogResponse } from "../src/core/contracts/models.ts";
+import { createPluginInference } from "../src/server/plugin-inference.ts";
+import { createPluginTaskRecordStore } from "../src/store/plugin-task-records.ts";
 import metadata from "../package.json" with { type: "json" };
 
 const factories = [
@@ -188,5 +195,68 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 		assert.equal(executed, 0);
 		assert.equal(prepared, 1, "SDK prepares arguments but preserves argumentsError for native validation");
 		assert.ok(result.newMessages.some((m) => m.role === "toolResult" && m.isError));
+	}));
+
+	it("plugin workers keep one opencode-go session across tool rounds", async () => closed(async () => {
+		const directory = mkdtempSync(path.join(tmpdir(), "lh-plugin-worker-session-"));
+		const signal = new AbortController();
+		const pin = { provider: "opencode-go", id: "glm-5.3", thinkingLevel: "off" as const };
+		const model = { provider: pin.provider, id: pin.id };
+		const catalog: ModelCatalogResponse = {
+			models: [{ provider: pin.provider, id: pin.id, name: "Fixture", reasoning: false, input: ["text"], supportedLevels: ["off"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 1024 }],
+			providers: [{ id: pin.provider, envVar: "OPENCODE_API_KEY", keyPresent: true }],
+			defaults: { model },
+			rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null },
+			slots: { strong: null, cheap: null, vision: null },
+		};
+		const adapter = createPluginInference({ signal: signal.signal, dataDirectory: directory }, {
+			catalog: () => catalog,
+			providerKeyPresent: () => true,
+			engineForSpec: (spec) => piEngineForSpec(spec),
+		});
+		const service = createPluginWorkerService({
+			store: createPluginTaskRecordStore(path.join(directory, "tasks")),
+			engineFor: adapter.engineFor,
+			signal: signal.signal,
+		});
+		try {
+			service.register({
+				id: "generate-cues-v1",
+				instructions: "offline",
+				resultSchema: Type.Object({ ok: Type.Literal(true) }),
+				tools: () => [{ name: "lookup", label: "lookup", description: "Look up a fact", parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "noted" }], details: {} }) }],
+			});
+			const requests: Request[] = [];
+			globalThis.fetch = async (input, init) => {
+				const request = new Request(input, init);
+				requests.push(request);
+				await request.text();
+				const round = requests.length - 1;
+				const call = round === 0 ? { name: "lookup", arguments: {} } : { name: "submit_result", arguments: { result: { ok: true } } };
+				const events = [
+					{ id: `chatcmpl_offline_${round}`, object: "chat.completion.chunk", created: 1, model: pin.id, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `call_${round}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } }] }, finish_reason: null }] },
+					{ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } },
+				];
+				return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+			};
+			const started = service.start("generate-cues-v1", { requestId: "flashcard-chunk-1", input: { nodes: ["n1"] }, prompt: "Generate one cue", model: pin, purpose: "user", maxTurns: 4 });
+			const outcome = await service.wait(started.id);
+			assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+			assert.equal(requests.length, 2);
+			const session = requests[0]!.headers.get("x-opencode-session");
+			assert.match(session ?? "", /^[0-9a-f-]{36}$/);
+			for (const request of requests) {
+				assert.equal(new URL(request.url).origin, "https://opencode.ai");
+				assert.equal(new URL(request.url).pathname, "/inference/go/v1/chat/completions");
+				assert.equal(request.headers.get("x-opencode-session"), session);
+				assert.equal(request.headers.get("x-opencode-client"), metadata.name);
+				assert.equal(request.headers.get("user-agent"), `learnharness/${metadata.version}`);
+				assert.ok(!JSON.stringify(Object.fromEntries(request.headers)).includes("dummy-router"));
+			}
+		} finally {
+			await service.dispose().catch(() => {});
+			signal.abort();
+			rmSync(directory, { recursive: true, force: true });
+		}
 	}));
 });
