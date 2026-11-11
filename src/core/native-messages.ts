@@ -632,6 +632,36 @@ function expandUserCitations(message: UserMessage): UserMessage {
 	return { ...message, content: message.content.map((block) => (block.type === "text" ? { ...block, text: expandCitationsForModel(block.text) } : block)) };
 }
 
+/** A submitted ChatGPT question answer is a new learner turn, although its canonical
+ * record entry also fulfils an earlier tool call. Tool-result-only replay can
+ * make a provider merely close that earlier turn instead of advancing the
+ * probe. Preserve the result and expose the actual submission as a transient,
+ * explicitly app-labelled user message. Never persist or invent learner speech,
+ * and never manufacture a "continue" instruction (the answer may ask to pause).
+ */
+function learnerAnswerTurn(message: AgentMessage, history: readonly AgentMessage[]): UserMessage | undefined {
+	if (message.role !== "toolResult" || message.isError ||
+		!(QUESTION_TOOLS as readonly string[]).includes(message.toolName) ||
+		nativeInputCause(message, history) !== "learner") return undefined;
+	const owner = history.find(m => m.role === "assistant" && m.content.some(
+		block => block.type === "toolCall" && block.id === message.toolCallId && block.name === message.toolName,
+	));
+	if (!owner || owner.role !== "assistant" || owner.stopReason === "error" || owner.stopReason === "aborted") return undefined;
+	// This boundary fixes the reproduced ChatGPT subscription continuation.
+	// Other transports keep their existing semantics; notably Claude Code's
+	// held MCP request requires the trailing native tool result for reuse.
+	if (owner.provider !== "chatgpt") return undefined;
+	const prefix = "Learner answer submitted through the question form:\n";
+	const [first, ...rest] = message.content;
+	return {
+		role: "user",
+		content: first?.type === "text"
+			? [{ ...first, text: prefix + first.text }, ...rest]
+			: [{ type: "text", text: prefix }, ...message.content],
+		timestamp: message.timestamp + 1,
+	};
+}
+
 /**
  * AgentMessage[] → the provider wire (the agent's convertToLlm — required
  * by pi-agent-core's loop config, the ONE place model-facing decisions
@@ -642,6 +672,9 @@ function expandUserCitations(message: UserMessage): UserMessage {
  * - markers flatten to a user message carrying their content (the
  *   canonical text single-sourced in core/contracts); plan blocks are
  *   UI-only and filtered.
+ * - the most recent learner event, when it is a genuine ChatGPT builtin
+ *   question answer, also projects a transient user-turn boundary carrying
+ *   that same answer; historical answer turns and saved records stay unchanged.
  * - dangling calls from successfully generated assistant messages (for
  *   example, an unanswered question) get a synthesized interrupted result.
  *   Error/aborted generations do not: Pi drops those assistant messages,
@@ -689,6 +722,13 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 	const out: Message[] = [];
 	if (leading) out.push(leading);
 	if (head) out.push(head);
+	// Rewriting every historical answer would teach the model the very stalled
+	// answer→assessment→"continue" pattern we are repairing. Only the latest
+	// learner event needs the boundary. Keep it across ordinary internal tool
+	// results, but retire it once the learner sends a newer message or answer.
+	const latestLearnerIndex = messages.findLastIndex((message, index) =>
+		nativeInputCause(message, messages.slice(0, index)) === "learner",
+	);
 	for (let i = leading ? Math.max(start, 1) : start; i < messages.length; i++) {
 		const m = messages[i]!;
 		const role = (m as { role?: string }).role;
@@ -718,6 +758,8 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 		// Learner citations are links in the record; the wire carries them
 		// expanded (core/citations.ts) — the one model-facing rewrite.
 		out.push(role === "user" ? expandUserCitations(native as UserMessage) : (native as Message));
+		const answerTurn = role === "toolResult" && i === latestLearnerIndex ? learnerAnswerTurn(m, messages.slice(0, i)) : undefined;
+		if (answerTurn) out.push(answerTurn);
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
 		// adding results for their unexecuted calls would leave orphans.
