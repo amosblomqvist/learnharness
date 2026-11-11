@@ -71,6 +71,7 @@ import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, newUser
 import { prepareSubmissionImages, submissionImagePolicyKey } from "./submission-images.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
+import { cancelVideo, videoIsLive } from "./video/render.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { connectionBackgroundAllowed, isSubscriptionProvider, onSubscriptionChange } from "../agent/subscription-connections.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
@@ -447,6 +448,10 @@ export function abortJob(jobId: string): AbortOutcome {
 	const job = stores.jobStore.getJob(jobId);
 	if (!job) return { ok: false, reason: "not_found" };
 	if (job.status !== "running") return { ok: false, reason: "not_running" };
+	if (job.kind === "video") {
+		cancelVideo(jobId, job.chatId);
+		return { ok: true };
+	}
 	if (job.result) {
 		normalizeLegacyResult(job);
 		return { ok: false, reason: "not_running" };
@@ -763,6 +768,10 @@ export function recoverStaleJobs(): void {
 	try {
 		for (const chat of stores.chatStore.listChats()) {
 			for (const job of stores.jobStore.listJobs(chat.id)) {
+				if (job.kind === "video") {
+					if (job.status === "running" && !videoIsLive(job.id)) stores.jobStore.updateJob(job.id, { status: "error", error: "Rendering was interrupted. Retry to render the video.", activity: "interrupted" });
+					continue;
+				}
 				if (isJobLive(job.id)) continue; // never re-run beside live computation
 				if (!stores.chatStore.getChat(job.chatId)) continue;
 				if (isTurnRunning(job.chatId)) continue;

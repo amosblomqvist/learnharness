@@ -1,0 +1,58 @@
+import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { test, after } from "node:test";
+import { setTimeout as pause } from "node:timers/promises";
+import { validVideoPlan } from "../src/core/video.ts";
+import { jobTools } from "../src/agent/tools/jobs.ts";
+
+const profile = fs.mkdtempSync(path.join(os.tmpdir(), "lh-video-test-"));
+process.env.LH_DATA_DIR = path.join(profile, "data");
+process.env.LH_AUTH_FILE = path.join(profile, "auth.json");
+after(() => fs.rmSync(profile, { recursive: true, force: true }));
+const { stores } = await import("../src/server/stores.ts");
+const { startVideo, cancelVideo, runtimeInstalled, videoFile, videoIsLive } = await import("../src/server/video/render.ts");
+const { GET } = await import("../app/api/video/route.ts");
+const plan = { title: "Slopes", scenes: [
+  { heading: "Average", caption: "Two points", seconds: 2, elements: [{ kind: "text", x: 0, y: 0, width: 1, height: .2, color: "white", text: "<script>${hostile}</script>" }] },
+  { heading: "Instantaneous", caption: "A limit", seconds: 2, elements: [] },
+] };
+const chat = stores.chatStore.createChat("Video test");
+function draft() { const job = stores.jobStore.createJob({ kind: "video", chatId: chat.id, toolCallId: crypto.randomUUID(), input: plan }); stores.jobStore.updateJob(job.id, { status: "done", activity: "ready to render" }); return job; }
+async function settled(id: string) { for (let i = 0; i < 200; i++) { const job = stores.jobStore.getJob(id); if (job?.status !== "running" && !videoIsLive(id)) return job; await pause(10); } throw new Error("job did not settle"); }
+
+test("scene plans reject paths, unbounded values and non-finite coordinates", () => {
+  assert(validVideoPlan(plan));
+  assert(!validVideoPlan({ ...plan, scenes: [{ ...plan.scenes[0], elements: [{ ...plan.scenes[0]!.elements[0], src: "/etc/passwd" }] }, plan.scenes[1]] }));
+  assert(!validVideoPlan({ ...plan, scenes: [{ ...plan.scenes[0], seconds: NaN }, plan.scenes[1]] }));
+  assert(!validVideoPlan({ ...plan, scenes: Array(6).fill(plan.scenes[0]) }));
+});
+
+test("teacher video dispatch persists one local plan without a background model or delivery", async () => {
+  let calls = 0;
+  const tools = jobTools({ chatId: chat.id, jobStore: stores.jobStore, spawn: () => { calls++; } });
+  await tools.teaching_video!.execute("video-call", plan);
+  await tools.teaching_video!.execute("video-call", plan);
+  const job = stores.jobStore.findJobByToolCallId(chat.id, "video-call");
+  assert.equal(calls, 1); assert.equal(job?.status, "done"); assert.equal(job?.delivery, undefined); assert.deepEqual(job?.input, plan);
+});
+
+test("download requires consent, cancellation stops it, bad bytes cannot install", { skip: process.platform !== "darwin" || process.arch !== "arm64" }, async () => {
+  const oldFetch = globalThis.fetch; let count = 0; let bad = false;
+  globalThis.fetch = (async (_url, options) => { count++; if (bad) return new Response("bad bytes"); return new Response(new ReadableStream({ start(c) { options?.signal?.addEventListener("abort", () => c.error(new Error("aborted")), { once: true }); } })); }) as typeof fetch;
+  try {
+    const job = draft(); await assert.rejects(startVideo(job.id, chat.id, false), /approval/i); assert.equal(count, 0);
+    await startVideo(job.id, chat.id, true); for (let i = 0; i < 200 && count === 0; i++) await pause(10); assert.equal(count, 1); assert(cancelVideo(job.id, chat.id));
+    assert.equal((await settled(job.id))?.status, "error"); assert(!runtimeInstalled()); assert(!fs.existsSync(videoFile(job.id)));
+    bad = true; await startVideo(job.id, chat.id, true); assert.match((await settled(job.id))?.error ?? "", /checksum/i); assert(!runtimeInstalled());
+  } finally { globalThis.fetch = oldFetch; }
+});
+
+test("media is chat-scoped, supports seeking, and refuses symlinks", async () => {
+  const job = draft(); const file = videoFile(job.id); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, Buffer.alloc(64, 42)); stores.jobStore.updateJob(job.id, { result: { video: true } });
+  const req = (id: string, owner: string, range?: string) => new Request(`http://localhost/api/video?id=${id}&chatId=${owner}&media=1`, { headers: range ? { range } : undefined });
+  const res = await GET(req(job.id, chat.id, "bytes=4-11")); assert.equal(res.status, 206); assert.equal(res.headers.get("content-range"), "bytes 4-11/64"); assert.equal((await res.arrayBuffer()).byteLength, 8);
+  assert.equal((await GET(req(job.id, chat.id, "bytes=100-"))).status, 416); assert.equal((await GET(req(job.id, "other"))).status, 404);
+  const other = draft(); stores.jobStore.updateJob(other.id, { result: { video: true } }); if (process.platform !== "win32") { fs.symlinkSync(file, videoFile(other.id)); assert.equal((await GET(req(other.id, chat.id))).status, 404); }
+});

@@ -9,6 +9,7 @@ import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 import { discardChatDeliveries } from "./jobs.ts";
 import { sideChats } from "./side-chat.ts";
+import { deleteVideo } from "./video/render.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -149,6 +150,7 @@ function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatD
 }
 
 function finishChatRecordDeletion(chatId: string): number {
+	for (const job of stores.jobStore.listJobs(chatId)) if (job.kind === "video") deleteVideo(job.id);
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardChatDeliveries(chatId);

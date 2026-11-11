@@ -127,3 +127,7 @@ Additional runtime gates have prerequisites:
 | Other `scripts/smoke-*.mjs` | Standalone/native renderers, image workers, demo helper, compression, file paths, opening. Read each script and the [release guide](desktop-release.md) before running. |
 
 Run checks proportionate to the change. Offline gates prove exercised contracts, not live entitlements or model-authored lesson quality.
+
+### Explainer videos (experimental)
+
+In teaching sessions the teacher can create short, silent Raea explainer videos with captions and a scene transcript. Interactive demos remain available. The teacher uses its existing configured model; rendering makes no additional model call. The renderer is currently supported on macOS with Apple Silicon. On first use, the video card asks before downloading the official Raea v0.1.1-rc2 archive (303 MiB; approximately 1.1 GiB installed). The archive is verified against its pinned SHA-256 before extraction under the learning-data directory. Later newly requested videos use the cached renderer. No separate Raea account or API key is needed. A download or render can be cancelled; a failed video can be retried. Rendered videos and their plans are stored with the local session, and removed when the session is deleted. Raea is distributed under the [Functional Source License](https://github.com/shinyobjectz/raea/blob/v0.1.1-rc2/LICENSE); review its terms for your use.

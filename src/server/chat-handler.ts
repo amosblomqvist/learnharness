@@ -13,6 +13,7 @@ import { chatGPTStreamError } from "../agent/chatgpt-stream.ts";
 import { SubscriptionRequestCycle, type SubscriptionDispatchLifecycle } from "../agent/subscription-request-cycle.ts";
 import { reconstructRequestCause } from "../core/native-messages.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
+import { runtimeInstalled, startVideo, videoSupported } from "./video/render.ts";
 import { createExtractionPipeline } from "../agent/subagents/extraction.ts";
 import type { ModelRole } from "../../config.ts";
 import {
@@ -750,7 +751,7 @@ export async function handleChatInput(
 						jobs: {
 							chatId,
 							jobStore: stores.jobStore,
-							spawn: (job, input) => void jobRunner.runJob(job.id, input),
+							spawn: (job, input) => void jobRunner.runJob(job.id, input as Parameters<typeof jobRunner.runJob>[1]),
 							searchAvailable,
 						},
 						...(graphToolsEnabled(effective) ? { graph: { chatStore: stores.chatStore, graphStore: stores.graphStore } } : {}),
@@ -763,7 +764,11 @@ export async function handleChatInput(
 						chatId,
 						chatStore: stores.chatStore,
 						jobStore: stores.jobStore,
-						spawn: (job, input) => void jobRunner.runJob(job.id, input),
+						spawn: (job, input) => {
+							if (job.kind === "video") {
+								if (runtimeInstalled() && videoSupported()) void startVideo(job.id, job.chatId, false).catch(error => stores.jobStore.updateJob(job.id, { status: "error", error: String(error), activity: "video failed" }));
+							} else void jobRunner.runJob(job.id, input as Parameters<typeof jobRunner.runJob>[1]);
+						},
 						// The registry drop's signal (2026-09-20): no live engine
 						// = no research tool in the teacher's registry.
 						searchAvailable,
@@ -779,7 +784,7 @@ export async function handleChatInput(
 						// dispatch (owner ruling — phase-omnipresent), so its ctx
 						// needs the same job wiring as the teacher's.
 						jobStore: stores.jobStore,
-						spawn: (job, input) => void jobRunner.runJob(job.id, input),
+						spawn: (job, input) => void jobRunner.runJob(job.id, input as Parameters<typeof jobRunner.runJob>[1]),
 						searchAvailable,
 						// The map reader (wave 7): the prober reads the learner's
 						// knowledge graph through tools when the gate opens —

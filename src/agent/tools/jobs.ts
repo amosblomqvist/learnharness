@@ -5,6 +5,7 @@ import type { JobRecord } from "../../core/contracts.ts";
 import type { JobStore } from "../../core/ports.ts";
 import { checkLearnerImage } from "./learner-image.ts";
 import { resolveSourcePath } from "./fs-shared.ts";
+import { videoSchema, validVideoPlan, type VideoPlan } from "../../core/video.ts";
 
 /**
  * Async sub-agent job tools (vision §2.5; W2/W6 kinds + the pi-model
@@ -24,7 +25,7 @@ export interface JobToolContext {
 	/** Fire the background runner for a fresh job — fire-and-forget. The
 	 *  input rides along because the spawn happens MID-STREAM, before
 	 *  onFinish persists the tool part — a transcript scan would race it. */
-	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
+	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput | VideoPlan) => void;
 	/** Search-provider availability, retained for existing composition seams.
 	 *  Research dispatch does not depend on it: web_fetch is keyless and
 	 *  web_search reports a missing provider as a recoverable tool result. */
@@ -141,6 +142,22 @@ const PDF_DESCRIPTION =
  */
 export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 	return {
+		teaching_video: {
+			name: "teaching_video",
+			label: "teaching_video",
+			description: "Create a short silent explainer video from 2–5 scenes. Use only when a video helps explain a concept or the learner asks for one. Supply meaningful heading, caption and diagram elements with normalized coordinates from 0 to 1. Text and formulas are plain text. Video rendering happens locally and may require the learner to approve a one-time runtime download. Continue teaching; do not claim it has finished.",
+			parameters: videoSchema,
+			execute: serverExecute("teaching_video", videoSchema, (input, { toolCallId }) => {
+				if (!validVideoPlan(input)) throw new Error("Invalid video plan");
+				const existing = ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId);
+				if (!existing) {
+					const job = ctx.jobStore.createJob({ kind: "video", chatId: ctx.chatId, toolCallId, input });
+					ctx.jobStore.updateJob(job.id, { status: "done", activity: "ready to render" });
+					ctx.spawn(job, input);
+				}
+				return "Video plan saved. The learner can render it in the video card; continue teaching.";
+			}),
+		},
 		research: {
 			name: "research",
 			label: "research",

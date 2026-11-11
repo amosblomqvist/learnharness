@@ -316,6 +316,7 @@ const KIND_ICON: Record<JobKind, typeof SearchIcon> = {
 	visual: PenToolIcon,
 	pdf: FileTextIcon, // sources v0 — type-forced entry (JobKind grew "pdf")
 	plugin: BotIcon,
+	video: PlayIcon,
 };
 
 /** Abort states per blob id: pending (fired) / failed (backend absent). */

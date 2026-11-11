@@ -14,9 +14,9 @@ import { newHandoffMessage } from "../native-messages.ts";
 // ─── Async sub-agent jobs (docs/archive/vision.md §2.5; docs/archive/plan.md Wave 0 protocol) ────────────
 
 export type BuiltinJobKind = "research" | "demo" | "visual" | "pdf";
-export type JobKind = BuiltinJobKind | "plugin";
+export type JobKind = BuiltinJobKind | "plugin" | "video";
 export function isBuiltinJobKind(kind: JobKind): kind is BuiltinJobKind {
-	return kind !== "plugin";
+	return kind !== "plugin" && kind !== "video";
 }
 /** Host-owned durable linkage. Never contains filesystem paths. */
 export interface PluginJobMetadata {
