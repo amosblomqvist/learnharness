@@ -106,6 +106,31 @@ test("a mixed fence owns inner code backticks even when native inline parsing cr
 	assert.equal(repairMathForDisplay(source), "Read this.\n\n" + code + "\n\nAfter `");
 });
 
+test("fence-internal backticks cannot erase independent native inline literals in the suffix", () => {
+	for (const marker of ["`", "``", "```"]) {
+		const fence = "~~~text\n" + marker + "literal\n~~~";
+		for (const inline of [
+			marker + String.raw`print("\n")` + marker,
+			marker + String.raw`literal \n~~~text\ninside\n~~~ and print("\n")` + marker,
+		]) {
+			const source = String.raw`Read this.\n\n` + extraLayer(fence) + String.raw`\n\nAfter ` + inline + String.raw`.\n\nThen $\nu+\nabla f$.`;
+			const expected = "Read this.\n\n" + fence + "\n\nAfter " + inline + ".\n\nThen " + String.raw`$\nu+\nabla f$.`;
+			const spans = readContentSpans(source);
+			assert.equal(spans.map(span => span.raw).join(""), source);
+			assert.ok(spans.some(span => span.kind === "code" && span.raw === inline), "suffix literal retains exact original offsets");
+			assert.equal(repairMathForDisplay(source), expected);
+			assert.equal(repairMathForDisplay(expected), expected);
+		}
+	}
+});
+
+test("each crossing fence restores its own following source boundaries", () => {
+	const fence = "~~~text\n`literal\n~~~";
+	const inline = "`" + String.raw`print("\n")` + "`";
+	const source = String.raw`Read this.\n\n` + extraLayer(fence) + String.raw`\n\nMiddle.\n\n` + extraLayer(fence) + String.raw`\n\nAfter ` + inline;
+	assert.equal(repairMathForDisplay(source), "Read this.\n\n" + fence + "\n\nMiddle.\n\n" + fence + "\n\nAfter " + inline);
+});
+
 test("unterminated fences after encoded prose keep the entire rejected code section opaque", () => {
 	for (const code of [
 		"```python\\nprint(\"\\n\")",

@@ -21,8 +21,8 @@ type LiteralRange = { start: number; end: number; escapedFence?: true };
 
 /** Read virtual lines without decoding their contents. Only odd final slashes
  * denote layout; even runs before n remain literal source. */
-function escapedFenceRanges(text: string, native: LiteralRange[]): LiteralRange[] {
-	if (!text.includes("\\n") || !/`{3,}|~{3,}/.test(text)) return [];
+function escapedFenceRanges(text: string, native: LiteralRange[]): { fences: LiteralRange[]; native: LiteralRange[] } {
+	if (!text.includes("\\n") || !/`{3,}|~{3,}/.test(text)) return { fences: [], native };
 	const lines: Array<{ start: number; end: number }> = [];
 	let start = 0;
 	for (const match of text.matchAll(/\r\n?|\n|(\\+)(r\\n|n)?/g)) {
@@ -41,6 +41,12 @@ function escapedFenceRanges(text: string, native: LiteralRange[]): LiteralRange[
 		if (!native.some(literal => literal.start <= fenceStart && literal.end > start &&
 			(literal.start < start || literal.end > end))) {
 			ranges.push({ start, end, ...(complete ? { escapedFence: true as const } : {}) });
+			if (native.some(literal => literal.start >= start && literal.start < end && literal.end > end)) {
+				// An internal backtick may have paired with a suffix backtick.
+				// Re-read that independent suffix with the SAME grammar and map
+				// its source offsets back, before scanning any later fences.
+				native = [...native.filter(literal => literal.start < start), ...nativeLiteralRanges(text.slice(end), end)];
+			}
 		}
 	};
 	let opening: { start: number; fence: string } | undefined;
@@ -64,26 +70,30 @@ function escapedFenceRanges(text: string, native: LiteralRange[]): LiteralRange[
 	// physical openers may have encoded bodies, and an unfinished fence
 	// protects the remainder just like an unfinished native Markdown fence.
 	if (opening) protect(opening.start, text.length, false);
-	return ranges;
+	return { fences: ranges, native };
 }
 
 /** Use the rendering stack's actual CommonMark+math grammar for literal
  * ranges, including nested quotes/lists and implicit container endings.
  * Keep source offsets: never serialize the AST back into Markdown. */
-function literalRanges(text: string): LiteralRange[] {
+function nativeLiteralRanges(text: string, offset = 0): LiteralRange[] {
 	const pending: MarkdownNode[] = [fromMarkdown(text, { extensions: [math({ singleDollarTextMath: true })], mdastExtensions: [mathFromMarkdown()] })];
 	const ranges: LiteralRange[] = [];
 	while (pending.length) {
 		const node = pending.pop()!;
 		if (node.type === "code" || node.type === "inlineCode") {
 			const start = node.position?.start.offset, end = node.position?.end.offset;
-			if (start !== undefined && end !== undefined) ranges.push({ start, end });
+			if (start !== undefined && end !== undefined) ranges.push({ start: start + offset, end: end + offset });
 		} else if (node.children) pending.push(...node.children);
 	}
-	const encoded = escapedFenceRanges(text, ranges);
+	return ranges;
+}
+
+function literalRanges(text: string): LiteralRange[] {
+	const { fences, native } = escapedFenceRanges(text, nativeLiteralRanges(text));
 	// Native inline ranges/openers starting INSIDE a virtual code section
 	// cannot extend beyond its close and swallow following prose either.
-	return [...ranges.filter(range => !encoded.some(fence => fence.start <= range.start && range.start < fence.end)), ...encoded]
+	return [...native.filter(range => !fences.some(fence => fence.start <= range.start && range.start < fence.end)), ...fences]
 		.sort((a, b) => a.start - b.start);
 }
 
