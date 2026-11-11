@@ -188,3 +188,15 @@ describe("the display mirror — raw records heal on read", () => {
 		assert.deepEqual(parsed ? coerceCorrectAnswer(parsed.correctAnswer, parsed.options.map((o) => o.value ?? o.label)) : [], ["parmenides"]);
 	});
 });
+
+
+describe("healEncodedArguments — numeric schema expectations", () => {
+	it("heals an encoded integer but leaves a fractional value for validation to reject", () => {
+		assert.deepEqual(healEncodedArguments({ n: "2" }, { properties: { n: { type: "integer" } } }), { n: 2 });
+		assert.deepEqual(healEncodedArguments({ n: "1.5" }, { properties: { n: { type: "integer" } } }), { n: "1.5" });
+	});
+
+	it("still heals fractional numbers for a number field", () => {
+		assert.deepEqual(healEncodedArguments({ n: "1.5" }, { properties: { n: { type: "number" } } }), { n: 1.5 });
+	});
+});
