@@ -476,6 +476,34 @@ describe("the merger (mergeFindings)", () => {
 		assert.equal(snap.sessions["src_snapfixture"], undefined, "a notes source is never a chat session");
 	});
 
+	it("reads the sources map once per snapshot, however many notes sources the graph names", () => {
+		const ids = ["src_snaponce_a", "src_snaponce_b", "src_snaponce_c"];
+		for (const [i, id] of ids.entries()) {
+			graphStore.upsertSource({ id, filePath: `/vault/once ${i}.md`, importedAt: "2026-09-13T00:00:00.000Z" });
+			mergeFindings(
+				id,
+				{
+					propositions: [{ id: "p1", name: `Once ${i}`, statement: `Snapshot-once fixture proposition ${i}.`, aliases: [] }],
+					chains: [],
+				},
+				{ links: [] },
+				graphDeps,
+				{ foldedAt: "2026-09-13T00:00:00.000Z" },
+			);
+		}
+		let reads = 0;
+		const countingGraphStore = {
+			...graphStore,
+			readSources: () => {
+				reads++;
+				return graphStore.readSources();
+			},
+		};
+		const snap = graphSnapshot({ chatStore, graphStore: countingGraphStore });
+		for (const [i, id] of ids.entries()) assert.equal(snap.fileSources[id], `/vault/once ${i}.md`);
+		assert.equal(reads, 1, "sources.json is read once, not once per notes source");
+	});
+
 	it("derives BIRTH-SESSION clusters in graphSnapshot, labeled with the session's name", () => {
 		// Wave 7 (owner-locked 2026-09-23): embeddings are dead — a cluster is
 		// the session that BIRTHED its propositions, derived on read from
