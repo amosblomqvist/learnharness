@@ -872,9 +872,10 @@ function SessionsSidebar() {
 				</div>
 
 				{/* The context menu (wave 6 + the extraction-UX redesign): the
-				    coverage block above, then exactly two management actions
-				    (owner ruling — no more). MenuShell owns placement/focus/arrow
-				    cycling; the dismissal effect above owns the contract. */}
+				    coverage block above, then the management actions and the
+				    export affordances (Markdown, Anki). MenuShell owns
+				    placement/focus/arrow cycling; the dismissal effect above
+				    owns the contract. */}
 				{ctxChatId !== null && (
 					<MenuShell onClose={() => { setCtxChatId(null); return "closed"; }}
 						anchorRef={ctxAnchorRef}
@@ -920,6 +921,26 @@ function SessionsSidebar() {
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
 							Export as Markdown…
+						</button>
+						{/* Export Anki deck (issue #11): the session's quiz history
+						    as a ready-to-open .apkg — same anchor download as the
+						    markdown export above, next to it per the approved design. */}
+						<button
+							type="button"
+							data-testid="ctx-export-anki"
+							onClick={() => {
+								const chatId = ctxChatId;
+								setCtxChatId(null);
+								const a = document.createElement("a");
+								a.href = `/api/chats/${chatId}/anki`;
+								a.download = ""; // the route's filename wins
+								document.body.appendChild(a);
+								a.click();
+								a.remove();
+							}}
+							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+						>
+							Export Anki deck (.apkg)…
 						</button>
 						<button
 							type="button"
