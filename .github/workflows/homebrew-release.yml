@@ -1,0 +1,150 @@
+name: Homebrew cask
+
+# Publishes the macOS build to `brew install --cask amosblomqvist/tap/learnharness`.
+#
+# On every published GitHub Release this job rewrites the `version` and
+# `sha256` lines in the tap's cask (the `url` interpolates both), commits, and
+# pushes. If the tap already points at the release it exits without a commit,
+# so re-running the job (or a re-published release) is safe.
+#
+# One-time setup (see the pull request description):
+#   1. Create the tap repo `amosblomqvist/homebrew-tap` containing
+#      `Casks/learnharness.rb` (pasted in the PR) and a README.
+#   2. Create a fine-grained token scoped to that repo, permission
+#      "Contents: Read and write", and store it here as `TAP_GITHUB_TOKEN`.
+# After that, publishing a release is the only human action.
+
+on:
+  release:
+    types: [published]
+
+# The tap push uses TAP_GITHUB_TOKEN; GITHUB_TOKEN needs read-only access here
+# (release lookup + asset download from the public repo).
+permissions:
+  contents: read
+
+# Serialize per tag so a double-clicked re-run cannot race itself.
+concurrency:
+  group: homebrew-cask-${{ github.event.release.tag_name }}
+  cancel-in-progress: false
+
+env:
+  TAP_REPO: amosblomqvist/homebrew-tap
+  CASK_PATH: Casks/learnharness.rb
+  UPSTREAM_REPO: ${{ github.repository }}
+
+jobs:
+  bump-cask:
+    name: Bump tap cask
+    # Drafts never reach `published`; prereleases stay out of the tap.
+    if: ${{ !github.event.release.prerelease }}
+    # Ubuntu is enough: the job only needs gh, git, ruby and shasum.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Resolve version and asset name
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          # Releases are tagged v<semver>; the cask carries the bare semver.
+          case "$TAG" in
+            v[0-9]*) version="${TAG#v}" ;;
+            *)
+              echo "::error::Release tag '$TAG' does not look like v<version>."
+              exit 1
+              ;;
+          esac
+          # electron-builder names the DMG from productName/version/arch.
+          # Fail loudly here rather than installing a 404 later.
+          dmg="LearnHarness-${version}-arm64.dmg"
+          assets=$(gh release view "$TAG" --repo "$UPSTREAM_REPO" --json assets --jq '.assets[].name')
+          if ! printf '%s\n' "$assets" | grep -Fxq "$dmg"; then
+            echo "::error::Release $TAG has no $dmg asset. Was the macOS job successful?"
+            exit 1
+          fi
+          {
+            echo "version=$version"
+            echo "dmg=$dmg"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Check out the tap
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.TAP_REPO }}
+          # Fine-grained PAT: Contents read/write on the tap repo only.
+          token: ${{ secrets.TAP_GITHUB_TOKEN }}
+          path: tap
+
+      - name: Compute SHA-256 of the DMG
+        id: digest
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ github.event.release.tag_name }}
+          DMG: ${{ steps.release.outputs.dmg }}
+        run: |
+          set -euo pipefail
+          gh release download "$TAG" --repo "$UPSTREAM_REPO" --pattern "$DMG" --dir "$RUNNER_TEMP" --clobber
+          sha=$(shasum -a 256 "$RUNNER_TEMP/$DMG" | cut -d' ' -f1)
+          echo "sha256=$sha" >> "$GITHUB_OUTPUT"
+          echo "Downloaded $DMG ($(du -h "$RUNNER_TEMP/$DMG" | cut -f1)), sha256 $sha"
+
+      - name: Update version and sha256 in the cask
+        id: update
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+          SHA256: ${{ steps.digest.outputs.sha256 }}
+          CASK: tap/${{ env.CASK_PATH }}
+        run: |
+          set -euo pipefail
+          ruby - "$CASK" "$VERSION" "$SHA256" <<'RUBY'
+          path, version, sha = ARGV
+
+          # Guard the two machine-owned lines; everything else stays hand-edited.
+          source = File.read(path)
+          %w[version sha256].each do |key|
+            abort "No top-level `#{key}` line found in #{path}" unless source.match?(/^  #{key} "/)
+          end
+
+          updated = source
+            .sub(/^  version "[^"]*"$/, %(  version "#{version}"))
+            .sub(/^  sha256 "[^"]*"$/, %(  sha256 "#{sha}"))
+
+          File.write(path, updated) if updated != source
+          puts "#{path}: #{version} #{sha[0, 12]}…"
+          RUBY
+          ruby -c "$CASK" > /dev/null   # never push a file that does not parse
+          if git -C tap diff --quiet -- "$CASK_PATH"; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+            echo "Tap already at $VERSION with this checksum; nothing to commit."
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Commit and push the tap
+        if: steps.update.outputs.changed == 'true'
+        env:
+          VERSION: ${{ steps.release.outputs.version }}
+        run: |
+          set -euo pipefail
+          git -C tap config user.name "github-actions[bot]"
+          git -C tap config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # actions/checkout can leave a detached HEAD; name the branch so the
+          # push has a ref to update.
+          git -C tap checkout -B main
+          git -C tap add "$CASK_PATH"
+          git -C tap commit -m "learnharness $VERSION"
+          # Rebasing keeps two releases published close together from
+          # colliding; the checkout step configures the token for pushes.
+          for attempt in 1 2 3; do
+            if git -C tap push origin main; then
+              echo "Pushed learnharness $VERSION to $TAP_REPO."
+              exit 0
+            fi
+            echo "Push attempt $attempt rejected; rebasing onto origin/main."
+            git -C tap pull --rebase origin main
+          done
+          echo "::error::Could not push to $TAP_REPO after 3 attempts."
+          exit 1
