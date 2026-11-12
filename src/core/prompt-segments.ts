@@ -14,7 +14,9 @@
  */
 
 /** A prompt fragment: numeric order key + .md (e.g. 20-teaching.md). Nothing else loads. */
-export const FRAGMENT_RE = /^\d+-[\w.-]+\.md$/;
+// The name after the numeric prefix must contain a real character: without
+// the lookahead, "1-..md" and "1-...md" pass as dot-only names.
+export const FRAGMENT_RE = /^\d+-(?![.]+\.md$)[\w.-]+\.md$/;
 
 /** Which agent's prompt directory to compose. */
 /** Practice (2026-10-04): composes ONLY its own directory — no shared
