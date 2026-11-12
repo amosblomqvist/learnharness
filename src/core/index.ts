@@ -75,6 +75,8 @@ export * from "./file-access.ts";
 // presets and the theme → CSS-token adapter — pure, shared by the layout,
 // the provider, Settings and the themes API.
 export * from "./themes.ts";
+// artifact-theme.ts: the theme as --lh-* variables for opted-in demos.
+export * from "./artifact-theme.ts";
 export * from "./dictation.ts";
 // graph-deletion.ts (wave 6): the whole module is PURE but storage-port
 // driven — the deletion RUNS server-side only. The shell needs exactly one
