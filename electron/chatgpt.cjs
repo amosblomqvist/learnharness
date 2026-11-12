@@ -55,6 +55,10 @@ function fileStore(file) {
 	return {
 		async read() {
 			try {
+				// Same rule as subscription-store.cjs: refuse a non-regular file, or
+				// (outside Windows) one readable by others or owned by another user.
+				const stat = await fs.lstat(file);
+				if (!stat.isFile() || (process.platform !== "win32" && ((stat.mode & 0o077) !== 0 || (typeof process.getuid === "function" && stat.uid !== process.getuid())))) throw fail("storage");
 				return validateState(JSON.parse(await fs.readFile(file, "utf8")));
 			} catch (err) {
 				if (err.code === "ENOENT") return null;

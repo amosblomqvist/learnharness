@@ -777,7 +777,15 @@ async function main() {
 	// interval fire after it below. setupAutoUpdater's contract: failures
 	// are log lines — this can never block boot.
 	setupAutoUpdater();
-	ipcMain.on("lh:update-install", () => installUpdateNow());
+	// Same sender rule as lh:update:get/check. ipcMain.on has no reply channel,
+	// so an untrusted request is dropped and logged.
+	ipcMain.on("lh:update-install", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) {
+			log("auto-update: ignored install request from an untrusted sender");
+			return;
+		}
+		installUpdateNow();
+	});
 	ipcMain.handle("lh:update:get", (event) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
 		return updateState;
