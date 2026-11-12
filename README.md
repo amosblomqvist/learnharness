@@ -49,7 +49,7 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 
 - **macOS (Apple Silicon):** signed and notarized DMG. Drag the app to Applications.
 - **Windows (x64):** run the installer. It is currently unsigned; Windows may show an “unknown publisher” or SmartScreen warning.
-- **Linux (x64):** make the AppImage executable and open it, or install the Debian/Ubuntu `.deb`.
+- **Linux (x64 and arm64):** make the AppImage executable and open it, or install the Debian/Ubuntu `.deb`. Pick the `arm64` files on ARM machines.
 
 Choose your models, then start a session with what you want to understand. You can use provider API keys, supported subscription connections in the desktop app, an installed [Claude Code CLI](docs/claude-code.md), or a [custom OpenAI-compatible endpoint](docs/custom-providers.md), including a local model server. Optional dictation and web search use separate service keys. Web research can use a Tavily, Brave, Exa, Firecrawl, or Ollama key in Settings → Providers → Search. Ollama search uses its hosted service, not a local model server.
 

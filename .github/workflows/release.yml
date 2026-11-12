@@ -102,6 +102,11 @@ jobs:
           - os: ubuntu-24.04
             platform: linux-x64
             builder_args: --linux --x64
+            linux_unpacked: dist/linux-unpacked
+          - os: ubuntu-24.04-arm
+            platform: linux-arm64
+            builder_args: --linux --arm64
+            linux_unpacked: dist/linux-arm64-unpacked
     runs-on: ${{ matrix.os }}
     # Apple's notarization queue has taken ~2 hours for this team.
     timeout-minutes: 180
@@ -186,8 +191,8 @@ jobs:
               runtime="dist/win-unpacked/LearnHarness.exe"
               ;;
             Linux)
-              payload="dist/linux-unpacked/resources/server/standalone"
-              runtime="dist/linux-unpacked/learnharness"
+              payload="${{ matrix.linux_unpacked }}/resources/server/standalone"
+              runtime="${{ matrix.linux_unpacked }}/learnharness"
               ;;
           esac
           node scripts/smoke-provider-runtime.mjs --standalone "$payload"
@@ -203,7 +208,8 @@ jobs:
               node scripts/smoke-demo-runtime.mjs --standalone dist/win-unpacked/resources/server/standalone --runtime dist/win-unpacked/LearnHarness.exe --browser
               ;;
             Linux)
-              xvfb-run -a node scripts/smoke-demo-runtime.mjs --standalone dist/linux-unpacked/resources/server/standalone --runtime dist/linux-unpacked/learnharness --browser
+              unpacked="${{ matrix.linux_unpacked }}"
+              xvfb-run -a node scripts/smoke-demo-runtime.mjs --standalone "$unpacked/resources/server/standalone" --runtime "$unpacked/learnharness" --browser
               ;;
           esac
       - name: Save installers and update metadata
@@ -221,10 +227,10 @@ jobs:
             dist/*.blockmap
             dist/latest*.yml
 
-  # The last gate before a human publishes: after ALL three packaging jobs
+  # The last gate before a human publishes: after ALL four packaging jobs
   # have uploaded, fail the run unless the tag's single draft release holds
-  # exactly the 11 verified assets (4 installers + mac updater ZIP + their
-  # blockmaps + 3 latest*.yml feeds) and the feeds reference those uploads
+  # exactly the 14 verified assets (6 installers + mac updater ZIP + their
+  # blockmaps + 4 latest*.yml feeds) and the feeds reference those uploads
   # by exact name at the package.json version. Read-only: it never creates,
   # edits, publishes, or deletes anything. Manual rehearsals upload nothing,
   # so there is no draft to verify and the job stays skipped.
@@ -258,13 +264,13 @@ jobs:
       - name: Select the tag's single draft
         # Machine JSON on stdout (release id + asset ids); warnings on stderr.
         run: npx tsx scripts/verify-release.ts select "$RUNNER_TEMP/releases.json" --tag "$GITHUB_REF_NAME" > "$RUNNER_TEMP/draft.json"
-      - name: Download the three update feeds
+      - name: Download the four update feeds
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           mkdir -p "$RUNNER_TEMP/metadata"
-          for name in latest-mac.yml latest.yml latest-linux.yml; do
+          for name in latest-mac.yml latest.yml latest-linux.yml latest-linux-arm64.yml; do
             id=$(DRAFT="$RUNNER_TEMP/draft.json" NAME="$name" node -e '
               const fs = require("node:fs");
               const draft = JSON.parse(fs.readFileSync(process.env.DRAFT, "utf8"));
