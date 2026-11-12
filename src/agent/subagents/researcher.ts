@@ -1,10 +1,10 @@
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { Usage } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { createWebTools } from "../tools/web.ts";
 import { createPdfReadTools } from "../tools/pdf-read.ts";
 import type { SearchProvider } from "../../core/search.ts";
 import type { PiEngine } from "../models.ts";
-import { runSubagent } from "./pi-run.ts";
+import { runSubagent, type SubagentRunResult } from "./pi-run.ts";
 
 /**
  * The researcher sub-agent (vision §2.5): a SEPARATE ToolLoopAgent instance
@@ -67,6 +67,18 @@ Numbered findings with inline source citations:
 ## Gaps
 What couldn't be answered. Suggested next steps.`;
 
+const FINALIZE = "The research phase has ended and no further tools are available. " +
+	"Write the final brief now, using only evidence already gathered in this conversation. " +
+	"Include the source URLs that support your findings, distinguish verified findings from uncertainty, " +
+	"and state any unanswered questions or failed searches in Gaps. If no sources could be verified, " +
+	"say so explicitly. Do not invent findings or citations. Return the complete brief as text in the required format.";
+
+function hasCompletedBrief(result: SubagentRunResult): boolean {
+	const last = result.newMessages.findLast((message): message is AssistantMessage => message.role === "assistant");
+	return Boolean(result.text.trim()) && last?.stopReason === "stop" &&
+		!last.content.some((block) => block.type === "toolCall");
+}
+
 export interface ResearcherRunOptions {
 	engine?: PiEngine;
 	/** The search seam (search port wave, 2026-09-20): resolves the LIVE
@@ -92,20 +104,32 @@ export interface ResearcherRunOptions {
  * the loop scripted.
  */
 export async function runResearcherAgent(prompt: string, opts: ResearcherRunOptions = {}): Promise<string> {
+	if (opts.abortSignal?.aborted) throw new DOMException("aborted", "AbortError");
 	const tools = Object.values(createWebTools(opts.search ?? (() => null)));
 	if (opts.pdfDir) tools.push(...Object.values(createPdfReadTools(opts.pdfDir)));
-	const { text } = await runSubagent(tools, {
-		role: "researcher",
-		prompt,
+	const shared = {
+		role: "researcher" as const,
 		engine: opts.engine,
 		systemPrompt: INSTRUCTIONS,
-		maxTurns: 12,
 		abortSignal: opts.abortSignal,
 		onUsage: opts.onUsage,
 		onToolStart: opts.onToolStart,
 		chatId: opts.chatId,
+	};
+	// Reserve the twelfth call for synthesis instead of ending on a tool result.
+	const research = await runSubagent(tools, { ...shared, prompt, maxTurns: 11 });
+	if (hasCompletedBrief(research)) return research.text;
+	if (opts.abortSignal?.aborted) throw new DOMException("aborted", "AbortError");
+	const final = await runSubagent([], {
+		...shared,
+		maxTurns: 1,
+		messages: [
+			...research.newMessages,
+			{ role: "user", content: FINALIZE, timestamp: Date.now() },
+		],
 	});
-	return text;
+	if (!hasCompletedBrief(final)) throw new Error("the researcher did not produce a complete final brief");
+	return final.text;
 }
 
 export type ResearcherAgent = ReturnType<typeof runResearcherAgent>;
