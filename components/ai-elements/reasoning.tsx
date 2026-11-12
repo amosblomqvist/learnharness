@@ -27,6 +27,7 @@ import { transformMathDelimiters } from "@/src/core";
 import { streamdownPlugins, streamdownRehypePlugins, streamdownRemend } from "./message";
 import { mdComponents } from "@/components/md-blocks";
 import { Shimmer } from "./shimmer";
+import { useTranscriptState } from "../transcript-row-state";
 
 interface ReasoningContextValue {
   isStreaming: boolean;
@@ -49,6 +50,7 @@ export type ReasoningProps = ComponentProps<typeof Collapsible> & {
   open?: boolean;
   defaultOpen?: boolean;
   onOpenChange?: (open: boolean) => void;
+  stateKey?: string;
 };
 
 const AUTO_CLOSE_DELAY = 1000;
@@ -60,6 +62,7 @@ export const Reasoning = memo(
     open,
     defaultOpen,
     onOpenChange,
+    stateKey = "agent-reasoning",
     children,
     ...props
   }: ReasoningProps) => {
@@ -70,10 +73,11 @@ export const Reasoning = memo(
     // learner's click; the auto-close after the stream still tidies a
     // row the learner had opened.
     const resolvedDefaultOpen = defaultOpen ?? false;
+    const [rememberedOpen, rememberOpen] = useTranscriptState(stateKey, resolvedDefaultOpen);
 
     const [isOpen, setIsOpen] = useControllableState<boolean>({
-      defaultProp: resolvedDefaultOpen,
-      onChange: onOpenChange,
+      defaultProp: rememberedOpen,
+      onChange: (value) => { rememberOpen(value); onOpenChange?.(value); },
       prop: open,
     });
     const hasEverStreamedRef = useRef(isStreaming);

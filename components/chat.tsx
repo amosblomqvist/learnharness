@@ -79,6 +79,8 @@ import { pluginQuestionOccurrenceKey, type PluginQuestionSnapshot } from "@/src/
 import type { PluginQuestionDraft } from "./session-core";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
+import { transcriptRows } from "./transcript-rows";
+import { VirtualTranscript, type VirtualTranscriptHandle } from "./virtual-transcript";
 import { SelectionToolbar } from "@/components/selection-toolbar";
 import { createCiteAction, type CitationEditTarget } from "@/components/citation-actions";
 import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
@@ -346,6 +348,8 @@ export function Chat({
 	};
 	const textTarget = (): Extract<PluginSubmissionTarget, { type: "text" }> | undefined => surfaceTarget ? { type: "text", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget, channels: ["content"] } : undefined;
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
+	const virtualTranscriptRef = useRef<VirtualTranscriptHandle | null>(null);
+	const rows = useMemo(() => transcriptRows(messages), [messages]);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
 	const sideEntries = useMemo(() => sideEntryPoints(nativeMessages, messages), [nativeMessages, messages]);
 
@@ -1060,14 +1064,18 @@ export function Chat({
 	const citationActions = useMemo<CitationActions>(() => ({
 		editComment: (citation, source) => setCitationEdit({ citation, link: source.link, start: source.start, host: source.host, input: source.host.closest<HTMLElement>("[data-file-path-input]") ?? undefined }),
 		openSource: (citation) => {
-			const context = scrollContextRef.current;
-			revealCitationSource({
-				transcript: transcriptElementRef.current,
-				scroll: context ? { scrollRef: context.scrollRef, stopScroll: context.stopScroll } : null,
-				citation,
-				currentChatId: chatId,
-				navigate: (href) => router.push(href),
-			});
+			const reveal = async () => {
+				if (citation.chatId === chatId) await virtualTranscriptRef.current?.revealMessage(citation.messageId);
+				const context = scrollContextRef.current;
+				revealCitationSource({
+					transcript: transcriptElementRef.current,
+					scroll: context ? { scrollRef: context.scrollRef, stopScroll: context.stopScroll } : null,
+					citation,
+					currentChatId: chatId,
+					navigate: (href) => router.push(href),
+				});
+			};
+			void reveal();
 		},
 	}), [chatId, router]);
 	useEffect(() => {
@@ -1741,10 +1749,10 @@ export function Chat({
 					<PluginSessionTopBarActions readContext={actionContext} captureContext={captureActionContext} refreshRef={refreshPluginActions} />
 				</TopBar>
 
-				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
+				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} rows={rows} virtualTranscriptRef={virtualTranscriptRef} />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
-					<SessionMessageNavigation />
+					<SessionMessageNavigation virtualTranscriptRef={virtualTranscriptRef} />
 					<TranscriptElementReporter onElement={setTranscriptElement} />
 					<ConversationContent className="min-h-full gap-0 p-0">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
@@ -1755,7 +1763,7 @@ export function Chat({
 								/>
 							)}
 
-							{messages.map((m, mi) =>
+							<VirtualTranscript rows={rows} handleRef={virtualTranscriptRef}>{({ message: m, messageIndex: mi, start, end }) =>
 								m.role === "user" && isSubagentSteer(m) ? (
 									// Sub-agent delivery (wake-pipeline steer): NO message bubble — the
 									// artifact card sits in the transcript column directly, full width
@@ -1834,7 +1842,7 @@ export function Chat({
 									PREPENDED, never a replacement branch: the teach group is a real
 									message with content — a replacement ternary swallowed the entire
 									first lesson block (the Lacan session, 2026-09-27). */}
-									{m.role === "assistant" &&
+									{start === 0 && m.role === "assistant" &&
 									mi > 0 &&
 									phases[mi] === "teach" &&
 									phases[mi - 1] !== "teach" &&
@@ -1874,7 +1882,8 @@ export function Chat({
 									) : (
 									<Message from="assistant" className="max-w-full">
 									<MessageContent className="w-full">
-											{m.parts.map((part, pi) => {
+											{m.parts.slice(start, end).map((part, offset) => {
+												const pi = start + offset;
 												if (part.pluginProblem) return <ProblemCard key={pi} part={{ ...part, state: part.state ?? "input-available", toolCallId: part.toolCallId ?? "" }} />;
 												if (part.pluginQuestion) return <PluginQuestionPart key={pi} part={part} chatId={chatId} />;
 												const isLastPart = mi === messages.length - 1 && pi === m.parts.length - 1;
@@ -1917,7 +1926,7 @@ export function Chat({
 													}
 													case "reasoning":
 														return (
-															<Reasoning key={pi} isStreaming={status === "streaming" && isLastPart} className="mb-2">
+															<Reasoning key={pi} stateKey={part.id ?? `reasoning-${pi}`} isStreaming={status === "streaming" && isLastPart} className="mb-2">
 																<ReasoningTrigger />
 																<ReasoningContent>{part.text ?? ""}</ReasoningContent>
 															</Reasoning>
@@ -1953,7 +1962,7 @@ export function Chat({
 														// transcript; answered ones render as graded records.
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<AnsweredCard key={pi} stateKey={`${part.sourceMessageId}:${part.sourceContentIndex}`} answer={part.output as QuestionAnswerData} input={part.input} />
 															);
 														}
 														return null;
@@ -1967,11 +1976,11 @@ export function Chat({
 												}
 											})}
 										</MessageContent>
-										{m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length))}
+										{end === m.parts.length && m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length))}
 									</Message>
 									)}
 								</Fragment>
-							))}
+							)}</VirtualTranscript>
 
 							{/* THE placeholder, ACTION-gated (owner, optimistic round
 							    3, 2026-10-02): spinner + shimmered Thinking… from the

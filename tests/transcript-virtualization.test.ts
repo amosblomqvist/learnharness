@@ -1,0 +1,86 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import { transcriptRows, estimateTranscriptRow } from "../components/transcript-rows.ts";
+import { findTranscriptMatches, markdownSearchRuns, partSearchSources, transcriptSearchIndex, type TranscriptSearchCache } from "../components/transcript-search.ts";
+import { projectView, type LhViewMessage } from "../src/core/view.ts";
+import type { LhMessage } from "../src/core/native-messages.ts";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { StickToBottom } from "use-stick-to-bottom";
+import { VirtualTranscript } from "../components/virtual-transcript.tsx";
+(globalThis as Record<string, unknown>).React = React;
+
+test("virtual rows split long assistant groups without changing the grouped view or part indexes", () => {
+	const view = projectView(Array.from({ length: 500 }, (_, index) => ({ id: `native-${index}`, role: "assistant", timestamp: index,
+		content: [{ type: "text", text: `Passage ${index}` }] }) as LhMessage));
+	assert.equal(view.length, 1);
+	const before = structuredClone(view);
+	const rows = transcriptRows(view);
+	assert.equal(rows.length, 500);
+	assert.equal(new Set(rows.map(row => row.key)).size, 500);
+	assert.deepEqual(rows.flatMap(row => row.message.parts.slice(row.start, row.end)), view[0]!.parts);
+	assert.deepEqual(rows[275]!.sourceIds, ["native-275"]);
+	assert.equal(rows[275]!.messageIndex, 0);
+	assert.equal(rows[275]!.gapAfter, 8);
+	assert.equal(rows.at(-1)!.gapAfter, 16);
+	assert.deepEqual(view, before);
+});
+
+test("all rows contribute estimated height before their DOM exists", () => {
+	const rows = transcriptRows([{ id: "long", role: "assistant", parts: [{ type: "text", text: "a large paragraph ".repeat(500) }] }]);
+	assert.ok(estimateTranscriptRow(rows[0]!, 400) > estimateTranscriptRow(rows[0]!, 1200));
+	assert.ok(estimateTranscriptRow(rows[0]!, 1200) > 1000);
+});
+
+test("server rendering emits a bounded tail window rather than the full history", () => {
+	const rows = transcriptRows(Array.from({ length: 1000 }, (_, index): LhViewMessage => ({ id: `message-${index}`, role: "assistant",
+		parts: [{ type: "text", text: `Passage ${index}. `.repeat(100) }] })));
+	const html = renderToStaticMarkup(React.createElement(StickToBottom, { children: React.createElement(VirtualTranscript, {
+		rows, handleRef: { current: null }, children: row => React.createElement("p", {}, row.message.parts[0]?.text),
+	}) }));
+	assert.ok((html.match(/data-transcript-row=/g)?.length ?? 0) > 0);
+	assert.ok((html.match(/data-transcript-row=/g)?.length ?? 0) < 20);
+	assert.ok(html.includes("Passage 999."));
+	assert.ok(!html.includes("Passage 0."));
+});
+
+test("data Find reaches unmounted rows and preserves literal matching and global occurrence order", () => {
+	const rows = transcriptRows(Array.from({ length: 1000 }, (_, index): LhViewMessage => ({ id: `message-${index}`, role: "assistant",
+		parts: [{ type: "text", text: index === 725 ? "Needle and **NEEDLE** [a.b](https://excluded.invalid)" : "other text" }] })));
+	const index = transcriptSearchIndex(rows);
+	assert.deepEqual(findTranscriptMatches(index, "needle").map(match => [match.rowIndex, match.occurrence]), [[725, 0], [725, 1]]);
+	assert.equal(findTranscriptMatches(index, "a.b").length, 1);
+	assert.equal(findTranscriptMatches(index, "excluded.invalid").length, 0);
+	assert.deepEqual(findTranscriptMatches(index, ""), []);
+});
+
+test("Markdown search joins inline formatting, separates blocks and preserves code whitespace", () => {
+	assert.deepEqual(markdownSearchRuns("the **chain** [rule](https://example.com)\n\nsecond paragraph\n\n```ts\na  b\n```"), ["the chain rule", "second paragraph", "a  b"]);
+	const rows = transcriptRows([{ id: "user", role: "user", parts: [{ type: "text", text: "a  b **literal**" }] }]);
+	const index = transcriptSearchIndex(rows);
+	assert.equal(findTranscriptMatches(index, "a  b").length, 1);
+	assert.equal(findTranscriptMatches(index, "**literal**").length, 1);
+});
+
+test("Find excludes internal payloads, hidden commitments and reasoning", () => {
+	assert.deepEqual(partSearchSources({ type: "reasoning", text: "hidden" }), []);
+	assert.deepEqual(partSearchSources({ type: "tool-practice_problem", input: { statement: "visible", modelSolution: "hidden" } }), ["visible"]);
+	assert.deepEqual(partSearchSources({ type: "tool-plan_init", input: { secret: "hidden" } }), []);
+	assert.deepEqual(partSearchSources({ type: "image", data: "base64-hidden" }), []);
+	assert.deepEqual(partSearchSources({ type: "tool-quiz", state: "input-available", input: { question: "pending dock owns this" } }), []);
+});
+
+test("streaming reuses unchanged search runs without retaining old versions of the tail", () => {
+	const cache: TranscriptSearchCache = new Map();
+	const messages: LhViewMessage[] = [{ id: "history", role: "assistant", parts: [{ type: "text", text: "Unchanged **history**" }] },
+		{ id: "tail", role: "assistant", parts: [{ type: "text", text: "Streaming" }] }];
+	const first = transcriptSearchIndex(transcriptRows(messages), cache);
+	for (let token = 0; token < 100; token++) {
+		const changed = structuredClone(messages);
+		changed[1]!.parts[0]!.text += ` ${token}`;
+		const next = transcriptSearchIndex(transcriptRows(changed), cache);
+		assert.equal(next[0]!.runs, first[0]!.runs);
+		assert.notEqual(next[1]!.runs, first[1]!.runs);
+		assert.equal(cache.size, 2);
+	}
+});
