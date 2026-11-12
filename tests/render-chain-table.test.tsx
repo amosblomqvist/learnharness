@@ -317,6 +317,38 @@ describe("ChainTableBody — chain rows (chips + connectors)", () => {
 		assert.ok(html.includes('aria-label="Premise one, Premise two → Conclusion"'));
 	});
 
+	it("renders Markdown, code and math only in expanded proposition statements", () => {
+		const statement = "**Statement** " + String.raw`$\nu$` + " with `literal`.\n\n$$\n" +
+			String.raw`\begin{pmatrix}a&b\\c&d\end{pmatrix}` + '\n$$\n\n```js\nconst text = "\\n";\n```\n\n' +
+			"| Value | Meaning |\n| --- | --- |\n| x | Variable |\n\n![untrusted](https://example.invalid/image.png)";
+		const nodes = NODES.map(n => n.id === "a" ? { ...n, name: "**Name** $x$", statement } : n);
+		const before = structuredClone(nodes);
+		const sourceName = "**Source** $x$ `raw`";
+		const { document } = parseHTML(render({ nodes, sessions: { ...BASE.sessions, chat1: sourceName },
+			expandedClusters: new Set(["chat1"]), expandedChains: new Set(["c1"]) }));
+		const row = document.querySelector('[data-testid="prop-row-a"]')!;
+		assert.equal(row.querySelector("strong")?.textContent, "Statement");
+		assert.equal(row.querySelectorAll(".katex").length, 2);
+		assert.equal(row.querySelectorAll(".katex-display").length, 1);
+		assert.equal(row.querySelectorAll("mtr").length, 2);
+		assert.equal(row.querySelectorAll(".katex-error").length, 0);
+		assert.equal(row.querySelector('[data-streamdown="inline-code"]')?.textContent, "literal");
+		assert.ok(row.querySelector('[aria-label="Copy code"]'));
+		assert.ok(row.querySelector('[data-testid="md-code"]')?.textContent?.includes('const text = "\\n";'));
+		assert.ok(row.querySelector("table"));
+		assert.equal(row.querySelector("img"), null);
+		assert.ok(row.innerHTML.includes("[Image blocked: untrusted]"));
+		const prose = row.querySelector(".lh-prose")!;
+		for (const token of ["[--font-prose:var(--font-ui)]", "[--lh-prose-size:var(--text-xs)]",
+			"[--lh-prose-leading:1.625]", "text-muted-foreground", "[&_[data-streamdown=inline-code]]:[font-size:inherit]",
+			"[&_[data-streamdown=inline-code]]:[color:inherit]"]) assert.ok(prose.classList.contains(token));
+		const chip = document.querySelector('[data-testid="prop-chip-a"]')!;
+		assert.equal(chip.textContent, "**Name** $x$");
+		assert.equal(chip.children.length, 0, "proposition-name chips remain literal");
+		assert.ok([...document.querySelectorAll("span")].some(span => span.textContent === sourceName && span.children.length === 0), "source names remain literal");
+		assert.deepEqual(nodes, before, "rendering never rewrites stored fields");
+	});
+
 	it("expanding a chain reveals member STATEMENTS directly — PLAIN rows, no conclusion marker (owner, round 2)", () => {
 		const html = render({
 			expandedClusters: new Set(["chat1"]),
