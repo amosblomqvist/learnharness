@@ -50,7 +50,15 @@ import { JobCard, PdfJobCard } from "../components/artifacts/job-card.tsx";
 import { ToolCallCard } from "../components/artifacts/tool-call-card.tsx";
 import { JobsContext } from "../components/jobs-context.ts";
 import { demoInputSchema, jobTools, pdfInputSchema, visualInputSchema } from "../src/agent/tools/jobs.ts";
-import { runDemoBuilder } from "../src/agent/subagents/demo-builder.ts";
+import { asLearnerSees, runDemoBuilder } from "../src/agent/subagents/demo-builder.ts";
+import {
+	artifactThemeCss,
+	artifactThemeVars,
+	injectArtifactTheme,
+	isThemedDemo,
+	seriesColors,
+} from "../src/core/artifact-theme.ts";
+import { BUILTIN_THEMES, DEFAULT_THEME, resolveTheme } from "../src/core/themes.ts";
 import { headlessOverride, realHeadless, type DemoRunResult, type HeadlessApi } from "../src/agent/subagents/headless.ts";
 import { createJobRunner, demoModelOverride, visualModelOverride } from "../src/agent/subagents/runner.ts";
 import { runVisualMaker } from "../src/agent/subagents/visual-maker.ts";
@@ -199,6 +207,85 @@ function noChromeHeadless(): HeadlessApi {
 }
 
 // ─── 1. bridge injection + reducer ───────────────────────────────────────────
+
+const THEMED_HTML =
+	'<!doctype html><html><head><meta name="lh-theme" content="app"><style>.k{color:var(--lh-text,#1f2328)}</style></head>' +
+	'<body><p class="k">themed</p></body></html>';
+
+describe("themed demos (artifact-theme)", () => {
+	it("isThemedDemo: only the lh-theme meta opts in", () => {
+		assert.equal(isThemedDemo(THEMED_HTML), true);
+		assert.equal(isThemedDemo("<meta name='lh-theme' content=app>"), true);
+		assert.equal(isThemedDemo(DEMO_HTML), false);
+		assert.equal(isThemedDemo('<meta name="theme-color" content="#fff">'), false);
+	});
+
+	it("injects the sheet at the top of <head>, before the demo's own styles", () => {
+		const out = injectArtifactTheme(THEMED_HTML, ":root{--lh-text:#fff}");
+		assert.ok(out.indexOf("<style data-lh-theme>") > out.indexOf("<head>"));
+		assert.ok(out.indexOf("<style data-lh-theme>") < out.indexOf("<style>.k"), "the demo's rules come later and win ties");
+	});
+
+	it("never puts the sheet before the doctype (quirks mode)", () => {
+		const out = injectArtifactTheme("<!doctype html><body>x</body>", "a{}");
+		assert.ok(out.startsWith("<!doctype html><style data-lh-theme>"));
+		assert.ok(injectArtifactTheme("<html lang=en><body>x</body></html>", "a{}").startsWith("<html lang=en><style data-lh-theme>"));
+		assert.ok(injectArtifactTheme("<div>x</div>", "a{}").startsWith("<style data-lh-theme>"));
+	});
+
+	it("the sheet cannot close its own <style> tag", () => {
+		const out = injectArtifactTheme("<head></head>", "a{font-family:'</style><script>x</script>'}");
+		assert.equal(out.match(/<\/style>/g)?.length, 1);
+	});
+
+	it("the css: every variable, a transparent page, the theme's color-scheme", () => {
+		for (const theme of BUILTIN_THEMES) {
+			const css = artifactThemeCss(theme.colors, theme.mode);
+			assert.match(css, new RegExp(`--lh-text:${theme.colors.text};`));
+			assert.match(css, new RegExp(`color-scheme:${theme.mode};`));
+			assert.match(css, /:where\(html,body\)\{background:transparent;/);
+			for (let i = 1; i <= 6; i++) assert.match(css, new RegExp(`--lh-chart-${i}:#[0-9a-f]{6};`), `${theme.name} chart-${i}`);
+		}
+	});
+
+	it("seriesColors: six distinct colors for every built-in theme, none a state color", () => {
+		for (const theme of BUILTIN_THEMES) {
+			const series = seriesColors(theme.colors, theme.mode);
+			assert.equal(series.length, 6, theme.name);
+			assert.equal(new Set(series).size, 6, `${theme.name}: ${series.join(" ")}`);
+			for (const sem of [theme.colors.success, theme.colors.warning, theme.colors.error])
+				assert.ok(!series.includes(sem.toLowerCase()), `${theme.name}: a series color is the state color ${sem}`);
+		}
+	});
+
+	it("seriesColors: a colored theme leads with its own accent; the gray Default falls back", () => {
+		const mocha = resolveTheme("catppuccin-mocha");
+		assert.equal(mocha.name, "Catppuccin Mocha");
+		assert.equal(seriesColors(mocha.colors, mocha.mode)[0], mocha.colors.accent);
+		const def = seriesColors(DEFAULT_THEME.colors, DEFAULT_THEME.mode);
+		assert.ok(!def.includes(DEFAULT_THEME.colors.accent), "the gray accent is not a series color");
+		assert.equal(artifactThemeVars(DEFAULT_THEME.colors, "dark")["--lh-chart-1"], def[0]);
+	});
+
+	it("the bridge swaps the sheet on lh-theme and fires lh-theme-change", () => {
+		assert.match(DEMO_BRIDGE_SCRIPT, /d\.type!=="lh-theme"/);
+		assert.match(DEMO_BRIDGE_SCRIPT, /e\.source!==parent/, "only the parent may retheme");
+		assert.match(DEMO_BRIDGE_SCRIPT, /style\[data-lh-theme\]/);
+		assert.match(DEMO_BRIDGE_SCRIPT, /new Event\("lh-theme-change"\)/);
+	});
+
+	it("buildDemoSrcDoc: the sheet only when given; the bridge either way", () => {
+		assert.ok(!buildDemoSrcDoc(THEMED_HTML).includes("data-lh-theme>"));
+		const doc = buildDemoSrcDoc(THEMED_HTML, artifactThemeCss(DEFAULT_THEME.colors, "dark"));
+		assert.match(doc, /<style data-lh-theme>/);
+		assert.match(doc, /demo-resize/);
+	});
+
+	it("asLearnerSees: the headless run gets the default theme for themed demos only", () => {
+		assert.match(asLearnerSees(THEMED_HTML), /<style data-lh-theme>:root\{--lh-text:#e6e6e6;/);
+		assert.equal(asLearnerSees(DEMO_HTML), DEMO_HTML);
+	});
+});
 
 describe("demo bridge", () => {
 	it("injects the resize + error hooks before </body>", () => {
@@ -366,6 +453,32 @@ describe("steer card rendering (the delivered artifact)", () => {
 		assert.match(html, /interactive demo/i);
 		// the model-facing protocol text never renders for the learner
 		assert.ok(!html.includes("do NOT wait"), "no protocol glue in the bubble");
+	});
+
+	it("a themed demo: transparent frame, the theme in srcdoc, no invert switch", () => {
+		const steer = buildSubagentSteer(
+			{ id: "jdt", kind: "demo", toolCallId: "cdt" },
+			{ title: "Themed", html: THEMED_HTML, tested: true },
+		);
+		const html = renderToStaticMarkup(<SubagentSteerCard message={projectNative([steer])[0] as never} />);
+		assert.match(html, /data-themed="true"/);
+		assert.match(html, /color-scheme:dark/, "the frame's scheme matches the document's");
+		assert.ok(!/demo-iframe[^>]*bg-white|bg-white[^>]*demo-iframe/.test(html), "no white backing");
+		assert.match(html, /&lt;style data-lh-theme&gt;:root\{--lh-text:/);
+		assert.ok(!html.includes("toggle-invert-demo-brightness"), "nothing to invert");
+		assert.match(html, /sandbox="allow-scripts"/);
+	});
+
+	it("a legacy demo keeps the white backing and the invert switch", () => {
+		const steer = buildSubagentSteer(
+			{ id: "jdl", kind: "demo", toolCallId: "cdl" },
+			{ title: "Legacy", html: DEMO_HTML, tested: true },
+		);
+		const html = renderToStaticMarkup(<SubagentSteerCard message={projectNative([steer])[0] as never} />);
+		assert.match(html, /bg-white/);
+		assert.ok(!html.includes("data-themed"));
+		assert.ok(!html.includes("&lt;style data-lh-theme&gt;"), "no theme sheet in the srcdoc");
+		assert.match(html, /toggle-invert-demo-brightness/);
 	});
 
 	it("renders the demo failure note with no iframe when the build FAILED", () => {
@@ -659,6 +772,19 @@ describe("demo builder (fake model + fake headless)", () => {
 		const result = await runDemoBuilder({ title: "T", brief: "b" }, { engine: model, headless: noChromeHeadless() });
 		assert.equal(result.html, "");
 		assert.match(result.notes ?? "", /^FAILED: .*Chrome/);
+	});
+
+	it("runs a themed demo headlessly with the default theme injected, and delivers it unchanged", async () => {
+		const headless = fakeHeadless();
+		const model = scriptedModel([
+			{ toolCalls: [{ toolCallId: "w1", toolName: "write_demo", input: { html: THEMED_HTML } }] },
+			{ toolCalls: [{ toolCallId: "r1", toolName: "run_demo", input: {} }] },
+			{ text: "Done." },
+		]);
+		const result = await runDemoBuilder({ title: "T", brief: "b" }, { engine: model, headless });
+		assert.equal(result.html, THEMED_HTML, "the saved document carries no theme; the card injects the live one");
+		assert.equal(headless.demoRuns.length, 1);
+		assert.match(headless.demoRuns[0]!, /<style data-lh-theme>/);
 	});
 
 	it("fails when the model never writes a demo", async () => {
