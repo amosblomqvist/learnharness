@@ -49,6 +49,8 @@ import {
 	extractionStatuses,
 	transcriptView,
 	sourceDigest,
+	relatedDigest,
+	RELATED_IDEAS_LIMIT,
 	EXTRACTION_CORE,
 	SESSION_PREAMBLE,
 	SESSION_MESSAGE_ID_RULE,
@@ -1494,9 +1496,11 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 	it("preserves the complete teaching-session prompt byte-for-byte", () => {
 		// Original UTF-8 snapshot, including every newline, preamble and the
 		// session-only anchor rule. Notes-only changes must not alter it.
+		// Re-pinned 2026-11-10 (owner-approved): EXTRACTION_CORE.related and the
+		// RELATED IDEAS mention in EXTRACTION_CORE.submission.
 		assert.equal(
 			createHash("sha256").update(EXTRACTOR_INSTRUCTIONS, "utf8").digest("hex"),
-			"a8bddd7d47130ed5e39ffe7d8d0ed6efdd6b30407d52cd9838e7be2e465089a6",
+			"b085107a1c5380e8fd23d2ce36f5c6388b5881092b0e978d847f0fa95f05fb10",
 		);
 	});
 
@@ -2141,7 +2145,14 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		assert.match(EXTRACTION_CORE.entailment, /JOINTLY entail a conclusion/);
 		assert.match(EXTRACTION_CORE.entailment, /[Ee]ntailment is the\s+only link that earns a\s+chain/);
 		assert.match(EXTRACTION_CORE.continuation, /build\s+on it\. Reference an existing idea by its id/);
-		assert.match(EXTRACTION_CORE.submission, /OR existing ids from THE GRAPH SO FAR, verbatim/);
+		assert.match(EXTRACTION_CORE.submission, /OR existing ids from THE GRAPH SO FAR or RELATED IDEAS FROM OTHER SOURCES, verbatim/);
+		// The cross-source rule (owner, 2026-11-10): related ids may be premises OR
+		// conclusions; what the stretch teaches is still restated as a NEW idea.
+		assert.match(EXTRACTION_CORE.related, /When the prompt carries RELATED IDEAS FROM OTHER SOURCES/);
+		assert.match(EXTRACTION_CORE.related, /as a premise or as its conclusion/);
+		assert.match(EXTRACTION_CORE.related, /a shared topic is not a connection/);
+		assert.match(EXTRACTION_CORE.related, /still enters as a NEW idea with its own statement/);
+		assert.match(EXTRACTION_CORE.related, /only for an idea\s+this stretch invokes without stating it/);
 		assert.match(EXTRACTOR_INSTRUCTIONS, /THE GOAL: uncover the source's CORE IDEAS and show how everything derives from the foundations/);
 		assert.match(EXTRACTOR_INSTRUCTIONS, /examples,\s+notation glosses, and restatements that no argument needs are not core ideas/);
 		for (const prompt of [EXTRACTOR_INSTRUCTIONS, NOTES_EXTRACTOR_INSTRUCTIONS]) {
@@ -2302,6 +2313,95 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		const byName = new Map(ledgers.readNodes().map((n) => [n.name, n.id]));
 		assert.deepEqual(stored[0]!.premises, ["n_a", byName.get("Appropriation axiom")]);
 		assert.equal(stored[0]!.conclusion, byName.get("Property rights"));
+	});
+
+	it("relatedDigest lists only OTHER sources' matching ideas, capped, and stays empty without overlap", () => {
+		const node = (id: string, name: string, statement: string, chatId: string): GraphNode => ({
+			id, name, statement, aliases: [], createdAt: "2026-11-10T00:00:00.000Z", provenance: [{ chatId, messageId: "" }],
+		});
+		const graph = {
+			nodes: [
+				node("n_own", "Own derivative", "A derivative measures rate of change.", "src_1"),
+				node("n_other", "Foreign derivative", "A derivative measures rate of change.", "src_2"),
+				node("n_far", "Mitochondria", "Mitochondria produce ATP.", "src_3"),
+			],
+			chains: [],
+		} as unknown as Parameters<typeof relatedDigest>[0];
+		const block = relatedDigest(graph, "src_1", "The derivative measures how fast a function changes.");
+		assert.match(block, /^RELATED IDEAS FROM OTHER SOURCES/);
+		assert.match(block, /n_other \| Foreign derivative \| A derivative measures rate of change\./);
+		assert.doesNotMatch(block, /n_own/, "this source's ideas stay in THE GRAPH SO FAR alone");
+		assert.doesNotMatch(block, /n_far/, "zero-overlap ideas never appear");
+		assert.equal(relatedDigest(graph, "src_1", "Unrelated words entirely."), "", "no overlap → no block");
+		assert.equal(relatedDigest({ nodes: [graph.nodes[0]!], chains: [] }, "src_1", "derivative"), "", "no other sources → no block");
+
+		assert.equal(RELATED_IDEAS_LIMIT, 20);
+		const many = {
+			nodes: Array.from({ length: 30 }, (_, i) => node(`n_${i}`, `Derivative ${i}`, "A derivative measures change.", `src_x${i}`)),
+			chains: [],
+		};
+		assert.equal(relatedDigest(many, "src_1", "derivative").split("\n").length - 1, RELATED_IDEAS_LIMIT);
+	});
+
+	it("the session extractor sees RELATED IDEAS FROM OTHER SOURCES and may chain FROM them (premise)", async () => {
+		const { chatId } = fixtureChat();
+		const ledgers = memoryLedgers();
+		ledgers.appendNode({
+			id: "n_foreign", name: "Rate of change", statement: "A derivative measures how fast a function changes.",
+			aliases: [], createdAt: "2026-11-10T00:00:00.000Z", provenance: [{ chatId: "src_elsewhere", messageId: "" }],
+		});
+		const views: string[] = [];
+		const extractor = fauxEngine([
+			(context) => {
+				views.push(capturedView(context));
+				const submit = {
+					propositions: [{ id: "p1", name: "Chain rule", statement: "Rates compose along a path.", aliases: [], messageId: "a1" }],
+					chains: [{ premises: ["n_foreign"], conclusion: "p1" }],
+				};
+				return fauxAssistantMessage([fauxToolCall("submit_findings", submit as unknown as ToolCall["arguments"], { id: "f1" })], { stopReason: "toolUse" });
+			},
+		]);
+		const pipeline = createExtractionPipeline({
+			chatStore, graphStore: ledgers, extractor, auditor: submitModel("submit_review", { links: [] }),
+		});
+		const stats = await pipeline.runExtraction(chatId);
+
+		assert.match(views[0]!, /RELATED IDEAS FROM OTHER SOURCES/);
+		assert.match(views[0]!, /n_foreign \| Rate of change/);
+		assert.doesNotMatch(views[0]!, /THE GRAPH SO FAR/, "this source owns nothing yet — no digest");
+		assert.deepEqual(stats, { nodes: 1, chains: 1 });
+		const stored = ledgers.readChains();
+		assert.equal(stored.length, 1);
+		assert.deepEqual(stored[0]!.premises, ["n_foreign"]);
+		assert.deepEqual(stored[0]!.provenance, [{ chatId, messageId: "" }], "credited to the extracting source");
+	});
+
+	it("the notes extractor sees RELATED IDEAS FROM OTHER SOURCES and may chain TO them (conclusion)", async () => {
+		const ledgers = memoryLedgers();
+		ledgers.appendNode({
+			id: "n_modal", name: "Modal editing", statement: "In a modal editor, keys are commands in Normal mode.",
+			aliases: [], createdAt: "2026-11-10T00:00:00.000Z", provenance: [{ chatId: "chat_elsewhere", messageId: "m1" }],
+		});
+		const views: string[] = [];
+		const extractor = fauxEngine([
+			(context) => {
+				views.push(capturedView(context));
+				const submit = { ...NOTES_FINDINGS, chains: [{ premises: ["p1"], conclusion: "n_modal" }] };
+				return fauxAssistantMessage([fauxToolCall("submit_findings", submit as unknown as ToolCall["arguments"], { id: "f1" })], { stopReason: "toolUse" });
+			},
+		]);
+		const pipeline = createExtractionPipeline({
+			chatStore, graphStore: ledgers, extractor, auditor: submitModel("submit_review", NOTES_VERDICT),
+		});
+		const stats = await pipeline.importNotes({ filePath: "/vault/related vim.md", text: NOTES_TEXT });
+
+		assert.match(views[0]!, /RELATED IDEAS FROM OTHER SOURCES/);
+		assert.match(views[0]!, /n_modal \| Modal editing/);
+		assert.deepEqual(stats, { nodes: 1, chains: 1 });
+		const stored = ledgers.readChains();
+		assert.equal(stored.length, 1);
+		assert.equal(stored[0]!.conclusion, "n_modal");
+		assert.match(stored[0]!.provenance[0]!.chatId, /^src_/, "credited to the importing notes source");
 	});
 
 	it("a chain endpoint that resolves NOWHERE is refused with the problem and the retry merges (error-back)", async () => {

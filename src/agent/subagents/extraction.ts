@@ -23,6 +23,7 @@ import type {
 	SessionFindings,
 } from "../../core/contracts.ts";
 import { getGraph, mergeFindings, type DerivedGraph, type EmissionStats, type GraphDeps } from "../../core/graph.ts";
+import { createPropositionCandidateSearch } from "../../core/proposition-candidates.ts";
 import type { GraphStore } from "../../core/ports.ts";
 import { emit } from "../../core/events.ts";
 import { settleGraphLayout } from "../../core/layout-settle.ts";
@@ -171,7 +172,7 @@ const propositionProps = {
 const endpoint = (role: string) =>
 	Type.String({
 		description:
-			`The id this ${role} — EITHER an existing graph idea id from THE GRAPH SO FAR in the prompt, ` +
+			`The id this ${role} — EITHER an existing graph idea id from THE GRAPH SO FAR or RELATED IDEAS FROM OTHER SOURCES in the prompt, ` +
 			'verbatim ("n_…"), OR the local id of a proposition in this submission ("p1", …).',
 	});
 
@@ -191,7 +192,8 @@ const chainSchema = Type.Object({
 // no zod left in the agent band.
 const propositionsDescription =
 	"Only the NEW core ideas this stretch contributes — ideas the prompt's THE GRAPH SO FAR already " +
-	"holds are referenced by id in chains, never restated here.";
+	"holds are referenced by id in chains, never restated here. An idea this stretch teaches that " +
+	"RELATED IDEAS FROM OTHER SOURCES also holds IS listed here.";
 const chainsDescription =
 	"Every argument this stretch makes — including arguments that join new ideas to established " +
 	"ones; conclusions reusable by id as premises of later chains; bare ideas (no argument) ride " +
@@ -317,7 +319,7 @@ function validateFindingsChains(value: FindingsSubmit, existingIds: ReadonlySet<
 		}
 		const unknown = [...chain.premises, chain.conclusion].find((id) => !ids.has(id) && !existingIds.has(id));
 		if (unknown !== undefined) {
-			return `chains: "${unknown}" is neither a submitted proposition id nor an existing idea id from THE GRAPH SO FAR — every premise and conclusion must resolve.`;
+			return `chains: "${unknown}" is neither a submitted proposition id nor an existing idea id from THE GRAPH SO FAR or RELATED IDEAS FROM OTHER SOURCES — every premise and conclusion must resolve.`;
 		}
 		if (chain.premises.includes(chain.conclusion)) {
 			return "chains: a conclusion cannot be its own premise.";
@@ -418,9 +420,15 @@ document is organized is not knowledge — drop it.`,
 on it. Reference an existing idea by its id ("n_…") instead of restating it, and prefer chains that
 lean on established conclusions as premises — derive new material from what is already derived. Do
 not re-derive a conclusion the graph already holds unless the route is genuinely different.`,
+	related: `When the prompt carries RELATED IDEAS FROM OTHER SOURCES, those are established ideas from elsewhere in
+the graph. A chain may use one, by id, as a premise or as its conclusion when this stretch's argument
+genuinely connects to it — the same entailment bar as every chain; a shared topic is not a connection.
+An idea this stretch itself teaches still enters as a NEW idea with its own statement, even when a
+related idea already covers it; never put a related id in its place. Use a related id only for an idea
+this stretch invokes without stating it.`,
 	submission: `SUBMIT with one submit_findings call: every NEW core idea with a short name and a precise statement,
 and every chain as premises + conclusion. A chain's premises and conclusion may be ids from this
-submission OR existing ids from THE GRAPH SO FAR, verbatim. Premises within one chain are used
+submission OR existing ids from THE GRAPH SO FAR or RELATED IDEAS FROM OTHER SOURCES, verbatim. Premises within one chain are used
 TOGETHER — independent arguments for the same conclusion are separate chains. A conclusion may
 reappear, by id, as a premise of later chains. A bare idea that no argument uses rides the
 propositions list alone. Include every field even when empty — "chains": [] when the source makes no
@@ -428,7 +436,7 @@ arguments. The tool's field descriptions carry the details.`,
 } as const;
 
 function composeExtractionInstructions(preamble: string, goal: string, selection: string): string {
-	return `${preamble}\n\n${goal}\n${EXTRACTION_CORE.entailment}\n\n${EXTRACTION_CORE.knowledge}\n\n${selection} ${EXTRACTION_CORE.standalone}\n\n${EXTRACTION_CORE.continuation}\n\n${EXTRACTION_CORE.submission}`;
+	return `${preamble}\n\n${goal}\n${EXTRACTION_CORE.entailment}\n\n${EXTRACTION_CORE.knowledge}\n\n${selection} ${EXTRACTION_CORE.standalone}\n\n${EXTRACTION_CORE.continuation}\n\n${EXTRACTION_CORE.related}\n\n${EXTRACTION_CORE.submission}`;
 }
 
 // Each front door owns its goal and selection wording independently of the
@@ -482,6 +490,30 @@ export function sourceDigest(graph: DerivedGraph, sourceId: string): string {
 			lines.push(`  [${c.premises.join(" + ")} ⇒ ${c.conclusion}]  ${names} ⇒ ${nameOf.get(c.conclusion) ?? c.conclusion}`);
 		}
 	}
+	return lines.join("\n");
+}
+
+// ── the cross-source related-ideas block (owner, 2026-11-10) ──
+//
+// sourceDigest is source-scoped, so the extractor could never see — and
+// so never chain to — what other sources already hold. This block adds
+// the other sources' ideas that best match THIS stretch (the auditor's
+// lexical BM25 search, the whole passage as the query), capped at
+// RELATED_IDEAS_LIMIT. Ideas this source already holds stay in the digest
+// alone; zero-overlap ideas never appear; "" when nothing matches.
+// Validation already accepts any existing graph id, so chains naming
+// these ids resolve verbatim through the merger.
+export const RELATED_IDEAS_LIMIT = 20;
+
+export function relatedDigest(graph: DerivedGraph, sourceId: string, passage: string, limit = RELATED_IDEAS_LIMIT): string {
+	const others = graph.nodes.filter((n) => !n.provenance.some((pt) => pt.chatId === sourceId));
+	if (others.length === 0 || limit <= 0) return "";
+	const hits = createPropositionCandidateSearch(others)({ id: "stretch", name: "", statement: passage, aliases: [] }).slice(0, limit);
+	if (hits.length === 0) return "";
+	const lines = [
+		"RELATED IDEAS FROM OTHER SOURCES — established ideas taught elsewhere that may bear on this stretch (reference these ids verbatim):",
+	];
+	for (const { node } of hits) lines.push(`  ${node.id} | ${node.name} | ${node.statement.replace(/\s+/g, " ")}`);
 	return lines.join("\n");
 }
 
@@ -934,10 +966,12 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// digest is source-scoped, so only SAME-source order matters).
 		const graph = getGraph(graphStore);
 		const digest = sourceDigest(graph, sourceId);
-		const prompt = digest === "" ? view : `${digest}\n\n${view}`;
+		const related = relatedDigest(graph, sourceId, view);
+		const prompt = [digest, related, view].filter((part) => part !== "").join("\n\n");
 		console.info(
 			`[extraction ${jobKey}] extractor starting (${view.split("\n").length} markdown lines` +
-				`${digest === "" ? "" : `, digest ${digest.split("\n").length} lines`})`,
+				`${digest === "" ? "" : `, digest ${digest.split("\n").length} lines`}` +
+				`${related === "" ? "" : `, related ${related.split("\n").length - 1} ideas`})`,
 		);
 		const t0 = performance.now();
 
@@ -1273,10 +1307,12 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// chunk extractor continues its own source, ids verbatim.
 		const graph = getGraph(graphStore);
 		const digest = sourceDigest(graph, input.id);
-		const prompt = digest === "" ? view : `${digest}\n\n${view}`;
+		const related = relatedDigest(graph, input.id, view);
+		const prompt = [digest, related, view].filter((part) => part !== "").join("\n\n");
 		console.info(
 			`[extraction ${jobKey}] notes extractor starting (${view.split("\n").length} source lines` +
-				`${digest === "" ? "" : `, digest ${digest.split("\n").length} lines`})`,
+				`${digest === "" ? "" : `, digest ${digest.split("\n").length} lines`}` +
+				`${related === "" ? "" : `, related ${related.split("\n").length - 1} ideas`})`,
 		);
 		const t0 = performance.now();
 		const findings = await runNotesExtractor(
