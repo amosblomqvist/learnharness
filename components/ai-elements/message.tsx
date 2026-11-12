@@ -412,10 +412,15 @@ export const MessageResponse = memo(
 MessageResponse.displayName = "MessageResponse";
 
 /** Recovery is a tool-text presentation concern, not a shape/answer-data
- * transform. Ordinary assistant/user prose keeps MessageResponse unchanged. */
+ * transform. Ordinary assistant/user prose keeps MessageResponse unchanged.
+ *
+ * Tool text (question, quiz options, practice statements) is always complete
+ * when it renders, so it uses Streamdown's static mode: no incomplete-Markdown
+ * repair. Under the default streaming mode a lone "[" in "(-∞, -2) ∪ [3, ∞)"
+ * is completed into a link and shown as "3, ∞) [blocked]". */
 export function ToolContentResponse({ children, ...props }: MessageResponseProps) {
   return (
-    <MessageResponse {...props}>
+    <MessageResponse mode="static" {...props}>
       {typeof children === "string" ? repairMathForDisplay(children) : children}
     </MessageResponse>
   );
