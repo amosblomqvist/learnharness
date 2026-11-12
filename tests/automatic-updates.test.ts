@@ -37,6 +37,8 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 			return Promise.resolve(this.result);
 		}
 		quitAndInstall() { order.push("install"); }
+		feeds: unknown[] = [];
+		setFeedURL(options: unknown) { this.feeds.push(options); }
 	}
 	const updater = new FakeUpdater();
 	class FakeWebContents extends EventEmitter {
@@ -299,5 +301,31 @@ describe("startup, timer, trusted IPC and menu wiring", () => {
 		const f = fixture(); f.setSettings({ general: { autoUpdate: false } }); await f.run("main()");
 		f.windows[0]!.webContents.fails = true; f.windows[0]!.webContents.loading = false;
 		f.menuCheck(); assert.equal(f.updater.checks, 1);
+	});
+});
+
+describe("LH_UPDATE_FEED override gate", () => {
+	const feedFor = (value: string) => {
+		const f = fixture();
+		f.run(`process.env.LH_UPDATE_FEED = ${JSON.stringify(value)}; setupAutoUpdater()`);
+		return JSON.parse(JSON.stringify(f.updater.feeds));
+	};
+
+	it("accepts HTTPS feeds and loopback HTTP feeds (the local release drill)", () => {
+		for (const url of ["https://updates.example/feed", "http://127.0.0.1:8080/", "http://localhost:8080/dist", "http://[::1]:8080/"]) {
+			assert.deepEqual(feedFor(url), [{ provider: "generic", url }], url);
+		}
+	});
+
+	it("ignores plain HTTP on other hosts, embedded credentials, other schemes and junk", () => {
+		for (const url of ["http://192.168.1.20:8080/", "http://updates.example/", "http://127.0.0.1.attacker.example/", "https://user:pass@updates.example/", "file:///tmp/feed", "not a url"]) {
+			assert.deepEqual(feedFor(url), [], url);
+		}
+	});
+
+	it("leaves the baked feed alone when unset", () => {
+		const f = fixture();
+		f.run("setupAutoUpdater()");
+		assert.deepEqual(f.updater.feeds, []);
 	});
 });

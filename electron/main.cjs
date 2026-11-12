@@ -462,6 +462,10 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  *    local server — the pre-release verification drill (serve
  *    latest-mac.yml + zip + blockmap from any localhost HTTP dir and
  *    watch a real installed copy find/download/restart). Test-only seam.
+ *    Accepted only as https:// or loopback http:// (updateFeedAllowed):
+ *    Windows/Linux updates are not signature-checked, so a plain-HTTP feed
+ *    on another host could be swapped in transit. Anything else is ignored
+ *    with a log line and the baked feed stays in effect.
  *
  * Install path: the downloaded update applies on quit (autoInstallOnAppQuit
  * — Squirrel.Mac stages natively and swaps on relaunch). The renderer
@@ -535,6 +539,19 @@ function installUpdateNow() {
 	autoUpdater?.quitAndInstall();
 }
 
+/** LH_UPDATE_FEED gate: https:// anywhere, plain http:// only on loopback
+ *  (the local drill server). No embedded credentials (they would be logged). */
+function updateFeedAllowed(feed) {
+	try {
+		const target = new URL(feed);
+		if (target.username || target.password) return false;
+		if (target.protocol === "https:") return true;
+		return target.protocol === "http:" && ["127.0.0.1", "localhost", "[::1]"].includes(target.hostname);
+	} catch {
+		return false;
+	}
+}
+
 function setupAutoUpdater() {
 	if (!app.isPackaged) {
 		log("auto-update: dev build — updater disabled");
@@ -549,9 +566,11 @@ function setupAutoUpdater() {
 		return;
 	}
 	const feed = process.env.LH_UPDATE_FEED;
-	if (feed) {
+	if (feed && updateFeedAllowed(feed)) {
 		autoUpdater.setFeedURL({ provider: "generic", url: feed });
 		log(`auto-update: LH_UPDATE_FEED override → ${feed}`);
+	} else if (feed) {
+		log("auto-update: LH_UPDATE_FEED ignored — only https:// or loopback http:// feeds without credentials are accepted");
 	}
 	autoUpdater.autoDownload = true;
 	autoUpdater.autoInstallOnAppQuit = true;
