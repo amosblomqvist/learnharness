@@ -29,6 +29,7 @@ import type {
 	RoleModelOverride,
 } from "../core/settings.ts";
 import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { sanitizeCustomModelCost } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
@@ -481,6 +482,11 @@ export function parseCustomModelOverridesBody(
 		if (entry.reasoning !== undefined) {
 			if (typeof entry.reasoning !== "boolean") return { ok: false, error: `reasoning for ${id} must be true or false` };
 			pin.reasoning = entry.reasoning;
+		}
+		if (entry.cost !== undefined) {
+			const cost = sanitizeCustomModelCost(entry.cost);
+			if (!cost) return { ok: false, error: `cost for ${id} must set input, output, cacheRead and cacheWrite as non-negative USD per million tokens` };
+			pin.cost = cost;
 		}
 		Object.defineProperty(out, id, { value: pin, enumerable: true, configurable: true, writable: true });
 	}

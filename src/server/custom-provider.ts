@@ -80,7 +80,7 @@ function toPiModel(
 		// off/minimal/low/medium/high set.
 		reasoning: pin?.reasoning ?? Boolean(model.reasoning),
 		input: model.image ? ["text", "image"] : ["text"],
-		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		cost: pin?.cost ?? { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
 		contextWindow: pin?.context ?? model.context ?? CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
 		maxTokens: pin?.maxTokens ?? model.maxTokens ?? CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
 		type: "chat",

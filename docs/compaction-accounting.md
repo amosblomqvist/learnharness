@@ -46,7 +46,7 @@ The server uses Pi AI's catalog and public `calculateCost`; the browser receives
 | API providers | Dollar estimates when catalog model and required usage detail are available. |
 | Built-in subscription connections | Labelled plan usage through explicit logical provider IDs, not API dollars. |
 | [Claude Code](claude-code.md) | CLI tokens retained; dollar costs unpriced. CLI result-line dollar totals are not imported; routing/billing belongs to the CLI. |
-| [Custom/local endpoints](custom-providers.md) | Tokens retained; unknown/unpriced costs, not $0. No rate editor. |
+| [Custom/local endpoints](custom-providers.md) | Tokens retained; unknown/unpriced costs, not $0, unless the model has an explicit `cost` pin. No rate editor in Settings. |
 
 Mixed sessions sum known API estimates and retain subscription/CLI labels. Unpriced turns remain unpriced, not free. Summarizer spending counts under the same rules but does not populate the conversation meter.
 
