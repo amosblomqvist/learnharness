@@ -21,7 +21,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ModelCatalogEntry } from "@/src/core";
-import { CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER, fuzzyScore, subscriptionLabel } from "@/src/core";
+import { CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER, fuzzyScore, opencodePlanLabel, subscriptionLabel } from "@/src/core";
 import { formatTokens } from "@/components/usage-format";
 import { SearchMenuList } from "./search-menu-list";
 
@@ -71,7 +71,7 @@ export function ModelMenuList({
 			<SearchMenuList
 				items={visionItems}
 				itemKey={(m) => `${m.provider}/${m.id}`}
-				searchTerms={(m) => [m.provider, m.id, m.name]}
+				searchTerms={(m) => [m.provider, m.id, m.name, opencodePlanLabel(m.provider) ?? ""]}
 				compare={(a, b) => a.id.localeCompare(b.id)}
 				prioritize={vision ? (m) => m.input.includes("image") : undefined}
 				isSelected={(m) => m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider)}
@@ -90,7 +90,7 @@ export function ModelMenuList({
 						</span>
 					</span>
 					<span className="flex items-center justify-between gap-2 text-muted-foreground">
-						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}</span>
+						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : opencodePlanLabel(m.provider) ?? m.provider} · {m.id}</span>
 						<span className="shrink-0 tabular-nums">{m.contextWindow === null ? "—" : formatTokens(m.contextWindow)}</span>
 					</span>
 				</>}

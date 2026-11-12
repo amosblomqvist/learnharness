@@ -140,6 +140,13 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "zai-coding-cn", envVar: "ZAI_CODING_CN_API_KEY", label: "Z.AI Coding CN" },
 ] as const;
 
+/** OpenCode Zen and Go share OPENCODE_API_KEY and 17 model ids, so the
+ *  model menu names the plan on their rows (#147). Other providers → undefined. */
+export function opencodePlanLabel(provider: string): string | undefined {
+	if (provider !== "opencode" && provider !== "opencode-go") return undefined;
+	return AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label;
+}
+
 /**
  * THE single custom endpoint's identity: a user-configured OpenAI-compatible
  * server registered into pi-ai at runtime (server/custom-provider.ts). NOT part
