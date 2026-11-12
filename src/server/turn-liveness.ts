@@ -16,20 +16,32 @@
  * Still ephemeral BY DESIGN: a process restart clears it, so there are no
  * stale flags to clean up — a crashed turn recovers via the write-ahead
  * record + mount continuation on the next visit. The TTL is a leak guard for
- * the pathological case where onFinish never fires (it runs even on aborts);
- * chat turns are minutes at most, so 30 minutes is far on the safe side.
+ * teacher turns whose onFinish never fires. Preparation owners are pinned
+ * until their callback settles: expiring an executing grader would admit a
+ * second writer. Handoff restores the teacher TTL with a fresh timestamp.
  */
 
 import { emit } from "../core/events.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 
+interface TurnOwner {
+	token: object;
+	preparing: boolean;
+}
+
 interface LhGlobal {
 	__lhTurnRegistry?: Map<string, number>;
+	__lhTurnOwners?: Map<string, TurnOwner>;
 }
 
 function registry(): Map<string, number> {
 	const g = globalThis as typeof globalThis & LhGlobal;
 	return (g.__lhTurnRegistry ??= new Map<string, number>());
+}
+
+function owners(): Map<string, TurnOwner> {
+	const g = globalThis as typeof globalThis & LhGlobal;
+	return (g.__lhTurnOwners ??= new Map<string, TurnOwner>());
 }
 
 const inFlight = registry();
@@ -40,11 +52,15 @@ const MAX_TURN_MS = 30 * 60_000;
  * chat — the caller rejects the request (only one turn may own a chat).
  * Announces "turn-started" AFTER the registry write: a listener that reads
  * isTurnRunning or fetches the record sees consistent truth. The rejected
- * double-begin (the 409 path) stays silent — no turn began.
+ * double-begin (the 409 path) stays silent — no turn began. A private
+ * preparation owner pins the entry until handoff; ordinary callers keep
+ * the existing TTL behavior and need not pass an owner.
  */
-export function beginTurn(chatId: string): boolean {
+export function beginTurn(chatId: string, preparationOwner?: object): boolean {
 	if (isTurnRunning(chatId)) return false;
 	clearTurnFailure(chatId);
+	if (preparationOwner) owners().set(chatId, { token: preparationOwner, preparing: true });
+	else owners().delete(chatId);
 	inFlight.set(chatId, Date.now());
 	emit("turn-started", { chatId });
 	return true;
@@ -55,10 +71,28 @@ export function beginTurn(chatId: string): boolean {
  * failure notice has been retained by settlement cleanup. A subsequent
  * fetch reads durable truth, never a promise that an unsaved reply landed.
  * Emits only when an entry was actually present: a
- * defensive no-op endTurn must not fire a spurious settle.
+ * defensive no-op endTurn must not fire a spurious settle. Passing an
+ * owner fences cleanup against a newer turn; omitted retains the original
+ * unconditional end API for ordinary turns.
  */
-export function endTurn(chatId: string): void {
+export function endTurn(chatId: string, owner?: object): void {
+	if (owner && owners().get(chatId)?.token !== owner) return;
+	owners().delete(chatId);
 	if (inFlight.delete(chatId)) emit("turn-settled", { chatId });
+}
+
+/** Private ownership fence for preparation and its handed-off teacher. */
+export function isTurnOwner(chatId: string, owner: object): boolean {
+	return isTurnRunning(chatId) && owners().get(chatId)?.token === owner;
+}
+
+/** Transfer the pinned preparation to the ordinary teacher TTL, without
+ * ending/restarting the turn or emitting another lifecycle event. */
+export function handoffTurn(chatId: string, owner: object): boolean {
+	if (!isTurnOwner(chatId, owner)) return false;
+	owners().get(chatId)!.preparing = false;
+	inFlight.set(chatId, Date.now());
+	return true;
 }
 
 /** True while the chat's turn is in flight; lazily evicts stale entries.
@@ -69,8 +103,9 @@ export function endTurn(chatId: string): void {
 export function isTurnRunning(chatId: string): boolean {
 	const since = inFlight.get(chatId);
 	if (since === undefined) return false;
-	if (Date.now() - since > MAX_TURN_MS) {
+	if (!owners().get(chatId)?.preparing && Date.now() - since > MAX_TURN_MS) {
 		inFlight.delete(chatId);
+		owners().delete(chatId);
 		return false;
 	}
 	return true;

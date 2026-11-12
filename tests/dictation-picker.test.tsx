@@ -6,6 +6,10 @@ import { setDictationActive } from "../components/dictation-state.ts";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { AUTH_KEYS, DICTATION_LANGUAGES, type AuthKeyStatus, type ModelCatalogEntry, type UserSettings } from "../src/core/index.ts";
 import { ModelMenuList } from "../components/settings/model-menu.tsx";
+import { InteractionLayersProvider, useInteractionLayers, type InteractionLayersController } from "../components/interaction-layers.tsx";
+let interactionController: InteractionLayersController | undefined;
+function InteractionFixture({ children }: { children: React.ReactNode }) { interactionController = useInteractionLayers(); return children; }
+function WithLayers({ children }: { children: React.ReactNode }) { return <InteractionLayersProvider><InteractionFixture>{children}</InteractionFixture></InteractionLayersProvider>; }
 
 let dispose: (() => Promise<void>) | undefined;
 let restore: (() => void) | undefined;
@@ -18,6 +22,8 @@ async function key(element: HTMLElement, value: string) {
 	await act(async () => {
 		const event = new window.Event("keydown", { bubbles: true, cancelable: true });
 		Object.assign(event, { key: value });
+		// linkedom omits the browser's window capture path.
+		interactionController?.captureKeyDown(event as KeyboardEvent);
 		element.dispatchEvent(event);
 	});
 }
@@ -73,13 +79,15 @@ async function fixture(failRead = false) {
 			else delete (globalThis as Record<string, unknown>)[name];
 		}
 	};
-	// Register the outer dialog listener first: one Escape must close only
-	// the language menu, even when the settings dialog owns another listener.
-	doc.addEventListener("keydown", (event) => { if ((event as KeyboardEvent).key === "Escape") state.outerEscapes++; });
+	// The outer surface observes the capture-snapshotted owner, rather than
+	// recreating the retired independent document-level dismissal listener.
+	doc.addEventListener("keydown", (event) => {
+		if ((event as KeyboardEvent).key === "Escape" && !interactionController?.getEventOwner(event as KeyboardEvent)) state.outerEscapes++;
+	});
 	const { createRoot } = await import("react-dom/client");
 	const { DictationLanguageSetting } = await import("../components/dictation-language.tsx");
 	let root = createRoot(doc.getElementById("root")!);
-	const mount = async () => { await act(async () => { root.render(<DictationLanguageSetting />); }); };
+	const mount = async () => { await act(async () => { root.render(<WithLayers><DictationLanguageSetting /></WithLayers>); }); };
 	dispose = async () => { await act(async () => { setDictationActive(false); root.unmount(); }); };
 	await mount();
 	// Fixtures represent distinct server records; remounts within a fixture
@@ -87,12 +95,12 @@ async function fixture(failRead = false) {
 	await act(async () => { notifySettingsSaved("dictation"); });
 	return {
 		state,
-		render: async (element: React.ReactNode) => { await act(async () => { root.render(element); }); },
+		render: async (element: React.ReactNode) => { await act(async () => { root.render(<WithLayers>{element}</WithLayers>); }); },
 		remount: async () => { await dispose!(); root = createRoot(doc.getElementById("root")!); await mount(); },
 	};
 }
 
-afterEach(async () => { await dispose?.(); restore?.(); dispose = undefined; restore = undefined; });
+afterEach(async () => { await dispose?.(); restore?.(); dispose = undefined; restore = undefined; interactionController = undefined; });
 
 test("an initial load failure is visible and opening the menu again can retry", async () => {
 	const f = await fixture(true);

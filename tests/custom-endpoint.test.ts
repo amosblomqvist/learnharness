@@ -350,6 +350,24 @@ describe("discoverModels", () => {
 		assert.equal(byId["ctx"]!.maxTokens, undefined);
 		assert.equal(byId["plain"]!.context, undefined);
 	});
+	it("detects llama.cpp's runtime context from meta.n_ctx, not n_ctx_train", async () => {
+		stubFetch(() => ({
+			status: 200,
+			body: {
+				data: [
+					{ id: "llamacpp", owned_by: "llamacpp", meta: { n_ctx: 65536, n_ctx_train: 262144, n_vocab: 151936 } },
+					{ id: "train-only", owned_by: "llamacpp", meta: { n_ctx_train: 262144 } },
+					{ id: "top-level-wins", context_length: 32768, meta: { n_ctx: 65536 } },
+				],
+			},
+		}));
+		const r = await discoverModels("http://h/v1");
+		assert.ok(r.ok);
+		const byId = Object.fromEntries(r.models.map((m) => [m.id, m]));
+		assert.equal(byId["llamacpp"]!.context, 65536);
+		assert.equal(byId["train-only"]!.context, undefined, "the training maximum is not what the server accepts");
+		assert.equal(byId["top-level-wins"]!.context, 32768);
+	});
 	it("detects reasoning from endpoint metadata only — never from the model name", async () => {
 		stubFetch(() => ({
 			status: 200,

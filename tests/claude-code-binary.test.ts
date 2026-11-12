@@ -34,6 +34,17 @@ test("checks ~/.claude/local, npm global bin, /opt/homebrew/bin, /usr/local/bin 
 	}
 });
 
+test("checks Nix profile dirs after the other known dirs, in per-user, ~/.nix-profile, system order", () => {
+	const all = ["/usr/local/bin/claude", "/etc/profiles/per-user/u/bin/claude", `${HOME}/.nix-profile/bin/claude`, "/run/current-system/sw/bin/claude"];
+	for (let i = 0; i < all.length; i++) {
+		assert.equal(resolveWith(all.slice(i), { PATH: "", USER: "u" }), all[i]);
+	}
+});
+
+test("skips the per-user Nix profile when USER is unset", () => {
+	assert.equal(resolveWith(["/etc/profiles/per-user/u/bin/claude"], { PATH: "" }), null);
+});
+
 test("npm global bin follows npm_config_prefix when set", () => {
 	const binary = resolveWith(["/opt/npm/bin/claude", `${HOME}/.npm-global/bin/claude`], { npm_config_prefix: "/opt/npm" });
 	assert.equal(binary, "/opt/npm/bin/claude");
