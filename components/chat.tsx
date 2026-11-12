@@ -26,7 +26,7 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { PathText } from "@/components/file-path-chip";
-import { copyText } from "@/components/md-blocks";
+import { CopyResponseButton } from "@/components/copy-response-button";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
@@ -68,7 +68,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, CheckIcon, CopyIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { PluginQuestionDock } from "./plugin-question-dock";
@@ -235,37 +235,6 @@ function SystemLine({ children, testId }: { children: React.ReactNode; testId?: 
 		>
 			{children}
 		</div>
-	);
-}
-
-/** Copy the whole assistant response (its text parts, in order). Beside the
- *  side-conversation button; a select-then-copy is the only other way and it
- *  loses the passage boundaries. The icon flips to a check for a beat. */
-function CopyResponseButton({ getText }: { getText: () => string }) {
-	const [copied, setCopied] = useState(false);
-	const timerRef = useRef<number | undefined>(undefined);
-	useEffect(() => () => window.clearTimeout(timerRef.current), []);
-	return (
-		<Button
-			type="button"
-			variant="ghost"
-			size="icon-xs"
-			data-testid="copy-response-button"
-			aria-label={copied ? "Copied" : "Copy response"}
-			title={copied ? "Copied" : "Copy response"}
-			className={copied ? "text-muted-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}
-			onClick={(event) => {
-				blurAfterPointerClick(event);
-				void copyText(getText()).then((ok) => {
-					if (!ok) return;
-					setCopied(true);
-					window.clearTimeout(timerRef.current);
-					timerRef.current = window.setTimeout(() => setCopied(false), 1500);
-				});
-			}}
-		>
-			{copied ? <CheckIcon aria-hidden className="size-3.5" /> : <CopyIcon aria-hidden className="size-3.5" />}
-		</Button>
 	);
 }
 
