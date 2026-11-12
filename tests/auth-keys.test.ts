@@ -15,7 +15,7 @@ describe("the catalog", () => {
 	it("lists the curated app-service keys (provider keys live in the provider table)", () => {
 		assert.deepEqual(
 			AUTH_KEYS.map((k) => k.id),
-			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY"],
+			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY", "SEARXNG_URL"],
 		);
 		for (const k of AUTH_KEYS) {
 			assert.ok(k.label.length > 0, `${k.id} has a label`);
@@ -83,6 +83,15 @@ describe("validateKeyShape (the 400 gate — curated keys)", () => {
 		assert.ok(!validateKeyShape("OLLAMA_API_KEY", "short").ok);
 		assert.ok(!validateKeyShape("OLLAMA_API_KEY", "ollama fake key 123456").ok);
 		assert.ok(!isKnownAuthKey("OLLAMA_BASE_URL"));
+	});
+
+	it("SearXNG takes an instance URL, not a key", () => {
+		assert.ok(validateKeyShape("SEARXNG_URL", "  http://127.0.0.1:8080  ").ok);
+		assert.ok(validateKeyShape("SEARXNG_URL", "https://search.example.com/searxng").ok);
+		assert.ok(!validateKeyShape("SEARXNG_URL", "search.example.com").ok, "scheme is required");
+		assert.ok(!validateKeyShape("SEARXNG_URL", "not a url").ok);
+		assert.ok(!validateKeyShape("SEARXNG_URL", "ftp://example.com").ok);
+		assert.ok(!validateKeyShape("SEARXNG_URL", "http://127.0.0.1:8080/searx ng").ok, "no whitespace");
 	});
 
 	it("trims surrounding paste whitespace before checking", () => {
