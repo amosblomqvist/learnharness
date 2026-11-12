@@ -36,7 +36,7 @@ import {
   type StreamdownProps,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
-import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
+import { healOverescapedCommands, repairMathForDisplay, transformMathDelimiters } from "@/src/core";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: LhViewMessage["role"];
@@ -411,8 +411,20 @@ export const MessageResponse = memo(
 
 MessageResponse.displayName = "MessageResponse";
 
+/** Assistant prose carries no JSON layer, so only doubled command
+ * backslashes need healing there: GPT-5.x writes `\\frac` in plain replies
+ * (#111), which KaTeX renders as a row break plus a bare "frac". The
+ * heal is parse-guarded and display-only; the saved text stays as written. */
+export function AssistantTextResponse({ children, ...props }: MessageResponseProps) {
+  return (
+    <MessageResponse {...props}>
+      {typeof children === "string" ? healOverescapedCommands(children) : children}
+    </MessageResponse>
+  );
+}
+
 /** Recovery is a tool-text presentation concern, not a shape/answer-data
- * transform. Ordinary assistant/user prose keeps MessageResponse unchanged. */
+ * transform. User prose keeps MessageResponse unchanged. */
 export function ToolContentResponse({ children, ...props }: MessageResponseProps) {
   return (
     <MessageResponse {...props}>
