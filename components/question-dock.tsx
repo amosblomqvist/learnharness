@@ -362,6 +362,12 @@ function QuestionDockForm({
 	// deliberate (the same number, the same meaning). The dock unmounts
 	// between questions, so each question starts fresh at 50.
 	const [confIdx, setConfIdx] = useState<number>(initialDraft?.confidenceIndex ?? DEFAULT_CONFIDENCE_INDEX);
+	/* Whether that value is a DELIBERATE choice or the resting default
+	 * (issue #390). The dock unmounts between questions, so a fresh
+	 * question starts untouched; a restored draft keeps its flag. Only an
+	 * actual slider interaction (drag or ←/→) flips this true — including
+	 * moving away and back to 50. */
+	const [confTouched, setConfTouched] = useState<boolean>(initialDraft?.confidenceTouched ?? false);
 	const selectMode: SelectMode = qd.mode === "multi-select" ? "multi-select" : "single-select";
 
 	// The PRIMARY dictation input (owner, STT round 1): while a question
@@ -447,6 +453,7 @@ function QuestionDockForm({
 			// Always sent on quiz answers (owner: 50 must mean 50, never
 			// "untouched"); buildAnswer drops it on "I don't know".
 			confidence: kind === "quiz" ? CONFIDENCE_STOPS[confIdx] : undefined,
+			confidenceTouched: kind === "quiz" ? confTouched : undefined,
 		};
 		// Snapshot before optimistic submission unmounts the form. Ref values
 		// include the dictation finals that just landed, unlike stale closures.
@@ -456,6 +463,7 @@ function QuestionDockForm({
 			other,
 			text: answerTextRef.current,
 			confidenceIndex: confIdx,
+			confidenceTouched: confTouched,
 		});
 		return req;
 	};
@@ -584,6 +592,7 @@ function QuestionDockForm({
 				// (the slider grays out and nothing is sent).
 				if (kind !== "quiz" || sel.dontKnow) return;
 				e.preventDefault();
+				setConfTouched(true);
 				setConfIdx((i) =>
 					Math.min(
 						CONFIDENCE_STOPS.length - 1,
@@ -862,6 +871,7 @@ function QuestionDockForm({
 									for (let i = 1; i < CONFIDENCE_STOPS.length; i++) {
 										if (Math.abs(CONFIDENCE_STOPS[i]! - v) < Math.abs(CONFIDENCE_STOPS[best]! - v)) best = i;
 									}
+									setConfTouched(true);
 									setConfIdx(best);
 								}}
 								style={{ color: CONFIDENCE_COLORS[confIdx] }}

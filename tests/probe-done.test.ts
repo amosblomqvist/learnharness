@@ -13,7 +13,8 @@ import * as path from "node:path";
 import { after, describe, it } from "node:test";
 import { probeDoneTool } from "../src/agent/tools/probe.ts";
 import type { SteerMessage } from "../src/core/contracts.ts";
-import { hasProbeDone, type LhMessage } from "../src/core/native-messages.ts";
+import { hasProbeDone, newAnswerResult, type LhMessage } from "../src/core/native-messages.ts";
+import type { QuestionAnswerData } from "../src/core/question-core.ts";
 import { phaseAt3Lh } from "../src/core/phases.ts";
 import { HANDOFF_TEXT } from "../src/core/contracts.ts";
 import { chatStore } from "../src/store/chats.ts";
@@ -79,11 +80,47 @@ describe("probe_done: the probe→planning seam", () => {
 		assert.equal(res.error, undefined);
 		assert.equal(delivered.length, 1, "the handoff is queued exactly once");
 		assert.equal(delivered[0]!.id, `steer_probe_${chatId}`);
-		// Native marker (Wave B): the model-facing HANDOFF_TEXT rides content;
-		// the UI keys off customType; the chat id rides details.
+		// Native marker (Wave B): the model-facing HANDOFF_TEXT rides content
+		// (followed by the deterministic calibration block), the UI keys off
+		// customType; the chat id rides details.
 		assert.equal(delivered[0]!.customType, "probe-handoff");
-		assert.equal(delivered[0]!.content, HANDOFF_TEXT);
+		assert.ok(delivered[0]!.content.startsWith(HANDOFF_TEXT));
+		assert.match(delivered[0]!.content, /CALIBRATION — probe phase/);
+		assert.match(delivered[0]!.content, /Calibration unavailable — the probe recorded no quiz answers/);
 		assert.equal((delivered[0]!.details as { chatId: string }).chatId, chatId);
+	});
+
+	it("ok path: the handoff carries the deterministic calibration summary", async () => {
+		const chatId = newChat("Probe: calibration handoff");
+		chatStore.saveMessages(chatId, [
+			assistantWithCall("q1", "probe", { question: "2+2?", options: [{ label: "4" }, { label: "5" }], correctAnswer: "4" }),
+			newAnswerResult("call_q1", "probe", {
+				kind: "quiz",
+				questionText: "2+2?",
+				options: [
+					{ index: 1, label: "4" },
+					{ index: 2, label: "5" },
+				],
+				dontKnow: false,
+				answers: [{ label: "4", value: "4", index: 1 }],
+				correct: true,
+				correctIndices: [1],
+				confidence: 90,
+				confidenceTouched: true,
+				answeredAt: "2026-11-01T00:00:00.000Z",
+			} as QuestionAnswerData),
+		]);
+		const delivered: SteerMessage[] = [];
+		const tools = probeDoneTool({ chatId, chatStore, deliver: (s) => delivered.push(s) });
+
+		const res = await execute(tools, { assessment: ASSESSMENT });
+		assert.equal(res.ok, true);
+		const content = delivered[0]!.content;
+		assert.match(content, /CALIBRATION — probe phase/);
+		assert.match(content, /Quiz answers: 1/);
+		assert.match(content, /explicit confidence: 1/);
+		assert.match(content, /90–100 +1 +0/);
+		assert.match(content, /high-confidence misses: 0/);
 	});
 
 	it("REFUSES while a question is still open — resolve it first", async () => {

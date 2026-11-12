@@ -467,6 +467,12 @@ export interface QuestionAnswerData {
 	/** Host-owned explicit image channels; never inferred from text or paths. */
 	images?: PluginSubmissionImages;
 	confidence?: number; // quiz only: the learner's stated probability (0-100, raw) that his selected answer is correct — never sent on "I don't know" (owner, 2026-10-01)
+	/** quiz only: whether the learner actually moved the confidence slider.
+	 *  `true` = a deliberate choice (including moving away and back to 50);
+	 *  `false` = the untouched 50 default; absent = a legacy record from
+	 *  before this flag, so its 50 is ambiguous. Calibration (core/
+	 *  calibration.ts) never counts a default or legacy 50 as a coin flip. */
+	confidenceTouched?: boolean;
 	correct?: boolean; // quiz only
 	correctIndices?: number[]; // quiz only (rendering)
 	committed?: string; // explain only (rendering): the model's committed answer
@@ -494,6 +500,9 @@ export interface AnswerRequest {
 	thinking?: string; // the reasoning-on-the-question channel (was `note`)
 	readingThinking?: string; // the thinking-while-reading channel (check answers)
 	confidence?: number; // quiz only: 0-100 raw probability — 50 is a real coin flip, always sent (owner, 2026-10-01)
+	/** quiz only: true when the learner moved the slider, false when the
+	 *  resting default was left untouched (see QuestionAnswerData). */
+	confidenceTouched?: boolean;
 }
 
 /** The confidence slider's snap stops (owner, 2026-10-01): raw probability
@@ -523,6 +532,9 @@ export interface QuestionFormDraft {
 	other: string;
 	text: string;
 	confidenceIndex: number;
+	/** The slider's deliberate-choice flag, restored with the draft so a
+	 *  submitted draft keeps classifying an explicit 50 as explicit. */
+	confidenceTouched?: boolean;
 }
 
 export interface QuestionDraft {
@@ -744,6 +756,10 @@ export function buildAnswer(qd: QuestionData, req: AnswerRequest, tool?: string)
 		// the dock snaps to the grid, the record accepts any integer.
 		if (!base.dontKnow && req.confidence !== undefined) {
 			base.confidence = Math.max(0, Math.min(100, Math.round(req.confidence)));
+			// A resting 50 and a deliberate 50 are the same number but not the
+			// same evidence: only a slider interaction sets this true. Absent
+			// (not false) is reserved for records written before the flag.
+			base.confidenceTouched = req.confidenceTouched === true;
 		}
 	}
 	if (qd.kind === "explain") {

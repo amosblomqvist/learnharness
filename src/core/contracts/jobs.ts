@@ -478,8 +478,8 @@ function abortText(kind: JobKind): string {
 // (core/contracts/chat.ts — single source); the UI renders the quiet
 // system line off the customType. Nothing human-looking is persisted, ever.
 
-export function buildProbeHandoffSteer(chatId: string): SteerMessage {
-	return newHandoffMessage(chatId);
+export function buildProbeHandoffSteer(chatId: string, calibration?: string): SteerMessage {
+	return newHandoffMessage(chatId, calibration);
 }
 
 /** True when the transcript already carries this steer — idempotent
