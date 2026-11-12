@@ -41,7 +41,7 @@ test("ordinary web restores configured sibling credentials, private runtime leas
 	assert(chat.chatGPTConnected()); assert(native.nativeSubscriptionConnected("github-copilot")); assert(native.nativeSubscriptionConnected("xai"));
 	assert.equal((await chat.chatGPTLease(chat.chatGPTScope(model.id), false)).accessToken, "fixture-chatgpt-access");
 	const xaiModel = native.nativeSubscriptionModels().find((entry) => entry.provider === "xai-subscription")!;
-	assert.equal((await native.subscriptionLease(native.subscriptionScope("xai", xaiModel.id), false)).apiKey, "fixture-xai-access");
+	assert.equal((await native.subscriptionLease(native.subscriptionScope("xai", xaiModel.id), false)).auth.apiKey, "fixture-xai-access");
 	const response = await subscriptionControlsResponse(request());
 	assert.equal(response.status, 200); assert.equal(response.headers.get("cache-control"), "no-store");
 	const publicState = await response.text();
