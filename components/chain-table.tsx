@@ -545,6 +545,7 @@ export function ChainTableBody({
 															key={id}
 															{...chainRow(["prop", group.key, chain.id, id], depth + 2)}
 															data-testid={`prop-row-${id}`}
+															data-chain-statement
 															{...treeRowLayout({ depth: 2, variant: "detail" })}
 														>
 															{selectMode ? <RowCheckbox
