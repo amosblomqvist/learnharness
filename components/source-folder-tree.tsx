@@ -86,6 +86,8 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 			className="block h-5 w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium leading-5 outline-none shadow-none focus:ring-0"
 			onChange={(e) => setDraft(e.target.value)} onBlur={() => { void commit(); }}
 			onKeyDown={(e) => {
+				// An IME's Enter/Escape confirms or cancels its composition, not the edit.
+				if (e.nativeEvent.isComposing || e.keyCode === 229) { e.stopPropagation(); return; }
 				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(""); onCancel?.(); }
 				if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void commit(); }
 			}} onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} />
