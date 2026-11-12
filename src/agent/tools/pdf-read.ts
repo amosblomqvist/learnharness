@@ -4,6 +4,7 @@ import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { pdfExtract, pdfInfo, pdfProbe, pdfSearch } from "../subagents/pdf-ops.ts";
+import { safeFetch } from "./safe-fetch.ts";
 
 /**
  * PDF reading tools for the RESEARCHER sub-agent (owner design B,
@@ -111,7 +112,7 @@ export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> 
 					return `web_fetch_pdf failed: invalid URL "${url}"`;
 				}
 				try {
-					const resp = await fetch(url, {
+					const resp = await safeFetch(url, {
 						headers: {
 							"User-Agent": USER_AGENT,
 							Accept: "application/pdf,application/octet-stream,*/*",

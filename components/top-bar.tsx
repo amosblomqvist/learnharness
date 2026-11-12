@@ -19,13 +19,15 @@
  *   non-natives (spans/divs with onClick).
  * - select-none — dragging never highlights the title.
  * - SidebarToggle FIRST — the sidebar reopen when closed, with its
- *   Electron traffic-light gutter (lh-closed-toggle).
+ *   Electron traffic-light gutter (lh-closed-toggle). Host knowledge
+ *   pickers omit the action and reserve only the overlapping native gutter.
  * - border-b border-border px-3, gap-3 rhythm.
  *
  * The consumer brings the title (font-title text-3xl tracking-tight) and
  * any right-side controls. THE TITLE LAW (owner round 11, 2026-10-05):
- * the serif title ALWAYS names a session — chrome-less creation surfaces
- * (home, both /chat/new drafts) and the chain table render NO title.
+ * the serif title names a session or a registered plugin view (plugin UI
+ * ruling, 2026-11-01); chrome-less creation surfaces (home, both /chat/new
+ * drafts) and the chain table render NO title.
  * `drag={false}` is the one escape hatch —
  * chat's rename mode (app-region:drag would eat the mousedown that
  * exits the input; owner ask).
@@ -38,24 +40,51 @@
  * no-drag column killed drag over the counts/search/close area).
  */
 
-import type { ReactNode } from "react";
+import { useLayoutEffect, useRef, type ReactNode } from "react";
 import { SidebarToggle } from "@/components/sidebar";
 
 export function TopBar({
 	drag = true,
 	onMouseDown,
 	children,
+	sidebarToggle = true,
 }: {
 	drag?: boolean;
 	onMouseDown?: React.MouseEventHandler<HTMLElement>;
 	children?: ReactNode;
+	/** Host picker chrome: native clearance without changing sidebar state. */
+	sidebarToggle?: boolean;
 }) {
+	const header = useRef<HTMLElement>(null);
+	useLayoutEffect(() => {
+		if (sidebarToggle || !header.current) return;
+		const element = header.current;
+		let previous: number | undefined;
+		const measure = () => {
+			const left = element.getBoundingClientRect().left;
+			if (left === previous) return;
+			previous = left;
+			element.style.setProperty("--lh-header-left", `${left}px`);
+		};
+		measure();
+		const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(measure);
+		observer?.observe(element);
+		window.addEventListener("resize", measure);
+		window.addEventListener("scroll", measure, true);
+		const offZoom = window.lh?.onZoom?.(measure);
+		return () => {
+			observer?.disconnect(); offZoom?.();
+			window.removeEventListener("resize", measure);
+			window.removeEventListener("scroll", measure, true);
+		};
+	}, [sidebarToggle]);
 	return (
 		<header
+			ref={header}
 			onMouseDown={onMouseDown}
-			className={`${drag ? "lh-drag " : ""}lh-wco-gutter flex h-15 select-none items-center gap-3 border-b border-border px-3`}
+			className={`${drag ? "lh-drag " : ""}${sidebarToggle ? "" : "lh-native-window-clearance "}lh-wco-gutter flex h-15 select-none items-center gap-3 border-b border-border px-3`}
 		>
-			<SidebarToggle />
+			{sidebarToggle && <SidebarToggle />}
 			{children}
 		</header>
 	);

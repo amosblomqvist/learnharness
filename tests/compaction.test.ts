@@ -13,6 +13,7 @@ import {
 	newUserMessage,
 	planTreeToText,
 	serializeForSummary,
+	serializeCitation,
 	toLlmMessages,
 	COMPACTED_HISTORY_HEADER,
 	type LhMessage,
@@ -470,5 +471,29 @@ describe("toLlmMessages carries the leading system message (request chrome)", ()
 				? out[0]!.content
 				: ((out[0]!.content as { text?: string }[])[0]?.text ?? "");
 		assert.ok(headText.includes("SUMMARY"));
+	});
+});
+
+describe("tutor citations leaving the record", () => {
+	const link = serializeCitation({ version: 1, chatId: "c", messageId: "m", text: "x y", start: 0, end: 3, prefix: "", suffix: "" });
+
+	it("expands learner citations at the wire and leaves the record untouched", () => {
+		const record: LhMessage[] = [newUserMessage(`see ${link}`)];
+		const [wire] = toLlmMessages(record as never);
+		assert.equal(typeof wire!.content, "string");
+		assert.match(wire!.content as string, /^see \[tutor-quote-1\]\n\n<tutor_citations>/);
+		assert.match((record[0] as { content: string }).content, /lh-citation:/);
+	});
+
+	it("expands citations inside text blocks of array-content learner messages", () => {
+		const message = { ...newUserMessage(""), content: [{ type: "text", text: link }] } as LhMessage;
+		const [wire] = toLlmMessages([message] as never);
+		assert.match(JSON.stringify(wire!.content), /\[tutor-quote-1\]/);
+	});
+
+	it("serializes learner citations as readable quotes for the summarizer", () => {
+		const text = serializeForSummary([newUserMessage(`see ${link}`)]);
+		assert.ok(text.includes("[LEARNER] see \n\n> Tutor quote:\n> x y"));
+		assert.ok(!text.includes("lh-citation:"));
 	});
 });

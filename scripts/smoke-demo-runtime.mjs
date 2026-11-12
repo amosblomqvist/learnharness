@@ -9,6 +9,7 @@
 import assert from "node:assert/strict";
 import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
+import http from "node:http";
 import { createRequire, registerHooks } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -176,21 +177,56 @@ async function browserProbe(puppeteer) {
 		page.on("console", (msg) => { if (msg.type() === "error") failures.push(msg.text()); });
 		page.on("pageerror", (err) => failures.push(String(err)));
 		page.on("requestfailed", (req) => failures.push(`failed request: ${req.url()}`));
-		await page.setRequestInterception(true);
-		page.on("request", (req) => {
-			if (/^(file:|about:|data:)/.test(req.url())) void req.continue();
-			else { failures.push(`unexpected network request: ${req.url()}`); void req.abort(); }
-		});
-		const html = path.join(home, "demo.html");
-		fs.writeFileSync(html, '<!doctype html><meta charset="utf-8"><button id="increment">Increment</button><output id="count">0</output><script>document.querySelector("#increment").onclick = () => { document.querySelector("#count").textContent = "1"; };</script>');
-		await page.goto(pathToFileURL(html).href, { waitUntil: "load", timeout: 10_000 });
+		// Import the actual production functions, not an independently implemented
+		// isolation recipe. Payload-only import tracing was checked separately.
+		const { tsImport } = await import("tsx/esm/api");
+		const { loadIsolatedPage, runDemoOnPage } = await tsImport("../src/agent/subagents/headless.ts", import.meta.url);
+		const cleanup = await loadIsolatedPage(page, '<!doctype html><meta charset="utf-8"><button id="increment">Increment</button><output id="count">0</output><script>document.querySelector("#increment").onclick = () => { document.querySelector("#count").textContent = "1"; };</script>');
 		assert.equal(await page.$eval("#count", (element) => element.textContent), "0");
 		await page.click("#increment");
 		assert.equal(await page.$eval("#count", (element) => element.textContent), "1");
-		await page.goto("about:blank");
-		assert.equal(await page.$("#increment"), null, "page state was not cleared");
 		assert.deepEqual(failures, [], "demo console/page/network errors");
-		console.log("[smoke-demo-runtime] packaged browser-service: JS button 0 → 1, clean console/page, page reset ok (no Chrome fallback)");
+		// A demo must not be able to read local files.
+		const canary = path.join(home, "canary.txt");
+		fs.writeFileSync(canary, "lh-demo-canary\n");
+		const leaked = await page.evaluate(async (url) => {
+			let fetchAttempted = false, xhrAttempted = false;
+			const viaFetch = async () => { fetchAttempted = true; try { return (await (await fetch(url)).text()).includes("lh-demo-canary"); } catch { return false; } };
+			const viaXhr = () => { xhrAttempted = true; try { const xhr = new XMLHttpRequest(); xhr.open("GET", url, false); xhr.send(); return xhr.responseText.includes("lh-demo-canary"); } catch { return false; } };
+			const fetchRead = await viaFetch(), xhrRead = viaXhr();
+			return { origin: location.origin, fetchAttempted, xhrAttempted, fetch: fetchRead, xhr: xhrRead };
+		}, pathToFileURL(canary).href);
+		assert.deepEqual(leaked, { origin: "null", fetchAttempted: true, xhrAttempted: true, fetch: false, xhr: false }, "active demo file-read attempts must be refused");
+		failures.length = 0; // the blocked reads above log expected errors
+		await cleanup();
+		assert.equal(page.url(), "about:blank");
+		assert.equal(await page.$("#increment"), null, "page state was not cleared");
+		assert.deepEqual(failures, [], "page reset console/page/network errors");
+		const listeners = ["request", "console", "pageerror", "requestfailed"].map(event => page.listenerCount(event));
+		const cdn = http.createServer((_request, response) => { response.setHeader("content-type", "text/javascript"); response.end("window.ownedDependency = 42;"); });
+		await new Promise(resolve => cdn.listen(0, "127.0.0.1", resolve));
+		try {
+			const url = `http://127.0.0.1:${cdn.address().port}/owned.js`;
+			const good = () => runDemoOnPage(page, `<script src="${url}"></script><button id="owned">owned</button>`, {
+				settleMs: 20, probe: '({ origin: location.origin, dependency: window.ownedDependency, button: !!document.querySelector("#owned"), previous: typeof window.previous })',
+			});
+			assert.deepEqual(await good(), { consoleErrors: [], pageErrors: [], failedRequests: [], ok: true,
+				probeResult: { origin: "null", dependency: 42, button: true, previous: "undefined" } });
+			const broken = await runDemoOnPage(page, '<script>window.previous = 1; console.error("owned console failure"); throw new Error("owned page failure")</script>', { settleMs: 20, probe: '(() => { throw new Error("owned probe failure") })()' });
+			assert.equal(broken.ok, false);
+			assert.ok(broken.consoleErrors.some(value => value.includes("owned console failure")));
+			assert.ok(broken.pageErrors.some(value => value.includes("owned page failure")));
+			assert.ok(broken.pageErrors.some(value => value.includes("owned probe failure")));
+			const failing = new Proxy(page, { get(target, key) {
+				if (key === "setContent") return async () => { throw new Error("owned load failure"); };
+				const value = Reflect.get(target, key, target); return typeof value === "function" ? value.bind(target) : value;
+			} });
+			await assert.rejects(loadIsolatedPage(failing, "<p>failure</p>"), /owned load failure/);
+			assert.equal(page.url(), "about:blank");
+			assert.equal((await good()).ok, true, "clean reuse after load/page/probe failure");
+			assert.deepEqual(["request", "console", "pageerror", "requestfailed"].map(event => page.listenerCount(event)), listeners, "no production listeners survive retirement");
+		} finally { await new Promise(resolve => cdn.close(resolve)); }
+		console.log("[smoke-demo-runtime] actual production loader/demo: opaque origin, active file refusal, inline/CDN/probe/error behavior, guarded reset and failure/reuse passed (no Chrome fallback)");
 	} catch (err) {
 		failed = true;
 		throw new Error(`browser-service probe failed at local CDP/browser interaction\n--- browser-service output ---\n${output}\n${errors}`, { cause: err });
@@ -215,9 +251,8 @@ async function main() {
 	const args = process.argv.slice(2);
 	if (args[0] === "--probe") {
 		const { puppeteer, hooks } = await importPayload(args[1]);
-		try {
-			if (args.includes("--browser")) await browserProbe(puppeteer);
-		} finally { hooks.deregister(); }
+		hooks.deregister();
+		if (args.includes("--browser")) await browserProbe(puppeteer);
 		return;
 	}
 	const value = (name, fallback) => {

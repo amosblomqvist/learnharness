@@ -2,7 +2,7 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import test from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { GraphCostControl } from "../components/graph-view.tsx";
 import { graphCostSummary } from "../src/core/cost-summary.ts";
 import { callCost } from "../src/server/pricing.ts";

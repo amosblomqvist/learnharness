@@ -1,7 +1,7 @@
 import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { afterEach, beforeEach, describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { DraftShell, startDraftSession } from "../components/new-session.tsx";

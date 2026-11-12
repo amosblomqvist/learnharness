@@ -1,12 +1,19 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { navigateChainRows, type ChainNavigationRow } from "../components/chain-navigation.ts";
+import { navigateTreeRows, type TreeNavigationRow } from "../components/tree-navigation.ts";
 const rows: ChainNavigationRow[] = [
 	{ key: "folder", depth: 0, expanded: true }, { key: "nested", depth: 1, expanded: true },
 	{ key: "book", depth: 2, expanded: true }, { key: "chain", depth: 3, expanded: true },
 	{ key: "p1", depth: 4 }, { key: "p2", depth: 4 }, { key: "chain2", depth: 3, expanded: false },
 	{ key: "book2", depth: 2, expanded: false }, { key: "rootBook", depth: 0, expanded: false },
 ];
+it("native exports alias the same pure tree kernel with compatible row types", () => {
+	const genericRows: TreeNavigationRow[] = rows;
+	const nativeRows: ChainNavigationRow[] = genericRows;
+	assert.equal(navigateChainRows, navigateTreeRows);
+	assert.equal(nativeRows, rows);
+});
 it("empty and stale/initial focus safely begin at the first current top-level row", () => {
 	assert.deepEqual(navigateChainRows([], null, "ArrowDown"), {});
 	for (const active of [null, "deleted"]) assert.deepEqual(navigateChainRows(rows, active, "ArrowDown"), { key: "folder" });
