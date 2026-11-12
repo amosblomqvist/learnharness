@@ -1114,6 +1114,7 @@ export function AgentSection({
 									<button
 										type="button"
 										data-testid="delete-personalization-button"
+										className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-error hover:underline"
 										onClick={() => {
 											setSegmentDraft((prev) => {
 												const next = { ...prev };

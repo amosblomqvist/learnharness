@@ -13,7 +13,7 @@ function catalogModel(id: string) {
 	const colon = id.indexOf(":");
 	// Native CLI routing determines billing. Adapter zero-rate placeholders
 	// must never become an apparent $0 estimate or subscription classification.
-	if (colon < 0 || isSubscriptionModel(id) || [CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER.id].includes(id.slice(0, colon))) return undefined;
+	if (colon < 0 || isSubscriptionModel(id) || [CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER.id, "9router"].includes(id.slice(0, colon))) return undefined;
 	return piModels().getModel(id.slice(0, colon), id.slice(colon + 1));
 }
 

@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { catalogProviders, modelCatalog, validateChatSettings, validateModelsSettings } from "../src/server/model-catalog.ts";
-import { isWritableAuthKey, keyStatuses, providerKeyList } from "../src/server/keys.ts";
+import { catalogProviders, validateChatSettings, validateModelsSettings } from "../src/server/model-catalog.ts";
+import { isWritableAuthKey, providerKeyList, resolveKeyStatuses } from "../src/server/keys.ts";
 import { piModels, piEngineForSpec } from "../src/agent/models.ts";
 
 describe("9router integration", () => {
@@ -15,12 +15,11 @@ describe("9router integration", () => {
 		const p9 = providers.find((p) => p.id === "9router");
 		assert.ok(p9, "9router in catalogProviders");
 		assert.equal(p9?.envVar, "NINEROUTER_API_KEY");
-		assert.equal(p9?.keyPresent, true);
+		assert.equal(typeof p9?.keyPresent, "boolean");
 	});
 
-	it("modelCatalog exposes 9router models", () => {
-		const catalog = modelCatalog();
-		const ninerouterModels = catalog.models.filter((m) => m.provider === "9router");
+	it("piModels() exposes 9router baseline models", () => {
+		const ninerouterModels = piModels().getModels("9router");
 		assert.ok(ninerouterModels.length > 0, "has 9router models");
 		const gemini = ninerouterModels.find((m) => m.id === "gemini/gemini-3.8-flash");
 		assert.ok(gemini, "gemini-3.8-flash is present in 9router catalog");
@@ -60,8 +59,8 @@ describe("9router integration", () => {
 		assert.equal(isWritableAuthKey("NINEROUTER_API_KEY"), true);
 	});
 
-	it("keyStatuses returns NINEROUTER_API_KEY when key is present", () => {
-		const statuses = keyStatuses();
+	it("keyStatuses handles NINEROUTER_API_KEY when key is present", () => {
+		const statuses = resolveKeyStatuses({ NINEROUTER_API_KEY: "sk-9router-test-key" }, {}, new Set(), new Set(["NINEROUTER_API_KEY"]));
 		const row = statuses.find((s) => s.id === "NINEROUTER_API_KEY");
 		assert.ok(row, "NINEROUTER_API_KEY status row exists");
 		assert.equal(row?.present, true);

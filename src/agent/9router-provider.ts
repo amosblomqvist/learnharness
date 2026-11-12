@@ -44,7 +44,7 @@ export function resolveLocal9RouterKey(): string | undefined {
 }
 
 export function nineRouterApiKey(): string | undefined {
-	if (process.env.LH_IGNORE_ENV_KEYS === "1") return process.env.NINEROUTER_API_KEY || undefined;
+	if (process.env.LH_IGNORE_ENV_KEYS === "1") return undefined;
 	return process.env.NINEROUTER_API_KEY || resolveLocal9RouterKey();
 }
 
