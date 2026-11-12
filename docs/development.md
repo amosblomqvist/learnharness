@@ -62,7 +62,7 @@ Provider-specific setup and limitations: [Claude Code](claude-code.md), [custom 
 
 ### Subscription connections in web/dev
 
-`npm run dev` and `npm start` support ChatGPT, GitHub Copilot, and Grok sign-in. `desktop:dev` uses those same dev-server connections; packaged desktop has a separate main-process credential owner/private transport. Subscription routes do not fall back to API-key billing.
+`npm run dev` and `npm start` support ChatGPT, GitHub Copilot, and Grok sign-in. `desktop:dev` uses those same dev-server connections; packaged desktop has a separate main-process credential owner/private transport. Subscription routes do not fall back to API-key billing. The packaged app sends those requests through the system proxy, and through `HTTPS_PROXY` / `HTTP_PROXY` when those are set. A dev server is an ordinary Node process: start it with `NODE_USE_ENV_PROXY=1` when it should honor the same variables. `NODE_USE_ENV_PROXY=0` keeps the Node side direct.
 
 Web/dev writes `chatgpt-credentials.json`, `github-copilot-credentials.json`, and `xai-credentials.json` **beside `LH_AUTH_FILE`**, in the repo by default—not under `data/` or a global Pi profile. Git/build exclusions cover these files and their write temporaries. Refresh serialization is process-local: use one server per credential directory.
 
