@@ -780,25 +780,27 @@ async function main() {
 	}));
 	// Apple on-device dictation (macOS 26+). Same trust gate as the
 	// controls above; audio frames ride a fire-and-forget channel.
-	const appleSpeech = createAppleSpeech({
+	// Created on first use: the helper path needs the packaged resources path.
+	let appleSpeechInstance = null;
+	const appleSpeech = () => (appleSpeechInstance ??= createAppleSpeech({
 		helperPath: appleSpeechHelper(),
 		broadcast: (value) => {
 			for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:apple-speech:install", value);
 		},
-	});
+	}));
 	const appleSpeechTrusted = (event) => trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) && trustedSender(event, new URL(url).origin, BrowserWindow);
 	ipcMain.handle("lh:apple-speech:control", async (event, command) => {
 		if (!appleSpeechTrusted(event)) throw new Error("Untrusted desktop request.");
 		const sender = event.sender;
-		return appleSpeechControl(command, appleSpeech, (value) => {
+		return appleSpeechControl(command, appleSpeech(), (value) => {
 			if (!sender.isDestroyed()) sender.send("lh:apple-speech:event", value);
 		});
 	});
 	ipcMain.on("lh:apple-speech:audio", (event, session, buffer) => {
 		if (!appleSpeechTrusted(event) || !Number.isInteger(session) || !(buffer instanceof ArrayBuffer || ArrayBuffer.isView(buffer))) return;
-		appleSpeech.audio(session, buffer);
+		appleSpeech().audio(session, buffer);
 	});
-	app.on("before-quit", () => appleSpeech.cancel());
+	app.on("will-quit", () => appleSpeechInstance?.cancel());
 
 	installMenu();
 

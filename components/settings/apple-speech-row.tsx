@@ -78,7 +78,7 @@ export function AppleSpeechRow() {
 				</span>
 			</div>
 			{error && (
-				<p role="alert" data-testid="apple-speech-error" className="pl-6 text-xs text-red-500">
+				<p role="alert" data-testid="apple-speech-error" className="pl-6 text-xs text-error">
 					{error}
 				</p>
 			)}
