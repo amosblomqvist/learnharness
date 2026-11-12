@@ -20,6 +20,7 @@ import {
 import type { PlanBlockData, PlanNodeStatus, PlanTree } from "@/src/core";
 import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
+import { useAppearance } from "@/components/settings/appearance";
 import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
 
 /**
@@ -29,8 +30,8 @@ import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers
  *
  * - kind "full": the whole DAG, BORDERLESS — no wrapping chrome, the SVG
  *   scales to the full column width (viewBox = layout extent + GRAPH_PAD,
- *   so strokes/glow never clip), natural height, capped by TEXT_CAP_SCALE
- *   (fills the column, never oversizes text).
+ *   so strokes/glow never clip), natural height, labels capped at the
+ *   chat's reading size (textCap: fills the column, never oversizes text).
  * - Clicking opens the full plan in a session-scoped focus overlay
  *   (absolute inside the session area, below the drag bar — chrome-melt
  *   wave, 2026-09-19; was a fixed inset-0 full-screen popup) —
@@ -211,12 +212,6 @@ export const GRAPH_PAD = 8;
 export const GLOW_MARGIN = 8;
 export const GLOW_BLUR = 5;
 export const GLOW_REACH = GLOW_MARGIN + 3 * GLOW_BLUR;
-/** The in-chat block's zoom ceiling: it scales up to fill the column but
- *  never past extent × this. Node titles render at text-xs, which is 11px
- *  in svg units (--text-xs) — so the cap lands titles at ≈14px on screen.
- *  (The 12.5 here dates from when text-xs was 12.5px; it was meant to stop
- *  at the 16px chat prose size.) */
-export const TEXT_CAP_SCALE = 16 / 12.5;
 
 // ─── The owner's arrowhead (plan-graph round 5) ──────────────────────────────
 
@@ -274,7 +269,7 @@ export function PlanDiagram({
 	markerId,
 	viewBoxOverride,
 	pad: padUnits,
-	textCapScale,
+	textCap,
 	naturalSize,
 	monochrome,
 	fill,
@@ -291,9 +286,10 @@ export function PlanDiagram({
 	/** Pads the viewBox by this many svg units so centered strokes and the
 	 *  glow halo never clip at the extent edges (full-extent renders only). */
 	pad?: number;
-	/** Caps the rendered width at extent × scale — the chat-font-size zoom
-	 *  ceiling for the in-chat block (fills the column, never past prose). */
-	textCapScale?: number;
+	/** The largest on-screen label size (px): the diagram fills its column
+	 *  but never scales labels past this. Callers pass the chat's reading
+	 *  size (Appearance proseFontSize), so plan text never outgrows prose. */
+	textCap?: number;
 	/** Renders at the viewBox width in px (1 svg unit = 1 px at zoom 1) —
 	 *  the popup's transform math depends on it; w-full inside the popup's
 	 *  shrink-to-fit wrapper resolved to the popup width and broke fit. */
@@ -323,13 +319,13 @@ export function PlanDiagram({
 	return (
 		<svg
 			viewBox={viewBoxOverride ?? `${ox - pad} ${oy - pad} ${vbW} ${vbH}`}
-			className={`block ${fill ? "h-full w-full" : `h-auto${naturalSize ? "" : " w-full"}`}${textCapScale ? " mx-auto" : ""}`}
+			className={`block ${fill ? "h-full w-full" : `h-auto${naturalSize ? "" : " w-full"}`}${textCap ? " mx-auto" : ""}`}
 			style={{
 				// The READING font (owner, 2026-09-26) — the same runtime token
 				// consumed by font-prose, so Appearance changes reach SVG text.
 				fontFamily: "var(--font-prose)",
-				...(textCapScale
-					? { maxWidth: `${Math.round(vbW * textCapScale * 100) / 100}px` }
+				...(textCap
+					? { maxWidth: `${Math.round(((vbW * textCap) / layout.fontSize) * 100) / 100}px` }
 					: naturalSize
 						? { width: `${vbW}px` }
 						: {}),
@@ -494,6 +490,7 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 	const statusMap = useMemo(() => new Map(data.nodes.map((n) => [n.id, n.status] as const)), [data]);
 	const statusOf = (id: string): PlanNodeStatus => statusMap.get(id) ?? "upcoming";
 	const plan = usePlanLayout(data);
+	const { appearance } = useAppearance();
 	return (
 		<Hint label="Open the full plan" side="bottom">
 <button
@@ -513,7 +510,7 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 			statusOf={statusOf}
 			markerId={markerId}
 			pad={GRAPH_PAD}
-			textCapScale={TEXT_CAP_SCALE}
+			textCap={appearance.proseFontSize}
 			monochrome
 		/>
 		</button>

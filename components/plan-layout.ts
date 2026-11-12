@@ -176,7 +176,7 @@ export function blockLayout(
 	 *  border intersection on whatever SIDE the edge leaves/enters
 	 *  (round 11: the mermaid line drawing). Keyed `${from}->${to}`. */
 	const edgePts = new Map<string, Array<{ x: number; y: number }>>();
-	if (nodes.length === 0) return { x, y, nodeH, nodeW, lines, lineH, edgePts, originX: 0, originY: 0, width: 0, height: 0 };
+	if (nodes.length === 0) return { x, y, nodeH, nodeW, lines, lineH, fontSize: measure.fontSize, edgePts, originX: 0, originY: 0, width: 0, height: 0 };
 	const ids = new Set(nodes.map((n) => n.id));
 	const routed: Array<{ from: string; to: string }> = [];
 	const g = new graphlib.Graph({ compound: false, multigraph: true });
@@ -263,6 +263,7 @@ export function blockLayout(
 		nodeW,
 		lines,
 		lineH,
+		fontSize: measure.fontSize,
 		edgePts,
 		originX,
 		originY,
