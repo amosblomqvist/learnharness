@@ -7,12 +7,16 @@
  * and runs
  * extractor → auditor → merger over the raw text.
  *
- * Only filename extensions listed in lib/notes-import-limits.ts are taken.
- * Among those files, a PDF (spotted by its %PDF- header) is converted to
- * Markdown first. Other files are decoded as UTF-8 unless a zero byte in
+ * Only filename extensions listed in lib/notes-import-limits.ts are taken
+ * (text, PDF, and the images the vision pass reads). Among those files, an
+ * image (sniffed by content) is transcribed whole by the pipeline's vision
+ * pass (issue #285); a PDF (spotted by its %PDF- header) is converted to
+ * Markdown, and the vision pass then reads the pages text can't carry —
+ * picture-only, math-heavy, or text-poor — so scans are transcribed rather
+ * than skipped. Other files are decoded as UTF-8 unless a zero byte in
  * their first 8 KiB causes refusal. This is a binary-file heuristic, not
- * complete text or encoding validation. These refusals, and PDFs with
- * nothing to extract, occur before any source record or model call.
+ * complete text or encoding validation. These refusals, and unreadable or
+ * over-long PDFs, occur before any source record or model call.
  *
  * Small concurrency cap: the model calls are the slow part, and a burst of
  * 25 simultaneous runs would trip provider rate limits — a 3-wide worker
@@ -20,8 +24,8 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
-import { IMPORT_EXTENSIONS, MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, UNSUPPORTED_TYPE_MESSAGE, validNotesPath } from "@/lib/notes-import-limits.ts";
+import { convertPdf, detectSupportedImageMimeType, extraction, NotesImportError, sourceDirectory } from "@/src/server";
+import { IMAGE_IMPORT_EXTENSIONS, IMPORT_EXTENSIONS, MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, UNSUPPORTED_TYPE_MESSAGE, validNotesPath } from "@/lib/notes-import-limits.ts";
 import { FormBodyLimitError, readBoundedFormData } from "@/lib/bounded-form-data.ts";
 import {
 	emit,
@@ -55,29 +59,31 @@ interface ImportResult {
 const MAX_PDF_PAGES = 1000;
 const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 
-type NotesFile = { kind: "notes"; text: string; notice?: string } | { kind: "refused"; error: string };
+type NotesImportInput = Parameters<typeof extraction.importNotes>[0];
+type NotesFile = { kind: "notes"; input: NotesImportInput; notice?: string } | { kind: "refused"; error: string };
 
-/** A PDF becomes page-marked Markdown; any other accepted file is read as text. */
-async function readNotesFile(file: File): Promise<NotesFile> {
-	if (!IMPORT_EXTENSIONS.test(file.name)) return { kind: "refused", error: UNSUPPORTED_TYPE_MESSAGE };
+/** An image goes to the vision pass whole; a PDF keeps its converted pages
+ * AND its bytes (the vision pass renders the pages text can't carry); any
+ * other accepted file is read as text. */
+async function readNotesFile(file: File, filePath: string): Promise<NotesFile> {
+	if (!IMPORT_EXTENSIONS.test(file.name) && !IMAGE_IMPORT_EXTENSIONS.test(file.name)) return { kind: "refused", error: UNSUPPORTED_TYPE_MESSAGE };
 	const bytes = new Uint8Array(await file.arrayBuffer());
+	const mimeType = detectSupportedImageMimeType(bytes);
+	if (mimeType) return { kind: "notes", input: { filePath, image: bytes, mimeType } };
 	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) {
 		if (bytes.subarray(0, 8192).includes(0)) return { kind: "refused", error: "This file isn't plain text." };
-		return { kind: "notes", text: new TextDecoder().decode(bytes) };
+		return { kind: "notes", input: { filePath, text: new TextDecoder().decode(bytes) } };
 	}
-	const pdf = await convertPdf(bytes, MAX_PDF_PAGES);
+	// pdfjs takes over (detaches) the buffer it reads; the vision pass needs
+	// these bytes intact, so the converter gets a copy.
+	const pdf = await convertPdf(bytes.slice(), MAX_PDF_PAGES);
 	switch (pdf.kind) {
 		case "unreadable":
 			return { kind: "refused", error: "Could not open this PDF." };
 		case "too-long":
 			return { kind: "refused", error: "Too long. Max 1,000 pages." };
-		case "converted": {
-			const text = joinPages(pdf.pages);
-			if (!text) return { kind: "refused", error: "OCR not supported yet." };
-			const skipped = pdf.pages.filter((page) => page.kind === "image-only").length;
-			const omission = skipped > 0 ? ` Skipped ${skipped} image-only ${skipped === 1 ? "page" : "pages"}; OCR is not supported.` : "";
-			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}` };
-		}
+		case "converted":
+			return { kind: "notes", input: { filePath, pdf: bytes, pages: pdf.pages }, notice: "Scanned pages may have errors." };
 	}
 }
 
@@ -117,13 +123,13 @@ export async function POST(request: Request) {
 			if (!next) return;
 			const { file, requestIndex, filePath } = next;
 			try {
-				const notes = await readNotesFile(file);
+				const notes = await readNotesFile(file, filePath);
 				if (notes.kind === "refused") {
 					results.push({ filePath, requestIndex, outcome: "failed", ok: false, error: notes.error });
 					continue;
 				}
 				sourceDirectory.registerImport(filePath);
-				const stats = await extraction.importNotes({ filePath, text: notes.text });
+				const stats = await extraction.importNotes(notes.input);
 				results.push({ filePath, requestIndex, outcome: "completed", ok: true, stats, ...(notes.notice ? { notice: notes.notice } : {}) });
 			} catch (err) {
 				if (err instanceof ModelsNotConfiguredError) {

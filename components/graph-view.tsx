@@ -267,7 +267,7 @@ function graphProviders(value: { subscriptionRuns?: number; subscriptionProvider
 	return value.subscriptionProviders ?? ((value.subscriptionRuns ?? 0) > 0 ? ["ChatGPT"] : []);
 }
 function graphUsageLabel(costs: Pick<GraphCostSummary, "stages">): string {
-	const stages = [costs.stages.extraction, costs.stages.audit];
+	const stages = [costs.stages.transcription, costs.stages.extraction, costs.stages.audit];
 	const providers = [...new Set(stages.flatMap(graphProviders))];
 	const priced = stages.some((stage) => stage.runs - stage.unpricedRuns - (stage.subscriptionRuns ?? 0) > 0);
 	const dollars = displayCostTotals(costs).totalDollars;
@@ -276,7 +276,7 @@ function graphUsageLabel(costs: Pick<GraphCostSummary, "stages">): string {
 
 /**
  * The cost figures the UI DISPLAYS (owner refinement round, 2026-09-24):
- * extraction + audit only. Cluster naming is dead — labels are session
+ * transcription (issue #285) + extraction + audit only. Cluster naming is dead — labels are session
  * titles / file names — so the core's naming fold (and its historical
  * spend) is deliberately not shown anywhere: the pill and the panel must
  * agree, and both read THIS, never GraphCostSummary.totalDollars.
@@ -287,11 +287,13 @@ export function displayCostTotals(costs: Pick<GraphCostSummary, "stages">): {
 	totalDollars: number;
 	unpricedRuns: number;
 } {
-	// The two live stages (the spine came and went on one day,
-	// 2026-09-30 — digest-aware extraction replaced it).
+	// The live stages (the spine came and went on one day, 2026-09-30 —
+	// digest-aware extraction replaced it; PDF/image imports added
+	// transcription, issue #285).
+	const { transcription, extraction, audit } = costs.stages;
 	return {
-		totalDollars: costs.stages.extraction.dollars + costs.stages.audit.dollars,
-		unpricedRuns: costs.stages.extraction.unpricedRuns + costs.stages.audit.unpricedRuns,
+		totalDollars: transcription.dollars + extraction.dollars + audit.dollars,
+		unpricedRuns: transcription.unpricedRuns + extraction.unpricedRuns + audit.unpricedRuns,
 	};
 }
 
@@ -339,8 +341,9 @@ export function GraphCostControl({ costs }: { costs: GraphCostSummary }) {
 }
 
 /**
- * The cost control's expanded panel: stage totals (extraction / audit —
- * dollars headline, tokens secondary) + the recent-runs list.
+ * The cost control's expanded panel: stage totals (transcription — only
+ * once a PDF/image import has run — / extraction / audit; dollars
+ * headline, tokens secondary) + the recent-runs list.
  * Presentational: the fold happens server-side (core/cost-summary.ts);
  * dollars are inferred read-time, never stored. Cluster naming is GONE
  * from the panel (owner refinement round, 2026-09-24): labels are session
@@ -350,6 +353,7 @@ export function GraphCostControl({ costs }: { costs: GraphCostSummary }) {
  */
 function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 	const stageRows: [string, GraphCostSummary["stages"]["extraction"]][] = [
+		...(costs.stages.transcription.runs > 0 ? [["Transcription", costs.stages.transcription] as [string, GraphCostSummary["stages"]["extraction"]]] : []),
 		["Extraction", costs.stages.extraction],
 		["Audit", costs.stages.audit],
 	];
@@ -399,7 +403,7 @@ function GraphCostPanel({ costs }: { costs: GraphCostSummary }) {
 									</span>
 								)}
 							</span>
-							<span className="shrink-0 tabular-nums">{fmtRunCost(run.dollars, graphProviders(run))}{run.dollars === null && run.subscriptionRuns === 1 ? " +1 unpriced" : ""}</span>
+							<span className="shrink-0 tabular-nums">{fmtRunCost(run.dollars, graphProviders(run))}{run.dollars === null && run.subscriptionRuns && run.unpricedStages ? ` +${run.unpricedStages} unpriced` : ""}</span>
 						</div>
 					))}
 			</div>
