@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { PlanMarginalia, planExists } from "../components/plan-window.tsx";
-import { blockLayout, edgePathD, type LayoutNode, type PopupMessage } from "../components/plan-block.tsx";
+import type { PopupMessage } from "../components/plan-block.tsx";
+import { blockLayout, edgePathD, type LayoutNode } from "../components/plan-layout.ts";
 import type { PlanTree } from "../src/core/contracts.ts";
 
 // The plan marginalia: the bare diagram in the dock band's right flank —
