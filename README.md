@@ -45,6 +45,8 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 
 ## Download and get started
 
+**This fork adds a [Codex engine](docs/codex.md):** sign in under Settings → Providers → External CLI, then select a Codex model for your learning sessions. Run from source to use this addition; upstream downloads do not include it.
+
 **[Download from learnharness.ai](https://learnharness.ai)** · [GitHub Releases](https://github.com/amosblomqvist/learnharness/releases)
 
 - **macOS (Apple Silicon):** signed and notarized DMG. Drag the app to Applications.
