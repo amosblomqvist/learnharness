@@ -61,6 +61,12 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		docsUrl: "https://www.firecrawl.dev/app/api-keys",
 	},
 	{
+		id: "PARALLEL_API_KEY",
+		label: "Parallel",
+		description: "Web-search engine for the researcher (parallel.ai Search API). Setting the key activates it — no engine toggle needed.",
+		docsUrl: "https://parallel.ai/",
+	},
+	{
 		id: "OLLAMA_API_KEY",
 		label: "Ollama",
 		description: "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models.",
@@ -193,6 +199,7 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 			// No public format — a length floor + paste hygiene only.
 			return nonEmpty(20);
 		case "EXA_API_KEY":
+		case "PARALLEL_API_KEY":
 		case "OLLAMA_API_KEY":
 			// No documented key prefix: use the provider-key paste guard.
 			return nonEmpty(12);
