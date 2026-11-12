@@ -6,6 +6,7 @@ import { actionForBinding, collectCitations, eventBinding, SIDE_QUOTE_MAX_CHARS,
 import { rmsToMeter, type DictationPhase } from "./dictation";
 import { CitationActionsContext } from "./citation-chip";
 import { MessageResponse } from "./ai-elements/message";
+import { CopyResponseButton } from "./copy-response-button";
 import { BrailleSpinner } from "./braille-spinner";
 import { Button } from "./ui/button";
 import { Textarea } from "./ui/textarea";
@@ -130,7 +131,10 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				{state.messages.map((message) => (
 					<div key={message.id} data-testid={message.role === "user" ? "side-learner-message" : "side-helper-message"} className={message.role === "user" ? "ml-auto flex w-fit max-w-[70%] flex-col gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm [overflow-wrap:anywhere]" : "flex flex-col gap-1.5 text-sm"}>
 						{message.quotes?.map((quote, index) => <Passage key={index} text={quote} citation={collectCitations(message.quoteCitations?.[index] ?? "")[0]?.citation} />)}
-						{message.role === "user" ? <p className="whitespace-pre-wrap font-medium">{message.text}</p> : <MessageResponse>{message.text}</MessageResponse>}
+						{message.role === "user" ? <p className="whitespace-pre-wrap font-medium">{message.text}</p> : <>
+							<MessageResponse>{message.text}</MessageResponse>
+							{message.text.trim() && <div className="flex justify-end"><CopyResponseButton getText={() => message.text} /></div>}
+						</>}
 						{message.stopped && <span className="font-ui text-xs text-muted-foreground">Stopped</span>}
 						{message.error && <span role="alert" className="text-xs text-destructive">{message.error}</span>}
 					</div>
