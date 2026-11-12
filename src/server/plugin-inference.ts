@@ -146,13 +146,16 @@ export function createPluginInference(
 					check(combined);
 					// Managed Agent passes private runtime hooks/options in its config;
 					// do NOT forward that bag to provider transports. Auth stays host-owned.
-					const { temperature, maxTokens, cacheRetention, reasoning, thinkingBudgets, toolChoice, timeoutMs, maxRetries, maxRetryDelayMs, metadata } = (runtime ?? {}) as SimpleStreamOptions;
+					// sessionId is the host Agent's conversation id (stable across tool
+					// rounds). OpenCode Go will not route a request that omits it.
+					// Plugins still cannot set it: validatePluginInferenceOptions rejects it.
+					const { temperature, maxTokens, cacheRetention, reasoning, thinkingBudgets, toolChoice, timeoutMs, maxRetries, maxRetryDelayMs, metadata, sessionId } = (runtime ?? {}) as SimpleStreamOptions;
 					const safe = optionsFor(Object.fromEntries(Object.entries({ temperature, maxTokens, cacheRetention, reasoning, thinkingBudgets, toolChoice, timeoutMs, maxRetries, maxRetryDelayMs, metadata, ...boundOptions }).filter(([, value]) => value !== undefined)));
 					if (safe.reasoning !== undefined && safe.reasoning !== base.level) throw new Error("Set model.thinkingLevel instead of overriding engine reasoning");
 					const current = await available(spec, combined);
 					const engine = await bounded(current.engineForSpec(spec, classified === "background", lifecycle), combined);
 					if (engine.model.provider !== spec.provider || engine.model.id !== spec.id) throw new Error("Inference engine changed the explicitly selected model");
-					const providerOptions: SimpleStreamOptions = { ...safe, signal: combined, reasoning: engine.level === "off" ? undefined : engine.level };
+					const providerOptions: SimpleStreamOptions = { ...safe, signal: combined, reasoning: engine.level === "off" ? undefined : engine.level, ...(typeof sessionId === "string" && sessionId.length > 0 ? { sessionId } : {}) };
 					source = engine.streamFn(engine.model, context, providerOptions);
 					combined.addEventListener("abort", stopSource, { once: true });
 					if (combined.aborted) stopSource();
