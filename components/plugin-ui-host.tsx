@@ -20,7 +20,7 @@ import { PluginSurface } from "./plugin-surface-shell";
 import { isInteractionElementVisible, useInteractionLayers, type CloseOutcome, type CloseReason } from "@/components/interaction-layers";
 export { PluginSettingsRows } from "@/components/plugin-settings-rows";
 
-export interface PluginUiFactoryOptions { signal: AbortSignal; onError?: (error: unknown) => void }
+export interface PluginUiFactoryOptions { signal: AbortSignal; pluginId?: string; onError?: (error: unknown) => void }
 interface Runtime {
 	signal: AbortSignal;
 	report(error: unknown): void;
@@ -94,7 +94,7 @@ export function createPluginUiStore() {
 	const store = {
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
 		getSnapshot() { return snapshot; },
-		createUi({ signal: lifetime, onError }: PluginUiFactoryOptions): PluginUi {
+		createUi({ signal: lifetime, pluginId, onError }: PluginUiFactoryOptions): PluginUi {
 			const report = (error: unknown) => {
 				if (lifetime.aborted) return;
 				try { if (onError) onError(error); else console.error("Plugin UI failed", error); }
@@ -227,7 +227,7 @@ export function createPluginUiStore() {
 					const boundary = requireSurfaceBoundary(explicitOptions ? targetOrProps as PluginSurfaceTarget : findCurrentSurfaceBoundary(document)?.target);
 					const opener = boundary.body.ownerDocument.activeElement;
 					const handle = mount(boundary.stack!.querySelector<HTMLElement>("[data-session-surface-mounts]")!, props, options,
-						(props, runtime) => <PluginSurface title={props.title} background={props.background} onClose={props.onClose} runtime={runtime} boundary={boundary}
+						(props, runtime) => <PluginSurface pluginId={pluginId} title={props.title} background={props.background} onClose={props.onClose} runtime={runtime} boundary={boundary}
 							opener={opener instanceof HTMLElement ? opener : null}>
 							<PluginContent content={props.content} runtime={runtime} className="h-full w-full" />
 						</PluginSurface>, boundary.signal, true, validateSurfaceBackground);

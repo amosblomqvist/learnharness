@@ -67,8 +67,8 @@ export function capturePluginSessionView(source: SessionViewSource): PluginSessi
   return Object.freeze({ ...copy, input: Object.freeze({ ...copy.input, surfaceTarget }) }) as PluginSessionViewContext;
 }
 /** Lazy for render-time disabled predicates; the chrome forces a fresh capture on click. */
-export function createPluginSessionActionContext(base: Omit<Extract<PluginActionContext, { surface: "session" }>, "view">,
-  read: () => SessionViewSource): Extract<PluginActionContext, { surface: "session" }> {
+export function createPluginSessionActionContext(base: Omit<Extract<PluginActionContext, { surface: "session"; placement: "top-bar" }>, "view">,
+  read: () => SessionViewSource): Extract<PluginActionContext, { surface: "session"; placement: "top-bar" }> {
   let snapshot: PluginSessionViewContext | undefined;
   return { ...base, get view() { return snapshot ??= capturePluginSessionView(read()); } };
 }

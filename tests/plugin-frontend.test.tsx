@@ -23,7 +23,7 @@ function deferred<T>() {
 }
 const tick = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };
 function info(id = "fixture", overrides: Partial<PluginInfo> = {}): PluginInfo {
-	return { id, enabled: true, status: "active", revision: "restart-1", manifest: {
+	return { id, origin: "community", enabled: true, status: "active", revision: "restart-1", manifest: {
 		apiVersion: 1, id, name: `Plugin ${id}`, version: "1.0.0", minAppVersion: "0.3.7", main: "main.js",
 	}, ...overrides };
 }
@@ -633,7 +633,7 @@ describe("plugin frontend surface and native importer", () => {
 			assert.ok(document.body.textContent?.includes("Fixture custom settings"), "plugin settings work despite core fetch failure");
 			assert.equal(document.querySelector('[data-testid="settings-nav-plugin:fixture"]')?.getAttribute("aria-current"), "true");
 			assert.deepEqual(actions, []);
-			await click(button("Plugins")); assert.equal(settingsCleanups, 1);
+			await click(button("Community plugins")); assert.equal(settingsCleanups, 1);
 			await act(async () => { frames.get("record-changed")!(JSON.stringify({ chatId: "external" })); });
 			assert.deepEqual(events, [{ type: "record-changed", chatId: "external" }]);
 			await click(document.querySelector<HTMLButtonElement>('[role="switch"]')!);

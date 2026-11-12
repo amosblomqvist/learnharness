@@ -15,6 +15,10 @@ SCOPE.md
 real-data-extraction/
 dist/
 
+# Generated app-owned plugin packages and transactional staging.
+/core-plugins/
+/.core-plugins-*/
+
 # dev auth/keys store (auth-keys wave): repo-root auth.json — secrets never committed
 auth.json
 chatgpt-credentials.json*

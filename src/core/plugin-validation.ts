@@ -1,6 +1,7 @@
 import { Compile } from "typebox/compile";
 import type { TSchema } from "typebox";
 import type { PluginInferenceOptions } from "./plugins.ts";
+import { copyImmutableData, ImmutableReadCache } from "./immutable-data.ts";
 
 // The installed SDK uses this same TypeBox compiler, but it silently accepts
 // malformed known keywords. This is basic native-schema hygiene, NOT a full
@@ -66,6 +67,21 @@ export function validatePluginSchema(schema: unknown) {
 	visit(schema, "$");
 	return Compile(schema as TSchema);
 }
+
+// Keep compiled validators private: callers of validatePluginSchema still get
+// their own mutable TypeBox Validator. Only immutable internal contracts reuse
+// a check closure; every new value is checked, never memoized as a submission.
+const preparedChecks = new ImmutableReadCache<(value: unknown) => boolean>();
+const booleanSchemas = copyImmutableData({ true: { schema: true }, false: { schema: false } });
+function preparedCheck(schema: unknown): (value: unknown) => boolean {
+	const key = typeof schema === "boolean" ? booleanSchemas[String(schema) as "true" | "false"] : schema;
+	return preparedChecks.read(key, undefined, () => {
+		const validator = validatePluginSchema(schema);
+		return value => validator.Check(value);
+	});
+}
+export function preparePluginSchema(schema: unknown): void { preparedCheck(schema); }
+export function checkPluginSchema(schema: unknown, value: unknown): boolean { return preparedCheck(schema)(value); }
 
 // Copied without semantic changes from the existing inference adapter. This
 // validates generation options only; transport/auth fields remain host-owned.

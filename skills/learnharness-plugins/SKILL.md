@@ -43,13 +43,19 @@ Model-using examples may incur cost when explicitly run.
   interface and deletion decisions. The platform supplies mechanisms, not product authority.
 - Plugins are trusted local code, not a sandbox. Never expose credentials, mutate core
   learning records, import host components or inject unsanitized model HTML.
-- Runtime layout is `<learning data>/plugins/<id>/dist/manifest.json` plus bundles/assets.
+- Community runtime layout is `<learning data>/plugins/<id>/dist/manifest.json` plus bundles/assets.
   Optional source/build configuration lives beside `dist/`; persistent `data/` is a sibling.
   Build directly into `dist/`, not `dist/<id>/`. Bundle JavaScript; no host-side npm install.
 - Distribute built contents into the installed `<id>/dist/`, preserving sibling data.
   Cleanup targets only generated `dist/`, never workspace/data, and must refuse symlinked
-  `dist/` or misplaced `dist/data/` before deletion. Official startup updates preserve data
-  but may replace managed installed code; do not treat that copy as durable source.
+  `dist/` or misplaced `dist/data/` before deletion.
+- Core code loads directly from app `core-plugins/<id>/`; writable core records are in
+  `<learning data>/core-plugin-data/<id>/`. Always use `ctx.directory`/`ctx.dataDirectory`,
+  never infer sibling paths. Core updates with the app; both origins start disabled and
+  retain explicit choices. Core IDs are reserved; community copies are skipped with a
+  diagnostic, not replacements. Use Settings → Community plugins for installations and
+  Settings → Core plugins for shipped features. `plugins:build-core` stages the four
+  catalog-selected packages; it never installs into learner data.
 - Refresh discovers packages/first builds; admitted code changes need server restart.
   No hot reload, separate development registration or root-manifest fallback exists.
 - Backend activation is per server; frontend activation per window; view/editor mounts
@@ -57,11 +63,15 @@ Model-using examples may incur cost when explicitly run.
   subscriptions, fence late awaits/publications and avoid top-level side effects.
 - Host view shells own top bar/title/gear. Register actions before explicit placements;
   registration creates no automatic chrome. Top bars require explicit sessions/own-view
-  targets. Use `refreshActions()` for plugin-owned dynamic predicates.
+  targets. Optional action `shortcut` metadata explicitly scopes app-wide/session/own-view
+  invocation and an optional default chord; the existing Keyboard page handles rebinding.
+  Accept `placement: "keyboard"` when opting in. Use `refreshActions()` for plugin-owned
+  dynamic predicates; shortcut scope/default are captured at registration.
 - Use controlled `ctx.ui` helpers, not private imports or DOM-dependent styling. Feed
   accepted values back through shallow handle updates; replace whole nested props.
   Model/thinking controls do not write core settings. Keep host keyboard/IME/focus,
-  dictation ownership and one-Escape rules; no public shortcut framework is implied.
+  dictation ownership and one-Escape rules. Declarative action shortcuts do not expose
+  raw events, bypass foreground dialogs/editors, or register OS-wide hotkeys.
 - Session top-bar `context.view` is a fresh detached/frozen whole-session snapshot,
   including current messages/transcript, presentation and unsent published drafts.
   Use it instead of a second history parser/shuffle or private DOM inspection. Reads

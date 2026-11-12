@@ -86,6 +86,7 @@ export class RenderService {
     const abort = () => controller.abort();
     const root = document.createElement("div");
     root.className = "rich-code-blocks";
+    root.dataset.language = block.language;
     const raw = document.createElement("pre");
     const code = document.createElement("code");
     code.textContent = block.source; raw.append(code); root.append(raw);

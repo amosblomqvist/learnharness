@@ -6,9 +6,13 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { build } from "esbuild";
 import puppeteer from "puppeteer-core";
+import katex from "katex";
 
 const root = fileURLToPath(new URL("../", import.meta.url));
 const built = path.join(root, "dist");
+// Test-only reference: the same pinned KaTeX version used by the app. None of
+// these reference assets are included in the plugin's distributable build.
+const katexAssets = path.dirname(fileURLToPath(import.meta.resolve("katex")));
 assert.ok(fs.readFileSync(path.join(built, 'licenses/GPL-3.0.txt'), 'utf8').split('\n').length > 600, 'Ship the complete GPL text, not just an upstream MIT file.');
 assert.ok(fs.readFileSync(path.join(built, 'licenses/Apache-2.0.txt'), 'utf8').split('\n').length > 190, 'Ship the complete Apache text for ColorBrewer.');
 assert.match(fs.readFileSync(path.join(built, 'licenses/PyDvi-NOTICE.txt'), 'utf8'), /Fabrice Salvaire/);
@@ -17,9 +21,9 @@ if (!chrome) throw new Error("Set CHROME_PATH to a local Chrome/Chromium executa
 const evidence = fs.mkdtempSync(path.join(os.tmpdir(), "lh-rich-browser-"));
 console.log(`Disposable browser evidence: ${evidence}`);
 const helper = await build({ absWorkingDir: root, stdin: { contents: 'export {sanitizeSvg} from "./src/svg.ts"; export {setInkColor} from "./src/appearance.ts";', resolveDir: root }, bundle: true, format: "esm", platform: "browser", write: false });
-const html = `<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="data:,"><link rel="stylesheet" href="/styles.css"><style>
+const html = `<!doctype html><html><head><meta charset="utf-8"><link rel="icon" href="data:,"><link rel="stylesheet" href="/styles.css"><link rel="stylesheet" href="/reference-katex/katex.css"><style>
 body{background:#171717;color:#eee;font:16px system-ui;margin:24px}#cards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:16px}article{min-width:0}h2{font-size:15px}pre{white-space:pre-wrap}body.light{background:#f7f7f7;color:#222}
-</style></head><body><h1>Rich code blocks — disposable fixture</h1><div id="cards"></div><script type="module">
+</style></head><body><h1>Rich code blocks — disposable fixture</h1><p id="reference-math">Chat LaTeX size: ${katex.renderToString("N+mg+R+x_1", { output: "html", throwOnError: true })}</p><div id="cards"></div><script type="module">
 import {activate} from '/main.js';
 import {sanitizeSvg,setInkColor} from '/test-utils.js';
 window.sanitizeSvg=sanitizeSvg;window.setInkColor=setInkColor;
@@ -52,9 +56,11 @@ const server = http.createServer((req, res) => {
   requests.push(pathname);
   if (pathname === "/") { res.setHeader("content-type", "text/html"); res.end(html); return; }
   if (pathname === "/test-utils.js") { res.setHeader("content-type", "text/javascript"); res.end(helper.outputFiles[0].text); return; }
-  const file = path.resolve(built, "." + pathname);
-  if (!file.startsWith(built + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); res.end(); return; }
-  const mime = { ".js": "text/javascript", ".css": "text/css", ".gz": "application/octet-stream", ".ttf": "font/ttf" };
+  const directory = pathname.startsWith('/reference-katex/') ? katexAssets : built;
+  const assetPath = directory === katexAssets ? pathname.slice('/reference-katex'.length) : pathname;
+  const file = path.resolve(directory, "." + assetPath);
+  if (!file.startsWith(directory + path.sep) || !fs.existsSync(file) || !fs.statSync(file).isFile()) { res.writeHead(404); res.end(); return; }
+  const mime = { ".js": "text/javascript", ".css": "text/css", ".gz": "application/octet-stream", ".ttf": "font/ttf", ".woff2": "font/woff2", ".woff": "font/woff" };
   res.setHeader("content-type", mime[path.extname(file)] ?? "application/octet-stream");
   res.end(fs.readFileSync(file));
 });
@@ -121,6 +127,35 @@ try {
   await page.evaluate(async () => { await document.fonts.ready; });
   const fontProof = await page.evaluate(() => ({ requests: performance.getEntriesByType('resource').filter(entry => entry.name.includes('.ttf')).map(entry => entry.name), families: [...document.querySelectorAll('svg text[font-family]')].map(node => ({family:node.getAttribute('font-family'),computed:getComputedStyle(node).fontFamily})) }));
   assert.ok(fontProof.requests.length > 0, "Bundled TeX fonts must actually load.");
+  const sizingProof = await page.evaluate(() => {
+    function measure() {
+      const reference = document.querySelector('#reference-math .katex');
+      return { mathFontPx: parseFloat(getComputedStyle(reference).fontSize), posts: window.texPosts,
+        diagrams: [...document.querySelectorAll('.rich-code-blocks--rendered[data-language="tikz"]')].map(root => {
+          const svg = root.querySelector('svg'), label = [...svg.querySelectorAll('text')].find(text => Math.abs(parseFloat(text.getAttribute('font-size')) - 10) < 0.01);
+          const matrix = label.getScreenCTM(), bounds = svg.getBoundingClientRect();
+          return { id: root.closest('article').id, fontPx: parseFloat(getComputedStyle(label).fontSize) * Math.hypot(matrix.a, matrix.b),
+            width: bounds.width, height: bounds.height, widthAttribute: svg.getAttribute('width'), viewBox: svg.getAttribute('viewBox'),
+            padding: ['paddingTop','paddingRight','paddingBottom','paddingLeft'].map(property => getComputedStyle(root)[property]),
+          };
+        }), otherWidths: ['Chemical structure','Musical notation'].map(id => document.getElementById(id).querySelector('svg').getBoundingClientRect().width) };
+    }
+    const original = [...document.querySelectorAll('.rich-code-blocks--rendered > svg')];
+    const normal = measure(); document.body.style.fontSize = '20px'; const larger = measure();
+    const sameSvg = original.every(svg => svg.isConnected); document.body.style.fontSize = '';
+    return { normal, larger, restored: measure(), sameSvg };
+  });
+  assert.equal(sizingProof.normal.diagrams.length, 4);
+  for (const state of [sizingProof.normal, sizingProof.larger, sizingProof.restored]) for (const diagram of state.diagrams) {
+    assert.ok(Math.abs(diagram.fontPx - state.mathFontPx) < 0.05, `${diagram.id} must match actual KaTeX: ${diagram.fontPx} vs ${state.mathFontPx}`);
+    assert.match(diagram.widthAttribute, /em$/);
+    assert.deepEqual(diagram.padding, ['12px','12px','12px','12px']);
+    const [, , width, height] = diagram.viewBox.split(' ').map(Number);
+    assert.ok(Math.abs(diagram.height / diagram.width - height / width) < 0.002, 'Diagram aspect ratio is preserved.');
+  }
+  assert.ok(sizingProof.larger.mathFontPx > sizingProof.normal.mathFontPx);
+  assert.equal(sizingProof.normal.posts, sizingProof.larger.posts); assert.equal(sizingProof.sameSvg, true, 'Font-size changes resize existing SVGs without TeX work.');
+  assert.deepEqual(sizingProof.normal.otherWidths, sizingProof.larger.otherWidths, 'Chemistry/music natural sizing stays unchanged.');
   const inkProof = await page.evaluate(() => {
     window.originalSvgs = [...document.querySelectorAll('.rich-code-blocks--rendered > svg')];
     return { posts: window.texPosts, roots: [...document.querySelectorAll('.rich-code-blocks--rendered')].map(root => ({
@@ -150,12 +185,31 @@ try {
   await page.screenshot({ path: path.join(evidence, "light-six-formats.png"), fullPage: true });
   await page.evaluate(() => { host.notifyInk('white'); document.body.classList.remove('light'); });
   assert.equal(await page.evaluate(() => window.texPosts), inkProof.posts, 'Cross-window color notifications also avoid TeX work.');
+  const wide = await render('Wide sizing probe', 'tikz', String.raw`\begin{document}\begin{tikzpicture}\draw[->] (0,0)--(20,0) node[right] {$x_1$};\end{tikzpicture}\end{document}`);
+  assert.ok(wide.svg, JSON.stringify(wide));
+  const wideProof = await page.evaluate(() => {
+    const card = document.getElementById('Wide sizing probe'); card.style.width = '240px';
+    const root = card.querySelector('.rich-code-blocks--rendered'), svg = root.querySelector('svg');
+    root.scrollLeft = 120;
+    return { width: svg.getBoundingClientRect().width, clientWidth: root.clientWidth, scrollWidth: root.scrollWidth, scrollLeft: root.scrollLeft,
+      mathFontPx: parseFloat(getComputedStyle(document.querySelector('#reference-math .katex')).fontSize),
+      labels: [...svg.querySelectorAll('text')].map(label => { const matrix = label.getScreenCTM(); return { texSize: parseFloat(label.getAttribute('font-size')), fontPx: parseFloat(getComputedStyle(label).fontSize) * Math.hypot(matrix.a, matrix.b) }; }),
+      pageWidth: document.documentElement.scrollWidth, viewportWidth: innerWidth,
+    };
+  });
+  assert.ok(wideProof.width > wideProof.clientWidth && wideProof.scrollWidth > wideProof.clientWidth && wideProof.scrollLeft > 0, 'Wide TikZ scrolls inside its own wrapper.');
+  assert.ok(wideProof.pageWidth <= wideProof.viewportWidth, 'Wide diagrams must not widen the page.');
+  for (const label of wideProof.labels) assert.ok(Math.abs(label.fontPx - wideProof.mathFontPx * label.texSize / 10) < 0.05, 'Wide-diagram labels and relative script sizes do not shrink.');
+  await page.screenshot({ path: path.join(evidence, 'wide-diagram-scroll.png'), fullPage: true });
   const paletteProof = await page.evaluate(async () => {
     // Rasterize a small, sanitized vector fixture to verify actual mask alpha,
     // including a definition shared between visible ink and a mask, rather than
     // merely checking that the mask's XML still contains black/white attributes.
     const source = '<svg xmlns="http://www.w3.org/2000/svg" width="60" height="20" viewBox="0 0 60 20"><defs><path id="box" d="M0 0H10V10H0Z" fill="black"/><linearGradient id="fade"><stop offset="0" stop-color="black"/><stop offset="1" stop-color="white"/></linearGradient><mask id="cut"><rect width="20" height="10" fill="white"/><use href="#box" x="10"/></mask><mask id="gradient"><rect y="10" width="20" height="10" fill="url(#fade)"/></mask></defs><rect width="20" height="10" fill="black" mask="url(#cut)"/><use href="#box" x="20"/><rect x="30" width="10" height="10" fill="red"/><rect x="40" width="10" height="10" fill="white"/><rect x="50" width="10" height="10" fill="blue"/><rect y="10" width="20" height="10" fill="black" mask="url(#gradient)"/></svg>';
     const svg = sanitizeSvg(source, 'Ink and mask fixture', 'tikz');
+    // This paint/alpha test deliberately rasterizes at fixed pixel dimensions,
+    // independently of the renderer's new text-relative TikZ display sizing.
+    svg.setAttribute('width','60'); svg.setAttribute('height','20');
     const canvas = document.createElement('canvas'); canvas.width = 60; canvas.height = 20;
     const context = canvas.getContext('2d');
     async function sample(ink) {
@@ -244,7 +298,7 @@ try {
   assert.equal(await page.evaluate(() => host.mounts.size), 0);
   assert.deepEqual(errors, []); assert.deepEqual(consoleErrors, []);
   assert.ok(network.every(url => url.startsWith(base + '/') || url.startsWith('data:')), `Unexpected network: ${network.filter(url => !url.startsWith(base + '/'))}`);
-  const report = { timings, chemicalLabels, inkProof, switchedInk, paletteProof, whiteColors, blackColors, referenceProof, cachedMs: cached.ms, timeout, heartbeatTicks: ticks, recoveredMs: recovered.ms, fontProof, requests, network, errors, consoleErrors };
+  const report = { timings, chemicalLabels, sizingProof, wideProof, inkProof, switchedInk, paletteProof, whiteColors, blackColors, referenceProof, cachedMs: cached.ms, timeout, heartbeatTicks: ticks, recoveredMs: recovered.ms, fontProof, requests, network, errors, consoleErrors };
   fs.writeFileSync(path.join(evidence, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ evidence, timings: Object.fromEntries(Object.entries(timings).map(([name,result])=>[name,Math.round(result.ms)])), cachedMs: Math.round(cached.ms), timeoutMs: Math.round(timeout.ms), heartbeatTicks: ticks, recoveredMs: Math.round(recovered.ms), bundledFontRequests: fontProof.requests.length, requests: requests.length, pageErrors: errors.length }, null, 2));
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

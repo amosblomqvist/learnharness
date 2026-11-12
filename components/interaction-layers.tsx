@@ -349,7 +349,9 @@ export function createInteractionLayers() {
 			return anchor?.ownerDocument.body ?? (typeof document === "undefined" ? null : document.body);
 		},
 		captureKeyDown(event: KeyboardEvent) {
-			if (event.key === "Escape") snapshotEscape(event);
+			// Observe original ownership for action shortcuts too: a leaf closing
+			// a foreground must not expose the background to the same key.
+			snapshotEscape(event);
 			capturePluginQuestionKey(event);
 			if (event.key === "Tab") event.preventDefault();
 		},
@@ -405,7 +407,7 @@ export function InteractionLayersProvider({ children }: { children: ReactNode })
 		const capture = (event: KeyboardEvent) => controller.captureKeyDown(event);
 		const bubble = (event: KeyboardEvent) => { if (event.key === "Escape") controller.dispatchEscape(event); };
 		const focus = () => controller.observeFocus();
-		// Capture only observes Escape. Native Tab prevention never stops propagation.
+		// Capture observes original ownership. Native Tab prevention never stops propagation.
 		window.addEventListener("keydown", capture, true);
 		document.addEventListener("keydown", bubble);
 		document.addEventListener("focusin", focus, true);

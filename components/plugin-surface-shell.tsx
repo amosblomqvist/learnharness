@@ -44,7 +44,8 @@ function enterRegion(boundary: SurfaceBoundary, root: HTMLElement, remembered = 
 }
 
 /** A view, not a modal: no trap, global hiding, viewport portal or scroll lock. */
-export function PluginSurface({ title, background = "dimmed", onClose, runtime, boundary, opener, children }: {
+export function PluginSurface({ pluginId, title, background = "dimmed", onClose, runtime, boundary, opener, children }: {
+	pluginId?: string;
 	title: string;
 	background?: PluginSurfaceProps["background"];
 	onClose?: () => void | Promise<void>;
@@ -100,7 +101,7 @@ export function PluginSurface({ title, background = "dimmed", onClose, runtime, 
 		focusInitial();
 	}, [boundary, runtime, layer.isTop, focusInitial]);
 	return <InteractionLayerOwner.Provider value={layer.id}>
-		<div ref={root} data-plugin-session-surface="" data-interaction-layer={layer.id}
+		<div ref={root} data-plugin-session-surface="" data-plugin-shortcut-owner={pluginId} data-interaction-layer={layer.id}
 			role="region" aria-label={title} style={{ display: "contents" }}>
 			<div data-plugin-session-surface-frame="" tabIndex={-1} aria-label={title}
 				className={`pointer-events-auto absolute inset-0 flex min-h-0 flex-col overflow-hidden outline-none ${background === "opaque" ? "bg-background" : "bg-background/80 backdrop-blur-sm"}`}

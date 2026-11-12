@@ -38,6 +38,8 @@ export interface PluginManifest {
 }
 export interface PluginInfo {
 	id: string;
+	/** Host-owned package provenance; never read from a plugin manifest. */
+	origin: "core" | "community";
 	manifest?: PluginManifest;
 	enabled: boolean;
 	status: "disabled" | "active" | "error";
@@ -105,9 +107,9 @@ export interface PluginTools {
 }
 export interface PluginBackendContext {
 	readonly manifest: PluginManifest;
-	/** Absolute built-package directory: <plugins>/<id>/dist. */
+	/** Absolute code directory: app core-plugins/<id> or community plugins/<id>/dist. */
 	readonly directory: string;
-	/** Persistent records: <plugins>/<id>/data, outside the build output. */
+	/** Writable records: core-plugin-data/<id> or community plugins/<id>/data. */
 	readonly dataDirectory: string;
 	readonly signal: AbortSignal;
 	cleanup(dispose: PluginCleanup): void;
@@ -140,11 +142,16 @@ export interface PluginView {
 	mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export type * from "./plugin-view-context.ts";
-export type PluginActionContext =
-	| { placement: "top-bar"; surface: "session"; sessionId: string; kind: "teaching" | "practice"; surfaceTarget: import("./plugin-ui.ts").PluginSurfaceTarget;
+export type { PluginActionShortcut, PluginShortcutViewScope } from "./plugin-shortcuts.ts";
+export type PluginPageActionContext =
+	| { surface: "session"; sessionId: string; kind: "teaching" | "practice"; surfaceTarget: import("./plugin-ui.ts").PluginSurfaceTarget;
 		/** Detached whole-session view, captured once before action invocation. */
 		readonly view: import("./plugin-view-context.ts").PluginSessionViewContext }
-	| { placement: "top-bar"; surface: "plugin-view"; pluginId: string; viewId: string }
+	| { surface: "plugin-view"; pluginId: string; viewId: string }
+	| { surface: "app"; pathname: string };
+export type PluginActionContext =
+	| ({ placement: "top-bar" } & Exclude<PluginPageActionContext, { surface: "app" }>)
+	| ({ placement: "keyboard" } & PluginPageActionContext)
 	| { placement: "sidebar"; surface: "sidebar" }
 	| { placement: "graph"; surface: "graph" };
 export interface PluginAction {
@@ -152,6 +159,8 @@ export interface PluginAction {
 	name: string;
 	/** Trusted plugin SVG markup. The host still renders the surrounding button. */
 	icon?: string;
+	/** Opt in without creating chrome. Scope/default are captured at registration. */
+	readonly shortcut?: import("./plugin-shortcuts.ts").PluginActionShortcut;
 	disabled?: boolean | ((context: PluginActionContext) => boolean);
 	run(context: PluginActionContext): void | Promise<void>;
 }

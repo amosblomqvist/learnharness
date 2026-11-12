@@ -6,7 +6,7 @@ import type { PluginUi } from "../src/core/plugin-ui.ts";
 
 const tick = async () => { for (let i = 0; i < 16; i++) await Promise.resolve(); };
 const sidebar: PluginActionContext = { placement: "sidebar", surface: "sidebar" };
-const info: PluginInfo = { id: "fixture", enabled: true, status: "active", revision: "1", manifest: {
+const info: PluginInfo = { id: "fixture", origin: "community", enabled: true, status: "active", revision: "1", manifest: {
 	apiVersion: 1, id: "fixture", name: "Fixture", version: "1.0.0", minAppVersion: "0.4.1", main: "main.js",
 } };
 function fixture(activate: (ctx: PluginFrontendContext) => void, extra: Partial<ConstructorParameters<typeof PluginFrontendManager>[0]> = {}) {

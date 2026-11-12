@@ -92,8 +92,8 @@ function knowledgeExample(ui: PluginUi, root: HTMLElement, life: Scope, id: stri
 }
 
 /** The target is passed through unchanged from the native action context. */
-export function openSurfaceDemo(ui: PluginUi, target: PluginSurfaceTarget, signal: AbortSignal): PluginWidgetHandle<PluginSurfaceProps> {
-  return openDemo(ui, signal, target);
+export function openSurfaceDemo(ui: PluginUi, target: PluginSurfaceTarget, signal: AbortSignal, onClose?: () => void): PluginWidgetHandle<PluginSurfaceProps> {
+  return openDemo(ui, signal, target, onClose);
 }
 
 /** Direct opening captures the current page body through the public host API. */

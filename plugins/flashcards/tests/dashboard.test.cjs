@@ -41,13 +41,14 @@ test('library-wide dashboard shows labeled current-state counts and neutral char
     assert.ok(h.root.textContent.includes('Active propositions with at least one cue.'));
     assert.deepEqual([...h.root.querySelectorAll('.fc-chart h3')].map(node => node.textContent), ['Scheduled due', 'Scheduled reviews']);
     assert.equal(h.root.querySelectorAll('.fc-chart-grid > .fc-chart').length, 2);
-    assert.match(h.root.textContent, /Current scheduled due dates, not a forecast of future workload or repeat reviews\./);
-    assert.match(h.root.textContent, /Scheduled-review ratings recorded each day, not unique propositions\./);
+    assert.deepEqual([...h.root.querySelectorAll('.fc-chart figcaption')].map(node => node.textContent), [
+      'Current scheduled due dates.', 'Scheduled review ratings recorded each day.',
+    ]);
     assert.equal(h.root.querySelector('button, input, select, a'), null, 'dashboard has no filters or actions');
   } finally { h.dashboard.dispose(); }
 });
 
-test('nine due bars and fourteen activity bars expose visible counts, hover titles and accessible image summaries', async () => {
+test('nine due bars and fourteen activity bars expose visible counts and accessible summaries without native hover tooltips', async () => {
   const h = await setup();
   try {
     const data = statistics(); h.dashboard.update(data);
@@ -62,17 +63,19 @@ test('nine due bars and fourteen activity bars expose visible counts, hover titl
       assert.equal(svg.namespaceURI, 'http://www.w3.org/2000/svg');
       assert.equal(svg.getAttribute('role'), 'img');
       assert.ok(svg.getAttribute('aria-label').startsWith(`${title}: `));
-      assert.equal(svg.querySelector('title').textContent, svg.getAttribute('aria-label'));
+      assert.ok(svg.querySelector('title, [title]') === null, 'neither whole-chart nor per-bar native tooltips remain');
+      assert.equal(svg.hasAttribute('title'), false);
+      const descriptions = svg.getAttribute('aria-label').slice(title.length + 2).split('; ');
+      assert.equal(descriptions.length, rows.length);
       assert.ok(svg.hasAttribute('viewBox')); assert.equal(svg.getAttribute('width'), '100%');
       assert.equal(svg.parentElement.className, 'fc-chart-scroll');
       groups(svg).forEach((group, index) => {
-        const description = group.querySelector('title').textContent;
-        assert.ok(description.endsWith(`: ${rows[index].count}`));
-        assert.ok(svg.getAttribute('aria-label').includes(description), 'image summary includes every bar label and count');
+        assert.ok(descriptions[index].endsWith(`: ${rows[index].count}`));
+        assert.ok(descriptions[index].split(': ')[0].length > 0, 'image summary retains each bar label and count');
         assert.equal(group.getAttribute('data-day'), rows[index].day ?? 'overdue');
         const rect = group.querySelector('rect');
         assert.equal(rect.getAttribute('fill'), 'currentColor');
-        assert.ok(Number(rect.getAttribute('height')) >= 0);
+        assert.ok(Number(rect.getAttribute('height')) >= 1);
         assert.ok(Number(rect.getAttribute('y')) >= 0);
       });
     }
@@ -164,12 +167,32 @@ test('missing statistics show a loading state without invented dates or counts; 
     assert.deepEqual(charts(h).map(svg => groups(svg).length), [9, 14]);
     for (const svg of charts(h)) {
       assert.ok(groups(svg).every(group => group.querySelector('text').textContent === '0'));
-      assert.ok([...svg.querySelectorAll('rect')].every(rect => Number(rect.getAttribute('height')) === 0));
+      assert.ok([...svg.querySelectorAll('rect')].every(rect => Number(rect.getAttribute('height')) === 1), 'zero values retain thin flat markers');
       assert.equal(/NaN|Infinity|undefined/.test(svg.outerHTML), false);
     }
     assert.ok([...h.root.querySelectorAll('.fc-state-segment')].every(node => node.style.width === '0%'));
     h.dashboard.update(null); assert.equal(h.root.querySelector('[role=status]').hidden, false);
     assert.deepEqual(charts(h).map(svg => groups(svg).length), [0, 0]);
+  } finally { h.dashboard.dispose(); }
+});
+
+test('paired charts share their proportions and bottom baseline across different bucket counts and updates', async () => {
+  const h = await setup();
+  try {
+    for (const zero of [false, true, false]) {
+      const data = statistics();
+      if (zero) for (const row of [...data.due, ...data.activity]) row.count = 0;
+      h.dashboard.update(data);
+      const [due, activity] = charts(h);
+      assert.equal(due.getAttribute('viewBox'), activity.getAttribute('viewBox'), 'equal-width cards use the same SVG proportions, aligning bars and caption starts');
+      const bottoms = charts(h).flatMap(svg => [...svg.querySelectorAll('rect')].map(rect => Number(rect.getAttribute('y')) + Number(rect.getAttribute('height'))));
+      assert.ok(bottoms.length > 0);
+      assert.ok(bottoms.every(bottom => Math.abs(bottom - bottoms[0]) < 1e-9), 'every bar rests on one common baseline');
+      assert.equal(due.querySelector('.fc-chart-label').getAttribute('y'), activity.querySelector('.fc-chart-label').getAttribute('y'));
+      assert.deepEqual(visibleCounts(due), data.due.map(row => row.count));
+      assert.deepEqual(visibleCounts(activity), data.activity.map(row => row.count));
+      assert.ok(charts(h).every(svg => !svg.querySelector('title, [title]')), 'updates do not restore native tooltips');
+    }
   } finally { h.dashboard.dispose(); }
 });
 

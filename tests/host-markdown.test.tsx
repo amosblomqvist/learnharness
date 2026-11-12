@@ -33,7 +33,7 @@ function deferred<T>() {
 function highlighted(content: string): HighlightResult {
 	return { tokens: [[{ content, offset: 0, color: "#aabbcc" }]], fg: "#eeeeee", bg: "#111111" };
 }
-const plugin: PluginInfo = { id: "static-markdown-proof", enabled: true, status: "active", revision: "fixture-1", manifest: {
+const plugin: PluginInfo = { id: "static-markdown-proof", origin: "community", enabled: true, status: "active", revision: "fixture-1", manifest: {
 	apiVersion: 1, id: "static-markdown-proof", name: "Static Markdown proof", version: "1.0.0", minAppVersion: "0.3.7", main: "main.js",
 } };
 

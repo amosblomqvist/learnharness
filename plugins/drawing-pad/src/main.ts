@@ -68,6 +68,7 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   }
   const action: PluginAction = {
     id: "draw", icon: PEN,
+    shortcut: { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+shift+d" },
     // A readonly string accessor uses public pathname + our click-time mapping;
     // no state capture occurs in disabled/render-time predicates.
     get name() {
@@ -76,6 +77,30 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
       return state && sheets.pending(state) ? "Draw (unsent)" : "Draw";
     },
     run(context) { if (context.surface === "session") toggle(context); },
+  };
+  function editingPad(context: PluginActionContext): MountedSheet | undefined {
+    if (disposed || ctx.signal.aborted || context.surface !== "session" || !open || open.closed ||
+      open.session.id !== context.sessionId || open.session.kind !== context.kind) return;
+    const mounted = open.mounted;
+    return mounted?.canUseEditingShortcuts() ? mounted : undefined;
+  }
+  const undoAction: PluginAction = {
+    id: "undo", name: "Undo drawing",
+    shortcut: { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+z" },
+    disabled: context => !editingPad(context)?.canUndo(),
+    run(context) { editingPad(context)?.undo(); },
+  };
+  const toggleToolsAction: PluginAction = {
+    id: "toggle-pen-eraser", name: "Toggle pen/eraser",
+    shortcut: { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+shift+e" },
+    disabled: context => !editingPad(context),
+    run(context) { editingPad(context)?.togglePenEraser(); },
+  };
+  const handAction: PluginAction = {
+    id: "hand", name: "Hand",
+    shortcut: { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+shift+h" },
+    disabled: context => !editingPad(context),
+    run(context) { editingPad(context)?.selectHand(); },
   };
   const rows = (value: Settings): PluginSettingsSchema["rows"] => [{
     key: "inkColor", type: "text", label: "Ink color", value: value.inkColor,
@@ -137,6 +162,9 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     await refreshSettings();
     if (disposed || ctx.signal.aborted) return dispose;
     cleanups.push(ctx.registerAction(action));
+    cleanups.push(ctx.registerAction(undoAction));
+    cleanups.push(ctx.registerAction(toggleToolsAction));
+    cleanups.push(ctx.registerAction(handAction));
     cleanups.push(ctx.placeAction({ id: "session-draw", actionId: "draw", location: "top-bar", sessions: ["teaching", "practice"] }));
     cleanups.push(ctx.registerSubmissionInterceptor({
       id: "drawing", priority: 0,

@@ -1,7 +1,8 @@
 /** Bounded plugin-question contracts and browser-safe saved-authority helpers. */
 import type { Static, TSchema } from "typebox";
 import type { PluginCleanup } from "./plugins.ts";
-import { validatePluginSchema } from "./plugin-validation.ts";
+import { checkPluginSchema, preparePluginSchema } from "./plugin-validation.ts";
+import { copyImmutableData, ImmutableReadCache } from "./immutable-data.ts";
 import { Format } from "typebox/format";
 import { validatePluginSubmissionImages, type PluginSubmissionImages } from "./plugin-submissions.ts";
 
@@ -144,21 +145,33 @@ export function validatePluginQuestionInput(definition: PluginQuestionTypeDefini
 export function validatePluginQuestionAnswer(snapshot: PluginQuestionSnapshot, context: { chatId: string; answer: unknown }, definition?: PluginQuestionTypeDefinition): PluginQuestionValidationResult<JsonValue> {
 	return validateAnswer(snapshot, context, definition);
 }
+const annotations = new ImmutableReadCache<PluginQuestionAnnotationRead>();
+const boundAnnotations = new ImmutableReadCache<PluginQuestionAnnotationRead>();
+const messageAnnotations = new ImmutableReadCache<PluginQuestionAnnotationRead>();
+const answers = new ImmutableReadCache<PluginQuestionAnswer | null>();
+const cancellations = new ImmutableReadCache<PluginQuestionCancellation | null>();
 export function readPluginQuestionAnnotation(value: unknown, expectedOccurrence?: PluginQuestionOccurrence): PluginQuestionAnnotationRead {
-	try { return readAnnotation(value, expectedOccurrence); } catch { return { status: "unreadable" }; }
+	try {
+		const cache = expectedOccurrence ? boundAnnotations : annotations;
+		const result = cache.read(value, expectedOccurrence ? pluginQuestionOccurrenceKey(expectedOccurrence) : undefined, () => readAnnotation(value, expectedOccurrence));
+		// A successfully hydrated, immutable snapshot is already canonical. Keep
+		// bound reads separate so a mismatched occurrence cannot poison this entry.
+		if (result.status === "posed") annotations.seed(result.snapshot, undefined, result);
+		return result;
+	} catch { return { status: "unreadable" }; }
 }
 export function readPluginQuestionMessageAnnotation(message: unknown, contentIndex: number): PluginQuestionAnnotationRead {
-	try { return readMessageAnnotation(message, contentIndex); } catch { return { status: "unreadable" }; }
+	try { return messageAnnotations.read(message, contentIndex, () => readMessageAnnotation(message, contentIndex)); } catch { return { status: "unreadable" }; }
 }
 export function readPluginQuestionSnapshot(value: unknown, expectedOccurrence?: PluginQuestionOccurrence): PluginQuestionSnapshot | null {
 	const result = readPluginQuestionAnnotation(value, expectedOccurrence);
 	return result.status === "posed" ? result.snapshot : null;
 }
 export function readPluginQuestionAnswer(value: unknown, snapshot?: PluginQuestionSnapshot): PluginQuestionAnswer | null {
-	return readAnswer(value, snapshot);
+	return answers.read(value, snapshot, () => readAnswer(value, snapshot));
 }
 export function readPluginQuestionCancellation(value: unknown, snapshot?: PluginQuestionSnapshot): PluginQuestionCancellation | null {
-	return readCancellation(value, snapshot);
+	return cancellations.read(value, snapshot, () => readCancellation(value, snapshot));
 }
 export function pluginQuestionOccurrenceKey(occurrence: PluginQuestionOccurrence): string {
 	return JSON.stringify([occurrence.messageId, occurrence.contentIndex, occurrence.toolCallId, occurrence.toolName]);
@@ -282,7 +295,13 @@ function pointerTarget(root: unknown, ref: unknown): unknown {
 	return current;
 }
 /** Compile the exact persistable representation, not the original runtime object. */
+const schemas = new ImmutableReadCache<TSchema>();
 export function preparePluginQuestionSchema(schema: unknown): TSchema {
+	const prepared = schemas.read(schema, undefined, () => prepareSchema(schema));
+	if (typeof prepared === "object" && prepared !== null) schemas.seed(prepared, undefined, prepared);
+	return prepared;
+}
+function prepareSchema(schema: unknown): TSchema {
 	const brandingNodes = new Set<object>();
 	walkSchema(schema, node => { brandingNodes.add(node); });
 	const saved = cloneJson(schema, brandingNodes);
@@ -302,8 +321,9 @@ export function preparePluginQuestionSchema(schema: unknown): TSchema {
 			if (typeof target !== "boolean" && !nodes.has(target)) throw new Error("Plugin question references must target schema positions");
 		}
 	});
-	validatePluginSchema(saved);
-	return freezePluginQuestionValue(saved) as TSchema;
+	const prepared = copyImmutableData(saved) as TSchema;
+	preparePluginSchema(prepared);
+	return prepared;
 }
 
 function prepareDefinition<Q extends TSchema, A extends TSchema>(definition: PluginQuestionTypeDefinition<Q, A>): PluginQuestionTypeDefinition<Q, A> {
@@ -336,9 +356,14 @@ function prepareDefinition<Q extends TSchema, A extends TSchema>(definition: Plu
 		...(definition.gradeAnswer ? { gradeAnswer: definition.gradeAnswer } : {}),
 	});
 }
+const parameterSchemas = { probe: new ImmutableReadCache<TSchema>(), teach: new ImmutableReadCache<TSchema>() };
 function parametersFor(definition: PluginQuestionTypeDefinition, variant: PluginQuestionVariant): TSchema {
 	if (!variantOf(variant) || !definition[variant]) throw new Error("Plugin question variant is not registered");
-	const payload = clonePluginQuestionJson(preparePluginQuestionSchema(definition.questionSchema));
+	const schema = preparePluginQuestionSchema(definition.questionSchema);
+	return parameterSchemas[variant].read(schema, undefined, () => buildParameters(schema, variant));
+}
+function buildParameters(schema: TSchema, variant: PluginQuestionVariant): TSchema {
+	const payload = clonePluginQuestionJson(schema);
 	walkSchema(payload, node => {
 		if (own(node, "$ref")) node.$ref = `#/properties/payload${(node.$ref as string).slice(1)}`;
 	});
@@ -350,12 +375,13 @@ function parametersFor(definition: PluginQuestionTypeDefinition, variant: Plugin
 		},
 		required: variant === "teach" ? ["type", "nodeId", "question", "payload"] : ["question", "payload"],
 	};
-	validatePluginSchema(parameters);
-	return freezePluginQuestionValue(parameters) as TSchema;
+	const prepared = copyImmutableData(parameters) as TSchema;
+	preparePluginSchema(prepared);
+	return prepared;
 }
 function problems<T>(message: string): PluginQuestionValidationResult<T> { return { ok: false, problems: [message] }; }
 function schemaAccepts(schema: unknown, value: JsonValue): boolean {
-	return validatePluginSchema(preparePluginQuestionSchema(schema)).Check(value);
+	return checkPluginSchema(preparePluginQuestionSchema(schema), value);
 }
 function refinement(callback: ((context: never) => unknown) | undefined, context: unknown): string[] {
 	if (!callback) return [];
@@ -374,7 +400,7 @@ function refinement(callback: ((context: never) => unknown) | undefined, context
 function validateInput(definition: PluginQuestionTypeDefinition, context: { chatId: string; variant: PluginQuestionVariant; input: unknown }): PluginQuestionValidationResult<PluginQuestionInput> {
 	try {
 		const input = clonePluginQuestionJson(context.input);
-		if (!variantOf(context.variant) || !definition[context.variant] || !validatePluginSchema(parametersFor(definition, context.variant)).Check(input)) return problems("Question does not satisfy its saved input contract.");
+		if (!variantOf(context.variant) || !definition[context.variant] || !checkPluginSchema(parametersFor(definition, context.variant), input)) return problems("Question does not satisfy its saved input contract.");
 		const accepted = freezePluginQuestionValue(input) as PluginQuestionInput;
 		const errors = refinement(definition.validateQuestion, { chatId: context.chatId, variant: context.variant, contractVersion: definition.contractVersion, input: accepted });
 		return errors.length ? { ok: false, problems: errors } : { ok: true, value: accepted };
@@ -433,7 +459,7 @@ function readAnnotation(value: unknown, expected?: PluginQuestionOccurrence): Pl
 		};
 		const input = validateInput(historicalDefinition, { chatId: "", variant: attempt.variant, input: saved.input });
 		if (!input.ok) return unreadable();
-		return { status: "posed", snapshot: freezePluginQuestionValue({ ...attempt, ...identity, input: input.value, questionSchema, answerSchema, showThinking: saved.showThinking, requiresAnswerRefinement: saved.requiresAnswerRefinement }) };
+		return { status: "posed", snapshot: copyImmutableData({ ...attempt, ...identity, input: input.value, questionSchema, answerSchema, showThinking: saved.showThinking, requiresAnswerRefinement: saved.requiresAnswerRefinement }) };
 	} catch { return unreadable(); }
 }
 function readMessageAnnotation(message: unknown, contentIndex: number): PluginQuestionAnnotationRead {
@@ -444,7 +470,7 @@ function readMessageAnnotation(message: unknown, contentIndex: number): PluginQu
 	if (message.role !== "assistant" || !text(message.id) || !Number.isSafeInteger(contentIndex) || contentIndex < 0 || !Array.isArray(message.content)) return { status: "unreadable" };
 	const call: unknown = message.content[contentIndex];
 	if (!record(call) || call.type !== "toolCall" || !text(call.id) || !text(call.name)) return { status: "unreadable" };
-	const result = readAnnotation(map[String(contentIndex)], { messageId: message.id, contentIndex, toolCallId: call.id, toolName: call.name });
+	const result = readPluginQuestionAnnotation(map[String(contentIndex)], { messageId: message.id, contentIndex, toolCallId: call.id, toolName: call.name });
 	return result.status === "absent" ? { status: "unreadable" } : result;
 }
 function readAnswer(value: unknown, snapshot?: PluginQuestionSnapshot): PluginQuestionAnswer | null {

@@ -39,7 +39,7 @@ import {
 	type SessionPricing,
 } from "../src/core";
 
-import { pendingPluginQuestionOf, pluginQuestionCallsOf } from "../src/core/index.ts";
+import { copyImmutableData, pendingPluginQuestionOf, pluginQuestionCallsOf } from "../src/core/index.ts";
 import { pluginQuestionOccurrenceKey, samePluginQuestionOccurrence, type PluginQuestionAnswerState, type PluginQuestionSnapshot, type PluginQuestionOccurrence } from "../src/core/index.ts";
 
 import type { PluginProblemSnapshot, PluginProblemSubmissionState } from "../src/core/index.ts";
@@ -329,9 +329,12 @@ export class SessionModel {
 	/** Synchronous ready check for the gate (send/read mount logic). */
 	readyRef = true;
 
+	private history?: { base: LhMessage[]; tail: LhMessage[]; messages: LhMessage[] };
+
 	constructor(opts: SessionModelOptions) {
 		this.chatId = opts.chatId;
-		this.base = opts.initialMessages;
+		this.base = copyImmutableData(opts.initialMessages);
+		this.tail = copyImmutableData(this.tail);
 		if (pluginQuestionCallsOf(this.base).some(call => call.status === "answerable" || call.status === "unreadable")) { this.reconciliationValue = "syncing"; this.readyRef = false; }
 		this.errorValue = opts.initialError === undefined ? null : { message: opts.initialError };
 		this.automaticContinuationBlocked = opts.initialError !== undefined;
@@ -351,12 +354,21 @@ export class SessionModel {
 		this.onReattachSettled = fn;
 	}
 
+	/** Status/dock updates do not change native history. Immutable message
+	 * identities let all historical question readers share the same analysis. */
+	private nativeHistory(): LhMessage[] {
+		if (this.history?.base === this.base && this.history.tail === this.tail) return this.history.messages;
+		const messages = copyImmutableData([...this.base, ...this.tail]);
+		this.history = { base: this.base, tail: this.tail, messages };
+		return messages;
+	}
+
 	getState(): SessionState {
 		const live =
 			this.statusValue === "submitted" || this.statusValue === "streaming"
 				? { executions: this.executions, inFlight: true, streamingIds: this.streamingIds }
 				: undefined;
-		const messages = [...this.base, ...this.tail];
+		const messages = this.nativeHistory();
 		const latest = failedResponseAtEnd(messages);
 		// Presentation/compaction markers do not resolve a failure. While
 		// trying again, hide the old banner from the first Thinking frame,
@@ -389,6 +401,10 @@ export class SessionModel {
 	/** Mutate model state + notify (the hook re-renders). */
 	private mutate(fn: () => void): void {
 		fn();
+		// Streaming SDK partials and POST inputs remain caller-owned. Detach only
+		// new data, retaining already immutable settled messages and contracts.
+		this.base = copyImmutableData(this.base);
+		this.tail = copyImmutableData(this.tail);
 		this.onChange?.();
 	}
 
@@ -856,7 +872,7 @@ export class SessionModel {
 				this.pluginProblemAvailability?.problemId !== active.problemId || this.pluginProblemAvailability.status !== "available") return refused();
 		}
 		if (input.type === "thinking" && activeProblemOf(this.base)?.pluginProblem) return refused();
-		const subject = input.type === "answer" ? pendingQuestionOf([...this.base, ...this.tail]) : null;
+		const subject = input.type === "answer" ? pendingQuestionOf(this.nativeHistory()) : null;
 		// A render-scoped answer must not move to another occurrence sharing
 		// its id. This identity is local only; the server's wire is unchanged.
 		if (input.type === "answer" && questionKey !== undefined &&
@@ -917,7 +933,7 @@ export class SessionModel {
 			// renders the instant the chip/Enter fires.
 			optimistic.push({ ...newNextMessage(), id: localId() });
 		} else if (input.type === "answer") {
-			const tool = pendingCallTool([...this.base, ...this.tail], input.toolCallId) ?? "quiz";
+			const tool = pendingCallTool(this.nativeHistory(), input.toolCallId) ?? "quiz";
 			const result = { ...newAnswerResult(input.toolCallId, tool, input.answer), id: localId() };
 			optimistic.push(result);
 			this.unconfirmedAnswers.set(result.id, expectedKey ?? input.toolCallId);
@@ -1087,9 +1103,9 @@ export class SessionModel {
 	 * (or any later refetch) replaces the optimistic append with truth. */
 	async dismissQuestion(toolCallId: string, answer: QuestionAnswerData, questionKey?: string): Promise<void> {
 		if (!this.readyRef || pluginQuestionCallsOf(this.base).some(call => call.status === "answerable" || call.status === "unreadable")) return;
-		const subject = pendingQuestionOf([...this.base, ...this.tail]);
+		const subject = pendingQuestionOf(this.nativeHistory());
 		if (questionKey !== undefined && (subject?.key !== questionKey || subject.toolCallId !== toolCallId)) return;
-		const tool = pendingCallTool([...this.base, ...this.tail], toolCallId) ?? "quiz";
+		const tool = pendingCallTool(this.nativeHistory(), toolCallId) ?? "quiz";
 		this.invalidateCanonicalReads();
 		this.mutate(() => {
 			this.tail = [...this.tail, { ...newAnswerResult(toolCallId, tool, answer), id: localId() }];
@@ -1172,6 +1188,7 @@ export class SessionModel {
 
 	private replaceMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability, problemAvailability?: PluginProblemAvailability): void {
 		if (this.imagePostOwner) return;
+		record = copyImmutableData(record);
 		this.mutate(() => {
 			this.base = record;
 			this.pluginQuestionAvailability = availability;
@@ -1206,6 +1223,7 @@ export class SessionModel {
 
 	private appendMessages(record: LhMessage[], availability?: PluginQuestionAvailability, updateAvailability = false, problemAvailability?: PluginProblemAvailability): boolean {
 		if (this.imagePostOwner) return false;
+		record = copyImmutableData(record);
 		const recordIds = new Set(record.map((m) => (m as { id?: string }).id));
 		const baseAbsorbed = this.base.some((m) => !recordIds.has((m as { id?: string }).id));
 		if (baseAbsorbed) return false; // not a pure append — the idle full sync is the net

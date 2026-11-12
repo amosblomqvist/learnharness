@@ -8,7 +8,7 @@ import { createPluginWorkerService } from "../agent/plugin-workers.ts";
 import { registerJobAbort, unregisterJobAbort } from "../agent/subagents/aborts.ts";
 import { createPluginAgentRecordStore } from "../store/plugin-agent-records.ts";
 import { createPluginTaskRecordStore, readPluginTaskRecord, recoverPluginTaskRecords } from "../store/plugin-task-records.ts";
-import { installBundledPlugins } from "../store/plugin-installation.ts";
+import corePluginIds from "../../core-plugins.json";
 import { assertGraphFormat } from "../store/graph-format.ts";
 import { createPluginLearningData } from "./plugin-learning.ts";
 import { createPluginInference } from "./plugin-inference.ts";
@@ -24,6 +24,13 @@ import { isTurnRunning } from "./turn-liveness.ts";
 import { compactionInFlight } from "./compaction.ts";
 
 export const pluginDirectory = path.join(/* turbopackIgnore: true */ PATHS.data, "plugins");
+// Explicitly staged by build-server, not discovered by Next's filesystem tracer.
+const core = {
+	directory: path.join(/* turbopackIgnore: true */ PATHS.root, "core-plugins"),
+	dataDirectory: path.join(/* turbopackIgnore: true */ PATHS.data, "core-plugin-data"),
+	ids: corePluginIds,
+};
+const coreData = { directory: core.dataDirectory, ids: core.ids };
 type Host = ReturnType<typeof createPluginHost>;
 interface Runtime { host: Host; ready: Promise<void> }
 interface PluginGlobal { __lhPlugins?: Runtime }
@@ -44,7 +51,7 @@ function runtime(): Runtime {
 	});
 	const installationErrors: Record<string, string> = Object.create(null);
 	const host = createPluginHost({
-		directory: pluginDirectory, appVersion: packageJson.version, installationErrors,
+		directory: pluginDirectory, core, appVersion: packageJson.version, installationErrors,
 		// The process-global runtime owns one admission slot across all plugins
 		// and every separately compiled Next route module.
 		convertDocument: createPluginDocumentConverter().convert,
@@ -78,25 +85,17 @@ function runtime(): Runtime {
 		onChange: () => emit("plugins-changed", {}),
 		onNotification: (notification) => emit("plugin-message", notification),
 	});
-	// Defer installation/activation until the process-wide holder is published.
+	// Defer recovery/activation until the process-wide holder is published.
 	const ready = Promise.resolve().then(async () => {
 		setPluginJobRecovery(job => recoverPluginBackgroundJob(job, {
 			jobStore: stores.jobStore, deliver: deliverJobResult,
-			readTask: (pluginId, taskId, requestId) => readPluginTaskRecord(pluginDirectory, pluginId, taskId, requestId),
+			readTask: (pluginId, taskId, requestId) => readPluginTaskRecord(pluginDirectory, pluginId, taskId, requestId, coreData),
 			registerAbort: registerJobAbort, unregisterAbort: unregisterJobAbort,
 		}));
 		// Exclusive bootstrap sweep, including disabled packages whose services
 		// will not construct. Read-only job recovery never activates plugin code.
-		for (const [id, error] of Object.entries(recoverPluginTaskRecords(pluginDirectory))) {
+		for (const [id, error] of Object.entries(recoverPluginTaskRecords(pluginDirectory, coreData))) {
 			installationErrors[id] = `Task recovery failed: ${error}`;
-		}
-		const bundled = path.join(PATHS.root, "bundled-plugins");
-		if (fs.existsSync(bundled)) {
-			const report = installBundledPlugins(bundled, pluginDirectory, packageJson.version);
-			for (const [id, error] of Object.entries(report.errors)) {
-				const diagnostic = `Bundled installation failed: ${error}`;
-				installationErrors[id] = Object.hasOwn(installationErrors, id) ? `${installationErrors[id]}; ${diagnostic}` : diagnostic;
-			}
 		}
 		await host.initialize();
 	});

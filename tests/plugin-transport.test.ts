@@ -7,7 +7,7 @@ const request = (body: unknown) => new Request("http://localhost/api/plugins", {
 function fixture() {
 	const calls: unknown[] = [];
 	const host: PluginTransportHost = {
-		list: () => [], refresh: async () => { calls.push("refresh"); },
+		list: () => [], conflicts: () => [], refresh: async () => { calls.push("refresh"); },
 		setEnabled: async (id, enabled) => { calls.push({ id, enabled }); },
 		call: async (id, operation, input) => { calls.push({ id, operation, input }); return input; },
 		convertDocument: async (id, request) => { calls.push({ id, request }); return { name: "fixture.txt", markdown: "Text", notices: [] }; },
@@ -17,7 +17,7 @@ function fixture() {
 }
 it("plugin HTTP adapter preserves list, explicit toggles and JSON operation results", async () => {
 	const { transport, calls } = fixture();
-	assert.deepEqual(await (await transport.list()).json(), { plugins: [], directory: "/temporary/plugins" });
+	assert.deepEqual(await (await transport.list()).json(), { plugins: [], directory: "/temporary/plugins", conflicts: [] });
 	assert.equal((await transport.setEnabled("example", request({ enabled: false }))).status, 200);
 	assert.equal((await transport.refresh(request({ action: "refresh" }))).status, 200);
 	const call = await transport.call("example", request({ operation: "snapshot", input: { id: 1 } }));

@@ -17,7 +17,7 @@ it("registered renderers override native plugin dispatch/result bodies; disable 
 	const keys = ["window", "self", "document", "HTMLElement", "Element", "Node", "MutationObserver", "IS_REACT_ACT_ENVIRONMENT"] as const;
 	const saved = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
 	Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, Node: dom.window.Node, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true });
-	const info: PluginInfo = { id: "presentation-proof", enabled: true, status: "active", revision: "fixture-1", manifest: { apiVersion: 1, id: "presentation-proof", name: "Presentation proof", version: "1.0.0", minAppVersion: "0.3.7", main: "main.js" } };
+	const info: PluginInfo = { id: "presentation-proof", origin: "community", enabled: true, status: "active", revision: "fixture-1", manifest: { apiVersion: 1, id: "presentation-proof", name: "Presentation proof", version: "1.0.0", minAppVersion: "0.3.7", main: "main.js" } };
 	const seen: PluginToolRenderProps[] = [];
 	// No network, plugin files, or provider calls: the real manager imports an in-memory fixture.
 	const owner = createPluginWindowOwner({

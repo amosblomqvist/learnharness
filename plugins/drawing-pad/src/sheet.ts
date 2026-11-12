@@ -7,7 +7,15 @@ import { referenceBounds, viewOrigin } from "./geometry.ts";
 import { paintInk, paintSegment, type Point, type Stroke } from "./strokes.ts";
 import type { SessionSheet, Sheets } from "./state.ts";
 
-export interface MountedSheet { flush(): void; dispose(): void }
+export interface MountedSheet {
+  flush(): void;
+  dispose(): void;
+  canUseEditingShortcuts(): boolean;
+  canUndo(): boolean;
+  undo(): void;
+  togglePenEraser(): void;
+  selectHand(): void;
+}
 export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, sheets: Sheets, state: SessionSheet,
   input: PluginSessionViewInput, signal: AbortSignal): MountedSheet {
   const root = document.createElement("div"); root.className = "drawing-pad-root";
@@ -20,13 +28,13 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
   const background = document.createElement("img"); background.alt = "Frozen question reference";
   background.className = "drawing-pad-background"; background.draggable = false;
   const canvas = document.createElement("canvas"); canvas.className = "drawing-pad-ink";
-  canvas.setAttribute("aria-label", "Draw with a mouse or pen, or pan with the Hand tool");
+  canvas.setAttribute("aria-label", "Draw with a mouse or pen; pan with Hand or a right mouse drag");
   const status = document.createElement("div"); status.className = "drawing-pad-status"; status.setAttribute("role", "status");
   paper.append(background, canvas); viewport.append(paper, status); root.append(toolbar, viewport); container.append(root);
   const buttons: PluginWidgetHandle<PluginButtonProps>[] = [];
   let disposed = false, preparing = !state.draft, active: Stroke | undefined, activeDraftId: number | undefined;
   let pointerId: number | undefined;
-  let panDrag: { x: number; y: number; pan: SessionSheet["pan"] } | undefined;
+  let panDrag: { x: number; y: number; pan: SessionSheet["pan"]; rightButton: boolean } | undefined;
   let reference: HTMLElement | undefined;
   let referenceMount: ReturnType<typeof mountReference> | undefined;
   let failure: string | undefined;
@@ -40,7 +48,18 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
   const eraser = toolButton("Eraser", () => sheets.setTool(state, "eraser"), ERASER);
   const hand = toolButton("Hand", () => sheets.setTool(state, "hand"), HAND);
   const commitHistory = (strokes: Stroke[]) => sheets.update(state, strokes);
-  const undo = toolButton("Undo", () => { if (pointerId === undefined && state.draft?.strokes.length) commitHistory(state.draft.strokes.slice(0, -1)); }, UNDO);
+  const editable = () => !disposed && !signal.aborted && !preparing && !failure && !!state.draft && pointerId === undefined;
+  const canUseEditingShortcuts = () => {
+    if (!editable()) return false;
+    const focused = document.activeElement;
+    return focused instanceof HTMLElement && root.contains(focused) && !focused.isContentEditable &&
+      !focused.closest('input,textarea,select,[role="textbox"],[role="combobox"]');
+  };
+  const canUndo = () => editable() && !!state.draft?.strokes.length;
+  const undoHistory = () => { if (canUndo()) commitHistory(state.draft!.strokes.slice(0, -1)); };
+  const togglePenEraser = () => { if (editable()) sheets.setTool(state, state.tool === "pen" ? "eraser" : "pen"); };
+  const selectHand = () => { if (editable()) sheets.setTool(state, "hand"); };
+  const undo = toolButton("Undo", undoHistory, UNDO);
   const clear = toolButton("Clear", () => { if (pointerId === undefined && state.draft) commitHistory([]); });
   const render = () => {
     if (disposed) return;
@@ -51,7 +70,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     hand.update({ variant: state.tool === "hand" ? "secondary" : "outline", disabled: preparing || !!failure });
     undo.update({ disabled: preparing || !!failure || pointerId !== undefined || !draft?.strokes.length });
     clear.update({ disabled: preparing || !!failure || pointerId !== undefined || !draft?.strokes.length });
-    canvas.style.cursor = state.tool === "hand" ? panDrag ? "grabbing" : "grab" : "default";
+    canvas.style.cursor = panDrag ? "grabbing" : state.tool === "hand" ? "grab" : "default";
     status.hidden = !preparing && !failure;
     status.setAttribute("role", failure ? "alert" : "status");
     status.textContent = failure ?? (preparing ? "Preparing drawing sheet…" : "");
@@ -90,15 +109,22 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     render();
   };
   const down = (event: PointerEvent) => {
+    const rightButton = event.pointerType === "mouse" && event.button === 2;
     if (preparing || failure || !state.draft || pointerId !== undefined || event.pointerType === "touch" ||
-      (event.pointerType !== "pen" && event.button !== 0)) return;
-    event.preventDefault(); pointerId = event.pointerId; canvas.setPointerCapture(event.pointerId);
-    if (state.tool === "hand") { panDrag = { x: event.clientX, y: event.clientY, pan: state.pan }; render(); }
+      (event.pointerType !== "pen" && event.button !== 0 && !rightButton)) return;
+    event.preventDefault(); viewport.focus({ preventScroll: true });
+    pointerId = event.pointerId; canvas.setPointerCapture(event.pointerId);
+    if (rightButton || state.tool === "hand") {
+      panDrag = { x: event.clientX, y: event.clientY, pan: state.pan, rightButton }; render();
+    }
     else if (event.pointerType !== "pen" || event.pressure > 0) start(event);
   };
   const move = (event: PointerEvent) => {
     if (preparing || failure || !state.draft || pointerId !== event.pointerId) return;
     if (panDrag) {
+      // Releasing Right while another mouse button is held emits pointermove,
+      // not pointerup. End this gesture before any unheld movement can pan.
+      if (panDrag.rightButton && (event.buttons & 2) === 0) { finish(event); return; }
       if (event.pointerType !== "pen" || event.pressure > 0) sheets.setPan(state,
         { x: panDrag.pan.x + event.clientX - panDrag.x, y: panDrag.pan.y + event.clientY - panDrag.y });
       return;
@@ -131,13 +157,6 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
   for (const name of ["pointerup", "pointercancel", "lostpointercapture"] as const) canvas.addEventListener(name, finish, { signal });
   canvas.addEventListener("contextmenu", event => event.preventDefault(), { signal });
   viewport.addEventListener("wheel", event => event.preventDefault(), { signal, passive: false });
-  root.addEventListener("keydown", event => {
-    if (event.defaultPrevented || event.isComposing || !(event.ctrlKey || event.metaKey) || event.altKey || event.shiftKey || event.key.toLowerCase() !== "z") return;
-    const target = event.target;
-    if (target instanceof HTMLElement && (target.isContentEditable || target.matches("input,textarea,select"))) return;
-    event.preventDefault(); event.stopPropagation();
-    if (pointerId === undefined && !preparing && !failure && state.draft?.strokes.length) commitHistory(state.draft.strokes.slice(0, -1));
-  }, { signal });
   const unsubscribe = sheets.onChange(render);
   const resize = new ResizeObserver(render); resize.observe(viewport);
   const dispose = () => {
@@ -175,5 +194,5 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
       }
     } finally { referenceMount?.dispose(); reference?.remove(); }
   })();
-  return { flush, dispose };
+  return { flush, dispose, canUseEditingShortcuts, canUndo, undo: undoHistory, togglePenEraser, selectHand };
 }

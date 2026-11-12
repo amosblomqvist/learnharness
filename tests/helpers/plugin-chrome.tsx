@@ -9,7 +9,7 @@ import { InteractionLayersProvider } from "../../components/interaction-layers.t
 import { installModalDom } from "../modal-dom.ts";
 
 export const pluginInfo = (id = "fixture"): PluginInfo => ({
-	id, enabled: true, status: "active", revision: "fixture-1",
+	id, origin: "community", enabled: true, status: "active", revision: "fixture-1",
 	manifest: { apiVersion: 1, id, name: `Plugin ${id}`, version: "1.0.0", minAppVersion: "0.4.1", main: "main.js" },
 });
 

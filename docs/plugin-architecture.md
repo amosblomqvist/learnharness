@@ -30,7 +30,8 @@ source management in the knowledge picker is not a programmable graph-write API.
 | Server composition and runtime | `src/server/plugins.ts`, `plugin-host.ts` |
 | Native external backend loading | `scripts/plugin-loader.cjs` |
 | Browser module loading | `public/plugin-loader.js`, `components/plugin-manager.ts`, `plugins.tsx` |
-| Recoverable bundled installation | `src/store/plugin-installation.ts` |
+| Core selection/build staging | `core-plugins.json`, `scripts/build-core-plugins.mjs` |
+| Origin-aware writable data paths | `src/store/plugin-data-paths.ts` |
 | Data/model adapters | `src/server/plugin-learning.ts`, `plugin-inference.ts` |
 | Persistent conversations/tasks | `src/agent/plugin-agents.ts`, `plugin-workers.ts`; `src/store/plugin-agent-records.ts`, `plugin-task-records.ts` |
 | Background result delivery/activity | `src/server/plugin-background-tools.ts`, `plugin-worker-activity.ts` and existing host jobs/steers |
@@ -47,28 +48,40 @@ not supported runtime imports for plugin code.
 
 ## Package discovery, installation and lifecycle
 
-Runtime lookup is fixed: `<learning data>/plugins/<id>/dist/manifest.json` and referenced
-bundles/assets. Optional source lives beside `dist/`; persistent `<id>/data/` is never
-runtime/static content. Manifest API version is 1; app/package versions are numeric
-`x.y.z`. Validate identity, paths, compatibility and built entries before executing code.
-Disabled packages are discovered without evaluation; new packages default to disabled.
+Manifest API version is 1; app/package versions are numeric `x.y.z`. Validate identity,
+paths, compatibility and built entries before executing code. Disabled packages are
+inspected without evaluation. New core and community plugins default to disabled;
+explicit enable/disable choices share `plugins-state.json` and survive app updates.
 
-There are three distinct locations:
+Code/data locations are explicit:
 
-1. Repository `plugins/<id>/`: feature source projects and local build output.
-2. App `bundled-plugins/<id>/`: flat built package contents used as managed startup input,
-   if provided. Selection/build staging is a separate distribution concern.
-3. Writable `<learning data>/plugins/<id>/`: installed `dist/` plus persistent sibling data.
-   Electron supplies its user-data location through `LH_DATA_DIR`; development uses the
-   configured local learning-data root.
+| Purpose | Location |
+| --- | --- |
+| Authoring projects | Repository `plugins/<id>/` with generated `dist/` |
+| Core code, app-owned/read-only | App `core-plugins/<id>/manifest.json` and flat built assets |
+| Core writable records | `<learning data>/core-plugin-data/<id>/` |
+| Community code | `<learning data>/plugins/<id>/dist/manifest.json` and built assets |
+| Community writable records | `<learning data>/plugins/<id>/data/` |
 
-`installBundledPlugins` validates/stages code, atomically replaces individual files,
-commits the manifest last, and preserves data. It records ownership in
-`plugins-bundled.json` beside the plugins directory. Durable write-ahead markers in
-`plugins-installing/` block a partially updated package from loading until startup retry
-succeeds. This is recoverable installation, **not a whole-directory atomic swap**.
-External ID collisions are refused. Per-package failures block only that package;
-corrupt shared ownership/enable metadata is refused rather than overwritten.
+`core-plugins.json` selects Flashcards, Coding Questions, Drawing Pad and Rich Code Blocks.
+`plugins:build-core` builds/stages those packages, assets and licenses before supported
+web/desktop dev and production builds. UI Showcase stays a developer example. Staging
+validates before replacing old generated output; failed builds preserve the previous
+staged tree. `build-server.mjs` requires the exact catalog, copies built core packages
+and removes the exact traced standalone-root `plugins/` authoring tree. It never removes
+runtime modules using broad `plugins`/`dist` globs.
+
+The host loads core code directly; there is no startup copying/install journal or data
+migration. Provenance is host-owned `PluginInfo.origin`, not manifest metadata. Core IDs
+remain reserved when a package is missing/corrupt; community collisions are skipped and
+reported separately without changing files or blocking the legitimate core package.
+Shared corrupt enable metadata is refused rather than overwritten.
+
+Electron sets `LH_DATA_DIR` to `<Electron userData>/data`; on macOS this is
+`~/Library/Application Support/LearnHarness/data/`. Ordinary development defaults to
+repository `data/`. Backend activation and disabled-package task recovery use the same
+origin-aware writable path resolver; neither falls back to old community copies of core
+data. Recovery never executes plugin code or creates missing data directories.
 
 Refresh discovers manual folders/first builds; admitted code changes require a server
 restart. There is no hot replacement, separate development registration, runtime npm
@@ -92,7 +105,9 @@ The host owns view shells, titles, top-bar overflow and settings gear. Views mou
 feature bodies. Registering actions/views creates no implicit navigation: placements
 explicitly target sidebar, graph or selected session/plugin-view top bars. Async action
 busy/repeat/error handling is host-owned. Each enabled plugin has its own Settings page;
-package management stays in Settings → Plugins.
+package management is split between Settings → Core plugins and Community plugins.
+Core management omits installation/trust preambles, directory, refresh and routine
+versions; community management retains them and shows reserved-ID conflicts.
 
 `ctx.ui` exposes controlled helpers rather than React/private component access.
 Handles shallow-update props, dispose idempotently and follow their mount signals.
@@ -105,8 +120,16 @@ controller; callers own hierarchy/selection, sufficient width and scrolling.
 Dialogs, menus, pickers and page-body surfaces use the shared interaction controller;
 see [dialog/overlay rules](dialog-overlay-contract.md). One Escape has one owner,
 covered content cannot receive native submit/dictation actions, and eligible focus is
-restored without focusing detached/covered controls. No new browser Tab navigation or
-plugin shortcut registry is supplied.
+restored without focusing detached/covered controls. Browser Tab navigation remains
+unchanged. Declarative action shortcuts use `src/core/plugin-shortcuts.ts` for validation,
+static scope-overlap/conflict resolution, and `components/plugin-shortcuts.tsx` for
+route-keyed page readers and eligible dispatch through the existing action runner.
+Shortcut metadata is captured at registration; dynamic disabled state stays live.
+The existing `lh:keymap` store, Keyboard Settings and cheat sheet include plugin actions.
+The interaction controller snapshots original foreground ownership at key capture;
+only the same owner's page-body surfaces allow a plugin action through. UI factories
+receive host-supplied plugin identity for this check, never author-supplied surface props.
+See [action shortcuts](plugin-authoring.md#action-shortcuts) for the public contract.
 
 Knowledge pickers capture opening origin. Page/surface origins use a main-pane view;
 modal/Settings origins use a full-viewport modal with the parent still painted/inert.
@@ -219,8 +242,8 @@ resync callbacks; observers fetch current snapshots and release subscriptions on
 Maintain tests at each actual boundary:
 
 - Manifest/path guards, disabled discovery, enable/disable cleanup and revocation.
-- Recoverable bundled updates, external ownership collisions, interrupted installs and
-  preservation of sibling data.
+- Direct core loading, disabled defaults/persisted choices, reserved-ID collisions,
+  isolated writable data paths/recovery and complete source-free core payloads.
 - Native loadout collision atomicity, canonical pose authority, exact occurrences,
   schema compatibility, mixed tool batches and stale submission rejection.
 - Inline grading/processing ownership, Stop/revocation, write-before-continuation,
@@ -249,6 +272,6 @@ platform has been verified for release.
 ## Non-goals
 
 No sandbox/per-plugin process, marketplace/community updater, hot replacement,
-programmable core-data writes, generic forms/UI/shortcuts framework, persistent arbitrary
+programmable core-data writes, generic forms/UI or raw keyboard-event framework, persistent arbitrary
 editor drafts, or automatic replay/exactly-once external effects. Host infrastructure
 must not choose plugin product prompts, algorithms, defaults or deletion policy.

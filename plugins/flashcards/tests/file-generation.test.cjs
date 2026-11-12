@@ -5,10 +5,6 @@ const { instructions, resultSchema, validateResult, validateFileInput, prepareFi
 const entry = Object.freeze({ maxTokens: 8192, contextWindow: 100000 });
 const chunks = (markdown, options = {}) => prepareFileChunks({ name: 'Notes.md', markdown, chunkBudget: 4000, entry, ...options });
 const tokensFor = prompt => Math.ceil(Buffer.byteLength(instructions + JSON.stringify(resultSchema) + prompt, 'utf8') / 3) + 256;
-const baseline = () => {
-  const prompt = chunks('x')[0].prompt;
-  return tokensFor(prompt.slice(0, prompt.indexOf('\n') + 1) + JSON.stringify({ name: 'Notes.md', markdown: '' }));
-};
 const fact = (statement = 'Water freezes at the stated conditions.', question = 'What happens under these conditions?') => ({ name: 'Freezing', statement, cards: [{ question, answer: 'Water freezes.' }] });
 function assertCoverage(source, plans, start = 0, end = source.length) {
   let cursor = start;
@@ -119,33 +115,44 @@ test('source is quoted as untrusted JSON and prompt instructions require support
 
 test('paragraph/newline splitting keeps all leading/trailing whitespace and exact UTF-16 source coverage', () => {
   const source = '  # Header\r\n\r\n' + ('First fact and its details. '.repeat(5) + '\r\n\r\n') + ('Next line. '.repeat(10) + '\n').repeat(8) + '  trailing whitespace  \n';
-  const budget = baseline() + 70;
+  const budget = 70;
   const plans = chunks(source, { chunkBudget: budget });
   assert.ok(plans.length > 2);
   assertCoverage(source, plans);
-  assert.ok(plans.every(plan => plan.tokens <= budget));
+  assert.ok(plans.every(plan => Math.ceil(plan.input.markdown.length / 4) <= budget));
+  assert.ok(plans.every(plan => plan.tokens > budget), 'full-request estimates include overhead outside the source budget');
   assert.ok(plans.slice(0, -1).some(plan => plan.input.markdown.endsWith('\r\n\r\n')), 'prefer a complete paragraph boundary');
   assert.ok(plans.slice(0, -1).every(plan => /[\r\n]$/.test(plan.input.markdown)), 'otherwise use line boundaries where available');
 });
 
-test('long blocks split only at code-point boundaries, include JSON escaping overhead and obey exact token limits', () => {
+test('long blocks split only at code-point boundaries using source characters, while full estimates include JSON escaping', () => {
   const source = ('😀界é"\\\t'.repeat(10000));
-  const budget = baseline() + 100;
+  const budget = 100;
   const plans = chunks(source, { chunkBudget: budget });
   assert.ok(plans.length > 100);
   assertCoverage(source, plans);
   for (const plan of plans) {
     assert.equal(plan.tokens, tokensFor(plan.prompt));
-    assert.ok(plan.tokens <= budget);
+    assert.ok(Math.ceil(plan.input.markdown.length / 4) <= budget);
+    assert.ok(plan.tokens > budget);
     assert.equal(plan.maxTokens, 8192);
   }
 });
 
-test('budgets must fit prompt/schema overhead and at least one entire source code point', () => {
+test('positive source budgets are independent of prompt/schema and filename overhead', () => {
   for (const chunkBudget of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => chunks('x', { chunkBudget }), /budget/);
-  assert.throws(() => chunks('x', { chunkBudget: 1 }), /cannot fit.*prompt.*code point/);
-  assert.throws(() => chunks('😀', { chunkBudget: baseline() }), /cannot fit.*code point/);
-  assert.throws(() => chunks('x', { name: 'Very long file name '.repeat(1000), chunkBudget: 4000 }), /cannot fit/);
+  const source = 'a😀bc😀def';
+  const shortName = chunks(source, { chunkBudget: 1 });
+  const longName = chunks(source, { name: 'Very long file name '.repeat(1000), chunkBudget: 1 });
+  assertCoverage(source, shortName); assertCoverage(source, longName);
+  assert.deepEqual(shortName.map(({ start, end }) => [start, end]), [[0, 4], [4, 8], [8, 10]]);
+  assert.deepEqual(longName.map(({ start, end }) => [start, end]), shortName.map(({ start, end }) => [start, end]));
+  assert.ok(longName[0].tokens > shortName[0].tokens, 'filename still counts toward full-request cost and context');
+  assert.equal(chunks('😀', { chunkBudget: 1 })[0].input.markdown, '😀');
+  assert.deepEqual(chunks('abc😀def', { chunkBudget: 1 }).map(plan => plan.input.markdown), ['abc', '😀de', 'f'], 'round a split inside a surrogate pair down to a complete code point');
+  const [exact] = chunks('abcd', { chunkBudget: 1 });
+  assert.equal(exact.input.markdown, 'abcd');
+  assert.deepEqual(chunks('abcde', { chunkBudget: 1 }).map(plan => plan.input.markdown), ['abcd', 'e']);
 });
 
 test('output allowances honor provider/context caps, reserve 256 tokens and require at least 1024', () => {

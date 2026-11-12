@@ -11,7 +11,7 @@ the released 0.4.1 app. Use documentation/types matching the target app, and set
 
 ## Quick start
 
-1. Open **Settings → Plugins** to find the writable plugins directory.
+1. Open **Settings → Community plugins** to find the writable plugins directory.
 2. Copy `examples/plugins/hello-plugin` there, keeping its folder name and `dist/`.
 3. Refresh the list, enable **Hello plugin**, and open its sidebar action.
 4. Edit the installed `hello-plugin/dist/` code and restart LearnHarness to load changes.
@@ -64,6 +64,8 @@ are intentionally part of API v1 and follow the app's pinned SDK, not arbitrary 
 
 ## Package and installation
 
+Community packages use this writable installation layout:
+
 ```text
 <learning data>/plugins/my-plugin/
   package.json       # optional authoring configuration
@@ -97,12 +99,21 @@ paths into source or data. Malformed/incompatible packages are reported without 
   Source-only projects and root-only manifests are not installable. There is no separate
   development registration, legacy-layout fallback, or hot code replacement.
 
-Official and external plugins use the same APIs and writable installation layout.
-The host can install/update flat built packages from app `bundled-plugins/<id>/` into
-`<learning data>/plugins/<id>/dist/` at startup, preserving sibling data and refusing
-external ID collisions. Editing managed installed code is not durable across startup
-updates. Source projects remain under repository `plugins/`; the selection and build
-staging of official packages is a separate distribution decision, not implied here.
+Core and community plugins use the same APIs, but have separate code/data locations.
+The app ships Flashcards, Coding Questions, Drawing Pad and Rich Code Blocks as flat
+built packages in app `core-plugins/<id>/`, loaded directly without a user-data code
+copy. Their writable settings/records live in `<learning data>/core-plugin-data/<id>/`.
+Always use `ctx.directory` for code and `ctx.dataDirectory` for writable records; do not
+infer one from the other. Core plugins update with the app and are managed in
+**Settings → Core plugins**; all four start disabled, existing explicit choices survive
+updates, and disabling never deletes data. Their IDs (`flashcards`, `coding-questions`,
+`drawing-pad`, `rich-code-blocks`) are reserved even if a core package is broken/missing.
+Conflicting community folders are skipped with a diagnostic and are not modified.
+
+Repository source stays in `plugins/`. `npm run plugins:build-core` builds the selected
+catalog in `core-plugins.json` and stages generated packages. UI Showcase remains a
+source/developer example, not a shipped core package. This build command never installs
+or enables a package in a learning-data directory.
 
 ## Frontend lifecycle and navigation
 
@@ -139,6 +150,12 @@ not only the longer activation signal. Unmount React roots and release events/ti
 Use scoped CSS/theme variables (`--foreground`, `--background`, `--border`) and safe text
 insertion; shared-page CSS is not sandboxed.
 
+The view body scrolls in a bounded, full-width host viewport **below the top bar**,
+with its scrollbar flush to the main pane's right edge. Long content must not move
+the document, top bar or sidebar. Plugins may still provide their own bounded
+scrollers; content that fits does not create a second host scrollbar. Page-body
+surfaces are separate overlay siblings, not children of the background scroll viewport.
+
 `ctx.app` exposes `pathname()`, `openSession(id)`, `openHome()`, `openView(id)` and
 `openSettings()`; the latter two target this plugin. It exposes no private React context
 or graph-selection internals.
@@ -146,7 +163,7 @@ or graph-selection internals.
 ### Actions
 
 Register an action **before** placing it. An action has `id`, `name`, optional trusted
-SVG `icon`, optional `disabled` boolean/context predicate, and `run(context)` (sync or
+SVG `icon`, optional declarative `shortcut`, optional `disabled` boolean/context predicate, and `run(context)` (sync or
 async). The host supplies button/tooltip, busy/repeat prevention and error reporting.
 Use `ctx.refreshActions()` when plugin state changes a dynamic predicate.
 
@@ -161,6 +178,9 @@ requires explicit `sessions: ["teaching", "practice"]` (either subset) and/or `v
 | `top-bar` / `plugin-view` | `pluginId`, `viewId` |
 | `sidebar` / `sidebar` | None |
 | `graph` / `graph` | None |
+| `keyboard` / `session` | Same session fields, including a fresh readonly `view` |
+| `keyboard` / `plugin-view` | `pluginId`, `viewId` |
+| `keyboard` / `app` | Current `pathname` (other app pages) |
 
 Session `context.view` is a fresh detached/frozen snapshot: full browser-native
 `messages`, host-projected `transcript`, metadata/status, queued steers, retained
@@ -170,6 +190,61 @@ awaits. Reads never reveal input, flush dictation, save, process or submit. Disa
 predicates receive the same read-only shape; clicks capture anew. Respect supplied
 reveal/availability flags when choosing learner-facing references: full history is
 inspectable, not sanitized to currently painted prose. See the [view-context contract](plugin-view-context.md).
+
+### Action shortcuts
+
+Opt an existing action into Keyboard Settings and the shortcut cheat sheet:
+
+```ts
+ctx.registerAction({
+  id: "open-board", name: "Open board",
+  shortcut: {
+    scope: { sessions: ["teaching", "practice"], views: ["board"] },
+    defaultBinding: "mod+shift+d", // illustrative; omit to start unbound
+  },
+  run(context) {
+    if (context.surface === "session") {
+      // Keyboard and top-bar invocations both receive context.view.
+    }
+  },
+});
+```
+
+`scope: "app"` explicitly enables an action across pages. Otherwise provide a nonempty
+`sessions` and/or `views` scope; view IDs always belong to this plugin. Registration
+captures a detached/frozen scope/default. Unregister/re-register to change them;
+`refreshActions()` remains for dynamic enabled state, not shortcut metadata changes.
+A shortcut requires no button placement, and actions without `shortcut` are unchanged.
+Existing actions opting in must accept `placement: "keyboard"`, not assume `top-bar`.
+App-wide actions still receive actual session/plugin-view context on those pages.
+
+Bindings use the existing canonical `mod`, `alt`, `shift`, key order: `mod+shift+d`,
+`alt+x`, `f8`, etc. `mod` accepts Ctrl or Cmd. Only single Mod/Alt chords and function
+keys F1–F24 are supported. Escape/Tab/Enter combinations, bare typing/navigation keys,
+sequences and OS-wide hotkeys are not supported. Existing typing-surface guards apply;
+leaf editors get first refusal. Repeats, handled events and composition do not invoke
+plugin actions. Invocation uses the existing disabled/busy/error-handled action runner.
+
+App-wide means across pages, not through blocking UI. Dialogs, menus, native expanded
+viewers and another plugin's foreground surface block shortcuts. An action remains
+eligible over its own plugin's page-body surface, allowing a toggle to close it. Scope
+still refers to the underlying active page. Navigation/retention never invokes an old
+page's reader; session snapshots detach before the action runs and remain immutable
+across awaits. One physical key cannot fall through a foreground closed by that key.
+
+Settings lists registered shortcuts under plugin names, including unbound/conflicting
+entries. Rebind assigns one chord; Clear saves unbound; Reset restores the optional
+plugin default. Overrides share `lh:keymap` under `plugin:<pluginId>:<actionId>` and
+survive disable/re-enable or temporary absence. Reset all also removes these overrides.
+Only enabled/active registrations participate in dispatch/conflicts.
+
+Core effective bindings always take precedence. Scope-overlapping competing plugin
+defaults remain inactive with no load-order winner. Explicit plugin assignments beat
+plugin defaults; Settings refuses core collisions and collisions with other explicit
+plugin assignments without changing saved bindings. Conflicts use declared scope overlap,
+not transient disabled/busy/focus state. Nonoverlapping scopes may share a chord. If
+saved assignments conflict after scope changes or manual storage edits, affected
+bindings fail closed and Settings explains the conflict. Clickable actions still work.
 
 ### Controlled host UI
 
@@ -276,7 +351,7 @@ for lifetime, stacking, close and return-focus rules.
 ### Dedicated settings
 
 Every enabled plugin has a Settings page, including backend-only/no-settings plugins.
-Settings → Plugins manages packages; `ctx.app.openSettings()` and the view gear open
+Settings → Core plugins / Community plugins manages packages; `ctx.app.openSettings()` and the view gear open
 this plugin's page. Without a registration it shows `No settings available`.
 
 `registerSettings({rows})` returns an update/dispose widget handle. Alternatively,
@@ -512,6 +587,6 @@ See [host architecture and verification seams](plugin-architecture.md#verificati
 ## Deliberate limits
 
 No marketplace/community updater, sandbox/per-plugin process, hot replacement,
-programmable core-data writes, general UI/forms/shortcuts framework, or automatic replay
+programmable core-data writes, general UI/forms or raw keyboard-event framework, or automatic replay
 of interrupted arbitrary tools. The platform supplies mechanisms, not feature prompts,
 algorithms, defaults or deletion policy; product decisions belong to the human.

@@ -11,7 +11,7 @@ const messages = [{ id: "pose", role: "assistant", content: [{ type: "toolCall",
   { id: "ack", role: "toolResult", toolCallId: "call", toolName: "code_problem", content: [], isError: false, details: { pluginProblem: snapshot } }] as unknown as LhMessage[];
 
 test("problem renderer registration is owner-scoped, receiver-bound and removed with activation", async () => {
-  const info = (id: string): PluginInfo => ({ id, enabled: true, status: "active", revision: "1", manifest: { apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.4.1", main: "index.js" } });
+  const info = (id: string): PluginInfo => ({ id, origin: "community", enabled: true, status: "active", revision: "1", manifest: { apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.4.1", main: "index.js" } });
   const contexts: PluginFrontendContext[] = [];
   const manager = new PluginFrontendManager({ fetch: async () => Response.json({}), pathname: () => "/", navigate() {}, async importModule() { return { activate(context) {
     contexts.push(context);

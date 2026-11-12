@@ -34,6 +34,19 @@ windows like the format toggles. Existing v1 settings without `inkColor` use Whi
 without rewriting the saved file on startup; the next accepted change persists
 the complete settings. Existing family choices remain unchanged.
 
+## TikZ sizing
+
+TikZ diagrams scale as a whole so the engine's normal 10-point labels match the
+surrounding chat LaTeX size (`1.21em`, matching KaTeX). At the default 16 px reading
+size, normal labels are approximately **19.4 px**, rather than the previous
+**13.3 px**. Text-relative SVG width follows surrounding font-size changes without
+replacing the SVG or recompiling TeX. Authored relative font sizes (including
+subscripts), diagram proportions and the original tight viewBox are preserved.
+Wide TikZ diagrams scroll horizontally within their own wrapper instead of
+shrinking their labels. Existing **12 px padding** and centering are unchanged;
+no extra margins or blank drawing space are introduced. Chemistry and music
+retain their previous natural sizing and fit-to-width behavior.
+
 ## Source/build/install layout
 
 This repository's authoring project is **`plugins/rich-code-blocks/`**. Build here:
@@ -183,7 +196,8 @@ is provided by this plugin.
   style admission is restricted; only bundled TeX fonts or ordinary system families
   are selected. Never insert raw model HTML.
 - Rendered drawings are transparent with selectable White/Black neutral ink,
-  preserving aspect ratio and fitting available width. Plugin-owned paint variables
+  preserving aspect ratio. Chemistry/music fit available width; wide TikZ scrolls
+  to retain math-size labels. Plugin-owned paint variables
   are applied only after sanitization and before the final expanded-output budget
   check. Mask luminance and intentional colors/fills are retained. No raw generated
   tree or interaction listener is mounted. Abort/disposal fences late results.
@@ -202,7 +216,9 @@ arbitrary JS execution or weaken Electron/host isolation.
 `npm test` exercises small contracts, settings, lifecycle, cache and Worker bounds.
 `npm run test:browser` starts only a disposable loopback fixture and a temporary
 Chrome profile to exercise built bundles, static SVG admission and actual library
-rendering/timing. It does not start/restart LearnHarness, install into a real data
+rendering/timing. A development-only KaTeX dependency supplies real reference math
+for font-parity checks; its code/fonts are not shipped in the plugin build.
+The fixture does not start/restart LearnHarness, install into a real data
 directory, call a model or establish packaged-app/user functional acceptance.
 See `THIRD-PARTY.md` for pinned libraries and explicit static-browser adaptations.
 
@@ -227,7 +243,11 @@ fixture screenshots were captured and visually inspected with White ink on dark
 and Black ink on light. Browser checks also proved transparent backgrounds for all
 six examples, stable mounted SVG identities and no TeX work/cache eviction on ink
 changes, preserved atom/TikZ colors and white fills, and actual raster alpha for
-shared-definition and gradient masks under both ink choices.
+shared-definition and gradient masks under both ink choices. TikZ sizing checks
+compare all four technical-diagram examples against actual KaTeX at 16 px and
+20 px surrounding text, verify unchanged padding and chemistry/music widths, and
+confirm a wide diagram scrolls without shrinking normal labels or subscripts.
+Font-size changes reused the existing SVGs without sending any TeX jobs.
 
 The build also preserves complete GPLv3 and Apache-2.0 texts and the relevant
 PyDvi/ColorBrewer notices alongside the other upstream licenses. This checkpoint

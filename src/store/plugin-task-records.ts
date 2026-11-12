@@ -4,7 +4,7 @@ import { randomUUID } from "node:crypto";
 import type { PluginTaskRecordStore } from "../core/ports.ts";
 import type { PluginTaskRecord } from "../core/plugin-workers.ts";
 import { validatePluginInferenceOptions } from "../core/plugin-validation.ts";
-import { PLUGIN_ID_PATTERN } from "../core/plugins.ts";
+import { safePluginDataDirectory, type CorePluginDataLocation } from "./plugin-data-paths.ts";
 
 const safeId = (value: unknown): value is string => typeof value === "string" && /^[A-Za-z0-9_-]{1,128}$/.test(value);
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -114,30 +114,29 @@ export function createPluginTaskRecordStore(directory: string): PluginTaskRecord
 	};
 }
 
-function safeTaskDirectory(rootPluginsDirectory: string, pluginId: string): string | null {
-	if (typeof pluginId !== "string" || !PLUGIN_ID_PATTERN.test(pluginId)) throw new Error("Invalid plugin id");
-	const root = path.resolve(/* turbopackIgnore: true */ rootPluginsDirectory);
-	let realRoot: string | undefined;
-	for (const dir of [root, path.join(root, pluginId), path.join(/* turbopackIgnore: true */ root, pluginId, "data"), path.join(/* turbopackIgnore: true */ root, pluginId, "data", "tasks")]) {
+function safeTaskDirectory(rootPluginsDirectory: string, pluginId: string, core?: CorePluginDataLocation): string | null {
+	const data = safePluginDataDirectory(rootPluginsDirectory, pluginId, core);
+	if (!data) return null;
+	for (const dir of [path.join(/* turbopackIgnore: true */ data, "tasks")]) {
 		let stat: fs.Stats;
 		try { stat = fs.lstatSync(dir); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
 		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe plugin task directory: ${dir}`);
 		// Installed user data is a runtime lookup, never a build input to trace.
-		const real = fs.realpathSync(/* turbopackIgnore: true */ dir); realRoot ??= real;
-		const relative = path.relative(realRoot, real);
+		const real = fs.realpathSync(/* turbopackIgnore: true */ dir);
+		const relative = path.relative(fs.realpathSync(/* turbopackIgnore: true */ data), real);
 		if (relative.startsWith(`..${path.sep}`) || relative === ".." || path.isAbsolute(relative)) throw new Error("Plugin task directory escapes root");
 	}
-	return path.join(/* turbopackIgnore: true */ root, pluginId, "data", "tasks");
+	return path.join(/* turbopackIgnore: true */ data, "tasks");
 }
 
 /** Recovery-only read: never activates plugin code or creates missing data.
  * taskId is authoritative when present; requestId locates an acceptance whose
  * core-job link was not committed before a crash. Unsafe/corrupt data throws. */
-export function readPluginTaskRecord(rootPluginsDirectory: string, pluginId: string, taskId?: string, requestId?: string): PluginTaskRecord | null {
+export function readPluginTaskRecord(rootPluginsDirectory: string, pluginId: string, taskId?: string, requestId?: string, core?: CorePluginDataLocation): PluginTaskRecord | null {
 	if (taskId !== undefined && !safeId(taskId)) throw new Error("Invalid plugin task id");
 	if (requestId !== undefined && (typeof requestId !== "string" || !requestId.length)) throw new Error("Invalid plugin task request id");
 	if (taskId === undefined && requestId === undefined) throw new Error("A task id or request id is required");
-	const directory = safeTaskDirectory(rootPluginsDirectory, pluginId);
+	const directory = safeTaskDirectory(rootPluginsDirectory, pluginId, core);
 	if (!directory) return null;
 	const store = createPluginTaskRecordStore(directory);
 	if (taskId !== undefined) {
@@ -153,16 +152,19 @@ export function readPluginTaskRecord(rootPluginsDirectory: string, pluginId: str
 /** Exclusive server-bootstrap sweep, before any task services activate. Disabled
  * packages are included. Per-package failures are diagnostic, never rewritten
  * as missing data or allowed to prevent recovery of other valid packages. */
-export function recoverPluginTaskRecords(rootPluginsDirectory: string): Record<string, string> {
+export function recoverPluginTaskRecords(rootPluginsDirectory: string, core?: CorePluginDataLocation): Record<string, string> {
 	const root = path.resolve(/* turbopackIgnore: true */ rootPluginsDirectory);
-	let stat: fs.Stats;
-	try { stat = fs.lstatSync(root); } catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw error; }
-	if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Unsafe plugins recovery root");
+	let entries: fs.Dirent[] = [];
+	try {
+		const stat = fs.lstatSync(root);
+		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Unsafe plugins recovery root");
+		entries = fs.readdirSync(/* turbopackIgnore: true */ root, { withFileTypes: true });
+	} catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 	const errors: Record<string, string> = Object.create(null);
-	for (const entry of fs.readdirSync(/* turbopackIgnore: true */ root, { withFileTypes: true })) {
-		if (!entry.isDirectory() && !entry.isSymbolicLink()) continue;
+	const ids = new Set([...entries.filter(entry => (entry.isDirectory() || entry.isSymbolicLink()) && !core?.ids.includes(entry.name)).map(entry => entry.name), ...core?.ids ?? []]);
+	for (const id of ids) {
 		try {
-			const directory = safeTaskDirectory(root, entry.name); if (!directory) continue;
+			const directory = safeTaskDirectory(root, id, core); if (!directory) continue;
 			const store = createPluginTaskRecordStore(directory);
 			// Read/validate the whole package first: corruption must not cause
 			// partially reinterpreted task histories within that package.
@@ -174,7 +176,7 @@ export function recoverPluginTaskRecords(rootPluginsDirectory: string): Record<s
 				const now = new Date().toISOString();
 				store.save({ ...record, status: "interrupted", completedAt: now, updatedAt: now, error: { code: "interrupted", message: "Task interrupted by server restart; no work was replayed" } });
 			}
-		} catch (error) { errors[entry.name] = error instanceof Error ? error.message : String(error); }
+		} catch (error) { errors[id] = error instanceof Error ? error.message : String(error); }
 	}
-	return errors;
+	return { ...errors };
 }

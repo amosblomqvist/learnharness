@@ -5,6 +5,7 @@ import type { PluginFrontendContext, PluginInfo } from "../core/plugins.ts";
 /** Thin HTTP adapter, separately injectable so its tests never boot plugins. */
 export interface PluginTransportHost {
 	list(): PluginInfo[];
+	conflicts(): { id: string; error: string }[];
 	refresh(): Promise<void>;
 	setEnabled(id: string, enabled: boolean): Promise<void>;
 	call(id: string, operation: string, input: unknown): Promise<unknown>;
@@ -27,21 +28,22 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
 			return json({ error: error instanceof Error || isPluginHostError(error) ? error.message : "Plugin request failed" }, status);
 		}
 	};
+	const catalog = (host: PluginTransportHost) => ({ plugins: host.list(), directory: deps.directory, conflicts: host.conflicts() });
 	return {
-		list: () => guarded(async () => json({ plugins: (await deps.getHost()).list(), directory: deps.directory })),
+		list: () => guarded(async () => json(catalog(await deps.getHost()))),
 		refresh: (request: Request) => guarded(async () => {
 			const body = await objectBody(request);
 			if (body.action !== "refresh") throw new InputError("Expected action: refresh");
 			const host = await deps.getHost();
 			await host.refresh();
-			return json({ plugins: host.list(), directory: deps.directory });
+			return json(catalog(host));
 		}),
 		setEnabled: (id: string, request: Request) => guarded(async () => {
 			const body = await objectBody(request);
 			if (typeof body.enabled !== "boolean") throw new InputError("enabled must be a boolean");
 			const host = await deps.getHost();
 			await host.setEnabled(id, body.enabled);
-			return json({ plugins: host.list(), directory: deps.directory });
+			return json(catalog(host));
 		}),
 		call: (id: string, request: Request) => guarded(async () => {
 			const body = await objectBody(request);

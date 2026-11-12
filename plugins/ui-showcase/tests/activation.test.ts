@@ -33,8 +33,8 @@ test("activation explicitly registers gallery sidebar and teaching/practice-only
     const surface = f.actions[1]!;
     for (const context of [{ placement: "sidebar", surface: "sidebar" }, { placement: "graph", surface: "graph" }, { placement: "top-bar", surface: "plugin-view", pluginId: "ui-showcase", viewId: "gallery" }] as const) assert.throws(() => surface.run(context), /native session top-bar context/);
     assert.equal(fixture.records.length, 0, "Rejected contexts must not call openSurface");
-    const target = Object.freeze({}) as Extract<Parameters<PluginAction["run"]>[0], { surface: "session" }>["surfaceTarget"];
     for (const kind of ["teaching", "practice"] as const) {
+      const target = Object.freeze({}) as Extract<Parameters<PluginAction["run"]>[0], { surface: "session" }>["surfaceTarget"];
       const view = Object.freeze({
         sessionId: "synthetic", kind, title: "Synthetic session", messages: [], transcript: [],
         status: "ready" as const, reconciliation: "ready" as const, busy: false, compacting: false,
@@ -48,6 +48,67 @@ test("activation explicitly registers gallery sidebar and teaching/practice-only
     assert.equal(fixture.records.filter(record => record.method === "openSurface").length, 2);
     f.controller.abort(); dispose(); dispose();
     assert.equal(f.disposed.length, 5); assert.equal(new Set(f.disposed).size, 5);
+    assert.ok(fixture.records.every(record => record.disposed === 1));
+  } finally { fixture.restore(); }
+});
+
+function sessionContext() {
+  const surfaceTarget = Object.freeze({}) as Extract<Parameters<PluginAction["run"]>[0], { surface: "session" }>["surfaceTarget"];
+  return {
+    placement: "top-bar", surface: "session", sessionId: "synthetic", kind: "teaching", surfaceTarget,
+    view: { sessionId: "synthetic", kind: "teaching", title: "Synthetic session", messages: [], transcript: [],
+      status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "teach",
+      contextTokens: null, queuedSteers: [], composer: { text: "" }, input: { type: "unavailable", expanded: false, revealed: false } },
+  } satisfies Parameters<PluginAction["run"]>[0];
+}
+
+test("top-bar surface toggles without stacking and closes its explicit nested examples", async () => {
+  const fixture = createFixture();
+  try {
+    const f = registrationContext(fixture.ui), dispose = activate(f.context);
+    const action = f.actions.find(action => action.id === "open-surface")!, context = sessionContext();
+    for (let attempt = 0; attempt < 3; attempt++) {
+      await action.run(context);
+      assert.equal(fixture.records.filter(record => record.method === "openSurface" && !record.disposed).length, 1);
+      fixture.find("surface-nested").props.onClick();
+      assert.equal(fixture.records.filter(record => record.method === "openSurface" && !record.disposed).length, 2, "Explicit nesting remains supported");
+      await action.run(context);
+      assert.equal(fixture.records.filter(record => record.method === "openSurface" && !record.disposed).length, 0);
+    }
+    assert.equal(fixture.records.filter(record => record.method === "openSurface").length, 6);
+    dispose();
+    await action.run(context);
+    assert.equal(fixture.records.filter(record => record.method === "openSurface").length, 6, "Retired actions stay inert");
+    assert.ok(fixture.records.every(record => record.disposed === 1));
+  } finally { fixture.restore(); }
+});
+
+test("native close clears the toggle; retired targets and stale callbacks cannot clear a fresh surface", async () => {
+  const fixture = createFixture();
+  try {
+    const f = registrationContext(fixture.ui), dispose = activate(f.context);
+    const action = f.actions.find(action => action.id === "open-surface")!, context = sessionContext();
+    await action.run(context);
+    const original = fixture.records.findLast(record => record.method === "openSurface")!;
+    original.props.onClose(); original.handle.dispose();
+    await action.run(context);
+    const reopened = fixture.records.findLast(record => record.method === "openSurface")!;
+    assert.notEqual(reopened, original);
+    original.props.onClose();
+    await action.run(context);
+    assert.equal(reopened.disposed, 1, "A stale close must not make the next click open another surface");
+    await action.run(context);
+    const beforeNavigation = fixture.records.findLast(record => record.method === "openSurface")!;
+    beforeNavigation.handle.dispose(); // Host retires the page without firing user onClose.
+    const returnedContext = sessionContext();
+    await action.run(returnedContext);
+    const returned = fixture.records.findLast(record => record.method === "openSurface")!;
+    assert.notEqual(returned, beforeNavigation);
+    assert.equal(returned.target, returnedContext.surfaceTarget);
+    await action.run(returnedContext);
+    assert.equal(returned.disposed, 1);
+    await action.run(returnedContext);
+    f.controller.abort(); dispose();
     assert.ok(fixture.records.every(record => record.disposed === 1));
   } finally { fixture.restore(); }
 });

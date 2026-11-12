@@ -107,8 +107,11 @@ for (const page of pages) it(`${page.name}: covers page content but not native c
 	} else if (page.floating) assert.equal(body.className, "relative flex min-h-0 flex-1");
 	else {
 		assert.equal(body.className, "relative flex min-h-0 min-w-0 flex-1 flex-col");
-		assert.equal(content.closest(".contents")?.parentElement, body, "stable coverage wrapper introduces no layout box");
-		assert.equal(body.children.length, 2, "coverage wrapper and surface region stay direct siblings");
+		const viewport = content.closest("[data-plugin-view-scroll]"); assert.ok(viewport);
+		assert.equal(viewport.parentElement, body, "only plugin content enters the bounded scroll viewport");
+		assert.equal(viewport.className, "relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto");
+		assert.equal(body.children.length, 2, "scroll viewport and surface region stay direct siblings");
+		assert.equal(viewport.contains(boundary.stack), false, "surface overlays never join the background scroll viewport");
 	}
 	const originalClass = body.className;
 	if (page.floating) {
@@ -148,7 +151,8 @@ it("plugin loading content is inside the same body boundary while TopBar stays o
 	const body = region.parentElement!;
 	const status = body.querySelector('[role="status"]');
 	assert.ok(status?.textContent?.includes("Loading plugin"));
-	assert.equal(status?.parentElement?.className, "contents");
+	assert.equal(status?.parentElement?.hasAttribute("data-plugin-view-scroll"), true);
+	assert.ok(status?.parentElement?.classList.contains("overflow-y-auto"));
 	assert.equal(body.querySelector("header"), null);
 	assert.ok(document.querySelector('header [aria-label="Plugin settings"]'));
 });

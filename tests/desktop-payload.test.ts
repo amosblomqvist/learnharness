@@ -30,6 +30,16 @@ function withPayload(test: (fixture: {
 	};
 	try {
 		write(path.join("scripts", "build-server.mjs"), source);
+		write("package.json", JSON.stringify({ version: "0.4.1" }));
+		write("core-plugins.json", fs.readFileSync(new URL("../core-plugins.json", import.meta.url), "utf8"));
+		write("scripts/build-core-plugins.mjs", fs.readFileSync(new URL("../scripts/build-core-plugins.mjs", import.meta.url), "utf8"));
+		write("src/core/plugins.ts", fs.readFileSync(new URL("../src/core/plugins.ts", import.meta.url), "utf8"));
+		for (const id of JSON.parse(fs.readFileSync(new URL("../core-plugins.json", import.meta.url), "utf8")) as string[]) {
+			write(`core-plugins/${id}/manifest.json`, JSON.stringify({ apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.4.1", main: "main.js" }));
+			write(`core-plugins/${id}/main.js`, "export function activate() {};");
+			write(`core-plugins/${id}/assets/font.woff`, "bundled-font");
+			write(`core-plugins/${id}/LICENSE`, "bundled-license");
+		}
 		write(path.join("scripts", "plugin-loader.cjs"), "exports.load = () => {};\n");
 		// Declaration generation is tested separately. This fixture tests payload
 		// curation, not the TypeScript compiler or the full application sources.
@@ -84,9 +94,9 @@ describe("desktop standalone payload", () => {
 		} finally { await host.dispose(); fs.rmSync(home, { recursive: true, force: true }); }
 	});
 
-	it("removes only traced installers/dev Electron, preserving runtime dist/ and native binaries", () => {
+	it("removes traced authoring sources/installers/dev Electron, preserving runtime modules and native binaries", () => {
 		withPayload(({ root, write, run }) => {
-			for (const extra of [path.join("dist", "old.app", "nested.dmg"), path.join("node_modules", "electron", "dist", "electron.exe")]) {
+			for (const extra of [path.join("dist", "old.app", "nested.dmg"), path.join("node_modules", "electron", "dist", "electron.exe"), path.join("plugins", "rich-code-blocks", "tests", "browser.mjs")]) {
 				// BOTH copies exist: curation must not touch the real repo's build/runtime.
 				write(extra);
 				write(path.join(STANDALONE, extra));
@@ -102,6 +112,10 @@ describe("desktop standalone payload", () => {
 			const result = run();
 			assert.equal(result.status, 0, String(result.stderr));
 			assert.equal(fs.existsSync(path.join(root, STANDALONE, "dist")), false);
+			assert.equal(fs.existsSync(path.join(root, STANDALONE, "plugins")), false);
+			assert.ok(fs.existsSync(path.join(root, "plugins", "rich-code-blocks", "tests", "browser.mjs")));
+			assert.deepEqual(fs.readdirSync(path.join(root, STANDALONE, "core-plugins")).sort(), ["coding-questions", "drawing-pad", "flashcards", "rich-code-blocks"]);
+			assert.equal(fs.readFileSync(path.join(root, STANDALONE, "core-plugins", "flashcards", "assets", "font.woff"), "utf8"), "bundled-font");
 			assert.equal(fs.existsSync(path.join(root, STANDALONE, "node_modules", "electron")), false);
 			assert.ok(fs.existsSync(path.join(root, "dist", "old.app", "nested.dmg")));
 			assert.ok(fs.existsSync(path.join(root, "node_modules", "electron", "dist", "electron.exe")));
@@ -168,12 +182,20 @@ describe("desktop standalone payload", () => {
 		}
 	});
 
-	it("refuses user data accidentally placed inside a bundled plugin", () => {
+	it("refuses user data accidentally placed inside a Core plugin", () => {
 		withPayload(({ write, run }) => {
-			write(path.join("bundled-plugins", "example", "data", "private.json"));
+			write(path.join("core-plugins", "flashcards", "data", "private.json"));
 			const result = run();
 			assert.equal(result.status, 1);
-			assert.match(String(result.stderr), /REFUSING.*bundled plugin/);
+			assert.match(String(result.stderr), /REFUSING.*Core plugin/);
+		});
+	});
+
+	it("refuses missing or extra Core packages instead of shipping an incomplete/stale set", () => {
+		for (const mode of ["missing", "extra"]) withPayload(({ root, write, run }) => {
+			if (mode === "missing") fs.rmSync(path.join(root, "core-plugins", "flashcards"), { recursive: true });
+			else write("core-plugins/ui-showcase/main.js");
+			assert.equal(run().status, 1);
 		});
 	});
 

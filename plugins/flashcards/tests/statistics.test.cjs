@@ -52,6 +52,17 @@ test('file-origin facts are live without graph membership while legacy graph fac
   assert.deepEqual(statistics(state, new Set(), at(2)).states, { new: 1, learning: 0, review: 0, relearning: 0 });
 });
 
+test('handwritten targets remain in state and due charts without graph membership and disappear from current charts only when all cues are deleted', () => {
+  const state = fixture({ ...proposition('manual', 2, at(2)), origin: 'manual' });
+  state.reviews.push({ at: at(2), propositionId: 'manual' });
+  assert.deepEqual(statistics(state, new Set(), at(2)).states, { new: 0, learning: 0, review: 1, relearning: 0 });
+  assert.equal(statistics(state, new Set(), at(2)).due[1].count, 1);
+  state.propositions.manual.cues[0].deleted = true;
+  const after = statistics(state, new Set(), at(2));
+  assert.deepEqual(after.states, { new: 0, learning: 0, review: 0, relearning: 0 });
+  assert.equal(after.due[1].count, 0); assert.equal(after.activity.at(-1).count, 1, 'historical ratings are retained');
+});
+
 test('due buckets use canonical review dueDay, civil-day overdue boundaries, and epoch fallback for learning/relearning/older reviews', () => {
   const state = fixture(
     proposition('new', 0, at(1)),

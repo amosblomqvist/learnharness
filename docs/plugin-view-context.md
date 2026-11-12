@@ -7,8 +7,9 @@ matching type-only SDK.
 
 ## Public entry point
 
-A session top-bar action receives readonly
-`context.view: PluginSessionViewContext`:
+A session top-bar action, or a shortcut action invoked on a session, receives readonly
+`context.view: PluginSessionViewContext`. Keyboard invocations use `placement: "keyboard"`;
+see [action shortcuts](plugin-authoring.md#action-shortcuts) for opt-in and scope rules:
 
 ```ts
 ctx.registerAction({
@@ -118,14 +119,14 @@ and its own approved product behavior, not pretend that inspectable data is alre
   view; normal surface lifetime rules govern later use. A stale view cannot silently
   substitute a new session's content.
 - Dynamic `disabled(context)` predicates receive the same read-only shape. Their
-  render-time snapshot is lazy/shared for that render; the eventual click captures anew
+  render-time snapshot is lazy/shared for that render; the eventual click/shortcut captures anew
   and checks disabled state again. Host input owners notify ordinary React rendering
   when their public presentation/drafts change. Plugin-owned external state still uses
   the existing `refreshActions()` mechanism.
 - Capture failures are contained by existing plugin action error handling. No action
   runs if its originating view has gone away before capture.
 
-There is no public subscription/global mutable context API, screenshot service, keyboard
+There is no public subscription/global mutable context API, screenshot service, raw keyboard
 shortcut addition, or new session state model. A snapshot read does not finish dictation,
 request microphone access, persist drafts, invoke submission interceptors, process/grade,
 submit, acknowledge, or send a model request. It reports current typed/published values,

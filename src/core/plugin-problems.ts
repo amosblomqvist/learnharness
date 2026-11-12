@@ -7,7 +7,8 @@ import {
   clonePluginQuestionJson, freezePluginQuestionValue, preparePluginQuestionType, preparePluginQuestionSchema, createPluginQuestionParameters,
   type JsonValue, type PluginQuestionEditorKey, type PluginQuestionOccurrence, type PluginQuestionValidationResult,
 } from "./plugin-questions.ts";
-import { validatePluginSchema } from "./plugin-validation.ts";
+import { checkPluginSchema, preparePluginSchema } from "./plugin-validation.ts";
+import { copyImmutableData, ImmutableReadCache } from "./immutable-data.ts";
 import { practiceProblemInputSchema } from "./practice-problems.ts";
 
 export interface PluginProblemInput<Q = JsonValue> {
@@ -123,12 +124,18 @@ export function preparePluginProblemType<Q extends TSchema, S extends TSchema>(d
     ...(definition.validateSubmission ? { validateSubmission: definition.validateSubmission } : {}),
     ...(definition.processSubmission ? { processSubmission: definition.processSubmission } : {}) });
 }
+const parameters = new ImmutableReadCache<TSchema>();
 export function createPluginProblemParameters(definition: PluginProblemTypeDefinition): TSchema {
   // Reuse the existing JSON-schema admission and local-reference rebasing.
   const base = createPluginQuestionParameters(questionAdapter(definition), "probe") as TSchema & { properties: Record<string, TSchema> };
+  return parameters.read(base, undefined, () => buildProblemParameters(base));
+}
+function buildProblemParameters(base: TSchema & { properties: Record<string, TSchema> }): TSchema {
   const common = preparePluginQuestionSchema(practiceProblemInputSchema) as TSchema & { properties: Record<string, TSchema>; required: string[] };
-  return freezePluginQuestionValue({ ...common, additionalProperties: false,
+  const prepared = copyImmutableData({ ...common, additionalProperties: false,
     properties: { ...common.properties, payload: base.properties.payload }, required: [...common.required, "payload"] }) as TSchema;
+  preparePluginSchema(prepared);
+  return prepared;
 }
 function refinement(callback: ((context: never) => unknown) | undefined, context: unknown): string[] {
   if (!callback) return [];
@@ -146,12 +153,18 @@ const failed = <T>(message: string): PluginQuestionValidationResult<T> => ({ ok:
 export function validatePluginProblemInput(definition: PluginProblemTypeDefinition, context: { chatId: string; input: unknown }): PluginQuestionValidationResult<PluginProblemInput> {
   try {
     const input = freezePluginQuestionValue(clonePluginQuestionJson(context.input)) as unknown as PluginProblemInput;
-    if (!validatePluginSchema(createPluginProblemParameters(definition)).Check(input)) return failed("Problem does not satisfy its input contract.");
+    if (!checkPluginSchema(createPluginProblemParameters(definition), input)) return failed("Problem does not satisfy its input contract.");
     const errors = refinement(definition.validateProblem as never, { chatId: context.chatId, contractVersion: definition.contractVersion, input });
     return errors.length ? { ok: false, problems: errors } : { ok: true, value: input };
   } catch { return failed("Problem must be finite JSON satisfying its input contract."); }
 }
+const snapshots = new ImmutableReadCache<PluginProblemSnapshot | null>();
 export function readPluginProblemSnapshot(value: unknown): PluginProblemSnapshot | null {
+  const saved = snapshots.read(value, undefined, () => readProblemSnapshot(value));
+  if (saved) snapshots.seed(saved, undefined, saved);
+  return saved;
+}
+function readProblemSnapshot(value: unknown): PluginProblemSnapshot | null {
   try {
     if (!value || typeof value !== "object" || Array.isArray(value) || (Object.getPrototypeOf(value) !== Object.prototype && Object.getPrototypeOf(value) !== null)) return null;
     const fields: Record<string, unknown> = {};
@@ -164,6 +177,10 @@ export function readPluginProblemSnapshot(value: unknown): PluginProblemSnapshot
         ? preparePluginQuestionSchema(descriptor.value) : descriptor.value });
     }
     const copy = clonePluginQuestionJson(fields) as unknown as PluginProblemSnapshot;
+    // These fields were already detached, checked and frozen above. Preserve
+    // their prepared identity instead of compiling a second clone of each.
+    copy.problemSchema = fields.problemSchema as TSchema;
+    copy.submissionSchema = fields.submissionSchema as TSchema;
     if (!copy || copy.protocolVersion !== 1 || typeof copy.problemId !== "string" || !copy.problemId.trim() ||
       typeof copy.pluginId !== "string" || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(copy.pluginId) ||
       typeof copy.requiresSubmissionRefinement !== "boolean" || typeof copy.requiresProcessing !== "boolean") return null;
@@ -171,7 +188,7 @@ export function readPluginProblemSnapshot(value: unknown): PluginProblemSnapshot
       tool: { toolName: "saved_problem", description: "Saved problem" }, problemSchema: copy.problemSchema, submissionSchema: copy.submissionSchema });
     const accepted = validatePluginProblemInput(definition, { chatId: "", input: copy.input });
     if (!accepted.ok) return null;
-    return freezePluginQuestionValue({ protocolVersion: 1, problemId: copy.problemId, pluginId: copy.pluginId,
+    return copyImmutableData({ protocolVersion: 1, problemId: copy.problemId, pluginId: copy.pluginId,
       typeId: definition.id, label: definition.label, contractVersion: definition.contractVersion, input: accepted.value,
       problemSchema: definition.problemSchema, submissionSchema: definition.submissionSchema,
       requiresSubmissionRefinement: copy.requiresSubmissionRefinement, requiresProcessing: copy.requiresProcessing });
@@ -182,7 +199,7 @@ export function validatePluginProblemSubmission(snapshot: PluginProblemSnapshot,
     const saved = readPluginProblemSnapshot(snapshot);
     if (!saved) return failed("Problem contract is unreadable.");
     const submission = freezePluginQuestionValue(clonePluginQuestionJson(context.submission));
-    if (!validatePluginSchema(saved.submissionSchema).Check(submission)) return failed("Submission does not satisfy the saved problem contract.");
+    if (!checkPluginSchema(saved.submissionSchema, submission)) return failed("Submission does not satisfy the saved problem contract.");
     if (saved.requiresSubmissionRefinement && (!definition || definition.id !== saved.typeId || definition.contractVersion !== saved.contractVersion || !definition.validateSubmission)) return failed("Required submission validation is unavailable.");
     const errors = saved.requiresSubmissionRefinement ? refinement(definition!.validateSubmission as never,
       { chatId: context.chatId, problemId: saved.problemId, contractVersion: saved.contractVersion, input: saved.input, submission }) : [];
@@ -190,7 +207,11 @@ export function validatePluginProblemSubmission(snapshot: PluginProblemSnapshot,
   } catch { return failed("Submission must be finite JSON satisfying its saved problem contract."); }
 }
 
+const submissions = new ImmutableReadCache<PluginProblemSubmission | null>();
 export function readPluginProblemSubmission(value: unknown): PluginProblemSubmission | null {
+  return submissions.read(value, undefined, () => readProblemSubmission(value));
+}
+function readProblemSubmission(value: unknown): PluginProblemSubmission | null {
   try {
     const copy = clonePluginQuestionJson(value) as unknown as PluginProblemSubmission;
     if (!copy || copy.kind !== "plugin-problem-submission" || typeof copy.problemId !== "string" || !copy.problemId ||

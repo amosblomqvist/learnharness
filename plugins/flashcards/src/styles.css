@@ -12,7 +12,7 @@
 .fc-root .fc-deck-panel { border: 1px solid var(--border, #8885); border-radius: 10px; overflow: hidden; }
 .fc-root .fc-deck-toolbar { display: flex; align-items: center; gap: 8px; padding: 12px; }
 .fc-root .fc-search { display: block; flex: 1; min-width: 0; }
-.fc-root .fc-tree > .fc-muted { padding: 0 12px 12px; }
+.fc-root .fc-tree > .fc-muted { padding: 12px; }
 .fc-root .fc-field { display: block; margin: 0 0 14px; }
 .fc-root .fc-label { display: block; font-weight: 600; margin-bottom: 5px; font-size: 12px; }
 .fc-root .fc-check { display: flex; align-items: center; gap: 7px; padding: 4px 0; }
@@ -24,6 +24,7 @@
 .fc-root .fc-markdown > :first-child { margin-top: 0; }
 .fc-root .fc-markdown > :last-child { margin-bottom: 0; }
 .fc-root .fc-selection-actions { justify-content: space-between; gap: 8px 16px; padding: 0 12px 8px; }
+.fc-root .fc-delete-selected { display: inline-flex; color: var(--muted-foreground, #888); }
 .fc-root .fc-selection-summary { display: flex; align-items: center; gap: 8px; margin-left: auto; white-space: nowrap; }
 .fc-root .fc-selection-summary > .fc-muted { min-width: 10ch; text-align: right; }
 .fc-root .fc-tree-viewport { overflow-x: auto; }
@@ -52,8 +53,8 @@
 .fc-root .fc-state-legend li { display: flex; align-items: center; gap: 6px; }
 .fc-root .fc-state-legend li::before { content: ''; width: 8px; height: 8px; border-radius: 2px; background: var(--fc-state-shade); }
 .fc-root .fc-chart-grid { display: grid; gap: 16px; margin-top: 16px; }
-.fc-root .fc-chart { min-width: 0; margin: 0; padding: 16px; border: 1px solid var(--border, #8885); border-radius: 10px; }
-.fc-root .fc-chart-scroll { overflow-x: auto; }
+.fc-root .fc-chart { display: flex; flex-direction: column; min-width: 0; margin: 0; padding: 16px; border: 1px solid var(--border, #8885); border-radius: 10px; }
+.fc-root .fc-chart-scroll { flex: none; overflow-x: auto; }
 .fc-root .fc-chart-svg { display: block; width: 100%; min-width: 20rem; max-width: 46rem; height: auto; margin-inline: auto; }
 .fc-root .fc-chart-bar[data-bucket="overdue"] { fill: var(--fc-red); }
 .fc-root .fc-chart-bar[data-bucket="today"] { fill: var(--fc-amber); }
@@ -61,13 +62,15 @@
 .fc-root .fc-chart-bar[data-bucket="activity"] { fill: var(--fc-green); }
 .fc-root .fc-chart-date { fill: var(--muted-foreground, #888); }
 .fc-root .fc-chart-caption { font-size: 11px; line-height: 1.5; color: var(--muted-foreground, #888); margin: 10px 0 0; }
+.fc-root .fc-chart > .fc-chart-caption { flex: 1; }
 @media (min-width: 1450px) { .fc-root .fc-chart-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .fc-root .fc-batch { border: 1px solid var(--border, #8885); border-radius: 8px; padding: 14px; margin-bottom: 14px; }
 .fc-root.fc-review-surface { box-sizing: border-box; min-height: 100%; height: 100%; overflow: auto; display: flex; flex-direction: column; align-items: center; padding: 48px 24px; }
 .fc-root.fc-review-surface:focus { outline: none; }
-.fc-root .fc-review-stage { --fc-rating-again: var(--fc-red); --fc-rating-hard: var(--fc-amber); --fc-rating-good: var(--fc-green); --fc-rating-easy: var(--fc-blue); width: 100%; max-width: 44rem; flex: none; margin-block: auto; text-align: center; }
+.fc-root .fc-review-stage { --fc-rating-again: var(--fc-red); --fc-rating-hard: var(--fc-amber); --fc-rating-good: var(--fc-green); --fc-rating-easy: var(--fc-blue); container-type: inline-size; width: 100%; max-width: 44rem; flex: none; margin-block: auto; text-align: center; }
 .fc-root .fc-review-stage:focus { outline: none; }
-.fc-root .fc-review-card { box-sizing: border-box; width: 100%; padding: 32px; border: 1px solid var(--border, #8885); border-radius: 12px; background: var(--card, var(--background, transparent)); }
+/* A width-based minimum keeps short cards 16:9 without constraining long answers. */
+.fc-root .fc-review-card { box-sizing: border-box; display: flex; flex-direction: column; justify-content: center; width: 100%; min-height: 56.25cqw; padding: 32px; border: 1px solid var(--border, #8885); border-radius: 12px; background: var(--card, var(--background, transparent)); }
 .fc-root .fc-review-title { font-size: 16px; font-weight: 600; margin: 0 0 16px; line-height: 1.5; }
 .fc-root .fc-review-title:focus { outline: none; }
 .fc-root .fc-review-footer { display: flex; flex-direction: column; align-items: center; gap: 12px; margin-top: 20px; }
@@ -83,12 +86,15 @@
 .fc-root.fc-practice-surface { padding-bottom: 16px; }
 .fc-root.fc-practice-surface > .fc-practice-note { flex: none; width: 100%; margin: 24px 0 0; text-align: center; }
 .fc-root .fc-review-card > .fc-markdown { font-size: 17px; }
+.fc-root.fc-preview-dialog { container-type: inline-size; }
 .fc-root .fc-preview-card { text-align: center; }
 .fc-root .fc-review-card table { margin-inline: auto; }
 .fc-root .fc-answer:not(:empty) { padding-top: 24px; margin-top: 24px; border-top: 1px solid var(--border, #8885); }
 .fc-dialog { min-width: 0; }
 .fc-dialog .fc-dialog-heading { font-size: 16px; font-weight: 600; margin: 0 0 18px; }
 .fc-dialog .fc-actions { margin-top: 14px; }
+.fc-dialog .fc-delete-description { margin-bottom: 12px; }
+.fc-dialog .fc-delete-description .fc-markdown { color: inherit; }
 .fc-settings { padding: 12px 0; }
 .fc-root .fc-model-settings { display: grid; gap: 16px; margin-top: 18px; }
 .fc-root .fc-model-overrides { display: flex; justify-content: flex-end; align-items: center; flex-wrap: wrap; gap: 10px; }

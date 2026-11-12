@@ -1,13 +1,14 @@
 .drawing-pad-root {
-  position: absolute; inset: 0; display: flex; flex-direction: column;
+  position: absolute; inset: 0;
   overflow: hidden; background: #141414; color: inherit;
 }
 .drawing-pad-tools {
-  display: flex; flex: 0 0 auto; gap: 6px; align-items: center;
-  min-height: 48px; padding: 8px 52px 8px 12px; overflow-x: auto;
+  position: absolute; top: 0; left: 0; z-index: 1;
+  display: flex; width: max-content; max-width: calc(100% - 52px); gap: 6px; align-items: center;
+  min-height: 48px; padding: 8px 12px; overflow-x: auto; pointer-events: none;
 }
-.drawing-pad-tools > span { flex: 0 0 auto; }
-.drawing-pad-viewport { position: relative; flex: 1 1 0; min-width: 0; min-height: 0; overflow: hidden; }
+.drawing-pad-tools > span { flex: 0 0 auto; pointer-events: auto; }
+.drawing-pad-viewport { position: absolute; inset: 0; min-width: 0; min-height: 0; overflow: hidden; }
 .drawing-pad-paper { position: absolute; inset: 0; overflow: hidden; }
 .drawing-pad-background { position: absolute; max-width: none; max-height: none; pointer-events: none; user-select: none; }
 .drawing-pad-background[hidden] { display: none; }

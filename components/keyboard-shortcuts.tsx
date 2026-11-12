@@ -39,6 +39,8 @@ import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-ques
 import { isDictationActive } from "@/components/dictation";
 import { dispatchFocusedPluginShortcut, hasLegacyInteractionForeground, isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
+import { usePlugins } from "./plugins";
+import { dispatchPluginActionShortcut, pluginShortcutScopeLabel, usePluginShortcutRows } from "./plugin-shortcuts";
 
 // Re-exported for the contract pin (tests/keyboard-toggle-sidebar.test.ts):
 // the dispatcher composes event names through the ONE helper — a second
@@ -50,6 +52,7 @@ export function KeyboardShortcuts() {
 	const [cheatOpen, setCheatOpen] = useState(false);
 	const { open: openSettings } = useSettingsDialog();
 	const controller = useOptionalInteractionLayers();
+	const { manager } = usePlugins();
 
 	// Router + cheat + settings state inside a ref so the keydown listener
 	// (attached once) never goes stale.
@@ -109,7 +112,7 @@ export function KeyboardShortcuts() {
 			// ── Registry dispatch. Leaf editors/rebinding keep their claims.
 			if (e.defaultPrevented) return;
 			const action = actionForBinding(eventBinding(e));
-			if (!action) return;
+			if (!action) { dispatchPluginActionShortcut(e, manager, controller); return; }
 
 			// The input guard: inside a typing surface only mod/alt combos
 			// fire (they never type a character). Bare keys — "?" included —
@@ -149,7 +152,7 @@ export function KeyboardShortcuts() {
 		};
 		window.addEventListener("keydown", onKeyDown);
 		return () => window.removeEventListener("keydown", onKeyDown);
-	}, [controller]);
+	}, [controller, manager]);
 
 	return <CheatSheet open={cheatOpen} onClose={() => setCheatOpen(false)} />;
 }
@@ -159,6 +162,7 @@ export function KeyboardShortcuts() {
  *  stay discoverable. */
 function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 	const headingId = useId();
+	const { rows: pluginRows } = usePluginShortcutRows();
 	const scopes = ["global", "chat", "graph"] as const;
 	const scopeLabels: Record<(typeof scopes)[number], string> = {
 		global: "Global",
@@ -201,6 +205,13 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 						</div>
 					);
 				})}
+				{[...new Set(pluginRows.map(row => row.pluginId))].map(pluginId => <div key={pluginId} className="mb-4" data-testid={`kbd-cheat-plugin-${pluginId}`}>
+					<div className="mb-1.5 text-xs uppercase tracking-widest text-muted-foreground/70">{pluginRows.find(row => row.pluginId === pluginId)!.pluginName}</div>
+					{pluginRows.filter(row => row.pluginId === pluginId).map(row => <div key={row.id} className="mb-1 text-sm">
+						<div className="flex items-center justify-between gap-4"><span className="text-muted-foreground">{row.name}</span><kbd className="rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-card-foreground">{row.binding ? formatBinding(row.binding) : "Unbound"}</kbd></div>
+						<div className="text-xs text-muted-foreground/70">{pluginShortcutScopeLabel(row)}{row.reason ? ` · Inactive: ${row.reason}` : ""}</div>
+					</div>)}
+				</div>)}
 		</HostDialog>
 	);
 }

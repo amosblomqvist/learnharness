@@ -85,6 +85,7 @@ import { ThinkingCard, ProblemCard, type PracticeThinkingData } from "@/componen
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
 import { PluginTopBarActions } from "@/components/plugin-chrome";
+import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
 import type { SessionInputViewReader, SessionViewTargets, NativeQuestionViewState, ViewReaderRef } from "./session-view-readers";
 import type { JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
@@ -1459,6 +1460,8 @@ export function Chat({
 		if (captured) void captured.view; // Detach once at invocation, not after plugin awaits.
 		return captured;
 	};
+
+	usePluginShortcutPage(`/chat/${encodeURIComponent(chatId)}`, captureActionContext);
 
 	return (
 		<ChatActionsContext.Provider
