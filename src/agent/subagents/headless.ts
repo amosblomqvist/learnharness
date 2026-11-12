@@ -49,8 +49,22 @@ export interface RenderSvgOptions {
 }
 
 export interface RenderPdfOptions {
-	/** Render DPI — 72 is 100% zoom; the skill's guidance is 100/150/200. */
+	/** Render DPI — 72 is 100% zoom; the skill's guidance is 100/150/200.
+	 *  With fitLongSide it is the ceiling instead. */
 	dpi?: number;
+	/** Rasterize only this part of the page (fractions of the page as
+	 *  displayed, after rotation, from the top-left corner). */
+	crop?: PdfCrop;
+	/** Scale so the rendered region's longer side is about this many pixels,
+	 *  never above dpi. */
+	fitLongSide?: number;
+}
+
+export interface PdfCrop {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
 }
 
 export interface RenderedPdfPage {
@@ -551,6 +565,13 @@ export function pdfCanvasGeometry(baseWidth: number, baseHeight: number, dpi: nu
 	return { scale, ...dimensions(scale) };
 }
 
+function checkPdfCrop({ x, y, width, height }: PdfCrop): void {
+	if (![x, y, width, height].every(Number.isFinite)) throw new Error("PDF crop values must be finite numbers");
+	if (width <= 0 || height <= 0) throw new Error("PDF crop width and height must be greater than 0");
+	const slack = 1e-9;
+	if (x < 0 || y < 0 || x + width > 1 + slack || y + height > 1 + slack) throw new Error("PDF crop must lie inside the page");
+}
+
 /** Render PDF pages to PNGs — the sources-v0 pdf-reader's eyes.
  *
  *  History: pdfjs ALWAYS painted the pages (scale = dpi/72, the skill's
@@ -567,6 +588,12 @@ async function renderPdfPages(
 	const dpi = opts.dpi ?? 150;
 	if (!Number.isFinite(dpi) || dpi <= 0 || dpi / 72 === 0) {
 		throw new Error("PDF render DPI must be finite and positive");
+	}
+	const crop = opts.crop ?? { x: 0, y: 0, width: 1, height: 1 };
+	checkPdfCrop(crop);
+	const fitLongSide = opts.fitLongSide;
+	if (fitLongSide !== undefined && !(Number.isFinite(fitLongSide) && fitLongSide > 0)) {
+		throw new Error("PDF render fitLongSide must be finite and positive");
 	}
 	// NATIVE CANVAS (Wave E, owner 2026-10-10): pdfjs paints into
 	// @napi-rs/canvas in this process — no browser involved. pdfjs-dist v6's
@@ -589,8 +616,16 @@ async function renderPdfPages(
 			if (pageNo < 1 || pageNo > doc.numPages) continue;
 			const pg = await doc.getPage(pageNo);
 			const base = pg.getViewport({ scale: 1 });
-			const geometry = pdfCanvasGeometry(base.width, base.height, dpi);
-			const vp = pg.getViewport({ scale: geometry.scale });
+			const regionWidth = base.width * crop.width;
+			const regionHeight = base.height * crop.height;
+			const regionDpi = fitLongSide === undefined ? dpi : Math.min(dpi, (fitLongSide * 72) / Math.max(regionWidth, regionHeight));
+			const geometry = pdfCanvasGeometry(regionWidth, regionHeight, regionDpi);
+			// A crop is the page shifted up and left under a crop-sized canvas.
+			const vp = pg.getViewport({
+				scale: geometry.scale,
+				offsetX: -crop.x * base.width * geometry.scale,
+				offsetY: -crop.y * base.height * geometry.scale,
+			});
 			const canvas = createCanvas(geometry.width, geometry.height);
 			const ctx = canvas.getContext("2d");
 			// pdfjs's render types speak the DOM context; @napi-rs/canvas's
