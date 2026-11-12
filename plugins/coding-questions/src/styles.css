@@ -52,6 +52,40 @@
   font-family: var(--font-mono, var(--font-ui, monospace));
   font-size: 0.75rem;
 }
+.lh-coding-tests {
+  margin-top: 0.5rem;
+  color: var(--muted-foreground, #8d8d8d);
+  font-size: 11px;
+  line-height: 1.4;
+}
+.lh-coding-tests__heading { font-weight: 500; }
+.lh-coding-tests pre {
+  margin: 0.375rem 0 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border, #434343);
+  border-radius: 0.5rem;
+  background: var(--muted, #262626);
+  color: var(--foreground, #e6e6e6);
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: var(--font-mono, var(--font-ui, monospace));
+  font-size: 0.8125rem;
+  line-height: 1.6;
+}
+/* About 12 lines of test code before it scrolls. */
+.lh-coding-tests__code { max-height: calc(12 * 1.6em + 1rem); overflow: auto; }
+.lh-coding-tests__code:focus-visible { outline: 2px solid var(--ring, #8d8d8d); outline-offset: 2px; }
+.lh-coding-tests__approval {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  margin-top: 0.5rem;
+  color: var(--foreground, #e6e6e6);
+  font-size: 12.5px;
+  cursor: pointer;
+}
+.lh-coding-tests__approval input { margin: 0; }
+.lh-coding-tests__approval:has(input:disabled) { cursor: default; opacity: 0.6; }
 .lh-coding-test-result__badge { display: inline-flex; }
 .lh-coding-disclosure { margin-top: 0.5rem; }
 /* The native quiz Why button: text-xs/11px, font-medium, text-only hover. */

@@ -263,6 +263,15 @@ try {
   }
   const code = selector => page.$$eval(`${selector} .cm-line`, lines => lines.map(line => line.textContent).join("\n"));
   const fillCode = async value => { await page.focus(editor); await chord("a"); await page.keyboard.sendCharacter(value); };
+  // Approve before any no-submit guard, so those guards still test a ready answer.
+  const approveTests = async tests => {
+    const submit = `${dock} button[type="submit"]`;
+    assert.equal(await page.$eval(`${dock} .lh-coding-tests__code`, node => node.textContent), tests.code, "The learner sees the exact test code before approving");
+    assert.equal(await page.$eval(submit, node => node.disabled), true, "Submit stays disabled until the learner approves the tests");
+    await page.click(`${dock} .lh-coding-tests__approval input`);
+    await page.waitForFunction(selector => document.querySelector(selector)?.disabled === false, {}, submit);
+    (evidence.testApprovals ??= []).push({ program: tests.program, disabledBefore: true, enabledAfter: true });
+  };
   const waitSettled = () => until(async () => !(await read()).turnInFlight, "canonical terminal settlement");
   const assertNoMic = async () => {
     const attempts = await page.evaluate(() => window.__nativeMicAttempts);
@@ -515,6 +524,7 @@ try {
   await send("CODING_NATIVE_PREDICT");
   await page.waitForSelector(editor, { visible: true }); await waitSettled();
   await assertHealthyFrame("predict");
+  await approveTests(predictTests);
   const predictRecord = await read(), predict = snapshots(predictRecord).at(-1);
   assert.equal(predict.pluginId, manifest.id); assert.equal(predict.typeId, "code"); assert.equal(predict.contractVersion, 1);
   assert.equal(predict.protocolVersion, 2); assert.equal(predict.requiresGrading, true);
@@ -620,6 +630,7 @@ try {
   assert.equal(await page.$eval('[data-testid="reading-thinking-field"] [contenteditable="true"]', node => node.textContent), readingText);
   assert.equal(await code(dock), starter);
   await assertHealthyFrame("check");
+  await approveTests(checkTests);
   const checkThinkingFirst = "Separate after-reveal host thinking, never mixed into the answer.";
   const checkThinkingLast = "Shift+Enter keeps this second line in the thinking channel.  ";
   const checkThinking = `${checkThinkingFirst}\n${checkThinkingLast}`;
@@ -683,6 +694,7 @@ try {
   await page.locator('[data-testid="teach-check-reveal"]').click();
   await page.waitForSelector(editor, { visible: true }); await waitSettled();
   await assertHealthyFrame("run-error check");
+  await approveTests(errorTests);
   const errorCheck = snapshots(await read()).at(-1);
   assert.equal(errorCheck.input.type, "check"); assert.equal(errorCheck.protocolVersion, 2); assert.equal(errorCheck.requiresGrading, true);
   assert.deepEqual(errorCheck.input.payload, { language: "javascript", starterCode: starter, tests: errorTests, modelSolution });

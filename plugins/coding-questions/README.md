@@ -6,10 +6,14 @@ tests that run automatically on submission. The agent reviews the exact code, se
 thinking, and recorded test observations. Practice allows repeated attempts; only the
 native **conclude** tool assesses and closes the problem.
 
-**Local code execution is not sandboxed.** Teacher test code and learner code run with
-LearnHarness's user permissions and inherited environment: they can access files,
-network, and installed programs. A temporary working directory, timeout, and output
-limits are operational safeguards, not security isolation. Use only with code you trust.
+**Local code execution is not sandboxed.** Before submitting, the learner sees the exact
+test command and test code under **Tests that will run on this computer** and must tick
+**Run these tests on my computer when I submit**; Submit stays disabled until then.
+Teacher test code and learner code then run with LearnHarness's user permissions: they
+can access files, network, and installed programs. Environment variables whose names
+end in `_KEY`, `_TOKEN` or `_SECRET`, or contain `PASSWORD`, are removed, so saved API
+keys are not in the test environment. A temporary working directory, timeout, and output
+limits are operational safeguards, not security isolation. Approve only tests you understand.
 
 ## Requirements and installation
 
@@ -67,7 +71,9 @@ only after submission. It is not executed or automatically tested. Existing ques
 without it keep their original data and have no Model solution toggle.
 
 A missing/empty starter starts blank; the learner submits their full code, not a diff. Unchanged starter code is allowed.
-Readiness requires non-whitespace code, not passing syntax checks or passing tests.
+Readiness requires non-whitespace code and the ticked test approval, not passing syntax
+checks or passing tests. The approval belongs to the open editor only: it is not saved,
+and a re-created question card starts unticked.
 Editor line endings become LF; other whitespace is preserved.
 
 On a valid submission, before saving and continuing the teacher, the plugin:
@@ -75,7 +81,8 @@ On a valid submission, before saving and continuing the teacher, the plugin:
 1. Creates a fresh `data/test-runs/<questionId>/attempt-…/` working directory.
 2. Writes the exact submitted code to **`answer.txt`** as UTF-8.
 3. Launches `tests.program` with the literal `tests.args`, **without an implicit shell**,
-   and sends `tests.code` to its standard input. The working directory is the fresh run.
+   and sends `tests.code` to its standard input. The working directory is the fresh run,
+   and the environment is the app's without secret-like variables (see above).
 4. Records the exit status and up to **64 KiB per stream** of stdout/stderr, draining
    excess output. Text is decoded as UTF-8; truncated incomplete final characters are
    omitted. Enforces a **30-second** process deadline.
