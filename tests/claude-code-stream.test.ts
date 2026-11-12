@@ -66,8 +66,13 @@ type RunCall = {
 
 type ScenarioRun = { events: AssistantMessageEvent[]; calls: RunCall[] };
 
-function readFixtureLines(name: string): string[] {
+function readRawFixtureLines(name: string): string[] {
 	return readFileSync(join(FIXTURES, name), "utf8").split("\n").filter(Boolean);
+}
+
+/** Recorded lines without the CLI's init line, so scenarios behave as if none arrived. */
+function readFixtureLines(name: string): string[] {
+	return readRawFixtureLines(name).filter((line) => !line.startsWith('{"type":"system","subtype":"init"'));
 }
 
 function getFlagValue(args: string[], flag: string): string {
@@ -871,6 +876,74 @@ test("writes one user prompt after local-only control initialization and summary
 	assert.deepEqual(JSON.parse(lines[1]!).request, { subtype: "get_context_usage", detail: "summary" });
 	assert.equal(lines[2], toStreamJsonLine([{ type: "text", text: "hi" }]));
 	assert(lines.slice(3).every((line) => JSON.parse(line).request.detail === "summary"));
+});
+
+const BRIDGE_UNREACHABLE = /could not reach the LearnHarness tool bridge/;
+
+/** CLI init lines as the real CLI 2.1.322 prints them (issue #571). */
+function initLine(tools: string[], bridgeStatus?: string): string {
+	return JSON.stringify({
+		type: "system",
+		subtype: "init",
+		tools,
+		mcp_servers: bridgeStatus ? [{ name: "learnharness", status: bridgeStatus }] : [],
+	});
+}
+
+test("an init line with no tools and a failed bridge fails the turn before any model text", async (t) => {
+	const { events } = await runScenario(t, [initLine([], "failed"), ...readFixtureLines("text.jsonl"), HOLD]);
+
+	assert.match(getErrorMessage(events) ?? "", BRIDGE_UNREACHABLE);
+	assert.equal(events.some((event) => event.type === "text_delta"), false);
+});
+
+test("a connected bridge that lacks a declared tool fails the turn before any model text", async (t) => {
+	const { events } = await runScenario(t, [initLine(["mcp__learnharness__read"], "connected"), ...readFixtureLines("text.jsonl"), HOLD]);
+
+	assert.match(getErrorMessage(events) ?? "", BRIDGE_UNREACHABLE);
+	assert.equal(events.some((event) => event.type === "text_delta"), false);
+});
+
+test("a healthy init line from the recorded tool turn lets the turn proceed", async (t) => {
+	const recordedInit = readRawFixtureLines("tool.jsonl")[0];
+	assert.ok(recordedInit);
+	assert.ok(recordedInit.includes('"mcp__learnharness__get_weather"'));
+	const weather: ToolUse = { id: "toolu_01JBB4cJsPa585FWb1XrfbNX", name: "get_weather", arguments: { city: "Paris" } };
+	const { runClaude } = createFakeRun(t, [recordedInit, ...toToolUseMessage([weather]), callTool(weather), HOLD]);
+	const tool: Tool = { name: "get_weather", description: "Weather", parameters: { type: "object", properties: {} } };
+	const context = normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI], tools: [tool] });
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), context, { sessionId: SESSION_ID }));
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.equal(done.reason, "toolUse");
+	assert.deepEqual(done.message.content, [{ type: "toolCall", ...weather }]);
+});
+
+test("extra tools beyond the declared ones do not fail the turn", async (t) => {
+	const { events } = await runScenario(t, [
+		initLine(["mcp__learnharness__read", "mcp__learnharness__get_weather", "mcp__other__extra"], "connected"),
+		...readFixtureLines("text.jsonl"),
+	]);
+
+	assert.equal(getLastEvent(events).type, "done");
+});
+
+test("a turn that declares no tools proceeds on the recorded empty init line", async (t) => {
+	const { runClaude, calls } = createFakeRun(t, readRawFixtureLines("text.jsonl"));
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [] })));
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.equal(getText(done.message), "hello there");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a bridge failure kills the CLI process and removes the temporary turn files", async (t) => {
+	const { events, calls } = await runScenario(t, [initLine([], "failed"), ...readFixtureLines("text.jsonl"), HOLD]);
+
+	assert.match(getErrorMessage(events) ?? "", BRIDGE_UNREACHABLE);
+	await assertCleanedUp(getOnlyCall(calls));
 });
 
 test("parseCliLine ignores non-JSON, system, rate-limit and successful result lines", () => {

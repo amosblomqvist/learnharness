@@ -71,6 +71,7 @@ const REFUSAL_MESSAGE = "The model refused to complete the request";
 const ABORT_MESSAGE = "Request was aborted";
 const START_FAILED_MESSAGE = "claude CLI failed to start";
 const NO_STOP_REASON_MESSAGE = "claude CLI ended the message without a stop reason";
+const BRIDGE_UNREACHABLE_MESSAGE = "Claude Code could not reach the LearnHarness tool bridge, so this turn was stopped before the tutor replied.";
 const NOT_SIGNED_IN_ERROR = "authentication_failed";
 
 export function toEffort(level: ThinkingLevel | undefined): AnthropicEffort {
@@ -560,6 +561,13 @@ class ClaudeProcess implements LiveProcess {
 		if (this.contextProbe?.handle(JSON.parse(line))) return;
 		const event = parseCliLine(line);
 		if (!event) return;
+		if (event.type === "init") {
+			const declared = this.bridge.allowedTools;
+			const bridgeConnected = event.mcpServers.some((server) => server.name === BRIDGE_SERVER_NAME && server.status === "connected");
+			// Without the bridge the model has no tools and types its calls as plain text.
+			if (declared.length > 0 && (!bridgeConnected || declared.some((name) => !event.tools.includes(name)))) this.fail(BRIDGE_UNREACHABLE_MESSAGE);
+			return;
+		}
 		if (event.type === "toolResults") {
 			if (event.ids.some((id) => this.sourceCalls.some((call) => call.id === id))) {
 				this.fail("claude CLI refused a harness tool call before MCP admission");

@@ -38,6 +38,12 @@ const { chatStore } = await import("../src/store/chats.ts");
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/claude-code/fake-claude.mjs", import.meta.url));
 const TEXT_FIXTURE = fileURLToPath(new URL("./fixtures/claude-code/text.jsonl", import.meta.url));
+
+/** Recorded text turn without the CLI's init line, so the scenario behaves as if none arrived. */
+function readTextFixtureLines(): string[] {
+	return readFileSync(TEXT_FIXTURE, "utf8").split("\n").filter((line) => line && !line.startsWith('{"type":"system","subtype":"init"'));
+}
+
 const TURN_TIMEOUT_MS = 8000;
 
 const ASK_ID = "toolu_harness_ask";
@@ -180,7 +186,7 @@ test("disabled opt-in refuses a saved CLI chat before write-ahead, liveness, or 
 });
 
 test("switching off blocks future requests but does not interrupt an already admitted CLI turn", async (t) => {
-	const scenario = [JSON.stringify({ fake: "checkpoint" }), JSON.stringify({ fake: "wait-for-message" }), ...readFileSync(TEXT_FIXTURE, "utf8").trim().split("\n")];
+	const scenario = [JSON.stringify({ fake: "checkpoint" }), JSON.stringify({ fake: "wait-for-message" }), ...readTextFixtureLines()];
 	const fakeRun = createFakeRun(t, [scenario]);
 	const run = fakeRun.runClaude;
 	let ready!: (child: ChildProcessWithoutNullStreams) => void;
@@ -295,7 +301,7 @@ test("a question answered after the idle timeout starts a fresh CLI process that
 	liveProcessIdleTimeoutMs.current = 300;
 	t.after(() => (liveProcessIdleTimeoutMs.current = LIVE_PROCESS_IDLE_TIMEOUT_MS));
 
-	const fakeRun = createFakeRun(t, [toAskScenario(), readFileSync(TEXT_FIXTURE, "utf8").split("\n").filter(Boolean)]);
+	const fakeRun = createFakeRun(t, [toAskScenario(), readTextFixtureLines()]);
 	const agentFactory = createAgentFactory(fakeRun);
 	const chatId = createClaudeCodeChat(t);
 
