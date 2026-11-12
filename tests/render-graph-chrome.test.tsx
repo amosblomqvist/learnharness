@@ -122,6 +122,18 @@ describe("node detail card text", () => {
 		assert.deepEqual(source, before);
 	});
 
+	it("lets inline code inherit each card line's size and colour without changing its monospace surface", () => {
+		const { document } = parseHTML(render("Name `x`", "Statement `x`"));
+		const lines = [...document.querySelectorAll(".lh-prose")];
+		assert.equal(lines.length, 2);
+		for (const line of lines) {
+			assert.ok(line.classList.contains("[&_[data-streamdown=inline-code]]:[font-size:inherit]"));
+			assert.ok(line.classList.contains("[&_[data-streamdown=inline-code]]:[color:inherit]"));
+			const code = line.querySelector('[data-streamdown="inline-code"]')!;
+			for (const token of ["font-mono", "px-1.5", "py-0.5"]) assert.ok(code.classList.contains(token));
+		}
+	});
+
 	it("keeps the card's own type rather than the chat prose font and size", () => {
 		const html = render("Name", "Statement");
 		assert.equal(html.split("[--font-prose:var(--font-ui)]").length - 1, 2, "both lines stay in the UI font");

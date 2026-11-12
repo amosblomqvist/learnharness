@@ -897,7 +897,8 @@ export function GraphChromeRow({
  *  and Markdown, never streamed. `.lh-prose` sets the chat font and size
  *  in unlayered CSS that beats Tailwind's type utilities — the variable
  *  overrides are what keep the card's own type. */
-const NODE_CARD_TYPE = "[--font-prose:var(--font-ui)]";
+const NODE_CARD_TYPE = "[--font-prose:var(--font-ui)] " +
+	"[&_[data-streamdown=inline-code]]:[font-size:inherit] [&_[data-streamdown=inline-code]]:[color:inherit]";
 export function NodeCardText({ name, statement }: Pick<GraphNode, "name" | "statement">) {
 	return (
 		<>
