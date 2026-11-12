@@ -565,7 +565,7 @@ export function AgentSection({
 								type="button"
 								data-testid={`delete-skill-${info.path}`}
 								onClick={() => void deleteSegment(info.path)}
-								className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-red-500 hover:underline"
+								className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-error hover:underline"
 							>
 								Delete
 							</button>
