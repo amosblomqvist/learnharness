@@ -71,6 +71,7 @@ const REFUSAL_MESSAGE = "The model refused to complete the request";
 const ABORT_MESSAGE = "Request was aborted";
 const START_FAILED_MESSAGE = "claude CLI failed to start";
 const NO_STOP_REASON_MESSAGE = "claude CLI ended the message without a stop reason";
+const NOT_STREAMED_MESSAGE = "claude CLI finished without streaming its response";
 const NOT_SIGNED_IN_ERROR = "authentication_failed";
 
 export function toEffort(level: ThinkingLevel | undefined): AnthropicEffort {
@@ -149,8 +150,12 @@ class ClaudeTurn {
 	private readonly partialJson = new Map<number, string>();
 	private readonly toolBlocks = new Map<number, ToolCall>();
 	private readonly intents: ToolCall[] = [];
+	/** Where the current CLI message began, so an abandoned attempt can be rolled back. */
+	private messageStart: { content: number; intents: number; stopReason: StopReason } = { content: 0, intents: 0, stopReason: "pending" };
 	/** The current message called a harness tool by its bare name; the CLI rejects that call itself. */
 	skippedBareCall = false;
+	/** The CLI abandoned the last message and has not started its retry yet. */
+	awaitingRetry = false;
 	started = false;
 	finished = false;
 
@@ -168,6 +173,8 @@ class ClaudeTurn {
 		switch (event.type) {
 			case "messageStart":
 				this.skippedBareCall = false;
+				this.awaitingRetry = false;
+				this.messageStart = { content: this.output.content.length, intents: this.intents.length, stopReason: this.output.stopReason };
 				this.updateUsage(event.usage);
 				this.start();
 				return;
@@ -228,12 +235,22 @@ class ClaudeTurn {
 				if (this.output.stopReason !== "toolUse") this.finish();
 				return;
 
+			case "messageAbandoned":
+				this.abandonMessage();
+				return;
+
 			case "assistantError":
 				this.fail(getAssistantErrorMessage(event.error, event.text), "error");
 				return;
 
 			case "resultError":
 				this.fail(event.text, "error");
+				return;
+
+			case "resultSuccess":
+				// The turn is still open, so the CLI answered without streaming: its non-streaming fallback
+				// sends one whole assistant line that this parser does not read.
+				this.fail(NOT_STREAMED_MESSAGE, "error");
 				return;
 		}
 	}
@@ -268,6 +285,18 @@ class ClaudeTurn {
 		this.output.errorMessage = message;
 		this.stream.push({ type: "error", reason, error: this.output });
 		this.stream.end();
+	}
+
+	/** Drop the abandoned attempt; the CLI's retried message streams the whole response again. */
+	private abandonMessage(): void {
+		this.output.content.splice(this.messageStart.content);
+		this.intents.splice(this.messageStart.intents);
+		this.output.stopReason = this.messageStart.stopReason;
+		delete this.output.errorMessage;
+		this.contentIndexes.clear();
+		this.partialJson.clear();
+		this.toolBlocks.clear();
+		this.awaitingRetry = true;
 	}
 
 	private start(): void {
@@ -522,7 +551,12 @@ class ClaudeProcess implements LiveProcess {
 
 	/** Only authenticated MCP requests, never stdout intent alone, admit side effects. */
 	flushAdmissions(): void {
-		if (this.stopping || this.turn.finished || !this.sourceComplete) return;
+		if (this.stopping || this.turn.finished) return;
+		if (this.turn.awaitingRetry && this.bridge.getPendingToolCalls().length > 0) {
+			this.fail("claude CLI called a tool from a response it did not stream");
+			return;
+		}
+		if (!this.sourceComplete) return;
 		const pending = this.bridge.getPendingToolCalls();
 		if (pending.length === 0) return;
 		const calls: ToolCall[] = [];

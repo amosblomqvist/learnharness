@@ -688,6 +688,65 @@ test("refusal stop reason → error", async (t) => {
 	assert.equal(getErrorMessage(events), "The model refused to complete the request");
 });
 
+/** What the CLI streams when a response breaks off and it retries: the open block closed, then a marked message_stop. */
+function abandonedAttempt(blocks: string[], openIndex: number): string[] {
+	return [
+		streamEvent({ type: "message_start", message: { usage: { output_tokens: 8 } } }),
+		...blocks,
+		streamEvent({ type: "content_block_stop", index: openIndex }),
+		JSON.stringify({ type: "stream_event", event: { type: "message_stop" }, abandoned_blocks: { api_message_id: "msg_abandoned", from_block_index: 0 } }),
+		JSON.stringify({ type: "system", subtype: "api_retry", attempt: 1, error: "unknown" }),
+	];
+}
+
+const OPEN_THINKING = streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } });
+const NON_STREAMED_ANSWER = JSON.stringify({ type: "assistant", error: null, message: { content: [{ type: "text", text: "non-streamed answer" }] } });
+
+test("an attempt the CLI abandons and retries is replaced by the retried message", async (t) => {
+	const { events, calls } = await runScenario(t, [...abandonedAttempt([OPEN_THINKING], 0), ...readFixtureLines("text.jsonl")]);
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done", `turn ended with ${done.type}`);
+	assert.equal(done.reason, "stop");
+	assert.deepEqual(done.message.content, [{ type: "text", text: "hello there" }]);
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a tool call from an abandoned attempt is never admitted; the retried call is", async (t) => {
+	const stale: ToolUse = { id: "toolu_abandoned", name: "read", arguments: { path: "stale" } };
+	const retried: ToolUse = { id: "toolu_retried", name: "read", arguments: { path: "a" } };
+	const staleBlocks = toToolUseMessage([stale]).slice(1, -3);
+	const { runClaude, calls } = createFakeRun(t, [...abandonedAttempt([...staleBlocks, OPEN_THINKING.replace('"index":0', '"index":1')], 1), ...toToolUseMessage([retried]), callTool(retried), REPLY]);
+	const streamFunction = createClaudeCodeStreamFunction(runClaude);
+
+	const toolMessage = await runTurn(streamFunction, [HI]);
+	assert.deepEqual(toolMessage.content, [{ type: "toolCall", id: retried.id, name: "read", arguments: { path: "a" } }]);
+	const reply = await runTurn(streamFunction, [HI, toolMessage, toToolResult(retried, "contents of a")]);
+	assert.equal(getText(reply), "contents of a");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a non-streamed fallback answer after an abandoned attempt fails the turn instead of hanging", async (t) => {
+	const { events, calls } = await runScenario(t, [
+		...abandonedAttempt([OPEN_THINKING], 0),
+		NON_STREAMED_ANSWER,
+		JSON.stringify({ type: "result", subtype: "success", is_error: false, result: "non-streamed answer" }),
+		HOLD,
+	]);
+
+	assert.equal(getErrorMessage(events), "claude CLI finished without streaming its response");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a tool call from a non-streamed fallback answer is never admitted", async (t) => {
+	const readA: ToolUse = { id: "toolu_fallback_a", name: "read", arguments: { path: "a" } };
+	const { events, calls } = await runScenario(t, [...abandonedAttempt([OPEN_THINKING], 0), NON_STREAMED_ANSWER, JSON.stringify({ fake: "start-call", ...JSON.parse(callTool(readA)) }), HOLD]);
+
+	assert.equal(events.some((event) => event.type === "toolcall_end"), false);
+	assert.match(getErrorMessage(events) ?? "", /did not stream/);
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
 test("non-zero exit mid-stream → error naming the exit code, stderr logged not shown, process and temp dirs gone", async (t) => {
 	const consoleError = t.mock.method(console, "error", () => {});
 	const midStream = readFixtureLines("text.jsonl").slice(0, 5);
@@ -873,13 +932,22 @@ test("writes one user prompt after local-only control initialization and summary
 	assert(lines.slice(3).every((line) => JSON.parse(line).request.detail === "summary"));
 });
 
-test("parseCliLine ignores non-JSON, system, rate-limit and successful result lines", () => {
+test("parseCliLine ignores non-JSON, system, rate-limit and successful assistant lines", () => {
 	assert.equal(parseCliLine("not json"), null);
 	assert.equal(parseCliLine("null"), null);
 	assert.equal(parseCliLine('{"type":"system","subtype":"init"}'), null);
+	assert.equal(parseCliLine('{"type":"system","subtype":"api_retry","attempt":1}'), null);
 	assert.equal(parseCliLine('{"type":"rate_limit_event"}'), null);
-	assert.equal(parseCliLine('{"type":"result","is_error":false,"result":"hello there"}'), null);
 	assert.equal(parseCliLine('{"type":"assistant","error":null,"message":{"content":[{"type":"text","text":"hello there"}]}}'), null);
+});
+
+test("parseCliLine tells an abandoned message_stop and a successful result apart from a normal stop", () => {
+	assert.deepEqual(parseCliLine('{"type":"stream_event","event":{"type":"message_stop"}}'), { type: "messageStop" });
+	assert.deepEqual(
+		parseCliLine('{"type":"stream_event","event":{"type":"message_stop"},"abandoned_blocks":{"api_message_id":"msg_1","from_block_index":0}}'),
+		{ type: "messageAbandoned" },
+	);
+	assert.deepEqual(parseCliLine('{"type":"result","is_error":false,"result":"hello there"}'), { type: "resultSuccess" });
 });
 
 test("trailing toolResults matching a live process continue it: held calls answered, new assistant message streamed, no new spawn", async (t) => {
