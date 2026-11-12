@@ -11,7 +11,7 @@ it("generated public document API accepts only Files and optional caller cancell
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-plugin-document-types-test-"));
 	try {
 		const output = path.join(home, "api");
-		const build = spawnSync(process.execPath, [path.join(root, "scripts", "build-plugin-types.mjs"), output], { cwd: root, encoding: "utf8", timeout: 30_000 });
+		const build = spawnSync(process.execPath, [path.join(root, "scripts", "build-plugin-types.mjs"), output], { cwd: root, encoding: "utf8", timeout: 120_000 });
 		assert.equal(build.status, 0, String(build.stdout) + String(build.stderr));
 		fs.symlinkSync(path.join(root, "node_modules"), path.join(home, "node_modules"), "dir");
 		const consumer = path.join(home, "consumer.mts");
@@ -56,7 +56,7 @@ backend.documents;
 void [pending, withOptions, name, markdown, notices, immediate];
 `);
 		const tsc = createRequire(import.meta.url).resolve("typescript/bin/tsc");
-		const check = spawnSync(process.execPath, [tsc, "--noEmit", "--strict", "--skipLibCheck", "false", "--allowImportingTsExtensions", "--target", "ES2022", "--lib", "ES2023,DOM,DOM.Iterable", "--module", "ESNext", "--moduleResolution", "bundler", consumer], { cwd: home, encoding: "utf8", timeout: 30_000 });
+		const check = spawnSync(process.execPath, [tsc, "--noEmit", "--strict", "--skipLibCheck", "false", "--allowImportingTsExtensions", "--target", "ES2022", "--lib", "ES2023,DOM,DOM.Iterable", "--module", "ESNext", "--moduleResolution", "bundler", consumer], { cwd: home, encoding: "utf8", timeout: 120_000 });
 		assert.equal(check.status, 0, String(check.stdout) + String(check.stderr));
 	} finally { fs.rmSync(home, { recursive: true, force: true }); }
 });

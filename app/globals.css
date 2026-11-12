@@ -359,11 +359,15 @@ body {
 [data-streamdown="table"] {
 	border: 1px solid var(--border);
 	/* Tables HUG their contents (owner, callout round 2026-10-07): no more
-	   full-width stretch with dead space. max-content sizes to the cells
-	   (width:auto would still stretch — the classic table trap). No
-	   max-width cap: a max-width would squish-wrap wide tables instead of
-	   letting the md-blocks overflow-x scroller carry them. */
-	width: max-content;
+	   full-width stretch with dead space. fit-content = min(max-content,
+	   max(min-content, column)): a narrow table hugs its cells exactly as
+	   max-content did, a wide one wraps its body text to the column instead
+	   of being clipped at the edge (macOS hides the scrollbar, so clipped
+	   read as cut off). Only a table whose min-content still exceeds the
+	   column (long unbreakable code/URLs) falls to the md-blocks overflow-x
+	   scroller. No max-width cap — that would squish columns below their
+	   min-content. */
+	width: fit-content;
 	/* Tables run at the SESSION prose size (owner note, 2026-09-19: they
 	   visibly lagged the 16px chat text at streamdown's 12.5px text-sm).
 	   Unlayered CSS beats the cells' own utility-layer text-sm, and the

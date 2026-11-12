@@ -3,11 +3,12 @@ import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { standardFontsDir } from "./pdf-ops";
+import { svgImageSource } from "../../../lib/svg-image-source";
 
 /**
  * Verification engines for sub-agents: demos use the app's own Electron
  * browser-service via puppeteer-core, with system Chrome as fallback.
- * SVGs use resvg (browser fallback); PDFs use pdfjs + Skia (no browser).
+ * SVGs use only resvg; PDFs use pdfjs + Skia (no browser).
  * No extra Chromium is shipped or downloaded.
  *
  * Chrome fallback resolution: CHROME_PATH first, then common macOS,
@@ -40,7 +41,7 @@ export interface RunDemoOptions {
 }
 
 export interface RenderSvgOptions {
-	/** Annotation images use only the static native rasterizer, never executable browser markup. */
+	/** Annotation images keep strict native input: skip ordinary figure display repairs. */
 	nativeOnly?: boolean;
 	/** Viewport size — defaults to the SVG's width/height attrs, else 900×700. */
 	width?: number;
@@ -306,7 +307,7 @@ async function withBrowserPage<T>(fn: (page: import("puppeteer-core").Page) => P
 }
 
 // ─── Isolated page loading ───────────────────────────────────────────────────
-// Demo HTML and fallback SVG markup are model output, so they are untrusted.
+// Demo HTML is model output, so it is untrusted.
 // They load in memory on about:blank, which gives the document an opaque
 // origin like the learner's sandboxed iframe. A file:// document could read
 // any local file. As a second layer, requests for any other scheme (file:
@@ -500,51 +501,18 @@ function crc32(buf: Buffer): number {
 }
 
 async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {
-	// NATIVE FIRST (Wave E stage 2, owner 2026-10-10): resvg rasterizes
-	// static SVG in-process — visual-maker SVGs never execute script, so a
-	// browser adds nothing but a process. White background mirrors the old
-	// Chrome page (html,body{background:#fff}); fitTo width mirrors
-	// svgViewport semantics (attrs win, viewBox-only gets the 900 default,
-	// opts override). The browser path below stays as the fallback for
-	// exotic-SVG features resvg cannot parse — failures there used to be
-	// the ONLY path, so nothing regresses.
+	// Static native rasterization only. Ordinary figures get the same two
+	// render-only repairs as their display; annotation inputs remain strict.
+	// Native errors propagate to the existing visual-maker revision/failure
+	// handling, never executable browser markup or a system Chrome fallback.
 	const { width } = svgViewport(svg, opts);
-	try {
-		const { Resvg } = await import("@resvg/resvg-js");
-		const resvg = new Resvg(svg, {
-			fitTo: { mode: "width", value: width },
-			font: { loadSystemFonts: true },
-			background: "#ffffff",
-		});
-		return providerSafePng(resvg.render().asPng());
-	} catch (error) {
-		if (opts.nativeOnly) throw error;
-		/* fall through to the browser path */
-	}
-	return renderSvgInBrowser(svg, opts);
-}
-
-/** The actual fallback path, also exercised directly by the runtime gate. */
-async function renderSvgInBrowser(svg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {
-	return withBrowserPage(page => renderSvgOnPage(page, svg, opts));
-}
-
-/** Actual browser fallback, shared with the packaged runtime gate. */
-export async function renderSvgOnPage(page: import("puppeteer-core").Page, svg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {
-	const html = `<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#fff}svg{display:block}</style></head><body>${svg}</body></html>`;
-
-	const { width, height } = svgViewport(svg, opts);
-	await page.setViewport({ width, height });
-	const cleanup = await loadIsolatedPage(page, html);
-	try {
-		const shot = (await page.screenshot({ fullPage: true, type: "png" })) as Buffer;
-		// Chrome's raw split-IDAT PNG is canonicalized before it reaches a
-		// provider (see providerSafePng) — the visual-maker feeds this exact
-		// buffer back to the vision model as its only way to "look".
-		return providerSafePng(Buffer.from(shot));
-	} finally {
-		await cleanup();
-	}
+	const { Resvg } = await import("@resvg/resvg-js");
+	const resvg = new Resvg(opts.nativeOnly ? svg : svgImageSource(svg), {
+		fitTo: { mode: "width", value: width },
+		font: { loadSystemFonts: true },
+		background: "#ffffff",
+	});
+	return providerSafePng(resvg.render().asPng());
 }
 
 // ─── PDF page rasterization (pdfjs paints, Skia hosts) ─────────────────

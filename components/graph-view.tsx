@@ -82,6 +82,7 @@ import { useInteractionLayers } from "@/components/interaction-layers";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
+import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Hint } from "@/components/ui/hint";
 import {
 	ARROW_LENGTH_LADDER,
@@ -890,6 +891,60 @@ export function GraphChromeRow({
 	);
 }
 
+/** The detail card's name and statement, as a pure seam for render pins
+ *  (the GraphChromeRow pattern). Both are extractor tool arguments, so
+ *  they render through ToolContentResponse like other tool content: math
+ *  and Markdown, never streamed. `.lh-prose` sets the chat font and size
+ *  in unlayered CSS that beats Tailwind's type utilities — the variable
+ *  overrides are what keep the card's own type. */
+const NODE_CARD_TYPE = "[--font-prose:var(--font-ui)] " +
+	"[&_[data-streamdown=inline-code]]:[font-size:inherit] [&_[data-streamdown=inline-code]]:[color:inherit]";
+export function NodeCardText({ name, statement }: Pick<GraphNode, "name" | "statement">) {
+	return (
+		<>
+			<ToolContentResponse
+				mode="static"
+				className={`${NODE_CARD_TYPE} font-medium [--lh-prose-size:var(--text-sm)] [--lh-prose-leading:1.375]`}
+			>
+				{name}
+			</ToolContentResponse>
+			<ToolContentResponse
+				mode="static"
+				className={`${NODE_CARD_TYPE} mt-1 text-muted-foreground [--lh-prose-size:var(--text-xs)] [--lh-prose-leading:1.625]`}
+			>
+				{statement}
+			</ToolContentResponse>
+		</>
+	);
+}
+
+/** Keep the existing placement policy as static Markdown finishes rendering:
+ * diagrams, plugin blocks and font reflow can resize a card after selection. */
+export function observeNodeCardPosition(card: HTMLDivElement, container: HTMLDivElement, anchor: { x: number; y: number }): () => void {
+	const place = () => {
+		const width = card.offsetWidth;
+		const height = card.offsetHeight;
+		const margin = 8;
+		const gap = 12;
+		const left = Math.min(
+			Math.max(anchor.x - width / 2, margin),
+			Math.max(container.clientWidth - width - margin, margin),
+		);
+		let top = anchor.y + gap;
+		if (top + height > container.clientHeight - margin) {
+			top = Math.max(anchor.y - gap - height, margin);
+		}
+		card.style.left = `${left}px`;
+		card.style.top = `${top}px`;
+		card.style.visibility = "visible";
+	};
+	place();
+	const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(place);
+	observer?.observe(card);
+	observer?.observe(container);
+	return () => observer?.disconnect();
+}
+
 export function GraphView({
 	chainSelectOpen = false,
 	practiceSelection,
@@ -1403,28 +1458,14 @@ export function GraphView({
 	}, [physicsTuning, isEmpty]);
 
 	// Position the detail card: below the clicked node, flipped above near
-	// the bottom edge, clamped horizontally. Imperative (ref + layout effect,
-	// before paint) because the flip needs the card's measured height.
+	// the bottom edge, clamped horizontally. Measure before paint, then keep
+	// the same placement policy when rich content or the container resizes.
 	useLayoutEffect(() => {
 		const card = cardRef.current;
 		const container = containerRef.current;
 		if (!selected || !card || !container) return;
-		const width = card.offsetWidth;
-		const height = card.offsetHeight;
-		const margin = 8;
-		const gap = 12;
-		const left = Math.min(
-			Math.max(selected.anchor.x - width / 2, margin),
-			Math.max(container.clientWidth - width - margin, margin),
-		);
-		let top = selected.anchor.y + gap;
-		if (top + height > container.clientHeight - margin) {
-			top = Math.max(selected.anchor.y - gap - height, margin);
-		}
-		card.style.left = `${left}px`;
-		card.style.top = `${top}px`;
-		card.style.visibility = "visible";
-	}, [selected]);
+		return observeNodeCardPosition(card, container, selected.anchor);
+	}, [selected, isEmpty]);
 
 	return (
 		<div className="relative h-full w-full">
@@ -1587,8 +1628,7 @@ export function GraphView({
 					// over home.tsx's drag surface (2026-09-17).
 					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 				>
-					<div className="text-sm font-medium leading-snug">{selected.node.name}</div>
-					<div className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>
+					<NodeCardText name={selected.node.name} statement={selected.node.statement} />
 					{selected.sourceIds.length > 0 ? (
 						<div className="mt-3 flex flex-col gap-1">
 							<div className="text-xs text-muted-foreground">Sessions</div>
