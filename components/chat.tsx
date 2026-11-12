@@ -1650,6 +1650,8 @@ export function Chat({
 								onChange={(e) => setTitleDraft(e.target.value)}
 								onKeyDown={(e) => {
 									if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
+									// An IME's Enter/Escape confirms or cancels its composition, not the rename.
+									if (e.nativeEvent.isComposing || e.keyCode === 229) return;
 									if (e.key === "Enter") void commitRename(titleDraft);
 									// stopPropagation claims the Esc (keyboard wave A):
 									// closing rename must not also abort a turn.
