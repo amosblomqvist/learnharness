@@ -49,6 +49,13 @@ export interface SubagentRunOptions {
 	onAssistantMessage?: (message: AssistantMessage, step: number) => void;
 	/** Extra stop rule (extractor: stop after a clean submit). */
 	shouldStop?: (message: AssistantMessage, toolResults: ToolResultMessage[]) => boolean;
+	/** Deliverable rescue (2026-11-11): when the loop ends with no final text
+	 *  (typically maxTurns exhausted by tool calls), run ONE more tool-less
+	 *  turn with this prompt and use its text. Observed failure: the
+	 *  researcher burned all 12 turns on web_search/web_fetch for questions
+	 *  like "list every certification …" and delivered an empty brief while
+	 *  the job had already paid for ~65k input tokens. */
+	finalizePrompt?: string;
 	/** Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream
 	 *  events append to data/debug/provider-events/<chatId>.jsonl (context
 	 *  "job:<role>"). Absent or env-off → no observer.
@@ -185,5 +192,19 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 				.map((c) => c.text)
 				.join("")
 		: "";
+
+	// Deliverable rescue (2026-11-11): a loop that spent every turn on tools
+	// still owes the caller its final text. One tool-less turn, same engine,
+	// transcript carried over — the model now has to write instead of fetch.
+	if (!text.trim() && opts.finalizePrompt && newMessages.length > 0 && !opts.abortSignal?.aborted) {
+		const fin = await runSubagent([], {
+			...opts,
+			messages: [...(opts.messages ?? []), ...newMessages],
+			prompt: opts.finalizePrompt,
+			maxTurns: 1,
+			finalizePrompt: undefined,
+		});
+		return { newMessages: [...newMessages, ...fin.newMessages], text: fin.text };
+	}
 	return { newMessages, text };
 }

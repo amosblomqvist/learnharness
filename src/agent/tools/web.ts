@@ -148,7 +148,7 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 				if (!provider) {
 					return (
 						"web_search is not available: no search engine is configured. " +
-						"Set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key in settings. Report in your brief that web search is unavailable."
+						"Set the SEARXNG_URL of a self-hosted instance, or a Tavily/Brave/Exa/Firecrawl/Ollama key in settings. Report in your brief that web search is unavailable."
 					);
 				}
 				try {
