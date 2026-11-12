@@ -214,11 +214,11 @@ export function wrapRegionLabel(
 			if (!line) {
 				// The word alone overflows: char-split it, the remainder stays
 				// pending for the next line (paths have no spaces to help).
+				const chars = graphemes(word);
 				let chunk = "";
-				while (word.length > 0 && measure(chunk + word[0]) <= maxWidth) {
-					chunk += word[0];
-					word = word.slice(1);
-				}
+				let used = 0;
+				while (used < chars.length && measure(chunk + chars[used]) <= maxWidth) chunk += chars[used++];
+				word = chars.slice(used).join("");
 				if (chunk) {
 					lines.push(chunk);
 					pending[0] = word;
@@ -244,10 +244,17 @@ export function wrapRegionLabel(
 		lines.push(rest);
 		return lines;
 	}
-	let tail = rest;
-	while (tail.length > 1 && measure(`${tail}…`) > maxWidth) tail = tail.slice(0, -1);
-	lines.push(`${tail}…`);
+	const tail = graphemes(rest);
+	while (tail.length > 1 && measure(`${tail.join("")}…`) > maxWidth) tail.pop();
+	lines.push(`${tail.join("")}…`);
 	return lines;
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+/** The user-perceived characters of `s` (emoji, flags and accented letters
+ *  stay whole) — the only safe units to split a label between. */
+function graphemes(s: string): string[] {
+	return Array.from(graphemeSegmenter.segment(s), (g) => g.segment);
 }
 
 /** Label-only cluster patch (rename-shuffle fix, 2026-09-23): apply a set
@@ -532,7 +539,7 @@ function wrapLabel(context: CanvasRenderingContext2D, text: string, maxWidth: nu
 			}
 		}
 		let chunk = "";
-		for (const char of word) {
+		for (const char of graphemes(word)) {
 			if (chunk && context.measureText(`${chunk}${char}`).width > maxWidth) {
 				lines.push(chunk);
 				chunk = char;
