@@ -242,13 +242,14 @@ test("activation abort closes an SDK source even while the plugin is paused betw
 	assert.deepEqual(ledger(f.directory), []);
 });
 
-test("managed engines do not forward Agent transport callbacks, credentials, or caching session identity", async (t) => {
+test("managed engines forward the host session id but not transport callbacks or credentials", async (t) => {
 	const f = fixture(t);
 	const engine = await f.adapter.engineFor(spec, "user");
-	const privateOptions = { apiKey: "secret-not-forwarded", headers: { Authorization: "secret-not-forwarded" }, sessionId: "not-a-plugin-session", fetch: () => { throw new Error("must not be invoked"); }, onPayload: () => { throw new Error("must not be invoked"); }, maxTokens: 64 };
+	const privateOptions = { apiKey: "secret-not-forwarded", headers: { Authorization: "secret-not-forwarded" }, sessionId: "host-session-1", fetch: () => { throw new Error("must not be invoked"); }, onPayload: () => { throw new Error("must not be invoked"); }, maxTokens: 64 };
 	await collect(engine.streamFn(engine.model, normalizeContext({ messages: [] }), privateOptions as never));
 	assert.equal(f.calls[0]?.options.maxTokens, 64);
-	for (const key of ["apiKey", "headers", "sessionId", "fetch", "onPayload"]) assert(!(key in f.calls[0]!.options));
+	assert.equal(f.calls[0]?.options.sessionId, "host-session-1");
+	for (const key of ["apiKey", "headers", "fetch", "onPayload"]) assert(!(key in f.calls[0]!.options));
 	assert.equal(ledger(f.directory).length, 0, "managed engine usage is written only by its host callback");
 });
 
@@ -396,7 +397,7 @@ test("incomplete transport streams become explicit errors; usage persistence fai
 	assert.equal(readFileSync(join(g.directory, "usage.jsonl"), "utf8"), "existing ledger\n");
 });
 
-test("bound worker generation options survive every native runner turn without leaking transport identity or changing purpose", async t => {
+test("bound worker generation options survive every native runner turn with one host session id", async t => {
 	const f = fixture(t, { produce(stream, dispatched) {
 		const m = f.calls.length === 1 ? output(dispatched.model) : { ...output(dispatched.model), stopReason: "stop" as const, content: [{ type: "text" as const, text: "Finished" }] };
 		stream.push({ type: "done", reason: m.stopReason as "toolUse" | "stop", message: m }); stream.end();
@@ -409,10 +410,12 @@ test("bound worker generation options survive every native runner turn without l
 		onUsage: value => { assert(usageWasAdmitted(value)); f.adapter.onUsage(spec, value); },
 	});
 	assert.equal(result.text, "Finished"); assert.equal(f.calls.length, 2); assert.equal(ledger(f.directory).length, 2);
+	const sessionId = f.calls[0]!.options.sessionId;
+	assert.match(String(sessionId), /^[0-9a-f-]{36}$/);
 	for (const call of f.calls) {
 		assert.equal(call.background, true); assert.equal(call.options.temperature, 0.3); assert.equal(call.options.maxTokens, 77); assert.equal(call.options.cacheRetention, "long");
 		assert.deepEqual(call.options.metadata, { tag: "original" }); assert.equal(call.options.reasoning, "medium"); assert.equal(call.options.maxRetries, 0);
-		assert.equal(call.options.apiKey, undefined); assert.equal(call.options.headers, undefined); assert.equal(call.options.sessionId, undefined); assert(call.options.signal instanceof AbortSignal);
+		assert.equal(call.options.sessionId, sessionId); assert.equal(call.options.apiKey, undefined); assert.equal(call.options.headers, undefined); assert(call.options.signal instanceof AbortSignal);
 	}
 });
 
