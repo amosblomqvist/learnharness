@@ -245,12 +245,52 @@ test("activation abort closes an SDK source even while the plugin is paused betw
 test("managed engines forward the host session id but not transport callbacks or credentials", async (t) => {
 	const f = fixture(t);
 	const engine = await f.adapter.engineFor(spec, "user");
-	const privateOptions = { apiKey: "secret-not-forwarded", headers: { Authorization: "secret-not-forwarded" }, sessionId: "host-session-1", fetch: () => { throw new Error("must not be invoked"); }, onPayload: () => { throw new Error("must not be invoked"); }, maxTokens: 64 };
+	const privateOptions = { apiKey: "secret-not-forwarded", headers: { Authorization: "secret-not-forwarded" }, sessionId: "host-session-1", identity: { attribution: { name: "not-forwarded", url: "https://invalid.example" } }, fetch: () => { throw new Error("must not be invoked"); }, onPayload: () => { throw new Error("must not be invoked"); }, onResponse: () => { throw new Error("must not be invoked"); }, onProviderStreamEvent: () => { throw new Error("must not be invoked"); }, maxTokens: 64 };
 	await collect(engine.streamFn(engine.model, normalizeContext({ messages: [] }), privateOptions as never));
 	assert.equal(f.calls[0]?.options.maxTokens, 64);
 	assert.equal(f.calls[0]?.options.sessionId, "host-session-1");
-	for (const key of ["apiKey", "headers", "fetch", "onPayload"]) assert(!(key in f.calls[0]!.options));
+	for (const key of ["apiKey", "headers", "identity", "fetch", "onPayload", "onResponse", "onProviderStreamEvent"]) assert(!(key in f.calls[0]!.options));
 	assert.equal(ledger(f.directory).length, 0, "managed engine usage is written only by its host callback");
+});
+
+for (const sessionId of [undefined, "", null, 123]) test(`managed engines omit invalid or absent host session id ${JSON.stringify(sessionId)}`, async t => {
+	const f = fixture(t);
+	const engine = await f.adapter.engineFor(spec, "user");
+	await collect(engine.streamFn(engine.model, normalizeContext({ messages: [] }), { sessionId } as never));
+	assert(!Object.hasOwn(f.calls[0]!.options, "sessionId"));
+});
+
+test("managed plugin conversations retain host identity across sends and restart without sharing sessions", { timeout: 3000 }, async t => {
+	const f = fixture(t, { produce(stream) {
+		const m = { ...output(), stopReason: "stop" as const, content: [{ type: "text" as const, text: "Done" }] };
+		stream.push({ type: "done", reason: "stop", message: m }); stream.end();
+	} });
+	const store = createPluginAgentRecordStore(join(f.directory, "agents"));
+	const create = () => createPluginAgentService({ store, engineFor: f.adapter.engineFor });
+	const definition = { id: "session-check", instructions: "Offline", model: spec };
+	let service = create();
+	t.after(() => service.dispose());
+	service.register(definition);
+	const first = service.create(definition.id).id, second = service.create(definition.id).id;
+	assert.notEqual(first, second);
+	const send = async (id: string, requestId: string) => {
+		await service.send(id, "Offline", { requestId });
+		await new Promise<void>(resolve => {
+			const unsubscribe = service.subscribe(id, snapshot => {
+				if (snapshot.status !== "running") queueMicrotask(() => { unsubscribe(); resolve(); });
+			});
+		});
+		assert.equal(service.get(id).status, "idle");
+	};
+	await send(first, "first-send");
+	await send(second, "separate-session");
+	await send(first, "second-send");
+	await service.dispose();
+	service = create();
+	service.register(definition);
+	assert.equal(f.calls.length, 3, "restoring conversations does not replay requests");
+	await send(first, "after-restart");
+	assert.deepEqual(f.calls.map(call => call.options.sessionId), [first, second, first, first]);
 });
 
 test("held managed engines inherit activation cancellation and revalidate provider availability at dispatch", async (t) => {
@@ -421,9 +461,10 @@ test("bound worker generation options survive every native runner turn with one 
 
 test("engine option binding rejects unsupported transport fields and reasoning overrides before dispatch", async t => {
 	const f = fixture(t);
-	for (const invalid of [{ apiKey: "secret" }, { signal: new AbortController().signal }, { sessionId: "foreign" }, { temperature: NaN }]) {
-		await assert.rejects(f.adapter.engineFor(spec, "user", invalid as never), /Unsupported|Invalid/);
+	for (const key of ["sessionId", "identity", "apiKey", "headers", "fetch", "onPayload", "onResponse", "onProviderStreamEvent", "signal"]) {
+		await assert.rejects(f.adapter.engineFor(spec, "user", { [key]: "plugin-controlled" } as never), new RegExp(`Unsupported plugin inference option: ${key}`));
 	}
+	await assert.rejects(f.adapter.engineFor(spec, "user", { temperature: NaN }), /Invalid/);
 	await assert.rejects(f.adapter.engineFor(spec, "user", { reasoning: "high" }), /thinkingLevel/);
 	assert.equal(f.calls.length, 0);
 });
