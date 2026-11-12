@@ -121,6 +121,7 @@ const nextConfig: NextConfig = {
 		"@napi-rs/canvas", // native binding — bundling breaks the .node require
 		"@silvia-odwyer/photon-node", // CJS loads its adjacent WASM from disk
 		"@resvg/resvg-js", // native binding — same
+		"unzipper", // ZIP reader has optional Node adapters that cannot be bundled
 	],
 };
 
