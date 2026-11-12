@@ -26,6 +26,7 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { PathText } from "@/components/file-path-chip";
+import { CopyResponseButton } from "@/components/copy-response-button";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
@@ -237,8 +238,7 @@ function SystemLine({ children, testId }: { children: React.ReactNode; testId?: 
 	);
 }
 
-/** One immediate optimistic placeholder; only its wording changes during
- * host-managed submission evaluation. The spinner keeps its identity. */
+/** One immediate optimistic placeholder; only its wording changes during * host-managed submission evaluation. The spinner keeps its identity. */
 export function PendingTurnIndicator({ evaluating }: { evaluating: boolean }) {
 	return (
 		<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
@@ -250,6 +250,15 @@ export function PendingTurnIndicator({ evaluating }: { evaluating: boolean }) {
 
 function isSubagentSteer(m: LhViewMessage): boolean {
 	return (m.metadata as { subagentResult?: unknown } | undefined)?.subagentResult != null;
+}
+
+/** The response text the copy button writes: assistant text parts only, in
+ *  order, blank-separated — reasoning, tool cards and data parts stay out. */
+export function responseTextOf(parts: readonly { type: string; text?: string }[]): string {
+	return parts
+		.filter((part) => part.type === "text" && part.text?.trim())
+		.map((part) => part.text!.trim())
+		.join("\n\n");
 }
 
 /**
@@ -1025,18 +1034,20 @@ export function Chat({
 			toggle: () => recording.toggleFor({ id: destinationId, append: (text) => sideThread.saveDraft(id, joinDictation(sideThread.draftFor(id), text), true) }),
 			finish: () => recording.finishFor(destinationId) };
 	};
-	const renderSideEntry = (sourceMessageId?: string) => {
+	const sideButton = (sourceMessageId?: string) => {
 		if (!sourceMessageId) return null;
 		const hasHistory = sideThread.threads.some((thread) => thread.anchor.messageId === sourceMessageId && thread.messages.length > 0);
-		return <div className="mt-1 flex justify-end">
-			<Button type="button" variant="ghost" size="icon-xs" data-testid="side-conversation-button" data-side-segment-id={sourceMessageId}
-				data-has-history={hasHistory} aria-label={hasHistory ? "Open side conversation" : "Ask a side question"}
-				title={hasHistory ? "Open side conversation" : "Ask a side question"}
-				className={hasHistory ? "border border-border/60 text-muted-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}
-				onClick={(event) => openSideThread({ sourceMessageId, anchor: { kind: "element", element: event.currentTarget } })}>
-				<MessageCircleQuestionIcon aria-hidden className="size-3.5" fill="currentColor" fillOpacity={hasHistory ? 0.12 : 0} />
-			</Button>
-		</div>;
+		return <Button type="button" variant="ghost" size="icon-xs" data-testid="side-conversation-button" data-side-segment-id={sourceMessageId}
+			data-has-history={hasHistory} aria-label={hasHistory ? "Open side conversation" : "Ask a side question"}
+			title={hasHistory ? "Open side conversation" : "Ask a side question"}
+			className={hasHistory ? "border border-border/60 text-muted-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}
+			onClick={(event) => openSideThread({ sourceMessageId, anchor: { kind: "element", element: event.currentTarget } })}>
+			<MessageCircleQuestionIcon aria-hidden className="size-3.5" fill="currentColor" fillOpacity={hasHistory ? 0.12 : 0} />
+		</Button>;
+	};
+	const renderSideEntry = (sourceMessageId?: string) => {
+		const button = sideButton(sourceMessageId);
+		return button ? <div className="mt-1 flex justify-end">{button}</div> : null;
 	};
 	const sideThreadOpenRef = useRef(false);
 	sideThreadOpenRef.current = sideThread.state !== null;
@@ -1967,7 +1978,17 @@ export function Chat({
 												}
 											})}
 										</MessageContent>
-										{m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length))}
+										{m.role === "assistant" && (() => {
+											const responseText = responseTextOf(m.parts);
+											const side = sideButton(sideEntries.get(m.id)?.get(m.parts.length));
+											if (!responseText && !side) return null;
+											return (
+												<div className="mt-1 flex items-center justify-end gap-1">
+													{responseText ? <CopyResponseButton getText={() => responseText} /> : null}
+													{side}
+												</div>
+											);
+										})()}
 									</Message>
 									)}
 								</Fragment>
