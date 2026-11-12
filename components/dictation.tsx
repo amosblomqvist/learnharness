@@ -655,6 +655,8 @@ export function useDictation({ append, destination = "primary", disabled = false
 		setDictationActive(true);
 		setError(null);
 		appendFailureRef.current = null;
+		// Without the Apple bridge there is no engine pick: show the bar at once.
+		if (!appleSpeechBridge()) setPhase("connecting");
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
