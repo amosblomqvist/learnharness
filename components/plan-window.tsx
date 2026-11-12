@@ -6,9 +6,10 @@ import {
 	PlanDiagram,
 	GRAPH_PAD,
 	latestTree,
-	TEXT_CAP_SCALE,
+	usePlanLayout,
 	type PopupMessage,
 } from "@/components/plan-block";
+import { useAppearance } from "@/components/settings/appearance";
 
 /**
  * THE PLAN MARGINALIA: the plan's ambient presence in the session view —
@@ -48,17 +49,20 @@ export function PlanMarginalia({ messages }: { messages: readonly PopupMessage[]
 		() => (tree ? derivePlanStatuses(tree, messages as Parameters<typeof derivePlanStatuses>[1]) : null),
 		[tree, messages],
 	);
+	const plan = usePlanLayout(tree);
+	const { appearance } = useAppearance();
 	if (!tree || tree.nodes.length === 0) return null; // no plan yet: nothing in the margin
 	const statusOf = (id: string) => (statuses ? derivedNodeStatus(statuses, id) : "upcoming");
 	return (
 		<PlanDiagram
+			plan={plan}
 			nodes={tree.nodes}
 			edges={tree.edges}
 			statusOf={statusOf}
 			glowId={statuses?.current ?? null}
 			markerId={markerId}
 			pad={MARGIN_PAD}
-			textCapScale={TEXT_CAP_SCALE}
+			textCap={appearance.proseFontSize}
 			fill
 		/>
 	);
