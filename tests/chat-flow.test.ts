@@ -1665,6 +1665,98 @@ describe("composer steering: POST /api/chats/[id]/steer", () => {
 		assert.equal(steerMsg.id, "steer_live1", "the client-minted id survived to the record");
 		assert.equal(steerMsg.content, "also cover Venus");
 	});
+
+	/** A quiz turn held inside its model call. The skip can be parked and a
+	 *  composer message steered before the question stopper ends the run. */
+	function gatedQuiz(gate: Promise<void>, calls: string[][]): PiEngine {
+		const faux = createFauxCore({});
+		faux.setResponses([
+			async (context: { messages: unknown[] }) => {
+				calls.push(context.messages.map((m) => JSON.stringify((m as { content: unknown }).content)));
+				await gate;
+				return fauxAssistantMessage(
+					[fauxToolCall("quiz", QUIZ_INPUT, { id: "call-1" })],
+					{ stopReason: "toolUse" },
+				);
+			},
+			(context: { messages: unknown[] }) => {
+				calls.push(context.messages.map((m) => JSON.stringify((m as { content: unknown }).content)));
+				return fauxAssistantMessage([fauxText("Continuing after the skip.")]);
+			},
+		]);
+		return { model: faux.getModel(), streamFn: faux.streamSimple };
+	}
+
+	async function holdQuizTurn(title: string): Promise<{ chatId: string; calls: string[][]; release: () => void; firstTurn: Promise<string> }> {
+		let release!: () => void;
+		const gate = new Promise<void>((resolve) => { release = resolve; });
+		const calls: string[][] = [];
+		const chat = createConfiguredChat(title);
+		createdChats.push(chat.id);
+		const ack = await handleChatRequest(post(chat.id, { type: "text", text: "teach me the solar system" }), agentFactory(gatedQuiz(gate, calls)));
+		assert.equal(ack.status, 200);
+		await ack.text();
+		await waitFor(() => calls.length === 1, 8000, "quiz turn reached its model call");
+		const firstTurn = drainRunning(chat.id);
+		return { chatId: chat.id, calls, release, firstTurn };
+	}
+
+	it("delivers a message steered after a skip once the quiz turn settles", async () => {
+		const { chatId, calls, release, firstTurn } = await holdQuizTurn("Test: message after skip");
+		const dismissed = await dismissPost(chatId, "call-1");
+		assert.equal(dismissed.status, 202, "the skip is parked while the quiz turn is still live");
+		const steered = await steerPost(chatId, { input: { type: "steer", id: "steer_after_skip", text: "skip that — tell me about Mars" } });
+		assert.equal(steered.status, 200, "the composer still has a live turn, so Enter is accepted as a steer");
+
+		release();
+		await firstTurn;
+		await waitFor(() => calls.length === 2 && !isTurnRunning(chatId), 8000, "the post-skip message to reach the tutor");
+
+		const saved = chatStore.getChat(chatId)!;
+		assert.equal(danglingQuestionOf(saved.messages), null, "the parked skip landed");
+		assert.equal(endsInDismissal(saved.messages), false, "the steered message lifted the dismissal pause");
+		assert.equal(saved.messages.filter((m) => m.id === "steer_after_skip").length, 1, "the steered message was persisted once");
+		assert.match(calls[1]!.join("\n"), /tell me about Mars/, "the tutor saw the message");
+		assert.match(calls[1]!.join("\n"), /dismissed/, "the tutor saw the skipped question");
+		assert.equal(calls.length, 2, "one follow-up turn, not a second learner send");
+	});
+
+	it("does not start a turn for a skip alone, or for a steer typed before the skip", async () => {
+		const skipped = await holdQuizTurn("Test: skip without a follow-up message");
+		assert.equal((await dismissPost(skipped.chatId, "call-1")).status, 202);
+		skipped.release();
+		await skipped.firstTurn;
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		assert.equal(skipped.calls.length, 1, "a skip by itself still wakes nothing");
+		assert.equal(isTurnRunning(skipped.chatId), false);
+		assert.equal(endsInDismissal(chatStore.getChat(skipped.chatId)!.messages), true);
+
+		const earlier = await holdQuizTurn("Test: steer before the skip");
+		const steered = await steerPost(earlier.chatId, { input: { type: "steer", id: "steer_before_skip", text: "also cover Venus" } });
+		assert.equal(steered.status, 200);
+		assert.equal((await dismissPost(earlier.chatId, "call-1")).status, 202);
+		earlier.release();
+		await earlier.firstTurn;
+		await new Promise((resolve) => setTimeout(resolve, 250));
+		assert.equal(earlier.calls.length, 1, "a steer from before the skip stays parked when the quiz ends");
+		assert.equal(chatStore.getChat(earlier.chatId)!.messages.some((m) => m.id === "steer_before_skip"), false);
+
+		const follow = createFauxCore({});
+		follow.setResponses([
+			(context: { messages: unknown[] }) => {
+				earlier.calls.push(context.messages.map((m) => JSON.stringify((m as { content: unknown }).content)));
+				return fauxAssistantMessage([fauxText("Onward.")]);
+			},
+		]);
+		await drainTurn(
+			post(earlier.chatId, { type: "text", text: "tell me about Mars" }),
+			agentFactory({ model: follow.getModel(), streamFn: follow.streamSimple }),
+		);
+		const prompt = earlier.calls.at(-1)!.join("\n");
+		assert.match(prompt, /also cover Venus/, "the earlier steer rides the next explicit send");
+		assert.match(prompt, /tell me about Mars/);
+		assert.equal(isTurnRunning(earlier.chatId), false);
+	});
 });
 
 // ─── THE LACAN INCIDENT: per-response tool-call ids (owner fix 2026-10-04) ──
