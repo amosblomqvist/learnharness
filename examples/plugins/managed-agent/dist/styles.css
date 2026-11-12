@@ -1,0 +1,5 @@
+.plugin-agent-example { padding: 1.5rem; color: var(--foreground); }
+.plugin-agent-example h1 { font-size: 1.5rem; margin-bottom: 1rem; }
+.plugin-agent-example p { margin: .75rem 0; }
+button.plugin-agent-example-native, .plugin-agent-example-native button, .plugin-agent-example-native select, .plugin-agent-example-native input { border: 1px solid var(--border); border-radius: .25rem; background: var(--background); color: var(--foreground); padding: .5rem; margin: .25rem; }
+.plugin-agent-example pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 50vh; overflow-y: auto; padding: 1rem; border: 1px solid var(--border); }

@@ -3,7 +3,9 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { StatsBar } from "../components/stats-bar.tsx";
+import { StatsBar as StatsBarBase } from "../components/stats-bar.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+function StatsBar(props: React.ComponentProps<typeof StatsBarBase>) { return <InteractionLayersProvider><StatsBarBase {...props} /></InteractionLayersProvider>; }
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import type { ModelCatalogResponse, TurnUsage } from "../src/core/index.ts";
 

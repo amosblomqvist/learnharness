@@ -28,6 +28,8 @@ const { ensureGraphFormat } = await import("../src/store/graph-format.ts");
 const { promptOverrides } = await import("../src/store/prompt-overrides.ts");
 const { authStore } = await import("../src/store/auth.ts");
 const { sourceOrganizationStore } = await import("../src/store/source-organization.ts");
+const { themeStore } = await import("../src/store/themes.ts");
+const { DEFAULT_THEME } = await import("../src/core/themes.ts");
 
 after(() => fs.rmSync(TMP_DATA, { recursive: true, force: true }));
 
@@ -61,8 +63,14 @@ describe("failed saves leave the old file whole", () => {
 
 	it("settings", (t) => {
 		assertAllOrNothing(t, config.SETTINGS_FILE,
-			() => writeSettings({ version: 1, appearance: { mode: "light" } }),
-			() => writeSettings({ version: 1, appearance: { mode: "dark" } }));
+			() => writeSettings({ version: 1, appearance: { theme: "catppuccin-latte" } }),
+			() => writeSettings({ version: 1, appearance: { theme: "default" } }));
+	});
+
+	it("custom theme", (t) => {
+		assertAllOrNothing(t, path.join(config.THEMES_DIR, "atomic-theme.json"),
+			() => themeStore.writeTheme("atomic-theme", { ...DEFAULT_THEME, name: "Old" }),
+			() => themeStore.writeTheme("atomic-theme", { ...DEFAULT_THEME, name: "New" }));
 	});
 
 	it("notes sources: import and delete", (t) => {
@@ -113,7 +121,11 @@ describe("Windows sharing violations: per-writer compatibility policy (modeled)"
 			const { id } = jobStore.createJob({ kind: "research", chatId: "chat_policy", toolCallId: "tc_update" });
 			return { file: path.join(config.PATHS.data, "jobs", `${id}.json`), save: () => jobStore.updateJob(id, { status: "done" }) };
 		} },
-		{ name: "settings", fallback: true, prepare: () => ({ file: config.SETTINGS_FILE, save: () => writeSettings({ version: 1, appearance: { mode: "light" } }) }) },
+		{ name: "settings", fallback: true, prepare: () => ({ file: config.SETTINGS_FILE, save: () => writeSettings({ version: 1, appearance: { theme: "catppuccin-latte" } }) }) },
+		{ name: "custom theme", fallback: false, prepare: () => {
+			themeStore.writeTheme("held-theme", DEFAULT_THEME);
+			return { file: path.join(config.THEMES_DIR, "held-theme.json"), save: () => themeStore.writeTheme("held-theme", { ...DEFAULT_THEME, name: "New" }) };
+		} },
 		{ name: "source update", fallback: true, prepare: () => ({ file: config.SOURCES_FILE, save: () => graphStore.upsertSource({ id: "src_policy", filePath: "/synthetic.md", importedAt: "2026-11-01T00:00:00Z" }) }) },
 		{ name: "render settings", fallback: true, prepare: () => ({ file: config.RENDER_SETTINGS_FILE, save: () => writeRenderSettings({ linkDistance: 90 }) }) },
 		{ name: "graph format", fallback: true, prepare: () => {

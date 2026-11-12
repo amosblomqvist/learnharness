@@ -84,11 +84,15 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		app, BrowserWindow: FakeWindow,
 		Menu: { buildFromTemplate: (value: typeof menu) => value, setApplicationMenu: (value: typeof menu) => { menu = value; } },
 		ipcMain: { on() {}, handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
+		nativeTheme: { shouldUseDarkColors: true, themeSource: "system", on() {} },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = createContext({
 		require: (id: string) => {
 			if (id === "electron") return electron;
+			// The actual dev readiness helper is tested separately; keep this
+			// updater shell fixture entirely offline and already ready.
+			if (id === "./dev-server-readiness.cjs") return { waitForDevServer: async () => {} };
 			if (id === "electron-updater") {
 				if (updaterMissing) throw new Error("missing updater");
 				return { autoUpdater: updater };
@@ -103,7 +107,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 			return mainRequire(id);
 		},
 		process: { argv: [], env: { LH_DEV_URL: "http://127.0.0.1:9000" }, platform: "darwin", on() {} },
-		__dirname: path.dirname(mainFile), URL,
+		__dirname: path.dirname(mainFile), URL, AbortController,
 		setInterval: (callback: () => void, delay: number) => intervals.push({ callback, delay }),
 		setTimeout() {},
 		fixtureChild: { kill: (signal: string) => order.push(signal) },
