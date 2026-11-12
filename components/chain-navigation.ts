@@ -68,7 +68,10 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 			const fromSearch = target === searchRef.current;
 			if (fromSearch ? event.key !== "ArrowDown" : target?.closest('input:not([type="checkbox"]),textarea,[contenteditable="true"]')) return;
 			if (event.key === " ") {
-				if (target?.closest('button,a[href],[role="button"]') && !target.closest("[data-chain-nav-row]")) return;
+				// Rich statement actions own Space; row/checkbox selection and
+				// the existing disclosure/arrow contracts remain unchanged.
+				if (target?.closest('button,a[href],[role="button"]') &&
+					(!target.closest("[data-chain-nav-row]") || target.closest("[data-chain-statement]"))) return;
 				const row = readRows().find((row) => row.key === active.current);
 				const checkbox = row?.element.querySelector<HTMLInputElement>('input[type="checkbox"]');
 				if (!row || !checkbox || checkbox.disabled) return;

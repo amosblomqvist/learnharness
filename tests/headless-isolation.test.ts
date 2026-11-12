@@ -1,5 +1,5 @@
 /**
- * Demo and fallback-SVG pages run model-written markup. They must load in
+ * Demo pages run model-written markup. They must load in
  * memory (opaque origin), never as a file:// document that can read local
  * files, and requests for schemes other than web/data ones are aborted while
  * they run. The helper's page is reused, so the filter must come off again.

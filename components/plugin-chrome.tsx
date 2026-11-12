@@ -1,6 +1,6 @@
 "use client";
 
-import { Children, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
+import { Children, useEffect, useLayoutEffect, useRef, useState, type ReactNode, type RefObject } from "react";
 import { EllipsisIcon, PuzzleIcon } from "lucide-react";
 import type { PluginAction, PluginActionContext } from "@/src/core";
 import type { FrontendPlugin } from "@/components/plugin-manager";
@@ -107,6 +107,23 @@ export function fitPluginTopBarActions(widths: readonly number[], available: num
 		used += gap + width; count++;
 	}
 	return count;
+}
+
+/** Draft notifications refresh action predicates, not the owning session transcript. */
+export function PluginSessionTopBarActions({ readContext, captureContext, refreshRef }: {
+	readContext: () => Extract<PluginActionContext, { placement: "top-bar"; surface: "session" }> | undefined;
+	captureContext: () => PluginActionContext | undefined;
+	refreshRef: RefObject<(() => void) | null>;
+}) {
+	const [, refresh] = useState(0);
+	useLayoutEffect(() => {
+		const notify = () => refresh(value => value + 1);
+		refreshRef.current = notify;
+		return () => { if (refreshRef.current === notify) refreshRef.current = null; };
+	}, [refreshRef]);
+	// Each render needs a new context: its lazy view getter caches a snapshot.
+	const context = readContext();
+	return context ? <PluginTopBarActions context={context} captureContext={captureContext} /> : null;
 }
 
 export function PluginTopBarActions({ context, captureContext }: { context: Extract<PluginActionContext, { placement: "top-bar" }>; captureContext?: () => PluginActionContext | undefined }) {

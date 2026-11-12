@@ -180,7 +180,7 @@ async function browserProbe(puppeteer) {
 		// Import the actual production functions, not an independently implemented
 		// isolation recipe. Payload-only import tracing was checked separately.
 		const { tsImport } = await import("tsx/esm/api");
-		const { loadIsolatedPage, runDemoOnPage, renderSvgOnPage } = await tsImport("../src/agent/subagents/headless.ts", import.meta.url);
+		const { loadIsolatedPage, runDemoOnPage } = await tsImport("../src/agent/subagents/headless.ts", import.meta.url);
 		const cleanup = await loadIsolatedPage(page, '<!doctype html><meta charset="utf-8"><button id="increment">Increment</button><output id="count">0</output><script>document.querySelector("#increment").onclick = () => { document.querySelector("#count").textContent = "1"; };</script>');
 		assert.equal(await page.$eval("#count", (element) => element.textContent), "0");
 		await page.click("#increment");
@@ -190,11 +190,13 @@ async function browserProbe(puppeteer) {
 		const canary = path.join(home, "canary.txt");
 		fs.writeFileSync(canary, "lh-demo-canary\n");
 		const leaked = await page.evaluate(async (url) => {
-			const viaFetch = async () => { try { return (await (await fetch(url)).text()).includes("lh-demo-canary"); } catch { return false; } };
-			const viaXhr = () => { try { const xhr = new XMLHttpRequest(); xhr.open("GET", url, false); xhr.send(); return xhr.responseText.includes("lh-demo-canary"); } catch { return false; } };
-			return { origin: location.origin, fetch: await viaFetch(), xhr: viaXhr() };
+			let fetchAttempted = false, xhrAttempted = false;
+			const viaFetch = async () => { fetchAttempted = true; try { return (await (await fetch(url)).text()).includes("lh-demo-canary"); } catch { return false; } };
+			const viaXhr = () => { xhrAttempted = true; try { const xhr = new XMLHttpRequest(); xhr.open("GET", url, false); xhr.send(); return xhr.responseText.includes("lh-demo-canary"); } catch { return false; } };
+			const fetchRead = await viaFetch(), xhrRead = viaXhr();
+			return { origin: location.origin, fetchAttempted, xhrAttempted, fetch: fetchRead, xhr: xhrRead };
 		}, pathToFileURL(canary).href);
-		assert.deepEqual(leaked, { origin: "null", fetch: false, xhr: false }, "demo page could read a local file");
+		assert.deepEqual(leaked, { origin: "null", fetchAttempted: true, xhrAttempted: true, fetch: false, xhr: false }, "active demo file-read attempts must be refused");
 		failures.length = 0; // the blocked reads above log expected errors
 		await cleanup();
 		assert.equal(page.url(), "about:blank");
@@ -222,19 +224,9 @@ async function browserProbe(puppeteer) {
 			await assert.rejects(loadIsolatedPage(failing, "<p>failure</p>"), /owned load failure/);
 			assert.equal(page.url(), "about:blank");
 			assert.equal((await good()).ok, true, "clean reuse after load/page/probe failure");
-			const observations = [];
-			const observe = message => { if (message.type() === "log") observations.push(message.text()); };
-			page.on("console", observe);
-			try {
-				const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="red"/><script>let read = false; try { const x = new XMLHttpRequest(); x.open("GET", ${JSON.stringify(pathToFileURL(canary).href)}, false); x.send(); read = x.responseText.includes("lh-demo-canary"); } catch {} console.log("SVG_FILE_READ=" + read);</script></svg>`;
-				const png = await renderSvgOnPage(page, svg);
-				assert.equal(png.subarray(0, 8).toString("hex"), "89504e470d0a1a0a");
-				assert.deepEqual(observations, ["SVG_FILE_READ=false"]);
-				assert.equal(page.url(), "about:blank");
-			} finally { page.off("console", observe); }
 			assert.deepEqual(["request", "console", "pageerror", "requestfailed"].map(event => page.listenerCount(event)), listeners, "no production listeners survive retirement");
 		} finally { await new Promise(resolve => cdn.close(resolve)); }
-		console.log("[smoke-demo-runtime] actual production loader/demo/SVG fallback: opaque origin, file refusal, inline/CDN/probe/error behavior, guarded reset and failure/reuse passed (no Chrome fallback)");
+		console.log("[smoke-demo-runtime] actual production loader/demo: opaque origin, active file refusal, inline/CDN/probe/error behavior, guarded reset and failure/reuse passed (no Chrome fallback)");
 	} catch (err) {
 		failed = true;
 		throw new Error(`browser-service probe failed at local CDP/browser interaction\n--- browser-service output ---\n${output}\n${errors}`, { cause: err });
