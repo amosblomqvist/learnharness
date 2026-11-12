@@ -180,6 +180,14 @@ body {
 	line-height: var(--lh-prose-leading);
 }
 
+/* RTL / BiDi (#600): each paragraph takes its direction from its first letter,
+   so any right-to-left language (Arabic, Hebrew, Persian, Urdu…) mixed with
+   left-to-right terms reads correctly in replies and the composer. */
+:where(.lh-prose, .lh-prose p, .lh-prose li, .lh-prose h1, .lh-prose h2, .lh-prose h3, .lh-prose blockquote, [data-file-path-input]) {
+	unicode-bidi: plaintext;
+	text-align: start;
+}
+
 /* Session-name weight (owner, fix wave round 3): with the serif toggle
    OFF, --font-title resolves to the prose font — Source Sans 3 is loaded
    as a VARIABLE font, and without an explicit weight the titles render at
