@@ -9,6 +9,16 @@ import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
 export { isDictationActive } from "@/components/dictation-state";
+import { AppleModelDialog } from "@/components/apple-model-dialog";
+import {
+	appleModelReady,
+	appleSpeechBridge,
+	chooseEngine,
+	refreshAppleStatus,
+	subscribeAppleStatus,
+	wireAppleInstallEvents,
+	type AppleSpeechEvent,
+} from "@/components/apple-speech";
 
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
@@ -84,6 +94,15 @@ export { isDictationActive } from "@/components/dictation-state";
  *     path, which always mints FRESH.
  *   - The honest floor stays: getUserMedia can't be pre-warmed (the mic
  *     indicator would stay lit) — hence the owner's optimistic meter.
+ *
+ * Apple on-device engine (components/apple-speech.ts):
+ * with NO Deepgram key on macOS 26+, the same capture graph streams its
+ * frames over IPC to the SpeechAnalyzer helper instead of the Deepgram
+ * socket; finals, the deferred flush, stop/cancel/finish and the meter are
+ * shared. On a host with the bridge, the engine is decided BEFORE the mic
+ * (warm token + cached status — near-instant), so the model-download
+ * prompt never lights the mic indicator. The download always asks first
+ * (AppleModelDialog); "downloading" shows its progress in the bar.
  */
 
 /*
@@ -92,6 +111,10 @@ export { isDictationActive } from "@/components/dictation-state";
  * pauses), so the socket never idles — no KeepAlive needed.
  */
 // URL construction lives in the browser-safe core; only language varies.
+
+/** Apple's stop path finalizes the last phrase on-device; allow longer
+ *  than Deepgram's 3s before the safety net ends the run anyway. */
+const APPLE_STOP_SAFETY_MS = 10_000;
 
 /** Meter tuning — the owner's tested values, see the file header. */
 const METER_FLOOR_DB = -50;
@@ -289,7 +312,7 @@ export function useDictationTarget(append: (text: string) => void, claimed: bool
 	}, [append, claimed]);
 }
 
-export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
+export type DictationPhase = "idle" | "downloading" | "connecting" | "recording" | "stopping";
 
 export interface DictationDestination { id: string; append: (text: string) => void | Promise<void> }
 
@@ -329,6 +352,14 @@ export type Dictation = {
 	 * the keyless click leaves for Settings and the surface must come
 	 * back clean. */
 	clearError: () => void;
+	/** The Apple model-download prompt: the locale's display name while it
+	 *  is open, else null. */
+	modelPrompt: string | null;
+	/** 0..1 during the "downloading" phase, else null. */
+	downloadProgress: number | null;
+	/** Download (the prompt's primary action), then start dictating. */
+	confirmModel: () => void;
+	dismissModel: () => void;
 };
 
 /**
@@ -394,6 +425,17 @@ export function useDictation({ append, destination = "primary", disabled = false
 	const waitersRef = useRef<Array<{ resolve: () => void; reject: (error: unknown) => void }>>([]);
 	const appendFailureRef = useRef<{ error: unknown } | null>(null);
 	const appendPendingRef = useRef(false);
+	/** Which transport the live run uses. */
+	const engineRef = useRef<"deepgram" | "apple">("deepgram");
+	/** The Apple helper session (null when idle), its readiness, and the
+	 *  event subscription's disposer. */
+	const appleSessionRef = useRef<number | null>(null);
+	const appleReadyRef = useRef(false);
+	const appleOffRef = useRef<(() => void) | null>(null);
+	const [modelPrompt, setModelPrompt] = useState<string | null>(null);
+	const [downloadProgress, setDownloadProgress] = useState<number | null>(null);
+	/** Where a run waiting on the model prompt or download will start. */
+	const promptDestinationRef = useRef<DictationDestination | undefined>(undefined);
 
 	/** Flush into this run's fixed destination. Called exactly once at cleanup; the
 	 *  buffer clears itself so double-cleanup is a no-op. */
@@ -438,6 +480,14 @@ export function useDictation({ append, destination = "primary", disabled = false
 				ws.close();
 			} catch {}
 		}
+		appleOffRef.current?.();
+		appleOffRef.current = null;
+		const appleSession = appleSessionRef.current;
+		appleSessionRef.current = null;
+		appleReadyRef.current = false;
+		// No-op when the helper already exited; kills it on cancel paths.
+		if (appleSession !== null) void appleSpeechBridge()?.cancel(appleSession);
+		setDownloadProgress(null);
 		const complete = (failed: { error: unknown } | null) => {
 			if (endGen !== genRef.current) return;
 			appendPendingRef.current = false;
@@ -530,8 +580,69 @@ export function useDictation({ append, destination = "primary", disabled = false
 		[cleanup, setPhase],
 	);
 
+	/** Start the Apple helper session and wire its events. `gen` guards staleness. */
+	const openApple = useCallback(
+		async (gen: number) => {
+			const bridge = appleSpeechBridge();
+			if (!bridge) {
+				setError("Apple dictation unavailable");
+				cleanup();
+				return;
+			}
+			const handle = (ev: AppleSpeechEvent) => {
+				if (ev.type === "ready") {
+					appleReadyRef.current = true;
+					for (const frame of pendingRef.current) bridge.audio(ev.session, frame);
+					pendingRef.current = [];
+					setPhase("recording");
+				} else if (ev.type === "final") {
+					bufferRef.current.push(ev.text); // deferred, as with Deepgram
+				} else if (ev.type === "error") {
+					// macOS can delete the model between the status check and the
+					// helper start. "model-missing" says so; any other failure might
+					// mean the same, so a fresh status decides: offer the download
+					// rather than an error the user cannot act on.
+					const missing = ev.message === "model-missing";
+					if (missing) bufferRef.current = [];
+					else setError(`Apple dictation failed: ${ev.message}`);
+					promptDestinationRef.current = destinationRef.current ?? undefined;
+					cleanup();
+					void refreshAppleStatus().then((status) => {
+						if (status.available && (missing || !appleModelReady(status))) {
+							setError(null);
+							setModelPrompt(status.language);
+						}
+					});
+				} else {
+					cleanup(); // "end": the helper finalized and exited
+				}
+			};
+			appleOffRef.current?.();
+			// main replies to start() before the helper can emit anything, and
+			// IPC to one window stays ordered: every event finds its session set.
+			appleOffRef.current = bridge.onEvent((ev) => {
+				if (gen === genRef.current && ev.session === appleSessionRef.current) handle(ev);
+			});
+			try {
+				const { session } = await bridge.start();
+				if (gen !== genRef.current) {
+					void bridge.cancel(session);
+					return;
+				}
+				appleSessionRef.current = session;
+			} catch (e) {
+				if (gen !== genRef.current) return;
+				setError(e instanceof Error ? e.message : "Apple dictation unavailable");
+				cleanup();
+			}
+		},
+		[cleanup, setPhase],
+	);
+
 	const start = useCallback(async (destination?: DictationDestination) => {
-		if (disabledRef.current || phaseRef.current !== "idle") return;
+		// The phase stays idle until the engine pick; the owner marks a run
+		// that is still choosing, so a second press cannot start another.
+		if (disabledRef.current || phaseRef.current !== "idle" || recordingOwner === owner) return;
 		if (recordingOwner !== null && recordingOwner !== owner) {
 			setError(DICTATION_ACTIVE_ELSEWHERE);
 			return;
@@ -544,7 +655,8 @@ export function useDictation({ append, destination = "primary", disabled = false
 		setDictationActive(true);
 		setError(null);
 		appendFailureRef.current = null;
-		setPhase("connecting");
+		// Without the Apple bridge there is no engine pick: show the bar at once.
+		if (!appleSpeechBridge()) setPhase("connecting");
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
@@ -568,6 +680,32 @@ export function useDictation({ append, destination = "primary", disabled = false
 		// first use.
 		const tokenPromise = warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
+		engineRef.current = "deepgram";
+		if (appleSpeechBridge()) {
+			// Engine BEFORE mic: the download prompt must not light the mic.
+			// The status is re-queried (~50 ms, overlapping the token), not
+			// cached: macOS may have deleted the model since the last check.
+			const apple = await refreshAppleStatus();
+			const hasKey = await tokenPromise.then(
+				() => true,
+				// Only the keyless 503 means "no key"; other failures stay
+				// Deepgram's to surface.
+				(e: unknown) => !(e instanceof Error && e.message === DICTATION_KEYLESS),
+			);
+			if (gen !== genRef.current) return;
+			if (chooseEngine(hasKey, apple) === "apple") {
+				if (!appleModelReady(apple) && apple.available) {
+					promptDestinationRef.current = destination;
+					cleanup(false); // releases the owner; the prompt is not a run
+					setModelPrompt(apple.language);
+					return;
+				}
+				engineRef.current = "apple";
+			}
+		}
+		// Only now: setting it before the engine pick flashed the bar open
+		// and shut again whenever the run ended in the download prompt.
+		setPhase("connecting");
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
 		});
@@ -594,6 +732,14 @@ export function useDictation({ append, destination = "primary", disabled = false
 				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
+				} else if (msg.type === "audio" && engineRef.current === "apple") {
+					const session = appleSessionRef.current;
+					if (session !== null && appleReadyRef.current) appleSpeechBridge()?.audio(session, msg.buffer!);
+					// Queue until the helper is ready (mitigation A, same cap).
+					else {
+						pendingRef.current.push(msg.buffer!);
+						if (pendingRef.current.length > 256) pendingRef.current.shift();
+					}
 				} else if (msg.type === "audio") {
 					const ws = wsRef.current;
 					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
@@ -624,6 +770,10 @@ export function useDictation({ append, destination = "primary", disabled = false
 			return;
 		}
 		if (gen !== genRef.current) return;
+		if (engineRef.current === "apple") {
+			void openApple(gen);
+			return;
+		}
 		let token: string;
 		try {
 			token = await tokenPromise;
@@ -637,7 +787,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
 		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getLanguage, owner, primary, setPhase]);
+	}, [openSocket, openApple, cleanup, getLanguage, owner, primary, setPhase]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
@@ -652,6 +802,21 @@ export function useDictation({ append, destination = "primary", disabled = false
 		sourceRef.current = null;
 		workletRef.current?.disconnect();
 		workletRef.current = null;
+
+		if (engineRef.current === "apple") {
+			const session = appleSessionRef.current;
+			if (session === null) {
+				cleanup();
+				return;
+			}
+			// Closing stdin finalizes: the helper sends its last finals, then
+			// "end" runs cleanup(); the safety net covers a helper that hangs.
+			void appleSpeechBridge()?.stop(session);
+			safetyRef.current = setTimeout(() => {
+				if (gen === genRef.current) cleanup();
+			}, APPLE_STOP_SAFETY_MS);
+			return;
+		}
 
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
@@ -672,17 +837,20 @@ export function useDictation({ append, destination = "primary", disabled = false
 	}, [cleanup, setPhase]);
 
 	const cancel = useCallback(() => {
-		if (phaseRef.current === "idle") return;
+		// The owner also covers a run still choosing its engine (the phase
+		// stays idle until the pick).
+		if (phaseRef.current === "idle" && recordingOwner !== owner) return;
 		// Discard first, teardown second — cleanup() flushes, and the now-empty
 		// buffer makes that flush a no-op. Also kills a "stopping" run: the
 		// flush already underway is abandoned (its timer is cleared inside).
 		bufferRef.current = [];
 		cleanup();
-	}, [cleanup]);
+	}, [cleanup, owner]);
 
 	const finishCurrent = useCallback((): Promise<void> => {
 		return new Promise((resolve, reject) => {
-			if (phaseRef.current === "idle") {
+			// A model download is not a run: nothing to flush, never block a submit.
+			if (phaseRef.current === "idle" || phaseRef.current === "downloading") {
 				if (appendFailureRef.current) reject(appendFailureRef.current.error);
 				else resolve();
 				return;
@@ -706,6 +874,50 @@ export function useDictation({ append, destination = "primary", disabled = false
 		};
 	}, [finish, primary]);
 
+	const confirmModel = useCallback(() => {
+		const bridge = appleSpeechBridge();
+		setModelPrompt(null);
+		if (!bridge) return;
+		if (recordingOwner !== null && recordingOwner !== owner) {
+			setError(DICTATION_ACTIVE_ELSEWHERE);
+			return;
+		}
+		const destination = promptDestinationRef.current;
+		const gen = ++genRef.current;
+		// Hold the recording owner so Esc cancels the wait (the download continues in macOS).
+		recordingOwner = owner;
+		recordingTarget = destination?.append ?? null;
+		setDictationActive(true);
+		setError(null);
+		setDownloadProgress(0);
+		setPhase("downloading");
+		bridge
+			.install()
+			.then(() => refreshAppleStatus())
+			.then(() => {
+				if (gen !== genRef.current) return;
+				cleanup(false); // release the download wait; start() takes the owner again
+				void start(destination);
+			})
+			.catch((e: unknown) => {
+				if (gen !== genRef.current) return;
+				setError(e instanceof Error ? `Model download failed: ${e.message}` : "Model download failed");
+				cleanup();
+			});
+	}, [start, cleanup, owner, setPhase]);
+
+	const dismissModel = useCallback(() => setModelPrompt(null), []);
+
+	// Shared download progress (the Settings row may have started it).
+	useEffect(() => {
+		wireAppleInstallEvents();
+		return subscribeAppleStatus((status) => {
+			if (status.available && status.model === "downloading" && status.progress !== undefined) {
+				setDownloadProgress((current) => (current === null ? current : status.progress!));
+			}
+		});
+	}, []);
+
 	const toggleFor = useCallback((destination?: DictationDestination) => {
 		if (phaseRef.current === "idle") void start(destination);
 		else if (phaseRef.current === "recording" || phaseRef.current === "connecting") stop();
@@ -719,6 +931,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 	// cancels the actual recording owner rather than the focused widget.
 	useEffect(() => {
 		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		void refreshAppleStatus(); // warm the engine choice (no bridge → unavailable)
 		return () => {
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.
@@ -741,6 +954,10 @@ export function useDictation({ append, destination = "primary", disabled = false
 		finish,
 		cancel,
 		clearError: () => setError(null),
+		modelPrompt,
+		downloadProgress,
+		confirmModel,
+		dismissModel,
 	};
 }
 
@@ -757,7 +974,7 @@ export function useDictation({ append, destination = "primary", disabled = false
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation, disabled = false }: { dictation: Dictation; disabled?: boolean }) {
-	const { phase, error, levelRef, toggle, active, clearError, blocked } = dictation;
+	const { phase, error, levelRef, toggle, active, clearError, blocked, modelPrompt, downloadProgress, confirmModel, dismissModel, cancel } = dictation;
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
@@ -805,8 +1022,45 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 		return () => ro.disconnect();
 	}, [active]);
 
+	const dialog = modelPrompt !== null && (
+		<AppleModelDialog
+			language={modelPrompt}
+			onDownload={confirmModel}
+			onCancel={dismissModel}
+			onUseDeepgram={() => {
+				dismissModel();
+				openSettings("keys", DEEPGRAM_KEY_ID);
+			}}
+		/>
+	);
+
+	if (phase === "downloading") {
+		const percent = Math.round((downloadProgress ?? 0) * 100);
+		return (
+			<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-download">
+				<Hint label="Stop waiting (Esc) — the download continues" side="top">
+					<button
+						type="button"
+						onClick={cancel}
+						aria-label="Stop waiting for the speech model"
+						data-testid="dictation-download-cancel"
+						className="flex h-7 shrink-0 items-center rounded-md bg-card/50 px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+					>
+						Cancel
+					</button>
+				</Hint>
+				<span className="shrink-0 text-xs tabular-nums text-muted-foreground">{percent}%</span>
+				<div className="h-1 min-w-0 flex-1 overflow-hidden rounded-full bg-foreground/10" role="progressbar" aria-label="Downloading speech model" aria-valuenow={percent} aria-valuemin={0} aria-valuemax={100}>
+					<div className="h-full rounded-full bg-foreground/40 transition-[width]" style={{ width: `${percent}%` }} />
+				</div>
+			</div>
+		);
+	}
+
 	if (!active) {
 		return (
+			<>
+			{dialog}
 			<Hint
 				// The error line truncates in the button; its tooltip reveals it.
 				label={error ?? "Dictate"}
@@ -832,6 +1086,7 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
 				</button>
 			</Hint>
+			</>
 		);
 	}
 
