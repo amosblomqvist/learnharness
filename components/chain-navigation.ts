@@ -1,50 +1,18 @@
 "use client";
 
 import { useEffect, useLayoutEffect, useRef, type RefObject } from "react";
-import { sessionFindHasForegroundLayer } from "./session-find";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { useOptionalInteractionLayers } from "./interaction-layers";
 
-export interface ChainNavigationRow { key: string; depth: number; expanded?: boolean }
+import { navigateTreeRows as navigateChainRows } from "./tree-navigation";
+export { navigateChainRows };
+export type { TreeNavigationRow as ChainNavigationRow } from "./tree-navigation";
 export function chainRow(parts: string[], depth: number, expanded?: boolean) {
 	return { "data-chain-nav-row": JSON.stringify(parts), "data-chain-nav-depth": depth,
 		"data-chain-nav-expanded": expanded, tabIndex: -1 };
 }
-function parentIndices(rows: ChainNavigationRow[]): number[] {
-	const ancestors: { depth: number; index: number }[] = [];
-	return rows.map((row, index) => {
-		let ancestor = ancestors.at(-1);
-		while (ancestor && ancestor.depth >= row.depth) { ancestors.pop(); ancestor = ancestors.at(-1); }
-		const parent = ancestor?.index ?? -1;
-		ancestors.push({ depth: row.depth, index });
-		return parent;
-	});
-}
-/** Visible DOM order is the navigation order, including the current sort/filter.
- * Up/Down visit siblings, not every row of an expanded subtree. */
-export function navigateChainRows(rows: ChainNavigationRow[], active: string | null, key: string): {
-	key?: string; toggle?: string; enter?: boolean;
-} {
-	const first = rows[0];
-	if (!first) return {};
-	const index = rows.findIndex((row) => row.key === active);
-	const row = rows[index];
-	if (!row) return { key: first.key };
-	const parents = parentIndices(rows), parent = parents[index] ?? -1;
-	if (key === "ArrowLeft") {
-		const target = rows[parent] ?? row;
-		return { key: target.key, ...(target.expanded ? { toggle: target.key } : {}) };
-	}
-	if (key === "ArrowRight") {
-		if (row.expanded === false) return { key: row.key, toggle: row.key, enter: true };
-		const child = rows[index + 1];
-		return { key: row.expanded && child && child.depth > row.depth ? child.key : row.key };
-	}
-	const siblings = rows.map((r, i) => ({ r, i })).filter(({ r, i }) => r.depth === row.depth && parents[i] === parent);
-	const position = siblings.findIndex(({ i }) => i === index);
-	const next = Math.max(0, Math.min(siblings.length - 1, position + (key === "ArrowDown" ? 1 : -1)));
-	return { key: siblings[next]?.r.key ?? row.key };
-}
-
 export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, searchRef: RefObject<HTMLInputElement | null>, enabled: boolean) {
+	const controller = useOptionalInteractionLayers();
 	const active = useRef<string | null>(null);
 	const pendingEnter = useRef<string | null>(null);
 	const pendingFocus = useRef<string | null>(null);
@@ -59,7 +27,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		active.current = row ? key : null;
 		if (row) {
 			row.dataset.chainNavActive = "true";
-			if (focus) { row.focus({ preventScroll: true }); row.scrollIntoView({ block: "nearest", inline: "nearest" }); }
+			if (focus && isInteractionScopeEligible(row, controller)) { row.focus({ preventScroll: true }); row.scrollIntoView({ block: "nearest", inline: "nearest" }); }
 		}
 	};
 	useLayoutEffect(() => {
@@ -79,7 +47,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		if (!enabled) return;
 		const root = rootRef.current;
 		const onFind = () => {
-			if (sessionFindHasForegroundLayer(document)) return;
+			if (!isInteractionScopeEligible(rootRef.current, controller)) return;
 			searchRef.current?.focus({ preventScroll: true }); searchRef.current?.select();
 		};
 		const onPointerDown = (event: PointerEvent) => {
@@ -94,13 +62,16 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		};
 		const onKeyDown = (event: KeyboardEvent) => {
 			if (event.defaultPrevented || event.isComposing || event.metaKey || event.ctrlKey || event.altKey || event.shiftKey || !["ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight", " "].includes(event.key)) return;
-			if (sessionFindHasForegroundLayer(document)) return;
+			if (!isInteractionScopeEligible(rootRef.current, controller)) return;
 			const target = event.target instanceof Element ? event.target : null;
 			if (target && !root?.contains(target) && target !== document.body && target !== document.documentElement) return;
 			const fromSearch = target === searchRef.current;
 			if (fromSearch ? event.key !== "ArrowDown" : target?.closest('input:not([type="checkbox"]),textarea,[contenteditable="true"]')) return;
 			if (event.key === " ") {
-				if (target?.closest('button,a[href],[role="button"]') && !target.closest("[data-chain-nav-row]")) return;
+				// Rich statement actions own Space; row/checkbox selection and
+				// the existing disclosure/arrow contracts remain unchanged.
+				if (target?.closest('button,a[href],[role="button"]') &&
+					(!target.closest("[data-chain-nav-row]") || target.closest("[data-chain-statement]"))) return;
 				const row = readRows().find((row) => row.key === active.current);
 				const checkbox = row?.element.querySelector<HTMLInputElement>('input[type="checkbox"]');
 				if (!row || !checkbox || checkbox.disabled) return;
@@ -121,7 +92,7 @@ export function useChainNavigation(rootRef: RefObject<HTMLDivElement | null>, se
 		root?.addEventListener("pointerdown", onPointerDown);
 		return () => { window.removeEventListener("lh:kbd-find", onFind); document.removeEventListener("keydown", onKeyDown); root?.removeEventListener("pointerdown", onPointerDown); };
 	});
-	useEffect(() => { if (enabled && !sessionFindHasForegroundLayer(document)) rootRef.current?.focus({ preventScroll: true }); }, [enabled, rootRef]);
+	useEffect(() => { if (enabled && isInteractionScopeEligible(rootRef.current, controller)) rootRef.current?.focus({ preventScroll: true }); }, [enabled, rootRef, controller]);
 	return { focusRow(parts: string[]) {
 		const key = JSON.stringify(parts);
 		if (readRows().some((row) => row.key === key)) highlight(key, true);

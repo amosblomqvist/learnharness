@@ -4,9 +4,11 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import assert from "node:assert/strict";
-import { describe, it, afterEach } from "node:test";
+import { describe, it, after, afterEach } from "node:test";
 import { readFileSync } from "node:fs";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { UpdateSettings, updateStatusText, MANUAL_UPDATE_HINT, AUTO_UPDATE_HINT, type UpdateState } from "../components/settings/update-settings.tsx";
@@ -15,7 +17,10 @@ import { SettingsDialogBody, SettingsDialogProvider } from "../components/settin
 import nextConfig from "../next.config.ts";
 
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent });
+Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element,
+	HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent });
+const restoreModalDom = installModalDom(dom);
+after(restoreModalDom);
 const originalFetch = globalThis.fetch;
 const roots: { root: Root; host: HTMLElement }[] = [];
 const state = (over: Partial<UpdateState> = {}): UpdateState => ({ status: "idle", version: null, revision: 0, ...over });
@@ -53,7 +58,7 @@ function bridge(initial = state(), snapshot = Promise.resolve(initial)) {
 async function mount(element: React.ReactElement) {
 	const host = document.createElement("div"); document.body.append(host);
 	const root = createRoot(host); roots.push({ root, host });
-	await act(async () => { root.render(element); });
+	await act(async () => { root.render(<InteractionLayersProvider>{element}</InteractionLayersProvider>); });
 	return host;
 }
 
@@ -66,6 +71,8 @@ afterEach(async () => {
 	for (const { root, host } of roots.splice(0)) {
 		await act(async () => { root.unmount(); }); host.remove();
 	}
+	// FocusScope's delayed cleanup still needs the installed fixture DOM.
+	await new Promise(resolve => setTimeout(resolve, 5));
 	delete window.lh;
 	globalThis.fetch = originalFetch;
 });
