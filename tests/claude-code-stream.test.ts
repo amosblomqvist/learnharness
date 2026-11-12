@@ -33,6 +33,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
 import { parseCliLine } from "../src/agent/claude-code/cli-events.ts";
+import { isNarrationBlock } from "../src/agent/narration-guard.ts";
 import { ClaudeCodeError } from "../src/agent/claude-code/constants.ts";
 import { LIVE_PROCESS_IDLE_TIMEOUT_MS, liveProcessIdleTimeoutMs } from "../src/agent/claude-code/live-processes.ts";
 import { CLAUDE_CODE_MODELS } from "../src/agent/claude-code/provider.ts";
@@ -369,6 +370,30 @@ test("thinking deltas map to thinking_*", async (t) => {
 		{ type: "thinking", thinking: "Sockets are endpoints." },
 		{ type: "text", text: "An endpoint." },
 	]);
+});
+
+test("signature deltas land on the thinking block so the narration guard recognizes it", async (t) => {
+	const signature = Buffer.from("\u0008\u0001narration-summary").toString("base64");
+	const split = Math.floor(signature.length / 8) * 4;
+	const { events } = await runScenario(t, [
+		streamEvent({ type: "message_start", message: { usage: {} } }),
+		streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "", signature: "" } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Feedback for the learner." } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: signature.slice(0, split) } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: signature.slice(split) } }),
+		streamEvent({ type: "content_block_stop", index: 0 }),
+		streamEvent({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: {} }),
+		streamEvent({ type: "message_stop" }),
+	]);
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.deepEqual(done.message.content, [
+		{ type: "thinking", thinking: "Feedback for the learner.", thinkingSignature: signature },
+	]);
+	const [block] = done.message.content;
+	assert.ok(block);
+	assert.equal(isNarrationBlock(block), true);
 });
 
 test("tool scenario ends with toolcall_end (Claude's tool_use id, unprefixed name) and done(toolUse)", async (t) => {
@@ -871,6 +896,12 @@ test("writes one user prompt after local-only control initialization and summary
 	assert.deepEqual(JSON.parse(lines[1]!).request, { subtype: "get_context_usage", detail: "summary" });
 	assert.equal(lines[2], toStreamJsonLine([{ type: "text", text: "hi" }]));
 	assert(lines.slice(3).every((line) => JSON.parse(line).request.detail === "summary"));
+});
+
+test("parseCliLine maps a signature_delta to a signatureDelta event", () => {
+	const line = streamEvent({ type: "content_block_delta", index: 2, delta: { type: "signature_delta", signature: "c2ln" } });
+
+	assert.deepEqual(parseCliLine(line), { type: "signatureDelta", index: 2, signature: "c2ln" });
 });
 
 test("parseCliLine ignores non-JSON, system, rate-limit and successful result lines", () => {
