@@ -86,5 +86,7 @@ export function deepgramListenUrl(language: DictationLanguage): string {
 	return "wss://api.deepgram.com/v1/listen" +
 		"?model=nova-3&encoding=linear16&sample_rate=16000&channels=1" +
 		"&smart_format=true&punctuate=true&endpointing=300" +
+		// Deepgram otherwise retains request audio and transcripts to improve its models.
+		"&mip_opt_out=true" +
 		`&language=${encodeURIComponent(language)}`;
 }
