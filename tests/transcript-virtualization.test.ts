@@ -9,9 +9,26 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { StickToBottom } from "use-stick-to-bottom";
 import { VirtualTranscript } from "../components/virtual-transcript.tsx";
 import { transcriptJumpWindow, transcriptJumpRestoreOffset, transcriptJumpTravel } from "../components/transcript-jump.ts";
-import { transcriptWindow } from "../components/transcript-window.ts";
+import { transcriptReadingAnchor, transcriptWindow } from "../components/transcript-window.ts";
+import { parseHTML } from "linkedom";
 import { transcriptScrollbarOffset } from "../components/transcript-scrollbar.ts";
 (globalThis as Record<string, unknown>).React = React;
+
+test("the reading anchor uses actual visible content and skips rows showing only their trailing gap", () => {
+	const { document } = parseHTML('<div id="scroll"><div id="rows"><div id="above"></div><div id="gap" style="padding-bottom: 16px"></div><div id="reading"></div><div id="below"></div></div></div>');
+	const root = document.getElementById("rows")!, scroll = document.getElementById("scroll")!;
+	const box = (top: number, bottom: number) => ({ top, bottom, height: bottom - top }) as DOMRect;
+	scroll.getBoundingClientRect = () => box(100, 500);
+	document.getElementById("above")!.getBoundingClientRect = () => box(-600, 80);
+	document.getElementById("gap")!.getBoundingClientRect = () => box(80, 112);
+	document.getElementById("reading")!.getBoundingClientRect = () => box(112, 600);
+	document.getElementById("below")!.getBoundingClientRect = () => box(600, 1000);
+	assert.equal(transcriptReadingAnchor(root, scroll)?.id, "reading");
+	assert.equal(transcriptReadingAnchor(root, null), null);
+	assert.equal(transcriptReadingAnchor(null, scroll), null);
+	root.replaceChildren(document.getElementById("below")!);
+	assert.equal(transcriptReadingAnchor(root, scroll), null);
+});
 
 test("a held scrollbar keeps its native track while measured history grows or shrinks", () => {
 	assert.equal(transcriptScrollbarOffset(500, 1000, 1400), 700);

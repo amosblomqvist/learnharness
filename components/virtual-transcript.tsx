@@ -7,7 +7,7 @@ import { useStickToBottomContext } from "use-stick-to-bottom";
 import { estimateTranscriptRow, type TranscriptRow } from "./transcript-rows";
 import { TranscriptRowState } from "./transcript-row-state";
 import { TRANSCRIPT_OVERSCAN, transcriptJumpWindow, transcriptJumpRestoreOffset, transcriptJumpTravel, type TranscriptJumpWindow } from "./transcript-jump";
-import { transcriptWindow } from "./transcript-window";
+import { transcriptReadingAnchor, transcriptWindow } from "./transcript-window";
 import { useTranscriptScrollbar } from "./transcript-scrollbar";
 
 const TranscriptRowBody = memo(function TranscriptRowBody({ row, state, render }: {
@@ -55,6 +55,14 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	const virtualizerRef = useRef<Virtualizer<HTMLElement, Element> | null>(null);
 	const cancelJumpRef = useRef<() => void>(() => {});
 	const scrollbar = useTranscriptScrollbar({ contextRef, virtualizerRef, root, cancelJumpRef, unpin: setPinned });
+	const readingAnchor = useRef<HTMLElement | null>(null);
+	const observeOffset = useCallback<typeof scrollbar.observeOffset>((instance, callback) =>
+		scrollbar.observeOffset(instance, (offset, scrolling) => {
+			// Record the reader's passage before the virtualizer mounts and
+			// measures a new window. Keep it through the measurement batch.
+			if (!scrollbar.dragRef.current && !jumpRef.current) readingAnchor.current = transcriptReadingAnchor(root.current, contextRef.current.scrollRef.current);
+			callback(offset, scrolling);
+		}), [scrollbar.observeOffset, scrollbar.dragRef]);
 	const estimates = useMemo(() => rows.map(row => estimateTranscriptRow(row, width)), [rows, width]);
 	const estimatedTotal = useMemo(() => estimates.reduce((total, height) => total + height, 0), [estimates]);
 	const getScrollElement = useCallback(() => context.scrollRef.current, [context.scrollRef]);
@@ -83,7 +91,7 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement, getItemKey, estimateSize,
-		observeElementOffset: scrollbar.observeOffset,
+		observeElementOffset: observeOffset,
 		measureElement: measureRow,
 		overscan: TRANSCRIPT_OVERSCAN,
 		scrollMargin,
@@ -93,6 +101,11 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	});
 	virtualizerRef.current = virtualizer;
 	const items = virtualizer.getVirtualItems();
+	useLayoutEffect(() => {
+		// A distant jump can leave no old DOM at the new viewport. Capture
+		// the committed window before ResizeObserver refines its estimates.
+		if (!readingAnchor.current || !root.current?.contains(readingAnchor.current)) readingAnchor.current = transcriptReadingAnchor(root.current, contextRef.current.scrollRef.current);
+	});
 	const sourceEnd = jump ? items.find(item => item.index === jump.sourceEnd) : undefined;
 	const tailStart = jump ? items.find(item => item.index === jump.tailStart) : undefined;
 	const shift = jump?.phase === "animate" && sourceEnd && tailStart ? Math.max(0, tailStart.start - sourceEnd.end) : 0;
@@ -121,11 +134,16 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	useLayoutEffect(() => { updateJumpPositions(); });
 	// StickToBottom remains the sole owner of following the live tail. A size
 	// correction above a reader should preserve that reader's current passage.
-	// Native thumb dragging and upward scrolling own their position: an
-	// anchoring write there rebases the thumb's grab point away from the mouse.
-	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
-		!scrollbar.dragRef.current && !(instance.isScrolling && instance.scrollDirection === "backward") &&
-		!contextRef.current.isAtBottom && item.end < (instance.scrollOffset ?? 0);
+	// Compensate changes before the visible passage in either wheel direction.
+	// The row being read must not compensate its own growth below the reader.
+	// Thumb dragging and bottom animations retain their separate coordinates.
+	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) => {
+		if (scrollbar.dragRef.current || jumpRef.current || contextRef.current.isAtBottom) return false;
+		const anchor = readingAnchor.current;
+		return anchor && root.current?.contains(anchor)
+			? item.index < Number(anchor.dataset.index)
+			: item.end < (instance.scrollOffset ?? 0);
+	};
 
 	useLayoutEffect(() => {
 		const scroll = context.scrollRef.current;
