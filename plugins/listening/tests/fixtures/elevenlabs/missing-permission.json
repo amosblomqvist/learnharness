@@ -1,0 +1,15 @@
+{
+  "recorded": "2026-11-15",
+  "request": "GET /v1/user/subscription",
+  "status": 401,
+  "contentType": "application/json",
+  "body": {
+    "detail": {
+      "type": "authentication_error",
+      "code": "unauthorized",
+      "message": "The API key you used is missing the permission user_read to execute this operation.",
+      "status": "missing_permissions",
+      "request_id": "00000000000000000000000000000000"
+    }
+  }
+}

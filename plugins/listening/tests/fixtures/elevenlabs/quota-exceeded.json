@@ -1,0 +1,13 @@
+{
+  "recorded": null,
+  "source": "Not recorded: shape taken from https://elevenlabs.io/docs/help-center/technical/api-error-code-400-or-401, which lists quota_exceeded as a 400 or 401 status.",
+  "request": "POST /v1/text-to-speech/{voice_id}",
+  "status": 401,
+  "contentType": "application/json",
+  "body": {
+    "detail": {
+      "status": "quota_exceeded",
+      "message": "This request exceeds your quota of 10000. You have 2 credits remaining, while 28 credits are required for this request."
+    }
+  }
+}

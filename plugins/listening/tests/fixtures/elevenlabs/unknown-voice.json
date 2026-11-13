@@ -1,0 +1,15 @@
+{
+  "recorded": "2026-11-15",
+  "request": "POST /v1/text-to-speech/{voice_id}",
+  "status": 404,
+  "contentType": "application/json",
+  "body": {
+    "detail": {
+      "type": "not_found",
+      "code": "voice_not_found",
+      "message": "A voice with voice_id 'ZZZZZZZZZZZZZZZZZZZZ' was not found.",
+      "status": "voice_not_found",
+      "request_id": "00000000000000000000000000000000"
+    }
+  }
+}
