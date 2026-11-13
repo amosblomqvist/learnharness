@@ -27,6 +27,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
+import * as vm from "node:vm";
 import { after, describe, it } from "node:test";
 import { createCanvas } from "@napi-rs/canvas";
 import { Value } from "typebox/value";
@@ -566,6 +567,72 @@ describe("bridge height: the body-based measure (ratchet fix, 2026-10-07)", () =
 		assert.ok(DEMO_BRIDGE_SCRIPT.includes("Math.max(b.scrollHeight,b.getBoundingClientRect().height)"));
 		assert.ok(DEMO_BRIDGE_SCRIPT.includes("getComputedStyle(b)"));
 		assert.ok(!/post=function\(\)\{send\(\{type:"demo-resize",height:document\.documentElement\.scrollHeight\}\)\};/.test(DEMO_BRIDGE_SCRIPT));
+	});
+});
+
+/** Runs the real bridge script against a stub iframe whose body height is
+ *  computed from the current viewport, and plays the parent's side of the
+ *  loop (reduceDemoBridgeState → new innerHeight → "resize") to a fixed point. */
+function bridgeHarness(initialBody: (innerHeight: number) => number) {
+	let bodyHeight = initialBody;
+	const listeners: Record<string, (() => void)[]> = {};
+	const posted: number[] = [];
+	const win = {
+		innerHeight: 360,
+		addEventListener: (type: string, fn: () => void) => { (listeners[type] ??= []).push(fn); },
+	};
+	const body = {
+		get scrollHeight() { return bodyHeight(win.innerHeight); },
+		getBoundingClientRect: () => ({ height: bodyHeight(win.innerHeight) }),
+	};
+	vm.runInNewContext(DEMO_BRIDGE_SCRIPT.replace(/^<script>|<\/script>$/g, ""), {
+		window: win,
+		document: { body, documentElement: {} },
+		parent: { postMessage: (m: { type: string; height: number }) => { if (m.type === "demo-resize") posted.push(m.height); } },
+		getComputedStyle: () => ({ marginTop: "0px", marginBottom: "0px" }),
+		setTimeout: () => 0,
+	});
+	let state = INITIAL_DEMO_BRIDGE_STATE;
+	const emit = (type: string) => (listeners[type] ?? []).forEach((fn) => fn());
+	/** One measure (an autoplay tick / load), then follow resizes for up to 100 rounds. */
+	const settle = () => {
+		emit("load");
+		for (let i = 0; i < 100; i++) {
+			state = posted.length ? reduceDemoBridgeState(state, { type: "demo-resize", height: posted.at(-1) }) : state;
+			const next = state.height ?? 360;
+			if (next === win.innerHeight) break;
+			win.innerHeight = next;
+			emit("resize");
+		}
+		return state.height;
+	};
+	return { posted, settle, setBody: (fn: (innerHeight: number) => number) => { bodyHeight = fn; } };
+}
+
+describe("bridge height: viewport-coupled layouts do not ratchet (jitter fix, 2026-11-13)", () => {
+	it("a min-height:100vh container inside a 16px-padded body settles instead of growing to MAX_HEIGHT", () => {
+		// body = max(content, 100vh) + 2×16 padding: the 'Call stack stepper' shape.
+		const h = bridgeHarness((vh) => Math.max(900, vh) + 32);
+		assert.equal(h.settle(), 964, "one coupled step (932 → 964), then the bridge stops posting");
+		for (let i = 0; i < 10; i++) assert.equal(h.settle(), 964, "autoplay ticks never ratchet it further");
+		assert.deepEqual(h.posted, [932, 964]);
+	});
+
+	it("a plain flowing demo still grows and shrinks with its content", () => {
+		const h = bridgeHarness(() => 500);
+		assert.equal(h.settle(), 500);
+		h.setBody(() => 1200);
+		assert.equal(h.settle(), 1200, "taller content posts its real height");
+		h.setBody(() => 300);
+		assert.equal(h.settle(), 300, "shorter content shrinks the iframe");
+	});
+
+	it("a coupled demo whose real content later grows still posts the growth", () => {
+		let content = 900;
+		const h = bridgeHarness((vh) => Math.max(content, vh) + 32);
+		assert.equal(h.settle(), 964);
+		content = 1500;
+		assert.equal(h.settle(), 1564, "real growth posts (1532), then one coupled step (1564) and it stops");
 	});
 });
 
