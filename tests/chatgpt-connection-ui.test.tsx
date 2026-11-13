@@ -303,7 +303,7 @@ for (const transport of ["desktop", "web"] as const) for (const revocationStatus
   assert.equal(byTest("chatgpt-confirm-disconnect").textContent, "Disconnect from LearnHarness");
   await act(async () => { byTest("chatgpt-confirm-disconnect").click(); await completedWithin(disconnectReply.promise, "disconnect control reply including revocation retries"); });
   const result = byTest("chatgpt-disconnect-result"); assert(result.textContent?.includes("Disconnected from LearnHarness"));
-  assert(result.textContent?.includes("Settings → Security and login → Login connections → Sign in with ChatGPT → LearnHarness → Manage connection → Disconnect"));
+  assert(result.textContent?.includes("To remove LearnHarness from ChatGPT, use the matching ChatGPT account and go to Settings → Security and login → Sign in with ChatGPT, then choose the LearnHarness connection and confirm Disconnect again."));
   assert(result.textContent?.includes("matching ChatGPT account"));
   const link = result.querySelector<HTMLAnchorElement>("a")!;
   assert.equal(link.textContent, "Open ChatGPT"); assert.equal(link.getAttribute("href"), "https://chatgpt.com/");

@@ -263,7 +263,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 			{dialog.kind === "disconnected" ? <div data-testid="chatgpt-disconnect-result">
 				<p className="mt-3 text-sm font-semibold text-foreground">Disconnected from LearnHarness.</p>
 				{warning && <p role="alert" className="mt-3 rounded-sm border border-border px-3 py-2 text-xs text-foreground" data-testid="chatgpt-revocation-warning">{warning}</p>}
-				<p className="mt-3 text-xs leading-relaxed text-muted-foreground">To remove LearnHarness from ChatGPT, use the matching ChatGPT account and go to <span className="text-foreground">Settings → Security and login → Login connections → Sign in with ChatGPT → LearnHarness → Manage connection → Disconnect</span>, then confirm Disconnect again.</p>
+				<p className="mt-3 text-xs leading-relaxed text-muted-foreground">To remove LearnHarness from ChatGPT, use the matching ChatGPT account and go to <span className="text-foreground">Settings → Security and login → Sign in with ChatGPT</span>, then choose the LearnHarness connection and confirm Disconnect again.</p>
 				<div className="mt-3 text-xs"><a href="https://chatgpt.com/" target="_blank" rel="noreferrer" className="underline underline-offset-2">Open ChatGPT</a></div>
 				<div className="mt-4 flex justify-end"><Button variant="outline" size="sm" onClick={close}>Dismiss</Button></div>
 			</div> : dialog.kind === "manage" && dialog.confirm ? <div data-testid="chatgpt-disconnect-confirmation">
