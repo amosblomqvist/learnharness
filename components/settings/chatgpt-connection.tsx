@@ -139,8 +139,10 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 
 	const managed = dialog?.kind === "manage" ? status.accounts.find((a) => a.id === dialog.accountId) ?? dialog.account : undefined;
 	const managedPresent = !!managed && status.accounts.some((a) => a.id === managed.id);
-	const visibleError = error || (status.error !== dismissedError ? status.error : null) || status.catalogError || null;
+	const statusError = status.error !== dismissedError ? status.error : null;
+	const visibleError = error || statusError || status.catalogError || null;
 	const warning = visibleError === REVOCATION_WARNING ? visibleError : null;
+	const resultError = [error, statusError, status.catalogError].find((message) => message && message !== REVOCATION_WARNING) ?? null;
 	function openConnect(accountId = "") {
 		if (operation.current) return;
 		setBackground(statusRef.current.allowBackgroundUse);
@@ -153,6 +155,13 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 	function close(): CloseOutcome {
 		if (operation.current === "disconnect" || operation.current === "change" || operation.current === "cancel") return "blocked";
 		const current = dialogRef.current;
+		if (current?.kind === "disconnected") {
+			// This informational result owns neither a later login nor its errors.
+			showDialog(null);
+			setError((message) => message === REVOCATION_WARNING ? null : message);
+			setDismissedError(REVOCATION_WARNING);
+			return "closed";
+		}
 		if (current?.kind === "manage" && current.confirm) { showDialog({ ...current, confirm: false }); setError(null); return "handled-without-close"; }
 		const cancel = loginAttempt.current !== null || statusRef.current.pending;
 		const intent = ++generation.current;
@@ -263,6 +272,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 			{dialog.kind === "disconnected" ? <div data-testid="chatgpt-disconnect-result">
 				<p className="mt-3 text-sm font-semibold text-foreground">Disconnected from LearnHarness.</p>
 				{warning && <p role="alert" className="mt-3 rounded-sm border border-border px-3 py-2 text-xs text-foreground" data-testid="chatgpt-revocation-warning">{warning}</p>}
+				{resultError && <p role="alert" className="mt-3 text-xs text-error">{resultError}</p>}
 				<p className="mt-3 text-xs leading-relaxed text-muted-foreground">To remove LearnHarness from ChatGPT, use the matching ChatGPT account and go to <span className="text-foreground">Settings → Security and login → Sign in with ChatGPT</span>, then choose the LearnHarness connection and confirm Disconnect again.</p>
 				<div className="mt-3 text-xs"><a href="https://chatgpt.com/" target="_blank" rel="noreferrer" className="underline underline-offset-2">Open ChatGPT</a></div>
 				<div className="mt-4 flex justify-end"><Button variant="outline" size="sm" onClick={close}>Dismiss</Button></div>

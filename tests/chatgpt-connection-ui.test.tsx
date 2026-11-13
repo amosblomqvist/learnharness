@@ -79,6 +79,17 @@ async function selectAccount(label: string, id: string) {
 }
 async function begin() { await click(byTest("chatgpt-login")); await click(byTest("chatgpt-proceed")); }
 async function confirmDisconnect() { await click(byTest("chatgpt-disconnect")); await click(byTest("chatgpt-confirm-disconnect")); }
+async function dismissDisconnectResult(method: "button" | "escape" | "backdrop") {
+ if (method === "button") return click(button("Dismiss", byTest("chatgpt-account-dialog")));
+ const target = method === "escape" ? document : byTest("chatgpt-dialog-backdrop");
+ await act(async () => {
+  for (const type of method === "escape" ? ["keydown"] : ["pointerdown", "pointerup", "click"]) {
+   const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+   Object.assign(event, method === "escape" ? { key: "Escape" } : { pointerId: 1, isPrimary: true, button: 0 });
+   target.dispatchEvent(event);
+  }
+ });
+}
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; delete window.lh; globalThis.fetch = originalFetch; });
 
 test("Providers is the first/default page; General closes the native group before Core/Community plugins", () => {
@@ -328,6 +339,27 @@ for (const transport of ["desktop", "web"] as const) for (const revocationStatus
  } finally { await act(async () => f.service.close()); }
 });
 
+for (const revocationStatus of [200, 503] as const) for (const method of ["button", "escape", "backdrop"] as const) test(`real controller disconnect result ${method} keeps a later credential error visible after ${revocationStatus} revocation`, async () => {
+ const f = recoveryController({ revocationStatus });
+ await f.store.write({ ...f.saved, registrations: [...f.saved.registrations, { ...f.saved.registrations[0], id: "other", clientId: "oaiapp_other", subject: "other", email: "other@example.invalid" }] });
+ const bridge = window.lh!.chatgpt!, disconnect = bridge.disconnect, done = deferred<ChatGPTStatus>();
+ bridge.disconnect = (id) => { const reply = disconnect(id); void reply.then(done.resolve, done.reject); return reply; };
+ try {
+  await mount(); await click(button("Manage…")); await selectAccount("Manage ChatGPT account", "other"); await confirmDisconnect();
+  await act(async () => { await completedWithin(done.promise, "disconnect before a later credential failure"); });
+  const result = byTest("chatgpt-disconnect-result"); assert(result);
+  assert.equal((await f.service.status()).activeId, "fixture");
+  f.store.write = async () => { throw Object.assign(new Error("fake-storage-failure"), { code: "storage" }); };
+  await act(async () => { await bridge.consent(false); });
+  assert.equal((await f.service.status()).error, storageError);
+  assert([...result.querySelectorAll('[role="alert"]')].some((alert) => alert.textContent === storageError), "a later credential error must be visible in the completion dialog");
+  assert.equal(byTest("chatgpt-revocation-warning")?.textContent ?? null, revocationStatus === 503 ? warning : null);
+  await dismissDisconnectResult(method);
+  assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]'));
+  assert.equal(document.querySelector('[role="alert"]')?.textContent, storageError, "closing a disconnect result must not acknowledge another operation's error");
+ } finally { await act(async () => f.service.close()); }
+});
+
 test("actual controller failed disconnect save keeps confirmation/error and never claims local or remote removal", async () => {
  const f = recoveryController({ writeFails: true, revocationStatus: 200 });
  try {
@@ -443,6 +475,26 @@ test("unconfirmed provider outcome keeps its concise dismissible warning alongsi
  assert(!document.querySelector('[data-testid="chatgpt-disconnect"]')); assert(byTest("chatgpt-login"));
  assert(byTest("chatgpt-disconnect-result").querySelector('a[href="https://chatgpt.com/"]'));
  await click(button("Dismiss", byTest("chatgpt-account-dialog"))); assert(!document.querySelector('[role="alert"]'));
+});
+
+for (const outcome of [null, warning]) for (const method of ["button", "escape", "backdrop"] as const) test(`disconnect result ${method} preserves another window's pending sign-in after ${outcome ? "unconfirmed" : "successful"} revocation`, async () => {
+ const f = fixture(connected(), { disconnect: async (id) => {
+  const next = { ...f.status, activeId: null, accounts: f.status.accounts.filter((a) => a.id !== id), error: outcome };
+  f.push(next); return next;
+ } });
+ await mount(); await click(button("Manage…")); await confirmDisconnect();
+ assert(byTest("chatgpt-disconnect-result"));
+ assert.equal(document.querySelector('[role="alert"]')?.textContent ?? null, outcome);
+ await act(async () => { await f.bridge.login(); });
+ assert.equal(f.status.pending, true);
+ await dismissDisconnectResult(method);
+ assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]'));
+ assert.equal(f.status.pending, true, "informational dismissal must not cancel another window's sign-in");
+ assert.equal(f.calls.cancel, 0);
+ await act(async () => f.complete());
+ assert.equal(f.status.activeId, "private-registration-id");
+ assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]'));
+ assert(!document.querySelector('[role="alert"]'));
 });
 
 test("dismissed revocation warning stays dismissed across global setting changes but a new unconfirmed disconnect is shown", async () => {
