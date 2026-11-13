@@ -41,8 +41,8 @@ test('converted sources use UUID-only private paths and never embed Markdown in 
   assert.deepEqual(store.get(), before); assert.equal(fs.existsSync(path.join(dir, 'flashcards.json')), false);
   assert.equal(store.readSource(id), markdown);
   assert.deepEqual(fs.readdirSync(path.join(dir, 'sources')), [`${id}.md`]);
-  assert.equal(fs.statSync(path.join(dir, 'sources', `${id}.md`)).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(path.join(dir, 'sources')).mode & 0o777, 0o700);
+  assert.equal(fs.statSync(path.join(dir, 'sources', `${id}.md`)).mode & 0o777, process.platform === 'win32' ? 0o666 : 0o600);
+  assert.equal(fs.statSync(path.join(dir, 'sources')).mode & 0o777, process.platform === 'win32' ? 0o666 : 0o700);
   for (const unsafe of ['../outside', '/tmp/outside', 'notes.md', '', null]) {
     assert.throws(() => store.writeSource(unsafe, markdown), /Invalid file source ID/);
     assert.throws(() => store.readSource(unsafe), /Invalid file source ID/);

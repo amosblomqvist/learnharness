@@ -119,3 +119,21 @@ test('graph and file full-request estimates still account for composed instructi
   const expectedFile = Math.ceil(Buffer.byteLength(prompts.fileInstructions + JSON.stringify(files.resultSchema) + prompts.filePromptFor(file), 'utf8') / 3) + 256;
   assert.equal(plan.prompt, prompts.filePromptFor(file)); assert.equal(plan.tokens, expectedFile);
 });
+
+test('graph and file generation prompts append target language instruction only when language is not auto', () => {
+  const graphInput = { targets: ['p'], propositions: [{ id: 'p', name: 'Fact', statement: 'Statement' }], chains: [], cards: [{ propositionId: 'p', active: [], deleted: [] }] };
+  const fileInput = { name: 'notes.md', markdown: 'Some source material.' };
+
+  for (const lang of [undefined, 'auto']) {
+    assert.equal(prompts.graphPromptFor(graphInput, lang).includes('Language:'), false);
+    assert.equal(prompts.filePromptFor(fileInput, lang).includes('Language:'), false);
+  }
+
+  for (const lang of ['Indonesian', 'Spanish', 'French', 'custom-lang']) {
+    const graphPrompt = prompts.graphPromptFor(graphInput, lang);
+    const filePrompt = prompts.filePromptFor(fileInput, lang);
+    const expectedInstruction = `\nLanguage: Generate all facts, cues, questions, and answers in ${lang}. Maintain technical terms, identifiers, or mathematical formulas in standard form.`;
+    assert.ok(graphPrompt.endsWith(expectedInstruction));
+    assert.ok(filePrompt.endsWith(expectedInstruction));
+  }
+});

@@ -369,6 +369,28 @@ export function activate(ctx) {
     const settingsRows = settings => {
       const row = (key, label, value, type, parse = value => value, extras = {}) => ({ key, label, value, type, ...extras, onChange: async value => { try { await save({ [key]: parse(value) }); } catch (cause) { showError(cause); throw cause; } } });
       return [
+        {
+          key: 'language',
+          label: 'Card language',
+          description: 'Language for generated cards',
+          type: 'dropdown',
+          value: settings.language || 'auto',
+          options: [
+            { value: 'auto', label: 'Auto (Source language)' },
+            { value: 'English', label: 'English' },
+            { value: 'Indonesian', label: 'Indonesian (Bahasa Indonesia)' },
+            { value: 'Spanish', label: 'Spanish (Español)' },
+            { value: 'French', label: 'French (Français)' },
+            { value: 'German', label: 'German (Deutsch)' },
+            { value: 'Chinese', label: 'Chinese (中文)' },
+            { value: 'Japanese', label: 'Japanese (日本語)' },
+            { value: 'Korean', label: 'Korean (한국어)' },
+            { value: 'Portuguese', label: 'Portuguese (Português)' },
+            { value: 'Russian', label: 'Russian (Русский)' },
+            { value: 'Arabic', label: 'Arabic (العربية)' },
+          ],
+          onChange: async value => { try { await save({ language: value }); } catch (cause) { showError(cause); throw cause; } },
+        },
         row('retention', 'Desired retention (%)', settings.retention * 100, 'number', value => Number(value) / 100, { min: 70, max: 99, step: 1 }),
         row('learningSteps', 'Learning steps (minutes)', settings.learningSteps.map(value => `${value}m`).join(' '), 'text', parseSteps),
         row('relearningSteps', 'Relearning steps (minutes)', settings.relearningSteps.map(value => `${value}m`).join(' '), 'text', parseSteps),

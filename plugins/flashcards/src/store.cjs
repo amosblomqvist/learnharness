@@ -46,9 +46,10 @@ function migrate(state) {
   }
   // Ratings/timing/schedule snapshots suffice for statistics and retry receipts.
   for (const r of state.reviews) for (const key of ['question', 'answer']) if (Object.hasOwn(r, key)) { delete r[key]; changed = true; }
+  if (!state.settings?.language) { if (state.settings) state.settings.language = 'auto'; changed = true; }
   return changed;
 }
-const defaults = () => ({ retention: 0.9, learningSteps: [1, 10], relearningSteps: [10], dayStart: 4, fuzz: false, chunkBudget: 4000, modelOverride: null });
+const defaults = () => ({ retention: 0.9, learningSteps: [1, 10], relearningSteps: [10], dayStart: 4, fuzz: false, chunkBudget: 4000, modelOverride: null, language: 'auto' });
 function openStore(directory) {
   fs.mkdirSync(directory, { recursive: true });
   const file = path.join(directory, 'flashcards.json');
