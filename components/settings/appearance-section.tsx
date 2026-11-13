@@ -522,6 +522,17 @@ export function GraphSection({
 					}}
 				/>
 			</SettingsRow>
+			<SettingsRow
+				label="Baidu OCR for PDF"
+				hint={graph?.ocrBaiduEnabled ? "Active — Warning: significantly reduces extraction speed on scanned pages" : "Off — fastest, uses native text extraction"}
+				testid="graph-row-baidu-ocr"
+			>
+				<Toggle
+					checked={graph?.ocrBaiduEnabled ?? false}
+					label="Baidu OCR for PDF enabled"
+					onChange={(on) => onSectionChange({ ...graph, ocrBaiduEnabled: on })}
+				/>
+			</SettingsRow>
 		</>
 	);
 }

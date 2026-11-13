@@ -793,6 +793,72 @@ export function callUsage(usage: Usage): CallUsage {
 		reasoningTokens: usage.reasoning ?? 0,
 	};
 }
+/**
+ * AST-aware chunking for notes: splits under the token budget (chars/4),
+ * respecting fenced code blocks (``` / ~~~), markdown tables, and prefers
+ * splitting at markdown heading boundaries when near budget.
+ */
+export function chunkNotes(text: string, budget: number): string[] {
+	if (text.trim().length === 0) return [];
+	const out: string[] = [];
+	let current = "";
+	let inCodeFence = false;
+	let inTable = false;
+	let fenceMarker = "";
+
+	const lines = text.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		const trimmed = line.trim();
+
+		const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
+		const isFenceOpener = !inCodeFence && !!fenceMatch;
+		const isTableRow = trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.length > 1;
+		const nextLine = lines[i + 1]?.trim();
+		const isTableOpener = !inTable && (isTableRow || (trimmed.startsWith("|") && (nextLine?.startsWith("|") ?? false)));
+
+		const candidate = current.length === 0 ? line : current + "\n" + line;
+		const candidateTokens = Math.ceil(candidate.length / 4);
+		const isHeading = /^#{1,4}\s+/.test(trimmed);
+		const shouldSplitAtHeading = !inCodeFence && !inTable && isHeading && candidateTokens >= Math.floor(budget * 0.7);
+		const shouldSplitBeforeBlock = !inCodeFence && !inTable && (isFenceOpener || isTableOpener) && candidateTokens > budget;
+
+		if (current.length > 0 && (shouldSplitAtHeading || shouldSplitBeforeBlock || (candidateTokens > budget && !inCodeFence && !inTable))) {
+			out.push(current);
+			current = line;
+			if (isFenceOpener && fenceMatch && fenceMatch[1]) {
+				inCodeFence = true;
+				fenceMarker = fenceMatch[1].slice(0, 3);
+			}
+			if (isTableOpener) {
+				inTable = true;
+			}
+			continue;
+		}
+
+		if (fenceMatch && fenceMatch[1]) {
+			if (!inCodeFence) {
+				inCodeFence = true;
+				fenceMarker = fenceMatch[1].slice(0, 3);
+			} else if (trimmed.startsWith(fenceMarker)) {
+				inCodeFence = false;
+				fenceMarker = "";
+			}
+		}
+
+		if (isTableRow || (trimmed.startsWith("|") && (nextLine?.startsWith("|") ?? false))) {
+			inTable = true;
+		} else if (inTable && !trimmed.startsWith("|")) {
+			inTable = false;
+		}
+
+		current = candidate;
+	}
+
+	if (current.trim().length > 0) out.push(current);
+	return out;
+}
+
 
 export function createExtractionPipeline(deps: ExtractionPipelineDeps): ExtractionPipeline {
 	const { chatStore, graphStore } = deps;
@@ -960,6 +1026,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	async function audit(jobKey: string, sourceId: string, findings: SessionFindings): Promise<AuditVerdicts> {
 		const signal = runningExtractions.get(jobKey)?.controller.signal;
 		signal?.throwIfAborted(); // an abort during the extract→audit gap ends here
+		if (findings.propositions.length === 0) {
+			return { links: [] };
+		}
 		const graph = getGraph(graphStore);
 		console.info(
 			`[extraction ${jobKey}] auditor starting (${findings.propositions.length} propositions, ` +
@@ -1237,27 +1306,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		return `SOURCE (the author's personal notes): ${input.filePath}${part}\n\n${input.text}`;
 	}
 
-	/** Chunk the notes text under the same budget the chat path uses
-	 * (owner, 2026-09-28: the whole-file-in-one-call design collapsed a
-	 * weak model — 26 propositions, structure bleed mid-emission).
-	 * Greedy by line, chars/4 like every other estimate in the app; a
-	 * single over-budget line rides alone (never split a line). */
-	function chunkNotes(text: string, budget: number): string[] {
-		if (text.trim().length === 0) return [];
-		const out: string[] = [];
-		let current = "";
-		for (const line of text.split("\n")) {
-			const candidate = current.length === 0 ? line : current + "\n" + line;
-			if (current.length > 0 && Math.ceil(candidate.length / 4) > budget) {
-				out.push(current);
-				current = line;
-			} else {
-				current = candidate;
-			}
-		}
-		if (current.trim().length > 0) out.push(current);
-		return out;
-	}
+	/** Chunk the notes text under the budget using AST and structure awareness:
+	 *  respects code fences, markdown tables, and splits cleanly on headings. */
 
 	async function notesExtract(
 		jobKey: string,

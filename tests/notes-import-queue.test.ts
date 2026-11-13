@@ -97,9 +97,9 @@ it("the queue uploads every accepted extension, including the expanded text type
 
 it("the file type check comes before the size check", () => {
 	const queue = createNotesImportQueue(async ([f]) => [success(f!.name)]);
-	const huge = file("huge.docx"); Object.defineProperty(huge, "size", { value: Number.MAX_SAFE_INTEGER });
+	const huge = file("huge.bin"); Object.defineProperty(huge, "size", { value: Number.MAX_SAFE_INTEGER });
 	queue.append([huge]);
-	assert.deepEqual(queue.getSnapshot().errors, ["Skipped 1 file that isn't text, Markdown, or PDF (.docx)."]);
+	assert.deepEqual(queue.getSnapshot().errors, ["Skipped 1 file that isn't text, Markdown, or PDF (.bin)."]);
 });
 
 it("a folder pick of unsupported files gives one summary line with the count and each distinct type once, in first-seen order", async () => {
