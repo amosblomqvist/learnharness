@@ -55,6 +55,9 @@ Runtime contract (the document runs in a sandboxed iframe, sandbox="allow-script
   when they genuinely help — but prefer dependency-free; you own the failure if a CDN import fails.
 - NO localStorage, sessionStorage, or document.cookie — the sandbox makes them throw.
 - The parent sizes the iframe to the document height automatically; just build normal flowing layout.
+- Never size the layout from the viewport: no vh units and no height:100% on html, body or page
+  containers. The iframe's viewport is the height the parent gave it, so viewport-relative layouts
+  grow without end.
   Make the demo fill the width and size its own height sensibly.
 
 Build quality:
