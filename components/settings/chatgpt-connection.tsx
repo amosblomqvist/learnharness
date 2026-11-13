@@ -347,6 +347,10 @@ export function ChatGPTConnection({ labelClassName }: { setup?: boolean; labelCl
 }
 
 /** Contextual consent discovery belongs beside background model choices only. */
+/** Background consent as the UI last saw it: readers that depend on it re-read when it flips. */
+export function useChatGPTBackgroundAllowed(): boolean {
+	return useContext(Context).status.allowBackgroundUse;
+}
 export function ChatGPTBackgroundAccess({ provider }: { provider: string | undefined }) {
 	const ui = useContext(Context);
 	const account: Account | undefined = ui.status.accounts.find((a) => a.id === ui.status.activeId && a.connected);

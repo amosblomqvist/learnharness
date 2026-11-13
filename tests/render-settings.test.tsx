@@ -232,6 +232,10 @@ describe("AgentSection (thin SSR)", () => {
 			<AgentSection agent={{ search: { engine: "ollama" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
 		);
 		assert.ok(ollama.includes("Ollama"), "an Ollama pin reads by its label");
+		const openai = renderToStaticMarkup(
+			<AgentSection agent={{ search: { engine: "openai" } }} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />,
+		);
+		assert.ok(openai.includes("OpenAI"), "an OpenAI pin reads by its label");
 	});
 
 	it("the prober graph-tools row: FIRST in the Tools group, default ON, its own key (wave 7)", () => {

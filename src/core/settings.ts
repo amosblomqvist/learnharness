@@ -363,7 +363,8 @@ export interface AgentSettings {
 	 *  never chooses an engine to make search work. An explicit choice only
 	 *  pins the preference (e.g. when BOTH keys are present); the chosen
 	 *  engine must still have its key, else search is honestly unavailable.
-	 *  Absent + no key = unavailable (no silent fallback, no default). */
+	 *  Absent + no key = unavailable (no silent fallback, no default).
+	 *  "openai" is the one engine that works only as an explicit choice. */
 	search?: { engine?: SearchEngineId };
 	/** Prober graph tools (wave 7, owner ruling 2026-09-23): read-only
 	 *  knowledge-graph views for the prober agent — a session list +
