@@ -4,6 +4,8 @@ The runtime composes prompts for **prober**, **teacher** and **practice** agents
 
 ## Composition order
 
+User-created custom segments under `data/prompts/` (`personalization.md` and `skills/<slug>.md`): composed as a trailing appendix across agents when enabled in `settings.agent.prompts`.
+
 | Agent | Segments, in order |
 |---|---|
 | Prober | [`system-prompt.md`](../system-prompt.md) → sorted `prober/` fragments → sorted `shared/` fragments |
@@ -27,6 +29,8 @@ prober/<fragment>.md
 teacher/<fragment>.md
 practice/<fragment>.md
 shared/<fragment>.md
+personalization.md
+skills/<slug>.md
 ```
 
 An override is effective only when **both** its `settings.json` → `agent.prompts[segmentPath]` switch is `true` **and** its file can be read. Absent/off switches and missing/unreadable files use source text. File presence alone does not enable anything. An enabled empty override contributes no text after trimming; it does not fall back to source.
