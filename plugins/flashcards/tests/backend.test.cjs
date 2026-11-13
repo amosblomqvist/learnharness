@@ -32,7 +32,7 @@ function workerService() {
       const prior = [...tasks.values()].find(task => task.requestId === options.requestId);
       if (prior) return structuredClone(prior);
       starts++;
-      const task = { id: randomUUID(), workerId, requestId: options.requestId, input: structuredClone(options.input), status: 'running', turns: 0, activity: 'waiting' };
+      const task = { id: randomUUID(), workerId, requestId: options.requestId, input: structuredClone(options.input), prompt: options.prompt, status: 'running', turns: 0, activity: 'waiting' };
       tasks.set(task.id, task);
       return structuredClone(task);
     },
@@ -393,8 +393,8 @@ test('file preflight is temporary and validates inputs before catalog access; co
   assert.equal(batch.kind, 'file'); assert.equal(batch.name, input.name); assert.equal(batch.deckId, source.deckId);
   assert.equal(h.state().decks.length, 1); assert.equal(h.state().decks[0].name, input.name);
   const filename = path.join(h.directory, 'sources', `${source.id}.md`);
-  assert.equal(fs.readFileSync(filename, 'utf8'), input.markdown); assert.equal(fs.statSync(filename).mode & 0o777, 0o600);
-  assert.equal(fs.statSync(path.dirname(filename)).mode & 0o777, 0o700);
+  assert.equal(fs.readFileSync(filename, 'utf8'), input.markdown); assert.equal(fs.statSync(filename).mode & 0o777, process.platform === 'win32' ? 0o666 : 0o600);
+  assert.equal(fs.statSync(path.dirname(filename)).mode & 0o777, process.platform === 'win32' ? 0o666 : 0o700);
   const ledger = fs.readFileSync(path.join(h.directory, 'flashcards.json'), 'utf8');
   assert.equal(ledger.includes('UNIQUE SOURCE MARKDOWN'), false); assert.equal(ledger.includes('markdown'), false);
   const task = h.workers.service.list()[0];
@@ -1189,7 +1189,8 @@ test('settings validate atomically and model resolution fails explicitly without
   const h = harness(t);
   const before = h.state();
   for (const patch of [{ retention: .69 }, { retention: 1 }, { learningSteps: [] }, { relearningSteps: [10, 5] },
-    { learningSteps: [1440] }, { dayStart: 24 }, { chunkBudget: 0 }, { modelOverride: {} }, { thinkingOverride: 'invented' }, { unknown: true }]) {
+    { learningSteps: [1440] }, { dayStart: 24 }, { chunkBudget: 0 }, { modelOverride: {} }, { thinkingOverride: 'invented' }, { unknown: true },
+    { language: '' }, { language: '   ' }, { language: 123 }, { language: null }]) {
     await assert.rejects(h.call('save-settings', patch));
     assert.deepEqual(h.state(), before);
   }
@@ -1197,4 +1198,26 @@ test('settings validate atomically and model resolution fails explicitly without
   await assert.rejects(h.call('preflight', { propositionIds: ['p1'] }), /Configure the cheap model slot/);
   assert.equal(h.workers.starts, 0);
   assert.deepEqual(h.state().propositions, []);
+});
+
+test('saving language setting updates store and informs graph and file preflights', async t => {
+  const h = harness(t, graph('p1'));
+  assert.equal(h.state().settings.language, 'auto');
+  await h.call('save-settings', { language: 'Indonesian' });
+  assert.equal(h.state().settings.language, 'Indonesian');
+
+  const graphPlan = await h.call('preflight', { propositionIds: ['p1'] });
+  assert.ok(graphPlan.id);
+  await h.call('start-generation', { preflightId: graphPlan.id, requestId: 'test-lang-graph' });
+  await flush();
+  const graphTask = h.workers.service.list().find(t => t.requestId === h.state().batch.chunks[0].requestId);
+  assert.ok(graphTask.prompt.includes('Language: Generate all facts, cues, questions, and answers in Indonesian.'));
+  await h.complete(graphTask, result(cards('p1', 'Pertanyaan', 'Jawaban')));
+  assert.equal(h.state().batch.status, 'completed');
+
+  const filePlan = await h.call('preflight-file', { name: 'test.md', markdown: '# Fact\nSome statement.' });
+  await h.call('start-generation', { preflightId: filePlan.id, requestId: 'test-lang-file' });
+  await flush();
+  const fileTask = h.workers.service.list().find(t => t.requestId === h.state().batch.chunks[0].requestId);
+  assert.ok(fileTask.prompt.includes('Language: Generate all facts, cues, questions, and answers in Indonesian.'));
 });
