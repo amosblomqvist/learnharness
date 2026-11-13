@@ -9,7 +9,7 @@ import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-men
 import { MenuShell } from "@/components/menu-shell";
 import { useInteractionLayers } from "@/components/interaction-layers";
 import { isInputShortcutScopeEligible } from "@/components/plugin-input-focus";
-import { prettyModel } from "@/components/usage-format";
+import { modelLabel } from "@/components/usage-format";
 import { THINKING_LABEL } from "@/components/thinking-default";
 import { claimPluginInputFocus } from "@/components/plugin-dictation";
 
@@ -52,7 +52,7 @@ export function PluginModelPicker({ value, onChange, disabled, onError, commandR
 	});
 	return <div ref={root} className="relative inline-flex" data-plugin-model-picker="">
 		<ModelPickerPill disabled={disabled} aria-label="Model selector" aria-expanded={open} onClick={() => { if (open) close(); else invoke(); }}>
-			{value ? prettyModel(value.id) : "—"}
+			{value ? modelLabel(value.id, catalog?.models.find((m) => m.id === value.id && m.provider === value.provider)) : "—"}
 		</ModelPickerPill>
 		{open && !disabled && <MenuShell anchorRef={root} preferredSide="up" testid="plugin-model-menu" onClose={() => { close(); return "closed"; }} menuClass="flex w-[22rem] flex-col rounded-xl border bg-card p-2 text-xs shadow-xl">
 			{error && <div role="alert" className="text-destructive">{error}</div>}

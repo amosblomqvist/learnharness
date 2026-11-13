@@ -24,6 +24,11 @@ export interface ModelCatalogEntry {
 	/** Null for native CLI aliases whose effective limits are session-specific. */
 	contextWindow: number | null;
 	maxTokens: number | null;
+	/** Claude Code aliases only: the canonical model the installed CLI says
+	 *  the alias resolves to right now (e.g. opus → claude-opus-5-5). */
+	resolvedModel?: string;
+	/** Short label for {@link resolvedModel} as the CLI names it (e.g. "Opus 5.5"). */
+	resolvedLabel?: string;
 }
 
 /** Conversation default resolved from the strong slot, used for new sessions

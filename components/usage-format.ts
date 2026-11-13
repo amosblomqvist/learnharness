@@ -37,3 +37,10 @@ export function prettyModel(id: string, qualified = false): string {
 	const short = bare.includes("/") ? bare.slice(bare.lastIndexOf("/") + 1) : bare;
 	return provider ? `${short} · ${provider}` : short;
 }
+/** Picker/chip label for a selected model. A Claude Code alias whose concrete
+ * model the installed CLI reported shows that version (opus → "Opus 5.5");
+ * everything else, including an alias the CLI hasn't reported, keeps
+ * {@link prettyModel}. The version comes from the CLI, never from this code. */
+export function modelLabel(id: string, entry?: { resolvedLabel?: string } | null): string {
+	return entry?.resolvedLabel ?? prettyModel(id);
+}

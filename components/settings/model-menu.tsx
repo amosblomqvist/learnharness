@@ -71,7 +71,7 @@ export function ModelMenuList({
 			<SearchMenuList
 				items={visionItems}
 				itemKey={(m) => `${m.provider}/${m.id}`}
-				searchTerms={(m) => [m.provider, m.id, m.name]}
+				searchTerms={(m) => [m.provider, m.id, m.name, ...(m.resolvedModel ? [m.resolvedModel] : [])]}
 				compare={(a, b) => a.id.localeCompare(b.id)}
 				prioritize={vision ? (m) => m.input.includes("image") : undefined}
 				isSelected={(m) => m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider)}
@@ -90,7 +90,7 @@ export function ModelMenuList({
 						</span>
 					</span>
 					<span className="flex items-center justify-between gap-2 text-muted-foreground">
-						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}</span>
+						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}{m.resolvedModel ? ` → ${m.resolvedModel}` : ""}</span>
 						<span className="shrink-0 tabular-nums">{m.contextWindow === null ? "—" : formatTokens(m.contextWindow)}</span>
 					</span>
 				</>}
