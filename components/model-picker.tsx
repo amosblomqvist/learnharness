@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { ChatSettings, ModelCatalogEntry, ModelCatalogResponse, ModelsSettings, UserSettings } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { prettyModel } from "@/components/usage-format";
+import { modelLabel, prettyModel } from "@/components/usage-format";
 import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
 import { composeSlotModel } from "@/components/settings/agent-section";
 import { MenuShell } from "@/components/menu-shell";
@@ -273,7 +273,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	return (
 		<div ref={containerRef} className="relative flex items-center gap-1.5" data-testid="model-control">
 			<Hint
-				label={effectiveId ? `${effectiveProvider ? `${effectiveProvider}:` : ""}${effectiveId}` : "Model selector"}
+				label={effectiveId ? `${effectiveProvider ? `${effectiveProvider}:` : ""}${effectiveId}${entry?.resolvedModel ? ` → ${entry.resolvedModel}` : ""}` : "Model selector"}
 				action="open-model-picker"
 				side="bottom"
 			>
@@ -281,7 +281,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 					data-testid="stats-model"
 					onClick={() => openMenu("model")}
 					aria-expanded={open === "model"}
-				>{effectiveId ? prettyModel(effectiveId) : "—"}</ModelPickerPill>
+				>{effectiveId ? modelLabel(effectiveId, entry) : "—"}</ModelPickerPill>
 			</Hint>
 			<Hint
 				// "Thinking" + its real shortcut via the registry (owner interlude
@@ -339,7 +339,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 						levels={catalog ? levels : []}
 						effectiveLevel={effectiveLevel}
 						onPick={(level) => apply(effectiveProvider ?? "", effectiveId ?? "", level as ThinkingLevel)}
-						empty={catalog ? (effectiveId ? `${prettyModel(effectiveId)} has no thinking levels.` : "Pick a model first.") : "Loading…"}
+						empty={catalog ? (effectiveId ? `${modelLabel(effectiveId, entry)} has no thinking levels.` : "Pick a model first.") : "Loading…"}
 						footer="Levels this model actually supports"
 					/>
 					{error && <div className="mt-1 text-destructive">{error}</div>}

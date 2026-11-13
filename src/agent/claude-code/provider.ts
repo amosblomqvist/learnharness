@@ -23,6 +23,22 @@ export const CLAUDE_CODE_MODELS: readonly Model<Api>[] = [
 	{ ...SHARED_MODEL_FIELDS, id: "haiku", name: "Claude Haiku" },
 ];
 
+/** A model name the CLI may accept beyond the three listed aliases: another
+ *  alias it reports (e.g. `fable`) or a full ID (e.g. `claude-mythos-5-2`).
+ *  Starting with a letter keeps it from ever reading as a CLI flag. */
+const CLI_MODEL_NAME = /^[a-z][a-z0-9]*(?:[-.][a-z0-9]+)*$/;
+
+/** The model record for a Claude Code selection. Listed aliases come from the
+ *  fixed catalog; any other well-formed name is synthesized with the same
+ *  fields, so a saved choice the CLI reported keeps working before the CLI is
+ *  asked again (for example right after a restart). Whether the account can
+ *  use it is the CLI's call at request time. */
+export function claudeCodeModel(id: string, name?: string): Model<Api> | undefined {
+	const listed = CLAUDE_CODE_MODELS.find((model) => model.id === id);
+	if (listed) return listed;
+	return CLI_MODEL_NAME.test(id) ? { ...SHARED_MODEL_FIELDS, id, name: name ?? id } : undefined;
+}
+
 export function createClaudeCodeProvider(streamSimple: StreamFunction<Api, SimpleStreamOptions>): Provider {
 	return createProvider({
 		id: CLAUDE_CODE_PROVIDER,

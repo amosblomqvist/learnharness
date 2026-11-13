@@ -5,7 +5,7 @@ export type CliUsage = Partial<Pick<Usage, "input" | "output" | "cacheRead" | "c
 export type CliBlock = { type: "text" } | { type: "thinking" } | { type: "toolUse"; id: string; name: string };
 
 export type CliEvent =
-	| { type: "messageStart"; usage: CliUsage }
+	| { type: "messageStart"; usage: CliUsage; model?: string }
 	| { type: "blockStart"; index: number; block: CliBlock }
 	| { type: "textDelta"; index: number; text: string }
 	| { type: "thinkingDelta"; index: number; thinking: string }
@@ -37,7 +37,7 @@ type RawDelta = {
 type RawStreamEvent = {
 	type: string;
 	index?: number;
-	message?: { usage?: RawUsage };
+	message?: { usage?: RawUsage; model?: unknown };
 	content_block?: RawContentBlock;
 	delta?: RawDelta;
 	usage?: RawUsage;
@@ -123,8 +123,12 @@ function parseBlockEvent(index: number, event: RawStreamEvent): CliEvent | null 
 
 function parseStreamEvent(event: RawStreamEvent): CliEvent | null {
 	switch (event.type) {
-		case "message_start":
-			return { type: "messageStart", usage: toUsage(event.message?.usage ?? {}) };
+		case "message_start": {
+			const usage = toUsage(event.message?.usage ?? {});
+			// The concrete model the CLI resolved the alias to (e.g. opus -> a dated ID).
+			const model = event.message?.model;
+			return typeof model === "string" && model ? { type: "messageStart", usage, model } : { type: "messageStart", usage };
+		}
 
 		case "message_delta": {
 			const stopReason = event.delta?.stop_reason ?? null;

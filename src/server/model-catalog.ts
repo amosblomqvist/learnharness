@@ -29,10 +29,13 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+		// Picker labels only (the catalog route); turns never wait on this.
+		!provider ? refreshClaudeCodeModels() : Promise.resolve(),
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
 	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
+	if (provider === CLAUDE_CODE_PROVIDER) return piModels().getModel(provider, id) ?? claudeCodeModel(id);
 	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
 }
 function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
@@ -52,6 +55,9 @@ import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolut
 import { AUTH_PROVIDER_KEYS, CUSTOM_PROVIDER } from "../core/auth-keys.ts";
 import { claudeCodeAvailable } from "./claude-code-config.ts";
 import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
+import { claudeModelVersionLabel } from "../core/contracts/claude-code.ts";
+import { claudeCodeExtraModels, claudeCodeModelInfo, refreshClaudeCodeModels } from "./claude-code-models.ts";
+import { claudeCodeModel } from "../agent/claude-code/provider.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
 	MODEL_SLOTS,
@@ -173,9 +179,13 @@ function keyedProviderIds(): Set<string> {
 
 /** Project one catalog model to the client DTO. */
 export function toModelDto(model: Model<Api>): ModelDto {
+	const info = model.provider === CLAUDE_CODE_PROVIDER ? claudeCodeModelInfo(model.id) : undefined;
+	const resolvedModel = info?.resolvedModel;
+	// The CLI's own display name first; the canonical ID's family/version as a fallback.
+	const version = info ? info.displayName ?? claudeModelVersionLabel(info.resolvedModel) : null;
 	return {
 		id: model.id,
-		name: model.name,
+		name: version ? `Claude ${version}` : model.name,
 		provider: model.provider,
 		reasoning: model.reasoning,
 		input: [...model.input],
@@ -188,6 +198,9 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		},
 		contextWindow: model.provider === CLAUDE_CODE_PROVIDER ? null : model.contextWindow,
 		maxTokens: model.provider === CLAUDE_CODE_PROVIDER ? null : model.maxTokens,
+		// A full ID the CLI reports resolves to itself; only aliases carry a target.
+		...(resolvedModel && resolvedModel !== model.id ? { resolvedModel } : {}),
+		...(version ? { resolvedLabel: version } : {}),
 	};
 }
 
@@ -224,7 +237,7 @@ export function modelCatalog(): ModelCatalogResponse {
 		.flatMap((p) => piModels().getModels(p.id))
 		.map(toModelDto)
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
-		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
+		.concat([...(keyed.has(CLAUDE_CODE_PROVIDER) ? claudeCodeExtraModels() : []), ...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
 	return {
 		models,
 		defaults: catalogDefaults(),

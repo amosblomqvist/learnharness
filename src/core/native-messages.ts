@@ -106,6 +106,9 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 	/** CLI-reported effective context budget, not a catalog model maximum.
 	 * App-only metadata: never transmitted as provider/model message content. */
 	cliContextWindow?: number;
+	/** Concrete model a Claude Code alias resolved to for this response, as
+	 * the CLI reported it. App-only metadata, like cliContextWindow. */
+	cliModel?: string;
 	/** Host-owned occurrence annotations, never model input. */
 	lhQuestions?: PluginQuestionOccurrenceMap;
 	/** Exact binding for genuine plugin-question results (details stays public envelope). */
@@ -122,6 +125,19 @@ export function cliContextWindowOf(messages: readonly LhMessage[]): { model: str
 		const tokens = message.cliContextWindow;
 		return message.provider === CLAUDE_CODE_PROVIDER && typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens > 0
 			? { model: `${message.provider}:${message.model}`, tokens } : null;
+	}
+	return null;
+}
+
+/** The concrete model behind the latest Claude Code response, if the CLI
+ * reported one. Keyed by the alias so callers never show it for another selection. */
+export function cliModelOf(messages: readonly LhMessage[]): { model: string; resolved: string } | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const message = messages[i]!;
+		if (message.role !== "assistant") continue;
+		if (message.provider !== CLAUDE_CODE_PROVIDER) return null;
+		const resolved = message.cliModel;
+		return typeof resolved === "string" && resolved ? { model: `${message.provider}:${message.model}`, resolved } : null;
 	}
 	return null;
 }
@@ -713,8 +729,8 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			});
 			continue;
 		}
-		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
-		const { id: _id, cliContextWindow: _cliContextWindow, lhQuestions: _lhQuestions, lhQuestionOccurrence: _lhQuestionOccurrence, ...native } = m as LhMessage;
+		// Strip app-only id/CLI context/model metadata: the wire carries the native shape only.
+		const { id: _id, cliContextWindow: _cliContextWindow, cliModel: _cliModel, lhQuestions: _lhQuestions, lhQuestionOccurrence: _lhQuestionOccurrence, ...native } = m as LhMessage;
 		// Learner citations are links in the record; the wire carries them
 		// expanded (core/citations.ts) — the one model-facing rewrite.
 		out.push(role === "user" ? expandUserCitations(native as UserMessage) : (native as Message));

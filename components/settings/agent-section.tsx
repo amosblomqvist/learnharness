@@ -75,7 +75,7 @@ import {
 	type SearchEngineId,
 } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { prettyModel } from "@/components/usage-format";
+import { modelLabel } from "@/components/usage-format";
 import { cn } from "@/lib/utils";
 import { SettingsGroup, SettingsRow, SettingsMenuTrigger, Toggle, CommitInput } from "./controls.tsx";
 import { ModelMenuList, ThinkingMenuList } from "./model-menu";
@@ -695,8 +695,8 @@ export function AgentSection({
 							>
 								{slot !== "strong" && <><ChatGPTBackgroundAccess provider={coord?.provider} /><NativeSubscriptionBackgroundAccess provider={coord?.provider} /></>}
 								<MenuTrigger
-									value={modelId ? prettyModel(modelId) : ""}
-									hint={modelId ? `${provider}:${modelId}` : undefined}
+									value={modelId ? modelLabel(modelId, chosen) : ""}
+									hint={modelId ? `${provider}:${modelId}${chosen?.resolvedModel ? ` → ${chosen.resolvedModel}` : ""}` : undefined}
 									emptyLabel="—"
 									ariaLabel={`${SLOT_META[slot].label} model`}
 									testid={`slot-model-${slot}`}
