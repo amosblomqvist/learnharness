@@ -1,5 +1,6 @@
 import path from "node:path";
 import type { PluginBackendContext } from "learnharness-plugin-api";
+import { answerProblems, definition, gradeListening, listeningInstructions, questionProblems, type ListeningAnswer, type ListeningPayload } from "./contract.ts";
 import { createSettingsStore, isRecord, type ListeningSettings } from "./settings-store.ts";
 import { createSpeechCache, type SpeechCache } from "./speech/cache.ts";
 import { createElevenLabsProvider } from "./speech/elevenlabs.ts";
@@ -59,13 +60,43 @@ export function activate(ctx: PluginBackendContext, options: ListeningBackendOpt
     };
   };
 
+  // The question type stays registered for the whole activation, so a pending question can
+  // always be answered, even after Listening stops being Ready or the app restarts. New poses
+  // are refused while not Ready, and the instructions only reach the agent while Ready.
+  const unregisterQuestion = ctx.registerQuestionType({
+    ...definition,
+    validateQuestion: context => {
+      const settings = store.settings();
+      if (!isReady(settings) || !settings.model) return ["Listening isn't set up, so listening questions are unavailable. Assess this another way."];
+      return questionProblems(context.input.payload as ListeningPayload, settings.model);
+    },
+    validateAnswer: context => answerProblems(context.input.payload as ListeningPayload, context.answer as ListeningAnswer),
+    gradeAnswer: context => gradeListening(context.input.payload as ListeningPayload, context.answer as ListeningAnswer),
+  });
+  let unregisterInstructions: (() => void) | undefined;
+  let instructionsFor: string | undefined;
+  /** Changes apply from the next turn. */
+  const syncInstructions = () => {
+    if (disposed) return;
+    const settings = store.settings();
+    const model = isReady(settings) ? settings.model : undefined;
+    const identity = model ? JSON.stringify(model) : undefined;
+    if (identity === instructionsFor) return;
+    unregisterInstructions?.();
+    unregisterInstructions = undefined;
+    instructionsFor = undefined;
+    if (!model) return;
+    unregisterInstructions = ctx.registerInstructions({ agents: ["prober", "teacher"], text: listeningInstructions(model) });
+    instructionsFor = identity;
+  };
+
   const speech = createSpeechService({
     cache,
     selection: () => { const settings = store.settings(); return { ...settings, provider: providerFor(settings) }; },
     key: provider => store.key(provider),
   });
 
-  const changed = () => { const next = status(); ctx.events.emit("status-changed", next); return next; };
+  const changed = () => { syncInstructions(); const next = status(); ctx.events.emit("status-changed", next); return next; };
 
   /** The last live model list per provider; model choices must come from it. */
   const listed = new Map<string, ModelInfo[]>();
@@ -145,10 +176,12 @@ export function activate(ctx: PluginBackendContext, options: ListeningBackendOpt
     }),
   ];
 
+  syncInstructions();
   return () => {
     if (disposed) return;
     disposed = true;
     for (const unregister of handlers) unregister();
+    try { unregisterInstructions?.(); } finally { unregisterQuestion(); }
   };
 }
 

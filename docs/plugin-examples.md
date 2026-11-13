@@ -15,7 +15,7 @@ building or exercising it: plugins are trusted local code, not sandboxed extensi
 | [Coding questions](../plugins/coding-questions/README.md) | Core source reference | Teaching questions and repeated practice submissions, controlled editors, processing observations and saved-result rendering |
 | [Drawing Pad](../plugins/drawing-pad/README.md) | Core source reference | Session-context actions, shortcuts, surfaces, learner-submission image attachment and acknowledgment-aware draft consumption |
 | [Rich code blocks](../plugins/rich-code-blocks/README.md) | Core source reference | Conditional fence renderers, additive instructions, settings synchronization, local assets and bounded rendering |
-| [Listening](../plugins/listening/README.md) | Core source reference | A readiness state, a custom settings mount with a plugin-owned secret and binary data over the JSON bridge |
+| [Listening](../plugins/listening/README.md) | Core source reference | Readiness-driven question registration, a custom settings mount with a plugin-owned secret, binary data over the JSON bridge and a shared question/editor state |
 
 Hello is the smallest place to begin. The official source projects are the primary
 substantial examples; read a route below for the extension point you need rather than
@@ -231,17 +231,26 @@ feature safeguards, not a sandbox for arbitrary plugin JavaScript.
 
 ### Listening: readiness, secrets and audio
 
-Read the [README](../plugins/listening/README.md) for setup, limits and caching.
+Read the [README](../plugins/listening/README.md) for setup, limits, caching and the
+question contract.
 
-1. [`src/backend.ts`](../plugins/listening/src/backend.ts): derives readiness from the
-   provider's settings and keeps the API key behind `ctx.handle` operations that never
-   return it.
-2. [`src/speech/`](../plugins/listening/src/speech/): a provider interface, the
+1. [`src/backend.ts`](../plugins/listening/src/backend.ts): keeps the question type
+   registered so pending questions stay answerable, gates new poses and instructions on
+   readiness, and keeps the API key behind `ctx.handle` operations that never return it.
+2. [`src/contract.ts`](../plugins/listening/src/contract.ts): probe and teach variants,
+   synchronous validation against a saved model snapshot, and observation-only grading.
+3. [`src/speech/`](../plugins/listening/src/speech/): a provider interface, the
    ElevenLabs adapter, a deduplicating bounded service and an LRU disk cache.
-3. [`src/settings-view.ts`](../plugins/listening/src/settings-view.ts): a custom settings
+4. [`src/views.ts`](../plugins/listening/src/views.ts),
+   [`src/editor.ts`](../plugins/listening/src/editor.ts) and
+   [`src/playback-state.ts`](../plugins/listening/src/playback-state.ts): question and
+   editor mounts sharing in-memory state keyed by question ID, with base64 audio from
+   `ctx.call`.
+5. [`src/settings-view.ts`](../plugins/listening/src/settings-view.ts): a custom settings
    mount combining `mountSettingsRows` with a write-only password field.
 
-The key is stored owner-only in the plugin data folder, not in host credentials.
+Speech requests go to the provider only when the learner presses Play and the audio is
+not cached. The key is stored owner-only in the plugin data folder, not in host credentials.
 
 ### UI Showcase: all 15 UI methods
 

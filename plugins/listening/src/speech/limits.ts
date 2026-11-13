@@ -1,5 +1,9 @@
 /** Speech limits and errors shared by the backend speech service and its providers. */
 
+/** Speeds offered to the learner. Both reuse the same recording with pitch preservation. */
+export const PLAYBACK_RATES = [1, 0.75] as const;
+export type PlaybackRate = (typeof PLAYBACK_RATES)[number];
+
 export const MAX_CONCURRENT_GENERATIONS = 2;
 export const SPEECH_CACHE_MAX_BYTES = 256 * 1024 * 1024;
 

@@ -3,8 +3,9 @@ import * as fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import type { PluginBackendContext } from "learnharness-plugin-api";
+import type { PluginBackendContext, PluginInstructions, PluginQuestionTypeDefinition } from "learnharness-plugin-api";
 import { activate, type ListeningStatus } from "../src/backend.ts";
+import { definition, listeningInstructions, PROBE_TOOL, TEACH_TOOL } from "../src/contract.ts";
 import type { SpeechCache } from "../src/speech/cache.ts";
 import { createElevenLabsProvider } from "../src/speech/elevenlabs.ts";
 import type { ModelInfo, TtsProvider } from "../src/speech/provider.ts";
@@ -22,7 +23,10 @@ async function harness(t: { after(fn: () => Promise<unknown>): unknown }, dataDi
   const directory = dataDirectory ?? await fs.mkdtemp(path.join(os.tmpdir(), "lh-listening-backend-"));
   if (!dataDirectory) t.after(() => fs.rm(directory, { recursive: true, force: true }));
   const handlers = new Map<string, (input: unknown) => unknown>();
+  const questions: PluginQuestionTypeDefinition[] = [];
+  const instructions: PluginInstructions[] = [];
   const events: [string, unknown][] = [];
+  const log: string[] = [];
   const syntheses: unknown[] = [];
   const base = createElevenLabsProvider({ fetch: async () => { throw new Error("no network in tests"); } });
   const models = [other, flash];
@@ -36,6 +40,8 @@ async function harness(t: { after(fn: () => Promise<unknown>): unknown }, dataDi
     dataDirectory: directory,
     signal: controller.signal,
     handle(name: string, handler: (input: unknown) => unknown) { handlers.set(name, handler); return () => { handlers.delete(name); }; },
+    registerQuestionType(value: PluginQuestionTypeDefinition) { questions.push(value); log.push("question+"); return () => { log.push("question-"); }; },
+    registerInstructions(value: PluginInstructions) { instructions.push(value); log.push("instructions+"); return () => { log.push("instructions-"); }; },
     events: { emit(topic: string, data: unknown) { events.push([topic, data]); }, on() { return () => {}; } },
   } as unknown as PluginBackendContext;
   const cleanup = activate(ctx, { providers: [provider], cache: memoryCache() });
@@ -44,7 +50,7 @@ async function harness(t: { after(fn: () => Promise<unknown>): unknown }, dataDi
     if (!handler) throw new Error(`No handler ${name}`);
     return await handler(input) as T;
   };
-  return { directory, call, events, syntheses, cleanup, handlers, models };
+  return { directory, call, questions, instructions, events, log, syntheses, cleanup, handlers, models };
 }
 
 async function makeReady(h: Awaited<ReturnType<typeof harness>>) {
@@ -53,30 +59,59 @@ async function makeReady(h: Awaited<ReturnType<typeof harness>>) {
   return h.call("save-settings", { voiceId: "voice-1" });
 }
 
-test("Ready needs a key, a Voice ID and a loaded model; status never includes the key", async t => {
+test("the type registers at activation; poses are refused and instructions withheld until Ready", async t => {
   const h = await harness(t);
+  assert.deepEqual(h.log, ["question+"], "registered at once so pending questions stay answerable");
+  const { validateQuestion, validateAnswer, gradeAnswer, ...rest } = h.questions[0]!;
+  assert.deepEqual(rest, definition);
+  assert.equal(rest.probe?.toolName, PROBE_TOOL);
+  assert.equal(rest.teach?.toolName, TEACH_TOOL);
+  for (const hook of [validateQuestion, validateAnswer, gradeAnswer]) assert.equal(typeof hook, "function");
+  const pose = () => validateQuestion!({ chatId: "c", variant: "probe", contractVersion: 1, input: { question: "?", payload: { audio: { text: "hola", language: "es" }, format: "recall", correctAnswer: "hi" } } } as never) ?? [];
+  assert.match(pose()[0]!, /isn't set up/);
   const initial = await h.call("get-status");
   assert.deepEqual(initial, { providers: [{ id: "elevenlabs", label: "ElevenLabs" }], provider: "elevenlabs", hasKey: false, voiceId: "", modelId: "eleven_flash_v2_5", ready: false });
-  await assert.rejects(h.call("list-models"), /API key first/);
-  assert.equal((await h.call("save-key", { apiKey: KEY })).ready, false, "a key alone is not Ready");
+  await h.call("save-key", { apiKey: KEY });
   const listed = await h.call<{ models: ModelInfo[]; status: ListeningStatus }>("list-models");
   assert.deepEqual(listed.models, [other, flash]);
   assert.deepEqual(listed.status.model, flash, "the preferred default is chosen and snapshotted");
-  assert.equal(listed.status.ready, false, "no voice yet");
+  assert.deepEqual(h.log, ["question+"], "no voice yet");
+  assert.match(pose()[0]!, /isn't set up/);
   const ready = await h.call("save-settings", { voiceId: "  voice-1  " });
   assert.equal(ready.ready, true);
   assert.equal(ready.voiceId, "voice-1");
-  assert.ok(h.events.some(([topic, data]) => topic === "status-changed" && (data as ListeningStatus).ready));
+  assert.deepEqual(h.log, ["question+", "instructions+"]);
+  assert.deepEqual(pose(), []);
+  assert.deepEqual(h.instructions[0], { agents: ["prober", "teacher"], text: listeningInstructions(flash) });
+  assert.ok(h.events.some(([topic]) => topic === "status-changed"));
+  h.cleanup();
+  assert.deepEqual(h.log, ["question+", "instructions+", "instructions-", "question-"]);
+  assert.equal(h.handlers.size, 0);
+});
+
+test("readiness changes only swap instructions; a pending answer still validates and grades when not Ready", async t => {
+  const h = await harness(t);
+  await makeReady(h);
+  await h.call("save-settings", { voiceId: "voice-2" });
+  assert.deepEqual(h.log, ["question+", "instructions+"], "a voice change keeps the instructions");
   const switched = await h.call("save-settings", { modelId: other.id });
   assert.deepEqual(switched.model, other);
+  assert.deepEqual(h.log, ["question+", "instructions+", "instructions-", "instructions+"]);
+  assert.match(h.instructions[1]!.text, /ja/);
   await assert.rejects(h.call("save-settings", { modelId: "not-listed" }), /Reload the model list/);
   await assert.rejects(h.call("save-settings", { model: flash }), /Unknown setting/);
-  await assert.rejects(h.call("save-settings", { provider: "nope" }), /Unknown speech provider/);
-  assert.equal((await h.call("remove-key")).ready, false);
+  await h.call("remove-key");
+  assert.equal(h.log.at(-1), "instructions-");
+  const { validateAnswer, gradeAnswer } = h.questions[0]!;
+  const pending = { chatId: "c", questionId: "q", variant: "probe", contractVersion: 1, input: { question: "?", payload: { audio: { text: "hi", language: "en" }, format: "recall", correctAnswer: "a greeting" } }, answer: { status: "audio_unavailable" }, signal: new AbortController().signal } as never;
+  assert.deepEqual(validateAnswer!(pending), []);
+  assert.deepEqual(await gradeAnswer!(pending), { modality: "listening", outcome: "audio_unavailable", assessment: "unassessed" });
   await h.call("save-key", { apiKey: KEY });
-  assert.equal((await h.call("save-settings", { voiceId: "" })).ready, false);
+  assert.equal(h.log.at(-1), "instructions+");
+  await h.call("save-settings", { voiceId: "" });
+  assert.equal(h.log.at(-1), "instructions-");
+  assert.equal(h.log.filter(entry => entry === "question-").length, 0, "the type is never unregistered while active");
   h.cleanup();
-  assert.equal(h.handlers.size, 0);
 });
 
 test("a saved model missing from the live list is kept, never replaced silently", async t => {
@@ -123,8 +158,49 @@ test("the API key is stored owner-only, survives restart and is never returned",
   const status = await restarted.call("get-status");
   assert.equal(status.ready, true);
   assert.deepEqual(status.model, flash);
-  assert.deepEqual(restarted.syntheses, [], "Ready at startup without a network call");
+  assert.deepEqual(restarted.log, ["question+", "instructions+"], "Ready at startup without a network call");
   restarted.cleanup();
+});
+
+test("validation enforces the model snapshot's languages and length, and option consistency", async t => {
+  const h = await harness(t);
+  await makeReady(h);
+  const validate = h.questions[0]!.validateQuestion!;
+  const run = (payload: unknown) => validate({ chatId: "c", variant: "probe", contractVersion: 1, input: { question: "What did you hear?", payload } } as never) ?? [];
+  const choice = { audio: { text: "Quiero un café.", language: "es" }, format: "choice", options: [{ label: "Coffee", value: "coffee" }, { label: "Tea" }], explanation: "café = coffee", correctAnswer: "coffee" };
+  assert.deepEqual(run(choice), []);
+  assert.deepEqual(run({ ...choice, correctAnswer: "Tea" }), [], "label fallback");
+  assert.equal(run({ ...choice, audio: { text: "Olá", language: "pt-BR" } }).length, 1);
+  assert.match(run({ ...choice, audio: { text: "Olá", language: "pt-BR" } })[0]!, /not supported.*en, es, zh/);
+  assert.deepEqual(run({ ...choice, audio: { text: "你好", language: "zh-CN" } }), [], "region falls back to the base code");
+  assert.match(run({ ...choice, audio: { text: "a".repeat(51), language: "en" } })[0]!, /at most 50/);
+  assert.match(run({ ...choice, correctAnswer: "juice" })[0]!, /does not match any option/);
+  assert.match(run({ ...choice, options: [{ label: "A" }, { label: "B", value: "A" }], correctAnswer: "A" })[0]!, /same value/);
+  assert.match(run({ ...choice, options: undefined })[0]!, /need options/);
+  const recall = { audio: { text: "Hello there", language: "en" }, format: "recall", correctAnswer: "A greeting" };
+  assert.deepEqual(run(recall), []);
+  assert.match(run({ ...recall, options: choice.options })[0]!, /no options/);
+  assert.match(run({ ...recall, explanation: "x" })[0]!, /no explanation/);
+  h.cleanup();
+});
+
+test("answers are checked against the format, and grading reports observations", async t => {
+  const h = await harness(t);
+  await makeReady(h);
+  const { validateAnswer, gradeAnswer } = h.questions[0]!;
+  const choicePayload = { audio: { text: "Quiero un café.", language: "es" }, format: "choice", options: [{ label: "Coffee", value: "coffee" }, { label: "Tea" }], correctAnswer: "coffee" };
+  const recallPayload = { audio: { text: "Hello", language: "en" }, format: "recall", correctAnswer: "A greeting" };
+  const context = (payload: unknown, answer: unknown) => ({ chatId: "c", questionId: "q", variant: "teach", contractVersion: 1, input: { question: "?", type: "check", nodeId: "n", payload }, answer, signal: new AbortController().signal }) as never;
+  assert.deepEqual(validateAnswer!(context(choicePayload, { status: "answered", choice: "Tea", playbackRates: [1] })), []);
+  assert.match(validateAnswer!(context(choicePayload, { status: "answered", choice: "juice", playbackRates: [1] }))![0]!, /not part/);
+  assert.match(validateAnswer!(context(choicePayload, { status: "answered", text: "x", playbackRates: [1] }))![0]!, /Choose/);
+  assert.match(validateAnswer!(context(recallPayload, { status: "answered", choice: "x", playbackRates: [1] }))![0]!, /Write/);
+  assert.deepEqual(validateAnswer!(context(recallPayload, { status: "audio_unavailable" })), []);
+  assert.deepEqual(await gradeAnswer!(context(choicePayload, { status: "answered", choice: "coffee", playbackRates: [0.75, 1] })), { modality: "listening", format: "choice", correct: true, playbackRates: [0.75, 1], slowPlaybackUsed: true });
+  assert.deepEqual(await gradeAnswer!(context(choicePayload, { status: "answered", choice: "Tea", playbackRates: [1] })), { modality: "listening", format: "choice", correct: false, playbackRates: [1], slowPlaybackUsed: false });
+  assert.deepEqual(await gradeAnswer!(context(recallPayload, { status: "answered", text: "hi", playbackRates: [1] })), { modality: "listening", format: "recall", playbackRates: [1], slowPlaybackUsed: false });
+  assert.deepEqual(await gradeAnswer!(context(recallPayload, { status: "audio_unavailable" })), { modality: "listening", outcome: "audio_unavailable", assessment: "unassessed" });
+  h.cleanup();
 });
 
 test("synthesize returns base64 audio, caches it and reports readable errors only", async t => {

@@ -105,8 +105,8 @@ export function mountSettings(container: HTMLElement, hostSignal: AbortSignal, c
   const render = () => {
     if (!status || signal.aborted) return;
     readiness.textContent = status.ready
-      ? `Ready: Listening can generate speech with ${status.model?.label ?? status.modelId}.`
-      : `Not ready: ${[!status.hasKey && "an API key", !status.voiceId && "a Voice ID", status.model?.id !== status.modelId && "a model"].filter(Boolean).join(", ")} still needed.`;
+      ? `Ready: the agent can pose listening questions with ${status.model?.label ?? status.modelId}.`
+      : `Not ready: ${[!status.hasKey && "an API key", !status.voiceId && "a Voice ID", status.model?.id !== status.modelId && "a model"].filter(Boolean).join(", ")} still needed. The agent won't pose listening questions until then.`;
     readiness.dataset.ready = String(status.ready);
     notice.textContent = status.notice ?? "";
     keyName.textContent = `${providerLabel()} API key`;
