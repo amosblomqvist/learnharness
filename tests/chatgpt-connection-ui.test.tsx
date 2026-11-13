@@ -46,15 +46,24 @@ function fixture(initial = disconnected(), overrides: Partial<ChatGPTControlBrid
  window.lh = { expandWindow() {}, chatgpt: bridge };
  return { calls, bridge, push, get status() { return status; }, complete() { push({ ...connected(status.allowBackgroundUse), pending: false }); } };
 }
-function recoveryController({ writeFails = false, tokens = "valid" }: { writeFails?: boolean; tokens?: "valid" | "missing" | "restricted" | "scope" | "expired" } = {}) {
+function recoveryController({ writeFails = false, tokens = "valid", revocationStatus }: { writeFails?: boolean; tokens?: "valid" | "missing" | "restricted" | "scope" | "expired"; revocationStatus?: 200 | 503 } = {}) {
  const require = createRequire(import.meta.url); const { createChatGPT, SCOPES } = require("../electron/chatgpt.cjs"); const { chatGPTControl } = require("../electron/chatgpt-ipc.cjs");
  const registration: any = { id: "fixture", clientId: "oaiapp_fixture", issuer: "https://auth.openai.com", subject: "fixture", email: "fixture@example.invalid", tokens: { accessToken: "fake-access", refreshToken: "fake-refresh", idToken: "fake-id", expiresAt: tokens === "expired" ? 0 : Date.now() + 3600000, scopes: tokens === "scope" ? ["openid"] : [...SCOPES] } };
  if (tokens === "missing") delete registration.tokens; if (tokens === "restricted") registration.reconnectRequired = true;
  let saved = { version: 1, hostId: "urn:uuid:offline-recovery", activeId: "fixture", allowBackgroundUse: true, registrations: [registration] };
  let browserAttempts = 0, tokenRequests = 0; const listeners = new Set<() => void>();
- const service = createChatGPT({ store: { read: async () => structuredClone(saved), write: async (next: typeof saved) => { if (writeFails) throw Object.assign(new Error("fake-storage-failure"), { code: "storage" }); saved = structuredClone(next); } }, openExternal: () => { browserAttempts++; throw new Error("No real browser"); }, fetch: async (url: string) => { tokenRequests++; assert.equal(tokens, "expired"); assert.equal(url, "https://auth.openai.com/api/accounts/oauth/token"); return Response.json({ error: "invalid_grant" }, { status: 401 }); }, onChange: () => { for (const cb of listeners) cb(); } });
+ const requests: string[] = [], revocations: RequestInit[] = [];
+ const store = { read: async () => structuredClone(saved), write: async (next: typeof saved) => { if (writeFails) throw Object.assign(new Error("fake-storage-failure"), { code: "storage" }); saved = structuredClone(next); } };
+ const service = createChatGPT({ store, openExternal: () => { browserAttempts++; throw new Error("No real browser"); }, fetch: async (url: string, init: RequestInit = {}) => {
+  requests.push(url);
+  if (revocationStatus !== undefined) {
+   if (url === "https://auth.openai.com/.well-known/openid-configuration") return Response.json({ issuer: "https://auth.openai.com", revocation_endpoint: "https://auth.openai.com/api/accounts/oauth/revoke" });
+   assert.equal(url, "https://auth.openai.com/api/accounts/oauth/revoke"); revocations.push(init); return new Response(null, { status: revocationStatus });
+  }
+  tokenRequests++; assert.equal(tokens, "expired"); assert.equal(url, "https://auth.openai.com/api/accounts/oauth/token"); return Response.json({ error: "invalid_grant" }, { status: 401 });
+ }, onChange: () => { for (const cb of listeners) cb(); } });
  window.lh = { expandWindow() {}, chatgpt: { status: () => chatGPTControl({ op: "status" }, service), consent: (enabled) => chatGPTControl({ op: "consent", enabled }, service), login: (id) => chatGPTControl({ op: "login", id }, service), cancel: () => chatGPTControl({ op: "cancel" }, service), select: (id) => chatGPTControl({ op: "select", id }, service), disconnect: (id) => chatGPTControl({ op: "disconnect", id }, service), logout: (id) => chatGPTControl({ op: "logout", id }, service), onChange: (cb) => { listeners.add(cb); return () => listeners.delete(cb); } } };
- return { service, get saved() { return saved; }, get browserAttempts() { return browserAttempts; }, get tokenRequests() { return tokenRequests; } };
+ return { service, store, requests, revocations, get saved() { return saved; }, get browserAttempts() { return browserAttempts; }, get tokenRequests() { return tokenRequests; } };
 }
 async function mount(children: React.ReactNode = <ChatGPTConnection />) {
  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
@@ -222,7 +231,7 @@ test("email-only connected selector and Manage remain responsive; account select
 });
 
 test("Disconnect is the quiet red left-footer action below identity; confirmation Cancel never forgets", async () => {
- assert.deepEqual(CHATGPT_DISCONNECT_COPY, { title: "Disconnect account?", body: "This removes the saved account and its credentials from this device." });
+ assert.deepEqual(CHATGPT_DISCONNECT_COPY, { title: "Disconnect from LearnHarness?", body: "This removes the saved account and its credentials from this device. LearnHarness will still appear in ChatGPT until you disconnect it there." });
  const f = fixture(connected()); await mount(); await click(button("Manage…"));
  assert.equal(byTest("chatgpt-account-actions").textContent, "Disconnect"); assert.match(byTest("chatgpt-disconnect").className, /text-error/);
  assert.equal(byTest("chatgpt-account-footer").firstElementChild, byTest("chatgpt-account-actions"));
@@ -269,6 +278,66 @@ test("ChatGPT Sign in again is reserved for a saved disconnected account and kee
  await click(byTest("chatgpt-proceed")); assert.deepEqual(f.calls.login, ["signed-out-record"]); assert.equal(f.status.activeId, "private-registration-id");
  await click(button("Cancel", byTest("chatgpt-account-dialog"))); assert.equal(f.calls.cancel, 1); assert.deepEqual(f.calls.disconnect, []); assert.deepEqual(f.calls.consent, []);
 });
+for (const transport of ["desktop", "web"] as const) for (const revocationStatus of [200, 503] as const) test(`real controller ${transport} disconnect guides ChatGPT-side removal after ${revocationStatus} revocation`, async () => {
+ const f = recoveryController({ revocationStatus });
+ const bridge = window.lh!.chatgpt!;
+ const disconnectReply = deferred<ChatGPTStatus>(), disconnect = bridge.disconnect;
+ bridge.disconnect = (id) => { const reply = disconnect(id); void reply.then(disconnectReply.resolve, disconnectReply.reject); return reply; };
+ const posts: unknown[] = [];
+ if (transport === "web") {
+  delete window.lh;
+  globalThis.fetch = async (url, init) => {
+   assert.equal(url, "/api/subscriptions");
+   if (init?.method !== "POST") return Response.json({ chatgpt: await bridge.status(), native: [] });
+   const body = JSON.parse(init.body as string); posts.push(body);
+   assert.deepEqual(body, { providerId: "chatgpt", op: "disconnect", id: "fixture" });
+   return Response.json({ value: await bridge.disconnect(body.id) });
+  };
+ }
+ try {
+  await mount(); await click(button("Manage…")); await click(byTest("chatgpt-disconnect"));
+  const confirmation = byTest("chatgpt-disconnect-confirmation");
+  assert(confirmation.textContent?.includes("Disconnect from LearnHarness?"));
+  assert(confirmation.textContent?.includes("LearnHarness will still appear in ChatGPT until you disconnect it there."));
+  assert(confirmation.textContent?.includes(transport === "web" ? "from the machine running LearnHarness" : "from this device"));
+  assert.equal(byTest("chatgpt-confirm-disconnect").textContent, "Disconnect from LearnHarness");
+  await act(async () => { byTest("chatgpt-confirm-disconnect").click(); await completedWithin(disconnectReply.promise, "disconnect control reply including revocation retries"); });
+  const result = byTest("chatgpt-disconnect-result"); assert(result.textContent?.includes("Disconnected from LearnHarness"));
+  assert(result.textContent?.includes("Settings → Security and login → Login connections → Sign in with ChatGPT → LearnHarness → Manage connection → Disconnect"));
+  assert(result.textContent?.includes("matching ChatGPT account"));
+  const link = result.querySelector<HTMLAnchorElement>("a")!;
+  assert.equal(link.textContent, "Open ChatGPT"); assert.equal(link.getAttribute("href"), "https://chatgpt.com/");
+  assert.equal(link.target, "_blank"); assert.match(link.rel, /noreferrer/);
+  assert.equal(document.querySelector('[role="alert"]')?.textContent ?? null, revocationStatus === 200 ? null : warning);
+  assert(!document.querySelector('[data-testid="chatgpt-disconnect-confirmation"]')); assert(byTest("chatgpt-login"));
+  assert.deepEqual(f.saved.registrations, []); assert.equal(f.saved.activeId, null); assert.equal(f.saved.allowBackgroundUse, true);
+  assert.deepEqual((await f.service.status()).accounts, []);
+  assert.deepEqual(f.requests, ["https://auth.openai.com/.well-known/openid-configuration", ...Array(revocationStatus === 200 ? 1 : 2).fill("https://auth.openai.com/api/accounts/oauth/revoke")]);
+  for (const request of f.revocations) {
+   assert.equal(request.method, "POST"); assert.equal(request.redirect, "error");
+   assert.equal(new Headers(request.headers).get("content-type"), "application/x-www-form-urlencoded");
+   assert.deepEqual(Object.fromEntries(new URLSearchParams(request.body as URLSearchParams)), { token: "fake-refresh", token_type_hint: "refresh_token", client_id: "oaiapp_fixture" });
+  }
+  assert.equal(f.browserAttempts, 0); assert.equal(f.tokenRequests, 0);
+  assert.deepEqual(posts, transport === "web" ? [{ providerId: "chatgpt", op: "disconnect", id: "fixture" }] : []);
+  const require = createRequire(import.meta.url); const { createChatGPT } = require("../electron/chatgpt.cjs");
+  const fresh = createChatGPT({ store: f.store, openExternal: () => assert.fail("No browser on restart"), fetch: () => assert.fail("No network on restart") });
+  try { assert.deepEqual((await fresh.status()).accounts, []); } finally { await fresh.close(); }
+  await click(button("Dismiss", byTest("chatgpt-account-dialog")));
+  assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]')); assert(!document.querySelector('[role="alert"]'));
+ } finally { await act(async () => f.service.close()); }
+});
+
+test("actual controller failed disconnect save keeps confirmation/error and never claims local or remote removal", async () => {
+ const f = recoveryController({ writeFails: true, revocationStatus: 200 });
+ try {
+  await mount(); await click(button("Manage…")); await confirmDisconnect();
+  assert.equal(document.querySelector('[role="alert"]')?.textContent, storageError);
+  assert(byTest("chatgpt-disconnect-confirmation")); assert(!document.querySelector('[data-testid="chatgpt-disconnect-result"]'));
+  assert.equal(f.saved.registrations.length, 1); assert.equal(f.revocations.length, 1); assert.equal(f.browserAttempts, 0);
+ } finally { await act(async () => f.service.close()); }
+});
+
 test("actual controller storage-write failure is not ChatGPT authorization recovery even while available stays true", async () => {
  const f = recoveryController({ writeFails: true });
  try {
@@ -342,7 +411,7 @@ test("Add accounts respects existing busy, pending and unavailable guards", asyn
  assert.deepEqual(f.calls.login, []);
 });
 
-test("confirmed disconnect preserves identity/pending content until outcome, prevents duplicate clicks, then closes without selecting another account", async () => {
+test("confirmed disconnect preserves identity/pending content, prevents duplicate clicks, then guides remote removal without selecting another account", async () => {
  const done = deferred<ChatGPTStatus>();
  const f = fixture(connected(false), { disconnect: (id) => { f.calls.disconnect.push(id); return done.promise; } });
  await mount(); await click(button("Manage…")); await confirmDisconnect();
@@ -351,9 +420,12 @@ test("confirmed disconnect preserves identity/pending content until outcome, pre
  await act(async () => f.push(final));
  assert(byTest("chatgpt-disconnect-confirmation").textContent?.includes("learner@example.invalid"));
  assert((byTest("chatgpt-confirm-disconnect") as HTMLButtonElement).disabled); assert.equal(byTest("chatgpt-account-dialog").getAttribute("aria-busy"), "true");
+ assert(!document.querySelector('[data-testid="chatgpt-disconnect-result"]'));
  await act(async () => done.resolve(final));
- assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]')); assert(byTest("chatgpt-login")); assert.equal(f.status.activeId, null);
- assert.equal(f.status.allowBackgroundUse, false); assert.equal(f.calls.logout, 0);
+ assert(byTest("chatgpt-disconnect-result")); assert(byTest("chatgpt-login")); assert.equal(f.status.activeId, null);
+ assert.equal(f.status.allowBackgroundUse, false); assert.equal(f.calls.logout, 0); assert.deepEqual(f.calls.select, []);
+ await click(button("Dismiss", byTest("chatgpt-account-dialog"))); assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]'));
+ await act(async () => f.push(final)); assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]'));
 });
 
 test("signed-out legacy accounts remain manageable/forgettable without pretending selection is a usable connection", async () => {
@@ -364,13 +436,13 @@ test("signed-out legacy accounts remain manageable/forgettable without pretendin
  assert.deepEqual(f.calls.disconnect, ["signed-out-record"]); assert.equal(f.status.accounts.length, 0); assert.equal(f.status.allowBackgroundUse, true);
 });
 
-test("unconfirmed provider outcome is exactly the approved concise dismissible warning, never permanent red success/navigation advice", async () => {
+test("unconfirmed provider outcome keeps its concise dismissible warning alongside ChatGPT removal guidance", async () => {
  const f = fixture(connected(), { disconnect: async () => { const result = { ...disconnected(), accounts: [], error: warning }; f.push(result); return result; } });
  await mount(); await click(button("Manage…")); await confirmDisconnect();
  const alert = byTest("chatgpt-revocation-warning"); assert.equal(alert.textContent, warning); assert.doesNotMatch(alert.className, /text-error/);
  assert(!document.querySelector('[data-testid="chatgpt-disconnect"]')); assert(byTest("chatgpt-login"));
+ assert(byTest("chatgpt-disconnect-result").querySelector('a[href="https://chatgpt.com/"]'));
  await click(button("Dismiss", byTest("chatgpt-account-dialog"))); assert(!document.querySelector('[role="alert"]'));
- assert(!document.body.textContent?.includes("ChatGPT Settings"));
 });
 
 test("dismissed revocation warning stays dismissed across global setting changes but a new unconfirmed disconnect is shown", async () => {
@@ -394,7 +466,8 @@ test("error-only disconnect reply preserves coherent status/confirmation and per
  await assert.doesNotReject(confirmDisconnect); assert.equal(document.querySelector('[role="alert"]')?.textContent, storageError);
  assert.equal((byTest("chatgpt-confirm-disconnect") as HTMLButtonElement).disabled, false); assert(byTest("chatgpt-disconnect-confirmation"));
  f.bridge.disconnect = async () => { const next = { ...disconnected(), accounts: [] }; f.push(next); return next; };
- await click(byTest("chatgpt-confirm-disconnect")); assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]')); assert(byTest("chatgpt-login"));
+ assert(!document.querySelector('[data-testid="chatgpt-disconnect-result"]'));
+ await click(byTest("chatgpt-confirm-disconnect")); assert(byTest("chatgpt-disconnect-result")); assert(byTest("chatgpt-login"));
 });
 
 for (const value of [true, false]) test(`global toggle keeps its normal cursor while saving ${!value}, without accepting duplicate clicks`, async () => {
