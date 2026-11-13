@@ -20,10 +20,10 @@ process.env.LH_DATA_DIR = testData;
 after(() => fs.rmSync(testData, { recursive: true, force: true }));
 
 const { CLAUDE_CODE_PROVIDER } = await import("../src/agent/claude-code/constants.ts");
-const { createClaudeCodeProvider } = await import("../src/agent/claude-code/provider.ts");
+const { claudeCodeModel, createClaudeCodeProvider } = await import("../src/agent/claude-code/provider.ts");
 const { parseInitializeModels, readClaudeModels } = await import("../src/agent/claude-code/model-info.ts");
 const { claudeModelVersionLabel } = await import("../src/core/contracts/claude-code.ts");
-const { claudeCodeModelInfo, refreshClaudeCodeModels, resetClaudeCodeModels } = await import("../src/server/claude-code-models.ts");
+const { claudeCodeExtraModels, claudeCodeModelInfo, refreshClaudeCodeModels, resetClaudeCodeModels } = await import("../src/server/claude-code-models.ts");
 const { toModelDto } = await import("../src/server/model-catalog.ts");
 const { modelLabel } = await import("../components/usage-format.ts");
 
@@ -158,4 +158,30 @@ test("without a CLI report the alias label is unchanged", () => {
 test("a row without a display name falls back to the canonical ID's version", async () => {
 	await refreshClaudeCodeModels(async () => [{ alias: "opus", resolvedModel: "claude-opus-6" }], () => true, () => "/bin/claude");
 	assert.equal(toModelDto(claudeModel("opus")).resolvedLabel, "Opus 6");
+});
+
+test("claudeCodeModel keeps the listed aliases and synthesizes other CLI names", () => {
+	assert.equal(claudeCodeModel("opus")?.name, "Claude Opus");
+	const mythos = claudeCodeModel("claude-mythos-5-2", "Claude Mythos 5.2");
+	assert.equal(mythos?.id, "claude-mythos-5-2");
+	assert.equal(mythos?.provider, CLAUDE_CODE_PROVIDER);
+	assert.equal(mythos?.name, "Claude Mythos 5.2");
+	assert.equal(claudeCodeModel("fable")?.name, "fable");
+	for (const bad of ["", "--dangerously-skip-permissions", "-p", "Opus", "claude mythos", "claude-x;rm", "../x"]) {
+		assert.equal(claudeCodeModel(bad), undefined, bad);
+	}
+});
+
+test("claudeCodeExtraModels lists what the CLI reported beyond the three aliases", async () => {
+	assert.deepEqual(claudeCodeExtraModels(), [], "nothing before the CLI answers");
+	await refreshClaudeCodeModels(async () => parseInitializeModels(INITIALIZE), () => true, () => "/bin/claude");
+	const extras = claudeCodeExtraModels();
+	assert.deepEqual(extras.map((m) => m.id), ["fable", "claude-haiku-4-5-20251001"], "other aliases first, no default, no duplicates of opus/sonnet/haiku");
+	assert.deepEqual(extras.map((m) => m.name), ["Claude Fable 5.2", "Claude Haiku 4.5"]);
+	const fable = toModelDto(extras[0]!);
+	assert.equal(fable.resolvedModel, "claude-fable-5-2");
+	assert.equal(fable.resolvedLabel, "Fable 5.2");
+	const haiku45 = toModelDto(extras[1]!);
+	assert.equal(haiku45.resolvedModel, undefined, "a full ID has no separate target");
+	assert.equal(haiku45.resolvedLabel, "Haiku 4.5");
 });

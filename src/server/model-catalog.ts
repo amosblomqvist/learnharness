@@ -35,6 +35,7 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
 	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
+	if (provider === CLAUDE_CODE_PROVIDER) return piModels().getModel(provider, id) ?? claudeCodeModel(id);
 	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
 }
 function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
@@ -55,7 +56,8 @@ import { AUTH_PROVIDER_KEYS, CUSTOM_PROVIDER } from "../core/auth-keys.ts";
 import { claudeCodeAvailable } from "./claude-code-config.ts";
 import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
 import { claudeModelVersionLabel } from "../core/contracts/claude-code.ts";
-import { claudeCodeModelInfo, refreshClaudeCodeModels } from "./claude-code-models.ts";
+import { claudeCodeExtraModels, claudeCodeModelInfo, refreshClaudeCodeModels } from "./claude-code-models.ts";
+import { claudeCodeModel } from "../agent/claude-code/provider.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
 	MODEL_SLOTS,
@@ -196,7 +198,8 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		},
 		contextWindow: model.provider === CLAUDE_CODE_PROVIDER ? null : model.contextWindow,
 		maxTokens: model.provider === CLAUDE_CODE_PROVIDER ? null : model.maxTokens,
-		...(resolvedModel ? { resolvedModel } : {}),
+		// A full ID the CLI reports resolves to itself; only aliases carry a target.
+		...(resolvedModel && resolvedModel !== model.id ? { resolvedModel } : {}),
 		...(version ? { resolvedLabel: version } : {}),
 	};
 }
@@ -234,7 +237,7 @@ export function modelCatalog(): ModelCatalogResponse {
 		.flatMap((p) => piModels().getModels(p.id))
 		.map(toModelDto)
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
-		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
+		.concat([...(keyed.has(CLAUDE_CODE_PROVIDER) ? claudeCodeExtraModels() : []), ...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
 	return {
 		models,
 		defaults: catalogDefaults(),

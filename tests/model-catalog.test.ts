@@ -405,6 +405,16 @@ describe("the claude-code provider (native CLI authentication, no LearnHarness k
 		assert.equal(engine.model.id, "sonnet");
 	});
 
+	it("a saved Claude Code model the CLI reported resolves and validates without a fresh CLI query", () => {
+		const engine = piEngineForSpec({ provider: "claude-code", id: "claude-mythos-5-2" });
+		assert.equal(engine.model.provider, "claude-code");
+		assert.equal(engine.model.id, "claude-mythos-5-2");
+		withClaudeInstalled(true, () => {
+			assert.equal(validateModelsSettings({ strong: { model: { provider: "claude-code", id: "claude-mythos-5-2" } } }).ok, true);
+			assert.equal(validateModelsSettings({ strong: { model: { provider: "claude-code", id: "--model" } } }).ok, false);
+		});
+	});
+
 	it('providerKeyPresent("claude-code") requires both explicit opt-in and executable presence', () => {
 		withClaudeInstalled(true, () => assert.equal(providerKeyPresent("claude-code"), true));
 		withClaudeInstalled(false, () => assert.equal(providerKeyPresent("claude-code"), false));
