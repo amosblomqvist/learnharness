@@ -5,9 +5,12 @@
  * pdf-reader loop tests via the headlessOverride fake.
  */
 import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 import { parsePageSpec, pdfExtract, pdfInfo, pdfProbe, pdfSearch } from "../src/agent/subagents/pdf-ops.ts";
+import { tinyPdf } from "./helpers/tiny-pdf.ts";
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
 
@@ -49,6 +52,71 @@ describe("pdf-ops — the pdfjs text layer", () => {
 		assert.equal(none.hits.length, 0);
 		// invalid regex throws the skill's error shape
 		await assert.rejects(() => pdfSearch(FIXTURE, "([unclosed"), /Invalid regex/);
+	});
+
+	it("pdfExtract and pdfSearch see lines and separate words, not one glued string per page", async () => {
+		const file = path.join(os.tmpdir(), `pdf-ops-lines-${process.pid}.pdf`);
+		fs.writeFileSync(file, tinyPdf([{
+			runs: [
+				{ text: "Week 3 lecture", x: 72, y: 700, size: 20 },
+				{ text: "Plants make sugar.", x: 72, y: 660 },
+				{ text: "Animals eat plants.", x: 72, y: 600 },
+			],
+		}]));
+		try {
+			assert.equal(await pdfExtract(file, "1"), "--- Page 1 ---\n# Week 3 lecture\n\nPlants make sugar.\n\nAnimals eat plants.");
+			const { hits } = await pdfSearch(file, "Animals", { literal: true, contextLines: 0 });
+			assert.equal(hits.length, 1);
+			assert.equal(hits[0]!.context, ">>> Animals eat plants.");
+		} finally {
+			fs.rmSync(file, { force: true });
+		}
+	});
+
+	it("search retains repeated numeric margin statements and extraction preserves word breaks", async () => {
+		const file = path.join(os.tmpdir(), `pdf-ops-preserved-${process.pid}.pdf`);
+		fs.writeFileSync(file, tinyPdf([5, 10].map((dose) => ({ runs: [
+			{ text: `Dose ${dose} mg`, x: 72, y: 730 },
+			{ text: "A cognitive-", x: 72, y: 600 },
+			{ text: "behavioral example", x: 72, y: 588 },
+			{ text: "Dose 5 mg", x: 72, y: 500 },
+		] }))));
+		try {
+			const text = await pdfExtract(file, "all");
+			assert.match(text, /Dose 10 mg/);
+			assert.match(text, /cognitive-\n\nbehavioral example/);
+			const { hits } = await pdfSearch(file, "Dose 5 mg", { literal: true, contextLines: 0 });
+			assert.deepEqual(hits.map((hit) => hit.page), [1, 1, 2]);
+			assert.ok(hits.every((hit) => hit.context === ">>> Dose 5 mg"));
+			assert.match(await pdfExtract(file, "1"), /Dose 5 mg/);
+		} finally {
+			fs.rmSync(file, { force: true });
+		}
+	});
+
+	it("a heterogeneous-font page has identical search lines and selected/full extraction order", async () => {
+		const file = path.join(os.tmpdir(), `pdf-ops-selection-${process.pid}.pdf`);
+		fs.writeFileSync(file, tinyPdf([
+			{ runs: Array.from({ length: 6 }, (_, i) => ({ text: `Ordinary prose line ${i} dominates the document's font statistics.`, x: 72, y: 700 - i * 12 })) },
+			{ runs: [
+				{ text: "Baseline", x: 72, y: 600, size: 24 },
+				{ text: "Caveat", x: 72, y: 560, size: 24 },
+				{ text: "Experimental conditions", x: 72, y: 720, size: 44 },
+			] },
+		]));
+		try {
+			const selected = await pdfExtract(file, "2");
+			const full = await pdfExtract(file, "all");
+			assert.equal(selected, `--- Page 2 ---\n${full.split("--- Page 2 ---\n")[1]}`);
+			const { hits, pageTexts } = await pdfSearch(file, "Baseline", { literal: true, contextLines: 0 });
+			assert.equal(hits.length, 1);
+			assert.equal(hits[0]!.page, 2);
+			assert.equal(hits[0]!.line, 3);
+			assert.equal(selected.split("\n").slice(1)[hits[0]!.line - 1], "Baseline");
+			assert.equal(selected, `--- Page 2 ---\n${pageTexts.get(2)}`);
+		} finally {
+			fs.rmSync(file, { force: true });
+		}
 	});
 
 	it("pdfProbe accepts the fixture and rejects garbage", async () => {

@@ -10,10 +10,12 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { describe, it } from "node:test";
+import { after, describe, it } from "node:test";
+import { createCanvas } from "@napi-rs/canvas";
 import { readTool } from "../src/agent/tools/read.ts";
 
 const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "lh-read-test-"));
+after(() => fs.rmSync(tmp, { recursive: true, force: true }));
 
 function write(name: string, content: string): string {
 	const file = path.join(tmp, name);
@@ -100,8 +102,10 @@ describe("read tool — text semantics", () => {
 describe("read tool — image semantics (native content parts)", () => {
 	it("returns native text + image parts for image files, details null (output-less part)", async () => {
 		const file = path.join(tmp, "dot.png");
-		// minimal valid PNG header bytes are enough — detection is by extension
-		fs.writeFileSync(file, Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]));
+		// Detection now sniffs bytes and the native processor decodes the image.
+		const canvas = createCanvas(1, 1);
+		canvas.getContext("2d").fillRect(0, 0, 1, 1);
+		fs.writeFileSync(file, canvas.toBuffer("image/png"));
 		const result = await readTool.execute!("test", { path: file });
 		assert.equal(result.content.length, 2);
 		const parts = result.content as Array<{ type: string; text?: string; data?: string; mimeType?: string }>;

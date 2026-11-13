@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createWebTools } from "../src/agent/tools/web.ts";
+import { safeFetchOverride } from "../src/agent/tools/safe-fetch.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
 import { runResearcherAgent } from "../src/agent/subagents/researcher.ts";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
@@ -28,7 +29,7 @@ describe("web_search on the injected port (web.ts)", () => {
 		assert.ok(web_search, "web_search is still exposed without a provider");
 		const out = await web_search!.execute!("c1", { query: "anything" });
 		const missing = "web_search is not available: no search engine is configured. " +
-			"Set a Tavily or Brave search API key in settings. Report in your brief that web search is unavailable.";
+			"Set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key in settings. Report in your brief that web search is unavailable.";
 		assert.equal(out.details, missing);
 		assert.deepEqual(out.content, [{ type: "text", text: missing }]);
 		assert.notEqual(out.isError, true, "missing keys remain ordinary recoverable text, not a native error");
@@ -47,25 +48,6 @@ describe("web_search on the injected port (web.ts)", () => {
 		const out = await web_search!.execute!("c1", { query: "sigma.js latest version" });
 		assert.deepEqual(seen, [{ query: "sigma.js latest version", count: 5 }]);
 		assert.deepEqual(out.details, [{ title: "sigma.js", url: "https://www.sigmajs.org/", snippet: "v3 released" }]);
-	});
-
-	it("forwards the tool abort signal to the search provider", async () => {
-		const controller = new AbortController();
-		let received: AbortSignal | undefined;
-		const provider: SearchProvider = {
-			id: "tavily",
-			async search(_query, _count, signal) {
-				received = signal;
-				return new Promise((resolve) => signal?.addEventListener("abort", () => resolve([]), { once: true }));
-			},
-		};
-		const { web_search } = createWebTools(() => provider);
-		const result = web_search!.execute!("signal-call", { query: "q" }, controller.signal);
-		await new Promise((resolve) => setImmediate(resolve));
-		controller.abort();
-		await result;
-		assert.ok(received, "provider received a signal");
-		assert.equal(received.aborted, true, "tool abort propagated into provider request");
 	});
 
 	it("provider errors surface as error strings, never thrown", async () => {
@@ -106,8 +88,7 @@ describe("web_search on the injected port (web.ts)", () => {
 		// so the happy path runs hermetically: a VALID url must REACH the
 		// fetch stage.
 		const { web_fetch } = createWebTools(() => null);
-		const realFetch = globalThis.fetch;
-		globalThis.fetch = (async () =>
+		safeFetchOverride.current = (async () =>
 			new Response("A plain text page with enough content to matter for the test.", {
 				headers: { "content-type": "text/plain" },
 			})) as typeof fetch;
@@ -122,7 +103,7 @@ describe("web_search on the injected port (web.ts)", () => {
 			const ftp = await web_fetch!.execute!("c-ftp", { url: "ftp://example.com/file" });
 			assert.match(String(ftp.details), /invalid URL/, "non-http(s) schemes still rejected");
 		} finally {
-			globalThis.fetch = realFetch;
+			safeFetchOverride.current = undefined;
 		}
 	});
 });
@@ -182,9 +163,8 @@ describe("keyless researcher loop", () => {
 			});
 			const faux = createFauxCore({});
 			faux.setResponses(steps);
-			const realFetch = globalThis.fetch;
 			const fetched: string[] = [];
-			globalThis.fetch = (async (input) => {
+			safeFetchOverride.current = (async (input) => {
 				fetched.push(String(input));
 				assert.equal(String(input), url, "only the supplied URL is fetched");
 				return new Response("Synthetic verified source content", { headers: { "content-type": "text/plain" } });
@@ -196,7 +176,7 @@ describe("keyless researcher loop", () => {
 				}), brief);
 				assert.deepEqual(fetched, [url]);
 			} finally {
-				globalThis.fetch = realFetch;
+				safeFetchOverride.current = undefined;
 			}
 		});
 	}

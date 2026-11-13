@@ -14,7 +14,6 @@ import {
 } from "../../core/settings.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
-import { withBgLlmSlot } from "./bg-llm-semaphore.ts";
 import type {
 	AuditVerdicts,
 	CallUsage,
@@ -29,7 +28,7 @@ import { emit } from "../../core/events.ts";
 import { settleGraphLayout } from "../../core/layout-settle.ts";
 import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts";
 import { failedOutputCallIds, type LhMessage } from "../../core/native-messages.ts";
-import { auditorGraphTools } from "../tools/graph.ts";
+import { prepareAuditorReview } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
 
 /**
@@ -398,42 +397,65 @@ export const NOTES_PREAMBLE =
 	"author's personal notes, rendered in reading order — and report what it teaches as findings for the " +
 	"learner's global knowledge graph, building on everything already extracted from this source.";
 
-export const EXTRACTION_CORE = `THE GOAL: uncover the source's CORE IDEAS and show how everything derives from the foundations. The
-source teaches by arguing — ideas worked out from other ideas, down to a foundation the rest stands on.
-Your deliverable is twofold: the core ideas themselves, and the chains of reasoning that derive them.
-Each chain is premises that JOINTLY entail a conclusion. Entailment is the only link that earns a
+// Source-agnostic graph/output contracts. Keep these as separate sections so
+// each front door can own its goal and selection criteria without changing the
+// order or wording of either assembled prompt.
+export const EXTRACTION_CORE = {
+	entailment: `Each chain is premises that JOINTLY entail a conclusion. Entailment is the only link that earns a
 chain — where the real connection is historical or narrative (who argued what, how a debate or
 exposition unfolds), there is no chain; keep the pieces as bare ideas or drop them. The direction of
 the graph is upward: foundational ideas at the bottom, derived ideas above them, each chain showing
 how its conclusion follows from what is more established — do not submit connections that carry no
-derivation.
-
-The graph holds TRUE ideas about the world, nothing else — never anything about the learner, the
+derivation.`,
+	knowledge: `The graph holds TRUE ideas about the world, nothing else — never anything about the learner, the
 teacher, or this reading: not "the learner understands X" but X. A misconception enters as its TRUE
-correction. Each statement is one self-contained idea at full precision.
-
-Extract the load-bearing ideas of the subject — what a reference on it would teach — not the full run
-of the discourse. An idea earns its place only when the source's arguments run through it — examples,
-notation glosses, and restatements that no argument needs are not core ideas. Every idea must stand
+correction. Each statement is one self-contained idea at full precision.`,
+	standalone: `Every idea must stand
 alone for a reader who never saw this source: names and statements may not lean on the source's own
 scaffolding (claim numbering, axiom tags, arc labels); a claim that only matters as part of how this
-document is organized is not knowledge — drop it.
-
-When the prompt carries THE GRAPH SO FAR, you are continuing a source already partly extracted: build
+document is organized is not knowledge — drop it.`,
+	continuation: `When the prompt carries THE GRAPH SO FAR, you are continuing a source already partly extracted: build
 on it. Reference an existing idea by its id ("n_…") instead of restating it, and prefer chains that
 lean on established conclusions as premises — derive new material from what is already derived. Do
-not re-derive a conclusion the graph already holds unless the route is genuinely different.
-
-SUBMIT with one submit_findings call: every NEW core idea with a short name and a precise statement,
+not re-derive a conclusion the graph already holds unless the route is genuinely different.`,
+	submission: `SUBMIT with one submit_findings call: every NEW core idea with a short name and a precise statement,
 and every chain as premises + conclusion. A chain's premises and conclusion may be ids from this
 submission OR existing ids from THE GRAPH SO FAR, verbatim. Premises within one chain are used
 TOGETHER — independent arguments for the same conclusion are separate chains. A conclusion may
 reappear, by id, as a premise of later chains. A bare idea that no argument uses rides the
 propositions list alone. Include every field even when empty — "chains": [] when the source makes no
-arguments. The tool's field descriptions carry the details.`;
+arguments. The tool's field descriptions carry the details.`,
+} as const;
 
-export const EXTRACTOR_INSTRUCTIONS = `${SESSION_PREAMBLE}\n\n${EXTRACTION_CORE}\n\n${SESSION_MESSAGE_ID_RULE}`;
-export const NOTES_EXTRACTOR_INSTRUCTIONS = `${NOTES_PREAMBLE}\n\n${EXTRACTION_CORE}`;
+function composeExtractionInstructions(preamble: string, goal: string, selection: string): string {
+	return `${preamble}\n\n${goal}\n${EXTRACTION_CORE.entailment}\n\n${EXTRACTION_CORE.knowledge}\n\n${selection} ${EXTRACTION_CORE.standalone}\n\n${EXTRACTION_CORE.continuation}\n\n${EXTRACTION_CORE.submission}`;
+}
+
+// Each front door owns its goal and selection wording independently of the
+// shared contracts: notes need not be a complete, argument-driven lesson.
+export const EXTRACTOR_INSTRUCTIONS = `${composeExtractionInstructions(
+	SESSION_PREAMBLE,
+	`THE GOAL: uncover the source's CORE IDEAS and show how everything derives from the foundations. The
+source teaches by arguing — ideas worked out from other ideas, down to a foundation the rest stands on.
+Your deliverable is twofold: the core ideas themselves, and the chains of reasoning that derive them.`,
+	`Extract the load-bearing ideas of the subject — what a reference on it would teach — not the full run
+of the discourse. An idea earns its place only when the source's arguments run through it — examples,
+notation glosses, and restatements that no argument needs are not core ideas.`,
+)}\n\n${SESSION_MESSAGE_ID_RULE}`;
+
+export const NOTES_EXTRACTOR_INSTRUCTIONS = composeExtractionInstructions(
+	NOTES_PREAMBLE,
+	`THE GOAL: bring the knowledge in these notes into the learner’s knowledge graph. Notes may contain
+definitions, formulas, facts, arguments, or outlines without forming a complete lesson. Report the
+substantive ideas and the reasoning the notes support. A useful representation of this material is
+the deliverable, not a reconstruction of the subject from its foundations.`,
+	`Keep the meaningful definitions, formulas, claims, and explanations, including ideas that have no
+derivation. Use chains for reasoning the notes give, including direct inferences from their stated
+relationships. A sketch need not spell out every intermediate step, but a topic outline or component
+dependency alone is not a derivation. Where the notes just state an idea, record it as a proposition
+rather than constructing an argument for it. Select enough detail to preserve the knowledge, without
+expanding the note into a full treatment of the subject.`,
+);
 
 // ── the same-source digest (owner, 2026-09-30 evening) ──
 //
@@ -534,41 +556,30 @@ function runNotesExtractor(
 // ─── the auditor ───────────────────────────────────────────────────────────
 
 
-const AUDITOR_INSTRUCTIONS = `You are the linking stage of a learning application's extraction pipeline. An extractor
-has read a source (a teaching session, or the author's personal notes) and reported findings: propositions and
-their reasoning chains. You NEVER see the source itself — the extractor is fully trusted, and you do not re-check
-its work. Your job is IDENTITY: connecting those findings to the CURRENT knowledge graph, preparing the merge.
+const AUDITOR_INSTRUCTIONS = `You reconcile newly extracted knowledge with existing graph records. The extractor has
+already read the source and supplied its findings. Your task is to identify useful matches, not verify the source.
 
-You explore the graph through your tools: list_sessions, list_propositions, and find (glob over names +
-statements + aliases; each hit also says which session it was born in). The graph is SMALL and FINITE — a handful of
-sessions — and your job is done as soon as you have SEEN the plausible candidates. FOLLOW THIS PROCEDURE:
+REVIEW THE PROVIDED RECORDS:
+Your input already contains five ranked candidates per finding (or fewer when fewer exist). matches associates
+finding ids with candidateIds; candidates contains each record once. For each finding, decide whether its main
+knowledge point is already represented by one of these records. Link useful paraphrases, compressions and different
+explanations of that same knowledge point. Otherwise leave the finding new. Shared subject matter alone is not a match.
 
-1. GROUND yourself first: call list_sessions ONCE. This one call shows the entire space — every session that ever
-   contributed propositions, and how many. Now you know the extent of what you are searching; nothing is hidden.
-2. READ the plausibly-related sessions: for each session whose topic could overlap these findings, call
-   list_propositions — every proposition born there, with full statement text. A few calls and you have read
-   every realistic identity candidate in the graph.
-3. find is your targeted sweep: use it for phrasings, synonyms, and neighboring ideas the session reads made you
-   wonder about — its hits point back at sessions you can read whole.
-4. SUBMIT. Once every plausibly-related session has been read (and stray finds come back empty), you are DONE.
-   Do not re-search ground you have already seen; more patterns over the same nodes are wasted work.
+A record's statement AND its matched aliases are accepted knowledge already in the graph. Use either as evidence
+of what it represents; its name is just a label. If an accepted alias already states the incoming knowledge point,
+recognize that match rather than reconsidering why the alias was grouped there. You are not redesigning earlier
+nodes or finding the ideal granularity. Make a practical judgment, not a proof of exact logical equivalence.
 
-IDENTITY — links, per proposition:
-- For each proposition: does an EXISTING node — one you have now SEEN — already state this same proposition?
-- If yes: add { "id": <its proposition id>, "linkTo": <that node's id> } to "links". The session's phrasings join
-  its aliases and its provenance; the node keeps its existing name.
-- If no: add nothing — a new node is created with the extractor's name as its label.
-- EQUIVALENCE BIAS (owner ruling): paraphrases, rewordings, and compressions of the same claim MERGE. When two
-  statements are the same claim at different precision or from different angles, LINK them. Only genuinely distinct
-  propositions — different claims about the world — stay apart. You are NOT guarding against wrong merges; you are
-  hunting for right ones.
+After reviewing the candidates, an unmatched finding can remain new. You do not need to establish that no equivalent
+exists anywhere in the graph. Additional tools are for a specific missing candidate or a named, promising source,
+not for confirming every negative judgment. A fresh find_candidates search can add alternative wording; nextCursor
+continues its fixed query. Once a finding is decided, revisit it only if another lookup actually supplies new evidence.
 
-Your deliverable is ONLY the identity verdicts: "links". NEVER restate the propositions —
-the merger already has them. You NEVER create relations between propositions — they come from the
-extractor alone, and the batch connects to the existing graph ONLY through the equivalences you identify. Your
-entire deliverable is ONE submit_review call.
-
-Include the "links" field even when empty — "links": [] when nothing links. NEVER omit it because it is empty.`;
+Complete this task by CALLING the submit_review TOOL with its links argument. A text message, including JSON
+printed as text, does not submit a review. Each link supplies the finding's id and the existing record's id as linkTo.
+Include only useful matches to existing records you have seen. Omitted findings become new nodes; use "links": []
+when none match. Do not restate findings, invent relations, or justify verdicts in the output. The merger retains the
+existing record's name and statement and adds the incoming wording as an alias with its provenance.`;
 
 /** The auditor — one shape for both front doors now (the notes schema was
  *  identical once attribution died). An agentic loop: graph-exploration
@@ -608,9 +619,8 @@ function runAuditor(
  *  2026-09-19) until wave 7 killed the embedder seam wholesale (this
  *  interlude) — birth-session clusters need no post-merge pass. The
  *  phases tell the truth about what the job is actually waiting on.
- *  "queued" (owner, 2026-09-28): the global extract semaphore — 3
- *  concurrent extractor calls process-wide; the job is waiting for an
- *  extract slot, not for the model.
+ *  Worker-request admission happens inside the model stream; the old
+ *  extraction-wide "queued" phase is retained only for type compatibility.
  *  "waiting" (owner 2026-09-28): the serialized-audit gate — the job's
  *  audit+merge critical section is queued behind another job's; the
  *  extractor is done but the auditor may not start until the graph is
@@ -664,10 +674,6 @@ interface LhExtractionGlobal {
 	 *  process-wide. globalThis for the same module-instance reason as
 	 *  the run registries. */
 	__lhAuditLock?: { tail: Promise<void> };
-	/** The EXTRACT SEMAPHORE (owner, 2026-09-28): 3 concurrent extractor
-	 *  calls process-wide — the provider-facing rate stance (the import
-	 *  route's old 3-wide pool doctrine, now global). Per-chunk jobs fan
-	 *  out in parallel but queue here. */
 }
 
 /** THE RUN REGISTRIES live on globalThis, not module level — the
@@ -906,7 +912,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			return await critical();
 		} finally {
 			if (onAbort && signal && !signal.aborted) signal.removeEventListener("abort", onAbort);
-			release();
+			// A cancelled waiter leaves promptly, but may not release its chain
+			// link before its predecessor: successors still owe that earlier hold.
+			void prev.then(release, release);
 		}
 	}
 
@@ -960,15 +968,16 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		const t0 = performance.now();
 
 		// The auditor NEVER sees the source (owner 2026-09-27): findings
-		// JSON + identity instructions, and the graph reached through
-		// exploration tools instead of an injected dump. The proposition
+		// JSON + an initial ranked candidate batch, not a global graph dump.
+		// Further graph reads remain optional. The proposition
 		// projection omits messageId (2026-10-13): the auditor is
 		// IDENTITY-only and never sees the passages, so anchors are useless
 		// to it — they add cognitive load, not signal.
+		const review = prepareAuditorReview({ chatStore, graphStore }, findings.propositions);
 		const auditResult = await runAuditor(
 			stageEngine("auditor", deps.auditor),
 			sourceId,
-			`Proposed findings from the extractor (the source itself is not available to you — the extractor is fully trusted; the propositions only — the reasoning chains are the merger's business, owner 2026-09-30):\n\n` +
+			`Review these proposed findings against the supplied existing records. matches points from finding ids to candidateIds; candidates contains those records:\n\n` +
 				`${JSON.stringify(
 					{
 						propositions: findings.propositions.map((p) => ({
@@ -977,17 +986,17 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 							statement: p.statement,
 							aliases: p.aliases,
 						})),
+						...review.initialCandidates,
 					},
 					null,
 					2,
-				)}\n\n` +
-				`The current knowledge graph has ${graph.nodes.length} node(s). Explore it with your tools and link what links.`,
+				)}`,
 			signal,
 			(usage, model, step, finishReason, tools) => {
 				recordStep(jobKey, "auditor", callUsage(usage), model);
 				console.info(`[extraction] auditor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
-			auditorGraphTools({ chatStore, graphStore }),
+			review.tools,
 		);
 		console.info(
 			`[extraction ${jobKey}] audit: ${findings.propositions.length} propositions through, ` +
@@ -995,18 +1004,6 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		);
 		console.info(`[extraction ${jobKey}] auditor done in ${Math.round(performance.now() - t0)}ms`);
 		return auditResult;
-	}
-
-
-	/** THE EXTRACT SLOT (unified 2026-09-29): extraction chunk jobs run
-	 *  under the SHARED background-LLM semaphore — one process-wide pool
-	 *  of 3 permits (see bg-llm-semaphore.ts). The
-	 *  job's registry-row signal kills a queued ticket (dead-ticket
-	 *  handoff). The audit side needs no slot: audits already serialize
-	 *  behind their own global lock. */
-	async function withExtractSlot<T>(jobKey: string, critical: () => Promise<T>): Promise<T> {
-		const signal = runningExtractions.get(jobKey)?.controller.signal;
-		return withBgLlmSlot(signal, critical);
 	}
 
 		/** Append the run's usage record to the chat's extractions log — success
@@ -1135,9 +1132,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// 2026-09-30 evening): every batch is its own job — registry row,
 			// because each batch's extractor continues the source's digest
 			// (everything the earlier batches merged). Cross-source runs stay
-			// parallel; the 3-slot extract semaphore still caps concurrent
-			// extracts process-wide ("queued"); audits serialize through the
-			// process-wide gate ("waiting"). A batch that fails is ISOLATED
+			// parallel; individual worker requests share process-wide admission.
+			// Audits serialize through the separate consistency gate ("waiting").
+			// A batch that fails is ISOLATED
 			// (its messages stay uncovered — honestly re-runnable); its
 			// siblings keep merging.
 			const settled: PromiseSettledResult<EmissionStats>[] = [];
@@ -1162,11 +1159,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 							const batchIds = new Set(
 								messages.filter((m) => messageViewLines(m, m.id, failedOutputCalls).length > 0).map((m) => m.id),
 							);
-							setPhase(jobKey, "queued", "chat", undefined, part);
-							const findings = await withExtractSlot(jobKey, async () => {
-								setPhase(jobKey, "extracting", "chat", undefined, part);
-								return extract(jobKey, chatId, view, batchIds);
-							});
+							setPhase(jobKey, "extracting", "chat", undefined, part);
+							const findings = await extract(jobKey, chatId, view, batchIds);
 							// SERIALIZED AUDIT (owner, 2026-09-28): audit + merge are the
 							// graph-mutating critical section — one job at a time,
 							// process-wide, so the auditor explores the graph as it
@@ -1326,8 +1320,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// 2026-09-30 evening): same law as the chat door — chunks run
 			// STRICTLY IN ORDER, each chunk's extractor continuing the
 			// source's digest (everything earlier chunks merged). Cross-source
-			// runs stay parallel; the semaphore caps concurrent extracts
-			// process-wide; audits serialize through the gate as before. The
+			// runs stay parallel; individual worker requests share admission,
+			// while audits serialize through the consistency gate. The
 			// part rides the registry entry (feed suffix "· i/N") only when
 			// the file actually chunked.
 			const settled: PromiseSettledResult<EmissionStats>[] = [];
@@ -1340,12 +1334,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 					settled.push({
 						status: "fulfilled",
 						value: await runJob({ id, kind: "notes", label: input.filePath, part }, async (jobKey) => {
-							setPhase(jobKey, "queued", "notes", input.filePath, part);
+							setPhase(jobKey, "extracting", "notes", input.filePath, part);
 							chunkSignal = runningExtractions.get(jobKey)?.controller.signal;
-							const findings = await withExtractSlot(jobKey, async () => {
-								setPhase(jobKey, "extracting", "notes", input.filePath, part);
-								return notesExtract(jobKey, { ...input, text: chunk, part });
-							});
+							const findings = await notesExtract(jobKey, { ...input, text: chunk, part });
 							// SERIALIZED AUDIT (owner, 2026-09-28): audit + merge one
 							// at a time, process-wide — the auditor explores the graph
 							// as it stands AFTER every earlier job's merge. Reacquired

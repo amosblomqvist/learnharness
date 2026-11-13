@@ -11,9 +11,13 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
-import { MessageResponse } from "../components/ai-elements/message.tsx";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+const renderToStaticMarkup = (node: React.ReactNode) => renderMarkup(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
+import { parseHTML } from "linkedom";
+import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
 import { ThinkingBlock, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { MermaidOverlay, SessionMermaidContext, chartSize } from "../components/session-overlay.tsx";
 import { PlanPopup } from "../components/plan-block.tsx";
@@ -27,7 +31,19 @@ describe("md-blocks — code", () => {
 	it("inline code passes through with the house inline styling", () => {
 		const html = render("a `term` b");
 		assert.ok(html.includes('data-streamdown="inline-code"'), "inline code keeps the inline-code path");
-		assert.match(html, /bg-muted/);
+		assert.match(html, /a <code class="rounded px-1\.5 py-0\.5 font-mono text-sm text-\(--lh-ink-code\)"[^>]*>term<\/code> b/, "inline semantics, spacing and typography stay intact, in the theme's code ink");
+		assert.ok(!html.includes("bg-muted"), "inline code no longer uses the question-card surface");
+	});
+
+	it("inline and fenced code share only the existing block background and border", () => {
+		const css = readFileSync("app/globals.css", "utf8");
+		const surface = css.match(/\[data-streamdown="inline-code"\],\s*\[data-streamdown="code-block"\]\s*\{([^}]+)\}/)?.[1];
+		assert.ok(surface, "both code paths share one surface rule");
+		assert.deepEqual(surface.trim().split(/;\s*/).filter(Boolean), [
+			"border: 1px solid var(--border)",
+			"background: color-mix(in oklab, var(--background) 86%, black)",
+		], "share the existing block surface, not block layout, padding or radius");
+		assert.match(css, /\[data-streamdown="code-block"\]\s*\{\s*border-radius: 0\.75rem;\s*padding: 0\.375rem;\s*\}/, "block geometry stays block-only and unchanged");
 	});
 
 	it("code fences delegate to streamdown's CodeBlock with a hover copy corner", () => {
@@ -62,6 +78,36 @@ describe("md-blocks — mermaid", () => {
 });
 
 describe("md-blocks — tables", () => {
+	it("sizes tables to fit the column or their minimum content, rather than always taking max-content width", () => {
+		const css = readFileSync("app/globals.css", "utf8");
+		const rule = css.match(/\[data-streamdown="table"\]\s*\{([^}]+)\}/)?.[1]?.replace(/\/\*[\s\S]*?\*\//g, "");
+		assert.ok(rule);
+		assert.match(rule, /\bwidth:\s*fit-content\s*;/);
+		assert.doesNotMatch(rule, /\b(?:max-width|table-layout|word-break|overflow-wrap|max-height):/,
+			"no new caps, forced layout or word-breaking policy; non-fitting tables keep their scroller");
+		// Actual hugging/wrapping/scroll geometry needs the compiled-CSS browser
+		// check; static rendering alone cannot prove CSS table sizing.
+	});
+
+	it("keeps the real table, scroller and rich cell contents on both message and tool-content paths", () => {
+		const md = "| Topic | Details |\n| --- | --- |\n| `foo_bar` | **Bold** prose that can wrap. |\n| $x^2$ | [Guide](https://example.invalid/guide) |";
+		for (const html of [render(md), renderToStaticMarkup(<ToolContentResponse mode="static">{md}</ToolContentResponse>)]) {
+			const { document } = parseHTML(html);
+			const wrapper = document.querySelector('[data-testid="md-table"]')!;
+			const table = wrapper.querySelector('table[data-streamdown="table"]')!;
+			assert.equal(table.parentElement?.className, "overflow-x-auto");
+			assert.ok(table.classList.contains("w-full"), "the unlayered sizing rule, not a renderer rewrite, controls width");
+			assert.equal(table.querySelectorAll("tr").length, 3);
+			assert.equal(table.querySelectorAll("th").length, 2);
+			assert.equal(table.querySelectorAll("td").length, 4);
+			assert.equal(table.querySelector("code")?.textContent, "foo_bar");
+			assert.equal(table.querySelector("strong")?.textContent, "Bold");
+			assert.equal(table.querySelector("annotation")?.textContent, "x^2");
+			assert.ok(table.textContent.includes("Guide"), "link text survives the normal link-safety renderer");
+			assert.equal(wrapper.querySelectorAll('button[aria-label="Copy table"]').length, 1);
+		}
+	});
+
 	it("renders as a plain prose table with the copy corner — no wrapper box, no button rows", () => {
 		const html = render("| A | B |\n| --- | --- |\n| 1 | 2 |");
 		assert.ok(html.includes('data-testid="md-table"'), "the md-blocks table wrapper mounts");
@@ -113,18 +159,25 @@ describe("md-blocks — codeSource (pure)", () => {
 describe("session-scoped overlays (chrome-melt wave, 2026-09-19)", () => {
 	it("mermaid overlay mounts inside the session area — absolute (not fixed), 80% + blur, closeable", () => {
 		const html = renderToStaticMarkup(<MermaidOverlay chart="graph TD\nA --> B" onClose={() => {}} />);
-		assert.match(html, /class="absolute inset-0[^"]*z-40/, "absolute inset-0 z-40 — scoped, not fullscreen");
+		assert.match(html, /class="[^"]*absolute inset-0[^"]*z-40/, "absolute inset-0 — scoped, not fullscreen");
+		assert.match(html, /style="z-index:100"/, "native view participates in the shared ordered local paint stack");
+		assert.ok(html.includes("pointer-events-auto"), "the frame opts into hit testing inside the transparent stack");
 		assert.ok(html.includes("bg-background/80"), "80% background: the transcript ghosts through");
 		assert.ok(html.includes("backdrop-blur"), "blur surface");
 		assert.ok(!html.includes("fixed inset-0"), "never fixed — the drag bar stays uncovered");
 		assert.ok(html.includes('data-testid="mermaid-overlay-close"'), "the close X is present");
-		assert.match(html, /role="dialog"/, "dialog semantics for Esc/aria");
+		assert.match(html, /role="region"/, "nonmodal content-area semantics");
+		assert.ok(!html.includes("aria-modal"), "does not claim viewport-modal isolation");
 	});
 
 	it("the plan popup is session-scoped the same way, and its chart is hidden until the first fit (no top-left flash)", () => {
 		const html = renderToStaticMarkup(<PlanPopup messages={[]} onClose={() => {}} />);
 		assert.match(html, /data-testid="plan-popup"/);
-		assert.match(html, /class="absolute inset-0[^"]*z-40/, "absolute inset-0 z-40 — scoped, not fullscreen");
+		assert.match(html, /role="region"/);
+		assert.ok(!html.includes("aria-modal"));
+		assert.match(html, /class="[^"]*absolute inset-0[^"]*z-40/, "absolute inset-0 — scoped, not fullscreen");
+		assert.match(html, /style="z-index:100"/, "plan views share the ordered local paint stack");
+		assert.ok(html.includes("pointer-events-auto"), "the frame remains interactive inside the transparent stack");
 		assert.ok(html.includes("bg-background/80"), "80% background");
 		assert.ok(html.includes("backdrop-blur"), "blur surface");
 		assert.ok(!html.includes("fixed inset-0"), "never fixed — the drag bar stays uncovered");
@@ -182,9 +235,10 @@ describe("md-blocks — key-idea callouts (GitHub alerts, owner round 2026-10-07
 		assert.ok(html.includes('data-alert-kind="important"'), "the kind is recorded");
 		assert.match(html, /ALL X is done through Y\./, "the prose survives");
 		assert.ok(!html.includes("[!IMPORTANT]"), "the marker line never leaks as text");
-		// The owner's minimal law: sharp corners (no rounded), white stroke,
-		// no background, no label, no icon — and the box hugs its text.
-		assert.match(html, /border-white/, "white stroke");
+		// The owner's minimal law: sharp corners (no rounded), white stroke
+		// (the strong line ink — white in dark), no background, no label, no
+		// icon — and the box hugs its text.
+		assert.match(html, /border-line-strong/, "strong-ink stroke");
 		assert.match(html, /w-fit/, "width: fit-content — the hug");
 		assert.ok(!html.includes("rounded"), "sharp corners — no rounding anywhere");
 		assert.ok(!html.includes("bg-card") && !html.includes("bg-background"), "transparent — no background");

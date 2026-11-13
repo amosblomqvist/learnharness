@@ -33,13 +33,14 @@
  * model can continue mid-thought.
  */
 
+import { citationsToReadableText } from "./citations.ts";
 import type { PlanTree } from "./contracts/plan.ts";
 import { derivePlanStatusesLh, derivedNodeStatus } from "./contracts/plan.ts";
 import { COMPACTED_HISTORY_HEADER } from "./contracts/chat.ts";
 import type { LhMessage, LhMarkerMessage } from "./native-messages.ts";
 import { newMessageId } from "./native-messages.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
-import type { AssistantMessage, ToolResultMessage, SystemMessage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model, ToolResultMessage, SystemMessage } from "@earendil-works/pi-ai";
 
 // ─── constants (the tunables, owner-approved) ────────────────────────────────
 
@@ -82,21 +83,38 @@ export function calculateContextTokens(usage: {
  * assistants, content text plus a fixed image allowance for other roles. NEVER JSON.stringify of the
  * whole message — record scaffolding (ids, usage, responseId, app-side
  * details, escaped quotes/backslashes) inflates ~3x (measured on the
- * 2026-10-05 relational-databases incident: 84k estimated vs ~30k real). */
-export function estimateMessageTokens(message: LhMessage | AgentMessage): number {
+ * 2026-10-05 relational-databases incident: 84k estimated vs ~30k real).
+ * Supplying a model opts into the same-model Responses output-usage floor;
+ * omitting it preserves the original heuristic. */
+export function estimateMessageTokens(message: LhMessage | AgentMessage, model?: Model<Api>): number {
 	const content: unknown = (message as { content?: unknown }).content;
 	let chars = 0;
 	if ((message as { role?: string }).role === "assistant") {
+		let hasSignedThinking = false;
 		for (const block of (Array.isArray(content) ? content : []) as Array<{
 			type: string;
 			text?: string;
 			thinking?: string;
+			thinkingSignature?: string;
 			name?: string;
 			arguments?: unknown;
 		}>) {
 			if (block.type === "text") chars += block.text?.length ?? 0;
-			else if (block.type === "thinking") chars += block.thinking?.length ?? 0;
-			else if (block.type === "toolCall") chars += (block.name?.length ?? 0) + JSON.stringify(block.arguments ?? {}).length;
+			else if (block.type === "thinking") {
+				chars += block.thinking?.length ?? 0;
+				hasSignedThinking ||= typeof block.thinkingSignature === "string" && block.thinkingSignature.length > 0;
+			} else if (block.type === "toolCall") chars += (block.name?.length ?? 0) + JSON.stringify(block.arguments ?? {}).length;
+		}
+		const assistant = message as AssistantMessage;
+		const output = assistant.usage?.output;
+		// Same-model Responses replay includes opaque reasoning. Charge the response's
+		// output once, not its ciphertext length or its context-wide input/total usage.
+		// ponytail: output usage is a replay-size proxy; exact sizing needs provider counts.
+		if (model?.api === "openai-responses" && assistant.api === model.api &&
+			assistant.provider === model.provider && assistant.model === model.id && hasSignedThinking &&
+			assistant.stopReason !== "error" && assistant.stopReason !== "aborted" &&
+			typeof output === "number" && Number.isSafeInteger(output) && output > 0) {
+			return Math.max(Math.ceil(chars / 4), output);
 		}
 	} else {
 		chars += textCharsOfContent(content);
@@ -152,7 +170,8 @@ export interface ContextTokenEstimate {
 	tokens: number;
 	/** Provider-reported tokens from the usage anchor (0 when unanchored). */
 	usageTokens: number;
-	/** chars/4-estimated tokens after the anchor (or everything, unanchored). */
+	/** chars/4-estimated tokens after the anchor (or everything, unanchored),
+	 *  with an optional reasoning floor when a model is supplied. */
 	trailingTokens: number;
 	/** Index of the usage anchor, or null (diagnostics). */
 	lastUsageIndex: number | null;
@@ -161,29 +180,30 @@ export interface ContextTokenEstimate {
 /** THE trigger estimator (pi's estimateContextTokens): anchor on the last
  * assistant usage the provider reported — prompt, tools, tokenizer
  * density and all — and chars/4-estimate ONLY what was appended after
- * it. The heuristic never re-estimates history the provider already
+ * it (with an optional reasoning floor). Never re-estimate history the provider already
  * counted (the relational-databases bug: full-record JSON.stringify/4
  * tripled the true context and fired a 30k session at an 80k threshold). */
 export function estimateContextTokens(
 	messages: readonly (LhMessage | AgentMessage)[],
+	model?: Model<Api>,
 ): ContextTokenEstimate {
 	const anchor = lastAssistantUsageIndex(messages);
 	if (anchor === null) {
 		let trailing = 0;
-		for (const m of messages) trailing += estimateMessageTokens(m);
+		for (const m of messages) trailing += estimateMessageTokens(m, model);
 		return { tokens: trailing, usageTokens: 0, trailingTokens: trailing, lastUsageIndex: null };
 	}
 	const anchored = messages[anchor]! as AssistantMessage;
 	const usageTokens = calculateContextTokens(anchored.usage as Parameters<typeof calculateContextTokens>[0]);
 	let trailing = 0;
-	for (let i = anchor + 1; i < messages.length; i++) trailing += estimateMessageTokens(messages[i]!);
+	for (let i = anchor + 1; i < messages.length; i++) trailing += estimateMessageTokens(messages[i]!, model);
 	return { tokens: usageTokens + trailing, usageTokens, trailingTokens: trailing, lastUsageIndex: anchor };
 }
 
-/** Estimate a whole message list (the plain heuristic — cut-walk use). */
-export function estimateTokens(messages: readonly (LhMessage | AgentMessage)[]): number {
+/** Estimate a whole message list, including replayable reasoning when a model is supplied. */
+export function estimateTokens(messages: readonly (LhMessage | AgentMessage)[], model?: Model<Api>): number {
 	let total = 0;
-	for (const m of messages) total += estimateMessageTokens(m);
+	for (const m of messages) total += estimateMessageTokens(m, model);
 	return total;
 }
 
@@ -195,6 +215,7 @@ export function estimateTokens(messages: readonly (LhMessage | AgentMessage)[]):
 function cutMessage(message: LhMessage): LhMessage | null {
 	if (message.role !== "custom") return message;
 	if (["compaction", "plan-block", "problem-dismissed"].includes(message.customType)) return null;
+	if (message.customType === "side-question" && !message.content) return null; // an empty marker has no model-visible text
 	return message;
 }
 
@@ -206,7 +227,7 @@ function cutMessage(message: LhMessage): LhMessage | null {
  * Returns the first kept record index; a zero/no-progress cut drops nothing.
  * Keep this and estimateMessageTokens aligned deliberately when upgrading Pi.
  */
-export function compactionCutIndex(messages: readonly LhMessage[], keepRecentTokens = KEEP_RECENT_TOKENS): number {
+export function compactionCutIndex(messages: readonly LhMessage[], keepRecentTokens = KEEP_RECENT_TOKENS, model?: Model<Api>): number {
 	const previous = activeCompactionOf(messages);
 	const previousKept = previous ? keptIndexFor(messages, previous) : -1;
 	const start = Math.max(0, previousKept);
@@ -220,7 +241,7 @@ export function compactionCutIndex(messages: readonly LhMessage[], keepRecentTok
 	let accumulated = 0;
 	for (let i = messages.length - 1; i >= start; i--) {
 		const message = cutMessage(messages[i]!);
-		const tokens = message ? estimateMessageTokens(message) : 0;
+		const tokens = message ? estimateMessageTokens(message, model) : 0;
 		if (tokens === 0) continue;
 		accumulated += tokens;
 		if (accumulated >= keepRecentTokens) {
@@ -272,9 +293,9 @@ export function newCompactionMarker(summary: string, details: CompactionDetails)
 	};
 }
 
-/** The ACTIVE compaction marker: the newest one in the record (chained
- * compactions — the last one rules; older markers fall inside the
- * dropped span and never render). */
+/** The ACTIVE compaction marker: the newest one with a retained-message
+ * id. Its summary supersedes older markers even when their stored
+ * positions remain inside its retained tail. */
 export function activeCompactionOf(messages: readonly LhMessage[]): (LhMarkerMessage & { details: CompactionDetails }) | null {
 	for (let i = messages.length - 1; i >= 0; i--) {
 		const m = messages[i]!;
@@ -311,7 +332,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${(m as { content: string }).content}`);
+			lines.push(`[LEARNER] ${citationsToReadableText((m as { content: string }).content)}`);
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];
@@ -335,7 +356,9 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 		} else if (role === "custom") {
 			const marker = m as LhMarkerMessage;
 			if (marker.customType === "plan-block") continue; // UI-only
-			lines.push(`[SYSTEM NOTE] ${marker.content}`);
+			if (marker.customType === "side-question" && !marker.content) continue;
+			if (marker.customType === "side-question") lines.push(`[LEARNER–HELPER CONVERSATION] ${citationsToReadableText(marker.content)}`);
+			else lines.push(`[SYSTEM NOTE] ${marker.customType === "practice-thinking" ? citationsToReadableText(marker.content) : marker.content}`);
 		}
 	}
 	return lines.join("\n\n");

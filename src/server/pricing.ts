@@ -4,12 +4,16 @@
  */
 import { calculateCost, type Usage } from "@earendil-works/pi-ai";
 import { piModels } from "../agent/models.ts";
+import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
+import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
 import type { CallUsage, ChatRecord, JobRecord, TurnUsage } from "../core/contracts.ts";
 import { isSubscriptionModel, sessionCost as foldSessionCost, turnCost as foldTurnCost, jobCost as foldJobCost } from "../core/prices.ts";
 
 function catalogModel(id: string) {
 	const colon = id.indexOf(":");
-	if (colon < 0 || isSubscriptionModel(id)) return undefined;
+	// Native CLI routing determines billing. Adapter zero-rate placeholders
+	// must never become an apparent $0 estimate or subscription classification.
+	if (colon < 0 || isSubscriptionModel(id) || [CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER.id].includes(id.slice(0, colon))) return undefined;
 	return piModels().getModel(id.slice(0, colon), id.slice(colon + 1));
 }
 

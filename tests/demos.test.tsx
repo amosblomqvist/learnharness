@@ -28,6 +28,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
+import { createCanvas } from "@napi-rs/canvas";
 import { Value } from "typebox/value";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall, type FauxResponseStep, type ToolCall } from "@earendil-works/pi-ai";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -50,7 +51,7 @@ import { ToolCallCard } from "../components/artifacts/tool-call-card.tsx";
 import { JobsContext } from "../components/jobs-context.ts";
 import { demoInputSchema, jobTools, pdfInputSchema, visualInputSchema } from "../src/agent/tools/jobs.ts";
 import { runDemoBuilder } from "../src/agent/subagents/demo-builder.ts";
-import { headlessOverride, type DemoRunResult, type HeadlessApi } from "../src/agent/subagents/headless.ts";
+import { headlessOverride, realHeadless, type DemoRunResult, type HeadlessApi } from "../src/agent/subagents/headless.ts";
 import { createJobRunner, demoModelOverride, visualModelOverride } from "../src/agent/subagents/runner.ts";
 import { runVisualMaker } from "../src/agent/subagents/visual-maker.ts";
 import { buildAbortSteer, buildSubagentSteer, isSubagentFailure, setSteerUiInverted, type SteerMessage } from "../src/core/contracts.ts";
@@ -171,7 +172,11 @@ function fakeHeadless(opts: {
 			if (opts.renderFailures && api.svgRenders.length <= opts.renderFailures) {
 				throw new Error("XML parse error");
 			}
-			return Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]); // PNG magic
+			// The shared native image processor decodes renders, so a signature
+			// alone is no longer a successful fake raster.
+			const canvas = createCanvas(1, 1);
+			canvas.getContext("2d").fillRect(0, 0, 1, 1);
+			return canvas.toBuffer("image/png");
 		},
 	};
 	return api as HeadlessApi & { demoRuns: string[]; svgRenders: string[] };
@@ -669,6 +674,30 @@ describe("demo builder (fake model + fake headless)", () => {
 const SVG_1 = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="100"><line x1="10" y1="50" x2="290" y2="50"/></svg>';
 
 describe("visual maker (fake model + fake headless)", () => {
+	it("native rendering repairs do not rewrite the figure delivered by the model loop", async () => {
+		const svg = '<svg width="80" height="40"><rect width="80" height="40" fill="red"/><text x="2" y="20">A&nbsp;B</text></svg>';
+		const model = scriptedModel([
+			{ toolCalls: [{ toolCallId: "w1", toolName: "write_svg", input: { svg } }] },
+			{ toolCalls: [{ toolCallId: "r1", toolName: "render_svg", input: {} }] },
+			{ text: "Looked at the native render." },
+		]);
+		const result = await runVisualMaker({ brief: "b" }, { engine: model, headless: { ...fakeHeadless(), renderSvg: realHeadless.renderSvg } });
+		assert.equal(result.svg, svg, "saved/download source remains the original, not the render-only repaired source");
+		assert.equal(result.notes, "Looked at the native render.");
+	});
+
+	it("refuses an unverified final SVG when its final render throws", async () => {
+		const headless = fakeHeadless({ renderFailures: 1 });
+		const model = scriptedModel([
+			{ toolCalls: [{ toolCallId: "w1", toolName: "write_svg", input: { svg: SVG_1 } }] },
+			{ text: "Done without looking." },
+		]);
+		const result = await runVisualMaker({ brief: "b" }, { engine: model, headless });
+		assert.equal(result.svg, "");
+		assert.match(result.notes ?? "", /^FAILED: rendering the final SVG failed — XML parse error/);
+		assert.equal(headless.svgRenders.length, 1);
+	});
+
 	it("write → render → look → finish delivers the svg with notes", async () => {
 		const headless = fakeHeadless();
 		const model = scriptedModel([
@@ -1097,7 +1126,7 @@ describe("tool + renderer registry wiring", () => {
 		const errHtml = renderToStaticMarkup(<ToolCallCard part={errPart as never} />);
 		assert.match(errHtml, /Error/);
 		assert.match(errHtml, /ENOENT/);
-		assert.match(errHtml, /text-red-500/);
+		assert.match(errHtml, /text-error/);
 	});
 
 	it("the tool-call card: find/grep headline the pattern, ls defaults to ~", () => {
