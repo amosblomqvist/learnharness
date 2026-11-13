@@ -8,6 +8,7 @@ import { estimateTranscriptRow, type TranscriptRow } from "./transcript-rows";
 import { TranscriptRowState } from "./transcript-row-state";
 import { TRANSCRIPT_OVERSCAN, transcriptJumpWindow, transcriptJumpRestoreOffset, transcriptJumpTravel, type TranscriptJumpWindow } from "./transcript-jump";
 import { transcriptWindow } from "./transcript-window";
+import { useTranscriptScrollbar } from "./transcript-scrollbar";
 
 const TranscriptRowBody = memo(function TranscriptRowBody({ row, state, render }: {
 	row: TranscriptRow; state: Map<string, unknown>; render: (row: TranscriptRow) => ReactNode;
@@ -53,6 +54,7 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	const jumpFrame = useRef<number | null>(null);
 	const virtualizerRef = useRef<Virtualizer<HTMLElement, Element> | null>(null);
 	const cancelJumpRef = useRef<() => void>(() => {});
+	const scrollbar = useTranscriptScrollbar({ contextRef, virtualizerRef, root, cancelJumpRef, unpin: setPinned });
 	const estimates = useMemo(() => rows.map(row => estimateTranscriptRow(row, width)), [rows, width]);
 	const estimatedTotal = useMemo(() => estimates.reduce((total, height) => total + height, 0), [estimates]);
 	const getScrollElement = useCallback(() => context.scrollRef.current, [context.scrollRef]);
@@ -71,6 +73,7 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	const virtualizer = useVirtualizer({
 		count: rows.length,
 		getScrollElement, getItemKey, estimateSize,
+		observeElementOffset: scrollbar.observeOffset,
 		overscan: TRANSCRIPT_OVERSCAN,
 		scrollMargin,
 		initialRect: { width: 900, height: 900 },
@@ -99,7 +102,10 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	useLayoutEffect(() => { updateJumpPositions(); });
 	// StickToBottom remains the sole owner of following the live tail. A size
 	// correction above a reader should preserve that reader's current passage.
+	// Native thumb dragging and upward scrolling own their position: an
+	// anchoring write there rebases the thumb's grab point away from the mouse.
 	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
+		!scrollbar.dragRef.current && !(instance.isScrolling && instance.scrollDirection === "backward") &&
 		!contextRef.current.isAtBottom && item.end < (instance.scrollOffset ?? 0);
 
 	useLayoutEffect(() => {
@@ -244,10 +250,12 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		};
 	}, [context.scrollRef]);
 
-	return <div ref={root} data-virtual-transcript="" data-row-count={rows.length} data-transcript-jump={shift ? "" : undefined} style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%", overflowAnchor: "none" }}>
+	const scrollbarOffset = scrollbar.contentOffset();
+	return <div ref={root} data-virtual-transcript="" data-row-count={rows.length} data-transcript-jump={shift ? "" : undefined} data-transcript-drag={scrollbar.drag ? "" : undefined}
+		style={{ height: scrollbar.drag?.height ?? virtualizer.getTotalSize(), overflow: scrollbar.drag ? "clip" : undefined, position: "relative", width: "100%", overflowAnchor: "none" }}>
 		{items.map(item => <div key={item.key} ref={virtualizer.measureElement} data-index={item.index} data-transcript-row={item.index} data-session-find-root=""
 			className="flex min-w-0 flex-col gap-4"
-			style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start - scrollMargin}px)`, paddingBottom: rows[item.index]!.gapAfter }}>
+			style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start - scrollMargin + scrollbarOffset}px)`, paddingBottom: rows[item.index]!.gapAfter }}>
 			<TranscriptRowBody row={rows[item.index]!} state={stateForRow(rows[item.index]!.key)} render={children} />
 		</div>)}
 	</div>;

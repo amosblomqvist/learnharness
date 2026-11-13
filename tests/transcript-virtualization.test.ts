@@ -10,7 +10,18 @@ import { StickToBottom } from "use-stick-to-bottom";
 import { VirtualTranscript } from "../components/virtual-transcript.tsx";
 import { transcriptJumpWindow, transcriptJumpRestoreOffset, transcriptJumpTravel } from "../components/transcript-jump.ts";
 import { transcriptWindow } from "../components/transcript-window.ts";
+import { transcriptScrollbarOffset } from "../components/transcript-scrollbar.ts";
 (globalThis as Record<string, unknown>).React = React;
+
+test("a held scrollbar keeps its native track while measured history grows or shrinks", () => {
+	assert.equal(transcriptScrollbarOffset(500, 1000, 1400), 700);
+	assert.equal(transcriptScrollbarOffset(500, 1000, 800), 400);
+	assert.equal(transcriptScrollbarOffset(1000, 1000, 1400), 1400);
+	assert.equal(transcriptScrollbarOffset(0, 1000, 1400), 0);
+	assert.equal(transcriptScrollbarOffset(1100, 1000, 1400), 1400);
+	assert.equal(transcriptScrollbarOffset(-50, 1000, 1400), 0);
+	assert.equal(transcriptScrollbarOffset(0, 0, 0), 0);
+});
 
 test("a long bottom jump joins buffered source and destination windows without rendering the middle", () => {
 	const positions = Array.from({ length: 1000 }, (_, index) => ({ index, start: index * 100, end: (index + 1) * 100 }));
