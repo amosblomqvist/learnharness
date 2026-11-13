@@ -8,7 +8,26 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StickToBottom } from "use-stick-to-bottom";
 import { VirtualTranscript } from "../components/virtual-transcript.tsx";
+import { transcriptJumpWindow, transcriptJumpRestoreOffset } from "../components/transcript-jump.ts";
 (globalThis as Record<string, unknown>).React = React;
+
+test("a long bottom jump joins buffered source and destination windows without rendering the middle", () => {
+	const positions = Array.from({ length: 1000 }, (_, index) => ({ index, start: index * 100, end: (index + 1) * 100 }));
+	const window = transcriptJumpWindow(positions.slice(0, 8), 0, 500, 99500, positions.length, index => positions[index]!.start);
+	assert.deepEqual(window, { sourceStart: 0, sourceEnd: 7, tailStart: 992 });
+	const shift = positions[window!.tailStart]!.start - positions[window!.sourceEnd]!.end;
+	// The destination has the same screen position before and after restoring
+	// the omitted middle's coordinates, so completion cannot visibly jump.
+	assert.equal(positions[992]!.start - shift - (99500 - shift), positions[992]!.start - 99500);
+	assert.equal(transcriptJumpRestoreOffset(300, positions[992]!.start, shift), 300);
+	assert.equal(transcriptJumpRestoreOffset(900, positions[992]!.start, shift), 99300);
+});
+
+test("nearby bottom jumps keep the normal animation when buffered windows overlap", () => {
+	const positions = Array.from({ length: 20 }, (_, index) => ({ index, start: index * 100, end: (index + 1) * 100 }));
+	assert.equal(transcriptJumpWindow(positions.slice(7), 1000, 500, 1500, positions.length, index => positions[index]!.start), null);
+	assert.equal(transcriptJumpWindow([], 0, 500, 0, 0, () => 0), null);
+});
 
 test("virtual rows split long assistant groups without changing the grouped view or part indexes", () => {
 	const view = projectView(Array.from({ length: 500 }, (_, index) => ({ id: `native-${index}`, role: "assistant", timestamp: index,

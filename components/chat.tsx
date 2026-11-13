@@ -2041,6 +2041,7 @@ export function Chat({
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
 				<DockOverlay
+					onScrollToBottom={() => { void virtualTranscriptRef.current?.scrollToBottom(); }}
 					viewReader={inputViewReader}
 					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}
 					pending={pending}
@@ -2383,6 +2384,7 @@ function TranscriptElementReporter({ onElement }: { onElement: (element: HTMLEle
 
 /** Host-only composition/test seam; never part of the plugin SDK. */
 export function DockOverlay({
+	onScrollToBottom,
 	viewReader, viewTargets, unavailableOccurrence,
 	pending,
 	onPrepareBuiltin, onBuiltinPendingInput, onPrepareThinking, pendingThinkingInput, onPreparePluginQuestion, preparing, preparationStatus,
@@ -2415,6 +2417,7 @@ export function DockOverlay({
 	queuedSteers,
 }: {
 	viewReader?: SessionInputViewReader;
+	onScrollToBottom?: () => void;
 	viewTargets?: SessionViewTargets;
 	unavailableOccurrence?: import("@/src/core").PluginSubmissionOccurrence;
 	pending: ReturnType<typeof pendingQuestionOf>;
@@ -2970,7 +2973,7 @@ export function DockOverlay({
 					    overlay is none by default. The isAtBottom/scrollToBottom
 					    context still reaches it — DockOverlay is a Conversation
 					    child. */}
-					<ConversationScrollButton className="pointer-events-auto bottom-full mb-2" />
+					<ConversationScrollButton className="pointer-events-auto bottom-full mb-2" {...(onScrollToBottom ? { onClick: onScrollToBottom } : {})} />
 				</div>
 				{/* The plan marginalia (owner, plan-placement round): the bare
 				    diagram in the band's right flank — boundaless, meet-fitted, part
