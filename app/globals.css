@@ -634,9 +634,3 @@ body {
 	outline: 1px solid var(--border);
 	border-radius: 0.25rem;
 }
-
-/* Keep pending/error rows beside the destination during a shortened jump.
-   Their flow space, like the virtual transcript's height, remains unchanged. */
-[data-virtual-transcript][data-transcript-jump] ~ * {
-	translate: 0 calc(-1 * var(--transcript-jump-offset, 0px));
-}

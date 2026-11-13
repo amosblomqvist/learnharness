@@ -2,7 +2,7 @@
 
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import { useVirtualizer, type Range, type Virtualizer } from "@tanstack/react-virtual";
+import { measureElement, useVirtualizer, type Range, type Virtualizer } from "@tanstack/react-virtual";
 import { useStickToBottomContext } from "use-stick-to-bottom";
 import { estimateTranscriptRow, type TranscriptRow } from "./transcript-rows";
 import { TranscriptRowState } from "./transcript-row-state";
@@ -60,6 +60,16 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	const getScrollElement = useCallback(() => context.scrollRef.current, [context.scrollRef]);
 	const getItemKey = useCallback((index: number) => rows[index]!.key, [rows]);
 	const estimateSize = useCallback((index: number) => estimates[index]!, [estimates]);
+	const measureRow = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Virtualizer<HTMLElement, Element>) => {
+		// React mounts every row before the observer's batched border-box
+		// measurements arrive. Reading layout from each ref forces repeated
+		// layout during the same commit; reuse the estimate for that first pass.
+		if (!entry) {
+			const index = instance.indexFromElement(element);
+			return instance.itemSizeCache.get(instance.options.getItemKey(index)) ?? instance.options.estimateSize(index);
+		}
+		return measureElement(element, entry, instance);
+	}, []);
 	const rangeExtractor = useCallback((range: Range) => {
 		const instance = virtualizerRef.current;
 		const indexes = new Set(jump ? [] : transcriptWindow(range, instance?.measurementsCache ?? [], instance?.scrollRect?.height ?? 900));
@@ -74,6 +84,7 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		count: rows.length,
 		getScrollElement, getItemKey, estimateSize,
 		observeElementOffset: scrollbar.observeOffset,
+		measureElement: measureRow,
 		overscan: TRANSCRIPT_OVERSCAN,
 		scrollMargin,
 		initialRect: { width: 900, height: 900 },
@@ -91,13 +102,21 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		const offset = jumpGeometry.current.shift;
 		const scroll = contextRef.current;
 		const travel = active?.phase === "animate" ? transcriptJumpTravel(scroll.state.scrollTop, active.from, scroll.state.targetScrollTop, offset) : 0;
+		const sourceTranslate = active?.phase === "animate" ? `0 ${travel}px` : "";
+		const tailTranslate = active?.phase === "animate" ? `0 ${travel - offset}px` : "";
 		for (const row of root.current?.children ?? []) {
 			const element = row as HTMLElement;
 			const index = Number(element.dataset.transcriptRow);
-			element.style.translate = active?.phase === "animate" ? `0 ${index >= active.tailStart ? travel - offset : travel}px` : "";
+			const translate = active && index >= active.tailStart ? tailTranslate : sourceTranslate;
+			if (element.style.translate !== translate) element.style.translate = translate;
 		}
-		const column = root.current?.parentElement;
-		column?.style.setProperty("--transcript-jump-offset", `${offset - travel}px`);
+		// Pending/error rows follow the destination too. Updating an inherited
+		// variable on the column restyles every Markdown/math descendant on
+		// every frame, so limit these writes to the siblings that actually move.
+		for (let sibling = root.current?.nextElementSibling; sibling; sibling = sibling.nextElementSibling) {
+			const element = sibling as HTMLElement;
+			if (element.style.translate !== tailTranslate) element.style.translate = tailTranslate;
+		}
 	}, []);
 	useLayoutEffect(() => { updateJumpPositions(); });
 	// StickToBottom remains the sole owner of following the live tail. A size
@@ -144,7 +163,6 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 			mounted.current = false;
 			if (jumpRef.current) contextRef.current.stopScroll();
 			if (jumpFrame.current !== null) cancelAnimationFrame(jumpFrame.current);
-			root.current?.parentElement?.style.removeProperty("--transcript-jump-offset");
 		};
 	}, []);
 	const finishJump = useCallback((completed: boolean) => {
