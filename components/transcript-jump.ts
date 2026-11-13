@@ -28,3 +28,11 @@ export function transcriptJumpWindow(items: readonly Position[], scrollTop: numb
 export function transcriptJumpRestoreOffset(scrollTop: number, tailStart: number, shift: number): number {
 	return scrollTop >= tailStart - shift ? scrollTop + shift : scrollTop;
 }
+
+/** The native thumb traverses the full history while the two mounted
+ * windows traverse only their joined distance. At the end, real and
+ * displayed coordinates coincide again. */
+export function transcriptJumpTravel(scrollTop: number, from: number, bottom: number, omittedHeight: number): number {
+	const progress = bottom > from ? Math.max(0, Math.min(1, (scrollTop - from) / (bottom - from))) : 1;
+	return progress * omittedHeight;
+}

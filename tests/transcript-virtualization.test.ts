@@ -8,7 +8,8 @@ import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { StickToBottom } from "use-stick-to-bottom";
 import { VirtualTranscript } from "../components/virtual-transcript.tsx";
-import { transcriptJumpWindow, transcriptJumpRestoreOffset } from "../components/transcript-jump.ts";
+import { transcriptJumpWindow, transcriptJumpRestoreOffset, transcriptJumpTravel } from "../components/transcript-jump.ts";
+import { transcriptWindow } from "../components/transcript-window.ts";
 (globalThis as Record<string, unknown>).React = React;
 
 test("a long bottom jump joins buffered source and destination windows without rendering the middle", () => {
@@ -27,6 +28,24 @@ test("nearby bottom jumps keep the normal animation when buffered windows overla
 	const positions = Array.from({ length: 20 }, (_, index) => ({ index, start: index * 100, end: (index + 1) * 100 }));
 	assert.equal(transcriptJumpWindow(positions.slice(7), 1000, 500, 1500, positions.length, index => positions[index]!.start), null);
 	assert.equal(transcriptJumpWindow([], 0, 500, 0, 0, () => 0), null);
+});
+
+test("the native scrollbar can traverse the history while the visible jump remains short", () => {
+	const travel = [200, 5100, 10000].map(top => transcriptJumpTravel(top, 200, 10000, 8000));
+	assert.deepEqual(travel, [0, 4000, 8000]);
+	assert.equal(transcriptJumpTravel(-100, 200, 10000, 8000), 0);
+	assert.equal(transcriptJumpTravel(11000, 200, 10000, 8000), 8000);
+	assert.equal(transcriptJumpRestoreOffset(5100 - travel[1]!, 9000, 8000), 9100);
+});
+
+test("manual scrolling buffers screen heights around short rows without mounting unbounded history", () => {
+	const positions = Array.from({ length: 10000 }, (_, index) => ({ start: index * 100, end: (index + 1) * 100 }));
+	const indexes = transcriptWindow({ startIndex: 50, endIndex: 54, overscan: 3, count: 10000 }, positions, 500);
+	assert.equal(indexes[0], 40);
+	assert.equal(indexes.at(-1), 64);
+	const tiny = positions.map((_, index) => ({ start: index, end: index + 1 }));
+	assert.equal(transcriptWindow({ startIndex: 50, endIndex: 54, overscan: 3, count: 10000 }, tiny, 500).length, 53);
+	assert.deepEqual(transcriptWindow({ startIndex: 0, endIndex: 1, overscan: 3, count: 2 }, positions.slice(0, 2), 500), [0, 1]);
 });
 
 test("virtual rows split long assistant groups without changing the grouped view or part indexes", () => {

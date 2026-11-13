@@ -2,11 +2,12 @@
 
 import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject } from "react";
 import { flushSync } from "react-dom";
-import { defaultRangeExtractor, useVirtualizer, type Range } from "@tanstack/react-virtual";
-import { useStickToBottomContext, type StickToBottomContext } from "use-stick-to-bottom";
+import { useVirtualizer, type Range, type Virtualizer } from "@tanstack/react-virtual";
+import { useStickToBottomContext } from "use-stick-to-bottom";
 import { estimateTranscriptRow, type TranscriptRow } from "./transcript-rows";
 import { TranscriptRowState } from "./transcript-row-state";
-import { TRANSCRIPT_OVERSCAN, transcriptJumpWindow, transcriptJumpRestoreOffset, type TranscriptJumpWindow } from "./transcript-jump";
+import { TRANSCRIPT_OVERSCAN, transcriptJumpWindow, transcriptJumpRestoreOffset, transcriptJumpTravel, type TranscriptJumpWindow } from "./transcript-jump";
+import { transcriptWindow } from "./transcript-window";
 
 const TranscriptRowBody = memo(function TranscriptRowBody({ row, state, render }: {
 	row: TranscriptRow; state: Map<string, unknown>; render: (row: TranscriptRow) => ReactNode;
@@ -17,7 +18,7 @@ const TranscriptRowBody = memo(function TranscriptRowBody({ row, state, render }
 interface TranscriptJump extends TranscriptJumpWindow {
 	id: number;
 	phase: "prepare" | "animate" | "settle";
-	previousTarget: StickToBottomContext["targetScrollTop"];
+	from: number;
 }
 
 export interface VirtualTranscriptHandle {
@@ -49,6 +50,8 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	const jumpRef = useRef(jump);
 	const jumpSequence = useRef(0);
 	const jumpGeometry = useRef({ shift: 0, tailStart: 0 });
+	const jumpFrame = useRef<number | null>(null);
+	const virtualizerRef = useRef<Virtualizer<HTMLElement, Element> | null>(null);
 	const cancelJumpRef = useRef<() => void>(() => {});
 	const estimates = useMemo(() => rows.map(row => estimateTranscriptRow(row, width)), [rows, width]);
 	const estimatedTotal = useMemo(() => estimates.reduce((total, height) => total + height, 0), [estimates]);
@@ -56,7 +59,8 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	const getItemKey = useCallback((index: number) => rows[index]!.key, [rows]);
 	const estimateSize = useCallback((index: number) => estimates[index]!, [estimates]);
 	const rangeExtractor = useCallback((range: Range) => {
-		const indexes = new Set(jump ? [] : defaultRangeExtractor(range));
+		const instance = virtualizerRef.current;
+		const indexes = new Set(jump ? [] : transcriptWindow(range, instance?.measurementsCache ?? [], instance?.scrollRect?.height ?? 900));
 		if (jump) {
 			for (let index = jump.sourceStart; index <= jump.sourceEnd && index < rows.length; index++) indexes.add(index);
 			for (let index = jump.tailStart; index < rows.length; index++) indexes.add(index);
@@ -73,17 +77,26 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		initialOffset: Math.max(0, estimatedTotal - 900),
 		rangeExtractor,
 	});
+	virtualizerRef.current = virtualizer;
 	const items = virtualizer.getVirtualItems();
 	const sourceEnd = jump ? items.find(item => item.index === jump.sourceEnd) : undefined;
 	const tailStart = jump ? items.find(item => item.index === jump.tailStart) : undefined;
 	const shift = jump?.phase === "animate" && sourceEnd && tailStart ? Math.max(0, tailStart.start - sourceEnd.end) : 0;
 	jumpGeometry.current = { shift, tailStart: tailStart?.start ?? 0 };
-	useLayoutEffect(() => {
+	const updateJumpPositions = useCallback(() => {
+		const active = jumpRef.current;
+		const offset = jumpGeometry.current.shift;
+		const scroll = contextRef.current;
+		const travel = active?.phase === "animate" ? transcriptJumpTravel(scroll.state.scrollTop, active.from, scroll.state.targetScrollTop, offset) : 0;
+		for (const row of root.current?.children ?? []) {
+			const element = row as HTMLElement;
+			const index = Number(element.dataset.transcriptRow);
+			element.style.translate = active?.phase === "animate" ? `0 ${index >= active.tailStart ? travel - offset : travel}px` : "";
+		}
 		const column = root.current?.parentElement;
-		if (!column) return;
-		column.style.setProperty("--transcript-jump-offset", `${shift}px`);
-		return () => { column.style.removeProperty("--transcript-jump-offset"); };
-	}, [shift]);
+		column?.style.setProperty("--transcript-jump-offset", `${offset - travel}px`);
+	}, []);
+	useLayoutEffect(() => { updateJumpPositions(); });
 	// StickToBottom remains the sole owner of following the live tail. A size
 	// correction above a reader should preserve that reader's current passage.
 	virtualizer.shouldAdjustScrollPositionOnItemSizeChange = (item, _delta, instance) =>
@@ -123,19 +136,19 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		mounted.current = true;
 		return () => {
 			mounted.current = false;
-			if (jumpRef.current) {
-				contextRef.current.stopScroll();
-				contextRef.current.targetScrollTop = jumpRef.current.previousTarget;
-			}
+			if (jumpRef.current) contextRef.current.stopScroll();
+			if (jumpFrame.current !== null) cancelAnimationFrame(jumpFrame.current);
+			root.current?.parentElement?.style.removeProperty("--transcript-jump-offset");
 		};
 	}, []);
 	const finishJump = useCallback((completed: boolean) => {
 		const active = jumpRef.current;
 		if (!active || active.phase === "settle") return;
 		const scroll = contextRef.current;
-		const top = completed ? scroll.state.targetScrollTop : transcriptJumpRestoreOffset(scroll.state.scrollTop, jumpGeometry.current.tailStart, jumpGeometry.current.shift);
+		const travel = active.phase === "animate" ? transcriptJumpTravel(scroll.state.scrollTop, active.from, scroll.state.targetScrollTop, jumpGeometry.current.shift) : 0;
+		const top = completed ? scroll.state.targetScrollTop : transcriptJumpRestoreOffset(scroll.state.scrollTop - travel, jumpGeometry.current.tailStart, jumpGeometry.current.shift);
 		scroll.stopScroll();
-		scroll.targetScrollTop = active.previousTarget;
+		if (jumpFrame.current !== null) { cancelAnimationFrame(jumpFrame.current); jumpFrame.current = null; }
 		const settling: TranscriptJump = { ...active, phase: "settle" };
 		jumpRef.current = settling;
 		// Restore real row coordinates and scroll offset in one frame. Keep
@@ -157,7 +170,7 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 			scroll.state.targetScrollTop, rows.length, index => virtualizer.getOffsetForIndex(index, "start")?.[0] ?? 0);
 		if (!window) { await scroll.scrollToBottom(); return; }
 		scroll.stopScroll();
-		const preparing: TranscriptJump = { ...window, id: ++jumpSequence.current, phase: "prepare", previousTarget: scroll.targetScrollTop };
+		const preparing: TranscriptJump = { ...window, id: ++jumpSequence.current, phase: "prepare", from: element.scrollTop };
 		jumpRef.current = preparing;
 		flushSync(() => setJump(preparing));
 		// The destination's actual DOM is measured before the animation starts.
@@ -166,12 +179,18 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		const animating: TranscriptJump = { ...preparing, phase: "animate" };
 		jumpRef.current = animating;
 		flushSync(() => setJump(animating));
-		scroll.targetScrollTop = (target, elements) => (preparing.previousTarget?.(target, elements) ?? target) - jumpGeometry.current.shift;
-		await new Promise<void>(resolve => requestAnimationFrame(() => resolve()));
-		if (!mounted.current || jumpRef.current !== animating) return;
-		const completed = await scroll.scrollToBottom();
+		const completion = scroll.scrollToBottom();
+		// StickToBottom queues its scroll write first. Project the two windows
+		// immediately afterwards in the same frame, before the browser paints.
+		const frame = () => {
+			if (!mounted.current || jumpRef.current?.phase !== "animate") return;
+			updateJumpPositions();
+			jumpFrame.current = requestAnimationFrame(frame);
+		};
+		jumpFrame.current = requestAnimationFrame(frame);
+		const completed = await completion;
 		if (mounted.current && jumpRef.current?.id === preparing.id) finishJump(completed);
-	}, [virtualizer, rows.length, finishJump]);
+	}, [virtualizer, rows.length, finishJump, updateJumpPositions]);
 	const revealRow = useCallback(async (index: number): Promise<HTMLElement | null> => {
 		if (index < 0 || index >= rows.length) return null;
 		cancelJumpRef.current();
@@ -228,7 +247,7 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	return <div ref={root} data-virtual-transcript="" data-row-count={rows.length} data-transcript-jump={shift ? "" : undefined} style={{ height: virtualizer.getTotalSize(), position: "relative", width: "100%", overflowAnchor: "none" }}>
 		{items.map(item => <div key={item.key} ref={virtualizer.measureElement} data-index={item.index} data-transcript-row={item.index} data-session-find-root=""
 			className="flex min-w-0 flex-col gap-4"
-			style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start - scrollMargin - (jump && item.index >= jump.tailStart ? shift : 0)}px)`, paddingBottom: rows[item.index]!.gapAfter }}>
+			style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start - scrollMargin}px)`, paddingBottom: rows[item.index]!.gapAfter }}>
 			<TranscriptRowBody row={rows[item.index]!} state={stateForRow(rows[item.index]!.key)} render={children} />
 		</div>)}
 	</div>;
