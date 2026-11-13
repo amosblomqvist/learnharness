@@ -6,6 +6,7 @@
   "license": "AGPL-3.0-only",
   "scripts": {
     "sdk": "node ../../scripts/build-plugin-types.mjs .sdk",
+    "build": "node scripts/build.mjs",
     "typecheck": "tsc --noEmit",
     "test": "tsx --test tests/*.test.ts"
   },
