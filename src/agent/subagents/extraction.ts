@@ -793,6 +793,72 @@ export function callUsage(usage: Usage): CallUsage {
 		reasoningTokens: usage.reasoning ?? 0,
 	};
 }
+/**
+ * AST-aware chunking for notes: splits under the token budget (chars/4),
+ * respecting fenced code blocks (``` / ~~~), markdown tables, and prefers
+ * splitting at markdown heading boundaries when near budget.
+ */
+export function chunkNotes(text: string, budget: number): string[] {
+	if (text.trim().length === 0) return [];
+	const out: string[] = [];
+	let current = "";
+	let inCodeFence = false;
+	let inTable = false;
+	let fenceMarker = "";
+
+	const lines = text.split("\n");
+	for (let i = 0; i < lines.length; i++) {
+		const line = lines[i]!;
+		const trimmed = line.trim();
+
+		const fenceMatch = trimmed.match(/^(`{3,}|~{3,})/);
+		const isFenceOpener = !inCodeFence && !!fenceMatch;
+		const isTableRow = trimmed.startsWith("|") && trimmed.endsWith("|") && trimmed.length > 1;
+		const nextLine = lines[i + 1]?.trim();
+		const isTableOpener = !inTable && (isTableRow || (trimmed.startsWith("|") && (nextLine?.startsWith("|") ?? false)));
+
+		const candidate = current.length === 0 ? line : current + "\n" + line;
+		const candidateTokens = Math.ceil(candidate.length / 4);
+		const isHeading = /^#{1,4}\s+/.test(trimmed);
+		const shouldSplitAtHeading = !inCodeFence && !inTable && isHeading && candidateTokens >= Math.floor(budget * 0.7);
+		const shouldSplitBeforeBlock = !inCodeFence && !inTable && (isFenceOpener || isTableOpener) && candidateTokens > budget;
+
+		if (current.length > 0 && (shouldSplitAtHeading || shouldSplitBeforeBlock || (candidateTokens > budget && !inCodeFence && !inTable))) {
+			out.push(current);
+			current = line;
+			if (isFenceOpener && fenceMatch && fenceMatch[1]) {
+				inCodeFence = true;
+				fenceMarker = fenceMatch[1].slice(0, 3);
+			}
+			if (isTableOpener) {
+				inTable = true;
+			}
+			continue;
+		}
+
+		if (fenceMatch && fenceMatch[1]) {
+			if (!inCodeFence) {
+				inCodeFence = true;
+				fenceMarker = fenceMatch[1].slice(0, 3);
+			} else if (trimmed.startsWith(fenceMarker)) {
+				inCodeFence = false;
+				fenceMarker = "";
+			}
+		}
+
+		if (isTableRow || (trimmed.startsWith("|") && (nextLine?.startsWith("|") ?? false))) {
+			inTable = true;
+		} else if (inTable && !trimmed.startsWith("|")) {
+			inTable = false;
+		}
+
+		current = candidate;
+	}
+
+	if (current.trim().length > 0) out.push(current);
+	return out;
+}
+
 
 export function createExtractionPipeline(deps: ExtractionPipelineDeps): ExtractionPipeline {
 	const { chatStore, graphStore } = deps;
@@ -961,6 +1027,11 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		const signal = runningExtractions.get(jobKey)?.controller.signal;
 		signal?.throwIfAborted(); // an abort during the extract→audit gap ends here
 		const graph = getGraph(graphStore);
+		if (findings.propositions.length === 0 || graph.nodes.length === 0) {
+			console.info(`[extraction ${jobKey}] audit: short-circuited (0 propositions or empty graph)`);
+			return { links: [] };
+		}
+
 		console.info(
 			`[extraction ${jobKey}] auditor starting (${findings.propositions.length} propositions, ` +
 				`${graph.nodes.length} graph nodes)`,
@@ -974,6 +1045,37 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// IDENTITY-only and never sees the passages, so anchors are useless
 		// to it — they add cognitive load, not signal.
 		const review = prepareAuditorReview({ chatStore, graphStore }, findings.propositions);
+		if (review.initialCandidates.candidates.length === 0) {
+			console.info(`[extraction ${jobKey}] audit: short-circuited (0 candidates matched across graph)`);
+			return { links: [] };
+		}
+
+		// Fast-path exact identity resolution: if all candidates are exact matches or zero-match,
+		// resolve deterministically without a model call.
+		const candidateMap = new Map(review.initialCandidates.candidates.map((c) => [c.id, c]));
+		let hasAmbiguous = false;
+		const autoLinks: Array<{ id: string; linkTo: string }> = [];
+		for (const prop of findings.propositions) {
+			const match = review.initialCandidates.matches.find((m) => m.propositionId === prop.id);
+			const ids = match?.candidateIds ?? [];
+			if (ids.length === 0) continue;
+			const exact = ids.find((id) => {
+				const cand = candidateMap.get(id);
+				if (!cand) return false;
+				return cand.name.trim().toLowerCase() === prop.name.trim().toLowerCase()
+					&& cand.statement.trim().toLowerCase() === prop.statement.trim().toLowerCase();
+			});
+			if (exact) {
+				autoLinks.push({ id: prop.id, linkTo: exact });
+			} else {
+				hasAmbiguous = true;
+				break;
+			}
+		}
+		if (!hasAmbiguous) {
+			console.info(`[extraction ${jobKey}] audit: short-circuited (${autoLinks.length} exact links resolved locally)`);
+			return { links: autoLinks };
+		}
 		const auditResult = await runAuditor(
 			stageEngine("auditor", deps.auditor),
 			sourceId,
@@ -1237,27 +1339,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		return `SOURCE (the author's personal notes): ${input.filePath}${part}\n\n${input.text}`;
 	}
 
-	/** Chunk the notes text under the same budget the chat path uses
-	 * (owner, 2026-09-28: the whole-file-in-one-call design collapsed a
-	 * weak model — 26 propositions, structure bleed mid-emission).
-	 * Greedy by line, chars/4 like every other estimate in the app; a
-	 * single over-budget line rides alone (never split a line). */
-	function chunkNotes(text: string, budget: number): string[] {
-		if (text.trim().length === 0) return [];
-		const out: string[] = [];
-		let current = "";
-		for (const line of text.split("\n")) {
-			const candidate = current.length === 0 ? line : current + "\n" + line;
-			if (current.length > 0 && Math.ceil(candidate.length / 4) > budget) {
-				out.push(current);
-				current = line;
-			} else {
-				current = candidate;
-			}
-		}
-		if (current.trim().length > 0) out.push(current);
-		return out;
-	}
+	/** Chunk the notes text under the budget using AST and structure awareness:
+	 *  respects code fences, markdown tables, and splits cleanly on headings. */
 
 	async function notesExtract(
 		jobKey: string,
