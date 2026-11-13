@@ -1026,12 +1026,10 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	async function audit(jobKey: string, sourceId: string, findings: SessionFindings): Promise<AuditVerdicts> {
 		const signal = runningExtractions.get(jobKey)?.controller.signal;
 		signal?.throwIfAborted(); // an abort during the extract→audit gap ends here
-		const graph = getGraph(graphStore);
-		if (findings.propositions.length === 0 || graph.nodes.length === 0) {
-			console.info(`[extraction ${jobKey}] audit: short-circuited (0 propositions or empty graph)`);
+		if (findings.propositions.length === 0) {
 			return { links: [] };
 		}
-
+		const graph = getGraph(graphStore);
 		console.info(
 			`[extraction ${jobKey}] auditor starting (${findings.propositions.length} propositions, ` +
 				`${graph.nodes.length} graph nodes)`,
@@ -1045,37 +1043,6 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// IDENTITY-only and never sees the passages, so anchors are useless
 		// to it — they add cognitive load, not signal.
 		const review = prepareAuditorReview({ chatStore, graphStore }, findings.propositions);
-		if (review.initialCandidates.candidates.length === 0) {
-			console.info(`[extraction ${jobKey}] audit: short-circuited (0 candidates matched across graph)`);
-			return { links: [] };
-		}
-
-		// Fast-path exact identity resolution: if all candidates are exact matches or zero-match,
-		// resolve deterministically without a model call.
-		const candidateMap = new Map(review.initialCandidates.candidates.map((c) => [c.id, c]));
-		let hasAmbiguous = false;
-		const autoLinks: Array<{ id: string; linkTo: string }> = [];
-		for (const prop of findings.propositions) {
-			const match = review.initialCandidates.matches.find((m) => m.propositionId === prop.id);
-			const ids = match?.candidateIds ?? [];
-			if (ids.length === 0) continue;
-			const exact = ids.find((id) => {
-				const cand = candidateMap.get(id);
-				if (!cand) return false;
-				return cand.name.trim().toLowerCase() === prop.name.trim().toLowerCase()
-					&& cand.statement.trim().toLowerCase() === prop.statement.trim().toLowerCase();
-			});
-			if (exact) {
-				autoLinks.push({ id: prop.id, linkTo: exact });
-			} else {
-				hasAmbiguous = true;
-				break;
-			}
-		}
-		if (!hasAmbiguous) {
-			console.info(`[extraction ${jobKey}] audit: short-circuited (${autoLinks.length} exact links resolved locally)`);
-			return { links: autoLinks };
-		}
 		const auditResult = await runAuditor(
 			stageEngine("auditor", deps.auditor),
 			sourceId,
