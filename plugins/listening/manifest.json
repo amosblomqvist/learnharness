@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "id": "listening",
+  "name": "Listening",
+  "version": "0.1.0",
+  "minAppVersion": "0.6.1",
+  "description": "Speech setup for listening questions: connect your own ElevenLabs API key, a voice and a model. Spoken text is sent to ElevenLabs only when its audio is not already cached.",
+  "main": "main.js",
+  "backend": "backend.cjs",
+  "styles": "styles.css"
+}

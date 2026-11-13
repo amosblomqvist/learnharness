@@ -59,5 +59,5 @@ export async function verifyCorePlugins({ root, standalone, dataDirectory, url }
 		for (const id of ids) await request(`/api/plugins/${id}`, { enabled: false });
 		fs.rmSync(shadow, { recursive: true }); await request("/api/plugins", { action: "refresh" });
 	}
-	console.log("[smoke-core-plugins] four disabled defaults → direct core activation/assets/private-file refusal → separate data → reserved-ID collision → cooperative disable; code byte-identical");
+	console.log("[smoke-core-plugins] five disabled defaults → direct core activation/assets/private-file refusal → separate data → reserved-ID collision → cooperative disable; code byte-identical");
 }

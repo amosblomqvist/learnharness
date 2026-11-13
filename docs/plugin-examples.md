@@ -15,6 +15,7 @@ building or exercising it: plugins are trusted local code, not sandboxed extensi
 | [Coding questions](../plugins/coding-questions/README.md) | Core source reference | Teaching questions and repeated practice submissions, controlled editors, processing observations and saved-result rendering |
 | [Drawing Pad](../plugins/drawing-pad/README.md) | Core source reference | Session-context actions, shortcuts, surfaces, learner-submission image attachment and acknowledgment-aware draft consumption |
 | [Rich code blocks](../plugins/rich-code-blocks/README.md) | Core source reference | Conditional fence renderers, additive instructions, settings synchronization, local assets and bounded rendering |
+| [Listening](../plugins/listening/README.md) | Core source reference | A readiness state, a custom settings mount with a plugin-owned secret and binary data over the JSON bridge |
 
 Hello is the smallest place to begin. The official source projects are the primary
 substantial examples; read a route below for the extension point you need rather than
@@ -24,8 +25,8 @@ of replacing these primary examples.
 
 ## Core references are not Community packages
 
-The four IDs **`flashcards`**, **`coding-questions`**, **`drawing-pad`** and
-**`rich-code-blocks`** are reserved for app-shipped Core plugins, even when a Core
+The five IDs **`flashcards`**, **`coding-questions`**, **`drawing-pad`**,
+**`rich-code-blocks`** and **`listening`** are reserved for app-shipped Core plugins, even when a Core
 package is disabled, broken or missing. Their sources are included for study and
 adaptation, not installation as Community duplicates. Enable the app-supplied features
 in **Settings → Core plugins**. App updates supply Core code; writable records live
@@ -60,6 +61,7 @@ The downloaded authoring kit preserves the repository layout:
     coding-questions/
     drawing-pad/
     rich-code-blocks/
+    listening/
     ui-showcase/
 ```
 
@@ -73,7 +75,7 @@ install the whole kit as a plugin.
 
 ### TypeScript projects
 
-For Coding questions, Drawing Pad, Rich code blocks and UI Showcase, copy the extracted
+For Coding questions, Drawing Pad, Rich code blocks, Listening and UI Showcase, copy the extracted
 kit's `types/` **contents** into that project's `.sdk/` **before npm dependency setup**.
 From the project's `plugins/<id>/` directory in the extracted kit:
 
@@ -108,7 +110,7 @@ and copies required assets/notices. Build cleanup refuses symlinked `dist/` and
 misplaced `dist/data/` and preserves sibling `data/`. It does not start/build the host,
 install/enable a plugin, call a model or update Core code. For a newly identified
 Community fork or UI Showcase, follow the [Community installation guide](plugin-authoring.md#package-and-installation);
-do not install the four reserved-ID references.
+do not install the five reserved-ID references.
 
 ## Reading routes
 
@@ -226,6 +228,20 @@ transparent appearance and the distinction between static drawing and simulation
 
 Rendering makes no model request. TeX Worker bounds and SVG sanitization are local
 feature safeguards, not a sandbox for arbitrary plugin JavaScript.
+
+### Listening: readiness, secrets and audio
+
+Read the [README](../plugins/listening/README.md) for setup, limits and caching.
+
+1. [`src/backend.ts`](../plugins/listening/src/backend.ts): derives readiness from the
+   provider's settings and keeps the API key behind `ctx.handle` operations that never
+   return it.
+2. [`src/speech/`](../plugins/listening/src/speech/): a provider interface, the
+   ElevenLabs adapter, a deduplicating bounded service and an LRU disk cache.
+3. [`src/settings-view.ts`](../plugins/listening/src/settings-view.ts): a custom settings
+   mount combining `mountSettingsRows` with a write-only password field.
+
+The key is stored owner-only in the plugin data folder, not in host credentials.
 
 ### UI Showcase: all 15 UI methods
 
