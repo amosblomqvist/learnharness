@@ -15,18 +15,6 @@ Choose **Strong**, **Cheap**, and **Vision** models in Settings. There are no fa
 
 Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. Research can still fetch known URLs without a search key. Dictation has its own service key below.
 
-### Disconnect ChatGPT
-
-In **Settings → Providers → ChatGPT → Manage…**, choose **Disconnect**, then confirm **Disconnect from LearnHarness**. LearnHarness attempts to revoke the renewable session and removes the saved account and credentials from the machine running LearnHarness. If revocation cannot be confirmed, it still removes the local credentials and shows a warning.
-
-Even successful session revocation [does not delete the registered app in ChatGPT](https://developers.openai.com/siwc/token-sharing-open-source/profiles-and-sessions#end-the-renewable-session). To remove that connection:
-
-1. Open [ChatGPT](https://chatgpt.com/) with the matching ChatGPT account.
-2. Go to **Settings → Security and login → Login connections → Sign in with ChatGPT**.
-3. Select **LearnHarness**, then **Manage connection → Disconnect**, and confirm **Disconnect** again.
-
-See [OpenAI's disconnect instructions](https://help.openai.com/en/articles/20001542-using-your-chatgpt-plan-in-other-apps-and-sites) for details. Disconnecting does not erase past usage.
-
 ## Start a session
 
 Choose **Teach** and describe what you want to understand. The agent probes your starting point, presents a plan, and teaches through explanations and checks. Reply naturally to accept or revise the plan.
