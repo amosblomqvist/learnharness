@@ -240,7 +240,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			// (pre-redesign record, fresh install) resolves to the factory
 			// 4096; the sanitizer has already clamped/floored any stored value.
 			extractionChunkTokens: graph.extractionChunkTokens ?? FACTORY_SETTINGS.graph.extractionChunkTokens,
-			...(graph.ocrBaiduEnabled !== undefined ? { ocrBaiduEnabled: graph.ocrBaiduEnabled } : {}),
+			ocrBaiduEnabled: graph.ocrBaiduEnabled ?? FACTORY_SETTINGS.graph.ocrBaiduEnabled,
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
