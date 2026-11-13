@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { ContextWindowProbe } from "../src/agent/claude-code/context-window.ts";
 import { CLAUDE_CODE_MODELS } from "../src/agent/claude-code/provider.ts";
-import { asAgentMessages, cliContextWindowOf, toLlmMessages, type LhMessage } from "../src/core/native-messages.ts";
+import { asAgentMessages, cliContextWindowOf, cliModelOf, toLlmMessages, type LhMessage } from "../src/core/native-messages.ts";
 import { catalogLimits } from "../components/model-picker.tsx";
 import { contextLimitForModel, formatContextMeasurement } from "../components/stats-bar.tsx";
 import { toModelDto } from "../src/server/model-catalog.ts";
@@ -95,4 +95,16 @@ test("CLI catalog limits remain unknown and cannot create a global denominator",
 	const models = CLAUDE_CODE_MODELS.map(toModelDto);
 	assert(models.every((model) => model.contextWindow === null && model.maxTokens === null));
 	assert.equal(catalogLimits({ models }).size, 0);
+});
+
+test("resolved CLI model is app-only, alias-keyed, and only read from the latest Claude Code response", () => {
+	const first = { ...assistant(), cliModel: "claude-opus-5-5" } as LhMessage;
+	assert.deepEqual(cliModelOf(JSON.parse(JSON.stringify([first]))), { model: "claude-code:opus", resolved: "claude-opus-5-5" });
+	assert(!("cliModel" in toLlmMessages(asAgentMessages([first]))[0]!));
+	assert.equal((first as { cliModel?: string }).cliModel, "claude-opus-5-5", "provider projection never mutates the stored model");
+	const unreported = assistant("opus");
+	assert.equal(cliModelOf([first, unreported]), null, "a newer response without metadata never borrows an older model");
+	const other = assistant("api"); other.provider = "anthropic";
+	assert.equal(cliModelOf([first, other]), null);
+	assert.equal(cliModelOf([]), null);
 });

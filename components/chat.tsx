@@ -53,6 +53,7 @@ import {
 	isProviderKeyRefusal,
 	firstSourceTextParts,
 	cliContextWindowOf,
+	cliModelOf,
 	messageAnchorId,
 	sideEntryPoints,
 	sideSegmentId,
@@ -2079,6 +2080,7 @@ export function Chat({
 					turns={turns}
 					contextTokens={contextTokens}
 					cliContextWindow={cliContextWindowOf(nativeMessages)}
+					cliModel={cliModelOf(nativeMessages)}
 					pricing={pricing}
 					onReserve={setDockReserve}
 					dictationSlot={<DictationBar dictation={dictation} disabled={pluginOwnsDock && !pluginMicAvailable} />}
@@ -2392,6 +2394,7 @@ export function DockOverlay({
 	turns,
 	contextTokens,
 	cliContextWindow,
+	cliModel,
 	pricing,
 	composer,
 	onSubmitAnswer,
@@ -2453,6 +2456,7 @@ export function DockOverlay({
 	turns: TurnUsage[];
 	contextTokens: number | null;
 	cliContextWindow: ReturnType<typeof cliContextWindowOf>;
+	cliModel: ReturnType<typeof cliModelOf>;
 	pricing?: SessionPricing;
 	composer: React.ReactNode;
 	onSubmitAnswer: (output: QuestionAnswerData) => void;
@@ -2945,6 +2949,7 @@ export function DockOverlay({
 						turns={turns}
 						contextTokens={contextTokens}
 						cliContextWindow={cliContextWindow}
+						cliModel={cliModel}
 						pricing={pricing}
 						dictationSlot={dictationSlot}
 						chatId={chatId}

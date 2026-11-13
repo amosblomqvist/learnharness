@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { CLAUDE_CODE_PROVIDER, sessionCacheHitRate, subscriptionLabels, subscriptionLabel, type cliContextWindowOf, type SessionPricing, type TurnUsage } from "@/src/core";
+import { CLAUDE_CODE_PROVIDER, sessionCacheHitRate, subscriptionLabels, subscriptionLabel, type cliContextWindowOf, type cliModelOf, type SessionPricing, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
@@ -43,6 +43,7 @@ export function StatsBar({
 	turns,
 	contextTokens = null,
 	cliContextWindow = null,
+	cliModel = null,
 	pricing,
 	dictationSlot,
 	chatId,
@@ -52,6 +53,8 @@ export function StatsBar({
 	turns: TurnUsage[];
 	contextTokens?: number | null;
 	cliContextWindow?: ReturnType<typeof cliContextWindowOf>;
+	/** The concrete model behind the latest Claude Code response (alias-keyed). */
+	cliModel?: ReturnType<typeof cliModelOf>;
 	pricing?: SessionPricing;
 	/** The bound session (per-session models, owner 2026-09-28): present
 	 *  on the in-session bar — the model control binds THE SESSION'S own
@@ -152,6 +155,12 @@ export function StatsBar({
 							</div>
 							{selectedModel?.startsWith(`${CLAUDE_CODE_PROVIDER}:`) && (
 								<p>Window reported by Claude Code; may be lower for auto-compaction.</p>
+							)}
+							{cliModel && cliModel.model === selectedModel && (
+								<div data-testid="stats-cli-model" className="flex justify-between gap-2">
+									<span>Model (last call)</span>
+									<span className="truncate tabular-nums text-card-foreground">{cliModel.resolved}</span>
+								</div>
 							)}
 							<div className="flex justify-between gap-2">
 								<span>{subscription ? "Usage" : "Total cost"}</span>

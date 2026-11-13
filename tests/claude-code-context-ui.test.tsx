@@ -46,3 +46,26 @@ test("compact CLI context is numeric only; effective-window explanation appears 
 	await act(async () => render({ model: "claude-code:sonnet", tokens: 1000000 }));
 	assert.equal(document.querySelector('[data-testid="stats-context"]')?.textContent, "42k", "another alias cannot supply this session's denominator");
 });
+
+test("the resolved Claude Code model appears in session stats only for the matching alias", async () => {
+	const catalog: ModelCatalogResponse = { models: CLAUDE_CODE_MODELS.map(toModelDto), providers: [],
+		slots: { strong: null, cheap: null, vision: null }, defaults: null,
+		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null } };
+	globalThis.fetch = (async (url) => {
+		if (url === "/api/models") return Response.json(catalog);
+		if (url === "/api/settings") return Response.json({ settings: { models: {} } });
+		if (url === "/api/chats/cli-session") return Response.json({ settings: { model: { provider: "claude-code", id: "opus" } } });
+		throw new Error(`unexpected request ${url}`);
+	}) as typeof fetch;
+	host = document.createElement("div"); document.body.append(host); root = createRoot(host);
+	const turn: TurnUsage = { id: "cli-turn", messageId: "cli-message", model: "claude-code:opus", at: "2026-10-28T00:00:00Z", steps: [{ inputTokens: 42000, outputTokens: 1, cacheReadTokens: undefined, cacheWriteTokens: undefined, reasoningTokens: undefined }] };
+	const render = (cliModel: { model: string; resolved: string } | null) => root!.render(<StatsBar chatId="cli-session" turns={[turn]} contextTokens={42000} cliModel={cliModel} />);
+	await act(async () => render({ model: "claude-code:opus", resolved: "claude-opus-5-5" }));
+	assert(!document.querySelector('[data-testid="stats-summary"]')?.textContent?.includes("claude-opus-5-5"), "compact row stays unchanged");
+	await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="stats-summary"]')!.click());
+	assert.match(document.querySelector('[data-testid="stats-cli-model"]')?.textContent ?? "", /claude-opus-5-5/);
+	await act(async () => render({ model: "claude-code:sonnet", resolved: "claude-sonnet-5-5" }));
+	assert.equal(document.querySelector('[data-testid="stats-cli-model"]'), null, "another alias's model is never shown for this selection");
+	await act(async () => render(null));
+	assert.equal(document.querySelector('[data-testid="stats-cli-model"]'), null);
+});

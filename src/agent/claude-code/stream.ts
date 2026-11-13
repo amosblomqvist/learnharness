@@ -144,7 +144,7 @@ function getAssistantErrorMessage(error: string, text: string): string {
 }
 
 class ClaudeTurn {
-	private readonly output: AssistantMessage & Pick<LhMessage, "cliContextWindow">;
+	private readonly output: AssistantMessage & Pick<LhMessage, "cliContextWindow" | "cliModel">;
 	private readonly contentIndexes = new Map<number, number>();
 	private readonly partialJson = new Map<number, string>();
 	private readonly toolBlocks = new Map<number, ToolCall>();
@@ -168,6 +168,7 @@ class ClaudeTurn {
 		switch (event.type) {
 			case "messageStart":
 				this.skippedBareCall = false;
+				if (event.model) this.output.cliModel = event.model;
 				this.updateUsage(event.usage);
 				this.start();
 				return;

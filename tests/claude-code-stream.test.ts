@@ -613,6 +613,14 @@ test("usage maps input/output/cacheRead/cacheWrite with zero cost, message_delta
 	});
 });
 
+test("the concrete model from message_start is recorded on the message, without changing the alias", async (t) => {
+	const { events } = await runScenario(t, getToolScenario());
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.equal(done.message.model, getModel().id);
+	assert.equal((done.message as { cliModel?: string }).cliModel, "claude-haiku-5-5");
+});
+
 test('missing binary → error "claude CLI not found"', async () => {
 	const model = CLAUDE_CODE_MODELS[0];
 	assert.ok(model);
