@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef } from "react";
+import { useTranscriptState } from "./transcript-row-state";
 import { ChevronDownIcon } from "lucide-react";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
@@ -44,6 +45,7 @@ import { PathText } from "@/components/file-path-chip";
 // null = "rows run their own defaults" (the pre-toggle state); the first ⌘T
 // resolves from `true` (transcript rows default open) and then alternates.
 let allUserThinkingOpen: boolean | null = null;
+let userThinkingRevision = 0;
 const userThinkingListeners = new Set<(open: boolean) => void>();
 
 export function currentUserThinkingOpen(): boolean {
@@ -58,6 +60,7 @@ function resolveUserThinkingOpen(defaultOpen: boolean): boolean {
 }
 
 export function setAllUserThinkingOpen(open: boolean) {
+	userThinkingRevision++;
 	allUserThinkingOpen = open;
 	for (const l of userThinkingListeners) l(open);
 }
@@ -88,7 +91,7 @@ export function ThinkingBlock({
 	/** On the card's own background: no band (the accent read too light). */
 	inCard?: boolean;
 }) {
-	const [open, setOpen] = useState(() => resolveUserThinkingOpen(defaultOpen));
+	const [open, setOpen] = useTranscriptState(`thinking:${userThinkingRevision}:${label}:${text}`, () => resolveUserThinkingOpen(defaultOpen));
 	// ⌘T: an explicit global set overrides every row (once set, rows re-sync).
 	const syncedRef = useRef(false);
 	useEffect(

@@ -1,8 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, type RefObject } from "react";
 import { useStickToBottomContext, type StickToBottomContext } from "use-stick-to-bottom";
 import { messageAnchorId, messageIdFromHash } from "@/src/core";
+import type { VirtualTranscriptHandle } from "./virtual-transcript";
 
 export type SessionScrollContext = Pick<StickToBottomContext, "scrollRef" | "stopScroll">;
 
@@ -31,7 +32,7 @@ export function scrollSessionTarget(target: Range | HTMLElement, scope: HTMLElem
  * frame-chained rAF proved cancellable mid-flight in dev (the owner's
  * every-link-lands-at-bottom report, 2026-10-13) — a synchronous tick that
  * retries until both elements exist has no cancellation window. */
-export function SessionMessageNavigation() {
+export function SessionMessageNavigation({ virtualTranscriptRef }: { virtualTranscriptRef?: RefObject<VirtualTranscriptHandle | null> }) {
 	const context = useStickToBottomContext();
 	// ABSORB IDENTITY CHURN (the 2026-10-13 heisenbug): use-stick-to-bottom
 	// re-creates stopScroll (and thus this context) while its initial scroll
@@ -43,6 +44,8 @@ export function SessionMessageNavigation() {
 	const contextRef = useRef(context);
 	contextRef.current = context;
 	const lastJump = useRef<{ hash: string; target: HTMLElement } | null>(null);
+	const mounting = useRef<string | null>(null);
+	const jumpRef = useRef<() => boolean>(() => false);
 	const flash = useRef<{ target: HTMLElement; timer: number } | null>(null);
 	const clearFlash = useCallback(() => {
 		if (!flash.current) return;
@@ -56,9 +59,17 @@ export function SessionMessageNavigation() {
 	const jump = useCallback((): boolean => {
 		const { scrollRef, stopScroll } = contextRef.current;
 		const hash = window.location.hash;
+		if (virtualTranscriptRef?.current && lastJump.current?.hash === hash) return true;
 		const messageId = messageIdFromHash(hash);
 		const main = scrollRef.current;
 		const target = messageId ? document.getElementById(messageAnchorId(messageId)) : null;
+		if (!target && messageId && virtualTranscriptRef?.current && mounting.current !== messageId) {
+			mounting.current = messageId;
+			void virtualTranscriptRef.current.revealMessage(messageId).then(element => {
+				mounting.current = null;
+				if (element && document.getElementById(messageAnchorId(messageId)) && window.location.hash === hash) jumpRef.current();
+			});
+		}
 		if (!main || !target || !main.contains(target)) return false;
 		if (lastJump.current?.hash === hash && lastJump.current.target === target) return true;
 		stopScroll();
@@ -68,7 +79,8 @@ export function SessionMessageNavigation() {
 		flash.current = { target, timer: window.setTimeout(clearFlash, 2_000) };
 		lastJump.current = { hash, target };
 		return true;
-	}, [clearFlash]);
+	}, [clearFlash, virtualTranscriptRef]);
+	jumpRef.current = jump;
 
 	// Arrival on mount (a graph link opened this session, or a full load
 	// carried the hash): retry on a short interval until the scroller and the

@@ -1,17 +1,19 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState, type RefObject } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type RefObject } from "react";
 import { ChevronDownIcon, ChevronUpIcon, SearchIcon, XIcon } from "lucide-react";
 import { kbdEventForAction, stepSessionMatch } from "@/src/core";
-import {
-	sameSessionRange, sessionFindRanges, sessionRangeIdentity, type SessionRangeIdentity,
-} from "@/components/session-find-dom";
+import { sessionFindRanges } from "@/components/session-find-dom";
+import { findTranscriptMatches, transcriptSearchIndex, type TranscriptSearchCache, type TranscriptSearchMatch } from "./transcript-search";
+import type { TranscriptRow } from "./transcript-rows";
+import type { VirtualTranscriptHandle } from "./virtual-transcript";
 import { scrollSessionTarget, type SessionScrollContext } from "@/components/session-navigation";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { hasLegacyInteractionForeground, isInteractionScopeEligible } from "./plugin-input-focus";
 
 export const SESSION_FIND_HIGHLIGHT = "lh-session-find";
 export const SESSION_FIND_ACTIVE_HIGHLIGHT = "lh-session-find-active";
+const EMPTY_ROWS: readonly TranscriptRow[] = [];
 
 /** ::highlight() rules live OUTSIDE globals.css on purpose: the PostCSS/
  *  Tailwind v4 pipeline rejects the Custom Highlight pseudo-element as a
@@ -56,9 +58,11 @@ export function sessionFindHasForegroundLayer(doc: Document, scope?: HTMLElement
 /** Mounted for the lifetime of ONE Chat (which is keyed by chatId). Closing
  * keeps the query/reading position; changing sessions resets all local state.
  * The bar lives outside scopeRef, so it never finds its own query or count. */
-export function SessionFind({ scopeRef, scrollContextRef }: {
+export function SessionFind({ scopeRef, scrollContextRef, rows = EMPTY_ROWS, virtualTranscriptRef }: {
 	scopeRef: RefObject<HTMLDivElement | null>;
 	scrollContextRef: RefObject<SessionScrollContext | null>;
+	rows?: readonly TranscriptRow[];
+	virtualTranscriptRef?: RefObject<VirtualTranscriptHandle | null>;
 }) {
 	const controller = useOptionalInteractionLayers();
 	const [open, setOpen] = useState(false);
@@ -67,12 +71,38 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 	useEffect(injectFindStyles, []);
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	const previousFocus = useRef<HTMLElement | null>(null);
-	const rangesRef = useRef<Range[]>([]);
 	const indexRef = useRef(-1);
-	const identityRef = useRef<SessionRangeIdentity | null>(null);
+	const identityRef = useRef<string | null>(null);
 	const lastQueryRef = useRef<string | null>(null);
+	const searchCache = useRef<TranscriptSearchCache>(new Map());
+	const searchIndex = useMemo(() => open ? transcriptSearchIndex(rows, searchCache.current) : [], [open, rows]);
+	const matches = useMemo(() => findTranscriptMatches(searchIndex, query), [searchIndex, query]);
+	type Match = TranscriptSearchMatch | { key: string; range: Range };
+	const matchesRef = useRef<readonly Match[]>([]);
+	const navigation = useRef(0);
+	const queryRef = useRef(query);
+	queryRef.current = query;
+	const reveal = useCallback(async (match: Match | undefined) => {
+		const request = ++navigation.current;
+		const scope = scopeRef.current;
+		if (!match || !scope) return;
+		if ("range" in match) { scrollSessionTarget(match.range, scope, scrollContextRef.current); return; }
+		const row = await virtualTranscriptRef?.current?.revealRow(match.rowIndex);
+		if (!row || request !== navigation.current) return;
+		const ranges = sessionFindRanges(row, queryRef.current);
+		const range = ranges[match.occurrence];
+		if (range) {
+			publishHighlights(ranges, match.occurrence);
+			scrollSessionTarget(range, scope, scrollContextRef.current);
+		} else {
+			// Plugin-rendered text may arrive after its row. The observer below
+			// paints the highlight when it arrives; the row is already revealed.
+			scrollSessionTarget(row, scope, scrollContextRef.current);
+		}
+	}, [scopeRef, scrollContextRef, virtualTranscriptRef]);
 
 	const close = useCallback(() => {
+		navigation.current++;
 		clearSessionFindHighlights();
 		setOpen(false);
 		if (isInteractionScopeEligible(previousFocus.current, controller)) previousFocus.current!.focus({ preventScroll: true });
@@ -111,15 +141,26 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 		let frame: number | null = null;
 		const refresh = (selectFirst: boolean) => {
 			const ranges = sessionFindRanges(scope, query);
-			let index = selectFirst ? 0 : ranges.findIndex((range) => sameSessionRange(range, identityRef.current));
-			if (index < 0) index = Math.max(0, Math.min(indexRef.current, ranges.length - 1));
-			if (!ranges.length) index = -1;
-			rangesRef.current = ranges;
+			// Only the active dock needs a DOM search. The transcript's global
+			// count and navigation come from data, including every unmounted row.
+			const dock = ranges.filter(range => !range.startContainer.parentElement?.closest("[data-virtual-transcript]"));
+			const all: Match[] = [...matches, ...dock.map((range, index) => ({ key: `dock:${index}`, range }))];
+			let index = selectFirst ? 0 : all.findIndex(match => match.key === identityRef.current);
+			if (index < 0) index = Math.max(0, Math.min(indexRef.current, all.length - 1));
+			if (!all.length) index = -1;
+			matchesRef.current = all;
 			indexRef.current = index;
-			identityRef.current = ranges[index] ? sessionRangeIdentity(ranges[index]!) : null;
-			setResult((old) => old.index === index && old.count === ranges.length ? old : { index, count: ranges.length });
-			publishHighlights(ranges, index);
-			if (selectFirst && ranges[index]) scrollSessionTarget(ranges[index]!, scope, scrollContextRef.current);
+			identityRef.current = all[index]?.key ?? null;
+			setResult(old => old.index === index && old.count === all.length ? old : { index, count: all.length });
+			const active = all[index];
+			let activeRange: Range | undefined;
+			if (active && "range" in active) activeRange = active.range;
+			else if (active) {
+				const row = scope.querySelector<HTMLElement>(`[data-transcript-row="${active.rowIndex}"]`);
+				if (row) activeRange = sessionFindRanges(row, query)[active.occurrence];
+			}
+			publishHighlights(ranges, activeRange ? ranges.findIndex(range => range.startContainer === activeRange.startContainer && range.startOffset === activeRange.startOffset) : -1);
+			if (selectFirst) void reveal(active);
 		};
 		// New queries start at the session's first match. Reopening the retained
 		// query or receiving streamed content only refreshes; neither yanks scroll.
@@ -139,19 +180,18 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 			if (frame !== null) window.cancelAnimationFrame(frame);
 			clearSessionFindHighlights();
 		};
-	}, [open, query, scopeRef, scrollContextRef]);
+	}, [open, query, matches, scopeRef, scrollContextRef, reveal]);
 
 	// Also clear on a session switch when Find was already closed.
 	useEffect(() => clearSessionFindHighlights, []);
 
 	const step = (direction: 1 | -1) => {
-		const ranges = rangesRef.current;
-		const index = stepSessionMatch(indexRef.current, ranges.length, direction);
+		const matches = matchesRef.current;
+		const index = stepSessionMatch(indexRef.current, matches.length, direction);
 		indexRef.current = index;
-		identityRef.current = ranges[index] ? sessionRangeIdentity(ranges[index]!) : null;
-		setResult({ index, count: ranges.length });
-		publishHighlights(ranges, index);
-		if (ranges[index] && scopeRef.current) scrollSessionTarget(ranges[index]!, scopeRef.current, scrollContextRef.current);
+		identityRef.current = matches[index]?.key ?? null;
+		setResult({ index, count: matches.length });
+		void reveal(matches[index]);
 	};
 
 	if (!open) return null;
