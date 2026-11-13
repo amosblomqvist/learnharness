@@ -1,4 +1,7 @@
+import { act } from "react";
+import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ActivitySection, formatElapsed, toBlobs, type ActivityFeed, type FeedExtraction } from "../components/activity-dock.tsx";
@@ -274,5 +277,36 @@ describe("activity section render", () => {
 		// two identical priced jobs → 2 × $0.002 = $0.0040 total (pi prices,
 		// glm-5.3-flash drifted in pi-ai 0.87.1)
 		assert.match(html, /activity-total-cost[^>]*>\$0\.0040</);
+	});
+
+	it("expanded card: END stays on the face row, the title isn't repeated (#450)", async () => {
+		const dom = parseHTML("<html><body><div id='root'></div></body></html>");
+		const globals = { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
+			Element: dom.window.Element, Node: dom.window.Node, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true };
+		const saved = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+		Object.assign(globalThis, globals);
+		const root = createRoot(dom.document.querySelector("#root")!);
+		try {
+			const feed = { jobs: [job({ kind: "pdf", title: "STA301", activity: "pdf_render: 1-5 @150dpi" })], extractions: [] };
+			await act(async () => { root.render(<ActivitySection feed={feed} />); });
+			const face = dom.document.querySelector("button[aria-expanded]")!;
+			await act(async () => { face.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+			const detail = dom.document.querySelector("[data-testid='activity-blob-detail']")!;
+			assert.ok(detail, "the card expanded");
+			// The END button is positioned against the face row only, so it
+			// can't drift down onto the detail rows when the card grows.
+			const abort = dom.document.querySelector("[data-testid='activity-abort']")!;
+			assert.equal(abort.parentElement, face.parentElement);
+			assert.equal(detail.contains(face.parentElement!), false);
+			assert.match(face.parentElement!.className, /\brelative\b/);
+			// The face already shows the title (with its title= reveal); the
+			// detail keeps only the full, wrapped activity line.
+			assert.doesNotMatch(detail.textContent!, /STA301/);
+			assert.match(detail.textContent!, /pdf_render: 1-5 @150dpi/);
+			assert.equal(face.querySelector("[title='STA301']")?.textContent, "STA301");
+		} finally {
+			await act(async () => root.unmount());
+			for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
+		}
 	});
 });
