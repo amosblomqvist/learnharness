@@ -19,7 +19,9 @@
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { piModels } from "../agent/models.ts";
+import { piModels, syncCodexProvider } from "../agent/models.ts";
+import { refreshCodexModels } from "../agent/codex/provider.ts";
+import { EXTERNAL_CLI_PROVIDERS } from "../core/contracts/external-cli.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
@@ -29,10 +31,12 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+		(!provider || provider === EXTERNAL_CLI_PROVIDERS.codex) && externalCliAvailable(EXTERNAL_CLI_PROVIDERS.codex)
+			? refreshCodexModels().then(syncCodexProvider) : Promise.resolve(),
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
-	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
+	if (isExternalCliProvider(provider) && !externalCliAvailable(provider)) return undefined;
 	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
 }
 function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
@@ -50,8 +54,8 @@ import type {
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
 import { AUTH_PROVIDER_KEYS, CUSTOM_PROVIDER } from "../core/auth-keys.ts";
-import { claudeCodeAvailable } from "./claude-code-config.ts";
-import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
+import { externalCliAvailable } from "./external-cli-config.ts";
+import { isExternalCliProvider } from "../core/contracts/external-cli.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
 	MODEL_SLOTS,
@@ -154,7 +158,7 @@ export function catalogProviders(): CatalogProvider[] {
 		keyPresent: keyValue(p.envVar) !== undefined,
 	})).concat([
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
-		{ id: CLAUDE_CODE_PROVIDER, envVar: "", keyPresent: claudeCodeAvailable() },
+		...piModels().getProviders().filter((p) => isExternalCliProvider(p.id)).map((p) => ({ id: p.id, envVar: "", keyPresent: isExternalCliProvider(p.id) && externalCliAvailable(p.id) })),
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
 		// The custom endpoint: a row only when usable (base URL set). keyPresent
 		// reflects usability, not key presence (keyless local servers are allowed).
@@ -180,14 +184,14 @@ export function toModelDto(model: Model<Api>): ModelDto {
 		reasoning: model.reasoning,
 		input: [...model.input],
 		supportedLevels: getSupportedThinkingLevels(model),
-		cost: model.provider === CLAUDE_CODE_PROVIDER || model.provider === CUSTOM_PROVIDER.id ? null : {
+		cost: isExternalCliProvider(model.provider) || model.provider === CUSTOM_PROVIDER.id ? null : {
 			input: model.cost.input,
 			output: model.cost.output,
 			cacheRead: model.cost.cacheRead,
 			cacheWrite: model.cost.cacheWrite,
 		},
-		contextWindow: model.provider === CLAUDE_CODE_PROVIDER ? null : model.contextWindow,
-		maxTokens: model.provider === CLAUDE_CODE_PROVIDER ? null : model.maxTokens,
+		contextWindow: isExternalCliProvider(model.provider) ? null : model.contextWindow,
+		maxTokens: isExternalCliProvider(model.provider) ? null : model.maxTokens,
 	};
 }
 
@@ -203,7 +207,7 @@ export function catalogContextLimits(): Map<string, number> {
 	const keyed = keyedProviderIds();
 	const index = new Map<string, number>();
 	for (const provider of piModels().getProviders()) {
-		if (!keyed.has(provider.id) || provider.id === CLAUDE_CODE_PROVIDER) continue;
+		if (!keyed.has(provider.id) || isExternalCliProvider(provider.id)) continue;
 		for (const model of piModels().getModels(provider.id)) {
 			index.set(`${provider.id}:${model.id}`, model.contextWindow);
 		}

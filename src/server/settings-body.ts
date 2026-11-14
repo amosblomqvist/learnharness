@@ -22,6 +22,7 @@ import type {
 	CustomModelOverride,
 	GeneralSettings,
 	DictationSettings,
+	ExternalCliOptIn,
 	GraphSettings,
 	ModelsSettings,
 	ModelSlot,
@@ -97,7 +98,11 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 }
 
 /** claudeCode: explicit app-wide opt-in. Empty section resets to off. */
-export function parseClaudeCodeSettingsBody(body: unknown): SettingsBodyResult<{ enabled?: boolean }> {
+export function parseClaudeCodeSettingsBody(body: unknown): SettingsBodyResult<ExternalCliOptIn> {
+	return parseExternalCliOptInBody(body);
+}
+
+function parseExternalCliOptInBody(body: unknown): SettingsBodyResult<ExternalCliOptIn> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	if (raw.enabled === undefined) return { ok: true, settings: {} };
@@ -467,6 +472,8 @@ export const SETTINGS_SECTIONS = {
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
+	codex: parseExternalCliOptInBody,
+	geminiCli: parseExternalCliOptInBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;

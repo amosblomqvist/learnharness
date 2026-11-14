@@ -36,7 +36,7 @@
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Message, ToolResultMessage, UserMessage } from "@earendil-works/pi-ai";
 import { QUESTION_TOOLS, type PendingQuestion } from "./pending.ts";
-import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
+import { isExternalCliProvider } from "./contracts/external-cli.ts";
 import {
 	CONCLUDE_ACK_TEXT,
 	HANDOFF_TEXT,
@@ -107,7 +107,7 @@ export function cliContextWindowOf(messages: readonly LhMessage[]): { model: str
 		if (message.role === "custom" && message.customType === "compaction") return null;
 		if (message.role !== "assistant") continue;
 		const tokens = message.cliContextWindow;
-		return message.provider === CLAUDE_CODE_PROVIDER && typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens > 0
+		return isExternalCliProvider(message.provider) && typeof tokens === "number" && Number.isSafeInteger(tokens) && tokens > 0
 			? { model: `${message.provider}:${message.model}`, tokens } : null;
 	}
 	return null;

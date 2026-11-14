@@ -15,7 +15,7 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { Type } from "typebox";
 
-import { BRIDGE_SERVER_NAME, createToolBridge, toolNameFromMcp, type ToolBridge } from "../src/agent/claude-code/tool-bridge.ts";
+import { BRIDGE_SERVER_NAME, createToolBridge, ToolCallKeyKind, toolNameFromMcp, type ToolBridge } from "../src/agent/claude-code/tool-bridge.ts";
 
 const READ_TOOL: Tool = { name: "read", description: "Read a file", parameters: Type.Object({ path: Type.String() }) };
 const SCREENSHOT_TOOL: Tool = { name: "screenshot", description: "Capture the screen", parameters: Type.Object({}) };
@@ -263,6 +263,55 @@ test("missing and reused Claude tool IDs are rejected rather than matched by arg
 	await assert.rejects(client.callTool(params), /claudecode\/toolUseId/);
 	assert.deepEqual(bridge.getPendingToolCalls(), []);
 	assert.equal(failures.length, 2);
+});
+
+test("a custom call key reader and server name replace the Claude defaults", async (t) => {
+	const serverName = "other-server";
+	const bridge = await createToolBridge(
+		[READ_TOOL],
+		undefined,
+		{
+			serverName,
+			callKey: (params) => {
+				const id = params._meta?.["other/callId"];
+				if (id === "unkeyed") return { kind: ToolCallKeyKind.UNKEYED };
+				return typeof id === "string" ? { kind: ToolCallKeyKind.KEYED, id } : { kind: ToolCallKeyKind.REJECTED };
+			},
+		},
+	);
+	t.after(() => bridge.close());
+
+	const config = JSON.parse(bridge.mcpConfig) as { mcpServers: Record<string, BridgeServerConfig> };
+	assert.deepEqual(Object.keys(config.mcpServers), [serverName]);
+	assert.deepEqual(bridge.allowedTools, ["mcp__other-server__read"]);
+	assert.equal(toolNameFromMcp("mcp__other-server__read", serverName), "read");
+	assert.equal(toolNameFromMcp("mcp__other-server__read"), "mcp__other-server__read");
+
+	const server = config.mcpServers[serverName];
+	assert.ok(server);
+	const transport = new StreamableHTTPClientTransport(new URL(server.url), { requestInit: { headers: { Authorization: server.headers.Authorization } } });
+	const client = new Client({ name: "test", version: "0" });
+	await client.connect(transport);
+	t.after(() => client.close());
+
+	const keyed = client.callTool({ name: "read", arguments: { path: "a" }, _meta: { "other/callId": "key-1" } });
+	const [keyedCall] = await bridge.waitForToolCalls(1);
+	assert.deepEqual(keyedCall, { id: "key-1", name: "read", arguments: { path: "a" } });
+	bridge.resolveToolCall(keyedCall!, toolResult([{ type: "text", text: "keyed" }]));
+	assert.deepEqual((await keyed).content, [{ type: "text", text: "keyed" }]);
+
+	// The Claude meta key means nothing to this reader, so the request is refused.
+	await assert.rejects(client.callTool({ name: "read", arguments: { path: "a" }, _meta: { "claudecode/toolUseId": "call-1" } }), /unique/);
+	assert.deepEqual(bridge.getPendingToolCalls(), []);
+
+	const unkeyed = client.callTool({ name: "read", arguments: { path: "b" }, _meta: { "other/callId": "unkeyed" } });
+	const [unkeyedCall] = await bridge.waitForToolCalls(1);
+	assert.ok(unkeyedCall);
+	assert.ok(unkeyedCall.id);
+	assert.notEqual(unkeyedCall.id, "key-1");
+	assert.deepEqual({ name: unkeyedCall.name, arguments: unkeyedCall.arguments }, { name: "read", arguments: { path: "b" } });
+	bridge.resolveToolCall(unkeyedCall, toolResult([{ type: "text", text: "unkeyed" }]));
+	assert.deepEqual((await unkeyed).content, [{ type: "text", text: "unkeyed" }]);
 });
 
 test("toolNameFromMcp strips the bridge prefix", () => {

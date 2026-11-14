@@ -17,7 +17,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
+import { convertPdf, extraction, joinPages, NotesImportError, refreshRoleCatalogs, sourceDirectory } from "@/src/server";
 import { MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits.ts";
 import {
 	emit,
@@ -137,6 +137,8 @@ export async function POST(request: Request) {
 	if (files.some((file, i) => !validNotesPath(paths[i]!, file.name))) {
 		return Response.json({ results: [], error: "Import contains an unsafe or mismatched relative path" }, { status: 400 });
 	}
+	// Engines resolve inside the extraction stages; load run-time catalogs (Codex) before the first one.
+	await refreshRoleCatalogs().catch(() => undefined);
 	const results: ImportResult[] = [];
 	const queue = files.map((file, requestIndex) => ({ file, requestIndex, filePath: paths[requestIndex]! }));
 	const workers = Array.from({ length: Math.min(3, files.length) }, async () => {

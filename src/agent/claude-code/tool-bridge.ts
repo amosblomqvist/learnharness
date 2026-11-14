@@ -10,21 +10,54 @@ import {
 	ErrorCode,
 	ListToolsRequestSchema,
 	McpError,
+	type CallToolRequest,
 	type CallToolResult,
 	type Tool as McpTool,
 } from "@modelcontextprotocol/sdk/types.js";
 
 export const BRIDGE_SERVER_NAME = "learnharness";
 
-const MCP_TOOL_PREFIX = `mcp__${BRIDGE_SERVER_NAME}__`;
 const LOOPBACK_HOST = "127.0.0.1";
 const TOKEN_BYTES = 32;
+
+export function mcpToolPrefix(serverName: string): string {
+	return `mcp__${serverName}__`;
+}
 
 export type PendingToolCall = { id: string; name: string; arguments: JsonObject };
 
 type BridgeCallbacks = { onCall(): void; onError(error: Error): void; onCancel?(call: PendingToolCall): void };
 
 export const MCP_IDENTITY_ERROR = "claude CLI compatibility error: MCP calls must include a unique claudecode/toolUseId";
+
+export const ToolCallKeyKind = { KEYED: "keyed", UNKEYED: "unkeyed", REJECTED: "rejected" } as const;
+export type ToolCallKeyKind = (typeof ToolCallKeyKind)[keyof typeof ToolCallKeyKind];
+
+/**
+ * What a key extractor says about one MCP `tools/call` request.
+ * KEYED: the request carries a call key; the bridge rejects a key it has already seen.
+ * UNKEYED: the request is accepted without a key; the bridge gives it its own unique id and the caller matches it some other way.
+ * REJECTED: the request is refused.
+ */
+export type ToolCallKey = { kind: typeof ToolCallKeyKind.KEYED; id: string } | { kind: typeof ToolCallKeyKind.UNKEYED } | { kind: typeof ToolCallKeyKind.REJECTED };
+
+export type ToolCallParams = CallToolRequest["params"];
+
+export const CLAUDE_TOOL_USE_ID_META_KEY = "claudecode/toolUseId";
+
+export function claudeToolCallKey(params: ToolCallParams): ToolCallKey {
+	const id = params._meta?.[CLAUDE_TOOL_USE_ID_META_KEY];
+	if (typeof id !== "string" || !id.trim()) return { kind: ToolCallKeyKind.REJECTED };
+
+	return { kind: ToolCallKeyKind.KEYED, id };
+}
+
+export type ToolBridgeOptions = {
+	/** Reads the call key from a `tools/call` request. Defaults to `claudeToolCallKey`. */
+	callKey?: (params: ToolCallParams) => ToolCallKey;
+	/** MCP server name; it also forms the `mcp__<name>__` tool name prefix. Defaults to `BRIDGE_SERVER_NAME`. */
+	serverName?: string;
+};
 
 export type ToolBridge = {
 	mcpConfig: string;
@@ -41,8 +74,10 @@ type ToolCallWaiter = {
 	reject: (error: Error) => void;
 };
 
-export function toolNameFromMcp(name: string): string {
-	return name.startsWith(MCP_TOOL_PREFIX) ? name.slice(MCP_TOOL_PREFIX.length) : name;
+export function toolNameFromMcp(name: string, serverName = BRIDGE_SERVER_NAME): string {
+	const prefix = mcpToolPrefix(serverName);
+
+	return name.startsWith(prefix) ? name.slice(prefix.length) : name;
 }
 
 function toMcpContent(block: TextContent | ImageContent): CallToolResult["content"][number] {
@@ -125,15 +160,21 @@ class ToolCallQueue {
 
 // Low-level Server on purpose: McpServer.registerTool only takes zod schemas, and pi tools carry
 // JSON Schema that must reach the CLI unchanged.
-function createMcpServer(tools: Tool[], queue: ToolCallQueue, callbacks?: BridgeCallbacks): Server {
-	const server = new Server({ name: BRIDGE_SERVER_NAME, version: "1.0.0" }, { capabilities: { tools: {} } });
+function createMcpServer(
+	tools: Tool[],
+	queue: ToolCallQueue,
+	serverName: string,
+	callKey: (params: ToolCallParams) => ToolCallKey,
+	callbacks?: BridgeCallbacks,
+): Server {
+	const server = new Server({ name: serverName, version: "1.0.0" }, { capabilities: { tools: {} } });
 
 	server.setRequestHandler(ListToolsRequestSchema, () => ({ tools: tools.map(toMcpTool) }));
 
 	const seenIds = new Set<string>();
 	server.setRequestHandler(CallToolRequestSchema, (request, extra) => {
-		const id = request.params._meta?.["claudecode/toolUseId"];
-		if (typeof id !== "string" || !id.trim() || seenIds.has(id)) {
+		const key = callKey(request.params);
+		if (key.kind === ToolCallKeyKind.REJECTED || (key.kind === ToolCallKeyKind.KEYED && seenIds.has(key.id))) {
 			const error = new McpError(ErrorCode.InvalidParams, MCP_IDENTITY_ERROR);
 			callbacks?.onError(error);
 			throw error;
@@ -143,6 +184,7 @@ function createMcpServer(tools: Tool[], queue: ToolCallQueue, callbacks?: Bridge
 			callbacks?.onError(error);
 			throw error;
 		}
+		const id = key.kind === ToolCallKeyKind.KEYED ? key.id : randomUUID();
 		seenIds.add(id);
 		const result = queue.add({ id, name: request.params.name, arguments: (request.params.arguments ?? {}) as JsonObject }, extra.signal, callbacks?.onCancel);
 		callbacks?.onCall();
@@ -196,17 +238,19 @@ function closeHttpServer(server: http.Server): Promise<void> {
 	});
 }
 
-function toMcpConfig(port: number, authorization: string): string {
+function toMcpConfig(port: number, authorization: string, serverName: string): string {
 	const server = { type: "http", url: `http://${LOOPBACK_HOST}:${port}/mcp`, headers: { Authorization: authorization } };
 
-	return JSON.stringify({ mcpServers: { [BRIDGE_SERVER_NAME]: server } });
+	return JSON.stringify({ mcpServers: { [serverName]: server } });
 }
 
-export async function createToolBridge(tools: Tool[], callbacks?: BridgeCallbacks): Promise<ToolBridge> {
+export async function createToolBridge(tools: Tool[], callbacks?: BridgeCallbacks, options: ToolBridgeOptions = {}): Promise<ToolBridge> {
+	const serverName = options.serverName ?? BRIDGE_SERVER_NAME;
+	const callKey = options.callKey ?? claudeToolCallKey;
 	const authorization = `Bearer ${randomBytes(TOKEN_BYTES).toString("hex")}`;
 
 	const queue = new ToolCallQueue();
-	const mcpServer = createMcpServer(tools, queue, callbacks);
+	const mcpServer = createMcpServer(tools, queue, serverName, callKey, callbacks);
 	const transport = new StreamableHTTPServerTransport({ sessionIdGenerator: () => randomUUID() });
 	await mcpServer.connect(transport);
 
@@ -220,8 +264,8 @@ export async function createToolBridge(tools: Tool[], callbacks?: BridgeCallback
 	}
 
 	return {
-		mcpConfig: toMcpConfig(port, authorization),
-		allowedTools: tools.map((tool) => `${MCP_TOOL_PREFIX}${tool.name}`),
+		mcpConfig: toMcpConfig(port, authorization, serverName),
+		allowedTools: tools.map((tool) => `${mcpToolPrefix(serverName)}${tool.name}`),
 		waitForToolCalls: (count) => queue.waitFor(count),
 		resolveToolCall: (call, result) => queue.resolve(call, result),
 		getPendingToolCalls: () => queue.list(),
