@@ -1,5 +1,7 @@
 # Desktop builds and releases
 
+The fork releases Windows only and publishes its draft automatically after verification. See [fork releases](fork/release.md).
+
 This is a maintainer reference. For installation and normal use, start with [Getting started](getting-started.md).
 
 ## Platforms and prerequisites

@@ -75,12 +75,12 @@ The default is the normal installed application's data folder:
 
 | OS | Data folder |
 | --- | --- |
-| macOS | `~/Library/Application Support/LearnHarness/data` |
-| Windows | `%APPDATA%\LearnHarness\data` |
-| Linux | `$XDG_CONFIG_HOME/LearnHarness/data`, or `~/.config/LearnHarness/data` |
+| macOS | `~/Library/Application Support/LearnHarness Fork/data` |
+| Windows | `%APPDATA%\LearnHarness Fork\data` |
+| Linux | `$XDG_CONFIG_HOME/LearnHarness Fork/data`, or `~/.config/LearnHarness Fork/data` |
 
 This is the directory **containing** `chats/` and `graph/`, not their parent
-`LearnHarness/` profile directory. For a moved installation, backup, development
+`LearnHarness Fork/` profile directory. To read upstream data, pass its location with `--data-dir`. For a moved installation, backup, development
 copy, or an app configured with `LH_DATA_DIR`, use `--data-dir` explicitly. Readers
 print the selected directory and never create a missing folder or silently switch
 to another copy.

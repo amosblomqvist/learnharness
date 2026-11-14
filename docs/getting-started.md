@@ -1,6 +1,6 @@
 # Getting started
 
-Download LearnHarness from [learnharness.ai](https://learnharness.ai) or [GitHub Releases](https://github.com/amosblomqvist/learnharness/releases). For running from source, see [Development](development.md).
+Download LearnHarness from [GitHub Releases](https://github.com/reeschan/learnharness/releases). For running from source, see [Development](development.md).
 
 ## Connect models
 
@@ -56,11 +56,13 @@ The graph stores propositions and reasoning chains with source provenance, **not
 
 Chats, graph records, settings, and credentials live on your machine. Packaged desktop data normally lives under:
 
+These are the fork’s data locations; see [moving upstream data](fork/release.md#move-data-from-upstream-learnharness).
+
 | OS | Learning-data folder |
 | --- | --- |
-| macOS | `~/Library/Application Support/LearnHarness/data` |
-| Windows | `%APPDATA%\LearnHarness\data` |
-| Linux | `$XDG_CONFIG_HOME/LearnHarness/data`, or `~/.config/LearnHarness/data` |
+| macOS | `~/Library/Application Support/LearnHarness Fork/data` |
+| Windows | `%APPDATA%\LearnHarness Fork\data` |
+| Linux | `$XDG_CONFIG_HOME/LearnHarness Fork/data`, or `~/.config/LearnHarness Fork/data` |
 
 API-key files sit beside `data`, not inside it. They are plaintext with restrictive file permissions, not an encrypted vault. Keep complete profiles private; do not share credential files or raw debug captures in bug reports.
 
@@ -68,4 +70,4 @@ API-key files sit beside `data`, not inside it. They are plaintext with restrict
 
 Click the context/cost row beneath the composer for Session stats. Dollar figures estimate known API costs; subscription, CLI, and custom-endpoint usage are not treated as free. See [context, caching, and costs](compaction-accounting.md) for the details.
 
-Packaged apps support updates under **Settings → General**. Development builds do not run the updater. Report problems through [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues), with reproduction steps and the app/OS version rather than private learning records or keys.
+Packaged apps support updates under **Settings → General**. Development builds do not run the updater. Report problems through [GitHub Issues](https://github.com/reeschan/learnharness/issues), with reproduction steps and the app/OS version rather than private learning records or keys.

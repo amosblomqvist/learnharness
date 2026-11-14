@@ -4,6 +4,7 @@
 
 - [Getting started](getting-started.md) — connections, models, sessions, dictation, files, and notes imports.
 - [Course packs (personal fork)](fork/course-pack.md) — import a local notes folder, review scheduling, and syncing this fork. [日本語](fork/course-pack.ja.md).
+- [Fork releases](fork/release.md) — versioning, Windows builds, releases, and moving data. [日本語](fork/release.ja.md).
 - [Keyboard shortcuts](keyboard.md) — defaults, rebinding, and navigation.
 - [Claude Code](claude-code.md) — use an installed CLI and troubleshoot its connection.
 - [Custom and local models](custom-providers.md) — configure an OpenAI-compatible endpoint.

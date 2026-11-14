@@ -33,7 +33,7 @@ git clone https://github.com/liquidslr/system-design-notes.git %USERPROFILE%\src
 取り込んだ章は、アプリのデータディレクトリへコピーされます。
 
 - `npm run dev` のとき: `<このリポジトリ>\data\courses\`（git の管理外）
-- パッケージした Electron のとき: `LH_DATA_DIR` は `<userData>\data` です。Windows では、このアプリの userData は通常 `%APPDATA%\LearnHarness` なので、コピー先は `%APPDATA%\LearnHarness\data\courses\` になります。
+- パッケージした Electron のとき: `LH_DATA_DIR` は `<userData>\data` です。Windows では、このアプリの userData は通常 `%APPDATA%\LearnHarness Fork` なので、コピー先は `%APPDATA%\LearnHarness Fork\data\courses\` になります。
 
 コースカードの **Check for updates** で、同じ取り込みをやり直せます。中身が変わっていない章はコピーし直さず、モデルにも送りません。変わった章だけファイルを置き換えます。復習カードと、これまでに開いたセッションの記録は残します。フォルダから消えた章は「削除された」と表示します。カードは消さず、今日のキューからは外します。
 
@@ -76,6 +76,8 @@ git clone https://github.com/liquidslr/system-design-notes.git %USERPROFILE%\src
 
 ## 上流との同期
 
+上流を取り込んだ後は、[fork の版の規則](release.ja.md#fork-version)に従ってください。
+
 公開リポジトリは、取得専用の remote として残します。そこへ push したり、このフォークから上流へ pull request を出したりしないでください。
 
 ```bat
@@ -100,10 +102,4 @@ system-design-notes や、自分で取り込んだ他のノートを再配布し
 
 ## デスクトップ版のビルド
 
-上流の `npm run desktop:dist` は、署名付き macOS 用です。Windows 用ではありません。上流の手順では、Windows 上で [デスクトップのビルドとリリース](../desktop-release.md) の共通準備をしたあと、次を実行します。
-
-```bat
-npx electron-builder --win --x64 --publish never
-```
-
-このフォークの開発環境では、そのコマンドは実行していません。
+Windows 上で `npm run desktop:dist:win` を実行します。出力とリリースの手順は [fork のリリース](release.ja.md#local-build)を参照してください。

@@ -31,7 +31,7 @@ On the Courses page, paste the full path, for example `C:\Users\you\src\system-d
 Imported chapters are copied into the app data directory:
 
 - `npm run dev`: `<this repo>\data\courses\` (gitignored)
-- Packaged Electron: `LH_DATA_DIR` is `<userData>\data`. On Windows, Electron's userData for this app is typically `%APPDATA%\LearnHarness`, so the copies land in `%APPDATA%\LearnHarness\data\courses\`.
+- Packaged Electron: `LH_DATA_DIR` is `<userData>\data`. On Windows, Electron's userData for this app is typically `%APPDATA%\LearnHarness Fork`, so the copies land in `%APPDATA%\LearnHarness Fork\data\courses\`.
 
 Check for updates on the course card. Unchanged chapters are not copied again and are not sent to the model. A changed chapter replaces its copied files. Review cards and the list of past sessions stay. A chapter that disappears from the folder is marked removed; its card is kept and it leaves today's queue.
 
@@ -74,6 +74,8 @@ Dates are UTC days, so a review taken late in the evening in Japan can already b
 
 ## Sync from upstream
 
+After incorporating upstream, follow the [fork version rules](release.md#fork-version).
+
 Keep the public repository as a fetch-only remote. Do not push to it, and do not open an upstream pull request from this fork.
 
 ```bat
@@ -98,10 +100,4 @@ Do not redistribute system-design-notes, or any other notes you import. That rep
 
 ## Desktop build
 
-`npm run desktop:dist` in upstream is the signed macOS path. It is not the Windows build. Upstream's packaging notes say to build on Windows, run the shared prep steps in [Desktop builds and releases](../desktop-release.md), then:
-
-```bat
-npx electron-builder --win --x64 --publish never
-```
-
-That command was not run in this fork's development environment.
+On Windows, run `npm run desktop:dist:win`. See [fork releases](release.md#local-build) for the output and release steps.
