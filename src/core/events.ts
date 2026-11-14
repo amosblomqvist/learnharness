@@ -1,35 +1,18 @@
 /**
- * THE EVENT BUS (push-architecture slice 1, owner ruling 2026-10-02: go
- * directly to the endgame — notify → fetch, no standing polls).
- *
- * One bus, every layer: server emits turn lifecycle here, the store
- * adapters emit job/chat mutations, the agent layer's background
- * registries (extraction) emit activity changes — and
- * GET /api/events turns every emission into an SSE frame for any open
- * window. The events carry the FACT, never the data: consumers fetch
- * truth on receipt (push the poke, pull the data), so payloads stay
- * tiny, schemaless, and idempotent — a reconnect heals by refetching.
- *
- * WHY globalThis (the turn-liveness discipline, same rationale): Next
- * dev compiles each route as its own module entry, so a module-level
- * singleton is a DIFFERENT instance in the page render, the events
- * route, and every emitter's entry — they would each hold a private
- * listener set and nothing would propagate. globalThis spans module
- * instances within the process; it is the standard Next singleton
- * channel (see src/server/turn-liveness.ts for the original incident).
- *
- * Pure core by law: no React, no IO, no imports — the one layer that
- * server, store, and agent may all depend on.
+ * Live app notifications for turn, job, record and availability changes.
+ * Consumers fetch authoritative state after a notification and refetch on
+ * reconnect; notifications are not a durable replay log. The plugin-message
+ * channel additionally carries plugin-scoped JSON data, with the same
+ * live-only delivery limitation.
  */
 
-/** The full event vocabulary — fixed from day one (slice plan, 2026-10-02). */
+/** The core event vocabulary plus the namespaced plugin extension channel. */
 export interface ServerEvents {
-	/** A teach turn began server-side (beginTurn) — client-initiated sends,
-	 *  wake turns, other-tab turns: every origin rides the same event. */
+	/** A native conversation turn began server-side, including sends, wake
+	 * turns and turns initiated from another window. */
 	"turn-started": { chatId: string };
-	/** A turn settled (endTurn — AFTER persistTurn, so any fetch triggered
-	 *  by this event reads a durable record; ordering is guaranteed in
-	 *  chat-handler's onFinish). */
+	/** A turn settled after turn persistence. Refetch the saved record; this
+	 * does not mean asynchronous extraction or background work has completed. */
 	"turn-settled": { chatId: string };
 	/** A job record changed (dispatch, progress, settle, abort, recovery).
 	 *  chatId when known — consumers that own one chat filter on it. */
@@ -46,12 +29,17 @@ export interface ServerEvents {
 	 *  Same notify-then-fetch contract as the turn events: open views of
 	 *  the chat refetch and adopt the durable record. */
 	"record-changed": { chatId: string };
-	/** A compaction started/finished for the chat (owner round 14,
-	 *  2026-10-05). running=true is the SEND GATE: while a compaction is
-	 *  in flight the server structurally refuses model interaction for
-	 *  the chat; the client mirrors it by disabling the composer/dock
-	 *  submit. */
+	/** Context compaction started or finished for this chat. While running is
+	 * true, the server gates model interaction and the client disables related
+	 * composer/dock submission. This is live state, not a persisted marker. */
 	"compaction-changed": { chatId: string; running: boolean };
+	/** A side conversation changed. Notify-then-fetch: open views refetch
+	 *  GET /api/chats/:id/side-chats. Closing never deletes it. */
+	"side-chats-changed": { chatId: string };
+	/** Plugin availability/lifecycle changed; refetch installed packages. */
+	"plugins-changed": Record<string, never>;
+	/** Live-only, plugin-scoped notifications. Reconnect requires snapshot resync. */
+	"plugin-message": { pluginId: string; topic: string; data?: unknown };
 }
 
 export type ServerEventType = keyof ServerEvents;
@@ -69,12 +57,16 @@ export const SERVER_EVENT_TYPES = [
 	"subscriptions-changed",
 	"record-changed",
 	"compaction-changed",
+	"side-chats-changed",
+	"plugins-changed",
+	"plugin-message",
 ] as const satisfies readonly ServerEventType[];
 
-/** One notification: the type discriminates the payload. */
+/** One notification: distribute over the vocabulary so narrowing `type`
+ * actually narrows its payload (including plugin-scoped messages). */
 export type ServerEvent<K extends ServerEventType = ServerEventType> = {
-	type: K;
-} & ServerEvents[K];
+	[T in K]: { type: T } & ServerEvents[T];
+}[K];
 
 export type ServerEventListener = (event: ServerEvent) => void;
 

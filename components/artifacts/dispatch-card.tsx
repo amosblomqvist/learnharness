@@ -24,12 +24,13 @@ const KIND_LABEL: Record<JobKind, string> = {
 	demo: "Demo agent",
 	visual: "Figure agent",
 	pdf: "PDF reader",
+	plugin: "Plugin worker",
 };
 
 export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: JobKind }) {
 	const jobs = useContext(JobsContext);
 	const job = jobs.find((j) => j.toolCallId === toolCallId) ?? null;
-	const label = KIND_LABEL[kind];
+	const label = kind === "plugin" ? job?.plugin?.label || job?.plugin?.toolName || KIND_LABEL.plugin : KIND_LABEL[kind];
 
 	if (!job || job.status === "running") {
 		return <DispatchActivityCard job={job} label={label} />;
@@ -52,7 +53,7 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 			className="flex items-center gap-2 text-xs text-muted-foreground"
 			data-testid="dispatch-settled"
 		>
-			{failed ? <XIcon className="size-3.5 text-red-500" /> : <CheckIcon className="size-3.5" />}
+			{failed ? <XIcon className="size-3.5 text-error" /> : <CheckIcon className="size-3.5" />}
 			<span className="font-medium uppercase tracking-wide">{label}</span>
 			<span>{failed ? "failed" : "finished"}</span>
 		</div>

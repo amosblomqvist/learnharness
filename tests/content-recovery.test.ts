@@ -106,6 +106,19 @@ test("legacy compatibility and recovery share code barriers, including tilde and
 	const comment = "$60% " + math`\n\n` + "\nx$";
 	assert.equal(repairMathForDisplay(comment), comment);
 });
+test("escaped fenced code blocks recover with physical newlines and language tags", () => {
+	const sqlQuestion =
+		"Consider the following SQL query:\\n\\n```sql\\nSELECT *\\nFROM users u\\nLEFT JOIN orders o ON u.id = o.user_id\\nWHERE o.status = 'PENDING';\\n```\\n\\nWhat is the behavioral impact of the `WHERE o.status = 'PENDING'` clause on this `LEFT JOIN`?";
+	const expectedSql =
+		"Consider the following SQL query:\n\n```sql\nSELECT *\nFROM users u\nLEFT JOIN orders o ON u.id = o.user_id\nWHERE o.status = 'PENDING';\n```\n\nWhat is the behavioral impact of the `WHERE o.status = 'PENDING'` clause on this `LEFT JOIN`?";
+	assert.equal(repairMathForDisplay(sqlQuestion), expectedSql);
+	assert.equal(repairMathForDisplay(expectedSql), expectedSql);
+
+	const isolatedFence = "```python\\ndef solve(n):\\n    return n * 2\\n```";
+	const expectedPython = "```python\ndef solve(n):\n    return n * 2\n```";
+	assert.equal(repairMathForDisplay(isolatedFence), expectedPython);
+	assert.equal(repairMathForDisplay(expectedPython), expectedPython);
+});
 test("recovery converges after one pass, including multiple debris characters", () => {
 	for (const source of ["$\forall x,\theta+\to$", math`First.\n\n$$\nJ=\\frac{1}{2}+60\\%\n$$`,
 		math`$\begin{pmatrix}a&b\\c&d\end{pmatrix}$`, "```text\n\\(\nabla\\)\n```", "$\nabla f$",

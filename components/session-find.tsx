@@ -7,6 +7,8 @@ import {
 	sameSessionRange, sessionFindRanges, sessionRangeIdentity, type SessionRangeIdentity,
 } from "@/components/session-find-dom";
 import { scrollSessionTarget, type SessionScrollContext } from "@/components/session-navigation";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { hasLegacyInteractionForeground, isInteractionScopeEligible } from "./plugin-input-focus";
 
 export const SESSION_FIND_HIGHLIGHT = "lh-session-find";
 export const SESSION_FIND_ACTIVE_HIGHLIGHT = "lh-session-find-active";
@@ -47,16 +49,8 @@ function publishHighlights(ranges: readonly Range[], index: number): void {
 /** One-Esc law: a surfaced menu/dialog/cheat sheet outranks this non-modal
  * bar, regardless of where focus happened to be left. Closed Radix exits
  * must not block Find once they have stopped being a surfaced layer. */
-export function sessionFindHasForegroundLayer(doc: Document): boolean {
-	return Array.from(doc.querySelectorAll(
-		'[data-lh-menu], [data-radix-popper-content-wrapper], [role="menu"], [role="dialog"], [data-testid="cheat-sheet"]',
-	)).some((element) => {
-		if (element.getAttribute("data-state") === "closed" || element.hasAttribute("hidden")) return false;
-		const view = doc.defaultView;
-		if (typeof view?.getComputedStyle !== "function") return true;
-		const style = view.getComputedStyle(element);
-		return style.display !== "none" && style.visibility !== "hidden" && style.opacity !== "0";
-	});
+export function sessionFindHasForegroundLayer(doc: Document, scope?: HTMLElement | null): boolean {
+	return hasLegacyInteractionForeground(doc, scope);
 }
 
 /** Mounted for the lifetime of ONE Chat (which is keyed by chatId). Closing
@@ -66,6 +60,7 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 	scopeRef: RefObject<HTMLDivElement | null>;
 	scrollContextRef: RefObject<SessionScrollContext | null>;
 }) {
+	const controller = useOptionalInteractionLayers();
 	const [open, setOpen] = useState(false);
 	const [query, setQuery] = useState("");
 	const [result, setResult] = useState({ index: -1, count: 0 });
@@ -80,12 +75,12 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 	const close = useCallback(() => {
 		clearSessionFindHighlights();
 		setOpen(false);
-		if (previousFocus.current?.isConnected) previousFocus.current.focus({ preventScroll: true });
-	}, []);
+		if (isInteractionScopeEligible(previousFocus.current, controller)) previousFocus.current!.focus({ preventScroll: true });
+	}, [controller]);
 
 	useEffect(() => {
 		const onFind = () => {
-			if (sessionFindHasForegroundLayer(document)) return;
+			if (!isInteractionScopeEligible(scopeRef.current, controller)) return;
 			if (!open) previousFocus.current = document.activeElement as HTMLElement | null;
 			setOpen(true);
 			// A second Mod+F focuses/selects the retained query, not a second bar.
@@ -93,21 +88,22 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 		};
 		window.addEventListener(kbdEventForAction("find"), onFind);
 		return () => window.removeEventListener(kbdEventForAction("find"), onFind);
-	}, [open]);
+	}, [open, controller, scopeRef]);
 
 	useEffect(() => {
-		if (!open) return;
+		if (!open || !isInteractionScopeEligible(scopeRef.current, controller)) return;
 		inputRef.current?.focus({ preventScroll: true });
 		inputRef.current?.select();
 		const onEscape = (event: KeyboardEvent) => {
-			if (event.key !== "Escape" || sessionFindHasForegroundLayer(document)) return;
+			if (event.key !== "Escape" || event.defaultPrevented || controller?.isEscapeOwned(event) || !isInteractionScopeEligible(scopeRef.current, controller)) return;
+			controller?.claimEscape(event);
 			event.preventDefault();
 			event.stopPropagation();
 			close();
 		};
 		document.addEventListener("keydown", onEscape);
 		return () => document.removeEventListener("keydown", onEscape);
-	}, [open, close]);
+	}, [open, close, controller, scopeRef]);
 
 	useEffect(() => {
 		if (!open || !scopeRef.current) return;
@@ -173,6 +169,8 @@ export function SessionFind({ scopeRef, scrollContextRef }: {
 					event.preventDefault();
 					step(event.shiftKey ? -1 : 1);
 				} else if (event.key === "Escape") {
+					if (!isInteractionScopeEligible(inputRef.current, controller)) return;
+					controller?.claimEscape(event);
 					event.preventDefault();
 					event.stopPropagation();
 					close();

@@ -1,0 +1,29 @@
+{
+  "name": "learnharness-rich-code-blocks",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "sdk": "node ../../scripts/build-plugin-types.mjs .sdk",
+    "build": "node scripts/build.mjs",
+    "typecheck": "tsc --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:browser": "node tests/browser.mjs"
+  },
+  "dependencies": {
+    "abcjs": "6.7.2",
+    "buffer": "6.0.3",
+    "isomorphic-tikzjax": "0.1.1",
+    "smiles-drawer": "2.4.1"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "esbuild": "0.28.2",
+    "katex": "0.18.2",
+    "learnharness-plugin-api": "file:.sdk",
+    "puppeteer-core": "25.16.0",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

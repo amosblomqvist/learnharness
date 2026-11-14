@@ -18,6 +18,13 @@ A useful report includes:
 - steps to reproduce, or a proof of concept;
 - any fix or mitigation you have in mind.
 
+## Security contacts
+
+- [@amosblomqvist](https://github.com/amosblomqvist)
+- [@IsaacZhangg](https://github.com/IsaacZhangg)
+
+Use the private reporting process above for vulnerability reports. Do not report security details through public mentions.
+
 ## What to expect
 
 These are targets, not guarantees:
