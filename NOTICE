@@ -1,5 +1,5 @@
-LearnHarness personal fork
-=========================
+LearnHarness Fork
+================
 
 This program is a modified version of LearnHarness.
 
@@ -35,6 +35,23 @@ What changed
   explicit. Practice-session outcomes are not written back into the cards.
 - Optional graph extraction calls the existing notes importer for changed
   chapters. It is off unless you ask, because it uses your model.
+- External CLI providers. Adds Codex (via `codex app-server`, minimum v0.165.0)
+  and Gemini CLI (via `stream-json` and HTTP MCP, minimum v0.68.0) alongside
+  Claude Code under Settings -> Providers -> External CLI. All external CLIs
+  are off by default (`codex` and `geminiCli` opt-ins), run with built-in tools
+  disabled so only LearnHarness tools execute, and delegate authentication and
+  billing to the CLI (`CLI billing`).
+- Explainer. Adds the `explainer` sub-agent job tool during teaching sessions
+  (using the Cheap model slot, toggleable in Settings -> Agent via
+  `Tool · explainer`). Bundles `visual-explainer` 0.15.0 (MIT) in
+  `src/agent/explainer-kit/` to render self-contained diagram-led HTML pages on
+  the server, shown scaled down in a sandboxed card with full-screen view and
+  HTML download.
+- Fork releases. Sets `appId` to `com.reeschan.learnharness` and `productName`
+  to `LearnHarness Fork`, giving the app its own userData directory
+  (`%APPDATA%\LearnHarness Fork\data`). Publishes Windows x64 NSIS installers
+  (unsigned) on `reeschan/learnharness` GitHub Releases, restricts auto-updates
+  to fork Releases, and uses fork versioning (upstream patch * 100 + sequence).
 
 What this fork does not include
 -------------------------------
@@ -44,17 +61,19 @@ copyrighted book (Alex Xu, System Design Interview). Its text and images are
 not vendored, committed, copied into fixtures, or embedded in prompts.
 Tests use short original placeholder chapters under tests/fixtures/course-pack.
 
-Personal use and distribution
------------------------------
+Distribution and source
+-----------------------
 
-This fork is for personal use. Nothing here publishes a GitHub mirror or
-opens a pull request upstream.
+This fork publishes Windows x64 installers on GitHub Releases:
+https://github.com/reeschan/learnharness/releases
 
-If you ever distribute this program, AGPL-3.0 applies to the whole
-application, including the course-pack changes: you must provide the
-corresponding source to users who interact with it over a network. Do not
-redistribute the imported notes. Those files stay in the user's local app
-data and are not covered by this project's license.
+AGPL-3.0-only applies to the whole application, including all modifications in
+this fork. Each release on this fork's GitHub Releases is built from the commit
+its tag points to. The Corresponding Source for a release is this repository at
+that tag, available from the same Releases page.
+
+Do not redistribute imported notes (such as system-design-notes). Those files
+stay in the user's local app data and are not covered by this project's license.
 
 Sync from upstream
 ------------------
@@ -69,8 +88,56 @@ Do not push to upstream. A local safety setting is:
 
     git remote set-url --push upstream DISABLE_PUSH_DO_NOT_PUBLISH
 
-Prefer upstream changes outside the course-pack files when a merge conflicts.
+Prefer upstream changes outside the fork's files when a merge conflicts.
 The fork's additions are concentrated in src/core/course.ts,
 src/server/course-import.ts, src/server/course-paths.ts, src/server/courses.ts,
 src/store/courses.ts, app/courses, app/api/courses, components/course-pack.tsx,
-docs/fork, and this NOTICE.
+src/agent/external-cli/, src/agent/codex/, src/agent/gemini-cli/,
+src/agent/explainer/, src/agent/explainer-kit/,
+src/agent/subagents/explainer-writer.ts,
+components/artifacts/explainer-card.tsx, scripts/fork-version.ts, docs/fork/,
+README.ja.md, and this NOTICE. After incorporating upstream, follow the fork
+versioning rules in docs/fork/release.md.
+
+Third-party software
+--------------------
+
+visual-explainer 0.15.0
+- Source: https://github.com/nicobailon/visual-explainer (tag v0.15.0, commit 9d5f880b7e8e0a9a80c890b8e1bb6918b68481ad)
+- Copyright: Copyright (c) 2025 Nico Bailon
+- License: MIT License (also bundled at src/agent/explainer-kit/LICENSE)
+- Bundled path: src/agent/explainer-kit/ (selected files from plugins/visual-explainer/ and LICENSE)
+
+MIT License
+
+Copyright (c) 2025 Nico Bailon
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+pele (bundled inside visual-explainer)
+- Bundled path: src/agent/explainer-kit/kit/vendor/pele.mjs
+- License: MIT License (Copyright (c) 2026 kepano), with reset icon "rotate-ccw" from Lucide v1.14.0 (https://lucide.dev) under the ISC License (Copyright (c) 2026 Lucide Icons and Contributors)
+- License file: src/agent/explainer-kit/kit/vendor/PELE-LICENSE
+
+@earendil-works/pi-coding-agent (Pi coding agent)
+- Copyright: Copyright (c) Mario Zechner (2025 in src/agent/image-processing/LICENSE)
+- License: MIT License
+- Adapted path (1.4.0): src/core/compaction.ts (cutoff selection and size estimates; full notice in docs/compaction-accounting.md)
+- Adapted path (1.1.0): src/agent/image-processing/ (image utilities; license in src/agent/image-processing/LICENSE)
+
