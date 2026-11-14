@@ -4,6 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
+import { useBackdropDismiss } from "@/components/backdrop-dismiss";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
 import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
@@ -58,6 +59,13 @@ import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
 const SIDEBAR_AUTOCLOSE = 928;
 
+/* The narrow-viewport breakpoint (mobile web pass, 2026-11-14): below
+ * 40rem (640px) — the Electron window floor — the sidebar becomes an
+ * overlay drawer instead of an inline column. Mirrors the `narrow` custom
+ * variant in app/globals.css; CSS owns the layout, this constant only
+ * decides which presentation JS mounts. Electron cannot reach it. */
+const NARROW_QUERY = "(width < 40rem)";
+
 // Module scope, guarded for SSR (the server has no navigator).
 const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
 
@@ -94,9 +102,18 @@ declare global {
 	}
 }
 
-const SidebarContext = createContext<{ open: boolean; toggle: () => void }>({
+const SidebarContext = createContext<{
+	open: boolean;
+	toggle: () => void;
+	/** True below 640px: the sidebar renders as an overlay drawer. */
+	narrowViewport: boolean;
+	/** Closes the narrow drawer (backdrop, Esc, navigation). No-op at ≥640px. */
+	closeDrawer: () => void;
+}>({
 	open: false,
 	toggle: () => {},
+	narrowViewport: false,
+	closeDrawer: () => {},
 });
 
 export function useSidebar() {
@@ -116,6 +133,12 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	const [open, setOpen] = useState(false);
 	const [narrow, setNarrow] = useState(false);
 	const [mounted, setMounted] = useState(false);
+	// Narrow-viewport presentation (mobile web pass, 2026-11-14): below
+	// 640px the sidebar is an overlay drawer. It owns a SEPARATE open
+	// state — a phone visit never writes the desktop preference, and
+	// leaving narrow discards the drawer state instead of resurrecting it.
+	const [narrowViewport, setNarrowViewport] = useState(false);
+	const [drawerOpen, setDrawerOpen] = useState(false);
 
 	useEffect(() => {
 		// Electron shell detection (merged chrome, 2026-09-17): keys the
@@ -157,7 +180,36 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 		return () => window.removeEventListener("resize", onResize);
 	}, []);
 
+	const closeDrawer = useCallback(() => setDrawerOpen(false), []);
+
+	// Phones: one media-query listener drives the drawer presentation
+	// (resizes and rotation included). The CSS `narrow` variant owns
+	// layout; this boolean only selects which DOM the sidebar mounts.
+	useEffect(() => {
+		// Guarded: render tests mount the tree under linkedom, which has no
+		// matchMedia. No query means the desktop presentation, which is also
+		// what SSR renders — nothing to decide.
+		if (typeof window.matchMedia !== "function") return;
+		const query = window.matchMedia(NARROW_QUERY);
+		const apply = () => setNarrowViewport(query.matches);
+		apply();
+		query.addEventListener("change", apply);
+		return () => query.removeEventListener("change", apply);
+	}, []);
+
+	// Leaving narrow drops the drawer state (no ghost reopen next time a
+	// phone-width tab appears).
+	useEffect(() => {
+		if (!narrowViewport) setDrawerOpen(false);
+	}, [narrowViewport]);
+
 	const toggle = useCallback(() => {
+		// Phones: the drawer is a local overlay state — no preference write
+		// and no window expansion (there is no window to widen).
+		if (narrowViewport) {
+			setDrawerOpen((v) => !v);
+			return;
+		}
 		// Opening while narrow (auto-closed, or the user's own closed-at-
 		// narrow): ask the shell to widen to the threshold — the resize
 		// listener flips `narrow` and the sidebar appears. The preference
@@ -173,7 +225,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 			localStorage.setItem(STORAGE_KEY, v ? "0" : "1");
 			return !v;
 		});
-	}, [narrow, open]);
+	}, [narrow, open, narrowViewport]);
 
 	// ⌘B: the global shortcut dispatches kbdEventForAction("toggle-sidebar")
 	// and the context answers on exactly that name — the shared spelling
@@ -189,7 +241,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [toggle]);
 
 	return (
-		<SidebarContext.Provider value={{ open: open && !narrow, toggle }}>
+		<SidebarContext.Provider
+			value={{ open: narrowViewport ? drawerOpen : open && !narrow, toggle, narrowViewport, closeDrawer }}
+		>
 			{/* transitions gated on mount: no slide-in flash on page load */}
 			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
 		</SidebarContext.Provider>
@@ -404,7 +458,9 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
 	const interactions = useInteractionLayers();
-	const { open, toggle } = useSidebar();
+	const { open, toggle, narrowViewport, closeDrawer } = useSidebar();
+	const asideRef = useRef<HTMLElement | null>(null);
+	const backdrop = useBackdropDismiss(closeDrawer);
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
@@ -419,6 +475,21 @@ function SessionsSidebar() {
 	const pathname = usePathname();
 	const router = useRouter();
 	const { open: openSettings } = useSettingsDialog();
+
+	// Phones: the drawer is a navigation surface — picking a session (or
+	// any route change) closes it. Also closes on entering the drawer's
+	// narrow presentation, which starts closed by design.
+	useEffect(() => {
+		if (narrowViewport) closeDrawer();
+	}, [pathname, narrowViewport, closeDrawer]);
+
+	// Phones: opening the drawer puts focus on its container, so Esc is
+	// heard immediately (the container owns the keydown below) without
+	// stealing focus into the search field and popping the keyboard.
+	useEffect(() => {
+		if (!narrowViewport || !open) return;
+		asideRef.current?.focus({ preventScroll: true });
+	}, [narrowViewport, open]);
 
 	/* New session (owner, 2026-09-13): NO POST — the button opens the
 	   sessionless draft view; the session is created only when the first
@@ -652,8 +723,43 @@ function SessionsSidebar() {
 	}, [open, pathname, refresh]);
 
 	return (
+		<>
+		{/* Phones: the drawer's backdrop. Pointer-capture dismissal (both
+		    endpoints of one gesture) — the same primitive every dialog uses. */}
+		{narrowViewport && open && (
+			<div
+				data-testid="sidebar-backdrop"
+				aria-hidden
+				className="fixed inset-0 z-30 bg-background/60 backdrop-blur-sm"
+				{...backdrop}
+			/>
+		)}
 		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
+			ref={asideRef}
+			tabIndex={narrowViewport ? -1 : undefined}
+			onKeyDown={
+				narrowViewport
+					? (e) => {
+							if (!open || e.key !== "Escape") return;
+							// Claimed here: the window chain must not also read
+							// this Esc as abort-turn.
+							e.preventDefault();
+							e.stopPropagation();
+							closeDrawer();
+						}
+					: undefined
+			}
+			className={cn(
+				"sidebar-motion shrink-0 overflow-hidden duration-200",
+				narrowViewport
+					? cn(
+							"fixed inset-y-0 left-0 z-40 w-72 pt-[var(--lh-safe-top)] pb-[var(--lh-safe-bottom)] outline-none",
+							open ? "translate-x-0 border-r bg-background shadow-xl" : "-translate-x-full",
+						)
+					: open
+						? "w-72"
+						: "w-0",
+			)}
 			aria-hidden={!open}
 		>
 			<div className="flex h-full w-72 flex-col border-r bg-background">
@@ -946,6 +1052,7 @@ function SessionsSidebar() {
 					onDeleted={onDeleted}
 				/>
 			</aside>
+		</>
 	);
 }
 
