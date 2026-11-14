@@ -28,7 +28,7 @@ import type {
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MISTAKE_ANALYSIS_DAILY_CAP_MAX, MISTAKE_ANALYSIS_DAILY_CAP_MIN, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
@@ -217,6 +217,30 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 			return { ok: false, error: "graphTools.enabled must be a boolean" };
 		}
 		settings.graphTools = graphTools.enabled === undefined ? {} : { enabled: graphTools.enabled };
+	}
+	if (raw.mistakeAnalysis !== undefined) {
+		const analysis = asRecord(raw.mistakeAnalysis);
+		if (!analysis) return { ok: false, error: "mistakeAnalysis must be an object" };
+		const parsed: NonNullable<AgentSettings["mistakeAnalysis"]> = {};
+		if (analysis.auto !== undefined) {
+			if (typeof analysis.auto !== "boolean") return { ok: false, error: "mistakeAnalysis.auto must be a boolean" };
+			parsed.auto = analysis.auto;
+		}
+		if (analysis.dailyCap !== undefined) {
+			if (
+				typeof analysis.dailyCap !== "number" ||
+				!Number.isFinite(analysis.dailyCap) ||
+				analysis.dailyCap < MISTAKE_ANALYSIS_DAILY_CAP_MIN ||
+				analysis.dailyCap > MISTAKE_ANALYSIS_DAILY_CAP_MAX
+			) {
+				return {
+					ok: false,
+					error: `mistakeAnalysis.dailyCap must be ${MISTAKE_ANALYSIS_DAILY_CAP_MIN}–${MISTAKE_ANALYSIS_DAILY_CAP_MAX}`,
+				};
+			}
+			parsed.dailyCap = Math.round(analysis.dailyCap);
+		}
+		settings.mistakeAnalysis = parsed;
 	}
 	if (raw.fileAccess !== undefined) {
 		const parsed = parseFileAccessSettings(raw.fileAccess);

@@ -68,6 +68,7 @@ export interface ServerEvents {
         topic: string;
         data?: unknown;
     };
+    "mistakes-changed": Record<string, never>;
 }
 ```
 
@@ -95,6 +96,7 @@ export interface ServerEvents {
 - ["plugin-message".pluginId](#serverevents-plugin-messagepluginid)
 - ["plugin-message".topic](#serverevents-plugin-messagetopic)
 - ["plugin-message".data](#serverevents-plugin-messagedata)
+- ["mistakes-changed"](#serverevents-mistakes-changed)
 
 ### ServerEvents "turn-started"
 
@@ -275,6 +277,14 @@ topic: string;
 
 ```ts
 data?: unknown;
+```
+
+### ServerEvents "mistakes-changed"
+
+The learner's mistakes changed (found, analyzed, deleted).
+
+```ts
+"mistakes-changed": Record<string, never>;
 ```
 
 ## ServerEventType

@@ -65,3 +65,21 @@ export { claudeCodeInstallationResponse } from "./claude-code.ts";
 // No import side effects; the boot sync lives in stores.ts.
 export * from "./custom-provider.ts";
 export { customProviderGet, customProviderMutation } from "./custom-provider-http.ts";
+// The learner's mistakes: the scan/analysis service + the record store's
+// read seam. Named like the barrel's other record re-exports.
+export { readMistakes } from "../store/mistakes.ts";
+export {
+	analysisEngineOverride,
+	analysisProgress,
+	analysesInLastDay,
+	autoAnalysisEnabled,
+	cancelAnalyses,
+	countAllNewMistakes,
+	countNewMistakes,
+	deleteMistake,
+	enqueueAnalyses,
+	mistakesAfterTurn,
+	recordAllMistakes,
+	recordChatMistakes,
+	retryMistake,
+} from "./mistakes.ts";
