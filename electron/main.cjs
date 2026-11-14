@@ -215,11 +215,16 @@ function startServer(port) {
 	return new Promise((resolve, reject) => {
 		const child = spawn(
 			process.execPath,
-			// Only the macOS backend needs this: Next's native title setter
-			// otherwise checks this Node-mode process in as a foreground app.
+			// macOS: Next's native title setter otherwise checks this Node-mode
+			// process in as a foreground app. Windows: Node trusts only its
+			// bundled roots by default; also trust the Windows certificate
+			// store, as Chromium does, so antivirus HTTPS scanning and
+			// corporate TLS inspection keep working.
 			process.platform === "darwin"
 				? ["--require", path.join(process.resourcesPath, "server-title-guard.cjs"), serverEntry()]
-				: [serverEntry()],
+				: process.platform === "win32"
+					? ["--use-system-ca", serverEntry()]
+					: [serverEntry()],
 			{
 				cwd: path.dirname(serverEntry()),
 				env: {

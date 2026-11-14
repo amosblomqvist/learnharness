@@ -118,7 +118,9 @@ describe("backend-only preload wiring and packaging", () => {
 			assert.equal(launch.binary, "/fixture/LearnHarness");
 			assert.deepEqual(launch.args, platform === "darwin"
 				? ["--require", path.join("/fixture/resources with spaces", "server-title-guard.cjs"), entry]
-				: [entry]);
+				: platform === "win32"
+					? ["--use-system-ca", entry]
+					: [entry]);
 			assert.equal(launch.options.cwd, path.dirname(entry));
 			assert.equal(launch.options.env.NODE_OPTIONS, undefined, "do not add NODE_OPTIONS to the child environment");
 			assert.equal(launch.options.env.ELECTRON_RUN_AS_NODE, "1");
