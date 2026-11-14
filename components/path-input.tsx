@@ -5,6 +5,7 @@ import { createPortal } from "react-dom";
 import { FilePathChip } from "./file-path-chip";
 import { CitationChip } from "./citation-chip";
 import { cn } from "../lib/utils";
+import { clipboardImages, savePastedImages } from "./pasted-images";
 import {
 	adjacentPathRange, atomicPathRange, clampPathSelection, insertCitation, insertFilePaths, locateToken,
 	normalizePathEdit, normalizePathInputValue, pathInputStaticRange, PathInputHistory, readPathInput, readPathSelection, renderPathInput,
@@ -53,6 +54,7 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 	const callbacks = React.useRef({ onValueChange, singleLine, fileInsertion });
 	const composing = React.useRef(false);
 	const [chips, setChips] = React.useState<ChipHost[]>([]);
+	const [pasteStatus, setPasteStatus] = React.useState("");
 	// Keep this text child immutable: SSR/hydration gets the complete draft,
 	// while subsequent React renders leave the browser-owned editable DOM alone.
 	const initial = React.useRef({ value: normalizePathInputValue(value, singleLine), autoFocus, singleLine });
@@ -216,7 +218,20 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 		function paste(event: ClipboardEvent) {
 			if (event.defaultPrevented) return;
 			event.preventDefault();
+			const images = callbacks.current.singleLine ? [] : clipboardImages(event.clipboardData);
 			const text = event.clipboardData?.getData("text/plain") ?? "";
+			const linuxFallback = event.isTrusted && !callbacks.current.singleLine && !text
+				&& window.lh?.platform === "linux" ? window.lh.readClipboardImage : undefined;
+			if (images.length || linuxFallback) {
+				setPasteStatus("Saving pasted image…");
+				void savePastedImages(images.length ? images : linuxFallback!).then((paths) => {
+					if (!mounted) return;
+					if (paths.length) stage(paths);
+					setPasteStatus("");
+				}).catch((error) => { if (mounted) setPasteStatus(error instanceof Error ? error.message : "Image paste failed."); });
+				return;
+			}
+
 			// Image/file/HTML-only clipboard contents are not text replacement.
 			if (text === "") return;
 			if (composing.current) pendingPaste.push(text);
@@ -345,8 +360,10 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			onCompositionStart={onCompositionStart}
 			onCompositionEnd={onCompositionEnd}
 		>{initial.current.value}</div>
+
 		{chips.map(({ host, token }) => createPortal(token.kind === "path"
 			? <FilePathChip path={token.path} contentEditable={false} />
 			: <CitationChip citation={token.citation} variant="composer" contentEditable={false} source={{ start: token.start, end: token.end, link: token.text, host }} />, host))}
+		{pasteStatus && <span role="status" className="block px-2 text-xs text-muted-foreground">{pasteStatus}</span>}
 	</>;
 });

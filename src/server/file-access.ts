@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { FileAccessPolicy } from "../agent/tools/file-access.ts";
 import { readFileAccessSettings } from "../store/settings.ts";
+import { CLIPBOARD_IMAGES_DIR } from "../../config.ts";
 
 export function expandFolder(folder: string, home: string = os.homedir()): string {
 	if (folder === "~") return home;
@@ -16,7 +17,7 @@ export function expandFolder(folder: string, home: string = os.homedir()): strin
 export function fileAccessPolicy(): FileAccessPolicy {
 	const result = readFileAccessSettings();
 	if (!result.ok) return { restricted: true, folders: [], error: result.error };
-	return { restricted: result.settings.restricted, folders: result.settings.folders.map((folder) => expandFolder(folder)) };
+	return { restricted: result.settings.restricted, folders: [...result.settings.folders.map((folder) => expandFolder(folder)), CLIPBOARD_IMAGES_DIR] };
 }
 
 /** Safe UI diagnostic, no raw JSON/file contents. A corrupt record must

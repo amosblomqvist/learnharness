@@ -9,6 +9,7 @@ import { useEnterSubmits } from "@/components/enter-submits";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
+import { imagePastePending, useImagePastePending } from "@/components/pasted-images";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { QuestionPreview } from "@/components/question-preview";
@@ -342,6 +343,7 @@ function QuestionDockForm({
 	// "Other…" row in a multi-select must never clear already-picked
 	// options, and picking an option must never clear a typed custom answer.
 	const [sel, setSel] = useState<DockSelection>(() => initialDraft?.selection ?? emptyDockSelection());
+	const pastingImage = useImagePastePending();
 	// The learner's transfer channel — thinking, never "a note".
 	const [thinking, setThinking] = useState(initialDraft?.thinking ?? "");
 	const [other, setOther] = useState(initialDraft?.other ?? "");
@@ -419,6 +421,7 @@ function QuestionDockForm({
 	const viewPresentationKey = JSON.stringify({ ...toClientQuestion(qd), questionType: qd.questionType });
 	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, sel, other, text, thinking, confIdx, viewPresentationKey]);
 	const submit = () => {
+		if (imagePastePending()) return;
 		if (!canSubmit || compactionRunning || preparing) return;
 		if (onPrepareSubmission) {
 			onPrepareSubmission({ question: qd, isCurrent: () => mounted.current && currentQuestion.current === qd && isInteractionScopeEligible(rootRef.current, controller), capture: captureRequest });
@@ -978,7 +981,7 @@ function QuestionDockForm({
 						</span>
 						<Button
 							type="submit"
-							disabled={!canSubmit || compactionRunning || preparing}
+							disabled={!canSubmit || compactionRunning || preparing || pastingImage}
 							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 						>
 							Submit answer

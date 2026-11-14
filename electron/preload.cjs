@@ -44,6 +44,7 @@ ipcRenderer.on("lh:open-settings", (_event, section) => {
 
 contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
+	...(process.platform === "linux" ? { readClipboardImage: () => ipcRenderer.invoke("lh:clipboard:linux-image") } : {}),
 	// Resolve only a renderer-supplied, OS-backed File. No filesystem API,
 	// uploads, copies, or DOM File IPC to main; sandbox/isolation stay on.
 	getPathForFile: (file) => webUtils.getPathForFile(file),

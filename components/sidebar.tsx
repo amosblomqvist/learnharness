@@ -67,6 +67,7 @@ declare global {
 		lh?: {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
+			readClipboardImage?: () => Promise<Uint8Array<ArrayBuffer> | null>;
 			/** Resolve an OS-backed File without copying/uploading its contents. */
 			getPathForFile?: (file: File) => string;
 			/** Choose one original directory path, without reading its contents. */

@@ -24,7 +24,7 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog, clipboard } = require("electron");
 const { pickAttachmentPath } = require("./attachment-picker.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
@@ -778,6 +778,18 @@ async function main() {
 	// are log lines — this can never block boot.
 	setupAutoUpdater();
 	ipcMain.on("lh:update-install", () => installUpdateNow());
+	ipcMain.handle("lh:clipboard:linux-image", (event) => {
+		const win = BrowserWindow.fromWebContents(event.sender);
+		if (process.platform !== "linux" || !win?.isFocused() || !trustedAppWindows.has(win) ||
+			!trustedSender(event, new URL(url).origin, BrowserWindow)) return null;
+		const image = clipboard.readImage();
+		if (image.isEmpty()) return null;
+		const { width, height } = image.getSize();
+		if (width > 8192 || height > 8192 || width * height > 16_000_000) throw new Error("Clipboard image is too large.");
+		const bytes = image.toPNG();
+		if (bytes.length > 25 * 1024 * 1024) throw new Error("Clipboard image is too large.");
+		return new Uint8Array(bytes);
+	});
 	ipcMain.handle("lh:update:get", (event) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
 		return updateState;

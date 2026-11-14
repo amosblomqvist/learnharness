@@ -21,6 +21,9 @@ const DATA_ROOT = process.env.LH_DATA_DIR
 	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DATA_DIR)
 	: path.join(/* turbopackIgnore: true */ ROOT, "data");
 
+/** Explicitly pasted learner images, separate from credentials and chat ledgers. */
+export const CLIPBOARD_IMAGES_DIR = path.join(DATA_ROOT, "clipboard-images");
+
 export const PATHS = {
 	root: ROOT,
 	/** Teacher system prompt — the agent's instructions (src/agent/). */

@@ -71,13 +71,16 @@ async function normalize(bytes: Uint8Array, signal?: AbortSignal): Promise<Resiz
 export async function loadLearnerImage(rawPath: string, signal?: AbortSignal): Promise<LearnerImage> {
 	signal?.throwIfAborted();
 	const absolute = await checkLearnerImage(rawPath);
-	const bytes = await readBounded(absolute, signal);
+	return normalizeLearnerImageBytes(await readBounded(absolute, signal), absolute, signal);
+}
+
+export async function normalizeLearnerImageBytes(bytes: Uint8Array, source: string, signal?: AbortSignal): Promise<LearnerImage> {
 	const mime = detectSupportedImageMimeType(bytes);
-	if (!mime) throw new Error(`Not a supported image: ${absolute}`);
+	if (!mime) throw new Error(`Not a supported image: ${source}`);
 	checkImageDimensions(bytes, mime);
 	const stored = await normalize(bytes, signal);
 	signal?.throwIfAborted();
 	if (stored.mimeType !== "image/png" && stored.mimeType !== "image/jpeg") throw new Error("Unexpected stored image format");
 	const snapshotId = createHash("sha256").update(Buffer.from(stored.data, "base64")).digest("hex");
-	return { path: absolute, snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
+	return { path: source, snapshotId, mimeType: stored.mimeType, data: stored.data, width: stored.width, height: stored.height };
 }

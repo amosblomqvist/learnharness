@@ -5,6 +5,7 @@ import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import { imagePastePending, useImagePastePending } from "@/components/pasted-images";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 
@@ -150,12 +151,14 @@ export function Composer({
 }) {
 	const controller = useOptionalInteractionLayers();
 	const act = () => {
+		if (imagePastePending()) return;
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
 		else if (action === "send") onSend();
 		else if (action === "next") onNext?.();
 	};
 	const ownInputRef = useRef<HTMLDivElement>(null);
+	const pastingImage = useImagePastePending();
 	const editorRef = inputRef ?? ownInputRef;
 	return (
 		<form
@@ -217,6 +220,7 @@ export function Composer({
 						type="submit"
 						data-testid="next-problem-button"
 						aria-label="Next problem"
+						disabled={pastingImage}
 						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-success px-4 font-ui text-xs font-medium uppercase tracking-wide text-background transition-colors hover:bg-success/85"
 					>
 						Next problem
@@ -226,7 +230,7 @@ export function Composer({
 					<button
 						type="submit"
 						aria-label={busy && !canSend ? "Stop" : "Send"}
-						disabled={!busy && !canSend}
+						disabled={pastingImage || (!busy && !canSend)}
 						className={cn(
 							"flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors",
 							busy && !canSend

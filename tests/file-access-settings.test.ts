@@ -24,10 +24,20 @@ const { readFileAccessSettings, readSettings, writeSettings } = await import("..
 const { fileAccessPolicy, fileAccessConfigurationError } = await import("../src/server/file-access.ts");
 const { setFileAccessPolicy } = await import("../src/agent/tools/file-access.ts");
 const { resolveSourcePath } = await import("../src/agent/tools/fs-shared.ts");
+const { CLIPBOARD_IMAGES_DIR } = await import("../config.ts");
 const { GET } = await import("../app/api/settings/route.ts");
 const { PUT } = await import("../app/api/settings/[section]/route.ts");
 const stored = async (value: unknown) => fs.writeFile(SETTINGS_FILE, JSON.stringify(value));
 const put = (section: string, value: unknown) => PUT(new Request(`http://localhost/api/settings/${section}`, { method: "PUT", body: JSON.stringify(value), headers: { "Content-Type": "application/json" } }), { params: Promise.resolve({ section }) });
+it("explicitly pasted images remain readable with closed learner folders, without granting access to other app files", async () => {
+	await stored({ version: 1, agent: { fileAccess: { restricted: true, folders: [] } } });
+	await fs.mkdir(CLIPBOARD_IMAGES_DIR, { recursive: true });
+	const image = path.join(CLIPBOARD_IMAGES_DIR, "pasted-image-test.png");
+	await fs.writeFile(image, "synthetic image");
+	assert.equal(resolveSourcePath(image), fsSync.realpathSync(image));
+	assert.throws(() => resolveSourcePath(path.join(data, "chats", "private.json")), /allowed folders/);
+	await fs.rm(CLIPBOARD_IMAGES_DIR, { recursive: true, force: true });
+});
 beforeEach(async () => { await fs.rm(SETTINGS_FILE, { recursive: true, force: true }); setFileAccessPolicy(fileAccessPolicy); });
 after(async () => {
 	setFileAccessPolicy(() => ({ restricted: false, folders: [] }));

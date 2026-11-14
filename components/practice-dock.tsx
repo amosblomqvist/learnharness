@@ -10,6 +10,7 @@ import { useEnterSubmits } from "@/components/enter-submits";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
+import { imagePastePending, useImagePastePending } from "@/components/pasted-images";
 import type { PrepareThinkingSubmission } from "./plugin-submission-adapters";
 import { cn } from "@/lib/utils";
 
@@ -72,6 +73,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 	const custom = useRef(customInput); custom.current = customInput;
 	const thinking = customInput ? customInput.thinking : nativeThinking;
 	const setThinking = (value: string) => { if (custom.current) custom.current.onThinkingChange(value); else setNativeThinking(value); };
+	const pastingImage = useImagePastePending();
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
 	// the tail, never a stale closure.
@@ -98,6 +100,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 
 	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, thinking]);
 	const submit = () => {
+		if (imagePastePending()) return;
 		if (compactionRunning || preparing) return;
 		const prepare = customInput?.prepare ?? onPrepareSubmission;
 		if (prepare) {
@@ -204,7 +207,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={(customInput ? !customInput.ready : (!thinking.trim() && !hasPendingInput)) || compactionRunning || preparing}
+						disabled={(customInput ? !customInput.ready : (!thinking.trim() && !hasPendingInput)) || compactionRunning || preparing || pastingImage}
 						onClick={() => submit()}
 						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>
