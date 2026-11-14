@@ -350,6 +350,24 @@ describe("discoverModels", () => {
 		assert.equal(byId["ctx"]!.maxTokens, undefined);
 		assert.equal(byId["plain"]!.context, undefined);
 	});
+	it("reads nested token limits as independent fallbacks", async () => {
+		const limit = { context: 1050000, input: 922000, output: 128000 };
+		const data = [
+			{ id: "nested", limit },
+			{ id: "flat", context_length: 32768, max_output_tokens: 4096, limit },
+			{ id: "mixed", meta: { n_ctx: 65536 }, limit },
+			{ id: "invalid", limit: { input: 922000, context: -1, output: "128000" } },
+		];
+		stubFetch(() => ({ status: 200, body: { data } }));
+		const result = await discoverModels("http://h/v1");
+		assert.ok(result.ok);
+		assert.deepEqual(result.models, [
+			{ id: "flat", context: 32768, maxTokens: 4096 },
+			{ id: "invalid" },
+			{ id: "mixed", context: 65536, maxTokens: 128000 },
+			{ id: "nested", context: 1050000, maxTokens: 128000 },
+		]);
+	});
 	it("detects llama.cpp's runtime context from meta.n_ctx, not n_ctx_train", async () => {
 		stubFetch(() => ({
 			status: 200,
