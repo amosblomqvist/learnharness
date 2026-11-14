@@ -9,10 +9,11 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
-import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
+import { createFauxCore, fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
 import { runPdfReaderAgent } from "../src/agent/subagents/pdf-reader.ts";
 import type { HeadlessApi } from "../src/agent/subagents/headless.ts";
+import { isSubagentFailure } from "../src/core/contracts/jobs.ts";
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
 
@@ -142,8 +143,55 @@ describe("pdf-reader loop (faux engine)", () => {
 		);
 		assert.equal(result.path, FIXTURE);
 		assert.match(result.brief, /integral rule/);
+		assert.equal(isSubagentFailure("pdf", result), false, "a finished brief is a successful job");
 		assert.deepEqual(result.pagesRead, [1, 2], "extracted pages are read pages");
 		assert.deepEqual(result.pagesConsulted, [1, 2]);
+	});
+
+	// #642: a final turn that ran out of output, or wrote nothing, is not a
+	// brief. It fails the job instead of being delivered as complete.
+	const OUTPUT_LIMIT_BRIEF = "PDF failed: the reader hit the model's output limit (8192 tokens) before finishing its brief. A larger Maximum output for this model may help.";
+	for (const { name, final, brief } of [
+		{
+			name: "a final turn that spent the whole output limit on thinking fails the job",
+			final: fauxAssistantMessage([fauxThinking("Planning the brief…")], { stopReason: "length" }),
+			brief: OUTPUT_LIMIT_BRIEF,
+		},
+		{
+			name: "a brief cut off by the output limit fails the job instead of being delivered as complete",
+			final: fauxAssistantMessage([fauxText("The integral rule (p. 1) says that")], { stopReason: "length" }),
+			brief: OUTPUT_LIMIT_BRIEF,
+		},
+		{
+			name: "an empty final brief fails the job instead of delivering a placeholder",
+			final: fauxAssistantMessage([fauxText(" \n\t")]),
+			brief: "PDF failed: the reader produced no brief text",
+		},
+	]) {
+		it(name, async () => {
+			const engine = fauxEngine([
+				fauxAssistantMessage([fauxToolCall("pdf_extract", { pages: "1-2" }, { id: "e1" })], { stopReason: "toolUse" }),
+				final,
+			]);
+			engine.model = { ...engine.model, maxTokens: 8192 };
+			const result = await runPdfReaderAgent({ path: FIXTURE, question: "what is the integral of x?" }, { engine });
+			assert.equal(result.brief, brief);
+			assert.equal(isSubagentFailure("pdf", result), true);
+			assert.deepEqual(result.pagesRead, [1, 2], "pages read so far are still reported");
+			assert.deepEqual(result.pagesConsulted, [1, 2]);
+		});
+	}
+
+	it("the output-limit failure leaves out the limit when the model doesn't report one", async () => {
+		for (const maxTokens of [0, undefined]) {
+			const engine = fauxEngine([
+				fauxAssistantMessage([fauxToolCall("pdf_extract", { pages: "1" }, { id: "e1" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxThinking("…")], { stopReason: "length" }),
+			]);
+			engine.model = { ...engine.model, maxTokens: maxTokens as number };
+			const result = await runPdfReaderAgent({ path: FIXTURE, question: "anything" }, { engine });
+			assert.equal(result.brief, "PDF failed: the reader hit the model's output limit before finishing its brief. A larger Maximum output for this model may help.");
+		}
 	});
 
 	it("the unread-finish gate: a brief with zero consultation is bounced, not delivered", async () => {

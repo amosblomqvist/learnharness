@@ -158,6 +158,13 @@ function toolText(toolCallId: string, toolName: string, value: string): ToolResu
 	};
 }
 
+/** Why a final turn stopped by the output limit failed, naming the limit
+ *  when the model reports one (custom endpoints fall back to 4096). */
+function outputLimitReason(maxTokens: number | undefined): string {
+	const limit = typeof maxTokens === "number" && maxTokens > 0 ? ` (${maxTokens} tokens)` : "";
+	return `the reader hit the model's output limit${limit} before finishing its brief. A larger Maximum output for this model may help.`;
+}
+
 /** Doctrine gate (the visual-maker's unlooked-finish rule, ported): never
  *  deliver a brief that consulted nothing — an unread PDF brief is made-up
  *  content, exactly the class of failure the gate exists for. */
@@ -252,7 +259,12 @@ export async function runPdfReaderAgent(
 					];
 					continue;
 				}
-				return { path: pdfPath, question: input.question, brief: finalText || "(no brief text)", pagesRead: [...read].sort((a, b) => a - b), pagesConsulted: [...consulted].sort((a, b) => a - b) };
+				// A provider-declared incomplete answer (the output limit hit,
+				// often all of it spent on thinking) or an empty one is not a
+				// brief: fail the job rather than deliver it as complete.
+				const brief = result.stopReason === "length" ? `PDF failed: ${outputLimitReason(engine.model.maxTokens)}`
+					: finalText || "PDF failed: the reader produced no brief text";
+				return { path: pdfPath, question: input.question, brief, pagesRead: [...read].sort((a, b) => a - b), pagesConsulted: [...consulted].sort((a, b) => a - b) };
 			}
 
 			const toolResults: ToolResultMessage[] = [];
