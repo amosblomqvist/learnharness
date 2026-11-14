@@ -2,7 +2,7 @@ import React from "react";
 (globalThis as { React?: typeof React }).React = React;
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { parseHTML } from "linkedom";
 import { ToolContentResponse } from "../components/ai-elements/message.tsx";
 import { svgContentParts } from "../components/svg-content.ts";
