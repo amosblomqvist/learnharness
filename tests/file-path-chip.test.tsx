@@ -5,6 +5,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { FilePathChip, PathText } from "../components/file-path-chip.tsx";
 import { quoteFilePath } from "../src/core/file-paths.ts";
+import { serializeCitation } from "../src/core/citations.ts";
 
 function documentFor(node: React.ReactNode) {
 	return parseHTML(`<html><body>${renderToStaticMarkup(node)}</body></html>`).document;
@@ -107,5 +108,17 @@ describe("PathText", () => {
 		assert.equal(document.querySelector("script, img, [onerror], a"), null);
 		assert.equal(document.querySelector('[role="img"]')!.getAttribute("title"), path);
 		assert.equal(document.body.textContent, '<script>alert(1)</script> <img src=x onerror="alert(1)">.png');
+	});
+});
+
+describe("PathText citations", () => {
+	it("renders a sent citation as a chip with its label, never the raw link", () => {
+		const link = serializeCitation({ version: 1, chatId: "c", messageId: "m", text: "the derivatives multiply", start: 0, end: 24, prefix: "", suffix: "" });
+		const document = documentFor(<PathText text={`why ${link}?`} />);
+		const chip = document.querySelector('[data-testid="citation-chip"]')!;
+		assert.ok(chip);
+		assert.match(chip.textContent!, /the derivatives multiply/);
+		assert.doesNotMatch(document.body.textContent!, /lh-citation:/);
+		assert.match(document.body.textContent!, /^why .*\?$/);
 	});
 });

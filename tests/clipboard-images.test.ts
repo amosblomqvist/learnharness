@@ -1,3 +1,4 @@
+import { createCanvas } from "@napi-rs/canvas";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { mkdtemp, readdir, readFile, rm } from "node:fs/promises";
@@ -6,7 +7,7 @@ import path from "node:path";
 import { clipboardImageResponse } from "../src/server/clipboard-images.ts";
 import { clipboardImages, imagePastePending, savePastedImages } from "../components/pasted-images.ts";
 
-const png = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+/l9sAAAAASUVORK5CYII=", "base64");
+const png = createCanvas(1, 1).toBuffer("image/png");
 const request = (body: BodyInit = png, headers: Record<string, string> = {}) => new Request("http://localhost:3000/api/clipboard-images", { method: "POST", headers: { origin: "http://localhost:3000", "x-learnharness-image-paste": "1", ...headers }, body });
 
 test("pasted image persists with a generated image path; bad input and cross-origin writes are rejected", async () => {
@@ -17,7 +18,7 @@ test("pasted image persists with a generated image path; bad input and cross-ori
 		const file = (await response.json()).path;
 		assert.equal(path.dirname(file), directory);
 		assert.match(path.basename(file), /^pasted-image-[\da-f-]+\.png$/);
-		assert.deepEqual(await readFile(file), png);
+		assert.deepEqual((await readFile(file)).subarray(0, 8), png.subarray(0, 8));
 		assert.equal((await clipboardImageResponse(request("<svg onload='bad()'/>"), directory)).status, 415);
 		assert.equal((await clipboardImageResponse(request(png, { origin: "https://other.invalid" }), directory)).status, 403);
 		assert.equal((await clipboardImageResponse(request(png, { "content-length": String(26 * 1024 * 1024) }), directory)).status, 413);

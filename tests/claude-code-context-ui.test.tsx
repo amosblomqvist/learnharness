@@ -4,7 +4,9 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { StatsBar } from "../components/stats-bar.tsx";
+import { StatsBar as StatsBarBase } from "../components/stats-bar.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+function StatsBar(props: React.ComponentProps<typeof StatsBarBase>) { return <InteractionLayersProvider><StatsBarBase {...props} /></InteractionLayersProvider>; }
 import { CLAUDE_CODE_MODELS } from "../src/agent/claude-code/provider.ts";
 import { toModelDto } from "../src/server/model-catalog.ts";
 import type { ModelCatalogResponse, TurnUsage } from "../src/core/index.ts";
@@ -19,7 +21,7 @@ afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); 
 test("compact CLI context is numeric only; effective-window explanation appears only in expanded session metadata", async () => {
 	const catalog: ModelCatalogResponse = { models: CLAUDE_CODE_MODELS.map(toModelDto), providers: [],
 		slots: { strong: null, cheap: null, vision: null }, defaults: null,
-		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null } };
+		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null } };
 	globalThis.fetch = (async (url) => {
 		if (url === "/api/models") return Response.json(catalog);
 		if (url === "/api/settings") return Response.json({ settings: { models: {} } });

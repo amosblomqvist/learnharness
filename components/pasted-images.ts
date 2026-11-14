@@ -7,10 +7,12 @@ const subscribe = (listener: () => void) => { listeners.add(listener); return ()
 export const imagePastePending = () => pending > 0;
 export const useImagePastePending = () => useSyncExternalStore(subscribe, imagePastePending, () => false);
 
-export async function savePastedImages(files: readonly File[]): Promise<string[]> {
+export async function savePastedImages(source: readonly File[] | (() => Promise<Uint8Array<ArrayBuffer> | null>)): Promise<string[]> {
 	pending++;
 	notify();
 	try {
+		const bytes = typeof source === "function" ? await source() : null;
+		const files = typeof source !== "function" ? source : bytes ? [new File([bytes], "clipboard.png", { type: "image/png" })] : [];
 		const paths: string[] = [];
 		for (const file of files) {
 			if (file.size > 25 * 1024 * 1024) throw new Error("Image exceeds 25 MiB. Paste a smaller image.");
