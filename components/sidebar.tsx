@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { CircleXIcon, DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -722,6 +722,17 @@ function SessionsSidebar() {
 						<span className="min-w-0 truncate">Practice</span>
 						<span className="sr-only">create a new practice session</span>
 					</button>
+					<Link
+						href="/mistakes"
+						data-testid="nav-mistakes"
+						className={cn(
+							"flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+							pathname?.startsWith("/mistakes") && "bg-accent text-foreground",
+						)}
+					>
+						<CircleXIcon className="size-3 shrink-0" />
+						<span className="min-w-0 truncate">Mistakes</span>
+					</Link>
 				</PluginSidebarActions>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">

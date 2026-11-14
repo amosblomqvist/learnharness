@@ -59,7 +59,7 @@ export type AgentKind = "prober" | "teacher" | "practice";
 /** Reserve conversation builtins even when role/mechanics/settings gates hide them.
  * New builtin names must join this catalog; actual turn tools are reserved too. */
 export const CONVERSATION_TOOL_NAMES = Object.freeze([
-	...QUESTION_TOOLS, ...TOGGLEABLE_TOOLS, "probe_done", "read", "ls", "find", "grep",
+	...QUESTION_TOOLS, ...TOGGLEABLE_TOOLS, "probe_done", "read", "ls", "find", "grep", "mistakes",
 	"plan_init", "list_sessions", "list_propositions", "problem", "conclude", sendToUserTool.name,
 ] as const);
 

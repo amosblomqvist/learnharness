@@ -88,6 +88,7 @@ import { createSideQuestionActions, SideThreadBody, SideThreadPanel, SideThreadP
 import { useSideThread, type SideThreadOpenArgs } from "@/components/use-side-thread";
 import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
+import { MistakesContext, useChatMistakes } from "@/components/mistakes-context";
 import { PluginProblemDock, type PluginProblemDockProps } from "./plugin-problem-dock";
 import { practiceProblemForCall } from "@/src/core";
 import { PluginProblemSubmitted } from "./plugin-problem-submitted";
@@ -1457,6 +1458,8 @@ export function Chat({
 		firstFetchRef.current = jobStatusRef.current.size === 0;
 		void fetchJobs();
 	}, [fetchJobs]); // identity changes exactly on chatId
+	// The recorded analyses for this session's answer cards.
+	const sessionMistakes = useChatMistakes(chatId);
 	useServerEvent("jobs-changed", (p) => {
 		if (p.chatId != null && p.chatId !== chatId) return; // ours or unattributed
 		if (fetchDebounceRef.current) clearTimeout(fetchDebounceRef.current);
@@ -1593,6 +1596,7 @@ export function Chat({
 	usePluginShortcutPage(`/chat/${encodeURIComponent(chatId)}`, captureActionContext);
 
 	return (
+		<MistakesContext.Provider value={sessionMistakes}>
 		<ChatActionsContext.Provider
 			value={{
 				chatId,
@@ -1953,7 +1957,7 @@ export function Chat({
 														// transcript; answered ones render as graded records.
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} mistakeId={`${chatId}:${part.toolCallId}`} />
 															);
 														}
 														return null;
@@ -2240,6 +2244,7 @@ export function Chat({
 			}}
 		/>
 		</ChatActionsContext.Provider>
+		</MistakesContext.Provider>
 	);
 }
 

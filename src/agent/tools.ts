@@ -17,6 +17,7 @@ import type { JobRecord } from "../core/contracts.ts";
 import type { JobStore } from "../core/ports.ts";
 import { jobTools, type DemoInput, type PdfInput, type ResearchInput, type VisualInput } from "./tools/jobs.ts";
 import { planTools, type PlanToolContext } from "./tools/plan.ts";
+import { mistakeTools, type MistakeToolContext } from "./tools/mistakes.ts";
 import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
 import { proberGraphTools } from "./tools/graph.ts";
 import { readTool } from "./tools/read.ts";
@@ -401,6 +402,8 @@ export interface TeacherToolContext extends PlanToolContext {
 	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
 	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
+	/** Read-only mistake history; injected so the agent layer stays store-free. */
+	mistakeStore?: MistakeToolContext;
 }
 
 /**
@@ -463,6 +466,8 @@ export function createTeacherTools(
 			show_image: createShowImageTool(ctx),
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
+			// The learner's mistake history, read-only (never a file path).
+			...mistakeTools({ read: ctx.mistakeStore?.read ?? (() => []) }),
 		},
 		withoutMechanics(enabled),
 		),

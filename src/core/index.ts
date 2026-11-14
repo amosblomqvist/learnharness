@@ -109,3 +109,6 @@ export * from "./plugin-submissions.ts";
 export type * from "./plugin-ui.ts";
 export type * from "./plugin-tree.ts";
 export * from "./plugin-agents.ts";
+// The learner's mistakes: finding misses, the error-analysis contract,
+// and the review tab's pure grouping/filter helpers.
+export * from "./mistakes.ts";
