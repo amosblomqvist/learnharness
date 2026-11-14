@@ -1,0 +1,14 @@
+# Run the published image; see docs/self-hosting.md for the full guide.
+services:
+  learnharness:
+    image: ghcr.io/amosblomqvist/learnharness:latest
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    volumes:
+      - lh-data:/data
+      - lh-config:/config
+
+volumes:
+  lh-data:
+  lh-config:
