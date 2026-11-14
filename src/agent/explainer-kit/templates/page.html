@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>94% of reads never touch the database</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%230b0d0c'/%3E%3Cpath d='M16 32h14M34 22h14M34 42h14' stroke='%23f2a93b' stroke-width='5' stroke-linecap='round'/%3E%3C/svg%3E">
+<!-- Reference page: the Instrument register from references/style-guide.md. Its CSS and script are the kit (../kit/), which the renderer inlines; the links let this file open as is. -->
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="../kit/kit.css" data-ve-kit>
+</head>
+<body>
+<!-- Shared defs: one arrowhead (context-stroke follows each edge's color), the node fill, and the waffle cells. -->
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <marker id="ve-ah" viewBox="0 0 10 10" refX="9" refY="5" markerUnits="userSpaceOnUse" markerWidth="11" markerHeight="11" orient="auto"><path d="M0 0L10 5L0 10z" fill="context-stroke"/></marker>
+    <linearGradient id="ve-node" x1="0" y1="0" x2="0" y2="1"><stop offset="0" style="stop-color:var(--node-top)"/><stop offset="1" style="stop-color:var(--surface)"/></linearGradient>
+    <pattern id="ve-w-on" width="10" height="10" patternUnits="userSpaceOnUse"><rect x="1" y="1" width="8" height="8" rx="1.5" style="fill:var(--accent)"/></pattern>
+    <pattern id="ve-w-off" width="10" height="10" patternUnits="userSpaceOnUse"><rect x="1.5" y="1.5" width="7" height="7" rx="1.5" style="fill:none;stroke:var(--text-dim)"/></pattern>
+  </defs>
+</svg>
+<main>
+
+  <header>
+    <p class="eyebrow">Read path</p>
+    <h1><span class="num">94%</span> of reads never touch the database</h1>
+    <p class="lead"><span class="ve-ref" data-ref="redis" tabindex="0">Redis</span> answers them in <b class="ve-ref" data-ref="hit" tabindex="0">about 1&nbsp;ms</b>. Only misses reach <span class="ve-ref" data-ref="pg" tabindex="0">Postgres</span>.</p>
+    <p class="meta">user-service · GET /user/:id · 7 days to 1 Oct</p>
+  </header>
+
+  <figure class="ve-steps">
+    <div class="frame">
+      <svg class="ve-svg" viewBox="0 50 800 270" role="img" aria-label="Client calls API. API gets the key from Redis. A hit returns in 1 ms. A miss reads Postgres in 9 ms, then the API sets the key with a 60 second TTL.">
+        <path class="ve-e" data-s="1" data-ref="client api" pathLength="1" d="M170 105H300"/>
+        <text class="ve-el" data-s="1" data-ref="client api" x="235" y="95">GET /user/42</text>
+        <path class="ve-e" data-s="2" data-ref="redis hit" pathLength="1" d="M450 80H610"/>
+        <text class="ve-el" data-s="2" data-ref="redis hit" x="530" y="71">get key</text>
+        <path class="ve-e is-hot" data-s="3" data-ref="redis hit" pathLength="1" d="M610 105H450"/>
+        <text class="ve-el" data-s="3" data-ref="redis hit" x="530" y="96">hit · 1 ms</text>
+        <path class="ve-e" data-s="4" data-ref="pg" pathLength="1" d="M355 150V230"/>
+        <text class="ve-el l" data-s="4" data-ref="pg" x="345" y="194">miss: SELECT</text>
+        <path class="ve-e" data-s="4" data-ref="pg" pathLength="1" d="M395 230V150"/>
+        <text class="ve-el r" data-s="4" data-ref="pg" x="405" y="194">row · 9 ms</text>
+        <path class="ve-e is-async" data-s="5" data-ref="redis pg" d="M450 130H610"/>
+        <text class="ve-el" data-s="5" data-ref="redis pg" x="530" y="121">set key</text>
+
+        <!-- Replay tokens: one per step, on the same path as that step's edge. The miss runs down and back under Postgres. -->
+        <circle class="ve-tok" data-s="1" r="5" style="offset-path: path('M170 105H300')"/>
+        <circle class="ve-tok" data-s="2" r="5" style="offset-path: path('M450 80H610')"/>
+        <circle class="ve-tok" data-s="3" r="5" style="offset-path: path('M610 105H450')"/>
+        <circle class="ve-tok" data-s="4" r="5" style="offset-path: path('M355 150V250H395V150')"/>
+        <circle class="ve-tok" data-s="5" r="5" style="offset-path: path('M450 130H610')"/>
+
+        <!-- One hit route and one miss route; spawn intervals give the real 94:6 split. -->
+        <path data-flow="hit" data-every="420" d="M95 105H375V80H695V105H375"/>
+        <path data-flow="miss" data-every="7000" d="M95 105H355V270H395V130H695"/>
+        <g class="ve-dots" aria-hidden="true"></g>
+
+        <g class="ve-n" data-s="1" data-ref="client" transform="translate(20 60)"><rect class="sh" width="150" height="90" rx="6"/><path class="gl" transform="translate(12 12)" d="M0 1h16v12H0zM0 4.5h16"/><text x="75" y="45">Client</text></g>
+        <g class="ve-n is-key" data-s="1" data-ref="api" transform="translate(300 60)"><rect class="sh" width="150" height="90" rx="6"/><path class="gl" transform="translate(12 12)" d="M8 0l7 4v8l-7 4-7-4V4z"/><text x="75" y="38">API</text><text class="sub" x="75" y="62">user-service</text></g>
+        <g class="ve-n" data-s="2" data-ref="redis" transform="translate(610 60)"><rect class="sh" width="170" height="90" rx="6"/><path class="gl" transform="translate(12 12)" d="M9 0L2 9h5l-1 7 7-9H8z"/><text x="85" y="38">Redis</text><g class="ve-vals"><text class="sub" data-s="2" x="85" y="62">TTL 60 s</text><text class="sub" data-s="4" x="85" y="62">no key</text><text class="sub" data-s="5" x="85" y="62">TTL 60 s</text></g></g>
+        <g class="ve-n" data-s="4" data-ref="pg" transform="translate(300 230)"><path class="sh" d="M0 10V70A75 10 0 0 0 150 70V10"/><ellipse class="sh lid" cx="75" cy="10" rx="75" ry="10"/><text x="75" y="46">Postgres</text></g>
+      </svg>
+    </div>
+    <div class="ve-player">
+      <ol class="ve-cap">
+        <li data-n="1/5">The client asks the API for user 42.</li>
+        <li data-n="2/5">The API asks Redis first.</li>
+        <li data-n="3/5">A hit returns in about 1 ms. Done.</li>
+        <li data-n="4/5">A miss reads Postgres in about 9 ms, because the key expired.</li>
+        <li data-n="5/5">The API writes the row back, so the next read hits.</li>
+      </ol>
+      <button data-go="-1" aria-label="Previous step">←</button>
+      <button data-play>Play</button>
+      <input type="range" min="0" value="0" aria-label="Step">
+      <button data-go="1" aria-label="Next step">→</button>
+    </div>
+    <figcaption><span class="fig-n">Fig. 1</span>Each moving dot is one read. One in sixteen misses and goes on to Postgres.</figcaption>
+  </figure>
+
+  <section>
+    <div class="sec-head"><p class="ve-label caps">Load</p><h2>Postgres now serves 6% of reads</h2></div>
+    <figure>
+      <div class="kpis">
+        <div class="kpi"><span class="ve-label">Hit rate · 7 days</span><span class="val"><span data-count="94">94</span><span class="unit">%</span></span>
+          <svg class="ve-waffle" viewBox="0 0 170 100" role="img" aria-label="94 of 100 reads hit Redis; 6 miss"><rect width="100" height="90" fill="url(#ve-w-on)"/><rect y="90" width="40" height="10" fill="url(#ve-w-on)"/><rect x="40" y="90" width="60" height="10" fill="url(#ve-w-off)"/><path class="ann" d="M104 95H114"/><text x="118" y="95">6 misses</text></svg></div>
+        <div class="kpi"><span class="ve-label">p50 read latency</span><span class="val"><span data-count="1.2">1.2</span><span class="unit"> ms</span></span>
+          <svg class="ve-bars" viewBox="0 0 240 52" role="img" aria-label="A hit takes 1 ms; a miss takes 9 ms"><text y="12">hit</text><rect class="hot" x="44" y="5" width="16" height="14" rx="2"/><text x="68" y="12">1 ms</text><text y="40">miss</text><rect x="44" y="33" width="140" height="14" rx="2"/><text x="192" y="40">9 ms</text></svg></div>
+        <div class="kpi"><span class="ve-label">Postgres reads / s</span><span class="val" data-ref="pg"><span data-count="340">340</span></span>
+          <svg class="ve-bars" viewBox="0 0 240 52" role="img" aria-label="Postgres reads fell from 5,600 to 340 per second"><text y="12">before</text><rect x="64" y="5" width="140" height="14" rx="2"/><text x="212" y="12">5.6k</text><text y="40">now</text><rect class="hot" x="64" y="33" width="9" height="14" rx="2"/><text x="81" y="40">340</text></svg></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 2</span>Each square is 1% of reads. A miss costs 9× a hit.</figcaption>
+    </figure>
+  </section>
+
+  <section>
+    <div class="sec-head"><p class="ve-label caps">Failure modes</p><h2>One failure mode is still open</h2></div>
+    <figure>
+      <div class="cases">
+        <div class="case" data-st="ok"><span class="chip ok">Handled</span><h3>User updates profile</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="The API deletes the key in Redis. The next read goes to Postgres and gets fresh data.">
+            <path class="ve-e is-st" d="M58 56C94 56 94 28 130 28"/><path class="ve-e" d="M58 68C94 68 94 100 130 100"/>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="56" height="36" rx="5"/><text x="30" y="62">API</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="130" y="4" width="106" height="48" rx="5"/><text x="183" y="21">Redis</text><text class="sub" x="183" y="40">key deleted</text></g>
+            <g class="ve-n"><path class="sh" d="M130 80V116A53 6 0 0 0 236 116V80"/><ellipse class="sh lid" cx="183" cy="80" rx="53" ry="6"/><text x="183" y="97">Postgres</text><text class="sub" x="183" y="112">fresh row</text></g>
+          </svg></div>
+        <div class="case" data-st="ok"><span class="chip ok">Handled</span><h3>Key reaches its TTL</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="The key expires. The next read misses, reads Postgres, and refills the key.">
+            <path class="ve-e" d="M58 56C94 56 94 28 130 28"/><path class="ve-e is-st" d="M58 68C94 68 94 100 130 100"/>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="56" height="36" rx="5"/><text x="30" y="62">API</text></g>
+            <g class="ve-n"><rect class="sh" x="130" y="4" width="106" height="48" rx="5"/><text x="183" y="21">Redis</text><text class="sub" x="183" y="40">expired</text></g>
+            <g class="ve-n is-st"><path class="sh" d="M130 80V116A53 6 0 0 0 236 116V80"/><ellipse class="sh lid" cx="183" cy="80" rx="53" ry="6"/><text x="183" y="97">Postgres</text><text class="sub" x="183" y="112">refill</text></g>
+          </svg></div>
+        <div class="case" data-st="warn"><span class="chip warn">Accepted</span><h3>Write races a read</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="A read caches an old row just before a write lands. Redis serves the old row for up to 60 seconds.">
+            <path class="ve-e" d="M58 56C94 56 94 28 130 28"/><path class="ve-e" d="M58 68C94 68 94 100 130 100"/>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="56" height="36" rx="5"/><text x="30" y="62">API</text></g>
+            <g class="ve-n is-st"><rect class="sh" x="130" y="4" width="106" height="48" rx="5"/><text x="183" y="21">Redis</text><text class="sub" x="183" y="40">old ≤ 60 s</text></g>
+            <g class="ve-n"><path class="sh" d="M130 80V116A53 6 0 0 0 236 116V80"/><ellipse class="sh lid" cx="183" cy="80" rx="53" ry="6"/><text x="183" y="97">Postgres</text><text class="sub" x="183" y="112">new row</text></g>
+          </svg></div>
+        <div class="case" data-st="risk" data-ref="pg"><span class="chip risk">Open risk</span><h3>Redis is down</h3>
+          <svg class="ve-mini" viewBox="0 0 240 128" role="img" aria-label="Redis is down. Every read goes to Postgres at about 16 times the normal load.">
+            <path class="ve-e is-off" d="M58 56C94 56 94 28 130 28"/><path class="ve-e is-st" d="M58 68C94 68 94 100 130 100"/>
+            <g class="ve-n"><rect class="sh" x="2" y="44" width="56" height="36" rx="5"/><text x="30" y="62">API</text></g>
+            <g class="ve-n is-st"><rect class="sh is-off" x="130" y="4" width="106" height="48" rx="5"/><text x="183" y="21">Redis</text><text class="sub" x="183" y="40">down</text></g>
+            <g class="ve-n is-st"><path class="sh" d="M130 80V116A53 6 0 0 0 236 116V80"/><ellipse class="sh lid" cx="183" cy="80" rx="53" ry="6"/><text x="183" y="97">Postgres</text><text class="sub" x="183" y="112">16× load</text></g>
+          </svg></div>
+      </div>
+      <figcaption><span class="fig-n">Fig. 3</span>Postgres cannot take the full read load if Redis fails.</figcaption>
+    </figure>
+  </section>
+
+  <section class="sources" aria-label="Sources">
+    <p class="ve-label caps">Sources</p>
+    <p><code>src/cache/user.ts:14–52</code> · <code>src/routes/user.ts:30</code> · dashboard "user-service read path", last 7 days.</p>
+  </section>
+
+</main>
+<script src="../kit/kit.js" data-ve-kit></script>
+</body>
+</html>

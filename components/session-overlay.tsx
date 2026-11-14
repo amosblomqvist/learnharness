@@ -29,12 +29,15 @@ import { SvgImage } from "@/components/artifacts/svg-image";
 
 /** The expand seam: md-blocks' mermaid hover button calls openMermaid with
  *  the chart source; the figure card's fullscreen button calls openFigure
- *  with the raw svg (+ its invert state). The chat page (which provides
- *  this context) opens the overlay. Null when no chat page is mounted
- *  (sidebar previews etc.) — the buttons simply don't render there. */
+ *  with the raw svg (+ its invert state); the explainer card's fullscreen
+ *  button calls openPage with the page HTML + title (optional: a provider
+ *  that omits it simply gets no explainer fullscreen button). The chat page
+ *  (which provides this context) opens the overlay. Null when no chat page
+ *  is mounted (sidebar previews etc.) — the buttons simply don't render. */
 export const SessionMermaidContext = createContext<{
 	openMermaid: (chart: string) => void;
 	openFigure: (svg: string, inverted: boolean) => void;
+	openPage?: (html: string, title: string) => void;
 } | null>(null);
 
 export function useSessionMermaid() {
@@ -63,6 +66,108 @@ export function chartSize(svg: string): { w: number; h: number } {
 	const h = attr("height");
 	if (w !== null && h !== null) return { w, h };
 	return { w: 600, h: 400 };
+}
+
+/** The message the fullscreen page posts to its parent when Esc is pressed
+ *  inside it (keydown never leaves an iframe, so the page reports it). */
+export const PAGE_ESCAPE_TYPE = "explainer-page-escape";
+
+const PAGE_ESCAPE_SCRIPT = `<script>(function(){
+document.addEventListener("keydown",function(e){
+if(e.key==="Escape"){try{parent.postMessage({type:"${PAGE_ESCAPE_TYPE}"},"*")}catch(x){}}
+});
+})();</script>`;
+
+/** The fullscreen srcDoc: the page plus the Esc reporter, before </body> (or
+ *  at the end of a body-less document). Only the overlay uses this — the
+ *  downloaded HTML is the page untouched. Pure. */
+export function withPageEscape(html: string): string {
+	if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, () => `${PAGE_ESCAPE_SCRIPT}</body>`);
+	return `${html}${PAGE_ESCAPE_SCRIPT}`;
+}
+
+/** True only for an Esc report that came from THIS overlay's iframe
+ *  (`source` is the message's source window, `frameWindow` the iframe's
+ *  contentWindow). Pure. */
+export function isPageEscapeMessage(source: unknown, data: unknown, frameWindow: unknown): boolean {
+	if (!frameWindow || source !== frameWindow) return false;
+	if (typeof data !== "object" || data === null) return false;
+	return (data as { type?: unknown }).type === PAGE_ESCAPE_TYPE;
+}
+
+/** The explainer page focus: the delivered page in a sandboxed iframe
+ *  (scripts only — no same-origin grant) filling the session area, same
+ *  shell as MermaidOverlay. Esc/X close; no pan/zoom (the page scrolls
+ *  itself). Esc reaches us three ways: the document listener (focus outside
+ *  the page), the X button focused on open, and the page's own Esc report
+ *  (focus inside the page) via window "message". */
+export function PageOverlay({ html, title, onClose }: { html: string; title: string; onClose: () => void }) {
+	const iframeRef = useRef<HTMLIFrameElement>(null);
+	const closeRef = useRef<HTMLButtonElement>(null);
+	const srcDoc = useMemo(() => withPageEscape(html), [html]);
+
+	useEffect(() => {
+		closeRef.current?.focus();
+	}, []);
+
+	useEffect(() => {
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === "Escape") {
+				e.preventDefault();
+				e.stopPropagation();
+				onClose();
+			}
+		};
+		document.addEventListener("keydown", onKey);
+		return () => document.removeEventListener("keydown", onKey);
+	}, [onClose]);
+
+	useEffect(() => {
+		const onMessage = (event: MessageEvent) => {
+			if (isPageEscapeMessage(event.source, event.data, iframeRef.current?.contentWindow)) onClose();
+		};
+		window.addEventListener("message", onMessage);
+		return () => window.removeEventListener("message", onMessage);
+	}, [onClose]);
+
+	return (
+		<div
+			data-testid="page-overlay"
+			className="absolute inset-0 z-40 flex flex-col bg-background/80 p-4 backdrop-blur-sm"
+			role="dialog"
+			aria-modal="true"
+			aria-label="Explainer focus"
+		>
+			<div className="mb-2 flex items-center gap-2">
+				<span className="text-sm font-medium">Explainer</span>
+				<span className="min-w-0 truncate text-xs text-muted-foreground">{title}</span>
+				<Hint label="Close" binding="escape" side="left">
+					<button
+						ref={closeRef}
+						type="button"
+						onClick={onClose}
+						aria-label="Close"
+						data-testid="page-overlay-close"
+						className="ml-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<XIcon className="size-4" />
+					</button>
+				</Hint>
+			</div>
+			<div className="relative min-h-0 flex-1 overflow-hidden rounded-xl border bg-white">
+				<iframe
+					ref={iframeRef}
+					title={title}
+					// scripts only: the page runs its own scripts but never reaches
+					// the app's storage, cookies, or DOM.
+					sandbox="allow-scripts"
+					srcDoc={srcDoc}
+					className="absolute inset-0 size-full border-0"
+					data-testid="page-overlay-iframe"
+				/>
+			</div>
+		</div>
+	);
 }
 
 /** The diagram focus: the chart at natural size inside a pan/zoom viewport

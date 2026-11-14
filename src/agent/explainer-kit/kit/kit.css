@@ -1,0 +1,328 @@
+/* visual-explainer kit. The renderer inlines this file at <link rel="stylesheet" data-ve-kit>.
+   Tokens sit in :where(), so a page's own :root rules (topic motif, a named palette) always win.
+   A page picks its register with <html data-register="instrument|blueprint|paper|editorial">; Instrument is the default. */
+
+/* scale, shared by every register */
+:where(:root) {
+  color-scheme: light dark;
+  --t-label: .75rem; --t-small: .875rem; --t-body: 1rem; --t-lead: 1.25rem; --t-h2: 1.625rem; --t-h1: clamp(2.25rem, 5.5vw, 4rem);
+  --s-1: .25rem; --s-2: .5rem; --s-3: .75rem; --s-4: 1rem; --s-5: 1.5rem; --s-6: 2rem; --s-7: 3rem; --s-8: 4.5rem;
+  --r-1: 4px; --r-2: 10px;
+  --ease: cubic-bezier(.16,1,.3,1); --fast: 150ms; --med: 300ms; --slow: 500ms;
+}
+
+/* Instrument (default): Geist, near-black and amber; dark first */
+:where(:root) {
+  --bg: #0b0d0c; --surface: #121614; --border: #1f2522; --border-bright: #5e6662;
+  --text: #e6ebe8; --text-dim: #919d97; --accent: #f2a93b; --accent-dim: rgba(242,169,59,.14);
+  --ok: #6fcf97; --warn: #e8c547; --risk: #ef6f5c; --info: #6cb6e0;
+  --node-top: color-mix(in srgb, var(--text) 7%, var(--surface)); --lift: rgb(0 0 0 / .45); --halo: 32%;
+  --font-body: 'Geist', 'Segoe UI', sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, monospace;
+  --font-display: var(--font-body); --display-weight: 600;
+  --stage: radial-gradient(circle at 1px 1px, color-mix(in srgb, var(--text) 13%, transparent) 1px, transparent 1.5px) 0 0 / 20px 20px;
+}
+@media (prefers-color-scheme: light) {
+  :where(:root) {
+    --bg: #f4f5f3; --surface: #ffffff; --border: #dfe3e0; --border-bright: #888e8b;
+    --text: #121614; --text-dim: #545e59; --accent: #955700; --accent-dim: rgba(149,87,0,.12);
+    --ok: #1c7443; --warn: #7a5e00; --risk: #b0341e; --info: #1a6890;
+    --node-top: var(--surface); --lift: rgb(18 22 20 / .12); --halo: 22%;
+  }
+}
+
+/* Blueprint: IBM Plex, blue-black, a 24px line grid on the stage, r-1 everywhere; dark first */
+:where(:root[data-register="blueprint"]) {
+  --bg: #0d1520; --surface: #132031; --border: #22324a; --border-bright: #596b87;
+  --text: #e3ecf5; --text-dim: #92a6bb; --accent: #ffb547; --accent-dim: rgba(255,181,71,.14);
+  --ok: #6fd3a0; --warn: #e8d36a; --risk: #ff7b6b; --info: #7cc0f0;
+  --font-body: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, monospace;
+  --r-2: 4px;
+  --stage: linear-gradient(color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px) 0 0 / 24px 24px, linear-gradient(90deg, color-mix(in srgb, var(--border) 55%, transparent) 1px, transparent 1px) 0 0 / 24px 24px;
+}
+@media (prefers-color-scheme: light) {
+  :where(:root[data-register="blueprint"]) {
+    --bg: #f2f6fa; --surface: #ffffff; --border: #d6e0ea; --border-bright: #818f9e;
+    --text: #0f1a26; --text-dim: #4d6074; --accent: #a34700; --accent-dim: rgba(163,71,0,.12);
+    --ok: #1c7443; --warn: #776300; --risk: #b0341e; --info: #145f99;
+  }
+}
+
+/* Paper: Newsreader headings over Atkinson Hyperlegible, ink blue; light first */
+:where(:root[data-register="paper"]) {
+  --bg: #f7f7f4; --surface: #ffffff; --border: #e3e3dc; --border-bright: #8e8e8a;
+  --text: #17191c; --text-dim: #575c63; --accent: #2c4cd0; --accent-dim: rgba(44,76,208,.12);
+  --ok: #1d7443; --warn: #836000; --risk: #b3301d; --info: #1b6a94;
+  --node-top: var(--surface); --lift: rgb(18 22 20 / .12); --halo: 22%;
+  --font-body: 'Atkinson Hyperlegible Next', 'Segoe UI', sans-serif;
+  --font-mono: 'Atkinson Hyperlegible Mono', ui-monospace, monospace;
+  --font-display: 'Newsreader', Georgia, serif; --display-weight: 500;
+}
+@media (prefers-color-scheme: dark) {
+  :where(:root[data-register="paper"]) {
+    --bg: #111316; --surface: #181b1f; --border: #262a30; --border-bright: #62676c;
+    --text: #e8e8e3; --text-dim: #9ba1a9; --accent: #93a6ff; --accent-dim: rgba(147,166,255,.14);
+    --ok: #6cc492; --warn: #e3b94d; --risk: #f0806b; --info: #6fb8dc;
+    --node-top: color-mix(in srgb, var(--text) 7%, var(--surface)); --lift: rgb(0 0 0 / .45); --halo: 32%;
+  }
+}
+
+/* Editorial: Instrument Serif display over Instrument Sans; light first */
+:where(:root[data-register="editorial"]) {
+  --bg: #fbfbf9; --surface: #f1f0ec; --border: #e2e0da; --border-bright: #8c8a85;
+  --text: #111111; --text-dim: #5a5853; --accent: #cc3418; --accent-dim: rgba(204,52,24,.12);
+  --ok: #1d7443; --warn: #836000; --risk: #a01d48; --info: #1b6a94;
+  --node-top: var(--surface); --lift: rgb(18 22 20 / .12); --halo: 22%;
+  --font-body: 'Instrument Sans', 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, monospace;
+  --font-display: 'Instrument Serif', Georgia, serif; --display-weight: 400;
+}
+@media (prefers-color-scheme: dark) {
+  :where(:root[data-register="editorial"]) {
+    --bg: #0f0f0f; --surface: #1a1a19; --border: #2b2a28; --border-bright: #696763;
+    --text: #f2f0eb; --text-dim: #a4a19b; --accent: #ff6e50; --accent-dim: rgba(255,110,80,.14);
+    --ok: #6cc492; --warn: #e3b94d; --risk: #f57fa2; --info: #7cb8e8;
+    --node-top: color-mix(in srgb, var(--text) 7%, var(--surface)); --lift: rgb(0 0 0 / .45); --halo: 32%;
+  }
+}
+
+/* base */
+html { font-size: 17px; }
+* { box-sizing: border-box; margin: 0; }
+body { background: var(--bg); color: var(--text); font: 400 var(--t-body)/1.6 var(--font-body); text-wrap: pretty; font-kerning: normal; font-synthesis: none; -webkit-font-smoothing: antialiased; }
+::selection { background: var(--accent-dim); }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+main { max-width: 64rem; margin: 0 auto; padding: var(--s-8) var(--s-5); display: grid; grid-template-columns: minmax(0, 1fr); gap: var(--s-8); }
+section, figure, header { min-width: 0; }
+header { display: grid; gap: var(--s-4); }
+header + figure { margin-top: calc(var(--s-6) - var(--s-8)); }
+/* text-box trims to cap height and baseline, so gaps are measured from the letters, not the line box */
+h1, h2, .kpi .val { text-box: trim-both cap alphabetic; }
+h1 { font-size: var(--t-h1); line-height: 1.05; font-family: var(--font-display); font-weight: var(--display-weight); letter-spacing: -.035em; text-wrap: balance; max-width: 16ch; margin-bottom: var(--s-2); }
+h1 .num { color: var(--accent); font-variant-numeric: tabular-nums; }
+h2 { font-size: var(--t-h2); line-height: 1.2; font-family: var(--font-display); font-weight: var(--display-weight); letter-spacing: -.015em; text-wrap: balance; }
+/* section opener: hairline, mono label in columns 1–3, h2 in 4–12, on one baseline */
+.sec-head { display: grid; gap: var(--s-3) var(--s-5); align-items: baseline; border-top: 1px solid var(--border); padding-top: var(--s-5); margin-bottom: var(--s-6); }
+@media (min-width: 52rem) { .sec-head { grid-template-columns: 3fr 9fr; } }
+/* the other opener, a bare label above the h2, gets the same gaps, so the h2 never sits on the figure below */
+section > .ve-label:has(+ h2) { margin-bottom: var(--s-3); }
+section > h2 { margin-bottom: var(--s-6); }
+h3 { font-size: var(--t-body); line-height: 1.3; font-weight: 600; }
+.eyebrow { display: flex; align-items: center; gap: var(--s-2); font: 600 var(--t-label) var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--accent); }
+.eyebrow::before { content: ''; width: 1.25rem; height: 2px; background: currentColor; }
+.ve-label { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); }
+.caps { text-transform: uppercase; letter-spacing: .08em; font-weight: 600; color: var(--text); }
+.lead { font-size: var(--t-lead); line-height: 1.5; color: var(--text-dim); max-width: 44ch; }
+.lead b { color: var(--text); font-weight: 600; }
+.meta { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.unit { font-size: .5em; font-weight: 500; color: var(--text-dim); letter-spacing: 0; }
+code { font: .875em var(--font-mono); font-variant-ligatures: none; }
+/* prose by element, at zero specificity so a page's own rules win: the measure on a section's own text (a card or a table sets
+   its own), code blocks, bare lists, and the gaps between a section's blocks (text to text closer than a block, the line after
+   an h3 closest). The opener keeps its own gaps, so h2 gets none. */
+:where(main, section:not(.sources)) > :where(p, ul, ol) { max-width: 65ch; }
+:where(pre) { font: 500 var(--t-small)/1.55 var(--font-mono); font-variant-ligatures: none; background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-4); overflow-x: auto; }
+:where(pre) code { font: inherit; }
+:where(main :is(ul, ol):not([class])) { padding-left: 1.25rem; display: grid; gap: var(--s-2); }
+:where(section:not(.sources) > * + :not(h2)) { margin-top: var(--s-5); }
+:where(section:not(.sources) > :is(p, ul, ol) + :is(p, ul, ol)) { margin-top: var(--s-3); }
+:where(section:not(.sources) > h3 + *) { margin-top: var(--s-2); }
+
+/* section nav for 4+ sections: a sticky bar before <main>, aligned to its column; the links alone scroll sideways on a phone, and
+   kit.js marks the section in view */
+.ve-toc { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: var(--s-4); padding: 0 max(var(--s-5), (100% - 64rem) / 2 + var(--s-5)); background: var(--bg); border-bottom: 1px solid var(--border); }
+.ve-toc > div { display: flex; flex: 1; gap: var(--s-1); min-width: 0; padding: var(--s-2) 0; overflow-x: auto; scrollbar-width: none; mask-image: linear-gradient(90deg, #000 85%, transparent); }
+.ve-toc > div::-webkit-scrollbar { display: none; }
+.ve-toc a { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); text-decoration: none; padding: var(--s-2); border-radius: var(--r-1); white-space: nowrap; }
+.ve-toc a:hover { color: var(--text); }
+.ve-toc a[aria-current] { color: var(--text); background: var(--accent-dim); }
+.ve-toc .pos { font: 500 var(--t-label) var(--font-mono); color: var(--text-dim); font-variant-numeric: tabular-nums; white-space: nowrap; }
+:where(body:has(> .ve-toc) main > *) { scroll-margin-top: 4rem; }
+
+/* figure: the stage is a faint dot grid, so nodes read as objects placed on it */
+.frame { background: var(--stage), var(--bg); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-5); overflow-x: auto; }
+figcaption { font-size: var(--t-body); color: var(--text-dim); margin-top: var(--s-3); max-width: 65ch; }
+.fig-n { font: 600 var(--t-label) var(--font-mono); color: var(--text); margin-right: var(--s-2); }
+
+/* diagram kit (references/diagrams.md) */
+/* min-width keeps 14-unit labels >= 12px as rendered; narrow screens scroll the frame instead. kit/render.mjs sets --ve-min for a viewBox wider than 816. */
+.ve-svg { width: 100%; min-width: var(--ve-min, 700px); height: auto; display: block; font: 500 17px var(--font-body); }
+.ve-n .sh { fill: url(#ve-node); stroke: var(--border-bright); stroke-width: 1.5; filter: drop-shadow(0 6px 14px var(--lift)); transition: stroke var(--fast) var(--ease), opacity var(--med) var(--ease); }
+.ve-n .lid { fill: var(--node-top); }
+.ve-n.is-key .sh { fill: color-mix(in srgb, var(--accent) 11%, var(--surface)); stroke: var(--accent); stroke-width: 2; filter: drop-shadow(0 0 16px color-mix(in srgb, var(--accent) var(--halo), transparent)); }
+.ve-n text { fill: var(--text); text-anchor: middle; dominant-baseline: central; font-weight: 600; }
+.ve-n .sub { fill: var(--text-dim); font: 500 14px var(--font-mono); }
+.ve-n .gl { fill: none; stroke: var(--text-dim); stroke-width: 1.5; stroke-linejoin: round; }
+.ve-n .ve-kind { fill: var(--text-dim); font: 600 14px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+.ve-n.is-key .gl { stroke: var(--accent); }
+.ve-e { fill: none; stroke: var(--text-dim); stroke-width: 1.75; marker-end: url(#ve-ah); }
+.ve-e.is-hot { stroke: var(--accent); stroke-width: 2.75; filter: drop-shadow(0 0 5px color-mix(in srgb, var(--accent) 55%, transparent)); }
+.ve-e.is-async { stroke-dasharray: 6 5; }
+.ve-el { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; paint-order: stroke; stroke: var(--bg); stroke-width: 5px; stroke-linejoin: round; }
+.ve-el.l { text-anchor: end; } .ve-el.r { text-anchor: start; }
+/* a dashed boundary around a group, with a mono tag in its corner */
+.ve-bnd { fill: none; stroke: var(--border-bright); stroke-width: 1; stroke-dasharray: 6 5; }
+.ve-bnd-t { fill: var(--text-dim); font: 600 14px var(--font-mono); letter-spacing: .08em; text-transform: uppercase; }
+/* a plain mono label on a drawing (a note, a count); .key and .risk color it */
+.ve-tag { fill: var(--text-dim); font: 500 14px var(--font-mono); }
+.ve-tag.key { fill: var(--accent); } .ve-tag.risk { fill: var(--risk); }
+/* a slot in a queue or worker pool; .is-on fills it (.on is the stepper's) */
+.ve-slot { fill: var(--surface); stroke: var(--border-bright); stroke-width: 1.25; }
+.ve-slot.is-on { fill: var(--accent-dim); stroke: var(--accent); stroke-width: 1.75; }
+/* chart axes and ticks, and their labels */
+.ve-axis { fill: none; stroke: var(--border-bright); stroke-width: 1; }
+.ve-axis-t { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; font-variant-numeric: tabular-nums; }
+/* <ve-flow> on a page: its labels stay at 12 px or more, and a small drawing grows no more than 1.3× (kit/flow.mjs sets both) */
+.ve-svg.ve-flow { min-width: var(--min); max-width: var(--max); }
+/* flags on <ve-flow> parts: new, gone (an arrow also gets ✕) */
+.ve-n.is-new .sh { stroke: var(--ok); stroke-dasharray: 6 4; }
+.ve-n.is-gone .sh { stroke: var(--risk); stroke-dasharray: 3 4; opacity: .7; }
+.ve-n.is-gone text { text-decoration: line-through; }
+.ve-e.is-new { stroke: var(--ok); }
+.ve-e.is-gone { stroke: var(--risk); stroke-dasharray: 3 4; }
+/* a walked machine (references/machines.md): a state that can still reach a broken rule, the shortest way there, and the state
+   that breaks it; later rules win, so the breaking state stays red on the path */
+.ve-n.is-may-break .sh { stroke: var(--warn); } .ve-n.is-may-break:not(.is-key) .sh { fill: color-mix(in srgb, var(--warn) 10%, var(--surface)); }
+/* in a stepper the path lights only on its last step, the full picture; elsewhere it is always lit. :where() keeps the
+   condition from adding specificity, so .is-breaks below still wins and the breaking state stays red */
+.ve-n.is-bug-path:not(:where(.ve-steps:not(.is-full) *)) .sh, .ve-e.is-bug-path:not(:where(.ve-steps:not(.is-full) *)) { stroke: var(--accent); }
+.ve-n.is-breaks .sh, .ve-steps .ve-n.is-breaks.now > .sh { stroke: var(--risk); stroke-width: 2.5; stroke-dasharray: 6 3; }
+.ve-x { fill: var(--risk); font: 600 16px var(--font-mono); text-anchor: middle; dominant-baseline: central; paint-order: stroke; stroke: var(--surface); stroke-width: 5px; }
+/* <ve-stack>: one bar split in proportion; labels under their segments */
+.ve-stack rect { fill: color-mix(in srgb, var(--text) 9%, var(--surface)); stroke: var(--border-bright); stroke-width: 1.5; }
+.ve-stack rect.hot { fill: var(--accent-dim); stroke: var(--accent); }
+.ve-stack text { fill: var(--text-dim); font: 500 14px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+
+/* numbered callouts and edge numbers (references/diagrams.md): .now fills the current one; .q keeps an edge number quiet until its step */
+.ve-co circle { fill: var(--surface); stroke: var(--accent); stroke-width: 1.75; }
+.ve-co text { fill: var(--accent); font: 600 14px var(--font-mono); text-anchor: middle; dominant-baseline: central; }
+.ve-co.now circle { fill: var(--accent); } .ve-co.now text { fill: var(--surface); }
+.ve-co.q circle { stroke: var(--border-bright); } .ve-co.q text { fill: var(--text-dim); }
+.ve-co.q.now circle { fill: var(--accent); stroke: var(--accent); } .ve-co.q.now text { fill: var(--surface); }
+
+/* dimension lines (references/diagrams.md) */
+.ve-dim path { fill: none; stroke-width: 1; } .ve-dim .ext { stroke: var(--border-bright); } .ve-dim .ln { stroke: var(--text-dim); }
+.ve-dim text { fill: var(--text); font: 500 14px var(--font-mono); text-anchor: middle; }
+.ve-dim.is-key .ln { stroke: var(--accent); } .ve-dim.is-key text { fill: var(--accent); }
+
+/* flow dots: they travel under the nodes, so a dot enters a box and leaves from the far side */
+[data-flow] { fill: none; stroke: none; }
+.ve-dots circle { fill: var(--text); }
+.ve-dots .hit { fill: var(--accent); filter: drop-shadow(0 0 4px var(--accent)); }
+.ve-steps:not(.is-full) .ve-dots { display: none; }
+
+/* linked highlighting: same data-ref lights up together */
+/* Dim shapes, never text below 4.5:1: unlit labels drop to --text-dim instead of fading. */
+.ve-ref { text-decoration: underline dotted var(--text-dim) 1px; text-underline-offset: .22em; border-radius: var(--r-1); transition: background var(--fast) var(--ease); }
+.ve-ref.is-lit { background: var(--accent-dim); text-decoration-color: var(--accent); }
+svg [data-ref] { transition: opacity var(--med) var(--ease); }
+svg.has-lit path[data-ref]:not(.is-lit), svg.has-lit g[data-ref]:not(.is-lit) .sh { opacity: .25; }
+svg.has-lit g[data-ref]:not(.is-lit) text, svg.has-lit text[data-ref]:not(.is-lit) { fill: var(--text-dim); }
+.ve-n.is-lit .sh { stroke: var(--accent); }
+.ve-e.is-lit { stroke: var(--accent); }
+.ve-el.is-lit { fill: var(--text); }
+.case.is-lit { border-color: var(--accent); }
+
+/* stepper / scene player */
+/* Future steps: shapes stay as a faint outline; their labels are hidden, not faded to an unreadable gray. */
+.ve-steps [data-s] { transition: opacity var(--slow) var(--ease), stroke-dashoffset var(--slow) var(--ease); }
+.ve-steps [data-s]:not(.on) { opacity: .15; }
+.ve-steps g[data-s]:not(.on) text, .ve-steps text[data-s]:not(.on) { opacity: 0; }
+.ve-steps path[pathLength][data-s] { stroke-dasharray: 1; stroke-dashoffset: 1; }
+.ve-steps path[pathLength][data-s].on { stroke-dashoffset: 0; }
+.ve-steps .ve-n.now > .sh { stroke: var(--accent); }
+/* replay: the edges that fired light until the full picture, and each token runs its path once, after --d; edges and nodes still show the step without tokens */
+.ve-steps:not(.is-full) .ve-e.now { stroke: var(--accent); stroke-width: 2.75; }
+.ve-tok { fill: var(--accent); visibility: hidden; }
+.ve-steps:not(.is-still) .ve-tok.now { visibility: visible; animation: ve-run var(--dur, 900ms) ease-in-out var(--d, 0ms) both; }
+@keyframes ve-run { from { offset-distance: 0%; opacity: 0; } 10%, 75% { opacity: 1; } to { offset-distance: 100%; opacity: 0; } }
+/* a part that comes and goes (a queued job, a busy slot): shown only on the steps its data-s lists, arriving after --d */
+.ve-steps .ve-at { transition: opacity var(--med) var(--ease); }
+.ve-steps .ve-at:not(.now) { opacity: 0; }
+.ve-steps .ve-at.now { transition-delay: var(--d, 0ms); }
+/* a changing value: one text per step at one spot; the latest step's shows, swapped without a crossfade */
+/* zero-specificity parent, so a value inside a node, a dimension, or a stack keeps that part's own fill and font */
+:where(.ve-vals) text { fill: var(--text-dim); } :where(.ve-vals) .sub { font: 500 14px var(--font-mono); }
+.ve-steps .ve-vals text { transition: none; }
+.ve-vals text.on:has(~ text.on) { opacity: 0; }
+.ve-player { display: grid; grid-template-columns: auto auto minmax(0, 1fr) auto; align-items: center; gap: var(--s-2) var(--s-3); margin-top: var(--s-4); }
+.ve-cap { grid-column: 1 / -1; list-style: none; padding: 0; min-height: 3.2em; }
+.ve-cap li::before { content: attr(data-n); font: 600 var(--t-label) var(--font-mono); color: var(--accent); margin-right: var(--s-3); font-variant-numeric: tabular-nums; }
+.ve-player input { accent-color: var(--accent); min-width: 0; }
+button { font: 500 var(--t-small) var(--font-mono); color: var(--text); background: var(--surface); border: 1px solid var(--border-bright); border-radius: var(--r-1); padding: var(--s-2) var(--s-3); cursor: pointer; transition: border-color var(--fast) var(--ease); }
+button:hover, button:focus-visible { border-color: var(--accent); }
+
+/* KPI strip: one frame, cells split by hairlines, each number with its picture. Flex, so a wrapped last row stretches instead of leaving an empty gray cell. */
+.kpis { display: flex; flex-wrap: wrap; gap: 1px; background: var(--border); border: 1px solid var(--border); border-radius: var(--r-2); overflow: hidden; }
+.kpi { flex: 1 1 14rem; background: var(--surface); padding: var(--s-5); display: grid; grid-template-rows: auto auto 1fr; gap: var(--s-3); min-width: 0; }
+.kpi .val { font: 600 2.75rem/1 var(--font-body); font-variant-numeric: tabular-nums; letter-spacing: -.04em; }
+.ve-waffle { align-self: end; width: 11rem; height: auto; font: 500 13px var(--font-mono); overflow: visible; }
+.ve-waffle text { fill: var(--text-dim); dominant-baseline: central; }
+.ann { fill: none; stroke: var(--text-dim); stroke-width: 1; }
+.ve-bars { align-self: end; width: 100%; max-width: 16rem; height: auto; font: 500 13px var(--font-mono); overflow: visible; }
+.ve-bars text { fill: var(--text-dim); dominant-baseline: central; }
+.ve-bars rect { fill: var(--border-bright); transform-box: fill-box; transform-origin: left; transition: transform 900ms var(--ease) 150ms; }
+.ve-bars .hot { fill: var(--accent); }
+.ve-bars .hot + text { fill: var(--text); }
+
+/* small multiples: one mini diagram per case; the changed part takes the case's status color */
+.cases { display: grid; grid-template-columns: repeat(auto-fit, minmax(14.5rem, 1fr)); gap: var(--s-4); }
+.case { background: var(--surface); border: 1px solid var(--border); border-radius: var(--r-2); padding: var(--s-4); display: grid; gap: var(--s-3); align-content: start; transition: border-color var(--fast) var(--ease); }
+.case[data-st=ok] { --st: var(--ok); } .case[data-st=warn] { --st: var(--warn); } .case[data-st=risk] { --st: var(--risk); }
+.ve-mini { width: 100%; height: auto; font: 600 15px var(--font-body); }
+.ve-mini .ve-n .sh { filter: none; }
+/* a .cases column is never under 14.5rem, so a mini is ≥ 211 px and 14 units render ≥ 12.3 px */
+.ve-mini .ve-n .sub { font-size: 14px; }
+.ve-mini .is-st.ve-e { stroke: var(--st); stroke-width: 2.75; }
+.ve-mini .is-st .sh { stroke: var(--st); stroke-width: 2; }
+.ve-mini .is-st .sub { fill: var(--st); }
+.ve-mini .is-off { stroke-dasharray: 5 4; }
+.ve-mini .ve-e.is-off { opacity: .35; }
+
+/* chips */
+.chip { display: inline-flex; align-items: center; gap: var(--s-2); font: 600 var(--t-label) var(--font-mono); padding: 2px var(--s-2); border: 1px solid currentColor; border-radius: var(--r-1); white-space: nowrap; justify-self: start; }
+.chip::before { content: ''; width: .5rem; height: .5rem; background: currentColor; }
+.chip.ok { color: var(--ok); } .chip.ok::before { border-radius: 50%; }
+.chip.warn { color: var(--warn); } .chip.warn::before { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.chip.risk { color: var(--risk); }
+
+/* a table: a scroll frame, the header in the label style, row rules only; .num cells are right-aligned numbers */
+.ve-table { overflow-x: auto; border: 1px solid var(--border); border-radius: var(--r-2); }
+.ve-table table { border-collapse: collapse; width: 100%; font-size: var(--t-body); font-variant-numeric: tabular-nums; }
+.ve-table th, .ve-table td { padding: var(--s-3) var(--s-4); text-align: left; vertical-align: top; border-bottom: 1px solid var(--border); }
+.ve-table thead th { background: var(--surface); font: 600 var(--t-label)/1.3 var(--font-mono); letter-spacing: .08em; text-transform: uppercase; color: var(--text-dim); }
+.ve-table tbody th { font-weight: 600; }
+.ve-table tbody tr:last-child > * { border-bottom: 0; }
+.ve-table .num { text-align: right; font-family: var(--font-mono); }
+.ve-table td small { display: block; color: var(--text-dim); font-size: var(--t-small); }
+
+details { border-top: 1px solid var(--border); padding-top: var(--s-4); color: var(--text-dim); font-size: var(--t-body); }
+summary { cursor: pointer; font: 500 var(--t-label) var(--font-mono); margin-bottom: var(--s-2); }
+/* sources stay visible: readers check them without hunting for a toggle */
+.sources { border-top: 1px solid var(--border); padding-top: var(--s-4); display: grid; gap: var(--s-2); }
+
+/* entrance: blocks rise in once; bars grow as their block arrives (JS adds .js-motion only when motion is allowed) */
+.js-motion main > * { transition: opacity var(--slow) var(--ease), transform var(--slow) var(--ease); }
+.js-motion main > :not(.in) { opacity: 0; transform: translateY(1rem); }
+.js-motion main > :not(.in) .ve-bars rect { transform: scaleX(0); }
+@media (prefers-reduced-motion: reduce) { * { transition: none !important; } .ve-tok { display: none; } }
+
+@media print {
+  /* Print uses the register's light foregrounds on white, every step fully drawn, and no effects. */
+  :where(:root) { --bg: #fff; --surface: #fff; --border: #dfe3e0; --border-bright: #888e8b; --text: #121614; --text-dim: #545e59; --accent: #955700; --ok: #1c7443; --warn: #7a5e00; --risk: #b0341e; --info: #1a6890; --node-top: #fff; }
+  :where(:root[data-register="blueprint"]) { --border: #d6e0ea; --border-bright: #818f9e; --text: #0f1a26; --text-dim: #4d6074; --accent: #a34700; --warn: #776300; --info: #145f99; }
+  :where(:root[data-register="paper"]) { --border: #e3e3dc; --border-bright: #8e8e8a; --text: #17191c; --text-dim: #575c63; --accent: #2c4cd0; --ok: #1d7443; --warn: #836000; --risk: #b3301d; --info: #1b6a94; }
+  :where(:root[data-register="editorial"]) { --border: #e2e0da; --border-bright: #8c8a85; --text: #111111; --text-dim: #5a5853; --accent: #cc3418; --ok: #1d7443; --warn: #836000; --risk: #a01d48; --info: #1b6a94; }
+  .ve-player button, .ve-player input, .ve-dots { display: none; }
+  .ve-toc { display: none; }
+  .frame { overflow: visible; background: #fff; } .ve-svg, .ve-svg.ve-flow { min-width: 0; }
+  .frame, .case, .kpi { break-inside: avoid; } h2 { break-after: avoid; }
+  svg * { filter: none !important; }
+  .js-motion main > * { opacity: 1 !important; transform: none !important; }
+  .js-motion .ve-bars rect { transform: none !important; }
+  .ve-steps [data-s]:not(.on), .ve-steps g[data-s]:not(.on) text, .ve-steps text[data-s]:not(.on) { opacity: 1; }
+  .ve-steps .ve-at:not(.now) { opacity: 0; }
+  .ve-steps path[pathLength][data-s] { stroke-dashoffset: 0; }
+  .ve-tok, .ve-vals text:not(:last-child) { display: none; }
+}

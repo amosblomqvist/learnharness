@@ -28,6 +28,15 @@ function withPayload(test: (fixture: {
 		write(path.join("public", "asset.txt"));
 		write(path.join(STANDALONE, PROMPT));
 		write(path.join(STANDALONE, "src", "agent", "prompts", "teacher", "20-teaching.md"));
+		for (const asset of [
+			path.join("src", "agent", "explainer", "render-worker.mjs"),
+			path.join("src", "agent", "explainer-kit", "kit", "render.mjs"),
+			path.join("src", "agent", "explainer-kit", "kit", "kit.css"),
+			path.join("src", "agent", "explainer-kit", "kit", "reply.js"),
+			path.join("src", "agent", "explainer-kit", "SKILL.md"),
+			path.join("src", "agent", "explainer-kit", "LICENSE"),
+			path.join("src", "agent", "explainer-kit", "kit", "vendor", "PELE-LICENSE"),
+		]) write(path.join(STANDALONE, asset));
 		test({ root, write, run: () => spawnSync(process.execPath, [path.join(root, "scripts", "build-server.mjs")], {
 			cwd: root, encoding: "utf8", timeout: 10_000,
 		}) });

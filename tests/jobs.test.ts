@@ -405,6 +405,17 @@ describe("steer helpers (contracts.ts)", () => {
 		assert.equal(isSubagentFailure("visual", { ...visual, svg: "" }), true);
 	});
 
+	it("explainer results and aborts use explainer-specific outcomes", () => {
+		const job = { id: "explainer-job", kind: "explainer" as const, toolCallId: "call-explainer" };
+		const success = { title: "T", html: "<p>x</p>" };
+		const failure = { title: "T", html: "", notes: "FAILED: boom" };
+		assert.equal(isSubagentFailure("explainer", success), false);
+		assert.equal(isSubagentFailure("explainer", failure), true);
+		assert.equal(buildSubagentSteer(job, success).content, "The explainer \"T\" is written and rendered in the lesson as a card the learner can expand to full screen or download. Writer notes: (none).\nTeach with it — point the learner at its sections and diagrams by name.");
+		assert.equal(buildSubagentSteer(job, failure).content, "The explainer \"T\" could not be made: FAILED: boom. Fall back to prose or mermaid; if the brief was the problem, re-call explainer with a tighter one.");
+		assert.equal(buildAbortSteer(job).content, "The explainer job was aborted by the learner — no explainer is coming. Acknowledge it in one line and teach the topic in prose instead (a re-dispatch is fine if the learner wants it).");
+	});
+
 	it("steerDelivered: matches on the deterministic steer id (any steer kind)", () => {
 		const steer = buildSubagentSteer({ id: "job_y", kind: "demo", toolCallId: "c" }, demo);
 		assert.equal(steer.id, "steer_job_y");

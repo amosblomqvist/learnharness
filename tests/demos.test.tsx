@@ -49,7 +49,7 @@ import { DispatchCard } from "../components/artifacts/dispatch-card.tsx";
 import { JobCard, PdfJobCard } from "../components/artifacts/job-card.tsx";
 import { ToolCallCard } from "../components/artifacts/tool-call-card.tsx";
 import { JobsContext } from "../components/jobs-context.ts";
-import { demoInputSchema, jobTools, pdfInputSchema, visualInputSchema } from "../src/agent/tools/jobs.ts";
+import { demoInputSchema, explainerInputSchema, jobTools, pdfInputSchema, visualInputSchema } from "../src/agent/tools/jobs.ts";
 import { runDemoBuilder } from "../src/agent/subagents/demo-builder.ts";
 import { headlessOverride, type DemoRunResult, type HeadlessApi } from "../src/agent/subagents/headless.ts";
 import { createJobRunner, demoModelOverride, visualModelOverride } from "../src/agent/subagents/runner.ts";
@@ -1000,12 +1000,15 @@ describe("tool + renderer registry wiring", () => {
 	it("demo and visual are SERVER-EXECUTED dispatch tools with the contract schemas", () => {
 		const { runner } = testRunner();
 		const tools = jobTools({ chatId: "chat_registry", jobStore, spawn: (job) => void runner.runJob(job.id) });
-		assert.deepEqual(Object.keys(tools).sort(), ["demo", "pdf", "research", "visual"]);
-		for (const name of ["demo", "visual", "research", "pdf"] as const) {
+		assert.deepEqual(Object.keys(tools).sort(), ["demo", "explainer", "pdf", "research", "visual"]);
+		for (const name of ["demo", "explainer", "visual", "research", "pdf"] as const) {
 			assert.equal(typeof (tools[name] as { execute?: unknown }).execute, "function", `${name} executes server-side — fire-and-forget ack per THE ASYNC PROTOCOL`);
 		}
 		assert.equal(Value.Check(demoInputSchema, { title: "T", brief: "b" }), true);
 		assert.equal(Value.Check(demoInputSchema, { brief: "b" }), false, "demo requires a title");
+		assert.equal(Value.Check(explainerInputSchema, { title: "T", brief: "b" }), true);
+		assert.equal(Value.Check(explainerInputSchema, { brief: "b" }), false, "explainer requires a title");
+		assert.equal(Value.Check(explainerInputSchema, { title: "T" }), false, "explainer requires a brief");
 		assert.equal(Value.Check(visualInputSchema, { brief: "b" }), true);
 		assert.equal(Value.Check(visualInputSchema, {}), false, "visual requires a brief");
 		assert.equal(Value.Check(pdfInputSchema, { path: "/tmp/doc.pdf", question: "q" }), true);

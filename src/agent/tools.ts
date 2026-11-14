@@ -15,7 +15,7 @@ import {
 import { filterEnabledTools, type EnabledTools } from "../core/pending.ts";
 import type { JobRecord } from "../core/contracts.ts";
 import type { JobStore } from "../core/ports.ts";
-import { jobTools, type DemoInput, type PdfInput, type ResearchInput, type VisualInput } from "./tools/jobs.ts";
+import { jobTools, type DemoInput, type ExplainerInput, type PdfInput, type ResearchInput, type VisualInput } from "./tools/jobs.ts";
 import { planTools, type PlanToolContext } from "./tools/plan.ts";
 import { probeDoneTool, type ProbeDoneContext } from "./tools/probe.ts";
 import { proberGraphTools } from "./tools/graph.ts";
@@ -268,7 +268,7 @@ export interface ProberToolContext extends ProbeDoneContext {
 	/** Creates the job record (deduped by toolCallId). */
 	jobStore: JobStore;
 	/** Fire the background runner for a freshly created job. */
-	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
+	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput | ExplainerInput) => void;
 	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
 	/** The prober's graph-map reader (wave 7): present = the two map tools
@@ -398,7 +398,7 @@ export interface TeacherToolContext extends PlanToolContext {
 	/** Fire the background runner for a freshly created job. The tool input
 	 *  rides along — the spawn fires mid-stream, before the tool part is
 	 *  persisted to the transcript (a transcript scan would race it). */
-	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
+	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput | ExplainerInput) => void;
 	/** Retained search-status seam; research dispatch is available keylessly. */
 	searchAvailable?: () => boolean;
 }

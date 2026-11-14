@@ -50,7 +50,7 @@ import {
 } from "@/src/core";
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
-import { MermaidOverlay, SessionMermaidContext } from "@/components/session-overlay";
+import { MermaidOverlay, PageOverlay, SessionMermaidContext } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
@@ -379,7 +379,8 @@ export function Chat({
 		const onAbort = () => {
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
-				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
+				mermaidFocus:
+						mermaidFocusRef.current !== null || figureFocusRef.current !== null || pageFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
 				pending: pendingRef.current !== null,
@@ -898,6 +899,8 @@ export function Chat({
 	// overlay shell as mermaid, but carrying the raw svg + the card's invert
 	// state so the fullscreen view stays faithful to the toggled card.
 	const [figureFocus, setFigureFocus] = useState<{ svg: string; inverted: boolean } | null>(null);
+	// Explainer page focus: the explainer card's fullscreen button.
+	const [pageFocus, setPageFocus] = useState<{ html: string; title: string } | null>(null);
 
 	// Overlay mirrors for the layered-Esc gate (owner 2026-10-04): the
 	// lh:kbd-abort-turn handler reads these at EVENT time — declared here
@@ -909,6 +912,9 @@ export function Chat({
 	// document level by the overlay itself); the window chain must stay out.
 	const figureFocusRef = useRef(figureFocus);
 	figureFocusRef.current = figureFocus;
+	// The explainer page focus rides the same layer (same Esc claim).
+	const pageFocusRef = useRef(pageFocus);
+	pageFocusRef.current = pageFocus;
 	const planOpenRef = useRef(planOpen);
 	planOpenRef.current = planOpen;
 	const setupOpenRef = useRef(setupOpen);
@@ -1268,6 +1274,7 @@ export function Chat({
 			value={{
 				openMermaid: setMermaidFocus,
 				openFigure: (svg, inverted) => setFigureFocus({ svg, inverted }),
+				openPage: (html, title) => setPageFocus({ html, title }),
 			}}
 		>
 		<JobsContext.Provider value={jobs}>
@@ -1789,6 +1796,9 @@ export function Chat({
 						inverted={figureFocus.inverted}
 						onClose={() => setFigureFocus(null)}
 					/>
+				)}
+				{pageFocus !== null && (
+					<PageOverlay html={pageFocus.html} title={pageFocus.title} onClose={() => setPageFocus(null)} />
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
 				<AbortTurnDialog mode={abortAsk} onClose={() => setAbortAsk(null)} onConfirm={confirmAbort} busy={busy} />
