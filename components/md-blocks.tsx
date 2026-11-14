@@ -378,11 +378,115 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 
 // ─── Tables (the Streamdown `table` override) ────────────────────────────────
 
+type HastElement = NonNullable<ExtraProps["node"]>;
+
+/** Literal cell text, escaped so a pasted copy reads it back as text: no
+ *  emphasis, links, math, entities or HTML out of what was plain. `]` stays
+ *  bare — `\[…\]` is a display-math delimiter here, and an escaped `[` is
+ *  already enough to keep `[x](y)` from becoming a link. */
+function escapeMarkdownText(value: string): string {
+	return value
+		.replace(/[\\`*~[<>$]/g, "\\$&")
+		.replace(/(^|[^\p{L}\p{N}])_|_(?=$|[^\p{L}\p{N}])/gu, (match) => match.replace("_", "\\_"))
+		.replace(/&(?=#?[0-9A-Za-z]+;)/g, "\\&");
+}
+
+/** A link or image destination: bare when that parses back unchanged, else
+ *  the angle-bracket form (which allows spaces and parentheses). */
+function markdownDestination(url: string): string {
+	return /^[^\s()<>\\]*$/.test(url) ? url : `<${url.replace(/[\\<>]/g, "\\$&")}>`;
+}
+
+function markdownTitle(title: unknown): string {
+	return typeof title === "string" && title ? ` "${title.replace(/["\\]/g, "\\$&")}"` : "";
+}
+
+/** The corner copy for tables: the table's hast node back to GFM Markdown,
+ *  keeping inline code, emphasis, strikethrough, links, images, footnote
+ *  references, math and alignment; plain text is escaped so it stays plain.
+ *  Elements with no Markdown form (inline HTML such as kbd) keep their text.
+ *  Not the DOM: rendered links lose their href (link-safety buttons) and
+ *  KaTeX adds a visual duplicate of each formula. */
+export function tableNodeToMarkdown(node: HastElement): string {
+	const elements = (element: HastElement) => element.children.filter((child): child is HastElement => child.type === "element");
+	const text = (element: HastElement): string => element.children
+		.map(child => child.type === "text" ? child.value : child.type === "element" ? text(child) : "").join("");
+	const tex = (element: HastElement): string | undefined => {
+		if (element.tagName === "annotation" && element.properties?.encoding === "application/x-tex") return text(element);
+		for (const child of elements(element)) {
+			const source = tex(child);
+			if (source !== undefined) return source;
+		}
+		return undefined;
+	};
+	const inline = (element: HastElement): string => {
+		const classes = String(element.properties?.className ?? "").split(/[,\s]+/);
+		if (classes.includes("katex-html")) return "";
+		if (classes.includes("katex")) {
+			const source = tex(element);
+			if (source !== undefined) return `$${source}$`;
+		}
+		if (element.tagName === "code") {
+			const value = text(element).replace(/\r\n?|\n/g, " ");
+			const fence = "`".repeat(Math.max(0, ...(value.match(/`+/g) ?? []).map(run => run.length)) + 1);
+			const pad = /^`|`$/.test(value) || (/^ .* $/.test(value) && /[^ ]/.test(value));
+			return `${fence}${pad ? " " : ""}${value}${pad ? " " : ""}${fence}`;
+		}
+		if (element.tagName === "img") {
+			const src = element.properties?.src;
+			const alt = escapeMarkdownText(String(element.properties?.alt ?? ""));
+			return typeof src === "string" && src ? `![${alt}](${markdownDestination(src)}${markdownTitle(element.properties?.title)})` : alt;
+		}
+		if (element.tagName === "a" && element.properties?.dataFootnoteRef !== undefined) {
+			// GFM footnote reference (`[^label]`): the label is the id after
+			// the generated `#…fn-` prefix of its href.
+			const label = /fn-(.+)$/.exec(String(element.properties?.href ?? ""))?.[1];
+			if (label) return `[^${decodeURIComponent(label)}]`;
+		}
+		const content = element.children.map(child =>
+			child.type === "text" ? escapeMarkdownText(child.value) : child.type === "element" ? inline(child) : ""
+		).join("");
+		switch (element.tagName) {
+			// An empty mark would paste as stray delimiters (`****`), not as
+			// an empty emphasis, so it contributes nothing.
+			case "strong": return content ? `**${content}**` : "";
+			case "em": return content ? `*${content}*` : "";
+			case "del": return content ? `~~${content}~~` : "";
+			case "a": {
+				const href = element.properties?.href;
+				return typeof href === "string" && href ? `[${content}](${markdownDestination(href)}${markdownTitle(element.properties?.title)})` : content;
+			}
+			case "br": return "<br>";
+			default: return content;
+		}
+	};
+	const rows = elements(node).flatMap(child =>
+		child.tagName === "tr" ? [child] :
+		/^(thead|tbody|tfoot)$/.test(child.tagName) ? elements(child).filter(row => row.tagName === "tr") : []
+	).map(row => elements(row).filter(cell => cell.tagName === "th" || cell.tagName === "td"));
+	const header = rows[0];
+	if (!header?.length) return "";
+	const alignment = (cell: HastElement | undefined): string => {
+		const value = String(cell?.properties?.align ?? "");
+		const style = String(cell?.properties?.style ?? "");
+		return (value || /(?:^|;)\s*text-align\s*:\s*(left|center|right)\b/i.exec(style)?.[1] || "").toLowerCase();
+	};
+	const separator = header.map((_, index) => {
+		const align = rows.map(row => alignment(row[index])).find(Boolean);
+		return align === "left" ? ":---" : align === "center" ? ":---:" : align === "right" ? "---:" : "---";
+	});
+	const line = (cells: string[]) => `| ${cells.join(" | ")} |`;
+	const renderRow = (cells: HastElement[]) => line(cells.map(cell =>
+		inline(cell).replace(/\r\n?|\n/g, " ").replace(/\|/g, "\\|").trim()
+	));
+	return [renderRow(header), line(separator), ...rows.slice(1).map(renderRow)].join("\n");
+}
+
 /** A plain PROSE table: no wrapper box, no button rows — just the table
  *  (streamdown's inner cells keep their padding/typography; the hairline
  *  rules live in globals.css on the data-streamdown attributes) inside a
  *  horizontal-scroller for wide ones, with the corner copy. The copy
- *  serializes the REAL DOM table (the library's own extractor → Markdown). */
+ *  serializes the semantic tree, with the library's DOM extractor as fallback. */
 export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const { children, node, ...rest } = props;
@@ -397,7 +501,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 				// corner is fixed to the wrapper, not the scrolling table).
 				className="absolute top-1 right-1 z-10"
 				label="Copy table"
-				getText={() => (ref.current ? tableDataToMarkdown(extractTableDataFromElement(ref.current)) : "")}
+				getText={() => node ? tableNodeToMarkdown(node) : (ref.current ? tableDataToMarkdown(extractTableDataFromElement(ref.current)) : "")}
 			/>}
 			<div className="overflow-x-auto">
 				<table

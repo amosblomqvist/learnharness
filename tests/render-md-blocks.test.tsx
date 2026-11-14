@@ -21,7 +21,7 @@ import { MessageResponse, ToolContentResponse } from "../components/ai-elements/
 import { ThinkingBlock, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { MermaidOverlay, SessionMermaidContext, chartSize } from "../components/session-overlay.tsx";
 import { PlanPopup } from "../components/plan-block.tsx";
-import { MarkdownCode, codeSource } from "../components/md-blocks.tsx";
+import { MarkdownCode, codeSource, mdComponents, tableNodeToMarkdown } from "../components/md-blocks.tsx";
 
 function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
@@ -78,6 +78,200 @@ describe("md-blocks — mermaid", () => {
 });
 
 describe("md-blocks — tables", () => {
+	type TableNode = Parameters<typeof tableNodeToMarkdown>[0];
+	const text = (value: string): TableNode["children"][number] => ({ type: "text", value });
+	const element = (tagName: string, children: TableNode["children"], properties: TableNode["properties"] = {}): TableNode => ({
+		type: "element", tagName, properties, children,
+	});
+	const cellTable = (children: TableNode["children"]) => element("table", [
+		element("thead", [element("tr", [element("th", [text("Value")])])]),
+		element("tbody", [element("tr", [element("td", children)])]),
+	]);
+	/** The hast node the table override receives when `md` goes through the
+	 *  real message pipeline — how a pasted copy is read back. */
+	const parseTable = (md: string): TableNode => {
+		const original = mdComponents.table as (props: React.ComponentProps<"table"> & { node?: TableNode }) => React.ReactNode;
+		let captured: TableNode | undefined;
+		mdComponents.table = ((props: React.ComponentProps<"table"> & { node?: TableNode }) => {
+			captured = props.node;
+			return original(props);
+		}) as typeof mdComponents.table;
+		try {
+			render(md);
+		} finally {
+			mdComponents.table = original as typeof mdComponents.table;
+		}
+		assert.ok(captured, "the table override receives the hast node");
+		return captured;
+	};
+	const firstCell = (table: TableNode): TableNode => {
+		const cells: TableNode[] = [];
+		const walk = (node: TableNode) => node.children.forEach(child => {
+			if (child.type !== "element") return;
+			if (child.tagName === "td") cells.push(child);
+			else walk(child);
+		});
+		walk(table);
+		assert.ok(cells[0], "the table has a body cell");
+		return cells[0];
+	};
+	const textOf = (node: TableNode): string => node.children.map(child => child.type === "text" ? child.value : child.type === "element" ? textOf(child) : "").join("");
+	const find = (node: TableNode, tagName: string): TableNode[] => node.children.flatMap(child =>
+		child.type !== "element" ? [] : child.tagName === tagName ? [child, ...find(child, tagName)] : find(child, tagName));
+
+	it("copies the issue example as markdown that renders with its inline formatting intact", () => {
+		const node = element("table", [
+			element("thead", [element("tr", [
+				element("th", [text("Expression")]),
+				element("th", [text("New objects")]),
+				element("th", [text("Shared with the original")]),
+			])]),
+			element("tbody", [element("tr", [
+				element("td", [
+					element("code", [text("a.copy()")]), text(", "),
+					element("code", [text("a[:]")]), text(", "),
+					element("code", [text("list(a)")]),
+				]),
+				element("td", [text("the "), element("strong", [text("outer list")])]),
+				element("td", [element("em", [text("every")]), text(" element")]),
+			])]),
+		]);
+		const copied = tableNodeToMarkdown(node);
+		assert.equal(copied, [
+			"| Expression | New objects | Shared with the original |",
+			"| --- | --- | --- |",
+			"| `a.copy()`, `a[:]`, `list(a)` | the **outer list** | *every* element |",
+		].join("\n"));
+		const { document } = parseHTML(render(copied));
+		assert.deepEqual(Array.from(document.querySelectorAll("td code"), code => code.textContent), ["a.copy()", "a[:]", "list(a)"]);
+		assert.equal(document.querySelector("td strong")?.textContent, "outer list");
+		assert.equal(document.querySelector("td em")?.textContent, "every");
+	});
+
+	it("copies a table rendered by the real message pipeline back to its markdown source", () => {
+		const source = [
+			"| Expression | New objects | Shared with the original |",
+			"| :--- | :---: | ---: |",
+			"| `a.copy()`, `a[:]`, `list(a)` | the **outer list** | *every* ~~old~~ element |",
+			"| $x^2$ | [Guide](https://example.invalid/guide) | a\\|b |",
+		].join("\n");
+		assert.equal(tableNodeToMarkdown(parseTable(source)), source);
+	});
+
+	it("keeps link destinations, nested formatting, deletion and breaks while escaping cell pipes", () => {
+		const node = cellTable([
+			element("a", [element("strong", [text("Guide")])], { href: "https://example.invalid/guide" }),
+			text(" "), element("a", [text("no href")]),
+			text(" "), element("del", [text("old")]),
+			element("br", []), element("span", [text("a|b\nnext")]),
+		]);
+		assert.equal(tableNodeToMarkdown(node), [
+			"| Value |",
+			"| --- |",
+			"| [**Guide**](https://example.invalid/guide) no href ~~old~~<br>a\\|b next |",
+		].join("\n"));
+	});
+
+	it("uses safe code fences and padding, including pipes and newlines in code", () => {
+		const cases: [source: string, expected: string][] = [
+			["a|b", "`a\\|b`"],
+			["`x`", "`` `x` ``"],
+			["a``b", "```a``b```"],
+			[" x ", "`  x  `"],
+			["  ", "`  `"],
+			["a\nb", "`a b`"],
+		];
+		for (const [source, expected] of cases) {
+			const copied = tableNodeToMarkdown(cellTable([element("code", [text(source)])]));
+			assert.equal(copied, `| Value |\n| --- |\n| ${expected} |`);
+			// Read back, the span holds the original code (a newline in a
+			// cell can only come back as the space it was copied as).
+			const [code, ...rest] = find(firstCell(parseTable(copied)), "code");
+			assert.ok(code && rest.length === 0, `one code span for ${JSON.stringify(source)}`);
+			assert.equal(textOf(code), source.replace(/\n/g, " "));
+		}
+	});
+
+	it("escapes literal cell text so markdown punctuation and HTML-looking text paste back as text", () => {
+		const source = "| A |\n| --- |\n| **a \\*b\\* c** and \\<span> x\\_y \\$5 snake_case \\&amp; Q&A \\[x](y) [y] \\~~z~~ a\\\\b |";
+		const original = parseTable(source);
+		const copied = tableNodeToMarkdown(original);
+		assert.ok(!copied.includes("\\]"), "no `\\[…\\]`, which would read back as display math");
+		const reread = parseTable(copied);
+		const [before, after] = [firstCell(original), firstCell(reread)];
+		assert.equal(textOf(after), textOf(before), "the pasted copy reads back as the same text");
+		assert.equal(textOf(before), "a *b* c and <span> x_y $5 snake_case &amp; Q&A [x](y) [y] ~~z~~ a\\b");
+		assert.deepEqual(find(after, "strong").map(textOf), ["a *b* c"], "only the real bold is bold");
+		for (const tag of ["em", "a", "del", "span", "code"]) assert.equal(find(after, tag).length, 0, `no ${tag} made out of literal text`);
+		assert.equal(tableNodeToMarkdown(reread), copied, "copying the pasted copy is stable");
+	});
+
+	it("writes link destinations that survive parentheses, spaces and titles when read back", () => {
+		const source = '| A |\n| --- |\n| [Guide](<https://example.invalid/a)b>) [Two](<https://example.invalid/a b>) [T](https://example.invalid/x "Ti\\"tle") |';
+		const copied = tableNodeToMarkdown(parseTable(source));
+		assert.ok(copied.includes("[Guide](<https://example.invalid/a)b>)"), copied);
+		const links = find(firstCell(parseTable(copied)), "a");
+		assert.deepEqual(links.map(link => [link.properties.href, textOf(link)]), [
+			["https://example.invalid/a)b", "Guide"],
+			["https://example.invalid/a%20b", "Two"],
+			["https://example.invalid/x", "T"],
+		]);
+		assert.equal(links[2]?.properties.title, 'Ti"tle');
+	});
+
+	it("copies footnote references, images and inline HTML, and drops empty marks instead of leaving stray delimiters", () => {
+		const footnote = tableNodeToMarkdown(parseTable("| A |\n| --- |\n| note[^n1] <kbd>K</kbd> |\n\n[^n1]: The note."));
+		assert.equal(footnote, "| A |\n| --- |\n| note[^n1] K |", "a footnote reference keeps its label; HTML without a Markdown form keeps its text");
+		assert.equal(
+			tableNodeToMarkdown(cellTable([element("img", [], { src: "https://example.invalid/a b.png", alt: "a *chart*", title: "T" })])),
+			"| Value |\n| --- |\n| ![a \\*chart\\*](<https://example.invalid/a b.png> \"T\") |",
+		);
+		assert.equal(tableNodeToMarkdown(cellTable([element("img", [], { alt: "no source" })])), "| Value |\n| --- |\n| no source |");
+		assert.equal(
+			tableNodeToMarkdown(cellTable([text("a"), element("strong", []), element("em", []), element("del", []), text("b")])),
+			"| Value |\n| --- |\n| ab |",
+		);
+	});
+
+	it("copies KaTeX annotations once, including display wrappers and TeX pipes", () => {
+		const katex = element("span", [
+			element("span", [element("math", [element("semantics", [
+				element("mi", [text("visual mathml")]),
+				element("annotation", [text("x|y")], { encoding: "application/x-tex" }),
+			])])], { className: ["katex-mathml"] }),
+			element("span", [text("visual duplicate")], { className: ["katex-html"] }),
+		], { className: ["katex"] });
+		const node = cellTable([katex, text(" "), element("span", [katex], { className: ["katex-display"] })]);
+		assert.equal(tableNodeToMarkdown(node), "| Value |\n| --- |\n| $x\\|y$ $x\\|y$ |");
+	});
+
+	it("preserves alignment from header properties and header or body styles", () => {
+		const node = element("table", [
+			element("thead", [element("tr", [
+				element("th", [text("L")], { align: "left" }),
+				element("th", [text("C")], { style: "color: red; text-align: center;" }),
+				element("th", [text("R")]),
+				element("th", [text("N")]),
+			])]),
+			element("tbody", [element("tr", [
+				element("td", [text("1")]),
+				element("td", [text("2")]),
+				element("td", [text("3")], { style: "text-align: right" }),
+				element("td", [text("4")]),
+			])]),
+		]);
+		assert.equal(tableNodeToMarkdown(node), [
+			"| L | C | R | N |",
+			"| :--- | :---: | ---: | --- |",
+			"| 1 | 2 | 3 | 4 |",
+		].join("\n"));
+	});
+
+	it("handles empty tables and rows without section wrappers", () => {
+		assert.equal(tableNodeToMarkdown(element("table", [])), "");
+		assert.equal(tableNodeToMarkdown(element("table", [element("tr", [element("th", [text("A")])])])), "| A |\n| --- |");
+	});
+
 	it("sizes tables to fit the column or their minimum content, rather than always taking max-content width", () => {
 		const css = readFileSync("app/globals.css", "utf8");
 		const rule = css.match(/\[data-streamdown="table"\]\s*\{([^}]+)\}/)?.[1]?.replace(/\/\*[\s\S]*?\*\//g, "");
