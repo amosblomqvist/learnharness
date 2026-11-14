@@ -204,6 +204,50 @@ describe("send_to_user transcript projection", () => {
 		assert.deepEqual(prose(live), []);
 		assert.equal(live[0]!.parts[1]!.state, "output-error");
 	});
+
+	it("folds a closing text-only restatement into reasoning, live and after reload", () => {
+		const messages = [
+			assistant([outputCall("The probe is finished.")]), ack(),
+			assistant([fauxText("The probe is finished, and here is a reworded copy.")], "a2"),
+		];
+		const before = structuredClone(messages);
+		const view = projectView(messages);
+		assert.deepEqual(prose(view), ["The probe is finished."]);
+		assert.deepEqual(view[0]!.parts.filter((p) => p.type === "reasoning").map((p) => [p.id, p.text]), [["a2-r0", "The probe is finished, and here is a reworded copy."]]);
+		assert.deepEqual(messages, before, "projection never rewrites native content");
+		assert.deepEqual(projectView(JSON.parse(JSON.stringify(messages))), view);
+		const live = projectView(messages, { inFlight: true, streamingIds: new Set(["a2"]), executions: new Map() });
+		assert.deepEqual(prose(live), ["The probe is finished."]);
+	});
+
+	it("folds after other tools in the same response, but only the closing text-only response", () => {
+		const messages = [
+			assistant([fauxToolCall("plan_init", {}, { id: "plan-1" }), outputCall("The plan.")]),
+			{ id: "result-plan-1", role: "toolResult", toolCallId: "plan-1", toolName: "plan_init", content: [], details: null, isError: false, timestamp: 1 } as LhMessage,
+			ack(),
+			assistant([fauxText("The plan, again.")], "a2"),
+		];
+		assert.deepEqual(prose(projectView(messages)), ["The plan."]);
+		const withTool = [assistant([outputCall("The plan.")]), ack(), assistant([fauxText("Narration."), fauxToolCall("research", {}, { id: "r-1" })], "a2")];
+		assert.deepEqual(prose(projectView(withTool)), ["The plan.", "Narration."], "a response that also calls a tool is not a closing restatement");
+	});
+
+	it("keeps text that is not a restatement of a delivered message", () => {
+		const restated = (messages: LhMessage[]) => prose(projectView(messages));
+		const closing = assistant([fauxText("Closing text.")], "a2");
+		assert.deepEqual(restated([assistant([fauxText("Plain teaching.")]), closing]), ["Plain teaching.", "Closing text."], "no output call");
+		assert.deepEqual(restated([assistant([outputCall("Broken.")]), ack("send-1", true), closing]), ["Closing text."], "failed output");
+		assert.deepEqual(restated([{ ...assistant([outputCall("Cut off.")]), stopReason: "aborted" } as LhMessage, closing]), ["Closing text."], "aborted output");
+		const answered = [
+			assistant([outputCall("A lesson."), fauxToolCall("quiz", { question: "Q?" }, { id: "quiz-1" })]),
+			ack(),
+			{ id: "answer-1", role: "toolResult", toolCallId: "quiz-1", toolName: "quiz", content: [{ type: "text", text: "B" }], details: null, isError: false, timestamp: 2 } as LhMessage,
+			closing,
+		];
+		assert.deepEqual(restated(answered), ["A lesson.", "Closing text."], "feedback after an answered question");
+		const steered = [assistant([outputCall("A lesson.")]), ack(), { id: "u1", role: "user", content: "Why?", timestamp: 3 } as LhMessage, closing];
+		assert.deepEqual(restated(steered), ["A lesson.", "Closing text."], "a reply to new learner input");
+	});
 });
 
 describe("send_to_user extraction and Markdown", () => {

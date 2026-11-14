@@ -137,6 +137,32 @@ function lastSuccessfulPlanInit(parts: LhViewPart[]): number {
 	return idx;
 }
 
+/** Text-only responses that directly follow a delivered `send_to_user`.
+ * Claude tends to close the turn by restating the message it just sent,
+ * usually reworded; the restatement renders as reasoning so the learner
+ * sees one copy. Native history is unchanged. A question, a failed output,
+ * or any non-result message between the two breaks the pairing, so
+ * feedback after an answer and replies to a steer still render as prose. */
+function restatementsAfterOutput(messages: readonly LhMessage[], outputErrors: ReadonlyMap<string, ToolResultMessage>): ReadonlySet<string> {
+	const restated = new Set<string>();
+	let delivered = false;
+	for (const m of messages) {
+		if (m.role === "toolResult") continue;
+		if (m.role !== "assistant") {
+			delivered = false;
+			continue;
+		}
+		const content = (m as AssistantMessage).content;
+		const calls = content.flatMap((block, contentIndex) => block.type === "toolCall" ? [{ block, contentIndex }] : []);
+		if (delivered && calls.length === 0 && content.some((b) => b.type === "text" && b.text.trim())) restated.add(m.id);
+		const settled = m.stopReason !== "error" && m.stopReason !== "aborted";
+		const asks = calls.some(({ block, contentIndex }) =>
+			(QUESTION_TOOLS as readonly string[]).includes(block.name) || readPluginQuestionMessageAnnotation(m, contentIndex).status !== "absent");
+		delivered = settled && !asks && calls.some(({ block }) => sendToUserText(block) !== undefined && !outputErrors.has(block.id));
+	}
+	return restated;
+}
+
 /** Project the native record (+ live turn working list) into the client's
  *  view messages. Pure: the same input always projects to the same list. */
 export function projectView(messages: readonly LhMessage[], live?: LiveTurnState): LhViewMessage[] {
@@ -149,6 +175,7 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			outputErrors.set(message.toolCallId, message);
 		}
 	}
+	const restated = restatementsAfterOutput(messages, outputErrors);
 
 	const lastAssistant = (): LhViewMessage | undefined => {
 		const last = out[out.length - 1];
@@ -244,7 +271,9 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			// bottom, and this gate is what puts them there by construction).
 			const streamingMessage = live?.streamingIds.has(m.id) === true;
 			for (const [contentIndex, block] of assistant.content.entries()) {
-				if (block.type === "text") {
+				if (block.type === "text" && restated.has(m.id)) {
+					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.text, state: "done" });
+				} else if (block.type === "text") {
 					rest.push({ type: "text", id: `${m.id}-t${textN++}`, text: block.text, state: "done" });
 				} else if (block.type === "thinking") {
 					reasoning.push({ type: "reasoning", id: `${m.id}-r${reasoningN++}`, text: block.thinking, state: "done" });
