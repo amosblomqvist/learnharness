@@ -1,12 +1,12 @@
-/**
- * Wave E stage 2 (owner 2026-10-10): renderSvg is NATIVE FIRST — resvg
- * rasterizes in-process; the old Chrome path stays as fallback for
- * exotic-SVG parse failures. These tests pin the native path against real
- * SVGs: attribute-sized, viewBox-only (the 900px default), text-bearing
- * (system fonts), and the canonical single-IDAT PNG form.
- */
+/** Static native SVG rendering, bounded render-only repairs, strict annotation
+ * input, and native failures that never dispatch a browser or system Chrome. */
 import assert from "node:assert/strict";
-import { describe, it } from "node:test";
+import { describe, it, type TestContext } from "node:test";
+import childProcess from "node:child_process";
+import { syncBuiltinESMExports } from "node:module";
+import puppeteer from "puppeteer-core";
+import { Resvg } from "@resvg/resvg-js";
+import * as photon from "@silvia-odwyer/photon-node";
 import { realHeadless } from "../src/agent/subagents/headless.ts";
 
 function pngFacts(buf: Buffer): { w: number; h: number; idats: number } {
@@ -24,7 +24,62 @@ function pngFacts(buf: Buffer): { w: number; h: number; idats: number } {
 	return { w, h, idats };
 }
 
-describe("native renderSvg (resvg in-process, browser fallback)", () => {
+function forbidBrowser(t: TestContext) {
+	const unexpected = () => { assert.fail("SVG rendering must not dispatch a browser or Chrome"); };
+	const spawn = t.mock.method(childProcess, "spawn", unexpected);
+	const connect = t.mock.method(puppeteer, "connect", unexpected);
+	const launch = t.mock.method(puppeteer, "launch", unexpected);
+	syncBuiltinESMExports();
+	t.after(() => {
+		t.mock.restoreAll();
+		syncBuiltinESMExports();
+		assert.equal(spawn.mock.callCount(), 0);
+		assert.equal(connect.mock.callCount(), 0);
+		assert.equal(launch.mock.callCount(), 0);
+	});
+}
+
+const RED = '<svg xmlns="http://www.w3.org/2000/svg" width="80" height="40"><rect width="80" height="40" fill="red"/></svg>';
+
+describe("native renderSvg (resvg only)", () => {
+	it("repairs an ordinary missing namespace and returns actual opaque red pixels", async (t) => {
+		forbidBrowser(t);
+		const original = RED.replace(' xmlns="http://www.w3.org/2000/svg"', "");
+		const png = await realHeadless.renderSvg(original);
+		assert.deepEqual(pngFacts(png), { w: 80, h: 40, idats: 1 });
+		const image = photon.PhotonImage.new_from_byteslice(png);
+		try {
+			const pixels = image.get_raw_pixels();
+			assert.equal(pixels.length, 80 * 40 * 4);
+			for (let i = 0; i < pixels.length; i++) assert.equal(pixels[i], [255, 0, 0, 255][i % 4]);
+		} finally { image.free(); }
+		assert.equal(original.includes("xmlns"), false, "rendering does not rewrite the original source");
+	});
+
+	it("repairs ordinary HTML nbsp exactly like a numeric entity, including attribute values", async (t) => {
+		forbidBrowser(t);
+		const svg = RED.replace("</svg>", '<text x="2" y="20" aria-label="A&nbsp;B">A&nbsp;B</text></svg>');
+		assert.deepEqual(await realHeadless.renderSvg(svg), await realHeadless.renderSvg(svg.replaceAll("&nbsp;", "&#160;")));
+	});
+
+	it("keeps annotation inputs strict for both repairs", async (t) => {
+		forbidBrowser(t);
+		await assert.rejects(realHeadless.renderSvg(RED.replace(' xmlns="http://www.w3.org/2000/svg"', ""), { nativeOnly: true }), /root node/);
+		await assert.rejects(realHeadless.renderSvg(RED.replace("</svg>", "<text>A&nbsp;B</text></svg>"), { nativeOnly: true }), /unknown entity/);
+	});
+
+	it("does not broaden repairs or dispatch a browser for malformed SVG", async (t) => {
+		forbidBrowser(t);
+		await assert.rejects(realHeadless.renderSvg(RED.replace('xmlns="http://www.w3.org/2000/svg"', 'xmlns=""')), /root node/);
+		await assert.rejects(realHeadless.renderSvg('<svg><unclosed>'), /never closed/);
+	});
+
+	it("propagates a native renderer failure without browser/Chrome recovery", async (t) => {
+		forbidBrowser(t);
+		const error = new Error("owned native renderer failure");
+		t.mock.method(Resvg.prototype, "render", () => { throw error; });
+		await assert.rejects(realHeadless.renderSvg(RED), value => value === error);
+	});
 	it("renders an attribute-sized SVG at its intrinsic size", async () => {
 		const svg =
 			'<svg xmlns="http://www.w3.org/2000/svg" width="240" height="160"><rect width="240" height="160" fill="#3355aa"/></svg>';

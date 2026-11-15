@@ -28,6 +28,7 @@ jobs:
           node-version: "26"
           cache: npm
       - run: npm ci
+      - run: npm run plugins:setup
       - run: npm run typecheck
       - run: npm test
       - run: npm run lint
@@ -57,6 +58,7 @@ jobs:
           node-version: "26"
           cache: npm
       - run: npm ci
+      - run: npm run plugins:setup
       - name: Native renderer tests on this OS
         run: npx electron --import tsx --test tests/pdf-native-render.test.ts tests/pdf-ops.test.ts tests/svg-native-render.test.ts tests/browser-service.test.ts
         env:

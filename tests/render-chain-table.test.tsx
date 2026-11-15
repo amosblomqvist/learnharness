@@ -25,11 +25,16 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+const renderToStaticMarkup = (node: React.ReactNode) => renderMarkup(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
 import { describe, it } from "node:test";
 import { ChainTableBody, ChainTableOverlay } from "../components/chain-table.tsx";
 import type { ChainSort } from "../components/chain-table.tsx";
 import type { GraphChain, GraphNode } from "../src/core/contracts.ts";
+import { ServerEventsProvider } from "../components/server-events.tsx";
+import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeHeader, TreeRow, treeRowLayout } from "../components/tree-presentation.tsx";
 
 /** The fixture graph — two follows-chains + one standalone:
  *  a → c1 ← b  (chain one, conclusion born chat1), d → e (chain two,
@@ -73,6 +78,8 @@ const BASE = {
 	sort: { col: "name", dir: 1 } as ChainSort,
 	onSort: () => {},
 	selection: new Set<string>(),
+	selectedSources: new Set<string>(),
+	selectMode: false,
 	expandedClusters: new Set<string>(),
 	expandedChains: new Set<string>(),
 	onToggleCluster: () => {},
@@ -88,14 +95,121 @@ function render(props: Partial<typeof BASE> = {}) {
 	return renderToStaticMarkup(React.createElement(ChainTableBody, { ...BASE, ...props }));
 }
 
+describe("shared tree presentation", () => {
+	it("collapses an absent selection gutter and offsets guides consistently at every depth", () => {
+		for (const depth of [0, 1, 2, 4]) {
+			for (const selectionColumn of [false, true]) {
+				const html = renderToStaticMarkup(<TreeRow depth={depth} selectionColumn={selectionColumn}
+					disclosure={<TreeDisclosure open={false} aria-label="Expand occurrence" />}>
+					<strong>Custom <em>primary content</em></strong>
+					<TreeGuide depth={depth} selectionColumn={selectionColumn} />
+				</TreeRow>);
+				assert.equal(html.includes('aria-hidden="true" class="size-3.5 shrink-0"'), selectionColumn);
+				assert.match(html, new RegExp(`style="left:${(selectionColumn ? 37 : 19) + depth * 36}px"`));
+				assert.match(html, /<strong>Custom <em>primary content<\/em><\/strong>/);
+				assert.equal((html.match(/aria-label="Expand occurrence"/g) ?? []).length, 1);
+			}
+		}
+	});
+
+	it("keeps percentage-cell content boxes constant and indents before every optional control combination", () => {
+		for (const variant of ["branch", "compact", "detail"] as const) {
+			const gap = variant === "detail" ? 8 : 4;
+			for (const depth of [0, 1, 2, 4]) {
+				for (const selectionColumn of [false, true]) {
+					for (const suppliedSelection of [false, true]) {
+						for (const disclosure of [false, true]) {
+							const { document } = parseHTML(renderToStaticMarkup(<>
+								<TreeHeader data-testid="width-header">
+									<TreeCell grow>Header</TreeCell>
+									<TreeCell data-column="percent" style={{ width: "25%" }} />
+									<TreeCell data-column="zero" style={{ width: 0 }} />
+								</TreeHeader>
+								<TreeRow data-testid="width-row" depth={depth} variant={variant} selectionColumn={selectionColumn}
+									selection={suppliedSelection ? <TreeCheckbox checked readOnly aria-label="Select" /> : undefined}
+									disclosure={disclosure ? <TreeDisclosure open={false} aria-label="Expand" /> : undefined}
+									trailing={<>
+										<TreeCell data-column="percent" style={{ width: "25%" }} />
+										<TreeCell data-column="zero" style={{ width: 0 }} />
+									</>}>Primary</TreeRow>
+							</>));
+							const row = document.querySelector<HTMLElement>('[data-testid="width-row"]')!;
+							const header = document.querySelector<HTMLElement>('[data-testid="width-header"]')!;
+							// Identical horizontal padding at every depth keeps CSS percentage
+							// widths based on W - 24, never W - 24 - depth * 36.
+							assert.equal(row.className, treeRowLayout({ depth: 0, variant }).className);
+							assert.ok(row.classList.contains("px-3") && header.classList.contains("px-3"));
+							assert.ok(!row.style.paddingLeft && !row.style.paddingRight);
+							for (const column of ["percent", "zero"]) {
+								assert.equal(row.querySelector<HTMLElement>(`[data-column="${column}"]`)!.style.width,
+									header.querySelector<HTMLElement>(`[data-column="${column}"]`)!.style.width);
+							}
+							const children = Array.from(row.children);
+							if (depth > 0) {
+								const indent = children.shift() as HTMLElement;
+								assert.equal(indent.tagName, "SPAN");
+								assert.equal(indent.getAttribute("aria-hidden"), "true");
+								assert.equal(indent.className, "shrink-0");
+								assert.equal(Number.parseFloat(indent.style.width) + gap, depth * 36);
+								assert.ok(Number.parseFloat(indent.style.width) > 0);
+							}
+							if (selectionColumn) {
+								const selection = children.shift()!;
+								assert.equal(selection.tagName, suppliedSelection ? "INPUT" : "SPAN");
+								assert.ok(selection.classList.contains("size-3.5"));
+							}
+							if (disclosure) assert.equal(children.shift()!.getAttribute("aria-label"), "Expand");
+							assert.equal(children.shift()!.textContent, "Primary");
+							assert.deepEqual(children.map(child => child.getAttribute("data-column")), ["percent", "zero"]);
+						}
+					}
+				}
+			}
+		}
+	});
+
+	it("shares native row geometry without adding DOM and preserves arbitrary row attributes", () => {
+		assert.equal(treeRowLayout({ depth: 1, variant: "compact" }).className, "flex items-center gap-1 py-1 pl-12 pr-3");
+		assert.equal(treeRowLayout({ depth: 2, variant: "detail" }).className, "flex items-start gap-2 py-1 pl-21 pr-3");
+		assert.equal(treeRowLayout({ depth: 4 }).style?.paddingLeft, 156);
+		const html = renderToStaticMarkup(<div data-chain-nav-row='["occurrence","a"]' tabIndex={-1} draggable {...treeRowLayout()} />);
+		assert.equal((html.match(/<div/g) ?? []).length, 1);
+		assert.match(html, /data-chain-nav-row="\[&quot;occurrence&quot;,&quot;a&quot;\]"/);
+		assert.match(html, /tabindex="-1"/);
+		assert.match(html, /draggable="true"/);
+	});
+
+	it("keeps native disclosure styles distinct and makes sticky headers explicit", () => {
+		const plain = renderToStaticMarkup(<TreeDisclosure plain open aria-label="Folder" />);
+		const animated = renderToStaticMarkup(<TreeDisclosure open aria-label="Chain" />);
+		assert.doesNotMatch(plain, /rounded|transition-|hover:/);
+		assert.match(plain, /rotate-90/);
+		assert.match(animated, /rounded/);
+		assert.match(animated, /transition-transform rotate-90/);
+		assert.doesNotMatch(renderToStaticMarkup(<TreeHeader />), /sticky/);
+		assert.match(renderToStaticMarkup(<TreeHeader sticky />), /sticky top-0 z-10/);
+	});
+
+	it("preserves optional aligned cells, including empty reserved columns", () => {
+		const html = renderToStaticMarkup(<TreeRow selectionColumn={false} trailing={<>
+			<TreeCell widthClassName="w-14" align="right">42</TreeCell>
+			<TreeCell widthClassName="w-20" />
+		</>}>Primary</TreeRow>);
+		assert.match(html, /class="w-14 shrink-0 text-right">42<\/span>/);
+		assert.match(html, /class="w-20 shrink-0"><\/span>/);
+		assert.doesNotMatch(html, /type="checkbox"|aria-expanded=/);
+	});
+});
+
 describe("ChainTableBody — clusters (the outermost layer)", () => {
 	it("collapsed by default: cluster rows render, chain rows do not", () => {
 		const html = render();
 		assert.ok(html.includes('data-testid="cluster-group-chat1"'), "the chat cluster");
 		assert.ok(html.includes('data-testid="cluster-group-notes1"'), "the notes cluster");
 		assert.ok(html.includes("Ethics lesson"), "chat label");
-		assert.ok(html.includes("notes/raw/ethics.md"), "notes label");
-		assert.ok(html.includes("lucide-folder"), "the closed folder icon");
+		assert.ok(html.includes("ethics"), "exact basename minus extension");
+		assert.ok(!html.includes("notes/raw/ethics.md"), "import path is not a display name");
+		assert.ok(html.includes("lucide-book"), "the closed book icon");
 		assert.ok(!html.includes('data-testid="chain-row-c1"'), "no chain row when collapsed");
 		assert.ok(!html.includes("Premise one"), "no chips when collapsed");
 	});
@@ -155,12 +269,12 @@ describe("ChainTableBody — THE shared TopBar + the lines law (owner, round 2)"
 		assert.ok(open.includes('data-testid="cluster-thread-chat1"'), "the cluster thread");
 		assert.ok(open.includes('data-testid="chain-thread-c1"'), "the chain thread");
 		// the columns: the cluster arrow sits at 37px, the chain arrow at 73px
-		assert.ok(open.includes("left-[37px]"), "thread at the cluster arrow's column");
-		assert.ok(open.includes("left-[73px]"), "thread at the chain arrow's column");
+		assert.match(open, /data-testid="cluster-thread-chat1"[^>]*style="left:37px"/, "thread at the cluster arrow's column");
+		assert.match(open, /data-testid="chain-thread-c1"[^>]*style="left:73px"/, "thread at the chain arrow's column");
 		// the BRACKET LAW (owner round 6): each thread runs from its parent
 		// row's checkbox bottom edge (a visible gap below the arrow's stroke)
 		// to the LAST child row's checkbox bottom edge — live-measured anchors
-		assert.ok(open.includes("bottom-[8px] left-[37px] top-[23px]"), "cluster thread bracketed by checkbox bottoms");
+		assert.match(open, /data-testid="cluster-thread-chat1"[^>]*bottom-\[8px\][^>]*top-\[23px\][^>]*style="left:37px"/, "cluster thread bracketed by checkbox bottoms");
 		assert.ok(open.includes("top-[22px]") && open.includes("bottom-[8px]"), "chain thread bracketed by checkbox bottoms");
 	});
 });
@@ -201,6 +315,38 @@ describe("ChainTableBody — chain rows (chips + connectors)", () => {
 	it("the row carries the one-line derivation as its aria-label (core formatChainLine)", () => {
 		const html = render({ expandedClusters: new Set(["chat1"]) });
 		assert.ok(html.includes('aria-label="Premise one, Premise two → Conclusion"'));
+	});
+
+	it("renders Markdown, code and math only in expanded proposition statements", () => {
+		const statement = "**Statement** " + String.raw`$\nu$` + " with `literal`.\n\n$$\n" +
+			String.raw`\begin{pmatrix}a&b\\c&d\end{pmatrix}` + '\n$$\n\n```js\nconst text = "\\n";\n```\n\n' +
+			"| Value | Meaning |\n| --- | --- |\n| x | Variable |\n\n![untrusted](https://example.invalid/image.png)";
+		const nodes = NODES.map(n => n.id === "a" ? { ...n, name: "**Name** $x$", statement } : n);
+		const before = structuredClone(nodes);
+		const sourceName = "**Source** $x$ `raw`";
+		const { document } = parseHTML(render({ nodes, sessions: { ...BASE.sessions, chat1: sourceName },
+			expandedClusters: new Set(["chat1"]), expandedChains: new Set(["c1"]) }));
+		const row = document.querySelector('[data-testid="prop-row-a"]')!;
+		assert.equal(row.querySelector("strong")?.textContent, "Statement");
+		assert.equal(row.querySelectorAll(".katex").length, 2);
+		assert.equal(row.querySelectorAll(".katex-display").length, 1);
+		assert.equal(row.querySelectorAll("mtr").length, 2);
+		assert.equal(row.querySelectorAll(".katex-error").length, 0);
+		assert.equal(row.querySelector('[data-streamdown="inline-code"]')?.textContent, "literal");
+		assert.ok(row.querySelector('[aria-label="Copy code"]'));
+		assert.ok(row.querySelector('[data-testid="md-code"]')?.textContent?.includes('const text = "\\n";'));
+		assert.ok(row.querySelector("table"));
+		assert.equal(row.querySelector("img"), null);
+		assert.ok(row.innerHTML.includes("[Image blocked: untrusted]"));
+		const prose = row.querySelector(".lh-prose")!;
+		for (const token of ["[--font-prose:var(--font-ui)]", "[--lh-prose-size:var(--text-xs)]",
+			"[--lh-prose-leading:1.625]", "text-muted-foreground", "[&_[data-streamdown=inline-code]]:[font-size:inherit]",
+			"[&_[data-streamdown=inline-code]]:[color:inherit]"]) assert.ok(prose.classList.contains(token));
+		const chip = document.querySelector('[data-testid="prop-chip-a"]')!;
+		assert.equal(chip.textContent, "**Name** $x$");
+		assert.equal(chip.children.length, 0, "proposition-name chips remain literal");
+		assert.ok([...document.querySelectorAll("span")].some(span => span.textContent === sourceName && span.children.length === 0), "source names remain literal");
+		assert.deepEqual(nodes, before, "rendering never rewrites stored fields");
 	});
 
 	it("expanding a chain reveals member STATEMENTS directly — PLAIN rows, no conclusion marker (owner, round 2)", () => {
@@ -266,22 +412,33 @@ describe("ChainTableBody — the floating selection bar (never shifts layout)", 
 		assert.ok(!html.includes('data-testid="chain-selection-bar"'));
 	});
 
-	it("appears with the derived N nodes → M chains + Clear + the FENCED Delete", () => {
-		const html = render({ selection: new Set(["a", "b", "c1"]) });
+	it("counts selected sources with Clear and a fenced source-only Delete", () => {
+		const html = render({ selectedSources: new Set(["chat1", "notes1"]) });
 		assert.ok(html.includes('data-testid="chain-selection-bar"'));
 		assert.ok(html.includes('data-testid="chain-selected-summary"'));
-		assert.ok(html.includes("3 nodes → 1 chain"));
+		assert.ok(html.includes("2 sources"));
 		assert.ok(html.includes('data-testid="chain-clear"'));
 		// The danger fence (owner, 2026-09-29 night): a divider quarantines
 		// the destructive action at the bar's right end, red + trash icon,
-		// riding the same confirm dialog as the canvas delete.
+		// opening a source-contribution confirmation, not global node deletion.
 		assert.ok(html.includes('data-testid="chain-danger-divider"'));
 		const del = html.match(/<button[^>]*data-testid="chain-delete"[^>]*>/)?.[0] ?? "";
 		assert.match(del, /border-destructive\/50/); // the destructive pair
-		assert.match(del, /aria-label="Delete 3 selected nodes"/);
+		assert.match(del, /aria-label="Delete selected sources and folders"/);
 		assert.ok(html.includes("lucide-trash-2"), "the trash icon");
 		// the fence is before Delete in the DOM (right end of the bar)
 		assert.ok(html.indexOf('chain-danger-divider"') < html.indexOf('chain-delete"'));
+	});
+
+	it("Delete and practice Done have matching top/bottom/right pill insets and fully rounded contours", () => {
+		for (const [selectMode, action] of [[false, "chain-delete"], [true, "chain-practice-done"]] as const) {
+			const html = render({ selectMode, selectedSources: new Set(["chat1"]), selection: new Set(["a"]) });
+			const bar = html.match(/<div[^>]*data-testid="chain-selection-bar"[^>]*>/)?.[0] ?? "";
+			const button = html.match(new RegExp(`<button[^>]*data-testid="${action}"[^>]*>`))?.[0] ?? "";
+			assert.match(bar, /rounded-full/); assert.match(button, /rounded-full/);
+			assert.match(bar, /py-2 pl-4 pr-2/, "keep text inset, match right inset to the vertical inset");
+			assert.equal(bar.includes(" px-4 "), false);
+		}
 	});
 
 	it("the Delete rides ONLY with a selection — no bar, no kill switch", () => {
@@ -291,7 +448,7 @@ describe("ChainTableBody — the floating selection bar (never shifts layout)", 
 	});
 
 	it("a premise WITHOUT its conclusion derives as the singleton it becomes", () => {
-		const html = render({ selection: new Set(["a", "d"]) });
+		const html = render({ selectMode: true, selection: new Set(["a", "d"]) });
 		assert.ok(html.includes("2 nodes → 2 chains"), "no follows-edge survives inside the selection");
 	});
 });
@@ -301,6 +458,7 @@ describe("ChainTableBody — the fuzzy search (grouped + auto-expand)", () => {
 		const aliased = NODES.map((n) => (n.id === "b" ? { ...n, aliases: ["zebra alias"] } : n));
 		const html = render({
 			nodes: aliased,
+			selectMode: true,
 			query: "zebra",
 			selection: new Set(["a", "b", "c1"]), // selection spans BOTH chains
 		});
@@ -324,7 +482,7 @@ describe("ChainTableBody — the fuzzy search (grouped + auto-expand)", () => {
 describe("ChainTableOverlay — the lifted practice pick (owner vision, 2026-10-04)", () => {
 	function overlay(extra: Record<string, unknown> = {}) {
 		return renderToStaticMarkup(
-			React.createElement(ChainTableOverlay, {
+			React.createElement(ServerEventsProvider, { children: React.createElement(ChainTableOverlay, {
 				open: true,
 				nodes: NODES,
 				chains: CHAINS,
@@ -332,12 +490,12 @@ describe("ChainTableOverlay — the lifted practice pick (owner vision, 2026-10-
 				fileSources: {},
 				onClose: () => {},
 				...extra,
-			} as never),
+			} as never) }),
 		);
 	}
 
 	it("CONTROLLED selection renders the caller's set — the bar counts it live", () => {
-		const html = overlay({ controlledSelection: new Set(["a", "b", "c1"]) });
+		const html = overlay({ selectMode: true, controlledSelection: new Set(["a", "b", "c1"]) });
 		assert.ok(html.includes("3 nodes → 1 chain"), "the bar reflects the lifted set, not internal state");
 	});
 
@@ -352,9 +510,9 @@ describe("ChainTableOverlay — the lifted practice pick (owner vision, 2026-10-
 		assert.ok(!html.includes('data-testid="chain-danger-divider"'));
 	});
 
-	it("browse mode unchanged: the fenced Delete remains", () => {
+	it("browse mode cannot accidentally delete a lifted graph-node selection", () => {
 		const html = overlay({ controlledSelection: new Set(["a"]) });
-		assert.ok(html.includes('data-testid="chain-delete"'));
+		assert.ok(!html.includes('data-testid="chain-delete"'));
 		assert.ok(!html.includes('data-testid="chain-practice-done"'));
 	});
 });

@@ -1,10 +1,12 @@
 import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { after, afterEach, test } from "node:test";
+import { installModalDom } from "./modal-dom.ts";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { SetupDialog } from "../components/setup-dialog.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { AgentSection } from "../components/settings/agent-section.tsx";
 import { providerKeyLabel, classifyKeys } from "../components/settings/keys-section.tsx";
 import { useModelCatalog } from "../components/model-catalog.ts";
@@ -16,12 +18,10 @@ import type { ModelCatalogEntry, ModelCatalogResponse, ModelsSettings } from "..
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, {
 	window: dom.window, document: dom.document, Element: dom.window.Element,
-	HTMLElement: dom.window.HTMLElement, HTMLInputElement: dom.window.HTMLInputElement,
+	HTMLElement: dom.window.HTMLElement, HTMLInputElement: dom.window.HTMLInputElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
 	CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true,
-	requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0),
-	cancelAnimationFrame: (id: number) => clearTimeout(id),
 });
-Object.assign(dom.window, { innerWidth: 1280, innerHeight: 800 });
+after(installModalDom(dom));
 dom.window.HTMLElement.prototype.scrollIntoView = () => {};
 const originalFetch = globalThis.fetch;
 let root: Root | undefined;
@@ -36,7 +36,7 @@ const b: ModelCatalogEntry = { ...a, id: "claude-opus-5-5", name: "Claude Opus 5
 function catalog(connected = true): ModelCatalogResponse {
 	return {
 		models: connected ? [a, b] : [], defaults: null,
-		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null },
+		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null },
 		slots: { strong: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low" }, cheap: { model: { provider: a.provider, id: a.id }, thinkingLevel: "high" }, vision: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low" } },
 		providers: [{ ...provider, keyPresent: connected }],
 	};
@@ -50,14 +50,14 @@ function installFetch() {
 		if (path === "/api/models") { const request = deferred<Response>(); requests.push(request); return request.promise; }
 		if (path === "/api/settings/models") { writes.push(JSON.parse(String(init?.body))); return Response.json({ settings: { models: writes.at(-1) } }); }
 		if (path === "/api/keys") return Response.json({ providers: [provider], keys: [] });
-		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [] });
+		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [], practice: [] });
 		if (path === "/api/search") return Response.json({ available: false, engine: null, reason: "fixture" });
 		throw new Error(`Unexpected request ${path}`);
 	};
 }
 async function render(children: React.ReactNode) {
 	if (!root) { host = document.createElement("div"); document.body.append(host); root = createRoot(host); }
-	await act(async () => root!.render(children));
+	await act(async () => root!.render(<InteractionLayersProvider>{children}</InteractionLayersProvider>));
 }
 async function answer(index: number, body: ModelCatalogResponse | null) { await act(async () => requests[index]!.resolve(body ? Response.json(body) : new Response("unavailable", { status: 503 }))); }
 function element(testid: string) { const e = document.querySelector<HTMLElement>(`[data-testid="${testid}"]`); assert.ok(e, testid); return e; }
@@ -134,8 +134,18 @@ test("cold saved disconnected pins still enter the provider stage, without any m
 	await act(async () => notifySettingsSaved("keys"));
 	const stages: Array<string | undefined> = [];
 	function Probe() {
-		const { catalog } = useModelCatalog();
-		React.useLayoutEffect(() => { stages.push(document.querySelector<HTMLElement>('[data-testid^="setup-stage-"]')?.dataset.testid); }, [catalog]);
+		React.useLayoutEffect(() => {
+			// HostDialog creates its portal in a layout effect; observe actual
+			// stages rather than a sibling's pre-portal layout pass.
+			const record = () => {
+				const stage = document.querySelector<HTMLElement>('[data-testid^="setup-stage-"]')?.dataset.testid;
+				if (stage && stage !== stages.at(-1)) stages.push(stage);
+			};
+			const observer = new MutationObserver(record);
+			observer.observe(document.body, { childList: true, subtree: true });
+			record();
+			return () => observer.disconnect();
+		}, []);
 		return null;
 	}
 	await render(<><Reader />{setup()}<Probe /></>);
@@ -186,7 +196,7 @@ test("Agent opens with cached thinking metadata; refresh and disconnect never cl
 	installFetch(); await warm();
 	const models: ModelsSettings = { strong: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low" } };
 	let changed: ModelsSettings | undefined;
-	await render(<><Reader /><AgentSection agent={undefined} models={models} graph={undefined} compaction={undefined} onSectionChange={() => {}} onModelsChange={(next) => { changed = next; }} onCompactionChange={() => {}} /></>);
+	await render(<><Reader /><AgentSection agent={undefined} models={models} graph={undefined} compaction={undefined} onSectionChange={() => true} onModelsChange={(next) => { changed = next; }} onCompactionChange={() => true} /></>);
 	await click("slot-thinking-strong"); assert.deepEqual(levels(), ["off", "low✓", "high"]);
 	assert.equal(element("slot-model-strong").textContent, "model:free▾");
 	await answer(1, catalog());
@@ -287,6 +297,75 @@ test("shared refresh fences late failure as well as late success, and Retry clea
 	assert.equal(snapshot.failed, true); assert.equal(snapshot.catalog?.models[0]?.id, b.id);
 	await act(async () => snapshot.refresh()); assert.equal(snapshot.failed, false);
 	await answer(4, fresh);
+});
+
+test("cache retention is hidden by default, slot-specific, resettable, and preserved by model/thinking edits", async () => {
+	installFetch(); await warm();
+	const changes: ModelsSettings[] = [];
+	const initial: ModelsSettings = {
+		strong: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low", cacheRetention: "long" },
+		cheap: { model: { provider: a.provider, id: a.id }, thinkingLevel: "high" },
+		vision: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low", cacheRetention: "none" },
+	};
+	function Settings() {
+		const [models, setModels] = React.useState(initial);
+		return <AgentSection agent={undefined} models={models} graph={undefined} compaction={undefined} onCompactionChange={() => true} onSectionChange={() => true} onModelsChange={(next) => { changes.push(next); setModels(next); }} />;
+	}
+	await render(<Settings />); await answer(1, catalog());
+	assert.equal(element("models-advanced").textContent, "Show advanced settings");
+	assert.equal(element("models-advanced").getAttribute("aria-expanded"), "false");
+	assert.equal(document.querySelector('[data-testid="slot-cache-strong"]'), null);
+	assert.equal(changes.length, 0, "mounting untouched controls writes nothing");
+	await click("models-advanced");
+	assert.equal(element("models-advanced").textContent, "Hide advanced settings");
+	assert.equal(element("slot-cache-strong").textContent, "Cache: long▾");
+	assert.equal(element("slot-cache-cheap").textContent, "Cache: default▾");
+	assert.equal(element("slot-cache-vision").textContent, "Cache: not requested▾");
+	await click("slot-cache-strong");
+	const escape = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+	Object.assign(escape, { key: "Escape" });
+	await act(async () => { element("slot-cache-menu-strong").dispatchEvent(escape); });
+	assert.equal(document.querySelector('[data-testid="slot-cache-menu-strong"]'), null);
+	assert.equal(escape.defaultPrevented, true, "Escape is claimed before the outer dialog's document listener");
+	for (const value of ["short", "none", "long", "default"]) {
+		await click("slot-cache-strong");
+		assert.match(element("slot-cache-menu-strong").textContent ?? "", /Providers may still cache automatically/);
+		assert.match(element("slot-cache-menu-strong").textContent ?? "", /does not guarantee a cache hit/);
+		await click(`cache-retention-option-${value}`);
+		assert.equal(changes.at(-1)?.strong?.cacheRetention, value === "default" ? undefined : value);
+		assert.deepEqual(changes.at(-1)?.cheap, initial.cheap);
+		assert.deepEqual(changes.at(-1)?.vision, initial.vision);
+	}
+	assert.equal(Object.hasOwn(changes.at(-1)!.strong!, "cacheRetention"), false);
+	await click("slot-cache-strong"); await click("cache-retention-option-long");
+	await click("slot-model-strong"); await click("model-option-claude-opus-5-5");
+	assert.equal(changes.at(-1)?.strong?.cacheRetention, "long");
+	await click("slot-thinking-strong"); await click("thinking-option-off");
+	assert.equal(changes.at(-1)?.strong?.cacheRetention, "long");
+	await click("slot-cache-strong");
+	await click("models-advanced");
+	assert.equal(document.querySelector('[data-testid="slot-cache-menu-strong"]'), null, "collapse also closes the portaled menu");
+	await click("models-advanced");
+	assert.equal(element("slot-cache-strong").textContent, "Cache: long▾", "hiding did not reset the preference");
+	await render(<Settings key="new-open" />);
+	assert.equal(document.querySelector('[data-testid="slot-cache-strong"]'), null, "a new settings mount starts collapsed");
+});
+
+test("initial setup exposes no advanced controls and preserves all saved retention preferences on Save", async () => {
+	installFetch();
+	const body = catalog();
+	body.slots.strong!.cacheRetention = "long";
+	body.slots.cheap!.cacheRetention = "short";
+	body.slots.vision!.cacheRetention = "none";
+	await warm(body); await render(<><Reader />{setup()}</>); await answer(1, body);
+	assert.equal(document.querySelector('[data-testid="models-advanced"]'), null);
+	assert.equal(document.querySelector('[data-testid^="slot-cache-"]'), null);
+	await click("setup-trigger-strong"); await click("model-option-claude-opus-5-5");
+	await click("setup-save");
+	assert.equal(writes[0]?.strong?.cacheRetention, "long");
+	assert.equal(writes[0]?.cheap?.cacheRetention, "short");
+	assert.equal(writes[0]?.vision?.cacheRetention, "none");
+	assert.equal(writes[0]?.strong?.model?.id, b.id);
 });
 
 test("OpenCode's saved shared credential names both Pi providers without changing addable-provider semantics", () => {

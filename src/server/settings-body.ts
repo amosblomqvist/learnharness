@@ -11,8 +11,10 @@
  * a different concern and are preserved by the sanitizer (core/settings.ts).
  */
 
+import path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { isHexColor, type ChatSettings } from "../core";
+import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides, type ColorOverrideKey } from "../core/themes.ts";
 import type {
 	AgentSettings,
 	AppearanceSettings,
@@ -23,11 +25,14 @@ import type {
 	DictationSettings,
 	GraphSettings,
 	ModelsSettings,
+	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
+import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
+import { parseFileAccessSettings } from "../core/file-access.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -143,13 +148,19 @@ function parseBooleanMap(value: unknown, field: string): { map?: Record<string, 
 	return { map: out };
 }
 
-/** agent: { models?, tools?, prompts? } — model/thinking validity against
+/** agent: { workerRequestConcurrency?, models?, tools?, prompts? } — model/thinking validity against
  *  the catalog is checked by the route (validateChatSettings discipline);
  *  prompt switch-on membership is checked by the route (needs the store). */
 export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: AgentSettings = {};
+	if (raw.workerRequestConcurrency !== undefined) {
+		if (typeof raw.workerRequestConcurrency !== "number" || !Number.isSafeInteger(raw.workerRequestConcurrency) || raw.workerRequestConcurrency <= 0) {
+			return { ok: false, error: "workerRequestConcurrency must be a positive, safely representable whole number" };
+		}
+		settings.workerRequestConcurrency = raw.workerRequestConcurrency;
+	}
 	if (raw.models !== undefined) {
 		const models = asRecord(raw.models);
 		if (!models) return { ok: false, error: "models must be an object" };
@@ -189,8 +200,8 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		const search = asRecord(raw.search);
 		if (!search) return { ok: false, error: "search must be an object" };
 		if (search.engine !== undefined) {
-			if (search.engine !== "tavily" && search.engine !== "brave") {
-				return { ok: false, error: 'search.engine must be "tavily" or "brave"' };
+			if (!isSearchEngineId(search.engine)) {
+				return { ok: false, error: `search.engine must be ${SEARCH_ENGINES.map((engine) => `"${engine.id}"`).join(", ")}` };
 			}
 			settings.search = { engine: search.engine };
 		}
@@ -207,6 +218,14 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 		}
 		settings.graphTools = graphTools.enabled === undefined ? {} : { enabled: graphTools.enabled };
 	}
+	if (raw.fileAccess !== undefined) {
+		const parsed = parseFileAccessSettings(raw.fileAccess);
+		if (!parsed.ok) return parsed;
+		if (parsed.settings.folders.some((folder) => folder !== "~" && !folder.startsWith("~/") && !path.isAbsolute(folder))) {
+			return { ok: false, error: "fileAccess.folders must be absolute on the server filesystem (or start with ~/)" };
+		}
+		settings.fileAccess = parsed.settings;
+	}
 	return { ok: true, settings };
 }
 
@@ -219,22 +238,35 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 	return { color: value };
 }
 
-/** appearance: { mode?, background?, fontFamily?, proseFontSize?,
- *  sessionNameSerif?, mdRendering? } */
+/** appearance: { theme?, background?, colors?, fontFamily?,
+ *  proseFontSize?, codeLigatures?, sessionNameSerif?, mdRendering? } —
+ *  `theme` is shape-checked here (slug); whether it EXISTS is the route's check. */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: AppearanceSettings = {};
-	if (raw.mode !== undefined) {
-		if (raw.mode !== "dark" && raw.mode !== "light") {
-			return { ok: false, error: "mode must be \"dark\" or \"light\"" };
-		}
-		settings.mode = raw.mode;
+	if (raw.theme !== undefined) {
+		if (!isThemeId(raw.theme)) return { ok: false, error: "theme must be a theme id (lowercase slug)" };
+		settings.theme = raw.theme;
 	}
 	if (raw.background !== undefined) {
 		const parsed = parseHexOrNull(raw.background, "background");
 		if (parsed.error) return { ok: false, error: parsed.error };
 		settings.background = parsed.color ?? null;
+	}
+	if (raw.colors !== undefined) {
+		const colors = asRecord(raw.colors);
+		if (!colors) return { ok: false, error: "colors must be an object" };
+		const out: AppearanceColorOverrides = {};
+		for (const [key, value] of Object.entries(colors)) {
+			if (!(COLOR_OVERRIDE_KEYS as readonly string[]).includes(key)) {
+				return { ok: false, error: `unknown color "${key}" (supported: ${COLOR_OVERRIDE_KEYS.join(", ")})` };
+			}
+			const parsed = parseHexOrNull(value, `colors.${key}`);
+			if (parsed.error) return { ok: false, error: parsed.error };
+			out[key as ColorOverrideKey] = parsed.color ?? null;
+		}
+		settings.colors = out;
 	}
 	if (raw.fontFamily !== undefined) {
 		if (raw.fontFamily !== null && (typeof raw.fontFamily !== "string" || !raw.fontFamily.trim())) {
@@ -252,6 +284,12 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			return { ok: false, error: "proseFontSize must be an integer between 12 and 24" };
 		}
 		settings.proseFontSize = raw.proseFontSize;
+	}
+	if (raw.codeLigatures !== undefined) {
+		if (typeof raw.codeLigatures !== "boolean") {
+			return { ok: false, error: "codeLigatures must be a boolean" };
+		}
+		settings.codeLigatures = raw.codeLigatures;
 	}
 	if (raw.sessionNameSerif !== undefined) {
 		if (typeof raw.sessionNameSerif !== "boolean") {
@@ -354,12 +392,20 @@ export function parseModelsSettingsBody(body: unknown): SettingsBodyResult<Model
 		if (!parsed.override.model) {
 			return { ok: false, error: `slot "${key}" must set a model (thinkingLevel alone cannot run — absent slot = unset)` };
 		}
-		settings[key as (typeof MODEL_SLOTS)[number]] = parsed.override;
+		const slot: ModelSlot = parsed.override;
+		const retention = (raw[key] as Record<string, unknown>).cacheRetention;
+		if (retention !== undefined) {
+			if (!CACHE_RETENTIONS.some((value) => value === retention)) {
+				return { ok: false, error: `${key}.cacheRetention must be none, short, or long` };
+			}
+			slot.cacheRetention = retention as ModelSlot["cacheRetention"];
+		}
+		settings[key as (typeof MODEL_SLOTS)[number]] = slot;
 	}
 	return { ok: true, settings };
 }
 
-/** compaction (owner round 14): the context-compaction threshold — the
+/** compaction: opt-in reasoning accounting (boolean, default off) and the
  *  projected-token budget over which a session summarizes its own history
  *  into the compaction marker. Strict write side: a present
  *  thresholdTokens must be a number at or above the floor (the floor is
@@ -371,6 +417,12 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
 	const settings: CompactionSettings = {};
+	if (raw.includeReasoning !== undefined) {
+		if (typeof raw.includeReasoning !== "boolean") {
+			return { ok: false, error: "includeReasoning must be true or false" };
+		}
+		settings.includeReasoning = raw.includeReasoning;
+	}
 	if (raw.thresholdTokens !== undefined) {
 		if (typeof raw.thresholdTokens !== "number" || !Number.isFinite(raw.thresholdTokens)) {
 			return { ok: false, error: "thresholdTokens must be a number" };

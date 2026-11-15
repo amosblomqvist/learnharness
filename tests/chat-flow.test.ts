@@ -7,7 +7,7 @@
  *
  * Drives handleChatRequest directly (plain Request/Response — no Next server
  * needed) with a scripted pi engine (pi-ai's faux provider, docs/
- * pi-engine-swap.md §7). Wave B: POSTs carry ONE INPUT EVENT (never a client
+ * docs/archive/pi-engine-swap.md §7). Wave B: POSTs carry ONE INPUT EVENT (never a client
  * transcript), the record is pi-native agent history (read through the
  * projection where a part shape is pinned), and the answer arrives as the
  * question call's real tool result (fork 1, owner 2026-09-26).
@@ -1427,8 +1427,8 @@ describe("the silent dismissal (A2)", () => {
 				id: "a1",
 				role: "assistant",
 				content: [
-					{ type: "toolCall", id: "call-a", name: "quiz", arguments: { question: "A?" } as never },
-					{ type: "toolCall", id: "call-b", name: "quiz", arguments: { question: "B?" } as never },
+					{ type: "toolCall", id: "call-a", name: "quiz", arguments: { ...QUIZ_INPUT, question: "A?" } as never },
+					{ type: "toolCall", id: "call-b", name: "quiz", arguments: { ...QUIZ_INPUT, question: "B?" } as never },
 				],
 				api: "openai-completions",
 				provider: "openrouter",

@@ -76,9 +76,26 @@ export function parseFilePaths(text: string): FilePathPart[] {
 	return parts;
 }
 
+function isWindowsPath(path: string): boolean {
+	return /^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\");
+}
+
+/** Directory syntax, not a filesystem probe. A backslash is a legitimate
+ * POSIX filename character, so it marks a directory only on Windows paths. */
+export function isDirectoryReference(path: string): boolean {
+	return path.endsWith("/") || (isWindowsPath(path) && path.endsWith("\\"));
+}
+
+/** Only call for a positively known directory (native picker/drop metadata).
+ * The durable marker survives ordinary text storage/copy/reload unchanged. */
+export function directoryReferencePath(path: string): string {
+	quoteFilePath(path);
+	return isDirectoryReference(path) ? path : path + (isWindowsPath(path) ? "\\" : "/");
+}
+
 /** Basename for display only; the original full path remains untouched. */
 export function filePathLabel(path: string): string {
-	const windows = /^[a-z]:[\\/]/i.test(path) || path.startsWith("\\\\");
+	const windows = isWindowsPath(path);
 	const separator = windows ? /[\\/]/ : /\//;
 	const trimmed = windows ? path.replace(/[\\/]+$/, "") : path.replace(/\/+$/, "");
 	if (!trimmed || (windows && /^[a-z]:$/i.test(trimmed)) || trimmed === "~") return path;

@@ -4,9 +4,11 @@ import React, { act } from "react";
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 
 import assert from "node:assert/strict";
-import { describe, it, afterEach } from "node:test";
+import { describe, it, after, afterEach } from "node:test";
 import { readFileSync } from "node:fs";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { UpdateSettings, updateStatusText, MANUAL_UPDATE_HINT, AUTO_UPDATE_HINT, type UpdateState } from "../components/settings/update-settings.tsx";
@@ -15,7 +17,10 @@ import { SettingsDialogBody, SettingsDialogProvider } from "../components/settin
 import nextConfig from "../next.config.ts";
 
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, CustomEvent: dom.window.CustomEvent });
+Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element,
+	HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent });
+const restoreModalDom = installModalDom(dom);
+after(restoreModalDom);
 const originalFetch = globalThis.fetch;
 const roots: { root: Root; host: HTMLElement }[] = [];
 const state = (over: Partial<UpdateState> = {}): UpdateState => ({ status: "idle", version: null, revision: 0, ...over });
@@ -53,7 +58,7 @@ function bridge(initial = state(), snapshot = Promise.resolve(initial)) {
 async function mount(element: React.ReactElement) {
 	const host = document.createElement("div"); document.body.append(host);
 	const root = createRoot(host); roots.push({ root, host });
-	await act(async () => { root.render(element); });
+	await act(async () => { root.render(<InteractionLayersProvider>{element}</InteractionLayersProvider>); });
 	return host;
 }
 
@@ -66,6 +71,8 @@ afterEach(async () => {
 	for (const { root, host } of roots.splice(0)) {
 		await act(async () => { root.unmount(); }); host.remove();
 	}
+	// FocusScope's delayed cleanup still needs the installed fixture DOM.
+	await new Promise(resolve => setTimeout(resolve, 5));
 	delete window.lh;
 	globalThis.fetch = originalFetch;
 });
@@ -160,6 +167,43 @@ describe("General update rows", () => {
 		assert.ok(q(host, "update-banner")!.textContent!.includes("0.3.8"));
 		await click(q(host, "update-banner")!.querySelector("button")); assert.equal(b.calls.install, 1);
 		assert.equal(b.calls.check, 0);
+	});
+
+	for (const version of ["0.3.8", null]) {
+		it(`dismisses ${version ?? "an unnamed update"} without installing, keeps Settings available, and shows a new version`, async () => {
+			const b = bridge(state({ status: "downloaded", version, revision: 1 }));
+			const host = await mount(<><UpdateSettings {...props} /><UpdateBanner /></>);
+			const dismiss = host.querySelector<HTMLElement>("[aria-label='Dismiss update notification']");
+			await click(dismiss);
+			assert.equal(q(host, "update-banner"), null);
+			assert.equal(b.calls.install, 0, "dismiss must not restart or install");
+			assert.equal(b.calls.check, 0, "dismiss must not check for updates");
+
+			await b.push(state({ status: "downloaded", version, revision: 2 }));
+			assert.equal(q(host, "update-banner"), null, "repeated status must stay dismissed");
+			await click(q(host, "update-restart"));
+			assert.equal(b.calls.install, 1, "Settings still offers installation");
+
+			await b.push(state({ status: "downloaded", version: "0.4.0", revision: 3 }));
+			assert.ok(q(host, "update-banner")!.textContent!.includes("0.4.0"));
+		});
+	}
+
+	it("dismissal survives status transitions but is forgotten when the banner remounts", async () => {
+		const b = bridge(state({ status: "downloaded", version: "0.4.1", revision: 1 }));
+		const host = await mount(<UpdateBanner />);
+		await click(host.querySelector("[aria-label='Dismiss update notification']"));
+		await b.push(state({ status: "checking", revision: 2 }));
+		await b.push(state({ status: "downloaded", version: "0.4.1", revision: 3 }));
+		assert.equal(q(host, "update-banner"), null, "the same staged version stays hidden");
+
+		const { root } = roots.pop()!;
+		await act(async () => { root.unmount(); });
+		host.remove();
+		assert.equal(b.listeners.size, 0);
+		bridge(state({ status: "downloaded", version: "0.4.1", revision: 3 }));
+		const reopened = await mount(<UpdateBanner />);
+		assert.ok(q(reopened, "update-banner"), "dismissal is local state, not a persisted preference");
 	});
 
 	it("a delayed older snapshot cannot overwrite a newer push in Settings or the banner", async () => {
