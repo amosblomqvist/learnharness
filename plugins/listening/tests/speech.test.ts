@@ -78,6 +78,22 @@ test("valid JSON with invalid metadata is cleaned as a miss", async t => {
   assert.deepEqual(await fs.readdir(dir), []);
 });
 
+test("one entry that can't be read is skipped at startup; the rest of the cache keeps working", async t => {
+  const dir = await directory(t), cache = createSpeechCache({ directory: dir });
+  await cache.put(key("tea"), new Uint8Array([1, 2, 3]), "audio/mpeg");
+  // Reading it fails with EISDIR: stands in for EACCES, EPERM or a lock.
+  await fs.mkdir(path.join(dir, `${key("stuck")}.json`));
+  const restarted = createSpeechCache({ directory: dir });
+  assert.deepEqual([...(await restarted.get(key("tea")))!.audio], [1, 2, 3]);
+  await restarted.put(key("coffee"), new Uint8Array([4]), "audio/mpeg");
+  assert.deepEqual([...(await restarted.get(key("coffee")))!.audio], [4]);
+  assert.ok((await fs.stat(path.join(dir, `${key("stuck")}.json`))).isDirectory(), "left in place, not deleted");
+  let calls = 0;
+  const speech = createSpeechService({ cache: createSpeechCache({ directory: dir }), selection: selection(fakeProvider(async () => { calls++; return audio; })), key: () => "k" });
+  for (let i = 0; i < 3; i++) await speech({ text: "hello", language: "en" });
+  assert.equal(calls, 1, "replays hit the cache");
+});
+
 // ── limits and request parsing ───────────────────────────────────────────────
 
 test("audio and timeout limits scale with text length", () => {

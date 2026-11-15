@@ -89,6 +89,10 @@ arguments and audio requests remain visible in browser developer tools.
 There are no automatic retries, because a failed request may already have been billed. Disabling
 the plugin cancels a generation that is still running.
 
+Cached clips that can't be read at startup (locked or no permission) stay on disk and don't
+count toward the 256 MiB until they can be read again. While one stays unreadable, playing
+it shows the cache warning and generates the audio again.
+
 ## Privacy and cost
 
 Audio is generated only when the learner presses Play. The spoken text, voice, model and

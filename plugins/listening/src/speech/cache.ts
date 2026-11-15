@@ -71,9 +71,15 @@ export function createSpeechCache({ directory, maxBytes = SPEECH_CACHE_MAX_BYTES
     }
     const keys = new Set(names.filter(name => /^[a-f0-9]{64}\.(mp3|json)$/.test(name)).map(name => name.split(".")[0]!));
     for (const key of keys) {
-      const loaded = await load(key);
-      if (!loaded) await remove(key);
-      else { entries.set(key, loaded.entry); lastClock = Math.max(lastClock, loaded.entry.accessed); }
+      // An entry that can't be read now (locked, no permission) is skipped and left on disk.
+      // Failing here would leave the cache uninitialized, so every later get and put would fail.
+      // Limits: eviction doesn't count skipped entries until they can be read again. While one
+      // stays unreadable, requesting it shows the service's cache warning and regenerates it.
+      try {
+        const loaded = await load(key);
+        if (!loaded) await remove(key);
+        else { entries.set(key, loaded.entry); lastClock = Math.max(lastClock, loaded.entry.accessed); }
+      } catch {}
     }
     await evict(); initialized = true;
   }
