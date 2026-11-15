@@ -60,7 +60,7 @@ describe("pdf-reader source paths", () => {
 	const originalUserProfile = process.env.USERPROFILE;
 
 	before(() => {
-		home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-home-"));
+		home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-home-")));
 		const target = path.join(home, relativePath);
 		fs.mkdirSync(path.dirname(target), { recursive: true });
 		fs.copyFileSync(FIXTURE, target);

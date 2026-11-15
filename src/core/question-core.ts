@@ -19,6 +19,8 @@
 
 import { Type, type Static } from "typebox";
 import { stripModelValueDebris } from "./value-debris.ts";
+import { expandCitationsForModel } from "./citations.ts";
+import type { PluginSubmissionImages } from "./plugin-submissions.ts";
 
 // ─── shared types ───────────────────────────────────────────────────────────
 
@@ -199,7 +201,7 @@ export const quizInputBase = Type.Object({
 // purely MECHANICAL — no instructions on what the questions should be);
 // the enum's one-liners below say only WHEN each kind fires.
 // nodeId means "this question is ABOUT this node" — a position signal,
-// never a completion signal (docs/probe-teach-split.md §3). BOTH teaching
+// never a completion signal (docs/archive/probe-teach-split.md §3). BOTH teaching
 // types carry it. The cross-field authoring contract (the Gate-3
 // hardening: a quiz whose correctAnswer can't be graded NEVER reaches the
 // learner — schema-valid ⇔ gradeable, the rules exactly what the grading
@@ -462,6 +464,8 @@ export interface QuestionAnswerData {
 	 *  2026-10-03) — a separate channel from `thinking`, captured by the
 	 *  reading field and riding the check answer. Absent when empty. */
 	readingThinking?: string;
+	/** Host-owned explicit image channels; never inferred from text or paths. */
+	images?: PluginSubmissionImages;
 	confidence?: number; // quiz only: the learner's stated probability (0-100, raw) that his selected answer is correct — never sent on "I don't know" (owner, 2026-10-01)
 	correct?: boolean; // quiz only
 	correctIndices?: number[]; // quiz only (rendering)
@@ -784,8 +788,8 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	// fixtures, foreign records) — degrade to omission, never crash.
 	if (Array.isArray(ad.answers) && ad.answers.length > 0)
 		out.answers = ad.answers.map((a) => ({ index: a.index, label: a.label }));
-	if (ad.text) out.text = ad.text;
-	if (ad.other) out.other = ad.other;
+	if (ad.text) out.text = expandCitationsForModel(ad.text);
+	if (ad.other) out.other = expandCitationsForModel(ad.other);
 	// The verdict + stated confidence are the learner's PERFORMANCE — new
 	// information the model needs for its next move. (dontKnow implies
 	// incorrect and carries no confidence: both stay implicit.)
@@ -796,7 +800,7 @@ export function compactAnswerForModel(ad: QuestionAnswerData): Record<string, un
 	// thinking while reading the teaching. `note` is the pre-rename key —
 	// old records replay through here too, so both feed `thinking`.
 	const thinking = ad.thinking ?? ad.note;
-	if (thinking) out.thinking = thinking;
-	if (ad.readingThinking) out.thinkingWhileReading = ad.readingThinking;
+	if (thinking) out.thinking = expandCitationsForModel(thinking);
+	if (ad.readingThinking) out.thinkingWhileReading = expandCitationsForModel(ad.readingThinking);
 	return out;
 }

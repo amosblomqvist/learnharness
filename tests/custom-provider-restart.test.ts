@@ -12,7 +12,7 @@ const base = "http://first.invalid/v1";
 function profile() {
 	const home = fs.mkdtempSync(path.join(root, "case-"));
 	const id = "a".repeat(32);
-	fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ version: 1, appearance: { mode: "dark" }, customProvider: { baseUrl: base, authMode: "apiKey", credentialBindingId: id, models: [{ id: "m" }] } }));
+	fs.writeFileSync(path.join(home, "settings.json"), JSON.stringify({ version: 1, appearance: { theme: "catppuccin-mocha" }, customProvider: { baseUrl: base, authMode: "apiKey", credentialBindingId: id, models: [{ id: "m" }] } }));
 	fs.writeFileSync(path.join(home, "auth.json"), JSON.stringify({ CUSTOM_OPENAI_API_KEY: "fixture-old-key", OTHER_PROVIDER_KEY: "untouched", future: { preserve: true }, [CUSTOM_AUTH_BINDING]: JSON.stringify({ version: 1, id, baseUrl: base, authMode: "apiKey", fileKeyBaseUrl: base }) }), { mode: 0o600 });
 	return home;
 }
@@ -77,5 +77,5 @@ test("malformed/unreadable private snapshots are never rewritten or used, unrela
 test("missing auth file initializes normally with explicit new key, preserving other settings", () => {
 	const home = profile(); fs.unlinkSync(path.join(home, "auth.json")); closed(home);
 	assert.equal(child(home, "mutate").data.status, 200); const live = child(home, "inspect").data; assert.equal(live.enabled, true); assert.equal(live.requests[0].authorization, "Bearer fixture-new-key");
-	assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, "settings.json"), "utf8")).appearance, { mode: "dark" });
+	assert.deepEqual(JSON.parse(fs.readFileSync(path.join(home, "settings.json"), "utf8")).appearance, { theme: "catppuccin-mocha" });
 });
