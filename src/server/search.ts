@@ -228,8 +228,9 @@ export function openAIProvider(run: typeof openAIWebSearch = openAIWebSearch): S
 			for (const { text = "", annotations = [] } of items.flatMap((item) => item?.content ?? [])) {
 				let cited = 0, passage = "";
 				for (const { title, url, start_index = cited, end_index = cited } of annotations.filter((a) => a?.type === "url_citation")) {
-					// Citations that follow one another support the same passage.
-					passage = text.slice(cited, start_index).trim() || passage;
+					// The passage is the citation's own line, so an introduction above
+					// it is left out. Citations that follow one another share it.
+					passage = text.slice(cited, start_index).trim().split("\n").at(-1)!.trim() || passage;
 					cited = end_index;
 					pages.push(...searchHit(title, pageUrl(url), passage));
 				}

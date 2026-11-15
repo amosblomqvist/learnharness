@@ -188,6 +188,12 @@ for (const { provider, authorization } of [{ provider: "chatgpt", authorization:
 	});
 }
 
+test("an OpenAI API-key search cut short at the output limit still returns the pages it had", async () => {
+	const output = [{ type: "web_search_call", id: "ws_scratch", status: "completed", action: { type: "search", sources: [{ type: "url", url: "https://example.invalid/" }] } }];
+	responseEvents = [{ type: "response.incomplete", response: { status: "incomplete", output, incomplete_details: { reason: "max_output_tokens" }, usage } }];
+	assert.deepEqual(await openAIWebSearch("q", 3, { model: { provider: "openai", id: model.id } }), output);
+});
+
 test("an OpenAI API-key search failure is explained from the HTTP status alone", async () => {
 	const job = { provider: "openai", id: model.id };
 	try {

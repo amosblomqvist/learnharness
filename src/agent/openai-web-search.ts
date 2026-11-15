@@ -9,8 +9,8 @@ import { workerRequestStream } from "./worker-request-admission.ts";
 /** One model call with OpenAI's hosted web search tool, admitted like any
  *  other worker model request. It runs on the calling job's own model and
  *  route, an OpenAI API key or a ChatGPT plan, and never on the other.
- *  Resolves to the completed response's output items: the search calls and
- *  the cited answer. */
+ *  Resolves to the response's output items: the search calls and the cited
+ *  answer. */
 export async function openAIWebSearch(query: string, count: number, { model: job, signal, onUsage }: SearchContext): Promise<unknown[]> {
 	const models = piModels();
 	const chatgpt = job?.provider === "chatgpt";
@@ -32,10 +32,11 @@ export async function openAIWebSearch(query: string, count: number, { model: job
 		},
 		onProviderStreamEvent: (event) => {
 			const { type, response } = event as { type?: string; response?: { output?: unknown } };
-			if (type === "response.completed") output = response?.output;
+			// An answer cut short still carries the pages it had cited.
+			if (type === "response.completed" || type === "response.incomplete") output = response?.output;
 		},
 	}).result();
-	// A dispatched call is billed even when it fails, as in the researcher's own loop.
+	// A failed call still reports the usage it has, as in the researcher's own loop.
 	if (message.stopReason !== "aborted" && usageWasAdmitted(message.usage)) onUsage?.(message.usage);
 	if (message.stopReason === "error" || message.stopReason === "aborted") {
 		// ChatGPT failures arrive already reduced to safe guidance. An API error
@@ -49,7 +50,8 @@ export async function openAIWebSearch(query: string, count: number, { model: job
 /** The API-key route's failure, explained from the HTTP status alone. */
 function apiFailure(errorMessage: string | undefined): string {
 	const status = Number(/^OpenAI API error \((\d{3})\)/.exec(errorMessage ?? "")?.[1]);
-	const cause = status === 400 || status === 404 ? "OpenAI rejected the request; the researcher's model may not support web search"
+	const cause = status === 400 ? "OpenAI rejected the request; the researcher's model may not support web search"
+		: status === 404 ? "OpenAI did not find the researcher's model for this API key"
 		: status === 401 || status === 403 ? "OpenAI rejected the API key"
 		: status === 429 ? "the OpenAI rate limit or quota was reached"
 		: status >= 500 ? "OpenAI had a server error"

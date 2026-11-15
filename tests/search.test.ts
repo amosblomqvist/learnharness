@@ -444,6 +444,10 @@ describe("OpenAI web search: adapter", () => {
 		assert.deepEqual((await search([answered([["Alpha says X.", "https://alpha.example/a"], ["Beta says Y.", "https://beta.example/b"]], " ")])).map(({ snippet }) => snippet), ["Alpha says X.", "Beta says Y."]);
 	});
 
+	it("leaves an introduction above the first result out of its passage", async () => {
+		assert.deepEqual((await search([answered([["Here are the 2 most relevant results:\n\n- Alpha says X.", "https://alpha.example/a"], ["- Beta says Y.", "https://beta.example/b"]])])).map(({ snippet }) => snippet), ["- Alpha says X.", "- Beta says Y."]);
+	});
+
 	it("tolerates citations without positions and an answer that searched nothing", async () => {
 		const bare = { type: "message", content: [{ type: "output_text", text: "Alpha says X.", annotations: [{ type: "url_citation", title: "Alpha", url: "https://alpha.example/a" }] }] };
 		assert.deepEqual(await search([bare]), [{ title: "Alpha", url: "https://alpha.example/a", snippet: "" }]);
