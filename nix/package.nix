@@ -1,7 +1,7 @@
 {
   lib,
   buildNpmPackage,
-  electron,
+  electron_44,
   makeWrapper,
   copyDesktopItems,
   makeDesktopItem,
@@ -60,7 +60,7 @@ buildNpmPackage rec {
     substituteInPlace $out/share/${pname}/electron/main.cjs \
       --replace-fail 'process.resourcesPath' "\"$res\""
 
-    makeWrapper ${electron}/bin/electron $out/bin/${pname} \
+    makeWrapper ${electron_44}/bin/electron $out/bin/${pname} \
       --add-flags $out/share/${pname} \
       --set NODE_ENV production
 
