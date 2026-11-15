@@ -3,6 +3,7 @@
  * Every main request captures new raw activity across all threads. Delivery
  * is append-only; a live helper never delays the teacher. */
 import { emit } from "../core/events.ts";
+import { beginWork, isHostHoldError, type HostWorkLease } from "../core/host-hold.ts";
 import type { ChatRecord, SideChatMessage, SideChatThread } from "../core/contracts.ts";
 import type { ChatStore } from "../core/ports.ts";
 import { failedOutputCallIds, newMessageId, userFacingTextOf } from "../core/native-messages.ts";
@@ -180,11 +181,23 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 		if (engine.model.contextWindow > 0 && estimatedTokens > Math.max(1, engine.model.contextWindow - Math.min(COMPACTION_RESERVE_TOKENS, engine.model.maxTokens))) {
 			return Response.json({ error: "This side conversation and lesson exceed the selected model's context window. Select a model with a larger context window." }, { status: 400 });
 		}
-		const stored = deps.chatStore.updateSideChats(chatId, (current) => current.some((entry) => entry.id === thread.id)
-			? current.map((entry) => entry.id === thread.id ? thread : entry) : [...current, thread]);
-		if (!stored) return Response.json({ error: "Unknown chat" }, { status: 404 });
+		// Host work registry (core/host-hold.ts): refused under a hold; quit
+		// stops the answer through its controller (saved with stopped: true).
+		const controller = new AbortController();
+		let work: HostWorkLease;
+		try { work = beginWork("side-chat", chatId, () => controller.abort()); }
+		catch (error) {
+			if (isHostHoldError(error)) return Response.json({ error: error.message, hold: error.hold }, { status: 503 });
+			throw error;
+		}
+		let stored: ReturnType<typeof deps.chatStore.updateSideChats>;
+		try {
+			stored = deps.chatStore.updateSideChats(chatId, (current) => current.some((entry) => entry.id === thread.id)
+				? current.map((entry) => entry.id === thread.id ? thread : entry) : [...current, thread]);
+		} catch (error) { work.end(); throw error; }
+		if (!stored) { work.end(); return Response.json({ error: "Unknown chat" }, { status: 404 }); }
 		const run: SideRun = {
-			controller: new AbortController(), text: "", answerId: newMessageId(), updatedAt: new Date().toISOString(),
+			controller, text: "", answerId: newMessageId(), updatedAt: new Date().toISOString(),
 			model: `${engine.model.provider}:${engine.model.id}`, operationId: input.requestId,
 			listeners: new Set(), settled: Promise.resolve(),
 		};
@@ -224,6 +237,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 				broadcast({ type: "error", error: "The side answer could not be saved." });
 			} finally {
 				runs.delete(key);
+				work.end();
 				announce(chatId);
 				emit("record-changed", { chatId });
 				if (settledThread) broadcast({ type: "done", thread: settledThread });

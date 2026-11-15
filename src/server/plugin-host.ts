@@ -10,11 +10,14 @@ import type { PluginQuestionVariant } from "../core/plugin-questions.ts";
 import type { NativePluginQuestionDefinition } from "../agent/plugin-question-tools.ts";
 import { preparePluginProblemType, createPluginProblemParameters, type NativePluginProblemDefinition } from "../core/plugin-problems.ts";
 import type { NativePluginProblemContribution } from "../agent/plugin-problem-tools.ts";
-import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
+import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginLifecycleContext, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
 import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
 import type { ServerEvent } from "../core/events.ts";
 import { safePluginDataDirectory } from "../store/plugin-data-paths.ts";
+import { acquireHold as acquireHostHold, onHostIdle, releaseHoldsOf } from "../core/host-hold.ts";
+import { CURRENT_DATA_FORMATS } from "../core/data-format.ts";
+import { assertDataWritable } from "../store/atomic-write.ts";
 
 /** Expected host/transport failure. Exceptions thrown by plugin handlers stay ordinary 500 errors. */
 export class PluginHostError extends Error {
@@ -50,6 +53,10 @@ export interface PluginHostDependencies {
 	subscribeEvents?: (listener: (event: ServerEvent) => void) => () => void;
 	/** Startup installation/recovery failures, including failures before a package directory exists. */
 	installationErrors?: Record<string, string>;
+	/** Learning-data root for lifecycle hook contexts. */
+	learningDirectory?: string;
+	/** ctx.host.requestRestart; absent means "unavailable". */
+	requestRestart?: () => Promise<{ restarted: boolean; reason?: "unavailable" }>;
 }
 interface Instructions { agents: Set<PluginAgentKind>; text: string }
 interface Tools { agents: Set<PluginAgentKind>; create: PluginTools["create"] }
@@ -118,6 +125,7 @@ function readState(filename: string): State {
 	return { version: 1, enabled };
 }
 function writeState(filename: string, state: State): void {
+	assertDataWritable(filename);
 	const temp = `${filename}.${randomUUID()}.tmp`;
 	try {
 		const fd = fs.openSync(temp, "wx", 0o600);
@@ -205,7 +213,91 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	};
 	const get = (id: string) => { const pkg = packages.get(id); if (!pkg) throw new PluginHostError(404, `Unknown plugin: ${id}`); return pkg; };
 	const live = (pkg: Package, activation: Activation) => !disposed && pkg.activation === activation && !activation.controller.signal.aborted;
+	const activePackages = () => [...packages.keys()].sort().map(id => packages.get(id)!).filter(pkg => pkg.info.enabled && pkg.activation?.ready && live(pkg, pkg.activation));
 
+	function loadBackend(pkg: Package): PluginBackendModule {
+		if (pkg.backend) return pkg.backend;
+		const manifest = pkg.info.manifest;
+		if (!manifest?.backend) throw new Error("Plugin has no backend");
+		const entry = regularFile(pkg.directory, manifest.backend);
+		// This absolute runtime path is deliberately NOT an import/require in
+		// Next's module graph. Ship scripts/plugin-loader.cjs alongside app.
+		const sidecar = path.join(process.cwd(), "scripts", "plugin-loader.cjs");
+		const nativeRequire = createRequire(sidecar);
+		const loader = nativeRequire(sidecar) as { load(filename: string): PluginBackendModule };
+		const backend = loader.load(entry);
+		if (!backend || typeof backend.activate !== "function") throw new Error("Plugin backend must export activate(context)");
+		for (const hook of ["beforeLoad", "beforeQuit"] as const) {
+			if (backend[hook] !== undefined && typeof backend[hook] !== "function") throw new Error(`Plugin backend ${hook} must be a function`);
+		}
+		pkg.backend = backend;
+		return backend;
+	}
+	function lifecycleContext(pkg: Package, signal: AbortSignal): PluginLifecycleContext {
+		const manifest = pkg.info.manifest!;
+		pluginRoot(pkg.rootDirectory);
+		const dataDirectory = safePluginDataDirectory(directory, manifest.id, coreData, true)!;
+		return Object.freeze({
+			manifest, directory: pkg.directory, dataDirectory, signal,
+			learningDirectory: path.resolve(/* turbopackIgnore: true */ deps.learningDirectory ?? path.join(directory, "..")),
+			dataFormats: CURRENT_DATA_FORMATS,
+		});
+	}
+	/** Run one hook per package in id order with one shared signal. A hook
+	 *  that ignores the signal is no longer awaited once it aborts. Failures
+	 *  are reported per plugin and never thrown. */
+	async function runHooks(hook: "beforeLoad" | "beforeQuit", targets: Package[], signal: AbortSignal, onStart?: (names: string[]) => void): Promise<{ id: string; error?: string }[]> {
+		const runnable = targets.filter(pkg => typeof pkg.backend?.[hook] === "function");
+		const results: { id: string; error?: string }[] = [];
+		if (!runnable.length) return results;
+		onStart?.(runnable.map(pkg => pkg.info.manifest!.name));
+		for (const pkg of runnable) {
+			if (signal.aborted) { results.push({ id: pkg.info.id, error: "Skipped: time limit reached or cancelled" }); continue; }
+			let off = () => {};
+			const aborted = new Promise<void>(resolve => {
+				const listener = () => resolve();
+				signal.addEventListener("abort", listener, { once: true });
+				off = () => signal.removeEventListener("abort", listener);
+			});
+			try {
+				const ctx = lifecycleContext(pkg, signal);
+				await Promise.race([Promise.resolve().then(() => pkg.backend![hook]!(ctx)), aborted]);
+				results.push(signal.aborted ? { id: pkg.info.id, error: "Stopped: time limit reached or cancelled" } : { id: pkg.info.id });
+			} catch (e) {
+				results.push({ id: pkg.info.id, error: errorText(e) });
+			} finally { off(); }
+		}
+		for (const result of results) if (result.error) console.warn(`[plugins] ${hook} of ${result.id}: ${result.error}`);
+		return results;
+	}
+	/** Enabled, valid packages with a backend, evaluated for their hooks,
+	 *  without activating anything. Used before initialization. */
+	function startupCandidates(): Package[] {
+		const state = readState(stateFile);
+		fs.mkdirSync(directory, { recursive: true });
+		if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new Error("Unsafe plugins directory");
+		const communityIds = fs.readdirSync(/* turbopackIgnore: true */ directory).filter(id => {
+			if (coreIds.has(id) || !PLUGIN_ID_PATTERN.test(id)) return false;
+			const stat = fs.lstatSync(path.join(/* turbopackIgnore: true */ directory, id));
+			return stat.isDirectory() || stat.isSymbolicLink();
+		});
+		const out: Package[] = [];
+		for (const id of [...new Set([...communityIds, ...coreIds])].sort()) {
+			if (state.enabled[id] !== true || Object.hasOwn(deps.installationErrors ?? {}, id)) continue;
+			const origin = coreIds.has(id) ? "core" : "community";
+			try {
+				if (origin === "core") pluginRoot(core!.directory);
+				const candidate = snapshot(path.join(/* turbopackIgnore: true */ origin === "core" ? core!.directory : directory, id), id, deps.appVersion, origin);
+				if (!candidate.info.manifest?.backend) continue;
+				loadBackend(candidate);
+				out.push(candidate);
+			} catch (e) {
+				// Initialization reports the same failure through ordinary discovery.
+				console.warn(`[plugins] ${id} skipped for beforeLoad: ${errorText(e)}`);
+			}
+		}
+		return out;
+	}
 	async function deactivate(pkg: Package): Promise<string[]> {
 		const activation = pkg.activation;
 		if (!activation) return [];
@@ -321,18 +413,36 @@ export function createPluginHost(deps: PluginHostDependencies) {
 							try { deps.onNotification?.({ pluginId: manifest.id, topic, data }); } catch { /* Isolate observers. */ }
 						},
 					},
+					host: {
+						acquireHold(options) {
+							requireLive();
+							if (!options || typeof options.reason !== "string" || !options.reason.trim()) throw new Error("A hold requires a nonempty reason");
+							const hold = acquireHostHold({ owner: manifest.id, reason: options.reason.slice(0, 200) });
+							if (!hold) return null;
+							// Deactivation aborts and releases the hold (releaseHoldsOf below).
+							const signal = AbortSignal.any([hold.signal, activation.controller.signal]);
+							return { signal, release: () => hold.release() };
+						},
+						onIdle(listener) {
+							requireLive();
+							if (typeof listener !== "function") throw new Error("Invalid idle listener");
+							let subscribed = true;
+							const unsubscribe = onHostIdle(() => {
+								if (!subscribed || !live(pkg, activation)) return;
+								try { Promise.resolve(listener()).catch(() => {}); } catch { /* Isolate plugin listeners. */ }
+							});
+							const off = () => { if (subscribed) { subscribed = false; unsubscribe(); } };
+							cleanup(off); return off;
+						},
+						async requestRestart() {
+							requireLive();
+							return deps.requestRestart ? deps.requestRestart() : { restarted: false, reason: "unavailable" as const };
+						},
+						dataFormats: CURRENT_DATA_FORMATS,
+					},
 				};
-				if (!pkg.backend) {
-					const entry = regularFile(pkg.directory, manifest.backend);
-					// This absolute runtime path is deliberately NOT an import/require in
-					// Next's module graph. Ship scripts/plugin-loader.cjs alongside app.
-					const sidecar = path.join(process.cwd(), "scripts", "plugin-loader.cjs");
-					const nativeRequire = createRequire(sidecar);
-					const loader = nativeRequire(sidecar) as { load(filename: string): PluginBackendModule };
-					pkg.backend = loader.load(entry);
-					if (!pkg.backend || typeof pkg.backend.activate !== "function") throw new Error("Plugin backend must export activate(context)");
-				}
-				const returned = await pkg.backend.activate(ctx);
+				cleanup(() => releaseHoldsOf(manifest.id));
+				const returned = await loadBackend(pkg).activate(ctx);
 				if (returned !== undefined) cleanup(returned);
 			}
 			if (!live(pkg, activation)) { await deactivate(pkg); pkg.info.status = "disabled"; return; }
@@ -537,6 +647,24 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				requireActive() {
 					if (!live(pkg, activation) || activation.problems.get(typeId) !== definition) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`);
 				} };
+		},
+		/** Startup only, before initialize(): run beforeLoad of enabled plugins. */
+		runBeforeLoad(signal: AbortSignal, onStart?: (names: string[]) => void): Promise<{ id: string; error?: string }[]> {
+			return enqueue(async () => {
+				assertOpen();
+				if (initialized) throw new Error("beforeLoad runs before plugin initialization");
+				return runHooks("beforeLoad", startupCandidates(), signal, onStart);
+			});
+		},
+		/** App quit: run beforeQuit of active plugins. Not queued behind other
+		 *  host work, so a stuck operation cannot hold the quit. */
+		runBeforeQuit(signal: AbortSignal): Promise<{ id: string; error?: string }[]> {
+			assertOpen();
+			return runHooks("beforeQuit", activePackages(), signal);
+		},
+		/** True when an active plugin exports beforeQuit. */
+		hasBeforeQuit(): boolean {
+			return !disposed && activePackages().some(pkg => typeof pkg.backend?.beforeQuit === "function");
 		},
 		conflicts(): { id: string; error: string }[] { assertOpen(); return conflicts.map(value => ({ ...value })); },
 		list(): PluginInfo[] {

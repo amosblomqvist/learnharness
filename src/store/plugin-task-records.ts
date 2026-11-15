@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { assertDataWritable } from "./atomic-write.ts";
 import { randomUUID } from "node:crypto";
 import type { PluginTaskRecordStore } from "../core/ports.ts";
 import type { PluginTaskRecord } from "../core/plugin-workers.ts";
@@ -95,6 +96,7 @@ export function createPluginTaskRecordStore(directory: string): PluginTaskRecord
 			jsonSafe(record);
 			const data = JSON.stringify(record, null, "\t");
 			validate(JSON.parse(data), record.id);
+			assertDataWritable(file);
 			if (!directoryExists()) fs.mkdirSync(root, { recursive: true });
 			directoryExists();
 			const temp = path.join(root, `.${record.id}.${randomUUID()}.tmp`);

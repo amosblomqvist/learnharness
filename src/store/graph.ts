@@ -36,7 +36,7 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { LEDGER_FILES, POSITIONS_FILE, SOURCES_FILE } from "../../config.ts";
 import { assertGraphFormat, ensureGraphFormat } from "./graph-format.ts";
-import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { appendLineSafe, removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 import type {
 	GraphChain,
 	GraphNode,
@@ -54,7 +54,7 @@ import type { GraphStore } from "../core/ports.ts";
 function appendLine<T>(file: string, record: T): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
-	fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf-8");
+	appendLineSafe(file, JSON.stringify(record));
 }
 
 function readRawLines(file: string): unknown[] {

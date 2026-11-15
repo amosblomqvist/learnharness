@@ -1,11 +1,22 @@
 import type { PluginFrontendContext, PluginSettingsRow } from "learnharness-plugin-api";
 import type { InitResult, RepoStatus, SyncResult } from "./git-sync.ts";
+import type { Outcome } from "./backend.ts";
+
+/** The backend's status: repository plus per-machine state. */
+export interface PluginStatus extends RepoStatus {
+	autoSync?: boolean;
+	conflict?: { branch: string; remote: string; message: string; at: string } | null;
+	lastAuto?: { at: string; status: string; message: string } | null;
+	/** False on apps without the host hold API: manual sync only. */
+	automaticAvailable?: boolean;
+}
 
 const svg = (body: string) => `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">${body}</svg>`;
 export const ICONS = {
 	sync: svg('<path d="M21 12a9 9 0 0 1-15.5 6.2L3 16"/><path d="M3 21v-5h5"/><path d="M3 12a9 9 0 0 1 15.5-6.2L21 8"/><path d="M21 3v5h-5"/>'),
 	pull: svg('<path d="M12 4v12"/><path d="m6 10 6 6 6-6"/><path d="M5 20h14"/>'),
 	push: svg('<path d="M12 20V8"/><path d="m6 14 6-6 6 6"/><path d="M5 4h14"/>'),
+	conflict: svg('<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4"/><path d="M12 17h.01"/>'),
 };
 
 interface Choice { key: string; label: string; variant?: "default" | "destructive" | "outline" | "secondary" }
@@ -58,15 +69,24 @@ export function choose(ctx: PluginFrontendContext, title: string, body: string[]
 const message = (ctx: PluginFrontendContext, title: string, text: string) =>
 	choose(ctx, title, [text], [{ key: "ok", label: "OK" }]);
 
-/** Show a finished result; reload the window when files changed underneath it. */
-export async function present(ctx: PluginFrontendContext, result: SyncResult | InitResult, deps: Deps): Promise<void> {
+/** Show a finished result. After a result that changed files the app
+ *  restarts its server (the desktop app reloads this window), or on older
+ *  apps the window reloads; without a desktop shell the learner restarts. */
+export async function present(ctx: PluginFrontendContext, result: Outcome | SyncResult | InitResult, deps: Deps): Promise<void> {
 	if (result.status === "conflict") return resolveConflict(ctx, result, deps);
 	if (result.status === "remote-has-data") throw new Error("Unexpected setup result.");
-	if (result.changed) { deps.reload(); return; }
+	if (result.status === "newer-data") { await message(ctx, "Update LearnHarness first", result.message); return; }
+	const after = "after" in result ? result.after : result.changed ? "reload" : undefined;
+	if (after === "restarting") return; // the desktop app reloads this window
+	if (after === "reload") { deps.reload(); return; }
+	if (after === "restart-manually") {
+		await message(ctx, "Restart LearnHarness", `${result.message} Restart LearnHarness to load it. Changes stay paused until then.`);
+		return;
+	}
 	await message(ctx, "GitHub Sync", result.message);
 }
 
-async function resolveConflict(ctx: PluginFrontendContext, conflict: Extract<SyncResult, { status: "conflict" }>, deps: Deps): Promise<void> {
+export async function resolveConflict(ctx: PluginFrontendContext, conflict: Extract<SyncResult, { status: "conflict" }>, deps: Deps): Promise<void> {
 	const choice = await choose(ctx, "GitHub Sync conflict", [
 		conflict.message,
 		"Keep mine replaces GitHub's version with this computer's data. Take GitHub's replaces this computer's data with GitHub's. The replaced side is saved in a local backup branch either way.",
@@ -78,7 +98,7 @@ async function resolveConflict(ctx: PluginFrontendContext, conflict: Extract<Syn
 	if (choice !== "keep-local" && choice !== "take-remote") return;
 	const confirmText = choice === "keep-local"
 		? `This force-pushes your local data to GitHub branch ${conflict.branch}. GitHub's current version is kept only in a local backup branch on this computer.`
-		: "This replaces your local learning data with GitHub's version and reloads the window. Your local version is kept in a backup branch.";
+		: "This replaces your local learning data with GitHub's version and restarts LearnHarness to load it. Your local version is kept in a backup branch.";
 	const confirmed = await choose(ctx, "Confirm", [confirmText], [
 		{ key: "yes", label: choice === "keep-local" ? "Overwrite GitHub" : "Overwrite local data", variant: "destructive" },
 		{ key: "no", label: "Cancel", variant: "outline" },
@@ -112,12 +132,15 @@ async function adoptRemote(ctx: PluginFrontendContext, url: string, result: Extr
 	return true;
 }
 
-function describe(status: RepoStatus): string[] {
+function describe(status: PluginStatus): string[] {
 	if (!status.repository) return [`Learning-data folder: ${status.directory}`, "Not set up yet. Enter an empty or existing GitHub repository URL and initialize."];
 	const lines = [`Learning-data folder: ${status.directory}`, `Branch: ${status.branch ?? "(detached)"}`, `Remote: ${status.remote ?? "(no origin)"}`];
 	if (status.ahead !== undefined) lines.push(`Ahead/behind GitHub (as of last fetch): ${status.ahead} / ${status.behind}`);
 	lines.push(`Uncommitted changes: ${status.changes ?? 0}`);
 	if (status.lastCommit) lines.push(`Last commit: ${status.lastCommit}`);
+	if (status.conflict) lines.push(`Sync conflict waiting since ${new Date(status.conflict.at).toLocaleString()}. Automatic sync is paused until you resolve it with “GitHub: Sync conflict”.`);
+	if (status.lastAuto) lines.push(`Last automatic sync (${new Date(status.lastAuto.at).toLocaleString()}): ${status.lastAuto.message}`);
+	if (status.automaticAvailable === false) lines.push("Automatic sync needs a newer LearnHarness; use the sidebar actions.");
 	return lines;
 }
 
@@ -132,13 +155,29 @@ export function mountSettings(ctx: PluginFrontendContext, container: HTMLElement
 		const scope = new AbortController();
 		renderScope = scope;
 		const scoped = AbortSignal.any([signal, scope.signal]);
-		let status: RepoStatus | undefined, error: string | undefined;
-		try { status = await ctx.call<RepoStatus>("status"); }
+		let status: PluginStatus | undefined, error: string | undefined;
+		try { status = await ctx.call<PluginStatus>("status"); }
 		catch (e) { error = e instanceof Error ? e.message : String(e); }
 		if (scoped.aborted) return;
 		root.replaceChildren();
 		root.append(el("h3", "github-sync-title", "Repository"));
 		for (const line of error ? [error] : describe(status!)) root.append(el("p", "github-sync-text", line));
+		if (status?.repository && status.automaticAvailable) {
+			const rows = el("div");
+			root.append(rows);
+			let enabled = status.autoSync !== false;
+			const autoRow = (): PluginSettingsRow => ({
+				key: "auto-sync", type: "toggle", label: "Automatic sync",
+				description: "Pull when LearnHarness starts, push after a lesson or extraction ends, and sync when you quit. This setting is for this computer only.",
+				value: enabled,
+				onChange: async (value: boolean) => {
+					enabled = value;
+					auto.update({ rows: [autoRow()] });
+					await ctx.call("set-auto", { enabled: value });
+				},
+			});
+			const auto = ctx.ui.mountSettingsRows(rows, { rows: [autoRow()] }, { signal: scoped });
+		}
 		const buttons = el("div", "github-sync-buttons");
 		if (status && !status.repository) {
 			const rows = el("div");
@@ -173,17 +212,44 @@ export function mountSettings(ctx: PluginFrontendContext, container: HTMLElement
 }
 
 export function activate(ctx: PluginFrontendContext, deps: Deps = { reload: () => window.location.reload() }): void {
-	const operations = [
-		{ id: "sync", name: "GitHub: Sync now", icon: ICONS.sync },
+	// Sync now turns into "Sync conflict" while a conflict waits (automatic
+	// sync found it, or a dialog was closed); it then opens the conflict dialog.
+	let conflict: PluginStatus["conflict"] = null;
+	let unregisterSync: (() => void) | undefined;
+	function registerSync(): void {
+		unregisterSync?.();
+		const pending = conflict;
+		const offAction = ctx.registerAction({
+			id: "sync", name: pending ? "GitHub: Sync conflict" : "GitHub: Sync now", icon: pending ? ICONS.conflict : ICONS.sync,
+			run: async () => {
+				if (pending) return resolveConflict(ctx, { status: "conflict", changed: false, ...pending }, deps);
+				return present(ctx, await ctx.call<Outcome>("sync"), deps);
+			},
+		});
+		const offPlacement = ctx.placeAction({ id: "sync-sidebar", actionId: "sync", location: "sidebar" });
+		unregisterSync = () => { offPlacement(); offAction(); };
+	}
+	async function refresh(): Promise<void> {
+		let next: PluginStatus["conflict"] = null;
+		try { next = (await ctx.call<PluginStatus>("status")).conflict ?? null; }
+		catch { return; }
+		if (ctx.signal.aborted || (next?.remote ?? null) === (conflict?.remote ?? null)) return;
+		conflict = next;
+		registerSync();
+	}
+	registerSync();
+	for (const operation of [
 		{ id: "pull", name: "GitHub: Pull", icon: ICONS.pull },
 		{ id: "push", name: "GitHub: Push", icon: ICONS.push },
-	] as const;
-	for (const operation of operations) {
+	] as const) {
 		ctx.registerAction({
 			id: operation.id, name: operation.name, icon: operation.icon,
-			run: async () => present(ctx, await ctx.call<SyncResult>(operation.id), deps),
+			run: async () => present(ctx, await ctx.call<Outcome>(operation.id), deps),
 		});
 		ctx.placeAction({ id: `${operation.id}-sidebar`, actionId: operation.id, location: "sidebar" });
 	}
 	ctx.registerSettings((container, signal) => mountSettings(ctx, container, signal, deps));
+	ctx.onNotification?.(event => { if (event.topic === "state") void refresh(); });
+	ctx.onResync?.(() => { void refresh(); });
+	void refresh();
 }

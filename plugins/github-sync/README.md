@@ -2,8 +2,9 @@
 
 A Community plugin that keeps your LearnHarness **learning-data folder** in a GitHub
 repository, so the same chats, jobs, settings and plugin data follow you between
-computers. It runs your installed `git`; it has no model calls, tokens or background
-schedule. Everything happens when you press a button.
+computers. It runs your installed `git`; it has no model calls or tokens. It syncs
+automatically when LearnHarness starts, after work ends and when you quit, and from the
+sidebar whenever you press a button.
 
 ## What it does
 
@@ -17,7 +18,38 @@ The plugin adds three sidebar actions:
 
 Commits are named `sync: <hostname> YYYY-MM-DD HH:MM`. Only one operation runs at a time.
 
-**After a pull changes files, the window reloads** so open pages show the new data.
+**Changes pause while it syncs.** Each action waits for nothing to be running: if a
+lesson, job or extraction is in progress, it says LearnHarness is busy. While it syncs,
+the app shows a banner ("GitHub Sync is syncing") with **Cancel**, and changes in the app
+are refused until it finishes; reading keeps working.
+
+**After a pull changes files, LearnHarness restarts its server and reloads the window**
+so nothing keeps the old data in memory. Without the desktop app (for example `next dev`)
+it asks you to restart, and changes stay paused until then.
+
+**Newer data.** If GitHub's data was written by a newer LearnHarness (its
+`data-format.json` has a higher chat, graph or settings format), nothing is pulled and
+you are asked to update the app first.
+
+## Automatic sync
+
+On by default once the folder is set up; turn it off per computer under
+**Settings → GitHub Sync → Automatic sync**.
+
+| When | What happens |
+| --- | --- |
+| LearnHarness starts | Pull, before any learning data is loaded. A small window shows "Syncing your learning data…" with **Skip**. |
+| A lesson, job or extraction ends (and nothing else starts for 3 s) | Commit and push. Never pulls, so it never restarts the app. If GitHub moved on, the push waits for the next start or quit. |
+| You quit the desktop app | Running work is stopped and saved, then pull and push. A small window shows "Syncing before quit…" with **Quit now**. |
+
+Start and quit share a 30-second limit; after it, LearnHarness continues and the next
+sync catches up. If an automatic sync finds a **conflict**, your local data stays as it
+is, automatic sync pauses and the sidebar's Sync action becomes **GitHub: Sync conflict**,
+which opens the conflict dialog. Resolving it resumes automatic sync.
+
+**Graph ledgers merge.** The append-only `graph/*.jsonl` files use git's union merge
+(`.gitattributes`), so learning on two computers adds both sides' lines instead of
+reporting a conflict.
 
 **Conflicts.** If both computers changed the same file, the rebase is aborted (nothing
 is half-applied or pushed) and a dialog offers:
@@ -81,8 +113,10 @@ state. If the folder is not a repository yet:
    **Initialize**.
 
 With an **empty** GitHub repository, the plugin runs `git init -b main`, adds a
-`.gitignore` (temporary files, `.DS_Store`, plugin `node_modules/` and `.sdk/`), commits
-and pushes.
+`.gitignore` (temporary files, `.DS_Store`, plugin `node_modules/` and `.sdk/`, and this
+plugin's per-machine `plugins/github-sync/data/local.json`) and a `.gitattributes`
+(union merge for `graph/*.jsonl`), commits and pushes. Folders set up by an earlier
+version get the new entries on their next sync.
 
 If the GitHub repository **already has data** (for example from your other computer),
 nothing changes locally until you choose:
@@ -99,9 +133,11 @@ in a source checkout) is treated as not set up; initializing creates its own rep
 
 ## Limits
 
-- Pulling happens while the app is open. The window reloads afterwards, but work
-  in progress in another window may need a manual reload.
-- There is no automatic or scheduled sync, and no sync on app exit.
+- Sync on quit and the start/quit windows need the desktop app. With `next dev` or the
+  web server, startup sync still runs (with the time limit) but quit does not sync.
+- On LearnHarness versions without the host hold API, only the manual actions work and
+  the window reloads after a pull.
+- A pull that updates GitHub Sync's own code loads the new code on the next start.
 - The plugin syncs the entire learning-data folder; it does not choose individual files.
 - It does not install git or manage SSH keys or credentials.
 
@@ -117,5 +153,6 @@ npm test           # uses temporary repositories and a local bare remote; no net
 npm run build
 ```
 
-Source: `src/git-sync.ts` (git operations), `src/backend.ts` (call-bridge handlers),
-`src/main.ts` (sidebar actions, dialogs and settings).
+Source: `src/git-sync.ts` (git operations), `src/backend.ts` (call-bridge handlers,
+lifecycle hooks, hold and restart), `src/local-state.ts` (per-machine settings and
+conflict state), `src/main.ts` (sidebar actions, dialogs and settings).

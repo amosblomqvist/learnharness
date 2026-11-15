@@ -10,6 +10,8 @@ import type { ModelCatalogResponse } from "../core/contracts/models.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { providerKeyMissing } from "../core/settings.ts";
 import { validatePluginInferenceOptions as optionsFor } from "../core/plugin-validation.ts";
+import { appendLineSafe } from "../store/atomic-write.ts";
+import { beginWork } from "../core/host-hold.ts";
 
 /** Complete dependency seam for off-network tests; production defaults are lazy
  * so supplying it never initializes host stores, accounts, or model collections. */
@@ -78,6 +80,8 @@ export function createPluginInference(
 	injected?: PluginInferenceDeps,
 ): PluginInferenceAdapter {
 	const directory = path.resolve(/* turbopackIgnore: true */ dataDirectory);
+	// plugins/<id>/data (community) or core-plugin-data/<id> (core).
+	const pluginLabel = path.basename(directory) === "data" ? path.basename(path.dirname(directory)) : path.basename(directory);
 	let defaults: Promise<PluginInferenceDeps> | undefined;
 	const dependencies = (): Promise<PluginInferenceDeps> => {
 		check(signal);
@@ -112,7 +116,7 @@ export function createPluginInference(
 			cost: { input: usage.cost.input, output: usage.cost.output, cacheRead: usage.cost.cacheRead, cacheWrite: usage.cost.cacheWrite, total: usage.cost.total },
 		} };
 		fs.mkdirSync(directory, { recursive: true });
-		fs.appendFileSync(path.join(/* turbopackIgnore: true */ directory, "usage.jsonl"), `${JSON.stringify(row)}\n`, { mode: 0o600 });
+		appendLineSafe(path.join(/* turbopackIgnore: true */ directory, "usage.jsonl"), JSON.stringify(row), { mode: 0o600 });
 	};
 	const engineFor = async (model: PluginModelSpec, purpose: PluginCallPurpose, options?: PluginInferenceOptions): Promise<PiEngine> => {
 		check(signal);
@@ -192,18 +196,26 @@ export function createPluginInference(
 		} };
 	};
 	const stream = async function* (request: PluginInferenceRequest): AsyncGenerator<AssistantMessageEvent> {
-		const combined = request.signal ? AbortSignal.any([signal, request.signal]) : signal;
+		// Host work registry (core/host-hold.ts): refused while a hold is
+		// active; aborted on app quit through this call's own signal.
+		const quit = new AbortController();
+		const combined = AbortSignal.any([signal, quit.signal, ...(request.signal ? [request.signal] : [])]);
 		check(combined);
-		const options = optionsFor(request.options), model = modelSpec(request.model), purpose = purposeOf(request.purpose);
-		const engine = await bounded(engineFor(model, purpose), combined);
-		if (options.reasoning !== undefined && options.reasoning !== engine.level) throw new Error("Set model.thinkingLevel instead of overriding engine reasoning");
-		const source = engine.streamFn(engine.model, normalizeContext(request.context), { ...options, signal: combined });
-		for await (const event of source) {
-			if (event.type === "done" || event.type === "error") {
-				const message = event.type === "done" ? event.message : event.error;
-				if (message.stopReason !== "aborted" && usageWasAdmitted(message.usage)) onUsage(model, message.usage);
+		const work = beginWork("plugin-inference", pluginLabel, () => quit.abort(new Error("Application quit")));
+		try {
+			const options = optionsFor(request.options), model = modelSpec(request.model), purpose = purposeOf(request.purpose);
+			const engine = await bounded(engineFor(model, purpose), combined);
+			if (options.reasoning !== undefined && options.reasoning !== engine.level) throw new Error("Set model.thinkingLevel instead of overriding engine reasoning");
+			const source = engine.streamFn(engine.model, normalizeContext(request.context), { ...options, signal: combined });
+			for await (const event of source) {
+				if (event.type === "done" || event.type === "error") {
+					const message = event.type === "done" ? event.message : event.error;
+					if (message.stopReason !== "aborted" && usageWasAdmitted(message.usage)) onUsage(model, message.usage);
+				}
+				yield event;
 			}
-			yield event;
+		} finally {
+			work.end();
 		}
 	};
 	return {

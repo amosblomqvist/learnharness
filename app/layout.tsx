@@ -8,6 +8,7 @@ import { ActivityProvider } from "@/components/activity-dock";
 import { ServerEventsProvider } from "@/components/server-events";
 import { AppearanceProvider } from "@/components/settings/appearance";
 import UpdateBanner from "@/components/update-banner";
+import HoldBanner from "@/components/hold-banner";
 import { PluginsProvider } from "@/components/plugins";
 import { readThemeBoot } from "@/src/server";
 
@@ -45,6 +46,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 							<ActivityProvider>
 								<AppShell>{children}</AppShell>
 							</ActivityProvider>
+							{/* Host hold (e.g. GitHub Sync): changes paused, with Cancel. */}
+							<HoldBanner />
 						</SidebarProvider>
 					</AppearanceProvider>
 				</PluginsProvider>

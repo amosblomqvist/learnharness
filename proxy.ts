@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from "next/server";
 import { apiRequestRefusal } from "./src/server/desktop-access.ts";
+import { holdRequestRefusal } from "./src/server/host-hold.ts";
 
 /** Protects API methods, including SSE and spending/settings routes. The one
  * streamed document route enforces the identical all-method request policy
@@ -12,6 +13,12 @@ export function proxy(request: NextRequest) {
 			{ error: refusal },
 			{ status: 403, headers: { "Cache-Control": "no-store" } },
 		);
+	}
+	// Host hold (core/host-hold.ts): requests that may write are refused while
+	// a hold is active. The store backstop catches anything that slips past.
+	const held = holdRequestRefusal(request.method, request.nextUrl.pathname);
+	if (held) {
+		return NextResponse.json(held, { status: 503, headers: { "Cache-Control": "no-store" } });
 	}
 	return NextResponse.next();
 }

@@ -16,7 +16,7 @@ import { emit } from "../core/events.ts";
 import type { JobStore } from "../core/ports.ts";
 import type { CreateJobInit, JobPatch } from "../core/ports.ts";
 import type { JobRecord } from "../core/contracts.ts";
-import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { assertDataWritable, removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 /** Background jobs (data/jobs). Not in config.ts PATHS (orchestrator-owned). */
 const JOBS_DIR = path.join(/* turbopackIgnore: true */ PATHS.data, "jobs");
@@ -114,6 +114,7 @@ function findJobByToolCallId(chatId: string, toolCallId: string): JobRecord | nu
  *  Returns how many files were removed. The deletion route refuses while
  *  jobs are still running, so every record here is terminal. */
 function deleteJobsForChat(chatId: string): number {
+	assertDataWritable(JOBS_DIR);
 	let removed = 0;
 	for (const job of listJobs(chatId)) {
 		try {

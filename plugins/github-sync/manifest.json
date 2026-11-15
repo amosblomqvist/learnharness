@@ -4,7 +4,7 @@
   "name": "GitHub Sync",
   "version": "0.1.0",
   "minAppVersion": "0.6.1",
-  "description": "Sync your learning-data folder with a GitHub repository using your system git: Sync now, Pull and Push from the sidebar.",
+  "description": "Sync your learning-data folder with a GitHub repository using your system git: automatically on start, after work and on quit, or with Sync now, Pull and Push from the sidebar.",
   "main": "main.js",
   "backend": "backend.cjs",
   "styles": "styles.css"

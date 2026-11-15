@@ -9,6 +9,7 @@ import {
 } from "../core/plugin-questions.ts";
 import type { NativePluginQuestionDefinition } from "../agent/plugin-question-tools.ts";
 import type { ChatStore } from "../core/ports.ts";
+import { activeHold } from "../core/host-hold.ts";
 import { emit } from "../core/events.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { getPluginHost } from "./plugins.ts";
@@ -236,6 +237,8 @@ export async function reconcilePluginQuestionCompatibility(chatStore: ChatStore,
 	if (!record) return;
 	const appends = pluginQuestionCompatibilityAppends(record, (pluginId, typeId, version) => host.resolveQuestionType(pluginId, typeId, version));
 	if (!appends.length) return;
+	// A read path: under a host hold the reconciliation waits for a later read.
+	if (activeHold()) return;
 	chatStore.saveMessages(chatId, [...record.messages, ...appends]);
 	emit("record-changed", { chatId });
 }

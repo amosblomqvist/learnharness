@@ -10,6 +10,7 @@ import type { PiEngine } from "./models.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 import type { PluginAgentRecordStore } from "../core/ports.ts";
+import { assertNoHold, beginWork } from "../core/host-hold.ts";
 export type { PluginAgentRecordStore } from "../core/ports.ts";
 export interface PluginAgentServiceDeps {
 	store: PluginAgentRecordStore;
@@ -95,6 +96,7 @@ export function createPluginAgentService(deps: PluginAgentServiceDeps): PluginAg
 	const commit = (s: Session, next: PluginAgentRecord) => {
 		if (disposed) throw new Error("Plugin agent service disposed");
 		if (s.poisoned) throw s.poisoned;
+		assertNoHold(); // a host hold refuses the write without poisoning the session
 		const record = clone({ ...next, updatedAt: new Date().toISOString() });
 		try { deps.store.save(record); }
 		catch (error) {
@@ -139,6 +141,8 @@ export function createPluginAgentService(deps: PluginAgentServiceDeps): PluginAg
 	};
 	const launch = (s: Session, d: PluginAgentDefinition, purpose: PluginCallPurpose) => {
 		const run: Run = { controller: new AbortController(), cancelled: false };
+		// Host work registry (core/host-hold.ts); quit cancels the run.
+		const work = beginWork("plugin-agent", d.id, () => { try { cancel(s); } catch { /* commit failed closed */ } });
 		s.run = run; // Reserve the writer before engine resolution or any other await.
 		const active = () => {
 			if (disposed || run.cancelled || run.controller.signal.aborted || s.poisoned || definitions.get(d.id) !== d) {
@@ -253,6 +257,7 @@ export function createPluginAgentService(deps: PluginAgentServiceDeps): PluginAg
 					try { commit(s, { ...s.record, status: "error", error: errorText(error) }); } catch { /* commit already failed closed */ }
 				}
 			} finally {
+				work.end();
 				if (s.run === run) s.run = undefined;
 				if (!disposed) { s.partial = undefined; notify(s); }
 			}

@@ -43,7 +43,7 @@ test("a result that changed files reloads the window without a dialog", async ()
 	let reloads = 0;
 	activate(f.context, { reload: () => reloads++ });
 	await f.actions.find(action => action.id === "pull")!.run({ placement: "sidebar", surface: "sidebar" } as never);
-	assert.deepEqual(f.calls, ["pull"]);
+	assert.deepEqual(f.calls.filter(call => call !== "status"), ["pull"]);
 	assert.equal(reloads, 1);
 	assert.equal(f.dialogs.length, 0);
 });
@@ -67,4 +67,34 @@ test("a conflict opens the choice dialog and does nothing when closed", async ()
 	await present(f.context, { status: "conflict", changed: false, message: "Both changed.", branch: "main", remote: "a".repeat(40) }, { reload() {} });
 	assert.deepEqual(f.dialogs.map(dialog => dialog.title), ["GitHub Sync conflict"]);
 	assert.deepEqual(f.calls, []);
+});
+
+test("restart results: restarting shows nothing, restart-manually explains, newer data asks to update", async () => {
+	const base = { status: "done", changed: true, message: "Pulled new learning data from GitHub." } as const;
+	let f = fakeContext();
+	let reloads = 0;
+	await present(f.context, { ...base, after: "restarting" }, { reload: () => reloads++ });
+	assert.equal(f.dialogs.length, 0);
+	await present(f.context, { ...base, after: "restart-manually" }, { reload: () => reloads++ });
+	assert.equal(f.dialogs.at(-1)!.title, "Restart LearnHarness");
+	assert.equal(reloads, 0);
+	f = fakeContext();
+	await present(f.context, { status: "newer-data", changed: false, message: "GitHub's data needs a newer LearnHarness." }, { reload: () => reloads++ });
+	assert.equal(f.dialogs.at(-1)!.title, "Update LearnHarness first");
+	assert.equal(reloads, 0);
+});
+
+test("a pending conflict turns Sync now into Sync conflict, which opens the dialog without syncing", async () => {
+	const conflict = { branch: "main", remote: "b".repeat(40), message: "Both changed.", at: new Date().toISOString() };
+	const f = fakeContext({ status: { repository: true, directory: "/d", conflict } });
+	let notify: ((event: { topic: string }) => void) | undefined;
+	Object.assign(f.context, { onNotification: (listener: typeof notify) => { notify = listener; return () => {}; } });
+	activate(f.context, { reload() {} });
+	await new Promise(resolve => setTimeout(resolve, 0));
+	const sync = f.actions.filter(action => action.id === "sync").at(-1)!;
+	assert.equal(sync.name, "GitHub: Sync conflict");
+	await sync.run({ placement: "sidebar", surface: "sidebar" } as never);
+	assert.deepEqual(f.dialogs.map(dialog => dialog.title), ["GitHub Sync conflict"]);
+	assert.deepEqual(f.calls.filter(call => call !== "status"), []);
+	assert.ok(notify, "listens for backend state notifications");
 });

@@ -21,7 +21,8 @@ import {
 	type VisualResult,
 	type VisualToolInput,
 } from "../../core/contracts.ts";
-import { registerJobAbort, unregisterJobAbort } from "./aborts.ts";
+import { fireJobAbort, registerJobAbort, unregisterJobAbort } from "./aborts.ts";
+import { beginWork, isHostHoldError, type HostWorkLease } from "../../core/host-hold.ts";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -261,9 +262,19 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			await refuse(keyRefusal.error);
 			return;
 		}
+		// Host work registry (core/host-hold.ts). Under an active hold the job
+		// stays "running" without a live loop: the stale-job sweep respawns it
+		// after the hold. Quit fires the loop's own abort controller.
+		let work: HostWorkLease;
+		try { work = beginWork("job", `${job.kind} ${jobId}`, () => { fireJobAbort(jobId); }); }
+		catch (error) {
+			if (isHostHoldError(error)) { console.info(`[job ${jobId}] deferred — ${error.message}`); return; }
+			throw error;
+		}
 		try {
 			await run(jobId, engine, input, makeLoopContext(jobId, engine));
 		} finally {
+			work.end();
 			unregisterJobAbort(jobId);
 			// The last usage write may have been mid-flight when the loop died;
 			// persist what was folded (the abort path patches only status, so

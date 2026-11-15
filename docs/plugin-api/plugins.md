@@ -13,15 +13,19 @@
 - [PluginCleanup](#plugincleanup)
 - [PluginCodeBlockProps](#plugincodeblockprops)
 - [PluginCodeBlockRenderer](#plugincodeblockrenderer)
+- [PluginDataFormats](#plugindataformats)
 - [PluginFrontendContext](#pluginfrontendcontext)
 - [PluginFrontendModule](#pluginfrontendmodule)
 - [PluginGraphFileData](#plugingraphfiledata)
+- [PluginHostControl](#pluginhostcontrol)
+- [PluginHostHold](#pluginhosthold)
 - [PluginInference](#plugininference)
 - [PluginInferenceOptions](#plugininferenceoptions)
 - [PluginInferenceRequest](#plugininferencerequest)
 - [PluginInfo](#plugininfo)
 - [PluginInstructions](#plugininstructions)
 - [PluginLearningData](#pluginlearningdata)
+- [PluginLifecycleContext](#pluginlifecyclecontext)
 - [PluginManifest](#pluginmanifest)
 - [PluginNotification](#pluginnotification)
 - [PluginPageActionContext](#pluginpageactioncontext)
@@ -269,10 +273,11 @@ export interface PluginBackendContext {
         on(listener: (event: ServerEvent) => void): () => void;
         emit(topic: string, data?: unknown): void;
     };
+    host: PluginHostControl;
 }
 ```
 
-**Related types:** [PluginAgentService](plugin-agents.md#pluginagentservice), [PluginBackgroundTool](plugin-workers.md#pluginbackgroundtool), [PluginCleanup](plugins.md#plugincleanup), [PluginInference](plugins.md#plugininference), [PluginInstructions](plugins.md#plugininstructions), [PluginLearningData](plugins.md#pluginlearningdata), [PluginManifest](plugins.md#pluginmanifest), [PluginProblemTypeDefinition](plugin-problems.md#pluginproblemtypedefinition), [PluginQuestionTypeDefinition](plugin-questions.md#pluginquestiontypedefinition), [PluginToolContext](plugins.md#plugintoolcontext), [PluginTools](plugins.md#plugintools), [PluginWorkerService](plugin-workers.md#pluginworkerservice), [ServerEvent](events.md#serverevent).
+**Related types:** [PluginAgentService](plugin-agents.md#pluginagentservice), [PluginBackgroundTool](plugin-workers.md#pluginbackgroundtool), [PluginCleanup](plugins.md#plugincleanup), [PluginHostControl](plugins.md#pluginhostcontrol), [PluginInference](plugins.md#plugininference), [PluginInstructions](plugins.md#plugininstructions), [PluginLearningData](plugins.md#pluginlearningdata), [PluginManifest](plugins.md#pluginmanifest), [PluginProblemTypeDefinition](plugin-problems.md#pluginproblemtypedefinition), [PluginQuestionTypeDefinition](plugin-questions.md#pluginquestiontypedefinition), [PluginToolContext](plugins.md#plugintoolcontext), [PluginTools](plugins.md#plugintools), [PluginWorkerService](plugin-workers.md#pluginworkerservice), [ServerEvent](events.md#serverevent).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -294,6 +299,7 @@ export interface PluginBackendContext {
 - [events](#pluginbackendcontext-events)
 - [events.on](#pluginbackendcontext-eventson)
 - [events.emit](#pluginbackendcontext-eventsemit)
+- [host](#pluginbackendcontext-host)
 
 ### PluginBackendContext manifest
 
@@ -515,6 +521,15 @@ emit(topic: string, data?: unknown): void;
 
 **Returns:** `void`.
 
+### PluginBackendContext host
+
+Host coordination for plugins that rewrite the learning-data folder
+(e.g. syncing it with a remote).
+
+```ts
+host: PluginHostControl;
+```
+
 ## PluginBackendModule
 
 Public SDK type, exported as `PluginBackendModule`. Import with `import type`; the SDK has no runtime exports.
@@ -522,14 +537,18 @@ Public SDK type, exported as `PluginBackendModule`. Import with `import type`; t
 ```ts
 export interface PluginBackendModule {
     activate(context: PluginBackendContext): void | PluginCleanup | Promise<void | PluginCleanup>;
+    beforeLoad?(context: PluginLifecycleContext): void | Promise<void>;
+    beforeQuit?(context: PluginLifecycleContext): void | Promise<void>;
 }
 ```
 
-**Related types:** [PluginBackendContext](plugins.md#pluginbackendcontext), [PluginCleanup](plugins.md#plugincleanup).
+**Related types:** [PluginBackendContext](plugins.md#pluginbackendcontext), [PluginCleanup](plugins.md#plugincleanup), [PluginLifecycleContext](plugins.md#pluginlifecyclecontext).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [activate](#pluginbackendmodule-activate)
+- [beforeLoad](#pluginbackendmodule-beforeload)
+- [beforeQuit](#pluginbackendmodule-beforequit)
 
 ### PluginBackendModule activate
 
@@ -546,6 +565,37 @@ activate(context: PluginBackendContext): void | PluginCleanup | Promise<void | P
 | `context` | `PluginBackendContext` |
 
 **Returns:** `void \| PluginCleanup \| Promise<void \| PluginCleanup>`.
+
+### PluginBackendModule beforeLoad
+
+Optional. Runs at server startup before any learning data is loaded and
+before plugins activate, for enabled plugins. Failures are logged and do
+not block startup. Code changed by this hook loads on the next start.
+
+```ts
+beforeLoad?(context: PluginLifecycleContext): void | Promise<void>;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `context` | `PluginLifecycleContext` |
+
+**Returns:** `void \| Promise<void>`.
+
+### PluginBackendModule beforeQuit
+
+Optional. Runs when the desktop app quits, after running work has been
+stopped and saved, for active plugins. Desktop only.
+
+```ts
+beforeQuit?(context: PluginLifecycleContext): void | Promise<void>;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `context` | `PluginLifecycleContext` |
+
+**Returns:** `void \| Promise<void>`.
 
 ## PluginCleanup
 
@@ -651,6 +701,45 @@ mount(container: HTMLElement, block: PluginCodeBlockProps): void | PluginCleanup
 | `block` | `PluginCodeBlockProps` |
 
 **Returns:** `void \| PluginCleanup \| Promise<void \| PluginCleanup>`.
+
+## PluginDataFormats
+
+Public SDK type, exported as `PluginDataFormats`. Import with `import type`; the SDK has no runtime exports.
+
+Data format versions this app build reads and writes. A folder stamped
+with a greater value was written by a newer build.
+
+```ts
+export interface PluginDataFormats {
+    readonly chat: number;
+    readonly graph: number;
+    readonly settings: number;
+}
+```
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [chat](#plugindataformats-chat)
+- [graph](#plugindataformats-graph)
+- [settings](#plugindataformats-settings)
+
+### PluginDataFormats chat
+
+```ts
+readonly chat: number;
+```
+
+### PluginDataFormats graph
+
+```ts
+readonly graph: number;
+```
+
+### PluginDataFormats settings
+
+```ts
+readonly settings: number;
+```
 
 ## PluginFrontendContext
 
@@ -1248,6 +1337,130 @@ Raw versioned metadata rather than a second plugin-specific schema.
 "format.json": unknown;
 ```
 
+## PluginHostControl
+
+Public SDK type, exported as `PluginHostControl`. Import with `import type`; the SDK has no runtime exports.
+
+```ts
+export interface PluginHostControl {
+    acquireHold(options: {
+        reason: string;
+    }): PluginHostHold | null;
+    onIdle(listener: () => void): () => void;
+    requestRestart(): Promise<{
+        restarted: boolean;
+        reason?: "unavailable";
+    }>;
+    readonly dataFormats: PluginDataFormats;
+}
+```
+
+**Related types:** [PluginDataFormats](plugins.md#plugindataformats), [PluginHostHold](plugins.md#pluginhosthold).
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [acquireHold](#pluginhostcontrol-acquirehold)
+- [onIdle](#pluginhostcontrol-onidle)
+- [requestRestart](#pluginhostcontrol-requestrestart)
+- [dataFormats](#pluginhostcontrol-dataformats)
+
+### PluginHostControl acquireHold
+
+Take the exclusive hold. Returns null while any work is running or
+another hold is active; try again later (onIdle tells you when). `reason`
+is shown in the banner and in refusals, e.g. "GitHub Sync is syncing".
+
+```ts
+acquireHold(options: {
+    reason: string;
+}): PluginHostHold | null;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `options` | `{         reason: string;     }` |
+
+**Returns:** `PluginHostHold \| null`.
+
+### PluginHostControl onIdle
+
+Called when the host goes from busy to idle: the last running turn, job,
+extraction or other work ended and nothing started for a few seconds.
+Not called when a hold is released. Removed on deactivation.
+
+```ts
+onIdle(listener: () => void): () => void;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `listener` | `() => void` |
+
+**Returns:** `() => void`.
+
+### PluginHostControl requestRestart
+
+Ask the desktop app to restart the server and reload its windows (for
+example after rewriting data files). Resolves restarted: false with
+reason "unavailable" when no desktop shell owns the server (development
+and web); keep the hold and ask the user to restart.
+
+```ts
+requestRestart(): Promise<{
+    restarted: boolean;
+    reason?: "unavailable";
+}>;
+```
+
+**Returns:** `Promise<{         restarted: boolean;         reason?: "unavailable";     }>`.
+
+### PluginHostControl dataFormats
+
+This build's data format versions.
+
+```ts
+readonly dataFormats: PluginDataFormats;
+```
+
+## PluginHostHold
+
+Public SDK type, exported as `PluginHostHold`. Import with `import type`; the SDK has no runtime exports.
+
+An exclusive host hold. While held, the host refuses to start turns, jobs,
+extraction and other work, and refuses every write to the learning-data
+folder (reads keep working). The app shows a banner with Cancel.
+
+```ts
+export interface PluginHostHold {
+    readonly signal: AbortSignal;
+    release(): void;
+}
+```
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [signal](#pluginhosthold-signal)
+- [release](#pluginhosthold-release)
+
+### PluginHostHold signal
+
+Aborted when the user cancels the hold or this plugin is deactivated.
+Stop the work and release.
+
+```ts
+readonly signal: AbortSignal;
+```
+
+### PluginHostHold release
+
+End the hold. Idempotent.
+
+```ts
+release(): void;
+```
+
+**Returns:** `void`.
+
 ## PluginInference
 
 Public SDK type, exported as `PluginInference`. Import with `import type`; the SDK has no runtime exports.
@@ -1573,6 +1786,81 @@ readGraphFile<K extends keyof PluginGraphFileData>(name: K): PluginGraphFileData
 | `name` | `K` |
 
 **Returns:** `PluginGraphFileData[K]`.
+
+## PluginLifecycleContext
+
+Public SDK type, exported as `PluginLifecycleContext`. Import with `import type`; the SDK has no runtime exports.
+
+Context for the beforeLoad/beforeQuit lifecycle hooks. No activation
+services: the hooks run outside activation, while the host itself holds
+the app (nothing else runs and no data is being loaded or written).
+
+```ts
+export interface PluginLifecycleContext {
+    readonly manifest: PluginManifest;
+    readonly directory: string;
+    readonly dataDirectory: string;
+    readonly learningDirectory: string;
+    readonly dataFormats: PluginDataFormats;
+    readonly signal: AbortSignal;
+}
+```
+
+**Related types:** [PluginDataFormats](plugins.md#plugindataformats), [PluginManifest](plugins.md#pluginmanifest).
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [manifest](#pluginlifecyclecontext-manifest)
+- [directory](#pluginlifecyclecontext-directory)
+- [dataDirectory](#pluginlifecyclecontext-datadirectory)
+- [learningDirectory](#pluginlifecyclecontext-learningdirectory)
+- [dataFormats](#pluginlifecyclecontext-dataformats)
+- [signal](#pluginlifecyclecontext-signal)
+
+### PluginLifecycleContext manifest
+
+```ts
+readonly manifest: PluginManifest;
+```
+
+### PluginLifecycleContext directory
+
+Absolute code directory.
+
+```ts
+readonly directory: string;
+```
+
+### PluginLifecycleContext dataDirectory
+
+This plugin's writable records directory.
+
+```ts
+readonly dataDirectory: string;
+```
+
+### PluginLifecycleContext learningDirectory
+
+The learning-data folder root.
+
+```ts
+readonly learningDirectory: string;
+```
+
+### PluginLifecycleContext dataFormats
+
+```ts
+readonly dataFormats: PluginDataFormats;
+```
+
+### PluginLifecycleContext signal
+
+Aborted on the time limit (30 s for all hooks together), when the user
+skips (startup) or quits now (quit). Stop promptly.
+
+```ts
+readonly signal: AbortSignal;
+```
 
 ## PluginManifest
 
