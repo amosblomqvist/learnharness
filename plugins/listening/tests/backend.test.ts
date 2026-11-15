@@ -141,6 +141,49 @@ test("unreadable saved files fall back to defaults with a notice instead of fail
   h.cleanup();
 });
 
+test("the reset notice clears once each reset file is saved again", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-listening-notice-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(path.join(directory, "settings.json"), "{ truncated");
+  await fs.writeFile(path.join(directory, "credentials.json"), "{ truncated");
+  const h = await harness(t, directory);
+  assert.match((await h.call("get-status")).notice!, /settings and API key file could not be read/);
+  const saved = await h.call("save-settings", { voiceId: "v" });
+  assert.match(saved.notice!, /saved Listening API key file could not be read/, "the key file is still the default");
+  const ready = await makeReady(h);
+  assert.equal(ready.ready, true);
+  assert.equal(ready.notice, undefined);
+  h.cleanup();
+});
+
+test("loading the model list alone doesn't clear the settings notice", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-listening-notice-models-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  await fs.writeFile(path.join(directory, "settings.json"), "{ truncated");
+  await fs.writeFile(path.join(directory, "credentials.json"), JSON.stringify({ version: 1, keys: { elevenlabs: KEY } }));
+  const h = await harness(t, directory);
+  const listed = await h.call<{ status: ListeningStatus }>("list-models");
+  assert.match(listed.status.notice!, /saved Listening settings file could not be read/, "the settings page loads models on open");
+  assert.deepEqual(listed.status.model, flash, "the snapshot lives in memory");
+  assert.equal(await fs.readFile(path.join(directory, "settings.json"), "utf8"), "{ truncated", "only the learner's save writes the file");
+  assert.equal((await h.call("save-settings", { voiceId: "v" })).notice, undefined);
+  const saved = JSON.parse(await fs.readFile(path.join(directory, "settings.json"), "utf8"));
+  assert.equal(saved.voiceId, "v");
+  assert.deepEqual(saved.model, flash);
+  h.cleanup();
+});
+
+test("a save that fails keeps the reset notice", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-listening-notice-failed-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  // Neither readable nor replaceable: reading fails with EISDIR, the rename onto it fails too.
+  await fs.mkdir(path.join(directory, "settings.json"));
+  const h = await harness(t, directory);
+  await assert.rejects(h.call("save-settings", { voiceId: "v" }));
+  assert.match((await h.call("get-status")).notice!, /settings file could not be read/, "nothing was saved");
+  h.cleanup();
+});
+
 test("a settings file that fails to read, not only to parse, also falls back with a notice", async t => {
   const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-listening-unreadable-"));
   t.after(() => fs.rm(directory, { recursive: true, force: true }));

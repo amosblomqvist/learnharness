@@ -17,7 +17,7 @@ export interface ListeningStatus {
   modelId: string;
   model?: ModelInfo;
   ready: boolean;
-  /** Shown once on the settings page when saved files were unreadable and reset. */
+  /** Shown on the settings page until each unreadable, reset file is saved again. */
   notice?: string;
 }
 
@@ -124,7 +124,7 @@ export function activate(ctx: PluginBackendContext, options: ListeningBackendOpt
       const listedModel = models.find(model => model.id === current.modelId);
       // Only a first choice uses the default rule; an existing choice is never replaced silently.
       const selected = listedModel ?? (current.model ? undefined : chooseModel(models, current.modelId, provider.preferredDefaultModel));
-      if (selected && JSON.stringify(selected) !== JSON.stringify(current.model)) store.saveSettings({ ...current, modelId: selected.id, model: selected });
+      if (selected && JSON.stringify(selected) !== JSON.stringify(current.model)) store.saveModelSnapshot({ ...current, modelId: selected.id, model: selected });
     }
     return { models, status: changed() };
   };
