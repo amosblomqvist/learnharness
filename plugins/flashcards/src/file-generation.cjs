@@ -85,7 +85,7 @@ function prepareFileChunks(options) {
   const plan = (start, end) => {
     const input = { name, markdown: markdown.slice(start, end) }, prompt = promptFor(input);
     const tokens = estimate(prompt);
-    const maxTokens = Math.min(8192, outputLimit, contextLimit - tokens - 256);
+    const maxTokens = Math.min(32768, outputLimit, contextLimit - tokens - 256);
     return { start, end, input, prompt, tokens, maxTokens };
   };
   // Match core extraction's source-only chars/4 budget. Filename, JSON

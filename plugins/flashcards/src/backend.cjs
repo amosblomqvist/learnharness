@@ -370,7 +370,7 @@ function activate(ctx) {
     const state = store.get(), chunks = pack(graphNow(), propositionIds, state);
     const plans = chunks.map(input => {
       const tokens = estimate(input);
-      const maxTokens = Math.min(8192, resolved.entry.maxTokens ?? 8192, (resolved.entry.contextWindow ?? Infinity) - tokens - 256);
+      const maxTokens = Math.min(32768, resolved.entry.maxTokens ?? 8192, (resolved.entry.contextWindow ?? Infinity) - tokens - 256);
       if (maxTokens < 1024) fail('The selected model cannot fit this context and an output allowance. Reduce the chunk budget or choose another model.');
       return { input, prompt: promptFor(input), maxTokens, tokens };
     });
