@@ -147,8 +147,8 @@ test("the API key is stored owner-only, survives restart and is never returned",
   await assert.rejects(h.call("save-key", {}), /Expected an API key/);
   const ready = await makeReady(h);
   assert.equal(JSON.stringify(ready).includes(KEY), false);
-  const stat = await fs.stat(path.join(h.directory, "credentials.json"));
-  assert.equal(stat.mode & 0o777, 0o600);
+  // Windows ignores POSIX file modes.
+  if (process.platform !== "win32") assert.equal((await fs.stat(path.join(h.directory, "credentials.json"))).mode & 0o777, 0o600);
   for (const name of ["get-status", "list-models", "save-settings"]) {
     const value = await h.call<unknown>(name, name === "save-settings" ? {} : undefined);
     assert.equal(JSON.stringify(value).includes(KEY), false, name);

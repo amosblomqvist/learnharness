@@ -250,7 +250,8 @@ question contract.
    mount combining `mountSettingsRows` with a write-only password field.
 
 Speech requests go to the provider only when the learner presses Play and the audio is
-not cached. The key is stored owner-only in the plugin data folder, not in host credentials.
+not cached. The key is stored owner-only (on macOS and Linux) in the plugin data folder,
+not in host credentials.
 
 ### UI Showcase: all 15 UI methods
 

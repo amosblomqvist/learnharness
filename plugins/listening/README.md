@@ -38,7 +38,7 @@ Writable plugin files live under `<learning data>/core-plugin-data/listening/`:
 | File | Contents |
 | --- | --- |
 | `settings.json` | Provider, Voice ID, model ID and a snapshot of the selected model's name, text limit and languages |
-| `credentials.json` | API keys per provider, owner-only (`0600`), written atomically |
+| `credentials.json` | API keys per provider, owner-only (`0600`) on macOS and Linux, written atomically |
 | `cache/speech/` | Generated audio (see below) |
 
 If `settings.json` or `credentials.json` cannot be read, Listening starts with defaults
