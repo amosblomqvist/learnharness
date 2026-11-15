@@ -237,6 +237,21 @@ describe("status observation never controls the updater", () => {
 	});
 });
 
+describe("startup status window", () => {
+	it("closing it before the first app window opens does not quit (non-macOS)", async () => {
+		const f = fixture();
+		let quits = 0;
+		f.app.quit = () => { quits++; };
+		await f.run("main()");
+		f.run("process.platform = 'linux'; appWindowOpened = false");
+		f.app.emit("window-all-closed");
+		assert.equal(quits, 0, "plugin beforeLoad status window closed, no app window yet");
+		f.run("appWindowOpened = true");
+		f.app.emit("window-all-closed");
+		assert.equal(quits, 1);
+	});
+});
+
 describe("startup, timer, trusted IPC and menu wiring", () => {
 	it("starts and retains the 24h timer without any Settings subscription, checking current preference each time", async () => {
 		const f = fixture(); f.setSettings({ general: { autoUpdate: false } });

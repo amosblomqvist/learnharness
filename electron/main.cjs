@@ -166,6 +166,7 @@ let quitState = "idle"; // "idle" | "waiting" | "done"
 let quitFinish = null;
 let restartingServer = false;
 let serverUrl = null;
+let appWindowOpened = false; // the startup status window alone must not quit the app
 /** Wait for the quit sequence; the server reports done or the limit passes. */
 const QUIT_WAIT_MS = 35_000;
 
@@ -357,6 +358,7 @@ function openExternalLink(target) {
  *    external links go to the real browser via shell.openExternal, for
  *    http, https and mailto only (openExternalLink). */
 function createWindow(url) {
+	appWindowOpened = true;
 	const win = new BrowserWindow({
 		width: 1440,
 		height: 900,
@@ -763,6 +765,9 @@ function installMenu() {
 
 async function main() {
 	app.on("window-all-closed", () => {
+		// Closing the startup status window (plugin beforeLoad hooks) before the
+		// first app window exists is not the user closing the app.
+		if (!appWindowOpened) return;
 		chatgpt?.pause();
 		subscriptions?.pause();
 		// macOS convention: the app stays resident, reactivated from the Dock.
