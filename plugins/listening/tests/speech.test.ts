@@ -113,6 +113,13 @@ test("request keeps script and punctuation, normalizes layout whitespace and req
   }
 });
 
+test("spoken text needs at least one letter or digit", () => {
+  for (const text of [String.fromCharCode(0x200b), String.fromCharCode(0x200b, 0x200b), "?!", "..."]) {
+    assert.throws(() => parseSpeechRequest({ text, language: "en" }), { code: "invalid_request", message: "The spoken text has no letters or digits." }, JSON.stringify(text));
+  }
+  for (const text of ["42", "你好", "¿Dónde?"]) assert.equal(parseSpeechRequest({ text, language: "en" }).text, text);
+});
+
 test("cache key separates provider, model, voice, language and text", () => {
   const base = { provider: "elevenlabs", modelId: "m", voiceId: "v", language: "zh", text: "茶" };
   const keys = new Set([base, { ...base, provider: "other" }, { ...base, modelId: "n" }, { ...base, voiceId: "w" }, { ...base, language: "ja" }, { ...base, text: "茶。" }].map(speechCacheKey));

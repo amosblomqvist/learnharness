@@ -52,9 +52,11 @@ export function normalizeSpokenText(text: string): string {
   return text.replace(/[\t\r\n ]+/g, " ").trim();
 }
 
-/** Readable text only: no control characters other than layout whitespace. */
+/** Readable text only: no control characters other than layout whitespace, and at least one letter or digit. */
 export function spokenTextProblem(text: string): string | undefined {
   if (!normalizeSpokenText(text)) return "The spoken text is empty.";
   if (/[\u0000-\u0008\u000b\u000c\u000e-\u001f\u007f]/u.test(text)) return "The spoken text contains control characters.";
+  // Invisible characters such as U+200B are not whitespace to \S, so check for something to say.
+  if (!/[\p{L}\p{N}]/u.test(text)) return "The spoken text has no letters or digits.";
   return undefined;
 }
