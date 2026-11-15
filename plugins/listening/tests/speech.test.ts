@@ -133,6 +133,17 @@ test("identical concurrent requests generate once and cached audio works without
   await assert.rejects(service({ text: "goodbye", language: "en" }), { code: "key_missing" });
 });
 
+test("languages the model doesn't list never reach the provider; cached audio still plays", async () => {
+  let calls = 0;
+  const cache = memoryCache();
+  const service = createSpeechService({ cache, selection: selection(fakeProvider(async () => { calls++; return audio; })), key: () => "secret" });
+  await assert.rejects(service({ text: "konnichiwa", language: "ja" }), { code: "unsupported_language", message: /Flash v2\.5 doesn't support this language \(ja\)/ });
+  assert.equal(calls, 0);
+  await cache.put(speechCacheKey({ provider: "elevenlabs", modelId: model.id, voiceId: "voice", language: "ja", text: "konnichiwa" }), audio.audio, audio.mimeType);
+  assert.equal((await service({ text: "konnichiwa", language: "ja" })).cache, "hit");
+  assert.equal(calls, 0);
+});
+
 test("not ready without a voice or a matching model snapshot; text limit follows the model", async () => {
   const provider = fakeProvider(async () => audio);
   const run = (overrides: Partial<SpeechSelection>, text = "hello") => createSpeechService({ cache: memoryCache(), selection: selection(provider, overrides), key: () => "k" })({ text, language: "en" });

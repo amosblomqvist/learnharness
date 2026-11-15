@@ -35,7 +35,7 @@ export function generationTimeoutMs(text: string): number {
 }
 
 export type SpeechErrorCode =
-  | "invalid_request" | "text_too_long" | "not_ready" | "key_missing"
+  | "invalid_request" | "text_too_long" | "unsupported_language" | "not_ready" | "key_missing"
   | "auth_failed" | "voice_unavailable" | "payment_required" | "quota_exceeded" | "rate_limited"
   | "busy" | "timeout" | "provider_failed" | "invalid_audio";
 

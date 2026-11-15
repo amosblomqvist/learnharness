@@ -57,6 +57,8 @@ export function createSpeechService({ cache, selection, key, maxConcurrent = MAX
       let warning: string | undefined;
       try { const saved = await cache.get(identity); if (saved) return { ...saved, cache: "hit" }; }
       catch { warning = "Audio cache is unavailable; replay in this window still works."; }
+      // Same rule as pose-time validation; it sits after the cache so saved audio still plays.
+      if (!model.languages.includes(language)) throw new SpeechError("unsupported_language", `${model.label} doesn't support this language (${language}). Choose another model in Listening settings.`);
       const apiKey = key(provider.id);
       if (!apiKey) throw new SpeechError("key_missing", `Add your ${provider.label} API key in Listening settings.`);
       if (generating >= maxConcurrent) throw new SpeechError("busy", "Speech generation is busy. Try again shortly.");
