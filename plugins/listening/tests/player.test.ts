@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createSpeechPlayer, stopActivePlayback, type LoadedAudio, type PlayerMedia, type PlayerState } from "../src/player.ts";
+import { createPlaybackStore } from "../src/playback-state.ts";
+import { createSpeechPlayer, type LoadedAudio, type PlayerMedia, type PlayerState } from "../src/player.ts";
 import type { PlaybackRate } from "../src/speech/limits.ts";
+
+// One activation's store: every fixture player shares its slot, as in the app.
+const store = createPlaybackStore();
 
 function fixture(load: () => Promise<LoadedAudio>) {
   let plays = 0, pauses = 0, revoked = 0;
@@ -11,7 +15,7 @@ function fixture(load: () => Promise<LoadedAudio>) {
   const endedRates: PlaybackRate[] = [];
   const media: PlayerMedia = { src: "", currentTime: 0, playbackRate: 1, preservesPitch: true, onended: null, onerror: null, play: async () => { plays++; }, pause: () => { pauses++; }, load: () => {} };
   const player = createSpeechPlayer({
-    load, audio: () => media, createURL: () => "blob:test", revokeURL: () => { revoked++; },
+    load, audio: () => media, createURL: () => "blob:test", revokeURL: () => { revoked++; }, slot: store,
     changed: next => { state = next; transitions.push(next); },
     started: rate => startedRates.push(rate), ended: rate => endedRates.push(rate),
   });
@@ -32,7 +36,7 @@ test("replay reuses audio; stop and disposal release playback resources", async 
   assert.equal(f.plays(), 2);
   f.player.dispose();
   assert.equal(f.revoked(), 1);
-  assert.equal(stopActivePlayback(), false);
+  assert.equal(store.stopPlayback(), false);
 });
 
 test("pause keeps the attempt: resuming and reaching the end completes one full playback", async () => {
@@ -56,7 +60,7 @@ test("stopping while paused abandons the attempt; its end cannot complete it", a
   await f.player.play();
   const staleEnd = f.media.onended!;
   f.player.pause();
-  assert.equal(stopActivePlayback(), true);
+  assert.equal(store.stopPlayback(), true);
   assert.equal(f.state().phase, "ready");
   staleEnd.call(f.media as HTMLAudioElement, new Event("ended"));
   assert.deepEqual(f.endedRates, []);
@@ -69,7 +73,7 @@ test("late response after Stop cannot start playback", async () => {
   let finish!: (value: LoadedAudio) => void;
   const f = fixture(() => new Promise(resolve => { finish = resolve; }));
   const run = f.player.play();
-  assert.equal(stopActivePlayback(), true);
+  assert.equal(store.stopPlayback(), true);
   finish(await loaded());
   await run;
   assert.equal(f.plays(), 0);
@@ -82,7 +86,7 @@ test("Stop during a pending play permission prevents late playback", async () =>
   f.media.play = () => new Promise<void>(resolve => { finish = resolve; });
   const playing = f.player.play();
   await new Promise(resolve => setTimeout(resolve, 0));
-  assert.equal(stopActivePlayback(), true);
+  assert.equal(store.stopPlayback(), true);
   finish();
   await playing;
   assert.equal(f.state().phase, "ready");
@@ -115,7 +119,7 @@ test("starting another player stops the active one; idle players do not steal ow
   assert.equal(second.state().phase, "playing");
   const unused = fixture(loaded);
   assert.equal(second.state().phase, "playing", "creating a player must not interrupt audio");
-  assert.equal(stopActivePlayback(), true);
+  assert.equal(store.stopPlayback(), true);
   assert.equal(second.state().phase, "ready");
   unused.player.dispose(); first.player.dispose(); second.player.dispose();
 });
@@ -201,4 +205,19 @@ test("failed loading reports the readable message and records no started speed",
   assert.deepEqual(f.startedRates, []);
   assert.deepEqual(f.state(), { phase: "error", message: "Add your ElevenLabs API key in Listening settings." });
   f.player.dispose();
+});
+
+test("each activation has its own slot, and clearing the store stops its player", async () => {
+  const other = createPlaybackStore();
+  const mine = fixture(loaded);
+  const theirs = createSpeechPlayer({ load: loaded, audio: () => ({ ...fixture(loaded).media }), createURL: () => "blob:other", revokeURL: () => {}, changed: () => {}, slot: other });
+  await mine.player.play();
+  await theirs.play();
+  assert.equal(mine.state().phase, "playing", "another activation's player doesn't stop this one");
+  other.clear();
+  assert.equal(theirs.state().phase, "ready", "clear() stops the active player");
+  assert.equal(mine.state().phase, "playing");
+  store.clear();
+  assert.equal(mine.state().phase, "ready");
+  mine.player.dispose(); theirs.dispose();
 });

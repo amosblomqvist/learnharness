@@ -3,7 +3,6 @@ import { decodeAudio } from "./audio-control.ts";
 import { QUESTION_TYPE_ID, type ListeningAnswer, type ListeningPayload } from "./contract.ts";
 import { mountAnswerEditor } from "./editor.ts";
 import { createPlaybackStore } from "./playback-state.ts";
-import { stopActivePlayback } from "./player.ts";
 import { mountSettings } from "./settings-view.ts";
 import { mountAnswered, mountQuestion } from "./views.ts";
 
@@ -16,14 +15,14 @@ export function activate(ctx: PluginFrontendContext): () => void {
     supportedContractVersions: [1],
     mountQuestion: (container, props) => mountQuestion(container, props, { ui: ctx.ui, load, store }),
     mountAnswerEditor: (container, props) => mountAnswerEditor(container, props, store),
-    mountAnswered: (container, props) => mountAnswered(container, props, { ui: ctx.ui, load }),
+    mountAnswered: (container, props) => mountAnswered(container, props, { ui: ctx.ui, load, store }),
   } satisfies PluginQuestionRenderer<ListeningPayload, ListeningAnswer>);
   const unregisterSettings = ctx.registerSettings((container, signal) => mountSettings(container, signal, ctx));
   return () => {
     try { unregisterSettings(); }
     finally {
       try { unregisterQuestion(); }
-      finally { stopActivePlayback(); store.clear(); }
+      finally { store.clear(); }
     }
   };
 }

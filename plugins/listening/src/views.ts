@@ -37,7 +37,7 @@ export function mountQuestion(container: HTMLElement, props: PluginQuestionMount
   const dispose = combine(cleanups);
   try {
     cleanups.push(mountAudioControl(container, {
-      text, language, load: deps.load, signal, mode: "pending",
+      text, language, load: deps.load, signal, slot: deps.store, mode: "pending",
       completed: () => deps.store.get(questionId).completed,
       onStarted: rate => deps.store.update(questionId, record => startedAt(record, rate)),
       onEnded: () => deps.store.update(questionId, finished),
@@ -79,7 +79,7 @@ function mountWhy(container: HTMLElement, ui: Ui, explanation: string, signal: A
 }
 
 /** Answered card: verdict, options or answers, then the transcript with replay. */
-export function mountAnswered(container: HTMLElement, props: PluginQuestionMountContext<ListeningPayload> & { readonly answer: ListeningAnswer; readonly grading?: PluginQuestionGradingOutcome; readonly headerContainer?: HTMLElement; readonly footerContainer?: HTMLElement }, deps: { ui: Ui; load: Load }): () => void {
+export function mountAnswered(container: HTMLElement, props: PluginQuestionMountContext<ListeningPayload> & { readonly answer: ListeningAnswer; readonly grading?: PluginQuestionGradingOutcome; readonly headerContainer?: HTMLElement; readonly footerContainer?: HTMLElement }, deps: { ui: Ui; load: Load; store: PlaybackStore }): () => void {
   if (props.signal.aborted) return () => {};
   const document = container.ownerDocument;
   const { payload } = props.input;
@@ -133,7 +133,7 @@ export function mountAnswered(container: HTMLElement, props: PluginQuestionMount
     transcript.append(transcriptText);
     footer.append(transcript);
     cleanups.push(() => transcript.remove());
-    cleanups.push(mountAudioControl(transcript, { text: payload.audio.text, language: payload.audio.language, load: deps.load, signal, mode: "replay" }));
+    cleanups.push(mountAudioControl(transcript, { text: payload.audio.text, language: payload.audio.language, load: deps.load, signal, slot: deps.store, mode: "replay" }));
   } catch (error) { dispose(); throw error; }
   return dispose;
 }

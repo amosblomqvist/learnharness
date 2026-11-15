@@ -5,9 +5,11 @@ export type PlayerState = { phase: PlayerPhase; rate?: PlaybackRate; message?: s
 export type PlayerMedia = Pick<HTMLAudioElement, "play" | "pause" | "currentTime" | "onended" | "onerror" | "src" | "load" | "playbackRate" | "preservesPitch">;
 export interface LoadedAudio { blob: Blob; warning?: string }
 
-/** One window plays one clip at a time: starting playback stops whichever player was active. */
-let stopActive: (() => boolean) | undefined;
-export function stopActivePlayback(): boolean { return stopActive?.() ?? false; }
+/** One activation plays one clip at a time: starting playback stops whichever player claimed the slot before. */
+export interface PlaybackSlot {
+  claimPlayback(stop: () => boolean): void;
+  releasePlayback(stop: () => boolean): void;
+}
 
 /**
  * Plays one spoken text. Every Play restarts from the beginning at its speed; Pause keeps
@@ -20,6 +22,8 @@ export function createSpeechPlayer(deps: {
   createURL(blob: Blob): string;
   revokeURL(url: string): void;
   changed(state: PlayerState): void;
+  /** Shared by every player of one activation. */
+  slot: PlaybackSlot;
   /** Playback actually started at this rate (not merely requested). */
   started?(rate: PlaybackRate): void;
   /** A full playback reached its natural end. */
@@ -35,10 +39,6 @@ export function createSpeechPlayer(deps: {
     media = undefined;
     if (url) deps.revokeURL(url);
     url = undefined;
-  }
-  function claim() {
-    if (stopActive !== stop) stopActive?.();
-    stopActive = stop;
   }
   function stop(): boolean {
     const active = state.phase === "loading" || state.phase === "playing" || state.phase === "paused";
@@ -84,7 +84,7 @@ export function createSpeechPlayer(deps: {
       update({ ...state, rate });
       return;
     }
-    claim();
+    deps.slot.claimPlayback(stop);
     media?.pause();
     const current = ++token;
     if (media) { await begin(current, rate, true); return; }
@@ -108,13 +108,13 @@ export function createSpeechPlayer(deps: {
   }
   async function resume() {
     if (disposed || state.phase !== "paused" || !media) return;
-    claim();
+    deps.slot.claimPlayback(stop);
     await begin(token, state.rate ?? 1, false);
   }
   return {
     play, pause, resume, stop,
     state: () => state,
-    dispose() { stop(); disposed = true; release(); if (stopActive === stop) stopActive = undefined; },
+    dispose() { stop(); disposed = true; release(); deps.slot.releasePlayback(stop); },
   };
 }
 export type SpeechPlayer = ReturnType<typeof createSpeechPlayer>;

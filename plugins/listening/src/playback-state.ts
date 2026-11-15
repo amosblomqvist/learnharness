@@ -17,11 +17,13 @@ const EMPTY: PlaybackRecord = { completed: false, rates: [], failures: 0, audioU
 /**
  * In-memory, keyed by question ID. The question mount (audio) and the answer editor mount
  * separately, so they share state here. It survives remounts while this activation lives,
- * not reloads; nothing is persisted.
+ * not reloads; nothing is persisted. It also holds the one active player of this activation.
  */
 export function createPlaybackStore() {
   const records = new Map<string, PlaybackRecord>();
   const listeners = new Map<string, Set<(record: PlaybackRecord) => void>>();
+  let stopActive: (() => boolean) | undefined;
+  const stopPlayback = () => stopActive?.() ?? false;
   return {
     get(questionId: string): PlaybackRecord { return records.get(questionId) ?? EMPTY; },
     update(questionId: string, change: (record: PlaybackRecord) => PlaybackRecord): void {
@@ -35,7 +37,12 @@ export function createPlaybackStore() {
       listeners.set(questionId, set);
       return () => { set.delete(listener); if (set.size === 0) listeners.delete(questionId); };
     },
-    clear(): void { records.clear(); listeners.clear(); },
+    /** One activation plays one clip at a time: a player claims the slot when it starts. */
+    claimPlayback(stop: () => boolean): void { if (stopActive !== stop) stopActive?.(); stopActive = stop; },
+    releasePlayback(stop: () => boolean): void { if (stopActive === stop) stopActive = undefined; },
+    /** Stops the active player; true when one was playing, loading or paused. */
+    stopPlayback,
+    clear(): void { stopPlayback(); stopActive = undefined; records.clear(); listeners.clear(); },
   };
 }
 export type PlaybackStore = ReturnType<typeof createPlaybackStore>;

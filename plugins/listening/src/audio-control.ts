@@ -1,4 +1,4 @@
-import { createSpeechPlayer, type LoadedAudio, type PlayerState } from "./player.ts";
+import { createSpeechPlayer, type LoadedAudio, type PlaybackSlot, type PlayerState } from "./player.ts";
 import type { PlaybackRate } from "./speech/limits.ts";
 
 export interface AudioControlOptions {
@@ -6,6 +6,7 @@ export interface AudioControlOptions {
   language: string;
   load(text: string, language: string): Promise<LoadedAudio>;
   signal: AbortSignal;
+  slot: PlaybackSlot;
   /** Pending questions explain the gate; answered replays do not. */
   mode: "pending" | "replay";
   completed?(): boolean;
@@ -75,6 +76,7 @@ export function mountAudioControl(container: HTMLElement, options: AudioControlO
     audio: () => new Audio(),
     createURL: blob => URL.createObjectURL(blob),
     revokeURL: url => URL.revokeObjectURL(url),
+    slot: options.slot,
     changed: next => {
       if (next.phase === "error" && state.phase !== "error") options.onFailed?.();
       state = next;
