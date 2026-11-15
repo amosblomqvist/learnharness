@@ -1,0 +1,5 @@
+.github-sync-dialog { display: flex; flex-direction: column; gap: 0.75rem; padding: 0.25rem; max-width: 34rem; }
+.github-sync-title { margin: 0; font-size: 1rem; font-weight: 600; color: var(--foreground); }
+.github-sync-text { margin: 0; font-size: 0.875rem; line-height: 1.45; color: var(--foreground); overflow-wrap: anywhere; }
+.github-sync-buttons { display: flex; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.25rem; }
+.github-sync-settings { display: flex; flex-direction: column; gap: 0.5rem; }

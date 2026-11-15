@@ -8,7 +8,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { THEMES_DIR } from "../../config.ts";
-import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { assertDataWritable, removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 import type { ThemeStore } from "../core/ports.ts";
 import { isBuiltinThemeId, isThemeId, sanitizeThemeFile, type Theme, type ThemeFile } from "../core/themes.ts";
 
@@ -54,6 +54,7 @@ export const themeStore: ThemeStore = {
 
 	deleteTheme(id: string): void {
 		if (!isThemeId(id) || isBuiltinThemeId(id)) return;
+		assertDataWritable(fileFor(id));
 		fs.rmSync(fileFor(id), { force: true });
 		removeLeftoverTemps(fileFor(id));
 	},

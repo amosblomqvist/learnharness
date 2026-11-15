@@ -22,7 +22,8 @@
  */
 
 import { emit } from "../core/events.ts";
-import { clearTurnFailure } from "./turn-runs.ts";
+import { beginWork, type HostWorkLease } from "../core/host-hold.ts";
+import { abortTurn, clearTurnFailure } from "./turn-runs.ts";
 
 interface TurnOwner {
 	token: object;
@@ -32,6 +33,20 @@ interface TurnOwner {
 interface LhGlobal {
 	__lhTurnRegistry?: Map<string, number>;
 	__lhTurnOwners?: Map<string, TurnOwner>;
+	__lhTurnWork?: Map<string, HostWorkLease>;
+}
+
+/** Host work registry leases (core/host-hold.ts), one per live turn. */
+function workLeases(): Map<string, HostWorkLease> {
+	const g = globalThis as typeof globalThis & LhGlobal;
+	return (g.__lhTurnWork ??= new Map<string, HostWorkLease>());
+}
+
+function endWork(chatId: string): void {
+	const lease = workLeases().get(chatId);
+	if (!lease) return;
+	workLeases().delete(chatId);
+	lease.end();
 }
 
 function registry(): Map<string, number> {
@@ -58,6 +73,11 @@ const MAX_TURN_MS = 30 * 60_000;
  */
 export function beginTurn(chatId: string, preparationOwner?: object): boolean {
 	if (isTurnRunning(chatId)) return false;
+	// Throws HostHoldError while a hold is active; the caller's refusal path
+	// turns it into a 503. Quit aborts through the turn's own handle.
+	const lease = beginWork("turn", chatId, () => abortTurn(chatId));
+	workLeases().get(chatId)?.end();
+	workLeases().set(chatId, lease);
 	clearTurnFailure(chatId);
 	if (preparationOwner) owners().set(chatId, { token: preparationOwner, preparing: true });
 	else owners().delete(chatId);
@@ -78,6 +98,7 @@ export function beginTurn(chatId: string, preparationOwner?: object): boolean {
 export function endTurn(chatId: string, owner?: object): void {
 	if (owner && owners().get(chatId)?.token !== owner) return;
 	owners().delete(chatId);
+	endWork(chatId);
 	if (inFlight.delete(chatId)) emit("turn-settled", { chatId });
 }
 
@@ -106,6 +127,7 @@ export function isTurnRunning(chatId: string): boolean {
 	if (!owners().get(chatId)?.preparing && Date.now() - since > MAX_TURN_MS) {
 		inFlight.delete(chatId);
 		owners().delete(chatId);
+		endWork(chatId);
 		return false;
 	}
 	return true;

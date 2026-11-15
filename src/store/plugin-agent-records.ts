@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { assertDataWritable } from "./atomic-write.ts";
 import { randomUUID } from "node:crypto";
 import type { PluginAgentRecord } from "../core/plugin-agents.ts";
 import type { PluginAgentRecordStore } from "../core/ports.ts";
@@ -60,6 +61,7 @@ export function createPluginAgentRecordStore(directory: string): PluginAgentReco
 			// fail the acceptance barrier rather than corrupting an existing record.
 			const body = `${JSON.stringify(record, null, "\t")}\n`;
 			validate(JSON.parse(body), record.id);
+			assertDataWritable(file);
 			const temporary = path.join(root, `.${record.id}.${randomUUID()}.tmp`);
 			let fd: number | undefined;
 			try {

@@ -11,6 +11,7 @@ building or exercising it: plugins are trusted local code, not sandboxed extensi
 | --- | --- | --- |
 | [Hello plugin](../examples/plugins/hello-plugin/README.md) | Minimal starter; no build | Frontend activation, a view, explicit action placements, a host button/dialog and per-mount cleanup |
 | [UI Showcase](../plugins/ui-showcase/README.md) | Runnable Community developer gallery | All 15 public UI methods, controlled values, family-local Reset and overlay ownership |
+| [GitHub Sync](../plugins/github-sync/README.md) | Runnable Community plugin | Backend `ctx.handle` operations over `ctx.learning.directory`, `beforeLoad`/`beforeQuit` hooks, the `ctx.host` hold, idle and restart, sidebar actions, choice/confirmation dialogs and a custom settings mount |
 | [Flashcards](../plugins/flashcards/README.md) | Core source reference | A complete feature: knowledge/document input, durable worker outcomes, plugin-owned storage, tree, review surfaces and settings |
 | [Coding questions](../plugins/coding-questions/README.md) | Core source reference | Teaching questions and repeated practice submissions, controlled editors, processing observations and saved-result rendering |
 | [Drawing Pad](../plugins/drawing-pad/README.md) | Core source reference | Session-context actions, shortcuts, surfaces, learner-submission image attachment and acknowledgment-aware draft consumption |
@@ -61,6 +62,7 @@ The downloaded authoring kit preserves the repository layout:
     drawing-pad/
     rich-code-blocks/
     ui-showcase/
+    github-sync/
 ```
 
 Each `plugins/<id>/` project is exported **byte-for-byte from its canonical source
@@ -73,7 +75,7 @@ install the whole kit as a plugin.
 
 ### TypeScript projects
 
-For Coding questions, Drawing Pad, Rich code blocks and UI Showcase, copy the extracted
+For Coding questions, Drawing Pad, Rich code blocks, UI Showcase and GitHub Sync, copy the extracted
 kit's `types/` **contents** into that project's `.sdk/` **before npm dependency setup**.
 From the project's `plugins/<id>/` directory in the extracted kit:
 

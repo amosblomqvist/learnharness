@@ -11,6 +11,7 @@ import { accumulateJobUsage, piUsageToStep } from "../core/contracts/jobs.ts";
 import type { PiEngine } from "./models.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 import { runSubagent } from "./subagents/pi-run.ts";
+import { assertNoHold, beginWork, type HostWorkLease } from "../core/host-hold.ts";
 
 /** Host observability only: never project prompts, inputs, transcripts or results. */
 export type PluginWorkerActivityMetadata = Pick<PluginTaskRecord,
@@ -76,6 +77,8 @@ interface Task {
 	poisoned?: Error;
 	closed?: boolean;
 	activityRecord?: PluginTaskRecord;
+	/** Host work registry lease (core/host-hold.ts), until terminal or disposal. */
+	work?: HostWorkLease;
 }
 
 /** Standalone result tasks. One service/writer per directory; no admission pool,
@@ -107,6 +110,7 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 	const commit = (t: Task, record: PluginTaskRecord) => {
 		if (disposed || t.closed) throw new Error("Task writer is closed");
 		if (t.poisoned) throw t.poisoned;
+		assertNoHold(); // a host hold refuses the write without poisoning the task
 		const next = clone({ ...record, updatedAt: new Date().toISOString() });
 		try { deps.store.save(next); }
 		catch (error) {
@@ -126,6 +130,7 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 		}
 		t.record = next;
 		if (terminal(next) && t.timer) { clearTimeout(t.timer); t.timer = undefined; }
+		if (terminal(next)) { t.work?.end(); t.work = undefined; }
 		notify(t);
 	};
 	const finish = (t: Task, status: "failed" | "cancelled" | "interrupted", error: PluginTaskError) => {
@@ -267,11 +272,14 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 			const d = definitions.get(definitionId); if (!d) throw new Error(`Worker definition unavailable: ${definitionId}`);
 			const now = new Date().toISOString();
 			const record: PluginTaskRecord = { ...options, version: 1, id: randomUUID(), definitionId, createdAt: now, updatedAt: now, status: "queued", messages: [{ role: "user", content: options.prompt, timestamp: Date.now() }], turns: 0 };
+			// Throws HostHoldError under a host hold, before anything is saved.
+			// Quit cancels the task through the ordinary cancel path.
+			const work = beginWork("plugin-worker", definitionId, () => { const live = tasks.get(record.id); if (live && !terminal(live.record)) { try { finish(live, "cancelled", { code: "cancelled", message: "Task cancelled by application quit" }); } catch { /* storage poison is exposed to waiters */ } } });
 			// A post-rename fsync failure has an uncertain durable outcome. Stop
 			// further acceptance rather than risking duplicate request identities.
 			try { deps.store.save(clone(record)); }
-			catch (error) { acceptanceError = new Error(`Plugin task acceptance storage failed: ${text(error)}`); throw acceptanceError; }
-			const t: Task = { record, controller: new AbortController(), listeners: new Set(), waiters: new Set() }; tasks.set(record.id, t);
+			catch (error) { work.end(); acceptanceError = new Error(`Plugin task acceptance storage failed: ${text(error)}`); throw acceptanceError; }
+			const t: Task = { record, controller: new AbortController(), listeners: new Set(), waiters: new Set(), work }; tasks.set(record.id, t);
 			if (options.timeoutMs !== undefined) {
 				const schedule = () => {
 					const remaining = options.timeoutMs! - (Date.now() - Date.parse(record.createdAt));
@@ -307,6 +315,7 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 			for (const t of tasks.values()) {
 				try { if (!terminal(t.record)) finish(t, "interrupted", { code: "interrupted", message: "Task interrupted by plugin disposal" }); } catch (error) { failure ??= error; }
 				t.controller.abort(); t.closed = true; t.partial = undefined;
+				t.work?.end(); t.work = undefined;
 				if (t.timer) clearTimeout(t.timer); if (t.flush) clearTimeout(t.flush); t.listeners.clear(); wake(t);
 			}
 			disposed = true; definitions.clear(); deps.signal?.removeEventListener("abort", disabled);

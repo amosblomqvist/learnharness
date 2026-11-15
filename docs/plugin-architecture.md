@@ -236,6 +236,43 @@ The existing per-window app notification connection carries availability/app eve
 namespaced plugin messages. It is not a durable arbitrary-event log. Reconnect invokes
 resync callbacks; observers fetch current snapshots and release subscriptions on cleanup.
 
+## Host hold and lifecycle hooks
+
+For plugins that rewrite the learning-data folder (GitHub Sync), the host tracks running
+work and offers an exclusive hold (`src/core/host-hold.ts`).
+Turns (including the preparation before `beginTurn`), sub-agent jobs, extraction,
+compaction, side chats, plugin worker tasks, managed agent runs and plugin inference calls
+register with `beginWork` and end in their own `finally`. Queued wake steers are not work;
+the wake pump backs off on a 503 like on a 409.
+
+`ctx.host.acquireHold({ reason })` succeeds only while nothing is registered. While held,
+`beginWork` refuses (503 with the reason), the proxy refuses API requests that may write
+(except the holder's own `/api/plugins/<id>/call` and `/api/hold/cancel`), and the store
+writers refuse paths inside the data folder (`assertDataWritable`). Reads keep working;
+`recoverStaleJobs` and read-path reconciliation skip their writes. The app shows a banner
+with Cancel, which aborts the hold's signal and releases it. Holds never expire and are
+released when the plugin deactivates. `ctx.host.onIdle` reports the busy→idle edge
+(debounced 3 s), never a hold release. `ctx.host.requestRestart()` asks the desktop shell
+to restart the server and reload windows; without a desktop parent it returns
+`{ restarted: false, reason: "unavailable" }`.
+
+Backend modules may export `beforeLoad(ctx)` and `beforeQuit(ctx)` with a
+`PluginLifecycleContext` (no activation services). At startup, inside
+`instrumentation.register`, the host evaluates enabled backends and runs every
+`beforeLoad` under a forced host hold, before task recovery, the data-format stamp and
+activation; initialization then rediscovers packages and `plugins-state.json`. Code a hook
+changed loads on the next start. On desktop quit, when an active plugin exports
+`beforeQuit`, the shell holds the quit and the server takes a forced hold with writes open,
+aborts running work through its normal abort paths (partial results save), closes writes
+and runs the hooks. Both phases share a 30 s limit; the shell shows a small native status
+window with Skip (startup) or Quit now (quit). The update-install restart runs the same
+quit sequence.
+
+`data-format.json` at the data root records the chat, graph and settings format versions
+of the build that last started on the folder (`src/core/data-format.ts`).
+It is written after `beforeLoad` and never downgraded. Plugins read this build's versions
+from `ctx.host.dataFormats` / `ctx.dataFormats` to refuse incoming data from a newer build.
+
 ## Testing
 
 Maintain tests at each actual boundary:

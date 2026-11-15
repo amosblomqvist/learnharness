@@ -1,0 +1,20 @@
+{
+  "name": "learnharness-github-sync",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "license": "AGPL-3.0-only",
+  "scripts": {
+    "sdk": "node ../../scripts/build-plugin-types.mjs .sdk",
+    "typecheck": "tsc --noEmit",
+    "build": "node scripts/build.mjs",
+    "test": "tsx --test tests/*.test.ts"
+  },
+  "devDependencies": {
+    "@types/node": "24.13.3",
+    "esbuild": "0.28.2",
+    "learnharness-plugin-api": "file:.sdk",
+    "tsx": "4.23.12",
+    "typescript": "5.9.3"
+  }
+}

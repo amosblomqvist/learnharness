@@ -12,9 +12,9 @@ export const AUTHORING_DOCS = [
 	"plugin-view-context.md", "dialog-overlay-contract.md", "plugin-examples.md",
 ];
 export const AUTHORING_EXAMPLES = ["hello-plugin", "managed-agent", "teaching-extension"];
-export const AUTHORING_PROJECTS = ["flashcards", "coding-questions", "drawing-pad", "rich-code-blocks", "ui-showcase"];
+export const AUTHORING_PROJECTS = ["flashcards", "coding-questions", "drawing-pad", "rich-code-blocks", "ui-showcase", "github-sync"];
 const PROJECT_FILES = [".gitignore", "README.md", "LICENSE", "THIRD-PARTY.md", "FSRS-LICENSE.txt", "manifest.json", "package.json", "package-lock.json", "tsconfig.json"];
-const PROJECT_DIRECTORIES = ["src", "scripts", "tests", "licenses"];
+const PROJECT_DIRECTORIES = ["src", "scripts", "tests", "licenses", "screenshots"];
 export const AUTHORING_ZIP = "learnharness-plugins.zip";
 
 /** Admit every component below the intended source root before dereferencing it.

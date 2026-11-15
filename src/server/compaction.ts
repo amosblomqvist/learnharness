@@ -29,6 +29,7 @@
 
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
+import { beginWork, isHostHoldError, type HostWorkLease } from "../core/host-hold.ts";
 import {
 	activeCompactionOf,
 	buildCompactionPrompt,
@@ -324,12 +325,15 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
 		await admitted;
 		return;
 	}
+	// Host work registry (core/host-hold.ts); no abort path: quit waits.
+	const work = beginWork("compaction", chatId);
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
 	try {
 		await run;
 	} finally {
 		if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
+		work.end();
 	}
 }
 
@@ -348,9 +352,14 @@ export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: s
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
 	if (projectedContextTokens(record.messages, deps.systemPromptTokens, deps.includeReasoning ? deps.engine.model : undefined) <= deps.thresholdTokens) return;
+	// Under a host hold the kick is skipped; the next turn's gate compacts.
+	let work: HostWorkLease;
+	try { work = beginWork("compaction", chatId); }
+	catch (err) { if (isHostHoldError(err)) return; throw err; }
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
 	void run.finally(() => {
 		if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
+		work.end();
 	});
 }

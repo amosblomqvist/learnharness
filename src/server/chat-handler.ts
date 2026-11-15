@@ -62,6 +62,7 @@ import { ensureCompacted, kickCompaction, effectiveThresholdTokens, projectedCon
 import { COMPACTION_RESERVE_TOKENS } from "../core/compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
+import { beginWork, isHostHoldError, type HostHoldError, type HostWorkLease } from "../core/host-hold.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages, type LhMessage } from "../core/native-messages.ts";
 import { QUESTION_TOOLS } from "../core/pending.ts";
@@ -210,8 +211,39 @@ export async function handleChatRequest(
  * The turn composition: one input event → native record appends → one
  * agent turn as a background object. Also the wake pipeline's entry
  * (TurnInput's steer kind appends the marker under the same claim).
+ *
+ * HOST HOLD (core/host-hold.ts): the preparation window before beginTurn
+ * awaits several things, so it registers as work of its own for the whole
+ * call; beginTurn registers the running turn. While a hold is active the
+ * request is refused with 503 and the hold's message.
  */
 export async function handleChatInput(
+	chatId: string,
+	input: TurnInput,
+	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
+	sideContext: Pick<SideChatService, "snapshot"> = sideChats,
+): Promise<Response> {
+	let preparation: HostWorkLease;
+	try { preparation = beginWork("turn", `${chatId} (preparing)`); }
+	catch (err) {
+		if (isHostHoldError(err)) return holdRefusal(err);
+		throw err;
+	}
+	try {
+		return await runChatInput(chatId, input, buildAgent, sideContext);
+	} catch (err) {
+		if (isHostHoldError(err)) return holdRefusal(err);
+		throw err;
+	} finally {
+		preparation.end();
+	}
+}
+
+function holdRefusal(err: HostHoldError): Response {
+	return Response.json({ error: err.message, hold: err.hold }, { status: 503 });
+}
+
+async function runChatInput(
 	chatId: string,
 	input: TurnInput,
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,

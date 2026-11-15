@@ -40,6 +40,9 @@ export interface ServerEvents {
 	"plugins-changed": Record<string, never>;
 	/** Live-only, plugin-scoped notifications. Reconnect requires snapshot resync. */
 	"plugin-message": { pluginId: string; topic: string; data?: unknown };
+	/** An exclusive host hold started or ended (core/host-hold.ts). While
+	 * active, data writes are refused; refetch GET /api/hold for details. */
+	"hold-changed": { active: boolean };
 }
 
 export type ServerEventType = keyof ServerEvents;
@@ -60,6 +63,7 @@ export const SERVER_EVENT_TYPES = [
 	"side-chats-changed",
 	"plugins-changed",
 	"plugin-message",
+	"hold-changed",
 ] as const satisfies readonly ServerEventType[];
 
 /** One notification: distribute over the vocabulary so narrowing `type`

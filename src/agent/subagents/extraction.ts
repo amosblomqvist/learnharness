@@ -25,6 +25,7 @@ import type {
 import { getGraph, mergeFindings, type DerivedGraph, type EmissionStats, type GraphDeps } from "../../core/graph.ts";
 import type { GraphStore } from "../../core/ports.ts";
 import { emit } from "../../core/events.ts";
+import { beginWork } from "../../core/host-hold.ts";
 import { settleGraphLayout } from "../../core/layout-settle.ts";
 import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts";
 import { failedOutputCallIds, type LhMessage } from "../../core/native-messages.ts";
@@ -1096,6 +1097,10 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 
 	async function runExtraction(chatId: string): Promise<EmissionStats> {
 		if (inFlight.has(chatId)) return { nodes: 0, chains: 0 };
+		// Host work registry (core/host-hold.ts): spans the whole run, including
+		// the gaps between batches. Throws HostHoldError under a hold; the
+		// messages stay uncovered for the next run.
+		const work = beginWork("extraction", chatId, () => { abortExtraction(chatId); });
 		inFlight.add(chatId);
 		const t0 = performance.now();
 		// COVERAGE (vision-extraction-coverage.md, 2026-09-15): extract ONLY
@@ -1225,6 +1230,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		} finally {
 			inFlight.delete(chatId);
 			finishExtraction(chatId); // done or failed — no longer running
+			work.end();
 		}
 	}
 
@@ -1412,6 +1418,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
 		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
+		const work = beginWork("extraction", input.filePath, () => { abortExtraction(id); });
 		inFlight.add(id);
 		try {
 			const importedAt = new Date().toISOString();
@@ -1422,6 +1429,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			throw new NotesImportError("failed", { nodes: 0, chains: 0 }, err instanceof Error ? err.message : String(err), { cause: err });
 		} finally {
 			inFlight.delete(id);
+			work.end();
 		}
 	}
 

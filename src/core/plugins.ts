@@ -188,12 +188,72 @@ export interface PluginBackendContext {
 		 * persistence, replay or acknowledgement of frontend handling is supplied. */
 		emit(topic: string, data?: unknown): void;
 	};
+	/** Host coordination for plugins that rewrite the learning-data folder
+	 * (e.g. syncing it with a remote). */
+	host: PluginHostControl;
+}
+/** Data format versions this app build reads and writes. A folder stamped
+ * with a greater value was written by a newer build. */
+export interface PluginDataFormats {
+	readonly chat: number;
+	readonly graph: number;
+	readonly settings: number;
+}
+/** An exclusive host hold. While held, the host refuses to start turns, jobs,
+ * extraction and other work, and refuses every write to the learning-data
+ * folder (reads keep working). The app shows a banner with Cancel. */
+export interface PluginHostHold {
+	/** Aborted when the user cancels the hold or this plugin is deactivated.
+	 * Stop the work and release. */
+	readonly signal: AbortSignal;
+	/** End the hold. Idempotent. */
+	release(): void;
+}
+export interface PluginHostControl {
+	/** Take the exclusive hold. Returns null while any work is running or
+	 * another hold is active; try again later (onIdle tells you when). `reason`
+	 * is shown in the banner and in refusals, e.g. "GitHub Sync is syncing". */
+	acquireHold(options: { reason: string }): PluginHostHold | null;
+	/** Called when the host goes from busy to idle: the last running turn, job,
+	 * extraction or other work ended and nothing started for a few seconds.
+	 * Not called when a hold is released. Removed on deactivation. */
+	onIdle(listener: () => void): () => void;
+	/** Ask the desktop app to restart the server and reload its windows (for
+	 * example after rewriting data files). Resolves restarted: false with
+	 * reason "unavailable" when no desktop shell owns the server (development
+	 * and web); keep the hold and ask the user to restart. */
+	requestRestart(): Promise<{ restarted: boolean; reason?: "unavailable" }>;
+	/** This build's data format versions. */
+	readonly dataFormats: PluginDataFormats;
+}
+/** Context for the beforeLoad/beforeQuit lifecycle hooks. No activation
+ * services: the hooks run outside activation, while the host itself holds
+ * the app (nothing else runs and no data is being loaded or written). */
+export interface PluginLifecycleContext {
+	readonly manifest: PluginManifest;
+	/** Absolute code directory. */
+	readonly directory: string;
+	/** This plugin's writable records directory. */
+	readonly dataDirectory: string;
+	/** The learning-data folder root. */
+	readonly learningDirectory: string;
+	readonly dataFormats: PluginDataFormats;
+	/** Aborted on the time limit (30 s for all hooks together), when the user
+	 * skips (startup) or quits now (quit). Stop promptly. */
+	readonly signal: AbortSignal;
 }
 export interface PluginBackendModule {
 	/** Initialize server-scoped registrations/resources; optionally return cleanup.
 	 * Activation failures mark this plugin as errored. Modules remain cached, so
 	 * put activation side effects here rather than at module top level. */
 	activate(context: PluginBackendContext): void | PluginCleanup | Promise<void | PluginCleanup>;
+	/** Optional. Runs at server startup before any learning data is loaded and
+	 * before plugins activate, for enabled plugins. Failures are logged and do
+	 * not block startup. Code changed by this hook loads on the next start. */
+	beforeLoad?(context: PluginLifecycleContext): void | Promise<void>;
+	/** Optional. Runs when the desktop app quits, after running work has been
+	 * stopped and saved, for active plugins. Desktop only. */
+	beforeQuit?(context: PluginLifecycleContext): void | Promise<void>;
 }
 export interface PluginView {
 	id: string;

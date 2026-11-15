@@ -68,6 +68,9 @@ export interface ServerEvents {
         topic: string;
         data?: unknown;
     };
+    "hold-changed": {
+        active: boolean;
+    };
 }
 ```
 
@@ -95,6 +98,8 @@ export interface ServerEvents {
 - ["plugin-message".pluginId](#serverevents-plugin-messagepluginid)
 - ["plugin-message".topic](#serverevents-plugin-messagetopic)
 - ["plugin-message".data](#serverevents-plugin-messagedata)
+- ["hold-changed"](#serverevents-hold-changed)
+- ["hold-changed".active](#serverevents-hold-changedactive)
 
 ### ServerEvents "turn-started"
 
@@ -275,6 +280,23 @@ topic: string;
 
 ```ts
 data?: unknown;
+```
+
+### ServerEvents "hold-changed"
+
+An exclusive host hold started or ended (core/host-hold.ts). While
+active, data writes are refused; refetch GET /api/hold for details.
+
+```ts
+"hold-changed": {
+    active: boolean;
+};
+```
+
+### ServerEvents "hold-changed".active
+
+```ts
+active: boolean;
 ```
 
 ## ServerEventType

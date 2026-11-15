@@ -31,6 +31,8 @@
 import fs from "node:fs"; // default import on purpose: tests patch fs.renameSync on this object, namespace imports would not see it
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { PATHS } from "../../config.ts";
+import { assertNoHold } from "../core/host-hold.ts";
 
 const TEMP_MARKER = ".tmp-";
 const RENAME_RETRY_MS = 100;
@@ -39,6 +41,7 @@ const RENAME_RETRY_MS = 100;
  *  untouched, except when the in-place fallback fails midway: then the temp
  *  file beside it keeps the complete new bytes. */
 export function writeFileAtomicSync(file: string, text: string, options?: { mode?: number; allowInPlaceFallback?: boolean }): void {
+	assertDataWritable(file);
 	const tmp = `${file}${TEMP_MARKER}${randomUUID()}`;
 	let target: number;
 	try {
@@ -69,6 +72,7 @@ export function writeFileAtomicSync(file: string, text: string, options?: { mode
 /** Delete temp files that crashes left beside `file`. Call it after deleting `file`,
  *  or leftovers would keep the deleted record's newest bytes on disk. */
 export function removeLeftoverTemps(file: string): void {
+	assertDataWritable(file);
 	const prefix = `${path.basename(file)}${TEMP_MARKER}`;
 	let names: string[];
 	try {
@@ -80,6 +84,37 @@ export function removeLeftoverTemps(file: string): void {
 		return;
 	}
 	for (const name of names) if (name.startsWith(prefix)) removeTemp(path.join(path.dirname(file), name));
+}
+
+/** The write gate's store backstop (core/host-hold.ts): throws HostHoldError
+ *  while an exclusive hold is active and `file` is inside the learning-data
+ *  folder. Paths outside it (auth.json, temp folders) are never gated. */
+export function assertDataWritable(file: string): void {
+	const relative = path.relative(PATHS.data, path.resolve(file));
+	if (relative.startsWith("..") || path.isAbsolute(relative)) return;
+	assertNoHold();
+}
+
+/** Append one line to a JSONL file. A crash mid-append can leave the file
+ *  without a trailing newline; the next append would then glue onto that
+ *  torn line and corrupt its own record too, so a missing newline is
+ *  written first. `line` must not contain a newline (callers pass
+ *  JSON.stringify output). */
+export function appendLineSafe(file: string, line: string, options?: { mode?: number }): void {
+	assertDataWritable(file);
+	const fd = fs.openSync(file, "a+", options?.mode ?? 0o666);
+	try {
+		const { size } = fs.fstatSync(fd);
+		let prefix = "";
+		if (size > 0) {
+			const last = Buffer.alloc(1);
+			fs.readSync(fd, last, 0, 1, size - 1);
+			if (last[0] !== 0x0a) prefix = "\n";
+		}
+		fs.writeSync(fd, `${prefix}${line}\n`);
+	} finally {
+		fs.closeSync(fd);
+	}
 }
 
 /** True when the rename landed. False only when the caller allows the

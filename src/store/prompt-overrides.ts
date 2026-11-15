@@ -33,7 +33,7 @@ import path from "node:path";
 import { PROMPTS_OVERRIDE_DIR } from "../../config.ts";
 import { isValidSegmentPath } from "../core/prompt-segments.ts";
 import type { PromptOverrideStore } from "../core/ports.ts";
-import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { assertDataWritable, removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 /** Absolute path for an override file (unchecked — validate first). */
 function overrideFileFor(segmentPath: string): string {
@@ -79,6 +79,7 @@ export const promptOverrides: PromptOverrideStore = {
 
 	deleteOverride(segmentPath: string): void {
 		if (!isValidSegmentPath(segmentPath)) return;
+		assertDataWritable(overrideFileFor(segmentPath));
 		try {
 			fs.unlinkSync(overrideFileFor(segmentPath));
 		} catch {

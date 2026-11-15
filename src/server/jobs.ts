@@ -70,6 +70,7 @@ import type { TurnInput, UserSteerInput } from "../core/input-events.ts";
 import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, newUserSteer, type LhMessage } from "../core/native-messages.ts";
 import { prepareSubmissionImages, submissionImagePolicyKey } from "./submission-images.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
+import { activeHold } from "../core/host-hold.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { connectionBackgroundAllowed, isSubscriptionProvider, onSubscriptionChange } from "../agent/subscription-connections.ts";
@@ -601,7 +602,9 @@ async function pump(chatId: string): Promise<void> {
 			const saved = stores.chatStore.getChat(chatId);
 			if (saved) noteSteersDurable(chatId, saved.messages);
 			const owned = fire.filter((entry) => s.queues.get(chatId)?.includes(entry));
-			if (status === 403 || status === 409) {
+			// 503 is the host hold (core/host-hold.ts): the sync finishes, then
+			// the wake fires on the same backoff as a busy chat.
+			if (status === 403 || status === 409 || status === 503) {
 				for (const entry of owned) { entry.waking = false; entry.wakeAgent = undefined; }
 				if (status === 403) { parked = true; return; }
 				await delay(RETRY_BACKOFF_MS[Math.min(attempt++, RETRY_BACKOFF_MS.length - 1)]!);
@@ -756,6 +759,7 @@ const SWEEP_THROTTLE_MS = 30_000;
 /** Re-run a job's sub-agent loop — exposed for the sweep's tests (the
  *  /api/jobs poll is its only production caller, disabled under NODE_ENV=test). */
 export function recoverStaleJobs(): void {
+	if (activeHold()) return; // recovery writes and respawns; the next poll after the hold runs it
 	const s = state();
 	const now = Date.now();
 	if (now - s.lastSweepAt < SWEEP_THROTTLE_MS) return;

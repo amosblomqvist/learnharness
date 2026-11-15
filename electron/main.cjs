@@ -32,6 +32,7 @@ const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cj
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
+const { attachLifecycleChild, createStatusWindow } = require("./lifecycle.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -156,6 +157,18 @@ let subscriptionChild = null;
 let desktopAPISecret = null;
 let reopenWindow = null;
 const trustedAppWindows = new Set();
+// Server lifecycle (electron/lifecycle.cjs ↔ src/server/desktop-lifecycle.ts).
+let lifecycleChild = null;
+let statusWindow = null; // created after app-ready
+let startupHooksRunning = false; // pauses the "server never answered" countdown
+let quitHooksActive = false; // an active plugin exports beforeQuit
+let quitState = "idle"; // "idle" | "waiting" | "done"
+let quitFinish = null;
+let restartingServer = false;
+let serverUrl = null;
+let appWindowOpened = false; // the startup status window alone must not quit the app
+/** Wait for the quit sequence; the server reports done or the limit passes. */
+const QUIT_WAIT_MS = 35_000;
 
 // A GUI shell must never die to a stray exception (EPIPE dialogs, a race
 // in an event handler): the window + child server are the product, and
@@ -242,16 +255,40 @@ function startServer(port) {
 		serverProcess = child;
 		chatgptChild = attachChatGPTChild(child, chatgpt);
 		subscriptionChild = attachSubscriptionChild(child, subscriptions);
+		lifecycleChild = attachLifecycleChild(child, {
+			beforeLoad(state, plugins) {
+				if (state === "start") {
+					startupHooksRunning = true;
+					statusWindow?.show({
+						title: "Syncing your learning data…",
+						detail: plugins.length ? `Running ${plugins.join(", ")}` : "",
+						action: "skip", actionLabel: "Skip",
+					}, (action) => { if (action === "skip") lifecycleChild?.send("skip"); });
+				} else {
+					startupHooksRunning = false;
+					statusWindow?.close();
+				}
+			},
+			hooks(beforeQuit) { quitHooksActive = beforeQuit; },
+			restart() { void restartServer(); },
+			beforeQuitDone() { quitFinish?.(); },
+		});
 		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
 		child.stdout.on("data", fwd);
 		child.stderr.on("data", fwd);
 		child.on("exit", (code, signal) => {
 			log(`server exited (code=${code} signal=${signal})`);
-			serverProcess = null;
+			if (serverProcess === child) serverProcess = null;
 			chatgptChild?.dispose();
 			chatgptChild = null;
 			subscriptionChild?.dispose();
 			subscriptionChild = null;
+			lifecycleChild?.dispose();
+			lifecycleChild = null;
+			startupHooksRunning = false;
+			quitHooksActive = false;
+			// A plugin-requested restart keeps the shell's credential services.
+			if (restartingServer) return;
 			chatgpt?.close();
 			subscriptions?.close();
 		});
@@ -269,6 +306,9 @@ function waitUntilUp(url, tries = 150) {
 			});
 			req.on("error", () => {
 				if (n <= 0) reject(new Error(`server never answered on ${url}`));
+				// Plugin beforeLoad hooks (splash shown) do not count against the
+				// countdown; it starts over once they finish.
+				else if (startupHooksRunning) setTimeout(() => attempt(tries), 200);
 				else setTimeout(() => attempt(n - 1), 200);
 			});
 		};
@@ -318,6 +358,7 @@ function openExternalLink(target) {
  *    external links go to the real browser via shell.openExternal, for
  *    http, https and mailto only (openExternalLink). */
 function createWindow(url) {
+	appWindowOpened = true;
 	const win = new BrowserWindow({
 		width: 1440,
 		height: 900,
@@ -526,6 +567,11 @@ function checkForUpdates({ manual = false } = {}) {
 }
 
 function installUpdateNow() {
+	// Plugin beforeQuit hooks (e.g. a final sync) run first, like any quit.
+	if (quitState !== "done" && quitHooksActive && serverProcess?.connected) {
+		void runQuitHooks().then(installUpdateNow);
+		return;
+	}
 	// Kill the server BEFORE the quit-and-install (see block comment).
 	try {
 		killServer();
@@ -533,6 +579,60 @@ function installUpdateNow() {
 		/* already dead */
 	}
 	autoUpdater?.quitAndInstall();
+}
+
+/** Run the server's quit sequence (abort running work, then plugin
+ *  beforeQuit hooks) with the quit screen. Resolves when the server reports
+ *  done, on Quit now, or after QUIT_WAIT_MS. No-op without quit hooks. */
+function runQuitHooks() {
+	if (quitState === "done") return Promise.resolve();
+	if (!quitHooksActive || !serverProcess?.connected || !lifecycleChild) { quitState = "done"; return Promise.resolve(); }
+	if (quitState === "waiting") return new Promise((resolve) => { const previous = quitFinish; quitFinish = () => { previous?.(); resolve(); }; });
+	quitState = "waiting";
+	return new Promise((resolve) => {
+		let timer = null;
+		quitFinish = () => {
+			if (quitState !== "waiting") return;
+			quitState = "done";
+			quitFinish = null;
+			if (timer) clearTimeout(timer);
+			statusWindow?.close();
+			resolve();
+		};
+		timer = setTimeout(() => { log("quit: hooks did not finish in time"); quitFinish?.(); }, QUIT_WAIT_MS);
+		statusWindow?.show({ title: "Syncing before quit…", detail: "", action: "quit-now", actionLabel: "Quit now" }, (action) => {
+			if (action !== "quit-now") return;
+			lifecycleChild?.send("quit-now");
+			quitFinish?.();
+		});
+		if (!lifecycleChild.send("before-quit")) quitFinish();
+	});
+}
+
+/** ctx.host.requestRestart from a plugin: stop the server child (no quit
+ *  hooks), start a fresh one on the same port, reload the app windows. */
+async function restartServer() {
+	if (restartingServer || !serverUrl || quitState !== "idle") return;
+	restartingServer = true;
+	log("restart requested by a plugin");
+	try {
+		const old = serverProcess;
+		if (old) {
+			const exited = new Promise((resolve) => old.once("exit", resolve));
+			old.kill("SIGTERM");
+			const forced = setTimeout(() => { try { old.kill("SIGKILL"); } catch { /* gone */ } }, 3000);
+			await exited;
+			clearTimeout(forced);
+		}
+		await startServer(new URL(serverUrl).port);
+		await waitUntilUp(serverUrl);
+		log(`server up again: ${serverUrl}`);
+		for (const win of trustedAppWindows) if (!win.isDestroyed()) win.webContents.reload();
+	} catch (error) {
+		log(`restart failed: ${error?.message ?? error}`);
+	} finally {
+		restartingServer = false;
+	}
 }
 
 function setupAutoUpdater() {
@@ -665,18 +765,30 @@ function installMenu() {
 
 async function main() {
 	app.on("window-all-closed", () => {
+		// Closing the startup status window (plugin beforeLoad hooks) before the
+		// first app window exists is not the user closing the app.
+		if (!appWindowOpened) return;
 		chatgpt?.pause();
 		subscriptions?.pause();
 		// macOS convention: the app stays resident, reactivated from the Dock.
 		if (process.platform !== "darwin") app.quit();
 	});
 
-	// The child must not outlive us — cover every quit path.
-	app.on("before-quit", killServer);
+	// The child must not outlive us — cover every quit path. With plugin
+	// beforeQuit hooks the quit waits for the server's quit sequence first.
+	app.on("before-quit", (event) => {
+		if (quitState !== "done" && quitHooksActive && serverProcess?.connected) {
+			event.preventDefault();
+			void runQuitHooks().then(() => app.quit());
+			return;
+		}
+		killServer();
+	});
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
 	await app.whenReady();
+	statusWindow = createStatusWindow({ BrowserWindow, colors: () => chromeColors(appearance) });
 
 	// Read the same record/custom theme the server uses before constructing
 	// any native window, including the external development shell.
@@ -718,6 +830,7 @@ async function main() {
 		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
+		serverUrl = url;
 		await startServer(new URL(url).port);
 		await waitUntilUp(url);
 		log(`server up: ${url}`);
