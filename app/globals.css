@@ -178,6 +178,11 @@ body {
 	font-family: var(--font-prose);
 	font-size: var(--lh-prose-size);
 	line-height: var(--lh-prose-leading);
+	unicode-bidi: plaintext;
+}
+
+:where(p, h1, h2, h3, h4, h5, h6, li, blockquote, th, td) {
+	unicode-bidi: plaintext;
 }
 
 /* Session-name weight (owner, fix wave round 3): with the serif toggle
@@ -230,6 +235,22 @@ body {
 	font-family: var(--font-prose);
 	font-size: var(--lh-prose-size);
 	line-height: 1.25;
+}
+
+:where(
+	input:not([type]),
+	input[type="text"],
+	input[type="search"],
+	input[type="email"],
+	input[type="url"],
+	input[type="tel"],
+	input[type="password"],
+	input[type="number"],
+	textarea,
+	[contenteditable]:not([contenteditable="false"]),
+	[role="textbox"]
+) {
+	unicode-bidi: plaintext;
 }
 
 /* Thin dark native scrollbar (app-wide): dark thumb, transparent track. */
