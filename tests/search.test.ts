@@ -450,6 +450,11 @@ describe("OpenAI web search: adapter", () => {
 		assert.deepEqual(await search([{ type: "reasoning" }, { type: "message", content: [{ type: "output_text", text: "nothing" }] }]), []);
 	});
 
+	it("asks for two minutes per search, which no keyed engine does", () => {
+		assert.equal(openAIProvider().timeoutMs, 120_000);
+		for (const provider of [tavilyProvider("k"), braveProvider("k"), exaProvider("k"), firecrawlProvider("k"), ollamaProvider("k")]) assert.equal(provider.timeoutMs, undefined);
+	});
+
 	it("passes the caller's query, count and job context through", async () => {
 		const context = { signal: new AbortController().signal, model: { provider: "openai", id: "scratch-model" }, onUsage: () => {} };
 		const calls: unknown[][] = [];

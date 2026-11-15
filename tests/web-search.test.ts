@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { toolTimeoutMs } from "../src/agent/tool-execute.ts";
 import { createWebTools } from "../src/agent/tools/web.ts";
 import { safeFetchOverride } from "../src/agent/tools/safe-fetch.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
@@ -66,6 +67,21 @@ describe("web_search on the injected port (web.ts)", () => {
 		};
 		await createWebTools(() => provider, job).web_search!.execute!("c1", { query: "q" }, run.signal).catch(() => {});
 		assert.deepEqual(seen, [job.model, job.onUsage, false, true], "aborting the run reaches a search in flight");
+	});
+
+	it("an engine that asks for longer outlives the shared tool limit; others are still cut off", async () => {
+		const slow = (timeoutMs?: number): SearchProvider => ({
+			id: "openai",
+			timeoutMs,
+			search: () => new Promise((resolve) => setTimeout(() => resolve([{ title: "t", url: "https://example.invalid/", snippet: "" }]), 400)), // past the limit and its 250ms grace
+		});
+		const shared = toolTimeoutMs.current;
+		toolTimeoutMs.current = 20;
+		try {
+			const out = await createWebTools(() => slow(2_000)).web_search!.execute!("c1", { query: "q" });
+			assert.match(JSON.stringify(out.details), /example\.invalid/);
+			await assert.rejects(createWebTools(() => slow()).web_search!.execute!("c2", { query: "q" }), /timed out after 20ms/);
+		} finally { toolTimeoutMs.current = shared; }
 	});
 
 	it("provider errors surface as error strings, never thrown", async () => {

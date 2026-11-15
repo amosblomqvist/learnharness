@@ -997,7 +997,7 @@ export function AgentSection({
 										{SEARCH_ENGINES.filter(({ envVar }) => envVar !== null || openaiOffered).map(({ id, label, envVar }) => {
 											const mark = envVar !== null
 												? engineKeys[id] ? "✓ key" : "· no key"
-												: search?.openai === "ready" ? "✓ ready" : "· not ready";
+												: search?.openai === "ready" ? "✓ available" : "· unavailable";
 											return engineOption(id, label, engine === id, mark, () => {
 												onSectionChange(composeSearchEngine(agent, id));
 												setOpenMenu(null);

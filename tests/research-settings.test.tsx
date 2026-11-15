@@ -112,7 +112,7 @@ it(`a ${label}-only key enables the engine menu and selecting ${label} saves the
 ));
 }
 
-for (const { openai, mark } of [{ openai: "ready", mark: "✓ ready" }, { openai: "blocked", mark: "· not ready" }] as const) {
+for (const { openai, mark } of [{ openai: "ready", mark: "✓ available" }, { openai: "blocked", mark: "· unavailable" }] as const) {
 it(`a researcher model that can run it offers OpenAI last, marked "${mark}", with no key anywhere`, () => withAgentSection(
 	{ search: { available: false, engine: null, reason: "No search engine is configured.", openai }, keys: [] },
 	undefined,
@@ -134,7 +134,7 @@ it("OpenAI stays listed while it is the saved choice, so a researcher that can n
 	async (written) => {
 		assert.ok(!engineTrigger().hasAttribute("disabled"));
 		await act(async () => engineTrigger().click());
-		assert.equal(engineOptions().at(-1)!.textContent, "OpenAI· not ready");
+		assert.equal(engineOptions().at(-1)!.textContent, "OpenAI· unavailable");
 		act(() => document.querySelector<HTMLButtonElement>('[data-testid="engine-option-auto"]')!.click());
 		assert.equal(written()?.search, undefined);
 	},

@@ -56,6 +56,9 @@ export function isSearchEngineId(value: unknown): value is SearchEngineId {
  *  errors to clear Error messages); the tool layer catches and reports. */
 export interface SearchProvider {
 	id: SearchEngineId;
+	/** How long one search may run when the shared tool limit is too short:
+	 *  set by an engine that searches through a whole model call. */
+	timeoutMs?: number;
 	search(query: string, count: number, context?: SearchContext): Promise<SearchHit[]>;
 }
 

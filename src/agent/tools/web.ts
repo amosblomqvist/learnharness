@@ -157,7 +157,7 @@ export function createWebTools(search: () => SearchProvider | null, job?: Pick<S
 				} catch (err) {
 					return `web_search failed: ${err instanceof Error ? err.message : String(err)}`;
 				}
-			}),
+			}, () => search()?.timeoutMs),
 		},
 
 		web_fetch: {

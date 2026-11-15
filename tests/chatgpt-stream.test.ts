@@ -19,6 +19,7 @@ const originalKey = process.env.OPENAI_API_KEY;
 let leaseError: string | null = null;
 let requests: { authorization: string | null; body: Record<string, any>; url: string }[] = [];
 let responseEvents: unknown[] = [];
+let responseStatus = 200;
 const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", value);
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
 const status = { available: true, pending: false, allowBackgroundUse: false, activeId: "scratch-account", accounts: [{ id: "scratch-account", email: "dummy@example.invalid", registration: "oaiapp_scratch", connected: true, planEnabled: true, background: false }], error: null };
@@ -39,6 +40,7 @@ before(async () => {
 	globalThis.fetch = async (input, init) => {
 		const req = new Request(input, init);
 		requests.push({ authorization: req.headers.get("authorization"), body: JSON.parse(await req.text()), url: req.url });
+		if (responseStatus !== 200) return new Response(JSON.stringify({ error: { message: "secret scratch provider diagnostic" } }), { status: responseStatus, headers: { "content-type": "application/json" } });
 		return new Response(responseEvents.map((event) => `data: ${JSON.stringify(event)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
 	};
 });
@@ -162,6 +164,7 @@ for (const { provider, authorization } of [{ provider: "chatgpt", authorization:
 		assert.deepEqual(body.tools, [{ type: "web_search" }]);
 		assert.equal(body.tool_choice, "required");
 		assert.ok(body.include.includes("web_search_call.action.sources"));
+		assert.equal(body.reasoning.effort, "low", "a model that cannot turn reasoning off searches at low effort, not the provider default");
 		assert.match(JSON.stringify(body.input), /Search the web for: scratch query.*List the 3 most relevant results/);
 	});
 
@@ -184,6 +187,16 @@ for (const { provider, authorization } of [{ provider: "chatgpt", authorization:
 		assert.equal(requests.length, 0);
 	});
 }
+
+test("an OpenAI API-key search failure is explained from the HTTP status alone", async () => {
+	const job = { provider: "openai", id: model.id };
+	try {
+		for (const [status, cause] of [[400, "OpenAI rejected the request; the researcher's model may not support web search"], [401, "OpenAI rejected the API key"]] as const) {
+			responseStatus = status;
+			await assert.rejects(openAIWebSearch("q", 3, { model: job }), { message: `OpenAI web search request failed (${status}): ${cause}` });
+		}
+	} finally { responseStatus = 200; }
+});
 
 test("native identity/session/cache/fetch and awaited caller observers survive enforcement; terminal outcome exactly once", async () => {
 	const { APP_IDENTITY } = await import("../src/agent/models.ts");

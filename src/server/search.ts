@@ -221,6 +221,7 @@ export function ollamaProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
 export function openAIProvider(run: typeof openAIWebSearch = openAIWebSearch): SearchProvider {
 	return {
 		id: "openai",
+		timeoutMs: OPENAI_SEARCH_TIMEOUT_MS,
 		async search(query, count, context = {}): Promise<SearchHit[]> {
 			const items = (await run(query, count, context)) as (OpenAIOutputItem | null)[];
 			const pages: SearchHit[] = [];
@@ -238,6 +239,10 @@ export function openAIProvider(run: typeof openAIWebSearch = openAIWebSearch): S
 		},
 	};
 }
+
+/** One search is a whole model call: queueing, the model and the hosted
+ *  search together outlast the shared 30-second tool limit. */
+const OPENAI_SEARCH_TIMEOUT_MS = 120_000;
 
 /** The parts of a Responses output item the adapter reads: a web search
  *  call's sources, or a message's text with its URL citations in order. */
