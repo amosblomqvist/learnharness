@@ -141,6 +141,18 @@ test("unreadable saved files fall back to defaults with a notice instead of fail
   h.cleanup();
 });
 
+test("a settings file that fails to read, not only to parse, also falls back with a notice", async t => {
+  const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-listening-unreadable-"));
+  t.after(() => fs.rm(directory, { recursive: true, force: true }));
+  // Reading it fails with EISDIR: stands in for EACCES or EPERM.
+  await fs.mkdir(path.join(directory, "settings.json"));
+  const h = await harness(t, directory);
+  const status = await h.call("get-status");
+  assert.equal(status.ready, false);
+  assert.match(status.notice!, /settings file could not be read/);
+  h.cleanup();
+});
+
 test("the API key is stored owner-only, survives restart and is never returned", async t => {
   const h = await harness(t);
   await assert.rejects(h.call("save-key", { apiKey: "short" }), /does not look like/);

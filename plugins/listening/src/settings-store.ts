@@ -41,14 +41,15 @@ function readKeys(value: unknown): Record<string, string> {
   return Object.fromEntries(Object.entries(value.keys).filter((entry): entry is [string, string] => typeof entry[1] === "string" && entry[1] !== ""));
 }
 
-/** A missing file is the default. An unreadable one is also treated as the default, so the
- * plugin still activates and the settings page can write a fresh file over it. */
+/** A missing file is the default. One that can't be read or parsed is also treated as the
+ * default, so the plugin still activates and the settings page can write a fresh file over it.
+ * Limit: if the file was only locked for a moment (antivirus, sync tool), the next save
+ * overwrites it with the defaults plus that change. */
 function readJson<T>(file: string, parse: (value: unknown) => T, fallback: T): { value: T; unreadable: boolean } {
   let text: string;
   try { text = fs.readFileSync(file, "utf8"); }
   catch (error) {
-    if ((error as NodeJS.ErrnoException).code === "ENOENT") return { value: fallback, unreadable: false };
-    throw error;
+    return { value: fallback, unreadable: (error as NodeJS.ErrnoException).code !== "ENOENT" };
   }
   try { return { value: parse(JSON.parse(text)), unreadable: false }; }
   catch { return { value: fallback, unreadable: true }; }
