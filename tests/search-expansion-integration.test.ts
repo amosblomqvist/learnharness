@@ -108,23 +108,23 @@ it("OpenAI search follows the researcher's model and runs only when chosen", () 
 		writeSettings({ version: 1, agent: { ...(engine ? { search: { engine } } : {}), models: { researcher: { model: { provider, id: "scratch-model" } } } } });
 
 	researcher("anthropic", "openai");
-	assert.deepEqual(searchStatus(), { available: false, engine: null, reason: 'search engine is set to "openai" but the researcher model does not use an OpenAI API key or a ChatGPT connection', openai: "unsupported" });
+	assert.deepEqual(searchStatus(), { available: false, engine: null, reason: 'search engine is set to "openai" but the researcher model does not use an OpenAI API key or a ChatGPT connection', keyless: { openai: "unsupported" } });
 
 	researcher("openrouter", "openai");
-	assert.equal(searchStatus().openai, "unsupported", "an OpenAI model reached through another provider cannot run it");
+	assert.equal(searchStatus().keyless.openai, "unsupported", "an OpenAI model reached through another provider cannot run it");
 
 	researcher("openai", "openai");
 	assert.equal(searchStatus().reason, 'search engine is set to "openai" but the OpenAI API key is missing');
-	assert.equal(searchStatus().openai, "blocked");
+	assert.equal(searchStatus().keyless.openai, "blocked");
 	assert.equal(searchProvider(), null);
 
 	assert.equal(saveKey("OPENAI_API_KEY", "sk-fake-key-1234567890").ok, true);
-	assert.deepEqual(searchStatus(), { available: true, engine: "openai", reason: "search engine: openai (chosen)", openai: "ready" });
+	assert.deepEqual(searchStatus(), { available: true, engine: "openai", reason: "search engine: openai (chosen)", keyless: { openai: "ready" } });
 	assert.equal(searchProvider()?.id, "openai");
 
 	researcher("openai");
 	assert.equal(searchStatus().available, false, "ready is not chosen: Automatic never picks it");
-	assert.equal(searchStatus().openai, "ready");
+	assert.equal(searchStatus().keyless.openai, "ready");
 	assert.equal(searchProvider(), null);
 
 	assert.equal(saveKey("EXA_API_KEY", "exa-fake-key-1234567890").ok, true);

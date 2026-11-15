@@ -71,9 +71,9 @@ export interface SearchContext {
 	onUsage?: (usage: Usage) => void;
 }
 
-/** OpenAI web search for the current researcher model: usable, held back by
- *  a missing key, connection or consent, or not something the model can run. */
-export type OpenAISearchReadiness = "ready" | "blocked" | "unsupported";
+/** How a keyless engine stands for the current settings: usable, held back
+ *  by something the user can fix, or not something this setup can run. */
+export type EngineReadiness = "ready" | "blocked" | "unsupported";
 
 /** Why search is (un)available — the honest status the UI and the tool
  *  layer explain from. `engine` is the ACTIVE engine when live. */
@@ -83,5 +83,6 @@ export interface SearchStatus {
 	engine: SearchEngineId | null;
 	/** The one-line reason for the state (status text for the UI). */
 	reason: string;
-	openai: OpenAISearchReadiness;
+	/** Keyless engines only: whether each could run right now. */
+	keyless: Partial<Record<SearchEngineId, EngineReadiness>>;
 }

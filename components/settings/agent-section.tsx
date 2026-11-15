@@ -29,9 +29,9 @@
  * in the Tools group, with the same shared-menu look and
  * the live reason line from /api/search. No engine key at all → the row
  * grays whole-row (a choice without a key would only BLOCK another
- * engine's auto-activation). OpenAI web search is the keyless exception:
- * it is offered while the researcher's model can run it, and never
- * auto-activates.
+ * engine's auto-activation). A keyless engine (OpenAI web search) is the
+ * exception: it is offered while the current settings can run it, and
+ * never auto-activates.
  *
  * Tools — the owner's final list (2026-09-19): research, demo, visual, pdf.
  * Absent key = enabled in the schema; the UI writes explicit booleans for
@@ -446,7 +446,7 @@ export function AgentSection({
 	// keying on the pin avoids the race where the fetch beat the PUT and
 	// the hint contradicted the trigger it sits under. The researcher's
 	// provider and ChatGPT background consent are keyed the same way: they
-	// decide whether OpenAI is offered and ready.
+	// decide whether a keyless engine is offered and ready.
 	const researcherProvider = resolveModelSpec("researcher", agent?.models?.researcher, models)?.provider;
 	const chatGPTBackground = useChatGPTBackgroundAllowed();
 	useEffect(() => {
@@ -959,10 +959,11 @@ export function AgentSection({
 				})()}
 				{(() => {
 					const engine = agent?.search?.engine ?? null;
-					// OpenAI has no key: it is offered while the researcher model can
-					// run it, and stays listed while it is the saved choice.
-					const openaiOffered = engine === "openai" || (search?.openai ?? "unsupported") !== "unsupported";
-					const usable = openaiOffered || SEARCH_ENGINES.some(({ id }) => engineKeys[id] === true);
+					// A keyless engine is offered while the current settings can run
+					// it, and stays listed while it is the saved choice.
+					const offered = SEARCH_ENGINES.filter(({ id, envVar }) =>
+						envVar !== null || engine === id || (search?.keyless?.[id] ?? "unsupported") !== "unsupported");
+					const usable = offered.some(({ id, envVar }) => envVar === null || engineKeys[id] === true);
 					const open = openMenu?.target === "search";
 					return (
 						<SettingsRow
@@ -994,10 +995,10 @@ export function AgentSection({
 											onSectionChange(composeSearchEngine(agent, null));
 											setOpenMenu(null);
 										})}
-										{SEARCH_ENGINES.filter(({ envVar }) => envVar !== null || openaiOffered).map(({ id, label, envVar }) => {
+										{offered.map(({ id, label, envVar }) => {
 											const mark = envVar !== null
 												? engineKeys[id] ? "✓ key" : "· no key"
-												: search?.openai === "ready" ? "✓ available" : "· unavailable";
+												: search?.keyless?.[id] === "ready" ? "✓ available" : "· unavailable";
 											return engineOption(id, label, engine === id, mark, () => {
 												onSectionChange(composeSearchEngine(agent, id));
 												setOpenMenu(null);

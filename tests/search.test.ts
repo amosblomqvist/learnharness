@@ -12,7 +12,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider, openAIProvider, type OpenAISearchState } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider, openAIProvider, type KeylessState } from "../src/server/search.ts";
 import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
@@ -372,8 +372,8 @@ it("Firecrawl drops invalid result rows and normalizes only search descriptions"
 });
 
 describe("OpenAI web search: resolution", () => {
-	const ready: OpenAISearchState = { readiness: "ready" };
-	const blocked: OpenAISearchState = { readiness: "blocked", reason: "ChatGPT background use is off" };
+	const ready: { openai: KeylessState } = { openai: { readiness: "ready" } };
+	const blocked: { openai: KeylessState } = { openai: { readiness: "blocked", reason: "ChatGPT background use is off" } };
 
 	it("is never chosen automatically, with or without keys", () => {
 		const keyless = resolveSearchEngineFor(undefined, {}, ready);
@@ -387,7 +387,7 @@ describe("OpenAI web search: resolution", () => {
 
 	it("runs when chosen and ready, even beside keyed engines", () => {
 		const chosen = resolveSearchEngineFor("openai", { tavily: "fake-tavily" }, ready);
-		assert.deepEqual(chosen, { available: true, engine: "openai", reason: "search engine: openai (chosen)", key: null, openai: "ready" });
+		assert.deepEqual(chosen, { available: true, engine: "openai", reason: "search engine: openai (chosen)", key: null, keyless: { openai: "ready" } });
 	});
 
 	it("chosen but not ready is unavailable with the cause and never falls back to a keyed engine", () => {
@@ -397,13 +397,13 @@ describe("OpenAI web search: resolution", () => {
 			assert.equal(result.engine, null);
 		}
 		assert.equal(resolveSearchEngineFor("openai", {}, blocked).reason, 'search engine is set to "openai" but ChatGPT background use is off');
-		assert.equal(resolveSearchEngineFor("openai", {}).reason, 'search engine is set to "openai" but the researcher model does not use an OpenAI API key or a ChatGPT connection');
+		assert.equal(resolveSearchEngineFor("openai", {}).reason, 'search engine is set to "openai" but it cannot run with the current settings');
 	});
 
 	it("reports readiness whichever engine is active", () => {
-		assert.equal(resolveSearchEngineFor(undefined, { tavily: "fake-tavily" }, ready).openai, "ready");
-		assert.equal(resolveSearchEngineFor("brave", {}, blocked).openai, "blocked");
-		assert.equal(resolveSearchEngineFor(undefined, {}).openai, "unsupported");
+		assert.equal(resolveSearchEngineFor(undefined, { tavily: "fake-tavily" }, ready).keyless.openai, "ready");
+		assert.equal(resolveSearchEngineFor("brave", {}, blocked).keyless.openai, "blocked");
+		assert.equal(resolveSearchEngineFor(undefined, {}).keyless.openai, "unsupported");
 	});
 });
 

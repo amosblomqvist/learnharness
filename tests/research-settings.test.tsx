@@ -69,7 +69,7 @@ const engineOptions = () => [...document.querySelectorAll<HTMLButtonElement>('[d
 it("keyless settings keep Research interactive while search-engine setup retains its own disabled state", () => {
 	const reason = "No search engine is configured.";
 	return withAgentSection(
-		{ search: { available: false, engine: null, reason, openai: "unsupported" }, keys: KEYED_ENGINES.map(({ envVar }) => ({ id: envVar, present: false })) },
+		{ search: { available: false, engine: null, reason, keyless: { openai: "unsupported" } }, keys: KEYED_ENGINES.map(({ envVar }) => ({ id: envVar, present: false })) },
 		{ tools: { research: true } },
 		async (written) => {
 			const row = document.querySelector<HTMLElement>('[data-testid="tool-row-research"]')!;
@@ -91,7 +91,7 @@ it("keyless settings keep Research interactive while search-engine setup retains
 
 for (const { id, label, envVar } of KEYED_ENGINES) {
 it(`a ${label}-only key enables the engine menu and selecting ${label} saves the pin`, () => withAgentSection(
-	{ search: { available: true, engine: id, reason: `search engine: ${id} (auto)`, openai: "unsupported" }, keys: [{ id: envVar, present: true }] },
+	{ search: { available: true, engine: id, reason: `search engine: ${id} (auto)`, keyless: { openai: "unsupported" } }, keys: [{ id: envVar, present: true }] },
 	undefined,
 	async (written) => {
 		assert.ok(!engineTrigger().hasAttribute("disabled"));
@@ -114,7 +114,7 @@ it(`a ${label}-only key enables the engine menu and selecting ${label} saves the
 
 for (const { openai, mark } of [{ openai: "ready", mark: "✓ available" }, { openai: "blocked", mark: "· unavailable" }] as const) {
 it(`a researcher model that can run it offers OpenAI last, marked "${mark}", with no key anywhere`, () => withAgentSection(
-	{ search: { available: false, engine: null, reason: "No search engine is configured.", openai }, keys: [] },
+	{ search: { available: false, engine: null, reason: "No search engine is configured.", keyless: { openai } }, keys: [] },
 	undefined,
 	async (written) => {
 		assert.ok(!engineTrigger().hasAttribute("disabled"));
@@ -129,7 +129,7 @@ it(`a researcher model that can run it offers OpenAI last, marked "${mark}", wit
 }
 
 it("OpenAI stays listed while it is the saved choice, so a researcher that can no longer run it can be switched away from", () => withAgentSection(
-	{ search: { available: false, engine: null, reason: "not an OpenAI model", openai: "unsupported" }, keys: [] },
+	{ search: { available: false, engine: null, reason: "not an OpenAI model", keyless: { openai: "unsupported" } }, keys: [] },
 	{ search: { engine: "openai" } },
 	async (written) => {
 		assert.ok(!engineTrigger().hasAttribute("disabled"));

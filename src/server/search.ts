@@ -21,7 +21,7 @@
  * tool depends on the PORT only and tests never touch the network.
  */
 
-import { SEARCH_ENGINES, type OpenAISearchReadiness, type SearchEngineId, type SearchHit, type SearchProvider, type SearchStatus } from "../core/search.ts";
+import { SEARCH_ENGINES, type EngineReadiness, type SearchEngineId, type SearchHit, type SearchProvider, type SearchStatus } from "../core/search.ts";
 import { openAIWebSearch } from "../agent/openai-web-search.ts";
 import { connectionBackgroundAllowed } from "../agent/subscription-connections.ts";
 import { keyValue, providerKeyPresent } from "./keys.ts";
@@ -293,24 +293,38 @@ function engineKeys(): Partial<Record<SearchEngineId, string>> {
 	return keys;
 }
 
-/** OpenAI web search as the saved researcher model could run it, with the
- *  cause when it could not. */
-export type OpenAISearchState =
+/** A keyless engine as the current settings could run it, with the cause
+ *  when they could not. */
+export type KeylessState =
 	| { readiness: "ready" }
-	| { readiness: Exclude<OpenAISearchReadiness, "ready">; reason: string };
-
-const OPENAI_UNSUPPORTED: OpenAISearchState = { readiness: "unsupported", reason: "the researcher model does not use an OpenAI API key or a ChatGPT connection" };
+	| { readiness: Exclude<EngineReadiness, "ready">; reason: string };
 
 /** Read fresh from the researcher's resolved model and the two gates a
  *  research job on that model already has to pass: its key or connection,
  *  and, for a ChatGPT plan, background consent. */
-function openAISearchState(): OpenAISearchState {
+function openAISearchState(): KeylessState {
 	const spec = effectiveSettings().agent.models.researcher;
-	if (spec?.provider !== "openai" && spec?.provider !== "chatgpt") return OPENAI_UNSUPPORTED;
+	if (spec?.provider !== "openai" && spec?.provider !== "chatgpt") return { readiness: "unsupported", reason: "the researcher model does not use an OpenAI API key or a ChatGPT connection" };
 	const chatgpt = spec.provider === "chatgpt";
 	if (!providerKeyPresent(spec.provider)) return { readiness: "blocked", reason: chatgpt ? "no ChatGPT account is connected" : "the OpenAI API key is missing" };
 	if (!connectionBackgroundAllowed(spec.provider)) return { readiness: "blocked", reason: "ChatGPT background use is off" };
 	return { readiness: "ready" };
+}
+
+/** The keyless engines: how each reads its state and builds its adapter.
+ *  A new one is registered here and nowhere else. */
+const KEYLESS: Partial<Record<SearchEngineId, { state(): KeylessState; provider(): SearchProvider }>> = {
+	openai: { state: openAISearchState, provider: openAIProvider },
+};
+
+/** Every keyless engine's state, read fresh (the resolver's input). */
+function keylessStates(): Partial<Record<SearchEngineId, KeylessState>> {
+	const states: Partial<Record<SearchEngineId, KeylessState>> = {};
+	for (const { id } of SEARCH_ENGINES) {
+		const state = KEYLESS[id]?.state();
+		if (state) states[id] = state;
+	}
+	return states;
 }
 
 /** Resolve the search state PURELY from the given pins (testable): the
@@ -320,37 +334,45 @@ export function resolveSearchEngineFor(
 	pinned: SearchEngineId | undefined,
 	/** Per-engine live keys (absent engine = absent property is fine). */
 	keys: Partial<Record<SearchEngineId, string | undefined>>,
-	openai: OpenAISearchState = OPENAI_UNSUPPORTED,
+	/** Per-engine keyless states (absent engine = unsupported). */
+	keyless: Partial<Record<SearchEngineId, KeylessState>> = {},
 ): SearchStatus & { key: string | null } {
-	const unavailable = (reason: string) => ({ available: false, engine: null, reason, key: null, openai: openai.readiness });
-	const live = (engine: SearchEngineId, how: "chosen" | "auto", key: string | null) =>
-		({ available: true, engine, reason: `search engine: ${engine} (${how})`, key, openai: openai.readiness });
-	if (pinned === "openai") {
-		return openai.readiness === "ready" ? live(pinned, "chosen", null) : unavailable(`search engine is set to "openai" but ${openai.reason}`);
+	const readiness: SearchStatus["keyless"] = {};
+	for (const { id, envVar } of SEARCH_ENGINES) {
+		if (!envVar) readiness[id] = keyless[id]?.readiness ?? "unsupported";
 	}
-	if (pinned) {
-		const key = keys[pinned];
+	const unavailable = (reason: string) => ({ available: false, engine: null, reason, key: null, keyless: readiness });
+	const live = (engine: SearchEngineId, how: "chosen" | "auto", key: string | null) =>
+		({ available: true, engine, reason: `search engine: ${engine} (${how})`, key, keyless: readiness });
+	const pin = SEARCH_ENGINES.find((e) => e.id === pinned);
+	if (pin && !pin.envVar) {
+		const state = keyless[pin.id] ?? { readiness: "unsupported" as const, reason: "it cannot run with the current settings" };
+		return state.readiness === "ready" ? live(pin.id, "chosen", null) : unavailable(`search engine is set to "${pin.id}" but ${state.reason}`);
+	}
+	if (pin) {
+		const key = keys[pin.id];
 		return key
-			? live(pinned, "chosen", key)
-			: unavailable(`search engine is set to "${pinned}" but its API key is missing — set the ${SEARCH_ENGINES.find((e) => e.id === pinned)?.envVar} key`);
+			? live(pin.id, "chosen", key)
+			: unavailable(`search engine is set to "${pin.id}" but its API key is missing — set the ${pin.envVar} key`);
 	}
 	for (const { id, envVar } of SEARCH_ENGINES) {
 		const key = envVar && keys[id];
 		if (key) return live(id, "auto", key);
 	}
-	return unavailable(`no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key${openai.readiness === "ready" ? ", or choose OpenAI" : ""}`);
+	const choosable = SEARCH_ENGINES.filter(({ id }) => readiness[id] === "ready").map(({ label }) => label);
+	return unavailable(`no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key${choosable.length ? `, or choose ${choosable.join(" or ")}` : ""}`);
 }
 
 /** The live search state (the honest availability signal): reads the
  *  settings record's pin + the auth store fresh each call, so a key saved
  *  mid-session activates on the next check (no restart). */
 export function searchStatus(): SearchStatus {
-	const { available, engine, reason, openai } = resolveSearchEngineFor(
+	const { available, engine, reason, keyless } = resolveSearchEngineFor(
 		effectiveSettings().agent.search?.engine,
 		engineKeys(),
-		openAISearchState(),
+		keylessStates(),
 	);
-	return { available, engine, reason, openai };
+	return { available, engine, reason, keyless };
 }
 
 /** Search status only — research itself remains available without a key. */
@@ -362,8 +384,8 @@ export function searchAvailable(): boolean {
  *  the tool layer (Teacher stream) calls this once per search, so key
  *  rotations take effect immediately. */
 export function searchProvider(): SearchProvider | null {
-	const resolved = resolveSearchEngineFor(effectiveSettings().agent.search?.engine, engineKeys(), openAISearchState());
-	if (resolved.engine === "openai") return openAIProvider();
+	const resolved = resolveSearchEngineFor(effectiveSettings().agent.search?.engine, engineKeys(), keylessStates());
+	if (resolved.engine && KEYLESS[resolved.engine]) return KEYLESS[resolved.engine]!.provider();
 	if (!resolved.available || !resolved.key) return null;
 	switch (resolved.engine) {
 		case "tavily":
