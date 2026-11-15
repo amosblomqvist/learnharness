@@ -64,7 +64,6 @@ buildNpmPackage rec {
       --add-flags $out/share/${pname} \
       --set NODE_ENV production
 
-      # TODO: build .desktop file
     install -Dm444 build/icon.png \
         $out/share/icons/hicolor/512x512/apps/learnharness.png
 
