@@ -13,7 +13,7 @@ buildNpmPackage rec {
 
   src = ../.;
 
-  npmDepsHash = "sha256-a25cTyAXbk0AA3nNdOoMQ/Q5dVangmTrxO4uo1ekvhc=";
+  npmDepsHash = "sha256-hjr3v/hgCaFJg+09imsQWbbkKedyrAaNOTvw1Bj6YC0=";
 
   nativeBuildInputs = [
     makeWrapper
