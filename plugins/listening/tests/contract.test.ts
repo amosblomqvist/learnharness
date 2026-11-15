@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { Compile } from "typebox/compile";
 import { answerSchema, definition, listeningInstructions, questionSchema } from "../src/contract.ts";
-import { answerState, shuffleOptions } from "../src/editor.ts";
+import { adoptDraft, answerState, shuffleOptions } from "../src/editor.ts";
 import { createPlaybackStore, failed, finished, startedAt } from "../src/playback-state.ts";
 
 const question = Compile(questionSchema);
@@ -95,4 +95,14 @@ test("Continue another way makes audio unavailable ready; a later full playback 
   store.update("q", failed);
   assert.equal(seen.length, 4);
   assert.equal(store.get("other").completed, false, "questions are independent");
+});
+
+test("the host's echo of audio unavailable keeps the draft for a later full playback", () => {
+  const echo = { status: "ready", value: { status: "audio_unavailable" } } as const;
+  assert.deepEqual(adoptDraft({ choice: "coffee" }, echo), { choice: "coffee" });
+  assert.deepEqual(adoptDraft({ text: "a coffee" }, echo), { text: "a coffee" });
+  assert.deepEqual(adoptDraft({ choice: "coffee" }, { status: "unready", value: { status: "answered", choice: "tea", playbackRates: [] } }), { choice: "tea" }, "a real host answer still wins");
+  assert.deepEqual(adoptDraft({ choice: "coffee" }, { status: "empty" }), { choice: "coffee" }, "an empty echo never clears the draft");
+  const record = finished(startedAt({ completed: false, rates: [], failures: 2, audioUnavailable: true }, 1));
+  assert.deepEqual(answerState("choice", adoptDraft({ choice: "coffee" }, echo), record), { status: "ready", value: { status: "answered", choice: "coffee", playbackRates: [1] } });
 });

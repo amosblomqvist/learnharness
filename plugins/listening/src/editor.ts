@@ -40,6 +40,14 @@ function readDraft(answer: PluginQuestionAnswerState): Draft {
   };
 }
 
+/** Controlled update: adopt the host's answer only when it carries a choice or text. After
+ * Continue another way the host echoes {status: "audio_unavailable"}, which has neither; the
+ * draft must survive it so a later full playback brings the answer back. */
+export function adoptDraft(current: Draft, answer: PluginQuestionAnswerState): Draft {
+  const incoming = readDraft(answer);
+  return incoming.choice !== undefined || incoming.text !== undefined ? incoming : current;
+}
+
 /** Readiness requires one full playback and an answer, or the learner's Continue another way. */
 export function answerState(format: ListeningPayload["format"], draft: Draft, record: PlaybackRecord): PluginQuestionAnswerState {
   if (record.audioUnavailable) return { status: "ready", value: { status: "audio_unavailable" } };
@@ -144,9 +152,8 @@ export function mountAnswerEditor(container: HTMLElement, props: PluginQuestionE
     update(next) {
       if (disposed) return;
       active = next.active;
-      // Controlled update: adopt the host's answer, but never echo it back.
-      const incoming = readDraft(next.answer);
-      if (next.answer.status !== "empty" || (draft.choice === undefined && draft.text === undefined)) draft = incoming;
+      // Adopt only: publishing here would echo the host's own answer back to it.
+      draft = adoptDraft(draft, next.answer);
       apply();
     },
     focus() {
