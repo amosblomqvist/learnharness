@@ -512,7 +512,10 @@ per-plugin process or forced termination of uncooperative code.
 Register JSON-compatible operations with `ctx.handle(name, handler)` and call them
 from the frontend with `await ctx.call(name, input)`. This routes only to that plugin,
 not arbitrary HTTP endpoints. Validate inputs, expose genuine errors, and use atomic
-writes for important plugin-owned state under `ctx.dataDirectory`.
+writes for important plugin-owned state under `ctx.dataDirectory`. Keep secrets such as
+API keys in `credentials.json` directly in `ctx.dataDirectory`: agent file tools refuse
+that file and its `.credentials.json-<uuid>.tmp` temp, while other plugin data stays
+readable to them.
 
 `ctx.learning` is read-only:
 
