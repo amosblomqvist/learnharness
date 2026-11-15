@@ -20,9 +20,6 @@ buildNpmPackage rec {
     copyDesktopItems
   ];
 
-  # Runs `npm run build` (= next build), which the app needs.
-  # Remove dontNpmBuild entirely.
-
   env = {
     ELECTRON_SKIP_BINARY_DOWNLOAD = 1;
     NEXT_TELEMETRY_DISABLED = 1;
