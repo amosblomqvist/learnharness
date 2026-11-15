@@ -158,7 +158,7 @@ test('positive source budgets are independent of prompt/schema and filename over
 test('output allowances honor provider/context caps, reserve 256 tokens and require at least 1024', () => {
   const [full] = chunks('A short supported fact.');
   const tokens = full.tokens;
-  assert.equal(chunks('A short supported fact.', { entry: { maxTokens: 20000, contextWindow: 100000 } })[0].maxTokens, 8192);
+  assert.equal(chunks('A short supported fact.', { entry: { maxTokens: 40000, contextWindow: 100000 } })[0].maxTokens, 32768);
   assert.equal(chunks('A short supported fact.', { entry: { maxTokens: 2048, contextWindow: 100000 } })[0].maxTokens, 2048);
   assert.equal(chunks('A short supported fact.', { entry: { maxTokens: 8192, contextWindow: tokens + 256 + 1500 } })[0].maxTokens, 1500);
   assert.equal(chunks('A short supported fact.', { entry: { contextWindow: tokens + 256 + 1024 } })[0].maxTokens, 1024);
