@@ -82,10 +82,12 @@ const SYSTEM_PROMPT_FILE = "system.md";
 const SETTINGS_FILE = "settings.json";
 /**
  * The CLI reads the first `.gemini/.env` or `.env` it finds from its cwd up to the root, then the ones in the home
- * folder. An empty one in the turn's cwd ends that search, so no `.env` in a parent folder (such as a shared /tmp)
- * or in the home folder reaches the child.
+ * folder. It looks at `.gemini/.env` only in a trusted workspace, and skips a local `.env` when
+ * `advanced.ignoreLocalEnv` is on. Empty copies of both in the turn's cwd, with that setting pinned off in the system
+ * settings, end the search whether or not the temp folder is trusted, so no `.env` in a parent folder (such as a
+ * shared /tmp) or in the home folder reaches the child.
  */
-const ENV_STOP_FILES: Record<string, string> = { [join(".gemini", ".env")]: "" };
+const ENV_STOP_FILES: Record<string, string> = { [join(".gemini", ".env")]: "", ".env": "" };
 /** A context file name no user has, so `~/.gemini/GEMINI.md` and project context files are not loaded. */
 const NO_CONTEXT_FILE = "learnharness-no-context-file.md";
 
@@ -161,6 +163,7 @@ export function toGeminiSettings(bridge: BridgeServer): string {
 		mcp: { allowed: [ALLOWED_MCP_SERVER] },
 		tools: { core: [`${MCP_NAME_PREFIX}*`], exclude: GEMINI_BUILTIN_TOOLS },
 		context: { fileName: [NO_CONTEXT_FILE], includeDirectoryTree: false },
+		advanced: { ignoreLocalEnv: false },
 	});
 }
 

@@ -334,7 +334,7 @@ test("argv, settings and the system prompt: only the LearnHarness MCP server, no
 	await assertCleanedUp(call);
 });
 
-test("the child env has no LearnHarness key and the cwd is a temp dir holding only an empty .gemini/.env", async (t) => {
+test("the child env has no LearnHarness key and the cwd is a temp dir holding only empty .env stop files", async (t) => {
 	const names = ["GEMINI_API_KEY", "GOOGLE_API_KEY"];
 	const record = authEnvRecord();
 	const saved = names.map((name) => process.env[name]);
@@ -350,9 +350,13 @@ test("the child env has no LearnHarness key and the cwd is a temp dir holding on
 	for (const name of names) assert.equal(call.env[name], undefined, `${name} must not reach the child`);
 	assert.ok(!JSON.stringify(call.args).includes("lh-only-key"));
 	assert.equal(dirname(call.cwd), tmpdir());
-	assert.deepEqual(call.cwdEntries, [".gemini"]);
+	// `.env` stops an untrusted lookup, `.gemini/.env` a trusted one; both must be empty.
+	assert.deepEqual([...call.cwdEntries].sort(), [".env", ".gemini"]);
 	assert.deepEqual(readdirSync(join(call.cwd, ".gemini")), [".env"]);
 	assert.equal(readFileSync(join(call.cwd, ".gemini", ".env"), "utf8"), "");
+	assert.equal(readFileSync(join(call.cwd, ".env"), "utf8"), "");
+	const settings = JSON.parse(readRecord(call).settings!);
+	assert.equal(settings.advanced.ignoreLocalEnv, false, "a local .env must stay a lookup boundary");
 	await assertCleanedUp(call);
 });
 
