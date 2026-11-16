@@ -108,6 +108,13 @@ npm test           # fixtures and fake providers
 
 `npm test` assumes a bash shell (on Windows, run it in Git Bash).
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture/architecture-dark.svg">
+  <img src="docs/architecture/architecture-light.svg" alt="LearnHarness Fork architecture. The learner uses the lesson UI inside the Electron desktop app; Next.js routes start teaching-agent turns, which save to the local store, dispatch explainer jobs, and reach models through API keys, subscriptions, or external CLIs (Claude Code, Codex, Gemini CLI). The updater checks GitHub Releases of reeschan/learnharness.">
+</picture>
+
+The diagram source is [docs/architecture/architecture.d2](docs/architecture/architecture.d2); redraw the SVGs with the arch-diagram `render.py` after changing it.
+
 See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), and [desktop builds and releases](docs/desktop-release.md).
 
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/reeschan/learnharness/issues).

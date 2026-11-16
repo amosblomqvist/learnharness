@@ -108,6 +108,13 @@ npm test           # fixtures and fake providers
 
 `npm test` は bash シェルを前提としています（Windows では Git Bash で実行してください）。
 
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/architecture/architecture-dark.svg">
+  <img src="docs/architecture/architecture-light.svg" alt="LearnHarness Fork のアーキテクチャ図。学習者は Electron デスクトップアプリの中の授業画面を使い、Next.js のルートが授業エージェントのターンを始める。エージェントはローカルストアに保存し、explainer のジョブを出し、API キー・サブスク・外部 CLI (Claude Code・Codex・Gemini CLI) 経由でモデルを使う。アップデーターは reeschan/learnharness の GitHub Releases を確認する。">
+</picture>
+
+図のソースは [docs/architecture/architecture.d2](docs/architecture/architecture.d2) です。直したら arch-diagram の `render.py` で SVG を描き直してください。
+
 すべての案内は [documentation index](docs/README.md) を、開発環境と確認手順は [development](docs/development.md) を、ランタイム構造は [architecture](docs/architecture.md) を、ショートカットは [keyboard shortcuts](docs/keyboard.md) を、デスクトップビルドとリリースは [desktop builds and releases](docs/desktop-release.md) を参照してください。
 
 質問・不具合報告・機能要望: [GitHub Issues](https://github.com/reeschan/learnharness/issues)

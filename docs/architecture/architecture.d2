@@ -1,0 +1,102 @@
+# LearnHarness Fork のアーキテクチャ図
+# __MONO__ は単色ロゴの色。render.py がライト用 (000000) とダーク用 (ffffff) に置き換えて 2 枚描く
+# 生成: python ~/.claude/skills/arch-diagram/versions/v1.1/scripts/render.py docs/architecture/architecture.d2
+direction: right
+
+vars: {
+  d2-config: {
+    layout-engine: elk
+    pad: 40
+  }
+}
+
+classes: {
+  svc: {
+    shape: rectangle
+    style: {
+      border-radius: 12
+      font-size: 15
+    }
+  }
+  ext: {
+    shape: image
+    width: 64
+    height: 64
+    label.near: outside-bottom-center
+  }
+  zone: {
+    style.border-radius: 16
+  }
+  saas: {
+    style: {
+      border-radius: 16
+      stroke-dash: 3
+    }
+  }
+}
+
+learner: Learner {
+  class: ext
+  icon: https://icons.terrastruct.com/essentials%2F359-users.svg
+}
+
+desktop: Desktop app (Electron) {
+  class: zone
+  icon: https://cdn.simpleicons.org/electron
+
+  ui: "Lesson UI\nReact · knowledge graph" {
+    class: svc
+    icon: https://cdn.simpleicons.org/react
+  }
+  api: "Next.js routes\n/api/chat · jobs" {
+    class: svc
+    icon: https://cdn.simpleicons.org/nextdotjs/__MONO__
+  }
+  agents: "Teaching agents\nprober · teacher · practitioner" {
+    class: svc
+    icon: https://cdn.simpleicons.org/nodedotjs
+  }
+  explainer: "Explainer worker\nvisual-explainer pages" {
+    class: svc
+  }
+  store: "Local store\nchats · graph · settings" {
+    shape: cylinder
+  }
+  updater: "Updater\nelectron-updater" {
+    class: svc
+  }
+}
+
+providers: Model access {
+  class: saas
+  direction: down
+
+  apis: "API keys\nvia pi-ai" {
+    class: ext
+    icon: https://cdn.simpleicons.org/anthropic/__MONO__
+  }
+  subs: "Subscriptions\nChatGPT · Copilot · Grok" {
+    class: ext
+    icon: https://cdn.simpleicons.org/githubcopilot
+  }
+  cli: "External CLIs\nClaude Code · Codex · Gemini CLI" {
+    class: ext
+    icon: https://cdn.simpleicons.org/googlegemini
+  }
+}
+
+releases: "GitHub Releases\nreeschan/learnharness" {
+  class: ext
+  icon: https://cdn.simpleicons.org/github/__MONO__
+}
+
+learner -> desktop.ui
+desktop.ui <-> desktop.api: input · live stream
+desktop.api -> desktop.agents: turn
+desktop.agents -> desktop.explainer: dispatch job
+desktop.agents <-> desktop.store
+desktop.explainer -> desktop.store
+desktop.agents -> providers.apis
+desktop.agents -> providers.subs
+desktop.agents -> providers.cli: local process
+desktop.updater -> releases: check updates {style.stroke-dash: 4}
