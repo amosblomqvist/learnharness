@@ -707,6 +707,16 @@ try {
   await button("Pen"); await matchesFullRepaint("the canvas after an eraser sweep equals a full repaint");
   group("repaint economy: eraser moves repaint at most once per frame and never over empty space");
 
+  const inkBeforeHeld = await ink(), [hx, hy] = at(.45, .9);
+  await page.mouse.move(hx, hy); await page.mouse.down(); await page.mouse.move(hx + 80, hy, { steps: 8 }); await page.mouse.up();
+  assert.ok(await ink() > inkBeforeHeld, "the stroke to erase is drawn");
+  await button("Eraser"); await page.mouse.move(hx + 40, hy); await page.mouse.down(); await awaitFrame(); await awaitFrame();
+  assert.equal(await ink(), inkBeforeHeld, "a stationary eraser contact erases the stroke before any movement");
+  await page.mouse.up(); assert.equal(await ink(), inkBeforeHeld, "releasing the stationary eraser keeps the stroke erased");
+  await button("Undo"); await button("Undo"); assert.equal(await ink(), inkBeforeHeld, "Undo restores the stroke, then removes it");
+  await button("Pen"); await matchesFullRepaint("the canvas after a stationary eraser equals a full repaint");
+  group("repaint economy: a stationary eraser contact erases immediately");
+
   const inkOffset = () => run(() => {
     const canvas = document.querySelector(".drawing-pad-ink"), { width, height } = canvas;
     const data = canvas.getContext("2d").getImageData(0, 0, width, height).data;

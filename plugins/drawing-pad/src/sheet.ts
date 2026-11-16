@@ -198,6 +198,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
       // The dot a full repaint would draw for point 0.
       paintSegment(inkContext(), active.points[0]!, active.points[0]!, state.draft.color); livePainted = active;
     }
+    else if (active.tool === "eraser") syncInk();
     renderChrome();
   };
   const down = (event: PointerEvent) => {
