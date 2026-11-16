@@ -35,7 +35,7 @@ import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
-import { EXTERNAL_CLI_PROVIDERS, isExternalCliProvider } from "../core/contracts/external-cli.ts";
+import { isExternalCliProvider } from "../core/contracts/external-cli.ts";
 import {
 	extractionEnabled,
 	graphToolsEnabled,
@@ -51,6 +51,7 @@ import { hasProbeDone, hasUnresolvedQuestion } from "../core/native-messages.ts"
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens } from "./compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
+import { refreshExternalCliCatalogs } from "./external-cli-config.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages } from "../core/native-messages.ts";
@@ -162,15 +163,15 @@ function retentionForSlot(slot: ModelSlotName) {
 }
 
 /**
- * Loads the model catalogs a role or the conversation may need when they are fetched at run time (Codex lists its
- * models through its CLI). Engines resolved outside a chat turn (a job respawned after a restart, a notes import)
+ * Loads the model catalogs a role or the conversation may need when they are fetched at run time (an external CLI
+ * that lists its models through the CLI). Engines resolved outside a chat turn (a job respawned after a restart, a notes import)
  * call this first, or the catalog is still empty and the engine has no model. A failed fetch keeps the last list.
  */
 export async function refreshRoleCatalogs(conversationProvider?: string): Promise<void> {
 	const roleSettings = stores.settingsStore.readSettings();
 	const providers = new Set((Object.keys(ROLE_SLOT) as ModelRole[]).map((role) => resolveRoleSpec(role, roleSettings)?.provider));
 	if (conversationProvider) providers.add(conversationProvider);
-	if (providers.has(EXTERNAL_CLI_PROVIDERS.codex)) await refreshConnectionCatalog(EXTERNAL_CLI_PROVIDERS.codex);
+	await refreshExternalCliCatalogs(providers);
 }
 
 setJobRespawn((jobId) => void refreshRoleCatalogs().catch(() => undefined).then(() => jobRunner.runJob(jobId)));
