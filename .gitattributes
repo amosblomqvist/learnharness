@@ -1,0 +1,4 @@
+# Check text files out with LF on every platform. Git for Windows defaults to
+# core.autocrlf=true, which turned them into CRLF and broke tests and
+# generators that read files as text.
+* text=auto eol=lf

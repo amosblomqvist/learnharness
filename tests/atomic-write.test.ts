@@ -14,6 +14,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import { after, describe, it, type TestContext } from "node:test";
 import { removeLeftoverTemps, writeFileAtomicSync } from "../src/store/atomic-write.ts";
+import { CHILD_HANG_GUARD_MS } from "./helpers/child-process.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-atomic-write-"));
 after(() => fs.rmSync(root, { recursive: true, force: true }));
@@ -68,7 +69,7 @@ describe("writeFileAtomicSync", () => {
 
 	it("crashes right before the rename keep the chat (the #403 repro)", () => {
 		const env = { ...process.env, NODE_ENV: "test" as const, LH_DATA_DIR: fs.mkdtempSync(path.join(root, "data-")) };
-		const run = (...args: string[]) => spawnSync(process.execPath, ["--import", "tsx", "tests/helpers/chat-save-crash.ts", ...args], { env, encoding: "utf8", timeout: 30000 });
+		const run = (...args: string[]) => spawnSync(process.execPath, ["--import", "tsx", "tests/helpers/chat-save-crash.ts", ...args], { env, encoding: "utf8", timeout: CHILD_HANG_GUARD_MS });
 		const id = run("create").stdout.trim();
 		assert.equal(run("crash", id).status, 77);
 		const seen = JSON.parse(run("read", id).stdout);

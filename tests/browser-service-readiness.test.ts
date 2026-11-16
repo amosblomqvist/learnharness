@@ -62,7 +62,9 @@ describe("browser-service shipping readiness", () => {
 			if (++requests < 3) { res.writeHead(503); res.end(); }
 			else setTimeout(() => res.end(version(port)), 20);
 		}, async (port, idle) => {
-			assert.equal(await waitForBrowserService(port, { ...short, timeoutMs: 2000 }), endpoint(port));
+			// The third answer is delayed 20 ms on purpose; a busy machine must not turn
+			// that into a request timeout and a fourth request. Timeouts have their own test.
+			assert.equal(await waitForBrowserService(port, { ...short, timeoutMs: 2000, requestTimeoutMs: 1000 }), endpoint(port));
 			assert.equal(requests, 3);
 			await idle();
 			await delay(40);

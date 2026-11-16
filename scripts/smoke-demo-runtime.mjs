@@ -47,18 +47,27 @@ export function formatProbeError(error, depth = 0) {
 	return lines.join("\n");
 }
 
+const failureReason = (result) => result.error?.message ?? result.status;
+const printed = (result) => `${result.stdout ?? ""}${result.stderr ?? ""}`;
+
+/** Throw unless a runtime probe child exited cleanly, with everything it printed. */
+export function assertProbePassed(label, result) {
+	if (result.status === 0 && !result.error) return;
+	throw new Error(`${label} runtime probe failed (${failureReason(result)}):\n${printed(result)}`);
+}
+
 export function verifyDemoRuntime(standalone, runtime = process.execPath, browser = false) {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-demo-runtime-"));
 	try {
 		fs.writeFileSync(path.join(home, "auth.json"), "{}\n", { mode: 0o600 });
-		const result = spawnSync(runtime, [fileURLToPath(import.meta.url), "--probe", path.resolve(standalone), ...(browser ? ["--browser"] : [])], {
+		// The probe runs under this process's own Node flags (none in a release
+		// check; the test loader under tests, so coverage merges one text).
+		const result = spawnSync(runtime, [...process.execArgv, fileURLToPath(import.meta.url), "--probe", path.resolve(standalone), ...(browser ? ["--browser"] : [])], {
 			cwd: home,
 			env: { ...probeEnv(process.env, home), ELECTRON_RUN_AS_NODE: "1" },
 			encoding: "utf8", timeout: 60_000, maxBuffer: 128 * 1024,
 		});
-		if (result.status !== 0 || result.error) {
-			throw new Error(`demo runtime probe failed (${result.error?.message ?? result.status}):\n${result.stdout ?? ""}${result.stderr ?? ""}`);
-		}
+		assertProbePassed("demo", result);
 		process.stdout.write(result.stdout);
 	} finally {
 		fs.rmSync(home, { recursive: true, force: true });

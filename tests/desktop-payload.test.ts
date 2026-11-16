@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import { createPluginHost } from "../src/server/plugin-host.ts";
 import { createPluginSmokeFixture } from "../scripts/smoke-plugin-runtime.mjs";
 import { seedAuthoringReferenceFixture } from "./helpers/plugin-authoring-fixture.ts";
+import { CHILD_HANG_GUARD_MS } from "./helpers/child-process.ts";
 
 const source = fs.readFileSync(new URL("../scripts/build-server.mjs", import.meta.url), "utf8");
 const STANDALONE = path.join(".next", "standalone");
@@ -67,7 +68,7 @@ function withPayload(test: (fixture: {
 		write(path.join(STANDALONE, "src", "agent", "prompts", "side-chat", "00-base.md"));
 		write(path.join(STANDALONE, "src", "agent", "prompts", "side-chat", "90-style.md"));
 		test({ root, write, run: () => spawnSync(process.execPath, [path.join(root, "scripts", "build-server.mjs")], {
-			cwd: root, encoding: "utf8", timeout: 10_000,
+			cwd: root, encoding: "utf8", timeout: CHILD_HANG_GUARD_MS,
 		}) });
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });

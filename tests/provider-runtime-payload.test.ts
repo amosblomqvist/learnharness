@@ -6,10 +6,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { LOADER_ARGS } from "./helpers/child-process.ts";
 
 const script = fileURLToPath(new URL("../scripts/smoke-provider-runtime.mjs", import.meta.url));
 const checkout = fileURLToPath(new URL("..", import.meta.url));
-const run = (payload: string) => spawnSync(process.execPath, [script, "--standalone", payload], { encoding: "utf8", timeout: 40_000 });
+const run = (payload: string) => spawnSync(process.execPath, [...LOADER_ARGS, script, "--standalone", payload], { encoding: "utf8", timeout: 40_000 });
 
 describe("offline native Pi Google initialization gate", () => {
 	it("reaches the sentinel for Google, Google-backed OpenCode and Bedrock adapters using the real SDKs", () => {

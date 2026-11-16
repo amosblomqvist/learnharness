@@ -46,10 +46,15 @@ function nativeCatalogFor(model: { provider: string; id: string }): ModelCatalog
 
 // Whole-process replacement isolates native auth/profile discovery; fetch never
 // delegates. No real credentials, .env, OAuth accounts, or model inference.
+// Where the OS keeps temporary files is kept (on Windows os.tmpdir() reads
+// TEMP, TMP or SystemRoot); USERPROFILE is Windows' HOME.
+const OS_TEMP_VARS = ["TMPDIR", "TEMP", "TMP", "SystemRoot"];
 async function closed<T>(run: () => Promise<T>): Promise<T> {
 	const env = process.env;
 	const fetch = globalThis.fetch;
-	process.env = { NODE_ENV: "test", HOME: "/nonexistent/session-identity", OPENROUTER_API_KEY: "dummy-router", OPENCODE_API_KEY: "dummy-go", OPENAI_API_KEY: "dummy-openai" };
+	const temp = Object.fromEntries(OS_TEMP_VARS.filter((name) => env[name] !== undefined).map((name) => [name, env[name]]));
+	const home = "/nonexistent/session-identity";
+	process.env = { ...temp, NODE_ENV: "test", HOME: home, USERPROFILE: home, OPENROUTER_API_KEY: "dummy-router", OPENCODE_API_KEY: "dummy-go", OPENAI_API_KEY: "dummy-openai" };
 	globalThis.fetch = async () => { throw new Error("CLOSED: unexpected fetch"); };
 	try { return await run(); } finally { process.env = env; globalThis.fetch = fetch; }
 }

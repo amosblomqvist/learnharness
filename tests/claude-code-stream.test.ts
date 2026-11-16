@@ -9,12 +9,13 @@
 import assert from "node:assert/strict";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { once } from "node:events";
-import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, sep } from "node:path";
 import { setTimeout as sleep } from "node:timers/promises";
 import { fileURLToPath } from "node:url";
 import test, { type TestContext } from "node:test";
+import { assertPrivate } from "./helpers/private-file.ts";
 
 import type {
 	AssistantMessage,
@@ -60,11 +61,21 @@ type RunCall = {
 	env: NodeJS.ProcessEnv;
 	systemPrompt: string;
 	mcpConfig: string;
-	mcpConfigMode: number;
+	/** "private", or why the file was not (checked while the CLI runs, before cleanup). */
+	mcpConfigPrivate: string;
 	child: ChildProcessWithoutNullStreams;
 };
 
 type ScenarioRun = { events: AssistantMessageEvent[]; calls: RunCall[] };
+
+function privacyOf(file: string): string {
+	try {
+		assertPrivate(file, 0o600);
+		return "private";
+	} catch (error) {
+		return (error as Error).message;
+	}
+}
 
 function readFixtureLines(name: string): string[] {
 	return readFileSync(join(FIXTURES, name), "utf8").split("\n").filter(Boolean);
@@ -120,7 +131,7 @@ function createFakeRun(
 			env: options.env,
 			systemPrompt: readFileSync(getFlagValue(args, "--system-prompt-file"), "utf8"),
 			mcpConfig: readFileSync(mcpConfigFile, "utf8"),
-			mcpConfigMode: statSync(mcpConfigFile).mode & 0o777,
+			mcpConfigPrivate: privacyOf(mcpConfigFile),
 			child,
 		});
 		return child;
@@ -752,7 +763,7 @@ test("cwd is an empty temp dir; prompt and mcp config live in a separate private
 	assert.ok(!privateDir.startsWith(call.cwd + sep));
 	assert.equal(dirname(getFlagValue(call.args, "--mcp-config")), privateDir);
 	assert.equal(call.systemPrompt, "You are a tutor.");
-	assert.equal(call.mcpConfigMode, 0o600);
+	assert.equal(call.mcpConfigPrivate, "private");
 
 	const mcpConfig = JSON.parse(call.mcpConfig) as { mcpServers: Record<string, { url: string }> };
 	assert.match(mcpConfig.mcpServers.learnharness?.url ?? "", /^http:\/\/127\.0\.0\.1:\d+\/mcp$/);
@@ -1137,7 +1148,9 @@ test("output after MCP admission fails continuation instead of silently replayin
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
-test("normal completion escalates termination when the child ignores SIGTERM", async (t) => {
+// Unix only: on Windows kill("SIGTERM") ends the process outright, so no child
+// can ignore it and the escalation has nothing to escalate from.
+test("normal completion escalates termination when the child ignores SIGTERM", { skip: process.platform === "win32" && "Windows cannot ignore SIGTERM" }, async (t) => {
 	const { events, calls } = await runScenario(t, [JSON.stringify({ fake: "ignore-term" }), ...readFixtureLines("text.jsonl"), HOLD]);
 	assert.equal(getLastEvent(events).type, "done");
 	await assertCleanedUp(getOnlyCall(calls));

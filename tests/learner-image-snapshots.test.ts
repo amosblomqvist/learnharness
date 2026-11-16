@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { after, describe, it } from "node:test";
+import { redirectHome } from "./helpers/home.ts";
 import * as fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -161,14 +162,13 @@ describe("learner image source safety", () => {
 		await fs.mkdir(path.join(home, ".claude"));
 		await fs.writeFile(path.join(home, ".claude", "private.png"), picture());
 		await fs.symlink(path.join(home, ".claude"), path.join(home, "alias"));
-		const old = process.env.HOME;
+		const restoreHome = redirectHome(home);
 		try {
-			process.env.HOME = home;
 			const tool = createShowImageTool({ chatId: "never-written", chatStore: { saveImageSnapshot: () => assert.fail("must not save denied image") } });
 			await assert.rejects(tool.execute("denied", { path: "alias/private.png" }), /Access denied/);
 			const tools = jobTools({ chatId: "x", jobStore: { findJobByToolCallId: () => undefined } as unknown as JobStore, spawn: () => assert.fail("must not spawn") });
 			await assert.rejects(tools.visual!.execute("denied", { brief: "mark it", image: "alias/private.png" }), /Access denied/);
-		} finally { if (old === undefined) delete process.env.HOME; else process.env.HOME = old; }
+		} finally { restoreHome(); }
 	});
 
 	it("keeps visual dispatch idempotent if the source disappears after the first call", async () => {

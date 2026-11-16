@@ -15,6 +15,7 @@ import fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
+import { assertPrivate } from "./helpers/private-file.ts";
 
 const TMP = fs.mkdtempSync(path.join(os.tmpdir(), "lh-auth-store-"));
 process.env.LH_AUTH_FILE = path.join(TMP, "auth.json");
@@ -38,12 +39,11 @@ describe("AuthStore adapter", () => {
 		assert.equal(authStore.authVars().OPENROUTER_API_KEY, "sk-or-v1-abc");
 	});
 
-	it("the file is mode 0600 (secrets), also after rewrites", () => {
+	it("the file is private (mode 0600 on Unix), also after rewrites", () => {
 		authStore.setAuthVar("DEEPGRAM_API_KEY", "d".repeat(40));
-		const first = fs.statSync(AUTH_FILE).mode & 0o777;
-		assert.equal(first, 0o600);
+		assertPrivate(AUTH_FILE, 0o600);
 		authStore.setAuthVar("DEEPGRAM_API_KEY", "e".repeat(40));
-		assert.equal(fs.statSync(AUTH_FILE).mode & 0o777, 0o600, "rewrite keeps 0600");
+		assertPrivate(AUTH_FILE, 0o600);
 	});
 
 	it("set preserves unknown vars verbatim (forward-compat)", () => {
@@ -80,7 +80,7 @@ describe("AuthStore adapter", () => {
 			const name = String(tmp);
 			assert.match(name, /auth\.json\.tmp-[0-9a-f-]{36}$/);
 			assert.equal(JSON.parse(fs.readFileSync(tmp, "utf8")).TEMP_CONTRACT, "synthetic-key");
-			if (process.platform !== "win32") assert.equal(fs.statSync(tmp).mode & 0o777, 0o600);
+			assertPrivate(String(tmp), 0o600);
 			assert.equal(isSensitivePath(name), true);
 			assert.throws(() => resolveSourcePath(name), /Access denied/);
 			observed = true;
@@ -105,7 +105,7 @@ describe("AuthStore adapter", () => {
 		assert.ok(fs.lstatSync(AUTH_FILE).isFile());
 		assert.deepEqual(authStore.authVars(), { KEEP: "original", NEW: "synthetic" });
 		assert.equal(fs.readFileSync(referent, "utf8"), original);
-		if (process.platform !== "win32") assert.equal(fs.statSync(AUTH_FILE).mode & 0o777, 0o600);
+		assertPrivate(AUTH_FILE, 0o600);
 	});
 
 	it("atomic writes: no tmp leftovers, valid JSON on disk every time", () => {

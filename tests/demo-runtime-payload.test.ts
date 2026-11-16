@@ -5,8 +5,9 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
+import { CHILD_HANG_GUARD_MS, LOADER_ARGS } from "./helpers/child-process.ts";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { formatProbeError, probeEnv } from "../scripts/smoke-demo-runtime.mjs";
+import { assertProbePassed, formatProbeError, probeEnv } from "../scripts/smoke-demo-runtime.mjs";
 
 const script = fileURLToPath(new URL("../scripts/smoke-demo-runtime.mjs", import.meta.url));
 
@@ -25,8 +26,8 @@ function withPayload(test: (fixture: {
 		write("server.js", "// fixture");
 		write("node_modules/puppeteer-core/package.json", JSON.stringify({ name: "puppeteer-core", type: "module", main: "lib/index.js" }));
 		write("node_modules/puppeteer-core/lib/index.js", 'import "./browser-data/browser-data.js"; export default { connect() {} };');
-		test({ root, write, run: () => spawnSync(process.execPath, [script, "--standalone", root], {
-			encoding: "utf8", timeout: 10_000,
+		test({ root, write, run: () => spawnSync(process.execPath, [...LOADER_ARGS, script, "--standalone", root], {
+			encoding: "utf8", timeout: CHILD_HANG_GUARD_MS,
 		}) });
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
@@ -103,5 +104,13 @@ describe("demo standalone dependency gate", () => {
 		assert.equal(env.LH_IGNORE_ENV_KEYS, "1");
 		assert.equal(env.HOME, "/scratch");
 		assert.equal(original.API_KEY, "fake");
+	});
+});
+
+describe("a runtime probe's outcome", () => {
+	it("Given the probe exits 0, Then it passes; given a failure or a spawn error, Then it fails with what the probe printed", () => {
+		assertProbePassed("demo", { status: 0, stdout: "ok", stderr: "" });
+		assert.throws(() => assertProbePassed("demo", { status: 1, stdout: "out", stderr: "err" }), { message: "demo runtime probe failed (1):\nouterr" });
+		assert.throws(() => assertProbePassed("provider", { status: null, error: new Error("spawnSync ETIMEDOUT") }), { message: "provider runtime probe failed (spawnSync ETIMEDOUT):\n" });
 	});
 });

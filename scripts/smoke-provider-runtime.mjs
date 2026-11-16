@@ -14,20 +14,20 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
-import { formatProbeError, probeEnv } from "./smoke-demo-runtime.mjs";
+import { assertProbePassed, formatProbeError, probeEnv } from "./smoke-demo-runtime.mjs";
 
 export function verifyProviderRuntime(standalone, runtime = process.execPath) {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-provider-runtime-"));
 	try {
 		fs.writeFileSync(path.join(home, "auth.json"), "{}\n", { mode: 0o600 });
-		const result = spawnSync(runtime, [fileURLToPath(import.meta.url), "--probe", path.resolve(standalone)], {
+		// The probe runs under this process's own Node flags (none in a release
+		// check; the test loader under tests, so coverage merges one text).
+		const result = spawnSync(runtime, [...process.execArgv, fileURLToPath(import.meta.url), "--probe", path.resolve(standalone)], {
 			cwd: home,
 			env: { ...probeEnv(process.env, home), ELECTRON_RUN_AS_NODE: "1" },
 			encoding: "utf8", timeout: 30_000, maxBuffer: 128 * 1024,
 		});
-		if (result.status !== 0 || result.error) {
-			throw new Error(`provider runtime probe failed (${result.error?.message ?? result.status}):\n${result.stdout ?? ""}${result.stderr ?? ""}`);
-		}
+		assertProbePassed("provider", result);
 		assert.match(result.stdout, /native Pi Google initialization passed/, "probe exited without success marker");
 		process.stdout.write(result.stdout);
 	} finally { fs.rmSync(home, { recursive: true, force: true }); }

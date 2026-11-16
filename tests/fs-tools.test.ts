@@ -4,6 +4,7 @@ import { realpathSync } from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
+import { redirectHome } from "./helpers/home.ts";
 
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { expandBraces, globToRegex, isSensitivePath, matchGlob, resolveSourcePath, walkFiles } from "../src/agent/tools/fs-shared.ts";
@@ -127,10 +128,8 @@ describe("learner tools share leading-tilde resolution", () => {
 		const alias = `${home}-alias`;
 		const realHome = await fs.realpath(home);
 		await fs.symlink(home, alias, process.platform === "win32" ? "junction" : "dir");
-		const originalHome = process.env.HOME;
-		const originalUserProfile = process.env.USERPROFILE;
+		const restoreHome = redirectHome(alias);
 		try {
-			process.env.HOME = process.env.USERPROFILE = alias;
 			assert.equal(os.homedir(), alias, "the caller retains the non-canonical HOME");
 			assert.notEqual(alias, realHome);
 			for (const input of [undefined, "", "~"]) assert.equal(resolveSourcePath(input), realHome);
@@ -153,10 +152,7 @@ describe("learner tools share leading-tilde resolution", () => {
 			assert.ok(!seen.some((file) => file.startsWith("node_modules/") || file.startsWith("Library/")));
 			assert.equal(os.homedir(), alias, "tool execution does not rewrite caller configuration");
 		} finally {
-			if (originalHome === undefined) delete process.env.HOME;
-			else process.env.HOME = originalHome;
-			if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-			else process.env.USERPROFILE = originalUserProfile;
+			restoreHome();
 			await fs.unlink(alias);
 			await fs.rm(home, { recursive: true, force: true });
 		}
@@ -164,11 +160,8 @@ describe("learner tools share leading-tilde resolution", () => {
 
 	it("read, ls, find, and grep reach the same synthetic home", async () => {
 		const home = await setup();
-		const originalHome = process.env.HOME;
-		const originalUserProfile = process.env.USERPROFILE;
+		const restoreHome = redirectHome(home);
 		try {
-			process.env.HOME = home;
-			process.env.USERPROFILE = home;
 			assert.equal(os.homedir(), home);
 			const read = await runText(readTool, { path: "~/notes/calculus.md" });
 			assert.match(read, /The derivative measures force/);
@@ -179,10 +172,7 @@ describe("learner tools share leading-tilde resolution", () => {
 			const matched = await runText(grepTool, { path: "~/notes", pattern: "derivative" });
 			assert.match(matched, /calculus\.md:2: The derivative measures force/);
 		} finally {
-			if (originalHome === undefined) delete process.env.HOME;
-			else process.env.HOME = originalHome;
-			if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-			else process.env.USERPROFILE = originalUserProfile;
+			restoreHome();
 			await fs.rm(home, { recursive: true, force: true });
 		}
 	});
@@ -202,17 +192,11 @@ describe("sensitive locations under home are off-limits", () => {
 		await fs.symlink(path.join(home, ".ssh"), path.join(home, "notes", "keys"), process.platform === "win32" ? "junction" : "dir");
 		await fs.mkdir(path.join(home, ".claudette"), { recursive: true });
 		await fs.writeFile(path.join(home, ".claudette", "ok.md"), "eigenvector lookalike\n");
-		const originalHome = process.env.HOME;
-		const originalUserProfile = process.env.USERPROFILE;
+		const restoreHome = redirectHome(home);
 		try {
-			process.env.HOME = home;
-			process.env.USERPROFILE = home;
 			await fn(home);
 		} finally {
-			if (originalHome === undefined) delete process.env.HOME;
-			else process.env.HOME = originalHome;
-			if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-			else process.env.USERPROFILE = originalUserProfile;
+			restoreHome();
 			await fs.rm(home, { recursive: true, force: true });
 		}
 	}

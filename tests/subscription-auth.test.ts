@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { assertPrivate } from "./helpers/private-file.ts";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -48,7 +49,7 @@ for (const id of ids) test(`${id}: independent default-ON file, restart, explici
 		await f.controller.login(id, false);
 		const saved = JSON.parse(await fs.readFile(path.join(f.directory, `${id}-credentials.json`), "utf8"));
 		assert.equal(saved.version, 1); assert.equal(saved.credential.type, "oauth"); assert.equal(saved.allowBackgroundUse, false);
-		assert.equal((await fs.stat(path.join(f.directory, `${id}-credentials.json`))).mode & 0o777, 0o600);
+		assertPrivate(path.join(f.directory, `${id}-credentials.json`), 0o600);
 		const publicState = JSON.stringify(await f.controller.snapshot());
 		assert(!publicState.includes(saved.credential.access)); assert(!publicState.includes(saved.credential.refresh));
 		const scope = await f.scope(id), result = await f.controller.lease(scope, false);

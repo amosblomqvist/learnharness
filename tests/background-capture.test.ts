@@ -5,6 +5,7 @@ import * as fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test, type TestContext } from "node:test";
+import { assertPrivate } from "./helpers/private-file.ts";
 import { Type } from "typebox";
 import type { PiEngine } from "../src/agent/models.ts";
 import type { AssistantMessage, Model } from "@earendil-works/pi-ai";
@@ -130,10 +131,7 @@ test("only latest request remains; snapshots do not mutate inputs and redact tra
 	assert.equal(result.timings.length, 2);
 	assert.ok(!JSON.stringify(result).includes("OLD_REQUEST_ONLY"));
 	assert.ok(!JSON.stringify(result).includes("OLD_RESPONSE_ONLY"));
-	if (process.platform !== "win32") {
-		const file = path.join(dir, fs.readdirSync(dir)[0]!);
-		assert.equal(fs.statSync(file).mode & 0o777, 0o600);
-	}
+	assertPrivate(path.join(dir, fs.readdirSync(dir)[0]!), 0o600);
 });
 
 test("real native adapter captures replayed thinking, tool results AND the final tool call/reasoning", async (t) => {

@@ -12,6 +12,7 @@ import { after, before, describe, it } from "node:test";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
 import { runPdfReaderAgent } from "../src/agent/subagents/pdf-reader.ts";
+import { redirectHome } from "./helpers/home.ts";
 import type { HeadlessApi } from "../src/agent/subagents/headless.ts";
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
@@ -56,23 +57,18 @@ function fakeHeadless(rendered: { pages: number[] } = { pages: [] }): HeadlessAp
 describe("pdf-reader source paths", () => {
 	let home: string;
 	const relativePath = path.join("Course notes", "sample document.pdf");
-	const originalHome = process.env.HOME;
-	const originalUserProfile = process.env.USERPROFILE;
+	let restoreHome: () => void;
 
 	before(() => {
 		home = fs.realpathSync.native(fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-home-")));
 		const target = path.join(home, relativePath);
 		fs.mkdirSync(path.dirname(target), { recursive: true });
 		fs.copyFileSync(FIXTURE, target);
-		process.env.HOME = home;
-		process.env.USERPROFILE = home;
+		restoreHome = redirectHome(home);
 	});
 
 	after(() => {
-		if (originalHome === undefined) delete process.env.HOME;
-		else process.env.HOME = originalHome;
-		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-		else process.env.USERPROFILE = originalUserProfile;
+		restoreHome();
 		fs.rmSync(home, { recursive: true, force: true });
 	});
 

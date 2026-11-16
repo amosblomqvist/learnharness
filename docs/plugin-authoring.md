@@ -181,12 +181,13 @@ Keep the same project layout and build locally. Either copy the completed `dist/
 1. Copy `tools/install-plugin-local.mjs` from the extracted authoring skill into your
    project's `scripts/install-plugin-local.mjs`. In a LearnHarness checkout the same
    helper lives at `scripts/install-plugin-local.mjs`.
-2. Add this script to the plugin's `package.json`, alongside its existing `build` script:
+2. Add these scripts to the plugin's `package.json`, alongside its existing `build` script:
 
    ```json
    {
      "scripts": {
-       "install:local": "npm run build && node scripts/install-plugin-local.mjs"
+       "preinstall:local": "npm run build",
+       "install:local": "node scripts/install-plugin-local.mjs"
      }
    }
    ```
@@ -197,7 +198,7 @@ Keep the same project layout and build locally. Either copy the completed `dist/
    npm run install:local -- "<plugins-directory>"
    ```
 
-The command builds first. If the build fails, installation does not run. The helper uses
+npm runs `preinstall:local` first, so the command builds first. If the build fails, installation does not run. (Keep the build in the `pre` script: on Windows, npm escapes the plugins directory twice when the script itself starts with `npm run build && ...`, and a path with a space then arrives with stray `^` characters.) The helper uses
 only Node built-ins, checks the built manifest/entry files, and installs under the
 manifest's plugin ID. The supplied plugins directory must already exist. It does not
 infer a profile or save configuration. The host still decides app compatibility and

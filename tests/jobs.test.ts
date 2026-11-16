@@ -28,6 +28,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, afterEach, before, describe, it } from "node:test";
+import { redirectHome } from "./helpers/home.ts";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type AssistantMessage, type FauxResponseStep } from "@earendil-works/pi-ai";
 import {
 	accumulateJobUsage,
@@ -734,8 +735,7 @@ describe("pdf runner (sources v0)", () => {
 	const relativePath = path.join("Course notes", "sample document.pdf");
 	let home: string;
 	let homeAlias: string;
-	const originalHome = process.env.HOME;
-	const originalUserProfile = process.env.USERPROFILE;
+	let restoreHome: () => void;
 
 	before(() => {
 		home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-job-home-"));
@@ -746,15 +746,11 @@ describe("pdf runner (sources v0)", () => {
 		// canonical. Callers need not canonicalize their environment first.
 		homeAlias = `${home}-alias`;
 		fs.symlinkSync(home, homeAlias, process.platform === "win32" ? "junction" : "dir");
-		process.env.HOME = homeAlias;
-		process.env.USERPROFILE = homeAlias;
+		restoreHome = redirectHome(homeAlias);
 	});
 
 	after(() => {
-		if (originalHome === undefined) delete process.env.HOME;
-		else process.env.HOME = originalHome;
-		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
-		else process.env.USERPROFILE = originalUserProfile;
+		restoreHome();
 		fs.unlinkSync(homeAlias);
 		fs.rmSync(home, { recursive: true, force: true });
 	});

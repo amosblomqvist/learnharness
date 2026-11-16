@@ -1,4 +1,5 @@
 import { test } from "node:test";
+import { assertPrivate } from "./helpers/private-file.ts";
 import assert from "node:assert/strict";
 import { createRequire } from "node:module";
 import { createHash } from "node:crypto";
@@ -254,11 +255,11 @@ test("private JSON file round-trips global state; creation and atomic replacemen
 		await store.write(data);
 		assert.deepEqual(JSON.parse(await fs.readFile(file, "utf8")), data, "ordinary JSON, not an encrypted envelope");
 		assert.deepEqual(await store.read(), data);
-		assert.equal((await fs.stat(path.dirname(file))).mode & 0o777, 0o700);
-		assert.equal((await fs.stat(file)).mode & 0o777, 0o600);
+		assertPrivate(path.dirname(file), 0o700);
+		assertPrivate(file, 0o600);
 		await fs.chmod(file, 0o644);
 		await store.write({ ...data, allowBackgroundUse: true });
-		assert.equal((await fs.stat(file)).mode & 0o777, 0o600, "replacement never inherits a permissive old mode");
+		assertPrivate(file, 0o600); // the replacement never inherits a permissive old mode
 		assert.equal((await store.read()).allowBackgroundUse, true);
 		assert.deepEqual(await fs.readdir(path.dirname(file)), ["chatgpt-credentials.json"]);
 	} finally { await fs.rm(dir, { recursive: true, force: true }); }

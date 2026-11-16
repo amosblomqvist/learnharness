@@ -27,6 +27,7 @@ import { DEFAULT_THINKING_ORDER } from "../src/core/settings.ts";
 const { piEngineForSpec, piModels } = await import("../src/agent/models.ts");
 import { BACKGROUND_MODEL_ROLES } from "../src/core/settings.ts";
 import { resolveSettings } from "../src/core/settings-resolution.ts";
+import { redirectHome } from "./helpers/home.ts";
 const { readSettings, writeSettings } = await import("../src/store/settings.ts");
 const { SETTINGS_FILE } = await import("../config.ts");
 const { effectiveSettings } = await import("../src/server/stores.ts");
@@ -343,18 +344,21 @@ describe("pi thinking truth (pinned against pi-ai upgrades)", () => {
  *  finds a claude binary when installed is true. */
 function withClaudeInstalled(installed: boolean, fn: () => void, enabled = true): void {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-catalog-"));
-	const saved = { PATH: process.env.PATH, HOME: process.env.HOME, npm_config_prefix: process.env.npm_config_prefix };
+	const saved = { PATH: process.env.PATH, npm_config_prefix: process.env.npm_config_prefix };
 	const settings = readSettings();
 	writeSettings({ ...(settings ?? { version: 1 }), claudeCode: { enabled } });
 
-	if (installed) fs.writeFileSync(path.join(dir, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+	// The detector's executable name: Windows spawns claude.exe directly, without a shell.
+	const binary = process.platform === "win32" ? "claude.exe" : "claude";
+	if (installed) fs.writeFileSync(path.join(dir, binary), "#!/bin/sh\n", { mode: 0o755 });
 	process.env.PATH = dir;
-	process.env.HOME = dir;
+	const restoreHome = redirectHome(dir);
 	delete process.env.npm_config_prefix;
 
 	try {
 		fn();
 	} finally {
+		restoreHome();
 		for (const [name, value] of Object.entries(saved)) {
 			if (value === undefined) delete process.env[name];
 			else process.env[name] = value;

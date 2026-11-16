@@ -14,6 +14,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, it } from "node:test";
+import { LOADER_ARGS } from "./helpers/child-process.ts";
 
 import {
 	checkVersion, expectedAssets, feedExpectations, isPlainAssetName, normalizeReleasePages,
@@ -367,9 +368,8 @@ describe("release gate — CLI (offline, repo config)", () => {
 	// intentionally stay at 0.2.0. A release version bump must not break tests.
 	const VERSION = (JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string }).version;
 	const TAG = `v${VERSION}`;
-	const tsxImport = fileURLToPath(import.meta.resolve("tsx"));
 	function run(args: string[], cwd = repoRoot) {
-		return spawnSync(process.execPath, ["--import", tsxImport, script, ...args], {
+		return spawnSync(process.execPath, [...LOADER_ARGS, script, ...args], {
 			cwd, encoding: "utf8", timeout: 60_000,
 		});
 	}

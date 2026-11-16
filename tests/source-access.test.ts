@@ -8,6 +8,7 @@ import { createCanvas } from "@napi-rs/canvas";
 import { createFauxCore } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { ChatStore, JobStore } from "../src/core/ports.ts";
+import { redirectHome } from "./helpers/home.ts";
 
 // Set this test process's locations BEFORE importing config/agent modules.
 // Never read or modify the developer's actual home, keys or learning data.
@@ -15,9 +16,11 @@ const root = await fs.realpath(await fs.mkdtemp(path.join(os.tmpdir(), "lh-sourc
 const home = path.join(root, "home");
 const auth = path.join(root, "private", "custom-keys.json");
 const data = path.join(root, "private", "data");
-const previous = Object.fromEntries(["HOME", "USERPROFILE", "LH_AUTH_FILE", "LH_DATA_DIR"].map((key) => [key, process.env[key]]));
-Object.assign(process.env, { HOME: home, USERPROFILE: home, LH_AUTH_FILE: auth, LH_DATA_DIR: data });
+const previous = Object.fromEntries(["LH_AUTH_FILE", "LH_DATA_DIR"].map((key) => [key, process.env[key]]));
+Object.assign(process.env, { LH_AUTH_FILE: auth, LH_DATA_DIR: data });
+const restoreHome = redirectHome(home);
 after(async () => {
+	restoreHome();
 	for (const [key, value] of Object.entries(previous)) {
 		if (value === undefined) delete process.env[key]; else process.env[key] = value;
 	}
@@ -157,14 +160,14 @@ describe("source access: canonical roots and all tool paths", () => {
 	});
 
 	it("canonicalizes an aliased HOME, including default and relative paths", async () => {
-		process.env.HOME = process.env.USERPROFILE = path.join(root, "home-alias");
+		const restoreAlias = redirectHome(path.join(root, "home-alias"));
 		try {
 			assert.equal(resolveSourcePath(), home);
 			assert.equal(resolveSourcePath("~"), home);
 			assert.equal(resolveSourcePath("~/notes/topic.md"), path.join(home, "notes", "topic.md"));
 			assert.match(await text(readTool, { path: "notes/topic.md" }), /ordinary study notes/);
 			assert.equal(await text(grepTool, { pattern: "LH_SYNTHETIC_SECRET_MARKER" }), "No matches found");
-		} finally { process.env.HOME = process.env.USERPROFILE = home; }
+		} finally { restoreAlias(); }
 	});
 
 	it("a broken protected root does not disable ordinary reads, while source loops are never opened unchecked", async () => {
