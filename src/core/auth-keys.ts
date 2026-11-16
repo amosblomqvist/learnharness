@@ -66,6 +66,12 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models.",
 		docsUrl: "https://ollama.com/settings/keys",
 	},
+	{
+		id: "SPECSTREAM_API_KEY",
+		label: "SpecStream",
+		description: "Web-search engine for the researcher. Setting the key activates it.",
+		docsUrl: "https://specstream.ai/workspace/agents?tab=keys",
+	},
 ] as const;
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
@@ -172,7 +178,7 @@ export type KeyShapeResult = { ok: true } | { ok: false; error: string };
  * TRIMMED first (paste hygiene); empty-after-trim always fails.
  *
  * CURATED keys carry family rules (Tavily's tvly-… and Firecrawl's fc-…
- * prefixes; Brave, Exa, Ollama and Deepgram use length floors + paste hygiene only).
+ * prefixes; Brave, Exa, Ollama, SpecStream and Deepgram use length floors + paste hygiene only).
  * MODEL-PROVIDER keys use genericProviderKeyGuard below instead (families
  * vary by provider — only paste hygiene applies; owner spec: min length
  * ~12, no whitespace). OPENROUTER_API_KEY moved to the generic guard with
@@ -194,6 +200,7 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 			return nonEmpty(20);
 		case "EXA_API_KEY":
 		case "OLLAMA_API_KEY":
+		case "SPECSTREAM_API_KEY":
 			// No documented key prefix: use the provider-key paste guard.
 			return nonEmpty(12);
 		case "FIRECRAWL_API_KEY":
