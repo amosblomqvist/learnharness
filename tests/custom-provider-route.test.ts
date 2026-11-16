@@ -11,6 +11,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, before, describe, it } from "node:test";
+import type { CustomProviderSettings } from "../src/core/settings.ts";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-custom-route-"));
 process.env.LH_DATA_DIR = dir;
@@ -48,7 +49,7 @@ function seed(record: unknown): void {
 	fs.writeFileSync(SETTINGS_FILE, JSON.stringify(record, null, "\t"), "utf-8");
 }
 
-function stored(): { customProvider?: { models?: { id: string }[]; overrides?: unknown; manualModels?: string[] } } {
+function stored(): { customProvider?: CustomProviderSettings } {
 	return JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8"));
 }
 
@@ -112,6 +113,35 @@ describe("POST /api/custom-provider — typed ids and a failed probe", () => {
 		const body = (await res.json()) as { error: string };
 		assert.match(body.error, /404/);
 		assert.match(body.error, /add model IDs manually/);
+	});
+
+	it("reconnecting refreshes nested limits in storage and GET without replacing user pins", async () => {
+		seed(CONNECTED);
+		answerWith(200, "OK", { data: [
+			{ id: "disc-1", reasoning: true, limit: { context: 1050000, input: 922000, output: 128000 } },
+			{ id: "disc-2", limit: { context: 65536, output: 16384 } },
+		] });
+		const res = await post({ baseUrl: BASE, manualModels: "disc-1, m1" });
+		assert.equal(res.status, 200);
+		const models = [
+			{ id: "disc-1", reasoning: true, context: 1050000, maxTokens: 128000 },
+			{ id: "disc-2", context: 65536, maxTokens: 16384 },
+			{ id: "m1" },
+		];
+		assert.deepEqual((await res.json()).models, models);
+		const cp = stored().customProvider!;
+		assert.deepEqual(cp.models, models);
+		assert.deepEqual(cp.overrides, CONNECTED.customProvider.overrides);
+		const get = await route.GET(new Request("http://localhost/api/custom-provider")).json();
+		assert.deepEqual(get.models, models);
+		assert.deepEqual(get.overrides, CONNECTED.customProvider.overrides);
+		// Build from the persisted snapshot: pins win per field, while the
+		// unpinned fields use rediscovered values and manual-only ids stay at defaults.
+		const { buildOpenAiCompatibleProvider } = await import("../src/server/custom-provider.ts");
+		const registered = buildOpenAiCompatibleProvider({ baseUrl: BASE, models: cp.models!, overrides: cp.overrides }).getModels();
+		assert.deepEqual(registered.map((model) => [model.id, model.contextWindow, model.maxTokens]), [
+			["disc-1", 200000, 128000], ["disc-2", 65536, 8192], ["m1", 8192, 4096],
+		]);
 	});
 
 	it("a working probe merges the typed ids and keeps discovered metadata", async () => {

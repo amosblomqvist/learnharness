@@ -472,3 +472,23 @@ describe("side chat service", () => {
 		assert.equal(chatStore.getChat(other.chatId), null);
 	});
 });
+
+describe("side chat provider routing", () => {
+	it("carries the chat id as the provider session so OpenCode Go can route the answer", async () => {
+		const faux = createFauxCore({});
+		faux.appendResponses([() => fauxAssistantMessage("Short answer.")]);
+		let seen: string | undefined;
+		const engine: PiEngine = {
+			model: { ...faux.getModel(), provider: "opencode-go", id: "claude-haiku-5-5" },
+			streamFn: (model, context, options) => { seen = options?.sessionId; return faux.streamSimple(model, context, options); },
+		};
+		const service = createSideChatService({ chatStore, engineFor: async () => engine, instructions: () => "SIDE-INSTRUCTIONS" });
+		const chat = chatStore.createChat("side routing");
+		const prose = assistant([text("A paragraph the learner selects."), call("q-routing", "quiz", QUIZ_ARGS)]);
+		chatStore.saveMessages(chat.id, [newUserMessage("teach me"), prose]);
+		const anchor: SideChatAnchor = { messageId: prose.id, partId: `${prose.id}-t0`, blockIndex: 0, blockText: "A paragraph the learner selects." };
+		const lines = await readAll(await service.ask(chat.id, { anchor, text: "why?", quotes: [] }));
+		assert.equal(lines.at(-1)!.type, "done");
+		assert.equal(seen, chat.id);
+	});
+});
