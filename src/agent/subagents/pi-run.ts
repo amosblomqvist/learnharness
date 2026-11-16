@@ -6,6 +6,7 @@ import { usageWasAdmitted } from "../subscription-request-cycle.ts";
 import { workerRequestStream } from "../worker-request-admission.ts";
 import { providerEventObserver } from "../provider-events.ts";
 import { backgroundCaptureStream, createBackgroundCapture } from "../background-capture.ts";
+import { releaseParkedAntigravitySession } from "../antigravity/live-processes.ts";
 import type { ModelRole } from "../../../config.ts";
 
 /**
@@ -161,6 +162,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 	} finally {
 		opts.abortSignal?.removeEventListener("abort", onAbort);
 		capture?.finish(runFailure);
+		void releaseParkedAntigravitySession(sessionId);
 	}
 
 	if (aborted || opts.abortSignal?.aborted) {
