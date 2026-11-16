@@ -144,14 +144,22 @@ export function paintSegment(context: CanvasRenderingContext2D, a: Point, b: Poi
     context.moveTo(a.x, a.y); context.lineTo(b.x, b.y); context.stroke();
   }
 }
+export function paintStroke(context: CanvasRenderingContext2D, stroke: Stroke, color: string): void {
+  stroke.points.forEach((point, i) => paintSegment(context, stroke.points[Math.max(0, i - 1)]!, point, color));
+}
+/** Full repaint of already-resolved visible strokes. Leaves the world
+ * transform set, so later segments can be painted on top incrementally. */
+export function paintStrokes(context: CanvasRenderingContext2D, width: number, height: number, visible: readonly Stroke[], color: string,
+  origin: { x: number; y: number } = { x: 0, y: 0 }): void {
+  const canvas = context.canvas;
+  context.resetTransform();
+  context.clearRect(0, 0, canvas.width, canvas.height);
+  context.setTransform(canvas.width / width, 0, 0, canvas.height / height, origin.x * canvas.width / width, origin.y * canvas.height / height);
+  for (const stroke of visible) paintStroke(context, stroke, color);
+}
 export function paintInk(canvas: HTMLCanvasElement, width: number, height: number, strokes: readonly Stroke[], color: string,
   origin: { x: number; y: number } = { x: 0, y: 0 }): void {
   const context = canvas.getContext("2d", { willReadFrequently: true });
   if (!context) throw new Error("Could not create the drawing canvas.");
-  context.resetTransform();
-  context.clearRect(0, 0, canvas.width, canvas.height);
-  context.setTransform(canvas.width / width, 0, 0, canvas.height / height, origin.x * canvas.width / width, origin.y * canvas.height / height);
-  for (const stroke of visibleStrokes(strokes)) {
-    stroke.points.forEach((point, i) => paintSegment(context, stroke.points[Math.max(0, i - 1)]!, point, color));
-  }
+  paintStrokes(context, width, height, visibleStrokes(strokes), color, origin);
 }
