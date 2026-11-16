@@ -6,7 +6,8 @@ import { describe, it } from "node:test";
 import { Type } from "typebox";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, normalizeContext, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { streamSimple as streamCodex } from "@earendil-works/pi-ai/api/openai-codex-responses";
-import { APP_IDENTITY, piEngineForSpec, type PiEngine } from "../src/agent/models.ts";
+import { APP_IDENTITY, piEngineForSpec, piModels, type PiEngine } from "../src/agent/models.ts";
+import { buildOpenAiCompatibleProvider } from "../src/server/custom-provider.ts";
 import { createPluginWorkerService } from "../src/agent/plugin-workers.ts";
 import { createProberAgent, createTeacherAgent, createPracticeAgent, type AgentBuildOptions } from "../src/agent/teacher-agent.ts";
 import { streamSideAnswer } from "../src/agent/side-chat.ts";
@@ -135,10 +136,12 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 
 	for (const [id, endpoint] of [
 		["claude-haiku-5-5", "/inference/go/v1/messages"],
+		["gemini-4-argon-contributor", "/inference/go/v1/models/gemini-4-argon-contributor:streamGenerateContent"],
 		["glm-5.3", "/inference/go/v1/chat/completions"],
+		["gpt-6-luna", "/inference/go/v1/responses"],
 	] as const) {
-		it(`side questions carry the chat id so OpenCode Go can route ${id}`, async () => closed(async () => {
-			const engine = piEngineForSpec({ provider: "opencode-go", id, thinkingLevel: "off" });
+		for (const cacheRetention of [undefined, "none"] as const) it(`side questions carry the chat id so OpenCode Go can route ${id} (cache ${cacheRetention ?? "default"})`, async () => closed(async () => {
+			const engine = piEngineForSpec({ provider: "opencode-go", id, thinkingLevel: "off" }, false, undefined, () => cacheRetention);
 			const requests: Request[] = [];
 			globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return new Response('{"error":{"message":"closed fixture"}}', { status: 400, headers: { "content-type": "application/json" } }); };
 			const result = await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why this step?" }], chatId: "chat_wire_side" });
@@ -147,6 +150,40 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 			assert.equal(new URL(requests[0]!.url).pathname, endpoint);
 			assert.equal(requests[0]!.headers.get("x-opencode-session"), "chat_wire_side");
 			assert.equal(requests[0]!.headers.get("x-opencode-client"), metadata.name);
+		}));
+	}
+
+	it("side questions route custom OpenCode endpoints through the SDK's host detection", async () => closed(async () => {
+		const models = piModels();
+		models.setProvider(buildOpenAiCompatibleProvider({ baseUrl: "https://opencode.ai/inference/go/openai/v1", models: [{ id: "deepseek-v4.1-flash" }] }));
+		try {
+			const engine = piEngineForSpec({ provider: "custom", id: "deepseek-v4.1-flash", thinkingLevel: "off" });
+			const requests: Request[] = [];
+			globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return Response.json({}, { status: 400 }); };
+			for (let question = 0; question < 2; question++) {
+				const result = await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why?" }], chatId: "chat_custom_side" });
+				assert.equal(result.outcome, "error");
+			}
+			assert.equal(requests.length, 2);
+			for (const request of requests) {
+				assert.equal(request.url, "https://opencode.ai/inference/go/openai/v1/chat/completions");
+				assert.equal(request.headers.get("x-opencode-session"), "chat_custom_side");
+				assert.equal(request.headers.get("x-opencode-client"), metadata.name);
+				assert.equal(request.headers.get("authorization"), "Bearer not-needed");
+			}
+		} finally { models.deleteProvider("custom"); }
+	}));
+
+	for (const [provider, id, header] of [["openrouter", "openrouter/free", "x-session-id"], ["openai", "gpt-4o-mini", "session_id"]] as const) {
+		it(`side questions preserve native ${provider} affinity without OpenCode headers`, async () => closed(async () => {
+			const engine = piEngineForSpec({ provider, id, thinkingLevel: "off" });
+			const requests: Request[] = [];
+			globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return Response.json({}, { status: 400 }); };
+			await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why?" }], chatId: "chat_native_side" });
+			assert.equal(requests.length, 1);
+			assert.equal(requests[0]!.headers.get(header), "chat_native_side");
+			assert.equal(requests[0]!.headers.get("x-opencode-session"), null);
+			assert.equal(requests[0]!.headers.get("x-opencode-client"), null);
 		}));
 	}
 
