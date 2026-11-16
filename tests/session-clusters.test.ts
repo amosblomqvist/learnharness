@@ -54,7 +54,6 @@ function fakeStores(
 		readNodes: () => nodes,
 		readChains: () => chains,
 		readCheckpoints: () => [],
-		readCoverage: () => [],
 		readSources: () =>
 			(over.sources ?? []).map((s) => ({ ...s, extractions: [] }) as unknown as NotesSource),
 		readPositions: () => ({}),

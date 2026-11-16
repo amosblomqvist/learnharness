@@ -22,7 +22,7 @@ import { newMessageId } from "../core/native-messages.ts";
 import { QUESTION_TOOLS } from "../core/pending.ts";
 import { planBlocksFor } from "../core/plan-blocks.ts";
 import { coverageOf } from "../core/coverage.ts";
-import type { ChatStore, GraphStore } from "../core/ports.ts";
+import type { ChatStore, CoverageLedger } from "../core/ports.ts";
 import type { ExtractionPipeline } from "../agent/subagents/extraction.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError } from "../core/settings.ts";
 
@@ -105,9 +105,13 @@ export function persistTurn(
  * Deliberately isolated in this one seam — the pipeline is
  * trigger-agnostic. Skipped under tests: scripted chats are fixtures, not
  * knowledge (the pipeline itself is tested directly with mock models).
+ *
+ * `coverage` is the ledger of the chat's RECORD KIND (session/record kinds,
+ * stage A — the caller resolves it via server/record-kinds.ts
+ * coverageLedgerFor; the trigger itself never knows which record).
  */
 export function triggerExtraction(
-	deps: { chatStore: ChatStore; graphStore: GraphStore },
+	deps: { chatStore: ChatStore; coverage: CoverageLedger },
 	extraction: ExtractionPipeline,
 	chatId: string,
 	chunkTokens: number,
@@ -116,7 +120,7 @@ export function triggerExtraction(
 	try {
 		const record = deps.chatStore.getChat(chatId);
 		if (!record) return;
-		const covered = coverageOf(record.messages, deps.graphStore.readCoverage(), chatId);
+		const covered = coverageOf(record.messages, deps.coverage.read(), chatId);
 		if (covered.uncoveredTokens < chunkTokens) return;
 		void extraction.runExtraction(chatId).catch((err) => {
 			// BYOK (owner, 2026-09-22) + key presence (provider-key interlude,

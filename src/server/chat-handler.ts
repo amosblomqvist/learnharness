@@ -33,6 +33,7 @@ import { fileAccessPolicy } from "./file-access.ts";
 import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
+import { coverageLedgerFor } from "./record-kinds.ts";
 import { getPluginAgentContributions, getPluginHost } from "./plugins.ts";
 import { preparePluginQuestionSubmission, reconcilePluginQuestionCompatibility, type QuestionTypeResolver } from "./plugin-questions.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
@@ -883,12 +884,15 @@ export async function handleChatInput(
 				// extraction, its auditor — dies with the master switch.
 				// PRACTICE (owner, 2026-10-04): practice sessions write nothing —
 				// no extraction, no graph, no coverage (v1: the session itself
-				// is the deliverable).
-				if ((!requestCycle || requestCycle.dispatched) && record.kind !== "practice" && extractionEnabled(effective.graph)) {
+				// is the deliverable). Expressed as "no record kind" (session/
+				// record kinds, stage A): the chat's kind names the coverage
+				// ledger it folds into, or none.
+				const coverage = coverageLedgerFor(record.kind);
+				if ((!requestCycle || requestCycle.dispatched) && coverage !== null && extractionEnabled(effective.graph)) {
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares
 					// against it and the pipeline's batches share it.
-					triggerExtraction(stores, extraction, chatId, effective.graph.extractionChunkTokens);
+					triggerExtraction({ chatStore: stores.chatStore, coverage }, extraction, chatId, effective.graph.extractionChunkTokens);
 				}
 				// PARKED DISMISSAL (owner, 2026-10-04): a dismissal that arrived
 				// mid-turn was parked by the dismiss route (202); now that

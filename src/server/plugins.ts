@@ -41,7 +41,7 @@ function runtime(): Runtime {
 	const global = globalThis as typeof globalThis & PluginGlobal;
 	if (global.__lhPlugins) return global.__lhPlugins;
 	const learning = createPluginLearningData({
-		directory: PATHS.data, chatStore: stores.chatStore, graphStore: stores.graphStore,
+		directory: PATHS.data, chatStore: stores.chatStore, graphStore: stores.graphStore, coverage: stores.coverage,
 		isBusy: isTurnRunning, isCompacting: compactionInFlight,
 		readMetadata(name) {
 			assertGraphFormat();

@@ -12,7 +12,11 @@
  *                                      (premises, conclusion) appends
  *                                      another line; readers merge)
  *   sessions.jsonl  SessionCheckpoint— emission checkpoints (foldedAt)
- *   coverage.jsonl  CoverageEntry    — per-message extraction coverage
+ *
+ * coverage.jsonl (per-message extraction coverage) sits beside these under
+ * the same format stamp but is HOST-OWNED bookkeeping, not graph content:
+ * its adapter is store/coverage.ts (session/record kinds, stage A —
+ * 2026-11-16), one ledger per record kind.
  *
  * CHAINS-PRIMARY (owner, 2026-09-30): there is NO edges ledger — the edge
  * view (implication nodes + untyped arrows) is derived in core/graph.ts on
@@ -37,6 +41,7 @@ import * as path from "node:path";
 import { LEDGER_FILES, POSITIONS_FILE, SOURCES_FILE } from "../../config.ts";
 import { assertGraphFormat, ensureGraphFormat } from "./graph-format.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { appendJsonlLine, readJsonlLines, writeJsonlAtomic } from "./jsonl.ts";
 import type {
 	GraphChain,
 	GraphNode,
@@ -44,38 +49,15 @@ import type {
 	NotesSource,
 	Position,
 	ProvenancePoint,
-	CoverageEntry,
 	SessionCheckpoint,
 } from "../core/contracts.ts";
 import type { GraphStore } from "../core/ports.ts";
 
-// ─── JSONL primitives ────────────────────────────────────────────────────────
+// ─── JSONL primitives (store/jsonl.ts) under the graph-family stamp ─────────
 
 function appendLine<T>(file: string, record: T): void {
-	fs.mkdirSync(path.dirname(file), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
-	fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf-8");
-}
-
-function readRawLines(file: string): unknown[] {
-	let raw: string;
-	try {
-		raw = fs.readFileSync(file, "utf-8");
-	} catch {
-		return []; // no ledger yet — nothing has ever been emitted
-	}
-	const out: unknown[] = [];
-	for (const line of raw.split("\n")) {
-		const trimmed = line.trim();
-		if (trimmed.length === 0) continue;
-		try {
-			out.push(JSON.parse(trimmed));
-		} catch {
-			// Corrupt line: skip rather than fail the whole read — a torn
-			// append must never take the home graph down with it.
-		}
-	}
-	return out;
+	appendJsonlLine(file, record);
 }
 
 function isRecord(v: unknown): v is Record<string, unknown> {
@@ -87,7 +69,7 @@ const isString = (v: unknown): v is string => typeof v === "string";
 /** Strict shape guards — anything not matching a W4 ledger shape is skipped. */
 function readValid<T>(file: string, isValid: (v: unknown) => v is T): T[] {
 	assertGraphFormat(); // honest refusal on a newer-stamped data dir
-	return readRawLines(file).filter(isValid);
+	return readJsonlLines(file).filter(isValid);
 }
 
 /** Provenance points are (chatId, messageId) pairs — message-granular. */
@@ -124,9 +106,6 @@ const isGraphChain = (v: unknown): v is GraphChain =>
 const isCheckpoint = (v: unknown): v is SessionCheckpoint =>
 	isRecord(v) && isString(v.chatId) && isString(v.foldedAt);
 
-const isCoverageEntry = (v: unknown): v is CoverageEntry =>
-	isRecord(v) && isString(v.chatId) && isString(v.fp) && typeof v.tokens === "number" && isString(v.foldedAt);
-
 // ─── the port implementation ────────────────────────────────────────────────
 
 export const graphStore: GraphStore = {
@@ -154,13 +133,6 @@ export const graphStore: GraphStore = {
 	},
 	readCheckpoints(): SessionCheckpoint[] {
 		return readValid(LEDGER_FILES.sessions, isCheckpoint);
-	},
-
-	appendCoverage(entry: CoverageEntry): void {
-		appendLine(LEDGER_FILES.coverage, entry);
-	},
-	readCoverage(): CoverageEntry[] {
-		return readValid(LEDGER_FILES.coverage, isCoverageEntry);
 	},
 
 	// ── imported-notes bookkeeping (config.SOURCES_FILE — a JSON map) ──
@@ -212,23 +184,15 @@ export const graphStore: GraphStore = {
 	rewriteLedgers(next: {
 		nodes?: GraphNode[];
 		chains?: GraphChain[];
-		coverage?: CoverageEntry[];
 		checkpoints?: SessionCheckpoint[];
 	}): void {
 		const files = {
 			nodes: LEDGER_FILES.nodes,
 			chains: LEDGER_FILES.chains,
-			coverage: LEDGER_FILES.coverage,
 			checkpoints: LEDGER_FILES.sessions,
 		} as const;
 		for (const [key, records] of Object.entries(next) as [keyof typeof files, unknown[]][]) {
-			const file = files[key];
-			fs.mkdirSync(path.dirname(file), { recursive: true });
-			// JSONL: one record per line, trailing newline — the reader
-			// must see exactly what appendLine would have written.
-			const body = records.map((record) => JSON.stringify(record)).join("\n") + (records.length > 0 ? "\n" : "");
-			writeFileAtomicSync(file, body);
-			removeLeftoverTemps(file); // crash leftovers would still hold the purged records
+			writeJsonlAtomic(files[key], records);
 		}
 	},
 };

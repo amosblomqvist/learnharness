@@ -66,7 +66,6 @@ it("real route plus in-memory ledgers and faux stages reprocess identical import
 		appendNode: (node) => { nodes.push(node); }, readNodes: () => [...nodes],
 		appendChain: (chain) => { chains.push(chain); }, readChains: () => [...chains],
 		appendCheckpoint: (checkpoint) => { checkpoints.push(checkpoint); }, readCheckpoints: () => [...checkpoints],
-		appendCoverage: () => {}, readCoverage: () => [],
 		upsertSource: (source) => { sources.set(source.id, { ...source, extractions: sources.get(source.id)?.extractions ?? [] }); },
 		readSources: () => [...sources.values()],
 		deleteSources: (ids) => [...ids].reduce((count, id) => count + Number(sources.delete(id)), 0),
@@ -74,7 +73,7 @@ it("real route plus in-memory ledgers and faux stages reprocess identical import
 		readPositions: () => ({}), writePositions: () => {}, rewriteLedgers: () => {},
 	};
 	let calls = 0;
-	const pipeline = createExtractionPipeline({ chatStore: stores.chatStore, graphStore,
+	const pipeline = createExtractionPipeline({ chatStore: stores.chatStore, graphStore, coverage: { read: () => [], append: () => {}, rewrite: () => {} },
 		engineFor: (role) => {
 			const faux = createFauxCore({});
 			faux.setResponses([() => {

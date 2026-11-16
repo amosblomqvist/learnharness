@@ -8,6 +8,7 @@
 
 import { chatStore } from "../store/chats.ts";
 import { graphStore } from "../store/graph.ts";
+import { graphCoverage } from "../store/coverage.ts";
 import { sourceOrganizationStore } from "../store/source-organization.ts";
 import { jobStore } from "../store/jobs.ts";
 import { settingsStore } from "../store/settings.ts";
@@ -15,10 +16,14 @@ import { themeStore } from "../store/themes.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
 import { configureWorkerRequestAdmission } from "../agent/worker-request-admission.ts";
-/** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
+/** The wired adapters. Satisfies core/graph.ts's GraphWriteDeps structurally. */
 export const stores = {
 	chatStore,
 	graphStore,
+	/** The native graph record's host-owned coverage ledger
+	 *  (data/graph/coverage.jsonl; session/record kinds, stage A). Plugin
+	 *  record kinds bring their own — see server/record-kinds.ts. */
+	coverage: graphCoverage,
 	sourceOrganizationStore,
 	jobStore,
 	settingsStore,

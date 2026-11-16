@@ -45,9 +45,9 @@ it("purges only selected source contributions; shared identity, foreign aliases 
 	stores.graphStore.appendNode(node("b_only", ["b"]));
 	stores.graphStore.appendChain({ id: "arg_shared", premises: ["shared"], conclusion: "b_only", createdAt: "now", provenance: [{ chatId: "b", messageId: "m" }] });
 	stores.graphStore.appendChain({ id: "arg_unique", premises: ["shared"], conclusion: "unique", createdAt: "now", provenance: [{ chatId: "a", messageId: "m" }] });
-	stores.graphStore.appendCoverage({ chatId: "a", fp: "a", tokens: 10, foldedAt: "now" });
+	stores.coverage.append({ chatId: "a", fp: "a", tokens: 10, foldedAt: "now" });
 	stores.graphStore.appendCheckpoint({ chatId: "a", foldedAt: "now" });
-	stores.graphStore.appendCoverage({ chatId: "b", fp: "b", tokens: 10, foldedAt: "now" });
+	stores.coverage.append({ chatId: "b", fp: "b", tokens: 10, foldedAt: "now" });
 	stores.graphStore.writePositions({ unique: { x: 1, y: 1 }, shared: { x: 2, y: 2 }, legacy: { x: 3, y: 3 } });
 	assert.equal((await remove(["a"])).status, 200);
 	const lines = stores.graphStore.readNodes();
@@ -56,7 +56,7 @@ it("purges only selected source contributions; shared identity, foreign aliases 
 	assert.deepEqual(lines.filter((n) => n.id === "shared").flatMap((n) => n.aliases), ["b phrasing"]);
 	assert.ok(lines.every((n) => n.provenance.every((p) => p.chatId !== "a")));
 	assert.deepEqual(stores.graphStore.readChains().map((c) => c.id), ["arg_shared"]);
-	assert.deepEqual(stores.graphStore.readCoverage().map((r) => r.chatId), ["b"]); assert.deepEqual(stores.graphStore.readCheckpoints(), []);
+	assert.deepEqual(stores.coverage.read().map((r) => r.chatId), ["b"]); assert.deepEqual(stores.graphStore.readCheckpoints(), []);
 	assert.equal(stores.graphStore.readPositions().unique, undefined); assert.ok(stores.graphStore.readPositions().legacy);
 	assert.deepEqual(stores.graphStore.readSources().map((s) => s.id), ["b"]);
 	assert.equal((await remove(["b"])).status, 200); assert.deepEqual(stores.graphStore.readNodes().map((n) => n.id), ["legacy"]);
@@ -66,7 +66,7 @@ it("kept conversations retain messages and folder placement but lose contributio
 	stores.chatStore.saveMessages(chat.id, [{ id: "m", role: "assistant", content: [{ type: "text", text: "Synthetic teaching prose." }], timestamp: 1 } as never]);
 	const before = stores.chatStore.getChat(chat.id)!;
 	const slot = coverageSlots(before.messages)[0]!;
-	stores.graphStore.appendCoverage({ chatId: chat.id, fp: slot.fp, tokens: slot.tokens, foldedAt: "now" });
+	stores.coverage.append({ chatId: chat.id, fp: slot.fp, tokens: slot.tokens, foldedAt: "now" });
 	stores.graphStore.appendCheckpoint({ chatId: chat.id, foldedAt: "now" });
 	stores.graphStore.appendNode(node("chat_unique", [chat.id])); book("zero");
 	folders({ [chat.id]: { folderId: "inner" }, zero: { folderId: "inner" } });
@@ -81,14 +81,14 @@ it("kept conversations retain messages and folder placement but lose contributio
 it("deleting visible entries retains hidden practice conversations, graph contributions, coverage and their folder containers", async () => {
 	const practice = stores.chatStore.createChat("Hidden practice", "practice"); book("visible");
 	stores.graphStore.appendNode(node("historical", [practice.id]));
-	stores.graphStore.appendCoverage({ chatId: practice.id, fp: "practice", tokens: 10, foldedAt: "now" });
+	stores.coverage.append({ chatId: practice.id, fp: "practice", tokens: 10, foldedAt: "now" });
 	stores.graphStore.appendCheckpoint({ chatId: practice.id, foldedAt: "now" });
 	folders({ [practice.id]: { folderId: "inner" }, visible: { folderId: "inner" } });
-	const before = { chat: stores.chatStore.getChat(practice.id), nodes: stores.graphStore.readNodes(), coverage: stores.graphStore.readCoverage(), checkpoints: stores.graphStore.readCheckpoints() };
+	const before = { chat: stores.chatStore.getChat(practice.id), nodes: stores.graphStore.readNodes(), coverage: stores.coverage.read(), checkpoints: stores.graphStore.readCheckpoints() };
 	assert.equal((await remove(["visible"], ["outer", "inner", "empty"], true)).status, 200);
 	assert.deepEqual(stores.chatStore.getChat(practice.id), before.chat);
 	assert.deepEqual(stores.graphStore.readNodes(), before.nodes);
-	assert.deepEqual(stores.graphStore.readCoverage(), before.coverage); assert.deepEqual(stores.graphStore.readCheckpoints(), before.checkpoints);
+	assert.deepEqual(stores.coverage.read(), before.coverage); assert.deepEqual(stores.graphStore.readCheckpoints(), before.checkpoints);
 	const directory = sourceDirectory.read();
 	assert.equal(directory.organization.placements[practice.id]?.folderId, "inner");
 	assert.deepEqual(directory.organization.folders.map((f) => f.id), ["outer", "inner"]);

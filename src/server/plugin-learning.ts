@@ -1,11 +1,13 @@
 import type { PluginGraphFileData, PluginLearningData } from "../core/plugins.ts";
-import type { ChatStore, GraphStore } from "../core/ports.ts";
+import type { ChatStore, CoverageLedger, GraphStore } from "../core/ports.ts";
 import { graphSnapshot } from "../core/graph.ts";
 
 export interface PluginLearningDeps {
 	directory: string;
 	chatStore: ChatStore;
 	graphStore: GraphStore;
+	/** The graph record's coverage ledger (read-only here). */
+	coverage: CoverageLedger;
 	isBusy(id: string): boolean;
 	isCompacting(id: string): boolean;
 	readMetadata(name: "render-settings.json" | "format.json"): unknown;
@@ -19,7 +21,7 @@ export function createPluginLearningData(deps: PluginLearningDeps): PluginLearni
 		"nodes.jsonl": () => deps.graphStore.readNodes(),
 		"chains.jsonl": () => deps.graphStore.readChains(),
 		"sessions.jsonl": () => deps.graphStore.readCheckpoints(),
-		"coverage.jsonl": () => deps.graphStore.readCoverage(),
+		"coverage.jsonl": () => deps.coverage.read(),
 		"sources.json": () => deps.graphStore.readSources(),
 		"positions.json": () => deps.graphStore.readPositions(),
 		"render-settings.json": () => deps.readMetadata("render-settings.json"),

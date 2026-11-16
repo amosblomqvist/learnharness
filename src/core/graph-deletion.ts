@@ -55,12 +55,12 @@
  */
 
 import type {
-	CoverageEntry,
 	GraphChain,
 	GraphNode,
 	SessionCheckpoint,
 } from "./contracts.ts";
 import type { GraphStore } from "./ports.ts";
+import type { GraphLedgers } from "./graph.ts";
 
 /** The two deletion modes (owner-locked 2026-09-22). Machine-checkable on
  *  the API as the required `mode` query param — no default, so no
@@ -92,33 +92,41 @@ const EMPTY_STATS: ChatDeletionStats = {
  * (the atomicity argument above); idempotent (a second run finds nothing
  * and returns zero stats).
  */
-export function deleteChatTraces(graphStore: GraphStore, chatId: string, mode: ChatDeleteMode): ChatDeletionStats {
-	return deleteSourcesTraces(graphStore, new Set([chatId]), mode);
+export function deleteChatTraces(ledgers: GraphLedgers, chatId: string, mode: ChatDeleteMode): ChatDeletionStats {
+	return deleteSourcesTraces(ledgers, new Set([chatId]), mode);
 }
 
 /** The same provenance rules for a selected batch, with one ledger rewrite
- * rather than reparsing/rewriting the whole graph once per imported file. */
-export function deleteSourcesTraces(graphStore: GraphStore, sourceIds: ReadonlySet<string>, mode: ChatDeleteMode): ChatDeletionStats {
+ * rather than reparsing/rewriting the whole graph once per imported file.
+ * `ledgers` is the graph store plus the graph record's coverage ledger
+ * (host-owned since 2026-11-16; the deletion still purges both). */
+export function deleteSourcesTraces(ledgers: GraphLedgers, sourceIds: ReadonlySet<string>, mode: ChatDeleteMode): ChatDeletionStats {
 	if (mode !== "preserve-graph" && mode !== "delete-nodes") {
 		throw new Error(`Unknown deletion mode: ${mode as string}`);
 	}
+	const { graphStore, coverage: coverageLedger } = ledgers;
 
 	// The bookkeeping rows die in BOTH modes — coverage and checkpoints
 	// are extraction state, not graph content (owner semantics: even
 	// preserve-graph deletes "the chat's coverage rows").
 	if (sourceIds.size === 0) return { ...EMPTY_STATS };
-	const coverage = graphStore.readCoverage().filter((row) => !sourceIds.has(row.chatId));
+	const coverage = coverageLedger.read().filter((row) => !sourceIds.has(row.chatId));
 	const checkpoints = graphStore.readCheckpoints().filter((row) => !sourceIds.has(row.chatId));
 	const stats: ChatDeletionStats = {
 		...EMPTY_STATS,
-		coverageRemoved: graphStore.readCoverage().length - coverage.length,
+		coverageRemoved: coverageLedger.read().length - coverage.length,
 		checkpointsRemoved: graphStore.readCheckpoints().length - checkpoints.length,
 	};
 
+	// Bookkeeping-only rewrite: both files replaced whenever either lost
+	// rows (the pre-extraction rewriteLedgers wrote both keys together).
+	const rewriteBookkeeping = (): void => {
+		graphStore.rewriteLedgers({ checkpoints });
+		coverageLedger.rewrite(coverage);
+	};
+
 	if (mode === "preserve-graph") {
-		if (stats.coverageRemoved > 0 || stats.checkpointsRemoved > 0) {
-			graphStore.rewriteLedgers({ coverage, checkpoints });
-		}
+		if (stats.coverageRemoved > 0 || stats.checkpointsRemoved > 0) rewriteBookkeeping();
 		return stats;
 	}
 
@@ -134,9 +142,7 @@ export function deleteSourcesTraces(graphStore: GraphStore, sourceIds: ReadonlyS
 		nodeLines.some((line) => line.provenance.some((pt) => sourceIds.has(pt.chatId))) ||
 		chainLines.some((line) => line.provenance.some((pt) => sourceIds.has(pt.chatId)));
 	if (!touched) {
-		if (stats.coverageRemoved > 0 || stats.checkpointsRemoved > 0) {
-			graphStore.rewriteLedgers({ coverage, checkpoints });
-		}
+		if (stats.coverageRemoved > 0 || stats.checkpointsRemoved > 0) rewriteBookkeeping();
 		return stats;
 	}
 
@@ -215,9 +221,9 @@ export function deleteSourcesTraces(graphStore: GraphStore, sourceIds: ReadonlyS
 	graphStore.rewriteLedgers({
 		nodes: outNodes,
 		chains: outChains,
-		coverage,
 		checkpoints,
 	});
+	coverageLedger.rewrite(coverage);
 
 	// 4. Positions: prune dead nodes AND dead chains (an argument's derived
 	//    implication node carries the chain's arg_ id — stale resting spots

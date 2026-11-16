@@ -4,6 +4,7 @@ import { coverageOf } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
 import { titleFromPrompt } from "../core/contracts.ts";
 import { graphRevision } from "./graph.ts";
+import { coverageLedgerFor } from "./record-kinds.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
@@ -142,8 +143,9 @@ export function deleteIdleChatRecord(chatId: string): Extract<ChatDeleteOutcome,
 
 function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatDeleteOutcome, { ok: true }> {
 	// THE SYNC BLOCK — no awaits below (see the doc comment). Order:
-	// ledgers → jobs → the chat record.
-	const stats = deleteChatTraces(stores.graphStore, chatId, mode);
+	// ledgers → jobs → the chat record. (stores carries the graph store AND
+	// the graph record's coverage ledger — both purged.)
+	const stats = deleteChatTraces(stores, chatId, mode);
 	const jobsRemoved = finishChatRecordDeletion(chatId);
 	return { ok: true, mode, stats, jobsRemoved, graphRevision: graphRevision() };
 }
@@ -185,7 +187,9 @@ export interface SessionCoverage {
 export function sessionCoverage(chatId: string): SessionCoverage | null {
 	const record = stores.chatStore.getChat(chatId);
 	if (!record) return null;
-	const entries = stores.graphStore.readCoverage();
+	// The chat's RECORD KIND owns the ledger (session/record kinds, stage A):
+	// a kind that extracts nothing (practice) reads as never folded.
+	const entries = coverageLedgerFor(record.kind)?.read() ?? [];
 	// Wave B: the record is native history — coverage reads through the
 	// projection (same view the extraction pipeline folds).
 	const cov = coverageOf(record.messages, entries, chatId);

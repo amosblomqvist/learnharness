@@ -16,7 +16,7 @@
  * tests/graph.test.ts directly against mergeFindings — here it is the
  * integration: what one full pipeline run does to the ledgers.
  *
- * Ledger: in-memory (the GraphStore port) — this suite never touches
+ * Ledgers: in-memory (the GraphStore + CoverageLedger ports) — this suite never touches
  * data/graph. Chats: real ChatRecords in the real chat store (created and
  * deleted by this suite).
  */
@@ -41,7 +41,7 @@ import type {
 	SessionCheckpoint,
 	SessionFindings,
 } from "../src/core/contracts.ts";
-import type { GraphStore } from "../src/core/ports.ts";
+import type { CoverageLedger, GraphStore } from "../src/core/ports.ts";
 import {
 	abortExtraction,
 	createExtractionPipeline,
@@ -56,7 +56,7 @@ import {
 	EXTRACTOR_INSTRUCTIONS,
 	NOTES_EXTRACTOR_INSTRUCTIONS,
 } from "../src/agent/subagents/extraction.ts";
-import { getGraph, simplifyChains } from "../src/core/graph.ts";
+import { getGraph, simplifyChains, type GraphLedgers } from "../src/core/graph.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError, providerKeyMissing, type ModelSlotName } from "../src/core/settings.ts";
 import { coverageOf, coverageSlots, messageViewLines } from "../src/core/coverage.ts";
 import { chatStore } from "../src/store/chats.ts";
@@ -77,25 +77,29 @@ function fauxEngine(steps: FauxResponseStep[]): PiEngine {
 	return { model: faux.getModel(), streamFn: faux.streamSimple };
 }
 
-/** An in-memory GraphStore (core/ports.ts) — this suite never touches data/graph. */
-function memoryLedgers() {
+/** In-memory ledgers (core/ports.ts GraphStore + the host-owned CoverageLedger,
+ *  stage A 2026-11-16) — this suite never touches data/graph. */
+function memoryLedgers(): GraphLedgers {
 	const nodes: GraphNode[] = [];
 	const chains: GraphChain[] = [];
 	const checkpoints: SessionCheckpoint[] = [];
 	const coverage: CoverageEntry[] = [];
 	const sources = new Map<string, NotesSource>();
 	const positions = new Map<string, { x: number; y: number }>();
-		return {
+	// Extraction coverage (vision-extraction-coverage.md) — append-only;
+	// the chat pipeline checkpoints one entry per covered message.
+	const coverageLedger: CoverageLedger = {
+		append: (e) => void coverage.push({ ...e }),
+		read: () => coverage.map((e) => ({ ...e })),
+		rewrite: (next) => void coverage.splice(0, coverage.length, ...next.map((e) => ({ ...e }))),
+	};
+	const graphStore = {
 		appendNode: (n: GraphNode) => void nodes.push(n),
 		readNodes: () => nodes.map((n) => ({ ...n })),
 		appendChain: (c: GraphChain) => void chains.push(c),
 		readChains: () => chains.map((c) => ({ ...c, premises: [...c.premises], provenance: [...c.provenance] })),
 		appendCheckpoint: (c: SessionCheckpoint) => void checkpoints.push(c),
 		readCheckpoints: () => checkpoints.map((c) => ({ ...c })),
-		// Extraction coverage (vision-extraction-coverage.md) — append-only;
-		// the chat pipeline checkpoints one entry per covered message.
-		appendCoverage: (e) => void coverage.push({ ...e }),
-		readCoverage: () => coverage.map((e) => ({ ...e })),
 		upsertSource: (s: NotesSource) => {
 			// Mirrors the real store: an upsert KEEPS the existing usage log.
 			const prev = sources.get(s.id);
@@ -122,10 +126,10 @@ function memoryLedgers() {
 		rewriteLedgers: (next) => {
 			if (next.nodes) nodes.splice(0, nodes.length, ...next.nodes.map((n) => ({ ...n, provenance: [...n.provenance], aliases: [...n.aliases] })));
 			if (next.chains) chains.splice(0, chains.length, ...next.chains.map((c) => ({ ...c, premises: [...c.premises], provenance: [...c.provenance] })));
-			if (next.coverage) coverage.splice(0, coverage.length, ...next.coverage.map((c) => ({ ...c })));
 			if (next.checkpoints) checkpoints.splice(0, checkpoints.length, ...next.checkpoints.map((c) => ({ ...c })));
 		},
 	} satisfies GraphStore;
+	return { graphStore, coverage: coverageLedger };
 }
 
 // Native fixture builders (Wave B): the record holds pi-native history —
@@ -399,7 +403,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const verdict: AuditVerdicts = { links: [] };
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", FINDINGS),
 			auditor: submitModel("submit_review", verdict),
 		});
@@ -437,7 +441,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 			chains: FINDINGS.chains,
 		});
 
-		const pipeline = createExtractionPipeline({ chatStore, graphStore: ledgers, extractor, auditor: submitModel("submit_review", verdict) });
+		const pipeline = createExtractionPipeline({ chatStore, ...ledgers, extractor, auditor: submitModel("submit_review", verdict) });
 		const stats = await pipeline.runExtraction(chatId);
 		assert.deepEqual(stats, { nodes: 2, chains: 1 });
 	});
@@ -451,7 +455,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		});
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor,
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -465,7 +469,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		// The auditor passes p1 through and LINKS it to a pre-existing node
 		// (identity verdict); p2 stays a verdict-free create.
 		const existingId = "n_existing";
-		ledgers.appendNode({
+		ledgers.graphStore.appendNode({
 			id: existingId,
 			name: "Derivative",
 			statement: "Derivatives measure rates of change",
@@ -479,7 +483,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", FINDINGS),
 			auditor: submitModel("submit_review", verdict),
 		});
@@ -493,8 +497,8 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 
 		// Link-append: the phrasing joined the existing node's aliases and
 		// the provenance unioned; p2's create line is its own node.
-		assert.equal(ledgers.readNodes().length, 3); // pre-seeded + link line + p2's create
-		const linkedLines = ledgers.readNodes().filter((n) => n.id === existingId);
+		assert.equal(ledgers.graphStore.readNodes().length, 3); // pre-seeded + link line + p2's create
+		const linkedLines = ledgers.graphStore.readNodes().filter((n) => n.id === existingId);
 		assert.ok(
 			linkedLines.some((line) => line.provenance.some((pt) => pt.chatId === chatId)),
 			"the link-append unions provenance",
@@ -505,14 +509,14 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 			linkedLines.some((line) => line.provenance.some((pt) => pt.chatId === chatId && pt.messageId === "a2")),
 			"the link-append line carries p1's passage id",
 		);
-		const created = ledgers.readNodes().find((n) => n.name === "Chain rule")!;
+		const created = ledgers.graphStore.readNodes().find((n) => n.name === "Chain rule")!;
 		assert.deepEqual(created.provenance, [{ chatId, messageId: "a1" }], "the created node anchors to p2's passage");
 
 		// COVERAGE checkpointed per message (not a whole-chat checkpoint):
 		// one entry per transcript message, fingerprinted content each —
 		// the same turns are never extracted twice.
 		const record = chatStore.getChat(chatId)!;
-		const covered = ledgers.readCoverage();
+		const covered = ledgers.coverage.read();
 		// Wave D: the coverage unit is the VISIBLE native message — bonded
 		// riders with no view lines (a textless call message) are context,
 		// never checkpointed.
@@ -521,7 +525,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		).length;
 		assert.equal(covered.length, visible);
 		assert.ok(covered.every((c) => c.chatId === chatId && c.fp.length === 64 && c.tokens > 0));
-		assert.equal(ledgers.readCheckpoints().length, 0, "the chat path writes coverage, not the legacy checkpoint");
+		assert.equal(ledgers.graphStore.readCheckpoints().length, 0, "the chat path writes coverage, not the legacy checkpoint");
 
 		assert.equal(
 			coverageOf(record.messages, covered, chatId).uncoveredCount,
@@ -534,7 +538,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const { chatId } = fixtureChat();
 		const ledgers = memoryLedgers();
 		// No direct engines AND no engineFor — the chain came up empty.
-		const pipeline = createExtractionPipeline({ chatStore, graphStore: ledgers });
+		const pipeline = createExtractionPipeline({ chatStore, ...ledgers });
 		await assert.rejects(pipeline.runExtraction(chatId), (err: unknown) => {
 			assert.ok(err instanceof ModelsNotConfiguredError);
 			assert.deepEqual(err.envelope.missing, ["cheap"]); // extractor + auditor, both cheap-tier
@@ -542,7 +546,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 			return true;
 		});
 		// nothing ran: no phase residue, no usage, no coverage writes
-		assert.equal(ledgers.readCoverage().length, 0);
+		assert.equal(ledgers.coverage.read().length, 0);
 	});
 
 	it("key-presence refusal: a stage engine whose provider key is gone throws before any batch (provider-key interlude, 2026-09-25)", async () => {
@@ -553,7 +557,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const seen: Array<[string, ModelSlotName]> = [];
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor,
 			auditor,
 			providerKeyMissing: (provider, tier) => {
@@ -571,7 +575,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		// FIRST offender surfaces (extractor before auditor) — and nothing
 		// ran: the refusal lands before any batch, no coverage writes.
 		assert.deepEqual(seen, [[extractor.model.provider, "cheap"]]);
-		assert.equal(ledgers.readCoverage().length, 0);
+		assert.equal(ledgers.coverage.read().length, 0);
 	});
 
 	it("key-presence pass-through: null from the check lets a stage through — the NEXT keyless stage surfaces (first-offender discipline)", async () => {
@@ -580,7 +584,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		let calls = 0;
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: fauxEngine([]),
 			auditor: fauxEngine([]),
 			providerKeyMissing: (provider, tier) => (calls++ < 1 ? null : providerKeyMissing(provider, [tier])),
@@ -590,7 +594,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 			return true;
 		});
 		assert.equal(calls, 2, "both stages were checked, in order");
-		assert.equal(ledgers.readCoverage().length, 0);
+		assert.equal(ledgers.coverage.read().length, 0);
 	});
 
 	it("the LLM cluster-namer is DEAD (wave 7): a merge mints no naming runs — labels are session names now", async () => {
@@ -600,7 +604,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const verdict: AuditVerdicts = { links: [] };
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", FINDINGS),
 			auditor: submitModel("submit_review", verdict),
 		});
@@ -620,7 +624,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const consulted: string[] = [];
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			// NO direct values — the stages resolve ENTIRELY through engineFor
 			// (the role override → slot → factory-pin chain, read fresh per
 			// stage call in production; here, the scripted chain).
@@ -645,7 +649,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const verdict: AuditVerdicts = { links: [] };
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", FINDINGS),
 			auditor: submitModel("submit_review", verdict),
 			// If the direct values did NOT win, this throw would surface.
@@ -663,25 +667,25 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", FINDINGS),
 			auditor: silentModel(), // never submits the review
 		});
 		// The old run-level throw is gone: one failed job is absorbed at
 		// the fan-out — the run resolves with what actually merged (zeros).
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 0, chains: 0 });
-		assert.equal(ledgers.readNodes().length, 0);
-		assert.equal(ledgers.readCheckpoints().length, 0, "no checkpoint — the next trigger re-runs");
-		assert.equal(ledgers.readCoverage().length, 0);
+		assert.equal(ledgers.graphStore.readNodes().length, 0);
+		assert.equal(ledgers.graphStore.readCheckpoints().length, 0, "no checkpoint — the next trigger re-runs");
+		assert.equal(ledgers.coverage.read().length, 0);
 
 		const failingExtractor = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: silentModel(),
 			auditor: submitModel("submit_review", { links: [] }),
 		});
 		assert.deepEqual(await failingExtractor.runExtraction(chatId), { nodes: 0, chains: 0 });
-		assert.equal(ledgers.readCheckpoints().length, 0);
+		assert.equal(ledgers.graphStore.readCheckpoints().length, 0);
 
 		// THE isolation pin: a two-batch chat whose SECOND extractor call
 		// never submits — batch 1 still merges, batch 2 stays uncovered
@@ -698,7 +702,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		};
 		const mixed = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			// 4096 budget: the fixture is sized to split in two (the factory
 			// default again — halved back from the digest-era 8192, owner
 			// 2026-10-13).
@@ -710,9 +714,9 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		});
 		assert.deepEqual(await mixed.runExtraction(chunkyId), { nodes: 2, chains: 1 }, "batch 1's merge survives batch 2's failure");
 		assert.equal(invocations, 2);
-		assert.equal(ledgers.readCoverage().length, 3, "batch 1 checkpointed its three messages");
+		assert.equal(ledgers.coverage.read().length, 3, "batch 1 checkpointed its three messages");
 		assert.equal(
-			coverageOf(record.messages, ledgers.readCoverage(), chunkyId).uncoveredCount,
+			coverageOf(record.messages, ledgers.coverage.read(), chunkyId).uncoveredCount,
 			2,
 			"batch 2's messages stay uncovered for the next run",
 		);
@@ -722,7 +726,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const { chatId } = fixtureChat();
 		const ledgers = memoryLedgers();
 		const existingId = "n_existing";
-		ledgers.appendNode({
+		ledgers.graphStore.appendNode({
 			id: existingId,
 			name: "Derivative",
 			statement: "Derivatives measure rates of change",
@@ -737,7 +741,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		};
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			// Each stage's first generate is the observation point: the
 			// registry must already carry this chat at the right phase.
 			extractor: submitModel("submit_findings", FINDINGS, () => seen.push(phaseOf())),
@@ -765,7 +769,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		let aAuditing = false;
 		const pipelineA = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", findingsA),
 			auditor: gatedSubmitModel("submit_review", { links: [] }, gate, () => {
 				aAuditing = true;
@@ -779,21 +783,21 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		let bSawAlphasMerge = false;
 		const pipelineB = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", findingsB),
 			// THE pin: when B's auditor is finally invoked, A's merge must
 			// already be in the ledgers — B explores the post-merge graph,
 			// which is the entire point of the gate.
 			auditor: submitModel("submit_review", { links: [] }, () => {
 				bAuditorCalled = true;
-				bSawAlphasMerge = ledgers.readNodes().some((n) => n.name === "Alpha claim");
+				bSawAlphasMerge = ledgers.graphStore.readNodes().some((n) => n.name === "Alpha claim");
 			}),
 		});
 		const runB = pipelineB.runExtraction(b.chatId);
 
 		await until(() => extractionStatuses().some((r) => r.chatId === b.chatId && r.phase === "waiting"));
 		assert.ok(!bAuditorCalled, "B's auditor has not been invoked — it queues behind A");
-		assert.equal(ledgers.readNodes().filter((n) => n.name === "Beta claim").length, 0, "nothing of B merged yet");
+		assert.equal(ledgers.graphStore.readNodes().filter((n) => n.name === "Beta claim").length, 0, "nothing of B merged yet");
 		assert.equal(extractionStatuses().find((r) => r.chatId === a.chatId)?.phase, "auditing", "A still audits while B waits");
 
 		gateOpen();
@@ -819,7 +823,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const gate = new Promise<void>((resolve) => (gateOpen = resolve));
 		const pipelineA = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", single("pa", "Alpha claim", "Alpha statement")),
 			auditor: gatedSubmitModel("submit_review", { links: [] }, gate),
 		});
@@ -829,7 +833,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		let bAuditorCalled = false;
 		const pipelineB = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", single("pb", "Beta claim", "Beta statement")),
 			auditor: submitModel("submit_review", { links: [] }, () => {
 				bAuditorCalled = true;
@@ -843,7 +847,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		assert.deepEqual(await runB, { nodes: 0, chains: 0 }, "aborted before auditing — zero emissions");
 		assert.ok(!bAuditorCalled, "B's auditor was never invoked");
 		assert.ok(!extractionStatuses().some((r) => r.chatId === b.chatId), "B left the registry");
-		assert.equal(ledgers.readCoverage().some((row) => row.chatId === b.chatId), false, "B checkpointed nothing");
+		assert.equal(ledgers.coverage.read().some((row) => row.chatId === b.chatId), false, "B checkpointed nothing");
 
 		// The chain link B abandoned still resolved: A finishes, and a
 		// THIRD run audits normally — no deadlock residue.
@@ -851,7 +855,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		assert.deepEqual(await runA, { nodes: 1, chains: 0 });
 		const pipelineC = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", single("pc", "Gamma claim", "Gamma statement")),
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -862,7 +866,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const { chatId } = fixtureChat();
 		const ledgers = memoryLedgers();
 		const existingId = "n_existing";
-		ledgers.appendNode({
+		ledgers.graphStore.appendNode({
 			id: existingId,
 			name: "Derivative",
 			statement: "Derivatives measure rates of change",
@@ -885,7 +889,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		});
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			// During the auditor's generate, the registry must already carry
 			// the extractor's fully accumulated live usage (2 steps × 10/5).
 			extractor: recordUsage("extractor", submitModel("submit_findings", FINDINGS)),
@@ -933,7 +937,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: hangingModel(), // hangs until aborted — no step finishes
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -947,8 +951,8 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		// A deliberate stop, not a failure: zero emissions, no throw.
 		assert.deepEqual(stats, { nodes: 0, chains: 0 });
 		assert.equal(extractionStatuses().length, 0, "the registry clears");
-		assert.equal(ledgers.readNodes().length, 0, "nothing merged");
-		assert.equal(ledgers.readCheckpoints().length, 0, "nothing checkpointed — the next trigger re-runs");
+		assert.equal(ledgers.graphStore.readNodes().length, 0, "nothing merged");
+		assert.equal(ledgers.graphStore.readCheckpoints().length, 0, "nothing checkpointed — the next trigger re-runs");
 
 		// Partial usage still persisted (money was spent): stats absent,
 		// no completed steps in either stage.
@@ -983,7 +987,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: gatedExtractor,
 			auditor: silentModel(),
 		});
@@ -1019,7 +1023,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		]);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: gatedExtractor,
 			auditor: silentModel(),
 		});
@@ -1028,7 +1032,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		// module instances split; globalThis does not).
 		const observer = createExtractionPipeline({
 			chatStore,
-			graphStore: memoryLedgers(),
+			...memoryLedgers(),
 			extractor: silentModel(),
 			auditor: silentModel(),
 		});
@@ -1054,7 +1058,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		const ledgers = memoryLedgers();
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: silentModel(),
 			auditor: silentModel(),
 		});
@@ -1098,12 +1102,12 @@ describe("message anchors (session propositions carry their passage's id)", () =
 			);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			engineFor: (role) => (role === "extractor" ? bare() : submitModel("submit_review", { links: [] })),
 		});
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 0, chains: 0 });
-		assert.equal(ledgers.readNodes().length, 0, "nothing merged");
-		assert.equal(ledgers.readCoverage().length, 0, "nothing checkpointed — the batch stays re-runnable");
+		assert.equal(ledgers.graphStore.readNodes().length, 0, "nothing merged");
+		assert.equal(ledgers.coverage.read().length, 0, "nothing checkpointed — the batch stays re-runnable");
 	});
 
 	it("an EMPTY or UNKNOWN anchor rides the error-back channel: refused, the model re-anchors clean, then merges", async () => {
@@ -1120,12 +1124,12 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		]);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor,
 			auditor: submitModel("submit_review", { links: [] }),
 		});
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 1, chains: 0 }, "the retry anchored and merged");
-		const node = ledgers.readNodes()[0]!;
+		const node = ledgers.graphStore.readNodes()[0]!;
 		assert.deepEqual(node.provenance, [{ chatId, messageId: "a2" }], "the node anchors to its passage");
 	});
 
@@ -1142,7 +1146,7 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		]);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			getChunkTokens: () => 4096,
 			extractor,
 			// One review per batch job (the retry lives in the extractor's
@@ -1150,16 +1154,16 @@ describe("message anchors (session propositions carry their passage's id)", () =
 			auditor: fauxEngine([passThroughAuditStep(), passThroughAuditStep()]),
 		});
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 2, chains: 0 });
-		const anchors = ledgers.readNodes().map((n) => n.provenance[0]!.messageId).sort();
+		const anchors = ledgers.graphStore.readNodes().map((n) => n.provenance[0]!.messageId).sort();
 		assert.deepEqual(anchors, ["a2", "a4"], "each job's node anchors INSIDE its own batch — never a5");
-		assert.equal(ledgers.readCoverage().length, 5, "both batches checkpointed");
+		assert.equal(ledgers.coverage.read().length, 5, "both batches checkpointed");
 	});
 
 	it("a LINK-APPEND carries its proposition's anchor into the existing node's provenance", async () => {
 		const { chatId } = fixtureChat();
 		const ledgers = memoryLedgers();
 		const existingId = "n_anchor_existing";
-		ledgers.appendNode({
+		ledgers.graphStore.appendNode({
 			id: existingId,
 			name: "Derivative",
 			statement: "Derivatives measure rates of change",
@@ -1169,19 +1173,19 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		});
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", anchored("a2")),
 			auditor: submitModel("submit_review", { links: [{ id: "p1", linkTo: existingId }] }),
 		});
 		await pipeline.runExtraction(chatId);
 		// The link-append line — the re-encounter — carries the passage id.
-		const appended = ledgers
+		const appended = ledgers.graphStore
 			.readNodes()
 			.filter((n) => n.id === existingId)
 			.find((line) => line.provenance.some((pt) => pt.chatId === chatId))!;
 		assert.deepEqual(appended.provenance, [{ chatId, messageId: "a2" }]);
 		// And the derived graph unions it under the same point identity.
-		const merged = getGraph(ledgers).nodes.find((n) => n.id === existingId)!;
+		const merged = getGraph(ledgers.graphStore).nodes.find((n) => n.id === existingId)!;
 		assert.ok(merged.provenance.some((pt) => pt.chatId === chatId && pt.messageId === "a2"));
 	});
 
@@ -1189,7 +1193,7 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		const ledgers = memoryLedgers();
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			// NOTES_FINDINGS carries no messageId (the notes schema never
 			// asks for one) — the submit validates exactly as before.
 			extractor: submitModel("submit_findings", NOTES_FINDINGS),
@@ -1197,8 +1201,8 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		});
 		assert.deepEqual(await pipeline.importNotes({ filePath: "/vault/anchor-free.md", text: NOTES_TEXT }), { nodes: 1, chains: 0 });
 		assert.deepEqual(
-			ledgers.readNodes()[0]!.provenance,
-			[{ chatId: ledgers.readSources()[0]!.id, messageId: "" }],
+			ledgers.graphStore.readNodes()[0]!.provenance,
+			[{ chatId: ledgers.graphStore.readSources()[0]!.id, messageId: "" }],
 			"notes provenance stays chat-level — the file is the anchor",
 		);
 
@@ -1210,13 +1214,13 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		};
 		const second = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", stray),
 			auditor: submitModel("submit_review", { links: [] }),
 		});
 		assert.deepEqual(await second.importNotes({ filePath: "/vault/stray-anchor.md", text: NOTES_TEXT }), { nodes: 1, chains: 0 });
-		const secondSource = ledgers.readSources()[1]!;
-		const strayNode = ledgers.readNodes().find((n) => n.provenance.some((pt) => pt.chatId === secondSource.id))!;
+		const secondSource = ledgers.graphStore.readSources()[1]!;
+		const strayNode = ledgers.graphStore.readNodes().find((n) => n.provenance.some((pt) => pt.chatId === secondSource.id))!;
 		assert.deepEqual(strayNode.provenance, [{ chatId: secondSource.id, messageId: "" }], "the stray anchor was stripped before the merger");
 	});
 
@@ -1225,7 +1229,7 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		const ledgers = memoryLedgers();
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			getChunkTokens: () => 4096,
 			extractor: fauxEngine([findingsStep(), findingsStep()]),
 			auditor: fauxEngine([passThroughAuditStep(), passThroughAuditStep()]),
@@ -1234,10 +1238,10 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		// The labeled view reuses messageViewLines; the fingerprint seam is
 		// the same lines it always was — same hashes, same coverage.
 		assert.deepEqual(
-			ledgers.readCoverage().map((c) => c.fp).sort(),
+			ledgers.coverage.read().map((c) => c.fp).sort(),
 			coverageSlots(record.messages).map((slot) => slot.fp).sort(),
 		);
-		assert.equal(coverageOf(record.messages, ledgers.readCoverage(), chatId).uncoveredCount, 0);
+		assert.equal(coverageOf(record.messages, ledgers.coverage.read(), chatId).uncoveredCount, 0);
 	});
 });
 
@@ -1302,7 +1306,7 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		});
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor,
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -1310,9 +1314,9 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		// The stored chain's premises are exactly the two premises; the
 		// conclusion is C's resolved node (ids are random — assert
 		// set-wise, never by ledger order).
-		const byName = new Map(ledgers.readNodes().map((n) => [n.name, n.id]));
+		const byName = new Map(ledgers.graphStore.readNodes().map((n) => [n.name, n.id]));
 		const conclusion = byName.get("C")!;
-		const chains = ledgers.readChains();
+		const chains = ledgers.graphStore.readChains();
 		assert.ok(chains.every((c) => c.conclusion === conclusion), "chains point INTO the conclusion");
 		assert.deepEqual(
 			chains.flatMap((c) => c.premises).sort(),
@@ -1337,15 +1341,15 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		});
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor,
 			auditor: submitModel("submit_review", { links: [] }),
 		});
 		// Independent arguments for the same conclusion are separate chains;
 		// the bare p4 rides the propositions list alone.
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 4, chains: 2 });
-		const lonely = ledgers.readNodes().find((n) => n.name === "Lonely")!;
-		assert.ok(ledgers.readChains().every((c) => !c.premises.includes(lonely.id) && c.conclusion !== lonely.id));
+		const lonely = ledgers.graphStore.readNodes().find((n) => n.name === "Lonely")!;
+		assert.ok(ledgers.graphStore.readChains().every((c) => !c.premises.includes(lonely.id) && c.conclusion !== lonely.id));
 	});
 
 	it("identical chains dedupe SILENTLY at the expansion — restating an argument is a no-op, not an error", async () => {
@@ -1357,7 +1361,7 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		});
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor,
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -1386,7 +1390,7 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 			);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			engineFor: (role) => (role === "extractor" ? oldShape() : submitModel("submit_review", { links: [] })),
 		});
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 0, chains: 0 });
@@ -1401,7 +1405,7 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		};
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: retryEngine(bad, FINDINGS),
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -1419,7 +1423,7 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		};
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: retryEngine(bad, FINDINGS),
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -1435,7 +1439,7 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		};
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: retryEngine(bad, FINDINGS),
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -1514,7 +1518,7 @@ describe("the extractor redesign (owner, 2026-09-30): chains are the deliverable
 		let calls = 0;
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: memoryLedgers(),
+			...memoryLedgers(),
 			extractor: fauxEngine([(context) => {
 				calls++;
 				const system = context.messages.find((message) => message.role === "system");
@@ -1558,7 +1562,7 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 			let calls = 0;
 			const pipeline = createExtractionPipeline({
 				chatStore,
-				graphStore: memoryLedgers(),
+				...memoryLedgers(),
 				extractor: fauxEngine([(context) => {
 					calls++;
 					const system = context.messages.find((message) => message.role === "system");
@@ -1579,7 +1583,7 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		const seen: { kind?: string; label?: string }[] = [];
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", NOTES_FINDINGS),
 			// During the auditor's call the registry must show the notes run.
 			auditor: submitModel("submit_review", NOTES_VERDICT, () => {
@@ -1595,7 +1599,7 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		assert.equal(extractionStatuses().length, 0, "the registry clears when the run ends");
 
 		// The source record: deterministic src id, the file path, the usage log.
-		const source = ledgers.readSources()[0]!;
+		const source = ledgers.graphStore.readSources()[0]!;
 		assert.match(source.id, /^src_/);
 		assert.equal(source.filePath, "/vault/learn vim.md");
 		assert.ok(Date.parse(source.importedAt));
@@ -1606,11 +1610,11 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		// File-scoped provenance (submit-schema slim, 2026-09-28): the
 		// node carries ONE chat-level point — the source key itself, no
 		// message anchors.
-		const node = ledgers.readNodes()[0]!;
+		const node = ledgers.graphStore.readNodes()[0]!;
 		assert.equal(node.statement, "Vim starts in Normal mode, where keys are commands.");
 		assert.deepEqual(node.provenance, [{ chatId: source.id, messageId: "" }]);
 		// The checkpoint stamps the import.
-		assert.equal(ledgers.readCheckpoints()[0]!.chatId, source.id);
+		assert.equal(ledgers.graphStore.readCheckpoints()[0]!.chatId, source.id);
 	});
 
 	it("chunks a large file: one extract→audit→merge per chunk, part headers in each view (owner, 2026-09-28)", async () => {
@@ -1637,7 +1641,7 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		const text = Array.from({ length: 8 }, (_, i) => `note line ${i}: ${"x".repeat(30)}`).join("\n");
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			engineFor: (role) =>
 				role === "extractor"
 					? extractorStep()
@@ -1654,7 +1658,7 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		// cross-chunk identity is the auditor's linkTo verdict, and these
 		// fixtures submit none.
 		assert.deepEqual(stats, { nodes: calls, chains: 0 });
-		assert.equal(ledgers.readNodes().length, calls);
+		assert.equal(ledgers.graphStore.readNodes().length, calls);
 	});
 
 	it("required top-level fields (owner, 2026-09-28; chains since 2026-09-30): a findings submit MISSING chains fails validation — no silent structure-less merge", async () => {
@@ -1677,14 +1681,14 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 			);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			engineFor: (role) => (role === "extractor" ? noEdges() : submitModel("submit_review", { links: [] })),
 		});
 		// Isolated job failure (per-chunk jobs, owner 2026-09-28): the run
 		// resolves zeros — no throw — and still nothing merged.
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 0, chains: 0 });
-		assert.equal(ledgers.readNodes().length, 0);
-		assert.equal(ledgers.readCoverage().length, 0, "nothing checkpointed — the messages stay re-runnable");
+		assert.equal(ledgers.graphStore.readNodes().length, 0);
+		assert.equal(ledgers.coverage.read().length, 0, "nothing checkpointed — the messages stay re-runnable");
 	});
 
 	it("every explicit import runs the whole file, even identical text and legacy fingerprints", async () => {
@@ -1692,7 +1696,7 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		const mk = () =>
 			createExtractionPipeline({
 				chatStore,
-				graphStore: ledgers,
+				...ledgers,
 					extractor: submitModel("submit_findings", NOTES_FINDINGS),
 				auditor: submitModel("submit_review", NOTES_VERDICT),
 			});
@@ -1700,27 +1704,27 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		assert.deepEqual(first, { nodes: 1, chains: 0 });
 
 		// A legacy stamp must never suppress an explicit import.
-		ledgers.upsertSource({ ...ledgers.readSources()[0]!, contentFp: createHash("sha256").update(NOTES_TEXT).digest("hex").slice(0, 16) });
+		ledgers.graphStore.upsertSource({ ...ledgers.graphStore.readSources()[0]!, contentFp: createHash("sha256").update(NOTES_TEXT).digest("hex").slice(0, 16) });
 		const second = await mk().importNotes({ filePath: "/vault/learn vim.md", text: NOTES_TEXT });
 		assert.deepEqual(second, { nodes: 1, chains: 0 }, "identical content re-extracts");
-		assert.equal(ledgers.readSources()[0]!.contentFp, undefined, "new imports write no fingerprint");
+		assert.equal(ledgers.graphStore.readSources()[0]!.contentFp, undefined, "new imports write no fingerprint");
 
-		assert.equal(ledgers.readSources().length, 1, "one source identity — the path hashes to the same id");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2, "both runs bill usage");
-		assert.equal(ledgers.readNodes().length, 2, "the auditor, not a content skip, owns identity");
+		assert.equal(ledgers.graphStore.readSources().length, 1, "one source identity — the path hashes to the same id");
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 2, "both runs bill usage");
+		assert.equal(ledgers.graphStore.readNodes().length, 2, "the auditor, not a content skip, owns identity");
 
 		// Changed text also re-runs the whole file.
 		const third = await mk().importNotes({ filePath: "/vault/learn vim.md", text: `${NOTES_TEXT}\nA new closing line.` });
 		assert.deepEqual(third, { nodes: 1, chains: 0 }, "changed content re-extracts");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 3, "the re-run bills its usage");
-		assert.equal(ledgers.readNodes().length, 3);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 3, "the re-run bills its usage");
+		assert.equal(ledgers.graphStore.readNodes().length, 3);
 	});
 
 	it("aborts like a chat run: true cancellation, nothing merged, partial usage in the source record", async () => {
 		const ledgers = memoryLedgers();
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: hangingModel(),
 			auditor: submitModel("submit_review", NOTES_VERDICT),
 		});
@@ -1729,10 +1733,10 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		const srcId = extractionStatuses().find((r) => r.chatId.startsWith("src_"))!.chatId;
 		assert.equal(abortExtraction(srcId), true);
 		await assert.rejects(runPromise, (error) => error instanceof NotesImportError && error.outcome === "aborted" && error.partialStats.nodes === 0);
-		assert.equal(ledgers.readNodes().length, 0, "nothing merged");
-		assert.equal(ledgers.readCheckpoints().length, 0, "nothing checkpointed");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 1, "partial usage still persisted");
-		assert.equal(ledgers.readSources()[0]!.extractions![0]!.stats, undefined, "never merged → no stats");
+		assert.equal(ledgers.graphStore.readNodes().length, 0, "nothing merged");
+		assert.equal(ledgers.graphStore.readCheckpoints().length, 0, "nothing checkpointed");
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 1, "partial usage still persisted");
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions![0]!.stats, undefined, "never merged → no stats");
 	});
 });
 
@@ -1811,7 +1815,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			// 4096 budget: the fixture is sized to split in two (the factory
 			// default again — halved back from the digest-era 8192, owner
 			// 2026-10-13).
@@ -1848,9 +1852,9 @@ describe("the chunked pipeline (extraction coverage)", () => {
 		assert.deepEqual(stats, { nodes: 4, chains: 2 });
 
 		// Per-batch coverage: every message checkpointed, nothing legacy.
-		const coverage = ledgers.readCoverage();
+		const coverage = ledgers.coverage.read();
 		assert.equal(coverage.length, record.messages.length);
-		assert.equal(ledgers.readCheckpoints().length, 0);
+		assert.equal(ledgers.graphStore.readCheckpoints().length, 0);
 		assert.equal(coverageOf(record.messages, coverage, chatId).uncoveredCount, 0);
 
 		// A second run is a NO-OP: nothing uncovered → no model calls, no
@@ -1871,7 +1875,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			// 4096 budget: the fixture is sized to split in two (the factory
 			// default again — halved back from the digest-era 8192, owner
 			// 2026-10-13).
@@ -1898,7 +1902,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 		// show in coverage, then abort.
 		await new Promise<void>((resolve) => {
 			const check = setInterval(() => {
-				if (ledgers.readCoverage().length > 0) {
+				if (ledgers.coverage.read().length > 0) {
 					clearInterval(check);
 					resolve();
 				}
@@ -1909,8 +1913,8 @@ describe("the chunked pipeline (extraction coverage)", () => {
 
 		// Batch 1's emissions are kept and its messages stay covered.
 		assert.deepEqual(stats, { nodes: 2, chains: 1 });
-		assert.equal(ledgers.readCoverage().length, 3, "batch 1 checkpointed its three messages");
-		const cov = coverageOf(record.messages, ledgers.readCoverage(), chatId);
+		assert.equal(ledgers.coverage.read().length, 3, "batch 1 checkpointed its three messages");
+		const cov = coverageOf(record.messages, ledgers.coverage.read(), chatId);
 		assert.equal(cov.uncoveredCount, 2, "the in-flight batch's messages stay uncovered");
 
 		// The re-run — the manual extract button — picks up ONLY the
@@ -1918,7 +1922,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 		const reRunViews: string[] = [];
 		const finisher = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: fauxEngine([findingsStep((v) => reRunViews.push(v))]),
 			auditor: fauxEngine([passThroughAuditStep()]),
 		});
@@ -1926,7 +1930,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 		assert.equal(reRunViews.length, 1);
 		assert.ok(reRunViews[0]!.includes("topic 4:") && reRunViews[0]!.includes("topic 5:"));
 		assert.ok(!reRunViews[0]!.includes("topic 1:"), "the covered remainder never re-enters the prompt");
-		assert.equal(ledgers.readCoverage().length, 5, "the re-run closed the gap");
+		assert.equal(ledgers.coverage.read().length, 5, "the re-run closed the gap");
 	});
 
 	it("a re-opened message re-extracts alone; a data-part attach never re-opens it", async () => {
@@ -1942,7 +1946,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 		const ledgers = memoryLedgers();
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: fauxEngine([findingsStep()]),
 			auditor: fauxEngine([passThroughAuditStep()]),
 		});
@@ -1950,7 +1954,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 		// Wave D: the record IS native history — coverage reads it directly.
 		const record = () => chatStore.getChat(chatId)!.messages;
 		const messages = () => record();
-		assert.equal(coverageOf(messages(), ledgers.readCoverage(), chatId).uncoveredCount, 0);
+		assert.equal(coverageOf(messages(), ledgers.coverage.read(), chatId).uncoveredCount, 0);
 
 		// Data parts are invisible to the extraction view — a plan-block
 		// marker append (whose data part splices into the projected view)
@@ -1959,7 +1963,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 			...record(),
 			newPlanBlockMessage("call_s2", { kind: "full", at: "2026-09-26T00:00:00.000Z", current: null, nodes: [], edges: [] }),
 		]);
-		const afterAttach = coverageOf(messages(), ledgers.readCoverage(), chatId);
+		const afterAttach = coverageOf(messages(), ledgers.coverage.read(), chatId);
 		assert.equal(afterAttach.uncoveredCount, 0, "data parts don't change the fingerprint");
 
 		// A teacher-prose edit changes the message's view → exactly that
@@ -1971,13 +1975,13 @@ describe("the chunked pipeline (extraction coverage)", () => {
 				: m,
 		);
 		chatStore.saveMessages(chatId, mutated);
-		const afterMerge = coverageOf(messages(), ledgers.readCoverage(), chatId);
+		const afterMerge = coverageOf(messages(), ledgers.coverage.read(), chatId);
 		assert.equal(afterMerge.uncoveredCount, 1, "only the mutated message re-opens");
 
 		const reRunViews: string[] = [];
 		const reOpener = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: fauxEngine([findingsStep((v) => reRunViews.push(v))]),
 			auditor: fauxEngine([passThroughAuditStep()]),
 		});
@@ -1985,7 +1989,7 @@ describe("the chunked pipeline (extraction coverage)", () => {
 		assert.equal(reRunViews.length, 1, "one batch: the single re-opened message");
 		assert.ok(reRunViews[0]!.includes("the answer merged in late") && !reRunViews[0]!.includes("short topic two"));
 		assert.ok(reRunViews[0]!.includes("short topic one"), "the re-opened message renders its full prose");
-		assert.equal(coverageOf(messages(), ledgers.readCoverage(), chatId).uncoveredCount, 0, "re-covered");
+		assert.equal(coverageOf(messages(), ledgers.coverage.read(), chatId).uncoveredCount, 0, "re-covered");
 	});
 });
 
@@ -2019,7 +2023,7 @@ describe("per-chunk parallel jobs (owner, 2026-09-28)", () => {
 			});
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			engineFor: (role) =>
 				role === "extractor" ? fauxEngine([abortingStep]) : submitModel("submit_review", { links: [] }),
 			getChunkTokens: () => 20,
@@ -2038,9 +2042,9 @@ describe("per-chunk parallel jobs (owner, 2026-09-28)", () => {
 		assert.equal(abortExtraction(srcId), true);
 		await assert.rejects(runPromise, (error) => error instanceof NotesImportError && error.outcome === "aborted");
 		assert.equal(extractionStatuses().filter((r) => r.chatId === srcId).length, 0, "all rows leave the registry");
-		assert.equal(ledgers.readNodes().length, 0, "nothing merged");
+		assert.equal(ledgers.graphStore.readNodes().length, 0, "nothing merged");
 		// Per-job usage: the ONE minted job persisted its (failed) spend.
-		const source = ledgers.readSources().find((src) => src.id === srcId)!;
+		const source = ledgers.graphStore.readSources().find((src) => src.id === srcId)!;
 		assert.equal(source.extractions?.length, 1, "only the aborted job bills — later chunks never ran");
 		assert.ok(source.extractions!.every((entry) => entry.stats === undefined), "no job merged — no stats");
 	});
@@ -2077,7 +2081,7 @@ describe("per-chunk parallel jobs (owner, 2026-09-28)", () => {
 		};
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			engineFor: (role) =>
 				role === "extractor" ? fauxEngine([slowExtract]) : fauxEngine([slowAudit]),
 			getChunkTokens: () => 20,
@@ -2095,7 +2099,7 @@ describe("per-chunk parallel jobs (owner, 2026-09-28)", () => {
 		// independent — owner, 2026-09-29): 8 chunks × 2 propositions,
 		// 8 × 1 chain. The auditor's links, not the merger, dedupe identity.
 		assert.deepEqual(stats, { nodes: 16, chains: 8 });
-		assert.equal(ledgers.readNodes().length, 16);
+		assert.equal(ledgers.graphStore.readNodes().length, 16);
 	});
 });
 
@@ -2108,7 +2112,7 @@ describe("the session-deletion guard (chat deleted mid-run)", () => {
 		// window: findings already spent, the merge next.
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", FINDINGS),
 			auditor: submitModel("submit_review", { links: [] }, () => chatStore.deleteChat(chatId)),
 		});
@@ -2122,10 +2126,10 @@ describe("the session-deletion guard (chat deleted mid-run)", () => {
 
 		// Nothing merged, nothing checkpointed — the deleted chat leaves no
 		// trace for a later snapshot to resurrect.
-		assert.equal(ledgers.readNodes().length, 0);
-		assert.equal(ledgers.readChains().length, 0);
-		assert.equal(ledgers.readCoverage().length, 0);
-		assert.equal(ledgers.readCheckpoints().length, 0);
+		assert.equal(ledgers.graphStore.readNodes().length, 0);
+		assert.equal(ledgers.graphStore.readChains().length, 0);
+		assert.equal(ledgers.coverage.read().length, 0);
+		assert.equal(ledgers.graphStore.readCheckpoints().length, 0);
 
 		// The run is off the registry (the finally always cleans up).
 		assert.equal(extractionStatuses().some((run) => run.chatId === chatId), false);
@@ -2183,7 +2187,7 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 
 	it("the real auditor receives the proposed ids, batched candidate tool and practical-equivalence prompt", async () => {
 		const ledgers = memoryLedgers();
-		ledgers.appendNode({
+		ledgers.graphStore.appendNode({
 			id: "n_seed", name: "Evaporation", statement: "Liquid changes into vapor.", aliases: [],
 			createdAt: "2026-01-01T00:00:00Z", provenance: [{ chatId: "old_source", messageId: "" }],
 		});
@@ -2218,25 +2222,25 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 			},
 		]);
 		const pipeline = createExtractionPipeline({
-			chatStore, graphStore: ledgers, auditor,
+			chatStore, ...ledgers, auditor,
 			extractor: submitModel("submit_findings", { propositions: [{ id: "p1", name: "Vaporization", statement: "Liquid changes into vapor.", aliases: [] }], chains: [] }),
 		});
 		const stats = await pipeline.importNotes({ filePath: "synthetic-candidates.txt", text: "Liquid changes into vapor." });
 		assert.equal(stats.nodes, 0, "the candidate identity is used by the existing merger");
-		assert.equal(getGraph(ledgers).nodes.length, 1);
-		assert.ok(getGraph(ledgers).nodes[0]!.provenance.some((point) => point.chatId === ledgers.readSources()[0]!.id));
+		assert.equal(getGraph(ledgers.graphStore).nodes.length, 1);
+		assert.ok(getGraph(ledgers.graphStore).nodes[0]!.provenance.some((point) => point.chatId === ledgers.graphStore.readSources()[0]!.id));
 	});
 
 	it("a supplied accepted alias can be matched and submitted in one auditor response, with no lookup", async () => {
 		const ledgers = memoryLedgers();
-		ledgers.appendNode({
+		ledgers.graphStore.appendNode({
 			id: "n_seed", name: "Legacy label", statement: "The original canonical statement.",
 			aliases: ["An amber canoe travels upstream."], createdAt: "2026-01-01T00:00:00Z",
 			provenance: [{ chatId: "old_source", messageId: "" }],
 		});
 		let calls = 0;
 		const pipeline = createExtractionPipeline({
-			chatStore, graphStore: ledgers,
+			chatStore, ...ledgers,
 			extractor: submitModel("submit_findings", { propositions: [{ id: "p1", name: "Upstream travel", statement: "An amber canoe travels upstream.", aliases: [] }], chains: [] }),
 			auditor: fauxEngine([(context) => {
 				calls++;
@@ -2250,7 +2254,7 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		const stats = await pipeline.importNotes({ filePath: "synthetic-alias.txt", text: "PRIVATE SOURCE PASSAGE" });
 		assert.equal(calls, 1);
 		assert.equal(stats.nodes, 0);
-		assert.equal(getGraph(ledgers).nodes.length, 1);
+		assert.equal(getGraph(ledgers.graphStore).nodes.length, 1);
 	});
 
 	it("a seeded digest rides the extractor's view: mixed-namespace chains reference existing ids VERBATIM", async () => {
@@ -2264,7 +2268,7 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 			createdAt: "2026-09-30T00:00:00.000Z",
 			provenance: [{ chatId, messageId: "m0" }],
 		});
-		ledgers.appendNode(seed("n_a", "Self-ownership"));
+		ledgers.graphStore.appendNode(seed("n_a", "Self-ownership"));
 		const FINDINGS_B: SessionFindings = {
 			propositions: [{ id: "p1", name: "Appropriation axiom", statement: "c", aliases: [], messageId: "a1" }],
 			chains: [{ premises: ["n_a", "p1"], conclusion: "p1", }].slice(0, 0), // chains live in the engine below
@@ -2284,7 +2288,7 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		]);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor,
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -2297,9 +2301,9 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		// Mixed namespace resolved: n_a passes through verbatim; p1/p1b
 		// resolve through the job-local map.
 		assert.deepEqual(stats, { nodes: 2, chains: 1 });
-		const stored = ledgers.readChains();
+		const stored = ledgers.graphStore.readChains();
 		assert.equal(stored.length, 1);
-		const byName = new Map(ledgers.readNodes().map((n) => [n.name, n.id]));
+		const byName = new Map(ledgers.graphStore.readNodes().map((n) => [n.name, n.id]));
 		assert.deepEqual(stored[0]!.premises, ["n_a", byName.get("Appropriation axiom")]);
 		assert.equal(stored[0]!.conclusion, byName.get("Property rights"));
 	});
@@ -2336,7 +2340,7 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		]);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: badThenGood,
 			auditor: submitModel("submit_review", { links: [] }),
 		});
@@ -2378,7 +2382,7 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		const auditor = fauxEngine([auditStep(), auditStep()]);
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor,
 			auditor,
 			getChunkTokens: () => 4096, // two batches over the chunky fixture (the factory default, 4096 — halved back 2026-10-13)
@@ -2467,9 +2471,9 @@ describe("chain simplification (the merger's maintenance pass, owner 2026-09-30 
 			["n_x", "X"],
 			["n_y", "Y"],
 		] as const)
-			ledgers.appendNode(seedNode(id, name));
-		ledgers.appendChain(chain("arg_1", ["n_a", "n_b"], "n_x", "2026-09-30T01:00:00.000Z"));
-		ledgers.appendChain(chain("arg_2", ["n_x", "n_c"], "n_y", "2026-09-30T02:00:00.000Z"));
+			ledgers.graphStore.appendNode(seedNode(id, name));
+		ledgers.graphStore.appendChain(chain("arg_1", ["n_a", "n_b"], "n_x", "2026-09-30T01:00:00.000Z"));
+		ledgers.graphStore.appendChain(chain("arg_2", ["n_x", "n_c"], "n_y", "2026-09-30T02:00:00.000Z"));
 
 		// The chat re-asserts the full derivation [A,B,C]⇒Y (all-existing
 		// ids, digest references) — redundant given what stands.
@@ -2479,14 +2483,14 @@ describe("chain simplification (the merger's maintenance pass, owner 2026-09-30 
 		};
 		const pipeline = createExtractionPipeline({
 			chatStore,
-			graphStore: ledgers,
+			...ledgers,
 			extractor: submitModel("submit_findings", redundant),
 			auditor: submitModel("submit_review", { links: [] }),
 		});
 		const stats = await pipeline.runExtraction(chatId);
 		assert.equal(stats.chains, 1, "the append happened (stats count activity)");
 		assert.equal(stats.droppedChains, 1, "the simplification pass then removed it (maintenance)");
-		const stored = ledgers.readChains();
+		const stored = ledgers.graphStore.readChains();
 		assert.equal(stored.length, 2, "the ledger is back to the two lean chains");
 	});
 });
@@ -2494,8 +2498,8 @@ describe("chain simplification (the merger's maintenance pass, owner 2026-09-30 
 
 describe("notes import completion and retry reliability", () => {
 	const input = { filePath: "reliability.md", text: NOTES_TEXT };
-	const make = (graphStore: GraphStore, extractor = submitModel("submit_findings", NOTES_FINDINGS)) =>
-		createExtractionPipeline({ chatStore, graphStore, extractor, auditor: submitModel("submit_review", NOTES_VERDICT) });
+	const make = (ledgers: GraphLedgers, extractor = submitModel("submit_findings", NOTES_FINDINGS)) =>
+		createExtractionPipeline({ chatStore, ...ledgers, extractor, auditor: submitModel("submit_review", NOTES_VERDICT) });
 	const incomplete = (outcome: NotesImportError["outcome"], nodes: number) => (error: unknown) => {
 		assert.ok(error instanceof NotesImportError);
 		assert.equal(error.outcome, outcome);
@@ -2507,22 +2511,22 @@ describe("notes import completion and retry reliability", () => {
 		const ledgers = memoryLedgers();
 		await assert.rejects(make(ledgers, silentModel()).importNotes(input), incomplete("failed", 0));
 		assert.deepEqual(await make(ledgers).importNotes(input), { nodes: 1, chains: 0 });
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 2);
 	});
 
 	it("zero new nodes and an empty file are successful, but the readiness gate still applies", async () => {
 		const ledgers = memoryLedgers();
 		assert.deepEqual(await make(ledgers, submitModel("submit_findings", { propositions: [], chains: [] })).importNotes(input), { nodes: 0, chains: 0 });
 		assert.deepEqual(await make(ledgers).importNotes({ ...input, text: " \n" }), { nodes: 0, chains: 0 });
-		await assert.rejects(createExtractionPipeline({ chatStore, graphStore: ledgers }).importNotes({ ...input, text: "" }), ModelsNotConfiguredError);
-		await assert.rejects(createExtractionPipeline({ chatStore, graphStore: ledgers, extractor: submitModel("submit_findings", NOTES_FINDINGS), auditor: submitModel("submit_review", NOTES_VERDICT), providerKeyMissing: () => providerKeyMissing("openai", ["cheap"]) }).importNotes(input), ProviderKeyMissingError);
+		await assert.rejects(createExtractionPipeline({ chatStore, ...ledgers }).importNotes({ ...input, text: "" }), ModelsNotConfiguredError);
+		await assert.rejects(createExtractionPipeline({ chatStore, ...ledgers, extractor: submitModel("submit_findings", NOTES_FINDINGS), auditor: submitModel("submit_review", NOTES_VERDICT), providerKeyMissing: () => providerKeyMissing("openai", ["cheap"]) }).importNotes(input), ProviderKeyMissingError);
 	});
 
 	it("isolates an ordinary failed chunk, reports partial, and keeps earlier/later merges and usage", async () => {
 		const ledgers = memoryLedgers();
 		let calls = 0;
 		const pipeline = createExtractionPipeline({
-			chatStore, graphStore: ledgers, getChunkTokens: () => 1,
+			chatStore, ...ledgers, getChunkTokens: () => 1,
 			engineFor: (role) => role === "auditor" ? submitModel("submit_review", NOTES_VERDICT) : fauxEngine([() => {
 				calls++;
 				if (calls === 2) throw new Error("synthetic failed chunk");
@@ -2531,24 +2535,24 @@ describe("notes import completion and retry reliability", () => {
 		});
 		await assert.rejects(pipeline.importNotes({ ...input, text: "first chunk\nsecond chunk\nthird chunk" }), incomplete("partial", 2));
 		assert.equal(calls, 3);
-		assert.equal(ledgers.readNodes().length, 2);
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 3);
+		assert.equal(ledgers.graphStore.readNodes().length, 2);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 3);
 	});
 
 	it("an abort after an earlier merge stops later chunks without losing graph or billed usage", async () => {
 		const ledgers = memoryLedgers();
 		let calls = 0;
 		const pipeline = createExtractionPipeline({
-			chatStore, graphStore: ledgers, getChunkTokens: () => 1,
+			chatStore, ...ledgers, getChunkTokens: () => 1,
 			engineFor: (role) => role === "auditor" ? submitModel("submit_review", NOTES_VERDICT) : submitModel("submit_findings", NOTES_FINDINGS, () => {
 				calls++;
-				if (calls === 2) abortExtraction(ledgers.readSources()[0]!.id);
+				if (calls === 2) abortExtraction(ledgers.graphStore.readSources()[0]!.id);
 			}),
 		});
 		await assert.rejects(pipeline.importNotes({ ...input, text: "first chunk\nsecond chunk\nthird chunk" }), incomplete("aborted", 1));
 		assert.equal(calls, 2);
-		assert.equal(ledgers.readNodes().length, 1);
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
+		assert.equal(ledgers.graphStore.readNodes().length, 1);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 2);
 	});
 
 	for (const abortAt of [1, 2]) it(`abort in chunk ${abortAt} survives a usage-persistence error and stops later chunks`, async () => {
@@ -2556,17 +2560,17 @@ describe("notes import completion and retry reliability", () => {
 		let calls = 0;
 		let cancelled = false;
 		let usageFailures = 0;
-		const graphStore: GraphStore = { ...ledgers, appendSourceUsage: (id, entry) => {
+		const graphStore: GraphStore = { ...ledgers.graphStore, appendSourceUsage: (id, entry) => {
 			if (cancelled) { usageFailures++; throw new Error("synthetic usage persistence failure during abort"); }
-			ledgers.appendSourceUsage(id, entry);
+			ledgers.graphStore.appendSourceUsage(id, entry);
 		} };
 		const pipeline = createExtractionPipeline({
-			chatStore, graphStore, getChunkTokens: () => 1,
+			chatStore, graphStore, coverage: ledgers.coverage, getChunkTokens: () => 1,
 			engineFor: (role) => role === "auditor" ? submitModel("submit_review", NOTES_VERDICT) : submitModel("submit_findings", NOTES_FINDINGS, () => {
 				calls++;
 				if (calls === abortAt) {
 					cancelled = true;
-					assert.equal(abortExtraction(ledgers.readSources()[0]!.id), true);
+					assert.equal(abortExtraction(ledgers.graphStore.readSources()[0]!.id), true);
 				}
 			}),
 		});
@@ -2578,22 +2582,22 @@ describe("notes import completion and retry reliability", () => {
 		});
 		assert.equal(calls, abortAt, "no later extractor runs with a fresh controller after cancellation");
 		assert.equal(usageFailures, 1, "the aborted chunk attempted to persist usage and surfaced its failure");
-		assert.equal(ledgers.readNodes().length, abortAt - 1, "earlier graph merges retained");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, abortAt - 1, "earlier usage retained");
+		assert.equal(ledgers.graphStore.readNodes().length, abortAt - 1, "earlier graph merges retained");
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, abortAt - 1, "earlier usage retained");
 		assert.equal(extractionStatuses().length, 0, "cancelled job row removed");
 		assert.deepEqual(await make(ledgers).importNotes(wholeFile), { nodes: 1, chains: 0 }, "source exclusion released for an explicit unchanged whole-file retry");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, abortAt);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, abortAt);
 	});
 
 	it("a usage-persistence error without an aborted signal remains an isolated failure and later chunks run", async () => {
 		const ledgers = memoryLedgers();
 		let calls = 0;
-		const graphStore: GraphStore = { ...ledgers, appendSourceUsage: (id, entry) => {
+		const graphStore: GraphStore = { ...ledgers.graphStore, appendSourceUsage: (id, entry) => {
 			if (calls === 1) throw new Error("synthetic isolated usage failure");
-			ledgers.appendSourceUsage(id, entry);
+			ledgers.graphStore.appendSourceUsage(id, entry);
 		} };
 		const pipeline = createExtractionPipeline({
-			chatStore, graphStore, getChunkTokens: () => 1,
+			chatStore, graphStore, coverage: ledgers.coverage, getChunkTokens: () => 1,
 			engineFor: (role) => role === "auditor" ? submitModel("submit_review", NOTES_VERDICT) : submitModel("submit_findings", NOTES_FINDINGS, () => { calls++; }),
 		});
 		await assert.rejects(pipeline.importNotes({ ...input, text: "first chunk\nsecond chunk\nthird chunk" }), (error) => {
@@ -2602,8 +2606,8 @@ describe("notes import completion and retry reliability", () => {
 			return true;
 		});
 		assert.equal(calls, 3, "ordinary cleanup failure does not imply cancellation");
-		assert.equal(ledgers.readNodes().length, 3);
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
+		assert.equal(ledgers.graphStore.readNodes().length, 3);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 2);
 	});
 
 	it("overlapping identical or different contents are busy BEFORE source metadata changes, across pipeline instances", async () => {
@@ -2611,60 +2615,60 @@ describe("notes import completion and retry reliability", () => {
 		let release!: () => void;
 		const gate = new Promise<void>((resolve) => { release = resolve; });
 		let upserts = 0;
-		const tracked = { ...ledgers, upsertSource: (source: NotesSource) => { upserts++; ledgers.upsertSource(source); } };
+		const tracked: GraphLedgers = { ...ledgers, graphStore: { ...ledgers.graphStore, upsertSource: (source: NotesSource) => { upserts++; ledgers.graphStore.upsertSource(source); } } };
 		const first = make(tracked, gatedSubmitModel("submit_findings", NOTES_FINDINGS, gate)).importNotes(input);
-		const sourceBefore = structuredClone(ledgers.readSources());
+		const sourceBefore = structuredClone(ledgers.graphStore.readSources());
 		try {
 			await assert.rejects(make(tracked).importNotes(input), incomplete("busy", 0));
 			await assert.rejects(make(tracked).importNotes({ ...input, text: "changed" }), incomplete("busy", 0));
 			assert.equal(upserts, 1, "busy calls cannot even attempt source metadata writes");
-			assert.deepEqual(ledgers.readSources(), sourceBefore);
+			assert.deepEqual(ledgers.graphStore.readSources(), sourceBefore);
 		} finally { release(); }
 		await first;
 		assert.deepEqual(await make(ledgers).importNotes(input), { nodes: 1, chains: 0 }, "lock released after lifecycle");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 2);
 	});
 
 	it("a fulfilled zero-node chunk plus a failed chunk is partial, not failed or completed", async () => {
 		const ledgers = memoryLedgers();
 		let calls = 0;
 		const pipeline = createExtractionPipeline({
-			chatStore, graphStore: ledgers, getChunkTokens: () => 1,
+			chatStore, ...ledgers, getChunkTokens: () => 1,
 			engineFor: (role) => role === "auditor" ? submitModel("submit_review", NOTES_VERDICT) : fauxEngine([() => {
 				if (++calls === 2) throw new Error("synthetic failed chunk");
 				return fauxAssistantMessage([fauxToolCall("submit_findings", { propositions: [], chains: [] })], { stopReason: "toolUse" });
 			}]),
 		});
 		await assert.rejects(pipeline.importNotes({ ...input, text: "first chunk\nsecond chunk" }), incomplete("partial", 0));
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 2);
 	});
 
 	it("a merger failure after a node append is incomplete without rolling back that write", async () => {
 		const ledgers = memoryLedgers();
-		const broken = { ...ledgers, appendCheckpoint: () => { throw new Error("synthetic checkpoint failure after node append"); } };
+		const broken: GraphLedgers = { ...ledgers, graphStore: { ...ledgers.graphStore, appendCheckpoint: () => { throw new Error("synthetic checkpoint failure after node append"); } } };
 		await assert.rejects(make(broken).importNotes(input), incomplete("failed", 0));
-		assert.equal(ledgers.readNodes().length, 1, "already appended graph write retained even though merge never returned stats");
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 1);
+		assert.equal(ledgers.graphStore.readNodes().length, 1, "already appended graph write retained even though merge never returned stats");
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 1);
 	});
 
 	for (const seam of ["layout", "usage"] as const) it(`a post-merge ${seam} failure is not false success and reports committed stats`, async () => {
 		const ledgers = memoryLedgers();
-		const originalUsage = ledgers.appendSourceUsage;
+		const originalUsage = ledgers.graphStore.appendSourceUsage;
 		let failed = false;
-		const broken: GraphStore = { ...ledgers,
+		const broken: GraphLedgers = { ...ledgers, graphStore: { ...ledgers.graphStore,
 			...(seam === "layout" ? { writePositions: () => { throw new Error("synthetic layout failure"); } } : {
 				appendSourceUsage: (id, entry) => { if (!failed) { failed = true; throw new Error("synthetic usage failure"); } originalUsage(id, entry); },
 			}),
-		};
+		} };
 		await assert.rejects(make(broken).importNotes(input), incomplete("failed", 1));
-		assert.equal(ledgers.readNodes().length, 1);
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 1);
+		assert.equal(ledgers.graphStore.readNodes().length, 1);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 1);
 		await make(ledgers).importNotes(input);
 	});
 
 	it("source-upsert failure is typed and releases exclusion for retry", async () => {
 		const ledgers = memoryLedgers();
-		await assert.rejects(make({ ...ledgers, upsertSource: () => { throw new Error("synthetic metadata failure"); } }).importNotes(input), incomplete("failed", 0));
+		await assert.rejects(make({ ...ledgers, graphStore: { ...ledgers.graphStore, upsertSource: () => { throw new Error("synthetic metadata failure"); } } }).importNotes(input), incomplete("failed", 0));
 		await make(ledgers).importNotes(input);
 	});
 
@@ -2672,8 +2676,8 @@ describe("notes import completion and retry reliability", () => {
 		const ledgers = memoryLedgers();
 		await make(ledgers).importNotes({ ...input, filePath });
 		await make(ledgers).importNotes({ ...input, filePath });
-		assert.equal(ledgers.readSources().length, 1);
-		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
-		assert.equal(ledgers.readNodes().length, 2);
+		assert.equal(ledgers.graphStore.readSources().length, 1);
+		assert.equal(ledgers.graphStore.readSources()[0]!.extractions?.length, 2);
+		assert.equal(ledgers.graphStore.readNodes().length, 2);
 	});
 });

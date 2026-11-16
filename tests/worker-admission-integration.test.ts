@@ -8,7 +8,7 @@ import { after, test } from "node:test";
 import { Type } from "typebox";
 import { createFauxCore, fauxAssistantMessage, fauxToolCall, normalizeContext, type FauxResponseStep } from "@earendil-works/pi-ai";
 import type { PiEngine } from "../src/agent/models.ts";
-import type { GraphStore } from "../src/core/ports.ts";
+import type { CoverageLedger, GraphStore } from "../src/core/ports.ts";
 import type { HeadlessApi } from "../src/agent/subagents/headless.ts";
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "lh-worker-admission-integration-"));
@@ -71,17 +71,19 @@ const headless: HeadlessApi = {
 	runDemo: async () => { throw new Error("unexpected browser"); },
 };
 
+function memoryCoverage(): CoverageLedger {
+	const coverage: ReturnType<CoverageLedger["read"]> = [];
+	return { append: (value) => { coverage.push(value); }, read: () => structuredClone(coverage), rewrite: () => { throw new Error("unexpected destructive write"); } };
+}
 function memoryLedgers(): GraphStore {
 	const nodes: ReturnType<GraphStore["readNodes"]> = [];
 	const chains: ReturnType<GraphStore["readChains"]> = [];
-	const coverage: ReturnType<GraphStore["readCoverage"]> = [];
 	const checkpoints: ReturnType<GraphStore["readCheckpoints"]> = [];
 	const sources = new Map<string, ReturnType<GraphStore["readSources"]>[number]>();
 	let positions: ReturnType<GraphStore["readPositions"]> = {};
 	return {
 		appendNode: (value) => { nodes.push(value); }, readNodes: () => structuredClone(nodes),
 		appendChain: (value) => { chains.push(value); }, readChains: () => structuredClone(chains),
-		appendCoverage: (value) => { coverage.push(value); }, readCoverage: () => structuredClone(coverage),
 		appendCheckpoint: (value) => { checkpoints.push(value); }, readCheckpoints: () => structuredClone(checkpoints),
 		upsertSource: (value) => { sources.set(value.id, { ...value, extractions: sources.get(value.id)?.extractions ?? [] }); },
 		readSources: () => structuredClone([...sources.values()]),
@@ -111,11 +113,12 @@ function submit(name: string, value: unknown, onCall?: () => void, gate?: Promis
 test("actual audit lock: cancelling middle B cannot let C audit while A still holds audit+merge", { timeout: 8_000 }, async () => {
 	configureWorkerRequestAdmission(() => 8); // admission must not mask lock overlap
 	const graphStore = memoryLedgers();
+	const coverage = memoryCoverage();
 	const a = teachingChat("Alpha"), b = teachingChat("Beta"), c = teachingChat("Gamma");
 	const gate = deferred();
 	let cCalled = false, cSawAlpha = false, bCalled = false;
 	const pipeline = (id: string, label: string, auditor: PiEngine) => createExtractionPipeline({
-		chatStore, graphStore,
+		chatStore, graphStore, coverage,
 		extractor: submit("submit_findings", { propositions: [{ id, name: label, statement: `${label} claim.`, aliases: [], messageId: "teach" }], chains: [] }),
 		auditor,
 	});
@@ -139,7 +142,7 @@ test("actual audit lock: cancelling middle B cannot let C audit while A still ho
 		gate.resolve();
 		await Promise.all(runs);
 		assert.equal(cSawAlpha, true, "C explores the graph after A's merge, not just after A's request");
-		assert.equal(graphStore.readCoverage().some((row) => row.chatId === b), false);
+		assert.equal(coverage.read().some((row) => row.chatId === b), false);
 		assert.equal(extractionStatuses().length, 0);
 	} finally {
 		gate.resolve();
@@ -203,10 +206,10 @@ test("raw PDF + visual loops share request admission with the native worker runn
 
 test("chat and notes extraction share the configured request limit, not the old fixed-three extraction gate", { timeout: 8_000 }, async () => {
 	configureWorkerRequestAdmission(() => 4);
-	const graphStore = memoryLedgers(), gate = deferred();
+	const graphStore = memoryLedgers(), coverage = memoryCoverage(), gate = deferred();
 	let extractCalls = 0;
 	const pipeline = (label: string, notes: boolean) => createExtractionPipeline({
-		chatStore, graphStore,
+		chatStore, graphStore, coverage,
 		extractor: submit("submit_findings", { propositions: [{ id: "p1", name: label, statement: `${label} claim.`, aliases: [], ...(notes ? {} : { messageId: "teach" }) }], chains: [] }, () => { extractCalls++; }, gate.promise),
 		auditor: submit("submit_review", { links: [] }),
 	});
@@ -239,10 +242,10 @@ test("chat and notes extraction share the configured request limit, not the old 
 
 test("auditor model requests share admission with other workers, independently of the audit consistency lock", { timeout: 8_000 }, async () => {
 	configureWorkerRequestAdmission(() => 1);
-	const graphStore = memoryLedgers(), gate = deferred(), entered = deferred();
+	const graphStore = memoryLedgers(), coverage = memoryCoverage(), gate = deferred(), entered = deferred();
 	let called = false;
 	const pipeline = createExtractionPipeline({
-		chatStore, graphStore,
+		chatStore, graphStore, coverage,
 		extractor: submit("submit_findings", { propositions: [{ id: "p1", name: "Audit", statement: "Audit claim.", aliases: [], messageId: "teach" }], chains: [] }),
 		auditor: submit("submit_review", { links: [] }, entered.resolve, gate.promise),
 	});

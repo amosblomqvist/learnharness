@@ -68,13 +68,25 @@ import { MIN_CLUSTER_SIZE } from "./clusters.ts";
 import { formatChainLine } from "./chains.ts";
 import { attachImpToCommunities, birthSessionOf, birthSessionPartition } from "./session-clusters.ts";
 import { sourceFileLabel } from "./source-label.ts";
-import type { ChatStore, GraphStore } from "./ports.ts";
+import type { ChatStore, CoverageLedger, GraphStore } from "./ports.ts";
 
-/** The storage ports every graph operation needs, passed explicitly. */
+/** The storage ports every graph READ needs, passed explicitly. */
 export interface GraphDeps {
 	chatStore: ChatStore;
 	graphStore: GraphStore;
 }
+
+/** The ledgers a graph WRITE touches: the graph store plus the native
+ *  graph record's host-owned coverage ledger (coverage left GraphStore on
+ *  2026-11-16 — session/record kinds, stage A; core/record-kinds.ts). */
+export interface GraphLedgers {
+	graphStore: GraphStore;
+	coverage: CoverageLedger;
+}
+
+/** What the merger (and the extraction pipeline) needs: reads + the write
+ *  ledgers. src/server/stores.ts satisfies it structurally. */
+export interface GraphWriteDeps extends GraphDeps, GraphLedgers {}
 
 /** "n_" + 12 hex chars (contracts.ts GraphNode.id — store-assigned). */
 function newGraphNodeId(): string {
@@ -150,7 +162,7 @@ export function mergeFindings(
 	chatId: string,
 	findings: SessionFindings,
 	verdicts: AuditVerdicts,
-	deps: GraphDeps,
+	deps: GraphWriteDeps,
 	source: MergeSource,
 ): EmissionStats {
 	const { graphStore: ledgers } = deps;
@@ -282,7 +294,7 @@ export function mergeFindings(
 	//    batch's messages uncovered); the notes path keeps the whole-file
 	//    checkpoint (a file is one shot).
 	if (source.coverage !== undefined) {
-		for (const entry of source.coverage) ledgers.appendCoverage(entry);
+		for (const entry of source.coverage) deps.coverage.append(entry);
 	} else {
 		ledgers.appendCheckpoint({ chatId, foldedAt: source.foldedAt });
 	}

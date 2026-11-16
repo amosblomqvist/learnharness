@@ -44,7 +44,6 @@ function fakeStores(
 		readNodes: () => nodes,
 		readChains: () => chains,
 		readCheckpoints: () => [],
-		readCoverage: () => [],
 		readSources: () => [],
 		readPositions: () => ({}),
 		writePositions: () => {},

@@ -18,6 +18,7 @@ const { PATHS, SOURCES_FILE, PROMPTS_OVERRIDE_DIR, LEDGER_FILES } = await import
 const { chatStore } = await import("../src/store/chats.ts");
 const { jobStore } = await import("../src/store/jobs.ts");
 const { graphStore } = await import("../src/store/graph.ts");
+const { graphCoverage } = await import("../src/store/coverage.ts");
 const { promptOverrides } = await import("../src/store/prompt-overrides.ts");
 
 after(() => fs.rmSync(TMP_DATA, { recursive: true, force: true }));
@@ -55,9 +56,9 @@ describe("deleting records removes their crash leftovers", () => {
 	});
 
 	it("graph records purged by session or source deletes", () => {
-		graphStore.rewriteLedgers({ coverage: [] });
+		graphCoverage.rewrite([]);
 		fs.writeFileSync(`${LEDGER_FILES.coverage}.tmp-crash`, "purged row\n");
-		graphStore.rewriteLedgers({ coverage: [] });
+		graphCoverage.rewrite([]);
 		assert.deepEqual(leftovers(path.dirname(LEDGER_FILES.coverage)), []);
 	});
 

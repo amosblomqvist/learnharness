@@ -37,6 +37,7 @@ process.env.LH_DATA_DIR = TMP;
 
 const { chatStore } = await import("../src/store/chats.ts");
 const { graphStore } = await import("../src/store/graph.ts");
+const { graphCoverage } = await import("../src/store/coverage.ts");
 const { jobStore } = await import("../src/store/jobs.ts");
 const { settingsStore } = await import("../src/store/settings.ts");
 const { readRenderSettings } = await import("../src/store/render-settings.ts");
@@ -165,7 +166,7 @@ test("graph: the real ledgers parse through their shape guards", () => {
 	assert.ok(graphStore.readNodes().length >= 250, "nodes parse");
 	assert.ok(graphStore.readChains().length >= 150, "chains parse");
 	assert.ok(graphStore.readCheckpoints().length >= 5, "session checkpoints parse");
-	assert.ok(graphStore.readCoverage().length >= 90, "coverage entries parse");
+	assert.ok(graphCoverage.read().length >= 90, "coverage entries parse");
 	assert.ok(graphStore.readSources().length >= 1, "imported-notes sources parse");
 });
 

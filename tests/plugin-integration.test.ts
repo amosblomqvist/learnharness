@@ -15,7 +15,7 @@ import type { PluginNotification } from "../src/core/plugins.ts";
 import type { PluginWorkerService } from "../src/core/plugin-workers.ts";
 import type { ModelCatalogResponse } from "../src/core/contracts/models.ts";
 import type { ChatRecord, ChatSummary } from "../src/core/contracts/chat.ts";
-import type { ChatStore, GraphStore } from "../src/core/ports.ts";
+import type { ChatStore, CoverageLedger, GraphStore } from "../src/core/ports.ts";
 import type { ServerEvent } from "../src/core/events.ts";
 
 /** Hypothetical integration package, NOT a product feature. The backend uses
@@ -104,10 +104,11 @@ test("external native backend composes host, inference, persistent managed input
 		getChat: id => id === learningRecord.id ? JSON.parse(fs.readFileSync(learningFile, "utf8")) as ChatRecord : null,
 		listChats: () => structuredClone(summaries),
 	};
-	const graphReads: Pick<GraphStore, "readNodes" | "readChains" | "readCheckpoints" | "readCoverage" | "readSources" | "readPositions"> = {
-		readNodes: () => [], readChains: () => [], readCheckpoints: () => [], readCoverage: () => [], readSources: () => [], readPositions: () => ({}),
+	const graphReads: Pick<GraphStore, "readNodes" | "readChains" | "readCheckpoints" | "readSources" | "readPositions"> = {
+		readNodes: () => [], readChains: () => [], readCheckpoints: () => [], readSources: () => [], readPositions: () => ({}),
 	};
-	const learning = createPluginLearningData({ directory: learningDirectory, chatStore: chatReads as ChatStore, graphStore: graphReads as GraphStore, isBusy: () => false, isCompacting: () => false, readMetadata: name => name === "format.json" ? { version: 1 } : null });
+	const coverage: Pick<CoverageLedger, "read"> = { read: () => [] };
+	const learning = createPluginLearningData({ directory: learningDirectory, chatStore: chatReads as ChatStore, graphStore: graphReads as GraphStore, coverage: coverage as CoverageLedger, isBusy: () => false, isCompacting: () => false, readMetadata: name => name === "format.json" ? { version: 1 } : null });
 
 	const notifications: PluginNotification[] = [];
 	const observers = new Set<(notification: PluginNotification) => void>();

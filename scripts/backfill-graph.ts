@@ -7,6 +7,7 @@
  */
 import { chatStore } from "../src/store/chats.ts";
 import { graphStore } from "../src/store/graph.ts";
+import { graphCoverage } from "../src/store/coverage.ts";
 import { createExtractionPipeline } from "../src/agent/subagents/extraction.ts";
 import { getGraph } from "../src/core/graph.ts";
 import { effectiveSettings } from "../src/server/stores.ts";
@@ -18,6 +19,7 @@ async function main() {
 	const pipeline = createExtractionPipeline({
 		chatStore,
 		graphStore,
+		coverage: graphCoverage,
 		// Live budget: the graph section's setting, same as the app's trigger
 		getChunkTokens: () => effectiveSettings().graph.extractionChunkTokens,
 	});

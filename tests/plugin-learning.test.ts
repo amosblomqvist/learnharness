@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import type { ChatStore, GraphStore } from "../src/core/ports.ts";
+import type { ChatStore, CoverageLedger, GraphStore } from "../src/core/ports.ts";
 import { createPluginLearningData } from "../src/server/plugin-learning.ts";
 
 it("plugin learning reader preserves native data and provides reads only", () => {
@@ -10,7 +10,8 @@ it("plugin learning reader preserves native data and provides reads only", () =>
 	const checkpoints = [{ chatId: "chat_a", foldedAt: "2026-01-01" }];
 	const reader = createPluginLearningData({ directory: "/learning", isBusy: () => true, isCompacting: () => false,
 		chatStore: { getChat: (id: string) => id === "chat_a" ? record : null, listChats: () => [{ id: "chat_a", kind: "teach" }] } as unknown as ChatStore,
-		graphStore: { readNodes: () => nodes, readChains: () => [], readCheckpoints: () => checkpoints, readCoverage: () => [], readSources: () => sources, readPositions: () => ({ node: { x: 1, y: 2 } }) } as unknown as GraphStore,
+		graphStore: { readNodes: () => nodes, readChains: () => [], readCheckpoints: () => checkpoints, readSources: () => sources, readPositions: () => ({ node: { x: 1, y: 2 } }) } as unknown as GraphStore,
+		coverage: { read: () => [] } as unknown as CoverageLedger,
 		readMetadata: (name) => name === "format.json" ? { version: 1 } : { enabled: true },
 	});
 	assert.equal(reader.directory, "/learning");

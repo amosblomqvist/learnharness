@@ -23,15 +23,16 @@ import type { AuditVerdicts, GraphChain, GraphNode, SessionFindings } from "../s
 import type { QuestionAnswerData } from "../src/core/question-core.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 import { projectView as projectNative } from "../src/core/view.ts";
-import { deriveView, getGraph, graphSnapshot, mergeFindings, type GraphDeps } from "../src/core/graph.ts";
+import { deriveView, getGraph, graphSnapshot, mergeFindings, type GraphWriteDeps } from "../src/core/graph.ts";
 import { coverageSlots } from "../src/core/coverage.ts";
 import { graphStore } from "../src/store/graph.ts";
+import { graphCoverage } from "../src/store/coverage.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { GRAPH_FORMAT_FILE, LEDGER_FILES, PATHS, SOURCES_FILE } from "../config.ts";
 import { CURRENT_GRAPH_FORMAT_VERSION } from "../src/core/contracts/graph.ts";
 
 /** The wired fs adapters, exactly what src/server/stores.ts passes in production. */
-const graphDeps = { chatStore, graphStore } as const satisfies GraphDeps;
+const graphDeps = { chatStore, graphStore, coverage: graphCoverage } as const satisfies GraphWriteDeps;
 
 /** The session merge source for a chat — what the pipeline passes: the
  *  fold stamp only (the merger reads no transcript; quiz-event rebuilding
@@ -821,7 +822,7 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		// prunes both ledgers.
 		for (const chat of [dA, dB]) {
 			for (let i = 0; i < 2; i++) {
-				graphStore.appendCoverage({ chatId: chat.id, fp: `${chat.id}-${i}`, tokens: 10, foldedAt: "2026-09-23T00:02:00.000Z" });
+				graphCoverage.append({ chatId: chat.id, fp: `${chat.id}-${i}`, tokens: 10, foldedAt: "2026-09-23T00:02:00.000Z" });
 			}
 		}
 		graphStore.writePositions({ ...graphStore.readPositions(), [xId]: { x: 1, y: 1 }, [yId]: { x: 2, y: 2 }, [zId]: { x: 3, y: 3 } });
@@ -832,7 +833,7 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		const { dA, dB, xId, yId, zId } = buildTwoSessionScenario();
 		const zLineBefore = JSON.stringify(graphStore.readNodes().find((n) => n.id === zId));
 
-		const stats = deleteChatTraces(graphStore, dA.id, "delete-nodes");
+		const stats = deleteChatTraces(graphDeps, dA.id, "delete-nodes");
 		assert.deepEqual(stats, {
 			nodesRemoved: 1,
 			chainsRemoved: 1,
@@ -876,7 +877,7 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		graphStore.appendNode({ id: "n_del_append_probe", name: "Probe", statement: "Probe statement", aliases: [], createdAt: "2026-09-23T00:04:00.000Z", provenance: [{ chatId: "chat_foreign_probe", messageId: "" }] });
 		assert.equal(graphStore.readNodes().length, nodesBefore + 1);
 		// Idempotent: a second run finds nothing.
-		assert.deepEqual(deleteChatTraces(graphStore, dA.id, "delete-nodes"), { ...stats, nodesRemoved: 0, chainsRemoved: 0, coverageRemoved: 0, checkpointsRemoved: 0 } satisfies ChatDeletionStats);
+		assert.deepEqual(deleteChatTraces(graphDeps, dA.id, "delete-nodes"), { ...stats, nodesRemoved: 0, chainsRemoved: 0, coverageRemoved: 0, checkpointsRemoved: 0 } satisfies ChatDeletionStats);
 	});
 
 	it("preserve-graph: only the extraction bookkeeping dies — the graph ledgers are byte-identical", () => {
@@ -886,7 +887,7 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 			chains: graphStore.readChains(),
 			positions: graphStore.readPositions(),
 		};
-		const stats = deleteChatTraces(graphStore, dA.id, "preserve-graph");
+		const stats = deleteChatTraces(graphDeps, dA.id, "preserve-graph");
 		assert.deepEqual(stats, {
 			nodesRemoved: 0,
 			chainsRemoved: 0,
@@ -896,8 +897,8 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		assert.deepEqual(graphStore.readNodes(), before.nodes);
 		assert.deepEqual(graphStore.readChains(), before.chains);
 		assert.deepEqual(graphStore.readPositions(), before.positions);
-		assert.equal(graphStore.readCoverage().some((row) => row.chatId === dA.id), false);
-		assert.equal(graphStore.readCoverage().some((row) => row.chatId === dB.id), true);
+		assert.equal(graphCoverage.read().some((row) => row.chatId === dA.id), false);
+		assert.equal(graphCoverage.read().some((row) => row.chatId === dB.id), true);
 		void xId; void yId; void zId;
 	});
 
@@ -1111,10 +1112,10 @@ describe("session coverage read (extraction-UX redesign, 2026-09-24)", () => {
 		// Fold the first two messages: the read derives the split + the
 		// newest fold timestamp from the ledger rows.
 		const slots = coverageSlots(chatStore.getChat(chat.id)!.messages);
-		graphStore.appendCoverage({ chatId: chat.id, fp: slots[0]!.fp, tokens: slots[0]!.tokens, foldedAt: "2026-09-24T10:00:00.000Z" });
-		graphStore.appendCoverage({ chatId: chat.id, fp: slots[1]!.fp, tokens: slots[1]!.tokens, foldedAt: "2026-09-24T11:30:00.000Z" });
+		graphCoverage.append({ chatId: chat.id, fp: slots[0]!.fp, tokens: slots[0]!.tokens, foldedAt: "2026-09-24T10:00:00.000Z" });
+		graphCoverage.append({ chatId: chat.id, fp: slots[1]!.fp, tokens: slots[1]!.tokens, foldedAt: "2026-09-24T11:30:00.000Z" });
 		// Another session's row must not leak into this read.
-		graphStore.appendCoverage({ chatId: "chat_other", fp: slots[2]!.fp, tokens: slots[2]!.tokens, foldedAt: "2026-09-24T23:00:00.000Z" });
+		graphCoverage.append({ chatId: "chat_other", fp: slots[2]!.fp, tokens: slots[2]!.tokens, foldedAt: "2026-09-24T23:00:00.000Z" });
 
 		const cov = sessionCoverage(chat.id)!;
 		assert.equal(cov.totalMessages, 3);

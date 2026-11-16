@@ -22,7 +22,7 @@ import type {
 	ExtractionStageUsage,
 	SessionFindings,
 } from "../../core/contracts.ts";
-import { getGraph, mergeFindings, type DerivedGraph, type EmissionStats, type GraphDeps } from "../../core/graph.ts";
+import { getGraph, mergeFindings, type DerivedGraph, type EmissionStats, type GraphWriteDeps } from "../../core/graph.ts";
 import type { GraphStore } from "../../core/ports.ts";
 import { emit } from "../../core/events.ts";
 import { settleGraphLayout } from "../../core/layout-settle.ts";
@@ -734,7 +734,7 @@ export interface ExtractionModels {
 	providerKeyMissing?: (provider: string, tier: ModelSlotName) => ProviderKeyMissing | null;
 }
 
-export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
+export interface ExtractionPipelineDeps extends GraphWriteDeps, ExtractionModels {
 	/** The chunk budget — the transcript-token share of the extractor's
 	 *  context; batches fill to it (the trigger fires on the same number,
 	 *  read fresh per turn by the composition root). OPTIONAL with the
@@ -795,7 +795,7 @@ export function callUsage(usage: Usage): CallUsage {
 }
 
 export function createExtractionPipeline(deps: ExtractionPipelineDeps): ExtractionPipeline {
-	const { chatStore, graphStore } = deps;
+	const { chatStore, graphStore, coverage } = deps;
 	// Stage-engine resolution: a direct test value wins; otherwise the
 	// engineFor chain (role override → slot → nothing, resolved FRESH per
 	// stage call server-side) — the job runner's exact treatment. undefined
@@ -1113,7 +1113,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// engines AND their providers' keys; a refusal lands BEFORE any
 			// stage runs (typed — the trigger skips, routes surface 503).
 			refuseIfStagesUnready();
-			const covered = coverageOf(record.messages, graphStore.readCoverage(), chatId);
+			const covered = coverageOf(record.messages, coverage.read(), chatId);
 			const failedOutputCalls = failedOutputCallIds(record.messages);
 			if (covered.uncovered.length === 0) {
 				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
@@ -1184,7 +1184,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								// merges in), the stored fingerprint won't match its new
 								// one and it re-opens: honest by construction.
 								const foldedAt = new Date().toISOString();
-								const batchStats = mergeFindings(chatId, findings, auditResult, { chatStore, graphStore }, {
+								const batchStats = mergeFindings(chatId, findings, auditResult, { chatStore, graphStore, coverage }, {
 									foldedAt,
 									coverage: batch
 										.filter((slot) => slot.tokens > 0)
@@ -1349,7 +1349,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 									id,
 									findings,
 									auditResult,
-									{ chatStore, graphStore },
+									{ chatStore, graphStore, coverage },
 									{ foldedAt: input.importedAt },
 								);
 								// Capture the committed merge BEFORE layout/usage can fail.

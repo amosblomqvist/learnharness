@@ -119,11 +119,6 @@ export interface GraphStore {
 	/** Append one emission checkpoint. */
 	appendCheckpoint(checkpoint: SessionCheckpoint): void;
 	readCheckpoints(): SessionCheckpoint[];
-	/** Message-granular extraction coverage (vision-extraction-coverage.md):
-	 *  append-only; one line per covered message. The chat-extraction
-	 *  checkpoint — "uncovered" is derived from these, never tracked. */
-	appendCoverage(entry: CoverageEntry): void;
-	readCoverage(): CoverageEntry[];
 
 	/** Append one cluster-naming run's usage (graph-global money channel) —
 	 *  idempotent per startedAt. */
@@ -148,18 +143,38 @@ export interface GraphStore {
 
 	/** THE DESTRUCTIVE SEAM (session-deletion wave 6, owner 2026-09-22 —
 	 *  the first non-append operation on these ledgers): atomically
-	 *  replace the full contents of any subset of the six rewritable
+	 *  replace the full contents of any subset of the rewritable graph
 	 *  ledgers. Each provided array is written to a temp file and renamed
 	 *  over the ledger (crash-safe: a torn write never replaces the
 	 *  original); absent keys leave their ledger untouched. The pure
 	 *  computation is core/graph-deletion.ts — the store only makes the
-	 *  replacement atomic. */
+	 *  replacement atomic. (Coverage rewrites go through CoverageLedger.) */
 	rewriteLedgers(next: {
 		nodes?: GraphNode[];
 		chains?: GraphChain[];
-		coverage?: CoverageEntry[];
 		checkpoints?: SessionCheckpoint[];
 	}): void;
+}
+
+// ─── CoverageLedger — host-owned extraction coverage, one per record kind ───
+// Message-granular coverage (vision-extraction-coverage.md): append-only,
+// one row per covered message; "uncovered" is DERIVED from these rows
+// against the transcript (core/coverage.ts), never tracked. Left GraphStore
+// on 2026-11-16 (session/record kinds, stage A): the HOST owns coverage for
+// every record kind — the native graph's ledger stays at
+// data/graph/coverage.jsonl; a plugin record kind's lives in its own data
+// directory (core/record-kinds.ts). Rows carry no record field: the ledger
+// is chosen by the chat's record kind, which is a function of its session
+// kind.
+
+export interface CoverageLedger {
+	/** Every row in append order. */
+	read(): CoverageEntry[];
+	/** Append one covered-message row (the merge's final step). */
+	append(entry: CoverageEntry): void;
+	/** THE DESTRUCTIVE SEAM for coverage (session/source deletion):
+	 *  atomically replace the whole ledger; [] writes an empty file. */
+	rewrite(entries: CoverageEntry[]): void;
 }
 
 /** Separate from graph ledgers and source identity, for future shared views. */
