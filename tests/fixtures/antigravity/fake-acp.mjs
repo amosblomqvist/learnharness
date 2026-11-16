@@ -162,7 +162,7 @@ async function parseMcpResponseBody(response) {
 	return lastJson;
 }
 
-async function callMcpJsonRpc(url, authHeader, sessionId, payload) {
+async function callMcpJsonRpc(url, authHeader, sessionId, payload, signal) {
 	const headers = {
 		"Content-Type": "application/json",
 		Accept: "application/json, text/event-stream",
@@ -173,6 +173,7 @@ async function callMcpJsonRpc(url, authHeader, sessionId, payload) {
 		method: "POST",
 		headers,
 		body: JSON.stringify(payload),
+		...(signal ? { signal } : {}),
 	});
 	const nextSessionId = res.headers.get("mcp-session-id") ?? sessionId;
 	const body = await parseMcpResponseBody(res);
@@ -567,7 +568,10 @@ rl.on("line", (line) => {
 			}
 
 			if (
-				(streamMode === "mcp-tool" || streamMode === "two-mcp-tools") &&
+				(streamMode === "mcp-tool" ||
+					streamMode === "two-mcp-tools" ||
+					streamMode === "mcp-tool-timeout-and-retry" ||
+					streamMode === "mcp-tool-move-on") &&
 				!(process.env.FAKE_ACP_TEXT_ON_REPLAY === "1" && isReplayPrompt)
 			) {
 				const server = session.mcpServers[0];
@@ -658,6 +662,66 @@ rl.on("line", (line) => {
 						result: {
 							stopReason: "end_turn",
 							usage: { inputTokens: 45, outputTokens: 15, totalTokens: 60 },
+						},
+					});
+					return;
+				}
+
+				if (streamMode === "mcp-tool-timeout-and-retry") {
+					const ac = new AbortController();
+					setTimeout(() => ac.abort(), 40);
+					await callMcpJsonRpc(
+						server.url,
+						authHeader,
+						initRes.sessionId,
+						{
+							jsonrpc: "2.0",
+							id: 10,
+							method: "tools/call",
+							params: { name: "ask_user_question", arguments: { question: "Initial question" } },
+						},
+						ac.signal,
+					).catch(() => {});
+					// Simulate ACP timing out the held call and internally retrying + finishing.
+					void callMcpJsonRpc(server.url, authHeader, initRes.sessionId, {
+						jsonrpc: "2.0",
+						id: 11,
+						method: "tools/call",
+						params: { name: "ask_user_question", arguments: { question: "Initial question" } },
+					}).catch(() => {});
+					emitSessionUpdate(sessionId, {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "Timed out waiting on MCP tool." },
+					});
+					writeOut({
+						jsonrpc: "2.0",
+						id: msg.id,
+						result: {
+							stopReason: "end_turn",
+							usage: { inputTokens: 200, cachedReadTokens: 50, outputTokens: 20, totalTokens: 220 },
+						},
+					});
+					return;
+				}
+
+				if (streamMode === "mcp-tool-move-on") {
+					void callMcpJsonRpc(server.url, authHeader, initRes.sessionId, {
+						jsonrpc: "2.0",
+						id: 10,
+						method: "tools/call",
+						params: { name: "ask_user_question", arguments: { question: "Ignored wait" } },
+					}).catch(() => {});
+					await new Promise((resolve) => setTimeout(resolve, 40));
+					emitSessionUpdate(sessionId, {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "Moving on without waiting" },
+					});
+					writeOut({
+						jsonrpc: "2.0",
+						id: msg.id,
+						result: {
+							stopReason: "end_turn",
+							usage: { inputTokens: 200, cachedReadTokens: 50, outputTokens: 20, totalTokens: 220 },
 						},
 					});
 					return;

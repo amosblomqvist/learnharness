@@ -940,3 +940,63 @@ setInterval(() => {}, 1000);
 	assert.equal(grandchildAlive, false, "parked ACP grandchild must exit when host receives SIGTERM");
 	await waitForDirRemoved(runDir);
 });
+
+test("parked ACP process that cancels/times out or moves on past held MCP tool call unparks cleanly and replays learner answer", async (t) => {
+	for (const streamMode of ["mcp-tool-timeout-and-retry", "mcp-tool-move-on"] as const) {
+		const root = makeTempRoot(t, `lh-agy-${streamMode}-`);
+		const { authFile, profileDir } = makeSignedInProfile(root);
+		const spawns: SpawnRecord[] = [];
+		const streamFn = createAntigravityStream({
+			isEnabled: () => true,
+			isSignedIn: () => true,
+			resolveRuntime: () => fakeRuntime(),
+			ensureProfile: () => profileDir,
+			spawnProcess: spySpawner(spawns, t),
+			cancelGraceMs: 40,
+			env: {
+				...process.env,
+				LH_AUTH_FILE: authFile,
+				FAKE_ACP_STREAM_MODE: streamMode,
+				FAKE_ACP_TEXT_ON_REPLAY: "1",
+				FAKE_ACP_RECORD_EVENTS: "1",
+			},
+		});
+
+		const user1: Message = { role: "user", content: "Ask me a question", timestamp: 1 };
+		const events1 = await collectEvents(
+			streamFn(testModel(), normalizeContext({ systemPrompt: "Sys", messages: [user1], tools: [ASK_USER_QUESTION_TOOL] }), {
+				sessionId: `desync-${streamMode}`,
+			}),
+		);
+		const call1 = getToolCalls(events1)[0]!;
+		assert.equal(spawns.length, 1);
+
+		// Wait for ACP to abort/move on while parked -> LearnHarness must unpark and kill the stale child.
+		await waitForExit(spawns[0]!.child);
+		await waitForDirRemoved(spawns[0]!.runDir);
+		assert.equal(getParkedAntigravityProcessCount(), 0, `${streamMode}: should unpark stale ACP child`);
+		assert.equal(getActiveAntigravityProcessCount(), 0, `${streamMode}: should unregister stale ACP child`);
+
+		// Learner submits their answer -> must cold-start cleanly with replay instead of emitting duplicate tool calls or empty content[].
+		const turn1Msg = (events1.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>).message;
+		const tr1: ToolResultMessage = {
+			role: "toolResult",
+			toolCallId: call1.id,
+			toolName: "ask_user_question",
+			content: [{ type: "text", text: "My real answer" }],
+			isError: false,
+			timestamp: 2,
+		};
+		const events2 = await collectEvents(
+			streamFn(
+				testModel(),
+				normalizeContext({ systemPrompt: "Sys", messages: [user1, turn1Msg, tr1], tools: [ASK_USER_QUESTION_TOOL] }),
+				{ sessionId: `desync-${streamMode}` },
+			),
+		);
+		assert.equal(spawns.length, 2, `${streamMode}: learner answer must cold-start a fresh ACP session`);
+		assert.match(getFinalText(events2), /^Replayed \d+ blocks$/);
+		await waitForExit(spawns[1]!.child);
+		await waitForDirRemoved(spawns[1]!.runDir);
+	}
+});

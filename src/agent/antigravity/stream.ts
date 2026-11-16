@@ -308,13 +308,16 @@ class AcpTurn {
 
 		if (response.usage) {
 			const u = response.usage;
-			const input = typeof u.inputTokens === "number" && Number.isFinite(u.inputTokens) ? u.inputTokens : 0;
+			const rawInput = typeof u.inputTokens === "number" && Number.isFinite(u.inputTokens) ? u.inputTokens : 0;
 			const output = typeof u.outputTokens === "number" && Number.isFinite(u.outputTokens) ? u.outputTokens : 0;
 			const cacheRead =
 				typeof u.cachedReadTokens === "number" && Number.isFinite(u.cachedReadTokens) ? u.cachedReadTokens : 0;
 			const cacheWrite =
 				typeof u.cachedWriteTokens === "number" && Number.isFinite(u.cachedWriteTokens) ? u.cachedWriteTokens : 0;
 			const thought = typeof u.thoughtTokens === "number" && Number.isFinite(u.thoughtTokens) ? u.thoughtTokens : 0;
+			// ACP inputTokens includes cached reads; Pi/LearnHarness expects usage.input to be
+			// fresh non-cached input only because measuredContextTokens sums input + output + cacheRead + cacheWrite.
+			const input = Math.max(0, rawInput - cacheRead);
 			const total =
 				typeof u.totalTokens === "number" && Number.isFinite(u.totalTokens)
 					? u.totalTokens
@@ -411,6 +414,7 @@ class AcpSessionProcess implements LiveAntigravityProcess {
 		const bridge = await createAntigravityToolBridge(tools, {
 			onCall: () => this.flushAdmissions(),
 			onError: (err) => this.fail(err.message),
+			onCancel: (call) => this.handleCancelledToolCall(call),
 		});
 		if (this.stopping || this.closed) {
 			await bridge.close().catch(() => {});
@@ -456,6 +460,16 @@ class AcpSessionProcess implements LiveAntigravityProcess {
 								? update.error
 								: "Antigravity reported a stream error.";
 					this.fail(formatAntigravityError(raw, client.stderrTail(), this.platform));
+					return;
+				}
+				if (
+					this.turn.finished &&
+					this.admitted.length > 0 &&
+					(update.sessionUpdate === "agent_thought_chunk" || update.sessionUpdate === "agent_message_chunk")
+				) {
+					// Antigravity moved on with model generation instead of honoring the held MCP call wait.
+					// Kill and unpark immediately so the next turn cold-starts cleanly with transcript replay.
+					void this.kill();
 					return;
 				}
 				this.turn.handleSessionUpdate(update, client.stderrTail());
@@ -533,6 +547,10 @@ class AcpSessionProcess implements LiveAntigravityProcess {
 			if (!this.turn.finished) {
 				this.turn.finishPrompt(response);
 				await this.cleanup();
+			} else if (this.admitted.length > 0) {
+				// Antigravity ended the prompt while LearnHarness was parked waiting on admitted tool results.
+				// Tear down instead of caching completedResponse so the next turn cold-starts cleanly with replay.
+				await this.kill();
 			} else {
 				// Prompt completed right while handing off a tool batch or parked; keep response for continuation.
 				this.completedResponse = response;
@@ -610,6 +628,15 @@ class AcpSessionProcess implements LiveAntigravityProcess {
 		}
 
 		this.flushAdmissions();
+	}
+
+	private handleCancelledToolCall(call: AntigravityPendingToolCall): void {
+		if (this.stopping || this.closed) return;
+		if (this.admitted.some((admittedCall) => admittedCall.id === call.id)) {
+			// The MCP HTTP call was cancelled or timed out on Antigravity's side while parked;
+			// unpark and terminate so the next turn replays the tool result into a fresh ACP session.
+			void this.kill();
+		}
 	}
 
 	flushAdmissions(): void {

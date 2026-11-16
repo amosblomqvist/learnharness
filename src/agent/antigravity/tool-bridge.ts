@@ -1,3 +1,4 @@
+import { AsyncLocalStorage } from "node:async_hooks";
 import { randomBytes, randomUUID, timingSafeEqual } from "node:crypto";
 import * as http from "node:http";
 import type { AddressInfo } from "node:net";
@@ -77,6 +78,7 @@ class ToolCallQueue {
 		call: AntigravityPendingToolCall,
 		signal: AbortSignal,
 		onCancel?: (call: AntigravityPendingToolCall) => void,
+		res?: http.ServerResponse,
 	): Promise<CallToolResult> {
 		const result = new Promise<CallToolResult>((resolve) => {
 			const cancel = () => {
@@ -85,13 +87,20 @@ class ToolCallQueue {
 				settle({ content: [{ type: "text", text: "MCP request cancelled" }], isError: true });
 				onCancel?.(call);
 			};
+			const onResClose = () => {
+				if (res && !res.writableEnded) {
+					cancel();
+				}
+			};
 			this.results.set(call, (value) => {
 				this.results.delete(call);
 				signal.removeEventListener("abort", cancel);
+				res?.removeListener("close", onResClose);
 				resolve(value);
 			});
 			signal.addEventListener("abort", cancel, { once: true });
-			if (signal.aborted) cancel();
+			res?.once("close", onResClose);
+			if (signal.aborted || (res && res.closed && !res.writableEnded)) cancel();
 		});
 
 		this.wakeWaiters();
@@ -136,6 +145,7 @@ function createMcpServer(
 	queue: ToolCallQueue,
 	seenIds: Set<string>,
 	callbacks?: AntigravityBridgeCallbacks,
+	responseStore?: AsyncLocalStorage<http.ServerResponse>,
 ): Server {
 	const server = new Server({ name: ANTIGRAVITY_MCP_SERVER_NAME, version: "1.0.0" }, { capabilities: { tools: {} } });
 
@@ -166,6 +176,7 @@ function createMcpServer(
 			},
 			extra.signal,
 			callbacks?.onCancel,
+			responseStore?.getStore(),
 		);
 		callbacks?.onCall();
 		return result;
@@ -213,10 +224,11 @@ export async function createAntigravityToolBridge(
 	const seenIds = new Set<string>();
 	const sessions = new Map<string, SessionEntry>();
 	const ephemeralEntries = new Set<SessionEntry>();
+	const responseStore = new AsyncLocalStorage<http.ServerResponse>();
 	let closing = false;
 
 	const openSession = async (): Promise<SessionEntry> => {
-		const mcpServer = createMcpServer(tools, queue, seenIds, callbacks);
+		const mcpServer = createMcpServer(tools, queue, seenIds, callbacks, responseStore);
 		let entry!: SessionEntry;
 		const transport = new StreamableHTTPServerTransport({
 			sessionIdGenerator: () => randomUUID(),
@@ -264,7 +276,8 @@ export async function createAntigravityToolBridge(
 			} else {
 				entry = await openSession();
 			}
-			await entry.transport.handleRequest(req, res);
+			const handle = () => entry.transport.handleRequest(req, res);
+			await (req.method === "POST" ? responseStore.run(res, handle) : handle());
 		})().catch((error: unknown) => {
 			console.error("antigravity tool bridge request failed", error);
 			if (!res.headersSent) res.writeHead(500);

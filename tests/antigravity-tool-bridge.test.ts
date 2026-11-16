@@ -184,3 +184,75 @@ test("bridge.close rejects pending waitForToolCalls promises", async () => {
 	await bridge.close();
 	await assert.rejects(waitPromise, /antigravity tool bridge closed/i);
 });
+
+test("aborting HTTP tools/call request clears pending call and fires onCancel", async () => {
+	const cancelled: string[] = [];
+	const bridge = await createAntigravityToolBridge(
+		[
+			{
+				name: "recall",
+				description: "Ask recall question",
+				parameters: Type.Object({ question: Type.String() }),
+			},
+		],
+		{
+			onCall: () => {},
+			onError: () => {},
+			onCancel: (call) => {
+				cancelled.push(call.id);
+			},
+		},
+	);
+
+	try {
+		const authHeaders = {
+			"Content-Type": "application/json",
+			Accept: "application/json, text/event-stream",
+			Authorization: bridge.authorization,
+		};
+		const initRes = await fetch(bridge.url, {
+			method: "POST",
+			headers: authHeaders,
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 1,
+				method: "initialize",
+				params: { protocolVersion: "2024-11-05", capabilities: {}, clientInfo: { name: "test", version: "1" } },
+			}),
+		});
+		const sessionId = initRes.headers.get("mcp-session-id")!;
+		await fetch(bridge.url, {
+			method: "POST",
+			headers: { ...authHeaders, "mcp-session-id": sessionId },
+			body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized", params: {} }),
+		});
+
+		const abortCtrl = new AbortController();
+		const callPromise = fetch(bridge.url, {
+			method: "POST",
+			headers: { ...authHeaders, "mcp-session-id": sessionId },
+			body: JSON.stringify({
+				jsonrpc: "2.0",
+				id: 2,
+				method: "tools/call",
+				params: { name: "recall", arguments: { question: "Ohm's law?" } },
+			}),
+			signal: abortCtrl.signal,
+		}).catch(() => {});
+
+		const pending = await bridge.waitForToolCalls(1);
+		assert.equal(pending.length, 1);
+
+		abortCtrl.abort();
+		await callPromise;
+		const deadline = Date.now() + 1_000;
+		while (cancelled.length === 0 && Date.now() < deadline) {
+			await new Promise((r) => setTimeout(r, 15));
+		}
+
+		assert.deepEqual(cancelled, [pending[0]!.id]);
+		assert.equal(bridge.getPendingToolCalls().length, 0);
+	} finally {
+		await bridge.close();
+	}
+});

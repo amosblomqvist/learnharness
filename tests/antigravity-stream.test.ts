@@ -9,6 +9,7 @@ import type { ResolvedAntigravityRuntime } from "../src/agent/antigravity/instal
 import { antigravityTokenFilePath, ensureAntigravityProfile } from "../src/agent/antigravity/profile.ts";
 import { toPiAntigravityModel } from "../src/agent/antigravity/provider.ts";
 import { createAntigravityStream, isDeclaredLearnHarnessMcpPermission, shutdownAntigravityProcesses } from "../src/agent/antigravity/stream.ts";
+import { measuredContextTokens } from "../src/core/context-usage.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 
 const FAKE_ACP = path.resolve(import.meta.dirname, "fixtures", "antigravity", "fake-acp.mjs");
@@ -110,12 +111,13 @@ test("createAntigravityStream translates thinking/text chunks, usage, cliContext
 		assert.equal(finalMsg.role, "assistant");
 		assert.equal(finalMsg.content[0]?.thinking, "Thinking (high): analyzing.");
 		assert.equal(finalMsg.content[1]?.text, "Hello from gemini-3.1-pro!");
-		assert.equal(finalMsg.usage.input, 100);
+		assert.equal(finalMsg.usage.input, 80);
 		assert.equal(finalMsg.usage.output, 25);
 		assert.equal(finalMsg.usage.cacheRead, 20);
 		assert.equal(finalMsg.usage.cacheWrite, 5);
 		assert.equal(finalMsg.usage.totalTokens, 140);
 		assert.equal(finalMsg.usage.cost.total, 0);
+		assert.equal(measuredContextTokens([{ ...finalMsg, id: "m1" } as unknown as LhMessage]), 130);
 		assert.equal(finalMsg.cliContextWindow, 512000);
 
 		const recordedSession = JSON.parse(
