@@ -34,6 +34,7 @@ import { addLiveProcess, getLiveProcess, removeLiveProcess, type LiveProcess } f
 import { configurationForReuse, conversationForReuse } from "./reuse-context.ts";
 import { BRIDGE_SERVER_NAME, createToolBridge, toolNameFromMcp, type PendingToolCall, type ToolBridge } from "./tool-bridge.ts";
 import { toClaudeInput, toStreamJsonLine } from "./transcript.ts";
+import { sweepStaleTurnFilesOnce, TURN_CWD_PREFIX, TURN_PRIVATE_PREFIX } from "./turn-files.ts";
 
 type RunClaudeOptions = { cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal };
 
@@ -384,10 +385,11 @@ class ClaudeTurn {
 type TurnFiles = { cwd: string; privateDir: string; systemPromptFile: string; mcpConfigFile: string };
 
 async function createTurnFiles(systemPrompt: string, mcpConfig: string): Promise<TurnFiles> {
-	const cwd = await mkdtemp(join(tmpdir(), "claude-code-cwd-"));
+	void sweepStaleTurnFilesOnce(); // folders a turn stopped mid-way left behind
+	const cwd = await mkdtemp(join(tmpdir(), TURN_CWD_PREFIX));
 	let privateDir: string | undefined;
 	try {
-		privateDir = await mkdtemp(join(tmpdir(), "claude-code-private-"));
+		privateDir = await mkdtemp(join(tmpdir(), TURN_PRIVATE_PREFIX));
 		const systemPromptFile = join(privateDir, "system-prompt.md");
 		const mcpConfigFile = join(privateDir, "mcp.json");
 		await writeFile(systemPromptFile, systemPrompt, { mode: PRIVATE_FILE_MODE });
