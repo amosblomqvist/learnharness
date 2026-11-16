@@ -136,6 +136,7 @@ class AcpTurn {
 	started = false;
 	finished = false;
 	lastError: string | null = null;
+	private lastUsageUpdateUsed = 0;
 
 	constructor(
 		private readonly stream: AssistantMessageEventStream,
@@ -247,8 +248,13 @@ class AcpTurn {
 					this.output.cliContextWindow = Math.round(size);
 				}
 				const used = update.used;
-				if (typeof used === "number" && Number.isFinite(used) && used >= 0 && this.output.usage.totalTokens === 0) {
-					this.output.usage.totalTokens = Math.round(used);
+				if (typeof used === "number" && Number.isFinite(used) && used > 0) {
+					const rounded = Math.round(used);
+					this.lastUsageUpdateUsed = rounded;
+					// MCP tool-use steps finish via admit() before session/prompt returns PromptResponse.usage.
+					// Populate usage.input so measuredContextTokens and turns logs reflect single-call context size.
+					this.output.usage.input = rounded;
+					this.output.usage.totalTokens = rounded;
 				}
 				return;
 			}
@@ -308,28 +314,32 @@ class AcpTurn {
 
 		if (response.usage) {
 			const u = response.usage;
-			const rawInput = typeof u.inputTokens === "number" && Number.isFinite(u.inputTokens) ? u.inputTokens : 0;
+			// agy_acp_server reports uncached prompt_token_count in inputTokens (already disjoint from cachedReadTokens).
+			const input = typeof u.inputTokens === "number" && Number.isFinite(u.inputTokens) ? u.inputTokens : 0;
 			const output = typeof u.outputTokens === "number" && Number.isFinite(u.outputTokens) ? u.outputTokens : 0;
 			const cacheRead =
 				typeof u.cachedReadTokens === "number" && Number.isFinite(u.cachedReadTokens) ? u.cachedReadTokens : 0;
 			const cacheWrite =
 				typeof u.cachedWriteTokens === "number" && Number.isFinite(u.cachedWriteTokens) ? u.cachedWriteTokens : 0;
 			const thought = typeof u.thoughtTokens === "number" && Number.isFinite(u.thoughtTokens) ? u.thoughtTokens : 0;
-			// ACP inputTokens includes cached reads; Pi/LearnHarness expects usage.input to be
-			// fresh non-cached input only because measuredContextTokens sums input + output + cacheRead + cacheWrite.
-			const input = Math.max(0, rawInput - cacheRead);
-			const total =
-				typeof u.totalTokens === "number" && Number.isFinite(u.totalTokens)
-					? u.totalTokens
-					: input + output + cacheRead + cacheWrite + thought;
-			this.output.usage = {
-				input,
-				output,
-				cacheRead,
-				cacheWrite,
-				totalTokens: total,
-				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-			};
+			const bucketSum = input + output + cacheRead + cacheWrite;
+			// PromptResponse.usage is cumulative across all model calls since session/prompt started, whereas
+			// usage_update.used reports the single latest call's context usage. If bucketSum exceeds lastUsageUpdateUsed,
+			// PromptResponse spans multiple calls; keep the single-call usage_update measurement for Context (last call).
+			if (this.lastUsageUpdateUsed === 0 || bucketSum <= this.lastUsageUpdateUsed) {
+				const total =
+					typeof u.totalTokens === "number" && Number.isFinite(u.totalTokens)
+						? u.totalTokens
+						: bucketSum + thought;
+				this.output.usage = {
+					input,
+					output,
+					cacheRead,
+					cacheWrite,
+					totalTokens: total,
+					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+				};
+			}
 		}
 
 		const mapped = mapStopReason(response.stopReason);

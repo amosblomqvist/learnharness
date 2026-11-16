@@ -27,6 +27,7 @@ import { discoverAntigravityModels } from "../src/agent/antigravity/models-disco
 import { antigravityTokenFilePath, ensureAntigravityProfile } from "../src/agent/antigravity/profile.ts";
 import { toPiAntigravityModel } from "../src/agent/antigravity/provider.ts";
 import { createAntigravityStream, type AntigravityStreamDeps } from "../src/agent/antigravity/stream.ts";
+import { measuredContextTokens } from "../src/core/context-usage.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 import { shutdownAntigravityProcesses } from "../src/server/index.ts";
 
@@ -215,7 +216,10 @@ test("multi-turn learner-question pause parks ACP process and reuses same proces
 	assert.equal(call1.name, "ask_user_question");
 	assert.equal(spawns.length, 1);
 	assert.equal(getParkedAntigravityProcessCount(), 1);
-	assert.equal((turn1Events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }> & { message: LhMessage }).message.cliContextWindow, 768000);
+	const turn1DoneForCtx = (turn1Events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }> & { message: LhMessage }).message;
+	assert.equal(turn1DoneForCtx.cliContextWindow, 768000);
+	assert.equal(turn1DoneForCtx.usage.input, 150);
+	assert.equal(measuredContextTokens([{ ...turn1DoneForCtx, id: "t1" }]), 150);
 	assert.ok(fs.existsSync(spawns[0]!.runDir));
 
 	// Turn 2: learner answers ask_user_question -> same ACP process continues into quiz tool -> still parked

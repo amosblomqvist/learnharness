@@ -827,19 +827,22 @@ rl.on("line", (line) => {
 					size: Number(process.env.FAKE_ACP_CLI_WINDOW),
 				});
 			}
-			writeOut({
-				jsonrpc: "2.0",
-				id: msg.id,
-				result: {
-					stopReason: "end_turn",
-					usage: {
+			const usagePayload = process.env.FAKE_ACP_USAGE_JSON
+				? JSON.parse(process.env.FAKE_ACP_USAGE_JSON)
+				: {
 						inputTokens: 100,
 						outputTokens: 25,
 						thoughtTokens: 15,
 						cachedReadTokens: 20,
 						cachedWriteTokens: 5,
 						totalTokens: 140,
-					},
+					};
+			writeOut({
+				jsonrpc: "2.0",
+				id: msg.id,
+				result: {
+					stopReason: "end_turn",
+					usage: usagePayload,
 				},
 			});
 		})();

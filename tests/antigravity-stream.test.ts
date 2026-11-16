@@ -111,13 +111,13 @@ test("createAntigravityStream translates thinking/text chunks, usage, cliContext
 		assert.equal(finalMsg.role, "assistant");
 		assert.equal(finalMsg.content[0]?.thinking, "Thinking (high): analyzing.");
 		assert.equal(finalMsg.content[1]?.text, "Hello from gemini-3.1-pro!");
-		assert.equal(finalMsg.usage.input, 80);
+		assert.equal(finalMsg.usage.input, 100);
 		assert.equal(finalMsg.usage.output, 25);
 		assert.equal(finalMsg.usage.cacheRead, 20);
 		assert.equal(finalMsg.usage.cacheWrite, 5);
 		assert.equal(finalMsg.usage.totalTokens, 140);
 		assert.equal(finalMsg.usage.cost.total, 0);
-		assert.equal(measuredContextTokens([{ ...finalMsg, id: "m1" } as unknown as LhMessage]), 130);
+		assert.equal(measuredContextTokens([{ ...finalMsg, id: "m1" } as unknown as LhMessage]), 150);
 		assert.equal(finalMsg.cliContextWindow, 512000);
 
 		const recordedSession = JSON.parse(
@@ -485,6 +485,56 @@ test("createAntigravityStream approves learnharness MCP permission requests and 
 		assert.equal((deniedDone.message.content[0] as { text?: string }).text, "mcp-permission:cancelled");
 	} finally {
 		await shutdownAntigravityProcesses();
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("createAntigravityStream prefers single-call usage_update.used over larger multi-call cumulative PromptResponse.usage", async () => {
+	const root = makeTempRoot();
+	const authFile = path.join(root, "auth.json");
+	const env = {
+		...process.env,
+		LH_AUTH_FILE: authFile,
+		FAKE_ACP_CLI_WINDOW: "1048576",
+		FAKE_ACP_USAGE_JSON: JSON.stringify({
+			inputTokens: 400,
+			outputTokens: 25,
+			cachedReadTokens: 350,
+			totalTokens: 425,
+		}),
+	};
+
+	try {
+		const profileDir = ensureAntigravityProfile({ authFile, env });
+		fs.writeFileSync(antigravityTokenFilePath(profileDir), JSON.stringify({ token: "tok" }), { mode: 0o600 });
+
+		const streamFn = createAntigravityStream({
+			isEnabled: () => true,
+			isSignedIn: () => true,
+			resolveRuntime: () => fakeRuntime("1.4.5"),
+			ensureProfile: () => profileDir,
+			env,
+		});
+
+		const stream = streamFn(
+			testModel(),
+			normalizeContext({
+				systemPrompt: "Teach calculus patiently.",
+				messages: [{ role: "user", content: "Explain derivatives.", timestamp: 1 }],
+				tools: [],
+			}),
+			{ reasoning: "high", sessionId: "chat-multicall-usage" },
+		);
+
+		const events = await collectEvents(stream);
+		const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+		assert.equal(done.reason, "stop");
+		const finalMsg = done.message as unknown as LhMessage & { usage: NonNullable<typeof done.message.usage> };
+		assert.equal(finalMsg.usage.input, 150);
+		assert.equal(finalMsg.usage.totalTokens, 150);
+		assert.equal(measuredContextTokens([{ ...finalMsg, id: "m-multi" }]), 150);
+		assert.equal(finalMsg.cliContextWindow, 1048576);
+	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
