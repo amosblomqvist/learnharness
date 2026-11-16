@@ -7,6 +7,7 @@ import { isSubagentFailure } from "@/src/core";
 import { DemoOutputCard } from "@/components/artifacts/demo-card";
 import { PdfBriefCard, ResearchBriefCard } from "@/components/artifacts/job-card";
 import { VisualOutputCard } from "@/components/artifacts/visual-card";
+import { ExplainerOutputCard } from "@/components/artifacts/explainer-card";
 
 /**
  * The sub-agent result delivery card (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -21,9 +22,11 @@ import { VisualOutputCard } from "@/components/artifacts/visual-card";
  *     too long to inline by default and the teacher's wake turn weaves it
  *     into the lesson anyway. Failures keep the failure card (the brief
  *     explains what went wrong).
- *   demo / visual — the artifact itself (sandboxed iframe / sanitized SVG).
+ *   demo / visual / explainer — the artifact itself (sandboxed iframe /
+ *     sanitized SVG / the finished page shrunk into a sandboxed iframe).
  *     The sub-agent's verification notes are model-facing glue and do NOT
  *     render; only a failure note does.
+ *   a kind this build does not know — a quiet "could not be displayed" box.
  */
 export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 	const artifactPart = message.parts.find((p) => p.type === "data-subagent-artifact");
@@ -59,6 +62,20 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 			return <DemoOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
 		case "visual":
 			return <VisualOutputCard output={data.result} messageId={message.id} initialInverted={data.ui?.inverted ?? false} />;
+		case "explainer":
+			return <ExplainerOutputCard output={data.result} />;
+		default: {
+			// Type check only: a new JobKind that lacks a case above fails to
+			// compile here. At runtime a kind this build does not know (a
+			// stored record from a newer build) must not throw — one bad record
+			// would otherwise take down the whole lesson's render.
+			const unknownKind: never = data.kind;
+			return (
+				<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
+					A sub-agent ({String(unknownKind)}) completed, but the result could not be displayed.
+				</div>
+			);
+		}
 	}
 }
 

@@ -87,6 +87,10 @@ const nextConfig: NextConfig = {
 			// loads its colocated WASM through Node, also in packaged Electron.
 			"src/agent/image-processing/*.mjs",
 			"src/agent/image-processing/LICENSE",
+			// The bundled visual-explainer renderer runs in an unbundled worker and
+			// reads its CSS and JS relative to its own files.
+			"src/agent/explainer/*.mjs",
+			"src/agent/explainer-kit/**/*",
 			"node_modules/@silvia-odwyer/photon-node/**/*",
 			// Wave E stage 2: resvg rasterizes visual-maker SVGs natively; same
 			// per-platform-binary story as the canvas above (one per build).

@@ -1,7 +1,7 @@
 "use client";
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
-import { ActivityIcon, BotIcon, FileTextIcon, PenToolIcon, PlayIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
+import { ActivityIcon, BotIcon, FileTextIcon, PenToolIcon, PlayIcon, PresentationIcon, SearchIcon, SquareIcon, WaypointsIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { CallUsage, JobKind, JobRecord } from "@/src/core";
 import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels } from "@/src/core";
@@ -281,6 +281,7 @@ function useNow(active: boolean): number {
 const KIND_ICON: Record<JobKind, typeof SearchIcon> = {
 	research: SearchIcon,
 	demo: PlayIcon,
+	explainer: PresentationIcon,
 	visual: PenToolIcon,
 	pdf: FileTextIcon, // sources v0 — type-forced entry (JobKind grew "pdf")
 };
@@ -401,7 +402,9 @@ function ActivityBlobRow({
 						? "Figure maker"
 						: blob.jobKind === "pdf"
 							? "PDF reader"
-							: "Sub-agent";
+							: blob.jobKind === "explainer"
+									? "Explainer writer"
+									: "Sub-agent";
 	return (
 		<div
 			data-testid={`activity-blob-${blob.process}`}

@@ -49,7 +49,7 @@ test("launcher uses the verified executable directly and preserves model args an
 			calls++;
 			assert.equal(path, binary);
 			assert.deepEqual(args, ["-p", "--tools", ""]);
-			assert.deepEqual(opts, { ...options, stdio: "pipe" });
+			assert.deepEqual(opts, { ...options, stdio: "pipe", windowsHide: true });
 			return child;
 		}) as typeof spawn,
 	});

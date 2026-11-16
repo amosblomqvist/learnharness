@@ -66,7 +66,7 @@ export function toolQuestionKind(tool: string): "quiz" | "ask" | "explain" {
 }
 
 /** Tools fulfilled by background sub-agent jobs (W2/W6). */
-export const JOB_TOOLS = ["research", "demo", "visual"] as const;
+export const JOB_TOOLS = ["research", "demo", "visual", "explainer"] as const;
 
 // ─── Tool availability (2026-09 settings seam) ─────────────────────────────
 
@@ -84,7 +84,7 @@ export const JOB_TOOLS = ["research", "demo", "visual"] as const;
  *  lenient for forward-compat. The names are the MODEL-FACING tool names
  *  (research, not researcher; pdf is the PDF-reader dispatch, sources v0
  *  2026-09). */
-export const TOGGLEABLE_TOOLS = ["research", "demo", "visual", "pdf"] as const;
+export const TOGGLEABLE_TOOLS = ["research", "demo", "visual", "pdf", "explainer"] as const;
 
 /** The keys the settings WRITE side accepts in agent.tools: the plain
  *  toggleables PLUS the quizzing-mechanics switch (`explain: true` arms
@@ -166,6 +166,7 @@ const ACTIVITY_LABELS: Record<string, string> = {
 	grep: "Searching file contents…",
 	research: "Dispatching research…",
 	demo: "Building a demo…",
+	explainer: "Writing an explainer…",
 	visual: "Making a visual…",
 	pdf: "Reading a PDF…",
 	plan_init: "Drawing up the plan…",

@@ -24,7 +24,7 @@ export interface JobToolContext {
 	/** Fire the background runner for a fresh job — fire-and-forget. The
 	 *  input rides along because the spawn happens MID-STREAM, before
 	 *  onFinish persists the tool part — a transcript scan would race it. */
-	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput) => void;
+	spawn: (job: JobRecord, input: ResearchInput | DemoInput | VisualInput | PdfInput | ExplainerInput) => void;
 	/** Search-provider availability, retained for existing composition seams.
 	 *  Research dispatch does not depend on it: web_fetch is keyless and
 	 *  web_search reports a missing provider as a recoverable tool result. */
@@ -48,6 +48,15 @@ export const demoInputSchema = Type.Object({
 		description:
 			"Precise brief for the builder: the concept, the parameters/controls and what each does, the interactions, and the visual style. " +
 			"The builder sees NOTHING else of the lesson — include everything it needs, including necessary formulas and constants.",
+	}),
+});
+
+export const explainerInputSchema = Type.Object({
+	title: Type.String({ description: "Short title for the explainer card, e.g. 'How HTTP/2 multiplexing works'." }),
+	brief: Type.String({
+		description:
+			"Precise brief for the writer: the concept, the mechanisms/flows/states/comparisons to visualize, the section structure, and any necessary facts or formulas. " +
+			"The writer sees NOTHING else of the lesson — include everything it needs.",
 	}),
 });
 
@@ -85,7 +94,7 @@ function dispatch(
 	kind: JobRecord["kind"],
 	toolCallId: string,
 	ack: string,
-	input: ResearchInput | DemoInput | VisualInput | PdfInput,
+	input: ResearchInput | DemoInput | VisualInput | PdfInput | ExplainerInput,
 ): string {
 	const existing = ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId);
 	const job = existing ?? ctx.jobStore.createJob({ kind, chatId: ctx.chatId, toolCallId, input });
@@ -99,6 +108,9 @@ const RESEARCH_ACK =
 const DEMO_ACK =
 	"This call is fire-and-forget: continue your turn and keep teaching — do not wait, poll, or mention waiting. " +
 	"The tested demo arrives as a new message when ready and is rendered in the lesson; teach with it then.";
+const EXPLAINER_ACK =
+	"This call is fire-and-forget: continue your turn and keep teaching — do not wait, poll, or mention waiting. " +
+	"The rendered explainer page arrives as a new message when ready and is displayed in the lesson; teach with it then.";
 const VISUAL_ACK =
 	"This call is fire-and-forget: continue your turn and keep teaching — do not wait, poll, or mention waiting. " +
 	"The verified figure arrives as a new message when ready and is rendered in the lesson; reference it then.";
@@ -117,6 +129,11 @@ const DEMO_DESCRIPTION =
 	"something to sweep, animate, or sample is better experienced than described. " +
 	"The call is ASYNC and fire-and-forget — it resolves immediately and your turn continues; the tested demo arrives later " +
 	"as a new message. Write a precise brief: concept, controls, interactions, style.";
+const EXPLAINER_DESCRIPTION =
+	"Dispatch a background sub-agent that WRITES a diagram-first single-file HTML page (architecture, data flows, states, comparisons), " +
+	"rendered on the server and displayed scaled-down in the lesson. " +
+	"The call is ASYNC and fire-and-forget — it resolves immediately and your turn continues; the rendered page arrives later " +
+	"as a new message. Write a precise brief: the writer sees nothing else of the lesson.";
 const VISUAL_DESCRIPTION =
 	"Dispatch a background sub-agent that hand-authors ONE precise SVG figure, renders it, LOOKS at the render, and iterates " +
 	"until correct. Use it for exact spatial pictures auto-layout diagrams can't do: coordinate geometry, number lines, vectors, " +
@@ -157,6 +174,15 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			parameters: demoInputSchema,
 			execute: serverExecute("demo", demoInputSchema, (input, { toolCallId }) => dispatch(ctx, "demo", toolCallId, DEMO_ACK, input)),
 		},
+		explainer: {
+			name: "explainer",
+			label: "explainer",
+			description: EXPLAINER_DESCRIPTION,
+			parameters: explainerInputSchema,
+			execute: serverExecute("explainer", explainerInputSchema, (input, { toolCallId }) =>
+				dispatch(ctx, "explainer", toolCallId, EXPLAINER_ACK, input),
+			),
+		},
 		visual: {
 			name: "visual",
 			label: "visual",
@@ -187,5 +213,6 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 
 export type ResearchInput = Static<typeof researchInputSchema>;
 export type DemoInput = Static<typeof demoInputSchema>;
+export type ExplainerInput = Static<typeof explainerInputSchema>;
 export type VisualInput = Static<typeof visualInputSchema>;
 export type PdfInput = Static<typeof pdfInputSchema>;

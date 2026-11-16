@@ -1,6 +1,7 @@
 import type { ComponentType } from "react";
 import type { ArtifactPartProps } from "@/src/core";
 import { DemoCard } from "@/components/artifacts/demo-card";
+import { ExplainerCard } from "@/components/artifacts/explainer-card";
 import { JobCard, PdfJobCard } from "@/components/artifacts/job-card";
 import { VisualCard } from "@/components/artifacts/visual-card";
 import { ImageCard } from "@/components/artifacts/image-card";
@@ -29,6 +30,7 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	// Artifacts (W6 fills in the components):
 	demo: DemoCard,
 	visual: VisualCard,
+	explainer: ExplainerCard,
 	// A learner image shown as-is (issue #363): the picture itself, inline.
 	show_image: ImageCard,
 	// The probe conclusion: the assessment belongs to the learner as much as

@@ -51,13 +51,13 @@ class DataHelpersTest(unittest.TestCase):
         self.assertFalse(target.exists())
 
     def test_mac_standard_root(self):
-        expected = self.base / "Library" / "Application Support" / "LearnHarness" / "data"
+        expected = self.base / "Library" / "Application Support" / "LearnHarness Fork" / "data"
         expected.mkdir(parents=True)
         with patch.object(_data.sys, "platform", "darwin"), patch.object(Path, "home", return_value=self.base):
             self.assertEqual(_data.data_root(), expected.resolve())
 
     def test_windows_standard_root(self):
-        expected = self.base / "roaming" / "LearnHarness" / "data"
+        expected = self.base / "roaming" / "LearnHarness Fork" / "data"
         expected.mkdir(parents=True)
         with patch.object(_data.sys, "platform", "win32"), patch.dict(os.environ, {"APPDATA": str(self.base / "roaming")}):
             self.assertEqual(_data.data_root(), expected.resolve())
@@ -69,11 +69,11 @@ class DataHelpersTest(unittest.TestCase):
 
     def test_linux_xdg_and_fallback(self):
         xdg = self.base / "config"
-        expected = xdg / "LearnHarness" / "data"
+        expected = xdg / "LearnHarness Fork" / "data"
         expected.mkdir(parents=True)
         with patch.object(_data.sys, "platform", "linux"), patch.dict(os.environ, {"XDG_CONFIG_HOME": str(xdg)}):
             self.assertEqual(_data.data_root(), expected.resolve())
-        fallback = self.base / ".config" / "LearnHarness" / "data"
+        fallback = self.base / ".config" / "LearnHarness Fork" / "data"
         fallback.mkdir(parents=True)
         with patch.object(_data.sys, "platform", "linux"), patch.object(Path, "home", return_value=self.base), patch.dict(os.environ, {}, clear=True):
             self.assertEqual(_data.data_root(), fallback.resolve())

@@ -193,8 +193,8 @@ describe("AgentSection (thin SSR)", () => {
 		assert.ok(row.includes('aria-checked="false"'), "stored-off renders off");
 	});
 
-	it("renders the owner's FINAL tool list — research, demo, visual, pdf", () => {
-		assert.deepEqual([...TOGGLE_TOOLS], ["research", "demo", "visual", "pdf"]);
+	it("renders the owner's FINAL tool list — research, demo, visual, pdf, explainer", () => {
+		assert.deepEqual([...TOGGLE_TOOLS], ["research", "demo", "visual", "pdf", "explainer"]);
 		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => {}} onModelsChange={() => {}} />);
 		for (const id of TOGGLE_TOOLS) assert.ok(html.includes(`data-testid="tool-row-${id}"`), id);
 	});

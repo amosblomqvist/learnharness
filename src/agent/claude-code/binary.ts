@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
-type BinaryLookup = {
+export type BinaryLookup = {
 	env: Record<string, string | undefined>;
 	platform: NodeJS.Platform;
 	homeDir: string;
@@ -10,56 +10,63 @@ type BinaryLookup = {
 	isExecutable: (path: string) => boolean;
 };
 
-type SearchSpec = {
-	paths: path.PlatformPath;
-	names: string[];
-	knownDirs: string[];
+export type CliBinarySpec = {
+	windowsNames: string[];
+	posixNames: string[];
+	knownDirs: (lookup: BinaryLookup, paths: path.PlatformPath) => string[];
+	excludedExtensions: string[];
 };
 
-function getWindowsSearchSpec(env: BinaryLookup["env"], homeDir: string): SearchSpec {
+function getWindowsKnownDirs(env: BinaryLookup["env"], homeDir: string): string[] {
 	const paths = path.win32;
 	const appData = env.APPDATA ?? paths.join(homeDir, "AppData", "Roaming");
 
-	return {
-		paths,
-		// Direct spawn deliberately uses no shell. A .cmd-only npm install
-		// is not runnable and must not count as an available provider.
-		names: ["claude.exe"],
-		knownDirs: [
+	return [
 			paths.join(homeDir, ".local", "bin"),
 			paths.join(homeDir, ".claude", "local"),
 			env.npm_config_prefix ?? paths.join(appData, "npm"),
-		],
-	};
+	];
 }
 
-function getPosixSearchSpec(env: BinaryLookup["env"], homeDir: string): SearchSpec {
+function getPosixKnownDirs(env: BinaryLookup["env"], homeDir: string): string[] {
 	const paths = path.posix;
 	const npmBin = env.npm_config_prefix
 		? paths.join(env.npm_config_prefix, "bin")
 		: paths.join(homeDir, ".npm-global", "bin");
 
-	return {
-		paths,
-		names: ["claude"],
-		knownDirs: [
+	return [
 			paths.join(homeDir, ".local", "bin"),
 			paths.join(homeDir, ".claude", "local"),
 			npmBin,
 			"/opt/homebrew/bin",
 			"/usr/local/bin",
-		],
-	};
+	];
 }
 
-export function resolveClaudeBinary({ env, platform, homeDir, cwd = process.cwd(), isExecutable }: BinaryLookup): string | null {
-	const { paths, names, knownDirs } = platform === "win32"
-		? getWindowsSearchSpec(env, homeDir)
-		: getPosixSearchSpec(env, homeDir);
+const claudeBinarySpec: CliBinarySpec = {
+	windowsNames: ["claude.exe"],
+	posixNames: ["claude"],
+	knownDirs: ({ env, platform, homeDir }) => platform === "win32"
+		? getWindowsKnownDirs(env, homeDir) : getPosixKnownDirs(env, homeDir),
+	// Direct spawn uses no shell, so npm's .cmd-only installation cannot run.
+	excludedExtensions: [".cmd", ".bat"],
+};
+
+export function resolveCliBinary(spec: CliBinarySpec, lookup: BinaryLookup): string | null {
+	const { env, platform, cwd = process.cwd(), isExecutable } = lookup;
+	const paths = platform === "win32" ? path.win32 : path.posix;
+	const names = platform === "win32"
+		? [...new Set(spec.windowsNames.flatMap((name) => {
+			const base = name.slice(0, name.length - paths.extname(name).length);
+			return [name, `${base}.exe`, `${base}.cmd`, `${base}.bat`];
+		}))]
+		: spec.posixNames;
+	const knownDirs = spec.knownDirs(lookup, paths);
 
 	const pathDirs = (env.PATH ?? "").split(paths.delimiter).filter(Boolean);
 
 	for (const name of names) {
+		if (spec.excludedExtensions.some((extension) => name.toLowerCase().endsWith(extension.toLowerCase()))) continue;
 		for (const dir of [...pathDirs, ...knownDirs]) {
 			// Discovery is relative to the server cwd; probes/model work use
 			// different directories and must receive the same absolute identity.
@@ -69,6 +76,10 @@ export function resolveClaudeBinary({ env, platform, homeDir, cwd = process.cwd(
 	}
 
 	return null;
+}
+
+export function resolveClaudeBinary(lookup: BinaryLookup): string | null {
+	return resolveCliBinary(claudeBinarySpec, lookup);
 }
 
 function isExecutableFile(filePath: string): boolean {
@@ -81,7 +92,11 @@ function isExecutableFile(filePath: string): boolean {
 }
 
 export function getClaudeBinary(): string | null {
-	return resolveClaudeBinary({
+	return getCliBinary(claudeBinarySpec);
+}
+
+export function getCliBinary(spec: CliBinarySpec): string | null {
+	return resolveCliBinary(spec, {
 		env: process.env,
 		platform: process.platform,
 		homeDir: os.homedir(),

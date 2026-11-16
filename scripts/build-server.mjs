@@ -77,11 +77,20 @@ for (const extra of ["dist", path.join("node_modules", "electron")]) {
 	}
 }
 
-// 3) Sanity: the runtime-read prompt assets must be present (the teacher
-//    agent reads them from disk at request time).
+// 3) Sanity: the runtime-read assets must be present (the teacher agent
+//    reads its prompts from disk at request time; the explainer renderer
+//    runs unbundled and reads its CSS and JS next to it; the two MIT texts
+//    are the only copies of the bundled licenses inside the app).
 for (const asset of [
 	path.join("src", "agent", "system-prompt.md"),
 	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
+	path.join("src", "agent", "explainer", "render-worker.mjs"),
+	path.join("src", "agent", "explainer-kit", "kit", "render.mjs"),
+	path.join("src", "agent", "explainer-kit", "kit", "kit.css"),
+	path.join("src", "agent", "explainer-kit", "kit", "reply.js"),
+	path.join("src", "agent", "explainer-kit", "SKILL.md"),
+	path.join("src", "agent", "explainer-kit", "LICENSE"),
+	path.join("src", "agent", "explainer-kit", "kit", "vendor", "PELE-LICENSE"),
 ]) {
 	if (!exists(path.join(STANDALONE, asset))) {
 		console.error(`[build-server] prompt asset missing from the trace: ${asset}`);

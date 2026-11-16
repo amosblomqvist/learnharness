@@ -20,6 +20,10 @@ import { chatGPTStream } from "./chatgpt-stream.ts";
 import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 import { createClaudeCodeProvider } from "./claude-code/provider.ts";
 import { streamClaudeCode } from "./claude-code/stream.ts";
+import { codexModels, createCodexProvider } from "./codex/provider.ts";
+import { streamCodex } from "./codex/stream.ts";
+import { createGeminiCliProvider } from "./gemini-cli/provider.ts";
+import { streamGeminiCli } from "./gemini-cli/stream.ts";
 import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
 
@@ -92,9 +96,15 @@ export function piModels() {
 				: provider);
 		}
 		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
+		collection.setProvider(createCodexProvider(streamCodex, codexModels()));
+		collection.setProvider(createGeminiCliProvider(streamGeminiCli));
 	}
 	providerSource?.sync(collection);
 	return collection;
+}
+
+export function syncCodexProvider(): void {
+	piModels().setProvider(createCodexProvider(streamCodex, codexModels()));
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */

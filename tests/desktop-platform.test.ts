@@ -163,7 +163,7 @@ describe("desktop packaging policy", () => {
 		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 		assert.equal(pkg.author.name, "Amos Blomqvist");
 		assert.equal(pkg.author.email, "255718537+amosblomqvist@users.noreply.github.com");
-		assert.equal(pkg.homepage, "https://github.com/amosblomqvist/learnharness");
+		assert.equal(pkg.homepage, "https://github.com/reeschan/learnharness");
 		assert.equal(pkg.desktopName, "learnharness.desktop");
 	});
 });
@@ -178,7 +178,7 @@ describe("workflow action versions", () => {
 			const workflow = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
 			const expected = ["actions/checkout@v7", "actions/setup-node@v7"];
 			if (filename === "release.yml") {
-				expected.push("actions/github-script@v9", "actions/upload-artifact@v7", "maxim-lobanov/setup-xcode@v1");
+				expected.push("actions/github-script@v9", "actions/upload-artifact@v7");
 			}
 			const observed = new Set<string>();
 			for (const job of Object.values(workflow.jobs)) {
@@ -203,12 +203,12 @@ describe("workflow action versions", () => {
 describe("desktop release workflow", () => {
 	type Step = {
 		if?: string; run?: string; uses?: string; env?: Record<string, string>;
-		with?: { script?: string; "xcode-version"?: string };
+		with?: { script?: string };
 	};
 	type Workflow = {
 		concurrency: { group: string; "cancel-in-progress": boolean };
 		jobs: Record<string, {
-			needs?: string | string[]; steps: Step[]; "runs-on"?: string;
+			needs?: string | string[]; if?: string; steps: Step[]; "runs-on"?: string;
 			strategy?: { matrix: { include: { os: string; platform: string; builder_args?: string }[] } };
 		}>;
 	};
@@ -222,14 +222,16 @@ describe("desktop release workflow", () => {
 	const script = prepare.with.script;
 	assert.ok(script);
 	type Release = { id: number; tag_name: string; draft: boolean };
+	const notFound = () => Object.assign(new Error("Not Found"), { status: 404 });
 
 	/** Execute the REAL action script with an in-memory GitHub API. */
-	async function prepareDraft(releases: Release[]) {
+	async function prepareDraft(releases: Release[], tagExists = true) {
 		const created: Record<string, unknown>[] = [];
 		const listReleases = () => {};
 		await runInNewContext(`(async () => { ${script} })()`, {
-			context: { repo: { owner: "test-owner", repo: "test-repo" }, ref: "refs/tags/v0.3.0" },
+			context: { repo: { owner: "test-owner", repo: "test-repo" }, ref: "refs/heads/main", sha: "abc123" },
 			core: { info() {} },
+			process: { env: { TAG: "v0.3.0" } },
 			github: {
 				paginate: async (method: unknown, options: unknown) => {
 					assert.equal(method, listReleases);
@@ -238,22 +240,36 @@ describe("desktop release workflow", () => {
 					});
 					return releases;
 				},
-				rest: { repos: {
-					listReleases,
-					createRelease: async (options: Record<string, unknown>) => {
-						created.push(JSON.parse(JSON.stringify(options)));
-						return { data: { id: 123 } };
+				rest: {
+					git: {
+						getRef: async (options: Record<string, unknown>) => {
+							assert.equal(options.ref, "tags/v0.3.0");
+							if (!tagExists) throw notFound();
+							return { data: { object: { type: "commit", sha: "abc123" } } };
+						},
+						createRef: async (options: Record<string, unknown>) => {
+							created.push({ tagRef: JSON.parse(JSON.stringify(options)) });
+							return { data: {} };
+						},
 					},
-				} },
+					repos: {
+						listReleases,
+						createRelease: async (options: Record<string, unknown>) => {
+							created.push(JSON.parse(JSON.stringify(options)));
+							return { data: { id: 123 } };
+						},
+					},
+				},
 			},
 		});
 		return created;
 	}
 
 	it("prepares once after gates, never on rehearsals, before parallel packaging", () => {
-		assert.equal(draft.needs, "quality");
-		assert.equal(prepare.if, "github.event_name == 'push'");
-		assert.deepEqual(packaging.needs, ["quality", "draft"]);
+		assert.deepEqual(draft.needs, ["version", "quality"]);
+		assert.equal(prepare.if, "needs.version.outputs.release == 'true'");
+		assert.deepEqual(packaging.needs, ["version", "quality", "draft"]);
+		assert.equal(workflow.jobs.quality?.if, "needs.version.outputs.release == 'true' || github.event_name == 'workflow_dispatch'");
 		assert.equal(workflow.concurrency.group, "release-${{ github.ref }}");
 		assert.equal(workflow.concurrency["cancel-in-progress"], false);
 		for (const filename of ["ci.yml", "release.yml"]) {
@@ -269,18 +285,11 @@ describe("desktop release workflow", () => {
 		}
 	});
 
-	it("pairs Icon Composer packaging with macOS 26 and Xcode selection, retaining macOS 15 CI", () => {
-		const mac = packaging.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
-		assert.equal(mac?.os, "macos-26", "actool's .icon compiler needs macOS 26 host frameworks, not just newer Xcode");
-		assert.equal(mac?.builder_args, "--mac --arm64");
+	it("packages Windows x64 only, retaining macOS 15 CI", () => {
+		const matrix = packaging.strategy?.matrix.include;
+		assert.deepEqual(matrix, [{ os: "windows-2025", platform: "windows-x64", builder_args: "--win --x64" }]);
 		assert.equal(packaging["runs-on"], "${{ matrix.os }}");
-		const xcodeIndex = packaging.steps.findIndex(step => step.uses === "maxim-lobanov/setup-xcode@v1");
-		assert.ok(xcodeIndex >= 0);
-		const xcode = packaging.steps[xcodeIndex];
-		assert.equal(xcode?.if, "runner.os == 'macOS'");
-		assert.equal(xcode?.with?.["xcode-version"], "latest-stable");
-		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
-		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
+		assert.ok(packaging.steps.some(step => step.run?.includes("electron-builder")));
 
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
@@ -291,6 +300,13 @@ describe("desktop release workflow", () => {
 		assert.deepEqual(await prepareDraft([{ id: 9, tag_name: "v0.2.0", draft: false }]), [{
 			owner: "test-owner", repo: "test-repo", tag_name: "v0.3.0", name: "0.3.0", draft: true,
 		}]);
+	});
+
+	it("creates the missing tag on the merged commit before the draft", async () => {
+		assert.deepEqual(await prepareDraft([], false), [
+			{ tagRef: { owner: "test-owner", repo: "test-repo", ref: "refs/tags/v0.3.0", sha: "abc123" } },
+			{ owner: "test-owner", repo: "test-repo", tag_name: "v0.3.0", name: "0.3.0", draft: true },
+		]);
 	});
 
 	it("reuses an existing draft without creating another", async () => {
@@ -308,5 +324,66 @@ describe("desktop release workflow", () => {
 			{ id: 10, tag_name: "v0.3.0", draft: true },
 			{ id: 11, tag_name: "v0.3.0", draft: true },
 		]), /Multiple releases match/);
+	});
+});
+
+describe("release decision on main merges", () => {
+	type Step = { with?: { script?: string } };
+	const yaml = require("js-yaml") as { load(source: string): { jobs: Record<string, { steps: Step[] }> } };
+	const workflow = yaml.load(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
+	const script = workflow.jobs.version?.steps.find((step) => step.with?.script)?.with?.script;
+	assert.ok(script);
+	const notFound = () => Object.assign(new Error("Not Found"), { status: 404 });
+	type Scenario = { eventName?: string; ref?: string; published?: boolean; tagSha?: string | null; annotated?: boolean };
+
+	/** Execute the REAL decision script with package.json at 0.3.0 and an in-memory GitHub API. */
+	async function decide({ eventName = "push", ref = "refs/heads/main", published = false, tagSha = null, annotated = false }: Scenario) {
+		const outputs: Record<string, string> = {};
+		await runInNewContext(`(async () => { ${script} })()`, {
+			require: (name: string) => {
+				assert.equal(name, "node:fs");
+				return { readFileSync: () => JSON.stringify({ version: "0.3.0" }) };
+			},
+			context: { repo: { owner: "o", repo: "r" }, eventName, ref, sha: "merged" },
+			core: { setOutput: (key: string, value: string) => { outputs[key] = value; }, notice() {} },
+			github: { rest: {
+				repos: { getReleaseByTag: async ({ tag }: { tag: string }) => {
+					assert.equal(tag, "v0.3.0");
+					if (!published) throw notFound();
+					return { data: { draft: false } };
+				} },
+				git: {
+					getRef: async () => {
+						if (tagSha === null) throw notFound();
+						return { data: { object: annotated ? { type: "tag", sha: "tag-object" } : { type: "commit", sha: tagSha } } };
+					},
+					getTag: async () => ({ data: { object: { sha: tagSha } } }),
+				},
+			} },
+		});
+		return outputs;
+	}
+
+	it("releases a merge that bumps package.json to an unreleased version", async () => {
+		assert.deepEqual(await decide({}), { tag: "v0.3.0", release: "true" });
+	});
+
+	it("skips a merge whose version is already published", async () => {
+		assert.deepEqual(await decide({ published: true, tagSha: "older" }), { tag: "v0.3.0", release: "false" });
+	});
+
+	it("resumes when the tag already points at the merged commit", async () => {
+		assert.equal((await decide({ tagSha: "merged" })).release, "true");
+		assert.equal((await decide({ tagSha: "merged", annotated: true })).release, "true");
+	});
+
+	it("refuses an unpublished tag on another commit", async () => {
+		await assert.rejects(decide({ tagSha: "older" }), /already points at older/);
+	});
+
+	it("keeps tag pushes and manual rehearsals", async () => {
+		assert.equal((await decide({ ref: "refs/tags/v0.3.0" })).release, "true");
+		await assert.rejects(decide({ ref: "refs/tags/v0.2.9" }), /must equal v0\.3\.0/);
+		assert.equal((await decide({ eventName: "workflow_dispatch" })).release, "false");
 	});
 });

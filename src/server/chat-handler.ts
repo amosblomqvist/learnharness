@@ -35,7 +35,7 @@ import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { providerKeyPresent } from "./keys.ts";
-import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
+import { EXTERNAL_CLI_PROVIDERS, isExternalCliProvider } from "../core/contracts/external-cli.ts";
 import {
 	extractionEnabled,
 	graphToolsEnabled,
@@ -87,7 +87,7 @@ import type {CallUsage} from "../core/contracts.ts";
 /** Fresh check only at new background-run admission; never cancel a run
  * already in progress when the opt-in is switched off. */
 function connectionBackgroundAllowed(provider: string): boolean {
-	return subscriptionBackgroundAllowed(provider) && (provider !== CLAUDE_CODE_PROVIDER || providerKeyPresent(provider));
+	return subscriptionBackgroundAllowed(provider) && (!isExternalCliProvider(provider) || providerKeyPresent(provider));
 }
 
 function settlementErrorText(error: unknown): string {
@@ -161,7 +161,19 @@ function retentionForSlot(slot: ModelSlotName) {
 	return () => stores.settingsStore.readSettings()?.models?.[slot]?.cacheRetention;
 }
 
-setJobRespawn((jobId) => void jobRunner.runJob(jobId));
+/**
+ * Loads the model catalogs a role or the conversation may need when they are fetched at run time (Codex lists its
+ * models through its CLI). Engines resolved outside a chat turn (a job respawned after a restart, a notes import)
+ * call this first, or the catalog is still empty and the engine has no model. A failed fetch keeps the last list.
+ */
+export async function refreshRoleCatalogs(conversationProvider?: string): Promise<void> {
+	const roleSettings = stores.settingsStore.readSettings();
+	const providers = new Set((Object.keys(ROLE_SLOT) as ModelRole[]).map((role) => resolveRoleSpec(role, roleSettings)?.provider));
+	if (conversationProvider) providers.add(conversationProvider);
+	if (providers.has(EXTERNAL_CLI_PROVIDERS.codex)) await refreshConnectionCatalog(EXTERNAL_CLI_PROVIDERS.codex);
+}
+
+setJobRespawn((jobId) => void refreshRoleCatalogs().catch(() => undefined).then(() => jobRunner.runJob(jobId)));
 // The learner-filesystem policy (file-access wave): every tool registry is
 // built in this composition root, so the seam is installed here — the
 // tools read it fresh per call (allowed folders + the app's private paths).
@@ -253,10 +265,11 @@ export async function handleChatInput(
 	// (a chat.model override still resolves through it).
 	if (isSubscriptionProvider(conversation.provider)) {
 		await refreshConnectionCatalog(conversation.provider);
-		if (input.type === "steers" && !connectionBackgroundAllowed(conversation.provider)) {
+		if (isSubscriptionProvider(conversation.provider) && input.type === "steers" && !connectionBackgroundAllowed(conversation.provider)) {
 			return Response.json({ error: "Background use is off for this connection. Automatic follow-up remains deferred in its queue." }, { status: 403 });
 		}
 	}
+	await refreshRoleCatalogs(conversation.provider);
 	if (!providerKeyPresent(conversation.provider)) {
 		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);

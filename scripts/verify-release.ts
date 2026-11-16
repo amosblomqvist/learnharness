@@ -1,39 +1,29 @@
 /**
- * verify-release.ts — the final desktop-release gate (2026-10-13).
+ * verify-release.ts — the final desktop-release gate.
  *
- * Runs in the release workflow's LAST job, after all three packaging jobs
- * have uploaded to the tag's single draft GitHub Release, and fails the
+ * Runs in the release workflow's verify job, after the Windows packaging job
+ * has uploaded to the tag's single draft GitHub Release, and fails the
  * workflow unless that draft holds exactly what end users and
- * electron-updater need. The workflow never publishes; this script only
- * reads (release list via the workflow's read-only token, update feeds
- * downloaded by the workflow's own gh steps).
+ * electron-updater need. This script only reads (release list via the
+ * workflow's token, update feed downloaded by the workflow's own gh step).
+ * When it passes, the workflow's publish job publishes the draft; when it
+ * fails, the draft stays unpublished.
  *
- * Every expected file name below was verified against the INSTALLED
- * builder (app-builder-lib 26.15.3) — these are the artifacts it actually
- * emits for this repo's electron-builder.yml, not pattern guesses:
+ * The expected file names below were derived from the INSTALLED builder
+ * (app-builder-lib 26.15.3) for this repo's electron-builder.yml:
  *
- *   mac (dmg + zip, arm64; no user artifactName there):
- *     dmg    LearnHarness-<v>-arm64.dmg       + .blockmap (createBlockmap)
- *     zip    LearnHarness-<v>-arm64-mac.zip   + .blockmap (createBlockmap;
- *            Squirrel.Mac updates from the ZIP — it IS the updater payload)
- *     feed   latest-mac.yml — files[0] is the ZIP (writeUpdateInfoFiles
- *            sorts zip first) and the legacy top-level path/sha512 point
- *            at it.
  *   win (nsis x64; artifactName "${productName}-${version}-${arch}-setup.${ext}"):
- *     exe    LearnHarness-<v>-x64-setup.exe   + .blockmap (createBlockmap)
+ *     exe    LearnHarness Fork-<v>-x64-setup.exe   + .blockmap (createBlockmap)
  *     feed   latest.yml — a single file entry, the exe.
- *   linux (AppImage + deb, x64; artifactName "${productName}-${version}-${arch}.${ext}"
- *            is user-forced at the linux level, so it overrides BOTH targets'
- *            default name formats, and ${arch} expands per target ext:
- *            x64→x86_64 for AppImage, x64→amd64 for deb):
- *     image  LearnHarness-<v>-x86_64.AppImage (no blockmap in 26.15.3)
- *     deb    LearnHarness-<v>-amd64.deb       (no blockmap)
- *     feed   latest-linux.yml — the AppImage and deb entries merged by
- *            writeUpdateInfoFiles (order not deterministic; checked as a set).
  *
- * GitHub asset names equal these file names (all are already "safe" GitHub
- * names, so electron-publish uploads under the plain name) and every yml
- * files[].url equals the uploaded asset name.
+ * The product name has a space, so the file in dist/ is
+ * "LearnHarness Fork-<v>-x64-setup.exe". electron-builder swaps the space for
+ * "-" when it uploads to GitHub and in latest.yml's files[0].url and path
+ * (platformPackager.js computeSafeArtifactNameIfNeeded, NsisTarget.js,
+ * differentialUpdateInfoBuilder.js, updateInfoBuilder.js, httpPublisher.js).
+ * So the GitHub asset names, and the names latest.yml references, are the
+ * "LearnHarness-Fork-<v>-..." form below. latest.yml pointing at a name with
+ * a space (or any other name) fails this gate.
  *
  * Draft selection is FAIL-CLOSED and replicates the existing matching used
  * by the workflow's draft job and electron-builder's GitHub publisher:
@@ -47,7 +37,8 @@
  *   tsx scripts/verify-release.ts select <releases.json> --tag <tag>
  *     → one JSON object on stdout: {releaseId, matchedTagName, warnings,
  *       assets:[{id,name,size,state}]}; diagnostics on stderr. Used by the
- *       workflow to locate the draft and its asset ids.
+ *       workflow to locate the draft, its asset ids, and the release id the
+ *       publish job receives.
  *   tsx scripts/verify-release.ts verify <releases.json> <metadata-dir> --tag <tag>
  *     → full gate; human report on stdout; exit 0 only when everything
  *       below passes.
@@ -60,12 +51,11 @@
  *   - draft selection problems (above);
  *   - expected assets missing, zero-size, not in state "uploaded",
  *     duplicated, or unexpected extras (stale names from an older run);
- *   - update feeds that do not parse, carry the wrong version, reference
- *     a path/URL instead of a bare asset name (traversal / untrusted
- *     origin), reference an asset the release does not hold, disagree
- *     with the API-reported asset size, lack/misplace entries (mac ZIP
- *     must be first and back the legacy path/sha512), or carry an
- *     implausible sha512.
+ *   - an update feed that does not parse, carries the wrong version,
+ *     references a path/URL instead of a bare asset name (traversal /
+ *     untrusted origin), references an asset the release does not hold (or
+ *     one with a different name than the exe), disagrees with the
+ *     API-reported asset size, or carries an implausible sha512.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -87,12 +77,10 @@ export type DraftSelection =
 	| { ok: true; release: ReleaseRecord; warnings: string[] }
 	| Failures;
 
-/** The full expected asset inventory for one version (11 files). */
+/** The full expected asset inventory for one version (3 files). */
 export type ExpectedAssets = {
 	version: string;
-	mac: { dmg: string; zip: string; feed: string };
 	win: { exe: string; feed: string };
-	linux: { appImage: string; deb: string; feed: string };
 	/** Every asset name the draft must hold, and no others. */
 	files: string[];
 };
@@ -104,8 +92,12 @@ type Issues = Issue[];
 // Version + expected assets
 // ---------------------------------------------------------------------------
 
-/** Verified product name spelled into every artifact (electron-builder.yml productName). */
-const PRODUCT_NAME = "LearnHarness";
+/** Product name spelled into every artifact (electron-builder.yml productName). */
+const PRODUCT_NAME = "LearnHarness Fork";
+
+/** The product name as GitHub and latest.yml spell it: electron-builder swaps
+ *  each space for "-" when it uploads (computeSafeArtifactNameIfNeeded). */
+const PUBLISHED_PRODUCT_NAME = PRODUCT_NAME.replaceAll(" ", "-");
 
 const VERSION_PATTERN = /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/;
 
@@ -116,31 +108,17 @@ export function checkVersion(version: unknown): { ok: true; version: string } | 
 	return { ok: true, version };
 }
 
-/** The exact asset set the installed builder emits for this repo's config. */
+/** The exact asset set the installed builder uploads for this repo's config. */
 export function expectedAssets(version: string): ExpectedAssets {
-	const mac = {
-		dmg: `${PRODUCT_NAME}-${version}-arm64.dmg`,
-		zip: `${PRODUCT_NAME}-${version}-arm64-mac.zip`,
-		feed: "latest-mac.yml",
-	};
 	const win = {
-		exe: `${PRODUCT_NAME}-${version}-x64-setup.exe`,
+		exe: `${PUBLISHED_PRODUCT_NAME}-${version}-x64-setup.exe`,
 		feed: "latest.yml",
 	};
-	const linux = {
-		appImage: `${PRODUCT_NAME}-${version}-x86_64.AppImage`,
-		deb: `${PRODUCT_NAME}-${version}-amd64.deb`,
-		feed: "latest-linux.yml",
-	};
-	// Sidecar differential-update blockmaps: emitted for dmg, mac zip and
-	// NSIS exe (createBlockmap); AppImage/deb have none in app-builder-lib 26.15.3.
-	const blockmaps = [mac.dmg, mac.zip, win.exe].map((name) => `${name}.blockmap`);
+	// Sidecar differential-update blockmap, emitted for the NSIS exe (createBlockmap).
 	return {
 		version,
-		mac,
 		win,
-		linux,
-		files: [mac.dmg, mac.zip, win.exe, linux.appImage, linux.deb, ...blockmaps, mac.feed, win.feed, linux.feed],
+		files: [win.exe, `${win.exe}.blockmap`, win.feed],
 	};
 }
 
@@ -259,7 +237,6 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 	const errors: Issues = [];
 	const bad = (message: string) => errors.push(message);
 	if (!isPlainObject(pkg) || typeof pkg.version !== "string") bad("package.json has no string version");
-	if (!isPlainObject(pkg) || pkg.name !== "learnharness") bad("package.json name is no longer \"learnharness\"");
 	if (!isPlainObject(config)) {
 		return { ok: false, errors: ["electron-builder.yml did not parse to a mapping", ...errors] };
 	}
@@ -267,13 +244,6 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 	if (config.artifactName != null) bad("a top-level artifactName now overrides target defaults — expected names no longer hold");
 	const sameTargets = (actual: unknown, expected: Array<Record<string, unknown>>) =>
 		JSON.stringify(actual) === JSON.stringify(expected);
-	if (!isPlainObject(config.mac)) bad("mac section missing");
-	else {
-		if (config.mac.artifactName != null) bad("mac.artifactName set — expected names no longer hold");
-		if (!sameTargets(config.mac.target, [{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] }])) {
-			bad(`mac.target changed (${JSON.stringify(config.mac.target)}) — expected names no longer hold`);
-		}
-	}
 	if (!isPlainObject(config.win)) bad("win section missing");
 	else {
 		if (config.win.artifactName !== "${productName}-${version}-${arch}-setup.${ext}") {
@@ -283,18 +253,9 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 			bad(`win.target changed (${JSON.stringify(config.win.target)}) — expected names no longer hold`);
 		}
 	}
-	if (!isPlainObject(config.linux)) bad("linux section missing");
-	else {
-		if (config.linux.artifactName !== "${productName}-${version}-${arch}.${ext}") {
-			bad(`linux.artifactName changed (${JSON.stringify(config.linux.artifactName)}) — expected names no longer hold`);
-		}
-		if (!sameTargets(config.linux.target, [{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] }])) {
-			bad(`linux.target changed (${JSON.stringify(config.linux.target)}) — expected names no longer hold`);
-		}
-	}
 	const publish = Array.isArray(config.publish) ? config.publish[0] : undefined;
-	if (!isPlainObject(publish) || publish.provider !== "github" || publish.releaseType !== "draft") {
-		bad(`publish[0] must be the github provider with releaseType "draft" (${JSON.stringify(config.publish)}) — uploads would not land in the draft`);
+	if (!isPlainObject(publish) || publish.provider !== "github" || publish.owner !== "reeschan" || publish.releaseType !== "draft") {
+		bad(`publish[0] must be the github provider, owner "reeschan", releaseType "draft" (${JSON.stringify(config.publish)}) — uploads would not land in this fork's draft`);
 	}
 	if (errors.length > 0) {
 		errors.push("packaging config drifted from the verified shapes — re-derive the expected assets in scripts/verify-release.ts");
@@ -335,16 +296,10 @@ type FeedExpectation = {
 	file: string;
 	/** Every files[].url the feed must reference — exactly these, no more. */
 	urls: string[];
-	/** If set, files[0].url must be this entry (mac: the updater ZIP). */
-	first?: string;
 };
 
 export function feedExpectations(expected: ExpectedAssets): FeedExpectation[] {
-	return [
-		{ file: expected.mac.feed, urls: [expected.mac.zip, expected.mac.dmg], first: expected.mac.zip },
-		{ file: expected.win.feed, urls: [expected.win.exe] },
-		{ file: expected.linux.feed, urls: [expected.linux.appImage, expected.linux.deb] },
-	];
+	return [{ file: expected.win.feed, urls: [expected.win.exe] }];
 }
 
 /** An updater reference must be a bare file name: no directories, no
@@ -432,9 +387,6 @@ export function verifyMetadataFiles(
 		const actualSet = [...urls].sort().join("\n");
 		if (actualSet !== expectedSet) {
 			errors.push(`${expectation.file}: references [${urls.join(", ")}] but must reference exactly [${expectation.urls.join(", ")}]`);
-		}
-		if (expectation.first != null && urls[0] !== expectation.first) {
-			errors.push(`${expectation.file}: files[0] must be "${expectation.first}" (got "${urls[0] ?? "nothing"}")`);
 		}
 		// Legacy single-file fields electron-updater still reads on some paths:
 		// the builder backs them with files[0].
@@ -590,7 +542,7 @@ function main(argv: string[]): number {
 	const assets = verifyAssets(selection.release, expected);
 	if (!assets.ok) errors.push(...assets.errors);
 	const files: Record<string, string> = {};
-	for (const name of [expected.mac.feed, expected.win.feed, expected.linux.feed]) {
+	for (const name of [expected.win.feed]) {
 		try {
 			files[name] = fs.readFileSync(path.join(metadataDir, name), "utf8");
 		} catch {
@@ -602,8 +554,8 @@ function main(argv: string[]): number {
 	if (errors.length > 0) return fail(errors);
 	const present = expected.files.filter((name) => selection.release.assets.some((asset) => asset.name === name));
 	console.log(`assets: ${present.length}/${expected.files.length} expected files present, non-zero size, and "uploaded"`);
-	console.log(`feeds: ${expected.mac.feed}, ${expected.win.feed}, ${expected.linux.feed} parse, carry version ${start.version}, and reference only uploaded assets by exact name`);
-	console.log(`OK: draft for ${start.tag} is complete and consistent — ready for the owner to review and publish.`);
+	console.log(`feed: ${expected.win.feed} parses, carries version ${start.version}, and reference only uploaded assets by exact name`);
+	console.log(`OK: draft for ${start.tag} is complete and consistent — the publish job may publish it.`);
 	return 0;
 }
 
