@@ -245,7 +245,7 @@ test("ElevenLabs replies recorded from the real service map to readable errors",
   await assert.rejects(replying("revoked-api-key").listModels("k"), rejected);
   await assert.rejects(replying("quota-exceeded").synthesize(request), { code: "quota_exceeded", message: "Your ElevenLabs credits are used up. Add credits or wait for your quota to reset, then try again." });
   await assert.rejects(replying("unknown-voice").synthesize(request), { code: "voice_unavailable" });
-  await assert.rejects(replying("unknown-model").synthesize(request), (error: Error & { code?: string }) => error.code === "provider_failed" && !error.message.includes("no_such_model"));
+  await assert.rejects(replying("unknown-model").synthesize(request), { code: "model_unavailable", message: "ElevenLabs no longer offers the saved model. Open Listening settings, reload the model list and choose a model again." });
   const quotaAs400 = createElevenLabsProvider({ fetch: async () => { const reply = await recorded("quota-exceeded"); return new Response(reply.body, { status: 400, headers: reply.headers }); } });
   await assert.rejects(quotaAs400.synthesize(request), { code: "quota_exceeded" }, "ElevenLabs documents quota_exceeded as 400 or 401");
 });

@@ -61,7 +61,7 @@ async function replyStatus(response: Response): Promise<unknown> {
 }
 
 /** Reads the failure reply only for its status, because ElevenLabs reports a wrong key, a
- * missing key permission and a used-up quota as 400 or 401. The reply text is never shown. */
+ * missing key permission, a used-up quota and an unknown model as 400 or 401. The reply text is never shown. */
 async function failure(response: Response, permission: KeyPermission): Promise<SpeechError> {
   let status: unknown;
   if (response.status === 400 || response.status === 401 || response.status === 403) status = await replyStatus(response);
@@ -73,6 +73,8 @@ async function failure(response: Response, permission: KeyPermission): Promise<S
   }
   if (status === "quota_exceeded") return new SpeechError("quota_exceeded", "Your ElevenLabs credits are used up. Add credits or wait for your quota to reset, then try again.");
   if (status === "invalid_api_key") return statusError(401);
+  // The saved model was withdrawn or renamed; the snapshot still names it.
+  if (status === "model_not_found") return new SpeechError("model_unavailable", "ElevenLabs no longer offers the saved model. Open Listening settings, reload the model list and choose a model again.");
   return statusError(response.status);
 }
 

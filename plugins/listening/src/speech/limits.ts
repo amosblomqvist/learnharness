@@ -36,7 +36,7 @@ export function generationTimeoutMs(text: string): number {
 
 export type SpeechErrorCode =
   | "invalid_request" | "text_too_long" | "unsupported_language" | "not_ready" | "key_missing"
-  | "auth_failed" | "voice_unavailable" | "payment_required" | "quota_exceeded" | "rate_limited"
+  | "auth_failed" | "voice_unavailable" | "model_unavailable" | "payment_required" | "quota_exceeded" | "rate_limited"
   | "busy" | "timeout" | "provider_failed" | "invalid_audio";
 
 /** Readable, provider-detail-free failures. Messages are safe to show the learner. */
