@@ -59,6 +59,8 @@ interface ProviderSource {
 	isCustom(id: string): boolean;
 }
 let providerSource: ProviderSource | undefined;
+type AntigravitySource = (models: MutableModels) => void;
+let antigravitySource: AntigravitySource | undefined;
 
 /** Configuration IO is injected by the server; the agent never imports stores. */
 export function configureProviderSource(source: ProviderSource): void {
@@ -70,6 +72,11 @@ export function configureProviderSource(source: ProviderSource): void {
 		}
 	}
 	providerSource = source;
+}
+
+/** Antigravity availability & models.json sync injected by the server layer. */
+export function configureAntigravitySource(sync: AntigravitySource): void {
+	antigravitySource = sync;
 }
 
 /** The process-wide pi-ai Models collection — EVERY builtin provider's
@@ -94,6 +101,7 @@ export function piModels() {
 		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
 	}
 	providerSource?.sync(collection);
+	antigravitySource?.(collection);
 	return collection;
 }
 
