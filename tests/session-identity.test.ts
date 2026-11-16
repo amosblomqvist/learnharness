@@ -187,6 +187,68 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 		}));
 	}
 
+	for (const [provider, id, endpoint] of [
+		["opencode-go", "claude-haiku-5-5", "/inference/go/v1/messages"],
+		["opencode-go", "gemini-4-argon-contributor", "/inference/go/v1/models/gemini-4-argon-contributor:streamGenerateContent"],
+		["opencode-go", "glm-5.3", "/inference/go/v1/chat/completions"],
+		["opencode-go", "gpt-6-luna", "/inference/go/v1/responses"],
+		["custom", "deepseek-v4.1-flash", "/inference/go/openai/v1/chat/completions"],
+	] as const) {
+		it(`one-shot ${provider}/${id} calls carry private routing ids with caching off`, async () => closed(async () => {
+			const directory = mkdtempSync(path.join(tmpdir(), "lh-plugin-oneshot-session-"));
+			const controller = new AbortController();
+			if (provider === "custom") piModels().setProvider(buildOpenAiCompatibleProvider({ baseUrl: "https://opencode.ai/inference/go/openai/v1", models: [{ id }] }));
+			try {
+				const pin = { provider, id, thinkingLevel: "off" as const };
+				const adapter = createPluginInference({ signal: controller.signal, dataDirectory: directory }, {
+					catalog: () => nativeCatalogFor(pin), providerKeyPresent: () => true, engineForSpec: spec => piEngineForSpec(spec),
+				});
+				const requests: Request[] = [];
+				globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return Response.json({ error: { message: "closed fixture" } }, { status: 400 }); };
+				const request = { model: pin, context: { messages: [{ role: "user" as const, content: "Offline", timestamp: 1 }] }, options: { cacheRetention: "none" as const, maxRetries: 0 } };
+				const complete = await adapter.inference.complete({ ...request, purpose: "user" });
+				assert.equal(complete.stopReason, "error");
+				const events = [];
+				for await (const event of adapter.inference.stream({ ...request, purpose: "background" })) events.push(event);
+				assert.equal(events.at(-1)?.type, "error");
+				assert.equal(requests.length, 2);
+				const ids = requests.map((request) => request.headers.get("x-opencode-session"));
+				for (const session of ids) assert.match(session ?? "", /^[0-9a-f-]{36}$/);
+				assert.notEqual(ids[0], ids[1]);
+				for (const request of requests) {
+					assert.equal(new URL(request.url).origin, "https://opencode.ai");
+					assert.equal(new URL(request.url).pathname, endpoint);
+					assert.equal(request.headers.get("x-opencode-client"), metadata.name);
+					assert.equal(request.headers.get("user-agent"), `learnharness/${metadata.version}`);
+				}
+			} finally {
+				controller.abort();
+				if (provider === "custom") piModels().deleteProvider("custom");
+				rmSync(directory, { recursive: true, force: true });
+			}
+		}));
+	}
+
+	it("one-shot routing identity stays stable across a native transport retry", async () => closed(async () => {
+		const directory = mkdtempSync(path.join(tmpdir(), "lh-plugin-oneshot-retry-"));
+		const controller = new AbortController();
+		try {
+			const pin = { provider: "opencode-go", id: "glm-5.3", thinkingLevel: "off" as const };
+			const adapter = createPluginInference({ signal: controller.signal, dataDirectory: directory }, {
+				catalog: () => nativeCatalogFor(pin), providerKeyPresent: () => true, engineForSpec: spec => piEngineForSpec(spec),
+			});
+			const ids: (string | null)[] = [];
+			globalThis.fetch = async (input, init) => {
+				const request = new Request(input, init); ids.push(request.headers.get("x-opencode-session")); await request.text();
+				return Response.json({ error: { message: "closed fixture" } }, { status: ids.length === 1 ? 503 : 400, headers: { "retry-after-ms": "0" } });
+			};
+			await adapter.inference.complete({ model: pin, purpose: "user", context: { messages: [{ role: "user", content: "Offline", timestamp: 1 }] }, options: { maxRetries: 1 } });
+			assert.equal(ids.length, 2);
+			assert.match(ids[0] ?? "", /^[0-9a-f-]{36}$/);
+			assert.equal(ids[0], ids[1]);
+		} finally { controller.abort(); rmSync(directory, { recursive: true, force: true }); }
+	}));
+
 	it("side questions never resume a Claude Code live process", async () => {
 		const faux = createFauxCore({});
 		faux.setResponses([fauxAssistantMessage([fauxText("offline answer")])]);
