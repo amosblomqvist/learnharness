@@ -277,7 +277,7 @@ try {
 A \arrow[r,"f"] \arrow[d,"g"'] & B \arrow[d,"h"] \\
 C \arrow[r,"k"'] & D
 \end{tikzcd}
-\end{document}`, invalid: source => source.replace('\\begin{document}', '\\begin{document}\\[').replace('\\end{document}', '\\]\\end{document}') },
+\end{document}`, invalid: source => source.replace('\\begin{document}', '\\begin{document}\\[').replace('\\end{document}', '\\]\\end{document}'), reason: /: LaTeX Error: Bad math environment delimiter\.$/ },
     { id: 'free-body-authoring', source: String.raw`\usepackage{tikz}
 \usepackage{amsmath}
 \begin{document}
@@ -290,7 +290,7 @@ C \arrow[r,"k"'] & D
 \draw[->] (-0.6,0)--(-1.6,0) node[left] {$f_k$};
 \draw (-1.8,-0.55)--(1.8,-0.55);
 \end{tikzpicture}
-\end{document}`, invalid: source => source.replace('\\usepackage{amsmath}', '') },
+\end{document}`, invalid: source => source.replace('\\usepackage{amsmath}', ''), reason: /: Undefined control sequence\.$/ },
     { id: 'plot-authoring', source: String.raw`\usepackage{pgfplots}
 \pgfplotsset{compat=1.16}
 \begin{document}
@@ -299,13 +299,14 @@ C \arrow[r,"k"'] & D
 \addplot[blue,thick] {x^2};
 \end{axis}
 \end{tikzpicture}
-\end{document}`, invalid: source => source.replace('compat=1.16', 'compat=1.18') },
+\end{document}`, invalid: source => source.replace('compat=1.16', 'compat=1.18'), reason: /: Package pgfplots Error: .* Please use at most 'compat=1\.16'\.$/ },
   ];
   const authoringProof = [];
-  for (const { id, source, invalid } of authoringCases) {
+  for (const { id, source, invalid, reason } of authoringCases) {
     const unsupported = invalid(source);
     const failure = await render(id + '-unsupported', 'tikz', unsupported);
     assert.match(failure.error, /TeX engine render failed/, id);
+    assert.match(failure.error, reason, `${id} names TeX's first error`);
     assert.equal(failure.source, unsupported, 'Failed source stays intact; no automatic repairs.');
     const corrected = await render(id, 'tikz', source);
     assert.ok(corrected.svg && corrected.paths > 0 && corrected.width > 0 && corrected.height > 0, `${id}: ${JSON.stringify(corrected)}`);
