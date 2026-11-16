@@ -2,6 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { TexRunner, type WorkerLike } from "../src/tex-runner.ts";
 import { SVG_LIMIT, TEX_QUEUE_LIMIT } from "../src/contract.ts";
+import { TEX_ERROR_BYTES } from "../src/tex-diagnostics.ts";
 
 class FakeWorker implements WorkerLike {
   onmessage: WorkerLike["onmessage"] = null;
@@ -55,6 +56,23 @@ test("deadline forcibly terminates an unresponsive worker; errors/output bounds 
   assert.equal(host.workers[1]!.terminated, 1);
   const huge = assert.rejects(host.render(), /2 MiB/); host.workers[2]!.reply({ svg: "x".repeat(SVG_LIMIT + 1) }); await huge;
   const valid = host.render(); host.workers[3]!.reply({ svg: "recovered" }); assert.equal(await valid, "recovered");
+  host.runner.dispose();
+});
+
+test("worker errors are bounded and plain text while the next queued job gets a fresh engine", async () => {
+  const host = fixture();
+  const first = assert.rejects(host.render(), error => {
+    assert.ok(error instanceof Error);
+    assert.ok(new TextEncoder().encode(error.message).length <= TEX_ERROR_BYTES);
+    assert.ok(error.message.startsWith("<script>not markup</script>"));
+    return true;
+  });
+  const next = host.render("next");
+  host.workers[0]!.reply({ error: "<script>not markup</script>" + "🙂".repeat(2000) });
+  await first;
+  assert.equal(host.workers[0]!.terminated, 1);
+  assert.equal(host.workers[1]!.messages[0]!.source, "next");
+  host.workers[1]!.reply({ svg: "recovered" }); assert.equal(await next, "recovered");
   host.runner.dispose();
 });
 
