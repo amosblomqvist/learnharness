@@ -237,6 +237,26 @@ test("ElevenLabs names the key permission a restricted key is missing, without s
     error.code === "auth_failed" && error.message.includes('"Text to Speech"') && !error.message.includes("user_read"));
 });
 
+test("ElevenLabs JSON replies are read only up to a limit", async () => {
+  const request = { text: "x", language: "en", voiceId: "v", model, apiKey: "k" };
+  // A stream with no Content-Length, so only the streaming limit can stop it.
+  const stream = (text: string) => new ReadableStream<Uint8Array>({
+    pull(controller) { controller.enqueue(new TextEncoder().encode(text)); controller.close(); },
+  });
+  const hugeError = JSON.stringify({ detail: { status: "quota_exceeded", padding: "x".repeat(70 * 1024) } });
+  const errorReply = createElevenLabsProvider({ fetch: async () => new Response(stream(hugeError), { status: 401, headers: { "content-type": "application/json" } }) });
+  const failure = await errorReply.synthesize(request).then(() => new Error("resolved"), (error: Error & { code?: string }) => error);
+  console.log("70 KiB error reply ->", (failure as { code?: string }).code);
+  assert.equal((failure as { code?: string }).code, "auth_failed", "past 64 KiB the status is not read; the HTTP code decides");
+  const entry = { model_id: "eleven_flash_v2_5", name: "Flash", can_do_text_to_speech: true, maximum_text_length_per_request: 500, languages: [{ language_id: "en" }] };
+  const hugeList = JSON.stringify(Array.from({ length: 20_000 }, () => entry));
+  assert.ok(hugeList.length > 2 * 1024 * 1024);
+  const listReply = createElevenLabsProvider({ fetch: async () => new Response(stream(hugeList), { status: 200, headers: { "content-type": "application/json" } }) });
+  const listFailure = await listReply.listModels("k").then(() => new Error("resolved"), (error: Error) => error);
+  console.log("2+ MiB model list ->", listFailure.message);
+  assert.equal(listFailure.message, "ElevenLabs returned an unreadable model list.");
+});
+
 test("ElevenLabs replies recorded from the real service map to readable errors", async () => {
   const rejected = { code: "auth_failed", message: "ElevenLabs rejected the API key. Check the key in Listening settings." };
   const request = { text: "x", language: "en", voiceId: "v", model, apiKey: "k" };

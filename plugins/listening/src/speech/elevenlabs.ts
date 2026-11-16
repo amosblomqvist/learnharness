@@ -8,7 +8,7 @@ const TIMEOUT_LIST_MS = 15_000;
 const NO_LANGUAGE_CODE_MODELS = new Set(["eleven_multilingual_v2"]);
 
 /** Bounded binary reader: do not trust Content-Length alone. */
-async function readAudio(response: Response, limit: number, signal: AbortSignal): Promise<Uint8Array> {
+async function readBody(response: Response, limit: number, signal: AbortSignal): Promise<Uint8Array> {
   if (!response.body) throw new SpeechError("invalid_audio", "The speech service returned no audio. Try again.");
   const tooLarge = () => new SpeechError("invalid_audio", "The generated audio is too large.");
   if (Number(response.headers.get("content-length")) > limit) {
@@ -33,38 +33,67 @@ async function readAudio(response: Response, limit: number, signal: AbortSignal)
   } finally {
     reader.releaseLock();
   }
-  const audio = new Uint8Array(size);
+  const body = new Uint8Array(size);
   let offset = 0;
-  for (const chunk of chunks) { audio.set(chunk, offset); offset += chunk.byteLength; }
-  // MP3 starts with an ID3 tag or an MPEG frame header. This also catches an
-  // upstream JSON/HTML error mislabeled as audio/mpeg.
-  const id3 = size >= 10 && audio[0] === 0x49 && audio[1] === 0x44 && audio[2] === 0x33;
-  const frame = size >= 4 && audio[0] === 0xff && (audio[1]! & 0xe0) === 0xe0;
+  for (const chunk of chunks) { body.set(chunk, offset); offset += chunk.byteLength; }
+  return body;
+}
+
+/** MP3 starts with an ID3 tag or an MPEG frame header. This also catches an
+ * upstream JSON/HTML error mislabeled as audio/mpeg. */
+function checkMp3(audio: Uint8Array): Uint8Array {
+  const id3 = audio.byteLength >= 10 && audio[0] === 0x49 && audio[1] === 0x44 && audio[2] === 0x33;
+  const frame = audio.byteLength >= 4 && audio[0] === 0xff && (audio[1]! & 0xe0) === 0xe0;
   if (!id3 && !frame) throw new SpeechError("invalid_audio", "The speech service returned unusable audio. Try again.");
   return audio;
+}
+
+async function readAudio(response: Response, limit: number, signal: AbortSignal): Promise<Uint8Array> {
+  return checkMp3(await readBody(response, limit, signal));
+}
+
+/** Error replies are about 300 bytes; past this the status is not read and the HTTP code decides. */
+const ERROR_REPLY_LIMIT = 64 * 1024;
+/** Lists and lookups: the model list is about 50 KB. */
+const JSON_REPLY_LIMIT = 2 * 1024 * 1024;
+
+/** Bounded JSON reader: `unreadable` is thrown for a reply that is missing, too large or not JSON.
+ * Cancellation (the signal) is rethrown as it is. */
+async function readJson(response: Response, limit: number, signal: AbortSignal, unreadable: string): Promise<unknown> {
+  let bytes: Uint8Array;
+  try { bytes = await readBody(response, limit, signal); }
+  catch (error) {
+    if (signal.aborted) throw error;
+    throw new SpeechError("provider_failed", unreadable);
+  }
+  try { return JSON.parse(new TextDecoder().decode(bytes)); }
+  catch { throw new SpeechError("provider_failed", unreadable); }
 }
 
 /** The permission each call needs on a restricted ElevenLabs key, as the ElevenLabs dashboard names it. */
 type KeyPermission = "Models: Read" | "Text to Speech";
 
 /** The `detail.status` of an ElevenLabs JSON error reply, such as "quota_exceeded". */
-async function replyStatus(response: Response): Promise<unknown> {
+async function replyStatus(response: Response, signal: AbortSignal): Promise<unknown> {
   if (!response.headers.get("content-type")?.includes("json")) {
     void response.body?.cancel().catch(() => {});
     return undefined;
   }
   let body: unknown;
-  try { body = await response.json(); }
-  catch { return undefined; }
+  try { body = await readJson(response, ERROR_REPLY_LIMIT, signal, "unreadable"); }
+  catch (error) {
+    if (signal.aborted) throw error;
+    return undefined;
+  }
   const detail = body && typeof body === "object" ? (body as Record<string, unknown>).detail : undefined;
   return detail && typeof detail === "object" ? (detail as Record<string, unknown>).status : undefined;
 }
 
 /** Reads the failure reply only for its status, because ElevenLabs reports a wrong key, a
  * missing key permission, a used-up quota and an unknown model as 400 or 401. The reply text is never shown. */
-async function failure(response: Response, permission: KeyPermission): Promise<SpeechError> {
+async function failure(response: Response, permission: KeyPermission, signal: AbortSignal): Promise<SpeechError> {
   let status: unknown;
-  if (response.status === 400 || response.status === 401 || response.status === 403) status = await replyStatus(response);
+  if (response.status === 400 || response.status === 401 || response.status === 403) status = await replyStatus(response, signal);
   else void response.body?.cancel().catch(() => {});
   if (status === "missing_permissions") {
     return new SpeechError("auth_failed", permission === "Models: Read"
@@ -158,11 +187,8 @@ export function createElevenLabsProvider(options: { fetch?: typeof fetch; timeou
     listModels(apiKey: string, lifetime?: AbortSignal) {
       return withTimeout(TIMEOUT_LIST_MS, async signal => {
         const response = await fetcher(`${API}/models`, { headers: { "xi-api-key": apiKey, Accept: "application/json" }, signal, redirect: "error" });
-        if (!response.ok) throw await failure(response, "Models: Read");
-        let body: unknown;
-        try { body = await response.json(); }
-        catch { throw new SpeechError("provider_failed", "ElevenLabs returned an unreadable model list."); }
-        return readModels(body);
+        if (!response.ok) throw await failure(response, "Models: Read", signal);
+        return readModels(await readJson(response, JSON_REPLY_LIMIT, signal, "ElevenLabs returned an unreadable model list."));
       }, lifetime);
     },
     synthesize({ text, language, voiceId, model, apiKey, lifetime }: SynthesisRequest): Promise<SpeechAudio> {
@@ -174,7 +200,7 @@ export function createElevenLabsProvider(options: { fetch?: typeof fetch; timeou
           signal,
           redirect: "error",
         });
-        if (!response.ok) throw await failure(response, "Text to Speech");
+        if (!response.ok) throw await failure(response, "Text to Speech", signal);
         const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase();
         if (mimeType !== "audio/mpeg" && mimeType !== "audio/mp3") {
           void response.body?.cancel().catch(() => {});
