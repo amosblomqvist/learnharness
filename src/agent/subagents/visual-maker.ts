@@ -55,7 +55,7 @@ export interface VisualMakerOptions {
 	/** Test seam: scripted engine; production uses the visualMaker role. */
 	engine?: PiEngine;
 	headless?: HeadlessApi;
-	/** Max model rounds (write/render cycles + final answer). Default 8. */
+	/** Optional assistant-turn cap; omitted = no turn-count limit. */
 	maxIterations?: number;
 	/** Live activity-line callback (updates the job record). */
 	onActivity?: (line: string) => void;
@@ -164,7 +164,7 @@ const UNLOOKED_FINISH_MESSAGE =
 export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerOptions = {}): Promise<VisualResult> {
 	const headless = opts.headless ?? getHeadless();
 	const brief = input.brief.trim() || "(no brief)";
-	const maxIterations = opts.maxIterations ?? 8;
+	const maxIterations = opts.maxIterations;
 
 	const reason = headless.unavailableReason();
 	if (reason) {
@@ -229,7 +229,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	let captureError: unknown;
 
 	try {
-		for (let iteration = 0; iteration < maxIterations; iteration++) {
+		for (let iteration = 0; maxIterations === undefined || iteration < maxIterations; iteration++) {
 			// One model call per iteration (streamSimple, no agent loop — this
 			// loop owns tool execution and the image-in-the-loop injection).
 			const result = await streamOnce(

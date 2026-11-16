@@ -22,7 +22,7 @@ const submit = (result: unknown, id?: string) => call("submit_result", { result 
 const tick = () => new Promise<void>(r => setImmediate(r));
 function deferred<T = void>() { let resolve!: (v: T | PromiseLike<T>) => void; const promise = new Promise<T>(r => { resolve = r; }); return { promise, resolve }; }
 function options(extra: Partial<PluginWorkerStartOptions> = {}): PluginWorkerStartOptions {
-	return { requestId: "request_one", input: { source: { id: "trusted_source" } }, prompt: "Produce the requested result", model: pin, purpose: "background", maxTurns: 4, ...extra };
+	return { requestId: "request_one", input: { source: { id: "trusted_source" } }, prompt: "Produce the requested result", model: pin, purpose: "background", ...extra };
 }
 type Script = (context: TranscriptContext, index: number, stream: AssistantMessageEventStream) => AssistantMessage | Promise<AssistantMessage>;
 function fixture(t: TestContext, script: Script = () => message([submit("answer")]), override: Partial<PluginWorkerServiceDeps> = {}) {
@@ -156,6 +156,22 @@ test("natural completion, correction exhaustion and provider errors have explici
 	}
 });
 
+test("omitted maxTurns permits corrections beyond the old budget and stops at the accepted submission", async t => {
+	const f = fixture(t, (_context, index) => message([submit(index < 20 ? "bad" : "accepted", `submit_${index}`)]));
+	f.register({ validateResult(result) { if (result !== "accepted") throw new Error("Please correct"); } });
+	const started = f.service.start("worker", options());
+	assert.equal(Object.hasOwn(started, "maxTurns"), false);
+	assert.equal(f.service.start("worker", options({ maxTurns: undefined })).id, started.id);
+	assert.throws(() => f.service.start("worker", options({ maxTurns: 4 })), /requestId/);
+	assert.deepEqual(await f.service.wait(started.id), { id: started.id, status: "succeeded", result: "accepted" });
+	await tick();
+	assert.equal(f.calls.length, 21, "no call follows an accepted submission");
+	const saved = f.store.get(started.id)!;
+	assert.equal(Object.hasOwn(saved, "maxTurns"), false);
+	assert.equal(saved.turns, 21);
+	assert.equal(saved.usage?.steps, 21);
+});
+
 test("cancel fences async validation; waiter abort and unsubscription do not cancel the task", async t => {
 	const validating = deferred<void>(); const release = deferred<void>();
 	const f = fixture(t); f.register({ validateResult: async () => { validating.resolve(); await release.promise; } });
@@ -229,7 +245,7 @@ test("definition/input/options/identifier hygiene rejects before acceptance", as
 	const f = fixture(t);
 	assert.throws(() => f.register({ resultSchema: { type: "object", properties: [] } as never }), /schema/);
 	f.register(); assert.throws(() => f.register(), /already registered/);
-	for (const patch of [{ requestId: "" }, { input: undefined }, { input: { bad: Infinity } }, { maxTurns: 0 }, { model: { id: "offline" } }, { purpose: "other" }, { timeoutMs: -1 }, { options: { apiKey: "secret" } }, { options: { maxTokens: Infinity } }]) {
+	for (const patch of [{ requestId: "" }, { input: undefined }, { input: { bad: Infinity } }, { maxTurns: 0 }, { maxTurns: -1 }, { maxTurns: 1.5 }, { maxTurns: Infinity }, { maxTurns: NaN }, { maxTurns: null }, { maxTurns: "4" }, { maxTurns: Number.MAX_SAFE_INTEGER + 1 }, { model: { id: "offline" } }, { purpose: "other" }, { timeoutMs: -1 }, { options: { apiKey: "secret" } }, { options: { maxTokens: Infinity } }]) {
 		assert.throws(() => f.service.start("worker", options(patch as never)));
 	}
 	assert.equal(f.service.list().length, 0); assert.equal(f.calls.length, 0);

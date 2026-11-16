@@ -16,7 +16,8 @@ function validate(value: unknown, expected: string): PluginTaskRecord {
 	const r = value;
 	if (r.version !== 1 || r.id !== expected || !safeId(r.id) || !safeId(r.definitionId) || typeof r.requestId !== "string" || !r.requestId.length) return invalid();
 	if (!timestamp(r.createdAt) || !timestamp(r.updatedAt) || typeof r.prompt !== "string" || !Object.hasOwn(r, "input")) return invalid();
-	if (!Number.isSafeInteger(r.maxTurns) || (r.maxTurns as number) < 1 || !Number.isSafeInteger(r.turns) || (r.turns as number) < 0) return invalid();
+	if (r.maxTurns !== undefined && (!Number.isSafeInteger(r.maxTurns) || (r.maxTurns as number) < 1)) return invalid();
+	if (!Number.isSafeInteger(r.turns) || (r.turns as number) < 0) return invalid();
 	if (r.purpose !== "user" && r.purpose !== "background") return invalid();
 	if (!object(r.model) || typeof r.model.provider !== "string" || !r.model.provider.trim() || typeof r.model.id !== "string" || !r.model.id.trim()) return invalid();
 	if (r.model.thinkingLevel !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(r.model.thinkingLevel as string)) return invalid();

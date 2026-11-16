@@ -630,6 +630,32 @@ describe("research runner (async protocol §3)", () => {
 		assert.deepEqual(search.queries, ["sigma.js latest version (5)"]);
 	});
 
+	it("research beyond twelve tool turns delivers one final brief and accounts for every turn", async () => {
+		const chat = chatStore.createChat("Test: uncapped research"); trackChat(chat.id);
+		const toolCallId = "call-uncapped-research";
+		chatStore.saveMessages(chat.id, nativeToolMessages("which version?", "research", toolCallId, RESEARCH_INPUT));
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId }); trackJob(job.id);
+		const delivery = fakeDeliver(), search = stubSearch();
+		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, searchProvider: () => search });
+		researchModelOverride.current = fauxEngine([
+			...Array.from({ length: 15 }, (_, index) => fauxAssistantMessage([
+				fauxText("Progress, not the final brief."),
+				fauxToolCall("web_search", { query: `source ${index}` }, { id: `search_${index}` }),
+			], { stopReason: "toolUse" })),
+			fauxAssistantMessage(BRIEF),
+		]);
+		try { await runner.runJob(job.id); }
+		finally { researchModelOverride.current = undefined; }
+		const done = jobStore.getJob(job.id)!;
+		assert.equal(done.status, "done"); assert.equal(done.error, undefined);
+		assert.equal((done.result as ResearchResult).brief, BRIEF);
+		assert.ok((done.result as ResearchResult).sources.some(source => source.url === "https://www.sigmajs.org/docs"));
+		assert.equal(done.usage?.steps, 16); assert.equal(done.usage?.calls?.length, 16);
+		assert.equal(search.queries.length, 15);
+		assert.equal(delivery.steers.length, 1);
+		assert.ok(delivery.steers[0]!.content.includes(BRIEF));
+	});
+
 	it("a keyless fetch-only researcher still completes and delivers a sourced job result", async () => {
 		const url = "https://example.com/supplied-source";
 		const brief = `## Summary\nVerified supplied source. [Source](${url})\n\n## Sources\n- Source (${url})`;

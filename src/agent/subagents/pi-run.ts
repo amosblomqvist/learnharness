@@ -31,8 +31,8 @@ export interface SubagentRunOptions {
 	messages?: AgentMessage[];
 	/** Fresh-run prompt text (mutually exclusive with a continuation). */
 	prompt?: string;
-	/** Max model calls (the old stepCountIs safety net). */
-	maxTurns: number;
+	/** Optional assistant-turn cap. Omitted = run until natural completion or a stop rule. */
+	maxTurns?: number;
 	/** Abort mid-model-call (the real-kill semantics). */
 	abortSignal?: AbortSignal;
 	/** Money channel: one call per model request. */
@@ -106,7 +106,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 		// exits before the steering poll, exactly the old boolean-true).
 		finishTurn: (turn) => {
 			turns++;
-			return turns >= opts.maxTurns || opts.shouldStop?.(turn.message, turn.toolResults) === true
+			return (opts.maxTurns !== undefined && turns >= opts.maxTurns) || opts.shouldStop?.(turn.message, turn.toolResults) === true
 				? { action: "end" }
 				: undefined;
 		},

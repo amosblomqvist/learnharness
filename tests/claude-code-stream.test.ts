@@ -40,6 +40,7 @@ import { authEnvRecord } from "../src/core/auth-env.ts";
 import { ClaudeLaunchError } from "../src/agent/claude-code/launch.ts";
 import { createClaudeCodeStreamFunction, toClaudeArgs, toEffort, type RunClaude } from "../src/agent/claude-code/stream.ts";
 import { toStreamJsonLine } from "../src/agent/claude-code/transcript.ts";
+import { runSubagent } from "../src/agent/subagents/pi-run.ts";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/claude-code/fake-claude.mjs", import.meta.url));
 const FIXTURES = fileURLToPath(new URL("./fixtures/claude-code/", import.meta.url));
@@ -914,6 +915,34 @@ test("sequential identical calls split one response and correlate results by id,
 	assert.equal(toolMessage.usage.totalTokens, 9);
 	assert.equal(second.usage.totalTokens, 0, "splitting one response must not charge its tokens twice");
 	assert.equal(calls.length, 1);
+});
+
+test("an uncapped subagent reaches its final text after twelve split Claude tool slices", async t => {
+	const scenario: string[] = [];
+	for (let round = 0; round < 6; round++) {
+		const calls = [0, 1].map(index => ({ id: `slice_${round}_${index}`, name: "read", arguments: { path: "offline" } }));
+		const source = toToolUseMessage(calls);
+		source[0] = streamEvent({ type: "message_start", message: { usage: { input_tokens: 7, output_tokens: 10 } } });
+		scenario.push(...source, ...calls.map(callTool));
+	}
+	scenario.push(REPLY);
+	const { runClaude, calls } = createFakeRun(t, scenario);
+	const usage: number[] = []; const stops: string[] = [];
+	const result = await runSubagent([{
+		name: "read", label: "read", description: "Offline read", parameters: Type.Object({ path: Type.String() }),
+		execute: async () => ({ content: [{ type: "text", text: "evidence" }], details: null }),
+	}], {
+		engine: { model: getModel(), streamFn: createClaudeCodeStreamFunction(runClaude) }, systemPrompt: "Offline", prompt: "Offline",
+		// Isolate turn-count behavior from the separately investigated worker-admission
+		// source-abort/held-process lifecycle issue. This is NOT a full worker smoke.
+		bypassWorkerRequestAdmission: true,
+		onUsage: value => usage.push(value.output), onAssistantMessage: message => stops.push(message.stopReason),
+	});
+	assert.deepEqual(usage, [...Array.from({ length: 6 }, () => [10, 0]).flat(), 0]);
+	assert.deepEqual(stops, [...Array<string>(12).fill("toolUse"), "stop"]);
+	assert.equal(result.text, Array<string>(12).fill("evidence").join(" | "));
+	assert.equal(calls.length, 1);
+	await assertCleanedUp(getOnlyCall(calls));
 });
 
 test("mismatched result id starts fresh and kills the old process", async (t) => {

@@ -127,6 +127,23 @@ describe("pdf-reader source paths", () => {
 });
 
 describe("pdf-reader loop (faux engine)", () => {
+	it("continues past fourteen tool turns to the natural final brief", async () => {
+		const engine = fauxEngine([
+			fauxAssistantMessage([fauxToolCall("pdf_extract", { pages: "1" }, { id: "read" })], { stopReason: "toolUse" }),
+			...Array.from({ length: 14 }, (_, index) => fauxAssistantMessage([
+				fauxText(`Progress ${index}, not the final brief.`),
+				fauxToolCall("pdf_info", {}, { id: `info_${index}` }),
+			], { stopReason: "toolUse" })),
+			fauxAssistantMessage("Final brief from page 1 (p. 1)."),
+		]);
+		let calls = 0;
+		const result = await runPdfReaderAgent({ path: FIXTURE, question: "Read page one" }, { engine, onUsage: () => calls++ });
+		assert.equal(result.brief, "Final brief from page 1 (p. 1).");
+		assert.equal(calls, 16);
+		assert.deepEqual(result.pagesRead, [1]);
+		assert.deepEqual(result.pagesConsulted, [1]);
+	});
+
 	it("triage → extract → final brief: pagesConsulted tracks the extract", async () => {
 		const engine = fauxEngine([
 			fauxAssistantMessage([fauxToolCall("pdf_info", {}, { id: "i1" })], { stopReason: "toolUse" }),
