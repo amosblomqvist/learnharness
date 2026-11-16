@@ -25,7 +25,14 @@ export function parseForkVersion(version: string): { upstream: string; n: number
 }
 
 const invokedAsCli = process.argv[1] != null && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href;
+// `fork-version.ts <upstream> <n>` prints the fork version.
+// `fork-version.ts --check <version>` fails unless the version follows the fork rule (release gate).
 if (invokedAsCli) {
-	const [upstream, sequence] = process.argv.slice(2);
-	console.log(forkVersion(upstream ?? "", Number(sequence)));
+	const [first, second] = process.argv.slice(2);
+	if (first === "--check") {
+		const { upstream, n } = parseForkVersion(second ?? "");
+		console.log(`${second} is upstream ${upstream} with sequence ${n}`);
+	} else {
+		console.log(forkVersion(first ?? "", Number(second)));
+	}
 }

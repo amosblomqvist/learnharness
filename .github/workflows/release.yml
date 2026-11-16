@@ -90,6 +90,11 @@ jobs:
           node-version: "26"
           cache: npm
       - run: npm ci
+      - name: Version must follow the fork rule
+        if: needs.version.outputs.release == 'true'
+        run: npx tsx scripts/fork-version.ts --check "${TAG#v}"
+        env:
+          TAG: ${{ needs.version.outputs.tag }}
       - run: npm run typecheck
       - run: npm test
       - run: npm run lint

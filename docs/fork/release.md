@@ -12,7 +12,7 @@ Before the first tag, enable Actions in the fork's Actions tab. Check Settings �
 
 1. In the pull request, set the version in both package files with `npm version <version> --no-git-tag-version`, and commit the changes.
 2. Merge the pull request into `main`. You do not create or push a tag yourself.
-3. Actions runs decide → quality → draft → Windows package → verify (installer, blockmap, and `latest.yml`) → publish. The draft job creates the `v<version>` tag on the merged commit after the gates pass. A successful run publishes automatically.
+3. Actions runs decide → quality → draft → Windows package → verify (installer, blockmap, and `latest.yml`) → publish. The quality job first checks that the version follows the fork rule above, and the draft job creates the `v<version>` tag on the merged commit after the gates pass. A successful run publishes automatically.
 
 A merge that does not change the version releases nothing: the decide job sees that `v<version>` is already published and skips the other jobs. If `v<version>` already exists on another commit without a published release, the run fails; bump the version, or abandon that tag and draft as described below. Pushing a matching `v<version>` tag by hand still starts a release, as before.
 
