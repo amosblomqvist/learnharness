@@ -299,8 +299,9 @@ describe("release gate — workflow wiring", () => {
 
 	it("can see drafts after the packaging job, only on real tag pushes", () => {
 		assert.ok(verify);
-		assert.equal(verify.needs, "package");
-		assert.equal(verify.if, "github.event_name == 'push'");
+		assert.deepEqual(verify.needs, ["version", "package"]);
+		assert.equal(verify.if, "needs.version.outputs.release == 'true'");
+		assert.equal(verify.env?.TAG, "${{ needs.version.outputs.tag }}");
 		// GitHub's release-list API hides drafts from read-only tokens.
 		assert.deepEqual(verify.permissions, { contents: "write" });
 		assert.equal(verify.env?.GH_TOKEN, undefined);
@@ -332,7 +333,8 @@ describe("release gate — workflow wiring", () => {
 		const select = verify.steps.find((step) => step.run?.includes("verify-release.ts select"));
 		const final = verify.steps.find((step) => step.run?.includes("verify-release.ts verify"));
 		assert.ok(select && final);
-		assert.match(final.run!, /--tag "\$GITHUB_REF_NAME"/);
+		assert.match(final.run!, /--tag "\$TAG"/);
+		assert.match(select.run!, /--tag "\$TAG"/);
 		// The gate's own job: nothing here may create, edit, publish, or delete.
 		for (const step of verify.steps) {
 			assert.equal(step.run?.includes("create") ?? false, false, String(step.name));
@@ -364,7 +366,7 @@ describe("release gate — workflow wiring", () => {
 		it("runs only after verify, only on tag pushes, with write access to contents alone", () => {
 			assert.ok(publish);
 			assert.equal(publish.needs, "verify");
-			assert.equal(publish.if, "github.event_name == 'push'");
+			assert.equal(publish.if, "needs.verify.result == 'success'");
 			assert.equal(publish["runs-on"], "ubuntu-24.04");
 			assert.deepEqual(publish.permissions, { contents: "write" });
 			assert.equal(publish.steps.length, 1);
