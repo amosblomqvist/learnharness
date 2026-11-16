@@ -29,6 +29,7 @@ export interface SessionSheet {
   sentSignature: string;
   readTicket: number;
 }
+export type PublishReason = "sheet" | "ink" | "camera" | "tool";
 export interface Capture { session: SessionSheet; draft: Draft; signature: string; color: string; imageScale: number; sendImage: boolean }
 
 /** Window-owned only. No storage, navigation parsing, or host input reconstruction. */
@@ -37,12 +38,12 @@ export class Sheets {
   color = DEFAULT_DARK_INK_COLOR;
   imageScale = DEFAULT_IMAGE_SCALE;
   private nextId = 0;
-  private readonly listeners = new Set<() => void>();
+  private readonly listeners = new Set<(reason: PublishReason) => void>();
   private readonly signatures = new WeakMap<Draft, string>();
-  constructor(private readonly changed: () => void, private readonly newProblem: (session: SessionSheet) => void,
+  constructor(private readonly changed: (reason: PublishReason) => void, private readonly newProblem: (session: SessionSheet) => void,
     private readonly currentColor: () => string = () => this.color) {}
-  onChange(listener: () => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
-  private publish(): void { this.changed(); for (const listener of this.listeners) listener(); }
+  onChange(listener: (reason: PublishReason) => void): () => void { this.listeners.add(listener); return () => { this.listeners.delete(listener); }; }
+  private publish(reason: PublishReason): void { this.changed(reason); for (const listener of this.listeners) listener(reason); }
   session(id: string, kind: SessionSheet["kind"]): SessionSheet {
     let state = this.sessions.get(id);
     if (!state) {
@@ -57,7 +58,7 @@ export class Sheets {
     this.color = color;
     for (const state of this.sessions.values()) if (state.draft && state.draft.color !== color)
       state.draft = { ...state.draft, color, revision: state.draft.revision + 1 };
-    this.publish();
+    this.publish("sheet");
   }
   /** Accepted preferences can recolor already-current sheets without waiting
    * for unrelated reference work. Older rasters retain their own paired ink. */
@@ -66,7 +67,7 @@ export class Sheets {
     for (const state of this.sessions.values()) if (state.draft?.palette === palette && state.draft.color !== color) {
       state.draft = { ...state.draft, color, revision: state.draft.revision + 1 }; changed = true;
     }
-    if (changed) this.publish();
+    if (changed) this.publish("sheet");
   }
   /** Atomically pair re-rendered reference backgrounds with their matching ink.
    * Merge into the latest draft so work drawn during rasterization is retained. */
@@ -84,7 +85,7 @@ export class Sheets {
         changed = true;
       }
     }
-    if (changed) this.publish();
+    if (changed) this.publish("sheet");
   }
   /** Delivery resolution is not a drawing edit and does not trigger practice resends. */
   setImageScale(imageScale: number): void { this.imageScale = imageScale; }
@@ -92,21 +93,21 @@ export class Sheets {
     const draft = { ...sheet, color: this.currentColor(), id: ++this.nextId, revision: 0, strokes: [], hasInk: false };
     state.draft = draft;
     state.pan = { x: 0, y: 0 };
-    this.publish();
+    this.publish("sheet");
     return draft;
   }
   update(state: SessionSheet, strokes: Stroke[]): void {
     if (!state.draft) return;
     state.draft = { ...state.draft, revision: state.draft.revision + 1, strokes, hasInk: visibleStrokes(strokes).length > 0 };
-    this.publish();
+    this.publish("ink");
   }
-  setTool(state: SessionSheet, tool: Tool): void { state.tool = tool; this.publish(); }
+  setTool(state: SessionSheet, tool: Tool): void { state.tool = tool; this.publish("tool"); }
   /** Camera movement is not a content edit and cannot invalidate an acceptance. */
-  setPan(state: SessionSheet, pan: SessionSheet["pan"]): void { state.pan = pan; this.publish(); }
+  setPan(state: SessionSheet, pan: SessionSheet["pan"]): void { state.pan = pan; this.publish("camera"); }
   undo(state: SessionSheet): void { if (state.draft?.strokes.length) this.update(state, state.draft.strokes.slice(0, -1)); }
   clear(state: SessionSheet): void { if (state.draft?.strokes.length) this.update(state, []); }
   dropUntouched(state: SessionSheet): void {
-    if (state.draft && !state.draft.strokes.length) { state.draft = undefined; this.publish(); }
+    if (state.draft && !state.draft.strokes.length) { state.draft = undefined; this.publish("sheet"); }
   }
   signature(state: SessionSheet): string {
     const draft = state.draft;
@@ -133,7 +134,7 @@ export class Sheets {
     const state = captured.session;
     if (state.draft?.id !== captured.draft.id) return; // A new problem/sheet supersedes this acceptance.
     if (state.kind === "practice") {
-      if (captured.sendImage) { state.sentSignature = captured.signature; this.publish(); }
+      if (captured.sendImage) { state.sentSignature = captured.signature; this.publish("ink"); }
       return;
     }
     if (state.draft.revision === captured.draft.revision) this.update(state, []);
@@ -150,7 +151,7 @@ export class Sheets {
     state.tool = "pen";
     state.pan = { x: 0, y: 0 };
     this.newProblem(state);
-    this.publish();
+    this.publish("sheet");
     return true;
   }
   dispose(): void { this.sessions.clear(); this.listeners.clear(); }

@@ -114,10 +114,20 @@ export function visibleStrokes(history: readonly Stroke[]): readonly Stroke[] {
 export function visibleUnderEraser(visible: readonly Stroke[], eraser: Stroke): readonly Stroke[] {
   return erase(visible, eraser);
 }
-/** History-only edits (or Undo back to the sent drawing) are not new image content. */
+const ids = new WeakMap<Stroke, number>();
+let nextStrokeId = 0;
+/** Committed strokes are never mutated or rebuilt, so identity stands for content. */
+function strokeId(stroke: Stroke): number {
+  let id = ids.get(stroke);
+  if (id === undefined) { id = ++nextStrokeId; ids.set(stroke, id); }
+  return id;
+}
+/** History-only edits (or Undo back to the sent drawing) are not new image content.
+ * Visible strokes are identified by object identity, not by their points: an
+ * erased stroke redrawn with identical coordinates counts as changed. */
 export function inkSignature(history: readonly Stroke[], color: string): string {
   const visible = visibleStrokes(history);
-  return visible.length ? JSON.stringify([color, visible.map(stroke => stroke.points)]) : "";
+  return visible.length ? `${color}|${visible.map(strokeId).join(",")}` : "";
 }
 export function paintSegment(context: CanvasRenderingContext2D, a: Point, b: Point, color: string): void {
   context.globalCompositeOperation = "source-over";
