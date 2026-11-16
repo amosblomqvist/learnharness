@@ -188,6 +188,8 @@ is provided by this plugin.
 
 - Incomplete and pending fences show source without compiling incomplete input.
   Errors and limit violations use the host's error-plus-readable-source fallback.
+  A TikZ block that TeX cannot compile reports TeX's first error line there
+  (at most 300 characters).
 - TeX runs in one lazy serial browser Worker per window. A job has a **10 second**
   deadline (including cold loading), after which the Worker is terminated. Active
   mount cancellation also terminates it; waiting cancelled jobs are removed.

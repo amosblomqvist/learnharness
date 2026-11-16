@@ -1,5 +1,6 @@
 import { tex, dvi2svg, BrowserResourceLoader } from "isomorphic-tikzjax";
 import { checkSource, checkSvgSize } from "./contract.ts";
+import { withTexLog } from "./tex-log.ts";
 
 const worker = globalThis as unknown as {
   onmessage: ((event: MessageEvent<{ id: number; source: string; resourcesUrl: string }>) => void) | null;
@@ -14,7 +15,10 @@ worker.onmessage = async ({ data }) => {
     const url = new URL(data.resourcesUrl);
     if (url.origin !== new URL(import.meta.url).origin) throw new Error("TeX resources must be local plugin assets.");
     if (!loader || resourceUrl !== url.href) { resourceUrl = url.href; loader = new BrowserResourceLoader(url.href); }
-    const dvi = await tex(data.source, { showConsole: false }, loader);
+    // showConsole is the engine's only route to TeX's log; withTexLog captures it
+    // so a failed compile can name TeX's first error. Nothing reaches the console.
+    const resources = loader;
+    const dvi = await withTexLog(() => tex(data.source, { showConsole: true }, resources));
     // The library's DOM parse is NOT a sanitizer. Our main-thread static SVG
     // rebuilder is the only admission path to the page. No DOM/SVGO runs here.
     const raw = await dvi2svg(dvi, { disableSanitize: true, embedFontCss: false });
