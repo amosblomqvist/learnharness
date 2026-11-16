@@ -334,7 +334,7 @@ test("argv, settings and the system prompt: only the LearnHarness MCP server, no
 	await assertCleanedUp(call);
 });
 
-test("the child env has no LearnHarness key and the cwd is an empty temp dir", async (t) => {
+test("the child env has no LearnHarness key and the cwd is a temp dir holding only an empty .gemini/.env", async (t) => {
 	const names = ["GEMINI_API_KEY", "GOOGLE_API_KEY"];
 	const record = authEnvRecord();
 	const saved = names.map((name) => process.env[name]);
@@ -350,7 +350,9 @@ test("the child env has no LearnHarness key and the cwd is an empty temp dir", a
 	for (const name of names) assert.equal(call.env[name], undefined, `${name} must not reach the child`);
 	assert.ok(!JSON.stringify(call.args).includes("lh-only-key"));
 	assert.equal(dirname(call.cwd), tmpdir());
-	assert.deepEqual(call.cwdEntries, []);
+	assert.deepEqual(call.cwdEntries, [".gemini"]);
+	assert.deepEqual(readdirSync(join(call.cwd, ".gemini")), [".env"]);
+	assert.equal(readFileSync(join(call.cwd, ".gemini", ".env"), "utf8"), "");
 	await assertCleanedUp(call);
 });
 

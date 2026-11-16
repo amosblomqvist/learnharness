@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 
 import type { Api, Message, SimpleStreamOptions, StopReason, StreamFunction } from "@earendil-works/pi-ai";
 
@@ -79,6 +80,12 @@ const PRIVATE_FILE_MODE = 0o600;
 const TURN_DIR_PREFIX = "gemini-cli";
 const SYSTEM_PROMPT_FILE = "system.md";
 const SETTINGS_FILE = "settings.json";
+/**
+ * The CLI reads the first `.gemini/.env` or `.env` it finds from its cwd up to the root, then the ones in the home
+ * folder. An empty one in the turn's cwd ends that search, so no `.env` in a parent folder (such as a shared /tmp)
+ * or in the home folder reaches the child.
+ */
+const ENV_STOP_FILES: Record<string, string> = { [join(".gemini", ".env")]: "" };
 /** A context file name no user has, so `~/.gemini/GEMINI.md` and project context files are not loaded. */
 const NO_CONTEXT_FILE = "learnharness-no-context-file.md";
 
@@ -215,7 +222,7 @@ async function launch({ model, context, hooks }: LaunchInput): Promise<CliLaunch
 async function finishLaunch(bridge: ToolBridge, input: ReturnType<typeof toClaudeInput>, model: string): Promise<CliLaunch> {
 	let dirs: TurnDirs<typeof SYSTEM_PROMPT_FILE | typeof SETTINGS_FILE>;
 	try {
-		dirs = await createTurnDirs(TURN_DIR_PREFIX, { [SYSTEM_PROMPT_FILE]: input.systemPrompt, [SETTINGS_FILE]: toGeminiSettings(readBridgeServer(bridge.mcpConfig)) }, PRIVATE_FILE_MODE);
+		dirs = await createTurnDirs(TURN_DIR_PREFIX, { [SYSTEM_PROMPT_FILE]: input.systemPrompt, [SETTINGS_FILE]: toGeminiSettings(readBridgeServer(bridge.mcpConfig)) }, PRIVATE_FILE_MODE, ENV_STOP_FILES);
 	} catch (error) {
 		await bridge.close();
 		throw error;

@@ -1,15 +1,23 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 /** A temp working directory and a private directory holding the named files. */
 export type TurnDirs<Name extends string> = { cwd: string; privateDir: string; files: Record<Name, string> };
 
-/** Creates `<prefix>-cwd-*` and `<prefix>-private-*` and writes each file (name to content) into the private one. */
-export async function createTurnDirs<Name extends string>(prefix: string, files: Record<Name, string>, mode: number): Promise<TurnDirs<Name>> {
+/**
+ * Creates `<prefix>-cwd-*` and `<prefix>-private-*` and writes each file (name to content) into the private one.
+ * `cwdFiles` (relative path to content) are written into the cwd, for files the CLI looks up from its working directory.
+ */
+export async function createTurnDirs<Name extends string>(prefix: string, files: Record<Name, string>, mode: number, cwdFiles: Record<string, string> = {}): Promise<TurnDirs<Name>> {
 	const cwd = await mkdtemp(join(tmpdir(), `${prefix}-cwd-`));
 	let privateDir: string | undefined;
 	try {
+		for (const [relativePath, content] of Object.entries(cwdFiles)) {
+			const target = join(cwd, relativePath);
+			await mkdir(dirname(target), { recursive: true });
+			await writeFile(target, content, { mode });
+		}
 		privateDir = await mkdtemp(join(tmpdir(), `${prefix}-private-`));
 		const paths = {} as Record<Name, string>;
 		for (const name of Object.keys(files) as Name[]) {
