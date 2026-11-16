@@ -13,7 +13,7 @@
 
 import path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { isHexColor, type ChatSettings } from "../core";
+import { isHexColor, type AntigravitySettings, type ChatSettings } from "../core";
 import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides, type ColorOverrideKey } from "../core/themes.ts";
 import type {
 	AgentSettings,
@@ -104,6 +104,25 @@ export function parseClaudeCodeSettingsBody(body: unknown): SettingsBodyResult<{
 	if (raw.enabled === undefined) return { ok: true, settings: {} };
 	if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
 	return { ok: true, settings: { enabled: raw.enabled } };
+}
+
+/** antigravity: explicit app-wide opt-in + optional binary override. Empty section resets to off. */
+export function parseAntigravitySettingsBody(body: unknown): SettingsBodyResult<AntigravitySettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: AntigravitySettings = {};
+	if (raw.enabled !== undefined) {
+		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
+		settings.enabled = raw.enabled;
+	}
+	if (raw.binaryPath !== undefined) {
+		if (typeof raw.binaryPath !== "string" || raw.binaryPath.includes("\0")) {
+			return { ok: false, error: "binaryPath must be a string" };
+		}
+		const trimmed = raw.binaryPath.trim();
+		if (trimmed) settings.binaryPath = trimmed;
+	}
+	return { ok: true, settings };
 }
 
 /** agent.models: only the six known background roles; each override's
@@ -499,6 +518,7 @@ export const SETTINGS_SECTIONS = {
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
+	antigravity: parseAntigravitySettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;
