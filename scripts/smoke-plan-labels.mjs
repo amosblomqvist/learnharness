@@ -2,6 +2,7 @@
  * reading font, label size or script.
  *
  * Run: npm run build && node scripts/smoke-plan-labels.mjs [--out <dir>]
+ * Focused font invalidation regressions: add --invalidation-only.
  *
  * - Starts `next start` on the existing production build (it never builds)
  *   with disposable copies of tests/fixtures/golden-data, plus one seeded chat
@@ -249,6 +250,138 @@ async function setFont(page, stack, size) {
 	await settle(page);
 }
 
+/** Pick through the real appearance UI; do not wait for fonts here, since
+ * the delayed-load regression needs to inspect the fallback layout first. */
+async function pickReadingFont(page, family) {
+	const click = async (sel) => (await page.waitForSelector(sel, { visible: true, timeout: 30_000 })).click();
+	await click("[data-testid=settings-entry]");
+	await click("[data-testid=settings-nav-appearance]");
+	await click("[data-testid=font-trigger]");
+	await page.waitForSelector("[data-testid=font-search]", { visible: true });
+	await page.type("[data-testid=font-search]", family);
+	const saved = page.waitForResponse((r) => r.url().endsWith("/api/settings/appearance") && r.request().method() === "PUT" && r.ok());
+	await page.keyboard.press("Enter");
+	await saved;
+	await page.keyboard.press("Escape");
+	await page.waitForFunction((f) => getComputedStyle(document.querySelector("[data-testid=plan-block-full] svg")).fontFamily.includes(f), {}, family);
+	await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
+}
+
+/** Deterministic fonts made from the app's own bundled faces, not optional
+ * OS fonts. All share the sentinel's exact glyphs; only W changes advance. */
+async function installRegressionFonts(page) {
+	return page.evaluate(async () => {
+		const source = (variable) => {
+			const family = getComputedStyle(document.documentElement).getPropertyValue(variable).split(",")[0].trim().replace(/["']/g, "");
+			for (const sheet of document.styleSheets) {
+				for (const rule of sheet.cssRules) {
+					if (!(rule instanceof CSSFontFaceRule) || rule.style.fontFamily.replace(/["']/g, "") !== family) continue;
+					const hasW = rule.style.unicodeRange.split(",").some((range) => {
+						const [lo, hi = lo] = range.trim().replace(/^U\+/i, "").split("-");
+						return parseInt(lo.replace(/\?/g, "0"), 16) <= 0x57 && parseInt(hi.replace(/\?/g, "F"), 16) >= 0x57;
+					});
+					if (hasW) return rule.style.src.replace(/url\(["']?([^"')]+)["']?\)/g, (_, url) => `url("${new URL(url, sheet.href ?? location.href)}")`);
+				}
+			}
+			throw new Error(`No bundled Latin font face for ${variable}`);
+		};
+		const mono = source("--font-jetbrains");
+		const sans = source("--font-sans3");
+		const rest = "U+0-56,U+58-10FFFF";
+		const addLoaded = async (family, src, unicodeRange) => {
+			const face = new FontFace(family, src, { weight: "200 800", unicodeRange, display: "swap" });
+			await face.load();
+			document.fonts.add(face);
+		};
+		await addLoaded("PlanRegressionMono", mono, "U+0-10FFFF");
+		await addLoaded("PlanRegressionWide", mono, rest);
+		await addLoaded("PlanRegressionWide", sans, "U+57");
+		await addLoaded("PlanRegressionDelayed", mono, rest);
+		const url = new URL(mono.match(/url\(["']?([^"')]+)/)[1], location.href);
+		url.searchParams.set("plan-label-delayed", "1");
+		return url.href;
+	});
+}
+
+async function planSnapshot(page) {
+	return page.$eval("[data-testid=plan-block-full] svg", (svg) => {
+		const sample = svg.querySelector("[data-plan-probe] text").getBBox();
+		return {
+			sentinel: [sample.width, sample.height],
+			font: getComputedStyle(svg).fontFamily,
+			lines: [...svg.querySelectorAll("[data-testid^=plan-node-] text")].map((t) => t.textContent),
+			boxes: [...svg.querySelectorAll("[data-testid^=plan-node-] > rect:first-child")].map((r) => r.getAttribute("width")),
+		};
+	});
+}
+
+/** Like check(), retain failures so both invalidation cases run on a bad build. */
+function expectLayout(label, actual, expected) {
+	try {
+		assert.deepEqual(actual, expected);
+		results.push({ label, passed: true });
+		console.log(`ok   ${label}`);
+	} catch (error) {
+		results.push({ label, passed: false });
+		failures.push({ label, bad: [error.message] });
+		console.log(`FAIL ${label}: ${error.message}`);
+	}
+}
+
+async function checkFontInvalidation(page, origin) {
+	await openChat(page, origin, HARD_CHAT);
+	const delayedUrl = await installRegressionFonts(page);
+	await pickReadingFont(page, "PlanRegressionMono");
+	await settle(page);
+	const mono = await planSnapshot(page);
+	await pickReadingFont(page, "PlanRegressionWide");
+	await settle(page);
+	const wide = await planSnapshot(page);
+	assert.deepEqual(wide.sentinel, mono.sentinel, "font switch leaves the sentinel unchanged");
+	expectLayout("font switch rewraps titles with an unchanged sentinel", JSON.stringify(wide.lines) !== JSON.stringify(mono.lines), true);
+	check("unchanged sentinel · Settings font switch", await measureLabels(page, "[data-testid=plan-block-full]"));
+
+	// Start from a different sentinel so this case isolates the subsequent
+	// load notification, rather than depending on the settings regression.
+	await pickReadingFont(page, "Source Sans 3");
+	await settle(page);
+	// Hold just this local font request so fallback is measured before the
+	// real W glyph loads. No further setting, resize or reload may rescue it.
+	let release;
+	const gate = new Promise((resolve) => { release = resolve; });
+	const requests = (request) => { void (async () => {
+		if (request.url() === delayedUrl) await gate;
+		if (!request.isInterceptResolutionHandled()) await request.continue();
+	})(); };
+	await page.setRequestInterception(true);
+	page.on("request", requests);
+	try {
+		await pickReadingFont(page, "PlanRegressionDelayed");
+		await settle(page); // the hook's initial document.fonts.ready has resolved
+		const fallback = await planSnapshot(page);
+		assert.deepEqual(fallback.sentinel, mono.sentinel, "fallback leaves the sentinel unchanged");
+		assert.notDeepEqual(fallback.lines, mono.lines, "delayed W is still using the wider fallback");
+		const requested = page.waitForRequest((r) => r.url() === delayedUrl);
+		await page.evaluate((url) => {
+			const face = new FontFace("PlanRegressionDelayed", `url("${url}")`, { weight: "200 800", unicodeRange: "U+57", display: "swap" });
+			document.fonts.add(face);
+			void face.load();
+		}, delayedUrl);
+		await requested;
+		release();
+		await settle(page);
+		const loaded = await planSnapshot(page);
+		assert.deepEqual(loaded.sentinel, fallback.sentinel, "font load leaves the sentinel unchanged");
+		expectLayout("font load restores monospace line breaks without another setting change", loaded.lines, mono.lines);
+		expectLayout("font load restores the measured monospace boxes", loaded.boxes, mono.boxes);
+		check("unchanged sentinel · delayed font load", await measureLabels(page, "[data-testid=plan-block-full]"));
+	} finally {
+		release();
+		await page.setRequestInterception(false);
+		page.off("request", requests);
+	}
+}
+
 /** Element screenshot after scrolling it to the top and letting layout settle. */
 async function shoot(page, selector, file) {
 	await page.$eval(selector, (el) => el.scrollIntoView({ block: "start" }));
@@ -296,6 +429,12 @@ async function main() {
 		const page = await browser.newPage();
 		page.on("console", (m) => m.type() === "error" && consoleErrors.push(m.text()));
 		page.on("pageerror", (e) => consoleErrors.push(e.message));
+		page.on("response", (r) => { if (r.status() >= 400) consoleErrors.push(`${r.status()} ${r.url()}`); });
+		if (process.argv.includes("--invalidation-only")) {
+			await checkFontInvalidation(page, origin);
+			process.exitCode = failures.length ? 1 : 0;
+			return;
+		}
 
 		// 1. Font × size matrix, live (no reload), on both chats.
 		for (const chat of [FIXTURE_CHAT, HARD_CHAT]) {
@@ -335,16 +474,7 @@ async function main() {
 
 		// 3. The real user path: pick JetBrains Mono in Settings, no reload.
 		await openChat(page, origin, FIXTURE_CHAT);
-		const click = async (sel) => (await page.waitForSelector(sel, { visible: true, timeout: 30_000 })).click();
-		await click("[data-testid=settings-entry]");
-		await click("[data-testid=settings-nav-appearance]");
-		await click("[data-testid=font-trigger]");
-		await page.waitForSelector("[data-testid=font-search]", { visible: true });
-		await page.type("[data-testid=font-search]", "JetBrains Mono");
-		await new Promise((r) => setTimeout(r, 500));
-		await page.keyboard.press("Enter");
-		await new Promise((r) => setTimeout(r, 3000)); // the settings PUT
-		await page.keyboard.press("Escape");
+		await pickReadingFont(page, "JetBrains Mono");
 		await settle(page);
 		const live = await measureLabels(page, "[data-testid=plan-block-full]");
 		assert.match(live[0].font, /JetBrains Mono/, "Settings switched the plan labels to JetBrains Mono");
@@ -363,6 +493,9 @@ async function main() {
 		results.push({ label: "hydration errors on cold load", errors: hydration });
 		console.log(`${hydration.length ? "FAIL" : "ok  "} hydration errors on cold load: ${hydration.length}`);
 		if (hydration.length) failures.push({ label: "hydration", bad: hydration });
+
+		// 5. Font settings and completed loads cannot rely on sample widths.
+		await checkFontInvalidation(page, origin);
 	} finally {
 		await browser.close();
 		await stopServer();

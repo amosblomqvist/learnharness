@@ -57,9 +57,9 @@ import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers
  *  layout never shifts when the current step moves (owner, #671 design). */
 const LABEL_TYPE = "text-xs";
 const PROBE_TYPE = `${LABEL_TYPE} font-medium`;
-/** The sentinel's fixed sample: Latin, digits and CJK, so a font change or
- *  a font finishing its load changes its size whatever script the plan
- *  uses. */
+/** A fixed sample for size/visibility changes. It cannot represent every
+ *  title's glyphs: font settings and completed font loads also invalidate
+ *  measurement, even when this sample keeps exactly the same dimensions. */
 const SENTINEL_TEXT = "Hamburgefonstiv 0123 漢字";
 
 /** The hidden probe a diagram carries (rendered by PlanDiagram, inside its
@@ -154,12 +154,13 @@ const NO_EDGES: ReadonlyArray<{ from: string; to: string }> = [];
  *   (the Source Sans estimate), so the server HTML and hydration agree.
  * - Right after mount (layout effect, before paint) the real labels are
  *   measured and the layout is replaced.
- * - A ResizeObserver on the sentinel re-measures whenever the label font
- *   actually changes size on screen: a web font finishing its load, a
- *   reading font picked in Settings (applied by the Appearance provider's
- *   own layout effect, which runs AFTER ours — so we watch the result, not
- *   the cause), an installed font that never fires a load event. The
- *   sentinel is never rewritten, so measuring can't retrigger it.
+ * - Reading-font changes and completed font loads invalidate measurement
+ *   directly: a font can change a title without changing the sentinel.
+ *   The scheduled frame reads AFTER the Appearance provider's layout
+ *   effect applies the font variables (its effect runs after ours).
+ * - A ResizeObserver still covers size/visibility changes under the
+ *   diagram's own cascade. The sentinel is never rewritten, so measuring
+ *   can't retrigger it.
  *
  * Does NOT measure while the diagram has no layout box (an ancestor with
  * display:none reads 0 widths); the chart layout stays until it shows.
@@ -167,6 +168,7 @@ const NO_EDGES: ReadonlyArray<{ from: string; to: string }> = [];
 export function usePlanLayout(plan: { nodes: readonly LayoutNode[]; edges: ReadonlyArray<{ from: string; to: string }> } | null) {
 	const nodes = plan?.nodes ?? NO_NODES;
 	const edges = plan?.edges ?? NO_EDGES;
+	const { appearance: { fontFamily } } = useAppearance();
 	const sentinel = useRef<SVGTextElement>(null);
 	const measurer = useRef<SVGTextElement>(null);
 	const breaker = useRef<HTMLDivElement>(null);
@@ -182,19 +184,32 @@ export function usePlanLayout(plan: { nodes: readonly LayoutNode[]; edges: Reado
 			setMeasured({ nodes, edges, layout: blockLayout(nodes, edges, probeMeasure(el, box)) });
 		};
 		measure();
-		if (typeof ResizeObserver === "undefined") return;
-		let seen = watch.getComputedTextLength();
-		const observer = new ResizeObserver(() => {
-			const now = watch.getComputedTextLength();
-			if (now === seen) return;
-			seen = now;
-			// Commit before the browser paints, so the new font never shows
-			// in the old boxes for a frame.
-			flushSync(measure);
-		});
-		observer.observe(watch);
-		return () => observer.disconnect();
-	}, [nodes, edges]);
+		const remeasure = () => flushSync(measure);
+		const frame = requestAnimationFrame(remeasure);
+		// A loaded subset may affect only glyphs absent from SENTINEL_TEXT.
+		// Do not gate these notifications on the sentinel's dimensions.
+		const fonts = document.fonts;
+		fonts?.addEventListener("loadingdone", remeasure);
+		let active = true;
+		void fonts?.ready.then(() => { if (active) remeasure(); });
+		let observer: ResizeObserver | undefined;
+		if (typeof ResizeObserver !== "undefined") {
+			let seen = watch.getBBox();
+			observer = new ResizeObserver(() => {
+				const now = watch.getBBox();
+				if (now.width === seen.width && now.height === seen.height) return;
+				seen = now;
+				remeasure();
+			});
+			observer.observe(watch);
+		}
+		return () => {
+			active = false;
+			cancelAnimationFrame(frame);
+			fonts?.removeEventListener("loadingdone", remeasure);
+			observer?.disconnect();
+		};
+	}, [nodes, edges, fontFamily]);
 	const layout = measured && measured.nodes === nodes && measured.edges === edges ? measured.layout : chart;
 	const probe: PlanProbe = { sentinel, measurer, breaker };
 	return { layout, probe };
