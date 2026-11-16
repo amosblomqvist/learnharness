@@ -9,6 +9,8 @@ import { streamSimple as streamCodex } from "@earendil-works/pi-ai/api/openai-co
 import { APP_IDENTITY, piEngineForSpec, type PiEngine } from "../src/agent/models.ts";
 import { createPluginWorkerService } from "../src/agent/plugin-workers.ts";
 import { createProberAgent, createTeacherAgent, createPracticeAgent, type AgentBuildOptions } from "../src/agent/teacher-agent.ts";
+import { streamSideAnswer } from "../src/agent/side-chat.ts";
+import { CLAUDE_CODE_PROVIDER } from "../src/agent/claude-code/constants.ts";
 import { runSubagent } from "../src/agent/subagents/pi-run.ts";
 import { healToolRecord } from "../src/agent/tools/heal.ts";
 import type { ModelCatalogResponse } from "../src/core/contracts/models.ts";
@@ -130,6 +132,37 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 			}
 		}));
 	}
+
+	for (const [id, endpoint] of [
+		["claude-haiku-5-5", "/inference/go/v1/messages"],
+		["glm-5.3", "/inference/go/v1/chat/completions"],
+	] as const) {
+		it(`side questions carry the chat id so OpenCode Go can route ${id}`, async () => closed(async () => {
+			const engine = piEngineForSpec({ provider: "opencode-go", id, thinkingLevel: "off" });
+			const requests: Request[] = [];
+			globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return new Response('{"error":{"message":"closed fixture"}}', { status: 400, headers: { "content-type": "application/json" } }); };
+			const result = await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why this step?" }], chatId: "chat_wire_side" });
+			assert.equal(result.outcome, "error");
+			assert.equal(requests.length, 1);
+			assert.equal(new URL(requests[0]!.url).pathname, endpoint);
+			assert.equal(requests[0]!.headers.get("x-opencode-session"), "chat_wire_side");
+			assert.equal(requests[0]!.headers.get("x-opencode-client"), metadata.name);
+		}));
+	}
+
+	it("side questions never resume a Claude Code live process", async () => {
+		const faux = createFauxCore({});
+		faux.setResponses([fauxAssistantMessage([fauxText("offline answer")])]);
+		const seen: (string | undefined)[] = [];
+		const engine: PiEngine = {
+			model: { ...faux.getModel(), provider: CLAUDE_CODE_PROVIDER },
+			level: "off",
+			streamFn: (model, context, options) => { seen.push(options?.sessionId); return faux.streamSimple(model, context, options); },
+		};
+		const result = await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why?" }], chatId: "chat_side_claude" });
+		assert.equal(result.outcome, "done");
+		assert.deepEqual(seen, [undefined]);
+	});
 
 	it("native OpenAI cache keys clamp to 64 characters while affinity retains exact session", async () => closed(async () => {
 		const engine = piEngineForSpec({ provider: "openai", id: "gpt-4o-mini", thinkingLevel: "off" });
