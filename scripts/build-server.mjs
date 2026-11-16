@@ -54,13 +54,35 @@ if (exists(leakedData)) {
 // (the DEV BYOK key store, 0600) byte-identical into the DMG (caught in
 // the 2026-10-08 payload audit; excluded in next.config.ts — this guard
 // makes a regression loud instead of silent).
+function findNestedDir(rootDir, targetName) {
+	const stack = [rootDir];
+	while (stack.length > 0) {
+		const dir = stack.pop();
+		for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+			if (entry.isSymbolicLink() || !entry.isDirectory()) continue;
+			const full = path.join(dir, entry.name);
+			if (entry.name === targetName) return full;
+			stack.push(full);
+		}
+	}
+	return null;
+}
+
 const subscriptionSecrets = fs.readdirSync(STANDALONE).filter((name) => /^(chatgpt|github-copilot|xai)-credentials\.json/.test(name));
-for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]) {
+for (const secret of ["auth.json", "antigravity-profile", ...subscriptionSecrets, ".env", ".env.local"]) {
 	if (exists(path.join(STANDALONE, secret))) {
 		console.error(`[build-server] REFUSING: standalone contains ${secret} — dev secrets would ship in the app.`);
 		console.error("             Check outputFileTracingExcludes in next.config.ts.");
 		process.exit(1);
 	}
+}
+const leakedProfile = findNestedDir(STANDALONE, "antigravity-profile");
+if (leakedProfile) {
+	console.error(
+		`[build-server] REFUSING: standalone contains ${path.relative(STANDALONE, leakedProfile)} — dev secrets would ship in the app.`,
+	);
+	console.error("             Check outputFileTracingExcludes in next.config.ts.");
+	process.exit(1);
 }
 
 // Assemble plugin assets only after refusing unsafe traced data/credentials.
