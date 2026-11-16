@@ -1,10 +1,11 @@
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import test, { after } from "node:test";
 
-const dir = mkdtempSync(join(process.cwd(), ".pbi-tmp", "codex-models-"));
+const dir = mkdtempSync(join(tmpdir(), "codex-models-"));
 process.env.LH_DATA_DIR = dir;
 const originalPath = process.env.PATH;
 process.env.PATH = dir;

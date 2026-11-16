@@ -379,6 +379,16 @@ function getResponse(call: RunCall, rpcId: string | number) {
 	return readStdin(call).find((message) => message.method === undefined && message.id === rpcId);
 }
 
+/** The fake child records its stdin from another process, so a response can land after pi's next message. */
+async function waitForResponse(call: RunCall, rpcId: string | number) {
+	const deadline = Date.now() + CLEANUP_TIMEOUT_MS;
+	for (;;) {
+		const response = getResponse(call, rpcId);
+		if (response !== undefined || Date.now() >= deadline) return response;
+		await sleep(10);
+	}
+}
+
 test("parallel tool calls share one pi message and each result answers its own request id on the same child", async (t) => {
 	const first: ToolUse = { id: "call_p1", rpcId: "req-p1", name: "read", arguments: { path: "one" } };
 	const second: ToolUse = { id: "call_p2", rpcId: "req-p2", name: "read", arguments: { path: "two" } };
@@ -394,8 +404,8 @@ test("parallel tool calls share one pi message and each result answers its own r
 	assert.equal(getText(reply), "contents of one | contents of two");
 
 	const call = getOnlyCall(calls);
-	assert.deepEqual(getResponse(call, first.rpcId), { id: first.rpcId, result: { contentItems: [{ type: "inputText", text: "contents of one" }], success: true } });
-	assert.deepEqual(getResponse(call, second.rpcId), { id: second.rpcId, result: { contentItems: [{ type: "inputText", text: "contents of two" }], success: true } });
+	assert.deepEqual(await waitForResponse(call, first.rpcId), { id: first.rpcId, result: { contentItems: [{ type: "inputText", text: "contents of one" }], success: true } });
+	assert.deepEqual(await waitForResponse(call, second.rpcId), { id: second.rpcId, result: { contentItems: [{ type: "inputText", text: "contents of two" }], success: true } });
 	await assertCleanedUp(call);
 });
 
@@ -414,11 +424,11 @@ test("a call that arrives after pi has the first message is handed to pi in the 
 	const secondMessage = await runTurn(streamFunction, [HI, firstMessage, toToolResult(first, "contents of one")]);
 	assert.equal(secondMessage.stopReason, "toolUse");
 	assert.deepEqual(getToolCallIds(secondMessage), [late.id]);
-	assert.deepEqual(getResponse(call, first.rpcId), { id: first.rpcId, result: { contentItems: [{ type: "inputText", text: "contents of one" }], success: true } });
+	assert.deepEqual(await waitForResponse(call, first.rpcId), { id: first.rpcId, result: { contentItems: [{ type: "inputText", text: "contents of one" }], success: true } });
 
 	const reply = await runTurn(streamFunction, [HI, firstMessage, toToolResult(first, "contents of one"), secondMessage, toToolResult(late, "contents of two")]);
 	assert.equal(getText(reply), "contents of one | contents of two");
-	assert.deepEqual(getResponse(call, late.rpcId), { id: late.rpcId, result: { contentItems: [{ type: "inputText", text: "contents of two" }], success: true } });
+	assert.deepEqual(await waitForResponse(call, late.rpcId), { id: late.rpcId, result: { contentItems: [{ type: "inputText", text: "contents of two" }], success: true } });
 	assert.equal(calls.length, 1, "one child served every message");
 	await assertCleanedUp(call);
 });
