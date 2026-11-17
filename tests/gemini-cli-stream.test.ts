@@ -355,8 +355,8 @@ test("the child env has no LearnHarness key and the cwd is a temp dir holding on
 	assert.deepEqual(readdirSync(join(call.cwd, ".gemini")), [".env"]);
 	assert.equal(readFileSync(join(call.cwd, ".gemini", ".env"), "utf8"), "");
 	assert.equal(readFileSync(join(call.cwd, ".env"), "utf8"), "");
-	const settings = JSON.parse(readRecord(call).settings!);
-	assert.equal(settings.advanced.ignoreLocalEnv, false, "a local .env must stay a lookup boundary");
+	// Trusted, the CLI stops at the empty .gemini/.env even when a user setting ignores local .env files.
+	assert.equal(call.env.GEMINI_CLI_TRUST_WORKSPACE, "true");
 	await assertCleanedUp(call);
 });
 
