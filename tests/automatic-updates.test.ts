@@ -275,21 +275,31 @@ describe("startup, timer, trusted IPC and menu wiring", () => {
 		assert.equal(f.updater.checks, 1);
 	});
 
-	it("restart-to-install IPC accepts only an owned main frame", async () => {
+	it("restart-to-install IPC accepts only a live owned main frame at the exact app origin", async () => {
 		const f = fixture(); await f.run("main()");
-		const sender = f.windows[0]!.webContents;
+		const win = f.windows[0]!;
+		const sender = win.webContents;
 		const install = f.listeners.get("lh:update-install")!;
+		const foreign = f.window().webContents; // Same URL, but not registered by createWindow.
+		f.run("serverProcess = fixtureChild");
 		for (const bad of [
 			{ sender: {}, senderFrame: sender.mainFrame },
 			{ sender, senderFrame: { url: sender.mainFrame.url } },
+			{ sender, senderFrame: undefined },
+			{ sender: foreign, senderFrame: foreign.mainFrame },
 		]) install(bad);
-		const ownFrame = sender.mainFrame;
-		sender.mainFrame = { url: "https://untrusted.invalid/" };
+		const ownUrl = sender.mainFrame.url;
+		for (const url of ["https://untrusted.invalid/", "http://127.0.0.1:9001/", "not a URL"]) {
+			sender.mainFrame.url = url; // Navigation changes the current frame's URL, not its identity.
+			install({ sender, senderFrame: sender.mainFrame });
+		}
+		assert.deepEqual(f.order, [], "untrusted requests neither kill the server nor reach quit-and-install");
+		sender.mainFrame.url = ownUrl;
 		install({ sender, senderFrame: sender.mainFrame });
-		assert.deepEqual(f.order, [], "untrusted senders never reach quit-and-install");
-		sender.mainFrame = ownFrame;
+		assert.deepEqual(f.order, ["SIGTERM", "install"], "legitimate Restart still stops the server before installation");
+		win.emit("closed");
 		install({ sender, senderFrame: sender.mainFrame });
-		assert.deepEqual(f.order, ["install"]);
+		assert.deepEqual(f.order, ["SIGTERM", "install"], "closing the window revokes its membership");
 	});
 
 	it("menu restores/focuses a minimized window, opens General, and manually checks while OFF", async () => {

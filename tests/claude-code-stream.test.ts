@@ -843,6 +843,36 @@ test("preserves existing CLI environment authentication without a subscription g
 	assert.equal(getFlagValue(call.args, "--setting-sources"), "user");
 });
 
+test("Fable selection reaches the fake CLI unchanged without desktop API authority", async (t) => {
+	const names = ["LH_DESKTOP_API_SECRET", "LH_DESKTOP_SERVER", "ANTHROPIC_AUTH_TOKEN"] as const;
+	const saved = names.map((name) => [name, process.env[name]] as const);
+	t.after(() => {
+		for (const [name, value] of saved) {
+			if (value === undefined) delete process.env[name]; else process.env[name] = value;
+		}
+	});
+	process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
+	process.env.LH_DESKTOP_SERVER = "1";
+	process.env.ANTHROPIC_AUTH_TOKEN = "synthetic-native-cli-token";
+	const model = CLAUDE_CODE_MODELS.find((entry) => entry.id === "fable");
+	assert.ok(model);
+	const { runClaude, calls } = createFakeRun(t, readFixtureLines("text.jsonl"));
+	const context = normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI] });
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(model, context, { reasoning: "low" }));
+	const call = getOnlyCall(calls);
+	assert.equal(getFlagValue(call.args, "--model"), "fable");
+	assert.equal(getFlagValue(call.args, "--effort"), "low");
+	assert.equal(call.env.LH_DESKTOP_API_SECRET, undefined);
+	assert.equal(call.env.LH_DESKTOP_SERVER, undefined);
+	assert.equal(call.env.ANTHROPIC_AUTH_TOKEN, "synthetic-native-cli-token", "native authentication is retained");
+	assert.equal(process.env.LH_DESKTOP_API_SECRET, "d".repeat(64), "the parent keeps its own capability");
+	assert.equal(process.env.LH_DESKTOP_SERVER, "1");
+	const done = events.find((event) => event.type === "done");
+	assert.ok(done && done.type === "done");
+	assert.equal(done.message.model, "fable");
+	assert.equal(done.message.stopReason, "stop");
+});
+
 test("does not inject credentials reflected only from LearnHarness's key store", async (t) => {
 	const name = "ANTHROPIC_API_KEY";
 	const record = authEnvRecord();

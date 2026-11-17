@@ -309,4 +309,55 @@ describe("activity section render", () => {
 			for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
 		}
 	});
+
+	const stopCases: { label: string; feed: ActivityFeed; request: { kind: string; id: string } }[] = [
+		{ label: "job", feed: { jobs: [job({ id: "pdf-job", kind: "pdf" })], extractions: [] }, request: { kind: "job", id: "pdf-job" } },
+		{ label: "plugin worker", feed: { jobs: [], extractions: [], pluginWorkers: [{
+			id: "fixture-plugin:task-1", taskId: "task-1", pluginId: "fixture-plugin", definitionId: "worker",
+			status: "running", title: "Fixture worker", createdAt: new Date(NOW).toISOString(), updatedAt: new Date(NOW).toISOString(),
+			model: { provider: "offline", id: "fixture" }, costUsd: null, contextLimit: null,
+		}] }, request: { kind: "plugin-worker", id: "fixture-plugin:task-1" } },
+		{ label: "extraction chunk", feed: { jobs: [], extractions: [{
+			id: "source-1#2", chatId: "source-1", part: { i: 2, n: 3 }, title: "Notes · 2/3", phase: "extracting", startedAt: NOW,
+		}] }, request: { kind: "extraction", id: "source-1" } },
+	];
+	for (const { label, feed, request } of stopCases) it(`expanded ${label}: stop targets its process without toggling detail`, async (t) => {
+		const dom = parseHTML("<html><body><div id='root'></div></body></html>");
+		const globals = { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
+			Element: dom.window.Element, Node: dom.window.Node, MutationObserver: dom.window.MutationObserver, IS_REACT_ACT_ENVIRONMENT: true };
+		const saved = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+		Object.assign(globalThis, globals);
+		const calls: unknown[] = [];
+		let finish!: (response: Response) => void;
+		const pending = new Promise<Response>(resolve => { finish = resolve; });
+		t.mock.method(globalThis, "fetch", async (url: RequestInfo | URL, init?: RequestInit) => {
+			assert.equal(url, "/api/activity/abort");
+			assert.equal(init?.method, "POST");
+			calls.push(JSON.parse(String(init?.body)));
+			return pending;
+		});
+		const root = createRoot(dom.document.querySelector("#root")!);
+		try {
+			await act(async () => { root.render(<ActivitySection feed={feed} />); });
+			const face = dom.document.querySelector("button[aria-expanded]")!;
+			const stop = dom.document.querySelector("[data-testid='activity-abort']")!;
+			assert.equal(face.contains(stop), false, "stop is a sibling control, never a nested button");
+			assert.equal(stop.getAttribute("type"), "button");
+			assert.match(stop.getAttribute("aria-label")!, /^End /);
+			await act(async () => { face.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+			assert.equal(face.getAttribute("aria-expanded"), "true");
+			await act(async () => { stop.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+			assert.deepEqual(calls, [request]);
+			assert.equal(face.getAttribute("aria-expanded"), "true", "stop must not collapse the disclosure");
+			assert.equal(stop.hasAttribute("disabled"), true, "pending cancellation disables duplicate clicks");
+			assert.match(dom.document.querySelector("[data-testid='activity-blob-detail']")!.textContent!, /Stopping…/);
+			await act(async () => { finish(Response.json({ ok: true })); });
+			await act(async () => { root.render(<ActivitySection feed={{ jobs: [], extractions: [] }} />); });
+			assert.equal(dom.document.querySelector("[data-testid='activity-abort']"), null, "settled feed removes the control");
+		} finally {
+			finish(Response.json({ ok: true }));
+			await act(async () => root.unmount());
+			for (const [key, descriptor] of saved) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
+		}
+	});
 });
