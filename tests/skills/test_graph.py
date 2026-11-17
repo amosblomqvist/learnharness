@@ -153,7 +153,7 @@ class GraphTests(unittest.TestCase):
         corrupted.write_text("{torn", encoding="utf-8")
         self.write_json("chats/chat_future.json", {
             "id": "chat_future", "title": "Future metadata", "createdAt": "2026-01-01",
-            "updatedAt": "2026-01-01", "version": 2, "messages": [],
+            "updatedAt": "2026-01-01", "version": 3, "messages": [],
         })
         self.write_json("chats/src_notes.json", {
             "id": "src_notes", "title": "Older parts metadata", "createdAt": "2026-01-01",
@@ -170,7 +170,7 @@ class GraphTests(unittest.TestCase):
                 self.assertEqual(status, 0, diagnostics)
                 for name in ("chat_old.json", "chat_future.json", "src_notes.json", "chat_mismatch.json"):
                     self.assertIn(name, diagnostics)
-                for reason in ("format 2", "older UIMessage/parts", "filename/ID mismatch", "skipped"):
+                for reason in ("format 3", "older UIMessage/parts", "filename/ID mismatch", "skipped"):
                     self.assertIn(reason, diagnostics)
                 if format == "json":
                     sessions = {item["id"]: item for item in json.loads(output)["records"]}

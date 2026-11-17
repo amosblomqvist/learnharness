@@ -2,7 +2,9 @@
 
 The files are the user's record, not an import format to rewrite. Work read-only.
 The bundled readers make common views convenient; they are not required for custom
-analysis. This reference describes native session/graph format **1**. An absent
+analysis. This reference describes native session/graph format **1**; session
+format **2** adds the durable side-chat thread structures and keeps the same
+message shapes. An absent
 version stamp means v1. Older fields within that format are described below;
 pre-native `parts`/UIMessage transcripts are a different, unsupported dialect.
 
