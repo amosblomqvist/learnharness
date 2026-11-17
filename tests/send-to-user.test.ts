@@ -36,8 +36,10 @@ after(() => {
 });
 
 const { sendToUserTool } = await import("../src/agent/tools/send-to-user.ts");
-const { createProberAgent, createTeacherAgent, createPracticeAgent, composeInstructions } = await import("../src/agent/teacher-agent.ts");
-const { SEND_TO_USER_TOOL, activeProblemOf, asAgentMessages, newUserMessage, sendToUserText, toLlmMessages, userFacingTextOf } = await import("../src/core/native-messages.ts");
+const { practiceTools } = await import("../src/agent/tools/practice.ts");
+const { NARRATION_BLOCK_REASON, NARRATION_GUARD_MAX_BLOCKS, SEND_TO_USER_DELIVERY_RULE } = await import("../src/agent/narration-guard.ts");
+const { bareQuestionTools, createProberAgent, createTeacherAgent, createPracticeAgent, composeInstructions } = await import("../src/agent/teacher-agent.ts");
+const { SEND_TO_USER_TOOL, activeProblemOf, asAgentMessages, danglingQuestionOf, newUserMessage, sendToUserText, toLlmMessages, userFacingTextOf } = await import("../src/core/native-messages.ts");
 const { coverageOf, messageFingerprint, messageViewLines, teacherProseBlocks } = await import("../src/core/coverage.ts");
 const { projectView } = await import("../src/core/view.ts");
 const { sessionMarkdown } = await import("../src/core/session-markdown.ts");
@@ -95,18 +97,20 @@ describe("send_to_user model gate", () => {
 		["openai", "gpt-4o-mini", false],
 		["anthropic", "opaque-alias", false],
 	] as const) {
-		it(`${provider}/${id}: ${enabled ? "includes" : "omits"} tool and description in all conversation agents`, () => {
+		it(`${provider}/${id}: ${enabled ? "includes" : "omits"} teaching output, never adds it to practice`, () => {
 			const { engine } = scripted(provider, id);
 			for (const [kind, factory] of Object.entries(factories)) {
 				const agent = factory({ engine });
+				const offered = enabled && kind !== "practice";
+				const guarded = offered && kind === "teacher";
 				const output = agent.state.tools.find((tool) => tool.name === SEND_TO_USER_TOOL);
-				assert.equal(Boolean(output), enabled, kind);
-				if (enabled) {
+				assert.equal(Boolean(output), offered, kind);
+				if (offered) {
 					assert.equal(output!.description, sendToUserTool.description);
 					assert.equal(typeof output!.prepareArguments, "function", "standard argument healing is wired");
 				}
-				assert.equal(agent.state.systemPrompt, composeInstructions(kind as keyof typeof factories));
-				assert.ok(!agent.state.systemPrompt.includes(SEND_TO_USER_TOOL), "no added prompt instructions");
+				const composed = composeInstructions(kind as keyof typeof factories);
+				assert.equal(agent.state.systemPrompt, guarded ? `${composed}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composed);
 			}
 		});
 	}
@@ -114,7 +118,9 @@ describe("send_to_user model gate", () => {
 	it("explicitly injected teacher/practice test registries remain unchanged", () => {
 		const { engine } = scripted("anthropic", "claude-opus-5-5");
 		for (const factory of [factories.teacher, factories.practice]) {
-			assert.deepEqual(factory({ engine, tools: {} }).state.tools, []);
+			const agent = factory({ engine, tools: {} });
+			assert.deepEqual(agent.state.tools, []);
+			assert.ok(!agent.state.systemPrompt.includes(SEND_TO_USER_DELIVERY_RULE));
 		}
 	});
 
@@ -245,7 +251,29 @@ describe("send_to_user interrupted generations", () => {
 	}
 });
 
+// Legacy/caller-owned practice batches keep their existing stop semantics,
+// even though new production practice agents no longer offer the output tool.
+function legacyPracticeAgent(engine: PiEngine) {
+	return createPracticeAgent({ chatId, chatStore }, {
+		engine,
+		tools: { ...practiceTools({ chatId, chatStore }), [SEND_TO_USER_TOOL]: sendToUserTool },
+	});
+}
+
 describe("send_to_user native flow (offline)", () => {
+	it("practice uses one ordinary final response without offering an output channel", async () => {
+		const lesson = "A synthetic practice explanation.";
+		const { engine, faux } = scripted("anthropic", "claude-sonnet-5-5", [(context) => {
+			assert.ok(!context.messages.some((m) => m.role === "system" && m.toolsAdded?.some((t) => t.name === SEND_TO_USER_TOOL)));
+			return fauxAssistantMessage(lesson);
+		}]);
+		const agent = createPracticeAgent({ chatId, chatStore }, { engine });
+		await agent.prompt("Explain this synthetic practice attempt.");
+		assert.equal(faux.state.callCount, 1);
+		const messages = agent.state.messages.map((m, i) => ({ ...m, id: `practice-${i}` })) as LhMessage[];
+		assert.deepEqual(prose(projectView(messages)), [lesson]);
+		assert.ok(!agent.state.messages.some((m) => m.role === "toolResult"));
+	});
 	it("output alone continues the loop, so the model receives its native acknowledgement", async () => {
 		const { engine, faux } = scripted("anthropic", "claude-opus-5-5", [
 			fauxAssistantMessage([outputCall("Read this first.")], { stopReason: "toolUse" }),
@@ -269,7 +297,7 @@ describe("send_to_user native flow (offline)", () => {
 				fauxAssistantMessage(outputFirst ? [output, problem] : [problem, output], { stopReason: "toolUse" }),
 				fauxAssistantMessage("Premature continuation must not run."),
 			]);
-			const agent = createPracticeAgent({ chatId, chatStore }, { engine });
+			const agent = legacyPracticeAgent(engine);
 			await agent.prompt("Pose a synthetic problem.");
 			assert.equal(faux.state.callCount, 1, "wait for the learner after a successful mixed-batch pose");
 			const results = agent.state.messages.filter((m) => m.role === "toolResult");
@@ -288,7 +316,7 @@ describe("send_to_user native flow (offline)", () => {
 					}, { id: "unfinished-problem" }),
 				], { stopReason }),
 			]);
-			const agent = createPracticeAgent({ chatId, chatStore }, { engine });
+			const agent = legacyPracticeAgent(engine);
 			await agent.prompt("Pose a synthetic problem.");
 			assert.equal(faux.state.callCount, 1);
 			assert.ok(!agent.state.messages.some((m) => m.role === "toolResult"));
@@ -312,7 +340,7 @@ describe("send_to_user native flow (offline)", () => {
 			], { stopReason: "toolUse" }),
 			fauxAssistantMessage("Premature continuation must not run."),
 		]);
-		const agent = createPracticeAgent({ chatId, chatStore }, { engine });
+		const agent = legacyPracticeAgent(engine);
 		await agent.prompt("Pose a synthetic problem.");
 		assert.equal(faux.state.callCount, 2, "failed authoring retries; successful pose waits for the learner");
 		const results = agent.state.messages.filter((m) => m.role === "toolResult" && m.toolName === "problem");
@@ -366,4 +394,156 @@ describe("send_to_user native flow (offline)", () => {
 		assert.deepEqual(teacherProseBlocks(saved), [lesson]);
 		assert.equal(sessionMarkdown(saved).split(lesson).length - 1, 1);
 	});
+});
+
+const guardQuizInput = {
+	type: "check", nodeId: "synthetic", question: "What is two plus two?",
+	options: [{ label: "Four", value: "4" }, { label: "Five", value: "5" }],
+	correctAnswer: "4", explanation: "Add two pairs.",
+};
+const narration = () => ({
+	...fauxThinking("Synthetic narration summary, not a lesson."),
+	thinkingSignature: Buffer.from("synthetic-header:narration:payload").toString("base64"),
+});
+const guardQuestion = (id: string) => fauxToolCall("quiz", guardQuizInput, { id });
+
+describe("narration guard native flow (offline)", () => {
+	for (const [provider, id] of [
+		["anthropic", "claude-sonnet-5-5"],
+		["openrouter", "anthropic/claude-sonnet-5.5"],
+		["amazon-bedrock", "us.anthropic.claude-sonnet-5-5-v1:0"],
+		["claude-code", "sonnet"],
+	] as const) {
+		it(`${provider}: rejects undelivered narration, retries, persists errors, then stops on the delivered question`, async () => {
+			const lesson = "**Synthetic delivered lesson:** two pairs make four.";
+			const { engine, faux } = scripted(provider, id, [
+				fauxAssistantMessage([narration(), guardQuestion("blocked-question")], { stopReason: "toolUse" }),
+				(context) => {
+					const rejection = context.messages.find((m) => m.role === "toolResult" && m.toolCallId === "blocked-question");
+					assert.equal(rejection?.role, "toolResult");
+					if (rejection?.role !== "toolResult") assert.fail("missing retry error");
+					assert.equal(rejection.isError, true);
+					assert.deepEqual(rejection.content, [{ type: "text", text: NARRATION_BLOCK_REASON }]);
+					return fauxAssistantMessage([narration(), outputCall(lesson), guardQuestion("delivered-question")], { stopReason: "toolUse" });
+				},
+				fauxAssistantMessage("Must not continue past a successfully posed question."),
+			]);
+			const chat = chatStore.createChat("Synthetic guarded delivery");
+			const user = newUserMessage("Explain synthetic addition.");
+			chatStore.saveMessages(chat.id, [user]);
+			const agent = createTeacherAgent(undefined, { engine, messages: asAgentMessages([user]) });
+			const handle = runPiTurn({
+				agent, updateFlushMs: 0,
+				onFinish: (messages, aborted) => { persistTurn(chatStore, chat.id, 1, messages, aborted); },
+			});
+			const wire = await new Response(handle.subscribe()).text();
+			assert.ok(wire.endsWith("data: [DONE]\n\n"));
+			assert.equal(faux.state.callCount, 2);
+			const saved = chatStore.getChat(chat.id)!.messages;
+			assert.ok(saved.some((m) => m.role === "toolResult" && m.toolCallId === "blocked-question" && m.isError));
+			assert.equal(danglingQuestionOf(saved)?.toolCallId, "delivered-question");
+			assert.deepEqual(prose(projectView(saved)), [lesson]);
+			assert.deepEqual(prose(projectView(JSON.parse(JSON.stringify(saved)))), [lesson]);
+			assert.deepEqual(teacherProseBlocks(saved), [lesson]);
+			assert.equal(sessionMarkdown(saved).split(lesson).length - 1, 1);
+		});
+	}
+
+	for (const outputFirst of [true, false]) {
+		it(`requires successful preceding output in the same batch (${outputFirst ? "output first" : "question first"})`, async () => {
+			const output = outputCall("A synthetic lesson.");
+			const question = guardQuestion("ordered-question");
+			const { engine, faux } = scripted("anthropic", "claude-sonnet-5-5", [
+				fauxAssistantMessage([narration(), ...(outputFirst ? [output, question] : [question, output])], { stopReason: "toolUse" }),
+				fauxAssistantMessage([guardQuestion("retried-question")], { stopReason: "toolUse" }),
+			]);
+			const agent = createTeacherAgent(undefined, { engine });
+			await agent.prompt("Pose a synthetic check.");
+			assert.equal(faux.state.callCount, outputFirst ? 1 : 2);
+			const questionResult = agent.state.messages.find((m) => m.role === "toolResult" && m.toolCallId === "ordered-question");
+			assert.equal(questionResult?.role === "toolResult" && questionResult.isError, !outputFirst);
+			assert.ok(agent.state.messages.some((m) => m.role === "toolResult" && m.toolName === SEND_TO_USER_TOOL && !m.isError), "a blocked question does not cancel its sibling output");
+		});
+	}
+
+	it("does not let a failed output call end the run behind a successful question", async () => {
+		const { engine, faux } = scripted("anthropic", "claude-sonnet-5-5", [
+			fauxAssistantMessage([narration(), outputCall(" \n "), guardQuestion("undelivered-question")], { stopReason: "toolUse" }),
+			fauxAssistantMessage([narration(), outputCall("A repaired lesson.", "repaired-output"), guardQuestion("repaired-question")], { stopReason: "toolUse" }),
+		]);
+		const agent = createTeacherAgent(undefined, { engine });
+		await agent.prompt("Pose a synthetic check.");
+		assert.equal(faux.state.callCount, 2);
+		for (const callId of ["send-1", "undelivered-question"]) {
+			assert.ok(agent.state.messages.some((m) => m.role === "toolResult" && m.toolCallId === callId && m.isError));
+		}
+		const messages = agent.state.messages.map((m, i) => ({ ...m, id: `repair-${i}` })) as LhMessage[];
+		assert.deepEqual(prose(projectView(messages)), ["A repaired lesson."]);
+	});
+
+	it("does not borrow an earlier response's output to satisfy new narration", async () => {
+		const { engine, faux } = scripted("anthropic", "claude-sonnet-5-5", [
+			fauxAssistantMessage([outputCall("An earlier synthetic explanation.")], { stopReason: "toolUse" }),
+			fauxAssistantMessage([narration(), guardQuestion("new-narration")], { stopReason: "toolUse" }),
+			fauxAssistantMessage([guardQuestion("question-only-retry")], { stopReason: "toolUse" }),
+		]);
+		const agent = createTeacherAgent(undefined, { engine });
+		await agent.prompt("Continue synthetic teaching.");
+		assert.equal(faux.state.callCount, 3);
+		assert.ok(agent.state.messages.some((m) => m.role === "toolResult" && m.toolCallId === "new-narration" && m.isError));
+	});
+
+	it("keeps explicitly injected registries free of delivery instructions and enforcement", async () => {
+		const { engine, faux } = scripted("anthropic", "claude-sonnet-5-5", [
+			fauxAssistantMessage([narration(), guardQuestion("caller-owned-question")], { stopReason: "toolUse" }),
+		]);
+		const agent = createTeacherAgent(undefined, { engine, tools: bareQuestionTools() });
+		assert.ok(!agent.state.systemPrompt.includes(SEND_TO_USER_DELIVERY_RULE));
+		assert.ok(!agent.state.tools.some((tool) => tool.name === SEND_TO_USER_TOOL));
+		await agent.prompt("Pose a synthetic caller-owned check.");
+		assert.equal(faux.state.callCount, 1);
+		assert.ok(agent.state.messages.some((m) => m.role === "toolResult" && m.toolCallId === "caller-owned-question" && !m.isError));
+	});
+
+	it("stands down after two blocked calls and resets on reconstruction", async () => {
+		assert.equal(NARRATION_GUARD_MAX_BLOCKS, 2);
+		for (let run = 0; run < 2; run++) {
+			const { engine, faux } = scripted("anthropic", "claude-sonnet-5-5", Array.from({ length: 3 }, (_, i) =>
+				fauxAssistantMessage([narration(), guardQuestion(`budget-${i}`)], { stopReason: "toolUse" })));
+			const agent = createTeacherAgent(undefined, { engine });
+			await agent.prompt("Pose a synthetic check.");
+			assert.equal(faux.state.callCount, 3);
+			const results = agent.state.messages.filter((m) => m.role === "toolResult" && m.toolName === "quiz");
+			assert.deepEqual(results.map((m) => m.role === "toolResult" && m.isError), [true, true, false]);
+		}
+	});
+
+	for (const type of ["predict", "check"] as const) {
+		it(`allows a legitimate ${type} with plain thinking and no prose`, async () => {
+			const question = fauxToolCall("quiz", { ...guardQuizInput, type }, { id: "question-only" });
+			const { engine, faux } = scripted("anthropic", "claude-haiku-5-5", [
+				fauxAssistantMessage([fauxThinking("Synthetic internal planning."), question], { stopReason: "toolUse" }),
+			]);
+			const agent = createTeacherAgent(undefined, { engine });
+			await agent.prompt("Pose a synthetic question without commentary.");
+			assert.equal(faux.state.callCount, 1);
+			assert.ok(agent.state.messages.some((m) => m.role === "toolResult" && m.toolCallId === "question-only" && !m.isError));
+		});
+	}
+
+	for (const stopReason of ["error", "aborted", "length"] as const) {
+		it(`${stopReason} output/question generation never becomes successful delivery`, async () => {
+			const steps = [fauxAssistantMessage([narration(), outputCall("Unfinished lesson."), guardQuestion("unfinished-question")], { stopReason })];
+			if (stopReason === "length") steps.push(fauxAssistantMessage([guardQuestion("length-retry")], { stopReason: "toolUse" }));
+			const { engine, faux } = scripted("anthropic", "claude-sonnet-5-5", steps);
+			const agent = createTeacherAgent(undefined, { engine });
+			await agent.prompt("Pose a synthetic check.");
+			assert.equal(faux.state.callCount, stopReason === "length" ? 2 : 1);
+			const results = agent.state.messages.filter((m) => m.role === "toolResult" && m.toolName === SEND_TO_USER_TOOL);
+			assert.equal(results.length, stopReason === "length" ? 1 : 0);
+			assert.ok(results.every((m) => m.role === "toolResult" && m.isError));
+			const messages = agent.state.messages.map((m, i) => ({ ...m, id: `failed-${i}` })) as LhMessage[];
+			assert.deepEqual(prose(projectView(messages)), []);
+		});
+	}
 });

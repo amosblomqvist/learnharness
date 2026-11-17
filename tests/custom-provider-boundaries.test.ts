@@ -188,9 +188,9 @@ test("stale save, pin edit and disconnect all return reload guidance without wri
 	assert.equal(requests.length, 0); assert.deepEqual(current(), before);
 });
 test("after discovery preserves unrelated edits and rejects intervening custom edits", async () => {
-	globalThis.fetch = async () => { fs.writeFileSync(settingsFile, JSON.stringify({ ...current(), appearance: { mode: "dark" }, claudeCode: { enabled: true } })); return Response.json({ data: [{ id: "m" }] }); };
+	globalThis.fetch = async () => { fs.writeFileSync(settingsFile, JSON.stringify({ ...current(), appearance: { theme: "catppuccin-mocha" }, claudeCode: { enabled: true } })); return Response.json({ data: [{ id: "m" }] }); };
 	assert.equal((await mutate({ baseUrl: "http://h", authMode: "keyless" })).status, 200);
-	assert.deepEqual(current().appearance, { mode: "dark" }); assert.equal(current().claudeCode.enabled, true);
+	assert.deepEqual(current().appearance, { theme: "catppuccin-mocha" }); assert.equal(current().claudeCode.enabled, true);
 	globalThis.fetch = async () => { seed({ baseUrl: "http://changed", authMode: "keyless", models: [] }); return Response.json({ data: [{ id: "m" }] }); };
 	assert.equal((await mutate({ baseUrl: "http://h", authMode: "keyless" })).status, 409);
 	assert.equal(current().customProvider.baseUrl, "http://changed");
@@ -209,8 +209,8 @@ test("offline pins accept 512/1, retain support declaration, and do not probe", 
 test("settings-write failure restores previous key/config and reports failure", async () => {
 	setFileKey("old-key");
 	const before = current();
-	const write = fs.writeFileSync;
-	mock.method(fs, "writeFileSync", (...args: Parameters<typeof write>) => { if (args[0] === settingsFile) throw new Error("private-io-details"); return write(...args); });
+	const rename = fs.renameSync;
+	mock.method(fs, "renameSync", (...args: Parameters<typeof rename>) => { if (args[1] === settingsFile) throw new Error("private-io-details"); return rename(...args); });
 	const res = await mutate({ baseUrl: "http://new", authMode: "apiKey", key: "new-key" });
 	assert.equal(res.status, 500); assert.ok(!(await res.text()).includes("private-io-details"));
 	assert.equal(keys.keyValue(CUSTOM_PROVIDER.envVar), "old-key"); assert.deepEqual(current(), before);

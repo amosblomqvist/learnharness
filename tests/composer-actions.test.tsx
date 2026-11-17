@@ -3,7 +3,7 @@ import React from "react";
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { parseHTML } from "linkedom";
 import { ComposerActions, NodePickerControl } from "../components/composer-actions.tsx";
 import { ZeroKeysPill } from "../components/setup-cta.tsx";

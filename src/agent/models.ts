@@ -32,7 +32,7 @@ export const APP_IDENTITY = Object.freeze({
 
 /**
  * The one engine factory every agent's model comes from (the pi-ai swap,
- * docs/pi-engine-swap.md). BYOK ALL THE WAY DOWN (owner, 2026-09-22):
+ * docs/archive/pi-engine-swap.md). BYOK ALL THE WAY DOWN (owner, 2026-09-22):
  * there are no factory pins — every engine resolves from a RESOLVED SPEC
  * (the settings chain's output) and the one builder here wires it to
  * pi-ai's federated catalogs.

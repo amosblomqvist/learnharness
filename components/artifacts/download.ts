@@ -19,10 +19,10 @@ export function slugFilename(title: string): string {
 	return slug || "demo";
 }
 
-/** Save text as a downloaded file. The blob URL is revoked right after the
- *  click — Chromium keeps the download alive past the revoke. */
-export function downloadFile(name: string, text: string, mime: string): void {
-	const blob = new Blob([text], { type: mime });
+/** Save text (or bytes) as a downloaded file. The blob URL is revoked right
+ *  after the click — Chromium keeps the download alive past the revoke. */
+export function downloadFile(name: string, content: string | Uint8Array<ArrayBuffer>, mime: string): void {
+	const blob = new Blob([content], { type: mime });
 	const url = URL.createObjectURL(blob);
 	const a = document.createElement("a");
 	a.href = url;

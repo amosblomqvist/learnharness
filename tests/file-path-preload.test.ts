@@ -6,6 +6,7 @@ import { runInNewContext } from "node:vm";
 interface PathBridge {
 	platform: string;
 	getPathForFile(file: unknown): string;
+	chooseAttachmentFolder(...args: unknown[]): Promise<string | null>;
 	[key: string]: unknown;
 }
 
@@ -75,14 +76,21 @@ describe("path-only preload bridge", () => {
 	it("adds just the narrow path resolver to the explicit surface, without exposing Electron or filesystem APIs", () => {
 		const f = fixture(() => "");
 		assert.deepEqual(Object.keys(f.bridge).sort(), [
-			"chatgpt", "checkForUpdates", "expandWindow", "getPathForFile", "getUpdateState", "getZoom",
-			"installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "subscriptions",
+			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "expandWindow", "getPathForFile", "getUpdateState", "getZoom",
+			"installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "setAppearance", "subscriptions",
 		]);
 		assert.equal(f.bridge.platform, "darwin");
 		for (const name of ["webUtils", "ipcRenderer", "electron", "fs", "require", "readFile", "writeFile", "uploadFile", "openPath"]) {
 			assert.equal(Object.hasOwn(f.bridge, name), false, name);
 		}
 		assert.notEqual(f.bridge.getPathForFile, f.electron.webUtils.getPathForFile, "webUtils itself is not exposed");
+	});
+
+	it("folder picker invokes only its whitelisted mode, never forwarding renderer options", async () => {
+		const f = fixture(() => "");
+		await f.bridge.chooseAttachmentFolder({ properties: ["openFile", "multiSelections"], defaultPath: "/private" });
+		assert.deepEqual(f.invoked, [["lh:attachment:pick", "folder"]]);
+		assert.deepEqual(f.supplied, []);
 	});
 
 	it("retains context isolation, sandbox and disabled Node integration in the production window", () => {

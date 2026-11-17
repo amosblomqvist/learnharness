@@ -1,5 +1,7 @@
 # ⚠️ ARCHIVED — superseded 2026-09-18. Read [`docs/architecture.md`](../architecture.md) instead.
 
+[Archive index](README.md) · Historical notes below describe their own period, not today's runtime.
+
 This is the pre-audit architecture spec (last maintained 2026-09-08). It was superseded after a full-code audit found it drifted from the as-built system; it is retained for history only — **do not trust it as a spec, do not update it**.
 
 Known-stale in this copy: the single `contracts.ts` (now six domain files), the `everyNQuizAnswers` extraction trigger (now token coverage), hotspot + 1-hop graph context (now semantic top-K), sigma.js + forceAtlas2 rendering (now a hand-rolled Canvas 2D renderer + d3-force), Louvain clustering (now embedding-based agglomerative clustering), `MockLanguageModelV4` tests (now pi-ai's faux provider), the three-file store list (now five adapters), and "deliberately deferred" features that since shipped (dictation, notes import, embeddings, clusters, model settings). The current spec's decision-history appendix records each supersession.
