@@ -72,7 +72,7 @@ export function PluginQuestionAnswered({ snapshot, answer, chatId, registration 
 		{/* Reading precedes the question, exactly as in native answered cards.
 		    Presence remains authoritative, including defined empty channels. */}
 		{(answer.readingThinking !== undefined || !!answer.images?.readingThinking?.length) && <ThinkingBlock
-			testId="reading-thinking-block" label="YOUR THINKING" text={answer.readingThinking ?? ""} images={answer.images?.readingThinking} defaultOpen
+			testId="reading-thinking-block" label="YOUR THINKING" text={answer.readingThinking ?? ""} images={answer.images?.readingThinking}
 		/>}
 		<div data-testid="plugin-question-answered" className="rounded-2xl border bg-card px-4 py-3">
 			<div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{snapshot.label}<span ref={headerRoot} className="inline-flex items-center" /></div>

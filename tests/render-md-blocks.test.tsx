@@ -18,7 +18,7 @@ import { InteractionLayersProvider } from "../components/interaction-layers.tsx"
 const renderToStaticMarkup = (node: React.ReactNode) => renderMarkup(<InteractionLayersProvider>{node}</InteractionLayersProvider>);
 import { parseHTML } from "linkedom";
 import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
-import { ThinkingBlock, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { ThinkingBlock } from "@/components/thinking-block";
 import { MermaidOverlay, SessionMermaidContext, chartSize } from "../components/session-overlay.tsx";
 import { PlanPopup } from "../components/plan-block.tsx";
 import { MarkdownCode, codeSource } from "../components/md-blocks.tsx";
@@ -296,9 +296,9 @@ describe("md-blocks — the restored plain blockquote (owner round, 2026-10-07)"
 	});
 });
 
-describe("ThinkingBlock — the document band + ⌘T sync (owner rounds, 2026-10-07)", () => {
+describe("ThinkingBlock — the document band (owner rounds, 2026-10-07)", () => {
 	it("the row is the document band — round four geometry (owner, 2026-10-07)", () => {
-		const html = renderToStaticMarkup(<ThinkingBlock text="banded" defaultOpen />);
+		const html = renderToStaticMarkup(<ThinkingBlock text="banded" />);
 		assert.ok(html.includes("bg-card"), "the card-color band");
 		assert.ok(html.includes("border-l-[calc(3ch-14px)]"), "narrow rail — 14px gap inside the 3ch inset");
 		assert.ok(html.includes("py-1") && html.includes("pl-[14px]"), "4px band padding");
@@ -312,17 +312,5 @@ describe("ThinkingBlock — the document band + ⌘T sync (owner rounds, 2026-10
 		const html = renderToStaticMarkup(<ThinkingBlock text="in card" inCard />);
 		assert.ok(!html.includes("bg-accent") && !html.includes("bg-card"), "transparent on the card");
 		assert.ok(html.includes("border-l-[calc(3ch-14px)]"), "rail only, same geometry");
-	});
-
-	it("⌘T sets every row — explicit sets stomp individual state, late mounts honor the last set", () => {
-		setAllUserThinkingOpen(false);
-		const collapsed = renderToStaticMarkup(<ThinkingBlock text="synced" defaultOpen />);
-		assert.match(collapsed, /aria-expanded="false"/);
-		assert.ok(!collapsed.includes(">synced<"), "the open default was stomped");
-		setAllUserThinkingOpen(true);
-		const reopened = renderToStaticMarkup(<ThinkingBlock text="synced" />);
-		assert.match(reopened, /aria-expanded="true"/);
-		// restore the null default for other tests in this file
-		setAllUserThinkingOpen(true);
 	});
 });
