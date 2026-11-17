@@ -4,6 +4,7 @@ import { afterEach, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime.js";
 import { KeyboardShortcuts } from "../components/keyboard-shortcuts.tsx";
+import { formatBinding } from "../src/core/keyboard.ts";
 import { parseHTML } from "linkedom";
 import {
 	InteractionLayersProvider, useInteractionLayers, type InteractionLayersController,
@@ -93,6 +94,16 @@ it("one Escape closes only the cheat sheet's original owner and cannot reach abo
 		assert.equal(aborts, 0, "closing the top layer never aborts the turn underneath");
 		await f.key(document.body, "Escape"); assert.equal(aborts, 1);
 	} finally { window.removeEventListener("lh:kbd-abort-turn", onAbort); }
+});
+
+it("the cheat sheet lists Toggle all Why on its key and an unbound core action as Unbound", async () => {
+	const f = fixture();
+	await f.render(<Shortcuts />);
+	await f.key(document.body, "?", { code: "Slash" });
+	const keyFor = (label: string) => [...document.querySelectorAll("[data-testid='cheat-sheet'] div")]
+		.find(row => row.firstElementChild?.textContent === label)?.querySelector("kbd")?.textContent;
+	assert.equal(keyFor("Toggle all Why"), formatBinding("mod+y"));
+	assert.equal(keyFor("Toggle all agent thinking"), "Unbound");
 });
 
 it("Shift+Tab resolves a portaled plugin origin, while rebinding still receives and claims prevented Tab", async () => {

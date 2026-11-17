@@ -7,7 +7,7 @@ import { afterEach, describe, it } from "node:test";
 import { parseHTML } from "linkedom";
 import type { Root } from "react-dom/client";
 import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
-import { actionForBinding, eventBinding, loadOverrides } from "../src/core/keyboard.ts";
+import { actionForBinding, eventBinding, formatBinding, loadOverrides } from "../src/core/keyboard.ts";
 
 const { window, document } = parseHTML("<html><body></body></html>");
 const storage = new Map<string, string>();
@@ -89,5 +89,19 @@ describe("keyboard rebind shares layout normalization with dispatch", () => {
 		await click(host, "kbd-rebind-find");
 		await press({ key: "л", code: "KeyK" });
 		assert.deepEqual(loadOverrides(), { find: "л" });
+	});
+
+	it("an unbound core action reads Unbound, takes a binding on Rebind, and Reset unbinds it again", async () => {
+		const host = await mount();
+		const shown = () => host.querySelector('[data-testid="kbd-row-toggle-agent-thinking"] kbd')?.textContent;
+		assert.equal(shown(), "Unbound");
+		await click(host, "kbd-rebind-toggle-agent-thinking");
+		await press({ key: "u", code: "KeyU", ctrlKey: true, altKey: true });
+		assert.deepEqual(loadOverrides(), { "toggle-agent-thinking": "mod+alt+u" });
+		assert.equal(actionForBinding("mod+alt+u"), "toggle-agent-thinking");
+		assert.equal(shown(), formatBinding("mod+alt+u"));
+		await click(host, "kbd-reset-toggle-agent-thinking");
+		assert.equal(shown(), "Unbound");
+		assert.equal(actionForBinding("mod+alt+u"), undefined);
 	});
 });
