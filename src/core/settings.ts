@@ -38,6 +38,7 @@ import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
+import type { KeyAction } from "./keyboard.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -396,6 +397,18 @@ export interface MdRenderingSettings {
 	italicColor?: string | null;
 }
 
+/** The collapsible blocks whose starting state Appearance → Start expanded
+ *  sets (`expandByDefault` is the factory value) and whose chat shortcut
+ *  flips every block of the kind for the page load. */
+export const DISCLOSURES = {
+	userThinking: { expandByDefault: true, action: "toggle-user-thinking", label: "Your thinking" },
+	why: { expandByDefault: false, action: "toggle-why", label: "Why explanations" },
+	agentThinking: { expandByDefault: false, action: "toggle-agent-thinking", label: "Agent thinking" },
+} as const satisfies Record<string, { expandByDefault: boolean; action: KeyAction; label: string }>;
+
+export type DisclosureKind = keyof typeof DISCLOSURES;
+export const DISCLOSURE_KINDS = Object.keys(DISCLOSURES) as DisclosureKind[];
+
 /** Appearance settings — theme, color overrides, type, markdown emphasis. */
 export interface AppearanceSettings {
 	/** The active theme id (core/themes.ts presets or a custom file under
@@ -420,6 +433,9 @@ export interface AppearanceSettings {
 	/** Session names in CMU Serif (default true — today's look). */
 	sessionNameSerif?: boolean;
 	mdRendering?: MdRenderingSettings;
+	/** Which DISCLOSURES kinds start expanded; an absent kind takes its
+	 *  factory value. */
+	expandByDefault?: Partial<Record<DisclosureKind, boolean>>;
 }
 
 /** Knowledge-graph settings — a strict dependency ladder (owner decision
@@ -530,6 +546,7 @@ export interface FactorySettings {
 			boldColor: string | null;
 			italicColor: string | null;
 		};
+		expandByDefault: Record<DisclosureKind, boolean>;
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
@@ -549,6 +566,9 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		codeLigatures: false,
 		sessionNameSerif: true,
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
+		expandByDefault: Object.fromEntries(
+			DISCLOSURE_KINDS.map((kind) => [kind, DISCLOSURES[kind].expandByDefault]),
+		) as Record<DisclosureKind, boolean>,
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000, includeReasoning: false },
@@ -804,6 +824,15 @@ function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const sessionNameSerif = boolOrDrop(raw.sessionNameSerif);
 	if (sessionNameSerif !== undefined) out.sessionNameSerif = sessionNameSerif;
 	if (raw.mdRendering !== undefined) out.mdRendering = sanitizeMdRendering(raw.mdRendering);
+	if (raw.expandByDefault !== null && typeof raw.expandByDefault === "object" && !Array.isArray(raw.expandByDefault)) {
+		const stored = raw.expandByDefault as Record<string, unknown>;
+		const expandByDefault: NonNullable<AppearanceSettings["expandByDefault"]> = {};
+		for (const kind of DISCLOSURE_KINDS) {
+			const open = boolOrDrop(stored[kind]);
+			if (open !== undefined) expandByDefault[kind] = open;
+		}
+		out.expandByDefault = expandByDefault;
+	}
 	return out;
 }
 

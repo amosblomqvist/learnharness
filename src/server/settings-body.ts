@@ -21,6 +21,7 @@ import type {
 	BackgroundModelRole,
 	CompactionSettings,
 	CustomModelOverride,
+	DisclosureKind,
 	GeneralSettings,
 	DictationSettings,
 	GraphSettings,
@@ -28,7 +29,7 @@ import type {
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, DISCLOSURE_KINDS, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
@@ -239,7 +240,8 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { theme?, background?, colors?, fontFamily?,
- *  proseFontSize?, codeLigatures?, sessionNameSerif?, mdRendering? } —
+ *  proseFontSize?, codeLigatures?, sessionNameSerif?, mdRendering?,
+ *  expandByDefault? } —
  *  `theme` is shape-checked here (slug); whether it EXISTS is the route's check. */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
@@ -323,6 +325,19 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			rendering.italicColor = parsed.color ?? null;
 		}
 		if (Object.keys(rendering).length) settings.mdRendering = rendering;
+	}
+	if (raw.expandByDefault !== undefined) {
+		const stored = asRecord(raw.expandByDefault);
+		if (!stored) return { ok: false, error: "expandByDefault must be an object" };
+		const expandByDefault: NonNullable<AppearanceSettings["expandByDefault"]> = {};
+		for (const [kind, open] of Object.entries(stored)) {
+			if (!(DISCLOSURE_KINDS as readonly string[]).includes(kind)) {
+				return { ok: false, error: `unknown expandByDefault kind "${kind}" (supported: ${DISCLOSURE_KINDS.join(", ")})` };
+			}
+			if (typeof open !== "boolean") return { ok: false, error: `expandByDefault.${kind} must be a boolean` };
+			expandByDefault[kind as DisclosureKind] = open;
+		}
+		settings.expandByDefault = expandByDefault;
 	}
 	return { ok: true, settings };
 }

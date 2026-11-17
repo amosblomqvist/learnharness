@@ -34,6 +34,7 @@ import {
 	BUILTIN_THEMES,
 	effectiveColors,
 	FACTORY_SETTINGS,
+	resolveExpandByDefault,
 	resolveTheme,
 	themeVars,
 	type AppearanceSettings,
@@ -58,6 +59,7 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 			boldColor: delta?.mdRendering?.boldColor ?? f.mdRendering.boldColor,
 			italicColor: delta?.mdRendering?.italicColor ?? f.mdRendering.italicColor,
 		},
+		expandByDefault: resolveExpandByDefault(delta?.expandByDefault),
 	};
 }
 
