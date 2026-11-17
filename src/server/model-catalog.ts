@@ -15,9 +15,20 @@
  * model-slots wave), so a provider appears in the picker exactly when its
  * key is present — piModels() in src/agent/models.ts owns the provider
  * set; nothing here changes.
+ *
+ * Live OpenRouter supplement (new-model wave, 2026-11-17): pi-ai ships a
+ * GENERATED OpenRouter snapshot, so models released after that generation
+ * are absent until the app upgrades pi-ai. When the key is present this
+ * module also fetches OpenRouter's live `GET /models`, adds only ids the
+ * shipped snapshot does not carry (curated rows always win), and
+ * re-registers the provider in piModels() so the picker, settings
+ * validation, and engine resolution all see them. Cached and best-effort:
+ * a failed or slow refresh leaves the shipped catalog untouched.
  */
 
-import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
+import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model, type Provider } from "@earendil-works/pi-ai";
+import { openRouterCost, type OpenRouterModel } from "@earendil-works/pi-ai/providers/openrouter-api";
+import { openrouterProvider } from "@earendil-works/pi-ai/providers/openrouter";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
@@ -29,7 +40,181 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+		!provider || provider === OPENROUTER_PROVIDER_ID ? refreshOpenRouterCatalog() : Promise.resolve(),
 	]);
+}
+
+// ─── live OpenRouter catalog supplement ──────────────────────────────────────
+// pi-ai's OpenRouter rows are generated from `GET /models` at release time
+// (dist/providers/data/openrouter.json). A model released after that snapshot
+// is invisible to the picker, and pi-ai's own refresh hook only FILTERS the
+// shipped rows by `/models/user` — it never adds one. This supplement closes
+// that gap for the one provider whose catalog moves fastest.
+
+const OPENROUTER_PROVIDER_ID = "openrouter";
+const OPENROUTER_MODELS_URL = "https://openrouter.ai/api/v1/models";
+const OPENROUTER_BASE_URL = "https://openrouter.ai/api/v1";
+/** The chat endpoint; rows that do not serve it are image/classifier-only. */
+const OPENROUTER_CHAT_ENDPOINT = "/api/v1/chat/completions";
+const OPENROUTER_MODELS_TIMEOUT_MS = 10_000;
+/** New models are not urgent; one fetch per half hour is plenty. */
+const OPENROUTER_MODELS_TTL_MS = 30 * 60_000;
+/** pi's generated rows use 4096 when OpenRouter omits a completion cap. */
+const OPENROUTER_FALLBACK_MAX_TOKENS = 4096;
+const OPENROUTER_THINKING_LEVELS = ["minimal", "low", "medium", "high", "xhigh", "max"] as const;
+type OpenRouterEffort = (typeof OPENROUTER_THINKING_LEVELS)[number];
+
+/** The extra fields of an OpenRouter row that pi's generator consumes. */
+interface OpenRouterCatalogRow extends OpenRouterModel {
+	name?: string;
+	architecture?: { input_modalities?: readonly string[]; output_modalities?: readonly string[] };
+	reasoning?: { mandatory?: boolean; supported_efforts?: readonly string[] };
+	supported_parameters?: readonly string[];
+	endpoints?: readonly string[];
+}
+
+let liveOpenRouterRows: readonly OpenRouterCatalogRow[] = [];
+let appliedLiveOpenRouterRows: readonly OpenRouterCatalogRow[] | undefined;
+let openRouterFetchedAt = 0;
+let openRouterRefresh: Promise<void> | undefined;
+
+/** Project one live row to a pi-ai chat model, or undefined when the row is
+ *  not chat-callable (image/classifier rows) or has no usable context. The
+ *  mapping mirrors pi's generated rows: the OpenRouter thinking format maps
+ *  efforts one-to-one, `off` is only offered when reasoning is optional, and
+ *  prices reuse pi's own $/token → $/1M conversion (tiers included). */
+export function openRouterModelFromApi(row: OpenRouterCatalogRow): Model<"openai-completions"> | undefined {
+	if (!row.id || !(row.endpoints ?? []).includes(OPENROUTER_CHAT_ENDPOINT)) return undefined;
+	if (!(row.architecture?.output_modalities ?? ["text"]).includes("text")) return undefined;
+	const contextWindow = row.top_provider?.context_length || row.context_length || 0;
+	if (!contextWindow) return undefined;
+	const efforts = new Set(
+		(row.reasoning?.supported_efforts ?? []).filter(
+			(effort): effort is OpenRouterEffort => (OPENROUTER_THINKING_LEVELS as readonly string[]).includes(effort),
+		),
+	);
+	const reasoning = efforts.size > 0 || (row.supported_parameters ?? []).some((param) => param === "reasoning" || param === "reasoning_effort");
+	const input: ("text" | "image")[] = (row.architecture?.input_modalities ?? []).includes("image") ? ["text", "image"] : ["text"];
+	return {
+		type: "chat",
+		id: row.id,
+		name: row.name?.trim() || row.id,
+		api: "openai-completions",
+		provider: OPENROUTER_PROVIDER_ID,
+		baseUrl: OPENROUTER_BASE_URL,
+		reasoning,
+		// Known efforts get pi's full map; models that only advertise reasoning
+		// without effort metadata keep the provider defaults (map omitted), the
+		// same shape pi's generator emits.
+		...(efforts.size > 0
+			? {
+					thinkingLevelMap: {
+						off: row.reasoning?.mandatory === false ? "none" : null,
+						minimal: efforts.has("minimal") ? "minimal" : null,
+						low: efforts.has("low") ? "low" : null,
+						medium: efforts.has("medium") ? "medium" : null,
+						high: efforts.has("high") ? "high" : null,
+						xhigh: efforts.has("xhigh") ? "xhigh" : null,
+						max: efforts.has("max") ? "max" : null,
+					},
+				}
+			: {}),
+		input,
+		cost: openRouterCost(row.pricing),
+		contextWindow,
+		maxTokens: row.top_provider?.max_completion_tokens || OPENROUTER_FALLBACK_MAX_TOKENS,
+	};
+}
+
+/** Merge live rows into the shipped chat catalog, adding only unknown ids:
+ *  curated pi-ai metadata and prices for known models always win.
+ *  `knownIds` covers shipped rows of OTHER types too (an image-generation
+ *  id must not gain a chat twin); it defaults to the chat base's ids. */
+export function mergeOpenRouterCatalog(
+	base: readonly Model<Api>[],
+	rows: readonly OpenRouterCatalogRow[],
+	knownIds: ReadonlySet<string> = new Set(base.map((model) => model.id)),
+): Model<Api>[] {
+	const seen = new Set(knownIds);
+	const merged = [...base];
+	for (const row of rows) {
+		const model = openRouterModelFromApi(row);
+		if (!model || seen.has(model.id)) continue;
+		seen.add(model.id);
+		merged.push(model);
+	}
+	return merged;
+}
+
+/** Re-register the OpenRouter provider with the shipped rows plus any live
+ *  additions. The wrapper keeps pi-ai's auth, APIs, OAuth, and catalog rows;
+ *  it only widens the two model getters. */
+function applyLiveOpenRouterCatalog(): void {
+	if (liveOpenRouterRows.length === 0 || appliedLiveOpenRouterRows === liveOpenRouterRows) return;
+	appliedLiveOpenRouterRows = liveOpenRouterRows;
+	const base = openrouterProvider();
+	const baseChat = base.getModels();
+	const baseAll = base.getAllModels?.() ?? baseChat;
+	// A shipped id may already exist as another type (image-generation rows
+	// also advertise the chat endpoint); never mint a chat twin for it.
+	const mergedChat = mergeOpenRouterCatalog(baseChat, liveOpenRouterRows, new Set(baseAll.map((model) => model.id)));
+	if (mergedChat.length === baseChat.length) return;
+	const mergedAll = [...baseAll, ...mergedChat.slice(baseChat.length)];
+	const provider: Provider<Api> = {
+		...base,
+		getModels: () => mergedChat,
+		getAllModels: () => mergedAll,
+	};
+	piModels().setProvider(provider);
+}
+
+/** Fetch and validate OpenRouter's live model list. Throws on transport,
+ *  HTTP, and shape failures; the caller degrades to the shipped catalog. */
+async function fetchOpenRouterCatalog(signal: AbortSignal): Promise<OpenRouterCatalogRow[]> {
+	const key = keyValue("OPENROUTER_API_KEY");
+	if (!key) return [];
+	const response = await fetch(OPENROUTER_MODELS_URL, {
+		headers: { accept: "application/json", authorization: `Bearer ${key}` },
+		signal,
+	});
+	if (!response.ok) {
+		await response.body?.cancel();
+		throw new Error(`OpenRouter model list request failed: ${response.status}`);
+	}
+	const body: unknown = await response.json();
+	if (typeof body !== "object" || body === null || !("data" in body) || !Array.isArray(body.data)) {
+		throw new Error("Invalid OpenRouter model list response");
+	}
+	return body.data.filter(
+		(row): row is OpenRouterCatalogRow => typeof row === "object" && row !== null && typeof (row as { id?: unknown }).id === "string",
+	);
+}
+
+/** Refresh the live OpenRouter rows (TTL-cached unless `force`). Best-effort:
+ *  a failed refresh keeps the last good rows, and never fails the request.
+ *  Exported so the settings surface (and focused tests) can force one. */
+export async function refreshOpenRouterCatalog(options: { force?: boolean } = {}): Promise<void> {
+	if (!keyValue("OPENROUTER_API_KEY")) return;
+	if (!options.force && Date.now() - openRouterFetchedAt < OPENROUTER_MODELS_TTL_MS) {
+		applyLiveOpenRouterCatalog();
+		return;
+	}
+	openRouterRefresh ??= (async () => {
+		const controller = new AbortController();
+		const timer = setTimeout(() => controller.abort(), OPENROUTER_MODELS_TIMEOUT_MS);
+		try {
+			liveOpenRouterRows = await fetchOpenRouterCatalog(controller.signal);
+		} catch {
+			// Enhancement, not a dependency: keep the shipped/last-good catalog.
+		} finally {
+			clearTimeout(timer);
+			// Failures also age out, so an offline app does not refetch per request.
+			openRouterFetchedAt = Date.now();
+			openRouterRefresh = undefined;
+		}
+		applyLiveOpenRouterCatalog();
+	})();
+	await openRouterRefresh;
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
 	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
