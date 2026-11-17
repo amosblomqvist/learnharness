@@ -250,6 +250,8 @@ try {
     const canvas = document.querySelector(".drawing-pad-ink"), r = canvas.getBoundingClientRect(), pointerId = window.fixture.lastPenId;
     canvas.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, pointerType: "pen", pressure: .8, buttons: 32, button: 5, clientX: r.x + r.width * .4, clientY: r.y + r.height * .725 }));
   });
+  // Live eraser previews repaint once per animation frame.
+  await run(() => new Promise(resolve => requestAnimationFrame(() => resolve())));
   assert.equal(await ink(), 0, "held eraser bit removes the entire intersected stroke");
   await run(() => {
     const canvas = document.querySelector(".drawing-pad-ink"), r = canvas.getBoundingClientRect(), pointerId = window.fixture.lastPenId;
@@ -644,6 +646,118 @@ try {
   await run(() => { window.fixture.fontFetchMode = "normal"; }); await open();
   assert.deepEqual(await pageStyles(), stylesBefore);
   group("closing during font embedding aborts font fetches and reopening recovers without stylesheet mutation");
+
+  // Repaint economy: full display repaints are counted through clearRect, which
+  // only a full repaint calls. A fresh page keeps the theme step to one sheet.
+  await page.reload({ waitUntil: "networkidle0" }); await page.waitForFunction(() => window.fixtureReady);
+  await call("navigate", "repaint-economy", "teaching", question); await open();
+  await run(() => {
+    const native = CanvasRenderingContext2D.prototype.clearRect;
+    window.fixture.clears = 0; window.fixture.frames = 0; window.fixture.nativeClearRect = native;
+    CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+      if (this.canvas.classList?.contains("drawing-pad-ink")) window.fixture.clears++;
+      return native.apply(this, args);
+    };
+    const tick = () => { if (window.fixture.frames === undefined) return; window.fixture.frames++; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
+  const counts = () => run(() => ({ clears: window.fixture.clears, frames: window.fixture.frames }));
+  const awaitFrame = () => run(() => new Promise(resolve => requestAnimationFrame(() => resolve())));
+  const canvasData = () => run(() => document.querySelector(".drawing-pad-ink").toDataURL());
+  const economyBox = await (await page.$(".drawing-pad-ink")).boundingBox();
+  const at = (fx, fy) => [economyBox.x + economyBox.width * fx, economyBox.y + economyBox.height * fy];
+  const forcedRepaint = async () => {
+    const tool = await selectedTool(), before = (await counts()).clears;
+    await button("Hand"); await panBy(40, 0); await panBy(-40, 0); await button(tool);
+    assert.ok((await counts()).clears > before, "the forced repaint really repainted");
+    return canvasData();
+  };
+  const matchesFullRepaint = async message => { const shown = await canvasData(); assert.equal(await forcedRepaint(), shown, message); };
+  await button("Pen"); let economy = await counts();
+  for (let i = 0; i < 20; i++) {
+    const [x, y] = at(.15 + (i % 5) * .15, .3 + Math.floor(i / 5) * .08);
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 40, y + 15, { steps: 10 }); await page.mouse.up();
+  }
+  assert.equal((await counts()).clears, economy.clears, "20 pen strokes cause no full repaint");
+  await matchesFullRepaint("20 incrementally painted pen strokes equal a full repaint");
+  economy = await counts();
+  const pressurePen = await page.createCDPSession(), [px, py] = at(.2, .75);
+  await pressurePen.send("Input.dispatchMouseEvent", { type: "mousePressed", x: px, y: py, button: "left", buttons: 1, pointerType: "pen", force: .2 });
+  for (let i = 1; i <= 12; i++) await pressurePen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: px + i * 12, y: py + Math.sin(i) * 10, buttons: 1, pointerType: "pen", force: .2 + .06 * i });
+  await pressurePen.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: px + 144, y: py, button: "left", pointerType: "pen", force: 0 });
+  await pressurePen.detach();
+  assert.equal((await counts()).clears, economy.clears, "a pressure-varying pen stroke causes no full repaint");
+  await matchesFullRepaint("a pressure-varying pen stroke equals a full repaint");
+  await page.mouse.click(...at(.85, .8)); await matchesFullRepaint("a single-tap dot equals a full repaint");
+  const [sx, sy] = at(.15, .3);
+  await button("Eraser"); await page.mouse.move(sx + 20, sy - 20); await page.mouse.down(); await page.mouse.move(sx + 20, sy + 30, { steps: 6 }); await page.mouse.up();
+  await button("Pen"); await matchesFullRepaint("the canvas after an eraser gesture equals a full repaint");
+  group("repaint economy: pen strokes, pressure strokes and dots paint incrementally, pixel-identical to a full repaint");
+
+  await button("Eraser"); economy = await counts();
+  const [ex, ey] = at(.55, .12);
+  await page.mouse.move(ex, ey); await page.mouse.down(); await page.mouse.move(ex + 300, ey + 20, { steps: 100 }); await page.mouse.up();
+  assert.equal((await counts()).clears, economy.clears, "an eraser sweep over empty space repaints nothing");
+  const beforeSweep = await ink(), [tx, ty] = at(.3, .38);
+  await page.mouse.move(tx + 20, ty - 25); await page.mouse.down(); economy = await counts();
+  await page.mouse.move(tx + 20, ty + 35, { steps: 100 });
+  const sweeping = await counts();
+  assert.ok(sweeping.clears - economy.clears <= sweeping.frames - economy.frames, `eraser repaints ${sweeping.clears - economy.clears} within ${sweeping.frames - economy.frames} frames`);
+  await page.mouse.up(); assert.ok(await ink() < beforeSweep, "the swept stroke is erased");
+  await button("Pen"); await matchesFullRepaint("the canvas after an eraser sweep equals a full repaint");
+  group("repaint economy: eraser moves repaint at most once per frame and never over empty space");
+
+  const inkBeforeHeld = await ink(), [hx, hy] = at(.45, .9);
+  await page.mouse.move(hx, hy); await page.mouse.down(); await page.mouse.move(hx + 80, hy, { steps: 8 }); await page.mouse.up();
+  assert.ok(await ink() > inkBeforeHeld, "the stroke to erase is drawn");
+  await button("Eraser"); await page.mouse.move(hx + 40, hy); await page.mouse.down(); await awaitFrame(); await awaitFrame();
+  assert.equal(await ink(), inkBeforeHeld, "a stationary eraser contact erases the stroke before any movement");
+  await page.mouse.up(); assert.equal(await ink(), inkBeforeHeld, "releasing the stationary eraser keeps the stroke erased");
+  await button("Undo"); await button("Undo"); assert.equal(await ink(), inkBeforeHeld, "Undo restores the stroke, then removes it");
+  await button("Pen"); await matchesFullRepaint("the canvas after a stationary eraser equals a full repaint");
+  group("repaint economy: a stationary eraser contact erases immediately");
+
+  const inkOffset = () => run(() => {
+    const canvas = document.querySelector(".drawing-pad-ink"), { width, height } = canvas;
+    const data = canvas.getContext("2d").getImageData(0, 0, width, height).data;
+    let minX = Infinity, minY = Infinity;
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (data[(y * width + x) * 4 + 3]) { if (x < minX) minX = x; if (y < minY) minY = y; }
+    const image = document.querySelector(".drawing-pad-background"), ratio = width / canvas.getBoundingClientRect().width;
+    return [minX / ratio - parseFloat(image.style.left), minY / ratio - parseFloat(image.style.top)];
+  });
+  const panOffset = await inkOffset(), [cx, cy] = at(.5, .5);
+  await button("Hand"); await page.mouse.move(cx, cy); await page.mouse.down(); economy = await counts();
+  for (let i = 1; i <= 60; i++) {
+    await page.mouse.move(cx + 2 * i, cy + i); await awaitFrame();
+    assert.deepEqual(await inkOffset(), panOffset, `ink and reference move together (move ${i})`);
+  }
+  const panned = await counts(); await page.mouse.up();
+  assert.ok(panned.clears - economy.clears <= panned.frames - economy.frames + 1, `pan repaints ${panned.clears - economy.clears} within ${panned.frames - economy.frames} frames`);
+  await panBy(-120, -60); await button("Pen");
+  group("repaint economy: a pan repaints at most once per frame and never shows ink and reference at different offsets");
+
+  await button("Undo"); await matchesFullRepaint("Undo equals a full repaint");
+  let previousBackground = await bg(); await call("setTheme", "light");
+  await page.waitForFunction(previous => document.querySelector(".drawing-pad-background")?.src !== previous, { timeout: 30000 }, previousBackground); await waitForSheet();
+  await matchesFullRepaint("a theme change equals a full repaint");
+  previousBackground = await bg(); await call("setTheme", "dark");
+  await page.waitForFunction(previous => document.querySelector(".drawing-pad-background")?.src !== previous, { timeout: 30000 }, previousBackground); await waitForSheet();
+  await page.setViewport({ width: 1400, height: 800, deviceScaleFactor: 1 });
+  await page.waitForFunction(() => document.querySelector(".drawing-pad-ink").width === document.querySelector(".drawing-pad-viewport").clientWidth);
+  await matchesFullRepaint("a resize equals a full repaint");
+  await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 });
+  await page.waitForFunction(() => document.querySelector(".drawing-pad-ink").width === document.querySelector(".drawing-pad-viewport").clientWidth);
+  await button("Clear"); await matchesFullRepaint("Clear equals a full repaint"); assert.equal(await ink(), 0);
+  group("repaint economy: Undo, theme change, resize and Clear leave the canvas equal to a full repaint");
+
+  await stroke(); const beforeCulling = await canvasData(); economy = await counts();
+  await button("Hand"); for (let i = 0; i < 4; i++) await panBy(400, 0);
+  assert.equal(await ink(), 0, "the stroke is fully off-screen"); assert.ok((await counts()).clears > economy.clears);
+  assert.ok(images(await call("submit", { accept: false }))[0], "off-screen ink is still exported");
+  for (let i = 0; i < 4; i++) await panBy(-400, 0);
+  assert.equal(await canvasData(), beforeCulling, "panning back repaints culled ink exactly"); await button("Pen");
+  await run(() => { CanvasRenderingContext2D.prototype.clearRect = window.fixture.nativeClearRect; window.fixture.frames = undefined; });
+  group("repaint economy: off-screen strokes are skipped in full repaints, restored exactly, and still exported");
 
   // Keep the theme checks scoped to one saved reference rather than re-capturing
   // every retained sheet from the independent lifecycle groups above.
