@@ -48,6 +48,7 @@ export interface PluginProblemAvailability { problemId: string; status: "availab
 export interface PluginProblemDraft { submission: PluginProblemSubmissionState; thinking: string }
 export interface PluginQuestionAvailability { questionId: string; status: "available" | "unavailable" }
 export interface SessionRecordSnapshot {
+	awaitingInput?: boolean;
 	pluginProblemAvailability?: PluginProblemAvailability;
 	messages: LhMessage[];
 	turnError?: string;
@@ -252,6 +253,7 @@ export function visibleQueuedSteers(
 }
 
 export interface SessionModelOptions extends SessionModelDeps {
+	awaitingInput?: boolean;
 	chatId: string;
 	initialMessages: LhMessage[];
 	/** Retained, memory-only server failure when reopening a session. */
@@ -264,6 +266,7 @@ export interface SessionModelOptions extends SessionModelDeps {
 }
 
 export class SessionModel {
+	awaitingInput: boolean;
 	readonly chatId: string;
 	/** Injectable fetch (tests); defaults to the global. */
 	fetch: typeof globalThis.fetch;
@@ -332,6 +335,7 @@ export class SessionModel {
 	private history?: { base: LhMessage[]; tail: LhMessage[]; messages: LhMessage[] };
 
 	constructor(opts: SessionModelOptions) {
+		this.awaitingInput = opts.awaitingInput ?? false;
 		this.chatId = opts.chatId;
 		this.base = copyImmutableData(opts.initialMessages);
 		this.tail = copyImmutableData(this.tail);
@@ -469,11 +473,11 @@ export class SessionModel {
 		if (mode !== "none" && this.imagePostOwner) return undefined;
 		if (mode === "replace" && !options.allowInFlight && (this.statusValue === "submitted" || this.statusValue === "streaming")) return undefined;
 		if (mode === "append") {
-			if (!this.appendMessages(record.messages, record.pluginQuestionAvailability, true, record.pluginProblemAvailability)) return undefined;
+			if (!this.appendMessages(record.messages, record.pluginQuestionAvailability, true, record.pluginProblemAvailability, record.awaitingInput)) return undefined;
 			this.canonicalAcknowledged = Math.max(this.canonicalAcknowledged, ticket);
 		} else if (mode === "replace") {
 			this.canonicalAcknowledged = Math.max(this.canonicalAcknowledged, ticket);
-			this.replaceMessages(record.messages, record.turnError, record.pluginQuestionAvailability, record.pluginProblemAvailability);
+			this.replaceMessages(record.messages, record.turnError, record.pluginQuestionAvailability, record.pluginProblemAvailability, record.awaitingInput);
 		}
 		return record;
 	}
@@ -990,7 +994,10 @@ export class SessionModel {
 			accepted = true;
 			// Acceptance fences reads belonging to THIS action, but a delayed
 			// detached POST cannot invalidate a replacement stream's terminal GET.
-			if (this.latestRequest === controller) this.invalidateCanonicalReads();
+			if (this.latestRequest === controller) {
+				this.awaitingInput = false;
+				this.invalidateCanonicalReads();
+			}
 			// Opening-message handover ends at acceptance, not stream completion.
 			onAccepted?.();
 			settleDelivery();
@@ -1185,15 +1192,16 @@ export class SessionModel {
 	}
 
 	/** Full snapshot swap (the idle settle sync — server canon). */
-	setMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability, problemAvailability?: PluginProblemAvailability): void {
+	setMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability, problemAvailability?: PluginProblemAvailability, awaitingInput?: boolean): void {
 		this.invalidateCanonicalReads();
-		this.replaceMessages(record, turnError, availability, problemAvailability);
+		this.replaceMessages(record, turnError, availability, problemAvailability, awaitingInput);
 	}
 
-	private replaceMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability, problemAvailability?: PluginProblemAvailability): void {
+	private replaceMessages(record: LhMessage[], turnError?: string, availability?: PluginQuestionAvailability, problemAvailability?: PluginProblemAvailability, awaitingInput?: boolean): void {
 		if (this.imagePostOwner) return;
 		record = copyImmutableData(record);
 		this.mutate(() => {
+			if (awaitingInput !== undefined) this.awaitingInput = awaitingInput;
 			this.base = record;
 			this.pluginQuestionAvailability = availability;
 			this.pluginProblemAvailability = problemAvailability;
@@ -1225,13 +1233,14 @@ export class SessionModel {
 		this.appendMessages(record);
 	}
 
-	private appendMessages(record: LhMessage[], availability?: PluginQuestionAvailability, updateAvailability = false, problemAvailability?: PluginProblemAvailability): boolean {
+	private appendMessages(record: LhMessage[], availability?: PluginQuestionAvailability, updateAvailability = false, problemAvailability?: PluginProblemAvailability, awaitingInput?: boolean): boolean {
 		if (this.imagePostOwner) return false;
 		record = copyImmutableData(record);
 		const recordIds = new Set(record.map((m) => (m as { id?: string }).id));
 		const baseAbsorbed = this.base.some((m) => !recordIds.has((m as { id?: string }).id));
 		if (baseAbsorbed) return false; // not a pure append — the idle full sync is the net
 		this.mutate(() => {
+			if (awaitingInput !== undefined) this.awaitingInput = awaitingInput;
 			this.base = record;
 			if (updateAvailability) { this.pluginQuestionAvailability = availability; this.pluginProblemAvailability = problemAvailability; }
 			this.forgetResolvedDrafts(record);
@@ -1243,7 +1252,7 @@ export class SessionModel {
 	/** Automatic mount/sync continuation is never permission to retry a
 	 * failed turn. Read current model truth, not a stale React closure. */
 	async continueIfOwed(record: readonly LhMessage[]): Promise<void> {
-		if (this.readyRef && !this.automaticContinuationBlocked && this.getState().error === null && needsContinuation(record)) {
+		if (!this.awaitingInput && this.readyRef && !this.automaticContinuationBlocked && this.getState().error === null && needsContinuation(record)) {
 			await this.send({ type: "continue" });
 		}
 	}

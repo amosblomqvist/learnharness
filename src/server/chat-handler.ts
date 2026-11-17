@@ -257,6 +257,10 @@ export async function handleChatInput(
 		} catch { return Response.json({ error: "Question unavailable" }, { status: 400 }); }
 	}
 
+	const importRevision = stores.chatStore.pendingImport?.(chatId);
+	if (importRevision && (input.type === "continue" || input.type === "steers"))
+		return Response.json({ error: "Continue the lesson with an explicit learner input first." }, { status: 409 });
+
 	// Refuse an ineligible Retry before catalog refresh, compaction, or any
 	// turn/write effects. Revalidate after the awaited gates below too.
 	if (input.type === "retry") {
@@ -307,6 +311,7 @@ export async function handleChatInput(
 			return Response.json({ error: "Background use is off for this connection. Automatic follow-up remains deferred in its queue." }, { status: 403 });
 		}
 	}
+	if (stores.chatStore.pendingImport?.(chatId) !== importRevision) return Response.json({ error: "Lesson changed; try again." }, { status: 409 });
 	if (!providerKeyPresent(conversation.provider)) {
 		const envelope = providerKeyMissingEnvelope(conversation.provider, ["strong"]);
 		console.info(`[chat ${chatId}] turn refused — ${JSON.stringify(envelope)}`);
@@ -435,6 +440,7 @@ export async function handleChatInput(
 			console.error("[plugins] Agent contributions unavailable:", error);
 		}
 	}
+	if (stores.chatStore.pendingImport?.(chatId) !== importRevision) return Response.json({ error: "Lesson changed; try again." }, { status: 409 });
 	const compactedRecord = stores.chatStore.getChat(chatId);
 	if (!compactedRecord) return Response.json({ error: "Unknown chat" }, { status: 404 });
 	record = compactedRecord;
@@ -601,10 +607,14 @@ export async function handleChatInput(
 	const stagedAutomatic = isSubscriptionProvider(conversation.provider) && input.type === "steers";
 	let persistBaseCount = stagedAutomatic ? record.messages.length : agentMessages.length;
 	try {
+		if (importRevision) stores.chatStore.saveSettings(chatId, {
+			model: { provider: conversation.provider, id: conversation.id }, thinkingLevel: conversation.thinkingLevel,
+		});
 		if (!stagedAutomatic) {
 			stores.chatStore.saveMessages(chatId, merged);
 			inputSaved = true;
 		}
+		if (importRevision) stores.chatStore.acceptInput?.(chatId);
 	} catch (err) {
 		console.error(`[chat ${chatId}] write-ahead persist failed:`, err);
 		return new Response("Your input could not be saved. Please try again.", { status: 500 });

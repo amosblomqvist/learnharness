@@ -6,6 +6,8 @@ This reference describes the [repository source](README.md#about-these-docs). Se
 
 ## Code boundaries
 
+**Offline lesson import.** `POST /api/lesson-import` coordinates the chat and graph adapters through `src/store/lesson-import.ts`: validate/preview, explicit conflicts, revision and idle-writer checks, then synchronous byte-preserving installation under a rollback journal. Only already-authored compatible evidence is appended; it does not extract, regenerate, re-identify or overwrite graph definitions. Originals, inert packages and an explicit-input pause live in `data/lesson-transfers/`. Foreign model/account overrides remain inert; the first accepted learner input uses locally configured model settings and releases the pause. Opening an import never starts a model request. Chat-adapter startup recovers interrupted installs before serving requests. This single-process protocol is not a second live teaching/extraction writer or a multi-process lock. See [lesson transfer](lesson-transfer.md) for bounds and evidence.
+
 | Area | Responsibility / starting points |
 | --- | --- |
 | `app/` | Pages and HTTP transport; `api/chat/route.ts`, `api/chats/` |

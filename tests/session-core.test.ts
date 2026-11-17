@@ -92,6 +92,50 @@ function dietFetch(opts: {
 	}) as typeof globalThis.fetch;
 }
 
+it("imports pause automatic continuation but accept explicit learner input", async () => {
+	const messages = [
+		{ ...assistantMsg("a", ""), content: [{ type: "toolCall", id: "t", name: "recall", arguments: {} }] },
+		{ id: "r", role: "toolResult", toolCallId: "t", toolName: "recall", content: [{ type: "text", text: "[]" }], isError: false, timestamp: 1 },
+	] as LhMessage[];
+	assert.equal(needsContinuation(messages), true);
+	let requests = 0;
+	const model = new SessionModel({ chatId: "chat_x", initialMessages: messages, awaitingInput: true,
+		fetch: dietFetch({ stream: () => sseResponse({ type: "turn-settled" }), onPost: () => requests++ }) });
+	await model.continueIfOwed(messages);
+	assert.equal(requests, 0); assert.deepEqual(model.getState().nativeMessages, messages);
+	assert.equal(await model.send({ type: "text", text: "Continue" }), true);
+	assert.equal(requests, 1); assert.equal(model.awaitingInput, false);
+	// A fresh import/replacement arriving by idle sync must restore the pause immediately.
+	model.setMessages(messages, undefined, undefined, undefined, true);
+	await model.continueIfOwed(messages);
+	assert.equal(requests, 1);
+	model.setMessages(messages, undefined, undefined, undefined, false);
+	await model.continueIfOwed(messages);
+	assert.equal(requests, 2);
+});
+
+it("canonical replace and append reads adopt the imported-input pause before continuation", async () => {
+	const messages = [
+		{ ...assistantMsg("a", ""), content: [{ type: "toolCall", id: "t", name: "recall", arguments: {} }] },
+		{ id: "r", role: "toolResult", toolCallId: "t", toolName: "recall", content: [{ type: "text", text: "[]" }], isError: false, timestamp: 1 },
+	] as LhMessage[];
+	for (const adoption of ["replace", "append"] as const) {
+		let requests = 0;
+		let awaitingInput = true;
+		const fallback = dietFetch({ stream: () => sseResponse({ type: "turn-settled" }), onPost: () => { requests++; awaitingInput = false; } });
+		const model = new SessionModel({ chatId: "chat_x", initialMessages: messages,
+			fetch: (input, init) => String(input) === "/api/chats/chat_x"
+				? Promise.resolve(Response.json({ messages, awaitingInput })) : fallback(input, init) });
+		await model.readRecord({ adoption });
+		assert.equal(model.awaitingInput, true);
+		await model.continueIfOwed(messages);
+		assert.equal(requests, 0);
+		assert.equal(await model.send({ type: "text", text: "Continue" }), true);
+		assert.equal(requests, 1);
+		assert.equal(model.awaitingInput, false);
+	}
+});
+
 function assistantMsg(id: string, text: string): LhMessage {
 	return {
 		id,

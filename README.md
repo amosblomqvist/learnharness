@@ -77,6 +77,8 @@ See the [documentation index](docs/README.md) for all guides, [development](docs
 
 For trusted local plugins, start with the [authoring guide and capability map](docs/plugin-authoring.md). It links the question, practice-problem, submission, view-context and UI contracts. Use [`examples/plugins/`](examples/plugins/) for small runnable templates, [`plugins/`](plugins/) for feature source projects, and the [host architecture](docs/plugin-architecture.md) for internals.
 
+Experimental [lesson transfer](docs/lesson-transfer.md) is available under Settings → Export/import: export readable Markdown/text, original native JSON, or a ZIP with selected graph data and reviewed source files. Import accepts source-free native ZIP or one lesson JSON, validates automatically and prompts only for conflicts. Original versions are retained. Continue imported lessons with your local model settings; importing or opening them starts no model request. There are no separate preview buttons or acknowledgement checkboxes. The same screen also offers **Connect a device** with one-click QR pairing, online indicators and experimental paired-HTTPS LAN send/receive, without replacing file downloads or manual Google Drive transfer. Source-file import and automatic/background sync are not implemented; physical LAN/camera and browser/Electron transfer acceptance remain open.
+
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 
 Security vulnerabilities: report privately as described in [SECURITY.md](SECURITY.md), not in public issues.

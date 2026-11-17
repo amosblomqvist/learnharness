@@ -33,6 +33,7 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 	const { imageSnapshots: _imageSnapshots, ...record } = chat;
 	return Response.json({
 		...record,
+		awaitingInput: !!stores.chatStore.pendingImport?.(id),
 		messages: chat.messages,
 		pluginQuestionAvailability: pluginQuestionAvailabilityOf(chat, questionResolver),
 		pluginProblemAvailability: pluginProblemAvailabilityOf(chat, problemResolver),

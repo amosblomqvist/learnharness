@@ -198,6 +198,10 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			return;
 		}
 		if (job.status !== "running" || !isBuiltinJobKind(job.kind)) return; // plugin tasks never enter the core runner
+		if (chatStore.pendingImport?.(job.chatId)) {
+			jobStore.updateJob(jobId, { status: "error", error: "Continue the lesson before starting background work", activity: "stopped" });
+			return;
+		}
 		const run = KIND_RUNNERS[job.kind];
 		if (!run) {
 			console.error(`[job ${jobId}] unknown kind: ${job.kind}`);

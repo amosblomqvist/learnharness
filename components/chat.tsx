@@ -269,6 +269,7 @@ export function Chat({
 	initialPrompt,
 	initiallyInFlight,
 	initiallyCompacting = false,
+	initialAwaitingInput = false,
 	initialConfigured = false,
 	kind = "teach",
 }: {
@@ -294,6 +295,7 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
+	initialAwaitingInput?: boolean;
 }) {
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
@@ -306,8 +308,8 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
-		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
+	const { awaitingInput, canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
+		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight, initialAwaitingInput });
 
 	const controller = useOptionalInteractionLayers();
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
@@ -546,7 +548,7 @@ export function Chat({
 	useEffect(() => {
 		if (mountContinuation.current) return;
 		mountContinuation.current = true;
-		if (!turnInFlight) continueIfOwed(initialMessages);
+		if (!awaitingInput && !turnInFlight) continueIfOwed(initialMessages);
 		// mount-only by design (turnInFlight read at initial value)
 	}, []);
 
@@ -850,6 +852,7 @@ export function Chat({
 
 	const sentInitial = useRef(false);
 	useEffect(() => {
+		if (awaitingInput) { sentInitial.current = true; return; }
 		if (sentInitial.current || !surfaceTarget) return;
 		return scheduleOpeningSubmission(
 			() => !sentInitial.current && submissionMounted.current && submissionLive.current.surfaceTarget === surfaceTarget && !!findSurfaceBoundary(surfaceTarget),
@@ -869,7 +872,7 @@ export function Chat({
 				deliverOpeningPrompt(prompt!);
 			},
 		);
-	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, surfaceTarget, deliverOpeningPrompt, applyText]);
+	}, [chatId, initialPrompt, initialMessages, initiallyInFlight, surfaceTarget, deliverOpeningPrompt, applyText, awaitingInput]);
 
 	useEffect(() => {
 		if (!hasConfirmedConversation) return;
@@ -2085,7 +2088,14 @@ export function Chat({
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
 					setupCta={
-						zeroKeys ? (
+						awaitingInput && configured && !zeroKeys && !pending && !activeProblem && !busy && !compacting && !retryable && !nextReady ? (
+							<div className="pointer-events-auto mb-2 flex justify-center">
+								<button type="button" onClick={() => void send({ type: "text", text: "Continue" })}
+									className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer">
+									Continue
+								</button>
+							</div>
+						) : zeroKeys ? (
 							<ZeroKeysPill onOpen={() => setSetupOpen(true)} />
 						) : (
 							!configured && (

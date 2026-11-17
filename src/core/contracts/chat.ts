@@ -56,6 +56,34 @@ export interface ChatRecord {
 /** The chat record format this build writes and understands. */
 export const CURRENT_CHAT_VERSION = 2;
 
+/** Read-only lesson export transport. Source paths are references, never install destinations. */
+export type ExportMode = "md" | "txt" | "json" | "zip";
+export interface ExportSource {
+	path: string;
+	name: string;
+	bytes: number;
+	modified: number;
+	status: "available" | "missing" | "blocked";
+}
+export interface ExportPreview {
+	revision: string;
+	chats: { id: string; title: string }[];
+	files: ExportSource[];
+	issues: string[];
+	complete: false;
+}
+
+export type ImportChoices = Record<string, "local" | "incoming">;
+export interface ImportPreview {
+	revision: string;
+	packageSha: string;
+	chats: { id: string; title: string; kind: "new" | "same" | "conflict" }[];
+	nodes: number;
+	chains: number;
+	warnings: string[];
+	blockers: string[];
+}
+
 /** Per-session model and thinking choices for native conversation agents.
  * Each absent field falls back independently to the strong model slot; no
  * configured model means conversation work is unavailable. Choices resolve
