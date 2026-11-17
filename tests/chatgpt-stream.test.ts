@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { normalizeContext, type AssistantMessage, type Model } from "@earendil-works/pi-ai";
+import { hasApi, normalizeContext, type AssistantMessage } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import * as fs from "node:fs";
 import os from "node:os";
@@ -19,7 +19,9 @@ let leaseError: string | null = null;
 let requests: { authorization: string | null; body: Record<string, any>; url: string }[] = [];
 let responseEvents: unknown[] = [];
 const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", value);
-const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
+const supportedModels = piModels().getModels("openai").filter((entry) => hasApi(entry, "openai-responses"));
+const model = supportedModels.find((entry) => entry.id === "gpt-5")!;
+let offeredModels = [{ id: model.id, name: "Scratch account model" }, { id: "unknown-capabilities", name: "Do not invent capabilities" }];
 const status = { available: true, pending: false, allowBackgroundUse: false, activeId: "scratch-account", accounts: [{ id: "scratch-account", email: "dummy@example.invalid", registration: "oaiapp_scratch", connected: true, planEnabled: true, background: false }], error: null };
 before(async () => {
 	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
@@ -29,12 +31,12 @@ before(async () => {
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
 		queueMicrotask(() => {
 			ipc({ channel: "lh:chatgpt", id: message.id, op: message.op,
-				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: [{ id: model.id, name: "Scratch account model" }, { id: "unknown-capabilities", name: "Do not invent capabilities" }] } }),
+				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: offeredModels } }),
 			});
 		});
 		callback?.(); return true;
 	} });
-	await refreshChatGPTModels([model]);
+	await refreshChatGPTModels(supportedModels);
 	globalThis.fetch = async (input, init) => {
 		const req = new Request(input, init);
 		requests.push({ authorization: req.headers.get("authorization"), body: JSON.parse(await req.text()), url: req.url });
@@ -58,6 +60,24 @@ test("catalog intersects supported capabilities, without inventing model limits"
 	assert.equal(chatGPTModels()[0]!.provider, "chatgpt");
 	assert.equal(chatGPTModels()[0]!.contextWindow, model.contextWindow);
 	assert.deepEqual(chatGPTModels()[0]!.input, model.input);
+});
+
+test("account-offered GPT-6.1 Terra dispatches with subscription credentials", async (t) => {
+	const id = "gpt-6.1-terra";
+	const previous = offeredModels;
+	t.after(async () => { offeredModels = previous; await refreshChatGPTModels(supportedModels); });
+	responseEvents = [complete()];
+	offeredModels = [{ id, name: `Account ${id}` }];
+	await refreshChatGPTModels(supportedModels);
+	assert.deepEqual(chatGPTModels().map(({ id, name }) => ({ id, name })), offeredModels);
+	const engine = piEngineForSpec({ provider: "chatgpt", id, thinkingLevel: "off" }, false);
+	assert.deepEqual(engine.model.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+	const reply = await engine.streamFn(engine.model, context()).result();
+	assert.equal(reply.stopReason, "stop", reply.errorMessage);
+	const request = requests.at(-1)!;
+	assert.equal(request.authorization, "Bearer scratch-oauth-only");
+	assert.equal(request.body.model, id);
+	assert.equal(request.body.reasoning.effort, "none");
 });
 
 test("alias resolves only OAuth; native Responses body is stateless/namespaced, image/history preserved and logical output retained", async () => {
@@ -154,7 +174,7 @@ test("native identity/session/cache/fetch and awaited caller observers survive e
 	const events = []; for await (const event of stream) events.push(event);
 	assert.equal(delegated, 1); assert.equal(observed, 1); assert.equal(responses, 1);
 	assert.equal(headers.get("user-agent"), APP_IDENTITY.userAgent.custom);
-	assert.equal(headers.get("session_id"), "exact-native-chat-session");
+	assert.equal(headers.get("session-id"), "exact-native-chat-session");
 	assert.equal(headers.get("x-client-request-id"), "exact-native-chat-session");
 	assert.equal(headers.get("x-native-observer"), "retained"); assert.equal(headers.get("x-suppressed"), null);
 	assert.equal(payload.prompt_cache_key, "exact-native-chat-session"); assert.equal(payload.model, model.id); assert.equal(payload.metadata, undefined);

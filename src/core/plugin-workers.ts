@@ -1,7 +1,7 @@
 /** Result-oriented tasks owned by a plugin. Execution uses the native Pi runner. */
-import type { AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentMessage, AgentTool, AgentToolParams } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
-import type { Static, TSchema } from "typebox";
+import type { TSchema } from "typebox";
 import type { JobUsage } from "./contracts/jobs.ts";
 import type { PluginCallPurpose, PluginModelSpec } from "./plugin-agents.ts";
 import type { PluginInferenceOptions, PluginToolContext } from "./plugins.ts";
@@ -70,7 +70,7 @@ export type PluginBackgroundTool<T extends TSchema = TSchema> = Omit<AgentTool<T
 	workerId: string;
 	/** Derive worker input, prompt and explicit limits without side effects. The host
 	 * supplies request identity and forces background purpose. */
-	prepare(input: Static<T>, context: PluginToolContext):
+	prepare(input: AgentToolParams<T>, context: PluginToolContext):
 		Omit<PluginWorkerStartOptions, "requestId" | "purpose"> | Promise<Omit<PluginWorkerStartOptions, "requestId" | "purpose">>;
 	/** Turn a terminal outcome into model text and optional rendered data; keep this
 	 * side-effect free. Failure records a presentation error, not a different task

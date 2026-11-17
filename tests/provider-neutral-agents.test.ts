@@ -35,10 +35,10 @@ interface Transport {
 	origin: string; path: string; authHeader: string;
 }
 const TRANSPORTS: Transport[] = [
-	{ provider: "opencode-go", id: "claude-haiku-5-5", envVar: "OPENCODE_API_KEY", api: "anthropic-messages", origin: "https://opencode.ai", path: "/inference/go/v1/messages", authHeader: "x-api-key" },
-	{ provider: "opencode-go", id: "gemini-4-argon-contributor", envVar: "OPENCODE_API_KEY", api: "google-generative-ai", origin: "https://opencode.ai", path: "/inference/go/v1/models/gemini-4-argon-contributor:streamGenerateContent", authHeader: "x-goog-api-key" },
-	{ provider: "opencode-go", id: "glm-5.3", envVar: "OPENCODE_API_KEY", api: "openai-completions", origin: "https://opencode.ai", path: "/inference/go/v1/chat/completions", authHeader: "authorization" },
-	{ provider: "opencode-go", id: "gpt-6-luna", envVar: "OPENCODE_API_KEY", api: "openai-responses", origin: "https://opencode.ai", path: "/inference/go/v1/responses", authHeader: "authorization" },
+	{ provider: "opencode-go", id: "claude-haiku-5-5", envVar: "OPENCODE_API_KEY", api: "anthropic-messages", origin: "https://opencode.ai", path: "/inference/go/anthropic/v1/messages", authHeader: "x-api-key" },
+	{ provider: "opencode-go", id: "gemini-4-argon", envVar: "OPENCODE_API_KEY", api: "google-generative-ai", origin: "https://opencode.ai", path: "/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent", authHeader: "x-goog-api-key" },
+	{ provider: "opencode-go", id: "glm-5.3", envVar: "OPENCODE_API_KEY", api: "openai-completions", origin: "https://opencode.ai", path: "/inference/go/openai/v1/chat/completions", authHeader: "authorization" },
+	{ provider: "opencode-go", id: "gpt-6-luna", envVar: "OPENCODE_API_KEY", api: "openai-responses", origin: "https://opencode.ai", path: "/inference/go/openai/v1/responses", authHeader: "authorization" },
 	{ provider: "openrouter", id: "openai/gpt-4o-mini", envVar: "OPENROUTER_API_KEY", api: "openai-completions", origin: "https://openrouter.ai", path: "/api/v1/chat/completions", authHeader: "authorization" },
 	{ provider: "openai", id: "gpt-4o-mini", envVar: "OPENAI_API_KEY", api: "openai-responses", origin: "https://api.openai.com", path: "/v1/responses", authHeader: "authorization" },
 	{ provider: "anthropic", id: "claude-haiku-4-5", envVar: "ANTHROPIC_API_KEY", api: "anthropic-messages", origin: "https://api.anthropic.com", path: "/v1/messages", authHeader: "x-api-key" },
@@ -285,16 +285,17 @@ function closedFetch(transport: Transport, loop: Loop, requests: RecordedRequest
 
 function assertPayload(transport: Transport, loop: Loop, round: number, body: Record<string, unknown>) {
 	if (transport.api !== "google-generative-ai") assert.equal(body.model, transport.id);
-	// Native Responses models may declare tools in additional_tools input
-	// items rather than top-level tools; assert the SDK's complete payload.
-	const tools = JSON.stringify(body);
-	assert.match(tools, new RegExp(loop === "visual" ? "write_svg" : "pdf_extract"));
-	assert.match(tools, new RegExp(loop === "visual" ? "render_svg" : "pdf_render"));
 	if (transport.api === "google-generative-ai") assert.ok(Array.isArray(body.contents));
 	else if (transport.api === "openai-responses") assert.ok(Array.isArray(body.input));
 	else assert.ok(Array.isArray(body.messages));
 	const json = JSON.stringify(body);
-	assert.match(json, new RegExp(loop === "visual" ? "white square" : "Read page 1"));
+	if (transport.provider === "anthropic" && round > 0) {
+		assert.deepEqual(body.thread, { type: "continue", previous_message_id: `msg_offline_${round - 1}` });
+	} else {
+		assert.match(json, new RegExp(loop === "visual" ? "write_svg" : "pdf_extract"));
+		assert.match(json, new RegExp(loop === "visual" ? "render_svg" : "pdf_render"));
+		assert.match(json, new RegExp(loop === "visual" ? "white square" : "Read page 1"));
+	}
 	if (round === 2) {
 		const supportsImages = piEngineForSpec({ provider: transport.provider, id: transport.id }).model.input.includes("image");
 		assert.equal(json.includes(PNG.toString("base64")), supportsImages, "native modality filtering: only vision models receive rendered images");

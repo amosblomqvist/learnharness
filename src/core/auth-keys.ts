@@ -127,6 +127,7 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "qwen-token-plan", envVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan" },
 	{ id: "qwen-token-plan-cn", envVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan CN" },
 	{ id: "qwen-token-plan-individual", envVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan Individual" },
+	{ id: "qwen-token-plan-individual-cn", envVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan Individual CN" },
 	{ id: "radius", envVar: "RADIUS_API_KEY", label: "Radius" },
 	{ id: "together", envVar: "TOGETHER_API_KEY", label: "Together" },
 	{ id: "typesafe", envVar: "TYPESAFE_API_KEY", label: "TypeSafe" },
