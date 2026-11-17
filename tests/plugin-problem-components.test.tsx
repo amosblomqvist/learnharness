@@ -214,8 +214,7 @@ test("submitted rendering owns generation-scoped header/body/footer slots and sa
   assert.ok(elements.indexOf(document.querySelector('[data-testid="your-thinking"]')!) < elements.indexOf(footer));
   await render(<PluginProblemSubmittedContent data={data} snapshot={snapshot} chatId="chat" />);
   assert.equal(cleaned, 1); assert.equal(contexts[0]?.signal.aborted, true); assert.equal(contexts[0]?.headerContainer?.isConnected, false); assert.equal(footer.isConnected, false);
-  await act(async () => { (document.querySelector('button[aria-expanded]') as HTMLElement).click(); });
-  assert.match(document.body.textContent ?? "", /saved code/); assert.match(document.body.textContent ?? "", /saved thinking/);
+  assert.match(document.body.textContent ?? "", /saved code/); assert.match(document.body.textContent ?? "", /saved thinking/, "the thinking row starts expanded (factory setting)");
   assert.doesNotMatch(document.body.textContent ?? "", /Tests passed|Test output|PRIVATE_SOLUTION/);
 });
 

@@ -60,6 +60,8 @@ import {
 	sideSegmentId,
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
+	DISCLOSURE_KINDS,
+	DISCLOSURES,
 	type ChatInput,
 	type ChatSettings,
 	type LhMessage,
@@ -125,7 +127,7 @@ import {
 	questionNeedsReveal,
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
-import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { toggleAllDisclosures } from "@/components/disclosure-store";
 
 /**
  * Width tokens (wave-5 reskin, owner decision): the teaching PROSE spans the
@@ -647,16 +649,22 @@ export function Chat({
 	const [readingThinkingSeed, setReadingThinkingSeed] = useState({ questionId: null as string | null, value: "", revision: 0 });
 	const readingThinkingRef = useRef("");
 
-	// ⌘T (toggle-user-thinking, owner round 2026-10-07): set EVERY user
-	// thinking row to one state — transcript rows default open, so the
-	// first press collapses everything, the second re-expands.
+	// ⌘T, ⌘Y, and toggle-agent-thinking: each sets every block of its kind
+	// to one state, flipping from the last toggle or else the setting.
+	const { expandByDefault } = useAppearance().appearance;
 	useEffect(() => {
-		const onToggle = () => {
-			if (isInteractionScopeEligible(sessionFindScopeRef.current, controller)) setAllUserThinkingOpen(!currentUserThinkingOpen());
+		const unsubscribes = DISCLOSURE_KINDS.map((kind) => {
+			const event = kbdEventForChat(DISCLOSURES[kind].action);
+			const onToggle = () => {
+				if (isInteractionScopeEligible(sessionFindScopeRef.current, controller)) toggleAllDisclosures(kind, expandByDefault[kind]);
+			};
+			window.addEventListener(event, onToggle);
+			return () => window.removeEventListener(event, onToggle);
+		});
+		return () => {
+			for (const unsubscribe of unsubscribes) unsubscribe();
 		};
-		window.addEventListener(kbdEventForChat("toggle-user-thinking"), onToggle);
-		return () => window.removeEventListener(kbdEventForChat("toggle-user-thinking"), onToggle);
-	}, [controller]);
+	}, [controller, expandByDefault]);
 	const applyReadingThinking = useCallback((v: string) => {
 		readingThinkingRef.current = v;
 	}, []);
