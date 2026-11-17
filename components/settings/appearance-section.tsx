@@ -33,6 +33,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+	DISCLOSURE_KINDS,
+	DISCLOSURES,
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	resolveSettings,
 	THEME_COLOR_KEYS,
@@ -439,6 +441,16 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
+			<p className="mt-5 mb-2 text-xs uppercase tracking-widest text-muted-foreground">Start expanded</p>
+			{DISCLOSURE_KINDS.map((kind) => (
+				<SettingsRow key={kind} label={DISCLOSURES[kind].label} testid={`row-expand-${kind}`}>
+					<Toggle
+						checked={resolved.expandByDefault[kind]}
+						label={DISCLOSURES[kind].label}
+						onChange={(on) => onSectionChange({ ...appearance, expandByDefault: { ...appearance?.expandByDefault, [kind]: on } })}
+					/>
+				</SettingsRow>
+			))}
 		</>
 	);
 }
