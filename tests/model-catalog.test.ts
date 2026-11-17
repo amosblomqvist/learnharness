@@ -1,7 +1,8 @@
 import * as fs from "node:fs";
+import { createRequire, syncBuiltinESMExports } from "node:module";
 import * as os from "node:os";
 import * as path from "node:path";
-import { after, describe, it } from "node:test";
+import { after, describe, it, mock } from "node:test";
 import assert from "node:assert/strict";
 const testData = fs.mkdtempSync(path.join(os.tmpdir(), "lh-cli-catalog-data-"));
 process.env.LH_DATA_DIR = testData;
@@ -351,10 +352,23 @@ function withClaudeInstalled(installed: boolean, fn: () => void, enabled = true)
 	process.env.PATH = dir;
 	process.env.HOME = dir;
 	delete process.env.npm_config_prefix;
+	// The CLI lookup also probes fixed system dirs (/opt/homebrew/bin, ...), so
+	// hide any real install outside the temp dir to keep the test hermetic.
+	const realAccess = fs.accessSync;
+	const cjsFs = createRequire(import.meta.url)("node:fs") as typeof fs;
+	mock.method(cjsFs, "accessSync", (p: fs.PathLike, mode?: number) => {
+		if (path.basename(String(p)) === "claude" && !String(p).startsWith(dir)) {
+			throw Object.assign(new Error("ENOENT"), { code: "ENOENT" });
+		}
+		return realAccess(p, mode);
+	});
+	syncBuiltinESMExports();
 
 	try {
 		fn();
 	} finally {
+		mock.restoreAll();
+		syncBuiltinESMExports();
 		for (const [name, value] of Object.entries(saved)) {
 			if (value === undefined) delete process.env[name];
 			else process.env[name] = value;
