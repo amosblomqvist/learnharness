@@ -758,6 +758,27 @@ try {
   assert.equal(await canvasData(), beforeCulling, "panning back repaints culled ink exactly"); await button("Pen");
   group("repaint economy: off-screen strokes are skipped in full repaints, restored exactly, and still exported");
 
+  // A DPR-only change need not notify the CSS ResizeObserver. Ordinary input
+  // must reconcile density, without making subsequent strokes repaint fully.
+  const density = () => run(() => {
+    const canvas = document.querySelector(".drawing-pad-ink"), rect = canvas.getBoundingClientRect();
+    return { css: [rect.width, rect.height], pixels: [canvas.width, canvas.height], scale: canvas.getContext("2d").getTransform().a };
+  });
+  const initialDensity = await density();
+  await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 2 }); await awaitFrame(); await awaitFrame();
+  assert.deepEqual((await density()).css, initialDensity.css, "only density changes, not the CSS viewport");
+  await stroke(-.2);
+  assert.deepEqual(await density(), { css: initialDensity.css, pixels: initialDensity.pixels.map(size => size * 2), scale: 2 }, "the next pen stroke reconciles backing size and transform");
+  economy = await counts(); await stroke(-.15);
+  assert.equal((await counts()).clears, economy.clears, "normal strokes stay incremental at the new density");
+  await matchesFullRepaint("DPR-only pen reconciliation equals a full repaint");
+  await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 }); await awaitFrame(); await awaitFrame();
+  await button("Eraser"); assert.deepEqual(await density(), initialDensity, "a tool switch also reconciles a DPR-only decrease");
+  economy = await counts(); await button("Pen");
+  assert.equal((await counts()).clears, economy.clears, "ordinary tool switches do not repaint unchanged ink");
+  await matchesFullRepaint("DPR-only tool reconciliation equals a full repaint");
+  group("DPR-only changes reconcile on ordinary pen/tool input without full per-stroke repainting");
+
   // Controlled context loss: reset() really discards the bitmap and transform;
   // isContextLost/events supply a deterministic lifecycle, not a driver crash.
   const loseInk = () => run(() => {

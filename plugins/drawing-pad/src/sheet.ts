@@ -47,7 +47,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     if (!ink) throw new Error("Could not create the drawing canvas.");
     return ink;
   };
-  let view: { width: number; height: number; origin: { x: number; y: number } } | undefined;
+  let view: { width: number; height: number; pixelRatio: number; origin: { x: number; y: number } } | undefined;
   let geometry: { left: number; top: number; originX: number; originY: number } | undefined;
   // What the canvas shows: `visible` (committed strokes, minus any under a live
   // eraser) painted for this draft, color, origin and bitmap size, plus the
@@ -118,7 +118,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     let changed = !view || view.width !== width || view.height !== height || view.origin.x !== origin.x || view.origin.y !== origin.y;
     if (canvas.width !== pixelsWide) { canvas.width = pixelsWide; changed = true; }
     if (canvas.height !== pixelsHigh) { canvas.height = pixelsHigh; changed = true; }
-    view = { width, height, origin };
+    view = { width, height, pixelRatio, origin };
     if (changed) geometry = undefined;
     return changed;
   };
@@ -132,6 +132,9 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
   const syncInk = () => {
     const draft = state.draft;
     if (disposed || !draft || !view) return;
+    // A density-only monitor change need not resize the CSS content box.
+    // Reconcile on ordinary input, but leave unchanged gestures incremental.
+    if (view.pixelRatio !== Math.min(window.devicePixelRatio || 1, 2)) { layout(); if (!view) return; }
     const live = active && activeDraftId === draft.id ? active : undefined;
     let target = visibleStrokes(draft.strokes);
     if (live?.tool === "eraser") target = visibleUnderEraser(target, live);
@@ -265,7 +268,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
   viewport.addEventListener("wheel", event => event.preventDefault(), { signal, passive: false });
   const changed = (reason: PublishReason) => {
     if (disposed) return;
-    if (reason === "tool") { applyScheduledInk(); renderChrome(); }
+    if (reason === "tool") { applyScheduledInk(); renderChrome(); syncInk(); }
     // Reference image and ink move together, in the same frame.
     else if (reason === "camera") { geometry = undefined; scheduleInk(); }
     else if (reason === "ink") { applyScheduledInk(); renderChrome(); syncInk(); }
