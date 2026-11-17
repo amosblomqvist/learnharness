@@ -70,3 +70,9 @@ it("external desktop development reads the server's directory rather than the sh
 	assert.equal(serverDataDir({ ...base, devUrl: "http://127.0.0.1:9000" }), "/fixture/repo/data");
 	assert.equal(serverDataDir({ ...base, devUrl: "http://127.0.0.1:9000", env: { LH_DATA_DIR: data } }), data);
 });
+
+it("packaged desktop mode honors custom LH_DATA_DIR when set in environment", () => {
+	const custom = "/custom/packaged/data";
+	const base = { packagedDataDir: custom, repoRoot: "/fixture/repo", env: { LH_DATA_DIR: custom } };
+	assert.equal(serverDataDir(base), custom);
+});
