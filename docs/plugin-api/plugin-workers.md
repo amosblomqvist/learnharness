@@ -151,7 +151,7 @@ A thin native-tool adapter, not another agent or tool execution framework.
 ```ts
 export type PluginBackgroundTool<T extends TSchema = TSchema> = Omit<AgentTool<T>, "execute"> & {
     workerId: string;
-    prepare(input: Static<T>, context: PluginToolContext): Omit<PluginWorkerStartOptions, "requestId" | "purpose"> | Promise<Omit<PluginWorkerStartOptions, "requestId" | "purpose">>;
+    prepare(input: AgentToolParams<T>, context: PluginToolContext): Omit<PluginWorkerStartOptions, "requestId" | "purpose"> | Promise<Omit<PluginWorkerStartOptions, "requestId" | "purpose">>;
     format(outcome: PluginTaskOutcome, context: PluginToolContext): PluginBackgroundPresentation | Promise<PluginBackgroundPresentation>;
 };
 ```
@@ -176,12 +176,12 @@ Derive worker input, prompt and explicit limits without side effects. The host
 supplies request identity and forces background purpose.
 
 ```ts
-prepare(input: Static<T>, context: PluginToolContext): Omit<PluginWorkerStartOptions, "requestId" | "purpose"> | Promise<Omit<PluginWorkerStartOptions, "requestId" | "purpose">>;
+prepare(input: AgentToolParams<T>, context: PluginToolContext): Omit<PluginWorkerStartOptions, "requestId" | "purpose"> | Promise<Omit<PluginWorkerStartOptions, "requestId" | "purpose">>;
 ```
 
 | Parameter | Type |
 | --- | --- |
-| `input` | `Static<T>` |
+| `input` | `AgentToolParams<T>` |
 | `context` | `PluginToolContext` |
 
 **Returns:** `Omit<PluginWorkerStartOptions, "requestId" \| "purpose"> \| Promise<Omit<PluginWorkerStartOptions, "requestId" \| "purpose">>`.
