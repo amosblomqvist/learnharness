@@ -6,6 +6,7 @@ import type { PluginProblemSnapshot } from "./plugin-problems.ts";
 import type { AnswerRequest, ClientQuestion, QuestionData, QuizQuestionType } from "./question-core.ts";
 import { clonePluginQuestionJson } from "./plugin-questions.ts";
 import type { PluginSurfaceTarget } from "./plugin-ui.ts";
+import type { ChatKind } from "./contracts/chat.ts";
 
 type Immutable<T> = T extends (...args: never[]) => unknown ? T : T extends object ? { readonly [K in keyof T]: Immutable<T[K]> } : T;
 type ImmutableJson = null | boolean | number | string | ImmutableJsonArray | ImmutableJsonObject;
@@ -47,6 +48,8 @@ export type PluginSubmission =
 type SubmissionTargetBase = {
 	readonly sessionId: string;
 	readonly sessionKind: "teaching" | "practice";
+	/** Exact session kind: "teach", "practice" or a plugin kind id. */
+	readonly sessionKindId: ChatKind;
 	readonly surfaceTarget: PluginSurfaceTarget;
 };
 export type PluginSubmissionTarget = SubmissionTargetBase & (

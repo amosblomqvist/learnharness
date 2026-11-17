@@ -40,20 +40,24 @@ describe("record-kind registry", () => {
 });
 
 describe("recordKindIdOf — the chat's record kind is a function of its session kind", () => {
-	it("teach and an absent kind extract into the native graph; practice extracts into nothing", () => {
+	it("teach and an absent kind extract into the native graph; practice extracts into nothing; plugin kinds name theirs", () => {
 		assert.equal(recordKindIdOf("teach"), NATIVE_GRAPH_RECORD_KIND);
 		assert.equal(recordKindIdOf(undefined), NATIVE_GRAPH_RECORD_KIND);
 		assert.equal(recordKindIdOf("practice"), null);
+		assert.equal(recordKindIdOf("example:lesson"), undefined, "a plugin kind's definition names its record");
 	});
 });
 
-describe("server composition — coverageLedgerFor", () => {
-	it("hands out the wired graph ledger for teaching chats and null for practice", async () => {
-		const { coverageLedgerFor, recordKinds } = await import("../src/server/record-kinds.ts");
+describe("server composition — resolveChatRecord", () => {
+	it("hands out the wired graph ledger for teaching chats and none for practice", async () => {
+		const { resolveChatRecord, recordKinds } = await import("../src/server/record-kinds.ts");
 		const { stores } = await import("../src/server/stores.ts");
-		assert.equal(coverageLedgerFor("teach"), stores.coverage);
-		assert.equal(coverageLedgerFor(undefined), stores.coverage);
-		assert.equal(coverageLedgerFor("practice"), null);
+		for (const kind of ["teach", undefined] as const) {
+			const target = await resolveChatRecord(kind);
+			assert.equal(target.status, "graph");
+			assert.equal(target.status === "graph" && target.coverage, stores.coverage);
+		}
+		assert.deepEqual(await resolveChatRecord("practice"), { status: "none", sessionKindId: "practice" });
 		assert.deepEqual(recordKinds.list().map((k) => k.id), [NATIVE_GRAPH_RECORD_KIND]);
 		assert.equal(recordKinds.get(NATIVE_GRAPH_RECORD_KIND)!.coverage, stores.coverage);
 	});

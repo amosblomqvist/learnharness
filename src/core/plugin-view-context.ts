@@ -1,5 +1,6 @@
 /** Whole-session view data for contextual actions. Browser-safe, with no UI/store ownership. */
 import type { LhMessage } from "./native-messages.ts";
+import type { ChatKind } from "./contracts/chat.ts";
 import type { LhViewMessage } from "./view.ts";
 import type { Phase3 } from "./phases.ts";
 import type { PluginActionContext } from "./plugins.ts";
@@ -35,6 +36,8 @@ export type PluginSessionViewInput =
 export interface PluginSessionViewContext {
   readonly sessionId: string;
   readonly kind: "teaching" | "practice";
+  /** Exact session kind: "teach", "practice" or a plugin kind id. */
+  readonly sessionKindId: ChatKind;
   readonly title: string;
   /** Same browser-history visibility as submission context, including streamed content. */
   readonly messages: readonly Immutable<LhMessage>[];

@@ -70,10 +70,10 @@ it("kept conversations retain messages and folder placement but lose contributio
 	stores.graphStore.appendCheckpoint({ chatId: chat.id, foldedAt: "now" });
 	stores.graphStore.appendNode(node("chat_unique", [chat.id])); book("zero");
 	folders({ [chat.id]: { folderId: "inner" }, zero: { folderId: "inner" } });
-	assert.equal(sessionCoverage(chat.id)?.coveredCount, 1);
+	assert.equal((await sessionCoverage(chat.id))?.coveredCount, 1);
 	assert.equal((await remove([chat.id, "zero"], ["outer", "inner", "empty"])).status, 200);
 	assert.deepEqual(stores.chatStore.getChat(chat.id), before);
-	assert.equal(sessionCoverage(chat.id)?.coveredCount, 0); assert.equal(sessionCoverage(chat.id)?.uncoveredCount, 1);
+	assert.equal((await sessionCoverage(chat.id))?.coveredCount, 0); assert.equal((await sessionCoverage(chat.id))?.uncoveredCount, 1);
 	assert.deepEqual(stores.graphStore.readCheckpoints(), []); assert.deepEqual(stores.graphStore.readNodes(), []);
 	const result = sourceDirectory.read(); assert.deepEqual(result.organization.folders.map((f) => f.id), ["outer", "inner"]);
 	assert.equal(result.organization.placements[chat.id]?.folderId, "inner"); assert.equal(result.sources[0]?.id, chat.id);

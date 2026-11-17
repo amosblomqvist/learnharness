@@ -68,7 +68,7 @@ async function preparingFixture() {
       return { update() {}, focus() { input.focus(); }, dispose() { input.remove(); } };
     },
   } };
-  const target: PluginSubmissionTarget = { type: "plugin-problem-submission", sessionId: "chat", sessionKind: "practice", surfaceTarget: {} as PluginSurfaceTarget,
+  const target: PluginSubmissionTarget = { type: "plugin-problem-submission", sessionId: "chat", sessionKind: "practice", sessionKindId: "practice", surfaceTarget: {} as PluginSurfaceTarget,
     channels: ["submission", "thinking"], problem: { problemId: snapshot.problemId, occurrence, pluginId: snapshot.pluginId, typeId: snapshot.typeId,
       contractVersion: snapshot.contractVersion, label: snapshot.label, statement: snapshot.input.statement } };
   function Harness() {

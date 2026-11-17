@@ -5,12 +5,15 @@ import { createRequire } from "node:module";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { PLUGIN_ID_PATTERN, parsePluginManifest } from "../core/plugins.ts";
 import { validatePluginSchema } from "../core/plugin-validation.ts";
-import { createPluginQuestionParameters, preparePluginQuestionType } from "../core/plugin-questions.ts";
+import { createPluginQuestionParameters, preparePluginQuestionType, prepareSessionKindFilter } from "../core/plugin-questions.ts";
+import { isSessionKindId } from "../core/session-kinds.ts";
+import type { ChatKind } from "../core/contracts/chat.ts";
+import { preparePluginRecordKind, preparePluginSessionKind, type PreparedPluginRecordKind, type PreparedPluginSessionKind } from "../core/plugin-session-kinds.ts";
 import type { PluginQuestionVariant } from "../core/plugin-questions.ts";
 import type { NativePluginQuestionDefinition } from "../agent/plugin-question-tools.ts";
 import { preparePluginProblemType, createPluginProblemParameters, type NativePluginProblemDefinition } from "../core/plugin-problems.ts";
 import type { NativePluginProblemContribution } from "../agent/plugin-problem-tools.ts";
-import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
+import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginKindSummary, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
 import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
 import type { ServerEvent } from "../core/events.ts";
@@ -51,8 +54,18 @@ export interface PluginHostDependencies {
 	/** Startup installation/recovery failures, including failures before a package directory exists. */
 	installationErrors?: Record<string, string>;
 }
-interface Instructions { agents: Set<PluginAgentKind>; text: string }
-interface Tools { agents: Set<PluginAgentKind>; create: PluginTools["create"] }
+interface Instructions { agents: Set<PluginAgentKind>; sessionKinds?: Set<ChatKind>; text: string }
+interface Tools { agents: Set<PluginAgentKind>; sessionKinds?: Set<ChatKind>; create: PluginTools["create"] }
+/** Session/record kinds (stage B): live registry lookups by full id. A disabled,
+ * missing or unregistering plugin resolves unavailable; names stay displayable. */
+export type PluginSessionKindResolution =
+	| { status: "available"; pluginId: string; pluginName: string; definition: PreparedPluginSessionKind; requireActive(): void }
+	| { status: "unavailable"; pluginId: string; pluginName: string };
+export type PluginRecordKindResolution =
+	| { status: "available"; pluginId: string; definition: PreparedPluginRecordKind;
+		/** Host-owned bookkeeping folder: <dataDirectory>/records/<localId>. */
+		directory: string; signal: AbortSignal; requireActive(): void }
+	| { status: "unavailable"; pluginId: string };
 type QuestionDefinition = NativePluginQuestionDefinition;
 /** Frozen per-turn provenance, admitted atomically with ordinary package contributions. */
 export interface PluginQuestionContribution {
@@ -78,6 +91,9 @@ interface Activation {
 	tools: Set<Tools>;
 	questions: Map<string, QuestionDefinition>;
 	problems: Map<string, NativePluginProblemDefinition>;
+	sessionKinds: Map<string, PreparedPluginSessionKind>;
+	recordKinds: Map<string, PreparedPluginRecordKind>;
+	dataDirectory?: string;
 	ready: boolean;
 }
 interface Package {
@@ -103,6 +119,12 @@ function targets(agents: PluginAgentKind[]): Set<PluginAgentKind> {
 	if (!Array.isArray(agents) || !agents.length || !agents.every(agent => agentKinds.includes(agent))) throw new Error("Plugin contributions require explicit nonempty prober/teacher/practice targets");
 	return new Set(agents);
 }
+/** Optional exact session-kind filter; absent applies in every session kind. */
+function sessionKindTargets(sessionKinds: unknown): Set<ChatKind> | undefined {
+	return sessionKinds === undefined ? undefined : new Set(prepareSessionKindFilter(sessionKinds));
+}
+const inSessionKind = (filter: ReadonlySet<ChatKind> | readonly ChatKind[] | undefined, kind: ChatKind) =>
+	filter === undefined || (Array.isArray(filter) ? filter.includes(kind) : (filter as ReadonlySet<ChatKind>).has(kind));
 const safeSegment = (p: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(p);
 
 function readState(filename: string): State {
@@ -216,6 +238,8 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		activation.tools.clear();
 		activation.questions.clear();
 		activation.problems.clear();
+		activation.sessionKinds.clear();
+		activation.recordKinds.clear();
 		activation.controller.abort();
 		const failures: string[] = [];
 		for (const cleanup of activation.cleanups.splice(0).reverse()) {
@@ -230,7 +254,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			return;
 		}
 		const manifest = pkg.info.manifest;
-		const activation: Activation = { controller: new AbortController(), cleanups: [], handlers: new Map(), instructions: new Set(), tools: new Set(), questions: new Map(), problems: new Map(), ready: false };
+		const activation: Activation = { controller: new AbortController(), cleanups: [], handlers: new Map(), instructions: new Set(), tools: new Set(), questions: new Map(), problems: new Map(), sessionKinds: new Map(), recordKinds: new Map(), ready: false };
 		pkg.activation = activation;
 		const requireLive = () => { if (!live(pkg, activation)) throw new Error("Plugin activation is no longer active"); };
 		const cleanup = (fn: PluginCleanup) => {
@@ -242,6 +266,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			if (manifest.backend) {
 				pluginRoot(pkg.rootDirectory);
 				const dataDirectory = safePluginDataDirectory(directory, manifest.id, coreData, true)!;
+				activation.dataDirectory = dataDirectory;
 				const services = deps.createServices({ manifest, directory: pkg.directory, dataDirectory, signal: activation.controller.signal, cleanup });
 				cleanup(() => services.agents.dispose());
 				cleanup(() => services.workers.dispose());
@@ -251,16 +276,18 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					registerInstructions(contribution: PluginInstructions) {
 						requireLive();
 						const agents = targets(contribution?.agents);
+						const sessionKinds = sessionKindTargets(contribution.sessionKinds);
 						if (typeof contribution.text !== "string" || !contribution.text.trim()) throw new Error("Plugin instructions must contain nonempty text");
-						const registered = { agents, text: contribution.text };
+						const registered = { agents, ...(sessionKinds ? { sessionKinds } : {}), text: contribution.text };
 						activation.instructions.add(registered);
 						return () => { activation.instructions.delete(registered); };
 					},
 					registerTools(contribution: PluginTools) {
 						requireLive();
 						const agents = targets(contribution?.agents);
+						const sessionKinds = sessionKindTargets(contribution.sessionKinds);
 						if (typeof contribution.create !== "function") throw new Error("Plugin tools require a native tool factory");
-						const registered = { agents, create: contribution.create.bind(contribution) };
+						const registered = { agents, ...(sessionKinds ? { sessionKinds } : {}), create: contribution.create.bind(contribution) };
 						activation.tools.add(registered);
 						return () => { activation.tools.delete(registered); };
 					},
@@ -291,6 +318,30 @@ export function createPluginHost(deps: PluginHostDependencies) {
 							if (activation.problems.get(registered.id) !== registered) return;
 							activation.problems.delete(registered.id);
 							controller.abort();
+							if (activation.ready && live(pkg, activation)) change();
+						};
+					},
+					registerSessionKind(definition) {
+						requireLive();
+						const registered = preparePluginSessionKind(manifest.id, definition);
+						if (activation.sessionKinds.has(registered.localId)) throw new Error(`Duplicate plugin session kind: ${registered.localId}`);
+						activation.sessionKinds.set(registered.localId, registered);
+						if (activation.ready) change();
+						return () => {
+							if (activation.sessionKinds.get(registered.localId) !== registered) return;
+							activation.sessionKinds.delete(registered.localId);
+							if (activation.ready && live(pkg, activation)) change();
+						};
+					},
+					registerRecordKind(definition) {
+						requireLive();
+						const registered = preparePluginRecordKind(manifest.id, definition);
+						if (activation.recordKinds.has(registered.localId)) throw new Error(`Duplicate plugin record kind: ${registered.localId}`);
+						activation.recordKinds.set(registered.localId, registered);
+						if (activation.ready) change();
+						return () => {
+							if (activation.recordKinds.get(registered.localId) !== registered) return;
+							activation.recordKinds.delete(registered.localId);
 							if (activation.ready && live(pkg, activation)) change();
 						};
 					},
@@ -403,8 +454,8 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	function agentContributions(context: PluginToolContext, reservedToolNames: readonly string[]): PluginAgentContributions {
 		assertOpen();
 		if (!initialized) throw new PluginHostError(503, "Plugin host is not initialized");
-		if (!context || typeof context.chatId !== "string" || !context.chatId.trim() || !agentKinds.includes(context.agent)) throw new PluginHostError(400, "Invalid plugin tool context");
-		const turn = Object.freeze({ chatId: context.chatId, agent: context.agent });
+		if (!context || typeof context.chatId !== "string" || !context.chatId.trim() || !agentKinds.includes(context.agent) || !isSessionKindId(context.sessionKindId)) throw new PluginHostError(400, "Invalid plugin tool context");
+		const turn: PluginToolContext = Object.freeze({ chatId: context.chatId, agent: context.agent, sessionKindId: context.sessionKindId });
 		const names = new Set(reservedToolNames);
 		const result: PluginAgentContributions = { instructions: [], tools: [] };
 		// Capture ALL registration lists before any factory can change registrations.
@@ -416,10 +467,10 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		});
 		for (const { pkg, activation, instructions, factories, questions, problems } of contributions) {
 			try {
-				const texts = instructions.filter(item => item.agents.has(turn.agent)).map(item => item.text);
+				const texts = instructions.filter(item => item.agents.has(turn.agent) && inSessionKind(item.sessionKinds, turn.sessionKindId)).map(item => item.text);
 				const tools: AgentTool<any>[] = [];
 				const packageNames = new Set<string>();
-				for (const factory of factories.filter(item => item.agents.has(turn.agent))) {
+				for (const factory of factories.filter(item => item.agents.has(turn.agent) && inSessionKind(item.sessionKinds, turn.sessionKindId))) {
 					if (!live(pkg, activation)) break;
 					const created: unknown = factory.create(turn);
 					if (!Array.isArray(created)) {
@@ -460,6 +511,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				const questionTypes: PluginQuestionContribution[] = [];
 				const variant = turn.agent === "prober" ? "probe" : turn.agent === "teacher" ? "teach" : undefined;
 				if (variant) for (const definition of questions) {
+					if (!inSessionKind(definition.sessionKinds, turn.sessionKindId)) continue;
 					const tool = definition[variant];
 					if (!tool) continue;
 					if (names.has(tool.toolName) || packageNames.has(tool.toolName)) throw new Error(`Plugin tool name collision: ${tool.toolName}`);
@@ -538,10 +590,49 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					if (!live(pkg, activation) || activation.problems.get(typeId) !== definition) throw new PluginHostError(409, `Plugin ${pkg.info.id} is disabled or unavailable`);
 				} };
 		},
+		/** Exact live lookup of a plugin session kind by full id. */
+		resolveSessionKind(id: string): PluginSessionKindResolution {
+			assertOpen();
+			if (!initialized) throw new PluginHostError(503, "Plugin host is not initialized");
+			const [pluginId = "", localId = ""] = typeof id === "string" ? id.split(":") : [];
+			const pkg = packages.get(pluginId), activation = pkg?.activation;
+			const pluginName = pkg?.info.manifest?.name ?? pluginId;
+			if (!pkg || !pkg.info.enabled || !activation?.ready || !live(pkg, activation)) return { status: "unavailable", pluginId, pluginName };
+			const definition = activation.sessionKinds.get(localId);
+			if (!definition || definition.id !== id) return { status: "unavailable", pluginId, pluginName };
+			return { status: "available", pluginId, pluginName, definition,
+				requireActive() {
+					if (!live(pkg, activation) || activation.sessionKinds.get(localId) !== definition) throw new PluginHostError(409, `Plugin ${pluginId} is disabled or unavailable`);
+				} };
+		},
+		/** Exact live lookup of a plugin record kind by full id. */
+		resolveRecordKind(id: string): PluginRecordKindResolution {
+			assertOpen();
+			if (!initialized) throw new PluginHostError(503, "Plugin host is not initialized");
+			const [pluginId = "", localId = ""] = typeof id === "string" ? id.split(":") : [];
+			const pkg = packages.get(pluginId), activation = pkg?.activation;
+			if (!pkg || !pkg.info.enabled || !activation?.ready || !live(pkg, activation) || !activation.dataDirectory) return { status: "unavailable", pluginId };
+			const definition = activation.recordKinds.get(localId);
+			if (!definition || definition.id !== id) return { status: "unavailable", pluginId };
+			return { status: "available", pluginId, definition,
+				directory: path.join(/* turbopackIgnore: true */ activation.dataDirectory, "records", localId),
+				signal: activation.controller.signal,
+				requireActive() {
+					if (!live(pkg, activation) || activation.recordKinds.get(localId) !== definition) throw new PluginHostError(409, `Plugin ${pluginId} is disabled or unavailable`);
+				} };
+		},
 		conflicts(): { id: string; error: string }[] { assertOpen(); return conflicts.map(value => ({ ...value })); },
 		list(): PluginInfo[] {
 			assertOpen();
-			return [...packages.values()].map(({ info }) => ({ ...info, ...(info.manifest ? { manifest: { ...info.manifest } } : {}) })).sort((a, b) => a.id.localeCompare(b.id));
+			const summaries = (pkg: Package, kinds: "sessionKinds" | "recordKinds"): PluginKindSummary[] | undefined => {
+				const activation = pkg.activation;
+				if (!pkg.info.enabled || !activation?.ready || !live(pkg, activation) || !activation[kinds].size) return undefined;
+				return [...activation[kinds].values()].map(kind => ({ id: kind.id, label: kind.label }));
+			};
+			return [...packages.values()].map(pkg => {
+				const { info } = pkg, sessionKinds = summaries(pkg, "sessionKinds"), recordKinds = summaries(pkg, "recordKinds");
+				return { ...info, ...(info.manifest ? { manifest: { ...info.manifest } } : {}), ...(sessionKinds ? { sessionKinds } : {}), ...(recordKinds ? { recordKinds } : {}) };
+			}).sort((a, b) => a.id.localeCompare(b.id));
 		},
 		setEnabled(id: string, enabled: boolean): Promise<void> {
 			// Let a cooperative in-flight activation finish so queued teardown cannot deadlock.

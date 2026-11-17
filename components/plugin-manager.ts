@@ -4,7 +4,7 @@ import type {
 	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration, PluginPageActionContext, PluginActionShortcut,
 } from "@/src/core";
 
-import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
+import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, isSessionKindId, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
 import { orderSubmissionInterceptors, type SubmissionInterceptorRegistration } from "./plugin-submission-runner.ts";
 
 export type PluginMount = (container: HTMLElement, signal: AbortSignal) => ReturnType<PluginView["mount"]>;
@@ -368,12 +368,14 @@ export class PluginFrontendManager {
 				if (!["top-bar", "sidebar", "graph"].includes(placement.location)) throw new Error("Unknown plugin action placement");
 				if (placement.location === "top-bar") {
 					if (placement.sessions !== undefined && (!Array.isArray(placement.sessions) || placement.sessions.some(kind => kind !== "teaching" && kind !== "practice"))) throw new Error("Invalid plugin top-bar session targets");
+					if (placement.sessionKindIds !== undefined && (!Array.isArray(placement.sessionKindIds) || !placement.sessionKindIds.every(isSessionKindId))) throw new Error("Invalid plugin top-bar session kind targets");
 					if (placement.views !== undefined && (!Array.isArray(placement.views) || placement.views.some(id => typeof id !== "string" || !id))) throw new Error("Invalid plugin top-bar view targets");
-					if (!placement.sessions?.length && !placement.views?.length) throw new Error("Plugin top-bar placement requires explicit session or view targets");
+					if (!placement.sessions?.length && !placement.sessionKindIds?.length && !placement.views?.length) throw new Error("Plugin top-bar placement requires explicit session or view targets");
 				}
 				if (life.placements.has(placement.id)) throw new Error(`Duplicate plugin placement: ${placement.id}`);
 				const owned = Object.freeze({ ...placement, ...(placement.location === "top-bar" ? {
-					...(placement.sessions ? { sessions: [...placement.sessions] } : {}), ...(placement.views ? { views: [...placement.views] } : {}),
+					...(placement.sessions ? { sessions: [...placement.sessions] } : {}), ...(placement.sessionKindIds ? { sessionKindIds: [...placement.sessionKindIds] } : {}),
+					...(placement.views ? { views: [...placement.views] } : {}),
 				} : {}) });
 				life.placements.set(owned.id, owned); this.publish();
 				return () => { if (life.placements.get(owned.id) === owned) { life.placements.delete(owned.id); this.publish(); } };

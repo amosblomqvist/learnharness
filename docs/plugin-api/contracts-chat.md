@@ -5,7 +5,7 @@
 [API index](README.md) · [Data access and host boundaries](../plugin-authoring.md#backend-and-data)
 
 - [CallUsage](#callusage) — supporting declaration
-- [ChatKind](#chatkind) — supporting declaration
+- [ChatKind](#chatkind)
 - [ChatListItem](#chatlistitem)
 - [ChatRecord](#chatrecord)
 - [ChatSettings](#chatsettings) — supporting declaration
@@ -13,6 +13,7 @@
 - [ExtractionRunUsage](#extractionrunusage) — supporting declaration
 - [ExtractionStageUsage](#extractionstageusage) — supporting declaration
 - [ImageSnapshot](#imagesnapshot) — supporting declaration
+- [PluginSessionKindId](#pluginsessionkindid)
 - [SideChatAnchor](#sidechatanchor) — supporting declaration
 - [SideChatMessage](#sidechatmessage) — supporting declaration
 - [SideChatThread](#sidechatthread) — supporting declaration
@@ -94,15 +95,19 @@ reasoningTokens: number | undefined;
 
 ## ChatKind
 
-Supporting declaration used by a public type. This is not an additional runtime API or SDK helper.
+Public SDK type, exported as `ChatKind`. Import with `import type`; the SDK has no runtime exports.
 
 Session kind: teach is the default when a saved record omits kind.
 Practice uses the adaptive-practice agent without teaching extraction or
-graph writes. Reading an absent kind does not require a record migration.
+graph writes. Plugin kinds run the teaching shape (prober → teacher) with
+the declaring plugin's phase prompts and record. Reading an absent kind
+does not require a record migration.
 
 ```ts
-export type ChatKind = "teach" | "practice";
+export type ChatKind = "teach" | "practice" | PluginSessionKindId;
 ```
+
+**Related types:** [PluginSessionKindId](contracts-chat.md#pluginsessionkindid).
 
 ## ChatListItem
 
@@ -623,6 +628,17 @@ width: number;
 
 ```ts
 height: number;
+```
+
+## PluginSessionKindId
+
+Public SDK type, exported as `PluginSessionKindId`. Import with `import type`; the SDK has no runtime exports.
+
+A plugin-declared session kind's full id, "<pluginId>:<localId>"
+(bare names are reserved for native kinds).
+
+```ts
+export type PluginSessionKindId = `${string}:${string}`;
 ```
 
 ## SideChatAnchor

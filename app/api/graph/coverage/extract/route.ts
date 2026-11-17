@@ -10,7 +10,7 @@
  * flight (the dock is the source of truth for that); failures are logged
  * by the pipeline and leave coverage untouched — the button stays honest.
  */
-import { extraction, extractionStatuses } from "@/src/server";
+import { extraction, extractionStatuses, getChat, resolveChatRecord, runRecordExtraction, stores } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -27,6 +27,22 @@ export async function POST(request: Request) {
 	}
 	if (extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId)) {
 		return Response.json({ error: "An extraction run is already in flight for this session" }, { status: 409 });
+	}
+	// Plugin session kinds (stage B) extract into the record their kind names:
+	// a plugin record runs its host-chunked raw batches; an unavailable kind
+	// or record plugin refuses honestly. Native kinds keep the path below.
+	const kind = getChat(chatId)?.kind;
+	if (kind !== undefined && kind !== "teach" && kind !== "practice") {
+		const target = await resolveChatRecord(kind);
+		if (target.status === "unavailable") {
+			return Response.json({ error: "The plugin that owns this session's record is disabled or not installed", code: "record-kind-unavailable", recordKindId: target.recordKindId }, { status: 409 });
+		}
+		if (target.status === "plugin") {
+			void runRecordExtraction({ chatStore: stores.chatStore }, chatId, target, "manual").catch((err: unknown) => {
+				console.error(`[chat ${chatId}] manual record extraction failed:`, err);
+			});
+			return Response.json({ started: true }, { status: 202 });
+		}
 	}
 	// Fire-and-forget, like the trigger: the dock + the coverage panel's
 	// running flags track progress; the promise never blocks the response.

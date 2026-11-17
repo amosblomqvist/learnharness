@@ -25,7 +25,8 @@ export function placedPluginActions(plugins: readonly FrontendPlugin[], context:
 			if (placement.location !== context.placement) return [];
 			if (placement.location === "top-bar") {
 				if (context.placement !== "top-bar") return [];
-				if (context.surface === "session" && !placement.sessions?.includes(context.kind)) return [];
+				// A session matches its SHAPE target or its exact kind (stage B, q55).
+				if (context.surface === "session" && !placement.sessions?.includes(context.kind) && !placement.sessionKindIds?.includes(context.sessionKindId)) return [];
 				if (context.surface === "plugin-view" && (context.pluginId !== plugin.info.id || !placement.views?.includes(context.viewId))) return [];
 			}
 			const action = plugin.actions.find(item => item.id === placement.actionId);

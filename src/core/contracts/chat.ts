@@ -13,10 +13,16 @@ import type { EmissionStats } from "./graph.ts";
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
+/** A plugin-declared session kind's full id, "<pluginId>:<localId>"
+ * (bare names are reserved for native kinds). */
+export type PluginSessionKindId = `${string}:${string}`;
+
 /** Session kind: teach is the default when a saved record omits kind.
  * Practice uses the adaptive-practice agent without teaching extraction or
- * graph writes. Reading an absent kind does not require a record migration. */
-export type ChatKind = "teach" | "practice";
+ * graph writes. Plugin kinds run the teaching shape (prober → teacher) with
+ * the declaring plugin's phase prompts and record. Reading an absent kind
+ * does not require a record migration. */
+export type ChatKind = "teach" | "practice" | PluginSessionKindId;
 
 /** One persisted native session under data/chats/<id>.json. Messages retain
  * native agent history; transcript rendering groups them into a separate view.

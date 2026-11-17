@@ -58,6 +58,10 @@ export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web
 export { sessionCost } from "./pricing.ts";
 export { initializePlugins, getPluginHost, getPluginAgentContributions, getPluginQuestionTypeResolver, pluginTransport } from "./plugins.ts";
 export { createPluginDocumentRoute } from "./plugin-transport.ts";
+// Session/record kinds (stage B): kind resolution for routes and pages.
+export { resolveChatSessionKind, sessionKindStatus, sessionKindUnavailableResponse, type ChatSessionKind, type SessionKindStatus } from "./session-kinds.ts";
+export { resolveChatRecord, type ChatRecordTarget } from "./record-kinds.ts";
+export { runRecordExtraction } from "./record-extraction.ts";
 export { pluginProblemAvailabilityOf, type ProblemTypeResolver } from "./plugin-problems.ts";
 export { pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, preparePluginQuestionDismissal, type QuestionTypeResolver } from "./plugin-questions.ts";
 export { claudeCodeInstallationResponse } from "./claude-code.ts";

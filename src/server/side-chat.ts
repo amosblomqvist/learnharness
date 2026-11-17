@@ -22,6 +22,7 @@ import { effectiveSettings, stores } from "./stores.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { refreshConnectionCatalog } from "./model-catalog.ts";
 import { awaitCompaction } from "./compaction.ts";
+import { resolveChatSessionKind, sessionKindUnavailableResponse } from "./session-kinds.ts";
 
 export type SideStreamEvent =
 	| { type: "thread"; thread: SideChatThread }
@@ -265,6 +266,10 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 }
 
 async function productionEngineFor(record: ChatRecord): Promise<SideEngine | Response> {
+	// Read-only sessions (stage B, owner P5): an unavailable plugin session
+	// kind refuses side questions too — they are model work in the session.
+	const sessionKind = await resolveChatSessionKind(record.kind);
+	if (sessionKind.status === "unavailable") return sessionKindUnavailableResponse(sessionKind);
 	const spec = resolveSideQuestionSpec(record.settings, stores.settingsStore.readSettings());
 	if (!spec) return Response.json(modelsNotConfigured(["strong"]), { status: 503 });
 	if (isSubscriptionProvider(spec.provider)) await refreshConnectionCatalog(spec.provider);

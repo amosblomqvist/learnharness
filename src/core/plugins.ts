@@ -4,10 +4,12 @@
 import type { AssistantMessage, AssistantMessageEvent, Context, SimpleStreamOptions, ToolResultMessage } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { TSchema } from "typebox";
-import type { ChatRecord, ChatListItem } from "./contracts/chat.ts";
+import type { ChatRecord, ChatListItem, ChatKind } from "./contracts/chat.ts";
+import type { LhMessage } from "./native-messages.ts";
 import type { ModelCatalogResponse } from "./contracts/models.ts";
 import type { GraphSnapshot, GraphNode, GraphChain, SessionCheckpoint, CoverageEntry, NotesSource, Position } from "./contracts.ts";
-export type { ChatRecord, ChatListItem } from "./contracts/chat.ts";
+export type { ChatRecord, ChatListItem, ChatKind, PluginSessionKindId } from "./contracts/chat.ts";
+export type { LhMessage } from "./native-messages.ts";
 export type { ModelCatalogResponse } from "./contracts/models.ts";
 export type { GraphSnapshot, GraphNode, GraphChain, SessionCheckpoint, CoverageEntry, NotesSource, Position } from "./contracts.ts";
 import type { ServerEvent } from "./events.ts";
@@ -49,6 +51,16 @@ export interface PluginInfo {
 	error?: string;
 	/** Changes only after server restart, not merely after enable/disable. */
 	revision: string;
+	/** Session kinds this active plugin currently registers (full ids). */
+	sessionKinds?: PluginKindSummary[];
+	/** Record kinds this active plugin currently registers (full ids). */
+	recordKinds?: PluginKindSummary[];
+}
+/** Host-derived summary of a registered session or record kind. */
+export interface PluginKindSummary {
+	/** Full id: "<pluginId>:<localId>". */
+	id: string;
+	label: string;
 }
 export interface PluginNotification {
 	pluginId: string;
@@ -117,19 +129,70 @@ export type PluginAgentKind = "prober" | "teacher" | "practice";
 /** Agent contributions are additive and apply to explicitly selected agent kinds. */
 export interface PluginInstructions {
 	agents: PluginAgentKind[];
+	/** Optional session-kind filter ("teach", "practice" or "<pluginId>:<localId>");
+	 * absent applies in every session kind whose agents match. */
+	sessionKinds?: ChatKind[];
 	text: string;
 }
 export interface PluginToolContext {
 	readonly chatId: string;
 	readonly agent: PluginAgentKind;
+	/** The running session's exact kind: "teach", "practice" or a plugin kind id. */
+	readonly sessionKindId: ChatKind;
 }
 /** A fresh native Pi loadout per conversation turn; no private app imports. */
 export interface PluginTools {
 	agents: PluginAgentKind[];
+	/** Optional session-kind filter; absent applies in every session kind. */
+	sessionKinds?: ChatKind[];
 	/** Create fresh native tools for the matching turn's frozen chat/agent context.
 	 * Factory/admission errors omit this plugin's contribution for that turn rather
 	 * than replacing host tools. Honor each tool execution's cancellation signal. */
 	create(context: PluginToolContext): AgentTool<any>[];
+}
+/** Per-phase native tool delta, in the shape of the user's tool toggles:
+ * `false` removes that native tool; absent or `true` keeps it. A user's own
+ * `false` still wins. probe_done (prober) and plan_init (teacher) are always kept. */
+export type PluginSessionKindToolDelta = Record<string, boolean>;
+/** A teaching-shaped session kind (prober → probe_done → teacher). Its prompts
+ * replace the native phase fragments between the shared base and the shared
+ * appendix; every other plugin contribution still applies additively. */
+export interface PluginSessionKindDefinition {
+	/** Local id (lowercase words joined by hyphens); the full id is "<pluginId>:<id>". */
+	id: string;
+	label: string;
+	/** The record this kind extracts into: "graph" or any plugin's full record kind id. */
+	record: string;
+	/** This kind's job and method for each phase. */
+	prompts: { prober: string; teacher: string };
+	tools?: { prober?: PluginSessionKindToolDelta; teacher?: PluginSessionKindToolDelta };
+}
+/** One host-chunked batch of a session's raw saved transcript. */
+export interface PluginRecordBatch {
+	/** Full record kind id. */
+	readonly recordKindId: string;
+	readonly chatId: string;
+	readonly sessionKindId: ChatKind;
+	/** Deterministic for the same uncovered messages: redelivery repeats it. */
+	readonly batchId: string;
+	/** Every saved message of the batch, unfiltered (user, assistant including
+	 * thinking and tool calls, tool results, markers). Filtering is the plugin's. */
+	readonly messages: readonly LhMessage[];
+	/** Aborted on cancellation, session deletion or plugin deactivation. */
+	readonly signal: AbortSignal;
+}
+/** A plugin-owned record that sessions extract into. The host owns chunking,
+ * triggering and coverage bookkeeping; the plugin owns extraction and storage. */
+export interface PluginRecordKindDefinition {
+	/** Local id; the full id is "<pluginId>:<id>". */
+	id: string;
+	label: string;
+	/** Uncovered raw-transcript tokens that start extraction; default 4096, minimum 500. */
+	chunkTokens?: number;
+	/** Fold one batch into the record. Resolving marks the batch covered; rejecting
+	 * leaves it uncovered for a later retry. Delivery is at-least-once: make writes
+	 * idempotent by batchId. Batches for one record kind run one at a time. */
+	extract(batch: PluginRecordBatch): void | Promise<void>;
 }
 /** Backend activation scope, once per enabled plugin per server, not per window.
  * Trusted Node code must cooperate with cancellation; no forced process isolation. */
@@ -177,6 +240,13 @@ export interface PluginBackendContext {
 	 * results must be JSON-compatible; validate input in the handler. Invalid or
 	 * duplicate names throw. Returns unregister; this is not an arbitrary HTTP API. */
 	handle(name: string, handler: (input: unknown) => unknown | Promise<unknown>): () => void;
+	/** Register a teaching-shaped session kind. Invalid or duplicate definitions throw.
+	 * Unregister makes its saved sessions read-only until it is registered again. */
+	registerSessionKind(definition: PluginSessionKindDefinition): () => void;
+	/** Register a record kind whose coverage the host keeps under
+	 * dataDirectory/records/<id>/ (reserved). Invalid or duplicate definitions throw;
+	 * unregister pauses its extraction (retried later), not saved records. */
+	registerRecordKind(definition: PluginRecordKindDefinition): () => void;
 	/** Live app hints and plugin-scoped notifications, not a durable event log. */
 	events: {
 		/** Observe supported app events until unsubscribe or activation cleanup.
@@ -206,7 +276,9 @@ export interface PluginView {
 export type * from "./plugin-view-context.ts";
 export type { PluginActionShortcut, PluginShortcutViewScope } from "./plugin-shortcuts.ts";
 export type PluginPageActionContext =
-	| { surface: "session"; sessionId: string; kind: "teaching" | "practice"; surfaceTarget: import("./plugin-ui.ts").PluginSurfaceTarget;
+	| { surface: "session"; sessionId: string; kind: "teaching" | "practice";
+		/** Exact session kind: "teach", "practice" or a plugin kind id. */
+		sessionKindId: ChatKind; surfaceTarget: import("./plugin-ui.ts").PluginSurfaceTarget;
 		/** Detached whole-session view, captured once before action invocation. */
 		readonly view: import("./plugin-view-context.ts").PluginSessionViewContext }
 	| { surface: "plugin-view"; pluginId: string; viewId: string }
@@ -232,7 +304,9 @@ export interface PluginAction {
 /** Registration alone never creates chrome. Each placement is explicit. */
 export type PluginActionPlacement =
 	| { id: string; actionId: string; location: "sidebar" | "graph" }
-	| { id: string; actionId: string; location: "top-bar"; sessions?: ("teaching" | "practice")[]; views?: string[] };
+	| { id: string; actionId: string; location: "top-bar"; sessions?: ("teaching" | "practice")[];
+		/** Exact session kinds; a session matches if its shape OR its exact kind is targeted. */
+		sessionKindIds?: ChatKind[]; views?: string[] };
 export type PluginSettingsRegistration = PluginView["mount"] | import("./plugin-ui.ts").PluginSettingsSchema;
 export interface PluginCodeBlockProps {
 	language: string;

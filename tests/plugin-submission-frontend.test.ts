@@ -4,7 +4,7 @@ import { PluginSubmissionRunner, type SubmissionAttempt, type SubmissionIntercep
 import { SessionModel } from "../components/session-core.ts";
 import type { PluginSubmission, PluginSubmissionTarget, PluginSurfaceTarget, LhMessage } from "../src/core/index.ts";
 
-const target: PluginSubmissionTarget = { type: "text", sessionId: "chat", sessionKind: "teaching", channels: ["content"], surfaceTarget: {} as PluginSurfaceTarget };
+const target: PluginSubmissionTarget = { type: "text", sessionId: "chat", sessionKind: "teaching", sessionKindId: "teach", channels: ["content"], surfaceTarget: {} as PluginSurfaceTarget };
 const input: PluginSubmission = { type: "text", content: { text: "draft", images: [] } };
 const deferred = <T>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; };
 const tick = async () => { for (let i = 0; i < 12; i++) await Promise.resolve(); };

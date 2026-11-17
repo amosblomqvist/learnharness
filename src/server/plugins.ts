@@ -31,6 +31,9 @@ const core = {
 	ids: corePluginIds,
 };
 const coreData = { directory: core.dataDirectory, ids: core.ids };
+/** Where plugin data directories live (community plugins/<id>/data, core
+ *  core-plugin-data/<id>) — for host bookkeeping that spans every plugin. */
+export const pluginDataRoots = Object.freeze({ community: pluginDirectory, core: core.dataDirectory });
 type Host = ReturnType<typeof createPluginHost>;
 interface Runtime { host: Host; ready: Promise<void> }
 interface PluginGlobal { __lhPlugins?: Runtime }

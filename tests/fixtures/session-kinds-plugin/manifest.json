@@ -1,0 +1,9 @@
+{
+	"apiVersion": 1,
+	"id": "kinds-fixture",
+	"name": "Session kinds fixture",
+	"version": "1.0.0",
+	"minAppVersion": "0.4.1",
+	"backend": "backend.cjs",
+	"main": "main.js"
+}

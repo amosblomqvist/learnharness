@@ -33,7 +33,7 @@ function fixture(t: TestContext) {
 	}
 	return { host, plugin, context };
 }
-const turn = (agent: "prober" | "teacher" | "practice" = "teacher") => ({ chatId: "question-chat", agent });
+const turn = (agent: "prober" | "teacher" | "practice" = "teacher") => ({ chatId: "question-chat", agent, sessionKindId: agent === "practice" ? "practice" as const : "teach" as const });
 function definition(overrides: Partial<PluginQuestionTypeDefinition> = {}): PluginQuestionTypeDefinition {
 	return { id: "format", label: "A question", contractVersion: 1, showThinking: true,
 		questionSchema: Type.Object({ instruction: Type.String() }), answerSchema: Type.String(),

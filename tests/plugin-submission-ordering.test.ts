@@ -4,7 +4,7 @@ import { PluginFrontendManager } from "../components/plugin-manager.ts";
 import { PluginSubmissionRunner } from "../components/plugin-submission-runner.ts";
 import type { PluginFrontendContext, PluginInfo, PluginSubmissionTarget, PluginSurfaceTarget } from "../src/core/index.ts";
 
-const target: PluginSubmissionTarget = { type: "text", sessionId: "chat", sessionKind: "teaching", channels: ["content"], surfaceTarget: {} as PluginSurfaceTarget };
+const target: PluginSubmissionTarget = { type: "text", sessionId: "chat", sessionKind: "teaching", sessionKindId: "teach", channels: ["content"], surfaceTarget: {} as PluginSurfaceTarget };
 const tick = async () => { for (let i = 0; i < 15; i++) await Promise.resolve(); };
 const info = (id: string): PluginInfo => ({ id, origin: "community", enabled: true, status: "active", revision: "1", manifest: { apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.7", main: "index.js" } });
 function fixture() {

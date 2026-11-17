@@ -40,9 +40,9 @@ after(async () => { unregister(); await host.dispose(); globalThis.fetch = realF
 test("real coding registration poses once, processes revisions before continuation, and reveals only through native conclude", { timeout: 15000 }, async () => {
   const chat = chatStore.createChat("Isolated coding practice", "practice");
   chatStore.saveSettings(chat.id, { model: { provider: "openrouter", id: "z-ai/glm-5.3-flash" } });
-  const practice = host.agentContributions({ chatId: chat.id, agent: "practice" }, ["problem", "conclude"]);
-  const teacher = host.agentContributions({ chatId: chat.id, agent: "teacher" }, []);
-  const prober = host.agentContributions({ chatId: chat.id, agent: "prober" }, []);
+  const practice = host.agentContributions({ chatId: chat.id, agent: "practice", sessionKindId: "practice" as const }, ["problem", "conclude"]);
+  const teacher = host.agentContributions({ chatId: chat.id, agent: "teacher", sessionKindId: "teach" as const }, []);
+  const prober = host.agentContributions({ chatId: chat.id, agent: "prober", sessionKindId: "teach" as const }, []);
   assert.equal(practice.problemTypes?.length, 1);
   assert.equal(practice.questionTypes, undefined);
   assert.equal(teacher.questionTypes?.length, 1);

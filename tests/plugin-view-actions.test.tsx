@@ -14,13 +14,13 @@ import type { PluginSurfaceTarget } from "../src/core/plugin-ui.ts";
 import { mountPluginChrome } from "./helpers/plugin-chrome.tsx";
 const surfaceTarget = {} as PluginSurfaceTarget;
 function source(): Parameters<typeof capturePluginSessionView>[0] {
-  return { sessionId: "one", kind: "teaching", title: "Full session", messages: [], transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "teach", contextTokens: null, queuedSteers: [], composer: { text: "first draft" },
-    input: { type: "text", sessionId: "one", sessionKind: "teaching", surfaceTarget, channels: ["content"] } };
+  return { sessionId: "one", kind: "teaching", sessionKindId: "teach", title: "Full session", messages: [], transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "teach", contextTokens: null, queuedSteers: [], composer: { text: "first draft" },
+    input: { type: "text", sessionId: "one", sessionKind: "teaching", sessionKindId: "teach", surfaceTarget, channels: ["content"] } };
 }
 for (const overflow of [false, true]) test(`top-bar ${overflow ? "overflow" : "inline"} actions freshly capture the whole view before await`, async () => {
   const data = source(); let context!: PluginFrontendContext, captured: PluginSessionViewContext | undefined, after: PluginSessionViewContext | undefined;
   let resolve!: () => void; const pending = new Promise<void>(yes => { resolve = yes; });
-  const make = () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "one", kind: "teaching", surfaceTarget }, () => data);
+  const make = () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "one", kind: "teaching", sessionKindId: "teach", surfaceTarget }, () => data);
   function Chrome() {
     usePlugins(); // Like Chat, consume host publication to refresh render-time predicates.
     return <TopBar><h1 data-plugin-chrome-title>Session</h1><div className="flex-1" /><PluginTopBarActions context={make()} captureContext={() => { const fresh = make(); void fresh.view; return fresh; }} /></TopBar>;
@@ -56,10 +56,10 @@ for (const overflow of [false, true]) test(`question typing refreshes ${overflow
     useLayoutEffect(() => { connections.push(refreshRef.current); }, []);
     const reader = useRef<(() => NativeQuestionViewState) | null>(null) as ViewReaderRef<NativeQuestionViewState>;
     reader.changed = () => refreshRef.current?.();
-    const make = () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "one", kind: "teaching", surfaceTarget }, () => {
+    const make = () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "one", kind: "teaching", sessionKindId: "teach", surfaceTarget }, () => {
       const state = reader.current?.();
       return { ...data, input: state ? {
-        type: "answer", sessionId: "one", sessionKind: "teaching", surfaceTarget, channels: ["answer"],
+        type: "answer", sessionId: "one", sessionKind: "teaching", sessionKindId: "teach", surfaceTarget, channels: ["answer"],
         question: { ...toClientQuestion(state.question), occurrence: { messageId: "message", contentIndex: 0, toolCallId: "question", toolName: "explain" } },
         expanded: true, revealed: true, available: true, draft: { ...state.draft, readingThinking: "" },
       } : data.input };
@@ -110,7 +110,7 @@ for (const overflow of [false, true]) test(`question typing refreshes ${overflow
 
 test("disabled predicates receive view data and capture failures are contained by plugin action error handling", async () => {
   const data = source(); let calls = 0;
-  const make = () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "one", kind: "teaching", surfaceTarget }, () => data);
+  const make = () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "one", kind: "teaching", sessionKindId: "teach", surfaceTarget }, () => data);
   const fixture = await mountPluginChrome({ activate(ctx) { ctx.registerAction({ id: "view", name: "Read view", disabled(context) { return context.surface === "session" && context.view.composer.text === "disabled"; }, run() { calls++; } }); ctx.placeAction({ id: "view", actionId: "view", location: "top-bar", sessions: ["teaching"] }); } }, <TopBar><h1>Session</h1><PluginTopBarActions context={make()} captureContext={() => { throw Error("Cannot capture current view"); }} /></TopBar>);
   try {
     await fixture.click(fixture.document.querySelector<HTMLElement>('[data-plugin-action="fixture/view"]')!);

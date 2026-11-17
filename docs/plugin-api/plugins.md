@@ -21,10 +21,15 @@
 - [PluginInferenceRequest](#plugininferencerequest)
 - [PluginInfo](#plugininfo)
 - [PluginInstructions](#plugininstructions)
+- [PluginKindSummary](#pluginkindsummary)
 - [PluginLearningData](#pluginlearningdata)
 - [PluginManifest](#pluginmanifest)
 - [PluginNotification](#pluginnotification)
 - [PluginPageActionContext](#pluginpageactioncontext)
+- [PluginRecordBatch](#pluginrecordbatch)
+- [PluginRecordKindDefinition](#pluginrecordkinddefinition)
+- [PluginSessionKindDefinition](#pluginsessionkinddefinition)
+- [PluginSessionKindToolDelta](#pluginsessionkindtooldelta)
 - [PluginSettingsRegistration](#pluginsettingsregistration)
 - [PluginToolContext](#plugintoolcontext)
 - [PluginToolRenderer](#plugintoolrenderer)
@@ -179,9 +184,12 @@ export type PluginActionPlacement = {
     actionId: string;
     location: "top-bar";
     sessions?: ("teaching" | "practice")[];
+    sessionKindIds?: ChatKind[];
     views?: string[];
 };
 ```
+
+**Related types:** [ChatKind](contracts-chat.md#chatkind).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -189,6 +197,7 @@ export type PluginActionPlacement = {
 - [actionId](#pluginactionplacement-actionid) — 2 signatures/variants
 - [location](#pluginactionplacement-location) — 2 signatures/variants
 - [sessions](#pluginactionplacement-sessions)
+- [sessionKindIds](#pluginactionplacement-sessionkindids)
 - [views](#pluginactionplacement-views)
 
 ### PluginActionPlacement id
@@ -225,6 +234,14 @@ location: "top-bar";
 
 ```ts
 sessions?: ("teaching" | "practice")[];
+```
+
+### PluginActionPlacement sessionKindIds
+
+Exact session kinds; a session matches if its shape OR its exact kind is targeted.
+
+```ts
+sessionKindIds?: ChatKind[];
 ```
 
 ### PluginActionPlacement views
@@ -265,6 +282,8 @@ export interface PluginBackendContext {
     registerQuestionType<Q extends TSchema, A extends TSchema>(definition: PluginQuestionTypeDefinition<Q, A>): () => void;
     registerProblemType<Q extends TSchema, S extends TSchema>(definition: PluginProblemTypeDefinition<Q, S>): () => void;
     handle(name: string, handler: (input: unknown) => unknown | Promise<unknown>): () => void;
+    registerSessionKind(definition: PluginSessionKindDefinition): () => void;
+    registerRecordKind(definition: PluginRecordKindDefinition): () => void;
     events: {
         on(listener: (event: ServerEvent) => void): () => void;
         emit(topic: string, data?: unknown): void;
@@ -272,7 +291,7 @@ export interface PluginBackendContext {
 }
 ```
 
-**Related types:** [PluginAgentService](plugin-agents.md#pluginagentservice), [PluginBackgroundTool](plugin-workers.md#pluginbackgroundtool), [PluginCleanup](plugins.md#plugincleanup), [PluginInference](plugins.md#plugininference), [PluginInstructions](plugins.md#plugininstructions), [PluginLearningData](plugins.md#pluginlearningdata), [PluginManifest](plugins.md#pluginmanifest), [PluginProblemTypeDefinition](plugin-problems.md#pluginproblemtypedefinition), [PluginQuestionTypeDefinition](plugin-questions.md#pluginquestiontypedefinition), [PluginToolContext](plugins.md#plugintoolcontext), [PluginTools](plugins.md#plugintools), [PluginWorkerService](plugin-workers.md#pluginworkerservice), [ServerEvent](events.md#serverevent).
+**Related types:** [PluginAgentService](plugin-agents.md#pluginagentservice), [PluginBackgroundTool](plugin-workers.md#pluginbackgroundtool), [PluginCleanup](plugins.md#plugincleanup), [PluginInference](plugins.md#plugininference), [PluginInstructions](plugins.md#plugininstructions), [PluginLearningData](plugins.md#pluginlearningdata), [PluginManifest](plugins.md#pluginmanifest), [PluginProblemTypeDefinition](plugin-problems.md#pluginproblemtypedefinition), [PluginQuestionTypeDefinition](plugin-questions.md#pluginquestiontypedefinition), [PluginRecordKindDefinition](plugins.md#pluginrecordkinddefinition), [PluginSessionKindDefinition](plugins.md#pluginsessionkinddefinition), [PluginToolContext](plugins.md#plugintoolcontext), [PluginTools](plugins.md#plugintools), [PluginWorkerService](plugin-workers.md#pluginworkerservice), [ServerEvent](events.md#serverevent).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -291,6 +310,8 @@ export interface PluginBackendContext {
 - [registerQuestionType](#pluginbackendcontext-registerquestiontype)
 - [registerProblemType](#pluginbackendcontext-registerproblemtype)
 - [handle](#pluginbackendcontext-handle)
+- [registerSessionKind](#pluginbackendcontext-registersessionkind)
+- [registerRecordKind](#pluginbackendcontext-registerrecordkind)
 - [events](#pluginbackendcontext-events)
 - [events.on](#pluginbackendcontext-eventson)
 - [events.emit](#pluginbackendcontext-eventsemit)
@@ -468,6 +489,37 @@ handle(name: string, handler: (input: unknown) => unknown | Promise<unknown>): (
 | --- | --- |
 | `name` | `string` |
 | `handler` | `(input: unknown) => unknown \| Promise<unknown>` |
+
+**Returns:** `() => void`.
+
+### PluginBackendContext registerSessionKind
+
+Register a teaching-shaped session kind. Invalid or duplicate definitions throw.
+Unregister makes its saved sessions read-only until it is registered again.
+
+```ts
+registerSessionKind(definition: PluginSessionKindDefinition): () => void;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `definition` | `PluginSessionKindDefinition` |
+
+**Returns:** `() => void`.
+
+### PluginBackendContext registerRecordKind
+
+Register a record kind whose coverage the host keeps under
+dataDirectory/records/<id>/ (reserved). Invalid or duplicate definitions throw;
+unregister pauses its extraction (retried later), not saved records.
+
+```ts
+registerRecordKind(definition: PluginRecordKindDefinition): () => void;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `definition` | `PluginRecordKindDefinition` |
 
 **Returns:** `() => void`.
 
@@ -1395,10 +1447,12 @@ export interface PluginInfo {
     status: "disabled" | "active" | "error";
     error?: string;
     revision: string;
+    sessionKinds?: PluginKindSummary[];
+    recordKinds?: PluginKindSummary[];
 }
 ```
 
-**Related types:** [PluginManifest](plugins.md#pluginmanifest).
+**Related types:** [PluginKindSummary](plugins.md#pluginkindsummary), [PluginManifest](plugins.md#pluginmanifest).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -1409,6 +1463,8 @@ export interface PluginInfo {
 - [status](#plugininfo-status)
 - [error](#plugininfo-error)
 - [revision](#plugininfo-revision)
+- [sessionKinds](#plugininfo-sessionkinds)
+- [recordKinds](#plugininfo-recordkinds)
 
 ### PluginInfo id
 
@@ -1456,6 +1512,22 @@ Changes only after server restart, not merely after enable/disable.
 revision: string;
 ```
 
+### PluginInfo sessionKinds
+
+Session kinds this active plugin currently registers (full ids).
+
+```ts
+sessionKinds?: PluginKindSummary[];
+```
+
+### PluginInfo recordKinds
+
+Record kinds this active plugin currently registers (full ids).
+
+```ts
+recordKinds?: PluginKindSummary[];
+```
+
 ## PluginInstructions
 
 Public SDK type, exported as `PluginInstructions`. Import with `import type`; the SDK has no runtime exports.
@@ -1465,15 +1537,17 @@ Agent contributions are additive and apply to explicitly selected agent kinds.
 ```ts
 export interface PluginInstructions {
     agents: PluginAgentKind[];
+    sessionKinds?: ChatKind[];
     text: string;
 }
 ```
 
-**Related types:** [PluginAgentKind](plugins.md#pluginagentkind).
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [PluginAgentKind](plugins.md#pluginagentkind).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [agents](#plugininstructions-agents)
+- [sessionKinds](#plugininstructions-sessionkinds)
 - [text](#plugininstructions-text)
 
 ### PluginInstructions agents
@@ -1482,10 +1556,51 @@ export interface PluginInstructions {
 agents: PluginAgentKind[];
 ```
 
+### PluginInstructions sessionKinds
+
+Optional session-kind filter ("teach", "practice" or "<pluginId>:<localId>");
+absent applies in every session kind whose agents match.
+
+```ts
+sessionKinds?: ChatKind[];
+```
+
 ### PluginInstructions text
 
 ```ts
 text: string;
+```
+
+## PluginKindSummary
+
+Public SDK type, exported as `PluginKindSummary`. Import with `import type`; the SDK has no runtime exports.
+
+Host-derived summary of a registered session or record kind.
+
+```ts
+export interface PluginKindSummary {
+    id: string;
+    label: string;
+}
+```
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [id](#pluginkindsummary-id)
+- [label](#pluginkindsummary-label)
+
+### PluginKindSummary id
+
+Full id: "<pluginId>:<localId>".
+
+```ts
+id: string;
+```
+
+### PluginKindSummary label
+
+```ts
+label: string;
 ```
 
 ## PluginLearningData
@@ -1715,6 +1830,7 @@ export type PluginPageActionContext = {
     surface: "session";
     sessionId: string;
     kind: "teaching" | "practice";
+    sessionKindId: ChatKind;
     surfaceTarget: import("./plugin-ui.ts").PluginSurfaceTarget;
     readonly view: import("./plugin-view-context.ts").PluginSessionViewContext;
 } | {
@@ -1727,13 +1843,14 @@ export type PluginPageActionContext = {
 };
 ```
 
-**Related types:** [PluginSessionViewContext](plugin-view-context.md#pluginsessionviewcontext), [PluginSurfaceTarget](plugin-ui.md#pluginsurfacetarget).
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [PluginSessionViewContext](plugin-view-context.md#pluginsessionviewcontext), [PluginSurfaceTarget](plugin-ui.md#pluginsurfacetarget).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [surface](#pluginpageactioncontext-surface) — 3 signatures/variants
 - [sessionId](#pluginpageactioncontext-sessionid)
 - [kind](#pluginpageactioncontext-kind)
+- [sessionKindId](#pluginpageactioncontext-sessionkindid)
 - [surfaceTarget](#pluginpageactioncontext-surfacetarget)
 - [view](#pluginpageactioncontext-view)
 - [pluginId](#pluginpageactioncontext-pluginid)
@@ -1764,6 +1881,14 @@ sessionId: string;
 
 ```ts
 kind: "teaching" | "practice";
+```
+
+### PluginPageActionContext sessionKindId
+
+Exact session kind: "teach", "practice" or a plugin kind id.
+
+```ts
+sessionKindId: ChatKind;
 ```
 
 ### PluginPageActionContext surfaceTarget
@@ -1798,6 +1923,258 @@ viewId: string;
 pathname: string;
 ```
 
+## PluginRecordBatch
+
+Public SDK type, exported as `PluginRecordBatch`. Import with `import type`; the SDK has no runtime exports.
+
+One host-chunked batch of a session's raw saved transcript.
+
+```ts
+export interface PluginRecordBatch {
+    readonly recordKindId: string;
+    readonly chatId: string;
+    readonly sessionKindId: ChatKind;
+    readonly batchId: string;
+    readonly messages: readonly LhMessage[];
+    readonly signal: AbortSignal;
+}
+```
+
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [LhMessage](native-messages.md#lhmessage).
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [recordKindId](#pluginrecordbatch-recordkindid)
+- [chatId](#pluginrecordbatch-chatid)
+- [sessionKindId](#pluginrecordbatch-sessionkindid)
+- [batchId](#pluginrecordbatch-batchid)
+- [messages](#pluginrecordbatch-messages)
+- [signal](#pluginrecordbatch-signal)
+
+### PluginRecordBatch recordKindId
+
+Full record kind id.
+
+```ts
+readonly recordKindId: string;
+```
+
+### PluginRecordBatch chatId
+
+```ts
+readonly chatId: string;
+```
+
+### PluginRecordBatch sessionKindId
+
+```ts
+readonly sessionKindId: ChatKind;
+```
+
+### PluginRecordBatch batchId
+
+Deterministic for the same uncovered messages: redelivery repeats it.
+
+```ts
+readonly batchId: string;
+```
+
+### PluginRecordBatch messages
+
+Every saved message of the batch, unfiltered (user, assistant including
+thinking and tool calls, tool results, markers). Filtering is the plugin's.
+
+```ts
+readonly messages: readonly LhMessage[];
+```
+
+### PluginRecordBatch signal
+
+Aborted on cancellation, session deletion or plugin deactivation.
+
+```ts
+readonly signal: AbortSignal;
+```
+
+## PluginRecordKindDefinition
+
+Public SDK type, exported as `PluginRecordKindDefinition`. Import with `import type`; the SDK has no runtime exports.
+
+A plugin-owned record that sessions extract into. The host owns chunking,
+triggering and coverage bookkeeping; the plugin owns extraction and storage.
+
+```ts
+export interface PluginRecordKindDefinition {
+    id: string;
+    label: string;
+    chunkTokens?: number;
+    extract(batch: PluginRecordBatch): void | Promise<void>;
+}
+```
+
+**Related types:** [PluginRecordBatch](plugins.md#pluginrecordbatch).
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [id](#pluginrecordkinddefinition-id)
+- [label](#pluginrecordkinddefinition-label)
+- [chunkTokens](#pluginrecordkinddefinition-chunktokens)
+- [extract](#pluginrecordkinddefinition-extract)
+
+### PluginRecordKindDefinition id
+
+Local id; the full id is "<pluginId>:<id>".
+
+```ts
+id: string;
+```
+
+### PluginRecordKindDefinition label
+
+```ts
+label: string;
+```
+
+### PluginRecordKindDefinition chunkTokens
+
+Uncovered raw-transcript tokens that start extraction; default 4096, minimum 500.
+
+```ts
+chunkTokens?: number;
+```
+
+### PluginRecordKindDefinition extract
+
+Fold one batch into the record. Resolving marks the batch covered; rejecting
+leaves it uncovered for a later retry. Delivery is at-least-once: make writes
+idempotent by batchId. Batches for one record kind run one at a time.
+
+```ts
+extract(batch: PluginRecordBatch): void | Promise<void>;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `batch` | `PluginRecordBatch` |
+
+**Returns:** `void \| Promise<void>`.
+
+## PluginSessionKindDefinition
+
+Public SDK type, exported as `PluginSessionKindDefinition`. Import with `import type`; the SDK has no runtime exports.
+
+A teaching-shaped session kind (prober → probe_done → teacher). Its prompts
+replace the native phase fragments between the shared base and the shared
+appendix; every other plugin contribution still applies additively.
+
+```ts
+export interface PluginSessionKindDefinition {
+    id: string;
+    label: string;
+    record: string;
+    prompts: {
+        prober: string;
+        teacher: string;
+    };
+    tools?: {
+        prober?: PluginSessionKindToolDelta;
+        teacher?: PluginSessionKindToolDelta;
+    };
+}
+```
+
+**Related types:** [PluginSessionKindToolDelta](plugins.md#pluginsessionkindtooldelta).
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [id](#pluginsessionkinddefinition-id)
+- [label](#pluginsessionkinddefinition-label)
+- [record](#pluginsessionkinddefinition-record)
+- [prompts](#pluginsessionkinddefinition-prompts)
+- [prompts.prober](#pluginsessionkinddefinition-promptsprober)
+- [prompts.teacher](#pluginsessionkinddefinition-promptsteacher)
+- [tools](#pluginsessionkinddefinition-tools)
+- [tools.prober](#pluginsessionkinddefinition-toolsprober)
+- [tools.teacher](#pluginsessionkinddefinition-toolsteacher)
+
+### PluginSessionKindDefinition id
+
+Local id (lowercase words joined by hyphens); the full id is "<pluginId>:<id>".
+
+```ts
+id: string;
+```
+
+### PluginSessionKindDefinition label
+
+```ts
+label: string;
+```
+
+### PluginSessionKindDefinition record
+
+The record this kind extracts into: "graph" or any plugin's full record kind id.
+
+```ts
+record: string;
+```
+
+### PluginSessionKindDefinition prompts
+
+This kind's job and method for each phase.
+
+```ts
+prompts: {
+    prober: string;
+    teacher: string;
+};
+```
+
+### PluginSessionKindDefinition prompts.prober
+
+```ts
+prober: string;
+```
+
+### PluginSessionKindDefinition prompts.teacher
+
+```ts
+teacher: string;
+```
+
+### PluginSessionKindDefinition tools
+
+```ts
+tools?: {
+    prober?: PluginSessionKindToolDelta;
+    teacher?: PluginSessionKindToolDelta;
+};
+```
+
+### PluginSessionKindDefinition tools.prober
+
+```ts
+prober?: PluginSessionKindToolDelta;
+```
+
+### PluginSessionKindDefinition tools.teacher
+
+```ts
+teacher?: PluginSessionKindToolDelta;
+```
+
+## PluginSessionKindToolDelta
+
+Public SDK type, exported as `PluginSessionKindToolDelta`. Import with `import type`; the SDK has no runtime exports.
+
+Per-phase native tool delta, in the shape of the user's tool toggles:
+`false` removes that native tool; absent or `true` keeps it. A user's own
+`false` still wins. probe_done (prober) and plan_init (teacher) are always kept.
+
+```ts
+export type PluginSessionKindToolDelta = Record<string, boolean>;
+```
+
 ## PluginSettingsRegistration
 
 Public SDK type, exported as `PluginSettingsRegistration`. Import with `import type`; the SDK has no runtime exports.
@@ -1816,15 +2193,17 @@ Public SDK type, exported as `PluginToolContext`. Import with `import type`; the
 export interface PluginToolContext {
     readonly chatId: string;
     readonly agent: PluginAgentKind;
+    readonly sessionKindId: ChatKind;
 }
 ```
 
-**Related types:** [PluginAgentKind](plugins.md#pluginagentkind).
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [PluginAgentKind](plugins.md#pluginagentkind).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [chatId](#plugintoolcontext-chatid)
 - [agent](#plugintoolcontext-agent)
+- [sessionKindId](#plugintoolcontext-sessionkindid)
 
 ### PluginToolContext chatId
 
@@ -1836,6 +2215,14 @@ readonly chatId: string;
 
 ```ts
 readonly agent: PluginAgentKind;
+```
+
+### PluginToolContext sessionKindId
+
+The running session's exact kind: "teach", "practice" or a plugin kind id.
+
+```ts
+readonly sessionKindId: ChatKind;
 ```
 
 ## PluginToolRenderer
@@ -1988,21 +2375,31 @@ A fresh native Pi loadout per conversation turn; no private app imports.
 ```ts
 export interface PluginTools {
     agents: PluginAgentKind[];
+    sessionKinds?: ChatKind[];
     create(context: PluginToolContext): AgentTool<any>[];
 }
 ```
 
-**Related types:** [PluginAgentKind](plugins.md#pluginagentkind), [PluginToolContext](plugins.md#plugintoolcontext).
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [PluginAgentKind](plugins.md#pluginagentkind), [PluginToolContext](plugins.md#plugintoolcontext).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [agents](#plugintools-agents)
+- [sessionKinds](#plugintools-sessionkinds)
 - [create](#plugintools-create)
 
 ### PluginTools agents
 
 ```ts
 agents: PluginAgentKind[];
+```
+
+### PluginTools sessionKinds
+
+Optional session-kind filter; absent applies in every session kind.
+
+```ts
+sessionKinds?: ChatKind[];
 ```
 
 ### PluginTools create

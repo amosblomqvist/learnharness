@@ -23,6 +23,8 @@ import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, TOGGLEABLE_TOOLS, type EnabledTools } from "../core/pending.ts";
 import type { PluginToolContext } from "../core/plugins.ts";
+import type { ChatKind } from "../core/contracts/chat.ts";
+import { applySessionKindToolDelta } from "../core/plugin-session-kinds.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
@@ -93,6 +95,33 @@ export function composeInstructions(kind: AgentKind, switches?: Record<string, b
 		.join("\n\n---\n\n");
 }
 
+/**
+ * A plugin session kind's phase prompt (stage B, owner P2 2026-11-17): the
+ * kind is the one contribution that REPLACES — its phase text stands in for
+ * the native agent's own fragments, between the shared base
+ * (system-prompt.md) and the shared/ appendix, both of which keep their
+ * per-segment overrides. Plugin text itself is not user-overridable in v1.
+ */
+export function composeSessionKindInstructions(phase: "prober" | "teacher", phaseText: string, switches?: Record<string, boolean>): string {
+	const shared = effectivePromptSegments(phase, switches ?? {}).filter((s) => s.shared);
+	const [base, ...appendix] = shared;
+	return [base, phaseText, ...appendix]
+		.map((s) => (typeof s === "string" ? s : s ? (s.enabled ? s.overrideText! : s.sourceText) : ""))
+		.map((t) => t.trim())
+		.filter(Boolean)
+		.join("\n\n---\n\n");
+}
+
+/** The session-kind facts an agent build needs (the handler resolves them). */
+export interface AgentSessionKind {
+	/** Exact kind id: "teach", "practice" or "<pluginId>:<localId>". */
+	id: ChatKind;
+	/** Plugin kinds only: per-phase prompt text replacing the native fragments. */
+	prompts?: { prober: string; teacher: string };
+	/** Plugin kinds only: per-phase native tool delta (false removes; forced tools stay). */
+	tools?: { prober: Readonly<Record<string, boolean>>; teacher: Readonly<Record<string, boolean>> };
+}
+
 // The switch-free source composition, cached per kind (module-load once).
 // With promptSwitches provided, baseAgentOptions composes FRESH per turn —
 // an override file written while its switch is ON must flip the next
@@ -148,6 +177,9 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** The session's kind; absent reads as the native kind of the agent
+	 *  (teach for prober/teacher, practice for practice). */
+	sessionKind?: AgentSessionKind;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -211,14 +243,23 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const stopper = makeQuestionStopper(kind);
 	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
 	const narrationHooks = narrationGuard ? makeNarrationGuard() : undefined;
-	const composedPrompt = opts.promptSwitches
-		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+	const sessionKindId: ChatKind = opts.sessionKind?.id ?? (kind === "practice" ? "practice" : "teach");
+	const kindPhase = kind === "practice" ? undefined : kind;
+	const kindPrompt = kindPhase ? opts.sessionKind?.prompts?.[kindPhase] : undefined;
+	const composedPrompt = kindPrompt !== undefined
+		? composeSessionKindInstructions(kindPhase!, kindPrompt, opts.promptSwitches)
+		: opts.promptSwitches
+			? composeInstructions(kind, opts.promptSwitches)
+			: composedInstructions[kind]!;
+	// A session kind's tool delta narrows the NATIVE phase tools only (user
+	// toggles already applied — false wins either way; forced tools stay).
+	const kindTools = kindPhase && opts.tools === undefined ? opts.sessionKind?.tools?.[kindPhase] : undefined;
+	const phaseTools = kindTools ? applySessionKindToolDelta(tools, kindTools, kindPhase!) : tools;
 	const builtinPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
 	// Bind native read and preserve the kind/model-aware Claude output gate
 	// before resolving additive plugins. Explicit registries remain caller-owned.
 	const builtinTools = [
-		...tools.map((tool) => tool.name === "read" && tool.execute === readTool.execute
+		...phaseTools.map((tool) => tool.name === "read" && tool.execute === readTool.execute
 			? { ...tool, execute: createReadTool(engine.model).execute as AgentTool<any>["execute"] }
 			: tool),
 		...(sendToUserApplies(kind, engine.model, opts.tools !== undefined)
@@ -226,7 +267,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			: []),
 	];
 	const contributions = opts.tools === undefined && opts.chatId && opts.pluginContributions
-		? opts.pluginContributions({ chatId: opts.chatId, agent: kind }, [...CONVERSATION_TOOL_NAMES, ...builtinTools.map(tool => tool.name)])
+		? opts.pluginContributions({ chatId: opts.chatId, agent: kind, sessionKindId }, [...CONVERSATION_TOOL_NAMES, ...builtinTools.map(tool => tool.name)])
 		: undefined;
 	const questionLedger = contributions?.questionTypes?.length && opts.chatId
 		? new PluginQuestionLedger(contributions.questionTypes, opts.chatId, nodeExists) : undefined;

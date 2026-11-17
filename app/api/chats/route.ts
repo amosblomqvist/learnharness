@@ -1,7 +1,7 @@
 import { chainsForSelection, formatChainLine } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
-import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
-import type { ChatListItem } from "@/src/core";
+import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, resolveChatSessionKind, stores, titleFromPrompt } from "@/src/server";
+import type { ChatListItem, PluginSessionKindId } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
  *  question) + live liveness — a running turn marks the session busy
@@ -24,7 +24,15 @@ export async function POST(req: Request) {
 	const title = typeof body.title === "string" ? body.title : "";
 	// Practice sessions (owner, 2026-10-04): kind "practice" marks the
 	// record — the practice agent + its tools from turn 1, no extraction.
-	const kind = body.kind === "practice" ? ("practice" as const) : undefined;
+	// Session kinds (stage B): absent/"teach" → teach, "practice", or an
+	// ACTIVE plugin session kind's full id; anything else is refused.
+	let kind: "practice" | PluginSessionKindId | undefined;
+	if (body.kind === "practice") kind = "practice";
+	else if (body.kind !== undefined && body.kind !== "teach") {
+		const resolved = typeof body.kind === "string" ? await resolveChatSessionKind(body.kind as PluginSessionKindId) : undefined;
+		if (resolved?.status !== "plugin") return Response.json({ error: "Unknown or unavailable session kind", code: "session-kind-unavailable" }, { status: 400 });
+		kind = resolved.id as PluginSessionKindId;
+	}
 	const chat = createChat(titleFromPrompt(title || "Untitled session"), kind);
 	// PER-SESSION MODELS (owner, 2026-09-28): a session owns its model +
 	// thinking level from birth — stamped verbatim from the STRONG slot,

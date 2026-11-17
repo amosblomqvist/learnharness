@@ -1024,13 +1024,14 @@ export interface PluginQuestionTypeDefinition<Q extends TSchema = TSchema, A ext
         toolName: string;
         description: string;
     };
+    sessionKinds?: ChatKind[];
     validateQuestion?: (context: PluginQuestionValidationContext<Static<Q>>) => undefined | string[];
     validateAnswer?: (context: PluginQuestionAnswerValidationContext<Static<Q>, Static<A>>) => undefined | string[];
     gradeAnswer?: (context: PluginQuestionGradingContext<Static<Q>, Static<A>>) => JsonValue | Promise<JsonValue>;
 }
 ```
 
-**Related types:** [JsonValue](plugin-questions.md#jsonvalue), [PluginQuestionAnswerValidationContext](plugin-questions.md#pluginquestionanswervalidationcontext), [PluginQuestionGradingContext](plugin-questions.md#pluginquestiongradingcontext), [PluginQuestionValidationContext](plugin-questions.md#pluginquestionvalidationcontext).
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [JsonValue](plugin-questions.md#jsonvalue), [PluginQuestionAnswerValidationContext](plugin-questions.md#pluginquestionanswervalidationcontext), [PluginQuestionGradingContext](plugin-questions.md#pluginquestiongradingcontext), [PluginQuestionValidationContext](plugin-questions.md#pluginquestionvalidationcontext).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -1047,6 +1048,7 @@ export interface PluginQuestionTypeDefinition<Q extends TSchema = TSchema, A ext
 - [teach](#pluginquestiontypedefinition-teach)
 - [teach.toolName](#pluginquestiontypedefinition-teachtoolname)
 - [teach.description](#pluginquestiontypedefinition-teachdescription)
+- [sessionKinds](#pluginquestiontypedefinition-sessionkinds)
 - [validateQuestion](#pluginquestiontypedefinition-validatequestion)
 - [validateAnswer](#pluginquestiontypedefinition-validateanswer)
 - [gradeAnswer](#pluginquestiontypedefinition-gradeanswer)
@@ -1133,6 +1135,15 @@ toolName: string;
 
 ```ts
 description: string;
+```
+
+### PluginQuestionTypeDefinition sessionKinds
+
+Optional session-kind filter for offering the tools; absent offers them in
+every session kind. Already-posed questions stay answerable regardless.
+
+```ts
+sessionKinds?: ChatKind[];
 ```
 
 ### PluginQuestionTypeDefinition validateQuestion

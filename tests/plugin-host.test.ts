@@ -167,16 +167,16 @@ test("background-tool factory delegates to the activation service and rejects st
 	const f = fixture(t); f.plugin(); const original = f.deps.createServices;
 	let factoryCalls = 0;
 	f.deps.createServices = info => ({ ...original(info), createBackgroundTool(context, definition) {
-		assert.deepEqual(context, { chatId: "synthetic", agent: "teacher" }); factoryCalls++;
+		assert.deepEqual(context, { chatId: "synthetic", agent: "teacher", sessionKindId: "teach" as const }); factoryCalls++;
 		return { ...definition, execute: async () => ({ content: [{ type: "text", text: "fixture" }], details: null }) };
 	} });
 	await f.host.initialize(); await f.host.setEnabled("example", true);
 	const ctx = await f.host.call("example", "context") as PluginBackendContext;
 	const definition = { name: "fixture_background", label: "Fixture", description: "Offline fixture", parameters: { type: "object" }, workerId: "worker",
 		prepare: () => ({ input: null, prompt: "Synthetic", model: { provider: "faux", id: "offline" }, maxTurns: 1 }), format: () => ({ text: "Synthetic result" }) };
-	assert.equal(ctx.createBackgroundTool({ chatId: "synthetic", agent: "teacher" }, definition).name, "fixture_background");
+	assert.equal(ctx.createBackgroundTool({ chatId: "synthetic", agent: "teacher", sessionKindId: "teach" as const }, definition).name, "fixture_background");
 	await f.host.setEnabled("example", false);
-	assert.throws(() => ctx.createBackgroundTool({ chatId: "synthetic", agent: "teacher" }, definition), /no longer active/);
+	assert.throws(() => ctx.createBackgroundTool({ chatId: "synthetic", agent: "teacher", sessionKindId: "teach" as const }, definition), /no longer active/);
 	assert.equal(factoryCalls, 1);
 });
 

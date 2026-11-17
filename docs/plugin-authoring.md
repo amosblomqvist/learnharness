@@ -84,6 +84,7 @@ a plugin.
 | Dedicated plugin settings | `registerSettings` below |
 | Inspect the current session, including unsent input | Session top-bar `context.view`; [view context](plugin-view-context.md) |
 | Add instructions or tools to existing agents | `registerInstructions`, `registerTools` below |
+| A new kind of teaching session, or a record sessions extract into | Backend `registerSessionKind`, `registerRecordKind` below |
 | Custom teaching question and editor | `registerQuestionType` + `registerQuestionRenderer`; [question contract](plugin-question-contract.md) |
 | Custom practice problem and editor | `registerProblemType` + `registerProblemRenderer`; [problem contract](plugin-problem-contract.md) |
 | Transform learner input or attach images | `registerSubmissionInterceptor`; [session extensions](plugin-session-extension-contract.md) |
@@ -532,8 +533,11 @@ transactional. Write derived feature data to plugin state, never core learning f
 `registerInstructions({agents, text})` and `registerTools({agents, create(context)})`
 are additive contributions targeting `prober`, `teacher` and/or `practice`. They do not
 replace host prompts, model settings or built-in tools. Each matching turn gets one
-fresh native Pi loadout with frozen `{chatId, agent}`; the host saves calls/results.
-Instruction text composes into the system prompt, not separate transcript messages.
+fresh native Pi loadout with frozen `{chatId, agent, sessionKindId}`; the host saves
+calls/results. Instruction text composes into the system prompt, not separate transcript
+messages. An optional `sessionKinds` list (`"teach"`, `"practice"` or full plugin kind
+ids) narrows instructions, tools and question types to those session kinds; absent
+means every session kind whose agents match.
 
 Use distinctive native tool names: 1–64 provider-safe letters/digits/underscores/hyphens,
 starting with a letter or underscore. Core names stay reserved even when disabled.
@@ -557,6 +561,51 @@ Built-in Mermaid/dedicated/hidden tool claims stay reserved; collisions report e
 Producer identity is metadata, not a sandbox preventing cross-plugin tool presentation.
 Use safe text/trusted assets, never unsanitized model HTML. A renderer does not create
 pending learner input: use the dedicated question/problem APIs for that.
+
+## Session kinds and records
+
+A backend registers a **session kind** with `ctx.registerSessionKind(definition)` and a
+**record kind** with `ctx.registerRecordKind(definition)`. Local ids are lowercase words
+joined by hyphens; the full id is `<pluginId>:<localId>`, and bare names stay reserved for
+the native kinds. Both calls return an idempotent unregister; invalid or duplicate
+definitions throw. Active registrations appear on the plugin's `sessionKinds` /
+`recordKinds` summaries.
+
+A session kind is teaching-shaped: a prober phase that ends with `probe_done`, then a
+teacher phase. `prompts.prober` and `prompts.teacher` replace the native phase fragments
+between the shared base prompt and the shared appendix (voice, accuracy, formatting and
+similar); they are not user-overridable. `tools.prober` / `tools.teacher` are deltas in
+the shape of the learner's tool toggles: `false` removes a native tool, absent keeps it,
+and the learner's own `false` still wins. `probe_done` and `plan_init` are always kept.
+Other plugins' instructions, tools and question types still apply additively unless
+they narrow themselves with `sessionKinds`. `record` names where the session extracts:
+`"graph"` for the native graph, or any plugin's full record kind id.
+
+A record kind owns extraction and storage; the host owns chunking, triggering and
+coverage bookkeeping. After a turn, once a session's uncovered raw-transcript tokens
+reach `chunkTokens` (default 4096, minimum 500), the host calls `extract(batch)` with
+consecutive saved messages, unfiltered: learner turns, assistant text, thinking and tool
+calls, tool results and host markers. Filtering is the extractor's first step. Resolving
+marks the batch covered; rejecting leaves it uncovered for a later retry. Delivery is
+at-least-once and `batchId` is deterministic for the same messages, so make writes
+idempotent by `batchId`. Editing a saved message re-opens its coverage. Batches of one
+record kind run one at a time across sessions; `batch.signal` aborts on cancellation,
+session deletion or plugin deactivation, and an aborted batch is never marked covered.
+A kind recording into `"graph"` keeps the native extractor and its teacher-prose view.
+
+The host keeps coverage at `ctx.dataDirectory/records/<localId>/coverage.jsonl`; that
+file is reserved, while the rest of the plugin's data directory, including the record
+itself, is the plugin's. When a session is deleted the host removes its coverage rows,
+even if the plugin is disabled. Removing the session's entries from the record itself is
+the plugin's decision.
+
+When a session kind is unavailable (plugin disabled, missing or no longer registering
+it), its saved sessions open read-only: turns and side questions are refused with `409`
+and code `session-kind-unavailable`, naming the plugin; rename, export and delete stay
+available. When only the record kind is unavailable, sessions continue and extraction is
+skipped until it returns. Session action contexts, placements and submission targets
+carry `sessionKindId` alongside the shape `kind` (`"teaching"` for plugin kinds);
+top-bar placements can target exact kinds with `sessionKindIds`.
 
 ## Teaching questions, practice problems and learner submissions
 

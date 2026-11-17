@@ -49,6 +49,7 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 
 | Type | Module |
 | --- | --- |
+| [ChatKind](contracts-chat.md#chatkind) | `contracts-chat` |
 | [ChatListItem](contracts-chat.md#chatlistitem) | `contracts-chat` |
 | [ChatRecord](contracts-chat.md#chatrecord) | `contracts-chat` |
 | [CoverageEntry](contracts-graph.md#coverageentry) | `contracts-graph` |
@@ -56,6 +57,7 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 | [GraphNode](contracts-graph.md#graphnode) | `contracts-graph` |
 | [GraphSnapshot](contracts-graph.md#graphsnapshot) | `contracts-graph` |
 | [JsonValue](plugin-questions.md#jsonvalue) | `plugin-questions` |
+| [LhMessage](native-messages.md#lhmessage) | `native-messages` |
 | [ModelCatalogResponse](contracts-models.md#modelcatalogresponse) | `contracts-models` |
 | [NativePluginProblemDefinition](plugin-problems.md#nativepluginproblemdefinition) | `plugin-problems` |
 | [NotesSource](contracts-graph.md#notessource) | `contracts-graph` |
@@ -97,6 +99,7 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 | [PluginInferenceRequest](plugins.md#plugininferencerequest) | `plugins` |
 | [PluginInfo](plugins.md#plugininfo) | `plugins` |
 | [PluginInstructions](plugins.md#plugininstructions) | `plugins` |
+| [PluginKindSummary](plugins.md#pluginkindsummary) | `plugins` |
 | [PluginKnowledgePickerProps](plugin-ui.md#pluginknowledgepickerprops) | `plugin-ui` |
 | [PluginLearningData](plugins.md#pluginlearningdata) | `plugins` |
 | [PluginManifest](plugins.md#pluginmanifest) | `plugins` |
@@ -145,6 +148,11 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 | [PluginQuestionValidationContext](plugin-questions.md#pluginquestionvalidationcontext) | `plugin-questions` |
 | [PluginQuestionValidationResult](plugin-questions.md#pluginquestionvalidationresult) | `plugin-questions` |
 | [PluginQuestionVariant](plugin-questions.md#pluginquestionvariant) | `plugin-questions` |
+| [PluginRecordBatch](plugins.md#pluginrecordbatch) | `plugins` |
+| [PluginRecordKindDefinition](plugins.md#pluginrecordkinddefinition) | `plugins` |
+| [PluginSessionKindDefinition](plugins.md#pluginsessionkinddefinition) | `plugins` |
+| [PluginSessionKindId](contracts-chat.md#pluginsessionkindid) | `contracts-chat` |
+| [PluginSessionKindToolDelta](plugins.md#pluginsessionkindtooldelta) | `plugins` |
 | [PluginSessionViewContext](plugin-view-context.md#pluginsessionviewcontext) | `plugin-view-context` |
 | [PluginSessionViewInput](plugin-view-context.md#pluginsessionviewinput) | `plugin-view-context` |
 | [PluginSettingsRegistration](plugins.md#pluginsettingsregistration) | `plugins` |
@@ -195,7 +203,6 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 These are reachable through public data, event, inheritance or helper-type relationships. Types not re-exported from the SDK root cannot be imported by name from that root; access them through public types rather than private app imports.
 
 - [CallUsage](contracts-chat.md#callusage) — `contracts-chat`
-- [ChatKind](contracts-chat.md#chatkind) — `contracts-chat`
 - [ChatSettings](contracts-chat.md#chatsettings) — `contracts-chat`
 - [ChatSummary](contracts-chat.md#chatsummary) — `contracts-chat`
 - [ExtractionRunUsage](contracts-chat.md#extractionrunusage) — `contracts-chat`
@@ -222,7 +229,6 @@ These are reachable through public data, event, inheritance or helper-type relat
 - [ServerEvents](events.md#serverevents) — `events`
 - [ServerEventType](events.md#servereventtype) — `events`
 - [LhMarkerMessage](native-messages.md#lhmarkermessage) — `native-messages`
-- [LhMessage](native-messages.md#lhmessage) — `native-messages`
 - [Phase3](phases.md#phase3) — `phases`
 - [Immutable](plugin-submissions.md#immutable) — `plugin-submissions`
 - [ImmutableJson](plugin-submissions.md#immutablejson) — `plugin-submissions`
@@ -256,4 +262,4 @@ These are reachable through public data, event, inheritance or helper-type relat
 
 Standard JavaScript/DOM types (`Promise`, `AbortSignal`, `File`, `HTMLElement`, and utility types) use their standard contracts. Pi model/messages/tools and TypeBox schemas use the exact peer versions declared by the bundled SDK's `package.json`. Supply those peers when typechecking; they are development types, not permission to import private LearnHarness runtime modules.
 
-Coverage: **140 public types**, **57 supporting declarations**, **894 declared member signatures/variants**. Generation contains no build timestamps or absolute source paths.
+Coverage: **148 public types**, **55 supporting declarations**, **927 declared member signatures/variants**. Generation contains no build timestamps or absolute source paths.

@@ -1,10 +1,11 @@
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
 import { isJobLive } from "../agent/subagents/aborts.ts";
-import { coverageOf } from "../core/coverage.ts";
+import { coverageOf, rawCoverageSlots } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
 import { titleFromPrompt } from "../core/contracts.ts";
 import { graphRevision } from "./graph.ts";
-import { coverageLedgerFor } from "./record-kinds.ts";
+import { purgePluginRecordCoverage, resolveChatRecord } from "./record-kinds.ts";
+import { pluginDataRoots } from "./plugins.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
@@ -151,6 +152,11 @@ function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatD
 }
 
 function finishChatRecordDeletion(chatId: string): number {
+	// Plugin record coverage is host bookkeeping (stage B): the chat's rows
+	// leave every plugin record ledger, whether or not its plugin is enabled
+	// (chat ids are unique — no kind resolution needed). The plugin's own
+	// record data is its concern (purge hook: stage C).
+	purgePluginRecordCoverage(chatId, pluginDataRoots);
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardChatDeliveries(chatId);
@@ -180,19 +186,27 @@ export interface SessionCoverage {
 	running: boolean;
 	/** ISO of the newest fold in this session's coverage rows; null before any. */
 	lastFoldedAt: string | null;
+	/** Plugin session kinds only (stage B): the record the session extracts
+	 *  into. Counts are over the RAW transcript; available false = the kind or
+	 *  record plugin is disabled/missing (counts read as nothing covered). */
+	record?: { id: string | null; label: string | null; chunkTokens: number | null; available: boolean };
 }
 
 /** The per-session coverage block (see SessionCoverage). Null when the
  *  chat doesn't exist — callers own the 404. */
-export function sessionCoverage(chatId: string): SessionCoverage | null {
-	const record = stores.chatStore.getChat(chatId);
-	if (!record) return null;
+export async function sessionCoverage(chatId: string): Promise<SessionCoverage | null> {
+	if (!stores.chatStore.getChat(chatId)) return null;
 	// The chat's RECORD KIND owns the ledger (session/record kinds, stage A):
 	// a kind that extracts nothing (practice) reads as never folded.
-	const entries = coverageLedgerFor(record.kind)?.read() ?? [];
+	const target = await resolveChatRecord(stores.chatStore.getChat(chatId)?.kind);
+	const record = stores.chatStore.getChat(chatId);
+	if (!record) return null;
+	const entries = target.status === "graph" || target.status === "plugin" ? target.coverage.read() : [];
 	// Wave B: the record is native history — coverage reads through the
-	// projection (same view the extraction pipeline folds).
-	const cov = coverageOf(record.messages, entries, chatId);
+	// projection (same view the extraction pipeline folds). Plugin records
+	// cover the RAW transcript (stage B, P3).
+	const pluginKind = record.kind !== undefined && record.kind !== "teach" && record.kind !== "practice";
+	const cov = coverageOf(record.messages, entries, chatId, pluginKind && target.status !== "graph" ? rawCoverageSlots : undefined);
 	let lastFoldedAt: string | null = null;
 	for (const entry of entries) {
 		if (entry.chatId !== chatId) continue;
@@ -206,5 +220,12 @@ export function sessionCoverage(chatId: string): SessionCoverage | null {
 		uncoveredTokens: cov.uncoveredTokens,
 		running: extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId),
 		lastFoldedAt,
+		...(pluginKind ? {
+			record: target.status === "plugin"
+				? { id: target.recordKindId, label: target.label, chunkTokens: target.chunkTokens, available: true }
+				: target.status === "graph"
+					? { id: target.recordKindId, label: target.label, chunkTokens: null, available: true }
+					: { id: target.status === "unavailable" ? target.recordKindId : null, label: null, chunkTokens: null, available: false },
+		} : {}),
 	};
 }

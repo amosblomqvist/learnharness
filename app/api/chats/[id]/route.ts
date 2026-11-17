@@ -1,4 +1,4 @@
-import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
+import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, resolveChatSessionKind, sessionKindStatus, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
 import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
 
 export async function GET(_req: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -41,7 +41,10 @@ export async function GET(_req: Request, { params }: { params: Promise<{ id: str
 		// Also reaches idle views that missed the failing turn's stream.
 		turnError: turnFailure(id),
 		compacting: compactionInFlight(id),
-		coverage: sessionCoverage(id),
+		coverage: await sessionCoverage(id),
+		// Plugin session kinds only (stage B): availability for the read-only notice.
+		...(chat.kind !== undefined && chat.kind !== "teach" && chat.kind !== "practice"
+			? { sessionKind: sessionKindStatus(await resolveChatSessionKind(chat.kind)) } : {}),
 	});
 }
 

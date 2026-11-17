@@ -111,5 +111,5 @@ test("external teaching example composes native tools, validated workers, separa
 	await host.setEnabled("teaching-extension", false);
 	assert.equal(service.get(result.outcome.id).status, "succeeded", "disable preserves accepted results");
 	assert.equal(isJobLive((acknowledgement.details as { jobId: string }).jobId), false);
-	assert.deepEqual(host.agentContributions({ chatId: chat.id, agent: "teacher" }, []), { instructions: [], tools: [] });
+	assert.deepEqual(host.agentContributions({ chatId: chat.id, agent: "teacher", sessionKindId: "teach" as const }, []), { instructions: [], tools: [] });
 });

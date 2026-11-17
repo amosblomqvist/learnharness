@@ -102,7 +102,7 @@ test("saved requirements and validation cannot be bypassed with a native practic
 
 test("intercepted practice submissions keep native images separate from JSON and project real model image blocks", () => {
   const f = fixture();
-  const target = { type: "plugin-problem-submission", channels: ["submission", "thinking"], sessionKind: "practice", sessionId: "chat", surfaceTarget: {}, problem: { problemId: "problem-one", pluginId: "example", typeId: "code", label: "Code", contractVersion: 1, occurrence, statement: "Code" } } as unknown as PluginSubmissionTarget;
+  const target = { type: "plugin-problem-submission", channels: ["submission", "thinking"], sessionKind: "practice", sessionKindId: "practice", sessionId: "chat", surfaceTarget: {}, problem: { problemId: "problem-one", pluginId: "example", typeId: "code", label: "Code", contractVersion: 1, occurrence, statement: "Code" } } as unknown as PluginSubmissionTarget;
   const prepared = preparePluginSubmission({ type: "plugin-problem-submission", submission: "code", submissionImages: [image], thinking: { text: "Why it works", images: [image] } }, target);
   assert.equal(prepared.type, "plugin-problem-submission"); assert.ok(Object.isFrozen(prepared));
   const posted = parseChatInput({ ...f.submission, images: { submission: [image], thinking: [image] } });

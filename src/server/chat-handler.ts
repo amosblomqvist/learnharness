@@ -33,7 +33,9 @@ import { fileAccessPolicy } from "./file-access.ts";
 import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
-import { coverageLedgerFor } from "./record-kinds.ts";
+import { resolveChatRecord } from "./record-kinds.ts";
+import { triggerRecordExtraction } from "./record-extraction.ts";
+import { resolveChatSessionKind, sessionKindUnavailableResponse, type ChatSessionKind } from "./session-kinds.ts";
 import { getPluginAgentContributions, getPluginHost } from "./plugins.ts";
 import { preparePluginQuestionSubmission, reconcilePluginQuestionCompatibility, type QuestionTypeResolver } from "./plugin-questions.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
@@ -58,7 +60,7 @@ import { registerTurn, rememberTurnFailure, unregisterTurn } from "./turn-runs.t
 import { persistTurn, triggerExtraction, TurnPersistenceError } from "./turn-service.ts";
 import { hasProbeDone, hasUnresolvedQuestion, pendingPluginQuestionOf, pluginQuestionCallsOf, questionCallsOf } from "../core/native-messages.ts";
 import { samePluginQuestionOccurrence } from "../core/plugin-questions.ts";
-import { composeInstructions } from "../agent/teacher-agent.ts";
+import { composeInstructions, composeSessionKindInstructions, type AgentSessionKind } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens, projectedContextTokens, compactionInFlight } from "./compaction.ts";
 import { COMPACTION_RESERVE_TOKENS } from "../core/compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
@@ -212,12 +214,32 @@ export async function handleChatRequest(
  * agent turn as a background object. Also the wake pipeline's entry
  * (TurnInput's steer kind appends the marker under the same claim).
  */
+/** The session's composed system prompt size (compaction's estimate). */
+function sessionPromptTokens(kind: ChatSessionKind): number {
+	const prompt = kind.status === "plugin"
+		? composeSessionKindInstructions("teacher", kind.definition.prompts.teacher)
+		: composeInstructions(kind.id === "practice" ? "practice" : "teacher");
+	return Math.ceil(prompt.length / 4);
+}
+
+/** The agent-build view of a resolved (available) session kind. */
+function agentSessionKind(kind: ChatSessionKind): AgentSessionKind {
+	return kind.status === "plugin"
+		? { id: kind.id, prompts: kind.definition.prompts, tools: kind.definition.tools }
+		: { id: kind.id };
+}
+
 export async function handleChatInput(
 	chatId: string,
 	input: TurnInput,
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
 	sideContext: Pick<SideChatService, "snapshot"> = sideChats,
 ): Promise<Response> {
+	// READ-ONLY SESSIONS (stage B, owner P5 2026-11-17): a plugin session kind
+	// whose plugin is disabled, missing or no longer registers it refuses ALL
+	// model work here, before any effect (no reconciliation write, no claim).
+	const sessionKind = await resolveChatSessionKind(stores.chatStore.getChat(chatId)?.kind);
+	if (sessionKind.status === "unavailable") return sessionKindUnavailableResponse(sessionKind);
 	await reconcilePluginQuestionCompatibility(stores.chatStore, chatId);
 	const initialRecord = stores.chatStore.getChat(chatId);
 	if (!initialRecord) {
@@ -365,7 +387,7 @@ export async function handleChatInput(
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	const contextWindow = catalogContextLimits().get(modelIdForCompaction);
 	const thresholdTokens = effectiveThresholdTokens(effective.compaction?.thresholdTokens, contextWindow);
-	const systemPromptTokens = Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4);
+	const systemPromptTokens = sessionPromptTokens(sessionKind);
 	const estimateModel = effective.compaction.includeReasoning ? conversationEngine.model : undefined;
 	const fitsSideContext = (messages: readonly LhMessage[]) => {
 		const live = messages.filter((message) => (message as { role: string }).role !== "system");
@@ -726,6 +748,9 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		// The session's kind (stage B): plugin kinds bring their phase prompts
+		// and native tool delta; every plugin contribution sees the exact id.
+		sessionKind: agentSessionKind(sessionKind),
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher
@@ -887,13 +912,20 @@ export async function handleChatInput(
 				// is the deliverable). Expressed as "no record kind" (session/
 				// record kinds, stage A): the chat's kind names the coverage
 				// ledger it folds into, or none.
-				const coverage = coverageLedgerFor(record.kind);
-				if ((!requestCycle || requestCycle.dispatched) && coverage !== null && extractionEnabled(effective.graph)) {
-					// Fresh per-turn read of the graph section's chunk budget
-					// (extraction-UX redesign, 2026-09-24): the trigger compares
-					// against it and the pipeline's batches share it.
-					triggerExtraction({ chatStore: stores.chatStore, coverage }, extraction, chatId, effective.graph.extractionChunkTokens);
-				}
+				// Stage B: a plugin session kind names its record — the native graph
+				// (same pipeline and gate) or a plugin record (host-chunked raw
+				// batches into its extract()); an unavailable record plugin skips
+				// and the next turn retries (owner q65).
+				if (!requestCycle || requestCycle.dispatched) void resolveChatRecord(record.kind).then((target) => {
+					if (target.status === "graph" && extractionEnabled(effective.graph)) {
+						// Fresh per-turn read of the graph section's chunk budget
+						// (extraction-UX redesign, 2026-09-24): the trigger compares
+						// against it and the pipeline's batches share it.
+						triggerExtraction({ chatStore: stores.chatStore, coverage: target.coverage }, extraction, chatId, effective.graph.extractionChunkTokens);
+					} else if (target.status === "plugin") {
+						triggerRecordExtraction({ chatStore: stores.chatStore }, chatId, target);
+					}
+				}, (err) => console.error(`[chat ${chatId}] extraction trigger failed:`, err));
 				// PARKED DISMISSAL (owner, 2026-10-04): a dismissal that arrived
 				// mid-turn was parked by the dismiss route (202); now that
 				// persistTurn has landed the turn's messages, apply it against
@@ -947,7 +979,7 @@ export async function handleChatInput(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
+							systemPromptTokens: sessionPromptTokens(sessionKind),
 						};
 					}, chatId);
 			},

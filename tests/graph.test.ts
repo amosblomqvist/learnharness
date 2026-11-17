@@ -1090,7 +1090,7 @@ describe("single-node deletion (deleteNodeTraces + deleteGraphNode, node interlu
 });
 
 describe("session coverage read (extraction-UX redesign, 2026-09-24)", () => {
-	it("one session's block: derived uncovered, the newest fold, honest nulls", () => {
+	it("one session's block: derived uncovered, the newest fold, honest nulls", async () => {
 		// Empty coverage: everything uncovered, no fold yet, not running.
 		// Teacher prose only (owner, 2026-09-28): coverage slots are the
 		// teacher's text blocks, so the fixture is all-teacher.
@@ -1099,7 +1099,7 @@ describe("session coverage read (extraction-UX redesign, 2026-09-24)", () => {
 			teacher("cov_t2", "and about per-session blocks"),
 			teacher("cov_t3", "a third distinct message"),
 		].flat());
-		const empty = sessionCoverage(chat.id)!;
+		const empty = (await sessionCoverage(chat.id))!;
 		assert.ok(empty);
 		assert.equal(empty.totalMessages, 3);
 		assert.equal(empty.coveredCount, 0);
@@ -1117,7 +1117,7 @@ describe("session coverage read (extraction-UX redesign, 2026-09-24)", () => {
 		// Another session's row must not leak into this read.
 		graphCoverage.append({ chatId: "chat_other", fp: slots[2]!.fp, tokens: slots[2]!.tokens, foldedAt: "2026-09-24T23:00:00.000Z" });
 
-		const cov = sessionCoverage(chat.id)!;
+		const cov = (await sessionCoverage(chat.id))!;
 		assert.equal(cov.totalMessages, 3);
 		assert.equal(cov.coveredCount, 2);
 		assert.equal(cov.uncoveredCount, 1);
@@ -1126,7 +1126,7 @@ describe("session coverage read (extraction-UX redesign, 2026-09-24)", () => {
 		assert.equal(cov.lastFoldedAt, "2026-09-24T11:30:00.000Z", "the NEWEST fold, and scoped to this session's rows");
 	});
 
-	it("running: true only for THIS session's chat-kind run (the registry pin)", () => {
+	it("running: true only for THIS session's chat-kind run (the registry pin)", async () => {
 		const chat = fixtureChat("coverage running", [user("cov_r1", "running pin")].flat());
 		const g = globalThis as { __lhExtractionRuns?: unknown };
 		const realRuns = g.__lhExtractionRuns;
@@ -1140,7 +1140,7 @@ describe("session coverage read (extraction-UX redesign, 2026-09-24)", () => {
 				inFlight: new Set(),
 				lastStartedAt: 0,
 			};
-			assert.equal(sessionCoverage(chat.id)!.running, false, "no chat-kind run for this id");
+			assert.equal((await sessionCoverage(chat.id))!.running, false, "no chat-kind run for this id");
 			g.__lhExtractionRuns = {
 				running: new Map([
 					[chat.id, { chatId: chat.id, kind: "chat", phase: "extracting", startedAt: 3, usage: {}, controller: new AbortController() }],
@@ -1148,14 +1148,14 @@ describe("session coverage read (extraction-UX redesign, 2026-09-24)", () => {
 				inFlight: new Set(),
 				lastStartedAt: 0,
 			};
-			assert.equal(sessionCoverage(chat.id)!.running, true);
+			assert.equal((await sessionCoverage(chat.id))!.running, true);
 		} finally {
 			g.__lhExtractionRuns = realRuns;
 		}
 	});
 
-	it("unknown chat → null (the caller owns the 404)", () => {
-		assert.equal(sessionCoverage("chat_never_was"), null);
+	it("unknown chat → null (the caller owns the 404)", async () => {
+		assert.equal(await sessionCoverage("chat_never_was"), null);
 	});
 });
 

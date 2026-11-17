@@ -10,7 +10,7 @@ const occurrence = { messageId: "a", contentIndex: 1, toolCallId: "q", toolName:
 const image = { type: "image" as const, data: "aGVsbG8=", mimeType: "image/png" };
 const empty = () => ({ text: "", images: [] });
 const question: QuestionData = { id: "q", kind: "quiz", question: "Choose", mode: "single-select", options: [{ label: "B", value: "b" }, { label: "A", value: "a" }], correctIndices: [2], createdAt: "now" };
-const target: PluginSubmissionTarget = { type: "answer", sessionId: "s", sessionKind: "teaching", surfaceTarget, channels: ["answer", "thinking"], question: { id: "q", kind: "quiz", question: "Choose", mode: "single-select", options: question.options, occurrence } };
+const target: PluginSubmissionTarget = { type: "answer", sessionId: "s", sessionKind: "teaching", sessionKindId: "teach", surfaceTarget, channels: ["answer", "thinking"], question: { id: "q", kind: "quiz", question: "Choose", mode: "single-select", options: question.options, occurrence } };
 const answer = <T extends object = Record<never, never>>(extra: T = {} as T) => ({ images: [], ...extra });
 const submission = (extra = {}) => ({ type: "answer", answer: answer({ values: ["a"] }), thinking: empty(), readingThinking: empty(), ...extra });
 
@@ -34,7 +34,7 @@ describe("submission immutable boundary", () => {
 		assert.throws(() => preparePluginSubmission(submission({ readingThinking: { text: "", images: [image] } }), target), /not applicable/);
 	});
 	it("preserves exact plugin JSON/string answers and deep-freezes nested JSON", () => {
-		const pluginTarget: PluginSubmissionTarget = { type: "plugin-question-answer", sessionId: "s", sessionKind: "teaching", surfaceTarget, channels: ["answer"], question: { questionId: "q", occurrence, pluginId: "p", typeId: "t", contractVersion: 1, label: "Question", variant: "probe", showThinking: false } };
+		const pluginTarget: PluginSubmissionTarget = { type: "plugin-question-answer", sessionId: "s", sessionKind: "teaching", sessionKindId: "teach", surfaceTarget, channels: ["answer"], question: { questionId: "q", occurrence, pluginId: "p", typeId: "t", contractVersion: 1, label: "Question", variant: "probe", showThinking: false } };
 		for (const value of [false, null, 0, "  code\n\t ", { nested: [false, { source: "  text\n" }] }]) {
 			const prepared = preparePluginSubmission({ type: "plugin-question-answer", answer: value, answerImages: [image], thinking: empty(), readingThinking: empty() }, pluginTarget);
 			assert.ok(prepared.type === "plugin-question-answer");
@@ -71,7 +71,7 @@ describe("browser native image structure (not byte processing)", () => {
 		assert.notEqual(transport[0], image);
 		assert.throws(() => validatePluginSubmissionImageArray([, image]));
 		assert.throws(() => preparePluginSubmissionImages({ content: [image] }));
-		const textTarget = { type: "text", sessionId: "s", sessionKind: "teaching", surfaceTarget, channels: ["content"] } as const;
+		const textTarget = { type: "text", sessionId: "s", sessionKind: "teaching", sessionKindId: "teach", surfaceTarget, channels: ["content"] } as const;
 		assert.deepEqual(preparePluginSubmission({ type: "text", content: { text: "drawing.png", images: [] } }, textTarget), { type: "text", content: { text: "drawing.png", images: [] } });
 		assert.doesNotThrow(() => preparePluginSubmission({ type: "text", content: { text: "", images: [image] } }, textTarget));
 	});

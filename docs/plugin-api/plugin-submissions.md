@@ -635,16 +635,18 @@ Supporting declaration used by a public type. This is not an additional runtime 
 type SubmissionTargetBase = {
     readonly sessionId: string;
     readonly sessionKind: "teaching" | "practice";
+    readonly sessionKindId: ChatKind;
     readonly surfaceTarget: PluginSurfaceTarget;
 };
 ```
 
-**Related types:** [PluginSurfaceTarget](plugin-ui.md#pluginsurfacetarget).
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [PluginSurfaceTarget](plugin-ui.md#pluginsurfacetarget).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [sessionId](#submissiontargetbase-sessionid)
 - [sessionKind](#submissiontargetbase-sessionkind)
+- [sessionKindId](#submissiontargetbase-sessionkindid)
 - [surfaceTarget](#submissiontargetbase-surfacetarget)
 
 ### SubmissionTargetBase sessionId
@@ -657,6 +659,14 @@ readonly sessionId: string;
 
 ```ts
 readonly sessionKind: "teaching" | "practice";
+```
+
+### SubmissionTargetBase sessionKindId
+
+Exact session kind: "teach", "practice" or a plugin kind id.
+
+```ts
+readonly sessionKindId: ChatKind;
 ```
 
 ### SubmissionTargetBase surfaceTarget

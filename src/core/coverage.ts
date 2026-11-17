@@ -98,6 +98,28 @@ export function coverageSlots(messages: ReadonlyArray<LhMessage>): CoverageSlot[
 	}));
 }
 
+/**
+ * RAW coverage slots (plugin record kinds — owner refinement 2026-11-17 of
+ * principle P3): a plugin record's extract() receives the RAW saved
+ * transcript (every message, unfiltered — the plugin filters as the first
+ * step of its own extraction), so "covered = exactly what the extractor
+ * saw" makes the raw message the unit. fp = sha256 of (id, role, content):
+ * any change to a saved message's content re-opens it; app-only metadata
+ * (annotations, CLI context reports) does not. tokens = JSON(content)/4,
+ * the app-wide chars/4 estimate over what the plugin receives. Every
+ * message is visible (tokens ≥ 1). The native graph keeps teacher-prose
+ * slots (coverageSlots, owner q51).
+ */
+export function rawCoverageSlots(messages: ReadonlyArray<LhMessage>): CoverageSlot[] {
+	return messages.map((message) => {
+		const role = (message as { role?: string }).role;
+		const content = JSON.stringify((message as { content?: unknown }).content ?? null);
+		const h = createHash("sha256");
+		h.update(JSON.stringify([message.id, role, content]));
+		return { message, fp: h.digest("hex"), tokens: Math.max(1, Math.ceil(content.length / 4)) };
+	});
+}
+
 /** The covered-fingerprint set for one chat, from the ledger. */
 export function coveredSet(entries: ReadonlyArray<CoverageEntry>, chatId: string): Set<string> {
 	const out = new Set<string>();
@@ -116,6 +138,8 @@ export function coverageOf(
 	messages: ReadonlyArray<LhMessage>,
 	entries: ReadonlyArray<CoverageEntry>,
 	chatId: string,
+	/** The slot derivation: teacher prose (native graph, default) or raw. */
+	slotsOf: (messages: ReadonlyArray<LhMessage>) => CoverageSlot[] = coverageSlots,
 ): {
 	slots: CoverageSlot[];
 	uncovered: number[];
@@ -125,7 +149,7 @@ export function coverageOf(
 	uncoveredCount: number;
 } {
 	const covered = coveredSet(entries, chatId);
-	const slots = coverageSlots(messages);
+	const slots = slotsOf(messages);
 	const uncovered: number[] = [];
 	let coveredTokens = 0;
 	let uncoveredTokens = 0;

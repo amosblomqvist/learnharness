@@ -30,6 +30,7 @@ import type {
 	SideChatThread,
 	TurnUsage,
 	NotesSource,
+	PluginSessionKindId,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
 import type { Theme, ThemeFile } from "./themes.ts";
@@ -54,9 +55,9 @@ export interface PluginTaskRecordStore {
 
 export interface ChatStore {
 	/** Create a session record (persisted immediately). */
-	/** Create a session record; kind "practice" marks a practice session
-	 *  (absent = teach, the default). */
-	createChat(title: string, kind?: "practice"): ChatRecord;
+	/** Create a session record; kind "practice" marks a practice session and
+	 *  "<pluginId>:<localId>" a plugin session kind (absent = teach, the default). */
+	createChat(title: string, kind?: "practice" | PluginSessionKindId): ChatRecord;
 	/** The full record, or null if unknown id / corrupt file. */
 	getChat(id: string): ChatRecord | null;
 	/** All sessions, newest activity first (the sidebar's list view). */

@@ -52,7 +52,7 @@ function fixture(t: TestContext) {
 	async function context(id = "example") { await host.setEnabled(id, true); return await host.call(id, "context") as PluginBackendContext; }
 	return { directory, host, plugin, context, changes: () => changes, disposedServices: () => disposedServices };
 }
-const turn = (chatId = "chat-one", agent: PluginToolContext["agent"] = "teacher"): PluginToolContext => ({ chatId, agent });
+const turn = (chatId = "chat-one", agent: PluginToolContext["agent"] = "teacher"): PluginToolContext => ({ chatId, agent, sessionKindId: agent === "practice" ? "practice" as const : "teach" as const });
 
 test("registrations copy explicit role targets, unregister idempotently, and stay activation-owned", async t => {
 	const f = fixture(t); f.plugin();
@@ -146,7 +146,7 @@ test("all roles append instructions/tools without replacing builtin prompt, gate
 		assert.equal(extended.state.systemPrompt, `${core.state.systemPrompt}\n\n---\n\nPlugin appendix`);
 		assert.ok(extended.state.systemPrompt.startsWith(composeInstructions(role)));
 		assert.deepEqual(extended.state.tools.map(tool => tool.name), [...core.state.tools.map(tool => tool.name), `addon_${role}`]);
-		assert.deepEqual(contexts.at(-1), { chatId: `chat-${role}`, agent: role });
+		assert.deepEqual(contexts.at(-1), { chatId: `chat-${role}`, agent: role, sessionKindId: role === "practice" ? "practice" : "teach" });
 		for (const tool of core.state.tools) assert.ok((CONVERSATION_TOOL_NAMES as readonly string[]).includes(tool.name));
 		const count = contexts.length;
 		const explicit = builders[role]({ ...opts, tools: {}, pluginContributions: f.host.agentContributions });

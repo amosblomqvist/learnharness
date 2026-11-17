@@ -142,7 +142,7 @@ test("session keyboard invocation captures a fresh immutable whole-view snapshot
 	const f = await domFixture(); let draft = "first";
 	const target = Object.freeze({}) as Extract<PluginActionContext, { surface: "session" }>["surfaceTarget"];
 	try {
-		const off = f.owner.manager.registerShortcutPage("/plugins/fixture/overview", () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "fixture", kind: "teaching", surfaceTarget: target }, () => ({ sessionId: "fixture", kind: "teaching", title: "Fixture", messages: [], transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "probe", contextTokens: null, queuedSteers: [], composer: { text: draft }, input: { type: "unavailable", expanded: false, revealed: false } })));
+		const off = f.owner.manager.registerShortcutPage("/plugins/fixture/overview", () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "fixture", kind: "teaching", sessionKindId: "teach", surfaceTarget: target }, () => ({ sessionId: "fixture", kind: "teaching", sessionKindId: "teach", title: "Fixture", messages: [], transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "probe", contextTokens: null, queuedSteers: [], composer: { text: draft }, input: { type: "unavailable", expanded: false, revealed: false } })));
 		// App-wide eligibility still receives the actual current session, not an app placeholder.
 		await act(async () => saveOverrides({ "plugin:fixture:library": "mod+shift+l" }));
 		const plugin = f.owner.manager.getSnapshot().plugins[0]!;

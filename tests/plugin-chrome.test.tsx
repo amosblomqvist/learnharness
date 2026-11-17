@@ -14,8 +14,8 @@ import { mountPluginChrome, pluginInfo } from "./helpers/plugin-chrome.tsx";
 const sidebar = { placement: "sidebar", surface: "sidebar" } as const;
 // Chrome forwards the opaque target; this fixture never mounts a surface.
 const surfaceTarget = Object.freeze({}) as PluginSurfaceTarget;
-const session = createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "session-1", kind: "teaching", surfaceTarget }, () => ({
-	sessionId: "session-1", kind: "teaching", title: "Session", messages: [], transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "probe", contextTokens: null, queuedSteers: [], composer: { text: "" }, input: { type: "text", sessionId: "session-1", sessionKind: "teaching", surfaceTarget, channels: ["content"] },
+const session = createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "session-1", kind: "teaching", sessionKindId: "teach", surfaceTarget }, () => ({
+	sessionId: "session-1", kind: "teaching", sessionKindId: "teach", title: "Session", messages: [], transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "probe", contextTokens: null, queuedSteers: [], composer: { text: "" }, input: { type: "text", sessionId: "session-1", sessionKind: "teaching", sessionKindId: "teach", surfaceTarget, channels: ["content"] },
 }));
 function plugin(id = "fixture"): FrontendPlugin {
 	return { info: pluginInfo(id), phase: "active", views: [{ id: "overview", name: "Overview", mount() {} }],

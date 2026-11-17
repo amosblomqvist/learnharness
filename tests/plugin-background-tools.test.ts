@@ -107,7 +107,7 @@ function harness(overrides: Partial<PluginBackgroundTool<typeof schema>> = {}) {
 		registerAbort: (id: string, controller: AbortController) => { aborts.set(id, controller); },
 		unregisterAbort: (id: string) => { aborts.delete(id); },
 	};
-	const tool = createPluginBackgroundTool({ ...common, pluginId: "test-plugin", context: { chatId: "chat", agent: "teacher" }, definition, workers, signal: active.signal, isActive: () => !active.signal.aborted });
+	const tool = createPluginBackgroundTool({ ...common, pluginId: "test-plugin", context: { chatId: "chat", agent: "teacher", sessionKindId: "teach" as const }, definition, workers, signal: active.signal, isActive: () => !active.signal.aborted });
 	return { tool, workers, definition, jobStore, active, aborts, deliveries, released, update, common, counts: () => ({ prepareCalls, starts, formats }), task: () => structuredClone(task), job: () => jobStore.listJobs("chat")[0]!, listeners };
 }
 function result(job: JobRecord) { return job.result as PluginBackgroundResult; }
@@ -144,7 +144,7 @@ describe("native plugin background tool adapter", () => {
 		const h = harness(); const logged: unknown[][] = [];
 		t.mock.method(console, "error", (...args: unknown[]) => { logged.push(args); });
 		const tool = createPluginBackgroundTool({ ...h.common, workers: h.workers, definition: h.definition, pluginId: "example",
-			context: { chatId: "chat", agent: "teacher" }, signal: h.active.signal, isActive: () => true,
+			context: { chatId: "chat", agent: "teacher", sessionKindId: "teach" as const }, signal: h.active.signal, isActive: () => true,
 			deliver: async () => { throw new Error("wake start unavailable"); },
 		});
 		await tool.execute("call", { query: "input" }); h.update({ status: "succeeded", result: false }); await flush();
@@ -426,7 +426,7 @@ describe("real worker/store terminal ownership", () => {
 			const store = createPluginTaskRecordStore(join(directory, "tasks"));
 			const workers = createPluginWorkerService({ store, signal: h.active.signal, engineFor: async () => { await admission.promise; throw new Error("No inference should run"); } });
 			workers.register({ id: "worker", instructions: "Return a result", resultSchema: Type.Unknown() });
-			const tool = createPluginBackgroundTool({ ...h.common, workers, pluginId: "example", context: { chatId: "chat", agent: "teacher" }, signal: h.active.signal, isActive: () => enabled && !h.active.signal.aborted, definition: {
+			const tool = createPluginBackgroundTool({ ...h.common, workers, pluginId: "example", context: { chatId: "chat", agent: "teacher", sessionKindId: "teach" as const }, signal: h.active.signal, isActive: () => enabled && !h.active.signal.aborted, definition: {
 				name: "test", label: "test", description: "test", parameters: schema, workerId: "worker",
 				prepare: (input) => ({ input, prompt: "Complete the task", model: { provider: "offline", id: "fake" }, maxTurns: 1 }),
 				format: () => { formats++; throw new Error("Dead plugin formatter must not run"); },
@@ -457,7 +457,7 @@ describe("real worker/store terminal ownership", () => {
 			list: () => [], get: () => ({ status: "running" } as PluginTaskRecord), subscribe: () => () => {},
 			wait: () => poison.promise.then(() => { throw new Error("canonical storage poisoned"); }), cancel: () => {}, dispose: async () => {},
 		};
-		const tool = createPluginBackgroundTool({ ...h.common, workers, pluginId: "example", context: { chatId: "chat", agent: "teacher" }, signal: h.active.signal, isActive: () => true, definition: {
+		const tool = createPluginBackgroundTool({ ...h.common, workers, pluginId: "example", context: { chatId: "chat", agent: "teacher", sessionKindId: "teach" as const }, signal: h.active.signal, isActive: () => true, definition: {
 			name: "test", label: "test", description: "test", parameters: schema, workerId: "worker",
 			prepare: (input) => ({ input, prompt: "Complete the task", model: { provider: "offline", id: "fake" }, maxTurns: 1 }), format: () => { throw new Error("must not format"); },
 		} });
@@ -476,7 +476,7 @@ describe("real worker/store terminal ownership", () => {
 		const store = createPluginTaskRecordStore(join(directory, "tasks"));
 		const workers = createPluginWorkerService({ store, signal: h.active.signal, engineFor: () => ({ model: faux.getModel(), streamFn: faux.streamSimple }) });
 		workers.register({ id: "worker", instructions: "Return a result", resultSchema: Type.Boolean() });
-		const tool = createPluginBackgroundTool({ ...h.common, workers, pluginId: "example", context: { chatId: "chat", agent: "teacher" }, signal: h.active.signal, isActive: () => !h.active.signal.aborted, definition: {
+		const tool = createPluginBackgroundTool({ ...h.common, workers, pluginId: "example", context: { chatId: "chat", agent: "teacher", sessionKindId: "teach" as const }, signal: h.active.signal, isActive: () => !h.active.signal.aborted, definition: {
 			name: "test", label: "test", description: "test", parameters: schema, workerId: "worker",
 			prepare: (input) => ({ input, prompt: "Complete the task", model: { provider: "offline", id: "fake" }, maxTurns: 2 }),
 			format: async () => { formatting.resolve(); await releaseFormat.promise; return { text: "Stale plugin presentation" }; },
@@ -519,7 +519,7 @@ describe("shared native job integration regressions", () => {
 			return { model: faux.getModel(), streamFn: faux.streamSimple };
 		} });
 		workers.register({ id: "worker", instructions: "Return a result", resultSchema: Type.Boolean() });
-		const tool = createPluginBackgroundTool({ pluginId: "example", context: { chatId: chat.id, agent: "teacher" }, workers,
+		const tool = createPluginBackgroundTool({ pluginId: "example", context: { chatId: chat.id, agent: "teacher", sessionKindId: "teach" as const }, workers,
 			signal: active.signal, isActive: () => !active.signal.aborted, jobStore: diskJobs,
 			deliver: deliverJobResult, registerAbort: registerJobAbort, unregisterAbort: unregisterJobAbort,
 			definition: { name: "test", label: "test", description: "test", parameters: schema, workerId: "worker",

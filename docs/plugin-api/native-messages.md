@@ -5,7 +5,7 @@
 [API index](README.md) · [Data access and host boundaries](../plugin-authoring.md#backend-and-data)
 
 - [LhMarkerMessage](#lhmarkermessage) — supporting declaration
-- [LhMessage](#lhmessage) — supporting declaration
+- [LhMessage](#lhmessage)
 
 ## LhMarkerMessage
 
@@ -91,7 +91,7 @@ timestamp: number;
 
 ## LhMessage
 
-Supporting declaration used by a public type. This is not an additional runtime API or SDK helper.
+Public SDK type, exported as `LhMessage`. Import with `import type`; the SDK has no runtime exports.
 
 A record message: a native pi message (or our marker) plus the record id.
 

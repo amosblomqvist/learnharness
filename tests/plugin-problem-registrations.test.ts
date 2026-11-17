@@ -27,11 +27,11 @@ test("practice-only registrations preserve package atomicity and reject builtin 
   const { host, ctx } = await fixture(t);
   const off = ctx.registerProblemType({ ...definition(), tool: { toolName: "problem", description: "Collision" } });
   ctx.registerInstructions({ agents: ["practice"], text: "Do not leak a rejected package" });
-  assert.deepEqual(host.agentContributions({ chatId: "chat", agent: "practice" }, ["problem", "conclude"]), { instructions: [], tools: [] });
+  assert.deepEqual(host.agentContributions({ chatId: "chat", agent: "practice", sessionKindId: "practice" as const }, ["problem", "conclude"]), { instructions: [], tools: [] });
   assert.match(host.list()[0]!.error!, /collision/); off(); ctx.registerProblemType(definition());
-  const contributions = host.agentContributions({ chatId: "chat", agent: "practice" }, ["problem", "conclude"]);
+  const contributions = host.agentContributions({ chatId: "chat", agent: "practice", sessionKindId: "practice" as const }, ["problem", "conclude"]);
   assert.equal(contributions.problemTypes?.length, 1); assert.equal(host.list()[0]!.error, undefined);
-  for (const agent of ["prober", "teacher"] as const) assert.equal(host.agentContributions({ chatId: "chat", agent }, []).problemTypes, undefined);
+  for (const agent of ["prober", "teacher"] as const) assert.equal(host.agentContributions({ chatId: "chat", agent, sessionKindId: "teach" }, []).problemTypes, undefined);
 });
 
 test("unregister aborts exact registration ownership without reviving captured callbacks", async t => {
@@ -49,7 +49,7 @@ test("unregister aborts exact registration ownership without reviving captured c
 
 test("native and plugin poses atomically share one gate and the existing conclude tool", async t => {
   const { host, ctx } = await fixture(t); ctx.registerProblemType(definition());
-  const contributions = host.agentContributions({ chatId: "chat", agent: "practice" }, []), gate = { problemActive: false };
+  const contributions = host.agentContributions({ chatId: "chat", agent: "practice", sessionKindId: "practice" as const }, []), gate = { problemActive: false };
   const plugin = pluginProblemTools(contributions.problemTypes!, "chat", gate)[0]!;
   const result = await plugin.execute("code-call", input);
   assert.equal(gate.problemActive, true); assert.equal((result as { terminate?: boolean }).terminate, true);
@@ -66,7 +66,7 @@ test("native and plugin poses atomically share one gate and the existing conclud
 
 test("bad plugin authoring or graph targets never claim the shared problem gate", async t => {
   const { host, ctx } = await fixture(t); ctx.registerProblemType(definition());
-  const gate = { problemActive: false }, contributions = host.agentContributions({ chatId: "chat", agent: "practice" }, []);
+  const gate = { problemActive: false }, contributions = host.agentContributions({ chatId: "chat", agent: "practice", sessionKindId: "practice" as const }, []);
   const tool = pluginProblemTools(contributions.problemTypes!, "chat", gate, () => [{ id: "n", name: "Node" }])[0]!;
   assert.equal((await tool.execute("bad", { ...input, payload: { starter: 2 } })).isError, true); assert.equal(gate.problemActive, false);
   assert.equal((await tool.execute("bad-target", { ...input, target: ["absent"] })).isError, true); assert.equal(gate.problemActive, false);

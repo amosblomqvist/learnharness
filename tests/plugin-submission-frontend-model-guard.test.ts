@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import { PluginSubmissionRunner, SubmissionModelEpoch } from "../components/plugin-submission-runner.ts";
 import type { PluginSubmissionTarget, PluginSurfaceTarget } from "../src/core/index.ts";
-const target: PluginSubmissionTarget = { type: "text", channels: ["content"], sessionId: "chat", sessionKind: "teaching", surfaceTarget: {} as PluginSurfaceTarget };
+const target: PluginSubmissionTarget = { type: "text", channels: ["content"], sessionId: "chat", sessionKind: "teaching", sessionKindId: "teach", surfaceTarget: {} as PluginSurfaceTarget };
 
 test("known session model change during finalization refuses before capture/hooks/POST, while first read and catalog refresh do not", async () => {
 	const epoch = new SubmissionModelEpoch(), runner = new PluginSubmissionRunner();

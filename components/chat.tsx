@@ -99,7 +99,7 @@ import { PluginSessionTopBarActions } from "@/components/plugin-chrome";
 import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
 import type { SessionInputViewReader, SessionViewTargets, NativeQuestionViewState, ViewReaderRef } from "./session-view-readers";
-import type { JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
+import type { ChatKind, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import type { LhViewMessage } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
@@ -271,6 +271,7 @@ export function Chat({
 	initiallyCompacting = false,
 	initialConfigured = false,
 	kind = "teach",
+	initialKindUnavailable,
 }: {
 	chatId: string;
 	title: string;
@@ -280,7 +281,10 @@ export function Chat({
 	/** The session kind (practice sessions, owner 2026-10-04): practice
 	 *  renders no phase chip (no probe→teach arc applies) and a Practice
 	 *  tag rides the header instead. */
-	kind?: "teach" | "practice";
+	kind?: ChatKind;
+	/** Plugin session kinds only (stage B, owner P5): the declaring plugin's
+	 *  name while the kind is unavailable — the session opens read-only. */
+	initialKindUnavailable?: string;
 	initialPrompt?: string;
 	/** A teacher turn is running server-side but attached to no client
 	 * (navigated away mid-turn, returned while in flight). */
@@ -344,7 +348,7 @@ export function Chat({
 			return false;
 		}
 	};
-	const textTarget = (): Extract<PluginSubmissionTarget, { type: "text" }> | undefined => surfaceTarget ? { type: "text", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget, channels: ["content"] } : undefined;
+	const textTarget = (): Extract<PluginSubmissionTarget, { type: "text" }> | undefined => surfaceTarget ? { type: "text", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", sessionKindId: kind, surfaceTarget, channels: ["content"] } : undefined;
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
 	const sideEntries = useMemo(() => sideEntryPoints(nativeMessages, messages), [nativeMessages, messages]);
@@ -564,6 +568,24 @@ export function Chat({
 	useServerEvent("plugins-changed", () => {
 		if ((pluginOwnsDock || pluginProblemIdentity) && status !== "submitted" && status !== "streaming") void reconcile();
 	});
+	// READ-ONLY SESSIONS (stage B, owner P5): a plugin session kind whose plugin
+	// is disabled or missing refuses model work server-side; the composer shows
+	// why. Plugin changes re-read availability (enable restores the session).
+	const [kindUnavailable, setKindUnavailable] = useState<string | null>(initialKindUnavailable ?? null);
+	const pluginSessionKind = kind !== "teach" && kind !== "practice";
+	const readKindAvailability = () => {
+		if (!pluginSessionKind) return;
+		void fetch(`/api/chats/${encodeURIComponent(chatId)}`, { cache: "no-store" })
+			.then((res) => (res.ok ? res.json() : null))
+			.then((body: { sessionKind?: { available: boolean; pluginId?: string; pluginName?: string } } | null) => {
+				const next = body?.sessionKind;
+				if (next) setKindUnavailable(next.available ? null : next.pluginName || next.pluginId || String(kind));
+			})
+			.catch(() => {});
+	};
+	useServerEvent("plugins-changed", readKindAvailability);
+	// A change missed while the channel was (re)connecting is recovered here.
+	useServerResync(readKindAvailability);
 	const pending = findPendingToolCall(messages, pendingQuestionOf(nativeMessages));
 	const malformedQuestions = malformedQuestionsOf(nativeMessages);
 	// The abort handler reads the pending question from a ref (the window
@@ -711,7 +733,7 @@ export function Chat({
 
 	const builtinTarget = (question: QuestionData): Extract<PluginSubmissionTarget, { type: "answer" }> | undefined => {
 		if (!surfaceTarget || !pending) return;
-		return { type: "answer", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget,
+		return { type: "answer", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", sessionKindId: kind, surfaceTarget,
 			channels: ["answer", "thinking", ...(requiresReveal ? ["readingThinking" as const] : [])],
 			question: { ...toClientQuestion(question), occurrence: { messageId: pending.messageId, contentIndex: pending.contentIndex, toolCallId: pending.toolCallId, toolName: pending.tool }, ...(question.questionType ? { questionType: question.questionType } : {}) },
 		};
@@ -744,7 +766,7 @@ export function Chat({
 	const thinkingTarget = (): Extract<PluginSubmissionTarget, { type: "thinking" }> | undefined => {
 		const occurrence = activeProblemOccurrenceOf(nativeMessages);
 		if (!surfaceTarget || !activeProblem || activeProblem.pluginProblem || !occurrence) return;
-		return { type: "thinking", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget, channels: ["content"], problem: { occurrence, statement: (activeProblem.input as { statement: string }).statement } };
+		return { type: "thinking", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", sessionKindId: kind, surfaceTarget, channels: ["content"], problem: { occurrence, statement: (activeProblem.input as { statement: string }).statement } };
 	};
 	const prepareThinking: PrepareThinkingSubmission = (capture, clear) => {
 		const target = thinkingTarget();
@@ -760,7 +782,7 @@ export function Chat({
 	const pluginProblemTarget = (): Extract<PluginSubmissionTarget, { type: "plugin-problem-submission" }> | undefined => {
 		const original = activeProblem?.pluginProblem, occurrence = activeProblemOccurrence;
 		if (!surfaceTarget || !original || !occurrence) return;
-		return { type: "plugin-problem-submission", sessionId: chatId, sessionKind: "practice", surfaceTarget,
+		return { type: "plugin-problem-submission", sessionId: chatId, sessionKind: "practice", sessionKindId: kind, surfaceTarget,
 			channels: ["submission", "thinking"], problem: { problemId: original.problemId, occurrence, pluginId: original.pluginId, typeId: original.typeId, contractVersion: original.contractVersion, label: original.label, statement: original.input.statement } };
 	};
 	const preparePluginProblem: PreparePluginProblemSubmission = (capture, isCurrent, onAccepted) => {
@@ -781,7 +803,7 @@ export function Chat({
 	const pluginQuestionTarget = (): Extract<PluginSubmissionTarget, { type: "plugin-question-answer" }> | undefined => {
 		if (!surfaceTarget || !pendingPlugin) return;
 		const original = pendingPlugin;
-		return { type: "plugin-question-answer", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget,
+		return { type: "plugin-question-answer", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", sessionKindId: kind, surfaceTarget,
 			channels: ["answer", ...(original.showThinking ? ["thinking" as const] : []), ...(requiresReveal ? ["readingThinking" as const] : [])],
 			question: { questionId: original.questionId, occurrence: original.occurrence, pluginId: original.pluginId, typeId: original.typeId, contractVersion: original.contractVersion, label: original.label, variant: original.variant, showThinking: original.showThinking },
 		};
@@ -1106,7 +1128,7 @@ export function Chat({
 	// recovers from it. Later compaction requires new input instead.
 	const retryable = !pluginOwnsDock && (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
 	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
-	const sendAllowed = !pluginOwnsDock && reconciliation === "ready" && !pending && !activeProblem && !compacting && !submissionRunner.occupied;
+	const sendAllowed = kindUnavailable === null && !pluginOwnsDock && reconciliation === "ready" && !pending && !activeProblem && !compacting && !submissionRunner.occupied;
 	const pendingTextTarget = textTarget();
 	const pendingTextInput = !!pendingTextTarget && !!pluginManager?.hasPendingSubmissionInput(pendingTextTarget);
 	const pendingThinkingTarget = thinkingTarget();
@@ -1573,10 +1595,10 @@ export function Chat({
 		if (current && current.type !== "text" && expected && occurrence && pluginQuestionOccurrenceKey(expected) === pluginQuestionOccurrenceKey(occurrence)) return current;
 		return { type: "unavailable", ...(expected ? { occurrence: expected } : {}), expanded: false, revealed: false };
 	};
-	const actionContext = () => surfaceTarget ? createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: chatId, kind: kind === "practice" ? "practice" : "teaching", surfaceTarget }, () => {
+	const actionContext = () => surfaceTarget ? createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: chatId, kind: kind === "practice" ? "practice" : "teaching", sessionKindId: kind, surfaceTarget }, () => {
 		if (!submissionMounted.current || submissionLive.current.surfaceTarget !== surfaceTarget) throw new Error("This session view is no longer active.");
 		return {
-			sessionId: chatId, kind: kind === "practice" ? "practice" : "teaching", title: titleText,
+			sessionId: chatId, kind: kind === "practice" ? "practice" : "teaching", sessionKindId: kind, title: titleText,
 			messages: nativeMessages, transcript: messages, status, reconciliation, busy, compacting,
 			phase: kind === "practice" ? "practice" : phases.at(-1) ?? "probe", contextTokens,
 			queuedSteers: visibleQueuedSteers(steerQueue, nativeMessages), composer: { text: textRef.current },
@@ -2102,7 +2124,11 @@ export function Chat({
 							)
 						)
 					}
-					composer={
+					composer={kindUnavailable !== null ? (
+						<p role="status" data-testid="session-kind-unavailable" className="pointer-events-auto rounded-sm border border-border bg-card px-4 py-3 font-ui text-sm text-muted-foreground">
+							This session is read-only: it needs the &ldquo;{kindUnavailable}&rdquo; plugin, which is disabled or not installed.
+						</p>
+					) : (
 						<ChatSessionComposer
 							// Stop aborts ANY in-flight turn (stream-reattach wave): the
 							// square renders while a reattached/wake turn runs too — the
@@ -2126,7 +2152,7 @@ export function Chat({
 							onNext={sendNext}
 							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
 						/>
-					}
+					)}
 					onSubmitAnswer={(output) => {
 						if (!pending) return;
 						// THE ANSWER IS THE QUESTION CALL'S TOOL RESULT (fork 1, owner

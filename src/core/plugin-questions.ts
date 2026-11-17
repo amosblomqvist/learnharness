@@ -5,6 +5,8 @@ import { checkPluginSchema, preparePluginSchema } from "./plugin-validation.ts";
 import { copyImmutableData, ImmutableReadCache } from "./immutable-data.ts";
 import { Format } from "typebox/format";
 import { validatePluginSubmissionImages, type PluginSubmissionImages } from "./plugin-submissions.ts";
+import type { ChatKind } from "./contracts/chat.ts";
+import { isSessionKindId } from "./session-kinds.ts";
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type PluginQuestionVariant = "probe" | "teach";
@@ -36,6 +38,9 @@ export interface PluginQuestionTypeDefinition<Q extends TSchema = TSchema, A ext
 	answerSchema: A;
 	probe?: { toolName: string; description: string };
 	teach?: { toolName: string; description: string };
+	/** Optional session-kind filter for offering the tools; absent offers them in
+	 * every session kind. Already-posed questions stay answerable regardless. */
+	sessionKinds?: ChatKind[];
 	validateQuestion?: (context: PluginQuestionValidationContext<Static<Q>>) => undefined | string[];
 	validateAnswer?: (context: PluginQuestionAnswerValidationContext<Static<Q>, Static<A>>) => undefined | string[];
 	gradeAnswer?: (context: PluginQuestionGradingContext<Static<Q>, Static<A>>) => JsonValue | Promise<JsonValue>;
@@ -326,6 +331,12 @@ function prepareSchema(schema: unknown): TSchema {
 	return prepared;
 }
 
+/** A contribution's optional session-kind filter: a nonempty list of native
+ *  or well-formed plugin kind ids (registration need not exist yet). */
+export function prepareSessionKindFilter(value: unknown): ChatKind[] {
+	if (!Array.isArray(value) || !value.length || !value.every(isSessionKindId)) throw new Error("Plugin sessionKinds must be a nonempty list of \"teach\", \"practice\" or \"<pluginId>:<kindId>\" ids");
+	return [...new Set(value as ChatKind[])];
+}
 function prepareDefinition<Q extends TSchema, A extends TSchema>(definition: PluginQuestionTypeDefinition<Q, A>): PluginQuestionTypeDefinition<Q, A> {
 	if (!record(definition) || typeof definition.id !== "string" || !localId.test(definition.id)) throw new Error("Invalid plugin question type id");
 	if (!text(definition.label) || !version(definition.contractVersion) || typeof definition.showThinking !== "boolean") throw new Error("Invalid plugin question label, contractVersion or showThinking");
@@ -344,6 +355,7 @@ function prepareDefinition<Q extends TSchema, A extends TSchema>(definition: Plu
 		if (callback !== undefined && (typeof callback !== "function" || ["[object AsyncFunction]", "[object GeneratorFunction]", "[object AsyncGeneratorFunction]"].includes(Object.prototype.toString.call(callback)))) throw new Error(`Plugin question ${key} must be synchronous`);
 	}
 	if (definition.gradeAnswer !== undefined && typeof definition.gradeAnswer !== "function") throw new Error("Plugin question gradeAnswer must be a function");
+	const sessionKinds = definition.sessionKinds === undefined ? undefined : prepareSessionKindFilter(definition.sessionKinds);
 	return freezePluginQuestionValue({
 		id: definition.id, label: definition.label, contractVersion: definition.contractVersion,
 		showThinking: definition.showThinking,
@@ -351,6 +363,7 @@ function prepareDefinition<Q extends TSchema, A extends TSchema>(definition: Plu
 		answerSchema: preparePluginQuestionSchema(definition.answerSchema) as A,
 		...variants,
 		...(incompatible !== undefined ? { incompatibleContractVersions: [...new Set(incompatible)] } : {}),
+		...(sessionKinds !== undefined ? { sessionKinds } : {}),
 		...(definition.validateQuestion ? { validateQuestion: definition.validateQuestion } : {}),
 		...(definition.validateAnswer ? { validateAnswer: definition.validateAnswer } : {}),
 		...(definition.gradeAnswer ? { gradeAnswer: definition.gradeAnswer } : {}),

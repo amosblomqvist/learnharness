@@ -30,7 +30,7 @@ async function fixture(run: (f: { state: { active: boolean; key: string; hooks: 
 			if (!target || claimed.current) return;
 			return scheduleOpeningSubmission(() => !claimed.current && live.current === target && !!findSurfaceBoundary(target), () => {
 				claimed.current = true;
-				const submissionTarget: PluginSubmissionTarget = { type: "text", channels: ["content"], sessionId: state.key, sessionKind: "teaching", surfaceTarget: target };
+				const submissionTarget: PluginSubmissionTarget = { type: "text", channels: ["content"], sessionId: state.key, sessionKind: "teaching", sessionKindId: "teach", surfaceTarget: target };
 				const attempt = runner.begin(submissionTarget, [{ pluginId: "fixture", pluginName: "Fixture", signal: new AbortController().signal, isCurrent: () => true, report() {}, interceptor: { id: "opening", async intercept() { state.hooks++; entered.resolve(); if (waitInHook) await finish.promise; } } }], () => live.current === target && !!findSurfaceBoundary(target))!;
 				void (async () => {
 					try {

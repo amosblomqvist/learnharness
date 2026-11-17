@@ -694,6 +694,61 @@ export function extractionStatuses(): RunningExtraction[] {
 	return [...runs().running.values()].sort((a, b) => a.startedAt - b.startedAt);
 }
 
+/** Register or advance one extraction JOB in the shared registry (every
+ *  pipeline — the native graph's and the plugin record runner's — rides the
+ *  same registry, so the dock, abort, the ring's running flag and deletion's
+ *  wind-down see one truth). */
+export function setExtractionPhase(
+	jobKey: string,
+	phase: ExtractionPhase,
+	kind: "chat" | "notes",
+	label?: string,
+	part?: { i: number; n: number },
+): void {
+	const R = runs();
+	const runningExtractions = R.running;
+	const prev = runningExtractions.get(jobKey);
+	if (!prev) R.lastStartedAt = Math.max(Date.now(), R.lastStartedAt + 1);
+	runningExtractions.set(jobKey, {
+		chatId: prev?.chatId ?? jobKey.split("#")[0]!,
+		part: prev?.part ?? part, // phase changes never lose the part
+		kind,
+		label: prev?.label ?? label, // phase changes never lose the label
+		phase,
+		startedAt: prev?.startedAt ?? R.lastStartedAt,
+		usage: prev?.usage ?? {}, // phase changes never lose usage
+		controller: prev?.controller ?? new AbortController(),
+	});
+	// Every phase transition announces the dock (push S5, 2026-10-02):
+	// notify-after-write — the registry is the feed's truth.
+	emit("activity-changed", {});
+}
+
+/** Run over (done, failed, aborted — every exit is a finally): the row
+ *  leaves the feed. ONE seam for all delete sites so no exit path can
+ *  miss the announce (push S5, 2026-10-02). */
+export function finishExtractionRun(jobKey: string): void {
+	runs().running.delete(jobKey);
+	emit("activity-changed", {});
+}
+
+/** The registered job's cancellation signal (undefined when not running). */
+export function extractionRunSignal(jobKey: string): AbortSignal | undefined {
+	return runs().running.get(jobKey)?.controller.signal;
+}
+
+/** The per-source single-flight guard shared by every pipeline: false when
+ *  a run for this source is already in flight. Pair with releaseExtraction. */
+export function claimExtraction(sourceId: string): boolean {
+	const inFlight = runs().inFlight;
+	if (inFlight.has(sourceId)) return false;
+	inFlight.add(sourceId);
+	return true;
+}
+export function releaseExtraction(sourceId: string): void {
+	runs().inFlight.delete(sourceId);
+}
+
 /** True cancellation of the in-flight run for a chat (the dock's abort
  *  button): the pending model call receives the signal — the provider
  *  cancels the request, spend stops — and the run ends like a failure:
@@ -835,38 +890,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	const runningExtractions = runs().running;
 	const inFlight = runs().inFlight;
 
-	function setPhase(
-		jobKey: string,
-		phase: ExtractionPhase,
-		kind: "chat" | "notes",
-		label?: string,
-		part?: { i: number; n: number },
-	): void {
-		const R = runs();
-		const prev = runningExtractions.get(jobKey);
-		if (!prev) R.lastStartedAt = Math.max(Date.now(), R.lastStartedAt + 1);
-		runningExtractions.set(jobKey, {
-			chatId: prev?.chatId ?? jobKey.split("#")[0]!,
-			part: prev?.part ?? part, // phase changes never lose the part
-			kind,
-			label: prev?.label ?? label, // phase changes never lose the label
-			phase,
-			startedAt: prev?.startedAt ?? R.lastStartedAt,
-			usage: prev?.usage ?? {}, // phase changes never lose usage
-			controller: prev?.controller ?? new AbortController(),
-		});
-		// Every phase transition announces the dock (push S5, 2026-10-02):
-		// notify-after-write — the registry is the feed's truth.
-		emit("activity-changed", {});
-	}
-
-	/** Run over (done, failed, aborted — every exit is a finally): the row
-	 *  leaves the feed. ONE seam for all delete sites so no exit path can
-	 *  miss the announce (push S5, 2026-10-02). */
-	function finishExtraction(jobKey: string): void {
-		runningExtractions.delete(jobKey);
-		emit("activity-changed", {});
-	}
+	const setPhase = setExtractionPhase;
+	const finishExtraction = finishExtractionRun;
 
 	/** Accumulate one billed step into the run's registry entry (live). */
 	function recordStep(jobKey: string, stage: "extractor" | "auditor", usage: CallUsage, model: string): void {

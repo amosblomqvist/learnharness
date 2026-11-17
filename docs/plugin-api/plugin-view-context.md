@@ -164,6 +164,7 @@ Public SDK type, exported as `PluginSessionViewContext`. Import with `import typ
 export interface PluginSessionViewContext {
     readonly sessionId: string;
     readonly kind: "teaching" | "practice";
+    readonly sessionKindId: ChatKind;
     readonly title: string;
     readonly messages: readonly Immutable<LhMessage>[];
     readonly transcript: readonly Immutable<LhViewMessage>[];
@@ -184,12 +185,13 @@ export interface PluginSessionViewContext {
 }
 ```
 
-**Related types:** [Immutable](plugin-view-context.md#immutable), [LhMessage](native-messages.md#lhmessage), [LhViewMessage](view.md#lhviewmessage), [Phase3](phases.md#phase3), [PluginSessionViewInput](plugin-view-context.md#pluginsessionviewinput).
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [Immutable](plugin-view-context.md#immutable), [LhMessage](native-messages.md#lhmessage), [LhViewMessage](view.md#lhviewmessage), [Phase3](phases.md#phase3), [PluginSessionViewInput](plugin-view-context.md#pluginsessionviewinput).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [sessionId](#pluginsessionviewcontext-sessionid)
 - [kind](#pluginsessionviewcontext-kind)
+- [sessionKindId](#pluginsessionviewcontext-sessionkindid)
 - [title](#pluginsessionviewcontext-title)
 - [messages](#pluginsessionviewcontext-messages)
 - [transcript](#pluginsessionviewcontext-transcript)
@@ -214,6 +216,14 @@ readonly sessionId: string;
 
 ```ts
 readonly kind: "teaching" | "practice";
+```
+
+### PluginSessionViewContext sessionKindId
+
+Exact session kind: "teach", "practice" or a plugin kind id.
+
+```ts
+readonly sessionKindId: ChatKind;
 ```
 
 ### PluginSessionViewContext title
