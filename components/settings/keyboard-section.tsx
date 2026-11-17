@@ -137,7 +137,7 @@ export function KeyboardSection() {
 									>
 										<span className="flex items-center gap-2">
 											<kbd className="rounded-sm border border-border bg-muted px-1.5 py-0.5 font-ui text-xs">
-												{rebinding === def.id ? "Press keys…" : formatBinding(effective)}
+												{rebinding === def.id ? "Press keys…" : effective ? formatBinding(effective) : "Unbound"}
 											</kbd>
 											{def.displayOnly ? null : rebinding === def.id ? (
 												<button

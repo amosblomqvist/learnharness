@@ -199,14 +199,17 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 								{scopeLabels[scope]}
 							</div>
 							<div className="flex flex-col gap-1">
-								{actions.map((a) => (
-									<div key={a.id} className="flex items-center justify-between gap-4 text-sm">
-										<span className="text-muted-foreground">{a.label}</span>
-										<kbd className="rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-card-foreground">
-											{formatBinding(bindingForAction(a.id))}
-										</kbd>
-									</div>
-								))}
+								{actions.map((a) => {
+									const binding = bindingForAction(a.id);
+									return (
+										<div key={a.id} className="flex items-center justify-between gap-4 text-sm">
+											<span className="text-muted-foreground">{a.label}</span>
+											<kbd className="rounded-md border border-border bg-background px-1.5 py-0.5 font-mono text-xs text-card-foreground">
+												{binding ? formatBinding(binding) : "Unbound"}
+											</kbd>
+										</div>
+									);
+								})}
 							</div>
 						</div>
 					);

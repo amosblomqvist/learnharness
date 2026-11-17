@@ -18,6 +18,8 @@ in-app cheat sheet. See [Getting started](getting-started.md) for setup.
 | New session | Mod+N |
 | Rename current session | F2 |
 | Toggle all your thinking in the session | Mod+T |
+| Toggle all Why explanations in the session | Mod+Y |
+| Toggle all agent thinking in the session | Unbound |
 | Find in session / search graph or chains view | Mod+F |
 | Shortcut cheat sheet | ? |
 
