@@ -1,14 +1,19 @@
 import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
-import { afterEach, it } from "node:test";
+import { after, afterEach, it } from "node:test";
 import { createRoot, type Root } from "react-dom/client";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { parseHTML } from "linkedom";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
+import { IMPORT_EXTENSIONS } from "../lib/notes-import-limits.ts";
 import { MAX_IMPORT_BYTES, NotesImportControl, NotesImportErrors, NotesImportNotices, parseNotesImportResults, postNotesImport, useNotesImport, type NotesImportResult } from "../components/notes-import.tsx";
 
 const dom = parseHTML("<html><body></body></html>");
-Object.assign(globalThis, { window: dom.window, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true });
+Object.assign(globalThis, { window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element, IS_REACT_ACT_ENVIRONMENT: true });
+const restoreModalDom = installModalDom(dom);
+after(restoreModalDom);
 const originalFetch = globalThis.fetch;
 let root: Root | undefined, host: HTMLDivElement | undefined;
 let current: ReturnType<typeof useNotesImport>;
@@ -141,8 +146,44 @@ it("25 MiB is per file, not per selection; oversized files fail locally while sm
 });
 it("picker stays enabled during imports, offers Files/Folder, and keeps PDF support", () => {
 	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
-	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".md,.markdown,.txt,.pdf"/); assert.doesNotMatch(html, /disabled/);
+	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".txt,.md,.markdown,.rst,.org,.adoc,.tex,.pdf"/); assert.doesNotMatch(html, /disabled/);
 });
+it("the Files picker's accept lists only types the queue takes, in any letter case", () => {
+	const accepted = renderToStaticMarkup(<NotesImportControl importing={false} onImportFiles={() => {}} />).match(/accept="([^"]*)"/)![1]!.split(",");
+	for (const extension of accepted) assert.ok(IMPORT_EXTENSIONS.test(`NOTES${extension.toUpperCase()}`), extension);
+	assert.ok(!IMPORT_EXTENSIONS.test("README") && !IMPORT_EXTENSIONS.test("notes.md.bak") && !IMPORT_EXTENSIONS.test("notes.docx"));
+});
+it("graph menu clearly distinguishes extraction from lesson material, above unchanged Files/Folder choices", async () => {
+	const selected: unknown[] = [];
+	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+	await act(async () => { root!.render(<InteractionLayersProvider><NotesImportControl importing={false} onImportFiles={(files) => selected.push(files)} /></InteractionLayersProvider>); });
+	const trigger = host.querySelector<HTMLButtonElement>('[data-testid="import-notes"]')!;
+	assert.equal(trigger.textContent, "Extract files…");
+	assert.ok(trigger.querySelector(".lucide-waypoints"));
+	await act(async () => { trigger.click(); });
+	const menu = host.querySelector('[role="menu"]')!;
+	assert.equal(menu.getAttribute("aria-label"), "Extract files into the graph");
+	assert.equal(menu.querySelector("p")!.textContent, "For lessons, attach material to a session instead.");
+	assert.equal(menu.getAttribute("aria-describedby"), menu.querySelector("p")!.id);
+	assert.ok(menu.className.includes("w-52"), "compact width wraps the short hint");
+	assert.deepEqual(Array.from(menu.querySelectorAll('[role="menuitem"]')).map((item) => item.textContent), ["Files", "Folder"]);
+	assert.equal(menu.firstElementChild!.textContent, "For lessons, attach material to a session instead.");
+	const inputs = host.querySelectorAll<HTMLInputElement>('input[type="file"]');
+	let filesClicks = 0, folderClicks = 0;
+	inputs[0]!.click = () => { filesClicks++; }; inputs[1]!.click = () => { folderClicks++; };
+	await act(async () => { menu.querySelector<HTMLButtonElement>("button")!.click(); });
+	assert.equal(filesClicks, 1);
+	await act(async () => { trigger.click(); });
+	await act(async () => { host!.querySelectorAll<HTMLButtonElement>('[role="menuitem"]')[1]!.click(); });
+	assert.equal(folderClicks, 1);
+	assert.deepEqual(selected, [], "opening either picker itself never enqueues work");
+});
+it("busy graph action names extraction, and preserves the enabled queue picker", () => {
+	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
+	assert.match(html, /Extracting…/);
+	assert.doesNotMatch(html, /Import notes|Importing…|disabled/);
+});
+
 it("alerts/notices stay plain and escaped", () => {
 	assert.equal(renderToStaticMarkup(<NotesImportErrors errors={[]} />), "");
 	const html = renderToStaticMarkup(<NotesImportErrors errors={["one.md: failure", "two.md: failure"]} />);

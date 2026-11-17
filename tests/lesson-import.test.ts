@@ -13,7 +13,7 @@ const roots: string[] = [];
 const temp = () => { const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-import-")); roots.push(root); return root; };
 after(() => { for (const root of roots) fs.rmSync(root, { recursive: true, force: true }); });
 const hash = (raw: Uint8Array) => createHash("sha256").update(raw).digest("hex");
-const record = (id = "chat_import", text = "Authored offline example") => ({ version: 1, id, title: "Synthetic import", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", opaque: { preserve: "Ω" }, messages: [{ id: "u", role: "user", content: text, timestamp: 1 }] });
+const record = (id = "chat_import", text = "Authored offline example") => ({ version: 2, id, title: "Synthetic import", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", opaque: { preserve: "Ω" }, messages: [{ id: "u", role: "user", content: text, timestamp: 1 }] });
 const node = (id: string, chatId: string) => ({ id, name: id, statement: "Synthetic proposition", aliases: [], createdAt: "2026-01-01T00:00:00Z", provenance: [{ chatId, messageId: "u" }], opaque: { preserve: true } });
 function write(root: string, file: string, data: string | Uint8Array) { fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true }); fs.writeFileSync(path.join(root, file), data); }
 function archive(records = [record()], nodes = records.map(c => node(`n_${c.id}`, c.id)), chains: object[] = []) {
@@ -68,6 +68,38 @@ test("preview is read-only; install preserves native bytes, graph and opaque met
 	assert.equal(chatStore.pendingImport?.("chat_import"), undefined);
 	assert.deepEqual(chatStore.getChat("chat_import")!.settings, local);
 });
+test("v2 images, side conversations and opaque message metadata survive JSON and ZIP installation byte-for-byte", () => {
+	const source = temp();
+	const image = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+	const imageId = createHash("sha256").update(Buffer.from(image, "base64")).digest("hex");
+	const authored = {
+		...record(),
+		messages: [...record().messages, { id: "tutor", role: "assistant", timestamp: 2, stopReason: "stop",
+			content: [{ type: "text", text: "Authored offline explanation" }], opaquePluginData: { keep: "synthetic" } }],
+		imageSnapshots: { [imageId]: { mimeType: "image/png", data: image, width: 1, height: 1 } },
+		sideChats: [{ id: "side_fixture", anchor: { messageId: "tutor", partId: "tutor-t0", blockIndex: 0, blockText: "Authored offline explanation" },
+			open: false, createdAt: "2026-01-01T00:00:00Z", messages: [{ id: "side_user", role: "user", text: "Authored clarification", at: "2026-01-01T00:00:01Z" }] }],
+	};
+	const raw = Buffer.from(" \n" + JSON.stringify(authored, null, "\t") + "\n");
+	write(source, "chats/chat_import.json", raw);
+	const p = previewExport(source, [authored.id]);
+	for (const bytes of [downloadExport(source, [authored.id], "json").bytes,
+		downloadExport(source, [authored.id], "zip", { revision: p.revision, files: [] }).bytes]) {
+		const root = temp();
+		assert.deepEqual(readImportPackage(bytes).chats[0]!.raw, raw);
+		install(root, bytes);
+		assert.deepEqual(fs.readFileSync(path.join(root, "chats/chat_import.json")), raw);
+	}
+	const zip = downloadExport(source, [authored.id], "zip", { revision: p.revision, files: [] }).bytes;
+	for (const nativeChatVersion of [1, 3, "2", undefined]) {
+		assert.throws(() => readImportPackage(repack(zip, members => {
+			const manifest = JSON.parse(Buffer.from(members["manifest.json"]!).toString());
+			manifest.nativeChatVersion = nativeChatVersion;
+			members["manifest.json"] = Buffer.from(JSON.stringify(manifest));
+		})), /Unsupported transfer manifest/);
+	}
+});
+
 test("standalone JSON preserves bytes, uses the same conflicts and bounds, and adds no graph assertions", () => {
 	const root = temp(), raw = Buffer.from(" \n" + JSON.stringify(record(), null, "\t") + "\n");
 	const p = previewImport(root, raw);
@@ -81,7 +113,8 @@ test("standalone JSON preserves bytes, uses the same conflicts and bounds, and a
 	assert.throws(() => install(root, changed)); install(root, changed, { chat_import: "incoming" });
 	assert.equal(importVersions(root).length, 2);
 	assert.equal(fs.readFileSync(path.join(root, "graph/nodes.jsonl"), "utf8"), "");
-	for (const bad of [Buffer.from('{"id":"../unsafe","messages":[]}'), Buffer.from(JSON.stringify({ ...record(), version: 2 })),
+	for (const bad of [Buffer.from('{"id":"../unsafe","messages":[]}'), Buffer.from(JSON.stringify({ ...record(), version: 1 })), Buffer.from(JSON.stringify({ ...record(), version: 3 })),
+		Buffer.from(JSON.stringify({ ...record(), version: undefined })),
 		Buffer.from([0xc3, 0x28]), Buffer.from("[".repeat(65) + "0" + "]".repeat(65)), Buffer.alloc(16_000_001, 32)])
 		assert.throws(() => readImportPackage(bad));
 });
@@ -153,7 +186,7 @@ test("unsafe members, malformed ZIP64, dependencies, bad hashes, newer versions 
 	for (const name of ["../escape", "files/000.pdf", "graph/sources.json", "chats/unselected.json"]) assert.throws(() => readImportPackage(repack(source.bytes, m => { m[name] = Buffer.from("{}"); })));
 	assert.throws(() => readImportPackage(repack(source.bytes, m => { m["chats/chat_import.json"] = Buffer.from([0xff]); })));
 	assert.throws(() => readImportPackage(repack(source.bytes, m => { m["chats/chat_import.json"] = Buffer.from("[".repeat(65) + "0" + "]".repeat(65)); })));
-	assert.throws(() => readImportPackage(repack(source.bytes, m => { const r = record(); r.version = 2; m["chats/chat_import.json"] = Buffer.from(JSON.stringify(r)); })));
+	assert.throws(() => readImportPackage(repack(source.bytes, m => { const r = record(); r.version = 3; m["chats/chat_import.json"] = Buffer.from(JSON.stringify(r)); })));
 	// CVE-2026-45820: missing ZIP64 extra field used to hang before the bounded filter ran.
 	const zip64 = Buffer.from(zipSync({ "manifest.json": Buffer.from("{}") }));
 	const central = zip64.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02])); assert.ok(central >= 0);

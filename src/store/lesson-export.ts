@@ -4,7 +4,7 @@ import { createHash } from "node:crypto";
 import { zipSync } from "fflate";
 import { sessionMarkdown } from "../core/session-markdown.ts";
 import { selectExportGraph } from "../core/export-graph.ts";
-import type { ChatRecord, ExportMode, ExportPreview, ExportSource } from "../core/contracts/chat.ts";
+import { CURRENT_CHAT_VERSION, type ChatRecord, type ExportMode, type ExportPreview, type ExportSource } from "../core/contracts/chat.ts";
 
 export const EXPORT_LIMIT = 32 * 1024 * 1024;
 const MEMBER_LIMIT = 16_000_000;
@@ -51,7 +51,7 @@ function records(root: string, ids: string[]) {
 		const raw = read(path.join(root, "chats", `${id}.json`));
 		if ((total += raw.length) > EXPORT_LIMIT - 524_288) throw new Error("Export selection limit");
 		const record = json(raw) as ChatRecord;
-		if (!record || record.id !== id || (record.version !== undefined && record.version !== 1) ||
+		if (!record || record.id !== id || record.version !== CURRENT_CHAT_VERSION ||
 			!Array.isArray(record.messages) || record.messages.length > 10_000 || typeof record.title !== "string") throw new Error("Unsupported native lesson");
 		const mids = record.messages.map(m => m?.id);
 		if (mids.some(mid => typeof mid !== "string" || !mid || mid.length > 512) || new Set(mids).size !== mids.length)
@@ -162,7 +162,7 @@ export function downloadExport(root: string, ids: string[], mode: ExportMode, ap
 		const name = `files/${String(i).padStart(3, "0")}${path.extname(source.path).toLowerCase()}`;
 		add(name, raw); return { path: name, sourcePath: source.path };
 	});
-	const manifest = encode(JSON.stringify({ format: "learnharness-transfer", version: 1, nativeChatVersion: 1, nativeGraphVersion: 1,
+	const manifest = encode(JSON.stringify({ format: "learnharness-transfer", version: 1, nativeChatVersion: CURRENT_CHAT_VERSION, nativeGraphVersion: 1,
 		chats: ids, files: Object.entries(files).map(([p, b]) => ({ path: p, bytes: b.length, sha256: hash(b) })), attachments,
 		report: { complete: false, dependencyAudit: "partial", coverage: "not-included", jobs: "not-included", pendingInput: "not-included", continuationAuthorized: false,
 			issues: s.issues, sources: s.files.map((f, i) => ({ ...f, included: approval.files.includes(i) })) } }));

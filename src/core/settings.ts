@@ -21,7 +21,8 @@
  * unknown keys verbatim (a newer record must never be destroyed by an
  * older app reading it). Invalid known values degrade gracefully:
  * out-of-range numbers CLAMP, wrong-typed/invalid fields DROP (resolve to
- * factory default), never throw.
+ * factory default), never throw. File-access policy is the exception:
+ * malformed policy stays restricted/empty, never default-unrestricted.
  *
  * Browser-safe: pure logic + types only, no node imports. The resolved
  * (fully concrete) view lives in settings-resolution.ts.
@@ -33,8 +34,10 @@ import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
-import type { SearchEngineId } from "./search.ts";
+import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
+import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -49,6 +52,10 @@ export const BACKGROUND_MODEL_ROLES = [
 	"visualMaker",
 	"extractor",
 	"auditor",
+	// Side questions (#16): listed here for the schema-level override only
+	// (agent.models.sideQuestion). The role itself runs in the foreground,
+	// despite the list's name.
+	"sideQuestion",
 ] as const;
 
 export type BackgroundModelRole = (typeof BACKGROUND_MODEL_ROLES)[number];
@@ -190,16 +197,15 @@ export class ProviderKeyMissingError extends Error {
 
 export const CACHE_RETENTIONS = ["none", "short", "long"] as const satisfies readonly CacheRetention[];
 
-/** One slot's stored state. BYOK (owner, 2026-09-22): the WRITE side
- *  requires model (a level alone can never run — no factory floor); the
- *  sanitizer keeps whatever is on disk, but RESOLUTION treats a slot
- *  without a model as unset (inert level, no phantom default). */
+/** Stored model-slot preferences. A slot is configured only when model is
+ * present; sanitized level-only records can be retained but resolve as unset.
+ * A thinking level alone does not select an implicit fallback model. */
 export interface ModelSlot {
 	/** Native Pi preference. Absent leaves Pi/environment behavior unchanged. */
 	cacheRetention?: CacheRetention;
-	/** The model swap: both coordinates or neither. */
+	/** Configured model coordinates; provider and id must be supplied together. */
 	model?: { provider: string; id: string };
-	/** The thinking budget swap. */
+	/** Optional thinking level used with this slot's configured model. */
 	thinkingLevel?: ThinkingLevel;
 }
 
@@ -326,6 +332,7 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 	auditor: "cheap",
 	visualMaker: "vision",
 	pdfReader: "vision",
+	sideQuestion: "strong", // the conversation chain, like prober/teacher (resolveSideQuestionSpec)
 };
 
 /** General settings — app-level behavior. Version DISPLAY and plans login
@@ -342,6 +349,10 @@ export interface DictationSettings {
 
 /** Agent settings — everything about the non-conversation machinery. */
 export interface AgentSettings {
+	/** Maximum simultaneous background-worker model requests (default 8).
+	 *  Direct conversations bypass this limit. Positive safe integers only:
+	 *  no arbitrary ceiling, rounding, or clamping. */
+	workerRequestConcurrency?: number;
 	/** Background-role model/thinking overrides (absent role = config pin). */
 	models?: Partial<Record<BackgroundModelRole, RoleModelOverride>>;
 	/** Tool toggles keyed by tool id (absent key = enabled). User-level
@@ -367,6 +378,11 @@ export interface AgentSettings {
 	 *  route); the switch is explicit so users keep a file on disk but run
 	 *  the source default to compare (owner decision 2026-09-19). */
 	prompts?: Record<string, boolean>;
+	/** Optional learner-source boundary, OFF when absent. ON with no folders
+	 *  refuses all learner-source reads. Paths are absolute or ~/ anchored;
+	 *  the current policy is read per new tool call/job start. Existing
+	 *  sensitive-location/credential denials always win, not a whole-data ban. */
+	fileAccess?: FileAccessSettings;
 }
 
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
@@ -380,19 +396,27 @@ export interface MdRenderingSettings {
 	italicColor?: string | null;
 }
 
-/** Appearance settings — mode, colors, type, markdown emphasis. */
+/** Appearance settings — theme, color overrides, type, markdown emphasis. */
 export interface AppearanceSettings {
-	/** "dark" | "light" (default dark). */
-	mode?: "dark" | "light";
-	/** The one user-chosen color; everything else derives per-mode in code.
-	 *  null = the mode's default background. */
+	/** The active theme id (core/themes.ts presets or a custom file under
+	 *  THEMES_DIR). Absent or gone = "default". The theme declares the
+	 *  mode (dark/light) — the old `mode`/`lightBackground` keys are no
+	 *  longer read (theme wave, 2026-11-04). */
+	theme?: string;
+	/** The background override (null = the theme's). Kept at its pre-theme
+	 *  key so existing records keep their color. */
 	background?: string | null;
+	/** Per-color overrides on top of the theme (null/absent = the theme's).
+	 *  Preserved across theme switches. Bold/italic live in mdRendering. */
+	colors?: AppearanceColorOverrides;
 	/** The main reading font (everything that is Source Sans 3 today), by
 	 *  name — user-chosen from installed fonts. null = Source Sans 3. */
 	fontFamily?: string | null;
 	/** Reading font size in px (12–24, default 16). Headings render as
 	 *  multiples of this, so one knob scales the document coherently. */
 	proseFontSize?: number;
+	/** Permit normal font ligatures in code (including inline code and code editors). Default false; prose is unaffected. */
+	codeLigatures?: boolean;
 	/** Session names in CMU Serif (default true — today's look). */
 	sessionNameSerif?: boolean;
 	mdRendering?: MdRenderingSettings;
@@ -445,7 +469,7 @@ export interface GraphSettings {
 
 /**
  * COMPACTION (owner round 14, 2026-10-05): the context-fitting mechanic's
- * user-facing knob. One number — the trigger threshold in context tokens.
+ * user-facing controls: the trigger threshold and opt-in reasoning accounting.
  * The effective trigger is min(this, model contextWindow − 16k reserve)
  * (owner ruling: on big models the setting rules; on small ones the
  * window rules before the provider overflows).
@@ -459,6 +483,9 @@ export interface GraphSettings {
  */
 export interface CompactionSettings {
 	thresholdTokens?: number;
+	/** Use saved output usage for replayable same-model Responses reasoning.
+	 *  Absent = false: preserve the original readable-content heuristic. */
+	includeReasoning?: boolean;
 }
 
 /** THE record. Every section optional (delta); unknown top-level keys are
@@ -487,13 +514,16 @@ export interface UserSettings {
  *  prompts default off — hence their absence here. */
 export interface FactorySettings {
 	version: number;
+	agent: Required<Pick<AgentSettings, "workerRequestConcurrency">>;
 	general: Required<GeneralSettings>;
 	dictation: Required<DictationSettings>;
 	appearance: {
-		mode: "dark" | "light";
+		theme: string;
 		background: string | null;
+		colors: AppearanceColorOverrides;
 		fontFamily: string | null;
 		proseFontSize: number;
+		codeLigatures: boolean;
 		sessionNameSerif: boolean;
 		mdRendering: {
 			headingWeight: number;
@@ -507,18 +537,21 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
+	agent: { workerRequestConcurrency: 8 },
 	general: { autoUpdate: true },
 	dictation: { language: "en" },
 	appearance: {
-		mode: "dark",
-		background: null, // the dark default (#141414) lives in the mode's derivation curve
+		theme: "default",
+		background: null, // null = the active theme's background
+		colors: {}, // no overrides: every color is the theme's
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
+		codeLigatures: false,
 		sessionNameSerif: true,
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
-	compaction: { thresholdTokens: 150_000 },
+	compaction: { thresholdTokens: 150_000, includeReasoning: false },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -690,6 +723,10 @@ function sanitizeBooleanMap(raw: unknown): Record<string, boolean> | undefined {
 
 function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	const out: AgentSettings = {};
+	// Invalid disk values drop: absence resolves to 8, never a silent clamp.
+	if (typeof raw.workerRequestConcurrency === "number" && Number.isSafeInteger(raw.workerRequestConcurrency) && raw.workerRequestConcurrency > 0) {
+		out.workerRequestConcurrency = raw.workerRequestConcurrency;
+	}
 	if (raw.models !== null && typeof raw.models === "object" && !Array.isArray(raw.models)) {
 		const models: Partial<Record<BackgroundModelRole, RoleModelOverride>> = {};
 		for (const [role, override] of Object.entries(raw.models as Record<string, unknown>)) {
@@ -709,7 +746,7 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	// record, it just loses the pin and auto-detection resumes).
 	if (raw.search !== null && typeof raw.search === "object" && !Array.isArray(raw.search)) {
 		const engine = (raw.search as Record<string, unknown>).engine;
-		if (engine === "tavily" || engine === "brave") out.search = { engine };
+		if (isSearchEngineId(engine)) out.search = { engine };
 	}
 	// Prober graph tools (wave 7): its own agent-section subsection —
 	// lenient read side (a bad shape drops the key and the default ON
@@ -718,6 +755,13 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
+	}
+	// Never drop a malformed access policy into the unrestricted default.
+	// The strict store reader separately reports its configuration error;
+	// this safe view also preserves the boundary during unrelated UI writes.
+	if (raw.fileAccess !== undefined) {
+		const parsed = parseFileAccessSettings(raw.fileAccess);
+		out.fileAccess = parsed.ok ? parsed.settings : { restricted: true, folders: [] };
 	}
 	return out;
 }
@@ -736,14 +780,27 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 
 function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const out: AppearanceSettings = {};
-	if (raw.mode === "dark" || raw.mode === "light") out.mode = raw.mode;
+	// Theme wave (2026-11-04): `mode`/`lightBackground` (light-mode wave)
+	// are no longer read — the theme declares the mode. Dropped here like
+	// the graph's dead rungs; the next appearance write flushes them.
+	if (isThemeId(raw.theme)) out.theme = raw.theme;
 	if (raw.background !== undefined) out.background = sanitizeHexOrNull(raw.background);
+	if (raw.colors !== null && typeof raw.colors === "object" && !Array.isArray(raw.colors)) {
+		const colors: AppearanceColorOverrides = {};
+		const c = raw.colors as Record<string, unknown>;
+		for (const key of COLOR_OVERRIDE_KEYS) {
+			if (c[key] !== undefined) colors[key] = sanitizeHexOrNull(c[key]);
+		}
+		out.colors = colors;
+	}
 	if (raw.fontFamily !== undefined) {
 		out.fontFamily = typeof raw.fontFamily === "string" && raw.fontFamily.trim() ? raw.fontFamily : null;
 	}
 	if (typeof raw.proseFontSize === "number" && Number.isFinite(raw.proseFontSize)) {
 		out.proseFontSize = clamp(Math.round(raw.proseFontSize), PROSE_FONT_MIN, PROSE_FONT_MAX);
 	}
+	const codeLigatures = boolOrDrop(raw.codeLigatures);
+	if (codeLigatures !== undefined) out.codeLigatures = codeLigatures;
 	const sessionNameSerif = boolOrDrop(raw.sessionNameSerif);
 	if (sessionNameSerif !== undefined) out.sessionNameSerif = sessionNameSerif;
 	if (raw.mdRendering !== undefined) out.mdRendering = sanitizeMdRendering(raw.mdRendering);
@@ -784,6 +841,8 @@ export const COMPACTION_THRESHOLD_FLOOR = 32_000;
 
 function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	const out: CompactionSettings = {};
+	const includeReasoning = boolOrDrop(raw.includeReasoning);
+	if (includeReasoning !== undefined) out.includeReasoning = includeReasoning;
 	const rawTokens = raw.thresholdTokens;
 	if (typeof rawTokens === "number" && Number.isFinite(rawTokens) && rawTokens > 0) {
 		out.thresholdTokens = Math.max(COMPACTION_THRESHOLD_FLOOR, Math.floor(rawTokens));
@@ -834,9 +893,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
-		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
-			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
-		}
+	}
+	if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
+		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old

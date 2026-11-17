@@ -3,7 +3,7 @@ import path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
 import { Unzip, UnzipInflate, unzipSync } from "fflate";
 import { selectExportGraph } from "../core/export-graph.ts";
-import type { ChatRecord, ChatSettings, ImportPreview, ImportChoices } from "../core/contracts/chat.ts";
+import { CURRENT_CHAT_VERSION, type ChatRecord, type ChatSettings, type ImportPreview, type ImportChoices } from "../core/contracts/chat.ts";
 import { EXPORT_LIMIT, parseTransferJson as json, readTransferMember as read } from "./lesson-export.ts";
 
 const hash = (raw: Uint8Array | string) => createHash("sha256").update(raw).digest("hex");
@@ -29,7 +29,7 @@ function canonical(value: unknown): string {
 }
 function chat(raw: Buffer, id: string): ChatRecord {
 	const v = object(json(raw));
-	if (v.id !== id || (v.version !== undefined && v.version !== 1) || typeof v.title !== "string" || v.title.length > 2000 ||
+	if (v.id !== id || v.version !== CURRENT_CHAT_VERSION || typeof v.title !== "string" || v.title.length > 2000 ||
 		typeof v.createdAt !== "string" || typeof v.updatedAt !== "string" || !Array.isArray(v.messages) || v.messages.length > 10_000 ||
 		(v.kind !== undefined && v.kind !== "teach" && v.kind !== "practice")) throw new Error("Unsupported native lesson");
 	const mids = new Set<string>();
@@ -85,7 +85,7 @@ export function readImportPackage(bytes: Uint8Array) {
 	for (let start = 0; start < bytes.length; start += 1024) unzip.push(bytes.subarray(start, start + 1024), start + 1024 >= bytes.length);
 	if (members.size !== inventory.size || !members.has("manifest.json")) throw new Error("Incomplete ZIP");
 	const manifest = object(json(members.get("manifest.json")!));
-	if (manifest.format !== "learnharness-transfer" || manifest.version !== 1 || manifest.nativeChatVersion !== 1 || manifest.nativeGraphVersion !== 1 ||
+	if (manifest.format !== "learnharness-transfer" || manifest.version !== 1 || manifest.nativeChatVersion !== CURRENT_CHAT_VERSION || manifest.nativeGraphVersion !== 1 ||
 		!Array.isArray(manifest.chats) || !manifest.chats.length || manifest.chats.length > 100 || new Set(manifest.chats).size !== manifest.chats.length ||
 		manifest.chats.some(id => typeof id !== "string" || !idPattern.test(id)) || !Array.isArray(manifest.files) || manifest.files.length !== members.size - 1 ||
 		(manifest.attachments !== undefined && (!Array.isArray(manifest.attachments) || manifest.attachments.length))) throw new Error("Unsupported transfer manifest");

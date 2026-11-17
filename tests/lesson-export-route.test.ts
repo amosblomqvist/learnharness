@@ -16,7 +16,7 @@ before(async () => {
 	POST = (await import("../app/api/lesson-export/route.ts")).POST;
 	({ beginTurn, endTurn } = await import("../src/server/turn-liveness.ts"));
 	fs.mkdirSync(path.join(root, "chats"), { recursive: true });
-	fs.writeFileSync(path.join(root, "chats/chat_export.json"), JSON.stringify({ id: "chat_export", title: "Synthetic", messages: [{ id: "u", role: "user", content: "Offline example" }] }));
+	fs.writeFileSync(path.join(root, "chats/chat_export.json"), JSON.stringify({ version: 2, id: "chat_export", title: "Synthetic", messages: [{ id: "u", role: "user", content: "Offline example" }] }));
 });
 after(() => { globalThis.fetch = originalFetch; fs.rmSync(root, { recursive: true, force: true }); });
 const request = (body: unknown, origin = "http://localhost") => new Request("http://localhost/api/lesson-export", { method: "POST", headers: { "Content-Type": "application/json", Origin: origin }, body: JSON.stringify(body) });

@@ -19,7 +19,7 @@ before(async () => {
 	({ beginTurn, endTurn } = await import("../src/server/turn-liveness.ts"));
 	const source = fs.mkdtempSync(path.join(root, "synthetic-export-"));
 	fs.mkdirSync(path.join(source, "chats"));
-	fs.writeFileSync(path.join(source, "chats/chat_import.json"), JSON.stringify({ version: 1, id: "chat_import", title: "Authored offline route test", createdAt: "2026-01-01", updatedAt: "2026-01-01", settings: { model: { provider: "foreign_billing", id: "foreign_model" } }, messages: [{ id: "u", role: "user", content: "Synthetic", timestamp: 1 }] }));
+	fs.writeFileSync(path.join(source, "chats/chat_import.json"), JSON.stringify({ version: 2, id: "chat_import", title: "Authored offline route test", createdAt: "2026-01-01", updatedAt: "2026-01-01", settings: { model: { provider: "foreign_billing", id: "foreign_model" } }, messages: [{ id: "u", role: "user", content: "Synthetic", timestamp: 1 }] }));
 	const { previewExport, downloadExport } = await import("../src/store/lesson-export.ts");
 	bytes = downloadExport(source, ["chat_import"], "zip", { revision: previewExport(source, ["chat_import"]).revision, files: [] }).bytes;
 });
@@ -39,7 +39,7 @@ test("route rejects cross-origin, wrong content, oversized uploads, missing revi
 	assert.equal(fs.existsSync(path.join(root, "chats/chat_import.json")), false); assert.equal(network, 0);
 });
 test("route accepts one native JSON lesson without graph or provider access", async () => {
-	const raw = JSON.stringify({ version: 1, id: "chat_json", title: "Authored JSON", createdAt: "2026-01-01", updatedAt: "2026-01-01", messages: [] });
+	const raw = JSON.stringify({ version: 2, id: "chat_json", title: "Authored JSON", createdAt: "2026-01-01", updatedAt: "2026-01-01", messages: [] });
 	function jsonRequest(action: string, revision = "") {
 		const form = new FormData(); form.set("file", new File([raw], "lesson.json")); form.set("action", action);
 		form.set("revision", revision); form.set("choices", "{}");

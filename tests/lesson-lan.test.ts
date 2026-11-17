@@ -11,7 +11,7 @@ import { lanHash, lanReceipt } from "../src/store/lesson-lan.ts";
 import { downloadExport, previewExport } from "../src/store/lesson-export.ts";
 import { installImport, previewImport, recoverTransfers } from "../src/store/lesson-import.ts";
 
-const record = (text = "Authored offline LAN fixture") => ({ version: 1, id: "chat_lan", title: "Synthetic LAN lesson", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", messages: [{ id: "u", role: "user", content: text, timestamp: 1 }], opaque: { preserve: "Ω" } });
+const record = (text = "Authored offline LAN fixture") => ({ version: 2, id: "chat_lan", title: "Synthetic LAN lesson", createdAt: "2026-01-01T00:00:00Z", updatedAt: "2026-01-01T00:00:00Z", messages: [{ id: "u", role: "user", content: text, timestamp: 1 }], opaque: { preserve: "Ω" } });
 function write(root: string, name: string, raw: string) { const file = path.join(root, name); fs.mkdirSync(path.dirname(file), { recursive: true }); fs.writeFileSync(file, raw); }
 function archive(root: string, text?: string) { write(root, "chats/chat_lan.json", JSON.stringify(record(text), null, "\t") + "\n"); const p = previewExport(root, ["chat_lan"]); return downloadExport(root, ["chat_lan"], "zip", { revision: p.revision, files: [] }).bytes; }
 

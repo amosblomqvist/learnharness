@@ -24,13 +24,13 @@ Only absolute PDF, PNG/JPEG/WebP/GIF, TXT and Markdown source paths are eligible
 
 The ZIP has `manifest.json`, `chats/<native-id>.json`, `graph/nodes.jsonl`, `graph/chains.jsonl`, an optional original `graph/format.json`, optional selected `graph/sources.json`, and optional `files/<index>.<extension>` members. The proposed manifest identifies `learnharness-transfer`, version 1, native chat/graph schema versions, selected IDs, member inventory, source-path associations and a dependency report. Source paths are references, **not extraction/installation destinations**. Graph edges/layout are not exported as independent truth. Other sessions' transcripts and unrelated incident chains are excluded, even when external provenance is retained in required definitions.
 
-Limits: 32 MiB total payload/ZIP, 16,000,000 bytes per native/source member, 512 KiB manifest, 100 sessions/source candidates, 10,000 messages per session or graph assertions per ledger, bounded UTF-8 JSON nesting. Chat schema v1 is supported (including the native convention of an absent version). Unsupported/newer graph versions or malformed graph assertions refuse ZIP; they do not block an otherwise supported text/native-JSON export.
+Limits: 32 MiB total payload/ZIP, 16,000,000 bytes per native/source member, 512 KiB manifest, 100 sessions/source candidates, 10,000 messages per session or graph assertions per ledger, bounded UTF-8 JSON nesting. Only explicit chat schema v2 is supported for transfer. Older v1 records, records without a version and newer versions are refused, not migrated. Native JSON and ZIP retain v2 image snapshots, side conversations and opaque message/plugin metadata byte-for-byte; preserving metadata does not install a plugin or guarantee receiving-client support. Unsupported/newer graph versions or malformed graph assertions refuse ZIP; they do not block an otherwise supported text/native-JSON export.
 
 **Completeness is not established:** `report.complete` stays false and `dependencyAudit` stays `partial`. Extraction coverage/checkpoints, running/resumable jobs, pending in-memory learner messages, global settings and credentials are not transferred. Unknown tool dependency schemas and external provenance are reported. There is no claim that this archive is a full library backup, self-contained lesson, automatic continuation permission or universally accepted import format.
 
 ## Import ZIP or JSON
 
-Click **Import** and choose a source-free native v1 ZIP (lessons and graph) or a native lesson JSON (one lesson without a graph). Validation and installation run automatically. Only conflicts need another action: choose the local or imported active version for each conflict, then click **Import selected versions**. Both original JSON records are retained; identities are not renamed and duplicate sidebar lessons are not created. Errors block installation without partial changes. Selecting another file clears old conflict decisions.
+Click **Import** and choose a source-free transfer v1 ZIP containing native v2 lessons and graph or a native lesson JSON (one lesson without a graph). Validation and installation run automatically. Only conflicts need another action: choose the local or imported active version for each conflict, then click **Import selected versions**. Both original JSON records are retained; identities are not renamed and duplicate sidebar lessons are not created. Errors block installation without partial changes. Selecting another file clears old conflict decisions.
 
 There is no mandatory preview screen or acknowledgement checkbox. Short explanations state that imported lessons use local model settings and import starts no model requests; incomplete dependencies are still disclosed. A custom English Import button replaces the browser's locale-dependent file-input chrome; the system file dialog still follows the operating system language.
 
@@ -99,13 +99,31 @@ Wi-Fi/firewall, camera QR, browser/Electron or a full manual UI conflict-workflo
 
 Dependency audit: `fflate` is pinned to 0.8.3 to fix malformed-ZIP64 infinite-loop advisory
 [CVE-2026-45820](https://github.com/advisories/GHSA-px8p-9vwx-vf98); a child-process timeout regression
-checks rejection through the real importer. The current npm audit still reports 34 existing dependency
-findings (24 moderate, 7 high, 3 critical), outside this transport change. Those remain release/security
+checks rejection through the real importer. An earlier npm audit reported 34 existing dependency
+findings (24 moderate, 7 high, 3 critical), outside this transport change; the root audit was not rerun
+for the current integration. Those remain release/security
 gates, not a clean-audit claim; no new LAN dependency version was in that advisory set.
 
 No external-file/source-registry installation, automatic/background sync or multi-process library locking. Continuation covers the supported native subset, not every historical tool/artifact or external dependency. Exports containing those broader source members remain useful for backup/tools but are not accepted by this receiver or Reasoned's current receiver. This is not a complete library backup or universal portability guarantee. Browser/Electron import and the full two-app manual conflict workflow remain unverified; synthetic installation evidence below is narrower.
 
 ## Offline checks
+
+### Upstream integration (2026-11-17)
+
+Merged upstream `main` at `cb25c8e` (0.6.1), preserving its atomic chat writer, plugin/session
+reconciliation, image-pool separation and current Settings navigation. Transfer is restricted to
+explicit native chat v2; transport and graph schemas remain v1. Canonical replace/append reads carry
+the imported-input pause through the shared session model, without bypassing upstream stale-read gates.
+
+On Windows with Node 24.12.0, TypeScript, scoped ESLint and 206 focused
+transfer/LAN/session/Settings/Markdown tests passed. Hosted CI uses Node 26 and remains the authority
+for that environment. The updated
+Reasoned JVM package reader/re-exporter and this desktop receiver completed a synthetic v2 round trip,
+including image snapshots, side-thread data, opaque message metadata, inventory, graph fold,
+idempotent installation and the explicit-input pause, without provider requests. This check used
+fresh temporary libraries, not installed lessons or Android SQLite. Full-suite, production-build,
+current emulator/LAN and manual browser/Electron acceptance were not rerun for this integration.
+Earlier broader checks below are historical, not fresh acceptance of this update.
 
 From the repository root:
 
@@ -125,7 +143,7 @@ Use a separate development server and an isolated synthetic library. In Bash / G
 ```sh
 export LH_DATA_DIR="$(node -p 'require("node:fs").mkdtempSync(require("node:path").join(require("node:os").tmpdir(), "lh-export-demo-"))')"
 export LH_AUTH_FILE="$LH_DATA_DIR/auth.json"
-node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; const root = process.env.LH_DATA_DIR; if (!root) throw Error("Isolated data directory required"); fs.mkdirSync(path.join(root, "chats"), { recursive: true }); fs.writeFileSync(path.join(root, "chats/chat_export_demo.json"), JSON.stringify({version:1,id:"chat_export_demo",title:"Synthetic export example",createdAt:"2026-10-30T00:00:00Z",updatedAt:"2026-10-30T00:00:00Z",messages:[{id:"example_user",role:"user",content:"Authored offline export example, not learner evidence.",timestamp:1}]})); console.log(root);'
+node --input-type=module -e 'import fs from "node:fs"; import path from "node:path"; const root = process.env.LH_DATA_DIR; if (!root) throw Error("Isolated data directory required"); fs.mkdirSync(path.join(root, "chats"), { recursive: true }); fs.writeFileSync(path.join(root, "chats/chat_export_demo.json"), JSON.stringify({version:2,id:"chat_export_demo",title:"Synthetic export example",createdAt:"2026-10-30T00:00:00Z",updatedAt:"2026-10-30T00:00:00Z",messages:[{id:"example_user",role:"user",content:"Authored offline export example, not learner evidence.",timestamp:1}]})); console.log(root);'
 npm run dev
 ```
 

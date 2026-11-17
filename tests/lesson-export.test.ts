@@ -17,7 +17,7 @@ function library() {
 const user = { id: "u", role: "user", content: "Teach me $x^2$", timestamp: 1 };
 const question = { id: "a", role: "assistant", content: [{ type: "toolCall", id: "q", name: "quiz", arguments: { question: "What is x?", options: [{ label: "Alpha", value: "UNREVEALED" }, { label: "Beta", value: "second" }], correctAnswer: "UNREVEALED", explanation: "SECRET_EXPLANATION" } }], stopReason: "toolUse", timestamp: 2 };
 function chat(root: string, id = "chat_one", messages: unknown[] = [user, question]) {
-	const raw = Buffer.from(JSON.stringify({ version: 1, id, title: "Synthetic lesson", createdAt: "2026-10-30", updatedAt: "2026-10-30", messages, opaque: { future: "preserve" }, turns: [{ opaque: "usage" }] }, null, "\t") + "\n");
+	const raw = Buffer.from(JSON.stringify({ version: 2, id, title: "Synthetic lesson", createdAt: "2026-10-30", updatedAt: "2026-10-30", messages, opaque: { future: "preserve" }, turns: [{ opaque: "usage" }] }, null, "\t") + "\n");
 	fs.writeFileSync(path.join(root, "chats", id + ".json"), raw); return raw;
 }
 function graph(root: string) {
@@ -50,6 +50,18 @@ test("readable text excludes hidden commitments, JSON preserves exact bytes, nei
 	assert.throws(() => downloadExport(root, ["chat_one"], "html" as never));
 });
 
+test("exports refuse legacy, unstamped and unknown native chat versions without rewriting them", () => {
+	const root = library();
+	const current = JSON.parse(chat(root).toString());
+	for (const version of [undefined, 1, 3, 2.5, "2", null]) {
+		const raw = Buffer.from(JSON.stringify({ ...current, version }));
+		fs.writeFileSync(path.join(root, "chats/chat_one.json"), raw);
+		assert.throws(() => downloadExport(root, ["chat_one"], "json"), /Unsupported native lesson/);
+		assert.throws(() => previewExport(root, ["chat_one"]), /Unsupported native lesson/);
+		assert.deepEqual(fs.readFileSync(path.join(root, "chats/chat_one.json")), raw);
+	}
+});
+
 test("current structured learner answers export as labels with thinking, not object dumps", () => {
 	const root = library();
 	chat(root, "chat_one", [user, question, { id: "r", role: "toolResult", toolCallId: "q", toolName: "quiz", content: [], details: {
@@ -63,7 +75,7 @@ test("current structured learner answers export as labels with thinking, not obj
 test("ZIP preserves native bytes, selects graph by provenance and inventories every inert member", () => {
 	const root = library(), raw = chat(root); chat(root, "chat_other"); graph(root);
 	const zip = archive(root), manifest = JSON.parse(text(zip["manifest.json"]!));
-	assert.equal(manifest.format, "learnharness-transfer"); assert.equal(manifest.report.complete, false);
+	assert.equal(manifest.format, "learnharness-transfer"); assert.equal(manifest.nativeChatVersion, 2); assert.equal(manifest.report.complete, false);
 	assert.equal(manifest.report.continuationAuthorized, false); assert.equal(manifest.report.dependencyAudit, "partial");
 	assert.deepEqual(Buffer.from(zip["chats/chat_one.json"]!), raw); assert.equal(zip["chats/chat_other.json"], undefined);
 	assert.match(text(zip["graph/nodes.jsonl"]!), /n2/); assert.doesNotMatch(text(zip["graph/nodes.jsonl"]!), /n3/);

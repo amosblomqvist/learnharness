@@ -23,7 +23,7 @@ function probeConcluded(messages: readonly LhMessage[]): boolean {
 }
 
 /**
- * probe_done — the probe→planning seam (docs/probe-teach-split.md §2).
+ * probe_done — the probe→planning seam (docs/archive/probe-teach-split.md §2).
  *
  * SERVER-SIDE. The prober concludes the probe by authoring the learner
  * assessment (the tool INPUT — it streams to the learner live and is
