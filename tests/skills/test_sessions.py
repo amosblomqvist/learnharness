@@ -341,7 +341,7 @@ class SessionsTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.save(root, record())
-            self.save(root, record(session_id="future", version=2))
+            self.save(root, record(session_id="future", version=3))
             self.save(root, record(session_id="old", messages=[{"role": "assistant", "parts": []}]))
             (root / "chats" / "broken.json").write_text("{bad", encoding="utf-8")
             before = snapshot(root)

@@ -16,6 +16,11 @@ from typing import Any
 
 sys.dont_write_bytecode = True
 
+# Windows pipes default to a legacy locale codepage; the records are UTF-8.
+for _stream in (sys.stdout, sys.stderr):
+    if hasattr(_stream, "reconfigure"):
+        _stream.reconfigure(encoding="utf-8", errors="replace")
+
 
 class DataError(Exception):
     """An actionable reader error, suitable for stderr without a traceback."""
@@ -85,7 +90,7 @@ def read_json(root: Path, relative: str | Path, *, missing: Any = None) -> Any:
 
 
 def read_chat(root: Path, session_id: str) -> dict[str, Any]:
-    """Read a native v1 session; refuse unsupported formats rather than migrate."""
+    """Read a native v1/v2 session; refuse unsupported formats rather than migrate."""
     if not session_id or session_id in {".", ".."} or any(char in session_id for char in ("/", "\\", "\x00")):
         raise DataError("Use a session ID from sessions.py list, not a filesystem path.")
     relative = Path("chats") / f"{session_id}.json"
@@ -96,9 +101,9 @@ def read_chat(root: Path, session_id: str) -> dict[str, Any]:
         raise DataError(f"Session {session_id} is not a JSON object.")
     version = record.get("version", 1)
     if isinstance(version, bool) or not isinstance(version, (int, float)):
-        raise DataError(f"Session {session_id} has an invalid version; this reader supports native format 1.")
-    if version > 1:
-        raise DataError(f"Session {session_id} uses format {version}; this reader supports 1. Update the skill; no migration was attempted.")
+        raise DataError(f"Session {session_id} has an invalid version; this reader supports native formats 1 and 2.")
+    if version > 2:
+        raise DataError(f"Session {session_id} uses format {version}; this reader supports 1 and 2. Update the skill; no migration was attempted.")
     if record.get("id") != session_id:
         raise DataError(f"Session filename/ID mismatch: {session_id}.")
     if not all(isinstance(record.get(key), str) for key in ("title", "createdAt", "updatedAt")):

@@ -127,8 +127,12 @@ class DataHelpersTest(unittest.TestCase):
         self.assertEqual(target.read_bytes(), before)
         self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), ["chats", "chats/chat_one.json"])
 
-    def test_future_chat_version_is_refused(self):
+    def test_chat_version_2_is_read_without_stamping(self):
         self.save_chat(version=2)
+        self.assertEqual(_data.read_chat(self.root, "chat_one"), self.record(version=2))
+
+    def test_future_chat_version_is_refused(self):
+        self.save_chat(version=3)
         with self.assertRaisesRegex(_data.DataError, "Update the skill"):
             _data.read_chat(self.root, "chat_one")
         self.save_chat(version=True)
