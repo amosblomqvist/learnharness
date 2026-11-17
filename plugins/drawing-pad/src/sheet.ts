@@ -136,6 +136,9 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     let target = visibleStrokes(draft.strokes);
     if (live?.tool === "eraser") target = visibleUnderEraser(target, live);
     const context = inkContext();
+    // A lost context has no usable bitmap or world transform. Keep collecting
+    // input, but never remember failed paint commands as a current display.
+    if (context.isContextLost()) { painted = undefined; livePainted = undefined; return; }
     if (painted && painted.draftId === draft.id && painted.color === draft.color && painted.originX === view.origin.x &&
       painted.originY === view.origin.y && painted.pixelsWide === canvas.width && painted.pixelsHigh === canvas.height) {
       if (target === painted.visible) return;
@@ -250,6 +253,11 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     applyScheduledInk(); renderChrome(); syncInk();
   };
+  // Context restoration resets both pixels and drawing state without changing
+  // our draft/viewport keys. Reconstruct committed ink and any active gesture.
+  // Do not preventDefault on loss: the browser owns automatic restoration.
+  canvas.addEventListener("contextlost", () => { painted = undefined; livePainted = undefined; }, { signal });
+  canvas.addEventListener("contextrestored", render, { signal });
   canvas.addEventListener("pointerdown", down, { signal });
   canvas.addEventListener("pointermove", move, { signal });
   for (const name of ["pointerup", "pointercancel", "lostpointercapture"] as const) canvas.addEventListener(name, finish, { signal });

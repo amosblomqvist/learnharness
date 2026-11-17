@@ -756,8 +756,61 @@ try {
   assert.ok(images(await call("submit", { accept: false }))[0], "off-screen ink is still exported");
   for (let i = 0; i < 4; i++) await panBy(-400, 0);
   assert.equal(await canvasData(), beforeCulling, "panning back repaints culled ink exactly"); await button("Pen");
-  await run(() => { CanvasRenderingContext2D.prototype.clearRect = window.fixture.nativeClearRect; window.fixture.frames = undefined; });
   group("repaint economy: off-screen strokes are skipped in full repaints, restored exactly, and still exported");
+
+  // Controlled context loss: reset() really discards the bitmap and transform;
+  // isContextLost/events supply a deterministic lifecycle, not a driver crash.
+  const loseInk = () => run(() => {
+    const canvas = document.querySelector(".drawing-pad-ink"), context = canvas.getContext("2d");
+    window.fixture.lostCanvas = canvas; window.fixture.inkLost = true;
+    Object.defineProperty(context, "isContextLost", { configurable: true, value: () => window.fixture.inkLost });
+    context.reset();
+    const event = new Event("contextlost", { cancelable: true }); canvas.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  const restoreInk = () => run(() => {
+    const canvas = window.fixture.lostCanvas, context = canvas.getContext("2d");
+    window.fixture.inkLost = false; canvas.dispatchEvent(new Event("contextrestored"));
+    delete context.isContextLost;
+  });
+  const intact = await canvasData();
+  assert.equal(await loseInk(), false, "do not cancel the browser's automatic restoration");
+  assert.equal(await ink(), 0); await restoreInk();
+  assert.equal(await canvasData(), intact, "restoration reconstructs committed ink without a camera/content change");
+  await matchesFullRepaint("restored committed ink equals a full repaint");
+  group("context recovery: a discarded bitmap and transform rebuild without changing the drawing");
+
+  const [rx, ry] = at(.25, .55);
+  await page.mouse.move(rx, ry); await page.mouse.down(); await page.mouse.move(rx + 30, ry + 15);
+  await loseInk(); await page.mouse.move(rx + 60, ry + 25);
+  assert.equal(await ink(), 0, "live input does not paint or mark the lost bitmap current");
+  await restoreInk(); assert.ok(await ink() > 0);
+  await page.mouse.move(rx + 90, ry + 35); await page.mouse.up();
+  await matchesFullRepaint("a pen stroke spanning context restoration retains all segments and the world transform");
+  // Also recover when the entire commit happens while the context is lost.
+  await loseInk(); await stroke(-.1); assert.equal(await ink(), 0);
+  await restoreInk(); await matchesFullRepaint("a stroke committed while lost is reconstructed on restore");
+  group("context recovery: active and committed-while-lost pen strokes survive with exact pixels");
+
+  await button("Eraser"); const beforeRestoreErase = await ink();
+  await page.mouse.move(...at(.4, .725)); await page.mouse.down();
+  await loseInk(); await restoreInk();
+  assert.ok(await ink() < beforeRestoreErase, "restoration includes the held whole-stroke eraser preview");
+  await page.mouse.up(); await button("Pen"); await matchesFullRepaint("restored eraser preview commits exactly");
+  await loseInk(); await button("Hand"); await panBy(55, -35);
+  assert.equal(await ink(), 0); await restoreInk(); await button("Pen");
+  await matchesFullRepaint("camera changes during loss restore with the latest transform");
+  group("context recovery: held eraser preview and a camera change restore the current display");
+
+  await loseInk(); const detached = await run(() => window.fixture.lostCanvas.isConnected);
+  assert.equal(detached, true); await close(); await restoreInk();
+  assert.equal(await run(() => {
+    const canvas = window.fixture.lostCanvas;
+    return !canvas.isConnected && canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data.every(value => value === 0);
+  }), true, "a disposed sheet does not repaint on a late restore event");
+  await open(); assert.ok(await ink() > 0); await matchesFullRepaint("remount after context loss reconstructs retained ink");
+  group("context recovery: teardown retires restore handlers and remount retains work");
+  await run(() => { CanvasRenderingContext2D.prototype.clearRect = window.fixture.nativeClearRect; window.fixture.frames = undefined; });
 
   // Keep the theme checks scoped to one saved reference rather than re-capturing
   // every retained sheet from the independent lifecycle groups above.

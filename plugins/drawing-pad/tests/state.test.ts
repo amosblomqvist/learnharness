@@ -160,6 +160,19 @@ it("accepted ink recolors only current-palette drafts, preserving older raster p
   sheets.setInkForPalette("#7654ab", "light"); assert.equal(current.draft, acceptedDraft); assert.equal(changes, beforeNoop);
   sheets.accepted(captured); assert.equal(sheets.pending(current), true);
 });
+it("practice treats an identical redraw as new ink, but Undo back to the acknowledged stroke suppresses resending", () => {
+  const { sheets, state } = fixture("practice"), original = stroke(10);
+  sheets.update(state, [original]); sheets.accepted(sheets.capture(state)!);
+  const acknowledged = sheets.signature(state);
+  const eraser: Stroke = { tool: "eraser", points: [{ x: 10, y: 10, pressure: .5 }] };
+  sheets.update(state, [original, eraser]); assert.equal(sheets.pending(state), false);
+  const redrawn = structuredClone(original);
+  assert.deepEqual(redrawn, original); assert.notEqual(redrawn, original);
+  sheets.update(state, [original, eraser, redrawn]);
+  assert.equal(sheets.pending(state), true); assert.notEqual(sheets.signature(state), acknowledged);
+  sheets.undo(state); assert.equal(sheets.pending(state), false, "fully erased ink sends nothing");
+  sheets.undo(state); assert.equal(sheets.signature(state), acknowledged); assert.equal(sheets.pending(state), false);
+});
 it("sheet change listeners unsubscribe and disposal loses window-owned drafts", () => {
   const { sheets, state } = fixture(); let calls = 0; const off = sheets.onChange(() => calls++);
   sheets.update(state, [stroke()]); off(); sheets.clear(state); assert.equal(calls, 1);
