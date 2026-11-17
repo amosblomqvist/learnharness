@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { spawnSync } from "node:child_process";
 import { test } from "node:test";
 import { forkVersion, parseForkVersion } from "../scripts/fork-version.ts";
 
@@ -27,4 +28,12 @@ test("parses fork versions and round trips", () => {
 	}
 	assert.throws(() => parseForkVersion("0.6.100"));
 	assert.throws(() => parseForkVersion("0.6.1-beta"));
+});
+
+test("--check passes fork versions and fails the release gate otherwise", () => {
+	const check = (version: string) => spawnSync(process.execPath, ["node_modules/tsx/dist/cli.mjs", "scripts/fork-version.ts", "--check", version], { encoding: "utf8" });
+	const ok = check("0.5.1");
+	assert.equal(ok.status, 0, ok.stderr);
+	assert.match(ok.stdout, /0\.5\.1 is upstream 0\.5\.0 with sequence 1/);
+	for (const version of ["0.5.0", "0.6.100", "0.6.1-beta", ""]) assert.notEqual(check(version).status, 0, version);
 });

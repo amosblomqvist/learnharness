@@ -19,9 +19,7 @@
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
-import { piModels, syncCodexProvider } from "../agent/models.ts";
-import { refreshCodexModels } from "../agent/codex/provider.ts";
-import { EXTERNAL_CLI_PROVIDERS } from "../core/contracts/external-cli.ts";
+import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
@@ -31,8 +29,7 @@ export async function refreshConnectionCatalog(provider?: string): Promise<void>
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
-		(!provider || provider === EXTERNAL_CLI_PROVIDERS.codex) && externalCliAvailable(EXTERNAL_CLI_PROVIDERS.codex)
-			? refreshCodexModels().then(syncCodexProvider) : Promise.resolve(),
+		refreshExternalCliCatalogs(provider === undefined ? undefined : [provider]),
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
@@ -54,7 +51,7 @@ import type {
 } from "../core/contracts/models.ts";
 import type { EffectiveModelSpec, EffectiveSlot } from "../core/settings-resolution.ts";
 import { AUTH_PROVIDER_KEYS, CUSTOM_PROVIDER } from "../core/auth-keys.ts";
-import { externalCliAvailable } from "./external-cli-config.ts";
+import { externalCliAvailable, refreshExternalCliCatalogs } from "./external-cli-config.ts";
 import { isExternalCliProvider } from "../core/contracts/external-cli.ts";
 import {
 	BACKGROUND_MODEL_ROLES,

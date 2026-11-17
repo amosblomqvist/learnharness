@@ -12,7 +12,7 @@ fork のパッチ番号は、upstream のパッチ番号 × 100 に、1〜99 の
 
 1. プルリクエストの中で、`npm version <version> --no-git-tag-version` を使って両方の package ファイルの版を上げ、変更をコミットします。
 2. プルリクエストを `main` にマージします。タグを自分で作ったり push したりする必要はありません。
-3. Actions は decide → quality → draft → Windows package → verify（インストーラー、blockmap、`latest.yml`）→ publish の順に実行されます。検査が通ると、draft job がマージしたコミットに `v<version>` のタグを付けます。成功すると自動で公開されます。
+3. Actions は decide → quality → draft → Windows package → verify（インストーラー、blockmap、`latest.yml`）→ publish の順に実行されます。quality job は最初に版番号が上の fork version の規則に合っているかを確かめます。検査が通ると、draft job がマージしたコミットに `v<version>` のタグを付けます。成功すると自動で公開されます。
 
 版を上げないマージでは何も公開しません。decide job が `v<version>` は公開済みだと判断し、残りの job を飛ばします。`v<version>` のタグが別のコミットにあり、まだ公開されていない場合は、実行が失敗します。版を上げるか、下の手順でそのタグと下書きを破棄してください。これまでどおり、`v<version>` のタグを手で push してもリリースが始まります。
 

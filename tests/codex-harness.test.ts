@@ -29,7 +29,7 @@ after(() => rmSync(testData, { recursive: true, force: true }));
 const { PATHS, SETTINGS_FILE } = await import("../config.ts");
 const { configureCodexModelLister, refreshCodexModels, toCodexModel } = await import("../src/agent/codex/provider.ts");
 const { createCodexStreamFunction } = await import("../src/agent/codex/stream.ts");
-const { piModels, syncCodexProvider } = await import("../src/agent/models.ts");
+const { piModels, syncExternalCliProvider } = await import("../src/agent/models.ts");
 const { createTeacherAgent } = await import("../src/agent/teacher-agent.ts");
 const { EXTERNAL_CLI_PROVIDERS } = await import("../src/core/contracts/external-cli.ts");
 const { danglingQuestionOf } = await import("../src/core/native-messages.ts");
@@ -113,7 +113,7 @@ async function createFakeRun(t: TestContext, scenarios: string[][]): Promise<Fak
 	t.after(() => { if (savedPath === undefined) delete process.env.PATH; else process.env.PATH = savedPath; });
 
 	await refreshCodexModels();
-	syncCodexProvider();
+	syncExternalCliProvider("codex");
 
 	const calls: RunRecord[] = [];
 	const runCodex: RunCodex = (args, options) => {

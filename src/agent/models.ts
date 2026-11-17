@@ -14,6 +14,7 @@ import { lazyApi, lazyStream } from "@earendil-works/pi-ai/api/lazy";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import { EXTERNAL_CLI_PROVIDERS, type ExternalCliProvider } from "../core/contracts/external-cli.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
@@ -95,16 +96,22 @@ export function piModels() {
 				? { ...provider, ...lazyApi(() => import("@earendil-works/pi-ai/api/bedrock-converse-stream")) }
 				: provider);
 		}
-		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
-		collection.setProvider(createCodexProvider(streamCodex, codexModels()));
-		collection.setProvider(createGeminiCliProvider(streamGeminiCli));
+		for (const createProvider of Object.values(EXTERNAL_CLI_PROVIDER_FACTORIES)) collection.setProvider(createProvider());
 	}
 	providerSource?.sync(collection);
 	return collection;
 }
 
-export function syncCodexProvider(): void {
-	piModels().setProvider(createCodexProvider(streamCodex, codexModels()));
+/** Each external CLI's Pi provider, built from its current model list. */
+const EXTERNAL_CLI_PROVIDER_FACTORIES: Record<ExternalCliProvider, () => ReturnType<typeof createClaudeCodeProvider>> = {
+	[EXTERNAL_CLI_PROVIDERS.claudeCode]: () => createClaudeCodeProvider(streamClaudeCode),
+	[EXTERNAL_CLI_PROVIDERS.codex]: () => createCodexProvider(streamCodex, codexModels()),
+	[EXTERNAL_CLI_PROVIDERS.geminiCli]: () => createGeminiCliProvider(streamGeminiCli),
+};
+
+/** Rebuilds an external CLI's provider after its model list changed (for a CLI that lists models at run time). */
+export function syncExternalCliProvider(provider: ExternalCliProvider): void {
+	piModels().setProvider(EXTERNAL_CLI_PROVIDER_FACTORIES[provider]());
 }
 
 /** OpenRouter API key (BYOK); tests never read this — they inject engines. */

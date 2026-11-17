@@ -1,4 +1,5 @@
 import { spawn } from "node:child_process";
+import { join } from "node:path";
 
 import type { Api, Message, SimpleStreamOptions, StopReason, StreamFunction } from "@earendil-works/pi-ai";
 
@@ -79,6 +80,17 @@ const PRIVATE_FILE_MODE = 0o600;
 const TURN_DIR_PREFIX = "gemini-cli";
 const SYSTEM_PROMPT_FILE = "system.md";
 const SETTINGS_FILE = "settings.json";
+/**
+ * The CLI reads the first `.gemini/.env` or `.env` it finds from its cwd up to the root, then the ones in the home
+ * folder. It looks at `.gemini/.env` only in a trusted workspace, and a user setting (`advanced.ignoreLocalEnv`) makes
+ * it skip every `.env` but the home one. So the turn's cwd holds an empty `.gemini/.env` and the child is told the
+ * workspace is trusted (TRUST_WORKSPACE_ENV): the search stops at that empty file, and no `.env` in a parent folder
+ * (such as a shared /tmp) or in the home folder reaches the child. The empty `.env` covers a CLI that ignores the env.
+ * Checked against Gemini CLI 0.68.0 with sentinel keys in parent and home `.env` files, with and without that setting.
+ */
+const ENV_STOP_FILES: Record<string, string> = { [join(".gemini", ".env")]: "", ".env": "" };
+/** The turn's cwd is an empty temp folder the app made, so trusting it adds nothing but the `.env` boundary above. */
+const TRUST_WORKSPACE_ENV: Readonly<Record<string, string>> = { GEMINI_CLI_TRUST_WORKSPACE: "true" };
 /** A context file name no user has, so `~/.gemini/GEMINI.md` and project context files are not loaded. */
 const NO_CONTEXT_FILE = "learnharness-no-context-file.md";
 
@@ -215,7 +227,7 @@ async function launch({ model, context, hooks }: LaunchInput): Promise<CliLaunch
 async function finishLaunch(bridge: ToolBridge, input: ReturnType<typeof toClaudeInput>, model: string): Promise<CliLaunch> {
 	let dirs: TurnDirs<typeof SYSTEM_PROMPT_FILE | typeof SETTINGS_FILE>;
 	try {
-		dirs = await createTurnDirs(TURN_DIR_PREFIX, { [SYSTEM_PROMPT_FILE]: input.systemPrompt, [SETTINGS_FILE]: toGeminiSettings(readBridgeServer(bridge.mcpConfig)) }, PRIVATE_FILE_MODE);
+		dirs = await createTurnDirs(TURN_DIR_PREFIX, { [SYSTEM_PROMPT_FILE]: input.systemPrompt, [SETTINGS_FILE]: toGeminiSettings(readBridgeServer(bridge.mcpConfig)) }, PRIVATE_FILE_MODE, ENV_STOP_FILES);
 	} catch (error) {
 		await bridge.close();
 		throw error;
@@ -223,7 +235,7 @@ async function finishLaunch(bridge: ToolBridge, input: ReturnType<typeof toClaud
 	return {
 		args: toGeminiArgs({ model }),
 		cwd: dirs.cwd,
-		env: { GEMINI_SYSTEM_MD: dirs.files[SYSTEM_PROMPT_FILE], GEMINI_CLI_SYSTEM_SETTINGS_PATH: dirs.files[SETTINGS_FILE] },
+		env: { GEMINI_SYSTEM_MD: dirs.files[SYSTEM_PROMPT_FILE], GEMINI_CLI_SYSTEM_SETTINGS_PATH: dirs.files[SETTINGS_FILE], ...TRUST_WORKSPACE_ENV },
 		open: (io) => openSession(io, toPrompt(input.userContent), bridge),
 		dispose: async () => { await Promise.all([bridge.close(), removeTurnDirs(dirs)]); },
 	};
