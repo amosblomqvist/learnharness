@@ -8,12 +8,15 @@ import { AppearanceProvider, useAppearance } from "../components/settings/appear
 import { toggleAllDisclosures } from "../components/disclosure-store.ts";
 import { ThinkingBlock } from "../components/thinking-block.tsx";
 import { AnsweredCard } from "../components/answered-card.tsx";
+import { Reasoning, ReasoningContent, ReasoningTrigger } from "../components/ai-elements/reasoning.tsx";
 
 (globalThis as Record<string, unknown>).React = React;
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, {
 	window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement,
 	IS_REACT_ACT_ENVIRONMENT: true, fetch: async () => Response.json({ themes: [DEFAULT_THEME] }),
+	getComputedStyle: () => ({ animationName: "none", getPropertyValue: () => "" }),
+	requestAnimationFrame: (callback: () => void) => setTimeout(callback, 0), cancelAnimationFrame: clearTimeout,
 });
 
 type ExpandByDefault = AppearanceSettings["expandByDefault"];
@@ -81,6 +84,14 @@ describe("blocks start at their Start expanded setting", () => {
 			assert.equal(html.includes("Hide why"), open);
 		}
 	});
+
+	it("agent thinking: factory collapsed, open when the setting says so", () => {
+		for (const [setting, open] of [[undefined, false], [{ agentThinking: false }, false], [{ agentThinking: true }, true]] as const) {
+			const html = ssr(setting, <Reasoning><ReasoningTrigger /><ReasoningContent>The agent weighs it.</ReasoningContent></Reasoning>);
+			assert.ok(html.includes(`aria-expanded="${open}"`), JSON.stringify(setting));
+			assert.equal(html.includes("The agent weighs it."), open);
+		}
+	});
 });
 
 describe("keyboard toggles and setting changes", () => {
@@ -138,5 +149,48 @@ describe("keyboard toggles and setting changes", () => {
 		} finally {
 			await view.unmount();
 		}
+	});
+
+	it("Toggle all agent thinking opens every block; each block's own trigger still works", async () => {
+		const blocks = (count: number) => Array.from({ length: count }, (_, i) => (
+			<Reasoning key={i}><ReasoningTrigger data-testid={`r${i}`} /><ReasoningContent>{`step ${i}`}</ReasoningContent></Reasoning>
+		));
+		const view = await mount({ agentThinking: false }, blocks(2));
+		const open = () => [0, 1].map((i) => view.host.querySelector(`[data-testid="r${i}"]`)!.getAttribute("aria-expanded") === "true");
+		try {
+			assert.deepEqual(open(), [false, false]);
+			await keyboardToggle("agentThinking");
+			assert.deepEqual(open(), [true, true]);
+			await act(async () => view.host.querySelector<HTMLButtonElement>('[data-testid="r0"]')!.click());
+			assert.deepEqual(open(), [false, true]);
+		} finally {
+			await view.unmount();
+		}
+	});
+});
+
+describe("agent thinking after its stream ends", () => {
+	const settled = () => act(() => new Promise((resolve) => setTimeout(resolve, 1300)));
+	const streamed = async (agentThinking: boolean) => {
+		const block = (isStreaming: boolean) => (
+			<Reasoning isStreaming={isStreaming}><ReasoningTrigger data-testid="streamed" /><ReasoningContent>streamed</ReasoningContent></Reasoning>
+		);
+		const view = await mount({ agentThinking }, block(true));
+		const trigger = () => view.host.querySelector<HTMLButtonElement>('[data-testid="streamed"]')!;
+		if (trigger().getAttribute("aria-expanded") !== "true") await act(async () => trigger().click());
+		assert.equal(trigger().getAttribute("aria-expanded"), "true", "open while streaming");
+		await view.render(block(false));
+		await settled();
+		const stayedOpen = trigger().getAttribute("aria-expanded") === "true";
+		await view.unmount();
+		return stayedOpen;
+	};
+
+	it("setting on: the block stays open", async () => {
+		assert.equal(await streamed(true), true);
+	});
+
+	it("setting off: a block the learner opened still collapses", async () => {
+		assert.equal(await streamed(false), false);
 	});
 });
