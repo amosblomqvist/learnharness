@@ -3,10 +3,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
-import { DEFAULT_THEME, type AppearanceSettings, type DisclosureKind } from "../src/core/index.ts";
+import { DEFAULT_THEME, type AppearanceSettings, type DisclosureKind, type QuestionAnswerData } from "../src/core/index.ts";
 import { AppearanceProvider, useAppearance } from "../components/settings/appearance.tsx";
 import { toggleAllDisclosures } from "../components/disclosure-store.ts";
 import { ThinkingBlock } from "../components/thinking-block.tsx";
+import { AnsweredCard } from "../components/answered-card.tsx";
 
 (globalThis as Record<string, unknown>).React = React;
 const dom = parseHTML("<html><body></body></html>");
@@ -16,6 +17,13 @@ Object.assign(globalThis, {
 });
 
 type ExpandByDefault = AppearanceSettings["expandByDefault"];
+
+const quizAnswer = (explanation: string) => ({
+	kind: "quiz", questionText: "Which planet is closest to the Sun?",
+	options: [{ index: 0, label: "Mercury" }, { index: 1, label: "Venus" }],
+	answers: [{ index: 0, label: "Mercury", value: "Mercury" }],
+	correct: true, explanation, dontKnow: false, answeredAt: "2026-11-16T00:00:00.000Z",
+}) as QuestionAnswerData;
 
 function ssr(expandByDefault: ExpandByDefault, node: React.ReactNode) {
 	return renderToStaticMarkup(
@@ -65,6 +73,14 @@ describe("blocks start at their Start expanded setting", () => {
 			}
 		}
 	});
+
+	it("Why: factory collapsed, open when the setting says so", () => {
+		for (const [setting, open] of [[undefined, false], [{ why: false }, false], [{ why: true }, true]] as const) {
+			const html = ssr(setting, <AnsweredCard answer={quizAnswer("Mercury orbits innermost.")} />);
+			assert.equal(html.includes("Mercury orbits innermost."), open, JSON.stringify(setting));
+			assert.equal(html.includes("Hide why"), open);
+		}
+	});
 });
 
 describe("keyboard toggles and setting changes", () => {
@@ -96,6 +112,29 @@ describe("keyboard toggles and setting changes", () => {
 			assert.deepEqual(open(), [false, false, false, false], "the next press flips from the new setting");
 			await setExpandByDefault({ userThinking: true, why: true });
 			assert.deepEqual(open(), [false, false, false, false], "another kind's setting change leaves these rows alone");
+		} finally {
+			await view.unmount();
+		}
+	});
+
+	it("Toggle all Why opens every card; each card's own Why button still works", async () => {
+		const cards = (count: number) => Array.from({ length: count }, (_, i) => <AnsweredCard key={i} answer={quizAnswer(`Reason ${i}.`)} />);
+		const view = await mount({ why: false }, cards(2));
+		const shown = () => [...view.host.querySelectorAll('[data-testid="tucked-explanation"]')].map((card) => card.textContent?.includes("Why: ") ?? false);
+		const click = (i: number) => act(async () => view.host.querySelectorAll<HTMLButtonElement>('[data-testid="tucked-explanation"] > button')[i]!.click());
+		try {
+			assert.deepEqual(shown(), [false, false]);
+			await click(1);
+			assert.deepEqual(shown(), [false, true]);
+			await keyboardToggle("why");
+			assert.deepEqual(shown(), [true, true]);
+			await click(0);
+			assert.deepEqual(shown(), [false, true]);
+			await keyboardToggle("why");
+			assert.deepEqual(shown(), [false, false]);
+			await keyboardToggle("why");
+			await view.render(cards(3));
+			assert.deepEqual(shown(), [true, true, true], "a late card honors the keyboard set");
 		} finally {
 			await view.unmount();
 		}

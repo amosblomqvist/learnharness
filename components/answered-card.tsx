@@ -1,11 +1,11 @@
 "use client";
 
-import { useState } from "react";
 import { ConfidenceRail } from "@/components/confidence-rail";
 import { GlyphMark } from "@/components/ui/glyph-mark";
 import { StatusBadge } from "@/components/ui/status-badge";
 import { SubmittedImages } from "./submitted-images";
 import { ThinkingBlock } from "@/components/thinking-block";
+import { useDisclosure } from "@/components/disclosure-store";
 import { PathText } from "@/components/file-path-chip";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
@@ -24,7 +24,7 @@ import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core
  */
 export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionAnswerData; input?: unknown }) {
 	const answer = answerForPresentation(savedAnswer, input);
-	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
+	const [whyOpen, setWhyOpen] = useDisclosure("why"); // the tucked explanation (predictions, owner 2026-10-03)
 	if (answer.dismissed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
@@ -203,9 +203,10 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			    else; py-2 stays for vertical air. */}
 			{isQuiz && answer.explanation && (
 				/* The TUCKED explanation — ALL questions (owner, 2026-10-07): the
-				   verdict shows, the explanation sits collapsed behind the Why
-				   toggle — viewable, never center stage. Identical to the
-				   prediction pattern it generalizes (owner, 2026-10-03). */
+				   verdict shows, the explanation sits behind the Why toggle —
+				   viewable, never center stage, unless Appearance → Start
+				   expanded opens it. Identical to the prediction pattern it
+				   generalizes (owner, 2026-10-03). */
 				<div className="mt-2" data-testid="tucked-explanation">
 					<button
 						type="button"
