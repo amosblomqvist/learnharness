@@ -387,7 +387,7 @@ function answeredQuestionMarkdown(result: ToolResultMessage, input: Record<strin
 	}
 	if (typeof answer.confidence === "number") lines.push(`The learner's stated confidence: ${answer.confidence}%.`);
 	const thinking = answer.thinking ?? answer.note;
-	if (typeof thinking === "string" && thinking.trim()) lines.push(`*The learner's thinking:* ${thinking.trim()}`);
+	if (typeof thinking === "string" && thinking.trim()) lines.push(`*The learner's notes:* ${thinking.trim()}`);
 	if (answer.explanation) lines.push(`**Explanation shown to the learner:** ${answer.explanation}`);
 	if (answer.committed) lines.push(`**The teacher's committed answer, shown to the learner:** ${answer.committed}`);
 	return lines.join("\n\n");
@@ -422,7 +422,7 @@ function sidePluginQuestionMarkdown(question: ReturnType<typeof sidePluginQuesti
 	} else {
 		const answer = readPluginQuestionAnswer(question.result.role === "toolResult" ? question.result.details : undefined, snapshot);
 		if (answer?.readingThinking?.trim()) lines.push(`*The learner's notes while reading, before this question:* ${answer.readingThinking.trim()}`);
-		if (answer?.thinking?.trim()) lines.push(`*The learner's thinking:* ${answer.thinking.trim()}`);
+		if (answer?.thinking?.trim()) lines.push(`*The learner's notes:* ${answer.thinking.trim()}`);
 	}
 	return lines.join("\n\n");
 }

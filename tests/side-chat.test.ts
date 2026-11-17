@@ -141,6 +141,17 @@ describe("side lesson document", () => {
 		assert.match(doc, /I counted wrong/);
 	});
 
+	it("labels the learner's written reasoning as notes, not thinking", () => {
+		// "The learner's thinking:" in the replayed lesson made Claude's
+		// safeguards refuse every side question as reasoning_extraction (#474).
+		const doc = sideChatLessonDocument([
+			assistant([text("Addition combines counts."), call("q1", "quiz", { ...QUIZ_ARGS, question: "What is 2+2?" })]),
+			result("q1", "quiz", answeredQuiz()),
+		]);
+		assert.match(doc, /\*The learner's notes:\* I counted wrong/);
+		assert.doesNotMatch(doc, /learner's thinking/i);
+	});
+
 	it("shows the OPEN check without its key, explanation or committed answer", () => {
 		const doc = sideChatLessonDocument([
 			assistant([text("Derivatives measure change."), call("q2", "quiz", QUIZ_ARGS), call("q3", "explain", { type: "check", nodeId: "n", question: "Explain the slope.", correctAnswer: "SECRET-COMMITTED" })]),
