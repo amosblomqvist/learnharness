@@ -320,7 +320,6 @@ describe("render smoke tests", () => {
 		const html = renderToStaticMarkup(<AnsweredCard answer={answer} />);
 		assert.ok(html.includes('data-testid="your-thinking"'), "the thinking row exists");
 		assert.match(html, /YOUR THINKING/, "labeled as the learner's voice (all caps, owner round 3)");
-		// The row follows the Your thinking setting (factory: expanded).
 		assert.ok(html.includes('data-testid="your-thinking-trigger"'), "the trigger row");
 		assert.ok(html.includes('aria-expanded="true"'), "arrives expanded");
 		// ONE GEOMETRY, NO BAND IN CARDS (owner round five, 2026-10-07): the
@@ -743,7 +742,6 @@ describe("predict vs check rendering", () => {
 		assert.ok(html.includes("YOUR THINKING"), "the plain label");
 		assert.ok(!html.includes("Your thinking while reading"), "the old verbose label is gone");
 		assert.ok(!html.includes("your-reading-thinking"), "the in-card inset is gone");
-		// Both rows follow the Your thinking setting (factory: expanded).
 		assert.ok(html.includes('data-testid="your-thinking-trigger"'), "the answer thinking stays inside the card");
 		assert.ok(html.includes("was unsure mid-paragraph"), "the lifted row arrives expanded");
 		assert.ok(html.includes("answering thought"), "the in-card row arrives expanded too");

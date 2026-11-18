@@ -59,7 +59,6 @@ async function mount(expandByDefault: ExpandByDefault, node: React.ReactNode) {
 	};
 }
 
-/** What the chat's shortcut listener does with the live setting. */
 const keyboardToggle = (kind: DisclosureKind) =>
 	act(async () => toggleAllDisclosures(kind, live.appearance.expandByDefault[kind]));
 

@@ -642,8 +642,6 @@ export function Chat({
 	const [readingThinkingSeed, setReadingThinkingSeed] = useState({ questionId: null as string | null, value: "", revision: 0 });
 	const readingThinkingRef = useRef("");
 
-	// ⌘T, ⌘Y, and toggle-agent-thinking: each sets every block of its kind
-	// to one state, flipping from the last toggle or else the setting.
 	const { expandByDefault } = useAppearance().appearance;
 	useEffect(() => {
 		const unsubscribes = DISCLOSURE_KINDS.map((kind) => {
