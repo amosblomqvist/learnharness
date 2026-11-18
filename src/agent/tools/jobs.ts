@@ -4,6 +4,7 @@ import { serverExecute } from "../tool-execute.ts";
 import type { JobRecord } from "../../core/contracts.ts";
 import type { JobStore } from "../../core/ports.ts";
 import { checkLearnerImage } from "./learner-image.ts";
+import { checkPdfPage } from "./pdf-figure.ts";
 import { resolveSourcePath } from "./fs-shared.ts";
 
 /**
@@ -65,6 +66,19 @@ export const visualInputSchema = Type.Object({
 				"instead of drawing from scratch.",
 		}),
 	),
+	pdf: Type.Optional(
+		Type.Object(
+			{
+				path: Type.String({ minLength: 1, description: "Path to the learner's PDF (relative or absolute), exactly as they gave it." }),
+				page: Type.Integer({ minimum: 1, description: "The 1-based page that holds the figure." }),
+			},
+			{
+				description:
+					"A figure on one page of the learner's PDF (lecture slides, a textbook chapter) to annotate — the maker crops it from " +
+					"that page and draws on the crop. Never together with image.",
+			},
+		),
+	),
 });
 
 export const pdfInputSchema = Type.Object({
@@ -121,7 +135,10 @@ const VISUAL_DESCRIPTION =
 	"Dispatch a background sub-agent that hand-authors ONE precise SVG figure, renders it, LOOKS at the render, and iterates " +
 	"until correct. Use it for exact spatial pictures auto-layout diagrams can't do: coordinate geometry, number lines, vectors, " +
 	"function plots, physical layouts. For flows/relations/taxonomies write mermaid inline instead. " +
-	"Pass `image` (a learner image file) to have the maker annotate that picture — arrows, outlines, labels — instead. Local image paths follow File access settings; use ls to discover allowed folders. " +
+	"Pass `image` (a learner image file) to have the maker annotate that picture — arrows, outlines, labels — instead. " +
+	"Pass `pdf` ({ path, page }) to annotate a figure on one page of a learner's PDF: the maker crops it from that page itself; " +
+	"name the exact page and describe the figure in the brief so the maker can find it. " +
+	"Local image and PDF paths follow File access settings; use ls to discover allowed folders. " +
 	"The call is ASYNC and fire-and-forget — it resolves immediately and your turn continues; the verified figure arrives later " +
 	"as a new message.";
 const PDF_DESCRIPTION =
@@ -162,10 +179,14 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 			label: "visual",
 			description: VISUAL_DESCRIPTION,
 			parameters: visualInputSchema,
-			// An unusable image path fails the CALL (no job is created), so the
-			// teacher corrects the path in the same turn.
+			// An unusable image path, PDF or page fails the CALL (no job is
+			// created), so the teacher corrects it in the same turn.
 			execute: serverExecute("visual", visualInputSchema, async (input, { toolCallId, signal }) => {
-				if (!ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId) && input.image !== undefined) await checkLearnerImage(input.image);
+				if (!ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId)) {
+					if (input.image !== undefined && input.pdf !== undefined) throw new Error("Pass either image or pdf, not both.");
+					if (input.image !== undefined) await checkLearnerImage(input.image);
+					if (input.pdf !== undefined) await checkPdfPage(input.pdf.path, input.pdf.page);
+				}
 				signal?.throwIfAborted();
 				return dispatch(ctx, "visual", toolCallId, VISUAL_ACK, input);
 			}),
