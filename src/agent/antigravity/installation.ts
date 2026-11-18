@@ -21,7 +21,7 @@ import {
 	ANTIGRAVITY_MINIMUM_CLI_VERSION,
 	ANTIGRAVITY_VERSION_TIMEOUT_MS,
 } from "./constants.ts";
-import { buildAntigravityEnvironment } from "./profile.ts";
+import { buildAntigravityEnvironment, touchAntigravityKeyringUnavailable } from "./profile.ts";
 import { getAntigravityRelease, type AntigravityReleaseManifestEntry } from "./release.ts";
 
 export type AntigravityRuntimeKind = "acp-server" | "cli";
@@ -684,6 +684,25 @@ export function buildProbeEnvironment(options: {
 	return buildAntigravityEnvironment(options);
 }
 
+/** Appends `--gemini-dir <profileDir> --app-data-dir antigravity-acp` for
+ *  `agy` / `antigravity` CLI runtimes, which ignore `GEMINI_HOME`. */
+export function antigravityRuntimeArgs(
+	runtime: Pick<ResolvedAntigravityRuntime, "kind" | "args">,
+	profileDir?: string,
+): string[] {
+	const args = [...runtime.args];
+	if (runtime.kind !== "cli" || !profileDir) {
+		return args;
+	}
+	if (!args.some((arg) => arg === "--gemini-dir" || arg.startsWith("--gemini-dir="))) {
+		args.push("--gemini-dir", profileDir);
+	}
+	if (!args.some((arg) => arg === "--app-data-dir" || arg.startsWith("--app-data-dir="))) {
+		args.push("--app-data-dir", "antigravity-acp");
+	}
+	return args;
+}
+
 export async function probeAntigravityInitialize(
 	runtime: ResolvedAntigravityRuntime,
 	options: {
@@ -704,6 +723,9 @@ export async function probeAntigravityInitialize(
 	fs.mkdirSync(cwd, { recursive: true });
 	fs.mkdirSync(geminiHome, { recursive: true, mode: 0o700 });
 	fs.mkdirSync(tempDir, { recursive: true });
+	if (runtime.kind === "cli") {
+		touchAntigravityKeyringUnavailable(geminiHome, platform);
+	}
 
 	const env = buildProbeEnvironment({
 		baseEnv: options.baseEnv,
@@ -715,7 +737,7 @@ export async function probeAntigravityInitialize(
 
 	try {
 		return await new Promise<{ version: string | null }>((resolve, reject) => {
-			const child = spawnProcess(runtime.executablePath, runtime.args, {
+			const child = spawnProcess(runtime.executablePath, antigravityRuntimeArgs(runtime, geminiHome), {
 				cwd,
 				env,
 				stdio: ["pipe", "pipe", "pipe"],
@@ -812,7 +834,7 @@ export async function probeAntigravityInitialize(
 					return;
 				}
 				const agentName = msg.result?.agentInfo?.name;
-				if (agentName !== "antigravity-acp") {
+				if (agentName !== "antigravity-acp" && agentName !== "Antigravity ACP Server") {
 					fail(new Error(`Unexpected ACP agentInfo.name: ${String(agentName ?? "missing")}`));
 					return;
 				}

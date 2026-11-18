@@ -419,6 +419,7 @@ export async function discoverAntigravityModels(
 		cwd,
 		env,
 		runtime,
+		profileDir,
 		platform,
 		spawnProcess: options.spawnProcess,
 		onSessionUpdate: (_sessionId, update) => {

@@ -1,4 +1,5 @@
 import { spawn, type ChildProcess } from "node:child_process";
+import * as fs from "node:fs";
 import * as readline from "node:readline";
 import packageMetadata from "../../../package.json" with { type: "json" };
 import {
@@ -8,7 +9,13 @@ import {
 	ANTIGRAVITY_SESSION_NEW_TIMEOUT_MS,
 	ANTIGRAVITY_SET_CONFIG_TIMEOUT_MS,
 } from "./constants.ts";
-import { compareSemver, type ResolvedAntigravityRuntime } from "./installation.ts";
+import {
+	antigravityRuntimeArgs,
+	compareSemver,
+	type AntigravityRuntimeKind,
+	type ResolvedAntigravityRuntime,
+} from "./installation.ts";
+import { touchAntigravityKeyringUnavailable } from "./profile.ts";
 
 /** Terminates an ACP child cleanly via `stdin` EOF first, escalating directly
  *  to `SIGKILL` on timeout so `agy_acp_server` never emits noisy absl `SIGTERM`
@@ -276,7 +283,10 @@ type PendingRpc = {
 export interface CreateAcpClientOptions {
 	cwd: string;
 	env: NodeJS.ProcessEnv;
-	runtime: Pick<ResolvedAntigravityRuntime, "executablePath" | "args" | "version">;
+	runtime: Pick<ResolvedAntigravityRuntime, "executablePath" | "args" | "version"> & {
+		kind?: AntigravityRuntimeKind;
+	};
+	profileDir?: string;
 	platform?: NodeJS.Platform;
 	spawnProcess?: typeof spawn;
 	onSessionUpdate?: (sessionId: string | undefined, update: AcpSessionUpdate) => void;
@@ -331,7 +341,19 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 export function spawnAcpClient(options: CreateAcpClientOptions): AcpClient {
 	const spawnProcess = options.spawnProcess ?? spawn;
 	const platform = options.platform ?? process.platform;
-	const child = spawnProcess(options.runtime.executablePath, options.runtime.args, {
+	const profileDir = options.profileDir ?? options.env.GEMINI_HOME;
+	const runtimeKind: AntigravityRuntimeKind = options.runtime.kind ?? "acp-server";
+	if (runtimeKind === "cli" && profileDir) {
+		try {
+			if (fs.existsSync(profileDir)) {
+				touchAntigravityKeyringUnavailable(profileDir, platform);
+			}
+		} catch {
+			// Best-effort refresh; do not block synthetic tests.
+		}
+	}
+	const args = antigravityRuntimeArgs({ kind: runtimeKind, args: options.runtime.args }, profileDir);
+	const child = spawnProcess(options.runtime.executablePath, args, {
 		cwd: options.cwd,
 		env: options.env,
 		stdio: ["pipe", "pipe", "pipe"],

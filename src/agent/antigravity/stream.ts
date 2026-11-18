@@ -448,6 +448,7 @@ class AcpSessionProcess implements LiveAntigravityProcess {
 			cwd,
 			env,
 			runtime: input.runtime,
+			profileDir: input.profileDir,
 			platform: this.platform,
 			spawnProcess: input.spawnProcess,
 			approvePermission: (params) =>
