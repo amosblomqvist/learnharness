@@ -2,7 +2,7 @@ import { DOMParser } from "linkedom";
 import { embedLearnerImage, LEARNER_IMAGE_HREF } from "../../core/learner-image-svg.ts";
 
 /** Structural annotation protocol, not a claim to prove visibility or mark accuracy.
- * Native-only rendering avoids executing generated SVG in the browser fallback.
+ * Annotation rendering keeps strict native input, without ordinary figure repairs.
  */
 export function annotationPlacementProblem(svg: string, width: number, height: number): string | null {
 	if (/<!DOCTYPE|<!ENTITY/i.test(svg)) return "annotation SVGs cannot declare entities or a document type";

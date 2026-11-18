@@ -3,13 +3,14 @@ import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PathInput, INSERT_FILE_PATHS_EVENT } from "../components/path-input.tsx";
+import { PathInput, INSERT_CITATION_EVENT, INSERT_FILE_PATHS_EVENT, UPDATE_CITATION_EVENT } from "../components/path-input.tsx";
 import {
 	PATH_CARET_ATTRIBUTE, PATH_SOURCE_ATTRIBUTE, PathInputHistory, adjacentPathRange, atomicPathRange,
-	insertFilePaths, normalizePathEdit, normalizePathInputValue, pathInputOffset, pathInputPoint, pathInputStaticRange, readPathInput,
+	insertCitation, insertFilePaths, normalizePathEdit, normalizePathInputValue, pathInputOffset, pathInputPoint, pathInputStaticRange, readPathInput,
 	readPathSelection, renderPathInput, replacePathSelection, restorePathSelection,
 } from "../components/path-input-dom.ts";
 import { quoteFilePath } from "../src/core/file-paths.ts";
+import { serializeCitation } from "../src/core/citations.ts";
 
 function editor() {
 	const { document } = parseHTML("<html><body><div id='editor'></div></body></html>");
@@ -626,4 +627,63 @@ test("single-line IME sanitizes after completion, and queued external assignment
 	await f.event("compositionend");
 	assert.equal(readPathInput(f.root), "externalvalue");
 	assert.deepEqual(f.writes, ["a中文"]);
+});
+
+const citationLink = (text: string, comment?: string) => serializeCitation({ version: 1, chatId: "c", messageId: "m", text, start: 0, end: text.length, prefix: "", suffix: "", ...(comment ? { comment } : {}) });
+
+test("tutor citations render as atomic chips that keep their full link source", () => {
+	const root = editor();
+	const link = citationLink("the derivatives multiply");
+	const value = `why ${link} ${quoteFilePath("/a.pdf")}`;
+	const hosts = renderPathInput(root, value);
+	assert.deepEqual(hosts.map(({ token }) => token.kind), ["citation", "path"]);
+	assert.equal(hosts[0]!.host.getAttribute(PATH_SOURCE_ATTRIBUTE), link);
+	assert.equal(readPathInput(root), value);
+	assert.deepEqual(atomicPathRange(value, { anchor: 6, focus: 6 }), { start: 4, end: 4 + link.length });
+	assert.deepEqual(adjacentPathRange(value, { anchor: 4 + link.length, focus: 4 + link.length }, "backward"), { anchor: 4, focus: 4 + link.length });
+});
+
+test("citation insertion adds a separating space before and one after, swallowing an existing one", () => {
+	const link = citationLink("q");
+	const next = insertCitation("ab cd", { anchor: 2, focus: 2 }, link);
+	assert.equal(next.value, `ab ${link} cd`);
+	assert.deepEqual(next.inserted, { start: 3, end: 3 + link.length, spaceBefore: true, spaceAfter: false });
+	assert.equal(next.selection.anchor, 3 + link.length + 1);
+	const atEnd = insertCitation("ab ", { anchor: 3, focus: 3 }, link);
+	assert.equal(atEnd.value, `ab ${link} `);
+	assert.deepEqual(atEnd.inserted, { start: 3, end: 3 + link.length, spaceBefore: false, spaceAfter: true });
+});
+
+test("citation events insert, re-comment and remove the chip through the owned history", async () => {
+	const f = await fixture("ab");
+	f.select(2);
+	const link = citationLink("q");
+	let inserted: { start: number; end: number; spaceBefore: boolean; spaceAfter: boolean } | undefined;
+	await f.event(INSERT_CITATION_EVENT, { detail: { link, onInserted: (range: typeof inserted) => { inserted = range; } } });
+	assert.equal(f.value, `ab ${link} `);
+	assert.deepEqual(inserted, { start: 3, end: 3 + link.length, spaceBefore: true, spaceAfter: true });
+	const commented = citationLink("q", "why");
+	await f.event(UPDATE_CITATION_EVENT, { detail: { start: 3, end: 3 + link.length, previous: link, source: commented } });
+	assert.equal(f.value, `ab ${commented} `);
+	await f.event(UPDATE_CITATION_EVENT, { detail: { start: 3, end: 3 + commented.length, previous: commented, source: null, spaceBefore: true, spaceAfter: true } });
+	assert.equal(f.value, "ab");
+	await f.event("keydown", { key: "z", metaKey: true });
+	assert.equal(f.value, `ab ${commented} `);
+});
+
+test("a citation update whose source moved or vanished never edits other text", async () => {
+	const link = citationLink("q");
+	const f = await fixture(`x ${link}`);
+	await f.event(UPDATE_CITATION_EVENT, { detail: { start: 0, end: link.length, previous: link, source: null } });
+	assert.equal(f.value, "x ");
+	await f.event(UPDATE_CITATION_EVENT, { detail: { start: 2, end: 2 + link.length, previous: link, source: null } });
+	assert.equal(f.value, "x ");
+});
+
+test("Backspace after a citation chip deletes the whole link", async () => {
+	const link = citationLink("q");
+	const f = await fixture(`a ${link}`);
+	f.select(2 + link.length);
+	await f.event("keydown", { key: "Backspace" });
+	assert.equal(f.value, "a ");
 });

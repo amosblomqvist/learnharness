@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { ModelMenuList } from "../components/settings/model-menu.tsx";
 import { contextLimitForModel, StatsBar } from "../components/stats-bar.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { cliContextWindowOf, type LhMessage, type ModelCatalogEntry, type ModelCatalogResponse, type TurnUsage } from "../src/core/index.ts";
 
 const dom = parseHTML("<html><body></body></html>");
@@ -88,7 +89,7 @@ test("StatsBar renders CLI billing and CLI context rules for codex turns includi
 		providers: [],
 		slots: { strong: null, cheap: null, vision: null },
 		defaults: null,
-		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null },
+		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null },
 	};
 	globalThis.fetch = (async (url) => {
 		if (url === "/api/models") return Response.json(catalog);
@@ -115,7 +116,7 @@ test("StatsBar renders CLI billing and CLI context rules for codex turns includi
 	const pricing = { cost: 0, unpriced: 1, turnCosts: { "codex-turn": null } };
 
 	await act(async () => {
-		root!.render(<StatsBar chatId="codex-session" turns={[turn]} pricing={pricing} />);
+		root!.render(<InteractionLayersProvider><StatsBar chatId="codex-session" turns={[turn]} pricing={pricing} /></InteractionLayersProvider>);
 	});
 
 	assert.equal(document.querySelector('[data-testid="stats-cost"]')?.textContent, "CLI");

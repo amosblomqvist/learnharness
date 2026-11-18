@@ -27,7 +27,7 @@ describe("fork release configuration", () => {
 
 	it("uses a valid fork version and a separate application data name", () => {
 		const pkg = JSON.parse(read("package.json"));
-		assert.deepEqual(parseForkVersion(pkg.version), { upstream: "0.5.0", n: 1 });
+		assert.deepEqual(parseForkVersion(pkg.version), { upstream: "0.6.1", n: 1 });
 		assert.match(read("electron/main.cjs"), /const PRODUCT_NAME = "LearnHarness Fork";/);
 	});
 

@@ -82,6 +82,7 @@ To build the Windows installer from source on Windows:
 
 ```bash
 npm ci
+npm run plugins:setup
 npm run desktop:dist:win
 ```
 
@@ -102,6 +103,7 @@ Windows fork builds support in-app updates from this fork's GitHub Releases.
 
 ```bash
 npm ci
+npm run plugins:setup
 npm run dev        # http://localhost:3000
 npm test           # fixtures and fake providers
 ```
@@ -115,7 +117,9 @@ npm test           # fixtures and fake providers
 
 The diagram source is [docs/architecture/architecture.d2](docs/architecture/architecture.d2); redraw the SVGs with the arch-diagram `render.py` after changing it.
 
-See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), and [desktop builds and releases](docs/desktop-release.md).
+See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), [themes](docs/themes.md) for the theme file format, and [desktop builds and releases](docs/desktop-release.md).
+
+For trusted local plugins, start with the [authoring guide and capability map](docs/plugin-authoring.md). It links the question, practice-problem, submission, view-context and UI contracts. Use [`examples/plugins/`](examples/plugins/) for small runnable templates, [`plugins/`](plugins/) for feature source projects, and the [host architecture](docs/plugin-architecture.md) for internals.
 
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/reeschan/learnharness/issues).
 

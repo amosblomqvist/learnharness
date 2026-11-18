@@ -27,7 +27,7 @@
  * EXPAND icon (opens the session overlay) when a chat page is mounted.
  */
 
-import { cloneElement, isValidElement, useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { cloneElement, createContext, isValidElement, useContext, useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { CheckIcon, CopyIcon, MaximizeIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -38,10 +38,16 @@ import {
 } from "streamdown";
 import type { ExtraProps } from "streamdown";
 import { MERMAID_FONT_SIZE, renderMermaid } from "@/components/mermaid-render";
+import { useAppearance } from "@/components/settings/appearance";
 import { MermaidError } from "@/components/mermaid-error";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
+import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
+
+/** Local rendering profile for host-mounted, display-only Markdown. Ordinary
+ * transcript rendering (including SSR/static Streamdown) stays interactive. */
+export const MarkdownDisplayOnlyContext = createContext(false);
 
 // ─── The one affordance: the hover-reveal corner copy ────────────────────────
 
@@ -132,18 +138,20 @@ export function codeSource(children: ReactNode): string {
 	return "";
 }
 
-/** Mermaid, in the message flow: the bare chart (dark theme, rendered via
+/** Mermaid, in the message flow: the bare chart (the rendered mode's theme, via
  *  the app's own plugin — components/mermaid-render.ts), the hover corner
  *  with copy + expand, the house error fallback. No container chrome, no
  *  zoom pill — the zoom/pan home is the session overlay. While the fence is
  *  still streaming (the trailing open fence), a quiet skeleton instead of a
  *  doomed parse. */
 function MermaidInline({ chart }: { chart: string }) {
+	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const [svg, setSvg] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const [attempt, setAttempt] = useState(0);
 	const overlay = useSessionMermaid();
 	const incomplete = useIsCodeFenceIncomplete();
+	const { resolvedMode } = useAppearance();
 	// The font-parity cap (owner rule, 2026-09-19): the house CSS
 	// (`max-width: 100% !important`) overrides mermaid's own natural-size cap,
 	// so a chart would otherwise stretch to the full column and render its
@@ -166,7 +174,7 @@ function MermaidInline({ chart }: { chart: string }) {
 		let cancelled = false;
 		setSvg(null);
 		setError(null);
-		renderMermaid(chart)
+		renderMermaid(chart, resolvedMode)
 			.then((s) => {
 				if (!cancelled) setSvg(s);
 			})
@@ -176,7 +184,7 @@ function MermaidInline({ chart }: { chart: string }) {
 		return () => {
 			cancelled = true;
 		};
-	}, [chart, attempt, incomplete]);
+	}, [chart, attempt, incomplete, resolvedMode]);
 
 	if (incomplete || (svg === null && error === null)) {
 		return (
@@ -186,7 +194,7 @@ function MermaidInline({ chart }: { chart: string }) {
 		);
 	}
 	if (error !== null) {
-		return <MermaidError chart={chart} error={error} retry={() => setAttempt((a) => a + 1)} />;
+		return <MermaidError chart={chart} error={error} retry={() => setAttempt((a) => a + 1)} displayOnly={displayOnly} />;
 	}
 	return (
 		// data-streamdown="mermaid" keeps the house CSS hook (the svg
@@ -198,7 +206,7 @@ function MermaidInline({ chart }: { chart: string }) {
 				style={capW === null ? undefined : { maxWidth: `${capW}px` }}
 				dangerouslySetInnerHTML={{ __html: svg ?? "" }}
 			/>
-			<div className="absolute top-0 right-0 flex items-start gap-0.5">
+			{!displayOnly && <div className="absolute top-0 right-0 flex items-start gap-0.5">
 				<CopyCorner getText={() => chart} label="Copy diagram source" />
 				{overlay && (
 					<Hint
@@ -221,7 +229,7 @@ function MermaidInline({ chart }: { chart: string }) {
 					</button>
 				</Hint>
 				)}
-			</div>
+			</div>}
 		</div>
 	);
 }
@@ -234,13 +242,14 @@ function MermaidInline({ chart }: { chart: string }) {
  *  mounts. The container/look is CSS-melted in globals.css
  *  (data-streamdown="code-block"…). */
 export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
+	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const incomplete = useIsCodeFenceIncomplete();
 	const { children, className, node, ...rest } = props;
 
 	// Inline code: no data-block (the pre handler stamps block fences only).
 	if (!("data-block" in props)) {
 		return (
-			<code className={cn("rounded px-1.5 py-0.5 font-mono text-sm", className)} data-streamdown="inline-code" {...rest}>
+			<code className={cn("rounded px-1.5 py-0.5 font-mono text-sm text-(--lh-ink-code)", className)} data-streamdown="inline-code" {...rest}>
 				{children}
 			</code>
 		);
@@ -250,14 +259,14 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const meta = (node?.properties?.metastring as string | undefined) ?? "";
 	const source = codeSource(children);
 
-	if (language === "mermaid") return <MermaidInline chart={source} />;
+	if (language === BUILTIN_MERMAID_LANGUAGE) return <MermaidInline chart={source} />;
 
 	const startMatch = /startLine=(\d+)/.exec(meta);
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
-	return (
+	const fallback = (
 		<div className="group/md relative" data-testid="md-code">
-			<CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />
+			{!displayOnly && <CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />}
 			<CodeBlock
 				code={source}
 				language={language}
@@ -268,6 +277,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 			/>
 		</div>
 	);
+	return displayOnly ? fallback : <PluginCodeBlock language={language} source={source} meta={meta} incomplete={incomplete} fallback={fallback} />;
 }
 
 // ─── Key-idea callouts (the Streamdown `blockquote` override) ────────────────
@@ -359,7 +369,7 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 		<div
 			data-testid="md-callout"
 			data-alert-kind={alert.kind}
-			className="my-4 w-fit max-w-full border border-white px-4 py-3 [&> :first-child]:mt-0 [&> :last-child]:mb-0"
+			className="my-4 w-fit max-w-full border border-line-strong px-4 py-3 [&> :first-child]:mt-0 [&> :last-child]:mb-0"
 		>
 			{alert.children}
 		</div>
@@ -374,11 +384,12 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
  *  horizontal-scroller for wide ones, with the corner copy. The copy
  *  serializes the REAL DOM table (the library's own extractor → Markdown). */
 export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
+	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const { children, node, ...rest } = props;
 	const ref = useRef<HTMLTableElement>(null);
 	return (
 		<div className="group/md relative my-4" data-testid="md-table">
-			<CopyCorner
+			{!displayOnly && <CopyCorner
 				// Contained in the table's top-right corner (owner note, 2026-09-19:
 				// the old -top-3 lifted only half the 24px button above the 12px
 				// offset, so it straddled the top outline). 4px inset, z above the
@@ -387,7 +398,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 				className="absolute top-1 right-1 z-10"
 				label="Copy table"
 				getText={() => (ref.current ? tableDataToMarkdown(extractTableDataFromElement(ref.current)) : "")}
-			/>
+			/>}
 			<div className="overflow-x-auto">
 				<table
 					ref={ref}
@@ -414,6 +425,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
  *  in the MathML <annotation>; read from the DOM on click, no re-parse).
  *  Every other span passes through untouched. */
 export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
+	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const { children, className, node, ...rest } = props;
 	const ref = useRef<HTMLSpanElement>(null);
 	if (!className?.includes("katex-display")) {
@@ -432,11 +444,11 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 		// nor copies; everything else works). display:block gives the corner a
 		// real box; z-10 keeps it above the equation spans it overlays.
 		<span className="group/md relative block z-0" data-testid="md-math">
-			<CopyCorner
+			{!displayOnly && <CopyCorner
 				className="absolute top-0 right-0 z-10"
 				label="Copy equation source"
 				getText={() => ref.current?.querySelector("annotation")?.textContent ?? ""}
-			/>
+			/>}
 			<span ref={ref} className={className} {...rest}>
 				{children}
 			</span>

@@ -31,7 +31,7 @@ test("local cutoff matches published native golden boundaries and estimator valu
 	];
 	for (const [name, messages, budget, expected, tokens] of cases) {
 		assert.equal(compactionCutIndex(messages, budget), expected, name);
-		assert.deepEqual(messages.map(estimateMessageTokens), tokens, name);
+		assert.deepEqual(messages.map((message) => estimateMessageTokens(message)), tokens, name);
 	}
 	assert.equal(compactionCutIndex([user(400), metadata(), assistant(40), metadata(), user(40)], 15), 1, "adjacent invisible metadata stays with the cut");
 	assert.equal(KEEP_RECENT_TOKENS, 20_000);
