@@ -91,6 +91,9 @@ export interface QuestionDockProps {
 	/** Escape in a question field stops dictation (STT wave) — threaded
 	 *  from the page that owns the dictation hook. */
 	onEscape?: () => void;
+	/** Main dictation is live: Submit finishes it first, so an empty field
+	 *  can still submit (its words land when the run stops). */
+	dictating?: boolean;
 	/** The learner's current unsubmitted working (thinking, or the typed
 	 *  answer in text mode), kept current for the side thread's nudges. */
 	workingRef?: { current: string };
@@ -127,6 +130,7 @@ export function QuestionDock({
 	initialDraft,
 	onSaveDraft,
 	onEscape,
+	dictating = false,
 	phase = "probe",
 	dictationClaim = true,
 	compactionRunning = false,
@@ -185,6 +189,7 @@ export function QuestionDock({
 					initialDraft={initialDraft}
 					onSaveDraft={onSaveDraft}
 					onEscape={onEscape}
+					dictating={dictating}
 					workingRef={workingRef}
 					dictationClaim={dictationClaim}
 					compactionRunning={compactionRunning}
@@ -278,6 +283,7 @@ function QuestionDockForm({
 	initialDraft,
 	onSaveDraft,
 	onEscape,
+	dictating = false,
 	dictationClaim = true,
 	compactionRunning = false,
 	workingRef,
@@ -399,7 +405,11 @@ function QuestionDockForm({
 			? text.trim().length > 0
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
-	const canSubmit = nativeCanSubmit || hasPendingInput?.(qd) === true;
+	// Prepared submits finish dictation before capture and read an unclicked
+	// option from the thinking (components/answer-intent.ts).
+	const pickFromThinking = qd.mode !== "text" && !nativeCanSubmit && thinking.trim().length > 0;
+	const inferable = !!onPrepareSubmission && ((dictating && dictationClaim) || pickFromThinking);
+	const canSubmit = nativeCanSubmit || inferable || hasPendingInput?.(qd) === true;
 	const currentQuestion = useRef(qd); currentQuestion.current = qd;
 	const mounted = useRef(true);
 	useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
@@ -974,7 +984,11 @@ function QuestionDockForm({
 					)}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning
+									? "compacting session…"
+									: onPrepareSubmission && pickFromThinking
+										? "↵ submits · option read from your thinking"
+										: "↵ submits · ⇧↵ newline"}
 						</span>
 						<Button
 							type="submit"

@@ -58,6 +58,8 @@ export interface PracticeDockProps {
 	preparing?: boolean;
 	/** Escape in the thinking field stops dictation (threaded from the page). */
 	onEscape?: () => void;
+	/** Main dictation is live: a prepared submit finishes it before capture. */
+	dictating?: boolean;
 	/** Compaction is running for this chat (owner round 14): the thinking
 	 *  POST would block on the server's compaction gate — disable submit
 	 *  and say so in the hint row. The server registry is the real gate;
@@ -65,7 +67,7 @@ export interface PracticeDockProps {
 	compactionRunning?: boolean;
 }
 
-export function PracticeDock({ viewReader, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
+export function PracticeDock({ viewReader, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, dictating = false, compactionRunning = false }: PracticeDockProps) {
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLElement>(null);
 	const [nativeThinking, setNativeThinking] = useState("");
@@ -101,7 +103,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 		if (compactionRunning || preparing) return;
 		const prepare = customInput?.prepare ?? onPrepareSubmission;
 		if (prepare) {
-			if (customInput ? !customInput.ready : (!thinkingRef.current.trim() && !hasPendingInput)) return;
+			if (customInput ? !customInput.ready : (!thinkingRef.current.trim() && !hasPendingInput && !dictating)) return;
 			let capturedRevision = editRevision.current;
 			prepare(() => { capturedRevision = editRevision.current; return customInput ? thinkingRef.current : thinkingRef.current.trim(); }, captured => {
 				if (editRevision.current === capturedRevision && (customInput ? thinkingRef.current : thinkingRef.current.trim()) === captured) { thinkingRef.current = ""; setThinking(""); }
@@ -204,7 +206,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 					<Button
 						type="button"
 						data-testid="practice-send"
-						disabled={(customInput ? !customInput.ready : (!thinking.trim() && !hasPendingInput)) || compactionRunning || preparing}
+						disabled={(customInput ? !customInput.ready : (!thinking.trim() && !hasPendingInput && !(dictating && onPrepareSubmission))) || compactionRunning || preparing}
 						onClick={() => submit()}
 						className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 					>

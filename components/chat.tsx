@@ -70,6 +70,7 @@ import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog"
 import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
+import { needsAnswerIntent, resolveAnswerIntent } from "@/components/answer-intent";
 import { PluginQuestionDock } from "./plugin-question-dock";
 import { PluginQuestionPart } from "./plugin-question-part";
 import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
@@ -719,9 +720,10 @@ export function Chat({
 	const prepareBuiltin: PrepareBuiltinSubmission = ({ question, capture, isCurrent }: BuiltinSubmissionCapture) => {
 		const target = builtinTarget(question), original = pending;
 		if (!target || !original || busyRef.current || compacting) return;
-		void runSubmission(target, () => {
-			const raw = capture();
+		void runSubmission(target, async () => {
+			const captured = capture();
 			saveQuestionDraft(original.key, { readingThinking: readingThinkingRef.current });
+			const raw = needsAnswerIntent(question, captured) ? await resolveAnswerIntent(question, captured) : captured;
 			return { type: "answer", answer: {
 				...(raw.dontKnow !== undefined ? { dontKnow: raw.dontKnow } : {}), ...(raw.values !== undefined ? { values: raw.values } : {}),
 				...(raw.other !== undefined ? { other: raw.other } : {}), ...(raw.text !== undefined ? { text: raw.text } : {}),
@@ -2083,6 +2085,7 @@ export function Chat({
 					onReserve={setDockReserve}
 					dictationSlot={<DictationBar dictation={dictation} disabled={pluginOwnsDock && !pluginMicAvailable} />}
 					dictationCancel={dictation.cancel}
+					dictating={dictation.active}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
 					setupCta={
 						zeroKeys ? (
@@ -2402,6 +2405,7 @@ export function DockOverlay({
 	onOpenPlan,
 	dictationSlot,
 	dictationCancel,
+	dictating = false,
 	setupCta,
 	queuedSteers,
 }: {
@@ -2473,6 +2477,8 @@ export function DockOverlay({
 	/** Esc in a pending question's field stops dictation (the strip is the
 	 *  stats bar's; the stop belongs to the page-owned hook, threaded down). */
 	dictationCancel?: () => void;
+	/** Main dictation is live: its words reach the dock's field only when it stops. */
+	dictating?: boolean;
 	/** The queued-steer indicator's lines (composer steering, 2026-10-03):
 	 *  already filtered by visibleQueuedSteers — only undrained steers. */
 	queuedSteers: QueuedSteerLine[];
@@ -2909,6 +2915,7 @@ export function DockOverlay({
 									onSaveDraft={onSaveQuestionDraft}
 									workingRef={workingRef}
 									onEscape={dictationCancel}
+									dictating={dictating}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}
 								/>
@@ -2929,6 +2936,7 @@ export function DockOverlay({
 									hasPendingInput={pendingThinkingInput}
 									preparing={preparing}
 									onEscape={dictationCancel}
+									dictating={dictating}
 									compactionRunning={compactionRunning}
 								/>
 							) : (

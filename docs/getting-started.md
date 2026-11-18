@@ -19,7 +19,7 @@ Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama se
 
 Choose **Teach** and describe what you want to understand. The agent probes your starting point, presents a plan, and teaches through explanations and checks. Reply naturally to accept or revise the plan.
 
-Use the thinking fields to explain your reasoning, uncertainty, or reaction—not only your selected answer. You can type or dictate. Your confidence is self-reported, not an independent assessment.
+Use the thinking fields to explain your reasoning, uncertainty, or reaction—not only your selected answer. You can type or dictate. With dictation you can say your answer and press Enter without clicking an option; the Cheap model reads which one you chose. Your confidence is self-reported, not an independent assessment.
 
 Choose **Practice** for problems rather than a lesson. Start from selected graph material or describe material directly. Submit your thinking as you work; the model's committed solution is revealed when the problem concludes. Use **Next problem** when ready to continue.
 
