@@ -28,29 +28,32 @@ describe("buildSessionTree", () => {
 	);
 	const sessions = [s("s3", "Unfiled recent", 9), s("s2", "Lenses", 7), s("s4", "Unfiled old", 2), s("s1", "Forces", 5)];
 
-	it("interleaves folders and unfiled sessions by activity; folders without sessions sit A–Z at the bottom", () => {
+	it("folders lead every level by activity, folders without sessions follow A–Z, then sessions by activity", () => {
 		const tree = buildSessionTree(sessions, organization, { query: "", filtering: false });
 		assert.deepEqual(shape(tree), [
-			"s3",
 			{ "f-phys": [{ "f-optics": ["s2"] }, "s1"] },
-			"s4",
 			{ "f-empty-a": [] }, { "f-empty-b": [] }, { "f-notes": [] },
+			"s3",
+			"s4",
 		]);
-		const phys = tree[1];
+		const phys = tree[0];
 		assert.ok(phys?.type === "folder" && phys.activity === "2026-01-07T00:00:00.000Z", "activity includes subfolders");
 	});
 
 	it("an active filter hides folders without matching sessions (including notes-only folders)", () => {
 		const tree = buildSessionTree(sessions.filter((x) => x.id !== "s2"), organization, { query: "", filtering: true });
-		assert.deepEqual(shape(tree), ["s3", { "f-phys": ["s1"] }, "s4"]);
+		assert.deepEqual(shape(tree), [{ "f-phys": ["s1"] }, "s3", "s4"]);
 	});
 
 	it("search keeps the tree, title-only matching, ranked by best match at every level", () => {
 		const list = [s("a", "xenon notes", 9), s("b", "Lens basics", 1), s("c", "lens", 3)];
 		const o = org([folder("f", "Optics")], { b: "f", c: "f" });
 		const tree = buildSessionTree(list, o, { query: "lens", filtering: true });
-		// "lens" (exact) beats "Lens basics" (prefix); the folder ranks by its best.
+		// "lens" (exact) beats "Lens basics" (prefix) within the folder.
 		assert.deepEqual(shape(tree), [{ f: ["c", "b"] }]);
+		const o2 = org([folder("f", "Optics"), folder("g", "Geometry")], { b: "f", c: "g" });
+		const tree3 = buildSessionTree([...list, s("d", "lens", 2)], o2, { query: "lens", filtering: true });
+		assert.deepEqual(shape(tree3), [{ g: ["c"] }, { f: ["b"] }, "d"], "folders lead even when an unfiled session matches better; folders rank by best match");
 		const tree2 = buildSessionTree(list, o, { query: "Optics", filtering: true });
 		assert.deepEqual(shape(tree2), [], "folder names are not searched — titles only, as before");
 	});
@@ -64,7 +67,7 @@ describe("buildSessionTree", () => {
 		const closed = flattenSessionTree(tree, () => false).flatMap((r) => r.type === "session" ? [r.session.id] : []);
 		assert.deepEqual(closed, ["s3", "s4"]);
 		const opened = flattenSessionTree(tree, () => true);
-		assert.deepEqual(opened.flatMap((r) => r.type === "session" ? [`${r.session.id}@${r.depth}`] : []), ["s3@0", "s2@2", "s1@1", "s4@0"]);
+		assert.deepEqual(opened.flatMap((r) => r.type === "session" ? [`${r.session.id}@${r.depth}`] : []), ["s2@2", "s1@1", "s3@0", "s4@0"]);
 	});
 });
 

@@ -180,7 +180,14 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 			return <div key={folder.id} data-testid={`source-folder-${folder.id}`} {...treeBranchLayout()} {...dropProps(folder.id)}>
 				<SourceDragRow {...chainRow(["folder", folder.id], depth, open)} kind="folder" id={folder.id} name={folder.name} enabled={Boolean(onAction)} data-testid={`folder-row-${folder.id}`}
 					data-drop-active={dropTarget === folder.id}
-					{...treeRowLayout({ depth, className: `transition-colors ${!open || !hasChildren ? "border-b border-transparent" : ""} ${dropTarget === folder.id ? "bg-accent/50" : ""}`, style: { paddingLeft: 12 + depth * 36 } })}>
+					{...treeRowLayout({ depth, className: `relative transition-colors ${dropTarget === folder.id ? "bg-accent/50" : ""}`,
+						// Inline: the unlayered global `* { border-color }` outranks
+						// Tailwind's transparent border, which drew this slot full width.
+						style: { paddingLeft: 12 + depth * 36, borderBottom: "1px solid transparent" } })}>
+					{/* An open folder's contents are framed top AND bottom (owner,
+					    polish round): a rule under the folder row starting at the
+					    rail, like every rule between its items. */}
+					{open && hasChildren && <TreeSeparator data-testid={`folder-head-separator-${folder.id}`} outside inset={(depth + 1) * 36 + 1} />}
 					<TreeCheckbox aria-label={`Select ${sourceSelection ? "folder" : "contents of"} ${folder.name}`} data-testid={`folder-checkbox-${folder.id}`}
 						disabled={entryCheck ? false : empty ? !allowEmptySelection : members.length === 0}
 						checked={entryCheck?.checked ?? (empty ? selectedFolders.has(folder.id) : members.length > 0 && selectedCount === members.length)}
@@ -197,7 +204,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 					<TreeCell widthClassName="w-14" align="right" className="text-xs tabular-nums text-muted-foreground">{members.length}</TreeCell>
 					<TreeCell widthClassName="w-20" align="right" className="text-xs tabular-nums text-muted-foreground">{folder.createdAt.slice(0, 10)}</TreeCell>
 				</SourceDragRow>
-				{open && hasChildren && <TreeGuide selectionColumn depth={depth} data-testid={`folder-thread-${folder.id}`} />}
+				{open && hasChildren && <TreeGuide selectionColumn through depth={depth} data-testid={`folder-thread-${folder.id}`} />}
 				{open && renderLevel(folder.id, depth + 1)}
 				<TreeSeparator data-testid={`folder-separator-${folder.id}`} inset={depth === 0 ? 0 : depth * 36 + 1} />
 			</div>;

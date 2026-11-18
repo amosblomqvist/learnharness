@@ -23,10 +23,12 @@ const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: tr
 /**
  * The sidebar's folder tree (approved plan):
  * - sessions sit in their placed folder; unknown/absent placements are unfiled;
- * - outside search, every level orders by recent activity (a folder's activity
- *   is its newest visible session, subfolders included) and folders without
- *   visible sessions follow A–Z at the bottom;
- * - while searching, every level ranks by best match score (activity breaks ties);
+ * - folders always sit above sessions at every level (owner, polish round);
+ * - outside search, folders order by recent activity (a folder's activity is
+ *   its newest visible session, subfolders included), folders without visible
+ *   sessions follow A–Z after them; sessions order by recent activity;
+ * - while searching, folders still lead; within the folders and within the
+ *   sessions each level ranks by best match score (activity breaks ties);
  * - with a filter or search active (`filtering`), folders without matching
  *   sessions are hidden; otherwise every folder is shown.
  * `sessions` must already be narrowed by the existing type filter; `query`
@@ -54,8 +56,9 @@ export function buildSessionTree<T extends SidebarSession>(
 	const nameOf = (node: SessionTreeNode<T>) => node.type === "session" ? node.session.title : node.folder.name;
 	const idOf = (node: SessionTreeNode<T>) => node.type === "session" ? node.session.id : node.folder.id;
 	const compare = (a: SessionTreeNode<T>, b: SessionTreeNode<T>): number => {
+		if (a.type !== b.type) return a.type === "folder" ? -1 : 1;
 		const aa = activityOf(a), ba = activityOf(b);
-		// Folders without visible sessions sit below everything, A–Z.
+		// Folders without visible sessions follow the other folders, A–Z.
 		if (aa === null || ba === null) {
 			if (aa !== ba) return aa === null ? 1 : -1;
 			return collator.compare(nameOf(a), nameOf(b)) || idOf(a).localeCompare(idOf(b));

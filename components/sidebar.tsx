@@ -19,8 +19,9 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { buildSessionTree, flattenSessionTree, folderIsEmpty, placementOf, type SessionTreeNode } from "@/src/core";
 import { useSourceDirectory } from "@/components/source-directory";
-import { NewFolderRow, SidebarFolderRow, sidebarRowPadding, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
+import { NewFolderRow, RULE_SLOT, SidebarFolderRow, SidebarRule, sidebarRail, sidebarRowBox, sidebarRuleInset, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
 import { SourceDragRow } from "@/components/source-folder-tree";
+import { OverlayScrollArea } from "@/components/overlay-scroll";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
@@ -329,7 +330,7 @@ export function SessionRow({
 				active && "bg-accent",
 				kbdSelected && !active && "bg-accent/60 ring-1 ring-inset ring-border",
 			)}
-			style={{ paddingLeft: sidebarRowPadding(depth) }}
+			style={{ paddingLeft: sidebarRowBox(depth).paddingLeft }}
 		>
 			<SessionStatus busy={chat.busy || chat.compacting} />
 			<span className="min-w-0 flex-1">
@@ -370,7 +371,7 @@ export function RenameRow({ chat, onCommit, onCancel, depth = 0 }: { chat: ChatL
 		<div
 			data-testid="session-rename-row"
 			className="relative flex w-full items-center bg-accent py-2 pr-3"
-			style={{ paddingLeft: sidebarRowPadding(depth) }}
+			style={{ paddingLeft: sidebarRowBox(depth).paddingLeft }}
 		>
 			{/* NOTHING MOVES (owner, polish round): an idle row renders no
 			    status spacer (SessionStatus is null when not busy), so the
@@ -724,7 +725,9 @@ function SessionsSidebar() {
 			const placedIn = organization ? placementOf(organization, c.id)?.folderId ?? null : null;
 			return (
 				<SourceDragRow key={c.id} kind="source" id={c.id} name={c.title} enabled={Boolean(organization) && renamingId !== c.id}
-					{...folderDrop.dropProps(placedIn)}>
+					className="relative" style={{ ...RULE_SLOT, marginLeft: sidebarRowBox(depth).marginLeft }} {...folderDrop.dropProps(placedIn)}>
+					{/* Every row is ruled (Chains' table look, owner polish round). */}
+					<SidebarRule testid={`session-rule-${c.id}`} inset={0} />
 					{renamingId === c.id ? (
 						<RenameRow
 							chat={c}
@@ -751,17 +754,21 @@ function SessionsSidebar() {
 		const folder = node.folder;
 		const folderOpen = isFolderOpen(folder.id);
 		const creatingHere = creatingFolder?.parentId === folder.id;
+		const contentsShown = folderOpen && (node.children.length > 0 || creatingHere);
 		return (
 			<div key={folder.id} data-testid={`sidebar-folder-branch-${folder.id}`} className="relative" {...folderDrop.dropProps(folder.id)}>
-				{/* The tree thread at the chevron's column (Chains' guide). */}
-				{folderOpen && (node.children.length > 0 || creatingHere) && (
-					<div aria-hidden="true" className="pointer-events-none absolute top-[28px] bottom-1 w-px bg-border/50"
-						style={{ left: sidebarRowPadding(depth) + 7 }} />
+				{/* The tree thread at the chevron's column (Chains' guide): from
+				    under the chevron all the way to the folder's bottom rule, so
+				    the last item's rule still meets it. */}
+				{contentsShown && (
+					<div aria-hidden="true" data-testid={`sidebar-folder-thread-${folder.id}`} className="pointer-events-none absolute top-[23px] bottom-0 w-px bg-border/50"
+						style={{ left: sidebarRail(depth) }} />
 				)}
 				<SidebarFolderRow
 					folder={folder}
 					depth={depth}
 					open={folderOpen}
+					contentsShown={contentsShown}
 					draggable={Boolean(organization)}
 					dropActive={folderDrop.dropTarget === folder.id}
 					renaming={renamingFolderId === folder.id}
@@ -775,9 +782,10 @@ function SessionsSidebar() {
 						onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: folder.id })} />
 				)}
 				{folderOpen && renderTree(node.children, depth + 1)}
-				{/* Chains' separator: under folders only, never per session row. */}
-				<div aria-hidden="true" className="pointer-events-none absolute bottom-0 right-0 border-b border-border/60"
-					style={{ left: depth === 0 ? 0 : sidebarRowPadding(depth) }} />
+				{/* The folder's closing rule at its own level, over its last
+				    item's rule (Chains' folder separator). */}
+				{contentsShown && <div aria-hidden="true" className="pointer-events-none absolute bottom-0 right-0 border-b border-border/60"
+					style={{ left: sidebarRuleInset(depth) }} />}
 			</div>
 		);
 	});
@@ -964,7 +972,9 @@ function SessionsSidebar() {
 					</div>
 				)}
 
-				<div ref={listRef} data-testid="session-list" className="mt-2 flex flex-1 flex-col overflow-y-auto" {...folderDrop.containerProps}>
+				{/* The bar overlays the rows (owner polish round): rules and
+				    highlights run to the edge; it shows while scrolling/hovering. */}
+				<OverlayScrollArea scrollRef={listRef} areaClassName="mt-2" data-testid="session-list" className="flex flex-col" {...folderDrop.containerProps}>
 					{creatingFolder?.parentId === null && (
 						<NewFolderRow depth={0} onDone={() => setCreatingFolder(null)}
 							onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: null })} />
@@ -984,7 +994,7 @@ function SessionsSidebar() {
 							className={cn("min-h-16 flex-1 transition-colors", folderDrop.dropTarget === null && "bg-accent/30")}
 							{...folderDrop.dropProps(null)} />
 					)}
-				</div>
+				</OverlayScrollArea>
 
 					{/* Background agents (owner, sidebar round): the section is
 					    ALWAYS here — empty means empty (the header sits alone); it
