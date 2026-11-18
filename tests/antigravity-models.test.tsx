@@ -326,3 +326,25 @@ test("POST /api/antigravity/models enforces guards, refreshes models, and sign-i
 	assert.equal(fs.existsSync(modelsPath), false);
 	assert.equal(models.getStatus().count, 0);
 });
+
+test("discoverAntigravityModels works with kind='cli' (agy 1.5.10) using --gemini-dir/--app-data-dir isolation", async () => {
+	const profileDir = ensureAntigravityProfile({ authFile: testAuthFile });
+	fs.rmSync(antigravityTokenFilePath(profileDir), { force: true });
+	const cache = await discoverAntigravityModels(
+		fakeRuntime({ source: "cli", kind: "cli", args: ["acp"], version: "1.5.10", harnessPath: undefined }),
+		{
+			authFile: testAuthFile,
+			dataDir: testData,
+			env: {
+				...process.env,
+				FAKE_ACP_MODE: "cli-1510",
+				FAKE_ACP_RECORD_EVENTS: "1",
+			},
+		},
+	);
+	assert.equal(cache.models.length, 3);
+	const recordedArgv = JSON.parse(
+		fs.readFileSync(path.join(profileDir, "antigravity-acp", "last-argv.json"), "utf8"),
+	) as { argv: string[] };
+	assert.deepEqual(recordedArgv.argv, ["acp", "--gemini-dir", profileDir, "--app-data-dir", "antigravity-acp"]);
+});

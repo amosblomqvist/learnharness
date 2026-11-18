@@ -20,11 +20,14 @@ import {
 	type ResolvedAntigravityRuntime,
 } from "../src/agent/antigravity/installation.ts";
 import {
+	antigravityCliTokenFilePath,
+	antigravityKeyringUnavailablePath,
 	antigravityModelsCachePath,
 	antigravityProfileSettingsPath,
 	antigravityTokenFilePath,
 	buildAntigravityEnvironment,
 	createBrowserWrapper,
+	deleteAntigravityTokenFile,
 	ensureAntigravityProfile,
 	isAntigravityProfileSignedIn,
 	resolveAntigravityProfileDir,
@@ -676,6 +679,122 @@ test("logout clears local token, models.json, and state even when ACP logout fai
 		assert.equal(clearedError, true);
 		assert.equal(fs.existsSync(tokenPath), false);
 		assert.equal(fs.existsSync(modelsCache), false);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("agy 1.5.x CLI OAuth URLs, /auth/callback validation, antigravity-oauth-token detection, SSH stripping, and xdg-open capture work end-to-end", async () => {
+	const cliOAuthUrl =
+		"https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=cid&redirect_uri=http%3A%2F%2Flocalhost%3A45341%2Fauth%2Fcallback&state=cli-state";
+	const parsedCli = parseAndValidateAntigravityOAuthUrl(cliOAuthUrl);
+	assert.deepEqual(parsedCli, {
+		authUrl: cliOAuthUrl,
+		port: 45341,
+		state: "cli-state",
+		redirectUri: "http://localhost:45341/auth/callback",
+	});
+
+	assert.deepEqual(
+		validateManualCallbackUrl("http://localhost:45341/auth/callback?state=cli-state&code=abc", {
+			port: 45341,
+			state: "cli-state",
+			redirectUri: parsedCli!.redirectUri,
+		}),
+		{
+			ok: true,
+			forwardUrl: "http://127.0.0.1:45341/auth/callback?state=cli-state&code=abc",
+		},
+	);
+	assert.equal(
+		validateManualCallbackUrl("http://localhost:45341/wrong?state=cli-state&code=abc", {
+			port: 45341,
+			state: "cli-state",
+			redirectUri: parsedCli!.redirectUri,
+		}).ok,
+		false,
+	);
+
+	const root = makeTempRoot();
+	try {
+		const authFile = path.join(root, "secrets", "auth.json");
+		const dataDir = path.join(root, "data");
+		const fakeHome = path.join(root, "home");
+		fs.mkdirSync(fakeHome, { recursive: true });
+
+		const profileDir = ensureAntigravityProfile({ authFile, homeDir: fakeHome });
+		assert.equal(fs.existsSync(antigravityKeyringUnavailablePath(profileDir)), true);
+		assert.equal(isAntigravityProfileSignedIn({ profileDir }), false);
+
+		const cliTokenPath = antigravityCliTokenFilePath(profileDir);
+		fs.writeFileSync(cliTokenPath, JSON.stringify({ token: { access_token: "nested-cli-tok" } }), { mode: 0o600 });
+		assert.equal(isAntigravityProfileSignedIn({ profileDir }), true);
+		assert.equal(deleteAntigravityTokenFile({ profileDir }), true);
+		assert.equal(isAntigravityProfileSignedIn({ profileDir }), false);
+
+		const scrubbedEnv = buildAntigravityEnvironment({
+			baseEnv: {
+				PATH: "/usr/bin:/bin",
+				SSH_CONNECTION: "1.2.3.4 1000 5.6.7.8 22",
+				SSH_CLIENT: "1.2.3.4 1000 22",
+				SSH_TTY: "/dev/pts/0",
+			},
+			geminiHome: profileDir,
+			tempDir: path.join(root, "tmp"),
+			browserScript: "/tmp/lh-browser-dir/open-url.sh",
+			platform: "linux",
+		});
+		assert.equal(scrubbedEnv.SSH_CONNECTION, undefined);
+		assert.equal(scrubbedEnv.SSH_CLIENT, undefined);
+		assert.equal(scrubbedEnv.SSH_TTY, undefined);
+		assert.equal(scrubbedEnv.PATH?.startsWith("/tmp/lh-browser-dir:"), true);
+
+		const manager = createAntigravityAuthManager({
+			authFile,
+			dataDir,
+			homeDir: fakeHome,
+			platform: "linux",
+			env: {
+				...process.env,
+				HOME: fakeHome,
+				FAKE_ACP_MODE: "cli-1510",
+				FAKE_ACP_STATE: "cli-e2e-state",
+				FAKE_ACP_RECORD_EVENTS: "1",
+				SSH_CONNECTION: "1.2.3.4 1000 5.6.7.8 22",
+				SSH_CLIENT: "1.2.3.4 1000 22",
+				SSH_TTY: "/dev/pts/0",
+				DISPLAY: "",
+				WAYLAND_DISPLAY: "",
+			},
+		});
+
+		const cliRuntime: ResolvedAntigravityRuntime = {
+			source: "cli",
+			kind: "cli",
+			executablePath: FAKE_ACP,
+			args: ["acp"],
+			version: "1.5.10",
+		};
+
+		const started = await manager.startAuth(cliRuntime);
+		assert.equal(started.phase, "waiting");
+		assert.ok(started.authUrl);
+		const parsed = parseAndValidateAntigravityOAuthUrl(started.authUrl!)!;
+		assert.equal(parsed.redirectUri, `http://localhost:${parsed.port}/auth/callback`);
+
+		const completed = await manager.submitCallback(
+			`http://localhost:${parsed.port}/auth/callback?state=cli-e2e-state&code=cli-code-1`,
+			started.attemptId!,
+		);
+		assert.equal(completed.phase, "succeeded");
+		assert.equal(completed.signedIn, true);
+		assert.equal(fs.existsSync(cliTokenPath), true);
+		assert.deepEqual(fs.readdirSync(fakeHome), ["."].filter(() => false));
+
+		const afterLogout = await manager.logout(cliRuntime);
+		assert.equal(afterLogout.phase, "idle");
+		assert.equal(afterLogout.signedIn, false);
+		assert.equal(fs.existsSync(cliTokenPath), false);
 	} finally {
 		fs.rmSync(root, { recursive: true, force: true });
 	}

@@ -14,6 +14,23 @@ const ignoreEof = process.env.FAKE_ACP_IGNORE_EOF === "1";
 const trapSigterm = process.env.FAKE_ACP_TRAP_SIGTERM === "1";
 const lifecycleLogPath = process.env.FAKE_ACP_LIFECYCLE_LOG;
 
+const argv = process.argv.slice(2);
+const hasAcpSubcommand = argv[0] === "acp";
+let cliGeminiDir = null;
+let cliAppDataDir = null;
+for (let i = 0; i < argv.length; i++) {
+	const arg = argv[i];
+	if (arg === "--gemini-dir" && argv[i + 1]) {
+		cliGeminiDir = argv[++i];
+	} else if (arg.startsWith("--gemini-dir=")) {
+		cliGeminiDir = arg.slice("--gemini-dir=".length);
+	} else if (arg === "--app-data-dir" && argv[i + 1]) {
+		cliAppDataDir = argv[++i];
+	} else if (arg.startsWith("--app-data-dir=")) {
+		cliAppDataDir = arg.slice("--app-data-dir=".length);
+	}
+}
+
 if (mode === "immediate-exit") {
 	process.exit(2);
 }
@@ -40,16 +57,22 @@ function writeOut(payload) {
 	process.stdout.write(`${JSON.stringify(payload)}\n`);
 }
 
+function effectiveAppDataDir() {
+	const base = cliGeminiDir ?? process.env.GEMINI_HOME;
+	if (!base) return null;
+	return path.join(base, cliAppDataDir ?? "antigravity-acp");
+}
+
 function recordArtifact(filename, data) {
-	if (!recordEvents || !process.env.GEMINI_HOME) return;
-	const dir = path.join(process.env.GEMINI_HOME, "antigravity-acp");
+	const dir = effectiveAppDataDir();
+	if (!recordEvents || !dir) return;
 	fs.mkdirSync(dir, { recursive: true });
 	fs.writeFileSync(path.join(dir, filename), JSON.stringify(data, null, 2));
 }
 
 function appendArtifactLine(filename, data) {
-	if (!recordEvents || !process.env.GEMINI_HOME) return;
-	const dir = path.join(process.env.GEMINI_HOME, "antigravity-acp");
+	const dir = effectiveAppDataDir();
+	if (!recordEvents || !dir) return;
 	fs.mkdirSync(dir, { recursive: true });
 	fs.appendFileSync(path.join(dir, filename), `${JSON.stringify(data)}\n`);
 }
@@ -254,11 +277,34 @@ rl.on("line", (line) => {
 			}
 		}
 
-		if (process.env.FAKE_ACP_RECORD_CLIENT_INFO === "1" && process.env.GEMINI_HOME) {
-			const dir = path.join(process.env.GEMINI_HOME, "antigravity-acp");
-			fs.mkdirSync(dir, { recursive: true });
-			fs.writeFileSync(path.join(dir, "last-client-info.json"), JSON.stringify(msg.params?.clientInfo ?? null));
+		if (mode === "cli-1510") {
+			if (!hasAcpSubcommand || !cliGeminiDir || cliAppDataDir !== "antigravity-acp") {
+				writeOut({
+					jsonrpc: "2.0",
+					id: msg.id,
+					error: { code: -32003, message: "missing cli acp --gemini-dir/--app-data-dir flags" },
+				});
+				return;
+			}
+			const markerPath = path.join(cliGeminiDir, "antigravity-acp", "cache", "antigravity-keyring-unavailable");
+			if (!fs.existsSync(markerPath)) {
+				writeOut({
+					jsonrpc: "2.0",
+					id: msg.id,
+					error: { code: -32003, message: "missing keyring unavailable marker" },
+				});
+				return;
+			}
 		}
+
+		if (process.env.FAKE_ACP_RECORD_CLIENT_INFO === "1") {
+			const dir = effectiveAppDataDir();
+			if (dir) {
+				fs.mkdirSync(dir, { recursive: true });
+				fs.writeFileSync(path.join(dir, "last-client-info.json"), JSON.stringify(msg.params?.clientInfo ?? null));
+			}
+		}
+		recordArtifact("last-argv.json", { argv });
 
 		writeOut({
 			jsonrpc: "2.0",
@@ -272,9 +318,9 @@ rl.on("line", (line) => {
 				},
 				authMethods: [{ id: "oauth-personal", name: "Log in with Google" }],
 				agentInfo: {
-					name: "antigravity-acp",
+					name: mode === "cli-1510" ? "Antigravity ACP Server" : "antigravity-acp",
 					title: "Google Antigravity",
-					version: process.env.FAKE_ACP_VERSION ?? "1.4.5",
+					version: process.env.FAKE_ACP_VERSION ?? (mode === "cli-1510" ? "1.5.10" : "1.4.5"),
 				},
 			},
 		});
@@ -296,28 +342,59 @@ rl.on("line", (line) => {
 			);
 			return;
 		}
+		if (mode === "cli-1510") {
+			if (process.env.SSH_CONNECTION || process.env.SSH_CLIENT || process.env.SSH_TTY) {
+				writeOut({
+					jsonrpc: "2.0",
+					id: msg.id,
+					error: { code: -32005, message: "browser sign-in is disabled over SSH" },
+				});
+				return;
+			}
+			if (!process.env.DISPLAY && !process.env.WAYLAND_DISPLAY) {
+				writeOut({
+					jsonrpc: "2.0",
+					id: msg.id,
+					error: { code: -32005, message: "no display server available" },
+				});
+				return;
+			}
+		}
 
 		const expectedState = process.env.FAKE_ACP_STATE ?? "fake-oauth-state-123";
 		const server = http.createServer((req, res) => {
 			const reqUrl = new URL(req.url ?? "/", "http://127.0.0.1");
+			if (mode === "cli-1510" && reqUrl.pathname !== "/auth/callback") {
+				res.writeHead(404, { "Content-Type": "text/plain" });
+				res.end("Not found");
+				return;
+			}
 			if (reqUrl.searchParams.get("state") !== expectedState) {
 				res.writeHead(400, { "Content-Type": "text/plain" });
 				res.end("Invalid state");
 				return;
 			}
-			const geminiHome = process.env.GEMINI_HOME;
-			if (geminiHome) {
-				const tokenPath = path.join(geminiHome, "antigravity-acp", "acp_token.json");
+			const appDir = effectiveAppDataDir();
+			if (appDir) {
+				const tokenPath =
+					mode === "cli-1510"
+						? path.join(appDir, "antigravity-oauth-token")
+						: path.join(appDir, "acp_token.json");
 				fs.mkdirSync(path.dirname(tokenPath), { recursive: true });
-				fs.writeFileSync(
-					tokenPath,
-					JSON.stringify({
-						token: "fake-access-token",
-						refresh_token: "fake-refresh-token",
-						code: reqUrl.searchParams.get("code") ?? "fake-code",
-					}),
-					{ mode: 0o600 },
-				);
+				const tokenPayload =
+					mode === "cli-1510"
+						? {
+								access_token: "fake-cli-access-token",
+								refresh_token: "fake-cli-refresh-token",
+								token_type: "Bearer",
+								code: reqUrl.searchParams.get("code") ?? "fake-code",
+							}
+						: {
+								token: "fake-access-token",
+								refresh_token: "fake-refresh-token",
+								code: reqUrl.searchParams.get("code") ?? "fake-code",
+							};
+				fs.writeFileSync(tokenPath, JSON.stringify(tokenPayload), { mode: 0o600 });
 			}
 			res.writeHead(200, { "Content-Type": "text/html" });
 			res.end("<h1>Authentication successful</h1>");
@@ -329,7 +406,18 @@ rl.on("line", (line) => {
 		server.listen(0, "127.0.0.1", () => {
 			const address = server.address();
 			const port = typeof address === "object" && address ? address.port : 0;
-			const authUrl = `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=test-client&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${port}/`)}&scope=openid&state=${encodeURIComponent(expectedState)}`;
+			const authUrl =
+				mode === "cli-1510"
+					? `https://accounts.google.com/o/oauth2/auth?response_type=code&client_id=test-client&redirect_uri=${encodeURIComponent(`http://localhost:${port}/auth/callback`)}&scope=openid&state=${encodeURIComponent(expectedState)}`
+					: `https://accounts.google.com/o/oauth2/v2/auth?response_type=code&client_id=test-client&redirect_uri=${encodeURIComponent(`http://127.0.0.1:${port}/`)}&scope=openid&state=${encodeURIComponent(expectedState)}`;
+			if (mode === "cli-1510") {
+				// Simulate Go exec.Command("xdg-open", authUrl) where child stderr is discarded.
+				spawnSync("xdg-open", [authUrl], {
+					stdio: "ignore",
+					env: process.env,
+				});
+				return;
+			}
 			if ((authMode === "browser-only" || authMode === "browser-and-stderr") && process.env.BROWSER) {
 				spawnSync(process.env.BROWSER, [authUrl], {
 					stdio: ["ignore", "ignore", "inherit"],
@@ -352,9 +440,10 @@ rl.on("line", (line) => {
 			});
 			return;
 		}
-		if (process.env.GEMINI_HOME) {
-			const tokenPath = path.join(process.env.GEMINI_HOME, "antigravity-acp", "acp_token.json");
-			fs.rmSync(tokenPath, { force: true });
+		const appDir = effectiveAppDataDir();
+		if (appDir) {
+			fs.rmSync(path.join(appDir, "acp_token.json"), { force: true });
+			fs.rmSync(path.join(appDir, "antigravity-oauth-token"), { force: true });
 		}
 		writeOut({ jsonrpc: "2.0", id: msg.id, result: {} });
 		return;

@@ -301,3 +301,47 @@ test("client.close closes stdin cleanly first and escalates directly to SIGKILL 
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("spawnAcpClient passes --gemini-dir/--app-data-dir and refreshes keyring marker for cli runtimes only", async () => {
+	const root = makeTempRoot();
+	const geminiHome = path.join(root, "profile");
+	const tempDir = path.join(root, "tmp");
+	const cwd = path.join(root, "cwd");
+	fs.mkdirSync(geminiHome, { recursive: true });
+	fs.mkdirSync(tempDir, { recursive: true });
+	fs.mkdirSync(cwd, { recursive: true });
+
+	const env = buildAntigravityEnvironment({
+		baseEnv: {
+			...process.env,
+			FAKE_ACP_MODE: "cli-1510",
+			FAKE_ACP_RECORD_EVENTS: "1",
+		},
+		geminiHome,
+		tempDir,
+	});
+
+	const client = spawnAcpClient({
+		cwd,
+		env,
+		profileDir: geminiHome,
+		runtime: { kind: "cli", executablePath: FAKE_ACP, args: ["acp"], version: "1.5.10" },
+	});
+
+	try {
+		const init = await client.initialize(5_000);
+		assert.equal(init.agentInfo?.name, "Antigravity ACP Server");
+		assert.equal(init.agentInfo?.version, "1.5.10");
+
+		const markerPath = path.join(geminiHome, "antigravity-acp", "cache", "antigravity-keyring-unavailable");
+		assert.equal(fs.existsSync(markerPath), true);
+
+		const recorded = JSON.parse(
+			fs.readFileSync(path.join(geminiHome, "antigravity-acp", "last-argv.json"), "utf8"),
+		) as { argv: string[] };
+		assert.deepEqual(recorded.argv, ["acp", "--gemini-dir", geminiHome, "--app-data-dir", "antigravity-acp"]);
+	} finally {
+		await client.close();
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});

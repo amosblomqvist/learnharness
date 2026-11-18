@@ -15,6 +15,7 @@ import { dirname, join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+	antigravityRuntimeArgs,
 	assertSafeZipEntryPath,
 	buildProbeEnvironment,
 	compareSemver,
@@ -644,4 +645,42 @@ test("installManagedAntigravityRuntime forwards options.env to default ACP initi
 	});
 	assert.equal(installed.version, "1.4.5");
 	assert.equal(installed.runtime.source, "managed");
+});
+
+test("antigravityRuntimeArgs adds --gemini-dir and --app-data-dir only for cli runtimes without duplicating flags", () => {
+	assert.deepEqual(
+		antigravityRuntimeArgs({ kind: "acp-server", args: ["--uid="] }, "/tmp/profile"),
+		["--uid="],
+	);
+	assert.deepEqual(
+		antigravityRuntimeArgs({ kind: "cli", args: ["acp"] }, "/tmp/profile"),
+		["acp", "--gemini-dir", "/tmp/profile", "--app-data-dir", "antigravity-acp"],
+	);
+	assert.deepEqual(
+		antigravityRuntimeArgs(
+			{ kind: "cli", args: ["acp", "--gemini-dir=/already", "--app-data-dir", "custom"] },
+			"/tmp/profile",
+		),
+		["acp", "--gemini-dir=/already", "--app-data-dir", "custom"],
+	);
+});
+
+test("probeAntigravityInitialize supports agy 1.5.x agentInfo.name and CLI isolation flags", async () => {
+	const ok = await probeAntigravityInitialize(
+		{
+			source: "cli",
+			kind: "cli",
+			executablePath: FAKE_ACP,
+			args: ["acp"],
+			version: "1.5.10",
+		},
+		{
+			baseEnv: {
+				PATH: process.env.PATH,
+				FAKE_ACP_MODE: "cli-1510",
+				FAKE_ACP_VERSION: "1.5.10",
+			},
+		},
+	);
+	assert.equal(ok.version, "1.5.10");
 });

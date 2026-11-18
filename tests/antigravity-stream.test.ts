@@ -538,3 +538,57 @@ test("createAntigravityStream prefers single-call usage_update.used over larger 
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("createAntigravityStream works with kind='cli' (agy 1.5.10), antigravity-oauth-token, and --gemini-dir flags", async () => {
+	const root = makeTempRoot();
+	const authFile = path.join(root, "auth.json");
+	const env = {
+		...process.env,
+		LH_AUTH_FILE: authFile,
+		FAKE_ACP_MODE: "cli-1510",
+		FAKE_ACP_RECORD_EVENTS: "1",
+	};
+
+	try {
+		const profileDir = ensureAntigravityProfile({ authFile, env });
+		const { antigravityCliTokenFilePath } = await import("../src/agent/antigravity/profile.ts");
+		fs.writeFileSync(
+			antigravityCliTokenFilePath(profileDir),
+			JSON.stringify({ access_token: "cli-tok", refresh_token: "cli-ref" }),
+			{ mode: 0o600 },
+		);
+
+		const streamFn = createAntigravityStream({
+			isEnabled: () => true,
+			resolveRuntime: () => ({
+				source: "cli",
+				kind: "cli",
+				executablePath: FAKE_ACP,
+				args: ["acp"],
+				version: "1.5.10",
+			}),
+			ensureProfile: () => profileDir,
+			env,
+		});
+
+		const stream = streamFn(
+			testModel(),
+			normalizeContext({
+				systemPrompt: "Be helpful.",
+				messages: [{ role: "user", content: "Hello CLI", timestamp: 1 }],
+				tools: [],
+			}),
+			{ reasoning: "high", sessionId: "chat-cli-1510" },
+		);
+
+		const events = await collectEvents(stream);
+		const done = events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+		assert.equal(done.reason, "stop");
+		const recordedArgv = JSON.parse(
+			fs.readFileSync(path.join(profileDir, "antigravity-acp", "last-argv.json"), "utf8"),
+		) as { argv: string[] };
+		assert.deepEqual(recordedArgv.argv, ["acp", "--gemini-dir", profileDir, "--app-data-dir", "antigravity-acp"]);
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
