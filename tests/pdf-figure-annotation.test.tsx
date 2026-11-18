@@ -430,6 +430,34 @@ describe("visual maker with a PDF page (fake model + fake source)", () => {
 		}
 	});
 
+	it("shows only the last successful crop in one reply and marks earlier previews superseded", async () => {
+		const { source, crops, made } = await fakeSource();
+		const { engine, requests } = scripted([
+			fauxAssistantMessage([
+				fauxToolCall("crop_page", { x: 0, y: 0, width: 30, height: 30 }, { id: "superseded" }),
+				fauxToolCall("crop_page", { x: 40, y: 25, width: 40, height: 35 }, { id: "active" }),
+				fauxToolCall("crop_page", { x: 0, y: 0, width: 2, height: 2 }, { id: "invalid" }),
+			], { stopReason: "toolUse" }),
+			fauxAssistantMessage([
+				fauxToolCall("write_svg", { svg: marked(40, 35) }, { id: "w1" }),
+				fauxToolCall("render_svg", {}, { id: "r1" }),
+			], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Annotated the second crop.")]),
+		]);
+		const result = await runVisualMaker({ brief: "b", pdf: source }, { engine, headless: fakeHeadless() });
+		const feedback = requests[1]!.messages.filter((message) => message.role === "toolResult");
+		assert.deepEqual(feedback.map((message) => message.toolCallId), ["superseded", "active", "invalid"]);
+		const texts = feedback.map((message) => message.content.map((part) => part.type === "text" ? part.text : "").join("\n"));
+		assert.match(texts[0]!, /Cropped: 30×30 px — superseded .* preview is not shown; do not annotate it\./);
+		assert.match(texts[1]!, /Cropped: 40×35 px — the crop follows .* It is now the picture you annotate/);
+		assert.match(texts[2]!, /ERROR: crop failed/);
+		assert.equal(crops.length, 2);
+		const [, , finalCrop] = [...made.values()];
+		assert.deepEqual(images(requests[1]!).map(({ data }) => data), [source.pageImage.data, finalCrop!.data]);
+		assert.equal(result.svg, marked(40, 35));
+		assert.equal(result.image?.snapshotId, finalCrop!.snapshotId);
+	});
+
 	it("re-cropping discards the SVG and switches the placement size", async () => {
 		const { source, crops } = await fakeSource();
 		const { engine, requests } = scripted([

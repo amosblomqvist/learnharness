@@ -82,14 +82,14 @@ export async function openPdfBytes(data: Uint8Array, signal?: AbortSignal, loadT
 		signal?.removeEventListener("abort", onAbort);
 	});
 	const onAbort = () => { void destroy().catch(() => {}); };
-	signal?.addEventListener("abort", onAbort, { once: true });
-	// Covers cancellation while the loader itself was pending.
-	if (signal?.aborted) onAbort();
 	try {
-		// Do not race this promise against abort: opening and teardown must both
-		// settle before the caller can release conversion capacity.
+		// Opening bytes is a cooperative checkpoint. pdfjs's Node fake worker
+		// can leave the loading promise pending and reject internally without
+		// a handler if destroyed between setup and readiness. Let it settle
+		// before destroying, and never expose the opened doc after cancellation.
 		const doc = await loadingTask.promise;
 		signal?.throwIfAborted();
+		signal?.addEventListener("abort", onAbort, { once: true });
 		return { doc, task: { destroy } };
 	} catch (error) {
 		// Failed opens own a loading task too. Cleanup is best effort, without

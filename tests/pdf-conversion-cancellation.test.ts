@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { getEventListeners } from "node:events";
 import { describe, it } from "node:test";
 import type { PDFDocumentProxy, PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
-import { convertPdf, createPdfConverter } from "../src/agent/subagents/pdf-ops.ts";
+import { convertPdf, createPdfConverter, openPdfBytes } from "../src/agent/subagents/pdf-ops.ts";
 import { documentToMarkdown } from "../src/agent/subagents/pdf-markdown.ts";
 import { tinyPdf } from "./helpers/tiny-pdf.ts";
 
@@ -36,6 +36,38 @@ function assertNoListener(signal: AbortSignal) {
 	assert.equal(getEventListeners(signal, "abort").length, 0);
 }
 
+describe("native PDF opening cancellation", () => {
+	it("settles with the abort reason and tears down after abort before document readiness", { timeout: 5_000 }, async () => {
+		const { getDocument } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+		const controller = new AbortController();
+		const reason = new Error("cancel native PDF opening");
+		let ready = false;
+		let abortedBeforeReady = false;
+		let teardownComplete = false;
+		let destroys = 0;
+		const opening = openPdfBytes(tinyPdf([{}, {}]), controller.signal, (data) => {
+			const task = getDocument({ data, verbosity: 0 });
+			task.onProgress = () => {
+				abortedBeforeReady = !ready;
+				controller.abort(reason);
+			};
+			return {
+				promise: task.promise.then((doc) => { ready = true; return doc; }),
+				destroy: async () => {
+					destroys++;
+					await task.destroy();
+					teardownComplete = true;
+				},
+			};
+		});
+		await assert.rejects(opening, (error) => error === reason);
+		assert.equal(abortedBeforeReady, true);
+		assert.equal(teardownComplete, true);
+		assert.equal(destroys, 1);
+		assertNoListener(controller.signal);
+	});
+});
+
 describe("PDF conversion cooperative cancellation", () => {
 	it("pre-aborted calls preserve the exact reason and never invoke the loader", async () => {
 		let opens = 0;
@@ -56,7 +88,7 @@ describe("PDF conversion cooperative cancellation", () => {
 		assert.equal(bytes.byteLength, length);
 	});
 
-	it("abort while the loader is pending waits for both opening and destroy (destroy settles first)", async () => {
+	it("abort while the loader is pending waits for opening before destroying the task", async () => {
 		const loading = deferred<PDFDocumentProxy>();
 		const destroying = deferred<void>();
 		const destroyStarted = deferred<void>();
@@ -72,11 +104,12 @@ describe("PDF conversion cooperative cancellation", () => {
 		await flush();
 		assert.equal(settled(), false, "cannot abandon a pending loader");
 		loader.resolve(task);
-		await destroyStarted.promise;
-		destroying.resolve();
 		await flush();
-		assert.equal(settled(), false, "destroy alone does not settle the underlying opening");
+		assert.equal(destroys, 0, "do not destroy the worker while it is opening");
 		loading.reject(new Error("parser stopped"));
+		await destroyStarted.promise;
+		assert.equal(settled(), false, "teardown is still owned by this call");
+		destroying.resolve();
 		await assert.rejects(result, (error) => error === reason);
 		assert.equal(destroys, 1);
 		assertNoListener(controller.signal);
@@ -96,11 +129,10 @@ describe("PDF conversion cooperative cancellation", () => {
 		const result = convert(new Uint8Array(), 1000, { signal: controller.signal });
 		const settled = observed(result);
 		await flush();
-		assert.equal(getEventListeners(controller.signal, "abort").length, 1);
 		controller.abort("caller reason");
+		assert.equal(destroys, 0);
+		loading.reject(new Error("pdfjs loading failed"));
 		await destroyStarted.promise;
-		loading.reject(new Error("pdfjs loading aborted"));
-		await flush();
 		assert.equal(settled(), false);
 		destroying.reject(new Error("destroy failed"));
 		await assert.rejects(result, (error) => error === "caller reason");
@@ -121,8 +153,8 @@ describe("PDF conversion cooperative cancellation", () => {
 		observed(result);
 		await flush();
 		controller.abort();
-		await destroyStarted.promise;
 		loading.resolve(fakeDoc(async () => { assert.fail("must not read a page after abort"); }));
+		await destroyStarted.promise;
 		await assert.rejects(result, (error) => error === controller.signal.reason);
 		assert.equal(destroys, 1);
 		assertNoListener(controller.signal);

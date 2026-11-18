@@ -159,8 +159,9 @@ export function createVisualTools(mode: { pdf?: boolean } = {}): Record<string, 
 						name: "crop_page",
 						description:
 							"Crop the PDF page to the figure. x, y, width and height are a box in the pixels of the page image you were shown " +
-							"(origin top-left). The crop is re-rendered sharp from the PDF, shown to you, and becomes the picture you annotate. " +
-							"Call again to adjust; that discards any SVG written so far.",
+							"(origin top-left). The crop is re-rendered sharp from the PDF and becomes the picture you annotate. " +
+							"If you request multiple crops in one reply, only the last successful crop is shown and used. " +
+							"A successful crop discards any SVG written so far.",
 						parameters: Type.Object({
 							x: Type.Number({ description: "Left edge, in page-image pixels." }),
 							y: Type.Number({ description: "Top edge, in page-image pixels." }),
@@ -341,7 +342,13 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 
 			const toolResults: ToolResultMessage[] = [];
 			let renderImage: Extract<ProcessImageResult, { ok: true }> | null = null; // appended AFTER the tool results
-			let cropImage: { image: Extract<ProcessImageResult, { ok: true }>; width: number; height: number } | null = null;
+			let cropImage: {
+				image: Extract<ProcessImageResult, { ok: true }>;
+				width: number;
+				height: number;
+				resultIndex: number;
+				discardedSvg: boolean;
+			} | null = null;
 			for (const call of toolCalls) {
 				if (call.name === "write_svg") {
 					const svg = (call.arguments as { svg?: unknown }).svg;
@@ -431,7 +438,17 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						currentSvg = null;
 						renderedSvg = null;
 						renderImage = null; // a render from earlier in this batch shows a discarded SVG
-						cropImage = { image: shown, width: cropped.width, height: cropped.height };
+						if (cropImage) {
+							const { width, height, resultIndex, discardedSvg } = cropImage;
+							const prior = toolResults[resultIndex]!;
+							toolResults[resultIndex] = toolText(
+								prior.toolCallId,
+								prior.toolName,
+								`Cropped: ${width}×${height} px — superseded by a later successful crop in this reply. This preview is not shown; do not annotate it.` +
+									(discardedSvg ? " This crop discarded the SVG that preceded it." : ""),
+							);
+						}
+						cropImage = { image: shown, width: cropped.width, height: cropped.height, resultIndex: toolResults.length, discardedSvg: discarded };
 						opts.onActivity?.(`crop_page: ${cropped.width}×${cropped.height} px`);
 						toolResults.push(
 							toolText(
