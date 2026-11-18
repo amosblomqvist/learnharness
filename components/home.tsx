@@ -43,6 +43,7 @@ export function Home({
 	const bodyRef = useRef<HTMLDivElement>(null);
 	const surfaceTarget = usePageSurfaceBoundary({ active: pathname === "/", viewKey: "/", bodyRef });
 	const chromeStyle = useSurfaceChromeStyle(surfaceTarget);
+	const [folderFilterSlot, setFolderFilterSlot] = useState<HTMLElement | null>(null);
 	const [topic, setTopic] = useState("");
 	/* The topic MIRROR ("nothing gets lost" round, 2026-10-01 — same
 	 * mechanics as the chat composer, owner's consistency ruling): a
@@ -189,6 +190,7 @@ export function Home({
 			<main className="absolute inset-0">
 				{rendering ? (
 					<GraphView
+						folderFilterSlot={folderFilterSlot}
 						chainSelectOpen={chainSelectOpen}
 						practiceSelection={pickedIds}
 						onPracticeSelectionChange={setPracticeProps}
@@ -332,6 +334,9 @@ export function Home({
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>
+				{/* The graph's folder filter portals here (view only; graph
+				    rendering on). Empty when GraphView renders no control. */}
+				<div ref={setFolderFilterSlot} data-testid="graph-folder-filter-slot" className="pointer-events-auto empty:hidden" />
 			</header>
 
 			{/* First-run setup (unconfigured): the CTA's target and the send

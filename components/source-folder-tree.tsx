@@ -8,7 +8,8 @@ import { chainRow } from "./chain-navigation";
 import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeSeparator, treeBranchLayout, treeRowLayout } from "./tree-presentation";
 
 export type OrganizationChange = (action: OrganizationAction) => Promise<string | void>;
-const DRAG_TYPE = "application/x-learnharness-source";
+export const SOURCE_DRAG_TYPE = "application/x-learnharness-source";
+const DRAG_TYPE = SOURCE_DRAG_TYPE;
 const RowEditing = createContext<((editing: boolean) => void) | null>(null);
 
 /** Keep the existing row as the drag surface, not the editor. A transient,
