@@ -180,7 +180,12 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 			}
 			const purpose = typeof background === "function" ? background : () => background;
 			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
-			return stream(requestModel, context, requestOptions);
+			// Direct Anthropic auth is resolved per request. Keep full replay: Pi's
+			// message-thread fingerprint does not include that rotating credential.
+			const wireModel = requestModel.provider === "anthropic" && requestModel.api === "anthropic-messages"
+				? { ...requestModel, compat: { ...requestModel.compat, supportsMessageThreads: false } }
+				: requestModel;
+			return stream(wireModel, context, requestOptions);
 		},
 	};
 }
