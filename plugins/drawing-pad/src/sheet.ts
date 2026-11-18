@@ -92,8 +92,11 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     setButton(pen, { variant: state.tool === "pen" ? "secondary" : "outline", disabled: preparing || !!failure });
     setButton(eraser, { variant: state.tool === "eraser" ? "secondary" : "outline", disabled: preparing || !!failure });
     setButton(hand, { variant: state.tool === "hand" ? "secondary" : "outline", disabled: preparing || !!failure });
-    setButton(undo, { disabled: preparing || !!failure || pointerId !== undefined || !draft?.strokes.length });
-    setButton(clear, { disabled: preparing || !!failure || pointerId !== undefined || !draft?.strokes.length });
+    const canEditHistory = !preparing && !failure && !!draft?.strokes.length;
+    const gestureActive = pointerId !== undefined;
+    toolbar.toggleAttribute("data-gesture-lock", canEditHistory && gestureActive);
+    setButton(undo, { disabled: !canEditHistory || gestureActive });
+    setButton(clear, { disabled: !canEditHistory || gestureActive });
     canvas.style.cursor = panDrag ? "grabbing" : state.tool === "hand" ? "grab" : "default";
     status.hidden = !preparing && !failure;
     status.setAttribute("role", failure ? "alert" : "status");
@@ -217,6 +220,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
       panDrag = { x: event.clientX, y: event.clientY, pan: state.pan, rightButton }; render();
     }
     else if (event.pointerType !== "pen" || event.pressure > 0) { measure(); start(event); }
+    else renderChrome();
   };
   const move = (event: PointerEvent) => {
     if (preparing || failure || !state.draft || pointerId !== event.pointerId) return;

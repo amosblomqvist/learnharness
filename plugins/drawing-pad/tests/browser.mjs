@@ -31,7 +31,9 @@ try {
   const html = `<!doctype html><html class="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="/plugin.css"><link rel="stylesheet" href="/katex/katex.min.css"><link rel="stylesheet" href="/styles/capture-parent.css"><style>
     html.dark{color-scheme:dark}html.light{color-scheme:light}
     *{box-sizing:border-box} body{margin:0;background:var(--background);color:var(--foreground);font-family:monospace} #bar{height:48px;display:flex;gap:12px;padding:8px 240px;background:var(--card)} button{font:inherit;font-size:12px;padding:6px 10px;background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:6px;cursor:pointer} button[data-variant=secondary]{background:var(--border)}button:disabled{opacity:.4}button svg{display:block;width:16px;height:16px}input{background:var(--background);color:var(--foreground);border:1px solid var(--border)}
-    #sidebar{position:fixed;left:0;top:48px;width:220px;bottom:0;background:var(--card)}#pad{position:fixed;left:220px;top:48px;right:0;bottom:0;background:var(--background)}#close-pad{position:absolute;right:12px;top:10px;z-index:10}#settings{position:fixed;inset:150px 300px;background:var(--card);z-index:50;padding:24px}.lh-prose{font-family:serif;font-size:16px;line-height:1.5}.lh-prose p{margin:0 0 8px}#settings[hidden]{display:none}[data-streamdown=code-block-body] code>span{display:block}
+    #sidebar{position:fixed;left:0;top:48px;width:220px;bottom:0;background:var(--card)}#pad{position:fixed;left:220px;top:48px;right:0;bottom:0;background:var(--background)}#close-pad{position:absolute;right:12px;top:10px;z-index:10}#settings{position:fixed;inset:150px 300px;background:var(--card);z-index:50;padding:24px}.lh-prose{font-family:serif;font-size:16px;line-height:1.5}.lh-prose p{margin:0 0 8px}#settings[hidden]{display:none}
+    /* Match Streamdown's code line layout without loading the host Tailwind stylesheet. */
+    [data-streamdown="code-block-body"] code > span { display: block; }
     </style></head><body><div id="bar"><button id="draw">Loading</button><button id="settings-open">Settings</button></div><aside id="sidebar">Fixture sidebar</aside><div id="settings" hidden><label>Dark mode ink color <input id="dark-ink"></label><label>Light mode ink color <input id="light-ink"></label><label>Image scale (%) <input id="image-scale" type="number"></label><p id="setting-error"></p><button id="blur-target">Done editing</button></div><script type="module" src="/fixture.js"></script></body></html>`;
   server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://fixture");
@@ -94,6 +96,11 @@ try {
   };
   const label = () => run(() => document.querySelector("#draw").textContent);
   const selectedTool = () => run(() => document.querySelector('.drawing-pad-tools button[data-variant="secondary"]')?.getAttribute("aria-label"));
+  const editButtons = () => run(() => ["Undo", "Clear"].map(name => {
+    const button = [...document.querySelectorAll(".drawing-pad-tools button")]
+      .find(button => (button.getAttribute("aria-label") ?? button.textContent) === name);
+    return [button.disabled, getComputedStyle(button).opacity];
+  }));
   const chord = async (key, shift = false, modifier = "Meta", commands) => {
     await page.keyboard.down(modifier); if (shift) await page.keyboard.down("Shift");
     await page.keyboard.press(key, commands ? { commands } : {}); if (shift) await page.keyboard.up("Shift"); await page.keyboard.up(modifier);
@@ -246,6 +253,7 @@ try {
   const stylus = await page.createCDPSession(), penBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await stylus.send("Input.dispatchMouseEvent", { type: "mousePressed", x: penBox.x + penBox.width * .3, y: penBox.y + penBox.height * .7, button: "left", buttons: 1, pointerType: "pen", force: 0 });
   assert.equal(await ink(), originalPen, "zero-pressure contact is hover");
+  assert.deepEqual(await editButtons(), [[true, "1"], [true, "1"]], "buttons lock as soon as the pen owns the pointer, even before ink starts");
   await run(() => {
     const canvas = document.querySelector(".drawing-pad-ink"), r = canvas.getBoundingClientRect(), pointerId = window.fixture.lastPenId;
     canvas.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, pointerType: "pen", pressure: .8, buttons: 32, button: 5, clientX: r.x + r.width * .4, clientY: r.y + r.height * .725 }));
@@ -385,11 +393,23 @@ try {
   await page.screenshot({ path: path.join(evidence, "diagram-sheet.png") });
   group("capture waits for the actual asynchronous host Mermaid renderer");
 
+  const codeLines = Array.from({ length: 39 }, (_, line) => `value_${line} = ${line}`);
+  // Only this last line reaches the sampled columns, well before the right edge.
+  codeLines.push(`value_39 = "${"M".repeat(28)}"`);
   const longCode = { ...diagram, question: { ...diagram.question,
-    question: "Read this code.\n\n```python\n" + Array.from({ length: 40 }, (_, line) => `value_${line} = ${line}`).join("\n") + "\n```" } };
+    question: `Read this code.\n\n\`\`\`python\n${codeLines.join("\n")}\n\`\`\`` } };
   await call("navigate", "long-code", "teaching", longCode); await open();
-  assert.ok((await referenceSize())[1] > 600, "an offscreen code block freezes at its full height, not its 200px content-visibility placeholder");
-  group("long code blocks freeze at their full height");
+  assert.ok((await referenceSize())[1] > 600, "the reference uses the code block's full height, not its offscreen placeholder");
+  const tailPixels = await run(async () => {
+    const image = document.querySelector(".drawing-pad-background"); await image.decode();
+    const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d"); context.drawImage(image, 0, 0);
+    // Count bright glyph pixels near the bottom of the fixture's dark reference.
+    const pixels = context.getImageData(150, canvas.height - 40, 85, 38).data;
+    return pixels.filter((red, i) => i % 4 === 0 && Math.max(red, pixels[i + 1], pixels[i + 2]) > 100).length;
+  });
+  assert.ok(tailPixels > 30, "the final source line is painted into the frozen PNG, not just allocated space");
+  group("long code blocks freeze at full height with the last line visible");
 
   await call("navigate", "mount-replay", "teaching", question);
   await run(() => { window.fixture.replayOnOpen = true; });
@@ -408,14 +428,27 @@ try {
   await button("Undo"); assert.equal(await ink(), 0);
   group("replaying a mounted sheet preserves frozen reference, ink and editable Undo history");
 
-  await stroke();
+  assert.deepEqual(await editButtons(), [[true, "0.4"], [true, "0.4"]], "empty history remains visibly disabled");
+  await stroke(); const committedInk = await ink();
+  const available = await editButtons();
+  assert.deepEqual(available, [[false, "1"], [false, "1"]]);
   const heldBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await page.mouse.move(heldBox.x + heldBox.width * .3, heldBox.y + heldBox.height * .6); await page.mouse.down();
   await page.mouse.move(heldBox.x + heldBox.width * .5, heldBox.y + heldBox.height * .65, { steps: 4 });
-  assert.deepEqual(await run(() => ["Undo", "Clear"].map(name => [...document.querySelectorAll(".drawing-pad-tools button")]
-    .find(button => (button.getAttribute("aria-label") ?? button.textContent) === name).disabled)), [false, false], "Undo and Clear do not fade while the pen is down");
-  await page.mouse.up(); await button("Clear"); assert.equal(await ink(), 0);
-  group("Undo and Clear stay enabled while a stroke is drawn");
+  assert.deepEqual(await editButtons(), [[true, "1"], [true, "1"]], "Undo and Clear remain disabled without fading during a stroke");
+  // Bypass the native disabled click suppression to check the handler guards too.
+  await run(() => {
+    for (const button of document.querySelectorAll(".drawing-pad-tools button")) {
+      if (button.getAttribute("aria-label") === "Undo" || button.textContent === "Clear") button.dispatchEvent(new MouseEvent("click"));
+    }
+  });
+  await page.mouse.up();
+  assert.deepEqual(await editButtons(), available, "both commands are available again after release");
+  assert.ok(await ink() > committedInk, "the held stroke still commits");
+  await button("Undo"); assert.equal(await ink(), committedInk, "neither blocked command removed the earlier stroke");
+  await button("Clear"); assert.equal(await ink(), 0);
+  assert.deepEqual(await editButtons(), [[true, "0.4"], [true, "0.4"]], "clearing restores the normal disabled appearance");
+  group("Undo and Clear stay visually steady but disabled during a stroke");
 
   const activeBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await page.mouse.move(activeBox.x + activeBox.width * .3, activeBox.y + activeBox.height * .7); await page.mouse.down();
