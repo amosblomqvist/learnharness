@@ -23,8 +23,8 @@ export const sidebarRowPadding = (depth: number) => 12 + depth * SIDEBAR_TREE_IN
 const CHEVRON_INSET = 4;
 /** The rail's x: the centre of a folder row's chevron at `depth`. */
 export const sidebarRail = (depth: number) => sidebarRowPadding(depth) - CHEVRON_INSET + 7;
-/** Where a row's bottom rule starts (Chains' rule): full width at the top
- * level, from the parent folder's rail inside folders. */
+/** Where a folder's rules start: full width at the top level, from the
+ * parent folder's rail for nested folders. */
 export const sidebarRuleInset = (depth: number) => depth === 0 ? 0 : sidebarRail(depth - 1);
 /** Rows inside folders START at the parent's rail (Chains' source rows), so
  * their rules, hover and active highlights never cover a rail. */
@@ -32,13 +32,8 @@ export const sidebarRowBox = (depth: number) => ({ marginLeft: sidebarRuleInset(
 /** Folder rows (and the new-folder row): the same box, the chevron pulled in. */
 export const sidebarFolderBox = (depth: number) => ({ marginLeft: sidebarRuleInset(depth), paddingLeft: sidebarRowPadding(depth) - CHEVRON_INSET - sidebarRuleInset(depth) });
 
-/** Reserves each row's 1px rule slot. Inline on purpose: the unlayered
- * global `* { border-color }` rule outranks Tailwind's transparent border. */
-export const RULE_SLOT = { borderBottom: "1px solid transparent" } as const;
-
-/** A horizontal rule in its row's (transparent) bottom border pixel. */
-export function SidebarRule({ inset, testid }: { inset: number; testid?: string }) {
-	return <div aria-hidden="true" data-testid={testid} className="pointer-events-none absolute bottom-[-1px] right-0 border-b border-border/60" style={{ left: inset }} />;
+export function SidebarFolderRule({ depth, edge }: { depth: number; edge: "top" | "bottom" }) {
+	return <div aria-hidden="true" data-sidebar-folder-rule={edge} className={cn("pointer-events-none absolute right-0 z-10 border-b border-border/60", edge === "top" ? "top-0" : "bottom-0")} style={{ left: sidebarRuleInset(depth) }} />;
 }
 
 const OPEN_FOLDERS_KEY = "lh:sidebar-open-folders";
@@ -106,10 +101,8 @@ export function useSidebarDrop(organization: SourceOrganization | undefined, cha
 	return { dropTarget, dropProps, containerProps };
 }
 
-export function SidebarFolderRow({ folder, depth, open, contentsShown, dropActive, renaming, onToggle, onContextMenu, onRename, onRenameDone, draggable }: {
+export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, onToggle, onContextMenu, onRename, onRenameDone, draggable }: {
 	folder: SourceFolder; depth: number; open: boolean; dropActive: boolean; renaming: boolean; draggable: boolean;
-	/** Open with visible contents: the row's rule heads them from the rail. */
-	contentsShown: boolean;
 	onToggle: () => void;
 	onContextMenu: (event: ReactMouseEvent<HTMLButtonElement>) => void;
 	onRename: (name: string) => Promise<unknown>;
@@ -119,8 +112,7 @@ export function SidebarFolderRow({ folder, depth, open, contentsShown, dropActiv
 	return (
 		<SourceDragRow kind="folder" id={folder.id} name={folder.name} enabled={draggable && !renaming}
 			data-testid={`sidebar-folder-row-${folder.id}`} data-drop-active={dropActive}
-			style={{ ...RULE_SLOT, marginLeft: sidebarRowBox(depth).marginLeft }} className={cn("relative transition-colors", dropActive && "bg-accent/50")}>
-			<SidebarRule testid={`sidebar-folder-rule-${folder.id}`} inset={contentsShown ? sidebarRail(depth) - sidebarRuleInset(depth) : 0} />
+			style={{ marginLeft: sidebarRowBox(depth).marginLeft }} className={cn("relative transition-colors", dropActive && "bg-accent/50")}>
 			{renaming ? (
 				<div className="flex w-full items-center gap-1 py-1.5 pr-3" style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
 					<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground/70", open && "rotate-90")} />
@@ -146,8 +138,7 @@ export function SidebarFolderRow({ folder, depth, open, contentsShown, dropActiv
 /** The inline new-folder row (Add folder / New subfolder). */
 export function NewFolderRow({ depth, onCreate, onDone }: { depth: number; onCreate: (name: string) => Promise<unknown>; onDone: () => void }) {
 	return (
-		<div data-testid="sidebar-new-folder-row" className="relative flex w-full items-center gap-1 py-1.5 pr-3" style={{ ...RULE_SLOT, ...sidebarFolderBox(depth) }}>
-			<SidebarRule inset={0} />
+		<div data-testid="sidebar-new-folder-row" className="relative flex w-full items-center gap-1 py-1.5 pr-3" style={sidebarFolderBox(depth)}>
 			<span aria-hidden="true" className="size-3.5 shrink-0" />
 			<FolderIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
 			<EditableSourceName name="" initiallyEditing onCancel={onDone} onSave={async (name) => { await onCreate(name); onDone(); }} />
