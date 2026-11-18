@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { piModels, piEngineForSpec } from "../src/agent/models.ts";
-import { formatTranscript, ANTIGRAVITY_MODELS } from "../src/agent/providers/antigravity.ts";
+import { formatTranscript, parseToolCallsFromText, ANTIGRAVITY_MODELS } from "../src/agent/providers/antigravity.ts";
 import { providerKeyPresent } from "../src/server/keys.ts";
 import { modelCatalog } from "../src/server/model-catalog.ts";
 
@@ -78,5 +78,58 @@ describe("Antigravity Provider (Zero-Key Ambient)", () => {
 		const variantId = `${base.replace(/-(low|medium|high|xhigh|max)$/, "")}-${effort}`;
 		assert.equal(variantId, "gemini-3.8-flash-high");
 		assert.ok(ANTIGRAVITY_MODELS.some((m) => m.id === variantId));
+	});
+
+	it("parses tool calls cleanly from <tool_call> tags and extracts prose", () => {
+		const raw = `Let us assess your knowledge.\n\n<tool_call>\n{\n  "name": "probe",\n  "arguments": {\n    "question": "What is trace(A)?",\n    "options": ["Sum of eigenvalues", "Product of eigenvalues"],\n    "answer": "Sum of eigenvalues"\n  }\n}\n</tool_call>`;
+		const parsed = parseToolCallsFromText(raw);
+		assert.equal(parsed.prose, "Let us assess your knowledge.");
+		assert.equal(parsed.toolCalls.length, 1);
+		const first = parsed.toolCalls[0];
+		assert.ok(first);
+		assert.equal(first.name, "probe");
+		assert.equal((first.arguments as any).question, "What is trace(A)?");
+	});
+
+	it("parses tool calls wrapped in markdown code blocks inside <tool_call>", () => {
+		const raw = `<tool_call>\n\`\`\`json\n{\n  "name": "ask_user_question",\n  "arguments": { "question": "What is your goal?" }\n}\n\`\`\`\n</tool_call>`;
+		const parsed = parseToolCallsFromText(raw);
+		assert.equal(parsed.prose, "");
+		assert.equal(parsed.toolCalls.length, 1);
+		const first = parsed.toolCalls[0];
+		assert.ok(first);
+		assert.equal(first.name, "ask_user_question");
+		assert.equal((first.arguments as any).question, "What is your goal?");
+	});
+
+	it("formats tools in transcript when tools are provided in system message", () => {
+		const formatted = formatTranscript({
+			messages: [
+				{
+					role: "system",
+					content: "Base tutor instructions.",
+					toolsAdded: [
+						{
+							name: "probe",
+							description: "Ask a multiple choice diagnostic question",
+							parameters: {
+								type: "object",
+								properties: { question: { type: "string" } },
+							},
+						},
+					],
+					timestamp: 1,
+				},
+				{
+					role: "user",
+					content: "I want to learn linear algebra.",
+					timestamp: 2,
+				},
+			],
+		} as any);
+
+		assert.ok(formatted.includes("# Tools Available"));
+		assert.ok(formatted.includes("- **probe**: Ask a multiple choice diagnostic question"));
+		assert.ok(formatted.includes("<tool_call>"));
 	});
 });
