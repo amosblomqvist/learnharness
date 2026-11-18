@@ -200,6 +200,16 @@ class ClaudeTurn {
 				return;
 			}
 
+			case "signatureDelta": {
+				// The signature tags API-converted prose ("narration"); the narration
+				// guard reads it to catch learner-facing text swallowed into thinking.
+				const found = this.getBlock(event.index);
+				if (!found || found.block.type !== "thinking") return;
+
+				found.block.thinkingSignature = (found.block.thinkingSignature ?? "") + event.signature;
+				return;
+			}
+
 			case "toolInputDelta": {
 				const found = this.getBlock(event.index);
 				if (!found) return;

@@ -40,6 +40,7 @@ import { authEnvRecord } from "../src/core/auth-env.ts";
 import { ClaudeLaunchError } from "../src/agent/claude-code/launch.ts";
 import { createClaudeCodeStreamFunction, toClaudeArgs, toEffort, type RunClaude } from "../src/agent/claude-code/stream.ts";
 import { toStreamJsonLine } from "../src/agent/claude-code/transcript.ts";
+import { isNarrationBlock } from "../src/agent/narration-guard.ts";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/claude-code/fake-claude.mjs", import.meta.url));
 const FIXTURES = fileURLToPath(new URL("./fixtures/claude-code/", import.meta.url));
@@ -369,6 +370,41 @@ test("thinking deltas map to thinking_*", async (t) => {
 		{ type: "thinking", thinking: "Sockets are endpoints." },
 		{ type: "text", text: "An endpoint." },
 	]);
+});
+
+test("signature deltas are kept so narration (prose converted to summarized thinking) is detectable", async (t) => {
+	// Header shape recorded from the real CLI (2026-11-18): the API converted
+	// learner-facing prose before a tool call into a thinking block whose
+	// signature is tagged "narration". Dropping it blinded the narration guard.
+	const signature = Buffer.concat([
+		Buffer.from([0x08, 0x04, 0x12, 0x9f, 0x09, 0x0a, 0x11, 0x08, 0x13, 0x18, 0x02, 0x38, 0x01, 0x42, 0x09]),
+		Buffer.from("narration"),
+		Buffer.alloc(48, 7),
+	]).toString("base64");
+	const half = Math.floor(signature.length / 2);
+
+	assert.deepEqual(
+		parseCliLine(streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: "abc" } })),
+		{ type: "signatureDelta", index: 0, signature: "abc" },
+	);
+
+	const { events } = await runScenario(t, [
+		streamEvent({ type: "message_start", message: { usage: { input_tokens: 3, output_tokens: 1 } } }),
+		streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "" } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Summary of the swallowed prose." } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: signature.slice(0, half) } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: signature.slice(half) } }),
+		streamEvent({ type: "content_block_stop", index: 0 }),
+		streamEvent({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 9 } }),
+		streamEvent({ type: "message_stop" }),
+	]);
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.deepEqual(done.message.content, [
+		{ type: "thinking", thinking: "Summary of the swallowed prose.", thinkingSignature: signature },
+	]);
+	assert.equal(isNarrationBlock(done.message.content[0]!), true);
 });
 
 test("tool scenario ends with toolcall_end (Claude's tool_use id, unprefixed name) and done(toolUse)", async (t) => {
