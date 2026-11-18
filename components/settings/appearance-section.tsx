@@ -42,6 +42,7 @@ import {
 	resolveSettings,
 	THEME_COLOR_KEYS,
 	type AppearanceSettings,
+	type DisclosureKind,
 	type GraphSettings,
 	type ThemeColorKey,
 } from "@/src/core";
@@ -517,13 +518,21 @@ export function AppearanceSection({
 					onChange={(on) => onSectionChange({ ...appearance, adaptiveQuestions: on })}
 				/>
 			</SettingsRow>
+		</>
+	);
+}
+
+export function StartExpandedSwitches({ onToggle }: { onToggle: (kind: DisclosureKind) => void }) {
+	const { appearance } = useAppearance();
+	return (
+		<>
 			<p className="mt-5 mb-2 text-xs uppercase tracking-widest text-muted-foreground">Start expanded</p>
 			{DISCLOSURE_KINDS.map((kind) => (
 				<SettingsRow key={kind} label={DISCLOSURES[kind].label} testid={`row-expand-${kind}`}>
 					<Toggle
-						checked={resolved.expandByDefault[kind]}
+						checked={appearance.expandByDefault[kind]}
 						label={DISCLOSURES[kind].label}
-						onChange={(on) => onSectionChange({ ...appearance, expandByDefault: { ...appearance?.expandByDefault, [kind]: on } })}
+						onChange={() => onToggle(kind)}
 					/>
 				</SettingsRow>
 			))}

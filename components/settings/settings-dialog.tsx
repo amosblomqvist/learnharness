@@ -38,8 +38,10 @@ import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
 	CURRENT_SETTINGS_VERSION,
+	resolveExpandByDefault,
 	type AppearanceSettings,
 	type CompactionSettings,
+	type DisclosureKind,
 	type GraphSettings,
 	type UserSettings,
 } from "@/src/core";
@@ -52,7 +54,7 @@ import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
-import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
+import { AppearanceSection, GraphSection, StartExpandedSwitches } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { PluginsSection } from "./plugins-section.tsx";
 import { PluginSettingsPage } from "./plugin-settings-page.tsx";
@@ -84,6 +86,7 @@ const DialogContext = createContext<{ open: (section?: string, row?: string) => 
 interface SettingsWriteOrder {
 	issued: number;
 	acknowledged: number;
+	disclosureSave?: Promise<void>;
 	record?: UserSettings;
 	fileAccessError?: string | null;
 	pendingWrites: number;
@@ -382,6 +385,18 @@ export function SettingsDialogBody({
 		}
 	}
 
+	// Each click flips the last acknowledged value. Keep the queue on the
+	// Settings host so closing and reopening the dialog cannot reorder saves.
+	function toggleDisclosure(kind: DisclosureKind) {
+		const authority = writeOrder.current;
+		const save = async () => {
+			const appearance = authority.record?.appearance;
+			const open = resolveExpandByDefault(appearance?.expandByDefault)[kind];
+			await write("appearance", { ...appearance, expandByDefault: { ...appearance?.expandByDefault, [kind]: !open } });
+		};
+		authority.disclosureSave = (authority.disclosureSave ?? Promise.resolve()).then(save);
+	}
+
 	const frame = (
 		<div
 			tabIndex={-1}
@@ -537,6 +552,7 @@ export function SettingsDialogBody({
 											write("appearance", next)
 										}
 									/>
+									<StartExpandedSwitches onToggle={toggleDisclosure} />
 								</SettingsSection>
 							)}
 							{active === "graph" && (
