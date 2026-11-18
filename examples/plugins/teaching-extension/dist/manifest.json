@@ -1,0 +1,10 @@
+{
+  "apiVersion": 1,
+  "id": "teaching-extension",
+  "name": "Teaching extension example",
+  "version": "1.0.0",
+  "minAppVersion": "0.3.7",
+  "description": "Developer example: additive instructions, native Pi tools, an optional model-backed background worker and custom lesson rendering. No code execution or learner-data writes.",
+  "main": "main.js",
+  "backend": "backend.cjs"
+}

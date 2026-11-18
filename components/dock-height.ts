@@ -92,7 +92,7 @@ interface DockHeightRefs {
 
 export function useDockHeight({
 	scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-	expanded, enabled, mode, onScrollbarInset, onHeight,
+	expanded, enabled, mode, onScrollbarInset, onHeight, onLayout,
 }: DockHeightRefs & {
 	expanded: boolean;
 	enabled: boolean;
@@ -101,6 +101,8 @@ export function useDockHeight({
 	onScrollbarInset: (inset: number) => void;
 	/** Settled visible block height, fed through the existing reserve policy. */
 	onHeight: (height: number) => void;
+	/** Constraints are applied before notifying an active opening morph. */
+	onLayout?: () => void;
 }) {
 	const measure = useCallback(() => {
 		const column = scrollRef.current;
@@ -118,26 +120,32 @@ export function useDockHeight({
 			viewport.style.removeProperty("overflow-y");
 			shell.style.removeProperty("max-height");
 		}
+		onLayout?.();
 		// ResizeObserver runs even when only a child field changed and React
 		// did not rerender DockOverlay. Keep its transcript reserve current,
 		// but never report a mid-morph height.
 		if (shell.getAnimations().length === 0) onHeight(block.getBoundingClientRect().height);
-	}, [scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef, expanded, enabled, onScrollbarInset, onHeight]);
+	}, [scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef, expanded, enabled, onScrollbarInset, onHeight, onLayout]);
 
 	// Imperative constraints land before the overlay's later layout effect
 	// measures its morph target/reserve, and before paint (including reveal).
 	useIsoLayoutEffect(measure);
 	useIsoLayoutEffect(() => {
-		const observer = new ResizeObserver(measure);
+		// Ignore already-queued deliveries after variant replacement or Activity
+		// cleanup: old observers must never retarget a newer height animation.
+		let active = true;
+		const observedMeasure = () => { if (active) measure(); };
+		const observer = new ResizeObserver(observedMeasure);
 		for (const el of [scrollRef.current, blockRef.current, viewportRef.current, bodyRef.current, contentRef.current]) {
 			if (el) observer.observe(el);
 		}
 		const question = expanded ? contentRef.current?.querySelector("[data-dock-scroll-area]") : null;
 		if (question) observer.observe(question);
-		window.addEventListener("resize", measure);
+		window.addEventListener("resize", observedMeasure);
 		return () => {
+			active = false;
 			observer.disconnect();
-			window.removeEventListener("resize", measure);
+			window.removeEventListener("resize", observedMeasure);
 		};
 	}, [measure, mode, expanded, scrollRef, blockRef, viewportRef, bodyRef, contentRef]);
 }
