@@ -946,10 +946,7 @@ function SessionsSidebar() {
 				    Practice / All — the real modes first, "All" as the escape
 				    hatch on the right, mirroring the create-buttons above.
 				    Persisted client-side. */}
-				{/* Its band's bottom rule frames the list's top (owner polish
-				    round): the first row needs no rule of its own, and the
-				    rule stays put while the list scrolls under it. */}
-				<div data-testid="session-kind-filter-band" className="border-b border-border/60 pb-2">
+				<div data-testid="session-kind-filter-band" className="pb-2">
 				<div className="mx-3 flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="session-kind-filter">
 					{(["teach", "practice", "all"] as const).map((f) => (
 						<button
@@ -980,18 +977,23 @@ function SessionsSidebar() {
 				{/* The bar overlays the rows (owner polish round): rules and
 				    highlights run to the edge; it shows while scrolling/hovering. */}
 				<OverlayScrollArea scrollRef={listRef} data-testid="session-list" className="flex flex-col" {...folderDrop.containerProps}>
-					{creatingFolder?.parentId === null && (
-						<NewFolderRow depth={0} onDone={() => setCreatingFolder(null)}
-							onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: null })} />
+					{/* The topmost row carries a top rule (owner polish round): the
+					    list reads as a ruled table and the rule scrolls with it. */}
+					{(creatingFolder?.parentId === null || (rows !== null && rows.length > 0)) && (
+						<div data-testid="session-rows" className="border-t border-border/60">
+							{creatingFolder?.parentId === null && (
+								<NewFolderRow depth={0} onDone={() => setCreatingFolder(null)}
+									onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: null })} />
+							)}
+							{renderTree(tree ?? [], 0)}
+						</div>
 					)}
 					{rows === null ? (
 						<div className="px-4 py-4 text-xs text-muted-foreground">Loading…</div>
-					) : rows.length === 0 ? (
+					) : rows.length === 0 && (
 						<div className="px-4 py-4 text-xs text-muted-foreground">
 							{query.trim() ? "No sessions match." : "No sessions yet."}
 						</div>
-					) : (
-						<div>{renderTree(tree ?? [], 0)}</div>
 					)}
 					{/* Empty space below the list: drop here to move out of all folders. */}
 					{organization && (
