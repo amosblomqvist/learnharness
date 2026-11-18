@@ -517,6 +517,11 @@ export interface NotesSource {
     filePath: string;
     importedAt: string;
     contentFp?: string;
+    resume?: {
+        fp: string;
+        chunks: number;
+        done: number;
+    };
     extractions?: ExtractionRunUsage[];
 }
 ```
@@ -529,6 +534,10 @@ export interface NotesSource {
 - [filePath](#notessource-filepath)
 - [importedAt](#notessource-importedat)
 - [contentFp](#notessource-contentfp)
+- [resume](#notessource-resume)
+- [resume.fp](#notessource-resumefp)
+- [resume.chunks](#notessource-resumechunks)
+- [resume.done](#notessource-resumedone)
 - [extractions](#notessource-extractions)
 
 ### NotesSource id
@@ -554,11 +563,45 @@ importedAt: string;
 ### NotesSource contentFp
 
 Legacy content fingerprint. Accepted when reading old records, but
-ignored: every explicit notes import processes the whole file. New
-imports do not compute or write this field. No migration is needed.
+ignored: every completed notes import processes the whole file again.
+New imports do not write this field. No migration is needed.
 
 ```ts
 contentFp?: string;
+```
+
+### NotesSource resume
+
+Incomplete-run checkpoint: the chunking inputs' fingerprint plus the
+leading chunks already merged. Written after each merged chunk and
+cleared when a run completes, so a stopped import of the same file
+text resumes at `done` instead of re-paying earlier chunks. A changed
+file (or chunk size) has a different fp and starts from the top.
+
+```ts
+resume?: {
+    fp: string;
+    chunks: number;
+    done: number;
+};
+```
+
+### NotesSource resume.fp
+
+```ts
+fp: string;
+```
+
+### NotesSource resume.chunks
+
+```ts
+chunks: number;
+```
+
+### NotesSource resume.done
+
+```ts
+done: number;
 ```
 
 ### NotesSource extractions

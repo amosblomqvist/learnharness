@@ -83,9 +83,15 @@ export interface NotesSource {
 	/** ISO — when this file was imported (the checkpoint's foldedAt). */
 	importedAt: string;
 	/** Legacy content fingerprint. Accepted when reading old records, but
-	 * ignored: every explicit notes import processes the whole file. New
-	 * imports do not compute or write this field. No migration is needed. */
+	 * ignored: every completed notes import processes the whole file again.
+	 * New imports do not write this field. No migration is needed. */
 	contentFp?: string;
+	/** Incomplete-run checkpoint: the chunking inputs' fingerprint plus the
+	 * leading chunks already merged. Written after each merged chunk and
+	 * cleared when a run completes, so a stopped import of the same file
+	 * text resumes at `done` instead of re-paying earlier chunks. A changed
+	 * file (or chunk size) has a different fp and starts from the top. */
+	resume?: { fp: string; chunks: number; done: number };
 	/** The run's usage log — same append-only discipline as
 	 *  ChatRecord.extractions, idempotent per startedAt. */
 	extractions?: ExtractionRunUsage[];
