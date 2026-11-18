@@ -4,6 +4,13 @@ import { SEND_TO_USER_TOOL } from "../../core/native-messages.ts";
 import { CLAUDE_CODE_PROVIDER } from "../claude-code/constants.ts";
 import { serverExecute } from "../tool-execute.ts";
 
+/** Claude models get the output tool (their plain text may be summarized
+ *  into thinking). Matches Claude across providers (including OpenRouter),
+ *  not the API transport. The side-question agent uses this directly. */
+export function needsSendToUser(model: { provider: string; id: string }): boolean {
+	return model.provider === CLAUDE_CODE_PROVIDER || model.id.toLowerCase().includes("claude");
+}
+
 /** One availability rule for the tool and its teacher-only delivery guard.
  * Practice uses ordinary final prose; explicit registries remain caller-owned. */
 export function sendToUserApplies(
@@ -11,8 +18,7 @@ export function sendToUserApplies(
 	model: { provider: string; id: string },
 	toolsOverridden: boolean,
 ): boolean {
-	return (kind === "prober" || kind === "teacher") && !toolsOverridden &&
-		(model.provider === CLAUDE_CODE_PROVIDER || model.id.toLowerCase().includes("claude"));
+	return (kind === "prober" || kind === "teacher") && !toolsOverridden && needsSendToUser(model);
 }
 
 const sendToUserInput = Type.Object({

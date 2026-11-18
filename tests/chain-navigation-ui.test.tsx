@@ -122,6 +122,38 @@ it("Space clicks only the focused row's enabled checkbox; text editing and check
 	await key("ArrowDown"); await key("ArrowRight"); await key("ArrowRight"); await key("ArrowRight");
 	assert.equal(activeKey()?.[0], "chain"); assert.equal((await key(" ")).defaultPrevented, false);
 });
+it("rich statement actions keep native Space in both viewing and picking, while row/checkbox Space still selects", async () => {
+	for (const selectMode of [false, true]) {
+		const toggles: { ids: string[]; next: boolean }[] = [];
+		const richNodes = nodes.map(n => n.id === "n1" ? { ...n,
+			statement: '```js\nconst text = "\\n";\n```\n\n$$\nx^2\n$$\n\n[Reference](https://example.invalid/reference)' } : n);
+		host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
+		await act(async () => { root!.render(<ChainTableBody keyboardActive selectMode={selectMode}
+			nodes={richNodes} chains={[{ id: "argument", premises: ["n1"], conclusion: "n2", provenance: [], createdAt: "2026-10-30" }]}
+			sessions={{ a: "Synthetic source" }} fileSources={{}} query="" onQuery={() => {}}
+			sort={{ col: "name", dir: 1 }} onSort={() => {}} selection={new Set()}
+			expandedClusters={new Set(["a"])} expandedChains={new Set(["argument"])}
+			onToggleCluster={() => {}} onToggleChain={() => {}} onToggleNodes={(ids, next) => toggles.push({ ids, next })}
+			onClear={() => {}} onDelete={() => {}} onClose={() => {}} />); });
+		const row = document.querySelector<HTMLElement>('[data-testid="prop-row-n1"]')!;
+		for (const selector of ['[aria-label="Copy code"]', '[aria-label="Copy equation source"]', '[data-streamdown="link"]']) {
+			const action = row.querySelector<HTMLElement>(selector)!; assert.ok(action, selector);
+			await act(async () => { action.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true })); });
+			action.focus();
+			assert.equal((await key(" ", action)).defaultPrevented, false, `${selector}: native Space`);
+			assert.equal(focused, action, `${selector}: focus stays on the action`);
+			assert.equal(toggles.length, 0, `${selector}: no accidental selection`);
+		}
+		if (selectMode) {
+			for (const target of [row, row.querySelector<HTMLElement>('input[type="checkbox"]')!]) {
+				assert.equal((await key(" ", target)).defaultPrevented, true);
+				assert.equal(focused, row);
+			}
+			assert.deepEqual(toggles.map(call => call.ids), [["n1"], ["n1"]]);
+		}
+		await act(async () => { root!.unmount(); }); root = undefined; host.remove();
+	}
+});
 it("blank space below the tree clears row highlighting and focus, without toggling checked entries", async () => {
 	await mount(); await key("ArrowDown"); assert.ok(active()); assert.equal(focused, active());
 	const checkbox = active()!.querySelector<HTMLInputElement>('input[type="checkbox"]')!; checkbox.checked = true;

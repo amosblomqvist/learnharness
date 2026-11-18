@@ -6,6 +6,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createWebTools } from "../src/agent/tools/web.ts";
+import { safeFetchOverride } from "../src/agent/tools/safe-fetch.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
 import { runResearcherAgent } from "../src/agent/subagents/researcher.ts";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
@@ -87,8 +88,7 @@ describe("web_search on the injected port (web.ts)", () => {
 		// so the happy path runs hermetically: a VALID url must REACH the
 		// fetch stage.
 		const { web_fetch } = createWebTools(() => null);
-		const realFetch = globalThis.fetch;
-		globalThis.fetch = (async () =>
+		safeFetchOverride.current = (async () =>
 			new Response("A plain text page with enough content to matter for the test.", {
 				headers: { "content-type": "text/plain" },
 			})) as typeof fetch;
@@ -103,7 +103,7 @@ describe("web_search on the injected port (web.ts)", () => {
 			const ftp = await web_fetch!.execute!("c-ftp", { url: "ftp://example.com/file" });
 			assert.match(String(ftp.details), /invalid URL/, "non-http(s) schemes still rejected");
 		} finally {
-			globalThis.fetch = realFetch;
+			safeFetchOverride.current = undefined;
 		}
 	});
 });
@@ -163,9 +163,8 @@ describe("keyless researcher loop", () => {
 			});
 			const faux = createFauxCore({});
 			faux.setResponses(steps);
-			const realFetch = globalThis.fetch;
 			const fetched: string[] = [];
-			globalThis.fetch = (async (input) => {
+			safeFetchOverride.current = (async (input) => {
 				fetched.push(String(input));
 				assert.equal(String(input), url, "only the supplied URL is fetched");
 				return new Response("Synthetic verified source content", { headers: { "content-type": "text/plain" } });
@@ -177,7 +176,7 @@ describe("keyless researcher loop", () => {
 				}), brief);
 				assert.deepEqual(fetched, [url]);
 			} finally {
-				globalThis.fetch = realFetch;
+				safeFetchOverride.current = undefined;
 			}
 		});
 	}
