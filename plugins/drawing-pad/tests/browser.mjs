@@ -450,6 +450,23 @@ try {
   assert.deepEqual(await editButtons(), [[true, "0.4"], [true, "0.4"]], "clearing restores the normal disabled appearance");
   group("Undo and Clear stay visually steady but disabled during a stroke");
 
+  const firstPen = await page.createCDPSession();
+  const firstPenX = heldBox.x + heldBox.width * .3, firstPenY = heldBox.y + heldBox.height * .6;
+  const emptyButtons = await editButtons();
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mousePressed", x: firstPenX, y: firstPenY, button: "left", buttons: 1, pointerType: "pen", force: .7 });
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 40, y: firstPenY + 10, buttons: 1, pointerType: "pen", force: .5 });
+  assert.deepEqual(await editButtons(), emptyButtons, "the first live stroke does not brighten Undo or Clear");
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 50, y: firstPenY + 12, buttons: 1, pointerType: "pen", force: 0 });
+  assert.equal(await label(), "Draw (unsent)", "zero pressure committed the first segment before release");
+  assert.deepEqual(await editButtons(), emptyButtons, "a mid-gesture commit does not brighten the still-disabled controls");
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 60, y: firstPenY + 14, buttons: 1, pointerType: "pen", force: .7 });
+  assert.deepEqual(await editButtons(), emptyButtons, "resuming pressure does not change the toolbar appearance");
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: firstPenX + 60, y: firstPenY + 14, button: "left", pointerType: "pen", force: 0 });
+  await firstPen.detach();
+  assert.deepEqual(await editButtons(), available, "release enables and brightens Undo and Clear");
+  await button("Clear"); assert.equal(await ink(), 0);
+  group("a pressure gap during the first pen gesture keeps editing controls dim until release");
+
   const activeBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await page.mouse.move(activeBox.x + activeBox.width * .3, activeBox.y + activeBox.height * .7); await page.mouse.down();
   await page.mouse.move(activeBox.x + activeBox.width * .5, activeBox.y + activeBox.height * .75, { steps: 8 });

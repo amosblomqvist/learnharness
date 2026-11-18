@@ -92,11 +92,9 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     setButton(pen, { variant: state.tool === "pen" ? "secondary" : "outline", disabled: preparing || !!failure });
     setButton(eraser, { variant: state.tool === "eraser" ? "secondary" : "outline", disabled: preparing || !!failure });
     setButton(hand, { variant: state.tool === "hand" ? "secondary" : "outline", disabled: preparing || !!failure });
-    const canEditHistory = !preparing && !failure && !!draft?.strokes.length;
-    const gestureActive = pointerId !== undefined;
-    toolbar.toggleAttribute("data-gesture-lock", canEditHistory && gestureActive);
-    setButton(undo, { disabled: !canEditHistory || gestureActive });
-    setButton(clear, { disabled: !canEditHistory || gestureActive });
+    const historyDisabled = preparing || !!failure || pointerId !== undefined || !draft?.strokes.length;
+    setButton(undo, { disabled: historyDisabled });
+    setButton(clear, { disabled: historyDisabled });
     canvas.style.cursor = panDrag ? "grabbing" : state.tool === "hand" ? "grab" : "default";
     status.hidden = !preparing && !failure;
     status.setAttribute("role", failure ? "alert" : "status");
@@ -216,6 +214,8 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
       (event.pointerType !== "pen" && event.button !== 0 && !rightButton)) return;
     event.preventDefault(); viewport.focus({ preventScroll: true });
     pointerId = event.pointerId; canvas.setPointerCapture(event.pointerId);
+    // Keep the pre-gesture opacity even if a pressure gap commits ink before release.
+    toolbar.toggleAttribute("data-gesture-lock", state.draft.strokes.length > 0);
     if (rightButton || state.tool === "hand") {
       panDrag = { x: event.clientX, y: event.clientY, pan: state.pan, rightButton }; render();
     }
@@ -257,6 +257,7 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
       active.points.push(next);
     }
     flush(); pointerId = undefined;
+    toolbar.removeAttribute("data-gesture-lock");
     if (canvas.hasPointerCapture(event.pointerId)) canvas.releasePointerCapture(event.pointerId);
     applyScheduledInk(); renderChrome(); syncInk();
   };
