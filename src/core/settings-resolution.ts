@@ -73,7 +73,6 @@ export interface EffectiveModelSpec {
 /** The concrete appearance view — same shape as the factory's. */
 export type EffectiveAppearance = FactorySettings["appearance"];
 
-/** Per kind: the stored choice, else the factory's. */
 export function resolveExpandByDefault(stored: AppearanceSettings["expandByDefault"]): Record<DisclosureKind, boolean> {
 	const factory = FACTORY_SETTINGS.appearance.expandByDefault;
 	return Object.fromEntries(DISCLOSURE_KINDS.map((kind) => [kind, stored?.[kind] ?? factory[kind]])) as Record<DisclosureKind, boolean>;

@@ -31,7 +31,6 @@ test("image-only practice thinking, question thinking, reading and answer contai
 	assert.match(renderToStaticMarkup(<ThinkingCard data={{ text: "", problemCallId: "problem", images: [image] }} />), /Submitted image/);
 	const html = renderToStaticMarkup(<AnsweredCard answer={{ ...answer, images: { answer: [image], thinking: [image], readingThinking: [image] } }} />);
 	assert.match(html, /reading-thinking-block/); assert.match(html, /your-thinking/);
-	// Answer, reading, and question thinking all start open: the factory Your thinking setting is expanded.
 	assert.equal((html.match(/alt="Submitted image"/g) ?? []).length, 3);
 	assert.match(renderToStaticMarkup(<ThinkingBlock text="drawing.png" />), /drawing.png/);
 	assert.doesNotMatch(renderToStaticMarkup(<ThinkingBlock text="drawing.png" />), /<img/);

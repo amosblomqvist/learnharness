@@ -24,15 +24,12 @@ function setAll(kind: DisclosureKind, open: boolean) {
 	for (const listener of listeners[kind]) listener(open);
 }
 
-/** Flip every block of `kind` from the current shared state: the last
- *  keyboard set, else the setting the caller passes in. */
 export function toggleAllDisclosures(kind: DisclosureKind, expandByDefault: boolean): void {
 	const open = !(keyboardSets[kind] ?? expandByDefault);
 	keyboardSets[kind] = open;
 	setAll(kind, open);
 }
 
-/** The provider calls this when a kind's setting changes. */
 export function applyExpandByDefault(kind: DisclosureKind, open: boolean): void {
 	delete keyboardSets[kind];
 	setAll(kind, open);
