@@ -69,8 +69,8 @@ export function mountSheet(container: HTMLElement, ctx: PluginFrontendContext, s
     pen.update({ variant: state.tool === "pen" ? "secondary" : "outline", disabled: preparing || !!failure });
     eraser.update({ variant: state.tool === "eraser" ? "secondary" : "outline", disabled: preparing || !!failure });
     hand.update({ variant: state.tool === "hand" ? "secondary" : "outline", disabled: preparing || !!failure });
-    undo.update({ disabled: preparing || !!failure || pointerId !== undefined || !draft?.strokes.length });
-    clear.update({ disabled: preparing || !!failure || pointerId !== undefined || !draft?.strokes.length });
+    undo.update({ disabled: preparing || !!failure || !draft?.strokes.length });
+    clear.update({ disabled: preparing || !!failure || !draft?.strokes.length });
     canvas.style.cursor = panDrag ? "grabbing" : state.tool === "hand" ? "grab" : "default";
     status.hidden = !preparing && !failure;
     status.setAttribute("role", failure ? "alert" : "status");

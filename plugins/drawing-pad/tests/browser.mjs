@@ -31,7 +31,7 @@ try {
   const html = `<!doctype html><html class="dark"><head><meta charset="utf-8"><link rel="stylesheet" href="/plugin.css"><link rel="stylesheet" href="/katex/katex.min.css"><link rel="stylesheet" href="/styles/capture-parent.css"><style>
     html.dark{color-scheme:dark}html.light{color-scheme:light}
     *{box-sizing:border-box} body{margin:0;background:var(--background);color:var(--foreground);font-family:monospace} #bar{height:48px;display:flex;gap:12px;padding:8px 240px;background:var(--card)} button{font:inherit;font-size:12px;padding:6px 10px;background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:6px;cursor:pointer} button[data-variant=secondary]{background:var(--border)}button:disabled{opacity:.4}button svg{display:block;width:16px;height:16px}input{background:var(--background);color:var(--foreground);border:1px solid var(--border)}
-    #sidebar{position:fixed;left:0;top:48px;width:220px;bottom:0;background:var(--card)}#pad{position:fixed;left:220px;top:48px;right:0;bottom:0;background:var(--background)}#close-pad{position:absolute;right:12px;top:10px;z-index:10}#settings{position:fixed;inset:150px 300px;background:var(--card);z-index:50;padding:24px}.lh-prose{font-family:serif;font-size:16px;line-height:1.5}.lh-prose p{margin:0 0 8px}#settings[hidden]{display:none}
+    #sidebar{position:fixed;left:0;top:48px;width:220px;bottom:0;background:var(--card)}#pad{position:fixed;left:220px;top:48px;right:0;bottom:0;background:var(--background)}#close-pad{position:absolute;right:12px;top:10px;z-index:10}#settings{position:fixed;inset:150px 300px;background:var(--card);z-index:50;padding:24px}.lh-prose{font-family:serif;font-size:16px;line-height:1.5}.lh-prose p{margin:0 0 8px}#settings[hidden]{display:none}[data-streamdown=code-block-body] code>span{display:block}
     </style></head><body><div id="bar"><button id="draw">Loading</button><button id="settings-open">Settings</button></div><aside id="sidebar">Fixture sidebar</aside><div id="settings" hidden><label>Dark mode ink color <input id="dark-ink"></label><label>Light mode ink color <input id="light-ink"></label><label>Image scale (%) <input id="image-scale" type="number"></label><p id="setting-error"></p><button id="blur-target">Done editing</button></div><script type="module" src="/fixture.js"></script></body></html>`;
   server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://fixture");
@@ -383,6 +383,12 @@ try {
   await page.screenshot({ path: path.join(evidence, "diagram-sheet.png") });
   group("capture waits for the actual asynchronous host Mermaid renderer");
 
+  const longCode = { ...diagram, question: { ...diagram.question,
+    question: "Read this code.\n\n```python\n" + Array.from({ length: 40 }, (_, line) => `value_${line} = ${line}`).join("\n") + "\n```" } };
+  await call("navigate", "long-code", "teaching", longCode); await open();
+  assert.ok((await referenceSize())[1] > 600, "an offscreen code block freezes at its full height, not its 200px content-visibility placeholder");
+  group("long code blocks freeze at their full height");
+
   await call("navigate", "mount-replay", "teaching", question);
   await run(() => { window.fixture.replayOnOpen = true; });
   const mountsBefore = await run(() => window.fixture.contentMounts);
@@ -399,6 +405,15 @@ try {
   assert.equal(await ink(), replayInk); assert.equal(await bg(), replayBackground); assert.equal(await label(), "Draw (unsent)");
   await button("Undo"); assert.equal(await ink(), 0);
   group("replaying a mounted sheet preserves frozen reference, ink and editable Undo history");
+
+  await stroke();
+  const heldBox = await (await page.$(".drawing-pad-ink")).boundingBox();
+  await page.mouse.move(heldBox.x + heldBox.width * .3, heldBox.y + heldBox.height * .6); await page.mouse.down();
+  await page.mouse.move(heldBox.x + heldBox.width * .5, heldBox.y + heldBox.height * .65, { steps: 4 });
+  assert.deepEqual(await run(() => ["Undo", "Clear"].map(name => [...document.querySelectorAll(".drawing-pad-tools button")]
+    .find(button => (button.getAttribute("aria-label") ?? button.textContent) === name).disabled)), [false, false], "Undo and Clear do not fade while the pen is down");
+  await page.mouse.up(); await button("Clear"); assert.equal(await ink(), 0);
+  group("Undo and Clear stay enabled while a stroke is drawn");
 
   const activeBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await page.mouse.move(activeBox.x + activeBox.width * .3, activeBox.y + activeBox.height * .7); await page.mouse.down();

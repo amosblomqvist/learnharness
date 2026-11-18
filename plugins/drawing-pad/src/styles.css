@@ -18,6 +18,8 @@
 /* Native dock: 46rem column - 2rem outer padding - 2px shell borders
    - 2rem question padding. Match its normal content width, never the window. */
 .drawing-pad-reference { position: absolute; left: -100000px; top: 0; width: calc(42rem - 2px); box-sizing: border-box; color: inherit; }
+/* Offscreen, content-visibility:auto never renders and collapses to its intrinsic placeholder size. */
+.drawing-pad-reference * { content-visibility: visible !important; }
 .drawing-pad-reference-label { margin-bottom: 4px; font-size: 11px; font-weight: 500; text-transform: uppercase; letter-spacing: .025em; color: var(--muted-foreground); }
 .drawing-pad-reference-question { margin-bottom: 12px; font-weight: 500; }
 .drawing-pad-reference-context { margin-bottom: 12px; font-size: 13px; color: var(--muted-foreground); }
