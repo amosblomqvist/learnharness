@@ -26,6 +26,9 @@ in-app cheat sheet. See [Getting started](getting-started.md) for setup.
 Surface-specific actions require their surface to be mounted. Bare shortcuts
 such as **?** and **F2** do not fire while typing; modifier shortcuts still do.
 
+In an active chat, **Mod+Y** also toggles Why from the composer. **Mod+Shift+Z**
+redoes a composer edit. Rebinding Why frees **Mod+Y** for composer redo.
+
 **Settings → Keyboard** displays the registry and offers Rebind, per-action
 Reset, and Reset all controls. Overrides are stored on this device in
 localStorage (`lh:keymap`), not in the learning-data settings file. Contextual

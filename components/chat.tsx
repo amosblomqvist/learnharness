@@ -653,8 +653,10 @@ export function Chat({
 	useEffect(() => {
 		const unsubscribes = DISCLOSURE_KINDS.map((kind) => {
 			const event = kbdEventForChat(DISCLOSURES[kind].action);
-			const onToggle = () => {
-				if (isInteractionScopeEligible(sessionFindScopeRef.current, controller)) toggleAllDisclosures(kind, expandByDefault[kind]);
+			const onToggle = (request: Event) => {
+				if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller)) return;
+				request.preventDefault();
+				toggleAllDisclosures(kind, expandByDefault[kind]);
 			};
 			window.addEventListener(event, onToggle);
 			return () => window.removeEventListener(event, onToggle);

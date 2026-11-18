@@ -229,6 +229,30 @@ test("native typing, token insertion/deletion and undo/redo share one history", 
 	assert.equal(f.value, "ab");
 });
 
+test("the focused composer offers Mod+Y to chat and keeps redo available", async () => {
+	const f = await fixture("");
+	await f.nativeText("draft");
+	await f.event("keydown", { key: "z", ctrlKey: true });
+	let toggles = 0;
+	const claimWhy = (event: Event) => { toggles++; event.preventDefault(); };
+	window.addEventListener("lh:kbd-toggle-why", claimWhy);
+	try {
+		for (const mod of [{ ctrlKey: true }, { metaKey: true }]) {
+			const key = await f.event("keydown", { key: "y", ...mod });
+			assert.equal(key.defaultPrevented, true);
+			assert.equal(f.value, "");
+		}
+		assert.equal(toggles, 2);
+		await f.event("keydown", { key: "Z", ctrlKey: true, shiftKey: true });
+		assert.equal(f.value, "draft");
+	} finally {
+		window.removeEventListener("lh:kbd-toggle-why", claimWhy);
+	}
+	await f.event("keydown", { key: "z", ctrlKey: true });
+	await f.event("keydown", { key: "y", ctrlKey: true });
+	assert.equal(f.value, "draft", "outside an active chat Mod+Y keeps editor redo");
+});
+
 test("Cmd+Backspace delegates line extent to beforeinput instead of deleting just the final chip", async () => {
 	const source = "Explain `/tmp/notes.pdf`";
 	const f = await fixture(source);
