@@ -185,7 +185,7 @@ export function jobTools(ctx: JobToolContext): Record<string, AgentTool<any>> {
 				if (!ctx.jobStore.findJobByToolCallId(ctx.chatId, toolCallId)) {
 					if (input.image !== undefined && input.pdf !== undefined) throw new Error("Pass either image or pdf, not both.");
 					if (input.image !== undefined) await checkLearnerImage(input.image);
-					if (input.pdf !== undefined) await checkPdfPage(input.pdf.path, input.pdf.page);
+					if (input.pdf !== undefined) await checkPdfPage(input.pdf.path, input.pdf.page, signal);
 				}
 				signal?.throwIfAborted();
 				return dispatch(ctx, "visual", toolCallId, VISUAL_ACK, input);

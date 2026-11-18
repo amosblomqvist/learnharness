@@ -15,6 +15,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it } from "node:test";
+import type { PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { createCanvas } from "@napi-rs/canvas";
 import * as photon from "@silvia-odwyer/photon-node";
 import {
@@ -31,7 +32,8 @@ import { learnerImageFromBytes } from "../src/agent/tools/learner-image.ts";
 import { checkPdfPage, cropFraction, loadPdfFigureSource, type PdfFigureImage, type PdfFigureSource } from "../src/agent/tools/pdf-figure.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
 import { createVisualTools, LEARNER_IMAGE_HREF, runVisualMaker } from "../src/agent/subagents/visual-maker.ts";
-import { headlessOverride, realHeadless, type HeadlessApi, type PdfCrop } from "../src/agent/subagents/headless.ts";
+import { headlessOverride, realHeadless, renderOpenPdfPage, type HeadlessApi, type PdfCrop } from "../src/agent/subagents/headless.ts";
+import { fireJobAbort, isJobLive } from "../src/agent/subagents/aborts.ts";
 import { createJobRunner, visualModelOverride } from "../src/agent/subagents/runner.ts";
 import { isSubagentFailure, type JobRecord, type SteerMessage, type VisualResult } from "../src/core/contracts.ts";
 import type { JobStore } from "../src/core/ports.ts";
@@ -39,10 +41,6 @@ import type { PiEngine } from "../src/agent/models.ts";
 import { chatStore } from "../src/store/chats.ts";
 import { jobStore } from "../src/store/jobs.ts";
 import { tinyPdf } from "./helpers/tiny-pdf.ts";
-
-// The key-presence gate (see demos.test.tsx): the runner's model checks
-// read env-first truth.
-process.env.OPENROUTER_API_KEY ??= "test-key-presence-gate";
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "lh-pdf-figures-"));
 const JOBS_DIR = path.join(PATHS.data, "jobs");
@@ -140,7 +138,7 @@ function text(context: TranscriptContext): string {
 		.join("\n");
 }
 
-function fakeHeadless(renderPdfPages: HeadlessApi["renderPdfPages"] = async () => { throw new Error("unexpected pdf render"); }): HeadlessApi & { svgCalls: string[] } {
+function fakeHeadless(): HeadlessApi & { svgCalls: string[] } {
 	const svgCalls: string[] = [];
 	return {
 		svgCalls,
@@ -153,7 +151,7 @@ function fakeHeadless(renderPdfPages: HeadlessApi["renderPdfPages"] = async () =
 			svgCalls.push(svg);
 			return raster(4, 3);
 		},
-		renderPdfPages,
+		renderPdfPages: async () => { throw new Error("the figure job must not reopen the PDF by path"); },
 	};
 }
 
@@ -183,6 +181,7 @@ async function fakeSource(page = 3) {
 			return image;
 		},
 		imageFor: (id) => made.get(id),
+		close: async () => {},
 	};
 	return { source, crops, made };
 }
@@ -234,6 +233,50 @@ describe("PDF crop rendering (real pdfjs + Skia)", () => {
 	});
 });
 
+describe("job-owned PDF page", () => {
+	it("maps display coordinates onto a rotated page", async () => {
+		const p = file("rotated.pdf", tinyPdf([{ ...QUARTER_PAGE, rotation: 90 }]));
+		const source = await loadPdfFigureSource(p, 1);
+		try {
+			const { width, height } = source.pageImage;
+			assert.ok(width > height);
+			// /Rotate 90 moves the PDF's bottom-right block to display bottom-left.
+			const preview = decode(source.pageImage.data);
+			assert.ok(isRed(preview.at(Math.floor(width / 4), Math.floor(3 * height / 4))));
+			assert.ok(isWhite(preview.at(Math.floor(3 * width / 4), Math.floor(height / 4))));
+			const crop = await source.crop({ x: width * 0.05, y: height * 0.55, width: width * 0.4, height: height * 0.4 });
+			const png = decode(crop.data);
+			assert.ok(isRed(png.at(10, 10)) && isRed(png.at(png.width - 11, png.height - 11)));
+		} finally {
+			await source.close();
+		}
+	});
+
+	it("cancels and settles an active page render with the original abort reason", async () => {
+		const controller = new AbortController();
+		let began!: () => void;
+		const started = new Promise<void>((resolve) => { began = resolve; });
+		let rejectRender!: (reason: Error) => void;
+		const renderResult = new Promise<void>((_resolve, reject) => { rejectRender = reject; });
+		let cancelled = 0;
+		const page = {
+			getViewport: () => ({ width: 24, height: 24 }),
+			render: () => {
+				began();
+				return {
+					promise: renderResult,
+					cancel: () => { cancelled++; rejectRender(new Error("pdfjs stopped rendering")); },
+				};
+			},
+		} as unknown as PDFPageProxy;
+		const rendering = renderOpenPdfPage(page, {}, controller.signal);
+		await started;
+		controller.abort();
+		await assert.rejects(rendering, (error) => error === controller.signal.reason);
+		assert.equal(cancelled, 1);
+	});
+});
+
 // ─── 2. pixel box → page fractions ──────────────────────────────────────────
 
 describe("cropFraction", () => {
@@ -282,6 +325,56 @@ describe("visual with a PDF page: dispatch", () => {
 		await assert.rejects(tools.visual!.execute("c4", { brief: "b", pdf: { path: scratch, page: 1 } }), /not a regular file/);
 		const image = file("photo.png", raster(8, 8));
 		await assert.rejects(tools.visual!.execute("c5", { brief: "b", image, pdf: { path: good, page: 1 } }), /either image or pdf, not both/);
+		assert.equal(created.length, 0);
+		assert.equal(spawned.length, 0);
+	});
+
+	it("refuses a file over 64 MiB before creating a job or attempting PDF parsing", async () => {
+		const { tools, created, spawned } = fakeJobs();
+		const p = file("oversized.pdf", "not a PDF");
+		fs.truncateSync(p, 64 * 1024 * 1024 + 1);
+		await assert.rejects(tools.visual!.execute("large", { brief: "b", pdf: { path: p, page: 1 } }), /PDF exceeds 64 MiB/);
+		assert.equal(created.length, 0);
+		assert.equal(spawned.length, 0);
+	});
+
+	it("refuses growth past the cap during the read, then closes the file handle", async (t) => {
+		const p = deck("growing.pdf");
+		const probe = await fs.promises.open(p, "r");
+		const proto = Object.getPrototypeOf(probe) as typeof probe;
+		await probe.close();
+		const read = proto.read;
+		let actual: typeof probe | undefined;
+		t.mock.method(proto, "read", function (this: typeof probe, ...args: Parameters<typeof read>) {
+			if (!actual) {
+				actual = this;
+				fs.truncateSync(p, 64 * 1024 * 1024 + 1);
+			}
+			return Reflect.apply(read, this, args);
+		});
+		await assert.rejects(checkPdfPage(p, 1), /PDF exceeds 64 MiB/);
+		assert.equal(actual?.fd, -1);
+	});
+
+	it("cancels a dispatch read without creating a job and closes the open handle", async (t) => {
+		const { tools, created, spawned } = fakeJobs();
+		const p = deck("cancel-dispatch.pdf");
+		const probe = await fs.promises.open(p, "r");
+		const proto = Object.getPrototypeOf(probe) as typeof probe;
+		await probe.close();
+		const read = proto.read;
+		const controller = new AbortController();
+		let actual: typeof probe | undefined;
+		let reads = 0;
+		t.mock.method(proto, "read", function (this: typeof probe, ...args: Parameters<typeof read>) {
+			actual = this;
+			reads++;
+			controller.abort();
+			return Reflect.apply(read, this, args);
+		});
+		await assert.rejects(tools.visual!.execute("cancel", { brief: "b", pdf: { path: p, page: 1 } }, controller.signal), { name: "AbortError" });
+		assert.equal(reads, 1, "do not start another read after cancellation");
+		assert.equal(actual?.fd, -1);
 		assert.equal(created.length, 0);
 		assert.equal(spawned.length, 0);
 	});
@@ -438,20 +531,22 @@ describe("visual job runner with a PDF page", () => {
 		return job;
 	}
 
-	const realPdfHeadless = () => fakeHeadless((pdfPath, pages, opts) => realHeadless.renderPdfPages(pdfPath, pages, opts));
-
-	it("renders the page, stores only the final crop, and steers an annotated image", async () => {
+	it("keeps the original page after file replacement and stores only the final crop", async () => {
 		const p = deck("runner.pdf");
-		// The same deterministic renders the job will make, to script the model.
 		const preview = await loadPdfFigureSource(p, 2);
 		const { width: W, height: H } = preview.pageImage;
 		const box = { x: W / 2, y: H / 2, width: W / 2, height: H / 2 };
-		const expectedCrop = await preview.crop(box);
+		const expectedCrop = await preview.crop(box).finally(() => preview.close());
 
 		const job = visualChat("Test: annotate a PDF figure", { brief: "The red block. Outline it.", pdf: { path: p, page: 2 } });
-		headlessOverride.current = realPdfHeadless();
+		headlessOverride.current = fakeHeadless();
 		visualModelOverride.current = scripted([
-			fauxAssistantMessage([fauxToolCall("crop_page", box, { id: "c1" })], { stopReason: "toolUse" }),
+			() => {
+				// The model has the red preview by this point. Replace its file
+				// with a two-page blank PDF before the tool asks for a fresh crop.
+				fs.writeFileSync(p, tinyPdf([{}, {}]));
+				return fauxAssistantMessage([fauxToolCall("crop_page", box, { id: "c1" })], { stopReason: "toolUse" });
+			},
 			fauxAssistantMessage(
 				[
 					fauxToolCall("write_svg", { svg: marked(expectedCrop.width, expectedCrop.height) }, { id: "w1" }),
@@ -481,11 +576,34 @@ describe("visual job runner with a PDF page", () => {
 		assert.match(steers[0]!.content as string, /^The annotated image is drawn, verified by inspection/);
 	});
 
+	it("cancelling a visual job before crop dispatch prevents another request, saving or delivery", async () => {
+		const p = deck("cancelled-runner.pdf");
+		const job = visualChat("Test: cancel PDF figure", { brief: "b", pdf: { path: p, page: 2 } });
+		headlessOverride.current = fakeHeadless();
+		const { engine, requests } = scripted([() => {
+			assert.equal(fireJobAbort(job.id), true);
+			return fauxAssistantMessage([fauxToolCall("crop_page", { x: 0, y: 0, width: 100, height: 100 }, { id: "crop-aborted" })], { stopReason: "toolUse" });
+		}]);
+		visualModelOverride.current = engine;
+		const { steers, runner } = testRunner();
+		try {
+			await runner.runJob(job.id);
+		} finally {
+			headlessOverride.current = undefined;
+			visualModelOverride.current = undefined;
+		}
+		assert.equal(requests.length, 1);
+		assert.equal(isJobLive(job.id), false);
+		assert.equal(jobStore.getJob(job.id)?.result, undefined);
+		assert.deepEqual(chatStore.getChat(job.chatId)?.imageSnapshots ?? {}, {});
+		assert.equal(steers.length, 0);
+	});
+
 	it("a PDF gone by run time delivers a FAILED steer", async () => {
 		const p = deck("vanishing.pdf");
 		const job = visualChat("Test: annotate a PDF figure, vanished", { brief: "b", pdf: { path: p, page: 2 } });
 		fs.rmSync(p);
-		headlessOverride.current = realPdfHeadless();
+		headlessOverride.current = fakeHeadless();
 		visualModelOverride.current = scripted([]).engine;
 		const { steers, runner } = testRunner();
 		try {

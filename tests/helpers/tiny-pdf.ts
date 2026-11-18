@@ -25,6 +25,7 @@ export interface TinyPage {
 	/** A full-page picture: ordinary XObject, stencil mask, or inline bitmap. */
 	image?: boolean | "mask" | "inline";
 	rects?: Rect[];
+	rotation?: 90 | 180 | 270;
 }
 
 const WIDTH = 612;
@@ -71,7 +72,7 @@ export function tinyPdf(pages: readonly TinyPage[]): Uint8Array<ArrayBuffer> {
 	for (const [i, page] of pages.entries()) {
 		const stream = content(page);
 		objects.push(
-			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${WIDTH} ${HEIGHT}] /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R /Mask ${maskId} 0 R >> >> /Contents ${7 + i * 2} 0 R >>`,
+			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${WIDTH} ${HEIGHT}]${page.rotation ? ` /Rotate ${page.rotation}` : ""} /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R /Mask ${maskId} 0 R >> >> /Contents ${7 + i * 2} 0 R >>`,
 			`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
 		);
 	}

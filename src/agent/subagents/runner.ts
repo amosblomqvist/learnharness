@@ -472,22 +472,30 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 			// A PDF page: the maker crops the figure itself, so the stored
 			// image is whichever page or crop it finally annotated.
 			let pdf: PdfFigureSource | undefined;
-			if (pdfInput) {
-				jobStore.updateJob(jobId, { activity: `rendering page ${pdfInput.page}` });
-				pdf = await loadPdfFigureSource(pdfInput.path, pdfInput.page, loop.abortSignal);
+			let result: VisualResult;
+			let annotated: LearnerImage | undefined;
+			try {
+				if (pdfInput) {
+					jobStore.updateJob(jobId, { activity: `rendering page ${pdfInput.page}` });
+					pdf = await loadPdfFigureSource(pdfInput.path, pdfInput.page, loop.abortSignal);
+				}
+				jobStore.updateJob(jobId, { activity: pdf ? "finding figure" : image ? "annotating image" : "drawing figure" });
+				result = await runVisualMaker(
+					{ brief, image, pdf },
+					{
+						engine: model,
+						abortSignal: loop.abortSignal,
+						chatId: loop.chatId,
+						onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
+						onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
+					},
+				);
+				annotated = image ?? (result.image ? pdf?.imageFor(result.image.snapshotId) : undefined);
+			} finally {
+				// Release source PDF bytes before saving/delivering the artifact.
+				if (pdf) await pdf.close();
 			}
-			jobStore.updateJob(jobId, { activity: pdf ? "finding figure" : image ? "annotating image" : "drawing figure" });
-			const result = await runVisualMaker(
-				{ brief, image, pdf },
-				{
-					engine: model,
-					abortSignal: loop.abortSignal,
-					chatId: loop.chatId,
-					onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
-					onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
-				},
-			);
-			const annotated = image ?? (result.image ? pdf?.imageFor(result.image.snapshotId) : undefined);
+			if (pdf) loop.abortSignal.throwIfAborted();
 			if (annotated && result.svg && stillRunning(jobId)) chatStore.saveImageSnapshot(job.chatId, annotated.snapshotId, annotated);
 			if (isVisualFailure(result) && stillRunning(jobId))
 				jobStore.updateJob(jobId, { error: result.notes ?? "visual build failed" });

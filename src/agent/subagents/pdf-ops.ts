@@ -56,7 +56,7 @@ export function standardFontsDir(): string {
 }
 
 async function openDocument(filePath: string) {
-	return openBytes(new Uint8Array(await fs.readFile(filePath)));
+	return openPdfBytes(new Uint8Array(await fs.readFile(filePath)));
 }
 
 type PdfLoadingTask = Pick<import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentLoadingTask, "promise" | "destroy">;
@@ -73,7 +73,8 @@ async function loadBytes(data: Uint8Array, signal?: AbortSignal): Promise<PdfLoa
 	return pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
 }
 
-async function openBytes(data: Uint8Array, signal?: AbortSignal, loadTask: PdfTaskLoader = loadBytes) {
+/** Open caller-owned bytes (pdfjs may transfer them). The caller owns task destruction. */
+export async function openPdfBytes(data: Uint8Array, signal?: AbortSignal, loadTask: PdfTaskLoader = loadBytes) {
 	signal?.throwIfAborted();
 	const loadingTask = await loadTask(data, signal);
 	let destruction: Promise<void> | undefined;
@@ -139,16 +140,6 @@ function mathDensity(text: string): number {
 export async function pdfProbe(filePath: string): Promise<void> {
 	const { task } = await openDocument(filePath);
 	await task.destroy();
-}
-
-/** Page count only (no page walk): the PDF figure tool's page-range gate. */
-export async function pdfPageCount(filePath: string): Promise<number> {
-	const { doc, task } = await openDocument(filePath);
-	try {
-		return doc.numPages;
-	} finally {
-		await task.destroy();
-	}
 }
 
 /** pdf_info: page count + per-page triage signals. ALWAYS run first. */
@@ -219,11 +210,11 @@ function isAbortError(error: unknown): boolean {
 export function createPdfConverter(loadTask: PdfTaskLoader = loadBytes) {
 	return async (data: Uint8Array, maxPages: number, options?: { signal?: AbortSignal }): Promise<PdfConversion> => {
 		const signal = options?.signal;
-		let opened: Awaited<ReturnType<typeof openBytes>> | undefined;
+		let opened: Awaited<ReturnType<typeof openPdfBytes>> | undefined;
 		let result: PdfConversion | undefined;
 		let failure: unknown;
 		try {
-			opened = await openBytes(data, signal, loadTask);
+			opened = await openPdfBytes(data, signal, loadTask);
 			signal?.throwIfAborted();
 			result = opened.doc.numPages > maxPages
 				? { kind: "too-long", pageCount: opened.doc.numPages }
