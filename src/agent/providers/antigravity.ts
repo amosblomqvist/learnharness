@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { spawn } from "node:child_process";
 import readline from "node:readline";
 import {
@@ -6,11 +7,14 @@ import {
 	getCurrentSystemPrompt,
 	type Api,
 	type AssistantMessage,
+	type JsonObject,
 	type Model,
 	type Provider,
 	type SimpleStreamOptions,
+	type ToolCall,
 	type TranscriptContext,
 } from "@earendil-works/pi-ai";
+import { getCurrentTools } from "@earendil-works/pi-ai/utils/transcript";
 
 export const ANTIGRAVITY_MODELS: readonly Model<Api>[] = [
 	{
@@ -143,7 +147,7 @@ function messageContentToText(content: unknown): string {
 					if (typeof p.text === "string") return p.text;
 					if (typeof p.thinking === "string") return `[Thinking: ${p.thinking}]`;
 					if (typeof p.name === "string" && p.arguments) {
-						return `[ToolCall: ${p.name}(${JSON.stringify(p.arguments)})]`;
+						return `<tool_call>\n${JSON.stringify({ name: p.name, arguments: p.arguments })}\n</tool_call>`;
 					}
 				}
 				return "";
@@ -154,12 +158,90 @@ function messageContentToText(content: unknown): string {
 	return "";
 }
 
+export function parseToolCallsFromText(text: string): {
+	prose: string;
+	toolCalls: Array<{ name: string; arguments: JsonObject }>;
+} {
+	const toolCallRegex = /<tool_call>\s*(?:```(?:json)?\s*)?([\s\S]*?)(?:```\s*)?<\/tool_call>/gi;
+	const toolCalls: Array<{ name: string; arguments: JsonObject }> = [];
+	let lastIndex = 0;
+	let prose = "";
+	let match: RegExpExecArray | null;
+
+	while ((match = toolCallRegex.exec(text)) !== null) {
+		prose += text.slice(lastIndex, match.index);
+		lastIndex = match.index + match[0].length;
+		const jsonStr = (match[1] ?? "").trim();
+		try {
+			const parsed = JSON.parse(jsonStr);
+			if (parsed && typeof parsed.name === "string") {
+				toolCalls.push({
+					name: parsed.name,
+					arguments: (parsed.arguments ?? {}) as JsonObject,
+				});
+			}
+		} catch (err) {
+			console.error("Failed to parse tool call JSON:", jsonStr, err);
+		}
+	}
+	prose += text.slice(lastIndex);
+
+	if (toolCalls.length === 0 && text.includes("<tool_call>")) {
+		const startIdx = text.indexOf("<tool_call>");
+		const unclosed = text.slice(startIdx + "<tool_call>".length).trim();
+		const cleaned = unclosed.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+		try {
+			const parsed = JSON.parse(cleaned);
+			if (parsed && typeof parsed.name === "string") {
+				toolCalls.push({
+					name: parsed.name,
+					arguments: (parsed.arguments ?? {}) as JsonObject,
+				});
+				prose = text.slice(0, startIdx);
+			}
+		} catch {
+			// incomplete JSON
+		}
+	}
+
+	return { prose: prose.trim(), toolCalls };
+}
+
 export function formatTranscript(context: TranscriptContext): string {
 	const systemPrompt = getCurrentSystemPrompt(context.messages);
+	const tools = getCurrentTools(context.messages);
 	const sections: string[] = [];
 
 	if (systemPrompt && systemPrompt.trim().length > 0) {
 		sections.push(`Instructions:\n${systemPrompt.trim()}`);
+	}
+
+	if (tools && tools.length > 0) {
+		const toolDocs = tools
+			.map((t) => {
+				const params = t.parameters ? JSON.stringify(t.parameters) : "{}";
+				return `- **${t.name}**: ${t.description}\n  Parameters JSON Schema: ${params}`;
+			})
+			.join("\n");
+
+		sections.push(
+			`# Tools Available\n` +
+			`You have access to the following tools to interact with the learning harness and learner:\n\n` +
+			`${toolDocs}\n\n` +
+			`## Tool Calling Instructions\n` +
+			`When you need to ask a question (using probe, quiz, ask_user_question, etc.) or execute an action:\n` +
+			`1. Output any introductory prose, feedback, or pedagogical reasoning first.\n` +
+			`2. Call the tool using a single <tool_call> block containing a valid JSON object:\n` +
+			`<tool_call>\n` +
+			`{\n` +
+			`  "name": "<tool_name>",\n` +
+			`  "arguments": {\n` +
+			`    "<parameter_name>": <value>\n` +
+			`  }\n` +
+			`}\n` +
+			`</tool_call>\n` +
+			`3. End your turn immediately after closing </tool_call> so the learner can answer in the interactive dock.`
+		);
 	}
 
 	for (const msg of context.messages) {
@@ -221,8 +303,11 @@ function streamAntigravity(
 		});
 	}
 
+	let rawOutput = "";
 	let textStarted = false;
-	let fullText = "";
+	let textEmitted = "";
+	let textClosed = false;
+	let emittedToolCallsCount = 0;
 	let inputTokens = 0;
 	let outputTokens = 0;
 
@@ -256,22 +341,81 @@ function streamAntigravity(
 			if (data.event === "step_update" && data.step_update) {
 				const update = data.step_update;
 				if (update.text_delta) {
-					if (!textStarted) {
-						textStarted = true;
-						outer.push({
-							type: "text_start",
-							contentIndex: 0,
-							partial: partialMessage,
-						});
+					rawOutput += update.text_delta;
+
+					const toolCallIdx = rawOutput.indexOf("<tool_call>");
+
+					if (toolCallIdx === -1) {
+						const partialTag = rawOutput.match(/<(?:\/?tool_call.*)?$/);
+						const safeIndex = partialTag ? partialTag.index! : rawOutput.length;
+						const chunkToEmit = rawOutput.slice(textEmitted.length, safeIndex);
+						if (chunkToEmit.length > 0) {
+							if (!textStarted) {
+								textStarted = true;
+								outer.push({
+									type: "text_start",
+									contentIndex: 0,
+									partial: partialMessage,
+								});
+							}
+							textEmitted += chunkToEmit;
+							partialMessage.content = [{ type: "text", text: textEmitted }];
+							outer.push({
+								type: "text_delta",
+								contentIndex: 0,
+								delta: chunkToEmit,
+								partial: partialMessage,
+							});
+						}
+					} else {
+						const proseBefore = rawOutput.slice(textEmitted.length, toolCallIdx);
+						if (proseBefore.length > 0) {
+							if (!textStarted) {
+								textStarted = true;
+								outer.push({
+									type: "text_start",
+									contentIndex: 0,
+									partial: partialMessage,
+								});
+							}
+							textEmitted += proseBefore;
+							partialMessage.content = [{ type: "text", text: textEmitted }];
+							outer.push({
+								type: "text_delta",
+								contentIndex: 0,
+								delta: proseBefore,
+								partial: partialMessage,
+							});
+						}
+						if (textStarted && !textClosed) {
+							textClosed = true;
+							outer.push({
+								type: "text_end",
+								contentIndex: 0,
+								content: textEmitted,
+								partial: partialMessage,
+							});
+						}
+
+						const { toolCalls } = parseToolCallsFromText(rawOutput);
+						while (emittedToolCallsCount < toolCalls.length) {
+							const call = toolCalls[emittedToolCallsCount];
+							if (call) {
+								const toolCall: ToolCall = {
+									type: "toolCall",
+									id: `call_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+									name: call.name,
+									arguments: call.arguments,
+								};
+								const contentIndex = partialMessage.content.length;
+								partialMessage.content.push(toolCall);
+								outer.push({ type: "toolcall_start", contentIndex, partial: partialMessage });
+								outer.push({ type: "toolcall_end", contentIndex, toolCall, partial: partialMessage });
+								partialMessage.stopReason = "toolUse";
+							}
+							emittedToolCallsCount++;
+						}
 					}
-					fullText += update.text_delta;
-					partialMessage.content = [{ type: "text", text: fullText }];
-					outer.push({
-						type: "text_delta",
-						contentIndex: 0,
-						delta: update.text_delta,
-						partial: partialMessage,
-					});
 				}
 				if (update.usage) {
 					inputTokens = update.usage.input_tokens ?? inputTokens;
@@ -301,13 +445,33 @@ function streamAntigravity(
 	});
 
 	child.on("close", (code) => {
-		if (textStarted) {
+		if (textStarted && !textClosed) {
+			textClosed = true;
 			outer.push({
 				type: "text_end",
 				contentIndex: 0,
-				content: fullText,
+				content: textEmitted,
 				partial: partialMessage,
 			});
+		}
+
+		const { toolCalls } = parseToolCallsFromText(rawOutput);
+		while (emittedToolCallsCount < toolCalls.length) {
+			const call = toolCalls[emittedToolCallsCount];
+			if (call) {
+				const toolCall: ToolCall = {
+					type: "toolCall",
+					id: `call_${randomUUID().replace(/-/g, "").slice(0, 12)}`,
+					name: call.name,
+					arguments: call.arguments,
+				};
+				const contentIndex = partialMessage.content.length;
+				partialMessage.content.push(toolCall);
+				outer.push({ type: "toolcall_start", contentIndex, partial: partialMessage });
+				outer.push({ type: "toolcall_end", contentIndex, toolCall, partial: partialMessage });
+				partialMessage.stopReason = "toolUse";
+			}
+			emittedToolCallsCount++;
 		}
 
 		partialMessage.usage = {
@@ -319,7 +483,7 @@ function streamAntigravity(
 			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 		};
 
-		if (code !== 0 && !textStarted) {
+		if (code !== 0 && partialMessage.content.length === 0) {
 			partialMessage.stopReason = "error";
 			partialMessage.errorMessage = stderrText.trim() || `agy exited with code ${code}`;
 			outer.push({ type: "error", reason: "error", error: partialMessage });
@@ -327,7 +491,8 @@ function streamAntigravity(
 			return;
 		}
 
-		outer.push({ type: "done", reason: "stop", message: partialMessage });
+		const reason = partialMessage.stopReason === "toolUse" ? "toolUse" : "stop";
+		outer.push({ type: "done", reason, message: partialMessage });
 		outer.end(partialMessage);
 	});
 
