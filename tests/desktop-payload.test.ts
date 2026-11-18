@@ -182,13 +182,27 @@ describe("desktop standalone payload", () => {
 		});
 	});
 
-	it("still refuses leaked developer data or keys", () => {
-		for (const leaked of ["data/chat.json", "auth.json", ".env", ".env.local"]) {
-			withPayload(({ write, run }) => {
-				write(path.join(STANDALONE, leaked));
+	it("still refuses leaked developer data", () => {
+		withPayload(({ write, run }) => {
+			write(path.join(STANDALONE, "data/chat.json"));
+			const result = run();
+			assert.equal(result.status, 1);
+			assert.match(String(result.stderr), /REFUSING/);
+		});
+	});
+
+	// Turbopack traces the repo-root dev credentials into instrumentation.js
+	// (route-keyed outputFileTracingExcludes cannot reach it), so the curator
+	// strips them, loudly, instead of failing every build that has them.
+	it("strips traced developer keys and web credentials, logging each one", () => {
+		const credentials = ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json"];
+		for (const leaked of ["auth.json", ".env", ".env.local", ...credentials, ...credentials.map((name) => `${name}.fixture.tmp`)]) {
+			withPayload(({ root, write, run }) => {
+				write(path.join(STANDALONE, leaked), "fixture-not-real-credentials");
 				const result = run();
-				assert.equal(result.status, 1, leaked);
-				assert.match(String(result.stderr), /REFUSING/);
+				assert.equal(result.status, 0, `${leaked}: ${String(result.stderr)}`);
+				assert.equal(fs.existsSync(path.join(root, STANDALONE, leaked)), false, leaked);
+				assert.match(String(result.stdout), new RegExp(`removed traced dev secret: ${leaked.replace(/\./g, "\\.")}`));
 			});
 		}
 	});

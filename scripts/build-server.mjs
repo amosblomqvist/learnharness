@@ -52,13 +52,19 @@ if (exists(leakedData)) {
 // 2b) Safety: the repo's dev SECRETS must never ride along either — the
 // same trace sweep that catches data/ shipped the repo-root auth.json
 // (the DEV BYOK key store, 0600) byte-identical into the DMG (caught in
-// the 2026-10-08 payload audit; excluded in next.config.ts — this guard
-// makes a regression loud instead of silent).
+// the 2026-10-08 payload audit). Turbopack also traces the repo-root
+// chatgpt-credentials.json into instrumentation.js, which route-keyed
+// outputFileTracingExcludes cannot reach (2026-11-18). So strip these
+// exact standalone-root files, log each one, and keep the refusal as a
+// backstop in case removal did not take.
 const subscriptionSecrets = fs.readdirSync(STANDALONE).filter((name) => /^(chatgpt|github-copilot|xai)-credentials\.json/.test(name));
 for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]) {
-	if (exists(path.join(STANDALONE, secret))) {
-		console.error(`[build-server] REFUSING: standalone contains ${secret} — dev secrets would ship in the app.`);
-		console.error("             Check outputFileTracingExcludes in next.config.ts.");
+	const target = path.join(STANDALONE, secret);
+	if (!exists(target)) continue;
+	fs.rmSync(target, { force: true });
+	console.log(`[build-server] removed traced dev secret: ${secret}`);
+	if (exists(target)) {
+		console.error(`[build-server] REFUSING: standalone still contains ${secret} — dev secrets would ship in the app.`);
 		process.exit(1);
 	}
 }
