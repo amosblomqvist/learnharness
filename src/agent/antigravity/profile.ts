@@ -58,6 +58,29 @@ export function antigravityTokenFilePath(profileDir: string): string {
 	return path.join(profileDir, "antigravity-acp", "acp_token.json");
 }
 
+export function antigravityCliTokenFilePath(profileDir: string): string {
+	return path.join(profileDir, "antigravity-acp", "antigravity-oauth-token");
+}
+
+export function antigravityKeyringUnavailablePath(profileDir: string): string {
+	return path.join(profileDir, "antigravity-acp", "cache", "antigravity-keyring-unavailable");
+}
+
+/** Keeps `antigravity-acp/cache/antigravity-keyring-unavailable` fresh so `agy`
+ *  1.5+ uses profile-local file token storage rather than the host OS keyring. */
+export function touchAntigravityKeyringUnavailable(
+	profileDir: string,
+	platform: NodeJS.Platform = process.platform,
+): void {
+	const markerPath = antigravityKeyringUnavailablePath(profileDir);
+	const cacheDir = path.dirname(markerPath);
+	fs.mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
+	if (platform !== "win32") {
+		fs.chmodSync(cacheDir, 0o700);
+	}
+	writeFileAtomic(markerPath, "1\n", 0o600);
+}
+
 export function antigravityModelsCachePath(options: {
 	dataDir?: string;
 	env?: Record<string, string | undefined>;
@@ -71,6 +94,34 @@ export function antigravityModelsCachePath(options: {
 	return path.join(dataDir, "antigravity", "models.json");
 }
 
+function readJsonTokenObject(filePath: string): Record<string, unknown> | null {
+	try {
+		const stat = fs.statSync(filePath);
+		if (!stat.isFile()) return null;
+		const parsed = JSON.parse(fs.readFileSync(filePath, "utf8")) as unknown;
+		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return null;
+		return parsed as Record<string, unknown>;
+	} catch {
+		return null;
+	}
+}
+
+function hasNonEmptyCliTokenField(parsed: Record<string, unknown>): boolean {
+	for (const key of ["access_token", "refresh_token", "id_token", "api_key", "token", "accessToken", "refreshToken"]) {
+		const val = parsed[key];
+		if (typeof val === "string" && val.trim().length > 0) return true;
+	}
+	const nestedToken = parsed.token;
+	if (nestedToken && typeof nestedToken === "object" && !Array.isArray(nestedToken)) {
+		const inner = nestedToken as Record<string, unknown>;
+		for (const key of ["access_token", "refresh_token", "token", "accessToken", "refreshToken"]) {
+			const val = inner[key];
+			if (typeof val === "string" && val.trim().length > 0) return true;
+		}
+	}
+	return false;
+}
+
 /** Checks whether the isolated Antigravity profile holds a persisted OAuth token blob. */
 export function isAntigravityProfileSignedIn(options: {
 	profileDir?: string;
@@ -78,18 +129,18 @@ export function isAntigravityProfileSignedIn(options: {
 	env?: Record<string, string | undefined>;
 } = {}): boolean {
 	const profileDir = options.profileDir ?? resolveAntigravityProfileDir(options);
-	const tokenPath = antigravityTokenFilePath(profileDir);
-	try {
-		const stat = fs.statSync(tokenPath);
-		if (!stat.isFile()) return false;
-		const parsed = JSON.parse(fs.readFileSync(tokenPath, "utf8")) as unknown;
-		if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return false;
-		return Object.values(parsed as Record<string, unknown>).some(
-			(val) => typeof val === "string" && val.trim().length > 0,
-		);
-	} catch {
-		return false;
+	const acpToken = readJsonTokenObject(antigravityTokenFilePath(profileDir));
+	if (
+		acpToken &&
+		Object.values(acpToken).some((val) => typeof val === "string" && val.trim().length > 0)
+	) {
+		return true;
 	}
+	const cliToken = readJsonTokenObject(antigravityCliTokenFilePath(profileDir));
+	if (cliToken && hasNonEmptyCliTokenField(cliToken)) {
+		return true;
+	}
+	return false;
 }
 
 /** Creates and hardens `antigravity-profile/` (`0700`), writes `oauth-personal`
@@ -134,6 +185,7 @@ export function ensureAntigravityProfile(options: {
 		},
 	};
 	writeFileAtomic(settingsPath, `${JSON.stringify(nextSettings, null, "\t")}\n`, 0o600);
+	touchAntigravityKeyringUnavailable(profileDir, platform);
 
 	// Optional user skills symlinks from ~/.gemini (read-only convenience; never fatal).
 	const geminiRoot = path.join(homeDir, ".gemini");
@@ -181,14 +233,21 @@ export function deleteAntigravityTokenFile(options: {
 	env?: Record<string, string | undefined>;
 } = {}): boolean {
 	const profileDir = options.profileDir ?? resolveAntigravityProfileDir(options);
-	const tokenPath = antigravityTokenFilePath(profileDir);
-	try {
-		const existed = fs.existsSync(tokenPath);
-		fs.rmSync(tokenPath, { force: true });
-		return existed;
-	} catch {
-		return false;
+	const candidates = [
+		antigravityTokenFilePath(profileDir),
+		antigravityCliTokenFilePath(profileDir),
+		path.join(profileDir, "antigravity-cli", "antigravity-oauth-token"),
+	];
+	let anyExisted = false;
+	for (const tokenPath of candidates) {
+		try {
+			if (fs.existsSync(tokenPath)) anyExisted = true;
+			fs.rmSync(tokenPath, { force: true });
+		} catch {
+			// continue clearing remaining candidate paths
+		}
 	}
+	return anyExisted;
 }
 
 export interface BuildAntigravityEnvOptions {
@@ -222,7 +281,16 @@ export function buildAntigravityEnvironment({
 	env.PYTHONUNBUFFERED = "1";
 	env.ELECTRON_RUN_AS_NODE = "1";
 	if (harnessPath) env.ANTIGRAVITY_HARNESS_PATH = harnessPath;
-	if (browserScript) env.BROWSER = browserScript;
+	if (browserScript) {
+		env.BROWSER = browserScript;
+		if (platform !== "win32") {
+			const browserDir = path.dirname(browserScript);
+			const pathModule = path.posix;
+			if (browserDir && browserDir !== ".") {
+				env.PATH = env.PATH ? `${browserDir}${pathModule.delimiter}${env.PATH}` : browserDir;
+			}
+		}
+	}
 	if (platform === "linux" && !env.SSL_CERT_FILE) {
 		const fallback = env.NIX_SSL_CERT_FILE ?? LINUX_CA_BUNDLE_PATHS.find((p) => fileExists(p));
 		if (fallback) env.SSL_CERT_FILE = fallback;
@@ -237,11 +305,14 @@ function shellQuotePosix(value: string): string {
 export interface BrowserWrapper {
 	dir: string;
 	scriptPath: string;
+	capturedUrlPath?: string;
 	cleanup: () => void;
 }
 
 /** Creates an executable `BROWSER` wrapper script (no spaces in `BROWSER` path)
- *  because `agy_acp_server.par` ignores inline `node -e ...` strings. */
+ *  and POSIX `xdg-open` shim because `agy_acp_server.par` ignores inline
+ *  `node -e` strings while `agy` CLI invokes `xdg-open` directly on Linux
+ *  and discards its child stderr. */
 export function createBrowserWrapper(options: {
 	baseTmpDir?: string;
 	nodePath?: string;
@@ -254,12 +325,17 @@ export function createBrowserWrapper(options: {
 		fs.chmodSync(dir, 0o700);
 	}
 
+	const capturedUrlPath = path.join(dir, "captured-url.txt");
 	const helperPath = path.join(dir, "capture-url.mjs");
 	fs.writeFileSync(
 		helperPath,
 		[
-			"const url = process.argv[2] ?? '';",
-			`if (url) process.stderr.write(${JSON.stringify(ANTIGRAVITY_AUTH_URL_MARKER)} + JSON.stringify(url) + '\\n');`,
+			"import * as fs from 'node:fs';",
+			"const url = (process.argv[2] ?? '').trim();",
+			"if (url) {",
+			`  if (!url.startsWith('https://learnharness.invalid/')) fs.writeFileSync(${JSON.stringify(capturedUrlPath)}, url + '\\n', { encoding: 'utf8', mode: 0o600 });`,
+			`  process.stderr.write(${JSON.stringify(ANTIGRAVITY_AUTH_URL_MARKER)} + JSON.stringify(url) + '\\n');`,
+			"}",
 			"",
 		].join("\n"),
 		{ encoding: "utf8", mode: 0o600 },
@@ -275,17 +351,19 @@ export function createBrowserWrapper(options: {
 		);
 	} else {
 		scriptPath = path.join(dir, "open-url.sh");
-		fs.writeFileSync(
-			scriptPath,
-			`#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexec ${shellQuotePosix(nodePath)} ${shellQuotePosix(helperPath)} "$@"\n`,
-			{ encoding: "utf8", mode: 0o700 },
-		);
+		const wrapperScript = `#!/bin/sh\nexport ELECTRON_RUN_AS_NODE=1\nexec ${shellQuotePosix(nodePath)} ${shellQuotePosix(helperPath)} "$@"\n`;
+		fs.writeFileSync(scriptPath, wrapperScript, { encoding: "utf8", mode: 0o700 });
 		fs.chmodSync(scriptPath, 0o700);
+
+		const xdgOpenPath = path.join(dir, "xdg-open");
+		fs.writeFileSync(xdgOpenPath, wrapperScript, { encoding: "utf8", mode: 0o700 });
+		fs.chmodSync(xdgOpenPath, 0o700);
 	}
 
 	return {
 		dir,
 		scriptPath,
+		capturedUrlPath,
 		cleanup: () => {
 			fs.rmSync(dir, { recursive: true, force: true });
 		},
