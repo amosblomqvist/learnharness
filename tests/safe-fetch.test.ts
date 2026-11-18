@@ -41,6 +41,7 @@ describe("isPublicAddress", () => {
 			"127.0.0.1", "127.255.255.254", "10.0.0.1", "172.16.0.1", "172.31.255.255", "192.168.1.1",
 			"169.254.169.254", "100.64.0.1", "0.0.0.0", "224.0.0.1", "255.255.255.255", "198.18.0.1",
 			"::1", "::", "fd00::1", "fc00::1", "fe80::1", "ff02::1", "64:ff9b::a00:1", "2002:a00:1::",
+			"fec0::1", "fed0::1", "feff::1", "fec0:0000:0000:0000:0000:0000:0000:0001", "[fec0::1]",
 			"::ffff:127.0.0.1", "::ffff:10.0.0.1", "[::1]", "::FFFF:169.254.169.254",
 			"not an ip", "",
 		]) {
@@ -86,6 +87,12 @@ describe("research fetch tools refuse local destinations", () => {
 	it("no request ever reached the local server", () => {
 		assert.equal(target.hits, 0);
 	});
+});
+
+it("safeFetch refuses site-local IPv6 literals before attempting a connection", async () => {
+	for (const address of ["fec0::1", "fed0::1", "feff::1"]) {
+		await assert.rejects(safeFetch(`http://[${address}]:65535/`), /refusing to connect to a private or local address/);
+	}
 });
 
 describe("redirects are checked at every hop", () => {

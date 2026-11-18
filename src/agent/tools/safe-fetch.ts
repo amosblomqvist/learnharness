@@ -44,6 +44,7 @@ for (const [network, prefix] of [
 	["2002::", 16], // 6to4
 	["fc00::", 7], // unique local
 	["fe80::", 10], // link-local
+	["fec0::", 10], // deprecated site-local
 	["ff00::", 8], // multicast
 ] as const) NON_PUBLIC.addSubnet(network, prefix, "ipv6");
 
