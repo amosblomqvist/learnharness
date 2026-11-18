@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "id": "coding-questions",
+  "name": "Coding questions",
+  "version": "0.1.0",
+  "minAppVersion": "0.4.1",
+  "description": "Teaching questions and coding practice with syntax highlighting and automatic tests using your installed tools. Runs local code with your user permissions; not sandboxed.",
+  "main": "main.js",
+  "backend": "backend.cjs",
+  "styles": "styles.css"
+}

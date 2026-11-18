@@ -21,11 +21,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { ModelCatalogEntry } from "@/src/core";
-import { fuzzyScore, subscriptionLabel } from "@/src/core";
+import { CLAUDE_CODE_PROVIDER, CUSTOM_PROVIDER, fuzzyScore, subscriptionLabel } from "@/src/core";
 import { formatTokens } from "@/components/usage-format";
 import { SearchMenuList } from "./search-menu-list";
 
 function priceLabel(cost: ModelCatalogEntry["cost"]): string {
+	if (!cost) return "Unpriced";
 	const fmt = (n: number) => `$${n < 1 ? n.toFixed(2).replace(/0$/, "") : n.toFixed(2)}`;
 	return `${fmt(cost.input)}/${fmt(cost.output)}`;
 }
@@ -39,6 +40,7 @@ export function ModelMenuList({
 	effectiveProvider,
 	onPick,
 	footer,
+	vision,
 }: {
 	/** The full catalog — undefined while it loads. */
 	models: ModelCatalogEntry[] | undefined;
@@ -53,14 +55,25 @@ export function ModelMenuList({
 	onPick: (entry: ModelCatalogEntry) => void;
 	/** Quiet footer note under the list (context-specific). */
 	footer?: string;
+	/** Vision slot: only image-capable models are selectable — plus every
+	 *  custom-endpoint model, whose capability the endpoint may not report.
+	 *  Image-capable ones float to the top. */
+	vision?: boolean;
 }) {
+	// Vision slot: built-ins must report image input; custom-endpoint models
+	// stay selectable (the endpoint may not report a modality). Image-capable
+	// ones float to the top of the list.
+	const visionItems = vision
+		? models?.filter((m) => m.input.includes("image") || m.provider === CUSTOM_PROVIDER.id)
+		: models;
 	return (
 		<>
 			<SearchMenuList
-				items={models}
+				items={visionItems}
 				itemKey={(m) => `${m.provider}/${m.id}`}
 				searchTerms={(m) => [m.provider, m.id, m.name]}
 				compare={(a, b) => a.id.localeCompare(b.id)}
+				prioritize={vision ? (m) => m.input.includes("image") : undefined}
 				isSelected={(m) => m.id === effectiveId && m.provider === (effectiveProvider ?? m.provider)}
 				onPick={onPick}
 				searchTestid="model-search"
@@ -72,13 +85,13 @@ export function ModelMenuList({
 				renderItem={(m) => <>
 					<span className="flex items-center justify-between gap-2">
 						<span className="truncate text-card-foreground">{m.name}</span>
-						<span className="shrink-0 tabular-nums text-muted-foreground" title={subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : "USD per 1M tokens in/out"}>
-							{subscriptionLabel(`${m.provider}:${m.id}`) ?? priceLabel(m.cost)}
+						<span className="shrink-0 tabular-nums text-muted-foreground" title={m.provider === CLAUDE_CODE_PROVIDER ? "Billing is determined by your Claude Code configuration; LearnHarness does not estimate it." : subscriptionLabel(`${m.provider}:${m.id}`) ? "Subscription connection" : m.cost ? "USD per 1M tokens in/out" : "Price unavailable"}>
+							{m.provider === CLAUDE_CODE_PROVIDER ? "CLI billing" : subscriptionLabel(`${m.provider}:${m.id}`) ?? priceLabel(m.cost)}
 						</span>
 					</span>
 					<span className="flex items-center justify-between gap-2 text-muted-foreground">
 						<span className="truncate">{subscriptionLabel(`${m.provider}:${m.id}`) ? `${subscriptionLabel(`${m.provider}:${m.id}`)} (subscription)` : m.provider} · {m.id}</span>
-						<span className="shrink-0 tabular-nums">{formatTokens(m.contextWindow)}</span>
+						<span className="shrink-0 tabular-nums">{m.contextWindow === null ? "—" : formatTokens(m.contextWindow)}</span>
 					</span>
 				</>}
 			/>

@@ -7,6 +7,10 @@ import { refreshSubscriptionModels, nativeSubscriptionModels, subscriptionAbortC
 import { subscriptionHistory } from "../src/agent/subscription-stream.ts";
 import { runSubagent } from "../src/agent/subagents/pi-run.ts";
 import { getAntigravityRequestModelId } from "../electron/antigravity-provider.cjs";
+import * as fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { backgroundCaptureDir, backgroundCaptureStream, createBackgroundCapture } from "../src/agent/background-capture.ts";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send"), originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
 const marker = process.env.LH_DESKTOP_SERVER, secret = process.env.LH_DESKTOP_API_SECRET;
@@ -41,16 +45,27 @@ test("logical subscription routes are separate catalog entries without rewriting
 		assert(piModels().getModels(p.providerId).every((m) => m.provider === p.providerId));
 	}
 });
-for (const p of NATIVE_SUBSCRIPTIONS) test(`${p.providerId}: every SDK transport keeps native identity, account auth and selected model before dispatch`, async () => {
+for (const p of NATIVE_SUBSCRIPTIONS) test(`${p.providerId}: every SDK transport keeps native identity, account auth and selected model before dispatch`, async (t) => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-subscription-capture-"));
+	const previousDir = backgroundCaptureDir.current, previousFlag = process.env.LH_BACKGROUND_CAPTURE;
+	backgroundCaptureDir.current = dir; process.env.LH_BACKGROUND_CAPTURE = "researcher";
+	t.after(() => {
+		backgroundCaptureDir.current = previousDir;
+		if (previousFlag === undefined) delete process.env.LH_BACKGROUND_CAPTURE; else process.env.LH_BACKGROUND_CAPTURE = previousFlag;
+		fs.rmSync(dir, { recursive: true, force: true });
+	});
 	const apis = new Set<string>();
 	for (const native of piModels().getModels(p.providerId)) {
 		if (apis.has(native.api)) continue; apis.add(native.api);
 		const engine = piEngineForSpec({ provider: p.logicalId, id: native.id }, false);
 		let requests = 0, payloadObserved = false;
-		const result = await engine.streamFn(engine.model, context, {
+		let actualBody: unknown;
+		const runId = `${p.providerId}-${native.api}`;
+		const capture = createBackgroundCapture({ role: "researcher", runId })!;
+		const result = await backgroundCaptureStream(engine.streamFn, capture)(engine.model, context, {
 			onPayload: (raw, selected) => { payloadObserved = true; assert.equal(selected.provider, p.providerId); return { ...raw as object, model: "caller-cannot-replace-selected" }; },
 			fetch: async (input, init) => {
-				requests++; const request = new Request(input, init), body = await request.json();
+				requests++; const request = new Request(input, init), body = await request.json(); actualBody = body;
 				assert.equal(request.headers.get("authorization"), "Bearer fixture-oauth-only");
 				if (p.providerId === "antigravity") {
 					assert.equal(body.model, getAntigravityRequestModelId(native.id, "medium"));
@@ -69,6 +84,12 @@ for (const p of NATIVE_SUBSCRIPTIONS) test(`${p.providerId}: every SDK transport
 		}).result();
 		assert(payloadObserved); assert.equal(requests, 1); assert.equal(result.provider, p.logicalId); assert.equal(result.stopReason, "error");
 		assert(!result.errorMessage?.includes("private-fixture-provider-detail")); assert(result.errorMessage?.includes("No API-key fallback"));
+		capture.reply(result); capture.finish();
+		const record = JSON.parse(fs.readFileSync(path.join(dir, `researcher-${runId}.json`), "utf8"));
+		assert.deepEqual(record.request.payload, actualBody, "Observe after the selected model is enforced, not the caller replacement");
+		assert.equal(record.request.model.provider, p.logicalId);
+		assert(!JSON.stringify(record).includes("fixture-oauth-only"));
+		assert(!JSON.stringify(record).includes("native-retained"));
 	}
 });
 test("failed OAuth lease never dispatches despite valid-looking ambient keys; forbidden auth overrides do not dispatch", async () => {

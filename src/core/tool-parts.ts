@@ -32,6 +32,14 @@ import type { TSchema } from "typebox";
 import { quizDisplayInputSchema, askInputSchema, askOptionProblems, quizInputProblems, explainInputProblems, explainDisplayInputSchema, type AskToolInput, type QuizToolInput, type ExplainToolInput } from "./question-core.ts";
 import { healEncodedArguments } from "./argument-heal.ts";
 import { probeDoneInputSchema, type ProbeDoneInput } from "./contracts/probe.ts";
+import { readPluginQuestionSnapshot, type PluginQuestionSnapshot } from "./plugin-questions.ts";
+
+/** View metadata, not model arguments, owns plugin question role/position. */
+export function posedPluginQuestionOfPart(part: { pluginQuestion?: unknown }): PluginQuestionSnapshot | undefined {
+	const annotation = part.pluginQuestion;
+	if (!annotation || typeof annotation !== "object" || (annotation as { status?: unknown }).status !== "posed") return undefined;
+	return readPluginQuestionSnapshot((annotation as { snapshot?: unknown }).snapshot) ?? undefined;
+}
 
 /** The pi-boundary parse step, mirrored here (live-smoke fix, 2026-09-26):
  *  pi-ai's validateToolArguments runs TypeBox's Value.Convert on the model's
@@ -94,7 +102,7 @@ export function parseQuizInput(input: unknown): QuizToolInput | undefined {
  * keying, so they parse to undefined exactly like the zod seam did).
  */
 export function parseAskInput(input: unknown): AskToolInput | undefined {
-	const cleaned = boundaryParse<AskToolInput>(askInputSchema, input);
+	const cleaned = boundaryParse<AskToolInput>(askInputSchema, healEncodedArguments(input, askInputSchema));
 	if (!cleaned) return undefined;
 	if (askOptionProblems(cleaned.options ?? []).length > 0) return undefined;
 	return cleaned;
@@ -107,10 +115,21 @@ export function parseAskInput(input: unknown): AskToolInput | undefined {
  *  variants share the same fields; the teacher's nodeId is an unknown
  *  key Value.Clean strips, same as the quiz seam. */
 export function parseExplainInput(input: unknown): ExplainToolInput | undefined {
-	const cleaned = boundaryParse<ExplainToolInput>(explainDisplayInputSchema, input);
+	const cleaned = boundaryParse<ExplainToolInput>(explainDisplayInputSchema, healEncodedArguments(input, explainDisplayInputSchema));
 	if (!cleaned) return undefined;
 	if (explainInputProblems(cleaned).length > 0) return undefined;
 	return cleaned;
+}
+
+/** One display-validity decision for dock authority and recovery. Does not
+ * mutate the recorded input or invent missing authoring fields. */
+export function parseQuestionInput(tool: string, input: unknown): QuizToolInput | AskToolInput | ExplainToolInput | undefined {
+	switch (tool) {
+		case "quiz": case "probe": return parseQuizInput(input);
+		case "explain": case "recall": return parseExplainInput(input);
+		case "ask_user_question": return parseAskInput(input);
+		default: return undefined;
+	}
 }
 
 /** probe_done parse — the core-owned schema the tool itself declares. */

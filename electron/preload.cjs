@@ -27,9 +27,13 @@
  *   window.lh.onOpenSettings(cb) — menu navigation, buffered until React
  *   subscribes after a window is reopened. Browser builds have no bridge.
  *
+ *   window.lh.setAppearance(a) — the active theme's { mode, background }
+ *   (theme wave, 2026-11-04): main sets nativeTheme.themeSource and
+ *   repaints the native window background / control overlay to match.
+ *
  * Channel names are mirrored in electron/main.cjs — keep them in sync.
  */
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
 
 let openSettingsListener = null;
 let pendingOpenSettings = null;
@@ -40,6 +44,10 @@ ipcRenderer.on("lh:open-settings", (_event, section) => {
 
 contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
+	// Resolve only a renderer-supplied, OS-backed File. No filesystem API,
+	// uploads, copies, or DOM File IPC to main; sandbox/isolation stay on.
+	getPathForFile: (file) => webUtils.getPathForFile(file),
+	chooseAttachmentFolder: () => ipcRenderer.invoke("lh:attachment:pick", "folder"),
 	...(process.argv?.includes("--lh-web-subscriptions") ? {
 		subscriptionTransport: "web",
 		openSubscriptionBrowser: (action) => ipcRenderer.invoke("lh:subscriptions:web-browser", action),
@@ -74,6 +82,7 @@ contextBridge.exposeInMainWorld("lh", {
 		},
 	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
+	setAppearance: (a) => ipcRenderer.send("lh:appearance", a),
 	onZoom: (cb) => {
 		const listener = (_event, factor) => cb(factor);
 		ipcRenderer.on("lh:zoom", listener);

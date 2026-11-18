@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect } from "react";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /**
  * TAB CYCLES THE ACTIVE SURFACE'S TEXT FIELDS (owner, keyboard round
@@ -18,9 +20,10 @@ import { useEffect } from "react";
  * ever hears Tab on surfaces WITHOUT an active claim — no double act.
  */
 export function useFieldCycle(fields: () => readonly HTMLElement[]) {
+	const controller = useOptionalInteractionLayers();
 	useEffect(() => {
 		const onCycle = () => {
-			const list = fields().filter((el) => el.isConnected);
+			const list = fields().filter((el) => isInteractionScopeEligible(el, controller));
 			if (list.length === 0) return;
 			const active = document.activeElement;
 			const idx = active ? list.findIndex((el) => el === active || el.contains(active)) : -1;
@@ -32,5 +35,5 @@ export function useFieldCycle(fields: () => readonly HTMLElement[]) {
 		};
 		window.addEventListener("lh:kbd-cycle-fields", onCycle);
 		return () => window.removeEventListener("lh:kbd-cycle-fields", onCycle);
-	}, [fields]);
+	}, [fields, controller]);
 }

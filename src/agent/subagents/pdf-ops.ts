@@ -1,6 +1,7 @@
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import { documentToMarkdown, type PdfPage } from "./pdf-markdown.ts";
 
 /**
  * PDF plumbing for the pdf-reader sub-agent — sources v0 (2026-09): Node
@@ -8,6 +9,8 @@ import { fileURLToPath } from "node:url";
  * pdf_search / pdf_render), on the user-chosen hybrid stack:
  *
  * - TEXT (info / extract / search): pdfjs-dist — pure JS, no native deps.
+ *   extract and search read pdf-markdown's Markdown, so words and lines
+ *   survive (the raw text items glued "lecture" + "Plants").
  * - RENDER: subagents/headless.ts uses the same pdfjs engine with
  *   @napi-rs/canvas (Skia), in-process — no browser needed.
  *
@@ -53,14 +56,47 @@ export function standardFontsDir(): string {
 }
 
 async function openDocument(filePath: string) {
+	return openBytes(new Uint8Array(await fs.readFile(filePath)));
+}
+
+type PdfLoadingTask = Pick<import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentLoadingTask, "promise" | "destroy">;
+type PdfTaskLoader = (data: Uint8Array, signal?: AbortSignal) => PdfLoadingTask | Promise<PdfLoadingTask>;
+
+async function loadBytes(data: Uint8Array, signal?: AbortSignal): Promise<PdfLoadingTask> {
+	signal?.throwIfAborted();
 	const pdfjs = await loadPdfjs();
-	const data = new Uint8Array(await fs.readFile(filePath));
+	signal?.throwIfAborted();
 	// The legacy build in plain node runs on a main-thread fake worker (no
 	// workerSrc needed); teardown is the loading task's destroy().
 	// verbosity 0 = errors only — scanned PDFs (JBIG2 XObjects) otherwise
 	// flood the log with per-page warnings (live-smoke finding 2026-09-19).
-	const task = pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
-	return { doc: await task.promise, task };
+	return pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
+}
+
+async function openBytes(data: Uint8Array, signal?: AbortSignal, loadTask: PdfTaskLoader = loadBytes) {
+	signal?.throwIfAborted();
+	const loadingTask = await loadTask(data, signal);
+	let destruction: Promise<void> | undefined;
+	const destroy = () => destruction ??= Promise.resolve().then(() => loadingTask.destroy()).finally(() => {
+		signal?.removeEventListener("abort", onAbort);
+	});
+	const onAbort = () => { void destroy().catch(() => {}); };
+	signal?.addEventListener("abort", onAbort, { once: true });
+	// Covers cancellation while the loader itself was pending.
+	if (signal?.aborted) onAbort();
+	try {
+		// Do not race this promise against abort: opening and teardown must both
+		// settle before the caller can release conversion capacity.
+		const doc = await loadingTask.promise;
+		signal?.throwIfAborted();
+		return { doc, task: { destroy } };
+	} catch (error) {
+		// Failed opens own a loading task too. Cleanup is best effort, without
+		// replacing the parse error (or the caller's cancellation reason).
+		await destroy().catch(() => {});
+		signal?.throwIfAborted();
+		throw error;
+	}
 }
 
 /** Concatenate a page's text items into a body string. */
@@ -158,19 +194,69 @@ export function parsePageSpec(spec: string, total: number): number[] {
 	return [...pages].sort((a, b) => a - b);
 }
 
-/** pdf_extract: text of the requested pages, `--- Page N ---` headed. */
+export type PdfConversion =
+	| { kind: "converted"; pages: PdfPage[] }
+	| { kind: "too-long"; pageCount: number }
+	/** Broken, encrypted, or not a PDF at all: pdfjs could not read it. */
+	| { kind: "unreadable" };
+
+function isAbortError(error: unknown): boolean {
+	return error instanceof Error && error.name === "AbortError";
+}
+
+/** Server-internal loading-task seam for lifecycle tests, not a plugin capability.
+ * Both injected and default loaders use the same conversion and cleanup path. */
+export function createPdfConverter(loadTask: PdfTaskLoader = loadBytes) {
+	return async (data: Uint8Array, maxPages: number, options?: { signal?: AbortSignal }): Promise<PdfConversion> => {
+		const signal = options?.signal;
+		let opened: Awaited<ReturnType<typeof openBytes>> | undefined;
+		let result: PdfConversion | undefined;
+		let failure: unknown;
+		try {
+			opened = await openBytes(data, signal, loadTask);
+			signal?.throwIfAborted();
+			result = opened.doc.numPages > maxPages
+				? { kind: "too-long", pageCount: opened.doc.numPages }
+				: { kind: "converted", pages: await documentToMarkdown(opened.doc, undefined, signal) };
+		} catch (error) {
+			failure = error;
+		} finally {
+			try {
+				await opened?.task.destroy();
+			} catch (error) {
+				if (!signal?.aborted && !isAbortError(failure)) throw error;
+			}
+		}
+		// Also observe aborts arriving during final teardown. Never disguise
+		// cancellation as a corrupt PDF, even when destroy rejects on abort.
+		signal?.throwIfAborted();
+		if (isAbortError(failure)) throw failure;
+		return result ?? { kind: "unreadable" };
+	};
+}
+
+const defaultPdfConverter = createPdfConverter();
+
+/** An uploaded PDF's pages as Markdown (the notes import's door). The page
+ * cap is checked before any page is read. Cancellation is cooperative: pdfjs's
+ * Node fake worker cannot interrupt synchronous parsing/formatting. The promise
+ * waits for opening/conversion and best-effort destruction, not a hard deadline. */
+export async function convertPdf(data: Uint8Array, maxPages: number, options?: { signal?: AbortSignal }): Promise<PdfConversion> {
+	return defaultPdfConverter(data, maxPages, options);
+}
+
+/** A page's Markdown, or "" for a page with no text (the agent renders those). */
+function pageMarkdown(page: PdfPage): string {
+	return page.kind === "text" ? page.markdown : "";
+}
+
+/** pdf_extract: Markdown of the requested pages, `--- Page N ---` headed. */
 export async function pdfExtract(filePath: string, pageSpec: string): Promise<string> {
 	const { doc } = await openDocument(filePath);
 	const pages = parsePageSpec(pageSpec, doc.numPages);
 	if (pages.length === 0) return "No pages selected — page spec matched nothing.";
-	const out: string[] = [];
-	for (const i of pages) {
-		const page = await doc.getPage(i);
-		const content = await page.getTextContent();
-		out.push(`--- Page ${i} ---`);
-		out.push(itemsToText(content.items as unknown[]));
-	}
-	return out.join("\n");
+	const converted = await documentToMarkdown(doc, pages);
+	return converted.map((page) => `--- Page ${page.number} ---\n${pageMarkdown(page)}`).join("\n");
 }
 
 export interface PdfSearchHit {
@@ -202,10 +288,9 @@ export async function pdfSearch(
 	}
 	const hits: PdfSearchHit[] = [];
 	const pageTexts = new Map<number, string>();
-	for (let i = 1; i <= doc.numPages; i++) {
-		const page = await doc.getPage(i);
-		const content = await page.getTextContent();
-		const text = itemsToText(content.items as unknown[]);
+	for (const page of await documentToMarkdown(doc)) {
+		const i = page.number;
+		const text = pageMarkdown(page);
 		pageTexts.set(i, text);
 		const lines = text.split("\n");
 		for (let ln = 0; ln < lines.length; ln++) {

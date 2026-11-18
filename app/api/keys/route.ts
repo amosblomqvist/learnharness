@@ -10,7 +10,8 @@
  * tests/auth-provider-keys.test.ts) — the settings UI reads it optionally
  * with a graceful fallback.
  *
- * Masked only — last 4 + length; PLAINTEXT NEVER LEAVES THE STORE THROUGH
+ * Masked only — last 4 + length for ordinary keys; custom keys are fully
+ * redacted at every length (no credential suffix). PLAINTEXT NEVER LEAVES THE STORE THROUGH
  * THIS API (owner decision). `source` tells the page whether the live
  * value comes from the environment (dev .env.local / launch env) or the
  * file, and `shadowedByEnv` explains why a saved key is not the live one

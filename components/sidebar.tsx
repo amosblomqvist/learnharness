@@ -5,7 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
-import type { ChatDeleteMode } from "@/src/core";
+import type { ChatDeleteMode, ThemeMode } from "@/src/core";
 import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
@@ -22,6 +22,11 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
+import { PluginWidgets } from "@/components/plugins";
+import { PluginSidebarActions } from "@/components/plugin-chrome";
+import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
+import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
+import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -50,6 +55,7 @@ const STORAGE_KEY = "lh:sidebar-open";
  */
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
+import { FilePathDropZone } from "@/components/file-path-drop-zone";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -61,12 +67,19 @@ declare global {
 		lh?: {
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
+			/** Resolve an OS-backed File without copying/uploading its contents. */
+			getPathForFile?: (file: File) => string;
+			/** Choose one original directory path, without reading its contents. */
+			chooseAttachmentFolder?: () => Promise<string | null>;
 			/** External Next desktop-dev uses the server's web connections. */
 			subscriptionTransport?: "desktop" | "web";
 			openSubscriptionBrowser?: (action: string) => Promise<void>;
 			chatgpt?: ChatGPTControlBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
 			expandWindow: () => void;
+			/** Native chrome follows the active theme (theme wave): main sets
+			 *  themeSource and repaints the window background / overlay. */
+			setAppearance?: (a: { mode: ThemeMode; background: string }) => void;
 			/** The zoom truth (owner round 7): subscribes to "lh:zoom" pushes; returns unsubscribe. */
 			onZoom?: (cb: (factor: number) => void) => () => void;
 			getZoom?: () => Promise<number>;
@@ -336,6 +349,7 @@ export function SessionRow({
  *  The meta line stays so the row never changes height mid-edit. */
 export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; onCommit: (next: string) => void; onCancel: () => void }) {
 	const [draft, setDraft] = useState(chat.title);
+	const interactions = useOptionalInteractionLayers();
 	const inputRef = useRef<HTMLInputElement | null>(null);
 	useEffect(() => {
 		const el = inputRef.current;
@@ -366,6 +380,8 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 					onKeyDown={(e) => {
 						if (e.key === "Enter") e.currentTarget.blur();
 						if (e.key === "Escape") {
+							if (interactions && !interactions.isElementEligible(e.currentTarget)) return;
+							interactions?.claimEscape(e);
 							e.stopPropagation(); // discard, not also the sidebar/chat chains
 							onCancel();
 						}
@@ -387,6 +403,7 @@ export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
+	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
@@ -561,24 +578,15 @@ function SessionsSidebar() {
 	useEffect(() => {
 		if (ctxChatId === null) return;
 		const onPointerDown = (e: PointerEvent) => {
+			if (!interactions.isElementEligible(document.querySelector<HTMLElement>('[data-testid="session-context-menu"]'))) return;
 			const target = e.target as Node;
 			if (target instanceof Element && target.closest("[data-lh-menu]")) return;
 			if (ctxAnchorRef.current?.contains(target)) return;
 			setCtxChatId(null);
 		};
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				e.stopPropagation();
-				setCtxChatId(null);
-			}
-		};
 		document.addEventListener("pointerdown", onPointerDown);
-		document.addEventListener("keydown", onKeyDown);
-		return () => {
-			document.removeEventListener("pointerdown", onPointerDown);
-			document.removeEventListener("keydown", onKeyDown);
-		};
-	}, [ctxChatId]);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [ctxChatId, interactions]);
 
 	// Inline rename (owner ruling, wave 6): the row swaps to a text input;
 	// commit rides the SAME plumbing as the header rename — PUT the title,
@@ -619,14 +627,15 @@ function SessionsSidebar() {
 
 	useEffect(() => {
 		const onFocusSearch = () => {
+			if (interactions.getActiveModal() || interactions.getTopLayer()?.kind === "popup") return;
 			if (!open) toggle();
 			// A clipped (overflow-hidden) input still focuses — the sidebar's
 			// slide-in doesn't gate the keystroke.
-			requestAnimationFrame(() => searchRef.current?.focus());
+			requestAnimationFrame(() => { if (isInteractionScopeEligible(searchRef.current, interactions)) searchRef.current?.focus(); });
 		};
 		window.addEventListener("lh:kbd-sessions-search", onFocusSearch);
 		return () => window.removeEventListener("lh:kbd-sessions-search", onFocusSearch);
-	}, [open, toggle]);
+	}, [open, toggle, interactions]);
 
 	// Keep the kbd-selected row in view (the rows are the container's only
 	// buttons, so the index matches).
@@ -689,32 +698,31 @@ function SessionsSidebar() {
 					</Hint>
 				</div>
 
-				{/* Two doors, STACKED (owner round 8, 2026-10-05 — was a
-				    half/half row): full-width rows read cleaner and give the
-				    labels room; teaching keeps the original draft route,
-				    practice carries its mode. */}
-				<div className="mx-3 mb-2 flex flex-col gap-1.5">
+				{/* Core doors always lead explicit plugin sidebar placements. */}
+				<PluginSidebarActions>
 					<button
 						type="button"
 						data-testid="new-session"
+						title="Teaching"
 						onClick={() => void newSession()}
-						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
-						<PlusIcon className="size-3" />
-						Teaching
+						<PlusIcon className="size-3 shrink-0" />
+						<span className="min-w-0 truncate">Teaching</span>
 						<span className="sr-only">create a new teaching session</span>
 					</button>
 					<button
 						type="button"
 						data-testid="new-session-practice"
+						title="Practice"
 						onClick={() => router.push("/chat/new?mode=practice")}
-						className="flex w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
-						<DumbbellIcon className="size-3" />
-						Practice
+						<DumbbellIcon className="size-3 shrink-0" />
+						<span className="min-w-0 truncate">Practice</span>
 						<span className="sr-only">create a new practice session</span>
 					</button>
-				</div>
+				</PluginSidebarActions>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
@@ -742,6 +750,8 @@ function SessionsSidebar() {
 							// doesn't also fire.
 							onKeyDown={(e) => {
 								if (e.key === "Escape") {
+									if (!interactions.isElementEligible(e.currentTarget)) return;
+									interactions.claimEscape(e);
 									e.stopPropagation();
 									e.currentTarget.blur();
 									return;
@@ -866,7 +876,7 @@ function SessionsSidebar() {
 				    (owner ruling — no more). MenuShell owns placement/focus/arrow
 				    cycling; the dismissal effect above owns the contract. */}
 				{ctxChatId !== null && (
-					<MenuShell
+					<MenuShell onClose={() => { setCtxChatId(null); return "closed"; }}
 						anchorRef={ctxAnchorRef}
 						testid="session-context-menu"
 						preferredSide="down"
@@ -941,14 +951,21 @@ function SessionsSidebar() {
 
 /** The app frame: sidebar inline + content. Rendered once in the root layout. */
 export function AppShell({ children }: { children: React.ReactNode }) {
+	const [contentRoot, setContentRoot] = useState<HTMLElement | null>(null);
+	const pathname = usePathname();
 	return (
-		<SettingsDialogProvider>
-			<SessionsSidebar />
-			<main className="min-w-0 flex-1">{children}</main>
-			{/* The single document-level keydown listener (keyboard wave A) —
-			    after the content in the tree, but it's window-level so order only
-			    matters for the events it dispatches, never for DOM priority. */}
-			<KeyboardShortcuts />
-		</SettingsDialogProvider>
+		<HostRouteLifetimeProvider pathname={pathname}>
+		<HostContentRootContext.Provider value={contentRoot}>
+			<InteractionLayersProvider><SettingsDialogProvider>
+				<SessionsSidebar />
+				<FilePathDropZone className="relative isolate min-w-0 flex-1" onContentRoot={setContentRoot}>{children}</FilePathDropZone>
+				{/* The single document-level keydown listener (keyboard wave A) —
+				    after the content in the tree, but it's window-level so order only
+				    matters for the events it dispatches, never for DOM priority. */}
+				<KeyboardShortcuts />
+				<PluginWidgets />
+			</SettingsDialogProvider></InteractionLayersProvider>
+		</HostContentRootContext.Provider>
+		</HostRouteLifetimeProvider>
 	);
 }

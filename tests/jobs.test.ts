@@ -10,7 +10,7 @@
  *      CONTINUES — no turn break at the call), a job record exists, and the
  *      test runner (fake deliver) produces the steer
  *   4. runner completion: a fake researcher model (web_search call → final
- *      text brief, globalThis.fetch stubbed) → the job stores the result,
+ *      text brief, safeFetchOverride stubbed) → the job stores the result,
  *      the steer carries the brief + sources, the fake deliver flips the
  *      job done
  *   5. runner failure: a model that throws → the failure steer still fires
@@ -47,6 +47,7 @@ import {
 import { composeInstructions, createTeacherAgent } from "../src/agent/teacher-agent.ts";
 import { createTeacherTools } from "../src/agent/tools.ts";
 import { webTools } from "../src/agent/tools/web.ts";
+import { safeFetchOverride } from "../src/agent/tools/safe-fetch.ts";
 import { handleChatRequest } from "../src/server/chat-handler.ts";
 import { runningTurn } from "../src/server/turn-runs.ts";
 import {
@@ -641,8 +642,7 @@ describe("research runner (async protocol §3)", () => {
 		const delivery = fakeDeliver();
 		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, searchProvider: () => null });
 		const fetched: string[] = [];
-		const realFetch = globalThis.fetch;
-		globalThis.fetch = (async (source) => {
+		safeFetchOverride.current = (async (source) => {
 			fetched.push(String(source));
 			assert.equal(String(source), url);
 			return new Response("Synthetic verified source content", { headers: { "content-type": "text/plain" } });
@@ -655,7 +655,7 @@ describe("research runner (async protocol §3)", () => {
 			await runner.runJob(job.id);
 		} finally {
 			researchModelOverride.current = undefined;
-			globalThis.fetch = realFetch;
+			safeFetchOverride.current = undefined;
 		}
 		assert.deepEqual(fetched, [url]);
 		const done = jobStore.getJob(job.id)!;
@@ -733,6 +733,7 @@ describe("pdf runner (sources v0)", () => {
 	const PDF_INPUT = { path: PDF_FIXTURE, question: "What is the integral of x dx?" };
 	const relativePath = path.join("Course notes", "sample document.pdf");
 	let home: string;
+	let homeAlias: string;
 	const originalHome = process.env.HOME;
 	const originalUserProfile = process.env.USERPROFILE;
 
@@ -741,8 +742,12 @@ describe("pdf runner (sources v0)", () => {
 		const target = path.join(home, relativePath);
 		fs.mkdirSync(path.dirname(target), { recursive: true });
 		fs.copyFileSync(PDF_FIXTURE, target);
-		process.env.HOME = home;
-		process.env.USERPROFILE = home;
+		// Exercise a genuine alias even when the outer test HOME/TMPDIR are
+		// canonical. Callers need not canonicalize their environment first.
+		homeAlias = `${home}-alias`;
+		fs.symlinkSync(home, homeAlias, process.platform === "win32" ? "junction" : "dir");
+		process.env.HOME = homeAlias;
+		process.env.USERPROFILE = homeAlias;
 	});
 
 	after(() => {
@@ -750,6 +755,7 @@ describe("pdf runner (sources v0)", () => {
 		else process.env.HOME = originalHome;
 		if (originalUserProfile === undefined) delete process.env.USERPROFILE;
 		else process.env.USERPROFILE = originalUserProfile;
+		fs.unlinkSync(homeAlias);
 		fs.rmSync(home, { recursive: true, force: true });
 	});
 
@@ -795,7 +801,9 @@ describe("pdf runner (sources v0)", () => {
 	});
 
 	for (const mode of ["dispatch", "recovery"] as const) {
-		it(`resolves a home-relative PDF from ${mode} input without rewriting history`, async () => {
+		it(`resolves a home-relative PDF through aliased HOME from ${mode} input without rewriting history`, async () => {
+			assert.equal(os.homedir(), homeAlias);
+			assert.notEqual(homeAlias, fs.realpathSync.native(homeAlias));
 			const chat = chatStore.createChat(`Test: relative PDF ${mode}`);
 			trackChat(chat.id);
 			const toolCallId = `call-pdf-relative-${mode}`;
@@ -821,7 +829,7 @@ describe("pdf runner (sources v0)", () => {
 			assert.equal(done.status, "done");
 			assert.deepEqual(done.delivery, { kind: "result", status: "delivered" });
 			const result = done.result as PdfResult;
-			assert.equal(result.path, path.join(home, relativePath));
+			assert.equal(result.path, fs.realpathSync.native(path.join(home, relativePath)));
 			assert.match(result.brief, /integral rule/);
 			assert.deepEqual(result.pagesRead, [1, 2]);
 			assert.deepEqual(result.pagesConsulted, [1, 2]);
@@ -1028,7 +1036,7 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 		assert.equal(jobStore.getJob(jobId)!.status, "done");
 	});
 
-	it("the dismissal pause holds deliveries — no wake until the user's next turn settles (A2)", async () => {
+	for (const pause of ["dismissal", "question recovery"] as const) it(`the ${pause} pause holds deliveries until the user's next turn settles`, async () => {
 		const { chatId, jobId, steer } = setup();
 		let fired = 0;
 		setTurnRunner(async () => {
@@ -1036,9 +1044,9 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 			return 200;
 		});
 
-		// The record ends in a DISMISSAL (owner design 2026-10-03): the
-		// question was skipped via the silent route — no dangling call (the
-		// quiz gate would pass), so ONLY the dismissal pause holds the wake.
+		// Both resolutions clear the dangling call, so only the persisted
+		// manual-only pause holds the wake. Recovery can be interrupted after
+		// write-ahead but before any replacement output is persisted.
 		chatStore.saveMessages(chatId, [
 			{ id: "u1", role: "user", content: "hello", timestamp: 1 } as never,
 			{
@@ -1057,9 +1065,9 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 				role: "toolResult",
 				toolCallId: "quiz-call",
 				toolName: "quiz",
-				content: [{ type: "text", text: "skipped" }],
-				details: { kind: "quiz", questionText: "q", dontKnow: false, answers: [], dismissed: true, answeredAt: "t" },
-				isError: false,
+				content: [{ type: "text", text: pause === "dismissal" ? "skipped" : "Replacement requested" }],
+				details: pause === "dismissal" ? { kind: "quiz", questionText: "q", dontKnow: false, answers: [], dismissed: true, answeredAt: "t" } : { questionRecovery: true },
+				isError: pause === "question recovery",
 				timestamp: 1,
 			} as never,
 		]);
@@ -1067,7 +1075,7 @@ describe("wake pipeline (src/server/jobs.ts)", () => {
 		const delivery = deliverJobResult(steer);
 
 		await delay(1200);
-		assert.equal(fired, 0, "no wake while the session sits dismissal-paused");
+		assert.equal(fired, 0, `no wake while the session sits ${pause}-paused`);
 		assert.equal(jobStore.getJob(jobId)!.delivery?.status, "pending", "the delivery holds (queued, not lost)");
 
 		// The user's next message is the wake — its turn settles, and the

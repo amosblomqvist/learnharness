@@ -9,18 +9,20 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, PlanTree, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
 import { phaseAt3Lh } from "../core/phases.ts";
+import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
-	return path.join(PATHS.chats, `${id}.json`);
+	return path.join(/* turbopackIgnore: true */ PATHS.chats, `${id}.json`);
 }
 
 /** THE SILENCE LAW (push S6, 2026-10-02): chats-changed announces ONLY
@@ -55,13 +57,13 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
  *  lazy migration means existing files only get stamped on their next write.
  *  A future-version guard lives on the read side (getChat). */
 function writeChat(record: ChatRecord): void {
-	fs.writeFileSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), "utf-8");
+	writeFileAtomicSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
 }
 
 function getChat(id: string): ChatRecord | null {
 	let parsed: unknown;
 	try {
-		parsed = JSON.parse(fs.readFileSync(chatFile(id), "utf-8"));
+		parsed = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ chatFile(id), "utf-8"));
 	} catch {
 		return null;
 	}
@@ -80,11 +82,11 @@ function listChats(): ChatSummary[] {
 	try {
 		fs.mkdirSync(PATHS.chats, { recursive: true });
 		return fs
-			.readdirSync(PATHS.chats)
+			.readdirSync(/* turbopackIgnore: true */ PATHS.chats)
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getChat(f.slice(0, -5)))
 			.filter((r): r is ChatRecord => r !== null)
-			.map(({ messages, tree, turns, extractions, ...summary }) => {
+			.map(({ messages, tree, turns, extractions, imageSnapshots: _imageSnapshots, sideChats: _sideChats, ...summary }) => {
 				// Per-record isolation (Wave B): a record whose messages fail the
 				// projection (e.g. pre-Wave-B UIMessage-format scratch — the
 				// zero-back-compat wipe makes these "corrupt") must not blank the
@@ -100,20 +102,24 @@ function listChats(): ChatSummary[] {
 						messageCount: messages.length,
 						// Record-derived status for the session picker: phase from the
 						// transcript's explicit events (probe_done concluded / verdict
-						// accepted — docs/probe-teach-split.md §4), pending question
+						// accepted — docs/archive/probe-teach-split.md §4), pending question
 						// from the native dangling-call scan. Wave D: both folds read
 						// the NATIVE record (core/phases.ts phaseAt3Lh +
 						// native-messages.ts danglingQuestionOf). Liveness (busy) is
 						// NOT record-derived — the API route merges it (ChatListItem).
 						phase: phaseAt3Lh(messages),
 						pendingQuestion: danglingQuestionOf(messages) !== null,
+						// Practice: a posed problem with no conclude (the sidebar's
+						// "Problem waiting"); false on teaching sessions, which
+						// have no problem tool.
+						pendingProblem: activeProblemOf(messages) !== null,
 					};
 				} catch (err) {
 					console.error(`[chat ${summary.id}] summary projection failed:`, err);
 					return null;
 				}
 			})
-			.filter((s): s is ChatSummary => s !== null)
+			.filter((s) => s !== null)
 			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	} catch {
 		return [];
@@ -126,8 +132,24 @@ function listChats(): ChatSummary[] {
 function saveMessages(id: string, messages: LhMessage[]): void {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
+	// Side-delivery watermarks are part of the appended native entries,
+	// so input + updates commit together without mutating thread history.
 	record.messages = messages;
 	record.updatedAt = new Date().toISOString();
+	writeChat(record);
+}
+
+/** A synchronous read/merge/write keeps concurrent worker and turn writes from losing snapshots. */
+function saveImageSnapshot(id: string, snapshotId: string, image: ImageSnapshot): void {
+	if (!/^[a-f0-9]{64}$/.test(snapshotId) || createHash("sha256").update(Buffer.from(image.data, "base64")).digest("hex") !== snapshotId) {
+		throw new Error("Invalid image snapshot identity");
+	}
+	const record = getChat(id);
+	if (!record) throw new Error(`Chat not found: ${id}`);
+	if (record.imageSnapshots?.[snapshotId]) return;
+	record.imageSnapshots = { ...record.imageSnapshots, [snapshotId]: {
+		mimeType: image.mimeType, data: image.data, width: image.width, height: image.height,
+	} };
 	writeChat(record);
 }
 
@@ -188,6 +210,7 @@ function renameChat(id: string, title: string): ChatRecord {
 function deleteChat(id: string): boolean {
 	try {
 		fs.unlinkSync(chatFile(id));
+		removeLeftoverTemps(chatFile(id));
 		emit("chats-changed", {}); // only a real removal — the present-entry law
 		return true;
 	} catch {
@@ -205,15 +228,32 @@ function saveTree(id: string, tree: PlanTree): void {
 	writeChat(record);
 }
 
+/** Side-question threads (2026-11-02): one synchronous read-modify-write,
+ *  so a concurrent turn's saveMessages (which re-reads the record) never
+ *  loses a thread and a thread write never loses messages. Null when the
+ *  chat is gone (a side answer finishing after session deletion). Silent
+ *  and not conversation activity, like saveSettings. */
+function updateSideChats(id: string, update: (threads: SideChatThread[]) => SideChatThread[]): SideChatThread[] | null {
+	const record = getChat(id);
+	if (!record) return null;
+	const next = update(record.sideChats ?? []);
+	if (next.length > 0) record.sideChats = next;
+	else delete record.sideChats;
+	writeChat(record);
+	return next;
+}
+
 export const chatStore: ChatStore = {
 	createChat,
 	getChat,
 	listChats,
 	saveMessages,
+	saveImageSnapshot,
 	saveTree,
 	saveSettings,
 	renameChat,
 	deleteChat,
 	appendTurnUsage,
 	appendExtractionUsage,
+	updateSideChats,
 };

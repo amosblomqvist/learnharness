@@ -21,18 +21,23 @@
  * unknown keys verbatim (a newer record must never be destroyed by an
  * older app reading it). Invalid known values degrade gracefully:
  * out-of-range numbers CLAMP, wrong-typed/invalid fields DROP (resolve to
- * factory default), never throw.
+ * factory default), never throw. File-access policy is the exception:
+ * malformed policy stays restricted/empty, never default-unrestricted.
  *
  * Browser-safe: pure logic + types only, no node imports. The resolved
  * (fully concrete) view lives in settings-resolution.ts.
  */
 
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import type { CacheRetention } from "@earendil-works/pi-ai";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
+import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
-import type { SearchEngineId } from "./search.ts";
+import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
+import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -47,6 +52,10 @@ export const BACKGROUND_MODEL_ROLES = [
 	"visualMaker",
 	"extractor",
 	"auditor",
+	// Side questions (#16): listed here for the schema-level override only
+	// (agent.models.sideQuestion). The role itself runs in the foreground,
+	// despite the list's name.
+	"sideQuestion",
 ] as const;
 
 export type BackgroundModelRole = (typeof BACKGROUND_MODEL_ROLES)[number];
@@ -156,10 +165,11 @@ export interface ProviderKeyMissing {
 /** The refusal wording's invariant tail — the matcher below keys on it
  * (the label prefix varies by provider). */
 const PROVIDER_KEY_MISSING_TAIL = "key is set — add one in Settings → Keys";
+const CLAUDE_CODE_UNAVAILABLE = "Claude Code is unavailable. Enable and set it up in Settings → Providers.";
 export function providerKeyMissing(provider: string, slots: ModelSlotName[]): ProviderKeyMissing {
 	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
 	return {
-		error: `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
+		error: provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_UNAVAILABLE : `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
 		code: PROVIDER_KEY_MISSING_CODE,
 		provider,
 		slots,
@@ -170,7 +180,7 @@ export function providerKeyMissing(provider: string, slots: ModelSlotName[]): Pr
  * scary-error) — the envelope's home module owns the string so the
  * writer and the matcher can never drift. */
 export function isProviderKeyRefusal(error: string | undefined): boolean {
-	return !!error && error.endsWith(PROVIDER_KEY_MISSING_TAIL);
+	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CLAUDE_CODE_UNAVAILABLE);
 }
 /** The typed throw for in-process seams (extraction pipeline) — the
  * ProviderKeyMissing sibling of ModelsNotConfiguredError: callers catch
@@ -185,14 +195,17 @@ export class ProviderKeyMissingError extends Error {
 	}
 }
 
-/** One slot's stored state. BYOK (owner, 2026-09-22): the WRITE side
- *  requires model (a level alone can never run — no factory floor); the
- *  sanitizer keeps whatever is on disk, but RESOLUTION treats a slot
- *  without a model as unset (inert level, no phantom default). */
+export const CACHE_RETENTIONS = ["none", "short", "long"] as const satisfies readonly CacheRetention[];
+
+/** Stored model-slot preferences. A slot is configured only when model is
+ * present; sanitized level-only records can be retained but resolve as unset.
+ * A thinking level alone does not select an implicit fallback model. */
 export interface ModelSlot {
-	/** The model swap: both coordinates or neither. */
+	/** Native Pi preference. Absent leaves Pi/environment behavior unchanged. */
+	cacheRetention?: CacheRetention;
+	/** Configured model coordinates; provider and id must be supplied together. */
 	model?: { provider: string; id: string };
-	/** The thinking budget swap. */
+	/** Optional thinking level used with this slot's configured model. */
 	thinkingLevel?: ThinkingLevel;
 }
 
@@ -204,6 +217,98 @@ export interface ModelsSettings {
 	strong?: ModelSlot;
 	cheap?: ModelSlot;
 	vision?: ModelSlot;
+}
+
+// ─── Custom OpenAI-compatible endpoint ───────────────────────────────────────
+// ONE user-configured OpenAI-compatible server (vLLM / Ollama / a proxy). It is
+// one more provider in the Keys list, keyed by a base URL instead of an env var.
+// NON-SECRET config only (base URL + discovered model ids); the API key is a
+// secret in the auth store, never here. Registered into pi-ai as a normal
+// provider (server/custom-provider.ts).
+
+/** Budget fallbacks only; custom endpoint pricing is unknown. */
+export const CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW = 8192;
+export const CUSTOM_MODEL_DEFAULT_MAX_TOKENS = 4096;
+
+/** Custom budgets accept every positive integer, including small output caps. */
+export const CUSTOM_MODEL_PIN_FLOOR = 1;
+
+/** One discovered custom model. `image`/`reasoning`/`context`/`maxTokens` are
+ *  detected from the endpoint's /models metadata; anything it omits falls back
+ *  to a default. */
+export interface CustomModel {
+	id: string;
+	/** Accepts image input (Vision-capable). Default false (text-only). */
+	image?: boolean;
+	/** Accepts a reasoning effort (thinking). Default false → the only
+	 *  thinking level is "off", exactly like a non-reasoning built-in. */
+	reasoning?: boolean;
+	/** Context window in tokens, from the endpoint. Absent → the default. */
+	context?: number;
+	/** Max output tokens, from the endpoint. Absent → the default. */
+	maxTokens?: number;
+}
+
+/** A user pin for one custom model: it beats what the endpoint publishes
+ *  (owner ruling — explicit user intent wins; a local server's number is
+ *  often wrong or absent). Absent field = no pin. `reasoning` is tri-state:
+ *  true declares reasoning support, false removes that declaration, absent
+ *  uses discovery. This is NOT a backend execution/disable switch. */
+export interface CustomModelOverride {
+	context?: number;
+	maxTokens?: number;
+	reasoning?: boolean;
+}
+
+/** The single custom endpoint's stored config (delta section). */
+export interface CustomProviderSettings {
+	/** Server-owned random authorization nonce; never a credential hash. */
+	credentialBindingId?: string;
+	/** Explicit authentication intent; never inferred from a saved key. */
+	authMode?: "keyless" | "apiKey";
+	/** Normalized base URL (see normalizeBaseUrl). Empty/absent = not configured. */
+	baseUrl?: string;
+	/** Models this endpoint offers: advertised ids merged with the typed
+	 *  manual ones (rewritten on connect; a failed probe keeps the same
+	 *  endpoint's last snapshot). */
+	models?: CustomModel[];
+	/** User pins keyed by model id — pure user intent, never rewritten by
+	 *  discovery, pruned on connect to the ids that connect offers. */
+	overrides?: Record<string, CustomModelOverride>;
+	/** Model ids the user typed by hand, for an endpoint that publishes no
+	 *  usable /models list. Kept apart from the snapshot so a reconnect can
+	 *  re-merge them after discovery refreshes. */
+	manualModels?: string[];
+}
+
+export function parseModelIds(raw: unknown): string[] {
+	const items = typeof raw === "string" ? raw.split(/[\s,]+/) : Array.isArray(raw) ? raw : [];
+	const ids = items.filter((v): v is string => typeof v === "string").map((v) => v.trim()).filter(Boolean);
+	return [...new Set(ids)];
+}
+
+/** Canonical base-URL form (single source): trims, requires absolute http(s),
+ *  drops trailing slashes. Returns "" for anything invalid ("not configured"). */
+export function normalizeBaseUrl(raw: string): string {
+	const value = raw.trim();
+	if (!value) return "";
+	let url: URL;
+	try {
+		url = new URL(value);
+	} catch {
+		return "";
+	}
+	if (url.protocol !== "http:" && url.protocol !== "https:") return "";
+	if (url.username || url.password || url.search || url.hash || value.includes("?") || value.includes("#")) return "";
+	return url.toString().replace(/\/+$/, "");
+}
+
+/** THE single source of "is the custom endpoint usable?": a non-empty base URL.
+ *  Key presence is deliberately excluded (keyless local servers are allowed). */
+export function customProviderUsable(
+	cp: CustomProviderSettings | undefined,
+): cp is CustomProviderSettings & { baseUrl: string } {
+	return Boolean(cp?.baseUrl);
 }
 
 /** First-run gate (model-slots wave, owner 2026-09-20): the app refuses
@@ -227,6 +332,7 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 	auditor: "cheap",
 	visualMaker: "vision",
 	pdfReader: "vision",
+	sideQuestion: "strong", // the conversation chain, like prober/teacher (resolveSideQuestionSpec)
 };
 
 /** General settings — app-level behavior. Version DISPLAY and plans login
@@ -243,6 +349,10 @@ export interface DictationSettings {
 
 /** Agent settings — everything about the non-conversation machinery. */
 export interface AgentSettings {
+	/** Maximum simultaneous background-worker model requests (default 8).
+	 *  Direct conversations bypass this limit. Positive safe integers only:
+	 *  no arbitrary ceiling, rounding, or clamping. */
+	workerRequestConcurrency?: number;
 	/** Background-role model/thinking overrides (absent role = config pin). */
 	models?: Partial<Record<BackgroundModelRole, RoleModelOverride>>;
 	/** Tool toggles keyed by tool id (absent key = enabled). User-level
@@ -268,6 +378,11 @@ export interface AgentSettings {
 	 *  route); the switch is explicit so users keep a file on disk but run
 	 *  the source default to compare (owner decision 2026-09-19). */
 	prompts?: Record<string, boolean>;
+	/** Optional learner-source boundary, OFF when absent. ON with no folders
+	 *  refuses all learner-source reads. Paths are absolute or ~/ anchored;
+	 *  the current policy is read per new tool call/job start. Existing
+	 *  sensitive-location/credential denials always win, not a whole-data ban. */
+	fileAccess?: FileAccessSettings;
 }
 
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
@@ -281,19 +396,27 @@ export interface MdRenderingSettings {
 	italicColor?: string | null;
 }
 
-/** Appearance settings — mode, colors, type, markdown emphasis. */
+/** Appearance settings — theme, color overrides, type, markdown emphasis. */
 export interface AppearanceSettings {
-	/** "dark" | "light" (default dark). */
-	mode?: "dark" | "light";
-	/** The one user-chosen color; everything else derives per-mode in code.
-	 *  null = the mode's default background. */
+	/** The active theme id (core/themes.ts presets or a custom file under
+	 *  THEMES_DIR). Absent or gone = "default". The theme declares the
+	 *  mode (dark/light) — the old `mode`/`lightBackground` keys are no
+	 *  longer read (theme wave, 2026-11-04). */
+	theme?: string;
+	/** The background override (null = the theme's). Kept at its pre-theme
+	 *  key so existing records keep their color. */
 	background?: string | null;
+	/** Per-color overrides on top of the theme (null/absent = the theme's).
+	 *  Preserved across theme switches. Bold/italic live in mdRendering. */
+	colors?: AppearanceColorOverrides;
 	/** The main reading font (everything that is Source Sans 3 today), by
 	 *  name — user-chosen from installed fonts. null = Source Sans 3. */
 	fontFamily?: string | null;
 	/** Reading font size in px (12–24, default 16). Headings render as
 	 *  multiples of this, so one knob scales the document coherently. */
 	proseFontSize?: number;
+	/** Permit normal font ligatures in code (including inline code and code editors). Default false; prose is unaffected. */
+	codeLigatures?: boolean;
 	/** Session names in CMU Serif (default true — today's look). */
 	sessionNameSerif?: boolean;
 	mdRendering?: MdRenderingSettings;
@@ -346,7 +469,7 @@ export interface GraphSettings {
 
 /**
  * COMPACTION (owner round 14, 2026-10-05): the context-fitting mechanic's
- * user-facing knob. One number — the trigger threshold in context tokens.
+ * user-facing controls: the trigger threshold and opt-in reasoning accounting.
  * The effective trigger is min(this, model contextWindow − 16k reserve)
  * (owner ruling: on big models the setting rules; on small ones the
  * window rules before the provider overflows).
@@ -360,6 +483,9 @@ export interface GraphSettings {
  */
 export interface CompactionSettings {
 	thresholdTokens?: number;
+	/** Use saved output usage for replayable same-model Responses reasoning.
+	 *  Absent = false: preserve the original readable-content heuristic. */
+	includeReasoning?: boolean;
 }
 
 /** THE record. Every section optional (delta); unknown top-level keys are
@@ -368,9 +494,13 @@ export interface UserSettings {
 	version: number;
 	general?: GeneralSettings;
 	dictation?: DictationSettings;
+	/** Explicit app-wide opt-in; absent/invalid is off, including older records. */
+	claudeCode?: { enabled?: boolean };
 	agent?: AgentSettings;
 	/** The strong/cheap/vision model slots (model slots wave, 2026-09-20). */
 	models?: ModelsSettings;
+	/** The custom OpenAI-compatible endpoint (non-secret config only). */
+	customProvider?: CustomProviderSettings;
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
@@ -384,13 +514,16 @@ export interface UserSettings {
  *  prompts default off — hence their absence here. */
 export interface FactorySettings {
 	version: number;
+	agent: Required<Pick<AgentSettings, "workerRequestConcurrency">>;
 	general: Required<GeneralSettings>;
 	dictation: Required<DictationSettings>;
 	appearance: {
-		mode: "dark" | "light";
+		theme: string;
 		background: string | null;
+		colors: AppearanceColorOverrides;
 		fontFamily: string | null;
 		proseFontSize: number;
+		codeLigatures: boolean;
 		sessionNameSerif: boolean;
 		mdRendering: {
 			headingWeight: number;
@@ -404,18 +537,21 @@ export interface FactorySettings {
 
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
+	agent: { workerRequestConcurrency: 8 },
 	general: { autoUpdate: true },
 	dictation: { language: "en" },
 	appearance: {
-		mode: "dark",
-		background: null, // the dark default (#141414) lives in the mode's derivation curve
+		theme: "default",
+		background: null, // null = the active theme's background
+		colors: {}, // no overrides: every color is the theme's
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
+		codeLigatures: false,
 		sessionNameSerif: true,
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
-	compaction: { thresholdTokens: 150_000 },
+	compaction: { thresholdTokens: 150_000, includeReasoning: false },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -491,9 +627,88 @@ function sanitizeRoleOverride(raw: unknown): RoleModelOverride | undefined {
 function sanitizeModels(raw: Record<string, unknown>): ModelsSettings {
 	const out: ModelsSettings = {};
 	for (const slot of MODEL_SLOTS) {
-		const cleaned = sanitizeRoleOverride(raw[slot]);
-		if (cleaned) out[slot] = cleaned;
+		const cleaned: ModelSlot = sanitizeRoleOverride(raw[slot]) ?? {};
+		const value = raw[slot];
+		if (value && typeof value === "object" && !Array.isArray(value)) {
+			const retention = (value as Record<string, unknown>).cacheRetention;
+			if (CACHE_RETENTIONS.includes(retention as CacheRetention)) cleaned.cacheRetention = retention as CacheRetention;
+		}
+		if (Object.keys(cleaned).length) out[slot] = cleaned;
 	}
+	return out;
+}
+
+/** A positive integer, or undefined — keeps only meaningful token counts. */
+function positiveInt(value: unknown): number | undefined {
+	return typeof value === "number" && Number.isInteger(value) && value > 0 ? value : undefined;
+}
+
+/** One pin, clamped up to the floor (clamp-never-reject on read). */
+function sanitizeCustomModelOverride(raw: unknown): CustomModelOverride | undefined {
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+	const rec = raw as Record<string, unknown>;
+	const out: CustomModelOverride = {};
+	const context = positiveInt(rec.context);
+	if (context) out.context = Math.max(CUSTOM_MODEL_PIN_FLOOR, context);
+	const maxTokens = positiveInt(rec.maxTokens);
+	if (maxTokens) out.maxTokens = Math.max(CUSTOM_MODEL_PIN_FLOOR, maxTokens);
+	if (typeof rec.reasoning === "boolean") out.reasoning = rec.reasoning;
+	return Object.keys(out).length ? out : undefined;
+}
+
+/** THE pins map + THE prune law: well-formed entries only, ids trimmed, and
+ *  when `liveIds` is given every entry for a model the endpoint no longer
+ *  advertises drops. POST passes the discovered ids, PATCH the stored list. */
+export function sanitizeCustomModelOverrides(
+	raw: unknown,
+	liveIds?: Iterable<string>,
+): Record<string, CustomModelOverride> {
+	const out: Record<string, CustomModelOverride> = {};
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return out;
+	const live = liveIds ? new Set(liveIds) : undefined;
+	for (const [key, value] of Object.entries(raw)) {
+		const id = key.trim();
+		if (!id || (live && !live.has(id))) continue;
+		const pin = sanitizeCustomModelOverride(value);
+		if (pin) Object.defineProperty(out, id, { value: pin, enumerable: true, configurable: true, writable: true });
+	}
+	return out;
+}
+
+/** The customProvider section: normalized base URL (invalid → dropped) and
+ *  discovered models (ids trimmed, dupes/empties dropped; image kept only when
+ *  true; token counts only as positive ints). Clamp-never-reject. */
+function sanitizeCustomProvider(raw: Record<string, unknown>): CustomProviderSettings {
+	const out: CustomProviderSettings = {};
+	if (typeof raw.credentialBindingId === "string" && /^[a-f0-9]{32}$/.test(raw.credentialBindingId)) out.credentialBindingId = raw.credentialBindingId;
+	if (raw.authMode === "keyless" || raw.authMode === "apiKey") out.authMode = raw.authMode;
+	if (typeof raw.baseUrl === "string") {
+		const base = normalizeBaseUrl(raw.baseUrl);
+		if (base) out.baseUrl = base;
+	}
+	if (Array.isArray(raw.models)) {
+		const byId = new Map<string, CustomModel>();
+		for (const m of raw.models) {
+			if (typeof m !== "object" || m === null) continue;
+			const rec = m as Record<string, unknown>;
+			if (typeof rec.id !== "string") continue;
+			const id = rec.id.trim();
+			if (!id) continue;
+			const model: CustomModel = { id };
+			if (rec.image === true) model.image = true;
+			if (rec.reasoning === true) model.reasoning = true;
+			const context = positiveInt(rec.context);
+			if (context) model.context = context;
+			const maxTokens = positiveInt(rec.maxTokens);
+			if (maxTokens) model.maxTokens = maxTokens;
+			byId.set(id, model);
+		}
+		out.models = [...byId.values()];
+	}
+	const overrides = sanitizeCustomModelOverrides(raw.overrides);
+	if (Object.keys(overrides).length) out.overrides = overrides;
+	const manualModels = parseModelIds(raw.manualModels);
+	if (manualModels.length) out.manualModels = manualModels;
 	return out;
 }
 
@@ -508,6 +723,10 @@ function sanitizeBooleanMap(raw: unknown): Record<string, boolean> | undefined {
 
 function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	const out: AgentSettings = {};
+	// Invalid disk values drop: absence resolves to 8, never a silent clamp.
+	if (typeof raw.workerRequestConcurrency === "number" && Number.isSafeInteger(raw.workerRequestConcurrency) && raw.workerRequestConcurrency > 0) {
+		out.workerRequestConcurrency = raw.workerRequestConcurrency;
+	}
 	if (raw.models !== null && typeof raw.models === "object" && !Array.isArray(raw.models)) {
 		const models: Partial<Record<BackgroundModelRole, RoleModelOverride>> = {};
 		for (const [role, override] of Object.entries(raw.models as Record<string, unknown>)) {
@@ -527,7 +746,7 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 	// record, it just loses the pin and auto-detection resumes).
 	if (raw.search !== null && typeof raw.search === "object" && !Array.isArray(raw.search)) {
 		const engine = (raw.search as Record<string, unknown>).engine;
-		if (engine === "tavily" || engine === "brave") out.search = { engine };
+		if (isSearchEngineId(engine)) out.search = { engine };
 	}
 	// Prober graph tools (wave 7): its own agent-section subsection —
 	// lenient read side (a bad shape drops the key and the default ON
@@ -536,6 +755,13 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const enabled = (raw.graphTools as Record<string, unknown>).enabled;
 		if (enabled === undefined) out.graphTools = {};
 		else if (typeof enabled === "boolean") out.graphTools = { enabled };
+	}
+	// Never drop a malformed access policy into the unrestricted default.
+	// The strict store reader separately reports its configuration error;
+	// this safe view also preserves the boundary during unrelated UI writes.
+	if (raw.fileAccess !== undefined) {
+		const parsed = parseFileAccessSettings(raw.fileAccess);
+		out.fileAccess = parsed.ok ? parsed.settings : { restricted: true, folders: [] };
 	}
 	return out;
 }
@@ -554,14 +780,27 @@ function sanitizeMdRendering(raw: unknown): MdRenderingSettings {
 
 function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	const out: AppearanceSettings = {};
-	if (raw.mode === "dark" || raw.mode === "light") out.mode = raw.mode;
+	// Theme wave (2026-11-04): `mode`/`lightBackground` (light-mode wave)
+	// are no longer read — the theme declares the mode. Dropped here like
+	// the graph's dead rungs; the next appearance write flushes them.
+	if (isThemeId(raw.theme)) out.theme = raw.theme;
 	if (raw.background !== undefined) out.background = sanitizeHexOrNull(raw.background);
+	if (raw.colors !== null && typeof raw.colors === "object" && !Array.isArray(raw.colors)) {
+		const colors: AppearanceColorOverrides = {};
+		const c = raw.colors as Record<string, unknown>;
+		for (const key of COLOR_OVERRIDE_KEYS) {
+			if (c[key] !== undefined) colors[key] = sanitizeHexOrNull(c[key]);
+		}
+		out.colors = colors;
+	}
 	if (raw.fontFamily !== undefined) {
 		out.fontFamily = typeof raw.fontFamily === "string" && raw.fontFamily.trim() ? raw.fontFamily : null;
 	}
 	if (typeof raw.proseFontSize === "number" && Number.isFinite(raw.proseFontSize)) {
 		out.proseFontSize = clamp(Math.round(raw.proseFontSize), PROSE_FONT_MIN, PROSE_FONT_MAX);
 	}
+	const codeLigatures = boolOrDrop(raw.codeLigatures);
+	if (codeLigatures !== undefined) out.codeLigatures = codeLigatures;
 	const sessionNameSerif = boolOrDrop(raw.sessionNameSerif);
 	if (sessionNameSerif !== undefined) out.sessionNameSerif = sessionNameSerif;
 	if (raw.mdRendering !== undefined) out.mdRendering = sanitizeMdRendering(raw.mdRendering);
@@ -602,6 +841,8 @@ export const COMPACTION_THRESHOLD_FLOOR = 32_000;
 
 function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	const out: CompactionSettings = {};
+	const includeReasoning = boolOrDrop(raw.includeReasoning);
+	if (includeReasoning !== undefined) out.includeReasoning = includeReasoning;
 	const rawTokens = raw.thresholdTokens;
 	if (typeof rawTokens === "number" && Number.isFinite(rawTokens) && rawTokens > 0) {
 		out.thresholdTokens = Math.max(COMPACTION_THRESHOLD_FLOOR, Math.floor(rawTokens));
@@ -631,6 +872,12 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 			? { language: (raw as DictationSettings).language }
 			: {};
 	}
+	if (r.claudeCode !== undefined) {
+		const raw = r.claudeCode;
+		out.claudeCode = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+			&& typeof (raw as Record<string, unknown>).enabled === "boolean"
+			? { enabled: (raw as { enabled: boolean }).enabled } : {};
+	}
 	if (r.agent !== null && typeof r.agent === "object" && !Array.isArray(r.agent)) {
 		out.agent = sanitizeAgent(r.agent as Record<string, unknown>);
 	}
@@ -641,11 +888,14 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		const models = sanitizeModels(r.models as Record<string, unknown>);
 		if (Object.keys(models).length) out.models = models;
 	}
+	if (r.customProvider !== null && typeof r.customProvider === "object" && !Array.isArray(r.customProvider)) {
+		out.customProvider = sanitizeCustomProvider(r.customProvider as Record<string, unknown>);
+	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
-		if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
-			out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
-		}
+	}
+	if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
+		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
 	// known-DEAD key is stripped instead of riding: `chat` (the old
