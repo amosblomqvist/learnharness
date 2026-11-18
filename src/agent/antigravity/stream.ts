@@ -97,7 +97,8 @@ export function createAntigravityStream(run: RunAntigravity = (binary, args, opt
 				const args = ["--input-format", "stream-json", "--output-format", "stream-json", "--disable-slash-commands",
 					"--settings", JSON.stringify(settings), "--json-schema", JSON.stringify(actionSchema(input.tools)), "--print-timeout", "5m",
 					...(model.id === "default" ? [] : ["--model", model.id]),
-					...(options.reasoning ? ["--effort", ["low", "medium", "high"].includes(options.reasoning) ? options.reasoning : "high"] : []),
+					// Pi has already clamped reasoning to this model's supported levels.
+					...(options.reasoning && model.thinkingLevelMap?.[options.reasoning] ? ["--effort", model.thinkingLevelMap[options.reasoning]!] : []),
 				];
 				if (options.signal?.aborted) throw new Error("Request was aborted");
 				const env = externalCliEnv();

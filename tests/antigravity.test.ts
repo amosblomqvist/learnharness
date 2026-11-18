@@ -5,7 +5,7 @@ import test from "node:test";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
-import type { SimpleStreamOptions, Tool } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels, type SimpleStreamOptions, type Tool } from "@earendil-works/pi-ai";
 import { createAntigravityStream, parseActions, type RunAntigravity } from "../src/agent/antigravity/stream.ts";
 import { ANTIGRAVITY_MODELS } from "../src/agent/antigravity/provider.ts";
 import { sanitizeUserSettings } from "../src/core/settings.ts";
@@ -57,6 +57,28 @@ test("Antigravity requests explicit model slugs without falling back", async () 
 	const stream = createAntigravityStream(run, () => "/fake/agy")(ANTIGRAVITY_MODELS[1]!, context);
 	await stream.result();
 	assert.equal(calls[0]!.args[calls[0]!.args.indexOf("--model") + 1], ANTIGRAVITY_MODELS[1]!.id);
+});
+
+// Checked against `agy models` and `--effort` validation with CLI 1.5.11.
+test("Antigravity lists one entry per model family with the CLI's supported thinking levels", () => {
+	assert.deepEqual(ANTIGRAVITY_MODELS.map((m) => [m.id, m.name, getSupportedThinkingLevels(m)]), [
+		["default", "Antigravity · CLI default", ["low", "medium", "high"]],
+		["gemini-4-hydrogen", "Gemini 4 Hydrogen", ["low", "medium", "high", "xhigh"]],
+		["gemini-4-argon", "Gemini 4 Argon", ["low", "medium", "high"]],
+		["gemini-3.8-flash", "Gemini 3.8 Flash", ["low", "medium", "high"]],
+		["claude-opus-5-5", "Claude Opus 5.5", ["low", "medium", "high"]],
+		["claude-sonnet-5-5", "Claude Sonnet 5.5", ["low", "medium", "high"]],
+		["gpt-oss-120b", "GPT-OSS 120B", ["medium"]],
+	]);
+});
+
+test("Antigravity passes the selected thinking level to the CLI as --effort", async () => {
+	const hydrogen = ANTIGRAVITY_MODELS.find((m) => m.id === "gemini-4-hydrogen")!;
+	const { run, calls } = fakeRun(success({ text: "Done", toolCalls: [] }));
+	await createAntigravityStream(run, () => "/fake/agy")(hydrogen, context, { reasoning: "xhigh" }).result();
+	const args = calls[0]!.args;
+	assert.equal(args[args.indexOf("--model") + 1], "gemini-4-hydrogen");
+	assert.equal(args[args.indexOf("--effort") + 1], "xhigh");
 });
 
 test("a real Pi agent executes harness tools and replays tool results to the next CLI request", async () => {

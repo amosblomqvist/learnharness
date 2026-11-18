@@ -16,9 +16,11 @@ npm run dev
 
 Open http://localhost:3000, enable Google Antigravity CLI under Providers, and
 choose an `antigravity` model for Strong, Cheap, and Vision. **Antigravity · CLI
-default** follows the CLI's selected model. Explicit model slugs fail if the
-account cannot access them. The bundled explicit slugs were checked against
-`agy models` with CLI 1.4.12; use CLI default if Google's catalog changes.
+default** follows the CLI's selected model. Each other entry is one model family
+(for example **Gemini 4 Hydrogen**); its thinking setting is sent as `--effort`
+and offers only the levels the CLI accepts for that family. Explicit model slugs
+fail if the account cannot access them. The bundled families were checked against
+`agy models` with CLI 1.5.11; use CLI default if Google's catalog changes.
 
 If `agy` is missing, install it using Google's
 [official instructions](https://antigravity.google/docs/getting-started?tab=cli).
