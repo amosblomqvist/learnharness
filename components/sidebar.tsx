@@ -946,6 +946,10 @@ function SessionsSidebar() {
 				    Practice / All — the real modes first, "All" as the escape
 				    hatch on the right, mirroring the create-buttons above.
 				    Persisted client-side. */}
+				{/* Its band's bottom rule frames the list's top (owner polish
+				    round): the first row needs no rule of its own, and the
+				    rule stays put while the list scrolls under it. */}
+				<div data-testid="session-kind-filter-band" className="border-b border-border/60 pb-2">
 				<div className="mx-3 flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="session-kind-filter">
 					{(["teach", "practice", "all"] as const).map((f) => (
 						<button
@@ -964,6 +968,7 @@ function SessionsSidebar() {
 						</button>
 					))}
 				</div>
+				</div>
 
 				{folderFailure && (
 					<div role="alert" data-testid="sidebar-folder-error" className="mx-3 mt-2 flex items-start gap-2 text-xs text-error">
@@ -974,7 +979,7 @@ function SessionsSidebar() {
 
 				{/* The bar overlays the rows (owner polish round): rules and
 				    highlights run to the edge; it shows while scrolling/hovering. */}
-				<OverlayScrollArea scrollRef={listRef} areaClassName="mt-2" data-testid="session-list" className="flex flex-col" {...folderDrop.containerProps}>
+				<OverlayScrollArea scrollRef={listRef} data-testid="session-list" className="flex flex-col" {...folderDrop.containerProps}>
 					{creatingFolder?.parentId === null && (
 						<NewFolderRow depth={0} onDone={() => setCreatingFolder(null)}
 							onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: null })} />

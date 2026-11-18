@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { NewFolderRow, SidebarFolderRow, sidebarRail, sidebarRowBox, sidebarRuleInset } from "../components/sidebar-folders.tsx";
+import { NewFolderRow, SidebarFolderRow, sidebarFolderBox, sidebarRail, sidebarRowBox, sidebarRuleInset } from "../components/sidebar-folders.tsx";
 
 const folder = { id: "f1", name: "Physics", parentId: null, createdAt: "2026-10-01T00:00:00.000Z" };
 const row = (depth: number, contentsShown: boolean) => renderToStaticMarkup(
@@ -10,16 +10,18 @@ const row = (depth: number, contentsShown: boolean) => renderToStaticMarkup(
 );
 
 it("nested rows start at the parent's rail; the rule slot is an inline transparent border", () => {
-	assert.equal(sidebarRail(0), 19);
-	assert.deepEqual([sidebarRuleInset(0), sidebarRuleInset(1), sidebarRuleInset(2)], [0, 19, 37]);
-	assert.deepEqual(sidebarRowBox(2), { marginLeft: 37, paddingLeft: 11 });
+	assert.equal(sidebarRail(0), 15);
+	assert.deepEqual([sidebarRuleInset(0), sidebarRuleInset(1), sidebarRuleInset(2)], [0, 15, 33]);
+	assert.deepEqual(sidebarRowBox(2), { marginLeft: 33, paddingLeft: 15 });
+	assert.deepEqual(sidebarFolderBox(0), { marginLeft: 0, paddingLeft: 8 }, "the chevron glyph lines up with session titles at 12px");
 	const html = row(1, false);
-	assert.match(html, /data-testid="sidebar-folder-row-f1"[^>]*style="border-bottom:1px solid transparent;margin-left:19px"/);
+	assert.match(html, /data-testid="sidebar-folder-row-f1"[^>]*style="border-bottom:1px solid transparent;margin-left:15px"/);
+	assert.match(html, /data-testid="sidebar-folder-f1"[^>]*style="padding-left:11px"/);
 	assert.match(html, /data-testid="sidebar-folder-rule-f1"[^>]*style="left:0"/, "closed: the rule spans the row");
 });
 
 it("an open folder with contents heads them with a rule starting at its own rail", () => {
-	assert.match(row(0, true), /data-testid="sidebar-folder-rule-f1"[^>]*style="left:19px"/);
-	assert.match(row(1, true), /data-testid="sidebar-folder-rule-f1"[^>]*style="left:18px"/, "rail 37 minus the row's 19px start");
-	assert.match(renderToStaticMarkup(<NewFolderRow depth={1} onCreate={async () => {}} onDone={() => {}} />), /style="border-bottom:1px solid transparent;margin-left:19px;padding-left:11px"/);
+	assert.match(row(0, true), /data-testid="sidebar-folder-rule-f1"[^>]*style="left:15px"/);
+	assert.match(row(1, true), /data-testid="sidebar-folder-rule-f1"[^>]*style="left:18px"/, "rail 33 minus the row's 15px start");
+	assert.match(renderToStaticMarkup(<NewFolderRow depth={1} onCreate={async () => {}} onDone={() => {}} />), /style="border-bottom:1px solid transparent;margin-left:15px;padding-left:11px"/);
 });

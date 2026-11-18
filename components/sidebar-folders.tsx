@@ -18,14 +18,19 @@ import { cn } from "@/lib/utils";
  * checkbox column. */
 export const SIDEBAR_TREE_INDENT = 18;
 export const sidebarRowPadding = (depth: number) => 12 + depth * SIDEBAR_TREE_INDENT;
+/** The chevron glyph sits ~4.7px inside its 14px box; folder rows start that
+ * much earlier so the visible arrow lines up with session titles. */
+const CHEVRON_INSET = 4;
 /** The rail's x: the centre of a folder row's chevron at `depth`. */
-export const sidebarRail = (depth: number) => sidebarRowPadding(depth) + 7;
+export const sidebarRail = (depth: number) => sidebarRowPadding(depth) - CHEVRON_INSET + 7;
 /** Where a row's bottom rule starts (Chains' rule): full width at the top
  * level, from the parent folder's rail inside folders. */
 export const sidebarRuleInset = (depth: number) => depth === 0 ? 0 : sidebarRail(depth - 1);
 /** Rows inside folders START at the parent's rail (Chains' source rows), so
  * their rules, hover and active highlights never cover a rail. */
 export const sidebarRowBox = (depth: number) => ({ marginLeft: sidebarRuleInset(depth), paddingLeft: sidebarRowPadding(depth) - sidebarRuleInset(depth) });
+/** Folder rows (and the new-folder row): the same box, the chevron pulled in. */
+export const sidebarFolderBox = (depth: number) => ({ marginLeft: sidebarRuleInset(depth), paddingLeft: sidebarRowPadding(depth) - CHEVRON_INSET - sidebarRuleInset(depth) });
 
 /** Reserves each row's 1px rule slot. Inline on purpose: the unlayered
  * global `* { border-color }` rule outranks Tailwind's transparent border. */
@@ -117,7 +122,7 @@ export function SidebarFolderRow({ folder, depth, open, contentsShown, dropActiv
 			style={{ ...RULE_SLOT, marginLeft: sidebarRowBox(depth).marginLeft }} className={cn("relative transition-colors", dropActive && "bg-accent/50")}>
 			<SidebarRule testid={`sidebar-folder-rule-${folder.id}`} inset={contentsShown ? sidebarRail(depth) - sidebarRuleInset(depth) : 0} />
 			{renaming ? (
-				<div className="flex w-full items-center gap-1 py-1.5 pr-3" style={{ paddingLeft: sidebarRowBox(depth).paddingLeft }}>
+				<div className="flex w-full items-center gap-1 py-1.5 pr-3" style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
 					<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground/70", open && "rotate-90")} />
 					<Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
 					<EditableSourceName name={folder.name} initiallyEditing onCancel={onRenameDone}
@@ -128,7 +133,7 @@ export function SidebarFolderRow({ folder, depth, open, contentsShown, dropActiv
 					aria-label={`${open ? "Collapse" : "Expand"} folder ${folder.name}`}
 					onClick={onToggle} onContextMenu={onContextMenu}
 					className="flex w-full items-center gap-1 py-1.5 pr-3 text-left transition-colors hover:bg-accent"
-					style={{ paddingLeft: sidebarRowBox(depth).paddingLeft }}>
+					style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
 					<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground/70", open && "rotate-90")} />
 					<Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
 					<span className="min-w-0 flex-1 truncate font-ui text-sm font-medium leading-5">{folder.name}</span>
@@ -141,7 +146,7 @@ export function SidebarFolderRow({ folder, depth, open, contentsShown, dropActiv
 /** The inline new-folder row (Add folder / New subfolder). */
 export function NewFolderRow({ depth, onCreate, onDone }: { depth: number; onCreate: (name: string) => Promise<unknown>; onDone: () => void }) {
 	return (
-		<div data-testid="sidebar-new-folder-row" className="relative flex w-full items-center gap-1 py-1.5 pr-3" style={{ ...RULE_SLOT, ...sidebarRowBox(depth) }}>
+		<div data-testid="sidebar-new-folder-row" className="relative flex w-full items-center gap-1 py-1.5 pr-3" style={{ ...RULE_SLOT, ...sidebarFolderBox(depth) }}>
 			<SidebarRule inset={0} />
 			<span aria-hidden="true" className="size-3.5 shrink-0" />
 			<FolderIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />

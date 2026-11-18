@@ -331,7 +331,10 @@ export function Home({
 			    the region at the same owned-surface rank. The drag mask remains
 			    first so later controls retain their Electron no-drag carve-outs. */}
 			<header style={chromeStyle} className="pointer-events-none absolute inset-x-0 top-0 flex items-center gap-2 px-3 py-2">
-				<div className="pointer-events-auto">
+				{/* `contents`: the toggle's own collapse margin (w-0 -mr-3 while
+				    the sidebar is open) must act in THIS row, so the next control
+				    sits the header's top gap from the left edge. */}
+				<div className="pointer-events-auto contents">
 					<SidebarToggle />
 				</div>
 				{/* The graph's folder filter portals here (view only; graph

@@ -50,7 +50,12 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 	const rootRef = useRef<HTMLDivElement>(null);
 	const panelRef = useRef<HTMLDivElement>(null);
 	const popupLayer = usePopoverDismiss(rootRef, open, () => setOpen(false), { layerRootRef: panelRef });
-	const activeCount = [...selected].filter((id) => listed.has(id)).length;
+	const active = new Set([...selected].filter((id) => listed.has(id)));
+	// Count CHOICES, not folders: a ticked folder's ticked subfolders came with
+	// it. One choice → its name on the button; several → how many (owner polish).
+	const choices = organization.folders.filter((f) => active.has(f.id) && !(f.parentId !== null && active.has(f.parentId)));
+	const activeCount = choices.length;
+	const soleName = activeCount === 1 ? choices[0]!.name : null;
 	const collator = useMemo(() => new Intl.Collator(undefined, { sensitivity: "base", numeric: true }), []);
 	const childrenOf = (parentId: string | null): SourceFolder[] => organization.folders
 		.filter((f) => f.parentId === parentId && listed.has(f.id))
@@ -77,7 +82,7 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 				<button
 					type="button"
 					aria-expanded={open}
-					aria-label={activeCount > 0 ? `Folder filter: ${activeCount} selected` : "Folder filter"}
+					aria-label={soleName !== null ? `Folder filter: ${soleName}` : activeCount > 0 ? `Folder filter: ${activeCount} selected` : "Folder filter"}
 					data-testid="graph-folder-filter"
 					data-active={activeCount > 0}
 					onClick={() => setOpen((o) => !o)}
@@ -86,8 +91,10 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 						activeCount > 0 ? "border-primary/60 text-foreground" : open ? "text-foreground" : "text-muted-foreground hover:text-foreground",
 					)}
 				>
-					<FolderIcon className={cn("size-4", activeCount > 0 && "text-primary")} />
-					{activeCount > 0 && <span className="text-xs tabular-nums">{activeCount}</span>}
+					<FolderIcon className={cn("size-4 shrink-0", activeCount > 0 && "text-primary")} />
+					{soleName !== null
+						? <span data-testid="graph-folder-filter-name" className="max-w-40 truncate text-xs">{soleName}</span>
+						: activeCount > 0 && <span className="text-xs tabular-nums">{activeCount}</span>}
 				</button>
 			</Hint>
 			{open && (
@@ -97,7 +104,7 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 						<span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Show folders</span>
 						{activeCount > 0 && (
 							<button type="button" data-testid="graph-folder-filter-clear" onClick={() => onChange(new Set())}
-								className="text-[11px] text-muted-foreground transition-colors hover:text-foreground">Show all</button>
+								className="text-[10px] text-muted-foreground transition-colors hover:text-foreground">Show all</button>
 						)}
 					</div>
 					<div className="overflow-y-auto">
