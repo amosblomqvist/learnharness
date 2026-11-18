@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { spawn } from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 import readline from "node:readline";
 import {
 	createProvider,
@@ -158,6 +158,16 @@ function messageContentToText(content: unknown): string {
 	return "";
 }
 
+export function isAntigravityAvailable(): boolean {
+	try {
+		const cmd = process.platform === "win32" ? "where agy" : "which agy 2>/dev/null";
+		const out = execSync(cmd, { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] }).trim();
+		return out.length > 0;
+	} catch {
+		return false;
+	}
+}
+
 export function parseToolCallsFromText(text: string): {
 	prose: string;
 	toolCalls: Array<{ name: string; arguments: JsonObject }>;
@@ -295,6 +305,15 @@ function streamAntigravity(
 	const child = spawn("agy", args, {
 		stdio: ["pipe", "pipe", "pipe"],
 		env: { ...process.env },
+	});
+
+	child.on("error", (err: any) => {
+		partialMessage.stopReason = "error";
+		partialMessage.errorMessage = err?.code === "ENOENT"
+			? "Google Antigravity CLI ('agy') was not found in PATH. Please install or authenticate agy."
+			: (err?.message ?? "Failed to spawn agy");
+		outer.push({ type: "error", reason: "error", error: partialMessage });
+		outer.end(partialMessage);
 	});
 
 	if (streamOptions?.signal) {

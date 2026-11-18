@@ -1,7 +1,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { piModels, piEngineForSpec } from "../src/agent/models.ts";
-import { formatTranscript, parseToolCallsFromText, ANTIGRAVITY_MODELS } from "../src/agent/providers/antigravity.ts";
+import { formatTranscript, parseToolCallsFromText, isAntigravityAvailable, ANTIGRAVITY_MODELS } from "../src/agent/providers/antigravity.ts";
 import { providerKeyPresent } from "../src/server/keys.ts";
 import { modelCatalog } from "../src/server/model-catalog.ts";
 
@@ -18,8 +18,8 @@ describe("Antigravity Provider (Zero-Key Ambient)", () => {
 		}
 	});
 
-	it("providerKeyPresent('antigravity') is true without requiring env keys", () => {
-		assert.equal(providerKeyPresent("antigravity"), true);
+	it("providerKeyPresent('antigravity') reflects whether agy CLI is installed", () => {
+		assert.equal(providerKeyPresent("antigravity"), isAntigravityAvailable());
 	});
 
 	it("builds a PiEngine for antigravity specs via piEngineForSpec", () => {
