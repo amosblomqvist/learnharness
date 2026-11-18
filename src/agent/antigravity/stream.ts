@@ -57,6 +57,11 @@ import {
 	type AntigravityPendingToolCall,
 	type AntigravityToolBridge,
 } from "./tool-bridge.ts";
+import {
+	EMPTY_RESPONSE_ERROR_MESSAGE,
+	EMPTY_RESPONSE_RETRY_PROMPT,
+	isEmptyThinkingOnlyStop,
+} from "../empty-response-guard.ts";
 import { toAntigravityPromptBlocks } from "./transcript.ts";
 
 export { shutdownAntigravityProcesses, toAntigravityPromptBlocks };
@@ -307,40 +312,48 @@ class AcpTurn {
 		this.stream.end();
 	}
 
+	prepareForRetry(): void {
+		if (!this.finished) {
+			this.closeActiveBlock();
+		}
+	}
+
+	applyPromptUsage(response: AcpPromptResponse): void {
+		if (!response.usage) return;
+		const u = response.usage;
+		// agy_acp_server reports uncached prompt_token_count in inputTokens (already disjoint from cachedReadTokens).
+		const input = typeof u.inputTokens === "number" && Number.isFinite(u.inputTokens) ? u.inputTokens : 0;
+		const output = typeof u.outputTokens === "number" && Number.isFinite(u.outputTokens) ? u.outputTokens : 0;
+		const cacheRead =
+			typeof u.cachedReadTokens === "number" && Number.isFinite(u.cachedReadTokens) ? u.cachedReadTokens : 0;
+		const cacheWrite =
+			typeof u.cachedWriteTokens === "number" && Number.isFinite(u.cachedWriteTokens) ? u.cachedWriteTokens : 0;
+		const thought = typeof u.thoughtTokens === "number" && Number.isFinite(u.thoughtTokens) ? u.thoughtTokens : 0;
+		const bucketSum = input + output + cacheRead + cacheWrite;
+		// PromptResponse.usage is cumulative across all model calls since session/prompt started, whereas
+		// usage_update.used reports the single latest call's context usage. If bucketSum exceeds lastUsageUpdateUsed,
+		// PromptResponse spans multiple calls; keep the single-call usage_update measurement for Context (last call).
+		if (this.lastUsageUpdateUsed === 0 || bucketSum <= this.lastUsageUpdateUsed) {
+			const total =
+				typeof u.totalTokens === "number" && Number.isFinite(u.totalTokens)
+					? u.totalTokens
+					: bucketSum + thought;
+			this.output.usage = {
+				input,
+				output,
+				cacheRead,
+				cacheWrite,
+				totalTokens: total,
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+			};
+		}
+	}
+
 	finishPrompt(response: AcpPromptResponse): void {
 		if (this.finished) return;
 		this.start();
 		this.closeActiveBlock();
-
-		if (response.usage) {
-			const u = response.usage;
-			// agy_acp_server reports uncached prompt_token_count in inputTokens (already disjoint from cachedReadTokens).
-			const input = typeof u.inputTokens === "number" && Number.isFinite(u.inputTokens) ? u.inputTokens : 0;
-			const output = typeof u.outputTokens === "number" && Number.isFinite(u.outputTokens) ? u.outputTokens : 0;
-			const cacheRead =
-				typeof u.cachedReadTokens === "number" && Number.isFinite(u.cachedReadTokens) ? u.cachedReadTokens : 0;
-			const cacheWrite =
-				typeof u.cachedWriteTokens === "number" && Number.isFinite(u.cachedWriteTokens) ? u.cachedWriteTokens : 0;
-			const thought = typeof u.thoughtTokens === "number" && Number.isFinite(u.thoughtTokens) ? u.thoughtTokens : 0;
-			const bucketSum = input + output + cacheRead + cacheWrite;
-			// PromptResponse.usage is cumulative across all model calls since session/prompt started, whereas
-			// usage_update.used reports the single latest call's context usage. If bucketSum exceeds lastUsageUpdateUsed,
-			// PromptResponse spans multiple calls; keep the single-call usage_update measurement for Context (last call).
-			if (this.lastUsageUpdateUsed === 0 || bucketSum <= this.lastUsageUpdateUsed) {
-				const total =
-					typeof u.totalTokens === "number" && Number.isFinite(u.totalTokens)
-						? u.totalTokens
-						: bucketSum + thought;
-				this.output.usage = {
-					input,
-					output,
-					cacheRead,
-					cacheWrite,
-					totalTokens: total,
-					cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-				};
-			}
-		}
+		this.applyPromptUsage(response);
 
 		const mapped = mapStopReason(response.stopReason);
 		if (mapped === "aborted") {
@@ -552,12 +565,26 @@ class AcpSessionProcess implements LiveAntigravityProcess {
 			}
 			if (this.stopping) return;
 
-			const response = await client.prompt(sessionResult.sessionId, promptBlocks);
+			let response = await client.prompt(sessionResult.sessionId, promptBlocks);
 			if (this.stopping) return;
 
+			if (!this.turn.finished && isEmptyThinkingOnlyStop(mapStopReason(response.stopReason), this.turn.getMessage())) {
+				this.turn.prepareForRetry();
+				response = await client.prompt(sessionResult.sessionId, [
+					{ type: "text", text: EMPTY_RESPONSE_RETRY_PROMPT },
+				]);
+				if (this.stopping) return;
+			}
+
 			if (!this.turn.finished) {
-				this.turn.finishPrompt(response);
-				await this.cleanup();
+				if (isEmptyThinkingOnlyStop(mapStopReason(response.stopReason), this.turn.getMessage())) {
+					this.turn.applyPromptUsage(response);
+					this.turn.fail(EMPTY_RESPONSE_ERROR_MESSAGE, "error");
+					await this.cleanup();
+				} else {
+					this.turn.finishPrompt(response);
+					await this.cleanup();
+				}
 			} else if (this.admitted.length > 0) {
 				// Antigravity ended the prompt while LearnHarness was parked waiting on admitted tool results.
 				// Tear down instead of caching completedResponse so the next turn cold-starts cleanly with replay.

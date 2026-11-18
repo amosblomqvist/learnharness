@@ -569,9 +569,12 @@ rl.on("line", (line) => {
 		}
 
 		const promptBlocks = Array.isArray(msg.params?.prompt) ? msg.params.prompt : [];
+		session.promptCount = (session.promptCount ?? 0) + 1;
+		const promptNumber = session.promptCount;
 		const promptRecord = {
 			pid: process.pid,
 			sessionId,
+			promptNumber,
 			currentModel: session.currentModel,
 			currentThought: session.currentThought,
 			prompt: promptBlocks,
@@ -617,6 +620,47 @@ rl.on("line", (line) => {
 				return;
 			}
 
+			if (streamMode === "thinking-only-always" || streamMode === "thinking-whitespace-only") {
+				emitSessionUpdate(sessionId, {
+					sessionUpdate: "agent_thought_chunk",
+					content: { type: "text", text: `Silent thought #${promptNumber}.` },
+				});
+				if (streamMode === "thinking-whitespace-only") {
+					emitSessionUpdate(sessionId, {
+						sessionUpdate: "agent_message_chunk",
+						content: { type: "text", text: "   \n  " },
+					});
+				}
+				writeOut({
+					jsonrpc: "2.0",
+					id: msg.id,
+					result: {
+						stopReason: "end_turn",
+						usage: { inputTokens: 80, outputTokens: 20, thoughtTokens: 20, totalTokens: 100 },
+					},
+				});
+				return;
+			}
+
+			if (
+				(streamMode === "thinking-only-then-text" || streamMode === "thinking-only-then-mcp-tool") &&
+				promptNumber === 1
+			) {
+				emitSessionUpdate(sessionId, {
+					sessionUpdate: "agent_thought_chunk",
+					content: { type: "text", text: "Planning first attempt silently." },
+				});
+				writeOut({
+					jsonrpc: "2.0",
+					id: msg.id,
+					result: {
+						stopReason: "end_turn",
+						usage: { inputTokens: 60, outputTokens: 15, thoughtTokens: 15, totalTokens: 75 },
+					},
+				});
+				return;
+			}
+
 			if (streamMode === "hang-for-cancel") {
 				emitSessionUpdate(sessionId, {
 					sessionUpdate: "agent_thought_chunk",
@@ -658,6 +702,7 @@ rl.on("line", (line) => {
 
 			if (
 				(streamMode === "mcp-tool" ||
+					streamMode === "thinking-only-then-mcp-tool" ||
 					streamMode === "two-mcp-tools" ||
 					streamMode === "mcp-tool-timeout-and-retry" ||
 					streamMode === "mcp-tool-move-on") &&

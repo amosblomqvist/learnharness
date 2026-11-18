@@ -592,3 +592,174 @@ test("createAntigravityStream works with kind='cli' (agy 1.5.10), antigravity-oa
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });
+
+test("createAntigravityStream nudges once in-session on thinking-only stopReason=stop and recovers text or MCP toolCall", async () => {
+	const root = makeTempRoot();
+	const authFile = path.join(root, "auth.json");
+
+	try {
+		const profileDir = ensureAntigravityProfile({ authFile, env: { ...process.env, LH_AUTH_FILE: authFile } });
+		fs.writeFileSync(antigravityTokenFilePath(profileDir), JSON.stringify({ token: "tok" }), { mode: 0o600 });
+
+		// 1) Recovers into learner-facing text on the same ACP session
+		const textEnv = {
+			...process.env,
+			LH_AUTH_FILE: authFile,
+			FAKE_ACP_RECORD_EVENTS: "1",
+			FAKE_ACP_STREAM_MODE: "thinking-only-then-text",
+			FAKE_ACP_TEXT: "Recovered answer after thinking.",
+		};
+		const textStreamFn = createAntigravityStream({
+			isEnabled: () => true,
+			isSignedIn: () => true,
+			resolveRuntime: () => fakeRuntime("1.4.5"),
+			ensureProfile: () => profileDir,
+			env: textEnv,
+		});
+		const textEvents = await collectEvents(
+			textStreamFn(
+				testModel(),
+				normalizeContext({
+					systemPrompt: "Probe the learner.",
+					messages: [{ role: "user", content: "Teach me derivatives", timestamp: 1 }],
+					tools: [],
+				}),
+				{ reasoning: "high", sessionId: "chat-agy-nudge-text" },
+			),
+		);
+		const textDone = textEvents.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+		assert.equal(textDone.type, "done");
+		assert.equal(textDone.reason, "stop");
+		assert.equal(
+			textDone.message.content.find((b) => b.type === "text")?.type === "text"
+				? (textDone.message.content.find((b) => b.type === "text") as { text: string }).text
+				: "",
+			"Recovered answer after thinking.",
+		);
+
+		const historyLines = fs
+			.readFileSync(path.join(profileDir, "antigravity-acp", "prompt-history.jsonl"), "utf8")
+			.trim()
+			.split("\n")
+			.map((line) => JSON.parse(line) as { sessionId: string; promptNumber: number; prompt: Array<{ text?: string }> });
+		assert.equal(historyLines.length, 2);
+		assert.equal(historyLines[0]?.sessionId, historyLines[1]?.sessionId);
+		assert.equal(historyLines[1]?.promptNumber, 2);
+		assert.match(historyLines[1]?.prompt[0]?.text ?? "", /thinking only/i);
+
+		// 2) Recovers into an MCP tool call and completes the held call normally
+		const mcpEnv = {
+			...process.env,
+			LH_AUTH_FILE: authFile,
+			FAKE_ACP_STREAM_MODE: "thinking-only-then-mcp-tool",
+			FAKE_ACP_TOOL_NAME: "probe_check",
+			FAKE_ACP_TOOL_ARGS_JSON: JSON.stringify({ topic: "limits" }),
+		};
+		const mcpStreamFn = createAntigravityStream({
+			isEnabled: () => true,
+			isSignedIn: () => true,
+			resolveRuntime: () => fakeRuntime("1.4.5"),
+			ensureProfile: () => profileDir,
+			env: mcpEnv,
+		});
+		const tools = [
+			{
+				name: "probe_check",
+				description: "Record learner understanding",
+				parameters: Type.Object({ topic: Type.String() }),
+			},
+		];
+		const userMessage = { role: "user" as const, content: "Test me", timestamp: 1 };
+		const step1Events = await collectEvents(
+			mcpStreamFn(testModel(), normalizeContext({ systemPrompt: "Probe.", messages: [userMessage], tools }), {
+				sessionId: "chat-agy-nudge-mcp",
+			}),
+		);
+		const step1Done = step1Events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+		assert.equal(step1Done.type, "done");
+		assert.equal(step1Done.reason, "toolUse");
+		const toolCall = step1Done.message.content.find((b) => b.type === "toolCall");
+		assert.ok(toolCall && toolCall.type === "toolCall");
+		assert.equal(toolCall.name, "probe_check");
+
+		const step2Events = await collectEvents(
+			mcpStreamFn(
+				testModel(),
+				normalizeContext({
+					systemPrompt: "Probe.",
+					messages: [
+						userMessage,
+						step1Done.message,
+						{
+							role: "toolResult",
+							toolCallId: toolCall.id,
+							toolName: "probe_check",
+							content: [{ type: "text", text: "Recorded probe" }],
+							isError: false,
+							timestamp: 2,
+						},
+					],
+					tools,
+				}),
+				{ sessionId: "chat-agy-nudge-mcp" },
+			),
+		);
+		const step2Done = step2Events.at(-1) as Extract<AssistantMessageEvent, { type: "done" }>;
+		assert.equal(step2Done.reason, "stop");
+	} finally {
+		await shutdownAntigravityProcesses();
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("createAntigravityStream fails with stopReason=error after one nudge if output stays thinking-only or whitespace-only", async () => {
+	const root = makeTempRoot();
+	const authFile = path.join(root, "auth.json");
+
+	try {
+		const profileDir = ensureAntigravityProfile({ authFile, env: { ...process.env, LH_AUTH_FILE: authFile } });
+		fs.writeFileSync(antigravityTokenFilePath(profileDir), JSON.stringify({ token: "tok" }), { mode: 0o600 });
+
+		for (const streamMode of ["thinking-only-always", "thinking-whitespace-only"] as const) {
+			const historyPath = path.join(profileDir, "antigravity-acp", "prompt-history.jsonl");
+			fs.rmSync(historyPath, { force: true });
+
+			const streamFn = createAntigravityStream({
+				isEnabled: () => true,
+				isSignedIn: () => true,
+				resolveRuntime: () => fakeRuntime("1.4.5"),
+				ensureProfile: () => profileDir,
+				env: {
+					...process.env,
+					LH_AUTH_FILE: authFile,
+					FAKE_ACP_RECORD_EVENTS: "1",
+					FAKE_ACP_STREAM_MODE: streamMode,
+				},
+			});
+			const events = await collectEvents(
+				streamFn(
+					testModel(),
+					normalizeContext({
+						systemPrompt: "Probe.",
+						messages: [{ role: "user", content: "Start", timestamp: 1 }],
+						tools: [],
+					}),
+					{ reasoning: "high", sessionId: `chat-agy-${streamMode}` },
+				),
+			);
+			const end = events.at(-1) as Extract<AssistantMessageEvent, { type: "error" }>;
+			assert.equal(end.type, "error");
+			assert.equal(end.reason, "error");
+			assert.equal(end.error.stopReason, "error");
+			assert.match(end.error.errorMessage ?? "", /thinking only/i);
+			assert.ok(end.error.content.some((b) => b.type === "thinking"));
+			assert.equal(end.error.usage.totalTokens, 100);
+
+			const historyLines = fs.readFileSync(historyPath, "utf8").trim().split("\n");
+			assert.equal(historyLines.length, 2, `${streamMode} must nudge at most once`);
+		}
+	} finally {
+		await shutdownAntigravityProcesses();
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
