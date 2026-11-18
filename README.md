@@ -82,6 +82,7 @@ To build the Windows installer from source on Windows:
 
 ```bash
 npm ci
+npm run plugins:setup
 npm run desktop:dist:win
 ```
 

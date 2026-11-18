@@ -388,7 +388,7 @@ export async function handleChatInput(
 		// Retry's transient SDK prefix omits ALL tail failures. Keep the saved
 		// history in the metadata-only view so omission cannot revive a report
 		// invalidated by a genuine provider failure. New live responses win.
-		const saved = conversation.provider === CLAUDE_CODE_PROVIDER ? stores.chatStore.getChat(chatId)?.messages ?? [] : [];
+		const saved = isExternalCliProvider(conversation.provider) ? stores.chatStore.getChat(chatId)?.messages ?? [] : [];
 		const savedIds = new Set(saved.map((message) => message.id));
 		const reportHistory = saved.length ? [...saved, ...live.filter((message) => !savedIds.has(message.id))] : live;
 		const window = sideContextWindow(reportHistory, conversationEngine.model, contextWindow, input.type === "retry");

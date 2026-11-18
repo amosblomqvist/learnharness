@@ -82,6 +82,7 @@ Windows 上でソースから Windows インストーラーをビルドするに
 
 ```bash
 npm ci
+npm run plugins:setup
 npm run desktop:dist:win
 ```
 
@@ -102,6 +103,7 @@ Windows 向けの fork ビルドは、このフォークの GitHub Releases か�
 
 ```bash
 npm ci
+npm run plugins:setup
 npm run dev        # http://localhost:3000
 npm test           # fixtures and fake providers
 ```
@@ -115,7 +117,9 @@ npm test           # fixtures and fake providers
 
 図のソースは [docs/architecture/architecture.d2](docs/architecture/architecture.d2) です。直したら arch-diagram の `render.py` で SVG を描き直してください。
 
-すべての案内は [documentation index](docs/README.md) を、開発環境と確認手順は [development](docs/development.md) を、ランタイム構造は [architecture](docs/architecture.md) を、ショートカットは [keyboard shortcuts](docs/keyboard.md) を、デスクトップビルドとリリースは [desktop builds and releases](docs/desktop-release.md) を参照してください。
+すべての案内は [documentation index](docs/README.md) を、開発環境と確認手順は [development](docs/development.md) を、ランタイム構造は [architecture](docs/architecture.md) を、ショートカットは [keyboard shortcuts](docs/keyboard.md) を、テーマファイルの形式は [themes](docs/themes.md) を、デスクトップビルドとリリースは [desktop builds and releases](docs/desktop-release.md) を参照してください。
+
+信頼できるローカルプラグインを作るときは、まず [authoring guide and capability map](docs/plugin-authoring.md) を読んでください。question・practice-problem・submission・view-context・UI の各契約へのリンクがあります。小さく動くテンプレートは [`examples/plugins/`](examples/plugins/)、機能のソースプロジェクトは [`plugins/`](plugins/)、内部構造は [host architecture](docs/plugin-architecture.md) にあります。
 
 質問・不具合報告・機能要望: [GitHub Issues](https://github.com/reeschan/learnharness/issues)
 

@@ -6,6 +6,7 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { CodexInstallationStatus } from "../components/settings/codex-status.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { externalCliStatusLabel } from "../components/settings/external-cli-status.tsx";
 import { ConnectionRow } from "../components/settings/connection-controls.tsx";
@@ -55,7 +56,7 @@ test("External CLI group contains Claude Code followed by Codex", async () => {
 		? Response.json({ settings: { version: 1 } })
 		: Response.json({ providers: [], keys: [] })) as typeof fetch;
 	host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-	await act(async () => root!.render(<KeysSection />));
+	await act(async () => root!.render(<InteractionLayersProvider><KeysSection /></InteractionLayersProvider>));
 	const group = document.querySelector('[data-testid="group-external-cli"]')!;
 	const rows = [...group.querySelectorAll('[data-testid$="-installation"]')];
 	assert.deepEqual(rows.map((row) => row.getAttribute("data-testid")), ["claude-code-installation", "codex-installation", "gemini-cli-installation"]);
