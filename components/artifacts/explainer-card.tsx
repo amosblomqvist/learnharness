@@ -51,7 +51,7 @@ export function ExplainerOutputCard({ output }: { output: unknown }) {
 			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="explainer-card-failed">
 				<div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 					Explainer
-					<span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">failed</span>
+					<span className="rounded bg-error/15 px-1.5 py-0.5 text-error">failed</span>
 				</div>
 				<p className="mt-2 text-sm text-muted-foreground">{result.notes ?? "The explainer could not be built."}</p>
 			</div>
