@@ -29,25 +29,30 @@ const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: tr
  *   sessions follow A–Z after them; sessions order by recent activity;
  * - while searching, folders still lead; within the folders and within the
  *   sessions each level ranks by best match score (activity breaks ties);
- * - with a filter or search active (`filtering`), folders without matching
- *   sessions are hidden; otherwise every folder is shown.
- * `sessions` must already be narrowed by the existing type filter; `query`
- * scores titles exactly like the flat list did.
+ * - while searching, folders without matching sessions are hidden;
+ * - otherwise folders holding no sessions at all show under every type
+ *   filter (owner, 2026-11-18); a folder whose sessions the type filter
+ *   (`include`) hides is hidden, unless it still leads to a shown folder.
+ * `sessions` is every session; `include` is the existing type filter;
+ * `query` scores titles exactly like the flat list did.
  */
 export function buildSessionTree<T extends SidebarSession>(
 	sessions: readonly T[],
 	organization: SourceOrganization | undefined,
-	options: { query: string; filtering: boolean },
+	options: { query: string; include?: (session: T) => boolean },
 ): SessionTreeNode<T>[] {
 	const query = options.query.trim();
 	const folders = organization?.folders ?? [];
 	const folderIds = new Set(folders.map((f) => f.id));
 	const sessionsByFolder = new Map<string | null, SessionTreeNode<T>[]>();
+	const occupied = new Set<string>(); // folders directly holding any session
 	for (const session of sessions) {
-		const score = query ? fuzzyScore(query, session.title) : 0;
-		if (score === null) continue;
 		const placed = organization ? placementOf(organization, session.id)?.folderId ?? null : null;
 		const parent = placed !== null && folderIds.has(placed) ? placed : null;
+		if (parent !== null) occupied.add(parent);
+		if (options.include && !options.include(session)) continue;
+		const score = query ? fuzzyScore(query, session.title) : 0;
+		if (score === null) continue;
 		const list = sessionsByFolder.get(parent) ?? [];
 		list.push({ type: "session", session, score });
 		sessionsByFolder.set(parent, list);
@@ -66,11 +71,14 @@ export function buildSessionTree<T extends SidebarSession>(
 		if (query && a.score !== b.score) return b.score - a.score;
 		return ba.localeCompare(aa) || idOf(a).localeCompare(idOf(b));
 	};
+	const holdsSessions = (id: string, seen: Set<string>): boolean => occupied.has(id)
+		|| folders.some((f) => f.parentId === id && !seen.has(f.id) && holdsSessions(f.id, new Set([...seen, f.id])));
 	const build = (parentId: string | null, seen: Set<string>): SessionTreeNode<T>[] => {
 		const children: SessionTreeNode<T>[] = [...(sessionsByFolder.get(parentId) ?? [])];
 		for (const folder of folders) {
 			if (folder.parentId !== parentId || seen.has(folder.id)) continue;
-			const inner = build(folder.id, new Set([...seen, folder.id]));
+			const within = new Set([...seen, folder.id]);
+			const inner = build(folder.id, within);
 			let activity: string | null = null;
 			let score = 0;
 			for (const child of inner) {
@@ -78,7 +86,8 @@ export function buildSessionTree<T extends SidebarSession>(
 				if (childActivity !== null && (activity === null || childActivity > activity)) activity = childActivity;
 				if (childActivity !== null) score = Math.max(score, child.score);
 			}
-			if (options.filtering && activity === null) continue;
+			if (activity === null && (query
+				|| (holdsSessions(folder.id, within) && !inner.some((child) => child.type === "folder")))) continue;
 			children.push({ type: "folder", folder, children: inner, activity, score });
 		}
 		return children.sort(compare);

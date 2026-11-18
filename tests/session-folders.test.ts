@@ -29,7 +29,7 @@ describe("buildSessionTree", () => {
 	const sessions = [s("s3", "Unfiled recent", 9), s("s2", "Lenses", 7), s("s4", "Unfiled old", 2), s("s1", "Forces", 5)];
 
 	it("folders lead every level by activity, folders without sessions follow A–Z, then sessions by activity", () => {
-		const tree = buildSessionTree(sessions, organization, { query: "", filtering: false });
+		const tree = buildSessionTree(sessions, organization, { query: "" });
 		assert.deepEqual(shape(tree), [
 			{ "f-phys": [{ "f-optics": ["s2"] }, "s1"] },
 			{ "f-empty-a": [] }, { "f-empty-b": [] }, { "f-notes": [] },
@@ -40,30 +40,43 @@ describe("buildSessionTree", () => {
 		assert.ok(phys?.type === "folder" && phys.activity === "2026-01-07T00:00:00.000Z", "activity includes subfolders");
 	});
 
-	it("an active filter hides folders without matching sessions (including notes-only folders)", () => {
-		const tree = buildSessionTree(sessions.filter((x) => x.id !== "s2"), organization, { query: "", filtering: true });
-		assert.deepEqual(shape(tree), [{ "f-phys": ["s1"] }, "s3", "s4"]);
+	it("a type filter hides folders whose sessions it hides; folders holding no sessions show under every filter", () => {
+		const tree = buildSessionTree(sessions, organization, { query: "", include: (x) => x.id !== "s2" });
+		assert.deepEqual(shape(tree), [
+			{ "f-phys": ["s1"] },
+			{ "f-empty-a": [] }, { "f-empty-b": [] }, { "f-notes": [] },
+			"s3", "s4",
+		], "Optics (only a filtered-out session) hides; empty and notes-only folders stay");
+		const nested = org([folder("p", "Parent"), folder("e", "Empty", "p"), folder("q", "Practice only", "p")], { x: "q" });
+		const only = [{ ...s("x", "drill", 3), kind: "practice" as const }];
+		assert.deepEqual(shape(buildSessionTree(only, nested, { query: "", include: (x) => x.kind !== "practice" })),
+			[{ p: [{ e: [] }] }], "a parent stays to hold its shown empty subfolder");
+		assert.deepEqual(shape(buildSessionTree(only, org([folder("q", "Practice only")], { x: "q" }), { query: "", include: (x) => x.kind !== "practice" })), []);
+	});
+
+	it("search hides folders without matches, empty ones included", () => {
+		assert.deepEqual(shape(buildSessionTree(sessions, organization, { query: "forces" })), [{ "f-phys": ["s1"] }]);
 	});
 
 	it("search keeps the tree, title-only matching, ranked by best match at every level", () => {
 		const list = [s("a", "xenon notes", 9), s("b", "Lens basics", 1), s("c", "lens", 3)];
 		const o = org([folder("f", "Optics")], { b: "f", c: "f" });
-		const tree = buildSessionTree(list, o, { query: "lens", filtering: true });
+		const tree = buildSessionTree(list, o, { query: "lens" });
 		// "lens" (exact) beats "Lens basics" (prefix) within the folder.
 		assert.deepEqual(shape(tree), [{ f: ["c", "b"] }]);
 		const o2 = org([folder("f", "Optics"), folder("g", "Geometry")], { b: "f", c: "g" });
-		const tree3 = buildSessionTree([...list, s("d", "lens", 2)], o2, { query: "lens", filtering: true });
+		const tree3 = buildSessionTree([...list, s("d", "lens", 2)], o2, { query: "lens" });
 		assert.deepEqual(shape(tree3), [{ g: ["c"] }, { f: ["b"] }, "d"], "folders lead even when an unfiled session matches better; folders rank by best match");
-		const tree2 = buildSessionTree(list, o, { query: "Optics", filtering: true });
+		const tree2 = buildSessionTree(list, o, { query: "Optics" });
 		assert.deepEqual(shape(tree2), [], "folder names are not searched — titles only, as before");
 	});
 
 	it("without an organization the list is the flat activity order", () => {
-		assert.deepEqual(shape(buildSessionTree(sessions, undefined, { query: "", filtering: false })), ["s3", "s2", "s1", "s4"]);
+		assert.deepEqual(shape(buildSessionTree(sessions, undefined, { query: "" })), ["s3", "s2", "s1", "s4"]);
 	});
 
 	it("flatten hides closed folders' contents; the walk order is the visible session rows", () => {
-		const tree = buildSessionTree(sessions, organization, { query: "", filtering: false });
+		const tree = buildSessionTree(sessions, organization, { query: "" });
 		const closed = flattenSessionTree(tree, () => false).flatMap((r) => r.type === "session" ? [r.session.id] : []);
 		assert.deepEqual(closed, ["s3", "s4"]);
 		const opened = flattenSessionTree(tree, () => true);

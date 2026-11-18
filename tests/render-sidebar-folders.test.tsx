@@ -25,3 +25,20 @@ it("an open folder with contents heads them with a rule starting at its own rail
 	assert.match(row(1, true), /data-testid="sidebar-folder-rule-f1"[^>]*style="left:18px"/, "rail 33 minus the row's 15px start");
 	assert.match(renderToStaticMarkup(<NewFolderRow depth={1} onCreate={async () => {}} onDone={() => {}} />), /style="border-bottom:1px solid transparent;margin-left:15px;padding-left:11px"/);
 });
+
+it("the folder Delete reuses the session dialog's surface with plural wording", async () => {
+	const { DeleteSessionBody, folderDeleteCopy } = await import("../components/delete-session-dialog.tsx");
+	const copy = folderDeleteCopy({ sessions: 3, subfolders: 1, notes: 2, parentName: null });
+	const html = renderToStaticMarkup(<DeleteSessionBody chat={{ id: "f1", title: "Physics" }} copy={copy} traces={false} busy={false}
+		failure={null} onTraces={() => {}} onClose={() => {}} onRun={() => {}} />);
+	assert.match(html, /data-testid="delete-folder-dialog"/);
+	assert.match(html, /Delete folder\?/);
+	assert.match(html, />Physics</);
+	assert.match(html, /the 3 sessions and 1 subfolder inside/);
+	assert.match(html, /2 imported notes files inside move to the top level\./);
+	assert.match(html, /Also remove their graph traces/);
+	assert.match(html, /data-testid="delete-traces-checkbox"/);
+	const one = folderDeleteCopy({ sessions: 1, subfolders: 0, notes: 1, parentName: "Top" });
+	assert.match(one.body, /the 1 session inside/);
+	assert.match(one.body, /1 imported notes file inside moves to “Top”\./);
+});

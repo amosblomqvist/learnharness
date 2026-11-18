@@ -68,5 +68,5 @@ export function useSourceDirectory(enabled: boolean) {
 		return operation;
 	}, []);
 
-	return { directory, failure, clearFailure: () => setFailure(""), change };
+	return { directory, failure, clearFailure: () => setFailure(""), reportFailure: setFailure, change };
 }

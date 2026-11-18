@@ -4,7 +4,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
-import { DeleteSessionDialog } from "@/components/delete-session-dialog";
+import { DeleteFolderDialog, DeleteSessionDialog, folderDeleteCopy, type DeleteDialogCopy } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
 import { DumbbellIcon, FolderPlusIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
@@ -17,7 +17,7 @@ import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { buildSessionTree, flattenSessionTree, folderIsEmpty, placementOf, type SessionTreeNode } from "@/src/core";
+import { buildSessionTree, flattenSessionTree, folderAndDescendants, placementOf, type SessionTreeNode } from "@/src/core";
 import { useSourceDirectory } from "@/components/source-directory";
 import { NewFolderRow, RULE_SLOT, SidebarFolderRow, SidebarRule, sidebarRail, sidebarRowBox, sidebarRuleInset, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
 import { SourceDragRow } from "@/components/source-folder-tree";
@@ -445,7 +445,7 @@ function SessionsSidebar() {
 	 * titles only, and each tree level ranks by match while searching.
 	 * Outside search every level orders by recent activity. Any active
 	 * filter or search hides folders without matches. */
-	const { directory, failure: folderFailure, clearFailure: clearFolderFailure, change: changeFolders } = useSourceDirectory(open);
+	const { directory, failure: folderFailure, clearFailure: clearFolderFailure, reportFailure: reportFolderFailure, change: changeFolders } = useSourceDirectory(open);
 	const organization = directory?.organization;
 	const { openFolders, setOpen: setFolderOpen } = useOpenFolders();
 	const searching = query.trim() !== "";
@@ -467,9 +467,9 @@ function SessionsSidebar() {
 	}, [searching, query, openFolders, setFolderOpen]);
 	const tree = useMemo(() => {
 		if (!chats) return null;
-		const typed = kindFilter === "all" ? chats : chats.filter((c) => (c.kind ?? "teach") === kindFilter);
-		return buildSessionTree(typed, organization, { query, filtering: searching || kindFilter !== "all" });
-	}, [chats, kindFilter, organization, query, searching]);
+		const include = kindFilter === "all" ? undefined : (c: ChatListItem) => (c.kind ?? "teach") === kindFilter;
+		return buildSessionTree(chats, organization, { query, include });
+	}, [chats, kindFilter, organization, query]);
 	const rows = useMemo(() => tree && flattenSessionTree(tree, isFolderOpen), [tree, isFolderOpen]);
 	// The keyboard walk follows the visible session rows in tree order.
 	const shown = useMemo(() => rows?.flatMap((r) => r.type === "session" ? [r.session] : []) ?? null, [rows]);
@@ -686,12 +686,11 @@ function SessionsSidebar() {
 	const [creatingFolder, setCreatingFolder] = useState<{ parentId: string | null } | null>(null);
 	const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
 	const [ctxFolderId, setCtxFolderId] = useState<string | null>(null);
-	const [folderDeleteBlocked, setFolderDeleteBlocked] = useState(false);
+	const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string; copy: DeleteDialogCopy } | null>(null);
 	const folderAnchorRef = useRef<HTMLElement | null>(null);
 	const openFolderContext = (e: React.MouseEvent<HTMLButtonElement>, id: string) => {
 		e.preventDefault();
 		folderAnchorRef.current = e.currentTarget;
-		setFolderDeleteBlocked(false);
 		setCtxChatId(null);
 		setCtxFolderId(id);
 	};
@@ -707,16 +706,42 @@ function SessionsSidebar() {
 		document.addEventListener("pointerdown", onPointerDown);
 		return () => document.removeEventListener("pointerdown", onPointerDown);
 	}, [ctxFolderId, interactions]);
+	// A folder deletion's success: the session Delete's, for every session
+	// that went (list patch, home if the open one died, graph refetch).
+	const onFolderDeleted = useCallback(({ deletedChatIds, graphRevision }: { deletedChatIds: string[]; graphRevision: number }) => {
+		setDeletingFolder(null);
+		const gone = new Set(deletedChatIds);
+		setChats((prev) => (prev ? prev.filter((c) => !gone.has(c.id)) : prev));
+		const openId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;
+		if (openId !== null && gone.has(openId)) router.push("/");
+		window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { revision: graphRevision } }));
+	}, [pathname, router]);
+	// The folder Delete (owner, 2026-11-18): the folder, its subfolders and
+	// every session inside go — practice sessions hidden by the type filter
+	// included — after the session dialog's confirmation; imported notes
+	// inside move to the parent. A folder without sessions goes at once.
 	const deleteFolder = (id: string) => {
 		if (!directory) return;
-		// Empty EVERYWHERE: notes shown only in Chains and practice sessions
-		// hidden by the type filter still count.
-		if (!folderIsEmpty(directory.organization, id, new Set(directory.sources.map((source) => source.id)))) {
-			setFolderDeleteBlocked(true);
+		const organization = directory.organization;
+		const folder = organization.folders.find((f) => f.id === id);
+		if (!folder) return;
+		setCtxFolderId(null);
+		const inside = new Set(folderAndDescendants(organization, id));
+		const placedInside = (sourceId: string) => inside.has(placementOf(organization, sourceId)?.folderId ?? "");
+		const sessions = directory.sources.filter((s) => s.kind === "chat" && placedInside(s.id)).length;
+		if (sessions === 0) {
+			void fetch(`/api/graph/sources/folders/${encodeURIComponent(id)}?mode=preserve-graph`, { method: "DELETE" })
+				.then(async (res) => { if (!res.ok) reportFolderFailure(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Could not delete the folder (${res.status}).`); })
+				.catch(() => reportFolderFailure("Could not delete the folder — network error."));
 			return;
 		}
-		setCtxFolderId(null);
-		void changeFolders({ action: "delete-folder", id }).catch(() => {});
+		const copy = folderDeleteCopy({
+			sessions,
+			subfolders: inside.size - 1,
+			notes: directory.sources.filter((s) => s.kind === "notes" && placedInside(s.id)).length,
+			parentName: folder.parentId === null ? null : organization.folders.find((f) => f.id === folder.parentId)?.name ?? null,
+		});
+		setDeletingFolder({ id, name: folder.name, copy });
 	};
 
 	const renderTree = (nodes: SessionTreeNode<ChatListItem>[], depth: number): React.ReactNode => nodes.map((node) => {
@@ -1135,11 +1160,6 @@ function SessionsSidebar() {
 						>
 							Delete
 						</button>
-						{folderDeleteBlocked && (
-							<p role="alert" data-testid="folder-delete-blocked" className="px-2.5 pb-1 pt-0.5 text-muted-foreground">
-								Only empty folders can be deleted. Move its sessions, notes and subfolders out first — notes appear in Chains.
-							</p>
-						)}
 					</MenuShell>
 				)}
 
@@ -1149,6 +1169,12 @@ function SessionsSidebar() {
 					chat={deleting}
 					onClose={() => setDeleting(null)}
 					onDeleted={onDeleted}
+				/>
+				<DeleteFolderDialog
+					folder={deletingFolder}
+					copy={deletingFolder?.copy ?? null}
+					onClose={() => setDeletingFolder(null)}
+					onDeleted={onFolderDeleted}
 				/>
 			</aside>
 	);
