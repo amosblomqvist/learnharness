@@ -22,7 +22,7 @@ import { createClaudeCodeProvider } from "./claude-code/provider.ts";
 import { streamClaudeCode } from "./claude-code/stream.ts";
 import { createOpenCodeProvider } from "./opencode/provider.ts";
 import { streamOpenCode } from "./opencode/stream.ts";
-import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
+import { nativeSubscriptionId, nativeSubscriptionModel, nativeSubscriptionModels } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
 
 /** App identity is immutable and shared by Models and every native Agent.
@@ -135,7 +135,16 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
 export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle, cacheRetention?: () => CacheRetention | undefined): PiEngine {
 	const models: Models = piModels();
 	const nativeId = nativeSubscriptionId(spec.provider);
-	const registeredModel = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
+	let registeredModel = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
+	if (spec.provider === "github-copilot-subscription" && spec.id === "auto") {
+		// Auto is a server-side route: the stream strips the model field. Only a
+		// chat-completions-native transport can do that, so the virtual model
+		// mirrors one of those instead of an anthropic-messages entry.
+		const autoBase = nativeSubscriptionModels().find((model) => model.provider === spec.provider && model.api === "openai-completions")
+			?? nativeSubscriptionModel(spec.provider, "kimi-k3")
+			?? nativeSubscriptionModels().find((model) => model.provider === spec.provider);
+		if (autoBase) registeredModel = { ...autoBase, id: "auto", name: "Auto", provider: spec.provider };
+	}
 	const custom = providerSource?.isCustom(spec.provider) ?? false;
 	// Custom endpoint owners authorize image attempts independently of sparse
 	// discovery metadata. Never promote the registered/catalog capabilities.

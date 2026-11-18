@@ -76,7 +76,10 @@ function createSubscriptions(options) {
 		else if (entry.providerId === "github-copilot" && !Array.isArray(entry.state.credential.availableModelIds)) models = [];
 		else if (entry.provider?.filterModels) models = [...entry.provider.filterModels(models, entry.state.credential)];
 		if (entry.providerId === "github-copilot" && entry.state.credential && models.length > 0) {
-			const autoModel = { ...models[0], id: "auto", name: "Auto" };
+			// Auto routes server-side. Only chat-completions transports can omit
+			// the model field, so the virtual entry mirrors one of those.
+			const autoBase = models.find((model) => model.api === "openai-completions") ?? models[0];
+			const autoModel = { ...autoBase, id: "auto", name: "Auto" };
 			models = [autoModel, ...models.filter((model) => model.id !== "auto")];
 		}
 		if (JSON.stringify(models) !== JSON.stringify(entry.catalog)) { entry.catalog = models; entry.authorityRevision++; }
@@ -85,10 +88,15 @@ function createSubscriptions(options) {
 	function resolveModelId(entry, modelId) {
 		if (entry.providerId === "github-copilot" && modelId === "auto") {
 			const available = entry.state.credential?.availableModelIds;
-			if (Array.isArray(available)) {
-				const allowed = entry.provider.getModels().find((model) => available.includes(model.id));
-				if (allowed) return allowed.id;
-			}
+			const models = entry.provider.getModels();
+			// Auto omits the model field upstream, so only the request shape
+			// matters: it must be a chat-completions transport. Prefer a model
+			// the account may use, then any chat-completions model, because the
+			// account's available list does not reflect what Auto accepts.
+			const transports = models.filter((model) => model.api === "openai-completions");
+			const allowed = Array.isArray(available) ? transports.filter((model) => available.includes(model.id)) : transports;
+			const transport = allowed[0] ?? transports[0];
+			if (transport) return transport.id;
 			throw failure("stale");
 		}
 		return modelId;
@@ -216,6 +224,7 @@ function createSubscriptions(options) {
 				...(typeof resolved.auth.apiKey === "string" ? { apiKey: resolved.auth.apiKey } : {}),
 				...(resolved.auth.headers ? { headers: Object.fromEntries(Object.entries(resolved.auth.headers).filter(([, value]) => value === null || typeof value === "string")) } : {}),
 				...(typeof resolved.auth.baseUrl === "string" ? { baseUrl: resolved.auth.baseUrl } : {}),
+				...(entry.providerId === "github-copilot" && modelId === "auto" ? { modelId: backendModelId } : {}),
 			};
 		} catch (error) {
 			if (!entry.fatal && unchanged()) { entry.authFailed = true; entry.error = MESSAGES.refresh; entry.epoch++; changed(entry); }

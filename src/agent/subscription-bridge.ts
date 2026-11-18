@@ -105,11 +105,18 @@ export function onNativeSubscriptionChange(listener: () => void): () => void { c
 export function subscriptionScope(providerId: NativeSubscriptionProviderId, selectedModelId: string): NativeSubscriptionScope {
 	const state = nativeSubscriptionStatus(providerId);
 	const logicalId = NATIVE_SUBSCRIPTIONS.find((p) => p.providerId === providerId)!.logicalId;
-	if (!state?.connectionId || !nativeSubscriptionConnected(providerId) || !nativeSubscriptionModel(logicalId, selectedModelId)) throw new Error("Subscription model catalog unavailable");
+	const virtualAuto = providerId === "github-copilot" && selectedModelId === "auto";
+	if (!state?.connectionId || !nativeSubscriptionConnected(providerId)) throw new Error("Subscription model catalog unavailable");
+	if (!virtualAuto && !nativeSubscriptionModel(logicalId, selectedModelId)) throw new Error("Subscription model catalog unavailable");
 	return { providerId, connectionId: state.connectionId, epoch: state.epoch, authorityRevision: state.authorityRevision, selectedModelId };
 }
 export function subscriptionScopeCurrent(scope: NativeSubscriptionScope): boolean {
-	try { return JSON.stringify(subscriptionScope(scope.providerId, scope.selectedModelId)) === JSON.stringify(scope); } catch { return false; }
+	try {
+		const state = nativeSubscriptionStatus(scope.providerId);
+		return !!state?.connectionId && nativeSubscriptionConnected(scope.providerId)
+			&& state.connectionId === scope.connectionId && state.epoch === scope.epoch
+			&& state.authorityRevision === scope.authorityRevision;
+	} catch { return false; }
 }
 /** Compatibility shape for the shared admission cycle; accountId is a local connection ID here. */
 export function subscriptionAdmissionScope(scope: NativeSubscriptionScope): AdmissionScope {
@@ -121,7 +128,13 @@ export function nativeAdmissionCurrent(providerId: NativeSubscriptionProviderId,
 export async function subscriptionLease(scope: NativeSubscriptionScope, background: boolean): Promise<ModelAuth> {
 	if (!subscriptionScopeCurrent(scope)) throw new Error("Subscription connection changed");
 	const result = await subscriptionRequest<{ scope: NativeSubscriptionScope; auth: ModelAuth }>("lease", { scope, background });
-	if (!result?.auth || !subscriptionScopeCurrent(scope) || JSON.stringify(result.scope) !== JSON.stringify(scope) || (!result.auth.apiKey && !Object.values(result.auth.headers ?? {}).some((value) => !!value))) throw new Error("Subscription lease is stale");
+	const leaseMatches = !!result?.scope
+		&& result.scope.providerId === scope.providerId
+		&& result.scope.connectionId === scope.connectionId
+		&& result.scope.epoch === scope.epoch
+		&& result.scope.authorityRevision === scope.authorityRevision
+		&& result.scope.selectedModelId === scope.selectedModelId;
+	if (!result?.auth || !leaseMatches || (!result.auth.apiKey && !Object.values(result.auth.headers ?? {}).some((value) => !!value))) throw new Error("Subscription lease is stale");
 	return result.auth;
 }
 export function subscriptionAbortController(providerId: NativeSubscriptionProviderId, background: boolean) {

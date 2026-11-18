@@ -24,6 +24,9 @@ test("GitHub Copilot exposes auto as a virtual model and never sends auto upstre
 	const lease = await f.controller.lease(backendScope, false);
 	assert.equal(lease.scope.selectedModelId, "auto");
 	assert.equal(typeof lease.auth.apiKey, "string");
+	assert.equal(typeof (lease.auth as any).modelId, "string");
+	assert.notEqual((lease.auth as any).modelId, "auto");
+	assert(model.some((entry: any) => entry.id === "auto"));
 	f.controller.close();
 });
 const credential = (id: string, expires = Date.now() + 3600000): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires, ...(id === "github-copilot" ? { availableModelIds: [githubCopilotProvider().getModels()[0]!.id] } : {}) });
