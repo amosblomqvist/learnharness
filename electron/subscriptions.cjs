@@ -75,7 +75,23 @@ function createSubscriptions(options) {
 		if (!entry.state.credential) models = [];
 		else if (entry.providerId === "github-copilot" && !Array.isArray(entry.state.credential.availableModelIds)) models = [];
 		else if (entry.provider?.filterModels) models = [...entry.provider.filterModels(models, entry.state.credential)];
+		if (entry.providerId === "github-copilot" && entry.state.credential && models.length > 0) {
+			const autoModel = { ...models[0], id: "auto", name: "Auto" };
+			models = [autoModel, ...models.filter((model) => model.id !== "auto")];
+		}
 		if (JSON.stringify(models) !== JSON.stringify(entry.catalog)) { entry.catalog = models; entry.authorityRevision++; }
+	}
+
+	function resolveModelId(entry, modelId) {
+		if (entry.providerId === "github-copilot" && modelId === "auto") {
+			const available = entry.state.credential?.availableModelIds;
+			if (Array.isArray(available)) {
+				const allowed = entry.provider.getModels().find((model) => available.includes(model.id));
+				if (allowed) return allowed.id;
+			}
+			throw failure("stale");
+		}
+		return modelId;
 	}
 	async function updateEndpoint(entry) {
 		let endpoint = null;
@@ -190,7 +206,8 @@ function createSubscriptions(options) {
 		const connectionId = entry.state.connectionId, epoch = entry.epoch;
 		const unchanged = () => connectionId === entry.state.connectionId && epoch === entry.epoch && !entry.blocked && !closed && !paused;
 		try {
-			const model = entry.provider.getModels().find((m) => m.id === modelId);
+			const backendModelId = resolveModelId(entry, modelId);
+			const model = entry.provider.getModels().find((m) => m.id === backendModelId);
 			if (!model) throw failure("stale");
 			const resolved = await entry.models.getAuth(model);
 			if (!unchanged()) throw failure("stale");
