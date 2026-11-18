@@ -4,6 +4,7 @@ import * as React from "react";
 import { createPortal } from "react-dom";
 import { FilePathChip } from "./file-path-chip";
 import { CitationChip } from "./citation-chip";
+import { actionForBinding, eventBinding, kbdEventForAction } from "@/src/core";
 import { cn } from "../lib/utils";
 import {
 	adjacentPathRange, atomicPathRange, clampPathSelection, insertCitation, insertFilePaths, locateToken,
@@ -203,6 +204,15 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			if (event.key === "Delete" && event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) return;
 			remember();
 			if ((event.metaKey || event.ctrlKey) && !event.altKey && (event.key.toLowerCase() === "z" || event.key.toLowerCase() === "y")) {
+				// Give the active chat first claim on its configured Why shortcut.
+				// Outside chat the editor keeps its own undo/redo history.
+				if (!event.defaultPrevented && actionForBinding(eventBinding(event)) === "toggle-why") {
+					const why = new window.CustomEvent(kbdEventForAction("toggle-why"), { cancelable: true });
+					if (!window.dispatchEvent(why)) {
+						event.preventDefault();
+						return;
+					}
+				}
 				event.preventDefault();
 				travel(event.key.toLowerCase() === "y" || event.shiftKey ? "redo" : "undo");
 			} else if ((event.key === "Backspace" || event.key === "Delete") && !event.metaKey && !event.ctrlKey && !event.altKey) {
