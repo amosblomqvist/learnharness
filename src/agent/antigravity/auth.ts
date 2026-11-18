@@ -15,7 +15,7 @@ import {
 	ANTIGRAVITY_OAUTH_TIMEOUT_MS,
 	ANTIGRAVITY_STDERR_AUTH_PROMPT,
 } from "./constants.ts";
-import type { ResolvedAntigravityRuntime } from "./installation.ts";
+import { antigravityRuntimeArgs, type ResolvedAntigravityRuntime } from "./installation.ts";
 import { shutdownAntigravityProcesses } from "./live-processes.ts";
 import {
 	buildAntigravityEnvironment,
@@ -24,6 +24,7 @@ import {
 	deleteAntigravityTokenFile,
 	ensureAntigravityProfile,
 	isAntigravityProfileSignedIn,
+	touchAntigravityKeyringUnavailable,
 	verifyBrowserWrapper,
 	type BrowserWrapper,
 } from "./profile.ts";
@@ -71,10 +72,9 @@ export function extractAntigravityOAuthUrlFromLine(line: string): ExtractedOAuth
 }
 
 /** Strictly validates Google OAuth authorization URLs produced by Antigravity ACP:
- *  - https://accounts.google.com/o/oauth2/v2/auth (no embedded credentials)
- *  - response_type=code
- *  - non-empty state
- *  - redirect_uri=http://127.0.0.1:<port>/ with integer port >= 1024 */
+ *  - `agy_acp_server`: `https://accounts.google.com/o/oauth2/v2/auth` -> `http://127.0.0.1:<port>/`
+ *  - `agy` CLI 1.5+: `https://accounts.google.com/o/oauth2/auth` -> `http://localhost:<port>/auth/callback` (or `127.0.0.1` / `/`)
+ *  with `response_type=code`, non-empty `state`, no embedded credentials, and integer port >= 1024. */
 export function parseAndValidateAntigravityOAuthUrl(rawUrl: string): ValidatedAntigravityOAuthUrl | null {
 	let parsed: URL;
 	try {
@@ -85,7 +85,9 @@ export function parseAndValidateAntigravityOAuthUrl(rawUrl: string): ValidatedAn
 
 	if (parsed.protocol !== "https:") return null;
 	if (parsed.hostname !== "accounts.google.com") return null;
-	if (parsed.pathname !== "/o/oauth2/v2/auth") return null;
+	const isLegacyV2 = parsed.pathname === "/o/oauth2/v2/auth";
+	const isCliV1 = parsed.pathname === "/o/oauth2/auth";
+	if (!isLegacyV2 && !isCliV1) return null;
 	if (parsed.username || parsed.password) return null;
 	if (parsed.searchParams.get("response_type") !== "code") return null;
 
@@ -103,9 +105,14 @@ export function parseAndValidateAntigravityOAuthUrl(rawUrl: string): ValidatedAn
 	}
 
 	if (redirect.protocol !== "http:") return null;
-	if (redirect.hostname !== "127.0.0.1") return null;
 	if (redirect.username || redirect.password) return null;
-	if (redirect.pathname !== "/") return null;
+	if (isLegacyV2) {
+		if (redirect.hostname !== "127.0.0.1") return null;
+		if (redirect.pathname !== "/") return null;
+	} else {
+		if (redirect.hostname !== "127.0.0.1" && redirect.hostname !== "localhost") return null;
+		if (redirect.pathname !== "/" && redirect.pathname !== "/auth/callback") return null;
+	}
 	if (redirect.search || redirect.hash) return null;
 	if (!/^\d+$/.test(redirect.port)) return null;
 
@@ -125,10 +132,10 @@ export type CallbackValidationResult =
 	| { ok: false; error: string };
 
 /** Validates a user-pasted manual OAuth redirect URL against the active attempt's
- *  loopback port and state parameter before building a safe `127.0.0.1` GET target. */
+ *  loopback port, host/path, and state parameter before building a safe `127.0.0.1` GET target. */
 export function validateManualCallbackUrl(
 	rawCallbackUrl: string,
-	expected: { port: number; state: string },
+	expected: { port: number; state: string; redirectUri?: string },
 ): CallbackValidationResult {
 	const trimmed = rawCallbackUrl.trim();
 	if (!trimmed) {
@@ -142,12 +149,33 @@ export function validateManualCallbackUrl(
 		return { ok: false, error: "Redirect URL is not a valid URL." };
 	}
 
-	if (parsed.protocol !== "http:" || parsed.hostname !== "127.0.0.1" || parsed.username || parsed.password) {
-		return { ok: false, error: "Redirect URL must point to http://127.0.0.1:<port>/." };
+	let expectedHost = "127.0.0.1";
+	let expectedPath = "/";
+	if (expected.redirectUri) {
+		try {
+			const expectedRedirect = new URL(expected.redirectUri);
+			if (expectedRedirect.hostname === "localhost" || expectedRedirect.hostname === "127.0.0.1") {
+				expectedHost = expectedRedirect.hostname;
+			}
+			if (expectedRedirect.pathname === "/" || expectedRedirect.pathname === "/auth/callback") {
+				expectedPath = expectedRedirect.pathname;
+			}
+		} catch {
+			// Fall back to strict 127.0.0.1 / defaults
+		}
 	}
 
-	if (parsed.pathname !== "/") {
-		return { ok: false, error: "Redirect URL path must be /." };
+	const hostAllowed =
+		expectedHost === "localhost"
+			? parsed.hostname === "localhost" || parsed.hostname === "127.0.0.1"
+			: parsed.hostname === "127.0.0.1";
+
+	if (parsed.protocol !== "http:" || !hostAllowed || parsed.username || parsed.password) {
+		return { ok: false, error: `Redirect URL must point to http://${expectedHost}:<port>${expectedPath}.` };
+	}
+
+	if (parsed.pathname !== expectedPath) {
+		return { ok: false, error: `Redirect URL path must be ${expectedPath}.` };
 	}
 
 	if (!/^\d+$/.test(parsed.port) || Number(parsed.port) !== expected.port) {
@@ -175,7 +203,7 @@ export function validateManualCallbackUrl(
 
 	return {
 		ok: true,
-		forwardUrl: `http://127.0.0.1:${expected.port}/${parsed.search}`,
+		forwardUrl: `http://127.0.0.1:${expected.port}${expectedPath}${parsed.search}`,
 	};
 }
 
@@ -248,6 +276,7 @@ interface ActiveAttempt {
 	authUrl: string | null;
 	callbackPort: number | null;
 	expectedState: string | null;
+	redirectUri: string | null;
 	error: string | null;
 	cancelled: boolean;
 	child: ChildProcess | null;
@@ -386,6 +415,7 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 			authUrl: null,
 			callbackPort: null,
 			expectedState: null,
+			redirectUri: null,
 			error: null,
 			cancelled: false,
 			child: null,
@@ -404,6 +434,7 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 			let stderrRl: readline.Interface | null = null;
 			let oauthTimer: ReturnType<typeof setTimeout> | null = null;
 			let initTimer: ReturnType<typeof setTimeout> | null = null;
+			let urlPollTimer: ReturnType<typeof setInterval> | null = null;
 
 			const finishAttempt = async (
 				nextPhase: AntigravityAuthPhase,
@@ -412,6 +443,7 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 			) => {
 				if (oauthTimer) clearTimeout(oauthTimer);
 				if (initTimer) clearTimeout(initTimer);
+				if (urlPollTimer) clearInterval(urlPollTimer);
 				rl?.close();
 				stderrRl?.close();
 				if (attempt.cancelled) {
@@ -433,6 +465,9 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 
 			try {
 				const profileDir = ensureProfile();
+				if (runtime.kind === "cli") {
+					touchAntigravityKeyringUnavailable(profileDir, platform);
+				}
 				const runDir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-agy-auth-"));
 				const cwd = path.join(runDir, "cwd");
 				const tempDir = path.join(runDir, "tmp");
@@ -443,6 +478,13 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 				const wrapper = makeBrowserWrapper();
 				attempt.browserWrapper = wrapper;
 				await checkBrowserWrapper(wrapper.scriptPath);
+				if (wrapper.capturedUrlPath) {
+					try {
+						fs.rmSync(wrapper.capturedUrlPath, { force: true });
+					} catch {
+						// ignore
+					}
+				}
 				if (attempt.cancelled) {
 					await finishAttempt("cancelled", null);
 					return;
@@ -456,8 +498,11 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 					browserScript: wrapper.scriptPath,
 					platform,
 				});
+				if (platform === "linux" && runtime.kind === "cli" && !env.DISPLAY && !env.WAYLAND_DISPLAY) {
+					env.DISPLAY = ":0";
+				}
 
-				const child = spawnProcess(runtime.executablePath, runtime.args, {
+				const child = spawnProcess(runtime.executablePath, antigravityRuntimeArgs(runtime, profileDir), {
 					cwd,
 					env,
 					stdio: ["pipe", "pipe", "pipe"],
@@ -481,6 +526,7 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 						authSettled = true;
 						if (oauthTimer) clearTimeout(oauthTimer);
 						if (initTimer) clearTimeout(initTimer);
+						if (urlPollTimer) clearInterval(urlPollTimer);
 						if (!deps.onSignedIn) {
 							void finishAttempt("succeeded", null, false).then(resolveRun);
 							return;
@@ -518,11 +564,9 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 					}, initTimeoutMs);
 					initTimer.unref();
 
-					const handleCandidateLine = (line: string) => {
+					const acceptCandidateUrl = (rawUrl: string) => {
 						if (attempt.cancelled || authSettled) return;
-						const extracted = extractAntigravityOAuthUrlFromLine(line);
-						if (!extracted) return;
-						const validated = parseAndValidateAntigravityOAuthUrl(extracted.rawUrl);
+						const validated = parseAndValidateAntigravityOAuthUrl(rawUrl);
 						if (!validated) {
 							if (!attempt.authUrl) {
 								failRun("Antigravity emitted an invalid OAuth authorization URL.", true);
@@ -530,9 +574,14 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 							return;
 						}
 						if (!attempt.authUrl) {
+							if (urlPollTimer) {
+								clearInterval(urlPollTimer);
+								urlPollTimer = null;
+							}
 							attempt.authUrl = validated.authUrl;
 							attempt.callbackPort = validated.port;
 							attempt.expectedState = validated.state;
+							attempt.redirectUri = validated.redirectUri;
 							if (attempt.phase === "starting") {
 								attempt.phase = "waiting";
 							}
@@ -540,6 +589,36 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 							attempt.resolveUrlReady();
 						}
 					};
+
+					const handleCandidateLine = (line: string) => {
+						if (attempt.cancelled || authSettled) return;
+						const extracted = extractAntigravityOAuthUrlFromLine(line);
+						if (!extracted) return;
+						acceptCandidateUrl(extracted.rawUrl);
+					};
+
+					if (wrapper.capturedUrlPath) {
+						const capturedUrlPath = wrapper.capturedUrlPath;
+						urlPollTimer = setInterval(() => {
+							if (attempt.cancelled || authSettled || attempt.authUrl) {
+								if (urlPollTimer) {
+									clearInterval(urlPollTimer);
+									urlPollTimer = null;
+								}
+								return;
+							}
+							try {
+								const raw = fs.readFileSync(capturedUrlPath, "utf8").trim();
+								if (raw) {
+									const firstLine = raw.split(/\r?\n/, 1)[0]?.trim() ?? "";
+									if (firstLine) acceptCandidateUrl(firstLine);
+								}
+							} catch {
+								// file not written yet
+							}
+						}, 40);
+						urlPollTimer.unref();
+					}
 
 					if (child.stderr) {
 						stderrRl = readline.createInterface({ input: child.stderr });
@@ -656,6 +735,7 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 		const validated = validateManualCallbackUrl(callbackUrl, {
 			port: current.callbackPort,
 			state: current.expectedState,
+			redirectUri: current.redirectUri ?? undefined,
 		});
 		if (!validated.ok) {
 			throw new AntigravityAuthError(validated.error, 400);
@@ -719,6 +799,9 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 		try {
 			if (runtime) {
 				const profileDir = ensureProfile();
+				if (runtime.kind === "cli") {
+					touchAntigravityKeyringUnavailable(profileDir, platform);
+				}
 				const runDir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-agy-logout-"));
 				const cwd = path.join(runDir, "cwd");
 				const tempDir = path.join(runDir, "tmp");
@@ -735,7 +818,7 @@ export function createAntigravityAuthManager(deps: AntigravityAuthManagerDeps = 
 					});
 
 					await new Promise<void>((resolve, reject) => {
-						const child = spawnProcess(runtime.executablePath, runtime.args, {
+						const child = spawnProcess(runtime.executablePath, antigravityRuntimeArgs(runtime, profileDir), {
 							cwd,
 							env,
 							stdio: ["pipe", "pipe", "pipe"],
