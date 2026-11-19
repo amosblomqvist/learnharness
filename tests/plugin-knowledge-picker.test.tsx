@@ -731,8 +731,32 @@ it("accepted source writes outlive picker disposal and do not mutate selection o
 	} });
 	try {
 		await click(f, "practice-props-chip");
+		/* Chains drops are honored only for a drag that started inside the
+		   tree (chat-folders S05): replay the real gesture — dragstart on
+		   the chat's row records the payload, then the same transfer drops. */
+		const recorded = new Map<string, string>();
+		const transfer = {
+			types: [] as string[],
+			effectAllowed: "",
+			dropEffect: "",
+			setData(type: string, value: string) { recorded.set(type, value); this.types.push(type); },
+			getData(type: string) { return recorded.get(type) ?? ""; },
+			setDragImage() {},
+		};
+		const gcs = (globalThis as Record<string, unknown>).getComputedStyle;
+		(globalThis as Record<string, unknown>).getComputedStyle = () => ({ fontFamily: "monospace" });
+		try {
+			const start = new f.dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+			Object.defineProperty(start, "dataTransfer", { value: transfer });
+			Object.defineProperty(start, "clientX", { value: 100 });
+			Object.defineProperty(start, "clientY", { value: 100 });
+			await act(async () => { document.querySelector('[data-source-drag-row="chat"]')!.dispatchEvent(start); });
+		} finally {
+			if (gcs === undefined) delete (globalThis as Record<string, unknown>).getComputedStyle;
+			else (globalThis as Record<string, unknown>).getComputedStyle = gcs;
+		}
 		const event = new f.dom.window.Event("drop", { bubbles: true, cancelable: true });
-		Object.assign(event, { dataTransfer: { getData: () => JSON.stringify({ kind: "source", id: "chat" }) } });
+		Object.defineProperty(event, "dataTransfer", { value: transfer });
 		await act(async () => { document.querySelector('[data-testid="source-root-drop"]')!.dispatchEvent(event); });
 		assert.equal(accepted, true);
 		await act(async () => { f.handle.dispose(); }); assert.equal(overlay(), null);

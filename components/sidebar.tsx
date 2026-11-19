@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, FolderPlusIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -17,13 +17,27 @@ import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
-import type { ChatListItem } from "@/src/core";
+import type { ChatListItem, ChatListResponse } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { PluginWidgets } from "@/components/plugins";
 import { PluginSidebarActions } from "@/components/plugin-chrome";
+import { createSidebarRefresh } from "@/components/sidebar-refresh";
+import { buildSidebarFolderView, enterKbdChat, nextKbdChat, SidebarFolderTree } from "@/components/sidebar-folder-tree";
+import {
+	createFolderWriter,
+	folderPath,
+	MoveTargetDialog,
+	NewFolderDialog,
+	planCreateFolder,
+	planMoveChat,
+	postFolderCommand,
+	type FolderPlan,
+	type SidebarOrganization,
+	useSidebarDrag,
+} from "@/components/sidebar-folder-actions";
+import { SourceDragRow } from "@/components/source-folder-tree";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
@@ -402,10 +416,19 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
+/** Stable empty organization for the folder dialogs while the snapshot's
+ *  organization is null (the store refused the read): the dialogs stay
+ *  mounted with only "Outside folders" as a target, and every submit
+ *  re-plans against the live ref which reports the list as unavailable. */
+const EMPTY_ORGANIZATION: SidebarOrganization = { folders: [], placements: {} };
+
 function SessionsSidebar() {
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
-	const [chats, setChats] = useState<ChatListItem[] | null>(null);
+	const [snapshot, setSnapshot] = useState<ChatListResponse | null>(null);
+	const chats = snapshot?.chats ?? null;
+	const organization = snapshot?.organization ?? null;
+	const dialogOrganization = organization ?? EMPTY_ORGANIZATION;
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
 	useEffect(() => {
@@ -428,42 +451,92 @@ function SessionsSidebar() {
 		router.push("/chat/new");
 	}, [router]);
 
-	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
-	 * fuzzyScore — prefix beats word-boundary beats scattered. Empty query
-	 * keeps the natural list order (scores are all 0, sort is stable). */
-	const shown = useMemo(() => {
-		const q = query.trim();
-		let list = chats;
-		if (list && kindFilter !== "all") {
-			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
-		}
-		if (!list) return list;
-		if (!q) return list;
-		return list
-			.map((c) => ({ c, score: fuzzyScore(q, c.title) }))
-			.filter((r): r is { c: (typeof list)[number]; score: number } => r.score !== null)
-			.sort((a, b) => b.score - a.score)
-			.map((r) => r.c);
-	}, [chats, query, kindFilter]);
+	/* The session list is a TREE of the shared folders carried by the same
+	   snapshot. kindChats is the kind-filtered chat list (null until the
+	   first snapshot); view is the rendered tree — buildSidebarFolderView
+	   owns query matching, folder reveal and the visible-chat order the
+	   keyboard walk follows. */
+	const kindChats = useMemo(() => {
+		if (!chats) return null;
+		if (kindFilter === "all") return chats;
+		return chats.filter((c) => (c.kind ?? "teach") === kindFilter);
+	}, [chats, kindFilter]);
 
-	const refreshInFlightRef = useRef(false);
-	const refresh = useCallback(async () => {
-		// In-flight coalesce (S6): event bursts may land several refresh
-		// calls at once — one fetch serves them all; anything newer arrives
-		// with the next event's fetch.
-		if (refreshInFlightRef.current) return;
-		refreshInFlightRef.current = true;
+	/* Expansion state (owner decisions): manual expansion is a plain Set —
+	   empty on load, every folder starts collapsed. While searching, branches
+	   open by default and explicit collapses ride searchFolds, keyed to the
+	   query text exactly like chain-table's folds — any query change resets
+	   them, and clearing the query returns to the manual set untouched. */
+	const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set<string>());
+	const [searchFolds, setSearchFolds] = useState({ query: "", ids: new Set<string>() });
+	useEffect(() => {
+		setSearchFolds({ query, ids: new Set() });
+	}, [query]);
+	const foldedForQuery = useMemo(
+		() => (searchFolds.query === query ? searchFolds.ids : new Set<string>()),
+		[searchFolds, query],
+	);
+	const view = useMemo(
+		() => (kindChats === null ? null : buildSidebarFolderView(kindChats, organization, query, expandedIds, foldedForQuery)),
+		[kindChats, organization, query, expandedIds, foldedForQuery],
+	);
+
+	const toggleFolder = useCallback(
+		(folderId: string) => {
+			if (query.trim() === "") {
+				setExpandedIds((prev) => {
+					const next = new Set(prev);
+					if (next.has(folderId)) next.delete(folderId);
+					else next.add(folderId);
+					return next;
+				});
+				return;
+			}
+			setSearchFolds((prev) => {
+				const ids = new Set(prev.query === query ? prev.ids : []);
+				if (ids.has(folderId)) ids.delete(folderId);
+				else ids.add(folderId);
+				return { query, ids };
+			});
+		},
+		[query],
+	);
+
+	/* The list snapshot: GET /api/chats carries the chat list AND the
+	   shared source organization in one payload, replaced whole on every
+	   accepted read. createSidebarRefresh owns the sequence: one read at
+	   a time, signals during a read queue ONE repeat, and invalidate()
+	   (local edits) drops the answer already in flight. */
+	const readSnapshot = useCallback(async (): Promise<ChatListResponse | null> => {
 		try {
 			const res = await fetch("/api/chats", { cache: "no-store" });
-			const d = (await res.json()) as { chats: ChatListItem[] };
-			setChats(d.chats);
+			if (!res.ok) return null;
+			const d = (await res.json()) as Partial<ChatListResponse> | null;
+			if (typeof d !== "object" || d === null || !Array.isArray(d.chats)) return null;
+			const org = d.organization;
+			if (org === undefined) return null;
+			if (org !== null) {
+				const o = org as { folders?: unknown; placements?: unknown };
+				if (typeof o !== "object" || o === null || !Array.isArray(o.folders) || typeof o.placements !== "object" || o.placements === null || Array.isArray(o.placements)) return null;
+			}
+			return { chats: d.chats, organization: org };
 		} catch {
-			// a transient failure keeps the last snapshot
-			setChats((prev) => prev ?? []);
-		} finally {
-			refreshInFlightRef.current = false;
+			// a transient failure keeps the last snapshot (readSnapshot → null)
+			return null;
 		}
 	}, []);
+	const acceptSnapshot = useCallback((result: ChatListResponse | null) => {
+		if (result !== null) {
+			setSnapshot(result);
+			return;
+		}
+		// Whole-request failure: keep the previous snapshot with its local
+		// edits; only a missing first snapshot falls back to empty.
+		setSnapshot((prev) => prev ?? { chats: [], organization: null });
+	}, []);
+	const [sidebarRefresh] = useState(() => createSidebarRefresh(readSnapshot, acceptSnapshot));
+	const invalidate = sidebarRefresh.invalidate;
+	const refresh = useCallback(() => sidebarRefresh.request(), [sidebarRefresh]);
 
 	/* Instant rename propagation (2026-09-17): the chat header's rename
 	   commits dispatch lh:chat-renamed; patch the snapshot in place instead
@@ -471,11 +544,14 @@ function SessionsSidebar() {
 	useEffect(() => {
 		const onRenamed = (e: Event) => {
 			const { id, title } = (e as CustomEvent<{ id: string; title: string }>).detail;
-			setChats((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, title } : c)) : prev));
+			invalidate();
+			setSnapshot((prev) =>
+				prev ? { ...prev, chats: prev.chats.map((c) => (c.id === id ? { ...c, title } : c)) } : prev,
+			);
 		};
 		window.addEventListener("lh:chat-renamed", onRenamed);
 		return () => window.removeEventListener("lh:chat-renamed", onRenamed);
-	}, []);
+	}, [invalidate]);
 
 	/* INSTANT TURN-STATE (owner, sidebar round 2026-10-02): the open
 	   session broadcasts lh:turn-state the instant its turn starts
@@ -489,23 +565,99 @@ function SessionsSidebar() {
 	   immediate refresh instead of a patch. */
 	const chatsRef = useRef(chats);
 	chatsRef.current = chats;
+
+	/* Folder writes: ONE writer serializes the sidebar's create/move
+	   POSTs — a second submit while one is in flight is refused without
+	   posting. afterWrite ALWAYS drops the in-flight read and re-requests
+	   the snapshot (the tree renders only what GET /api/chats returns —
+	   no client-side copy of the organization), and on success expands
+	   the folder chain down to the write's parentId so the change is
+	   visible: for create-folder that is the new folder's parent chain,
+	   for move the target's. orgRef hands the once-created closures the
+	   latest organization — the writer must not plan against a stale
+	   render. */
+	const orgRef = useRef<SidebarOrganization | null>(snapshot?.organization ?? null);
+	orgRef.current = snapshot?.organization ?? null;
+	const [folderWriter] = useState(() =>
+		createFolderWriter({
+			post: (command) => postFolderCommand(command),
+			afterWrite: (command, result) => {
+				invalidate();
+				void refresh();
+				if (!result.ok) return;
+				const org = orgRef.current;
+				if (org === null) return;
+				const ids = folderPath(org, command.parentId);
+				if (ids.length === 0) return;
+				setExpandedIds((prev) => {
+					const next = new Set(prev);
+					for (const id of ids) next.add(id);
+					return next;
+				});
+			},
+		}),
+	);
+
+	/* Pre-send plans run against the freshest snapshot; the server stays
+	   authoritative. skip (already at the target) and plan errors resolve
+	   to the dialogs' string-or-null contract without a POST; only a
+	   command reaches the writer. The single org-null guard stays
+	   reachable: a dialog can be open when a snapshot with organization
+	   null arrives. */
+	const runPlan = useCallback(
+		async (make: (org: SidebarOrganization) => FolderPlan): Promise<string | null> => {
+			const org = orgRef.current;
+			if (org === null) return "The folder list is unavailable.";
+			const plan = make(org);
+			if (plan.kind === "error") return plan.error;
+			if (plan.kind !== "command") return null;
+			const result = await folderWriter.write(plan.command);
+			return result.ok ? null : result.error;
+		},
+		[folderWriter],
+	);
+	const createFolder = useCallback(
+		(name: string, parentId: string | null) => runPlan((org) => planCreateFolder(org, name, parentId)),
+		[runPlan],
+	);
+	const moveChat = useCallback(
+		(chatId: string, parentId: string | null) =>
+			runPlan((org) => planMoveChat(org, chatsRef.current ?? [], chatId, parentId)),
+		[runPlan],
+	);
+	/* Chat drag & drop: the hook owns the gesture — dragChatId arms only
+	   on a dragstart bubbled from this list's own SourceDragRow payload,
+	   folder headers plus the Outside folders zone are the targets, and
+	   a drop rides the same moveChat as the menu. */
+	const drag = useSidebarDrag({
+		organization,
+		chats: kindChats ?? [],
+		moveChat,
+	});
+
 	useEffect(() => {
 		const onTurnState = (e: Event) => {
 			const { id, running } = (e as CustomEvent<{ id: string; running: boolean }>).detail;
 			if (running) {
 				if (chatsRef.current?.some((c) => c.id === id)) {
-					setChats((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, busy: true } : c)) : prev));
+					invalidate();
+					setSnapshot((prev) =>
+						prev ? { ...prev, chats: prev.chats.map((c) => (c.id === id ? { ...c, busy: true } : c)) } : prev,
+					);
 				} else {
 					void refresh(); // the brand-new session: it isn't in the snapshot yet
 				}
 				return;
 			}
-			setChats((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, busy: false } : c)) : prev));
+			invalidate();
+			setSnapshot((prev) =>
+				prev ? { ...prev, chats: prev.chats.map((c) => (c.id === id ? { ...c, busy: false } : c)) } : prev,
+			);
 			void refresh(); // settle: the server snapshot is now truthful — land it now
 		};
 		window.addEventListener("lh:turn-state", onTurnState);
 		return () => window.removeEventListener("lh:turn-state", onTurnState);
-	}, [refresh]);
+	}, [refresh, invalidate]);
 
 	/* PUSH (architecture S6, 2026-10-02): the 2.5s poll is RETIRED — the
 	   last standing network poll in the app. List truth arrives as
@@ -530,6 +682,12 @@ function SessionsSidebar() {
 	useServerEvent("turn-started", scheduleEventRefresh);
 	useServerEvent("turn-settled", scheduleEventRefresh);
 	useServerEvent("compaction-changed", scheduleEventRefresh);
+	/* Chains publishes sources-changed after a folder or placement
+	   write — the OPEN panel re-reads the snapshot on the same 250ms
+	   debounce (a closed panel catches up on its next open fetch). */
+	useServerEvent("sources-changed", () => {
+		if (open) scheduleEventRefresh();
+	});
 	useServerResync(() => void refreshRef.current());
 	useEffect(
 		() => () => {
@@ -539,16 +697,17 @@ function SessionsSidebar() {
 	);
 
 	/* ── Keyboard seams (shortcut wave A, 2026-09-17; search-walk round
-	   2026-10-10) ── ⌘⇧F focuses the search field — and THE SEARCH OWNS THE
-	   WALK: ↑/↓ cycle the filtered list (wrap — "cycle"), Enter opens the
-	   walked row, or the FIRST match when nothing is walked (owner,
-	   2026-10-10 — the quick-open pattern: ⌘⇧F, type, Enter, done). The
-	   Alt+↑/↓/↵ global cycle was RETIRED the same round: barely used,
-	   felt laggy. The selection is a row index into `shown`, so the walk
-	   follows whatever the query + kind filter leave. Mouse and keyboard
-	   coexist: hovering doesn't claim, a click or an open clears the
-	   selection. */
-	const [kbdIndex, setKbdIndex] = useState<number | null>(null);
+	   2026-10-10) ── ⌘⇧F focuses the search field — and THE
+	   SEARCH OWNS THE WALK: ↑/↓ cycle the visible chats in tree order
+	   (wrap — "cycle"), Enter opens the walked chat, or the FIRST visible
+	   one when nothing is walked (owner, 2026-10-10 — the quick-open
+	   pattern: ⌘⇧F, type, Enter, done). The Alt+↑/↓/↵ global cycle was
+	   RETIRED the same round: barely used, felt laggy. The selection is a
+	   CHAT ID into the view's visibleChatIds — chats inside collapsed
+	   branches never join the walk, and a snapshot refresh can't slide the
+	   highlight onto a neighbor row. Mouse and keyboard coexist: hovering
+	   doesn't claim, a click or an open clears the selection. */
+	const [kbdChatId, setKbdChatId] = useState<string | null>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
 	const listRef = useRef<HTMLDivElement>(null);
 
@@ -564,6 +723,11 @@ function SessionsSidebar() {
 	const ctxAnchorRef = useRef<HTMLElement | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState<ChatListItem | null>(null);
+	/* Folder dialogs: the create dialog is a boolean; the move dialog
+	   holds the chat captured when the menu item was picked. */
+	const [newFolderOpen, setNewFolderOpen] = useState(false);
+	const [moving, setMoving] = useState<ChatListItem | null>(null);
+	const ctxChat = chats?.find((c) => c.id === ctxChatId) ?? null;
 
 	const openContext = (e: React.MouseEvent<HTMLButtonElement>, chat: ChatListItem) => {
 		e.preventDefault(); // suppress the native menu
@@ -618,11 +782,19 @@ function SessionsSidebar() {
 	const onDeleted = useCallback(
 		(id: string, _mode: ChatDeleteMode, graphRevision: number) => {
 			setDeleting(null);
-			setChats((prev) => (prev ? prev.filter((c) => c.id !== id) : prev));
+			invalidate();
+			setSnapshot((prev) => {
+				if (!prev) return prev;
+				const chats = prev.chats.filter((c) => c.id !== id);
+				if (!prev.organization) return { ...prev, chats };
+				const placements = { ...prev.organization.placements };
+				delete placements[id];
+				return { ...prev, chats, organization: { ...prev.organization, placements } };
+			});
 			if (pathname === `/chat/${id}`) router.push("/");
 			window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { revision: graphRevision } }));
 		},
-		[pathname, router],
+		[pathname, router, invalidate],
 	);
 
 	useEffect(() => {
@@ -637,12 +809,14 @@ function SessionsSidebar() {
 		return () => window.removeEventListener("lh:kbd-sessions-search", onFocusSearch);
 	}, [open, toggle, interactions]);
 
-	// Keep the kbd-selected row in view (the rows are the container's only
-	// buttons, so the index matches).
+	// Keep the kbd-selected chat row in view — folder buttons share the
+	// list now, so the target is the row's own data attribute, not an index.
 	useEffect(() => {
-		if (kbdIndex === null) return;
-		listRef.current?.querySelectorAll("button")[kbdIndex]?.scrollIntoView({ block: "nearest" });
-	}, [kbdIndex]);
+		if (kbdChatId === null) return;
+		listRef.current
+			?.querySelector(`[data-sidebar-chat="${CSS.escape(kbdChatId)}"]`)
+			?.scrollIntoView({ block: "nearest" });
+	}, [kbdChatId]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -726,6 +900,23 @@ function SessionsSidebar() {
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
+					{/* New folder: only once the snapshot carries the
+					    organization — with organization null the folders are
+					    unknowable and the action stays hidden. */}
+					{organization !== null && (
+						<Hint label="New folder" side="bottom">
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								aria-label="New folder"
+								data-testid="new-folder"
+								title="New folder"
+								onClick={() => setNewFolderOpen(true)}
+							>
+								<FolderPlusIcon className="size-3.5" />
+							</Button>
+						</Hint>
+					)}
 					<Hint label="Search sessions" action="sessions-search" side="bottom">
 					<span className="relative flex-1">
 						<Input
@@ -735,8 +926,8 @@ function SessionsSidebar() {
 							onChange={(e) => {
 								setQuery(e.target.value);
 								// The list reorders under the query every keystroke —
-								// a stale walk index would point at the wrong row.
-								setKbdIndex(null);
+								// a stale walk target would point at the wrong row.
+								setKbdChatId(null);
 							}}
 							// THE SEARCH OWNS THE WALK (owner, 2026-10-10 — the
 							// retired Alt+↑/↓/↵ cycle's successor): ↑/↓ cycle the
@@ -758,23 +949,21 @@ function SessionsSidebar() {
 								}
 								// Modified keys belong to the surface (⇧↵ etc.).
 								if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-								const n = shown?.length ?? 0;
-								if (n === 0) return;
+								const ids = view?.visibleChatIds ?? [];
+								if (ids.length === 0) return;
 								if (e.key === "ArrowDown" || e.key === "ArrowUp") {
 									// The rows move, not the caret.
 									e.preventDefault();
 									const dir = e.key === "ArrowDown" ? 1 : -1;
-									setKbdIndex((i) =>
-										i === null || i >= n ? (dir === 1 ? 0 : n - 1) : (i + dir + n) % n,
-										);
+									setKbdChatId((id) => nextKbdChat(ids, id, dir));
 									return;
 								}
 								if (e.key === "Enter") {
-									const target = shown![kbdIndex !== null && kbdIndex < n ? kbdIndex : 0];
+									const target = enterKbdChat(ids, kbdChatId);
 									if (!target) return;
 									e.preventDefault();
-									router.push(`/chat/${target.id}`);
-									setKbdIndex(null);
+									router.push(`/chat/${target}`);
+									setKbdChatId(null);
 									e.currentTarget.blur();
 								}
 							}}
@@ -813,36 +1002,76 @@ function SessionsSidebar() {
 					))}
 				</div>
 
-				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
-					{shown === null ? (
+				{drag.error !== null && (
+					<div role="alert" data-testid="sidebar-folder-error" className="mx-3 mb-1 text-xs text-error">
+						{drag.error}
+					</div>
+				)}
+				<div ref={listRef} className="flex-1 overflow-y-auto p-2" {...drag.containerProps}>
+					{drag.dragChatId !== null && (
+						<div
+							data-testid="sidebar-root-drop"
+							data-drop-active={String(drag.dropTarget === null)}
+							{...drag.targetProps(null)}
+							className={cn(
+								"mb-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground",
+								drag.dropTarget === null && "bg-accent/50",
+							)}
+						>
+							Outside folders
+						</div>
+					)}
+					{view === null ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">Loading…</div>
-					) : shown.length === 0 ? (
+					) : view.roots.length === 0 ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">
 							{query.trim() ? "No sessions match." : "No sessions yet."}
 						</div>
 					) : (
-						shown.map((c, i) =>
-							renamingId === c.id ? (
-								<RenameRow
-									key={c.id}
-									chat={c}
-									onCommit={(next) => void commitRename(c.id, next)}
-									onCancel={() => setRenamingId(null)}
-								/>
-							) : (
-								<SessionRow
-									key={c.id}
-									chat={c}
-									active={pathname === `/chat/${c.id}`}
-									kbdSelected={i === kbdIndex}
-									onOpen={() => {
-										setKbdIndex(null);
-										router.push(`/chat/${c.id}`);
-									}}
-									onContextMenu={(e) => openContext(e, c)}
-								/>
-							),
-						)
+						<SidebarFolderTree
+							view={view}
+							onToggleFolder={toggleFolder}
+							drop={{ activeTarget: drag.dropTarget, targetProps: drag.targetProps }}
+							renderChat={(c) => {
+								/* Drag source: only a teaching chat in the
+								   normal tree — a live organization, a blank
+								   query and no rename in flight. Practice chats,
+								   search results and the renamed row stay plain. */
+								const row =
+									renamingId === c.id ? (
+										<RenameRow
+											key={c.id}
+											chat={c}
+											onCommit={(next) => void commitRename(c.id, next)}
+											onCancel={() => setRenamingId(null)}
+										/>
+									) : (
+										<SessionRow
+											key={c.id}
+											chat={c}
+											active={pathname === `/chat/${c.id}`}
+											kbdSelected={c.id === kbdChatId}
+											onOpen={() => {
+												setKbdChatId(null);
+												router.push(`/chat/${c.id}`);
+											}}
+											onContextMenu={(e) => openContext(e, c)}
+										/>
+									);
+								const draggable =
+									organization !== null &&
+									query.trim() === "" &&
+									(c.kind ?? "teach") !== "practice" &&
+									renamingId !== c.id;
+								return draggable ? (
+									<SourceDragRow key={c.id} kind="source" id={c.id} name={c.title} enabled>
+										{row}
+									</SourceDragRow>
+								) : (
+									row
+								);
+							}}
+						/>
 					)}
 				</div>
 
@@ -899,6 +1128,24 @@ function SessionsSidebar() {
 						>
 							Rename
 						</button>
+						{/* Move to folder…: teaching chats only — practice chats
+						    always stay at the root, so the item would be a dead
+						    end — and only once the snapshot carries the
+						    organization (null = the folders are unknowable).
+						    Directly after Rename, same row classes. */}
+						{organization !== null && ctxChat !== null && (ctxChat.kind ?? "teach") !== "practice" && (
+							<button
+								type="button"
+								data-testid="ctx-move-folder"
+								onClick={() => {
+									setCtxChatId(null);
+									setMoving(ctxChat);
+								}}
+								className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+							>
+								Move to folder…
+							</button>
+						)}
 						{/* Export as Markdown (owner, release polish 2026-10-06): the
 					    session-markdown engine's user-facing debut — same-origin
 						    anchor download; the route's Content-Disposition names the
@@ -945,6 +1192,27 @@ function SessionsSidebar() {
 					onClose={() => setDeleting(null)}
 					onDeleted={onDeleted}
 				/>
+
+				{/* The folder dialogs — mounted only while open so each
+				    opening is a fresh form; both read the live organization
+				    snapshot for their target lists and writes ride the
+				    single folderWriter. */}
+				{newFolderOpen && (
+					<NewFolderDialog
+						organization={dialogOrganization}
+						onClose={() => setNewFolderOpen(false)}
+						onSubmit={createFolder}
+					/>
+				)}
+				{moving !== null && (
+					<MoveTargetDialog
+						key={moving.id}
+						chat={moving}
+						organization={dialogOrganization}
+						onClose={() => setMoving(null)}
+						onSubmit={moveChat}
+					/>
+				)}
 			</aside>
 	);
 }

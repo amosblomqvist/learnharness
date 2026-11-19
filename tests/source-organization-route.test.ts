@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
 import { after, it } from "node:test";
+import type { ChatListItem } from "../src/core/contracts/chat.ts";
 
 const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-source-organization-"));
 process.env.LH_DATA_DIR = root;
@@ -11,11 +12,23 @@ process.env.LH_AUTH_FILE = path.join(root, "auth.json");
 fs.writeFileSync(process.env.LH_AUTH_FILE, "{}\n");
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 const { GET, POST } = await import("../app/api/graph/sources/route.ts");
+const { GET: GET_CHATS } = await import("../app/api/chats/route.ts");
 const { stores } = await import("../src/server/stores.ts");
 const { sourceDirectory } = await import("../src/server/source-organization.ts");
-const { SOURCE_ORGANIZATION_FILE } = await import("../config.ts");
+const { SOURCE_ORGANIZATION_FILE, GRAPH_FORMAT_FILE } = await import("../config.ts");
+const { CURRENT_GRAPH_FORMAT_VERSION } = await import("../src/core/contracts/graph.ts");
 const change = (action: unknown) => POST(new Request("http://localhost/api/graph/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) }));
 const sourceId = (filePath: string) => `src_${createHash("sha256").update(filePath).digest("hex").slice(0, 12)}`;
+
+it("chats GET returns empty organization without creating graph files", async () => {
+	const chatsFirst = await GET_CHATS();
+	assert.equal(chatsFirst.status, 200);
+	const chatsFirstBody = await chatsFirst.json();
+	assert.deepEqual(chatsFirstBody.chats, []);
+	assert.deepEqual(chatsFirstBody.organization, { folders: [], placements: {} });
+	assert.equal(fs.existsSync(SOURCE_ORGANIZATION_FILE), false);
+	assert.equal(fs.existsSync(GRAPH_FORMAT_FILE), false);
+});
 
 it("GET is a non-writing read and inventories all sessions, imported records and missing provenance", async () => {
 	const before = await GET(); assert.equal(before.status, 200);
@@ -101,7 +114,112 @@ it("newer/corrupt data refuses reads and writes without overwriting its bytes", 
 			fs.writeFileSync(SOURCE_ORGANIZATION_FILE, value);
 			assert.equal((await GET()).status, 500);
 			assert.equal((await change({ action: "create-folder", name: "Do not overwrite", parentId: null })).status, 500);
+			const chatsRes = await GET_CHATS();
+			assert.equal(chatsRes.status, 200);
+			const chatsBody = await chatsRes.json();
+			assert.ok(Array.isArray(chatsBody.chats) && chatsBody.chats.length > 0);
+			assert.equal(chatsBody.organization, null);
 			assert.equal(fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8"), value);
 		}
 	} finally { fs.writeFileSync(SOURCE_ORGANIZATION_FILE, before); }
+});
+
+it("chats GET projects folders and chat placements from the shared organization store", async () => {
+	const parent = (await (await change({ action: "create-folder", name: "Algebra", parentId: null })).json()).createdFolderId;
+	const child = (await (await change({ action: "create-folder", name: "Week 1", parentId: parent })).json()).createdFolderId;
+	const teach = stores.chatStore.createChat("Placed teaching session");
+	const practice = stores.chatStore.createChat("Placed practice session", "practice");
+	const unplaced = stores.chatStore.createChat("Unplaced session");
+	assert.equal((await change({ action: "move", kind: "source", id: teach.id, parentId: child })).status, 200);
+	assert.equal((await change({ action: "move", kind: "source", id: practice.id, parentId: parent })).status, 200);
+
+	const body = await (await GET_CHATS()).json();
+	const byId = new Map<string, ChatListItem>((body.chats as ChatListItem[]).map((chat) => [chat.id, chat]));
+	for (const id of [teach.id, practice.id, unplaced.id]) {
+		const item = byId.get(id);
+		assert.ok(item);
+		assert.equal(typeof item.busy, "boolean");
+		assert.equal(typeof item.compacting, "boolean");
+	}
+	assert.equal(byId.get(teach.id)?.kind, "teach");
+	assert.equal(byId.get(practice.id)?.kind, "practice");
+
+	const org = body.organization;
+	assert.ok(org);
+	assert.deepEqual(org.placements[teach.id], { folderId: child });
+	assert.deepEqual(org.placements[practice.id], { folderId: parent });
+	assert.equal(Object.hasOwn(org.placements, unplaced.id), false);
+
+	const directory = await (await GET()).json();
+	const project = ({ id, name, parentId, createdAt }: { id: string; name: string; parentId: string | null; createdAt: string }) => ({ id, name, parentId, createdAt });
+	assert.deepEqual(org.folders, directory.organization.folders.map(project));
+	assert.equal(directory.organization.placements[teach.id].folderId, child);
+
+	assert.equal((await change({ action: "move", kind: "source", id: teach.id, parentId: null })).status, 200);
+	const moved = await (await GET_CHATS()).json();
+	assert.deepEqual(moved.organization.placements[teach.id], { folderId: null });
+	assert.equal(Object.hasOwn(moved.organization.placements, unplaced.id), false);
+});
+
+it("chats GET omits placements of imported sources and deleted chats while folders survive", async () => {
+	const filePath = "Mixed/Shared Notes.md";
+	const src = sourceId(filePath);
+	sourceDirectory.registerImport(filePath);
+	stores.graphStore.upsertSource({ id: src, filePath, importedAt: "2026-11-19T00:00:00Z" });
+	const doomed = stores.chatStore.createChat("Soon deleted");
+	const mixed = stores.sourceOrganizationStore.read().folders.find((f) => f.importPath === "Mixed");
+	assert.ok(mixed);
+	assert.equal((await change({ action: "move", kind: "source", id: doomed.id, parentId: mixed.id })).status, 200);
+	assert.equal(stores.chatStore.deleteChat(doomed.id), true);
+
+	const directory = await (await GET()).json();
+	assert.equal(directory.organization.placements[src].folderId, mixed.id);
+	assert.equal(directory.organization.placements[doomed.id].folderId, mixed.id);
+
+	const body = await (await GET_CHATS()).json();
+	const org = body.organization;
+	assert.ok(org);
+	assert.equal(Object.hasOwn(org.placements, src), false);
+	assert.equal(Object.hasOwn(org.placements, doomed.id), false);
+	assert.equal(body.chats.some((c: { id: string }) => c.id === doomed.id), false);
+	assert.ok(org.folders.some((f: { id: string }) => f.id === mixed.id));
+});
+
+it("a newer graph-format stamp refuses the organization read while chats still list", async () => {
+	const stampExisted = fs.existsSync(GRAPH_FORMAT_FILE);
+	const stampBytes = stampExisted ? fs.readFileSync(GRAPH_FORMAT_FILE) : null;
+	const orgBytes = fs.readFileSync(SOURCE_ORGANIZATION_FILE, "utf8");
+	fs.mkdirSync(path.dirname(GRAPH_FORMAT_FILE), { recursive: true });
+	const futureStamp = JSON.stringify({ version: CURRENT_GRAPH_FORMAT_VERSION + 1 });
+
+	try {
+		fs.rmSync(SOURCE_ORGANIZATION_FILE);
+		fs.writeFileSync(GRAPH_FORMAT_FILE, futureStamp);
+
+		const res = await GET_CHATS();
+		assert.equal(res.status, 200);
+		const body = await res.json();
+		assert.ok(Array.isArray(body.chats) && body.chats.length > 0);
+		assert.equal(body.organization, null);
+		assert.equal(fs.readFileSync(GRAPH_FORMAT_FILE, "utf8"), futureStamp);
+		assert.equal(fs.existsSync(SOURCE_ORGANIZATION_FILE), false);
+	} finally {
+		fs.writeFileSync(SOURCE_ORGANIZATION_FILE, orgBytes);
+		if (stampBytes === null) fs.rmSync(GRAPH_FORMAT_FILE, { force: true });
+		else fs.writeFileSync(GRAPH_FORMAT_FILE, stampBytes);
+	}
+});
+
+it("chats GET reads organization without touching graph nodes, chains or imported sources", async (t) => {
+	const boom = () => { throw new Error("graph read must not run"); };
+	t.mock.method(stores.graphStore, "readNodes", boom);
+	t.mock.method(stores.graphStore, "readChains", boom);
+	t.mock.method(stores.graphStore, "readSources", boom);
+	const res = await GET_CHATS();
+	assert.equal(res.status, 200);
+	const body = await res.json();
+	assert.ok(Array.isArray(body.chats));
+	assert.ok(body.organization);
+	assert.ok(body.organization.folders.length > 0);
+	assert.ok(Object.keys(body.organization.placements).length > 0);
 });
