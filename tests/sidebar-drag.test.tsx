@@ -164,9 +164,56 @@ async function fire(selector: string, type: string, data: ReturnType<typeof tran
 	Object.defineProperty(event, "clientY", { value: 100 });
 	await act(async () => {
 		target.dispatchEvent(event);
+		// The drag arms on the next task (see the dragstart DOM test below).
+		await new Promise((resolve) => setTimeout(resolve, 0));
 	});
 	return event;
 }
+
+it("dragstart leaves the list DOM unchanged until the next task, so the browser keeps the native drag", async () => {
+	await mount();
+	const data = transfer();
+	const before = document.querySelector('[data-testid="sidebar-list"]')!.innerHTML;
+	const row = document.querySelector('[data-source-drag-row="t2"]')!;
+
+	act(() => {
+		const event = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
+		Object.defineProperty(event, "dataTransfer", { value: data });
+		Object.defineProperty(event, "clientX", { value: 100 });
+		Object.defineProperty(event, "clientY", { value: 100 });
+		row.dispatchEvent(event);
+	});
+	assert.equal(
+		document.querySelector('[data-testid="sidebar-list"]')!.innerHTML,
+		before,
+		"Chrome cancels a drag whose source moves during dragstart: the Outside folders zone must not render synchronously",
+	);
+
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	});
+	assert.ok(document.querySelector('[data-testid="sidebar-root-drop"]'), "the zone appears once the drag is armed");
+});
+
+it("a dragend before the drag is armed leaves no zone behind", async () => {
+	await mount();
+	const data = transfer();
+	const row = document.querySelector('[data-source-drag-row="t2"]')!;
+
+	act(() => {
+		for (const type of ["dragstart", "dragend"]) {
+			const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
+			Object.defineProperty(event, "dataTransfer", { value: data });
+			Object.defineProperty(event, "clientX", { value: 100 });
+			Object.defineProperty(event, "clientY", { value: 100 });
+			row.dispatchEvent(event);
+		}
+	});
+	await act(async () => {
+		await new Promise((resolve) => setTimeout(resolve, 0));
+	});
+	assert.equal(document.querySelector('[data-testid="sidebar-root-drop"]'), null);
+});
 
 it("dragging a teaching chat onto a folder header moves it there once", async () => {
 	await mount();

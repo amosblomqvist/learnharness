@@ -168,19 +168,27 @@ export function useSidebarChatDrag(deps: {
 	const [dragChatId, setDragChatId] = useState<string | null>(null);
 	const [dropTarget, setDropTarget] = useState<string | null | undefined>(undefined);
 	const [error, setError] = useState<string | null>(null);
+	const armTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+	useEffect(() => () => clearTimeout(armTimer.current), []);
 
+	/* Arming waits for the next task: React would otherwise re-render
+	   inside dragstart, and the Outside folders zone (or a cleared error)
+	   shifts the row under the pointer — Chrome then cancels the native
+	   drag with an immediate dragend. dragover/drop arrive much later. */
 	const containerProps = {
 		onDragStart(e: DragEvent) {
-			setError(null);
+			clearTimeout(armTimer.current);
 			const organization = deps.organization;
-			if (organization === null) return;
 			const payload = readDragPayload(e.dataTransfer.getData(SOURCE_DRAG_TYPE));
-			if (payload === null || payload.kind !== "source") return;
-			const chat = deps.chats.find((c) => c.id === payload.id);
-			if (!chat || (chat.kind ?? "teach") === "practice") return;
-			setDragChatId(payload.id);
+			const chat = payload?.kind === "source" ? deps.chats.find((c) => c.id === payload.id) : undefined;
+			const armed = organization !== null && chat !== undefined && (chat.kind ?? "teach") !== "practice" ? chat.id : null;
+			armTimer.current = setTimeout(() => {
+				setError(null);
+				if (armed !== null) setDragChatId(armed);
+			}, 0);
 		},
 		onDragEnd() {
+			clearTimeout(armTimer.current);
 			setDragChatId(null);
 			setDropTarget(undefined);
 		},
