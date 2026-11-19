@@ -33,10 +33,11 @@ try {
 	const inspectTitle = () => page.$eval("button[data-plugin-chrome-title]", el => ({
 		font: getComputedStyle(el).fontSize, width: el.getBoundingClientRect().width,
 		parent: el.closest("header").getBoundingClientRect().width, title: el.title,
-		truncated: el.scrollWidth > el.clientWidth,
+		truncated: el.scrollWidth > el.clientWidth, translate: getComputedStyle(el).translate,
 	}));
 	const desktop = await inspectTitle();
 	assert.equal(desktop.font, "20px"); assert.equal(desktop.title, title);
+	assert.equal(desktop.translate, "0px 4px");
 	assert(desktop.width <= desktop.parent * .71); assert(desktop.truncated);
 	if (shots) await page.screenshot({ path: path.join(shots, "perrin-session-desktop.png") });
 	await page.click("button[data-plugin-chrome-title]");
