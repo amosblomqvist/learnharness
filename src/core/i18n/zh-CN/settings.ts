@@ -32,7 +32,6 @@ export const SETTINGS: Readonly<Record<string, string>> = {
 	"Colors": "颜色",
 	"Compaction threshold": "压缩阈值",
 	"Concurrent worker requests": "并发后台请求",
-	"Connect": "连接",
 	"Continue with ChatGPT": "使用 ChatGPT 继续",
 	"Controls the cache-retention preference sent to Pi. Support and duration depend on the provider and model. This does not guarantee a cache hit.": "控制发送给 Pi 的缓存保留偏好。是否支持以及保留时长取决于服务商和模型，不保证一定命中缓存。",
 	"Custom endpoint": "自定义端点",
@@ -74,7 +73,6 @@ export const SETTINGS: Readonly<Record<string, string>> = {
 	"Loading settings…": "正在加载设置……",
 	"Manage ChatGPT account": "管理 ChatGPT 账号",
 	"Manage usage": "管理用量",
-	"Manage…": "管理……",
 	"Maximum simultaneous background-worker model requests. Direct conversations are not limited.": "后台任务同时发起的模型请求上限。直接对话不受此限制。",
 	"Model API keys": "模型 API 密钥",
 	"Model IDs, comma-separated — optional, needed when the endpoint has no /models list": "模型 ID，用逗号分隔——可选；当端点没有 /models 列表时需要填写",
@@ -275,4 +273,5 @@ export const SETTINGS: Readonly<Record<string, string>> = {
 	"Community plugins": "社区插件",
 	"Dictation language: {label}": "听写语言：{label}",
 	"Dictation": "听写",
+	"Connecting…": "正在连接……",
 };
