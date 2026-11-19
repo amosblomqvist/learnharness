@@ -37,7 +37,7 @@ try {
 	}));
 	const desktop = await inspectTitle();
 	assert.equal(desktop.font, "20px"); assert.equal(desktop.title, title);
-	assert.equal(desktop.translate, "0px 4px");
+	assert.equal(desktop.translate, "none");
 	assert(desktop.width <= desktop.parent * .71); assert(desktop.truncated);
 	if (shots) await page.screenshot({ path: path.join(shots, "perrin-session-desktop.png") });
 	await page.click("button[data-plugin-chrome-title]");

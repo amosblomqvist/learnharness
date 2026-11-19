@@ -125,15 +125,9 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 
-/** One width for everything: transcript, cards, and the bottom blob share this column. */
-/**
- * Width tokens (wave-5 reskin, owner decision): the teaching PROSE spans the
- * full session width with a thin px-6 margin; the composer/question DOCK is
- * deliberately narrower (~46rem centered) per the reference. Same ELEMENT,
- * same place — width polish only.
- */
-const COLUMN = "mx-auto w-full max-w-none px-6";
-const DOCK = "mx-auto w-full max-w-[46rem] px-4";
+/** One reading column for prose, answered cards and the active dock. */
+const COLUMN = "mx-auto w-full max-w-[46rem] px-4";
+const DOCK = COLUMN;
 // The DOCK container's fixed width (46rem) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
@@ -1665,7 +1659,7 @@ export function Chat({
 								data-plugin-chrome-title
 								aria-label="Session title"
 								title="Rename this session"
-								className="lh-no-drag min-w-0 max-w-[70%] shrink translate-y-1 bg-transparent font-title text-xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className="lh-no-drag min-w-0 max-w-[70%] shrink h-11 bg-transparent font-ui text-xl font-semibold leading-7 caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
@@ -1688,7 +1682,7 @@ export function Chat({
 							}}
 							data-plugin-chrome-title
 							title={titleText}
-							className="lh-no-drag -mx-1.5 min-w-0 max-w-[70%] shrink translate-y-1 cursor-text truncate rounded-md px-1.5 text-left font-title text-xl tracking-tight transition-colors hover:bg-accent"
+							className="lh-no-drag -mx-1.5 min-w-0 max-w-[70%] shrink h-11 cursor-text truncate rounded-md px-1.5 text-left font-ui text-xl font-semibold leading-7 transition-colors hover:bg-accent"
 						>
 							{titleText}
 							</button>
@@ -1749,7 +1743,7 @@ export function Chat({
 					<SessionMessageNavigation />
 					<TranscriptElementReporter onElement={setTranscriptElement} />
 					<ConversationContent className="min-h-full gap-0 p-0">
-						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
+						<div data-session-find-root="" data-testid="session-column" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
 									title="New session"
