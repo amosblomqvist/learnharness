@@ -2,6 +2,7 @@
 
 import { createContext, useContext, useLayoutEffect, useRef, useState, type DragEvent, type HTMLAttributes, type ReactNode } from "react";
 import { FolderIcon, FolderOpenIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { canMoveFolder, folderIsEmpty, fuzzyScore, placementOf, folderEntryCheck, type SourceEntrySelection, type OrganizationAction, type SourceDirectory } from "@/src/core";
 import type { ChainSort } from "./chain-table";
 import { chainRow } from "./chain-navigation";
@@ -60,8 +61,8 @@ export function sourceNameMatches(directory: SourceDirectory | undefined, id: st
 
 /** Same Enter/blur commit and Escape cancel interaction as session titles.
  * The in-flight guard prevents Enter followed by blur from double-writing. */
-export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = false, muted = false }: {
-	name: string; onSave: (name: string) => Promise<unknown>; onCancel?: () => void; initiallyEditing?: boolean; muted?: boolean;
+export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = false, muted = false, inputClassName }: {
+	name: string; onSave: (name: string) => Promise<unknown>; onCancel?: () => void; initiallyEditing?: boolean; muted?: boolean; inputClassName?: string;
 }) {
 	const [editing, setEditing] = useState(initiallyEditing);
 	const [draft, setDraft] = useState(name);
@@ -84,7 +85,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 	};
 	return <span className="min-w-0 flex-1">
 		{editing ? <input ref={input} value={draft} placeholder="Folder name" aria-label="Source or folder name" data-testid="source-name-input"
-			className="block h-5 w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium leading-5 outline-none shadow-none focus:ring-0"
+			className={cn("block w-full min-w-0 border-0 bg-transparent p-0 font-medium outline-none shadow-none focus:ring-0", inputClassName ?? "h-5 text-sm leading-5")}
 			onChange={(e) => setDraft(e.target.value)} onBlur={() => { void commit(); }}
 			onKeyDown={(e) => {
 				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(""); onCancel?.(); }

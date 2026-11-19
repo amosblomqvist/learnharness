@@ -417,6 +417,13 @@ export function AppearanceSection({
 					onChange={(on) => onSectionChange({ ...appearance, sessionNameSerif: on })}
 				/>
 			</SettingsRow>
+			<SettingsRow label="Compact session list" hint="Single-line monospace rows in the sidebar" testid="row-compact-session-list">
+				<Toggle
+					checked={resolved.compactSessionList}
+					label="Compact session list"
+					onChange={(on) => onSectionChange({ ...appearance, compactSessionList: on })}
+				/>
+			</SettingsRow>
 			<SettingsRow label="Heading weight" hint={`${resolved.mdRendering.headingWeight}`} testid="row-heading-weight">
 				<CommitInput
 					type="number"

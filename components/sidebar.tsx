@@ -19,7 +19,8 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { buildSessionTree, flattenSessionTree, folderAndDescendants, placementOf, type SessionTreeNode } from "@/src/core";
 import { useSourceDirectory } from "@/components/source-directory";
-import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
+import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, SIDEBAR_COMPACT_ROW, SIDEBAR_ROW_HOVER, sidebarNameFont, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
+import { useAppearance } from "@/components/settings/appearance";
 import { SourceDragRow } from "@/components/source-folder-tree";
 import { OverlayScrollArea } from "@/components/overlay-scroll";
 import { useServerEvent, useServerResync } from "@/components/server-events";
@@ -306,8 +307,10 @@ export function SessionRow({
 	kbdSelected = false,
 	onContextMenu,
 	depth = 0,
+	compact = false,
 }: {
 	chat: ChatListItem;
+	compact?: boolean;
 	active: boolean;
 	onOpen: () => void;
 	/** Folder depth in the sidebar tree (0 = unfiled). */
@@ -326,7 +329,9 @@ export function SessionRow({
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 			data-session-id={chat.id}
 			className={cn(
-				"relative flex w-full items-center gap-2 py-2 pr-3 text-left transition-colors hover:bg-accent",
+				"relative flex w-full items-center gap-2 pr-3 text-left",
+				compact ? SIDEBAR_COMPACT_ROW : "py-2",
+				SIDEBAR_ROW_HOVER,
 				active && "bg-accent",
 				kbdSelected && !active && "bg-accent/60 ring-1 ring-inset ring-border",
 			)}
@@ -334,13 +339,8 @@ export function SessionRow({
 		>
 			<SessionStatus busy={chat.busy || chat.compacting} />
 			<span className="min-w-0 flex-1">
-				{/* Titles are the learner's/teacher's WORDS — Source Sans 3, the
-				    same voice the words were typed in (every input is lh-prose);
-				    the meta line below stays JetBrains Mono (machine data). One
-				    rule, finally applied to the picker too (owner, typography
-				    round): mono = chrome, Source Sans = human words. */}
-				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
-				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				<span className={cn("block truncate", sidebarNameFont(compact))}>{chat.title}</span>
+				{!compact && <span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>}
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
@@ -355,8 +355,8 @@ export function SessionRow({
 /** The inline-rename row (wave 6): same geometry as SessionRow, but the
  *  title line becomes a text input — select-all on entry (the click means
  *  "replace", the header rename's rule), Enter/blur commits, Esc discards.
- *  The meta line stays so the row never changes height mid-edit. */
-export function RenameRow({ chat, onCommit, onCancel, depth = 0 }: { chat: ChatListItem; onCommit: (next: string) => void; onCancel: () => void; depth?: number }) {
+ *  The row retains the list's density mid-edit. */
+export function RenameRow({ chat, onCommit, onCancel, depth = 0, compact = false }: { chat: ChatListItem; onCommit: (next: string) => void; onCancel: () => void; depth?: number; compact?: boolean }) {
 	const [draft, setDraft] = useState(chat.title);
 	const interactions = useOptionalInteractionLayers();
 	const inputRef = useRef<HTMLInputElement | null>(null);
@@ -370,7 +370,7 @@ export function RenameRow({ chat, onCommit, onCancel, depth = 0 }: { chat: ChatL
 	return (
 		<div
 			data-testid="session-rename-row"
-			className="relative flex w-full items-center bg-accent py-2 pr-3"
+			className={cn("relative flex w-full items-center bg-accent pr-3", compact ? SIDEBAR_COMPACT_ROW : "py-2")}
 			style={{ paddingLeft: sidebarRowBox(depth).paddingLeft }}
 		>
 			{/* NOTHING MOVES (owner, polish round): an idle row renders no
@@ -398,9 +398,9 @@ export function RenameRow({ chat, onCommit, onCancel, depth = 0 }: { chat: ChatL
 					}}
 					aria-label="Rename session"
 					data-testid="session-rename-input"
-					className="lh-input w-full min-w-0 truncate border-0 border-b border-border bg-transparent px-0 text-foreground outline-none"
+					className={cn("w-full min-w-0 truncate border-0 border-b border-border bg-transparent px-0 text-foreground outline-none", compact ? sidebarNameFont(true) : "lh-input")}
 				/>
-				<span className="block truncate text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				{!compact && <span className="block truncate text-xs text-muted-foreground">{sessionMeta(chat)}</span>}
 			</span>
 		</div>
 	);
@@ -413,6 +413,7 @@ export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
+	const { appearance: { compactSessionList } } = useAppearance();
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
@@ -755,6 +756,7 @@ function SessionsSidebar() {
 						<RenameRow
 							chat={c}
 							depth={depth}
+							compact={compactSessionList}
 							onCommit={(next) => void commitRename(c.id, next)}
 							onCancel={() => setRenamingId(null)}
 						/>
@@ -762,6 +764,7 @@ function SessionsSidebar() {
 						<SessionRow
 							chat={c}
 							depth={depth}
+							compact={compactSessionList}
 							active={pathname === `/chat/${c.id}`}
 							kbdSelected={kbdId === c.id}
 							onOpen={() => {
@@ -792,6 +795,7 @@ function SessionsSidebar() {
 					folder={folder}
 					depth={depth}
 					open={folderOpen}
+					compact={compactSessionList}
 					draggable={Boolean(organization)}
 					dropActive={folderDrop.dropTarget === folder.id}
 					renaming={renamingFolderId === folder.id}
@@ -801,7 +805,7 @@ function SessionsSidebar() {
 					onRenameDone={() => setRenamingFolderId(null)}
 				/>
 				{folderOpen && creatingHere && (
-					<NewFolderRow depth={depth + 1} onDone={() => setCreatingFolder(null)}
+					<NewFolderRow depth={depth + 1} compact={compactSessionList} onDone={() => setCreatingFolder(null)}
 						onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: folder.id })} />
 				)}
 				{folderOpen && renderTree(node.children, depth + 1)}
@@ -1000,7 +1004,7 @@ function SessionsSidebar() {
 					{(creatingFolder?.parentId === null || (rows !== null && rows.length > 0)) && (
 						<div data-testid="session-rows">
 							{creatingFolder?.parentId === null && (
-								<NewFolderRow depth={0} onDone={() => setCreatingFolder(null)}
+								<NewFolderRow depth={0} compact={compactSessionList} onDone={() => setCreatingFolder(null)}
 									onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: null })} />
 							)}
 							{renderTree(tree ?? [], 0)}

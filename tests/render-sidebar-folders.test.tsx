@@ -4,8 +4,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, sidebarFolderBox, sidebarRail, sidebarRowBox, sidebarRuleInset } from "../components/sidebar-folders.tsx";
 
 const folder = { id: "f1", name: "Physics", parentId: null, createdAt: "2026-10-01T00:00:00.000Z" };
-const row = (depth: number, open: boolean) => renderToStaticMarkup(
-	<SidebarFolderRow folder={folder} depth={depth} open={open} dropActive={false} renaming={false} draggable
+const row = (depth: number, open: boolean, compact = false) => renderToStaticMarkup(
+	<SidebarFolderRow folder={folder} depth={depth} open={open} compact={compact} dropActive={false} renaming={false} draggable
 		onToggle={() => {}} onContextMenu={() => {}} onRename={async () => {}} onRenameDone={() => {}} />,
 );
 
@@ -18,6 +18,14 @@ it("nested rows still start at the parent's rail without a rule on the folder he
 	assert.match(html, /data-testid="sidebar-folder-row-f1"[^>]*style="margin-left:15px"/);
 	assert.match(html, /data-testid="sidebar-folder-f1"[^>]*style="padding-left:11px"/);
 	assert.doesNotMatch(html + row(1, true), /data-sidebar-folder-rule|border-bottom/);
+});
+
+it("folder names use the reading font by default and the same compact styling as sessions when enabled", () => {
+	assert.match(row(0, false), /font-prose[^>]*>Physics/);
+	const compact = row(0, false, true);
+	assert.match(compact, /\bh-8\b/);
+	assert.match(compact, /hover:duration-0/);
+	assert.match(compact, /\bfont-ui\b[^>]*>Physics/);
 });
 
 it("folder boundaries use top and bottom rules aligned to the parent rail", () => {

@@ -239,7 +239,7 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { theme?, background?, colors?, fontFamily?,
- *  proseFontSize?, codeLigatures?, sessionNameSerif?, mdRendering? } —
+ *  proseFontSize?, codeLigatures?, sessionNameSerif?, compactSessionList?, mdRendering? } —
  *  `theme` is shape-checked here (slug); whether it EXISTS is the route's check. */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
@@ -296,6 +296,12 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			return { ok: false, error: "sessionNameSerif must be a boolean" };
 		}
 		settings.sessionNameSerif = raw.sessionNameSerif;
+	}
+	if (raw.compactSessionList !== undefined) {
+		if (typeof raw.compactSessionList !== "boolean") {
+			return { ok: false, error: "compactSessionList must be a boolean" };
+		}
+		settings.compactSessionList = raw.compactSessionList;
 	}
 	if (raw.mdRendering !== undefined) {
 		const md = asRecord(raw.mdRendering);
