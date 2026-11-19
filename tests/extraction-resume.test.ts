@@ -155,4 +155,148 @@ describe("resumable notes extraction", () => {
 		await assert.rejects(pipeline(ledgers, countingExtractor(1).engine).importNotes(input), unfinished);
 		assert.equal(ledgers.readSources()[0]!.resume, undefined);
 	});
+
+	it("retries a final usage write failure without model calls, then explicitly re-imports all chunks", async () => {
+		const ledgers = memoryLedgers();
+		const first = countingExtractor();
+		const appendUsage = ledgers.appendSourceUsage;
+		let failUsage = true;
+		ledgers.appendSourceUsage = (id, entry) => {
+			if (failUsage && first.calls() === 3 && entry.stats) {
+				failUsage = false;
+				throw new Error("synthetic final usage write failure");
+			}
+			appendUsage(id, entry);
+		};
+		await assert.rejects(pipeline(ledgers, first.engine).importNotes(input), (error: unknown) => {
+			unfinished(error);
+			assert.ok(error instanceof NotesImportError);
+			assert.match(error.message, /synthetic final usage write failure/);
+			assert.equal(error.partialStats.nodes, 3, "all merges landed even though usage persistence failed");
+			return true;
+		});
+		assert.equal(first.calls(), 3);
+		const checkpoint = ledgers.readSources()[0]!.resume;
+		assert.deepEqual(checkpoint && { chunks: checkpoint.chunks, done: checkpoint.done }, { chunks: 3, done: 3 });
+		const usage = ledgers.readSources()[0]!.extractions;
+
+		const retry = countingExtractor();
+		const stats = await pipeline(ledgers, retry.engine).importNotes(input);
+		assert.equal(retry.calls(), 0, "a full committed prefix skips all extractor calls");
+		assert.deepEqual(stats, { nodes: 0, chains: 0 });
+		assert.equal(ledgers.readSources()[0]!.resume, undefined);
+		assert.deepEqual(ledgers.readSources()[0]!.extractions, usage, "a no-model retry invents no usage recovery");
+
+		const reimport = countingExtractor();
+		await pipeline(ledgers, reimport.engine).importNotes(input);
+		assert.equal(reimport.calls(), 3, "clearing the checkpoint keeps explicit re-import whole");
+	});
+
+	for (const [label, fields] of [
+		["fractional done", { done: 1.5 }],
+		["done exceeds chunks", { done: 4 }],
+		["string done", { done: "2" }],
+		["string chunks", { chunks: "3" }],
+	] as const) {
+		it(`restarts every chunk for an injected malformed checkpoint (${label})`, async () => {
+			const ledgers = memoryLedgers();
+			await assert.rejects(pipeline(ledgers, countingExtractor(3).engine).importNotes(input), unfinished);
+			const source = ledgers.readSources()[0]!;
+			const resume = JSON.parse(JSON.stringify({ ...source.resume, ...fields }));
+			ledgers.upsertSource({ ...source, resume });
+
+			const retry = countingExtractor();
+			await pipeline(ledgers, retry.engine).importNotes(input);
+			assert.equal(retry.calls(), 3, "injected stores must not bypass checkpoint validation");
+			assert.equal(ledgers.readSources()[0]!.resume, undefined);
+		});
+	}
+
+	it("clears an incompatible checkpoint before changed text fails, so reverting text starts whole", async () => {
+		const ledgers = memoryLedgers();
+		await assert.rejects(pipeline(ledgers, countingExtractor(3).engine).importNotes(input), unfinished);
+		const changed = countingExtractor(1);
+		await assert.rejects(pipeline(ledgers, changed.engine).importNotes({ filePath: input.filePath, text: "changed first chunk line" }), unfinished);
+		assert.equal(changed.calls(), 1);
+		assert.equal(ledgers.readSources()[0]!.resume, undefined, "the old text's checkpoint is gone before the first changed chunk runs");
+
+		const reverted = countingExtractor();
+		await pipeline(ledgers, reverted.engine).importNotes(input);
+		assert.equal(reverted.calls(), 3, "reverting text must not resurrect the old completed prefix");
+	});
+
+	it("clears an incompatible chunk budget before extraction starts", async () => {
+		const ledgers = memoryLedgers();
+		await assert.rejects(pipeline(ledgers, countingExtractor(3).engine).importNotes(input), unfinished);
+		const changed = countingExtractor(1);
+		const changedPipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			getChunkTokens: () => 100,
+			extractor: changed.engine,
+			auditor: fauxEngine([() => fauxAssistantMessage([fauxToolCall("submit_review", VERDICT as unknown as ToolCall["arguments"])], { stopReason: "toolUse" })]),
+		});
+		await assert.rejects(changedPipeline.importNotes(input), unfinished);
+		assert.equal(changed.calls(), 1);
+		assert.equal(ledgers.readSources()[0]!.resume, undefined);
+
+		const retry = countingExtractor();
+		await pipeline(ledgers, retry.engine).importNotes(input);
+		assert.equal(retry.calls(), 3);
+	});
+
+	it("does not advance the prefix when persisting the checkpoint fails", async () => {
+		const ledgers = memoryLedgers();
+		const upsertSource = ledgers.upsertSource;
+		let failCheckpoint = true;
+		ledgers.upsertSource = (source) => {
+			if (failCheckpoint && source.resume) {
+				failCheckpoint = false;
+				throw new Error("synthetic checkpoint write failure");
+			}
+			upsertSource(source);
+		};
+		const first = countingExtractor();
+		await assert.rejects(pipeline(ledgers, first.engine).importNotes(input), unfinished);
+		assert.equal(first.calls(), 3);
+		assert.equal(ledgers.readSources()[0]!.resume, undefined, "later merges cannot jump over the unpersisted leading chunk");
+
+		const retry = countingExtractor();
+		await pipeline(ledgers, retry.engine).importNotes(input);
+		assert.equal(retry.calls(), 3);
+	});
+
+	it("persists a committed checkpoint before layout fails", async () => {
+		const ledgers = memoryLedgers();
+		const writePositions = ledgers.writePositions;
+		ledgers.writePositions = () => { throw new Error("synthetic layout write failure"); };
+		const first = countingExtractor();
+		await assert.rejects(pipeline(ledgers, first.engine).importNotes(input), unfinished);
+		assert.equal(first.calls(), 3);
+		assert.equal(ledgers.readSources()[0]!.resume?.done, 3, "layout failure must not erase committed merges");
+		assert.deepEqual(ledgers.readPositions(), {});
+		const failedRetry = countingExtractor();
+		await assert.rejects(pipeline(ledgers, failedRetry.engine).importNotes(input), (error: unknown) => {
+			unfinished(error);
+			assert.ok(error instanceof NotesImportError);
+			assert.match(error.message, /synthetic layout write failure/);
+			return true;
+		});
+		assert.equal(failedRetry.calls(), 0);
+		assert.equal(ledgers.readSources()[0]!.resume?.done, 3);
+		ledgers.writePositions = writePositions;
+
+		const retry = countingExtractor();
+		const stats = await pipeline(ledgers, retry.engine).importNotes(input);
+		assert.equal(retry.calls(), 0);
+		assert.deepEqual(stats, { nodes: 0, chains: 0 });
+		const positions = ledgers.readPositions();
+		assert.ok(Object.keys(positions).length > 0, "completed retry restores the rendered layout ledger");
+		for (const node of ledgers.readNodes()) {
+			const position = positions[node.id];
+			assert.ok(position, `missing rendered position for ${node.id}`);
+			assert.ok(Number.isFinite(position.x) && Number.isFinite(position.y), `nonfinite rendered position for ${node.id}`);
+		}
+		assert.equal(ledgers.readSources()[0]!.resume, undefined);
+	});
 });

@@ -306,7 +306,7 @@ const INDEX_ENTRY = /^\s*[^,]{2,60},\s*\d{1,4}(?:\s*[-,–]\s*\d{1,4})?(?:\s*,\s
  * Drops navigational front/back matter (table of contents, index) that would
  * otherwise cost extractor+auditor calls for propositions the book already
  * states. Conservative: a page is only dropped when its heading matches AND
- * most of its body looks like entries; anything ambiguous is kept.
+ * every nonblank body line looks like an entry; anything ambiguous is kept.
  */
 export function filterNonContentPages(pages: readonly PdfPage[]): { pages: PdfPage[]; skippedCount: number; skippedTypes: ("contents" | "index")[] } {
 	const kept: PdfPage[] = [];
@@ -322,11 +322,11 @@ export function filterNonContentPages(pages: readonly PdfPage[]): { pages: PdfPa
 		const body = lines.slice(1);
 		const contents = CONTENTS_HEADING.test(heading.replace(/^#+\s*/, ""))
 			&& body.length >= 3
-			&& body.filter((l) => CONTENTS_ENTRY.test(l)).length * 2 >= body.length;
+			&& body.every((l) => CONTENTS_ENTRY.test(l));
 		const index = !contents
 			&& INDEX_HEADING.test(heading.replace(/^#+\s*/, ""))
 			&& body.length >= 3
-			&& body.filter((l) => INDEX_ENTRY.test(l)).length * 2 >= body.length;
+			&& body.every((l) => INDEX_ENTRY.test(l));
 		if (!contents && !index) {
 			kept.push(page);
 			continue;

@@ -3,6 +3,32 @@ import { describe, it } from "node:test";
 import { filterNonContentPages, type PdfPage } from "../src/agent/subagents/pdf-markdown.ts";
 
 describe("filterNonContentPages", () => {
+	for (const { heading, entries } of [
+		{
+			heading: "Table of Contents",
+			entries: ["Chapter 1: Intro ...... 1", "Chapter 2: Core ....... 15", "Chapter 3: Advanced ... 40"],
+		},
+		{
+			heading: "Index",
+			entries: ["Abstraction, 12, 14, 99", "Algorithm, 5, 23, 45", "Array, 18, 32"],
+		},
+	]) {
+		for (const entryCount of [2, 3]) {
+			it(`retains ${heading} pages with ${entryCount} entries and ${4 - entryCount} prose lines`, () => {
+				const prose = ["Plants make sugar using sunlight.", "Roots absorb water from the soil."].slice(0, 4 - entryCount);
+				const pages: PdfPage[] = [{
+					kind: "text",
+					number: 1,
+					markdown: [`# ${heading}`, ...entries.slice(0, entryCount), ...prose].join("\n"),
+				}];
+				const result = filterNonContentPages(pages);
+				assert.deepEqual(result.pages, pages);
+				assert.equal(result.skippedCount, 0);
+				assert.deepEqual(result.skippedTypes, []);
+			});
+		}
+	}
+
 	it("preserves ordinary content pages", () => {
 		const pages: PdfPage[] = [
 			{ kind: "text", number: 1, markdown: "# Chapter 1\nThis is core subject matter." },

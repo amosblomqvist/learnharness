@@ -74,6 +74,9 @@ async function readNotesFile(file: File): Promise<NotesFile> {
 		case "converted": {
 			const filtered = filterNonContentPages(pdf.pages);
 			const text = joinPages(filtered.pages);
+			if (filtered.skippedCount > 0 && !filtered.pages.some((page) => page.kind === "text" && page.markdown.trim())) {
+				return { kind: "refused", error: "No content remains after skipping contents/index pages." };
+			}
 			if (!text) return { kind: "refused", error: "OCR not supported yet." };
 			const skipped = filtered.pages.filter((page) => page.kind === "image-only").length;
 			const omission = skipped > 0 ? ` Skipped ${skipped} image-only ${skipped === 1 ? "page" : "pages"}; OCR is not supported.` : "";

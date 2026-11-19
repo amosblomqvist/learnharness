@@ -1321,9 +1321,13 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			const fp = crypto.createHash("sha256").update(`${chunkTokens}\n${input.text}`).digest("hex").slice(0, 32);
 			const prevResume = graphStore.readSources().find((source) => source.id === id)?.resume;
 			const resumeFrom = prevResume && prevResume.fp === fp && prevResume.chunks === chunks.length
-				&& prevResume.done > 0 && prevResume.done < chunks.length
+				&& Number.isSafeInteger(prevResume.chunks) && prevResume.chunks > 0
+				&& Number.isSafeInteger(prevResume.done) && prevResume.done > 0 && prevResume.done <= chunks.length
 				? prevResume.done
 				: 0;
+			if (prevResume && resumeFrom === 0) {
+				graphStore.upsertSource({ id, filePath: input.filePath, importedAt: input.importedAt });
+			}
 			console.info(
 				`[extraction ${id}] notes pipeline start (${input.filePath}) — ${chunks.length} chunk(s) of ≤${chunkTokens} tok` +
 					(resumeFrom > 0 ? `, resuming after ${resumeFrom} merged chunk(s)` : ""),
@@ -1337,8 +1341,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// part rides the registry entry (feed suffix "· i/N") only when
 			// the file actually chunked.
 			const settled: PromiseSettledResult<EmissionStats>[] = [];
-			// Leading chunks that have ever merged for this fingerprint — the
-			// resume point only advances across a failed chunk, never past it.
+			// Only a successfully persisted leading merge advances the resume point.
 			let completedPrefix = resumeFrom;
 			for (const [chunkIndex, chunk] of chunks.entries()) {
 				if (chunkIndex < resumeFrom) continue;
@@ -1373,22 +1376,20 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								mergedStats.chains! += merged.chains ?? 0;
 								if (merged.droppedChains)
 									mergedStats.droppedChains = (mergedStats.droppedChains ?? 0) + merged.droppedChains;
-								// The layout ledger evolves with each merge — the next
-								// snapshot fetch reflects every finished chunk.
-								settleGraphLayout(graphStore);
-								console.info(`[extraction ${jobKey}] merged: ${merged.nodes} nodes, ${merged.chains ?? 0} chains`);
-								// Checkpoint AFTER the merge landed: a crash or stop
-								// between chunks then costs at most one re-extracted
-								// chunk, never the whole file.
+								// Persist the committed prefix before layout or usage can fail.
 								if (chunkIndex === completedPrefix) {
-									completedPrefix = chunkIndex + 1;
 									graphStore.upsertSource({
 										id,
 										filePath: input.filePath,
 										importedAt: input.importedAt,
-										resume: { fp, chunks: chunks.length, done: completedPrefix },
+										resume: { fp, chunks: chunks.length, done: chunkIndex + 1 },
 									});
+									completedPrefix = chunkIndex + 1;
 								}
+								// The layout ledger evolves with each merge — the next
+								// snapshot fetch reflects every finished chunk.
+								settleGraphLayout(graphStore);
+								console.info(`[extraction ${jobKey}] merged: ${merged.nodes} nodes, ${merged.chains ?? 0} chains`);
 								return merged;
 							});
 						}),
@@ -1419,6 +1420,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				const details = rejected.map((r) => r.reason instanceof Error ? r.reason.message : String(r.reason)).join("; ");
 				throw new NotesImportError(outcome, mergedStats, details || "Notes import did not complete");
 			}
+			if (resumeFrom > 0 && resumeFrom === chunks.length) settleGraphLayout(graphStore);
 			// Completed: the checkpoint has no further use. Another explicit
 			// import of this file processes it whole, as before.
 			graphStore.upsertSource({ id, filePath: input.filePath, importedAt: input.importedAt });
@@ -1437,8 +1439,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		}
 	}
 
-	/** Every explicit import processes the whole file. Identity, source digest,
-	 * auditor and usage history remain source-scoped; this is not exactly-once. */
+	/** Resume an incomplete import of matching text and chunk budget. After a
+	 * completed run, the next explicit import processes the whole file. */
 	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
