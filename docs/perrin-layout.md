@@ -5,7 +5,8 @@ The application chrome adopts the non-color foundations of [Perrin UI Kit](https
 - Settings headings use a clear 20px hierarchy; supporting text and controls are readable without changing reading preferences.
 - Settings navigation uses 44px targets and becomes a horizontally scrolling strip below 640px. Rows can wrap instead of squeezing labels and controls.
 - Session search gets its own full-width row, and session entries have more breathing room. Rename and display rows retain matching geometry.
-- Session headers use a compact 20px title, bounded to 70% of the header, with a 4px downward optical adjustment in both display and rename states. Long names truncate and expose the complete name through the native title tooltip. Click/F2 rename and the existing serif preference remain available.
+- Session headers use a 20px system-UI title in a 44px target, centered within the 60px header in display and rename states. This replaces the serif-metric-dependent 4px translation. Long names remain bounded to 70%, truncate and expose the complete name through the native tooltip; click/F2 rename remains available. Reading-font and serif preferences still apply to lesson prose.
+- Prose, answered cards and the active question/composer share a centered 46rem column with 16px side padding. They no longer alternate between a full-width transcript and a narrow dock.
 
 No kit palette is imported. Existing theme values, color overrides, hover colors, teaching-prose fonts/sizes, code fonts, and markdown rendering remain application-owned. Theme previews stack on narrow screens rather than overflowing their cards.
 
