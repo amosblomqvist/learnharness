@@ -102,21 +102,21 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 	try {
 		await act(async () => root.render(<Harness />));
 		await record();
-		let result: Promise<boolean>;
-		await act(async () => { result = current!.finish(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+		let result: Promise<void>;
+		await act(async () => { result = current!.finish(); void result.catch(() => {}); await new Promise((resolve) => setTimeout(resolve, 0)); });
 		assert.equal(current!.phase, "stopping");
 		assert.deepEqual(appended, []);
-		await act(async () => { resolveUpload!(Response.json({ text: "Первый ответ" })); assert.equal(await result!, true); });
+		await act(async () => { resolveUpload!(Response.json({ text: "Первый ответ" })); await result!; });
 		assert.deepEqual(appended, ["Первый ответ"]);
 		assert.equal(current!.active, false);
 
 		mode = "fail";
 		await record();
-		await act(async () => { assert.equal(await current!.finish(), false); });
+		await act(async () => { await assert.rejects(current!.finish(), /OpenAI transcription failed/); });
 		assert.equal(current!.retryable, true);
 		assert.equal(current!.active, true, "failed audio gates submission");
 		assert.equal(isDictationActive(), true, "pending retry keeps shared settings locked");
-		assert.equal(await current!.finish(), false, "submission stays gated while audio is pending");
+		await assert.rejects(current!.finish(), /OpenAI transcription failed/);
 		assert.deepEqual(appended, ["Первый ответ"]);
 		mode = "success";
 		await act(async () => { current!.toggle(); await new Promise((resolve) => setTimeout(resolve, 0)); });
@@ -126,11 +126,28 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 
 		mode = "defer";
 		await record();
-		await act(async () => { result = current!.finish(); await new Promise((resolve) => setTimeout(resolve, 0)); });
+		await act(async () => { result = current!.finish(); void result.catch(() => {}); await new Promise((resolve) => setTimeout(resolve, 0)); });
 		const late = resolveUpload!;
 		act(() => current!.cancel());
-		assert.equal(await result!, false);
+		await assert.rejects(result!, { name: "AbortError" });
 		await act(async () => { late(Response.json({ text: "late" })); await Promise.resolve(); });
+		assert.deepEqual(appended, ["Первый ответ", "Результат test"]);
+
+		// The shared recorder retains the side destination through a failed upload.
+		const side: string[] = [];
+		const sideTarget = { id: "side:one", append: (text: string) => { side.push(text); } };
+		mode = "fail";
+		await act(async () => { current!.toggleFor(sideTarget); });
+		act(() => worklet!.emit({ type: "audio", buffer: new Int16Array([100, -200]) }));
+		await act(async () => { await current!.finish(); });
+		assert.equal(current!.phase, "recording", "main submission leaves the side recording alone");
+		await act(async () => { await assert.rejects(current!.finishFor(sideTarget.id), /OpenAI transcription failed/); });
+		assert.equal(current!.retryable, true);
+		await act(async () => { current!.toggleFor({ id: "side:two", append: () => assert.fail("audio must stay with its original target") }); });
+		assert.equal(current!.retryable, true);
+		mode = "success";
+		await act(async () => { current!.toggleFor(sideTarget); await current!.finishFor(sideTarget.id); });
+		assert.deepEqual(side, ["Результат test"]);
 		assert.deepEqual(appended, ["Первый ответ", "Результат test"]);
 
 		hasKey = false;
@@ -144,10 +161,10 @@ it("records, flushes and retries OpenAI audio without losing or double-inserting
 		await act(async () => current!.toggle());
 		assert.equal(current!.phase, "recording");
 		act(() => socket!.emit("message", { data: JSON.stringify({ type: "Results", is_final: true, channel: { alternatives: [{ transcript: "Deepgram text" }] } }) }));
-		await act(async () => { assert.equal(await current!.finish(), true); });
+		await act(async () => { await current!.finish(); });
 		assert.equal(appended.at(-1), "Deepgram text");
 		assert.ok(sent.includes(JSON.stringify({ type: "CloseStream" })));
-		assert.equal(uploads, 4, "Deepgram never invokes the OpenAI API");
+		assert.equal(uploads, 6, "Deepgram never invokes the OpenAI API");
 	} finally {
 		act(() => root.unmount());
 		for (const [name, descriptor] of previous) {
@@ -181,7 +198,7 @@ it("stopping while provider settings are loading cannot start a late microphone 
 		await act(async () => root.render(<Harness />));
 		act(() => current!.toggle());
 		assert.equal(current!.phase, "connecting");
-		await act(async () => { assert.equal(await current!.finish(), false); });
+		await act(async () => { await assert.rejects(current!.finish(), { name: "AbortError" }); });
 		assert.equal(current!.phase, "idle");
 		await act(async () => { resolveSettings(Response.json({ settings: { general: { dictationProvider: "openai" } } })); await Promise.resolve(); });
 		assert.equal(micCalls, 0);

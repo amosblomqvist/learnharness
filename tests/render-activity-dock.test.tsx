@@ -48,6 +48,31 @@ describe("activity dock pure layer", () => {
 		assert.equal(blobs[1]!.id, "new");
 	});
 
+	it("standalone plugin workers share native row accounting without inventing a session identity", () => {
+		const feed: ActivityFeed = { jobs: [], extractions: [], pluginWorkers: [{
+			id: "my-plugin:task-1", taskId: "task-1", pluginId: "my-plugin", definitionId: "analyzer",
+			status: "running", title: "My plugin · analyzer", model: { provider: "offline", id: "fixture" },
+			createdAt: new Date(NOW - 10_000).toISOString(), updatedAt: new Date(NOW).toISOString(),
+			activity: "tool: inspect", costUsd: 0.004, contextLimit: 10_000,
+			usage: { model: "offline:fixture", inputTokens: 8000, outputTokens: 500, cacheReadTokens: 4000,
+				cacheWriteTokens: 0, reasoningTokens: undefined, steps: 3,
+				lastStep: { inputTokens: 100, outputTokens: 10, cacheReadTokens: 200, cacheWriteTokens: 20, reasoningTokens: undefined } },
+		}] };
+		const blob = toBlobs(feed)[0]!;
+		assert.equal(blob.process, "plugin-worker");
+		assert.equal(blob.chatId, undefined);
+		assert.equal(blob.cost, 0.004);
+		assert.equal(blob.model, "offline:fixture");
+		assert.equal(blob.steps, 3);
+		assert.deepEqual(blob.context, { used: 330, limit: 10_000 }, "last step, including cache buckets, not cumulative usage");
+		const html = renderToStaticMarkup(<ActivitySection feed={feed} />);
+		assert.match(html, /data-testid="activity-blob-plugin-worker"/);
+		assert.match(html, /data-activity-id="my-plugin:task-1"/);
+		assert.match(html, /My plugin · analyzer/);
+		assert.match(html, /tool: inspect/);
+		assert.match(html, /data-testid="activity-abort"/);
+	});
+
 	it("per-chunk jobs (owner, 2026-09-28): one source, N rows — unique ids (React keys), one chatId, part-suffixed titles", () => {
 		const rows = [
 			{ id: "src_a#1", chatId: "src_a", part: { i: 1, n: 2 }, title: "notes.md · 1/2", phase: "extracting", startedAt: NOW - 1000 },

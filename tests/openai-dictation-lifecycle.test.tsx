@@ -65,20 +65,20 @@ test("cancelling pending key preflight and unmounting an upload invalidate late 
 		await act(async () => current.toggle());
 		assert.equal(current.phase, "connecting");
 		assert.equal(micCalls, 0);
-		await act(async () => assert.equal(await current.finish(), false));
+		await act(async () => { await assert.rejects(current.finish(), /No audio was captured/); });
 		keyCheckPending = false;
 		await act(async () => finishKeys(Response.json({ keys: [{ id: "OPENAI_API_KEY", present: true }] })));
 		assert.equal(micCalls, 0, "a late key check must not start a cancelled recording");
 		await act(async () => current.toggle());
 		assert.equal(current.phase, "recording");
 		act(() => worklet.port.onmessage({ data: { type: "audio", buffer: new Int16Array([123]) } }));
-		let result!: Promise<boolean>;
-		await act(async () => { result = current.finish(); await Promise.resolve(); });
+		let result!: Promise<void>;
+		await act(async () => { result = current.finish(); void result.catch(() => {}); await Promise.resolve(); });
 		assert.equal(current.phase, "stopping");
 		await act(async () => { root.unmount(); unmounted = true; });
 		assert.equal(appendToPrimaryInput("/tmp/late-file"), false, "an unmounted composer cannot receive a dropped path");
 		assert.equal(uploadSignal.aborted, true);
-		assert.equal(await result, false);
+		await assert.rejects(result, { name: "AbortError" });
 		await act(async () => finishUpload(Response.json({ text: "late result" })));
 		assert.deepEqual(appended, [], "a late upload cannot append to a new page");
 	} finally {

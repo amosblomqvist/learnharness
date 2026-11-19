@@ -38,7 +38,7 @@ interface CaptureRecord {
 }
 
 /** Test seam; production always follows the configured app data root. */
-export const backgroundCaptureDir = { current: path.join(PATHS.debug, "background-captures") };
+export const backgroundCaptureDir = { current: path.join(/* turbopackIgnore: true */ PATHS.debug, "background-captures") };
 
 export function backgroundCaptureEnabled(role: ModelRole): boolean {
 	const selected = process.env.LH_BACKGROUND_CAPTURE?.split(",").map((value) => value.trim());
@@ -70,7 +70,7 @@ function describeError(value: unknown, depth = 0): unknown {
 export function createBackgroundCapture(input: { role: ModelRole; runId: string; sourceId?: string }) {
 	if (!backgroundCaptureEnabled(input.role)) return undefined;
 	const safe = (value: string) => value.replace(/[^a-zA-Z0-9_-]/g, "_");
-	const file = path.join(backgroundCaptureDir.current, `${safe(input.role)}-${safe(input.runId)}.json`);
+	const file = path.join(/* turbopackIgnore: true */ backgroundCaptureDir.current, `${safe(input.role)}-${safe(input.runId)}.json`);
 	const temporary = `${file}.tmp`;
 	const record: CaptureRecord = {
 		version: 1, ...input, startedAt: Date.now(), timings: [],

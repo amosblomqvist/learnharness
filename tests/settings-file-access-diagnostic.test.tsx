@@ -2,6 +2,7 @@ import React, { act } from "react";
 import assert from "node:assert/strict";
 import { test } from "node:test";
 import { parseHTML } from "linkedom";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { SettingsDialogBody } from "../components/settings/settings-dialog.tsx";
 
 type Write = (section: string, body: Record<string, unknown>) => Promise<Response> | Response;
@@ -37,7 +38,7 @@ async function withDialog(
 		await act(async () => { target.click(); });
 	};
 	try {
-		await act(async () => { root.render(<SettingsDialogBody initialSection="agent" onClose={() => {}} />); });
+		await act(async () => { root.render(<InteractionLayersProvider><SettingsDialogBody initialSection="agent" onClose={() => {}} /></InteractionLayersProvider>); });
 		await run(host, click);
 	} finally {
 		await act(async () => root.unmount());
@@ -94,6 +95,8 @@ test("an older unrelated response cannot restore stale file-access state", async
 		await act(async () => { finishGraph(Response.json({ settings: { version: 1, agent: previousAgent, graph: { enabled: false } }, fileAccessError: warning })); });
 		assert.equal(host.querySelector("[data-testid='file-access-config-error']"), null);
 		assert.equal(host.querySelector(restriction)?.getAttribute("aria-checked"), "false");
+		await click("[data-testid='settings-nav-graph']");
+		assert.equal(host.querySelector("[data-testid='toggle-extraction-enabled']")?.getAttribute("aria-checked"), "false");
 	});
 });
 
@@ -173,3 +176,30 @@ test("a queued folder addition is rebased after a pending removal", async () => 
 		assert.equal(host.querySelector("[data-testid='file-access-folder']")?.textContent?.includes("~/Study"), true);
 	});
 });
+
+for (const graphFirst of [true, false]) {
+	test("an unrelated snapshot cannot erase an agent acknowledgement (graph response first: " + graphFirst + ")", async () => {
+		const previousAgent = { fileAccess: { restricted: true, folders: [] } };
+		let finishAgent!: (response: Response) => void;
+		let finishGraph!: (response: Response) => void;
+		let nextAgent: Record<string, unknown> | undefined;
+		await withDialog({ settings: { version: 1, agent: previousAgent } }, (section, body) => {
+			if (section === "graph") return new Promise<Response>((resolve) => { finishGraph = resolve; });
+			assert.equal(section, "agent");
+			nextAgent = body;
+			return new Promise<Response>((resolve) => { finishAgent = resolve; });
+		}, async (host, click) => {
+			await click(restriction);
+			await click("[data-testid='settings-nav-graph']");
+			await click("[data-testid='toggle-extraction-enabled']");
+			const ackGraph = () => finishGraph(Response.json({
+				settings: { version: 1, agent: previousAgent, graph: { enabled: false } },
+			}));
+			const ackAgent = () => finishAgent(Response.json({ settings: { version: 1, agent: nextAgent } }));
+			for (const ack of graphFirst ? [ackGraph, ackAgent] : [ackAgent, ackGraph]) await act(async () => ack());
+			assert.equal(host.querySelector("[data-testid='toggle-extraction-enabled']")?.getAttribute("aria-checked"), "false");
+			await click("[data-testid='settings-nav-agent']");
+			assert.equal(host.querySelector(restriction)?.getAttribute("aria-checked"), "false");
+		});
+	});
+}
