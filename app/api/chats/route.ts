@@ -1,7 +1,6 @@
-import { chainsForSelection, formatChainLine } from "@/src/core";
+import { chainsForSelection, formatChainLine, placementOf, type ChatListItem, type ChatListResponse } from "@/src/core";
 import { newGraphContextMessage, type GraphContextPick } from "@/src/core";
 import { compactionInFlight, createChat, isTurnRunning, listChats, readSettingsRecord, stores, titleFromPrompt } from "@/src/server";
-import type { ChatListItem } from "@/src/core";
 
 /** The session picker's list: record-derived summaries (phase, pending
  *  question) + live liveness — a running turn marks the session busy
@@ -16,7 +15,23 @@ export async function GET() {
 		busy: isTurnRunning(c.id),
 		compacting: compactionInFlight(c.id),
 	}));
-	return Response.json({ chats });
+	let state;
+	try {
+		state = stores.sourceOrganizationStore.read();
+	} catch {
+		return Response.json({ chats, organization: null } satisfies ChatListResponse);
+	}
+
+	const organization = {
+		folders: state.folders.map(({ id, name, parentId, createdAt }) => ({ id, name, parentId, createdAt })),
+		placements: Object.fromEntries(
+			chats.flatMap(({ id }) => {
+				const placement = placementOf(state, id);
+				return placement ? [[id, { folderId: placement.folderId }] as const] : [];
+			}),
+		),
+	};
+	return Response.json({ chats, organization } satisfies ChatListResponse);
 }
 
 export async function POST(req: Request) {

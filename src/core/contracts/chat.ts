@@ -10,6 +10,7 @@ import type { LhMessage } from "../native-messages.ts";
 import type { Phase3 } from "../phases.ts";
 import type { PlanNodeStatus, PlanTree } from "./plan.ts";
 import type { EmissionStats } from "./graph.ts";
+import type { SourceFolder, SourcePlacement } from "../source-organization.ts";
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
@@ -320,6 +321,18 @@ export interface ChatListItem extends ChatSummary {
 	/** True while background context compaction holds the chat's model gate.
 	 * Supplied by the live compaction registry, not by saved compaction markers. */
 	compacting: boolean;
+}
+
+/** GET /api/chats payload: the session list plus the shared source
+ *  organization (folders + per-chat placements) from the same store Chains
+ *  uses. organization is null when the store refuses the read — the chats
+ *  list still answers. */
+export interface ChatListResponse {
+	chats: ChatListItem[];
+	organization: {
+		folders: Pick<SourceFolder, "id" | "name" | "parentId" | "createdAt">[];
+		placements: Record<string, Pick<SourcePlacement, "folderId">>;
+	} | null;
 }
 
 // ─── Learner images in the lesson (issue #363) ──────────────────────────────
