@@ -751,6 +751,7 @@ test("stream and model discovery suppress run_workflow so no SKILL.md files are 
 		fs.readFileSync(path.join(profileDir, "antigravity-acp", "last-session-new.json"), "utf8"),
 	) as { sessionNewParams: { _meta: { antigravity: { disabledTools: string[] } } } };
 	assert.ok(sessRec1.sessionNewParams._meta.antigravity.disabledTools.includes("run_workflow"));
+	assert.ok(sessRec1.sessionNewParams._meta.antigravity.disabledTools.includes("search_web"));
 	assert.equal(fs.existsSync(path.join(spawns[0]!.cwd, "skills", "system", "run-workflow", "SKILL.md")), false);
 
 	// Check stream temp workspace while active/parked contains no SKILL.md.
@@ -946,7 +947,11 @@ setInterval(() => {}, 1000);
 });
 
 test("parked ACP process that cancels/times out or moves on past held MCP tool call unparks cleanly and replays learner answer", async (t) => {
-	for (const streamMode of ["mcp-tool-timeout-and-retry", "mcp-tool-move-on"] as const) {
+	for (const streamMode of [
+		"mcp-tool-timeout-and-retry",
+		"mcp-tool-notifications-cancelled",
+		"mcp-tool-move-on",
+	] as const) {
 		const root = makeTempRoot(t, `lh-agy-${streamMode}-`);
 		const { authFile, profileDir } = makeSignedInProfile(root);
 		const spawns: SpawnRecord[] = [];
@@ -1000,6 +1005,17 @@ test("parked ACP process that cancels/times out or moves on past held MCP tool c
 		);
 		assert.equal(spawns.length, 2, `${streamMode}: learner answer must cold-start a fresh ACP session`);
 		assert.match(getFinalText(events2), /^Replayed \d+ blocks$/);
+		const history = readPromptHistory(profileDir);
+		assert.equal(history.length, 2, `${streamMode}: expected initial prompt plus cold-start replay prompt`);
+		const replayText = history[1]!.prompt
+			.filter((block): block is { type: "text"; text: string } => block.type === "text" && typeof block.text === "string")
+			.map((block) => block.text)
+			.join("\n\n");
+		assert.match(
+			replayText,
+			/\[tool result ask_user_question\]\nMy real answer/,
+			`${streamMode}: replay prompt must contain learner answer text inside [tool result ...] block`,
+		);
 		await waitForExit(spawns[1]!.child);
 		await waitForDirRemoved(spawns[1]!.runDir);
 	}
