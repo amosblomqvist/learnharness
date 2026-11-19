@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { spawnSync } from "node:child_process";
+import { spawn, spawnSync } from "node:child_process";
 import * as fs from "node:fs";
 import * as http from "node:http";
 import * as path from "node:path";
@@ -119,6 +119,11 @@ function buildConfigOptions(models, selectedModelId, selectedThought) {
 	const modelChoices = models.map((m) => {
 		const copy = { ...m };
 		delete copy.thoughtValues;
+		delete copy.usageWindow;
+		delete copy.omitUsageUpdate;
+		delete copy.emitPostReplyUsageInSameChunk;
+		delete copy.preReplyDelayMs;
+		delete copy.postReplyUsageDelayMs;
 		return copy;
 	});
 	const active = models.find((m) => m.value === selectedModelId) ?? models[0];
@@ -185,7 +190,7 @@ async function parseMcpResponseBody(response) {
 	return lastJson;
 }
 
-async function callMcpJsonRpc(url, authHeader, sessionId, payload, signal) {
+async function openMcpJsonRpc(url, authHeader, sessionId, payload, signal) {
 	const headers = {
 		"Content-Type": "application/json",
 		Accept: "application/json, text/event-stream",
@@ -199,8 +204,13 @@ async function callMcpJsonRpc(url, authHeader, sessionId, payload, signal) {
 		...(signal ? { signal } : {}),
 	});
 	const nextSessionId = res.headers.get("mcp-session-id") ?? sessionId;
+	return { res, status: res.status, headers: res.headers, sessionId: nextSessionId };
+}
+
+async function callMcpJsonRpc(url, authHeader, sessionId, payload, signal) {
+	const { res, status, sessionId: nextSessionId } = await openMcpJsonRpc(url, authHeader, sessionId, payload, signal);
 	const body = await parseMcpResponseBody(res);
-	return { status: res.status, sessionId: nextSessionId, body };
+	return { status, sessionId: nextSessionId, body };
 }
 
 const rl = readline.createInterface({ input: process.stdin, crlfDelay: Infinity });
@@ -462,6 +472,7 @@ rl.on("line", (line) => {
 			models,
 			currentModel: models[0]?.value ?? "",
 			currentThought: models[0]?.thoughtValues?.[0] ?? "",
+			modelConfigAttempts: new Map(),
 		};
 		sessions.set(sessionId, session);
 		simulateSkillFileIfWorkflowEnabled(cwd, msg.params?._meta);
@@ -483,6 +494,22 @@ rl.on("line", (line) => {
 				configOptions: buildConfigOptions(models, session.currentModel, session.currentThought),
 			},
 		});
+		if (isNew && process.env.FAKE_ACP_EMIT_USAGE_ON_SESSION_NEW === "1") {
+			const initialModel = models[0];
+			const initialWindow =
+				initialModel &&
+				initialModel.omitUsageUpdate !== true &&
+				typeof initialModel.usageWindow === "number"
+					? initialModel.usageWindow
+					: null;
+			if (initialWindow !== null) {
+				emitSessionUpdate(sessionId, {
+					sessionUpdate: "usage_update",
+					size: initialWindow,
+					used: 0,
+				});
+			}
+		}
 		return;
 	}
 
@@ -498,10 +525,42 @@ rl.on("line", (line) => {
 			return;
 		}
 
-		if (process.env.FAKE_ACP_HANG_CONFIG_VALUE && value === process.env.FAKE_ACP_HANG_CONFIG_VALUE) {
+		const attempt = configId === "model" ? (session.modelConfigAttempts.get(value) ?? 0) + 1 : 1;
+		if (configId === "model") {
+			session.modelConfigAttempts.set(value, attempt);
+		}
+
+		const shouldHang =
+			(process.env.FAKE_ACP_HANG_CONFIG_VALUE && value === process.env.FAKE_ACP_HANG_CONFIG_VALUE) ||
+			(attempt >= 2 && process.env.FAKE_ACP_HANG_BACKFILL_VALUE && value === process.env.FAKE_ACP_HANG_BACKFILL_VALUE);
+		if (shouldHang) {
+			const lateDelayMs = Number(process.env.FAKE_ACP_HANG_LATE_USAGE_MS ?? "0");
+			if (Number.isFinite(lateDelayMs) && lateDelayMs > 0) {
+				const selected = session.models.find((m) => m.value === value);
+				const envWindow = Number(process.env.FAKE_ACP_HANG_LATE_USAGE_WINDOW ?? "");
+				const lateWindow =
+					Number.isFinite(envWindow) && envWindow > 0
+						? envWindow
+						: typeof selected?.usageWindow === "number"
+							? selected.usageWindow
+							: null;
+				if (lateWindow !== null) {
+					setTimeout(() => {
+						emitSessionUpdate(sessionId, {
+							sessionUpdate: "usage_update",
+							size: lateWindow,
+							used: 0,
+						});
+					}, lateDelayMs);
+				}
+			}
 			return;
 		}
-		if (process.env.FAKE_ACP_ERROR_CONFIG_VALUE && value === process.env.FAKE_ACP_ERROR_CONFIG_VALUE) {
+
+		const shouldError =
+			(process.env.FAKE_ACP_ERROR_CONFIG_VALUE && value === process.env.FAKE_ACP_ERROR_CONFIG_VALUE) ||
+			(attempt >= 2 && process.env.FAKE_ACP_FAIL_BACKFILL_VALUE && value === process.env.FAKE_ACP_FAIL_BACKFILL_VALUE);
+		if (shouldError) {
 			writeOut({
 				jsonrpc: "2.0",
 				id: msg.id,
@@ -510,8 +569,53 @@ rl.on("line", (line) => {
 			return;
 		}
 
+		let preReplyUsageWindow = null;
+		let sameChunkPostReplyUsageWindow = null;
+		let deferredUsageWindow = null;
+		let deferredUsageDelayMs = 0;
+		let preReplyDelayMs = 0;
+		const envUsageDelayMs = Number(process.env.FAKE_ACP_USAGE_UPDATE_DELAY_MS ?? "0");
+		const envPreReplyDelayMs = Number(process.env.FAKE_ACP_PRE_REPLY_DELAY_MS ?? "0");
 		if (configId === "model") {
+			const prevModel = session.currentModel;
+			const modelChanged = value !== prevModel;
 			session.currentModel = value;
+			const selected = session.models.find((m) => m.value === value);
+			if (typeof selected?.preReplyDelayMs === "number" && selected.preReplyDelayMs > 0) {
+				preReplyDelayMs = selected.preReplyDelayMs;
+			} else if (Number.isFinite(envPreReplyDelayMs) && envPreReplyDelayMs > 0) {
+				preReplyDelayMs = envPreReplyDelayMs;
+			}
+			if (process.env.FAKE_ACP_EMIT_USAGE_ON_MODEL_CHANGE === "1") {
+				const foreignWindow = Number(process.env.FAKE_ACP_FOREIGN_SESSION_USAGE_WINDOW ?? "");
+				if (Number.isFinite(foreignWindow) && foreignWindow > 0) {
+					emitSessionUpdate(`${sessionId}-foreign`, {
+						sessionUpdate: "usage_update",
+						size: foreignWindow,
+						used: 0,
+					});
+				}
+				const omitUsage = selected?.omitUsageUpdate === true;
+				const nextWindow = !omitUsage && typeof selected?.usageWindow === "number" ? selected.usageWindow : null;
+				if (modelChanged && nextWindow !== null) {
+					if (selected?.emitPostReplyUsageInSameChunk === true) {
+						sameChunkPostReplyUsageWindow = nextWindow;
+					} else {
+						const modelPostDelay =
+							typeof selected?.postReplyUsageDelayMs === "number" && selected.postReplyUsageDelayMs > 0
+								? selected.postReplyUsageDelayMs
+								: Number.isFinite(envUsageDelayMs) && envUsageDelayMs > 0
+									? envUsageDelayMs
+									: 0;
+						if (modelPostDelay > 0) {
+							deferredUsageWindow = nextWindow;
+							deferredUsageDelayMs = modelPostDelay;
+						} else {
+							preReplyUsageWindow = nextWindow;
+						}
+					}
+				}
+			}
 		} else if (configId === "thought_level") {
 			session.currentThought = value;
 		}
@@ -524,16 +628,118 @@ rl.on("line", (line) => {
 		});
 
 		const configOptions = buildConfigOptions(session.models, session.currentModel, session.currentThought);
-		if (process.env.FAKE_ACP_CONFIG_VIA_NOTIFICATION === "1") {
-			emitSessionUpdate(sessionId, { sessionUpdate: "config_option_update", configOptions });
-			writeOut({ jsonrpc: "2.0", id: msg.id, result: {} });
-			return;
+		const sendReply = () => {
+			if (preReplyUsageWindow !== null) {
+				emitSessionUpdate(sessionId, {
+					sessionUpdate: "usage_update",
+					size: preReplyUsageWindow,
+					used: 0,
+				});
+			}
+			const replyPayload =
+				process.env.FAKE_ACP_CONFIG_VIA_NOTIFICATION === "1"
+					? { jsonrpc: "2.0", id: msg.id, result: {} }
+					: { jsonrpc: "2.0", id: msg.id, result: { configOptions } };
+			if (process.env.FAKE_ACP_CONFIG_VIA_NOTIFICATION === "1") {
+				emitSessionUpdate(sessionId, { sessionUpdate: "config_option_update", configOptions });
+			}
+			const exitAfterConfig =
+				configId === "model" &&
+				Boolean(process.env.FAKE_ACP_EXIT_AFTER_CONFIG_VALUE) &&
+				value === process.env.FAKE_ACP_EXIT_AFTER_CONFIG_VALUE;
+			const afterReplyWritten = () => {
+				if (!exitAfterConfig) return;
+				const postExitDelayMs = Number(process.env.FAKE_ACP_POST_EXIT_USAGE_DELAY_MS ?? "0");
+				const postExitHoldMs = Number(process.env.FAKE_ACP_POST_EXIT_HOLD_STDOUT_MS ?? "0");
+				if (Number.isFinite(postExitDelayMs) && postExitDelayMs > 0) {
+					const rawSize = Number(process.env.FAKE_ACP_POST_EXIT_USAGE_WINDOW ?? "131072");
+					const size = Number.isFinite(rawSize) && rawSize > 0 ? rawSize : 131072;
+					const payload = JSON.stringify({
+						jsonrpc: "2.0",
+						method: "session/update",
+						params: {
+							sessionId,
+							update: {
+								sessionUpdate: "usage_update",
+								size,
+								used: 0,
+							},
+						},
+					});
+					const helper = spawn(
+						process.execPath,
+						[
+							"-e",
+							'process.stdout.on("error", () => process.exit(0)); setTimeout(() => { process.stdout.write(process.env.FAKE_ACP_POST_EXIT_PAYLOAD + "\\n", () => process.exit(0)); }, Number(process.env.FAKE_ACP_POST_EXIT_DELAY_MS));',
+						],
+						{
+							detached: true,
+							stdio: ["ignore", 1, "ignore"],
+							env: {
+								...process.env,
+								FAKE_ACP_POST_EXIT_PAYLOAD: payload,
+								FAKE_ACP_POST_EXIT_DELAY_MS: String(postExitDelayMs),
+							},
+						},
+					);
+					helper.unref();
+				} else if (Number.isFinite(postExitHoldMs) && postExitHoldMs > 0) {
+					const helper = spawn(
+						process.execPath,
+						["-e", "setTimeout(() => process.exit(0), Number(process.env.FAKE_ACP_POST_EXIT_HOLD_MS));"],
+						{
+							detached: true,
+							stdio: ["ignore", 1, "ignore"],
+							env: {
+								...process.env,
+								FAKE_ACP_POST_EXIT_HOLD_MS: String(postExitHoldMs),
+							},
+						},
+					);
+					helper.unref();
+				}
+				process.exit(0);
+			};
+
+			if (sameChunkPostReplyUsageWindow !== null) {
+				const updatePayload = {
+					jsonrpc: "2.0",
+					method: "session/update",
+					params: {
+						sessionId,
+						update: {
+							sessionUpdate: "usage_update",
+							size: sameChunkPostReplyUsageWindow,
+							used: 0,
+						},
+					},
+				};
+				process.stdout.write(
+					`${JSON.stringify(replyPayload)}\n${JSON.stringify(updatePayload)}\n`,
+					afterReplyWritten,
+				);
+			} else if (exitAfterConfig) {
+				process.stdout.write(`${JSON.stringify(replyPayload)}\n`, afterReplyWritten);
+			} else {
+				writeOut(replyPayload);
+			}
+			if (deferredUsageWindow !== null) {
+				const windowToEmit = deferredUsageWindow;
+				setTimeout(() => {
+					emitSessionUpdate(sessionId, {
+						sessionUpdate: "usage_update",
+						size: windowToEmit,
+						used: 0,
+					});
+				}, deferredUsageDelayMs);
+			}
+		};
+
+		if (preReplyDelayMs > 0) {
+			setTimeout(sendReply, preReplyDelayMs);
+		} else {
+			sendReply();
 		}
-		writeOut({
-			jsonrpc: "2.0",
-			id: msg.id,
-			result: { configOptions },
-		});
 		return;
 	}
 
@@ -705,6 +911,7 @@ rl.on("line", (line) => {
 					streamMode === "thinking-only-then-mcp-tool" ||
 					streamMode === "two-mcp-tools" ||
 					streamMode === "mcp-tool-timeout-and-retry" ||
+					streamMode === "mcp-tool-notifications-cancelled" ||
 					streamMode === "mcp-tool-move-on") &&
 				!(process.env.FAKE_ACP_TEXT_ON_REPLAY === "1" && isReplayPrompt)
 			) {
@@ -835,6 +1042,66 @@ rl.on("line", (line) => {
 							usage: { inputTokens: 200, cachedReadTokens: 50, outputTokens: 20, totalTokens: 220 },
 						},
 					});
+					return;
+				}
+
+				if (streamMode === "mcp-tool-notifications-cancelled") {
+					// Synchronize deterministically on HTTP 200 SSE headers from tools/call:
+					// StreamableHTTPServerTransport runs CallToolRequestSchema (queue.add +
+					// onCall admission) before flushing response headers, while leaving the
+					// SSE stream body open.
+					const openCall = await openMcpJsonRpc(server.url, authHeader, initRes.sessionId, {
+						jsonrpc: "2.0",
+						id: 20,
+						method: "tools/call",
+						params: { name: "ask_user_question", arguments: { question: "Initial question" } },
+					});
+					const contentType = openCall.headers.get("content-type") ?? "";
+					if (openCall.status !== 200 || !contentType.includes("text/event-stream")) {
+						writeOut({
+							jsonrpc: "2.0",
+							id: msg.id,
+							error: {
+								code: -32031,
+								message: `Expected HTTP 200 text/event-stream for tools/call, got ${openCall.status} (${contentType})`,
+							},
+						});
+						return;
+					}
+					// Keep the original tools/call SSE stream open (do not await or cancel its
+					// body) while sending notifications/cancelled only (no id: 21 retry).
+					// Keep session/prompt pending (no end_turn) so the test genuinely exercises
+					// LearnHarness's onCancel -> handleCancelledToolCall() child teardown.
+					try {
+						const cancelRes = await callMcpJsonRpc(server.url, authHeader, initRes.sessionId, {
+							jsonrpc: "2.0",
+							method: "notifications/cancelled",
+							params: { requestId: 20, reason: "context deadline exceeded" },
+						});
+						if (cancelRes.status !== 202) {
+							writeOut({
+								jsonrpc: "2.0",
+								id: msg.id,
+								error: {
+									code: -32032,
+									message: `Expected HTTP 202 for notifications/cancelled, got ${cancelRes.status}`,
+								},
+							});
+						}
+					} catch (err) {
+						// Bridge teardown from onCancel -> kill() may close sockets before HTTP 202 flushes.
+						const code = err?.cause?.code ?? err?.code;
+						const msgText = err instanceof Error ? err.message : String(err);
+						const isTeardownReset =
+							code === "ECONNRESET" ||
+							code === "UND_ERR_SOCKET" ||
+							code === "ECONNREFUSED" ||
+							err?.name === "AbortError" ||
+							/fetch failed|socket|closed|reset/i.test(msgText);
+						if (!isTeardownReset) {
+							throw err;
+						}
+					}
 					return;
 				}
 
@@ -995,6 +1262,29 @@ rl.on("close", () => {
 			activeServer.close();
 		} catch {
 			// ignore
+		}
+	}
+	if (process.env.FAKE_ACP_EMIT_USAGE_ON_STDIN_EOF === "1") {
+		const lastSession = [...sessions.values()].at(-1);
+		if (lastSession) {
+			const rawSize = Number(process.env.FAKE_ACP_STDIN_EOF_USAGE_WINDOW ?? "131072");
+			const size = Number.isFinite(rawSize) && rawSize > 0 ? rawSize : 131072;
+			const payload = {
+				jsonrpc: "2.0",
+				method: "session/update",
+				params: {
+					sessionId: lastSession.sessionId,
+					update: {
+						sessionUpdate: "usage_update",
+						size,
+						used: 0,
+					},
+				},
+			};
+			process.stdout.write(`${JSON.stringify(payload)}\n`, () => {
+				process.exit(0);
+			});
+			return;
 		}
 	}
 	process.exit(0);

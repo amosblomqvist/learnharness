@@ -30,7 +30,7 @@ import {
 	type AcpPromptResponse,
 	type AcpSessionUpdate,
 } from "./acp-client.ts";
-import { ANTIGRAVITY_CANCEL_GRACE_MS } from "./constants.ts";
+import { ANTIGRAVITY_CANCEL_GRACE_MS, ANTIGRAVITY_DISABLED_TOOLS } from "./constants.ts";
 import { resolveAntigravityRuntimeSync, type ResolvedAntigravityRuntime } from "./installation.ts";
 import {
 	findParkedAntigravityProcess,
@@ -527,7 +527,7 @@ class AcpSessionProcess implements LiveAntigravityProcess {
 				cwd,
 				mcpServers: [bridge.toAcpMcpServer()],
 				systemPromptAppend: systemPrompt,
-				disabledTools: ["run_workflow"],
+				disabledTools: [...ANTIGRAVITY_DISABLED_TOOLS],
 			});
 			this.acpSessionId = sessionResult.sessionId;
 			if (this.stopping) return;

@@ -16,8 +16,15 @@ export const ANTIGRAVITY_SESSION_NEW_TIMEOUT_MS = 30_000;
 export const ANTIGRAVITY_MODEL_PROBE_TIMEOUT_MS = 4_000;
 export const ANTIGRAVITY_SET_CONFIG_TIMEOUT_MS = 10_000;
 export const ANTIGRAVITY_CANCEL_GRACE_MS = 2_000;
+/** Local orphan-reap ceiling for parked ACP processes. In practice agy 1.5.12
+ *  cancels held MCP calls after ~180s (~3 min), after which LearnHarness
+ *  unparks and cold-replays the learner answer. */
 export const ANTIGRAVITY_PARK_IDLE_TIMEOUT_MS = 10 * 60_000;
 export const ANTIGRAVITY_MCP_TOOL_TIMEOUT_MS = 30 * 60_000;
+
+/** Native Antigravity built-in tools suppressed on every ACP session so the
+ *  model cannot write SKILL.md files or bypass LearnHarness permission/web controls. */
+export const ANTIGRAVITY_DISABLED_TOOLS = ["run_workflow", "search_web"] as const;
 
 export const ANTIGRAVITY_AUTH_URL_MARKER = "__LH_ANTIGRAVITY_AUTH_URL__";
 export const ANTIGRAVITY_STDERR_AUTH_PROMPT = "Open the following link to authenticate the ACP server:";

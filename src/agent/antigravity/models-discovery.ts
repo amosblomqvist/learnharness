@@ -5,13 +5,19 @@ import * as os from "node:os";
 import * as path from "node:path";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import {
+	AcpRpcError,
 	spawnAcpClient,
 	type AcpConfigOption,
 	type AcpConfigOptionChoice,
 	type AcpConfigOptionGroup,
 } from "./acp-client.ts";
-import { ANTIGRAVITY_MODEL_PROBE_TIMEOUT_MS } from "./constants.ts";
-import type { ResolvedAntigravityRuntime } from "./installation.ts";
+import type { AntigravityRuntimeSource } from "../../core/contracts/antigravity.ts";
+import {
+	ANTIGRAVITY_DISABLED_TOOLS,
+	ANTIGRAVITY_MANAGED_VERSION,
+	ANTIGRAVITY_MODEL_PROBE_TIMEOUT_MS,
+} from "./constants.ts";
+import type { AntigravityRuntimeKind, ResolvedAntigravityRuntime } from "./installation.ts";
 import {
 	antigravityModelsCachePath,
 	buildAntigravityEnvironment,
@@ -30,6 +36,8 @@ export const ALL_THINKING_LEVELS: readonly ThinkingLevel[] = [
 
 export type ThinkingLevelMap = Record<ThinkingLevel, string | null>;
 
+export type AntigravityContextWindowSource = "explicit" | "usage_update";
+
 export interface DiscoveredAntigravityModel {
 	id: string;
 	name: string;
@@ -38,13 +46,33 @@ export interface DiscoveredAntigravityModel {
 	thinkingLevelMap: ThinkingLevelMap;
 	input: ("text" | "image")[];
 	contextWindow: number | null;
+	contextWindowSource?: AntigravityContextWindowSource;
 	maxTokens: number | null;
+}
+
+export interface AntigravityModelsCacheRuntime {
+	source: AntigravityRuntimeSource;
+	kind: AntigravityRuntimeKind;
+	version: string | null;
+	executablePath: string;
 }
 
 export interface AntigravityModelsCache {
 	version: 1;
 	updatedAt: string;
+	runtime?: AntigravityModelsCacheRuntime;
 	models: DiscoveredAntigravityModel[];
+}
+
+export function isVerifiedManagedUsageUpdateRuntime(
+	runtime: Pick<AntigravityModelsCacheRuntime, "source" | "kind" | "version"> | null | undefined,
+): boolean {
+	return Boolean(
+		runtime &&
+			runtime.kind === "acp-server" &&
+			runtime.source === "managed" &&
+			runtime.version === ANTIGRAVITY_MANAGED_VERSION,
+	);
 }
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
@@ -181,13 +209,19 @@ function configOptionId(option: AcpConfigOption): string {
 
 export function findModelConfigOption(
 	configOptions: readonly AcpConfigOption[],
-): { configId: string; choices: AcpConfigOptionChoice[] } | null {
+): { configId: string; choices: AcpConfigOptionChoice[]; currentValue: string | null } | null {
 	for (const option of configOptions) {
 		const id = configOptionId(option);
 		if (option.category === "model" || id === "model") {
 			const choices = flattenChoices(option);
 			if (choices.length > 0) {
-				return { configId: id || "model", choices };
+				const rawCurrent =
+					typeof option.currentValue === "string" && option.currentValue.trim()
+						? option.currentValue.trim()
+						: typeof option.value === "string" && option.value.trim()
+							? option.value.trim()
+							: null;
+				return { configId: id || "model", choices, currentValue: rawCurrent };
 			}
 		}
 	}
@@ -263,9 +297,18 @@ function extractInputModalities(choice: AcpConfigOptionChoice): ("text" | "image
 function buildDiscoveredModel(
 	choice: AcpConfigOptionChoice,
 	thoughtValues: readonly string[],
+	observedContextWindow: number | null = null,
 ): DiscoveredAntigravityModel {
 	const { reasoning, supportedThinkingLevels, thinkingLevelMap } = buildThinkingConfigFromRawValues(thoughtValues);
 	const displayName = typeof choice.name === "string" && choice.name.trim() ? choice.name.trim() : choice.value;
+	const explicitContextWindow = extractContextWindow(choice);
+	const contextWindow = explicitContextWindow ?? observedContextWindow;
+	const contextWindowSource: AntigravityContextWindowSource | undefined =
+		explicitContextWindow !== null
+			? "explicit"
+			: observedContextWindow !== null
+				? "usage_update"
+				: undefined;
 	return {
 		id: choice.value,
 		name: displayName,
@@ -273,9 +316,41 @@ function buildDiscoveredModel(
 		supportedThinkingLevels,
 		thinkingLevelMap,
 		input: extractInputModalities(choice),
-		contextWindow: extractContextWindow(choice),
+		contextWindow,
+		...(contextWindowSource ? { contextWindowSource } : {}),
 		maxTokens: extractMaxTokens(choice),
 	};
+}
+
+const VALID_RUNTIME_SOURCES = new Set<AntigravityRuntimeSource>([
+	"env",
+	"custom",
+	"managed",
+	"cli",
+	"t3-external",
+]);
+const VALID_RUNTIME_KINDS = new Set<AntigravityRuntimeKind>(["acp-server", "cli"]);
+
+function sanitizeCachedRuntime(raw: unknown): AntigravityModelsCacheRuntime | undefined {
+	if (!isPlainObject(raw)) return undefined;
+	const source =
+		typeof raw.source === "string" && VALID_RUNTIME_SOURCES.has(raw.source as AntigravityRuntimeSource)
+			? (raw.source as AntigravityRuntimeSource)
+			: null;
+	const kind =
+		typeof raw.kind === "string" && VALID_RUNTIME_KINDS.has(raw.kind as AntigravityRuntimeKind)
+			? (raw.kind as AntigravityRuntimeKind)
+			: null;
+	const executablePath =
+		typeof raw.executablePath === "string" && raw.executablePath.trim() ? raw.executablePath : null;
+	const version =
+		raw.version === null
+			? null
+			: typeof raw.version === "string" && raw.version.trim()
+				? raw.version.trim()
+				: undefined;
+	if (!source || !kind || !executablePath || version === undefined) return undefined;
+	return { source, kind, version, executablePath };
 }
 
 function sanitizeCachedModel(raw: unknown): DiscoveredAntigravityModel | null {
@@ -318,6 +393,12 @@ function sanitizeCachedModel(raw: unknown): DiscoveredAntigravityModel | null {
 	}
 	if (inputSet.size === 0) inputSet.add("text");
 
+	const contextWindow = isPositiveInteger(raw.contextWindow) ? raw.contextWindow : null;
+	const contextWindowSource: AntigravityContextWindowSource | undefined =
+		contextWindow !== null && (raw.contextWindowSource === "explicit" || raw.contextWindowSource === "usage_update")
+			? raw.contextWindowSource
+			: undefined;
+
 	return {
 		id,
 		name,
@@ -325,7 +406,8 @@ function sanitizeCachedModel(raw: unknown): DiscoveredAntigravityModel | null {
 		supportedThinkingLevels: effectiveReasoning ? supportedThinkingLevels : ["off"],
 		thinkingLevelMap,
 		input: [...inputSet],
-		contextWindow: isPositiveInteger(raw.contextWindow) ? raw.contextWindow : null,
+		contextWindow,
+		...(contextWindowSource ? { contextWindowSource } : {}),
 		maxTokens: isPositiveInteger(raw.maxTokens) ? raw.maxTokens : null,
 	};
 }
@@ -339,9 +421,11 @@ export function readAntigravityModelsCache(
 		if (!isPlainObject(raw) || raw.version !== 1 || !Array.isArray(raw.models)) return null;
 		const models = raw.models.map(sanitizeCachedModel).filter((m): m is DiscoveredAntigravityModel => m !== null);
 		if (models.length === 0) return null;
+		const runtime = sanitizeCachedRuntime(raw.runtime);
 		return {
 			version: 1,
 			updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date(0).toISOString(),
+			...(runtime ? { runtime } : {}),
 			models,
 		};
 	} catch {
@@ -358,11 +442,25 @@ export function hasCachedAntigravityModels(
 
 export function writeAntigravityModelsCache(
 	models: DiscoveredAntigravityModel[],
-	options: { dataDir?: string; env?: Record<string, string | undefined>; updatedAt?: string } = {},
+	options: {
+		dataDir?: string;
+		env?: Record<string, string | undefined>;
+		updatedAt?: string;
+		runtime?: AntigravityModelsCacheRuntime;
+	} = {},
 ): AntigravityModelsCache {
+	const runtime = options.runtime
+		? {
+				source: options.runtime.source,
+				kind: options.runtime.kind,
+				version: options.runtime.version,
+				executablePath: options.runtime.executablePath,
+			}
+		: undefined;
 	const cache: AntigravityModelsCache = {
 		version: 1,
 		updatedAt: options.updatedAt ?? new Date().toISOString(),
+		...(runtime ? { runtime } : {}),
 		models,
 	};
 	const cachePath = antigravityModelsCachePath(options);
@@ -381,6 +479,7 @@ export interface DiscoverAntigravityModelsOptions {
 	platform?: NodeJS.Platform;
 	spawnProcess?: typeof spawn;
 	modelProbeTimeoutMs?: number;
+	stdoutDrainMs?: number;
 }
 
 export async function discoverAntigravityModels(
@@ -390,6 +489,15 @@ export async function discoverAntigravityModels(
 	const platform = options.platform ?? process.platform;
 	const baseEnv = options.env ?? process.env;
 	const modelProbeTimeoutMs = options.modelProbeTimeoutMs ?? ANTIGRAVITY_MODEL_PROBE_TIMEOUT_MS;
+	// Google's pinned managed agy_acp_server (1.4.5) awaits _send_usage_update
+	// before replying to session/set_config_option when switching to a different model,
+	// omitting it only when get_context_window_size(model_id) returns None (unknown limit),
+	// and returns early without _send_usage_update when model_id === current_model_id.
+	// Pre-reply ordering is verified only for that pinned managed build; custom, external,
+	// or unpinned acp-server binaries and standalone agy (kind === "cli") never infer
+	// contextWindow from usage_update (keeping explicit choice metadata or null; live
+	// turns capture cliContextWindow in stream.ts).
+	const allowUsageUpdateInference = isVerifiedManagedUsageUpdateRuntime(runtime);
 
 	const profileDir = ensureAntigravityProfile({
 		authFile: options.authFile,
@@ -412,8 +520,44 @@ export async function discoverAntigravityModels(
 		platform,
 	});
 
+	let activeSessionId: string | null = null;
 	let latestConfigOptions: AcpConfigOption[] | undefined;
 	let configUpdateGeneration = 0;
+	let initialModelId: string | null = null;
+	let activeModelId: string | null = null;
+	let initialSessionContextWindow: number | null = null;
+	let usageStreamTainted = false;
+	let inModelProbe = false;
+	let completedAtLeastOneProbe = false;
+	let usageUpdatesInCurrentProbe = 0;
+	let usageWindowInCurrentProbe: number | null = null;
+
+	const discovered: DiscoveredAntigravityModel[] = [];
+	const knownModelWindows = new Map<string, number>();
+	const initialSessionInferredIndices = new Set<number>();
+
+	const preSessionConfigOptions = new Map<string, AcpConfigOption[]>();
+	const preSessionUsageWindow = new Map<string, number>();
+
+	const taintForOutOfOrderUsage = (): void => {
+		usageStreamTainted = true;
+		initialSessionContextWindow = null;
+		knownModelWindows.clear();
+		usageWindowInCurrentProbe = null;
+		usageUpdatesInCurrentProbe = 0;
+		// Any earlier entry that relied on session/new + same-model silence assumed strict
+		// pre-reply ordering; clear those back to null while preserving explicit choice
+		// metadata and directly observed single-update entries.
+		for (const idx of initialSessionInferredIndices) {
+			const entry = discovered[idx];
+			if (entry) {
+				const clearedEntry: DiscoveredAntigravityModel = { ...entry, contextWindow: null };
+				delete clearedEntry.contextWindowSource;
+				discovered[idx] = clearedEntry;
+			}
+		}
+		initialSessionInferredIndices.clear();
+	};
 
 	const client = spawnAcpClient({
 		cwd,
@@ -422,21 +566,144 @@ export async function discoverAntigravityModels(
 		profileDir,
 		platform,
 		spawnProcess: options.spawnProcess,
-		onSessionUpdate: (_sessionId, update) => {
+		onRpcSettled: (method) => {
+			if (method === "session/set_config_option") {
+				inModelProbe = false;
+				completedAtLeastOneProbe = true;
+			}
+		},
+		onSessionUpdate: (sessionId, update) => {
+			if (activeSessionId !== null) {
+				if (sessionId !== undefined && sessionId !== activeSessionId) {
+					return;
+				}
+				if (update.sessionUpdate === "config_option_update" && Array.isArray(update.configOptions)) {
+					latestConfigOptions = update.configOptions;
+					configUpdateGeneration++;
+				}
+				if (allowUsageUpdateInference && update.sessionUpdate === "usage_update") {
+					const size = update.size;
+					if (typeof size === "number" && Number.isFinite(size) && size > 0) {
+						const rounded = Math.round(size);
+						if (usageStreamTainted) {
+							return;
+						}
+						if (inModelProbe) {
+							usageUpdatesInCurrentProbe++;
+							if (usageUpdatesInCurrentProbe > 1) {
+								// Multiple usage_update notifications landed during a single probe
+								// (e.g., a delayed update from a prior switch overlapped this one).
+								taintForOutOfOrderUsage();
+								return;
+							}
+							usageWindowInCurrentProbe = rounded;
+							return;
+						}
+						if (completedAtLeastOneProbe) {
+							// Out-of-band usage_update arrived outside an active probe after a
+							// completed model switch (including in the same stdout chunk after
+							// the reply), violating pre-reply ordering.
+							taintForOutOfOrderUsage();
+							return;
+						}
+						// Deferred initial usage_update from session/new before the first probe begins.
+						initialSessionContextWindow = rounded;
+					}
+				}
+				return;
+			}
+
+			// Before session/new returns sessionId, buffer per-session updates so only
+			// notifications matching the created sessionId (or sessionless ones) apply.
+			const key = sessionId ?? "";
 			if (update.sessionUpdate === "config_option_update" && Array.isArray(update.configOptions)) {
-				latestConfigOptions = update.configOptions;
-				configUpdateGeneration++;
+				preSessionConfigOptions.set(key, update.configOptions);
+			}
+			if (allowUsageUpdateInference && update.sessionUpdate === "usage_update") {
+				const size = update.size;
+				if (typeof size === "number" && Number.isFinite(size) && size > 0) {
+					preSessionUsageWindow.set(key, Math.round(size));
+				}
 			}
 		},
 	});
+
+	const probeModelConfig = async (sessionId: string, configId: string, value: string) => {
+		inModelProbe = true;
+		usageUpdatesInCurrentProbe = 0;
+		usageWindowInCurrentProbe = null;
+		try {
+			return await client.setConfigOption(sessionId, configId, value, modelProbeTimeoutMs);
+		} finally {
+			inModelProbe = false;
+			completedAtLeastOneProbe = true;
+		}
+	};
+
+	const resolveObservedContextWindow = (
+		modelId: string,
+		prevActiveModelId: string | null,
+	): { contextWindow: number | null; inferredFromInitial: boolean } => {
+		if (!allowUsageUpdateInference || usageStreamTainted) {
+			return { contextWindow: null, inferredFromInitial: false };
+		}
+		if (usageUpdatesInCurrentProbe === 1 && usageWindowInCurrentProbe !== null) {
+			knownModelWindows.set(modelId, usageWindowInCurrentProbe);
+			return {
+				contextWindow: usageWindowInCurrentProbe,
+				inferredFromInitial: prevActiveModelId === modelId && modelId === initialModelId,
+			};
+		}
+		// Only a confirmed same-model no-op (prevActiveModelId === modelId) may reuse a
+		// known window or the deferred session/new window. Switching to a different model
+		// that replies silently means unknown limit (None) and must preserve null.
+		if (usageUpdatesInCurrentProbe === 0 && prevActiveModelId === modelId) {
+			const known = knownModelWindows.get(modelId);
+			if (known !== undefined) {
+				return { contextWindow: known, inferredFromInitial: false };
+			}
+			if (modelId === initialModelId && initialSessionContextWindow !== null) {
+				knownModelWindows.set(modelId, initialSessionContextWindow);
+				return { contextWindow: initialSessionContextWindow, inferredFromInitial: true };
+			}
+		}
+		return { contextWindow: null, inferredFromInitial: false };
+	};
+
+	const handleProbeFailure = (err: unknown): void => {
+		activeModelId = null;
+		usageWindowInCurrentProbe = null;
+		usageUpdatesInCurrentProbe = 0;
+		// A non-RPC-error rejection (such as AcpTimeoutError) leaves the server-side
+		// switch in flight, so a late usage_update cannot be unambiguously attributed
+		// to subsequent models on this session.
+		if (!(err instanceof AcpRpcError)) {
+			usageStreamTainted = true;
+		}
+	};
 
 	try {
 		await client.initialize();
 		const sessionResult = await client.sessionNew({
 			cwd,
 			mcpServers: [],
-			disabledTools: ["run_workflow"],
+			disabledTools: [...ANTIGRAVITY_DISABLED_TOOLS],
 		});
+
+		activeSessionId = sessionResult.sessionId;
+		const bufferedConfig = preSessionConfigOptions.get(activeSessionId) ?? preSessionConfigOptions.get("");
+		if (bufferedConfig) {
+			latestConfigOptions = bufferedConfig;
+			configUpdateGeneration++;
+		}
+		if (allowUsageUpdateInference) {
+			const bufferedUsage = preSessionUsageWindow.get(activeSessionId) ?? preSessionUsageWindow.get("");
+			if (bufferedUsage !== undefined) {
+				initialSessionContextWindow = bufferedUsage;
+			}
+		}
+		preSessionConfigOptions.clear();
+		preSessionUsageWindow.clear();
 
 		const initialConfigOptions = Array.isArray(sessionResult.configOptions)
 			? sessionResult.configOptions
@@ -447,10 +714,13 @@ export async function discoverAntigravityModels(
 			throw new Error("Antigravity ACP did not advertise any available models.");
 		}
 
+		initialModelId = modelOption.currentValue;
+		activeModelId = initialModelId;
+
 		const initialThoughtOption = findThoughtLevelConfigOption(initialConfigOptions);
 		const fallbackThoughtValues = initialThoughtOption?.values ?? [];
 
-		const discovered: DiscoveredAntigravityModel[] = [];
+		const backfillCandidates: Array<{ index: number; choice: AcpConfigOptionChoice }> = [];
 
 		for (const choice of modelOption.choices) {
 			if (client.isClosed()) {
@@ -459,13 +729,10 @@ export async function discoverAntigravityModels(
 			}
 
 			const genBefore = configUpdateGeneration;
+			const prevActiveModelId = activeModelId;
 			try {
-				const res = await client.setConfigOption(
-					sessionResult.sessionId,
-					modelOption.configId,
-					choice.value,
-					modelProbeTimeoutMs,
-				);
+				const res = await probeModelConfig(sessionResult.sessionId, modelOption.configId, choice.value);
+				activeModelId = choice.value;
 
 				let perModelOptions: AcpConfigOption[] | undefined;
 				if (Array.isArray(res.configOptions)) {
@@ -474,24 +741,82 @@ export async function discoverAntigravityModels(
 					perModelOptions = latestConfigOptions;
 				}
 
-				if (perModelOptions) {
-					const perModelThought = findThoughtLevelConfigOption(perModelOptions);
-					discovered.push(buildDiscoveredModel(choice, perModelThought?.values ?? []));
-				} else {
-					discovered.push(buildDiscoveredModel(choice, fallbackThoughtValues));
+				const thoughtValues = perModelOptions
+					? (findThoughtLevelConfigOption(perModelOptions)?.values ?? [])
+					: fallbackThoughtValues;
+				const explicitContextWindow = extractContextWindow(choice);
+				const observed = resolveObservedContextWindow(choice.value, prevActiveModelId);
+				const modelEntry = buildDiscoveredModel(choice, thoughtValues, observed.contextWindow);
+				const idx = discovered.push(modelEntry) - 1;
+				if (explicitContextWindow === null && observed.inferredFromInitial) {
+					initialSessionInferredIndices.add(idx);
 				}
-			} catch {
+				if (
+					allowUsageUpdateInference &&
+					modelEntry.contextWindow === null &&
+					(prevActiveModelId === choice.value || prevActiveModelId === null)
+				) {
+					backfillCandidates.push({ index: idx, choice });
+				}
+			} catch (err) {
 				// Graceful fallback per model on bounded timeout or per-model error.
+				handleProbeFailure(err);
 				discovered.push(buildDiscoveredModel(choice, fallbackThoughtValues));
 			}
+		}
+
+		// Re-probe any same-model no-op candidates that stayed null (e.g., the initial active
+		// model when session/new had not emitted usage_update before Pass 1) once a switch to
+		// another model has changed activeModelId.
+		if (allowUsageUpdateInference && !usageStreamTainted && backfillCandidates.length > 0 && !client.isClosed()) {
+			for (const { index, choice } of backfillCandidates) {
+				if (client.isClosed() || usageStreamTainted) break;
+				if (discovered[index]?.contextWindow !== null) continue;
+				if (activeModelId === choice.value) continue;
+				const prevActiveModelId = activeModelId;
+				try {
+					await probeModelConfig(sessionResult.sessionId, modelOption.configId, choice.value);
+					activeModelId = choice.value;
+					const observed = resolveObservedContextWindow(choice.value, prevActiveModelId);
+					if (observed.contextWindow !== null) {
+						discovered[index] = {
+							...discovered[index]!,
+							contextWindow: observed.contextWindow,
+							contextWindowSource: "usage_update",
+						};
+						if (observed.inferredFromInitial) {
+							initialSessionInferredIndices.add(index);
+						}
+					}
+				} catch (err) {
+					// Keep null on bounded timeout or error during backfill and invalidate active model tracking.
+					handleProbeFailure(err);
+				}
+			}
+		}
+
+		// Close and drain the ACP child/reader before writing models.json so any
+		// trailing out-of-order usage_update arriving during shutdown taints
+		// `discovered` before disk persistence (matching the returned cache). If
+		// stdout cannot drain within the bounded window, taint session-inferred
+		// entries conservatively.
+		await client.close({ stdoutDrainMs: options.stdoutDrainMs }).catch(() => {});
+		if (!client.isStdoutDrained()) {
+			taintForOutOfOrderUsage();
 		}
 
 		return writeAntigravityModelsCache(discovered, {
 			dataDir: options.dataDir,
 			env: baseEnv,
+			runtime: {
+				source: runtime.source,
+				kind: runtime.kind,
+				version: runtime.version,
+				executablePath: runtime.executablePath,
+			},
 		});
 	} finally {
-		await client.close().catch(() => {});
+		await client.close({ stdoutDrainMs: options.stdoutDrainMs }).catch(() => {});
 		fs.rmSync(runDir, { recursive: true, force: true });
 	}
 }

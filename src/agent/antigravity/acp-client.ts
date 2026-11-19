@@ -3,6 +3,7 @@ import * as fs from "node:fs";
 import * as readline from "node:readline";
 import packageMetadata from "../../../package.json" with { type: "json" };
 import {
+	ANTIGRAVITY_DISABLED_TOOLS,
 	ANTIGRAVITY_INIT_PROBE_TIMEOUT_MS,
 	ANTIGRAVITY_LOGOUT_TIMEOUT_MS,
 	ANTIGRAVITY_OAUTH_TIMEOUT_MS,
@@ -42,9 +43,11 @@ export async function terminateAcpProcess(
 			done = true;
 			clearTimeout(killTimer);
 			if (reapTimer) clearTimeout(reapTimer);
+			child.removeListener("exit", finish);
 			child.removeListener("close", finish);
 			resolve();
 		};
+		child.once("exit", finish);
 		child.once("close", finish);
 
 		const killTimer = setTimeout(() => {
@@ -290,6 +293,7 @@ export interface CreateAcpClientOptions {
 	platform?: NodeJS.Platform;
 	spawnProcess?: typeof spawn;
 	onSessionUpdate?: (sessionId: string | undefined, update: AcpSessionUpdate) => void;
+	onRpcSettled?: (method: string, ok: boolean) => void;
 	onPermissionRequest?: (params: AcpPermissionRequestParams) => void;
 	approvePermission?: (params: AcpPermissionRequestParams) => boolean;
 	onStderrLine?: (line: string) => void;
@@ -301,6 +305,7 @@ export interface AcpClient {
 	readonly child: ChildProcess;
 	readonly stderrTail: () => string;
 	readonly isClosed: () => boolean;
+	readonly isStdoutDrained: () => boolean;
 	initialize(timeoutMs?: number): Promise<AcpInitializeResult>;
 	authenticate(methodId?: string, timeoutMs?: number): Promise<Record<string, unknown>>;
 	logout(timeoutMs?: number): Promise<Record<string, unknown>>;
@@ -315,7 +320,12 @@ export interface AcpClient {
 	): Promise<AcpSetConfigOptionResult>;
 	prompt(sessionId: string, prompt: AcpPromptBlock[], timeoutMs?: number): Promise<AcpPromptResponse>;
 	cancel(sessionId: string): void;
-	close(options?: { eofGraceMs?: number; termGraceMs?: number; forceTerm?: boolean }): Promise<void>;
+	close(options?: {
+		eofGraceMs?: number;
+		termGraceMs?: number;
+		forceTerm?: boolean;
+		stdoutDrainMs?: number;
+	}): Promise<void>;
 }
 
 export function buildAntigravitySessionMeta(params: Pick<AcpSessionNewParams, "disabledTools" | "systemPromptAppend">): {
@@ -326,7 +336,7 @@ export function buildAntigravitySessionMeta(params: Pick<AcpSessionNewParams, "d
 } {
 	return {
 		antigravity: {
-			disabledTools: [...new Set([...(params.disabledTools ?? []), "run_workflow"])],
+			disabledTools: [...new Set([...(params.disabledTools ?? []), ...ANTIGRAVITY_DISABLED_TOOLS])],
 			...(params.systemPromptAppend !== undefined
 				? { systemPrompt: { append: params.systemPromptAppend } }
 				: {}),
@@ -373,8 +383,122 @@ export function spawnAcpClient(options: CreateAcpClientOptions): AcpClient {
 		}
 	};
 
+	let stdoutEnded = !child.stdout;
+	let stdoutDrainTimedOut = false;
+	let stdoutDrainIncomplete = false;
+
 	const stdoutRl = child.stdout ? readline.createInterface({ input: child.stdout, crlfDelay: Infinity }) : null;
 	const stderrRl = child.stderr ? readline.createInterface({ input: child.stderr, crlfDelay: Infinity }) : null;
+
+	const markStdoutEnded = () => {
+		if (!stdoutDrainTimedOut && !stdoutDrainIncomplete) {
+			stdoutEnded = true;
+		}
+	};
+	const markStdoutIncomplete = () => {
+		stdoutDrainIncomplete = true;
+	};
+	if (child.stdout) {
+		const stdout = child.stdout;
+		stdout.once("end", markStdoutEnded);
+		stdout.once("close", () => {
+			if (stdoutEnded || stdout.readableEnded) {
+				markStdoutEnded();
+			} else {
+				markStdoutIncomplete();
+			}
+		});
+		stdout.on("error", () => {
+			markStdoutIncomplete();
+		});
+	}
+	if (stdoutRl && child.stdout) {
+		const stdout = child.stdout;
+		stdoutRl.once("close", () => {
+			if (stdoutEnded || stdout.readableEnded) {
+				markStdoutEnded();
+			} else {
+				markStdoutIncomplete();
+			}
+		});
+		stdoutRl.on("error", () => {
+			markStdoutIncomplete();
+		});
+	}
+	if (child.stderr) {
+		child.stderr.on("error", () => {
+			// Ignore read/destroy errors during shutdown.
+		});
+	}
+	if (stderrRl) {
+		stderrRl.on("error", () => {
+			// Ignore forwarded stderr read/destroy errors during shutdown.
+		});
+	}
+
+	const waitForStdoutDrain = async (drainMs: number): Promise<void> => {
+		const stdout = child.stdout;
+		if (stdoutDrainIncomplete || stdoutDrainTimedOut) {
+			return;
+		}
+		if (!stdout) {
+			return;
+		}
+		if (stdoutEnded || stdout.readableEnded) {
+			markStdoutEnded();
+			return;
+		}
+		if (stdout.destroyed) {
+			markStdoutIncomplete();
+			return;
+		}
+		if (drainMs <= 0) {
+			stdoutDrainTimedOut = true;
+			return;
+		}
+		await new Promise<void>((resolve) => {
+			let settled = false;
+			const finish = (outcome: "complete" | "incomplete" | "timeout") => {
+				if (settled) return;
+				settled = true;
+				clearTimeout(timer);
+				stdout.removeListener("end", onEnd);
+				stdout.removeListener("close", onClose);
+				stdout.removeListener("error", onError);
+				stdoutRl?.removeListener("close", onRlClose);
+				stdoutRl?.removeListener("error", onError);
+				if (outcome === "timeout") {
+					stdoutDrainTimedOut = true;
+				} else if (outcome === "incomplete") {
+					markStdoutIncomplete();
+				} else {
+					markStdoutEnded();
+				}
+				resolve();
+			};
+			const onEnd = () => finish(stdoutDrainIncomplete || stdoutDrainTimedOut ? "incomplete" : "complete");
+			const onClose = () =>
+				finish(
+					(stdoutEnded || stdout.readableEnded) && !stdoutDrainIncomplete && !stdoutDrainTimedOut
+						? "complete"
+						: "incomplete",
+				);
+			const onRlClose = () =>
+				finish(
+					(stdoutEnded || stdout.readableEnded) && !stdoutDrainIncomplete && !stdoutDrainTimedOut
+						? "complete"
+						: "incomplete",
+				);
+			const onError = () => finish("incomplete");
+			stdout.once("end", onEnd);
+			stdout.once("close", onClose);
+			stdout.once("error", onError);
+			stdoutRl?.once("close", onRlClose);
+			stdoutRl?.once("error", onError);
+			const timer = setTimeout(() => finish("timeout"), drainMs);
+			timer.unref();
+		});
+	};
 
 	const sendRaw = (payload: Record<string, unknown>, onWriteError?: (err: Error) => void): void => {
 		if (closed || !child.stdin || child.stdin.destroyed) {
@@ -493,10 +617,17 @@ export function spawnAcpClient(options: CreateAcpClientOptions): AcpClient {
 			pending.delete(msg.id);
 			if (entry.timer) clearTimeout(entry.timer);
 
-			if (isPlainObject(msg.error)) {
-				const rawMsg = typeof msg.error.message === "string" ? msg.error.message : `ACP ${entry.method} failed`;
-				const code = typeof msg.error.code === "number" ? msg.error.code : undefined;
-				entry.reject(new AcpRpcError(formatAntigravityError(rawMsg, stderr, platform), code, msg.error.data));
+			const rpcError = isPlainObject(msg.error) ? msg.error : null;
+			try {
+				options.onRpcSettled?.(entry.method, rpcError === null);
+			} catch {
+				// Observer errors must not break RPC settlement.
+			}
+
+			if (rpcError) {
+				const rawMsg = typeof rpcError.message === "string" ? rpcError.message : `ACP ${entry.method} failed`;
+				const code = typeof rpcError.code === "number" ? rpcError.code : undefined;
+				entry.reject(new AcpRpcError(formatAntigravityError(rawMsg, stderr, platform), code, rpcError.data));
 				return;
 			}
 			entry.resolve(msg.result ?? {});
@@ -540,6 +671,7 @@ export function spawnAcpClient(options: CreateAcpClientOptions): AcpClient {
 		child,
 		stderrTail: () => stderr,
 		isClosed: () => closed,
+		isStdoutDrained: () => stdoutEnded && !stdoutDrainTimedOut && !stdoutDrainIncomplete,
 		initialize: (timeoutMs = ANTIGRAVITY_INIT_PROBE_TIMEOUT_MS) =>
 			request<AcpInitializeResult>(
 				"initialize",
@@ -602,8 +734,16 @@ export function spawnAcpClient(options: CreateAcpClientOptions): AcpClient {
 		},
 		close: async (closeOptions) => {
 			await terminateAcpProcess(child, closeOptions);
+			await waitForStdoutDrain(closeOptions?.stdoutDrainMs ?? 250);
 			stdoutRl?.close();
 			stderrRl?.close();
+			if (stdoutDrainTimedOut || stdoutDrainIncomplete) {
+				try {
+					child.stdout?.destroy();
+				} catch {
+					// ignore
+				}
+			}
 		},
 	};
 }

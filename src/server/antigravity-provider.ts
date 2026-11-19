@@ -7,6 +7,7 @@ import {
 import {
 	discoverAntigravityModels,
 	hasCachedAntigravityModels,
+	isVerifiedManagedUsageUpdateRuntime,
 	readAntigravityModelsCache,
 	type AntigravityModelsCache,
 	type DiscoverAntigravityModelsOptions,
@@ -74,11 +75,34 @@ export function installAntigravityProviderSource(deps: AntigravityAvailabilityDe
 			isEnabled && signedIn && cache && cache.models.length > 0 ? resolveSync(binaryPath ?? undefined) : null;
 		const ready = Boolean(isEnabled && signedIn && cache && cache.models.length > 0 && runtime);
 
+		const runtimeMatchesCache = Boolean(
+			cache?.runtime &&
+				runtime &&
+				cache.runtime.source === runtime.source &&
+				cache.runtime.kind === runtime.kind &&
+				cache.runtime.version === runtime.version &&
+				cache.runtime.executablePath === runtime.executablePath,
+		);
+		const allowInferredContextWindow = runtimeMatchesCache && isVerifiedManagedUsageUpdateRuntime(runtime);
+		const effectiveModels =
+			ready && cache
+				? allowInferredContextWindow
+					? cache.models
+					: cache.models.map((m) =>
+							m.contextWindowSource === "usage_update" ? { ...m, contextWindow: null } : m,
+						)
+				: [];
+
 		const next = ready
 			? JSON.stringify([
 					true,
 					cache!.updatedAt,
-					cache!.models.map((m) => [
+					runtime!.source,
+					runtime!.kind,
+					runtime!.version,
+					runtime!.executablePath,
+					allowInferredContextWindow,
+					effectiveModels.map((m) => [
 						m.id,
 						m.name,
 						m.reasoning,
@@ -92,7 +116,7 @@ export function installAntigravityProviderSource(deps: AntigravityAvailabilityDe
 
 		if (next === fingerprint) return;
 		if (ready) {
-			models.setProvider(createAntigravityProvider(streamSimple, cache!.models));
+			models.setProvider(createAntigravityProvider(streamSimple, effectiveModels));
 		} else {
 			models.deleteProvider(ANTIGRAVITY_PROVIDER);
 		}

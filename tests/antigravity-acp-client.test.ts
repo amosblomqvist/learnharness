@@ -104,7 +104,10 @@ test("spawnAcpClient handles initialize, session/new metadata/disabledTools, con
 			fs: { readTextFile: false, writeTextFile: false },
 			terminal: false,
 		});
-		assert.deepEqual(recordedSessionNew.sessionNewParams._meta.antigravity.disabledTools, ["run_workflow"]);
+		assert.deepEqual(recordedSessionNew.sessionNewParams._meta.antigravity.disabledTools, [
+			"run_workflow",
+			"search_web",
+		]);
 		assert.equal(recordedSessionNew.sessionNewParams._meta.antigravity.systemPrompt?.append, "You are a tutor.");
 
 		await client.setConfigOption(sess.sessionId, "model", "gemini-3.1-pro", 5_000);
@@ -204,7 +207,7 @@ test("spawnAcpClient surfaces AcpRpcError with IPv6 context on Linux stderr fail
 	}
 });
 
-test("spawnAcpClient enforces disabledTools=['run_workflow'] on sessionNew, sessionLoad, and sessionResume without creating SKILL.md", async () => {
+test("spawnAcpClient enforces disabledTools=['run_workflow','search_web'] on sessionNew, sessionLoad, and sessionResume without creating SKILL.md", async () => {
 	const root = makeTempRoot();
 	const geminiHome = path.join(root, "profile");
 	const tempDir = path.join(root, "tmp");
@@ -231,7 +234,7 @@ test("spawnAcpClient enforces disabledTools=['run_workflow'] on sessionNew, sess
 
 	try {
 		await client.initialize(5_000);
-		// Intentionally pass disabledTools: [] or other tools to verify run_workflow is always merged.
+		// Intentionally pass disabledTools: [] or other tools to verify default disabledTools are always merged.
 		const created = await client.sessionNew({ cwd, disabledTools: [] }, 5_000);
 		await client.sessionLoad({ sessionId: created.sessionId, cwd, disabledTools: ["other_tool"] }, 5_000);
 		await client.sessionResume({ sessionId: created.sessionId, cwd }, 5_000);
@@ -246,9 +249,13 @@ test("spawnAcpClient enforces disabledTools=['run_workflow'] on sessionNew, sess
 			params: { _meta: { antigravity: { disabledTools: string[] } } };
 		};
 
-		assert.deepEqual(newRec.sessionNewParams._meta.antigravity.disabledTools, ["run_workflow"]);
-		assert.deepEqual(loadRec.params._meta.antigravity.disabledTools, ["other_tool", "run_workflow"]);
-		assert.deepEqual(resumeRec.params._meta.antigravity.disabledTools, ["run_workflow"]);
+		assert.deepEqual(newRec.sessionNewParams._meta.antigravity.disabledTools, ["run_workflow", "search_web"]);
+		assert.deepEqual(loadRec.params._meta.antigravity.disabledTools, [
+			"other_tool",
+			"run_workflow",
+			"search_web",
+		]);
+		assert.deepEqual(resumeRec.params._meta.antigravity.disabledTools, ["run_workflow", "search_web"]);
 		assert.equal(fs.existsSync(path.join(cwd, "skills", "system", "run-workflow", "SKILL.md")), false);
 	} finally {
 		await client.close();
@@ -342,6 +349,113 @@ test("spawnAcpClient passes --gemini-dir/--app-data-dir and refreshes keyring ma
 		assert.deepEqual(recorded.argv, ["acp", "--gemini-dir", geminiHome, "--app-data-dir", "antigravity-acp"]);
 	} finally {
 		await client.close();
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test("spawnAcpClient reports isStdoutDrained() === false on premature stdout destroy and handles stdoutRl/stderrRl errors without throwing", async () => {
+	const scenarios: Array<{ name: string; destroyWithError: boolean }> = [
+		{ name: "premature-destroy", destroyWithError: false },
+		{ name: "premature-error", destroyWithError: true },
+	];
+
+	for (const scenario of scenarios) {
+		const root = makeTempRoot(`lh-agy-acp-${scenario.name}-`);
+		const geminiHome = path.join(root, "profile");
+		const tempDir = path.join(root, "tmp");
+		const cwd = path.join(root, "cwd");
+		fs.mkdirSync(geminiHome, { recursive: true });
+		fs.mkdirSync(tempDir, { recursive: true });
+		fs.mkdirSync(cwd, { recursive: true });
+
+		const env = buildAntigravityEnvironment({
+			baseEnv: { ...process.env },
+			geminiHome,
+			tempDir,
+			harnessPath: "/tmp/lh_harness",
+		});
+
+		const client = spawnAcpClient({
+			cwd,
+			env,
+			runtime: { executablePath: FAKE_ACP, args: [], version: "1.5.2" },
+		});
+
+		try {
+			await client.initialize(5_000);
+			assert.equal(client.child.stdout?.readableEnded, false, `${scenario.name}: stdout should not be ended yet`);
+
+			if (scenario.destroyWithError) {
+				client.child.stdout?.destroy(new Error("synthetic stdout read error"));
+				client.child.stderr?.destroy(new Error("synthetic stderr read error"));
+			} else {
+				client.child.stdout?.destroy();
+			}
+
+			await client.close({ stdoutDrainMs: 500 });
+			assert.equal(
+				client.isStdoutDrained(),
+				false,
+				`${scenario.name}: isStdoutDrained() must be false after premature stdout closure/error`,
+			);
+		} finally {
+			await client.close({ stdoutDrainMs: 50 }).catch(() => {});
+			fs.rmSync(root, { recursive: true, force: true });
+		}
+	}
+});
+
+test("spawnAcpClient.close settles promptly as undrained if stdout is destroyed with error during waitForStdoutDrain", async () => {
+	const root = makeTempRoot("lh-agy-acp-drain-err-");
+	const geminiHome = path.join(root, "profile");
+	const tempDir = path.join(root, "tmp");
+	const cwd = path.join(root, "cwd");
+	fs.mkdirSync(geminiHome, { recursive: true });
+	fs.mkdirSync(tempDir, { recursive: true });
+	fs.mkdirSync(cwd, { recursive: true });
+
+	const modelsJson = JSON.stringify([
+		{ value: "model-init", name: "Init Model", usageWindow: 524288, thoughtValues: ["low"] },
+		{ value: "model-direct", name: "Direct Model", usageWindow: 1048576, thoughtValues: ["low"] },
+	]);
+	const env = buildAntigravityEnvironment({
+		baseEnv: {
+			...process.env,
+			FAKE_ACP_MODELS_JSON: modelsJson,
+			FAKE_ACP_EMIT_USAGE_ON_MODEL_CHANGE: "1",
+			FAKE_ACP_EXIT_AFTER_CONFIG_VALUE: "model-direct",
+			FAKE_ACP_POST_EXIT_HOLD_STDOUT_MS: "2000",
+		},
+		geminiHome,
+		tempDir,
+		harnessPath: "/tmp/lh_harness",
+	});
+
+	const client = spawnAcpClient({
+		cwd,
+		env,
+		runtime: { executablePath: FAKE_ACP, args: [], version: "1.5.2" },
+	});
+
+	try {
+		await client.initialize(5_000);
+		const sess = await client.sessionNew({ cwd, mcpServers: [] }, 5_000);
+		await client.setConfigOption(sess.sessionId, "model", "model-direct", 5_000);
+
+		const startedAt = Date.now();
+		const destroyTimer = setTimeout(() => {
+			client.child.stdout?.destroy(new Error("synthetic mid-drain read error"));
+		}, 40);
+		destroyTimer.unref();
+
+		await client.close({ stdoutDrainMs: 2_000 });
+		clearTimeout(destroyTimer);
+		const elapsedMs = Date.now() - startedAt;
+
+		assert.ok(elapsedMs < 1_000, `close() must settle promptly on mid-drain stdout error (took ${elapsedMs}ms)`);
+		assert.equal(client.isStdoutDrained(), false);
+	} finally {
+		await client.close({ stdoutDrainMs: 50 }).catch(() => {});
 		fs.rmSync(root, { recursive: true, force: true });
 	}
 });

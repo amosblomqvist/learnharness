@@ -131,7 +131,10 @@ test("createAntigravityStream translates thinking/text chunks, usage, cliContext
 			fs: { readTextFile: false, writeTextFile: false },
 			terminal: false,
 		});
-		assert.deepEqual(recordedSession.sessionNewParams._meta.antigravity.disabledTools, ["run_workflow"]);
+		assert.deepEqual(recordedSession.sessionNewParams._meta.antigravity.disabledTools, [
+			"run_workflow",
+			"search_web",
+		]);
 		assert.equal(
 			recordedSession.sessionNewParams._meta.antigravity.systemPrompt?.append,
 			"Teach calculus patiently.",
