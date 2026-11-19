@@ -230,6 +230,12 @@ export function catalogContextLimits(): Map<string, number> {
 	return index;
 }
 
+/** Attach a known effective window without substituting a catalog placeholder for a CLI session. */
+export function withContextWindow<T extends { provider: string; id: string }>(spec: T): T & { contextWindow?: number } {
+	const contextWindow = catalogContextLimits().get(`${spec.provider}:${spec.id}`);
+	return contextWindow === undefined ? spec : { ...spec, contextWindow };
+}
+
 /** The full picker payload: every model of every configured provider
  *  (sorted by provider then id — stable, diff-friendly) + the config
  *  defaults a settings-less chat runs + the background roles' resolved

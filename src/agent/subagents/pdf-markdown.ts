@@ -154,8 +154,11 @@ function splitColumns(lines: Glyph[][]): Glyph[][] {
 	return lines;
 }
 
-async function scanPage(page: PDFPageProxy): Promise<PageScan> {
-	const glyphs = (await page.getTextContent()).items.flatMap((item) => toGlyph(item) ?? []);
+async function scanPage(page: PDFPageProxy, signal?: AbortSignal): Promise<PageScan> {
+	signal?.throwIfAborted();
+	const content = await page.getTextContent();
+	signal?.throwIfAborted();
+	const glyphs = content.items.flatMap((item) => toGlyph(item) ?? []);
 	const groups: Glyph[][] = [[]];
 	for (const glyph of glyphs) {
 		groups.at(-1)!.push(glyph);
@@ -167,8 +170,10 @@ async function scanPage(page: PDFPageProxy): Promise<PageScan> {
 
 /** Whether a page without text draws a picture. Asked only of such pages: building the operator list
  * was two thirds of the conversion time when every page paid for it. */
-async function drawsImage(page: PDFPageProxy): Promise<boolean> {
+async function drawsImage(page: PDFPageProxy, signal?: AbortSignal): Promise<boolean> {
+	signal?.throwIfAborted();
 	const { OPS } = await import("pdfjs-dist/legacy/build/pdf.mjs");
+	signal?.throwIfAborted();
 	const imageOps = new Set([
 		OPS.paintImageXObject,
 		OPS.paintImageXObjectRepeat,
@@ -179,7 +184,9 @@ async function drawsImage(page: PDFPageProxy): Promise<boolean> {
 		OPS.paintImageMaskXObjectRepeat,
 		OPS.paintSolidColorImageMask,
 	]);
-	return (await page.getOperatorList()).fnArray.some((op) => imageOps.has(op));
+	const operators = await page.getOperatorList();
+	signal?.throwIfAborted();
+	return operators.fnArray.some((op) => imageOps.has(op));
 }
 
 /** Body size: the whole-point size covering the most characters. Whole points, because justified
@@ -252,16 +259,24 @@ function toMarkdown(blocks: readonly Block[]): string {
 		.replace(/\n\n\n/g, "\n");
 }
 
-/** Convert the given pages (default: all). Formatting is page-local so search and selected reads agree. */
-export async function documentToMarkdown(doc: PDFDocumentProxy, pageNumbers?: readonly number[]): Promise<PdfPage[]> {
+/** Convert the given pages (default: all). Formatting is page-local so search and selected reads agree.
+ * Cancellation is checked around asynchronous page work, not during synchronous pdfjs/formatting work. */
+export async function documentToMarkdown(doc: PDFDocumentProxy, pageNumbers?: readonly number[], signal?: AbortSignal): Promise<PdfPage[]> {
+	signal?.throwIfAborted();
 	const numbers = pageNumbers ?? Array.from({ length: doc.numPages }, (_, i) => i + 1);
 	const pages: PageScan[] = [];
-	for (const n of numbers) pages.push(await scanPage(await doc.getPage(n)));
+	for (const n of numbers) {
+		signal?.throwIfAborted();
+		const page = await doc.getPage(n);
+		signal?.throwIfAborted();
+		pages.push(await scanPage(page, signal));
+	}
 	const out: PdfPage[] = [];
 	for (const p of pages) {
+		signal?.throwIfAborted();
 		const number = p.page.pageNumber;
 		if (!p.lines.length) {
-			out.push({ kind: (await drawsImage(p.page)) ? "image-only" : "empty", number });
+			out.push({ kind: (await drawsImage(p.page, signal)) ? "image-only" : "empty", number });
 			continue;
 		}
 		// Judge the body below the page's largest size (often its title), falling
@@ -271,6 +286,7 @@ export async function documentToMarkdown(doc: PDFDocumentProxy, pageNumbers?: re
 		const body = bodySize(p.lines.filter((l) => roundSize(l) < top)) || bodySize(p.lines);
 		out.push({ kind: "text", number, markdown: toMarkdown(toBlocks(titleFirst(p.lines, body), body)) });
 	}
+	signal?.throwIfAborted();
 	return out;
 }
 

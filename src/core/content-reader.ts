@@ -1,12 +1,14 @@
 /** Source-preserving boundaries for tool-authored Markdown. Recovery never
- * mutates input, reserializes Markdown, or enters protected literal content. */
+ * mutates input or reserializes Markdown. Native literals are protected;
+ * standalone extra-encoded fences have one explicit display-only recovery. */
 import katex from "katex";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { mathFromMarkdown } from "mdast-util-math";
 import { math } from "micromark-extension-math";
 
 export type ContentSpan =
-	| { kind: "prose" | "code"; raw: string }
+	| { kind: "prose"; raw: string }
+	| { kind: "code"; raw: string; escapedFence?: true }
 	| { kind: "math"; raw: string; open: string; body: string; close: string; display: boolean };
 const blankLine = /^\r?\n[ \t]*\r?\n/;
 const escaped = (text: string, i: number) => {
@@ -15,20 +17,84 @@ const escaped = (text: string, i: number) => {
 };
 const runLength = (text: string, i: number, char: string) => { let n = 0; while (text[i + n] === char) n++; return n; };
 type MarkdownNode = { type: string; position?: { start: { offset?: number }; end: { offset?: number } }; children?: MarkdownNode[] };
+type LiteralRange = { start: number; end: number; escapedFence?: true };
+
+/** Read virtual lines without decoding their contents. Only odd final slashes
+ * denote layout; even runs before n remain literal source. */
+function escapedFenceRanges(text: string, native: LiteralRange[]): { fences: LiteralRange[]; native: LiteralRange[] } {
+	if (!text.includes("\\n") || !/`{3,}|~{3,}/.test(text)) return { fences: [], native };
+	const lines: Array<{ start: number; end: number }> = [];
+	let start = 0;
+	for (const match of text.matchAll(/\r\n?|\n|(\\+)(r\\n|n)?/g)) {
+		if (match[1] && (!match[2] || match[1].length % 2 === 0)) continue;
+		const boundary = match.index + (match[1] ? match[1].length - 1 : 0);
+		lines.push({ start, end: boundary });
+		start = match.index + match[0].length;
+	}
+	lines.push({ start, end: text.length });
+	const ranges: LiteralRange[] = [];
+	const protect = (start: number, end: number, complete: boolean) => {
+		const fenceStart = start + /^ {0,3}/.exec(text.slice(start, start + 3))![0].length;
+		// Preserve enclosing native literals, including a native opener at
+		// this same offset. Backticks INSIDE the virtual fence are code, not
+		// independent inline ranges that can expose its body to layout repair.
+		if (!native.some(literal => literal.start <= fenceStart && literal.end > start &&
+			(literal.start < start || literal.end > end))) {
+			ranges.push({ start, end, ...(complete ? { escapedFence: true as const } : {}) });
+			if (native.some(literal => literal.start >= start && literal.start < end && literal.end > end)) {
+				// An internal backtick may have paired with a suffix backtick.
+				// Re-read that independent suffix with the SAME grammar and map
+				// its source offsets back, before scanning any later fences.
+				native = [...native.filter(literal => literal.start < start), ...nativeLiteralRanges(text.slice(end), end)];
+			}
+		}
+	};
+	let opening: { start: number; fence: string } | undefined;
+	for (const line of lines) {
+		const value = text.slice(line.start, line.end);
+		if (!opening) {
+			const match = /^[ ]{0,3}(`{3,}|~{3,})(.*)$/.exec(value);
+			if (!match || (match[1]![0] === "`" && match[2]!.includes("`"))) continue;
+			// Never enter an outer native fence or inline literal example. An
+			// inline-code range beginning HERE may be the escaped fence itself.
+			if (native.some(range => range.start < line.start && range.end > line.start)) continue;
+			opening = { start: line.start, fence: match[1]! };
+			continue;
+		}
+		const close = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/.exec(value)?.[1];
+		if (!close || close[0] !== opening.fence[0] || close.length < opening.fence.length) continue;
+		protect(opening.start, line.end, true);
+		opening = undefined;
+	}
+	// Rejected profiles must be opaque to the generic layout decoder too:
+	// physical openers may have encoded bodies, and an unfinished fence
+	// protects the remainder just like an unfinished native Markdown fence.
+	if (opening) protect(opening.start, text.length, false);
+	return { fences: ranges, native };
+}
+
 /** Use the rendering stack's actual CommonMark+math grammar for literal
  * ranges, including nested quotes/lists and implicit container endings.
  * Keep source offsets: never serialize the AST back into Markdown. */
-function literalRanges(text: string): Array<{ start: number; end: number }> {
+function nativeLiteralRanges(text: string, offset = 0): LiteralRange[] {
 	const pending: MarkdownNode[] = [fromMarkdown(text, { extensions: [math({ singleDollarTextMath: true })], mdastExtensions: [mathFromMarkdown()] })];
-	const ranges: Array<{ start: number; end: number }> = [];
+	const ranges: LiteralRange[] = [];
 	while (pending.length) {
 		const node = pending.pop()!;
 		if (node.type === "code" || node.type === "inlineCode") {
 			const start = node.position?.start.offset, end = node.position?.end.offset;
-			if (start !== undefined && end !== undefined) ranges.push({ start, end });
+			if (start !== undefined && end !== undefined) ranges.push({ start: start + offset, end: end + offset });
 		} else if (node.children) pending.push(...node.children);
 	}
-	return ranges.sort((a, b) => a.start - b.start);
+	return ranges;
+}
+
+function literalRanges(text: string): LiteralRange[] {
+	const { fences, native } = escapedFenceRanges(text, nativeLiteralRanges(text));
+	// Native inline ranges/openers starting INSIDE a virtual code section
+	// cannot extend beyond its close and swallow following prose either.
+	return [...native.filter(range => !fences.some(fence => fence.start <= range.start && range.start < fence.end)), ...fences]
+		.sort((a, b) => a.start - b.start);
 }
 
 /** Mirrors the app's native dollar-run and legacy-delimiter conventions,
@@ -37,14 +103,14 @@ export function readContentSpans(text: string): ContentSpan[] {
 	const spans: ContentSpan[] = [];
 	const literals = literalRanges(text);
 	let literal = 0, i = 0, plain = 0;
-	const opaque = (end: number) => {
+	const opaque = ({ end, escapedFence }: LiteralRange) => {
 		if (plain < i) spans.push({ kind: "prose", raw: text.slice(plain, i) });
-		spans.push({ kind: "code", raw: text.slice(i, end) }); i = plain = end;
+		spans.push({ kind: "code", raw: text.slice(i, end), ...(escapedFence ? { escapedFence } : {}) }); i = plain = end;
 	};
 	while (i < text.length) {
 		while (literal < literals.length && literals[literal]!.end <= i) literal++;
 		const barrier = literals[literal]?.start ?? Infinity;
-		if (i >= barrier) { opaque(literals[literal]!.end); continue; }
+		if (i >= barrier) { opaque(literals[literal]!); continue; }
 		let open = "", close = "", display = false, after = -1, at = -1;
 		if (text[i] === "\\" && !escaped(text, i) && ["(", "["].includes(text[i + 1] ?? "")) {
 			open = text.slice(i, i + 2); close = open === "\\(" ? "\\)" : "\\]"; display = open === "\\[";
@@ -175,8 +241,27 @@ export function outsideTexComments(body: string, transform: (part: string) => st
 	out.push(transform(body.slice(from))); return out.join("");
 }
 
+/** One extra JSON-string layer, local to a complete standalone fence. The
+ * layer-aware idea is from joneskim's PR #67; unlike its historical parser
+ * placement this is display-only. Never replace individual code escapes.
+ * A valid profile is structural evidence, NOT proof of the author's intent. */
+function decodeEscapedCodeFence(raw: string): string | null {
+	if (/[\r\n]/.test(raw)) return null; // mixed physical/encoded layout
+	let decoded: string;
+	try { decoded = JSON.parse(`"${raw}"`) as string; } catch { return null; }
+	const lines = decoded.split(/\r?\n/);
+	if (lines.length < 2) return null;
+	const open = /^[ ]{0,3}(`{3,}|~{3,})/.exec(lines[0]!)?.[1];
+	const close = /^[ ]{0,3}(`{3,}|~{3,})[ \t]*$/.exec(lines.at(-1)!)?.[1];
+	if (!open || !close || close[0] !== open[0] || close.length < open.length) return null;
+	// Use the actual CommonMark grammar to reject early closes, extra blocks
+	// and invalid info strings. Keep decoded source, never AST serialization.
+	const tree = fromMarkdown(decoded);
+	return tree.children.length === 1 && tree.children[0]?.type === "code" ? decoded : null;
+}
+
 /** Document escapes are not arbitrary string decoding. Complete known TeX
- * words win over the prefix `\\n`; code is never inspected or rewritten. */
+ * words win over the prefix `\\n`; native code is never rewritten. */
 export function recoverDocumentLayout(text: string): string {
 	const spans = readContentSpans(text);
 	const candidates = spans.filter(span => span.kind !== "code").map(span => span.raw).join("\u0000");
@@ -187,7 +272,13 @@ export function recoverDocumentLayout(text: string): string {
 	const knownN = (name: string) => declared.has(name) || knownTexCommand(name);
 	const tokens = [...candidates.matchAll(/(\\+)(n[A-Za-z]*)/g)];
 	const evidence = tokens.filter(m => m[1]!.length % 2 === 1 && !knownN(m[2]!));
-	const structural = evidence.length >= 2 || candidates.includes("\\n\\n") || (evidence.length > 0 &&
+	const recoveredFences = new Map(spans.flatMap(span => {
+		if (span.kind !== "code" || !span.escapedFence) return [];
+		const decoded = decodeEscapedCodeFence(span.raw);
+		return decoded === null ? [] : [[span, decoded] as const];
+	}));
+	const hasEscapedFence = recoveredFences.size > 0;
+	const structural = hasEscapedFence || evidence.length >= 2 || candidates.includes("\\n\\n") || (evidence.length > 0 &&
 		[...candidates.matchAll(/(\\+)([A-Za-z]+)/g)].some(m => m[1]!.length % 2 === 0 && knownTexCommand(m[2]!)));
 	if (!structural) return text;
 	const decode = (part: string) => part.replace(/(\\+)(n[A-Za-z]*)/g, (whole: string, slashes: string, name: string, offset: number) => {
@@ -196,10 +287,24 @@ export function recoverDocumentLayout(text: string): string {
 		if (/^(?:[A-Za-z]:[\\/]|https?:\/\/|\/)/.test(word + whole)) return whole;
 		return slashes.slice(0, -1) + "\n" + name.slice(1);
 	});
-	const projected = spans.map(span => ({ span, body: span.kind === "math" ? outsideTexComments(span.body, decode) : span.kind === "code" ? span.raw : decode(span.raw) }));
+	const projected = spans.map(span => ({
+		span,
+		body: span.kind === "math"
+			? outsideTexComments(span.body, decode)
+			: span.kind === "code"
+				? (recoveredFences.get(span) ?? span.raw)
+				: decode(span.raw),
+	}));
 	let out = "";
 	for (let i = 0; i < projected.length; i++) {
 		const { span, body } = projected[i]!;
+		if (span.kind === "code" && body !== span.raw) {
+			if (!/^[ \t]{0,3}$/.test(out.slice(out.lastIndexOf("\n") + 1))) out += "\n\n";
+			out += body;
+			const next = projected[i + 1];
+			if (next && !/^[\r\n]/.test(next.span.kind === "math" ? next.span.open : next.body)) out += "\n\n";
+			continue;
+		}
 		if (span.kind !== "math") { out += body; continue; }
 		// Decoding document layout can expose a flow opener whose close was
 		// written on the formula line. Frame BOTH ends; otherwise Markdown

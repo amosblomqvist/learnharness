@@ -1,10 +1,12 @@
 import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
-import { afterEach, test } from "node:test";
+import { after, afterEach, test } from "node:test";
+import { installModalDom } from "./modal-dom.ts";
 import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { SetupDialog } from "../components/setup-dialog.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { AgentSection } from "../components/settings/agent-section.tsx";
 import { providerKeyLabel, classifyKeys } from "../components/settings/keys-section.tsx";
 import { useModelCatalog } from "../components/model-catalog.ts";
@@ -18,10 +20,8 @@ Object.assign(globalThis, {
 	window: dom.window, document: dom.document, Element: dom.window.Element,
 	HTMLElement: dom.window.HTMLElement, HTMLInputElement: dom.window.HTMLInputElement, HTMLTextAreaElement: dom.window.HTMLTextAreaElement,
 	CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true,
-	requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0),
-	cancelAnimationFrame: (id: number) => clearTimeout(id),
 });
-Object.assign(dom.window, { innerWidth: 1280, innerHeight: 800 });
+after(installModalDom(dom));
 dom.window.HTMLElement.prototype.scrollIntoView = () => {};
 const originalFetch = globalThis.fetch;
 let root: Root | undefined;
@@ -36,7 +36,7 @@ const b: ModelCatalogEntry = { ...a, id: "claude-opus-5-5", name: "Claude Opus 5
 function catalog(connected = true): ModelCatalogResponse {
 	return {
 		models: connected ? [a, b] : [], defaults: null,
-		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null },
+		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null },
 		slots: { strong: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low" }, cheap: { model: { provider: a.provider, id: a.id }, thinkingLevel: "high" }, vision: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low" } },
 		providers: [{ ...provider, keyPresent: connected }],
 	};
@@ -57,7 +57,7 @@ function installFetch() {
 }
 async function render(children: React.ReactNode) {
 	if (!root) { host = document.createElement("div"); document.body.append(host); root = createRoot(host); }
-	await act(async () => root!.render(children));
+	await act(async () => root!.render(<InteractionLayersProvider>{children}</InteractionLayersProvider>));
 }
 async function answer(index: number, body: ModelCatalogResponse | null) { await act(async () => requests[index]!.resolve(body ? Response.json(body) : new Response("unavailable", { status: 503 }))); }
 function element(testid: string) { const e = document.querySelector<HTMLElement>(`[data-testid="${testid}"]`); assert.ok(e, testid); return e; }
@@ -134,8 +134,18 @@ test("cold saved disconnected pins still enter the provider stage, without any m
 	await act(async () => notifySettingsSaved("keys"));
 	const stages: Array<string | undefined> = [];
 	function Probe() {
-		const { catalog } = useModelCatalog();
-		React.useLayoutEffect(() => { stages.push(document.querySelector<HTMLElement>('[data-testid^="setup-stage-"]')?.dataset.testid); }, [catalog]);
+		React.useLayoutEffect(() => {
+			// HostDialog creates its portal in a layout effect; observe actual
+			// stages rather than a sibling's pre-portal layout pass.
+			const record = () => {
+				const stage = document.querySelector<HTMLElement>('[data-testid^="setup-stage-"]')?.dataset.testid;
+				if (stage && stage !== stages.at(-1)) stages.push(stage);
+			};
+			const observer = new MutationObserver(record);
+			observer.observe(document.body, { childList: true, subtree: true });
+			record();
+			return () => observer.disconnect();
+		}, []);
 		return null;
 	}
 	await render(<><Reader />{setup()}<Probe /></>);
@@ -186,7 +196,7 @@ test("Agent opens with cached thinking metadata; refresh and disconnect never cl
 	installFetch(); await warm();
 	const models: ModelsSettings = { strong: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low" } };
 	let changed: ModelsSettings | undefined;
-	await render(<><Reader /><AgentSection agent={undefined} models={models} graph={undefined} compaction={undefined} onSectionChange={() => {}} onModelsChange={(next) => { changed = next; }} onCompactionChange={() => {}} /></>);
+	await render(<><Reader /><AgentSection agent={undefined} models={models} graph={undefined} compaction={undefined} onSectionChange={() => true} onModelsChange={(next) => { changed = next; }} onCompactionChange={() => true} /></>);
 	await click("slot-thinking-strong"); assert.deepEqual(levels(), ["off", "low✓", "high"]);
 	assert.equal(element("slot-model-strong").textContent, "model:free▾");
 	await answer(1, catalog());
@@ -299,7 +309,7 @@ test("cache retention is hidden by default, slot-specific, resettable, and prese
 	};
 	function Settings() {
 		const [models, setModels] = React.useState(initial);
-		return <AgentSection agent={undefined} models={models} graph={undefined} compaction={undefined} onCompactionChange={() => {}} onSectionChange={() => {}} onModelsChange={(next) => { changes.push(next); setModels(next); }} />;
+		return <AgentSection agent={undefined} models={models} graph={undefined} compaction={undefined} onCompactionChange={() => true} onSectionChange={() => true} onModelsChange={(next) => { changes.push(next); setModels(next); }} />;
 	}
 	await render(<Settings />); await answer(1, catalog());
 	assert.equal(element("models-advanced").textContent, "Show advanced settings");

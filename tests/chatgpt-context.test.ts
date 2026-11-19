@@ -3,17 +3,19 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { normalizeContext, type Model } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, normalizeContext, type Model } from "@earendil-works/pi-ai";
 
 const dir = fs.mkdtempSync(path.join(os.tmpdir(), "lh-account-context-"));
 process.env.LH_DATA_DIR = path.join(dir, "data");
 process.env.LH_AUTH_FILE = path.join(dir, "auth.json");
 const { piModels, piEngineForSpec } = await import("../src/agent/models.ts");
 const { chatGPTModels, refreshChatGPTModels } = await import("../src/agent/chatgpt-bridge.ts");
-const { catalogContextLimits, modelCatalog, resolveModelContext, toModelDto } = await import("../src/server/model-catalog.ts");
+const { catalogContextLimits, modelCatalog, resolveModelContext, toModelDto, withContextWindow } = await import("../src/server/model-catalog.ts");
 const { effectiveThresholdTokens } = await import("../src/server/compaction.ts");
-const { compactionThresholdForSpec, withContextWindow } = await import("../src/server/chat-handler.ts");
+const { compactionThresholdForSpec } = await import("../src/server/chat-handler.ts");
 const { writeSettings, readSettings } = await import("../src/store/settings.ts");
+const { chatStore } = await import("../src/store/chats.ts");
+const { sideChats } = await import("../src/server/side-chat.ts");
 const available = piModels().getModels("openai").filter((model): model is Model<"openai-responses"> => model.api === "openai-responses");
 const model = available.find((entry) => entry.id === "gpt-6.1-sol")!;
 
@@ -62,6 +64,21 @@ test("account windows flow to the picker, engine and compaction without crossing
 		assert.equal(engine.model.contextWindow, 872_000);
 		assert.ok(!JSON.stringify(engine.model).includes("account-A"), "the private admission scope is not serialized with model metadata");
 		assert.equal(effectiveThresholdTokens(800_000, engine.model.contextWindow), 800_000);
+
+		// The production side route must enforce the same explicit limit as the picker.
+		writeSettings({ version: 1, compaction: { contextWindows: { [keyA]: 32_000 } } });
+		const chat = chatStore.createChat("Side context fixture");
+		chatStore.saveSettings(chat.id, { model: { provider: "chatgpt", id: model.id } });
+		const explanation = { ...fauxAssistantMessage("Lesson text. ".repeat(9_000)), id: "context-lesson" };
+		chatStore.saveMessages(chat.id, [explanation]);
+		const leaseCount = operations.filter(op => op === "lease").length;
+		const side = await sideChats.ask(chat.id, {
+			anchor: { messageId: explanation.id, partId: "context-lesson-t0", blockIndex: 0, blockText: "Lesson text." },
+			text: "Follow-up", quotes: [],
+		});
+		assert.equal(side.status, 400);
+		assert.match((await side.json()).error, /exceed the selected model's context window/);
+		assert.equal(operations.filter(op => op === "lease").length, leaseCount, "over-budget side request never dispatches");
 
 		account = "account-B"; epoch = 2; revision = 2; contextWindow = 272_000; maxContextWindow = 600_000;
 		await refreshChatGPTModels(available);

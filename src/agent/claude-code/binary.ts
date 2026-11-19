@@ -48,6 +48,12 @@ function getPosixSearchSpec(env: BinaryLookup["env"], homeDir: string): SearchSp
 			npmBin,
 			"/opt/homebrew/bin",
 			"/usr/local/bin",
+			// Nix (home-manager with useUserPackages, standalone home-manager /
+			// nix profile, NixOS/nix-darwin system packages). These are only on
+			// PATH after shell init, so desktop launches never see them.
+			...(env.USER ? [paths.join("/etc/profiles/per-user", env.USER, "bin")] : []),
+			paths.join(homeDir, ".nix-profile", "bin"),
+			"/run/current-system/sw/bin",
 		],
 	};
 }

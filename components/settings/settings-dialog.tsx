@@ -9,9 +9,9 @@
  *   appearance edits restyle the chat LIVE behind the dialog). Escape,
  *   backdrop, and ✕ all close. Modal-only — /settings redirects, so
  *   nothing links into a dead surface.
- * - Left section nav in the app's mono chrome (text-only, session-list
- *   language — active = bg-accent), no icons, matching the minimal-color
- *   doctrine.
+ * - Left section nav in the app's mono chrome, with small decorative
+ *   Lucide icons for the built-in sections; active = bg-accent. Icons
+ *   inherit the row's color, without a separate palette.
  * - The dialog is surface-agnostic by construction: the sections talk to
  *   /api/settings* and localStorage only, so this shell can be re-mounted
  *   as a true OS window in the Electron round with near-zero churn.
@@ -26,11 +26,16 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useId,
 	useRef,
 	useState,
+	type ReactElement,
+	type ReactNode,
+	type RefObject,
 } from "react";
-import { createPortal } from "react-dom";
-import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { BotIcon, KeyIcon, KeyboardIcon, PaletteIcon, PlugIcon, PuzzleIcon, SettingsIcon, WaypointsIcon, type LucideIcon } from "lucide-react";
+import { HostDialog } from "@/components/host-dialog";
+import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
 	CURRENT_SETTINGS_VERSION,
 	type AgentSettings,
@@ -50,6 +55,9 @@ import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
+import { PluginsSection } from "./plugins-section.tsx";
+import { PluginSettingsPage } from "./plugin-settings-page.tsx";
+import { usePlugins } from "@/components/plugins";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
 
@@ -57,22 +65,21 @@ import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
  *  prose is out; only the keyboard note stays (storage location is a
  *  real question users ask). */
 const SECTIONS = [
-	{ id: "keys", label: "Providers" },
-	{ id: "agent", label: "Agent" },
-	{ id: "appearance", label: "Appearance" },
-	{ id: "graph", label: "Graph" },
-	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
-	{ id: "general", label: "General" },
+	{ id: "keys", label: "Providers", icon: KeyIcon },
+	{ id: "agent", label: "Agent", icon: BotIcon },
+	{ id: "appearance", label: "Appearance", icon: PaletteIcon },
+	{ id: "graph", label: "Graph", icon: WaypointsIcon },
+	{ id: "keyboard", label: "Keyboard", icon: KeyboardIcon, hint: "Stored on this device" },
+	{ id: "general", label: "General", icon: SettingsIcon },
 ] as const;
-type SectionId = (typeof SECTIONS)[number]["id"];
-type WritableSection = "general" | "agent" | "models" | "appearance" | "graph" | "compaction";
-type PendingSectionWrite = { compose: (current: unknown) => object; optimistic: boolean };
-// A closed dialog can still have queued writes. A new dialog must wait
-// for those writes before loading a record on which new edits will build.
-const pendingSettingsWrites = new Map<Promise<void>, WritableSection>();
+type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 
-/** Wait for all pending writes, or only those for the requested section. */
-export async function waitForPendingSettingsWrites(section?: WritableSection) {
+type WritableSection = "general" | "agent" | "models" | "appearance" | "graph" | "compaction";
+const queuedSections = new Set<WritableSection>(["agent", "compaction"]);
+const pendingSettingsWrites = new Map<Promise<boolean>, WritableSection>();
+
+/** Wait for queued edits, including writes from a dialog that has closed. */
+async function waitForPendingSettingsWrites(section?: WritableSection) {
 	for (;;) {
 		const writes = [...pendingSettingsWrites].filter(([, name]) => !section || name === section).map(([write]) => write);
 		if (!writes.length) return;
@@ -86,6 +93,21 @@ export async function waitForPendingSettingsWrites(section?: WritableSection) {
  *  name, e.g. DEEPGRAM_API_KEY — KeysSection's openRow state), not the
  *  row's testid. */
 const DialogContext = createContext<{ open: (section?: string, row?: string) => void }>({ open: () => {} });
+// Authority belongs to the persistent Settings host, not a particular field or
+// open/close lifetime: a delayed response must not roll back a newer ACK.
+interface SettingsWriteOrder {
+	issued: number;
+	acknowledged: number;
+	record?: UserSettings;
+	fileAccessError?: string | null;
+	pending: Map<WritableSection, Promise<boolean>>;
+	sectionAcknowledgements: Map<WritableSection, number>;
+	listeners: Set<(record: UserSettings, fileAccessError: string | null) => void>;
+}
+function createWriteOrder(): SettingsWriteOrder {
+	return { issued: 0, acknowledged: 0, pending: new Map(), sectionAcknowledgements: new Map(), listeners: new Set() };
+}
+const WriteOrderContext = createContext<RefObject<SettingsWriteOrder> | null>(null);
 
 /** AppShell-level mount: the sidebar row and the mod+, chord call this.
  *  `open(section)` lands the dialog on a specific section (the first-run
@@ -95,22 +117,41 @@ export function SettingsDialogProvider({
 }: {
 	children: React.ReactNode;
 }) {
+	const interactions = useInteractionLayers();
+	const layerId = useId();
+	const writeOrder = useRef<SettingsWriteOrder>(null!);
+	writeOrder.current ??= createWriteOrder();
 	const [show, setShow] = useState(false);
 	const [landOn, setLandOn] = useState<SectionId>("keys");
 	const [landOnRow, setLandOnRow] = useState<string | null>(null);
+	const [navigationRequest, setNavigationRequest] = useState(0);
 	const open = useCallback((section?: string, row?: string) => {
+		// Returning to this singleton is a bounded request, not a forced pop.
+		// Controlled layers may accept closure before React commits it.
+		if (interactions.getLayer(layerId) && interactions.popTo(layerId) !== "closed") return;
+		interactions.invalidateOpening();
+		setNavigationRequest(request => request + 1);
 		setLandOn(section ? section as SectionId : "keys");
 		setLandOnRow(row ?? null);
 		setShow(true);
-	}, []);
+	}, [interactions, layerId]);
+	const close = useCallback((): CloseOutcome => { setShow(false); return "closed"; }, []);
 	useEffect(() => window.lh?.onOpenSettings?.((section) => open(section)), [open]);
+	useEffect(() => {
+		const onPluginSettings = (event: Event) => {
+			const pluginId: unknown = (event as CustomEvent<unknown>).detail;
+			if (typeof pluginId === "string") open(`plugin:${pluginId}`);
+		};
+		window.addEventListener("lh:open-plugin-settings", onPluginSettings);
+		return () => window.removeEventListener("lh:open-plugin-settings", onPluginSettings);
+	}, [open]);
 	return (
-		<ChatGPTUIProvider><NativeSubscriptionUIProvider><DialogContext.Provider value={{ open }}>
+		<ChatGPTUIProvider><NativeSubscriptionUIProvider><WriteOrderContext.Provider value={writeOrder}><DialogContext.Provider value={{ open }}>
 			{children}
 			{show && (
-				<SettingsDialog onClose={() => setShow(false)} initialSection={landOn} initialRow={landOnRow} />
+				<SettingsDialog onClose={close} initialSection={landOn} initialRow={landOnRow} navigationRequest={navigationRequest} layerId={layerId} />
 			)}
-		</DialogContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
+		</DialogContext.Provider></WriteOrderContext.Provider></NativeSubscriptionUIProvider></ChatGPTUIProvider>
 	);
 }
 
@@ -122,25 +163,26 @@ function SettingsDialog({
 	onClose,
 	initialSection,
 	initialRow,
+	navigationRequest,
+	layerId,
 }: {
-	onClose: () => void;
+	onClose: () => CloseOutcome;
 	initialSection: SectionId;
+	navigationRequest: number;
+	layerId: string;
 	/** The keys-section row to unfold (see DialogContext above). */
 	initialRow: string | null;
 }) {
-	const backdropDismiss = useBackdropDismiss(onClose);
-	// Plain dim backdrop (no blur — nothing decorative); a genuine
-	// backdrop click closes, the dialog body stops propagation.
-	return createPortal(
-		<div
-			className="fixed inset-0 z-50 flex items-center justify-center bg-background/80"
-			data-testid="settings-backdrop"
-			{...backdropDismiss}
-		>
-			<SettingsDialogBody onClose={onClose} initialSection={initialSection} initialRow={initialRow} />
-		</div>,
-		document.body,
-	);
+	// Keep the original visual frame and plain dim backdrop. The shared
+	// untransformed boundary also contains this modal's portaled menus.
+	return <SettingsDialogBody onClose={onClose} initialSection={initialSection}
+		initialRow={initialRow} navigationRequest={navigationRequest}
+		renderFrame={frame => <HostDialog open layerId={layerId} ownerId={null}
+			onClose={onClose} frame={frame} aria-label="Settings"
+			backdropProps={{
+				className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80",
+				"data-testid": "settings-backdrop",
+			}}>{frame.props.children}</HostDialog>} />;
 }
 
 /** The dialog without the portal/backdrop — the SSR-testable frame
@@ -149,27 +191,30 @@ export function SettingsDialogBody({
 	onClose,
 	initialSection = "keys",
 	initialRow = null,
+	navigationRequest = 0,
+	renderFrame,
 }: {
 	onClose: () => void;
+	/** The runtime supplies the shared modal shell; standalone SSR retains the frame. */
+	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 	initialSection?: SectionId;
+	/** Repeated opens must retarget even when the requested section is unchanged. */
+	navigationRequest?: number;
 	/** The keys row to unfold on arrival (null = none). While-open
 	 *  retargets follow it exactly like initialSection below. */
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const inheritedWriteOrder = useContext(WriteOrderContext);
+	const standaloneWriteOrder = useRef<SettingsWriteOrder>(null!);
+	standaloneWriteOrder.current ??= createWriteOrder();
+	const writeOrder = inheritedWriteOrder ?? standaloneWriteOrder;
+	const { snapshot } = usePlugins();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
-	// Separate confirmed server values from the visible pending edits. Writes
-	// replace whole sections, so edits for the same section must be rebased
-	// after the preceding response, not built from an older render.
-	const confirmedRecord = useRef<UserSettings | null>(null);
-	const visibleRecord = useRef<UserSettings | null>(null);
-	const sectionWrites = useRef<Partial<Record<WritableSection, PendingSectionWrite[]>>>({});
-	const agentWriteEpoch = useRef(0);
 	const [error, setError] = useState<string | null>(null);
 	const [fileAccessError, setFileAccessError] = useState<string | null>(null);
-	const fileAccessErrorRef = useRef<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
 	const contentRef = useRef<HTMLDivElement | null>(null);
@@ -210,150 +255,158 @@ export function SettingsDialogBody({
 	// nothing.
 	useEffect(() => {
 		setActive(initialSection);
-	}, [initialSection]);
+	}, [initialSection, navigationRequest]);
 
-	// Fetch once per dialog mount. 200 {settings: null} is FIRST BOOT
-	// (no record = factory everything), not a failure — the error state is
-	// a non-200 or a network throw only.
+	const enabledPlugins = snapshot.plugins.filter(plugin => plugin.info.enabled);
+	const activePluginId = active.startsWith("plugin:") ? active.slice("plugin:".length) : null;
+	const activePlugin = enabledPlugins.find(plugin => plugin.info.id === activePluginId);
+	// Keep a deep link pending while discovery loads. Once discovery settles,
+	// disabled/uninstalled destinations return to management, never stale DOM.
+	const missingPlugin = activePluginId !== null && !activePlugin && !snapshot.loading;
+	const management = snapshot.plugins.find(plugin => plugin.info.id === activePluginId)?.info.origin === "core" ? "core-plugins" : "plugins";
 	useEffect(() => {
-		let live = true;
+		if (missingPlugin) setActive(management);
+	}, [missingPlugin, management]);
+	const selected = missingPlugin ? management : active;
+	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = [
+		...SECTIONS,
+		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
+		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },
+		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
+	];
+
+	// A save may finish after its original dialog closes. Publish its
+	// acknowledged snapshot to whichever Settings instance is mounted now.
+	useEffect(() => {
+		const authority = writeOrder.current;
+		const apply = (record: UserSettings, fileAccessError: string | null) => {
+			setRecord(record);
+			setFileAccessError(fileAccessError);
+		};
+		authority.listeners.add(apply);
+		return () => { authority.listeners.delete(apply); };
+	}, [writeOrder]);
+
+	// Fetch once per dialog mount. 200 {settings: null} is FIRST BOOT.
+	// A GET started before a newer acknowledged save cannot roll it back.
+	useEffect(() => {
+		const authority = writeOrder.current;
+		let alive = true;
 		const load = async () => {
-			try {
-				await waitForPendingSettingsWrites();
-				if (!live) return;
-				const response = await fetch("/api/settings");
-				if (!response.ok) throw new Error(`status ${response.status}`);
-				const body = await response.json() as { settings: UserSettings | null; fileAccessError?: string };
-				if (!live) return;
-				const loaded = body.settings ?? { version: CURRENT_SETTINGS_VERSION };
-				confirmedRecord.current = loaded;
-				visibleRecord.current = loaded;
+			await waitForPendingSettingsWrites();
+			if (!alive) return;
+			const recordAtRead = authority.record;
+			const applyLoaded = (loaded: UserSettings | null, diagnostic: string | null = null) => {
+				if (!alive) return;
+				if (authority.record !== recordAtRead) {
+					setRecord(authority.record ?? loaded);
+					setFileAccessError(authority.fileAccessError ?? null);
+					return;
+				}
+				if (loaded) {
+					authority.record = loaded;
+					authority.fileAccessError = diagnostic;
+				}
 				setRecord(loaded);
-				fileAccessErrorRef.current = body.fileAccessError ?? null;
-				setFileAccessError(fileAccessErrorRef.current);
+				setFileAccessError(diagnostic);
+			};
+			try {
+				const response = await fetch("/api/settings");
+				if (!response.ok) throw new Error();
+				const body = await response.json() as { settings: UserSettings | null; fileAccessError?: string };
+				applyLoaded(body.settings ?? { version: CURRENT_SETTINGS_VERSION }, body.fileAccessError ?? null);
 			} catch {
-				if (live) setRecord(null);
+				applyLoaded(null);
 			}
 		};
 		void load();
-		return () => { live = false; };
-	}, []);
+		return () => { alive = false; };
+	}, [writeOrder]);
 
-	// Escape closes — the layered-dismiss convention (Esc is dead for the
-	// sections' own editors while they hold focus; this listener is the
-	// dialog's outer layer).
-	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
-				// at the document level — the window chain (dictation →
-				// abort) must not also act. One Esc, one action.
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKey);
-		return () => document.removeEventListener("keydown", onKey);
-	}, [onClose]);
-
-	/** PUTs replace whole sections. Serialize each section independently
-	 *  and apply functional edits to the last confirmed server value. */
+	/** ONE writer for the whole dialog: PUT the whole section, keep the
+	 *  record mirror in sync, surface route errors inline (a 400 is a
+	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
 		<S extends WritableSection,>(
 			section: S,
 			change: object | ((current: UserSettings[S]) => object),
-		) => {
+		): Promise<boolean> => {
+			const authority = writeOrder.current;
+			const queued = queuedSections.has(section);
 			setError(null);
-			if (section === "agent") agentWriteEpoch.current++;
-			const queue: PendingSectionWrite[] = sectionWrites.current[section] ?? (sectionWrites.current[section] = []);
-			const idle = queue.length === 0;
-			queue.push({
-				compose: typeof change === "function" ? (current) => change(current as UserSettings[S]) : () => change,
-				// Agent controls continue to show confirmed server state while
-				// their queued functional edits rebase on earlier saves.
-				optimistic: typeof change === "function" && section !== "agent",
-			});
-
-			const refreshVisibleSection = () => {
-				if (!confirmedRecord.current || !visibleRecord.current) return;
-				let value: unknown = confirmedRecord.current[section];
-				// Functional edits stay interactive while awaiting the server.
-				// Existing whole-section callers continue to show server truth.
-				if (queue.some((pending) => pending.optimistic)) {
-					for (const pending of queue) value = pending.compose(value);
-				}
-				const next = { ...visibleRecord.current, [section]: value } as UserSettings;
-				visibleRecord.current = next;
-				setRecord(next);
-			};
-			refreshVisibleSection();
-			if (!idle) return;
-
-			const drain = async () => {
-				while (queue.length) {
-					const body = queue[0]!.compose(confirmedRecord.current?.[section]);
-					const agentEpochAtSend = agentWriteEpoch.current;
-					try {
-						const res = await fetch(`/api/settings/${section}`, {
-							method: "PUT",
-							headers: { "content-type": "application/json" },
-							body: JSON.stringify(body),
-						});
-						if (!res.ok) {
-							const detail = (await res.json().catch(() => ({}))) as { error?: string };
-							setError(`${section}: ${detail.error ?? res.status}`);
-						} else {
-							const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
-							const stored = reply?.settings;
-							// Only this section belongs to this response: other sections
-							// may have newer writes or pending edits of their own.
-							const saved = stored && section in stored ? stored[section] : body;
-							confirmedRecord.current = { ...confirmedRecord.current, [section]: saved } as UserSettings;
-							// An unrelated save can repair corrupt settings into a fail-closed
-							// file policy. Mirror that policy only if no agent write has raced
-							// this response; its other agent fields may be stale.
-							if (stored && (section === "agent" || (agentWriteEpoch.current === agentEpochAtSend && !sectionWrites.current.agent?.length))) {
-								fileAccessErrorRef.current = reply?.fileAccessError ?? null;
-								setFileAccessError(fileAccessErrorRef.current);
-								if (section !== "agent") {
-									const syncFileAccess = (record: UserSettings | null): UserSettings | null => {
-										if (!record) return record;
-										const fileAccess = stored.agent?.fileAccess;
-										if (!record.agent && fileAccess === undefined) return record;
-										const agent = { ...record.agent };
-										if (fileAccess === undefined) delete agent.fileAccess;
-										else agent.fileAccess = fileAccess;
-										return { ...record, agent };
-									};
-									confirmedRecord.current = syncFileAccess(confirmedRecord.current);
-									visibleRecord.current = syncFileAccess(visibleRecord.current);
-								}
-							}
-							notifySettingsSaved(section);
-							if (section === "appearance") onAppearanceChange(body as AppearanceSettings);
-						}
-					} catch {
-						setError(`${section}: could not save`);
-					} finally {
-						if (section === "agent") agentWriteEpoch.current++;
+			const save = async () => {
+				const ticket = ++authority.issued;
+				const seenSections = new Map(authority.sectionAcknowledgements);
+				try {
+					const body = typeof change === "function" ? change(authority.record?.[section]) : change;
+					const res = await fetch(`/api/settings/${section}`, {
+						method: "PUT",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(body),
+					});
+					if (!res.ok) {
+						const detail = (await res.json().catch(() => ({}))) as {
+							error?: string;
+						};
+						if (queued || ticket === authority.issued) setError(`${section}: ${detail.error ?? res.status}`);
+						return false;
 					}
-					queue.shift();
-					refreshVisibleSection();
+					// Only the acknowledged record is canonical: never substitute the
+					// request body, including when normalization leaves the old value.
+					const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
+					const stored = reply?.settings;
+					if (!stored || typeof stored !== "object" || Array.isArray(stored) || stored.version !== 1 ||
+						!stored[section] || typeof stored[section] !== "object" || Array.isArray(stored[section])) {
+						if (queued || ticket === authority.issued) setError(`${section}: Could not confirm saved settings. Your input has been kept.`);
+						return false;
+					}
+					const full = ticket >= authority.acknowledged;
+					const ownsSection = ticket >= (authority.sectionAcknowledgements.get(section) ?? 0);
+					const prior = authority.record;
+					if (full || ownsSection) {
+						// A PUT owns its section. An unrelated snapshot may have been
+						// taken before a different section finished saving.
+						const canonical = full || !prior ? stored : { ...prior, [section]: stored[section] };
+						let diagnostic = full || section === "agent" ? reply?.fileAccessError ?? null : authority.fileAccessError ?? null;
+						if (full && prior) {
+							for (const [name, acknowledged] of authority.sectionAcknowledgements) {
+								if (name === section || acknowledged === seenSections.get(name)) continue;
+								Object.assign(canonical, { [name]: prior[name] });
+								if (name === "agent") diagnostic = authority.fileAccessError ?? null;
+							}
+						}
+						if (full) authority.acknowledged = ticket;
+						authority.sectionAcknowledgements.set(section, ticket);
+						authority.record = canonical;
+						authority.fileAccessError = diagnostic;
+						for (const apply of authority.listeners) apply(canonical, diagnostic);
+						if (full || section === "appearance") onAppearanceChange(canonical.appearance);
+					}
+					notifySettingsSaved(section);
+					return true;
+				} catch (error) {
+					if (queued || ticket === authority.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
+					return false;
 				}
 			};
-			const activeWrite = drain();
-			pendingSettingsWrites.set(activeWrite, section);
-			void activeWrite.then(
-				() => { pendingSettingsWrites.delete(activeWrite); },
-				() => { pendingSettingsWrites.delete(activeWrite); },
-			);
+			if (!queued) return save();
+			const previous = authority.pending.get(section);
+			const pending = previous ? previous.then(save) : save();
+			authority.pending.set(section, pending);
+			pendingSettingsWrites.set(pending, section);
+			const clear = () => {
+				if (authority.pending.get(section) === pending) authority.pending.delete(section);
+				pendingSettingsWrites.delete(pending);
+			};
+			void pending.then(clear, clear);
+			return pending;
 		},
-		[onAppearanceChange],
+		[onAppearanceChange, writeOrder],
 	);
 
-	return (
+	const frame = (
 		<div
+			tabIndex={-1}
 			role="dialog"
 			aria-modal="true"
 			aria-label="Settings"
@@ -365,7 +418,7 @@ export function SettingsDialogBody({
 			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
 				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
 				<Hint
-						// Esc closes the dialog (its own listener) — surface it.
+						// Esc closes through the shared interaction owner.
 						label="Close"
 						binding="escape"
 						side="left"
@@ -391,28 +444,32 @@ export function SettingsDialogBody({
 			</header>
 
 			<div className="flex min-h-0 flex-1">
-				{/* Left nav — text-only, the session-list mono language,
+				{/* Left nav — mono labels and theme-inherited decorative icons,
 					    active = bg-accent. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex w-44 shrink-0 flex-col gap-1 border-r border-border p-2"
+					className="flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
 				>
-					{SECTIONS.map((s) => (
-						<button
-							key={s.id}
-							type="button"
-							data-testid={`settings-nav-${s.id}`}
-							aria-current={active === s.id}
-							className={`rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
-								active === s.id
-									? "bg-accent text-foreground"
-									: "text-muted-foreground hover:bg-accent hover:text-foreground"
-							}`}
-							onClick={() => setActive(s.id)}
-						>
-							{s.label}
-						</button>
+					{navSections.map((s, index) => (
+						<div key={s.id} className="shrink-0">
+							{index === SECTIONS.length && <hr className="my-2 border-border" />}
+							<button
+								type="button"
+								data-testid={`settings-nav-${s.id}`}
+								aria-current={selected === s.id}
+								className={`flex w-full items-center gap-2 break-words rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
+									selected === s.id
+										? "bg-accent text-foreground"
+										: "text-muted-foreground hover:bg-accent hover:text-foreground"
+								}`}
+								onClick={() => setActive(s.id)}
+							>
+								{s.icon && <s.icon aria-hidden="true" focusable="false" className="size-3.5 shrink-0" />}
+								<span className="min-w-0">{s.label}</span>
+							</button>
+							{s.id === "plugins" && <hr className="my-2 border-border" />}
+						</div>
 					))}
 				</nav>
 
@@ -427,16 +484,19 @@ export function SettingsDialogBody({
 					className="min-w-0 flex-1 overflow-y-auto"
 					data-testid="settings-content"
 				>
-					{error && (
+					{error && !activePluginId && selected !== "plugins" && selected !== "core-plugins" && (
 						<p
 							role="alert"
-							className="m-4 rounded-sm border border-red-500/40 px-3 py-2 text-xs text-red-500"
+							className="m-4 rounded-sm border border-error/40 px-3 py-2 text-xs text-error"
 							data-testid="settings-error"
 						>
 							{error}
 						</p>
 					)}
-					{record === undefined ? (
+					{selected === "plugins" || selected === "core-plugins" ? <PluginsSection origin={selected === "core-plugins" ? "core" : "community"} onOpenSettings={pluginId => setActive(`plugin:${pluginId}`)} />
+						: activePlugin ? <PluginSettingsPage key={`${activePlugin.info.id}/${activePlugin.info.revision}`} plugin={activePlugin} />
+							: activePluginId !== null ? <p role="status" className="px-6 py-5 text-xs text-muted-foreground">Loading plugins…</p>
+								: record === undefined ? (
 						<p className="px-6 py-5 text-xs text-muted-foreground/70">
 							Loading settings…
 						</p>
@@ -470,8 +530,8 @@ export function SettingsDialogBody({
 									testid="section-agent"
 								>
 									<AgentSection
-										onSectionEdit={(edit) => void write("agent", (current) => {
-											const safeCurrent = fileAccessErrorRef.current
+										onSectionEdit={(edit) => write("agent", (current) => {
+											const safeCurrent = writeOrder.current.fileAccessError
 												? { ...current, fileAccess: { restricted: true, folders: current?.fileAccess?.folders ?? [] } }
 												: current;
 											return edit(safeCurrent);
@@ -485,10 +545,11 @@ export function SettingsDialogBody({
 											void write("models", next)
 										}
 										onSectionChange={(next: AgentSettings) =>
-											void write("agent", next)
+											write("agent", next)
 										}
-										onCompactionChange={(change: (current: CompactionSettings | undefined) => CompactionSettings) =>
-											void write("compaction", change)
+										onCompactionEdit={(edit) => write("compaction", edit)}
+										onCompactionChange={(next: CompactionSettings) =>
+											write("compaction", next)
 										}
 									/>
 								</SettingsSection>
@@ -501,7 +562,7 @@ export function SettingsDialogBody({
 									<AppearanceSection
 										appearance={record.appearance}
 										onSectionChange={(next: AppearanceSettings) =>
-											void write("appearance", next)
+											write("appearance", next)
 										}
 									/>
 								</SettingsSection>
@@ -514,7 +575,7 @@ export function SettingsDialogBody({
 									<GraphSection
 										graph={record.graph}
 										onSectionChange={(next: GraphSettings) =>
-											void write("graph", next)
+											write("graph", next)
 										}
 									/>
 								</SettingsSection>
@@ -534,4 +595,5 @@ export function SettingsDialogBody({
 			</div>
 		</div>
 	);
+	return renderFrame ? renderFrame(frame) : frame;
 }

@@ -2,6 +2,7 @@ import React, { act } from "react";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { parseHTML } from "linkedom";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { SettingsDialogBody } from "../components/settings/settings-dialog.tsx";
 import { parseCompactionSettingsBody } from "../src/server/settings-body.ts";
 
@@ -54,7 +55,7 @@ async function withDialog(run: (harness: {
 	}
 	const { createRoot } = await import("react-dom/client");
 	let root = createRoot(document.getElementById("root")!);
-	const render = () => root.render(<SettingsDialogBody initialSection="agent" onClose={() => {}} />);
+	const render = () => root.render(<InteractionLayersProvider><SettingsDialogBody initialSection="agent" onClose={() => {}} /></InteractionLayersProvider>);
 	const reopen = async () => {
 		await act(async () => root.unmount());
 		root = createRoot(document.getElementById("root")!);
@@ -65,13 +66,13 @@ async function withDialog(run: (harness: {
 	const reactProps = (el: Element) => {
 		const key = Object.keys(el).find((name) => name.startsWith("__reactProps$"));
 		assert.ok(key);
-		return (el as unknown as Record<string, { onChange: (event: { target: { value: string } }) => void; onBlur: () => void }>)[key]!;
+		return (el as unknown as Record<string, { onInput: () => void; onBlur: (event: { currentTarget: HTMLInputElement }) => void }>)[key]!;
 	};
 	const commit = async (id: string, value: string) => {
-		const input = document.querySelector(`[data-testid='${id}']`);
+		const input = document.querySelector<HTMLInputElement>(`[data-testid='${id}']`);
 		assert.ok(input);
-		await act(async () => { reactProps(input).onChange({ target: { value } }); });
-		await act(async () => { reactProps(input).onBlur(); });
+		await act(async () => { input.value = value; reactProps(input).onInput(); });
+		await act(async () => { reactProps(input).onBlur({ currentTarget: input }); });
 	};
 	const select = async (key: string) => {
 		const input = document.querySelector<HTMLSelectElement>("[data-testid='context-model']");
@@ -167,5 +168,21 @@ it("waits for a closed dialog's compaction writes before reopening", async () =>
 		assert.deepEqual(requests[2]!.body, { thresholdTokens: 800_000, contextWindows: { [other]: 400_000, [sol]: 650_000 } });
 		await act(async () => { requests[2]!.finish(); });
 		assert.deepEqual(saved(), { thresholdTokens: 800_000, contextWindows: { [other]: 400_000, [sol]: 650_000 } });
+	});
+});
+
+it("keeps the upstream reasoning toggle when a window edit is still pending", async () => {
+	await withDialog(async ({ requests, commit, saved }) => {
+		await commit("input-context-window", "700000");
+		const toggle = document.querySelector<HTMLButtonElement>("[data-testid='compaction-row-reasoning'] [role='switch']");
+		assert.ok(toggle);
+		await act(async () => toggle.click());
+		assert.equal(requests.length, 1);
+		await act(async () => { requests[0]!.finish(); });
+		assert.equal(requests.length, 2);
+		const expected = { thresholdTokens: 150_000, contextWindows: { [other]: 400_000, [sol]: 700_000 }, includeReasoning: true };
+		assert.deepEqual(requests[1]!.body, expected);
+		await act(async () => { requests[1]!.finish(); });
+		assert.deepEqual(saved(), expected);
 	});
 });

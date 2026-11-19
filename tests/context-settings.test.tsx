@@ -3,6 +3,7 @@ import React, { act } from "react";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { parseHTML } from "linkedom";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { AgentSection } from "../components/settings/agent-section.tsx";
 
 it("shows account-specific default, maximum and effective compaction for the selected model", async () => {
@@ -32,9 +33,9 @@ it("shows account-specific default, maximum and effective compaction for the sel
 	const { createRoot } = await import("react-dom/client");
 	const root = createRoot(document.getElementById("root")!);
 	try {
-		await act(async () => root.render(<AgentSection agent={undefined} models={undefined} graph={undefined}
+		await act(async () => root.render(<InteractionLayersProvider><AgentSection agent={undefined} models={undefined} graph={undefined}
 			compaction={{ thresholdTokens: 800_000, contextWindows: { "chatgpt:a:gpt-6-astra": 872_000 } }}
-			onSectionChange={() => {}} onModelsChange={() => {}} onCompactionChange={() => {}} />));
+			onSectionChange={() => true} onModelsChange={() => {}} onCompactionChange={() => true} /></InteractionLayersProvider>));
 		const row = document.querySelector<HTMLElement>('[data-testid="context-window-row"]')!;
 		assert.match(row.textContent ?? "", /Account default 500000; maximum 872000/);
 		assert.equal(document.querySelector<HTMLInputElement>('[data-testid="input-context-window"]')?.placeholder, "500000");
