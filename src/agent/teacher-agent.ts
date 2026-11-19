@@ -4,6 +4,8 @@ import { invalidInputResult, questionResult } from "./tool-execute.ts";
 import { providerEventObserver } from "./provider-events.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import { PATHS } from "../../config.ts";
+import { DEFAULT_APP_LANGUAGE, type AppLanguage } from "../core/i18n.ts";
+import { languageDirective } from "./prompt-language.ts";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
 import { effectivePromptSegments } from "./prompt-segments.ts";
 import {
@@ -84,13 +86,22 @@ export const CONVERSATION_TOOL_NAMES = Object.freeze([
  *  tests/prompt-overrides.test.ts). Overrides are a static-file read
  *  through config paths, not request state — the store import carries no
  *  chat/job machinery. */
-export function composeInstructions(kind: AgentKind, switches?: Record<string, boolean>): string {
+export function composeInstructions(
+	kind: AgentKind,
+	switches?: Record<string, boolean>,
+	language: AppLanguage = DEFAULT_APP_LANGUAGE,
+): string {
 	const segments = effectivePromptSegments(kind, switches ?? {});
-	return segments
+	const composed = segments
 		.map((s) => (s.enabled ? s.overrideText! : s.sourceText))
 		.map((t) => t.trim())
-		.filter(Boolean)
-		.join("\n\n---\n\n");
+		.filter(Boolean);
+	// i18n foundation (2026-11-19): the language directive is an APPENDIX, not
+	// a segment — it is not overridable, never changes source discovery, and
+	// English contributes nothing (byte-identical prompts for English).
+	const directive = languageDirective(language).trim();
+	if (directive) composed.push(directive);
+	return composed.join("\n\n---\n\n");
 }
 
 // The switch-free source composition, cached per kind (module-load once).
@@ -102,6 +113,18 @@ const composedInstructions: Record<AgentKind, string> = {
 	teacher: composeInstructions("teacher"),
 	practice: composeInstructions("practice"),
 };
+// Per-language, switch-free compositions (the same cache discipline): a new
+// language costs one composition per agent, not one per turn.
+const composedByLanguage = new Map<string, string>();
+function composedFor(kind: AgentKind, language: AppLanguage): string {
+	if (language === DEFAULT_APP_LANGUAGE) return composedInstructions[kind]!;
+	const key = `${kind}:${language}`;
+	const cached = composedByLanguage.get(key);
+	if (cached !== undefined) return cached;
+	const composed = composeInstructions(kind, undefined, language);
+	composedByLanguage.set(key, composed);
+	return composed;
+}
 
 // Money channel (wave 4): the chat-handler passes a per-turn collector;
 // every model call's usage lands in the chat record's turns log
@@ -148,6 +171,10 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** The app language (i18n foundation, 2026-11-19): composes the language
+	 *  directive into the system prompt. Absent = English (no directive, the
+	 *  prompts are byte-identical to the pre-i18n composition). */
+	language?: AppLanguage;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -211,9 +238,10 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const stopper = makeQuestionStopper(kind);
 	const narrationGuard = narrationGuardApplies(kind, engine.model, opts.tools !== undefined);
 	const narrationHooks = narrationGuard ? makeNarrationGuard() : undefined;
+	const language = opts.language ?? DEFAULT_APP_LANGUAGE;
 	const composedPrompt = opts.promptSwitches
-		? composeInstructions(kind, opts.promptSwitches)
-		: composedInstructions[kind]!;
+		? composeInstructions(kind, opts.promptSwitches, language)
+		: composedFor(kind, language);
 	const builtinPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
 	// Bind native read and preserve the kind/model-aware Claude output gate
 	// before resolving additive plugins. Explicit registries remain caller-owned.

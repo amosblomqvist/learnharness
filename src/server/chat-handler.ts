@@ -673,6 +673,9 @@ export async function handleChatInput(
 	});
 	let pendingSideBudgetError: Error | undefined;
 	const agentOpts: AgentBuildOptions = {
+		// The app language reaches the agents here (i18n foundation, 2026-11-19):
+		// one field, read once per turn from the resolved settings record.
+		language: effective.general.language,
 		pluginContributions,
 		engine,
 		callPurpose,
