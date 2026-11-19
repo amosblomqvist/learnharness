@@ -19,11 +19,12 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
-import type { ChatListItem } from "@/src/core";
+import type { ChatListItem, ChatListResponse } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { PluginWidgets } from "@/components/plugins";
 import { PluginSidebarActions } from "@/components/plugin-chrome";
+import { createSidebarRefresh } from "@/components/sidebar-refresh";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
@@ -405,7 +406,8 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 function SessionsSidebar() {
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
-	const [chats, setChats] = useState<ChatListItem[] | null>(null);
+	const [snapshot, setSnapshot] = useState<ChatListResponse | null>(null);
+	const chats = snapshot?.chats ?? null;
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
 	useEffect(() => {
@@ -446,24 +448,41 @@ function SessionsSidebar() {
 			.map((r) => r.c);
 	}, [chats, query, kindFilter]);
 
-	const refreshInFlightRef = useRef(false);
-	const refresh = useCallback(async () => {
-		// In-flight coalesce (S6): event bursts may land several refresh
-		// calls at once — one fetch serves them all; anything newer arrives
-		// with the next event's fetch.
-		if (refreshInFlightRef.current) return;
-		refreshInFlightRef.current = true;
+	/* The list snapshot (chat-folders S02): GET /api/chats carries the chat
+	   list AND the shared source organization in one payload, replaced
+	   whole on every accepted read. createSidebarRefresh owns the sequence:
+	   one read at a time, signals during a read queue ONE repeat, and
+	   invalidate() (local edits) drops the answer already in flight. */
+	const readSnapshot = useCallback(async (): Promise<ChatListResponse | null> => {
 		try {
 			const res = await fetch("/api/chats", { cache: "no-store" });
-			const d = (await res.json()) as { chats: ChatListItem[] };
-			setChats(d.chats);
+			if (!res.ok) return null;
+			const d = (await res.json()) as Partial<ChatListResponse> | null;
+			if (typeof d !== "object" || d === null || !Array.isArray(d.chats)) return null;
+			const org = d.organization;
+			if (org === undefined) return null;
+			if (org !== null) {
+				const o = org as { folders?: unknown; placements?: unknown };
+				if (typeof o !== "object" || o === null || !Array.isArray(o.folders) || typeof o.placements !== "object" || o.placements === null || Array.isArray(o.placements)) return null;
+			}
+			return { chats: d.chats, organization: org };
 		} catch {
-			// a transient failure keeps the last snapshot
-			setChats((prev) => prev ?? []);
-		} finally {
-			refreshInFlightRef.current = false;
+			// a transient failure keeps the last snapshot (readSnapshot → null)
+			return null;
 		}
 	}, []);
+	const acceptSnapshot = useCallback((result: ChatListResponse | null) => {
+		if (result !== null) {
+			setSnapshot(result);
+			return;
+		}
+		// Whole-request failure: keep the previous snapshot with its local
+		// edits; only a missing first snapshot falls back to empty.
+		setSnapshot((prev) => prev ?? { chats: [], organization: null });
+	}, []);
+	const [sidebarRefresh] = useState(() => createSidebarRefresh(readSnapshot, acceptSnapshot));
+	const invalidate = sidebarRefresh.invalidate;
+	const refresh = useCallback(() => sidebarRefresh.request(), [sidebarRefresh]);
 
 	/* Instant rename propagation (2026-09-17): the chat header's rename
 	   commits dispatch lh:chat-renamed; patch the snapshot in place instead
@@ -471,11 +490,14 @@ function SessionsSidebar() {
 	useEffect(() => {
 		const onRenamed = (e: Event) => {
 			const { id, title } = (e as CustomEvent<{ id: string; title: string }>).detail;
-			setChats((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, title } : c)) : prev));
+			invalidate();
+			setSnapshot((prev) =>
+				prev ? { ...prev, chats: prev.chats.map((c) => (c.id === id ? { ...c, title } : c)) } : prev,
+			);
 		};
 		window.addEventListener("lh:chat-renamed", onRenamed);
 		return () => window.removeEventListener("lh:chat-renamed", onRenamed);
-	}, []);
+	}, [invalidate]);
 
 	/* INSTANT TURN-STATE (owner, sidebar round 2026-10-02): the open
 	   session broadcasts lh:turn-state the instant its turn starts
@@ -494,18 +516,24 @@ function SessionsSidebar() {
 			const { id, running } = (e as CustomEvent<{ id: string; running: boolean }>).detail;
 			if (running) {
 				if (chatsRef.current?.some((c) => c.id === id)) {
-					setChats((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, busy: true } : c)) : prev));
+					invalidate();
+					setSnapshot((prev) =>
+						prev ? { ...prev, chats: prev.chats.map((c) => (c.id === id ? { ...c, busy: true } : c)) } : prev,
+					);
 				} else {
 					void refresh(); // the brand-new session: it isn't in the snapshot yet
 				}
 				return;
 			}
-			setChats((prev) => (prev ? prev.map((c) => (c.id === id ? { ...c, busy: false } : c)) : prev));
+			invalidate();
+			setSnapshot((prev) =>
+				prev ? { ...prev, chats: prev.chats.map((c) => (c.id === id ? { ...c, busy: false } : c)) } : prev,
+			);
 			void refresh(); // settle: the server snapshot is now truthful — land it now
 		};
 		window.addEventListener("lh:turn-state", onTurnState);
 		return () => window.removeEventListener("lh:turn-state", onTurnState);
-	}, [refresh]);
+	}, [refresh, invalidate]);
 
 	/* PUSH (architecture S6, 2026-10-02): the 2.5s poll is RETIRED — the
 	   last standing network poll in the app. List truth arrives as
@@ -530,6 +558,12 @@ function SessionsSidebar() {
 	useServerEvent("turn-started", scheduleEventRefresh);
 	useServerEvent("turn-settled", scheduleEventRefresh);
 	useServerEvent("compaction-changed", scheduleEventRefresh);
+	/* chat-folders S02: Chains publishes sources-changed after a folder or
+	   placement write — the OPEN panel re-reads the snapshot on the same
+	   250ms debounce (a closed panel catches up on its next open fetch). */
+	useServerEvent("sources-changed", () => {
+		if (open) scheduleEventRefresh();
+	});
 	useServerResync(() => void refreshRef.current());
 	useEffect(
 		() => () => {
@@ -618,11 +652,19 @@ function SessionsSidebar() {
 	const onDeleted = useCallback(
 		(id: string, _mode: ChatDeleteMode, graphRevision: number) => {
 			setDeleting(null);
-			setChats((prev) => (prev ? prev.filter((c) => c.id !== id) : prev));
+			invalidate();
+			setSnapshot((prev) => {
+				if (!prev) return prev;
+				const chats = prev.chats.filter((c) => c.id !== id);
+				if (!prev.organization) return { ...prev, chats };
+				const placements = { ...prev.organization.placements };
+				delete placements[id];
+				return { ...prev, chats, organization: { ...prev.organization, placements } };
+			});
 			if (pathname === `/chat/${id}`) router.push("/");
 			window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { revision: graphRevision } }));
 		},
-		[pathname, router],
+		[pathname, router, invalidate],
 	);
 
 	useEffect(() => {
