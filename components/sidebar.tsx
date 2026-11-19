@@ -28,13 +28,14 @@ import { buildSidebarFolderView, enterKbdChat, nextKbdChat, SidebarFolderTree } 
 import {
 	createFolderWriter,
 	folderPath,
-	MoveChatDialog,
+	MoveTargetDialog,
 	NewFolderDialog,
 	planCreateFolder,
 	planMoveChat,
 	postFolderCommand,
+	type FolderPlan,
 	type SidebarOrganization,
-	useSidebarChatDrag,
+	useSidebarDrag,
 } from "@/components/sidebar-folder-actions";
 import { SourceDragRow } from "@/components/source-folder-tree";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
@@ -426,6 +427,8 @@ function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
 	const [snapshot, setSnapshot] = useState<ChatListResponse | null>(null);
 	const chats = snapshot?.chats ?? null;
+	const organization = snapshot?.organization ?? null;
+	const dialogOrganization = organization ?? EMPTY_ORGANIZATION;
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
 	useEffect(() => {
@@ -448,11 +451,11 @@ function SessionsSidebar() {
 		router.push("/chat/new");
 	}, [router]);
 
-	/* Chat folders (chat-folders S03): the session list is a TREE of the
-	   shared folders carried by the same snapshot. kindChats is the
-	   kind-filtered chat list (null until the first snapshot); view is the
-	   rendered tree — buildSidebarFolderView owns query matching, folder
-	   reveal and the visible-chat order the keyboard walk follows. */
+	/* The session list is a TREE of the shared folders carried by the same
+	   snapshot. kindChats is the kind-filtered chat list (null until the
+	   first snapshot); view is the rendered tree — buildSidebarFolderView
+	   owns query matching, folder reveal and the visible-chat order the
+	   keyboard walk follows. */
 	const kindChats = useMemo(() => {
 		if (!chats) return null;
 		if (kindFilter === "all") return chats;
@@ -474,11 +477,8 @@ function SessionsSidebar() {
 		[searchFolds, query],
 	);
 	const view = useMemo(
-		() =>
-			kindChats === null
-				? null
-				: buildSidebarFolderView(kindChats, snapshot?.organization ?? null, query, expandedIds, foldedForQuery),
-		[kindChats, snapshot, query, expandedIds, foldedForQuery],
+		() => (kindChats === null ? null : buildSidebarFolderView(kindChats, organization, query, expandedIds, foldedForQuery)),
+		[kindChats, organization, query, expandedIds, foldedForQuery],
 	);
 
 	const toggleFolder = useCallback(
@@ -502,11 +502,11 @@ function SessionsSidebar() {
 		[query],
 	);
 
-	/* The list snapshot (chat-folders S02): GET /api/chats carries the chat
-	   list AND the shared source organization in one payload, replaced
-	   whole on every accepted read. createSidebarRefresh owns the sequence:
-	   one read at a time, signals during a read queue ONE repeat, and
-	   invalidate() (local edits) drops the answer already in flight. */
+	/* The list snapshot: GET /api/chats carries the chat list AND the
+	   shared source organization in one payload, replaced whole on every
+	   accepted read. createSidebarRefresh owns the sequence: one read at
+	   a time, signals during a read queue ONE repeat, and invalidate()
+	   (local edits) drops the answer already in flight. */
 	const readSnapshot = useCallback(async (): Promise<ChatListResponse | null> => {
 		try {
 			const res = await fetch("/api/chats", { cache: "no-store" });
@@ -566,16 +566,16 @@ function SessionsSidebar() {
 	const chatsRef = useRef(chats);
 	chatsRef.current = chats;
 
-	/* Folder writes (chat-folders S04): ONE writer serializes the
-	   sidebar's create/move POSTs — a second submit while one is in
-	   flight is refused without posting. afterWrite ALWAYS drops the
-	   in-flight read and re-requests the snapshot (the tree renders only
-	   what GET /api/chats returns — no client-side copy of the
-	   organization), and on success expands the folder chain down to the
-	   write's parentId so the change is visible: for create-folder that
-	   is the new folder's parent chain, for move the target's. orgRef
-	   hands the once-created closures the latest organization — the
-	   writer must not plan against a stale render. */
+	/* Folder writes: ONE writer serializes the sidebar's create/move
+	   POSTs — a second submit while one is in flight is refused without
+	   posting. afterWrite ALWAYS drops the in-flight read and re-requests
+	   the snapshot (the tree renders only what GET /api/chats returns —
+	   no client-side copy of the organization), and on success expands
+	   the folder chain down to the write's parentId so the change is
+	   visible: for create-folder that is the new folder's parent chain,
+	   for move the target's. orgRef hands the once-created closures the
+	   latest organization — the writer must not plan against a stale
+	   render. */
 	const orgRef = useRef<SidebarOrganization | null>(snapshot?.organization ?? null);
 	orgRef.current = snapshot?.organization ?? null;
 	const [folderWriter] = useState(() =>
@@ -601,39 +601,36 @@ function SessionsSidebar() {
 	/* Pre-send plans run against the freshest snapshot; the server stays
 	   authoritative. skip (already at the target) and plan errors resolve
 	   to the dialogs' string-or-null contract without a POST; only a
-	   command reaches the writer. moveChat is the single move handler —
-	   S05's drag/drop reuses it. */
-	const createFolder = useCallback(
-		async (name: string, parentId: string | null): Promise<string | null> => {
+	   command reaches the writer. The single org-null guard stays
+	   reachable: a dialog can be open when a snapshot with organization
+	   null arrives. */
+	const runPlan = useCallback(
+		async (make: (org: SidebarOrganization) => FolderPlan): Promise<string | null> => {
 			const org = orgRef.current;
 			if (org === null) return "The folder list is unavailable.";
-			const plan = planCreateFolder(org, name, parentId);
+			const plan = make(org);
 			if (plan.kind === "error") return plan.error;
 			if (plan.kind !== "command") return null;
 			const result = await folderWriter.write(plan.command);
 			return result.ok ? null : result.error;
 		},
 		[folderWriter],
+	);
+	const createFolder = useCallback(
+		(name: string, parentId: string | null) => runPlan((org) => planCreateFolder(org, name, parentId)),
+		[runPlan],
 	);
 	const moveChat = useCallback(
-		async (chatId: string, parentId: string | null): Promise<string | null> => {
-			const org = orgRef.current;
-			if (org === null) return "The folder list is unavailable.";
-			const plan = planMoveChat(org, chatsRef.current ?? [], chatId, parentId);
-			if (plan.kind === "error") return plan.error;
-			if (plan.kind !== "command") return null;
-			const result = await folderWriter.write(plan.command);
-			return result.ok ? null : result.error;
-		},
-		[folderWriter],
+		(chatId: string, parentId: string | null) =>
+			runPlan((org) => planMoveChat(org, chatsRef.current ?? [], chatId, parentId)),
+		[runPlan],
 	);
-
-	/* Chat drag & drop (chat-folders S05): the hook owns the gesture —
-	   dragChatId arms only on a dragstart bubbled from this list's own
-	   SourceDragRow payload, folder headers plus the Outside folders zone
-	   are the targets, and a drop rides the same moveChat as the menu. */
-	const drag = useSidebarChatDrag({
-		organization: snapshot?.organization ?? null,
+	/* Chat drag & drop: the hook owns the gesture — dragChatId arms only
+	   on a dragstart bubbled from this list's own SourceDragRow payload,
+	   folder headers plus the Outside folders zone are the targets, and
+	   a drop rides the same moveChat as the menu. */
+	const drag = useSidebarDrag({
+		organization,
 		chats: kindChats ?? [],
 		moveChat,
 	});
@@ -685,9 +682,9 @@ function SessionsSidebar() {
 	useServerEvent("turn-started", scheduleEventRefresh);
 	useServerEvent("turn-settled", scheduleEventRefresh);
 	useServerEvent("compaction-changed", scheduleEventRefresh);
-	/* chat-folders S02: Chains publishes sources-changed after a folder or
-	   placement write — the OPEN panel re-reads the snapshot on the same
-	   250ms debounce (a closed panel catches up on its next open fetch). */
+	/* Chains publishes sources-changed after a folder or placement
+	   write — the OPEN panel re-reads the snapshot on the same 250ms
+	   debounce (a closed panel catches up on its next open fetch). */
 	useServerEvent("sources-changed", () => {
 		if (open) scheduleEventRefresh();
 	});
@@ -700,7 +697,7 @@ function SessionsSidebar() {
 	);
 
 	/* ── Keyboard seams (shortcut wave A, 2026-09-17; search-walk round
-	   2026-10-10; folders S03) ── ⌘⇧F focuses the search field — and THE
+	   2026-10-10) ── ⌘⇧F focuses the search field — and THE
 	   SEARCH OWNS THE WALK: ↑/↓ cycle the visible chats in tree order
 	   (wrap — "cycle"), Enter opens the walked chat, or the FIRST visible
 	   one when nothing is walked (owner, 2026-10-10 — the quick-open
@@ -726,11 +723,10 @@ function SessionsSidebar() {
 	const ctxAnchorRef = useRef<HTMLElement | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState<ChatListItem | null>(null);
-	/* Folder dialogs (chat-folders S04): the create dialog is a boolean;
-	   the move dialog holds the ChatListItem captured when the menu item
-	   was picked (its id is what the write uses). */
+	/* Folder dialogs: the create dialog is a boolean; the move dialog
+	   holds the chat captured when the menu item was picked. */
 	const [newFolderOpen, setNewFolderOpen] = useState(false);
-	const [movingChat, setMovingChat] = useState<ChatListItem | null>(null);
+	const [moving, setMoving] = useState<ChatListItem | null>(null);
 	const ctxChat = chats?.find((c) => c.id === ctxChatId) ?? null;
 
 	const openContext = (e: React.MouseEvent<HTMLButtonElement>, chat: ChatListItem) => {
@@ -904,10 +900,10 @@ function SessionsSidebar() {
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
-					{/* New folder (chat-folders S04): only once the snapshot
-					    carries the organization — with organization null the
-					    folders are unknowable and the action stays hidden. */}
-					{snapshot?.organization != null && (
+					{/* New folder: only once the snapshot carries the
+					    organization — with organization null the folders are
+					    unknowable and the action stays hidden. */}
+					{organization !== null && (
 						<Hint label="New folder" side="bottom">
 							<Button
 								variant="ghost"
@@ -1037,7 +1033,7 @@ function SessionsSidebar() {
 							onToggleFolder={toggleFolder}
 							drop={{ activeTarget: drag.dropTarget, targetProps: drag.targetProps }}
 							renderChat={(c) => {
-								/* Drag source (S05): only a teaching chat in the
+								/* Drag source: only a teaching chat in the
 								   normal tree — a live organization, a blank
 								   query and no rename in flight. Practice chats,
 								   search results and the renamed row stay plain. */
@@ -1063,7 +1059,7 @@ function SessionsSidebar() {
 										/>
 									);
 								const draggable =
-									snapshot?.organization != null &&
+									organization !== null &&
 									query.trim() === "" &&
 									(c.kind ?? "teach") !== "practice" &&
 									renamingId !== c.id;
@@ -1132,19 +1128,18 @@ function SessionsSidebar() {
 						>
 							Rename
 						</button>
-						{/* Move to folder… (chat-folders S04): teaching chats
-						    only — practice chats always stay at the root, so
-						    the item would be a dead end — and only once the
-						    snapshot carries the organization (null = the
-						    folders are unknowable). Directly after Rename,
-						    same row classes. */}
-						{snapshot?.organization != null && ctxChat !== null && (ctxChat.kind ?? "teach") !== "practice" && (
+						{/* Move to folder…: teaching chats only — practice chats
+						    always stay at the root, so the item would be a dead
+						    end — and only once the snapshot carries the
+						    organization (null = the folders are unknowable).
+						    Directly after Rename, same row classes. */}
+						{organization !== null && ctxChat !== null && (ctxChat.kind ?? "teach") !== "practice" && (
 							<button
 								type="button"
 								data-testid="ctx-move-folder"
 								onClick={() => {
 									setCtxChatId(null);
-									setMovingChat(ctxChat);
+									setMoving(ctxChat);
 								}}
 								className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 							>
@@ -1198,21 +1193,26 @@ function SessionsSidebar() {
 					onDeleted={onDeleted}
 				/>
 
-				{/* The folder dialogs (chat-folders S04) — both read the live
-				    organization snapshot for their target lists; writes ride
-				    the single folderWriter. */}
-				<NewFolderDialog
-					open={newFolderOpen}
-					organization={snapshot?.organization ?? EMPTY_ORGANIZATION}
-					onClose={() => setNewFolderOpen(false)}
-					onSubmit={createFolder}
-				/>
-				<MoveChatDialog
-					chat={movingChat}
-					organization={snapshot?.organization ?? EMPTY_ORGANIZATION}
-					onClose={() => setMovingChat(null)}
-					onSubmit={moveChat}
-				/>
+				{/* The folder dialogs — mounted only while open so each
+				    opening is a fresh form; both read the live organization
+				    snapshot for their target lists and writes ride the
+				    single folderWriter. */}
+				{newFolderOpen && (
+					<NewFolderDialog
+						organization={dialogOrganization}
+						onClose={() => setNewFolderOpen(false)}
+						onSubmit={createFolder}
+					/>
+				)}
+				{moving !== null && (
+					<MoveTargetDialog
+						key={moving.id}
+						chat={moving}
+						organization={dialogOrganization}
+						onClose={() => setMoving(null)}
+						onSubmit={moveChat}
+					/>
+				)}
 			</aside>
 	);
 }

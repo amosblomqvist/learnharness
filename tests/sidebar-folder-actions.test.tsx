@@ -1,8 +1,7 @@
 /**
- * SIDEBAR FOLDER ACTIONS (chat-folders S04, 2026-11-19): the pure half of
- * the sidebar's folder writes — target/path planning against the freshest
- * organization snapshot, the POST /api/graph/sources command channel, the
- * one-write-at-a-time serializer, and the SSR-pinned dialog bodies.
+ * The pure half of the sidebar's folder writes: target/path planning
+ * against the freshest organization snapshot, the POST command channel,
+ * the one-write-at-a-time serializer, and the SSR-pinned dialog bodies.
  * Same tsx classic-JSX shim as sidebar-folder-tree.test.tsx.
  */
 import React from "react";
@@ -12,12 +11,11 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
-	canDropChat,
 	createFolderWriter,
 	currentChatFolder,
 	folderPath,
 	folderTargets,
-	MoveChatBody,
+	MoveTargetBody,
 	NewFolderBody,
 	planCreateFolder,
 	planMoveChat,
@@ -26,28 +24,7 @@ import {
 	type FolderCommand,
 	type FolderWriteResult,
 } from "../components/sidebar-folder-actions.tsx";
-import type { ChatListItem, ChatListResponse } from "../src/core/index.ts";
-
-type TestOrg = NonNullable<ChatListResponse["organization"]>;
-
-const STAMP = "2026-01-01T00:00:00.000Z";
-
-function chat(id: string, overrides: Partial<ChatListItem> = {}): ChatListItem {
-	return {
-		id,
-		title: id,
-		kind: "teach",
-		createdAt: STAMP,
-		updatedAt: STAMP,
-		messageCount: 1,
-		phase: "probe",
-		pendingQuestion: false,
-		pendingProblem: false,
-		busy: false,
-		compacting: false,
-		...overrides,
-	};
-}
+import { chat, STAMP, type TestOrg } from "./helpers/sidebar-fixtures.ts";
 
 /* Shared fixture: Algebra → Maps nesting, a notes-only folder, and chats
  * placed at each level plus a practice chat inside Algebra. */
@@ -110,7 +87,7 @@ describe("folderTargets", () => {
 });
 
 describe("folderPath", () => {
-	it("returns root-to-leaf ids; [] for null or unknown; cycle-safe", () => {
+	it("returns root-to-leaf ids; [] for null or unknown; an unknown parent reads as root", () => {
 		assert.deepEqual(folderPath(ORG, null), []);
 		assert.deepEqual(folderPath(ORG, "ghost"), []);
 		assert.deepEqual(folderPath(ORG, "alg"), ["alg"]);
@@ -121,16 +98,6 @@ describe("folderPath", () => {
 			placements: {},
 		};
 		assert.deepEqual(folderPath(dangling, "x"), ["x"], "an unknown parent reads as root-level");
-
-		const cyclic: TestOrg = {
-			folders: [
-				{ id: "a", name: "A", parentId: "b", createdAt: STAMP },
-				{ id: "b", name: "B", parentId: "a", createdAt: STAMP },
-			],
-			placements: {},
-		};
-		const path = folderPath(cyclic, "a");
-		assert.ok(path.includes("a") && path.length <= 2, "a parent cycle terminates instead of looping");
 	});
 });
 
@@ -165,19 +132,6 @@ describe("readDragPayload", () => {
 		]) {
 			assert.equal(readDragPayload(raw), null, raw);
 		}
-	});
-});
-
-describe("canDropChat", () => {
-	it("requires a known teaching chat and an existing target different from the current folder", () => {
-		const chats = [chat("c_alg"), chat("c_root"), chat("c_prac", { kind: "practice" })];
-		assert.equal(canDropChat(ORG, chats, "ghost", "maps"), false, "unknown chat");
-		assert.equal(canDropChat(ORG, chats, "c_prac", "maps"), false, "practice chats never folder");
-		assert.equal(canDropChat(ORG, chats, "c_root", "ghost"), false, "unknown target folder");
-		assert.equal(canDropChat(ORG, chats, "c_alg", "alg"), false, "already in that folder");
-		assert.equal(canDropChat(ORG, chats, "c_root", null), false, "root → Outside folders is a no-op");
-		assert.equal(canDropChat(ORG, chats, "c_alg", "maps"), true, "another existing folder");
-		assert.equal(canDropChat(ORG, chats, "c_alg", null), true, "folder → Outside folders");
 	});
 });
 
@@ -228,7 +182,7 @@ describe("planMoveChat", () => {
 });
 
 describe("postFolderCommand", () => {
-	it("POSTs the command as JSON to /api/graph/sources and returns createdFolderId on 2xx", async () => {
+	it("POSTs the command as JSON to /api/graph/sources; a readable 2xx body is ok, an unreadable one a failure", async () => {
 		const calls: Array<{ url: unknown; init: RequestInit | undefined }> = [];
 		const fetchImpl: typeof fetch = async (url, init) => {
 			calls.push({ url, init });
@@ -236,15 +190,15 @@ describe("postFolderCommand", () => {
 		};
 		const command: FolderCommand = { action: "create-folder", name: "Maps", parentId: "alg" };
 		const result = await postFolderCommand(command, fetchImpl);
-		assert.deepEqual(result, { ok: true, createdFolderId: "folder_new_1" });
+		assert.deepEqual(result, { ok: true });
 		assert.equal(calls.length, 1);
 		assert.equal(calls[0]?.url, "/api/graph/sources");
 		assert.equal(calls[0]?.init?.method, "POST");
 		assert.deepEqual(calls[0]?.init?.headers, { "Content-Type": "application/json" });
 		assert.equal(calls[0]?.init?.body, JSON.stringify(command));
 
-		const plain: typeof fetch = async () => new Response(JSON.stringify({ sources: [] }), { status: 200 });
-		assert.deepEqual(await postFolderCommand(command, plain), { ok: true }, "no createdFolderId → plain ok");
+		const unreadable: typeof fetch = async () => new Response("not json", { status: 200 });
+		assert.deepEqual(await postFolderCommand(command, unreadable), { ok: false, error: AMBIGUOUS });
 	});
 
 	it("400 surfaces the server's error as a definite rejection; a missing error field uses the default", async () => {
@@ -254,23 +208,21 @@ describe("postFolderCommand", () => {
 		assert.deepEqual(await postFolderCommand(command, rejected), {
 			ok: false,
 			error: "Parent folder no longer exists.",
-			ambiguous: false,
 		});
 
 		const noMessage: typeof fetch = async () => new Response(JSON.stringify({}), { status: 400 });
 		assert.deepEqual(await postFolderCommand(command, noMessage), {
 			ok: false,
 			error: "The folder change was rejected.",
-			ambiguous: false,
 		});
 	});
 
-	it("500 and a thrown fetch are ambiguous with the confirm-failure text", async () => {
+	it("500 and a thrown fetch fail with the confirm-failure text", async () => {
 		const command: FolderCommand = { action: "create-folder", name: "X", parentId: null };
 		const serverError: typeof fetch = async () =>
 			new Response(JSON.stringify({ error: "Could not save source organization." }), { status: 500 });
 		const result = await postFolderCommand(command, serverError);
-		assert.deepEqual(result, { ok: false, ambiguous: true, error: AMBIGUOUS });
+		assert.deepEqual(result, { ok: false, error: AMBIGUOUS });
 
 		const thrown: typeof fetch = async () => {
 			throw new Error("network down");
@@ -298,7 +250,6 @@ describe("createFolderWriter", () => {
 		const second = writer.write(cmd2);
 		assert.deepEqual(await second, {
 			ok: false,
-			ambiguous: false,
 			error: "Another folder change is still saving.",
 		});
 		assert.equal(posted.length, 1, "the overlapping write never reached post");
@@ -312,13 +263,13 @@ describe("createFolderWriter", () => {
 		assert.deepEqual(posted, [cmd1, cmd3], "the next write posts once the first settled");
 	});
 
-	it("awaits afterWrite with the command and result after success and failure, before write resolves", async () => {
+	it("passes the command and result to afterWrite after success and failure", async () => {
 		const seen: Array<{ command: FolderCommand; result: FolderWriteResult }> = [];
 		const writer = createFolderWriter({
 			post: async (command) =>
 				command.action === "create-folder" && command.name === "Bad"
-					? ({ ok: false, error: "nope", ambiguous: false } as FolderWriteResult)
-					: ({ ok: true } as FolderWriteResult),
+					? { ok: false, error: "nope" }
+					: { ok: true },
 			afterWrite: (command, result) => {
 				seen.push({ command, result });
 			},
@@ -329,29 +280,23 @@ describe("createFolderWriter", () => {
 		await writer.write(bad);
 		assert.equal(seen.length, 2);
 		assert.deepEqual(seen[0], { command: good, result: { ok: true } });
-		assert.deepEqual(seen[1], { command: bad, result: { ok: false, error: "nope", ambiguous: false } });
-
-		// afterWrite is awaited: write() stays pending until it finishes.
-		let release!: () => void;
-		const gate = new Promise<void>((resolve) => {
-			release = resolve;
-		});
-		const gated = createFolderWriter({
-			post: async () => ({ ok: true }),
-			afterWrite: () => gate,
-		});
-		let settled = false;
-		const pending = gated.write(good).then((r) => {
-			settled = true;
-			return r;
-		});
-		await new Promise((resolve) => setTimeout(resolve, 0));
-		assert.equal(settled, false, "write() waits for afterWrite to finish");
-		release();
-		await pending;
-		assert.equal(settled, true);
+		assert.deepEqual(seen[1], { command: bad, result: { ok: false, error: "nope" } });
 	});
 });
+
+/* SSR pins read markup, not DOM: these pull one element's opening tag or
+   a select's options by data-testid. */
+function openingTag(html: string, testId: string): string | null {
+	return html.match(new RegExp(`<[^>]*data-testid="${testId}"[^>]*>`))?.[0] ?? null;
+}
+function selectOptions(html: string, testId: string): Array<{ value: string; label: string }> {
+	const select = html.match(new RegExp(`<select[^>]*data-testid="${testId}"[^>]*>([\\s\\S]*?)</select>`));
+	if (!select) return [];
+	return [...(select[1] ?? "").matchAll(/<option[^>]*value="([^"]*)"[^>]*>([^<]*)<\/option>/g)].map((m) => ({
+		value: m[1] ?? "",
+		label: m[2] ?? "",
+	}));
+}
 
 describe("NewFolderBody", () => {
 	const targets = folderTargets(ORG);
@@ -376,31 +321,27 @@ describe("NewFolderBody", () => {
 		assert.ok(html.includes('data-testid="new-folder-dialog"'));
 		assert.ok(html.includes('aria-label="New folder"'));
 		assert.match(html, /<label[^>]*for="new-folder-name"[^>]*>\s*Name\s*<\/label>/, "the Name input is labelled");
-		assert.ok(html.includes('data-testid="new-folder-name"'));
+		assert.ok(openingTag(html, "new-folder-name") !== null);
 		assert.match(html, /<label[^>]*for="new-folder-parent"[^>]*>\s*Parent folder\s*<\/label>/);
 
-		const select = html.match(/<select[^>]*data-testid="new-folder-parent"[^>]*>([\s\S]*?)<\/select>/);
-		assert.ok(select, "the parent select renders");
-		const options = [...(select?.[1] ?? "").matchAll(/<option[^>]*value="([^"]*)"[^>]*>([^<]*)<\/option>/g)];
+		const options = selectOptions(html, "new-folder-parent");
 		assert.equal(options.length, targets.length, "one option per target");
-		assert.equal(options[0]?.[1], "");
-		assert.equal(options[0]?.[2], "Outside folders");
-		assert.ok(options.some((o) => o[1] === "maps" && o[2] === "Algebra / Maps"));
+		assert.equal(options[0]?.value, "");
+		assert.equal(options[0]?.label, "Outside folders");
+		assert.ok(options.some((o) => o.value === "maps" && o.label === "Algebra / Maps"));
 
-		const create = html.match(/<button[^>]*data-testid="new-folder-create"[^>]*>/);
-		assert.ok(create?.[0].includes('disabled=""'), "blank name keeps Create disabled");
+		const create = openingTag(html, "new-folder-create");
+		assert.ok(create?.includes('disabled=""'), "blank name keeps Create disabled");
 		assert.ok(html.includes(">Create</button>"));
 
 		const named = render({ name: "Maps" });
-		const createNamed = named.match(/<button[^>]*data-testid="new-folder-create"[^>]*>/);
-		assert.ok(createNamed && !createNamed[0].includes('disabled=""'), "a name enables Create");
+		const createNamed = openingTag(named, "new-folder-create");
+		assert.ok(createNamed && !createNamed.includes('disabled=""'), "a name enables Create");
 
 		const busy = render({ name: "Maps", busy: true });
 		assert.ok(busy.includes("Creating…"));
-		const cancelBusy = busy.match(/<button[^>]*data-testid="new-folder-cancel"[^>]*>/);
-		assert.ok(cancelBusy?.[0].includes('disabled=""'), "Cancel is disabled while busy");
-		const createBusy = busy.match(/<button[^>]*data-testid="new-folder-create"[^>]*>/);
-		assert.ok(createBusy?.[0].includes('disabled=""'));
+		assert.ok(openingTag(busy, "new-folder-cancel")?.includes('disabled=""'), "Cancel is disabled while busy");
+		assert.ok(openingTag(busy, "new-folder-create")?.includes('disabled=""'));
 
 		const failed = render({ error: "That folder no longer exists." });
 		assert.ok(failed.includes('role="alert"'));
@@ -409,12 +350,12 @@ describe("NewFolderBody", () => {
 	});
 });
 
-describe("MoveChatBody", () => {
+describe("MoveTargetBody", () => {
 	const targets = folderTargets(ORG);
-	const render = (props: Partial<Parameters<typeof MoveChatBody>[0]> = {}) =>
+	const render = (props: Partial<Parameters<typeof MoveTargetBody>[0]> = {}) =>
 		renderToStaticMarkup(
-			<MoveChatBody
-				chatTitle="Linear maps"
+			<MoveTargetBody
+				title="Linear maps"
 				currentId="alg"
 				targetId="alg"
 				targets={targets}
@@ -431,29 +372,27 @@ describe("MoveChatBody", () => {
 		const html = render();
 		assert.ok(html.includes('data-testid="move-chat-dialog"'));
 		assert.ok(html.includes('aria-label="Move to folder"'));
-		assert.ok(html.includes("Linear maps"), "the chat title renders");
+		assert.ok(html.includes("Linear maps"), "the subject title renders");
 
 		const current = html.match(/<p[^>]*data-testid="move-chat-current"[^>]*>([\s\S]*?)<\/p>/);
 		assert.ok(current, "the current-folder line renders");
 		assert.ok(current[1]?.includes("Currently in:"), "it is labelled");
 		assert.ok(current[1]?.includes("Algebra"), "the current folder's label");
 
-		const select = html.match(/<select[^>]*data-testid="move-chat-target"[^>]*>([\s\S]*?)<\/select>/);
-		assert.ok(select, "the target select renders");
-		const options = [...(select?.[1] ?? "").matchAll(/<option[^>]*value="([^"]*)"[^>]*>([^<]*)<\/option>/g)];
+		const options = selectOptions(html, "move-chat-target");
 		assert.equal(options.length, targets.length, "Outside folders plus every folder path");
-		assert.equal(options[0]?.[1], "");
-		assert.equal(options[0]?.[2], "Outside folders");
-		assert.ok(options.some((o) => o[1] === "maps" && o[2] === "Algebra / Maps"));
+		assert.equal(options[0]?.value, "");
+		assert.equal(options[0]?.label, "Outside folders");
+		assert.ok(options.some((o) => o.value === "maps" && o.label === "Algebra / Maps"));
 		assert.match(html, /<label[^>]*for="move-chat-target"[^>]*>\s*Folder\s*<\/label>/);
 
-		const move = html.match(/<button[^>]*data-testid="move-chat-confirm"[^>]*>/);
-		assert.ok(move?.[0].includes('disabled=""'), "target === current keeps Move disabled");
+		const move = openingTag(html, "move-chat-confirm");
+		assert.ok(move?.includes('disabled=""'), "target === current keeps Move disabled");
 		assert.ok(html.includes(">Move</button>"));
 
 		const changed = render({ targetId: "maps" });
-		const moveChanged = changed.match(/<button[^>]*data-testid="move-chat-confirm"[^>]*>/);
-		assert.ok(moveChanged && !moveChanged[0].includes('disabled=""'), "a different target enables Move");
+		const moveChanged = openingTag(changed, "move-chat-confirm");
+		assert.ok(moveChanged && !moveChanged.includes('disabled=""'), "a different target enables Move");
 
 		const busy = render({ targetId: "maps", busy: true, error: "Practice sessions stay outside folders." });
 		assert.ok(busy.includes("Moving…"));

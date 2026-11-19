@@ -5,9 +5,13 @@ import { FolderIcon, FolderOpenIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import type { ChatListItem, ChatListResponse } from "@/src/core";
-
-type SidebarOrganization = NonNullable<ChatListResponse["organization"]>;
-type SidebarFolder = SidebarOrganization["folders"][number];
+import {
+	currentChatFolder,
+	folderChain,
+	folderParentId,
+	type SidebarFolder,
+	type SidebarOrganization,
+} from "@/components/sidebar-folder-actions";
 
 export type SidebarTreeNode =
 	| { kind: "folder"; folder: SidebarFolder; expanded: boolean; children: SidebarTreeNode[] }
@@ -28,11 +32,11 @@ interface ChatEntry {
 }
 
 /**
- * The session list as a tree over the shared folders (chat-folders S03).
- * Pure: chats arrive kind-filtered in activity (snapshot) order; this owns
- * query matching, folder reveal and the visible-chat order the keyboard
- * walk follows. Only teaching chats live in folders — a practice chat is
- * always a root chat whatever its stored placement says.
+ * The session list as a tree over the shared folders. Pure: chats arrive
+ * kind-filtered in activity order; this owns query matching, folder
+ * reveal and the visible-chat order the keyboard walk follows. Only
+ * teaching chats live in folders — a practice chat is always a root
+ * chat whatever its stored placement says.
  */
 export function buildSidebarFolderView(
 	chats: readonly ChatListItem[],
@@ -61,17 +65,7 @@ export function buildSidebarFolderView(
 
 	const folderById = new Map(organization.folders.map((f) => [f.id, f]));
 	const collator = new Intl.Collator(undefined, { sensitivity: "base", numeric: true });
-	const folderParent = (f: SidebarFolder): string | null =>
-		f.parentId !== null && folderById.has(f.parentId) ? f.parentId : null;
-
-	/* A placement counts only when it names an existing folder — a missing
-	 * entry, folderId null and an unknown id all read as root. */
-	const chatFolder = (chat: ChatListItem): string | null => {
-		if ((chat.kind ?? "teach") === "practice") return null;
-		if (!Object.hasOwn(organization.placements, chat.id)) return null;
-		const folderId = organization.placements[chat.id]?.folderId;
-		return folderId != null && folderById.has(folderId) ? folderId : null;
-	};
+	const folderParent = (f: SidebarFolder): string | null => folderParentId(folderById, f);
 
 	/* presentIds: folders that render at all. Without a query every folder
 	 * renders (empty and notes-only included). While searching a folder
@@ -85,51 +79,27 @@ export function buildSidebarFolderView(
 
 	if (!searching) {
 		for (const f of organization.folders) presentIds.add(f.id);
-		for (const chat of chats) chatEntries.push({ chat, key: chatFolder(chat), titleScore: null });
+		for (const chat of chats) chatEntries.push({ chat, key: currentChatFolder(organization, chat), titleScore: null });
 	} else {
 		const nameMatch = (f: SidebarFolder) => fuzzyScore(q, f.name) !== null;
 		const revealedCache = new Map<string, boolean>();
 		const isRevealed = (id: string): boolean => {
 			const cached = revealedCache.get(id);
 			if (cached !== undefined) return cached;
-			const seen = new Set<string>();
-			let result = false;
-			let cur: string | null = id;
-			while (cur !== null && !seen.has(cur)) {
-				seen.add(cur);
-				const f = folderById.get(cur);
-				if (!f) break;
-				if (nameMatch(f)) {
-					result = true;
-					break;
-				}
-				cur = folderParent(f);
-			}
+			const result = folderChain(folderById, id).some(nameMatch);
 			revealedCache.set(id, result);
 			return result;
 		};
 		const markBranch = (id: string) => {
-			const seen = new Set<string>();
-			let cur: string | null = id;
-			while (cur !== null && !seen.has(cur)) {
-				seen.add(cur);
-				presentIds.add(cur);
-				const f = folderById.get(cur);
-				if (!f) break;
-				cur = folderParent(f);
-			}
+			for (const f of folderChain(folderById, id)) presentIds.add(f.id);
 		};
 
 		for (const f of organization.folders) if (isRevealed(f.id)) markBranch(f.id);
 
 		for (const chat of chats) {
 			const titleScore = fuzzyScore(q, chat.title);
-			const folderId = chatFolder(chat);
-			const matches =
-				(chat.kind ?? "teach") === "practice"
-					? titleScore !== null
-					: titleScore !== null || (folderId !== null && isRevealed(folderId));
-			if (!matches) continue;
+			const folderId = currentChatFolder(organization, chat);
+			if (titleScore === null && !(folderId !== null && isRevealed(folderId))) continue;
 			if (folderId !== null) markBranch(folderId);
 			chatEntries.push({ chat, key: folderId, titleScore });
 		}
@@ -137,25 +107,10 @@ export function buildSidebarFolderView(
 
 	const presentFolders = organization.folders.filter((f) => presentIds.has(f.id));
 
-	/* Each folder's tree parent. Corrupt cyclic folder data could otherwise
-	 * close a loop in the emitted tree: a folder whose resolved parent is
-	 * its own descendant falls back to the root level. chainHas walks the
-	 * resolved parent chain with a seen-set. */
-	const chainHas = (fromId: string, targetId: string): boolean => {
-		const seen = new Set<string>();
-		let cur: string | null = fromId;
-		while (cur !== null && !seen.has(cur)) {
-			seen.add(cur);
-			if (cur === targetId) return true;
-			const f = folderById.get(cur);
-			cur = f ? folderParent(f) : null;
-		}
-		return false;
-	};
 	const parentKeyOf = new Map<string, string | null>();
 	for (const f of presentFolders) {
 		const p = folderParent(f);
-		parentKeyOf.set(f.id, p !== null && presentIds.has(p) && !chainHas(p, f.id) ? p : null);
+		parentKeyOf.set(f.id, p !== null && presentIds.has(p) ? p : null);
 	}
 
 	const chatsByKey = new Map<string | null, ChatEntry[]>();
@@ -178,15 +133,11 @@ export function buildSidebarFolderView(
 
 		const levelChats = [...(chatsByKey.get(key) ?? [])];
 		if (searching) {
-			/* Title matches first by descending score, then chats present
-			 * only through a revealed folder. Array#sort is stable, so equal
-			 * scores and the folder-only tail keep input (activity) order. */
-			levelChats.sort((a, b) => {
-				if (a.titleScore === null && b.titleScore === null) return 0;
-				if (a.titleScore === null) return 1;
-				if (b.titleScore === null) return -1;
-				return b.titleScore - a.titleScore;
-			});
+			/* Title matches first by descending score (scores are > 0),
+			 * then chats present only through a revealed folder. The sort
+			 * is stable, so equal scores and the folder-only tail keep
+			 * input (activity) order. */
+			levelChats.sort((a, b) => (b.titleScore ?? -1) - (a.titleScore ?? -1));
 		}
 		const chatNodes: SidebarTreeNode[] = levelChats.map((e) => ({ kind: "chat" as const, chat: e.chat }));
 		return [...folderNodes, ...chatNodes];
@@ -230,6 +181,7 @@ export function enterKbdChat(visibleChatIds: readonly string[], current: string 
  * Renders the folder tree. Pure and SSR-safe: expansion arrives via the
  * view; folder rows are buttons named by the folder (aria-expanded), chat
  * rows render through the caller inside data-sidebar-chat wrappers.
+ * drop turns each folder header into a drop target.
  */
 export function SidebarFolderTree({
 	view,
@@ -240,10 +192,10 @@ export function SidebarFolderTree({
 	view: SidebarFolderView;
 	onToggleFolder: (folderId: string) => void;
 	renderChat: (chat: ChatListItem) => ReactNode;
-	/** Drag & drop (chat-folders S05): folder headers become drop targets.
-	 *  activeTarget mirrors the hook's dropTarget — undefined = no
-	 *  highlight, null = Outside folders (handled by the caller's own
-	 *  zone), a folder id highlights that header. */
+	/** Folder headers become drop targets. activeTarget mirrors the drag
+	 *  hook's dropTarget — undefined = no highlight, null = Outside
+	 *  folders (the caller's own zone), a folder id highlights that
+	 *  header. */
 	drop?: {
 		activeTarget: string | null | undefined;
 		targetProps: (target: string) => Partial<Pick<DOMAttributes<HTMLElement>, "onDragOver" | "onDragLeave" | "onDrop">>;

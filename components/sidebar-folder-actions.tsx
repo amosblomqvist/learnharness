@@ -1,12 +1,12 @@
 "use client";
 
-import { useEffect, useRef, useState, type DragEvent, type ReactElement, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type DragEvent, type ReactElement, type ReactNode, type Ref, type RefObject } from "react";
 import { HostDialog } from "@/components/host-dialog";
 import { SOURCE_DRAG_TYPE } from "@/components/source-folder-tree";
 import type { ChatListItem, ChatListResponse } from "@/src/core";
 
 export type SidebarOrganization = NonNullable<ChatListResponse["organization"]>;
-type SidebarFolder = SidebarOrganization["folders"][number];
+export type SidebarFolder = SidebarOrganization["folders"][number];
 
 export interface FolderTarget {
 	id: string | null;
@@ -22,7 +22,7 @@ export type FolderPlan =
 	| { kind: "skip" }
 	| { kind: "error"; error: string };
 
-export type FolderWriteResult = { ok: true; createdFolderId?: string } | { ok: false; error: string; ambiguous: boolean };
+export type FolderWriteResult = { ok: true } | { ok: false; error: string };
 
 /** Shared with the dialogs: the pre-send planner's "target vanished" text —
  *  the wrappers reset the selection to Outside folders on exactly this. */
@@ -30,36 +30,39 @@ const FOLDER_GONE_MESSAGE = "That folder no longer exists.";
 const FOLDER_WRITE_AMBIGUOUS =
 	"Could not confirm the folder change. The list was refreshed; try again if it is still needed.";
 
-const parentOf = (folderById: Map<string, SidebarFolder>, f: SidebarFolder): string | null =>
+const folderIndex = (organization: SidebarOrganization): Map<string, SidebarFolder> =>
+	new Map(organization.folders.map((f) => [f.id, f]));
+
+/** A folder's parent id, or null when it sits at the root — a parentId
+ *  naming no folder reads as root (the store rejects cycles and dangling
+ *  parents on read, so the client never sees either). */
+export const folderParentId = (folderById: Map<string, SidebarFolder>, f: SidebarFolder): string | null =>
 	f.parentId !== null && folderById.has(f.parentId) ? f.parentId : null;
+
+/** The folder's ancestor chain root → leaf ([] for an unknown id). */
+export function folderChain(folderById: Map<string, SidebarFolder>, id: string): SidebarFolder[] {
+	const chain: SidebarFolder[] = [];
+	for (let cur = folderById.get(id); cur !== undefined;) {
+		chain.unshift(cur);
+		const p = folderParentId(folderById, cur);
+		cur = p === null ? undefined : folderById.get(p);
+	}
+	return chain;
+}
 
 /**
  * The move/create picker's options: "Outside folders" (id null) first,
- * then every folder labelled by its full path joined with " / " — sorted
- * by the base/numeric collator on that path, ties by id. Two folders can
- * share a full path (same names under different roots is NOT a tie — the
- * path differs; true duplicates come from identical name chains), and
- * each of those carries a ` (${id.slice(-6)})` suffix so the picker can
- * tell them apart. Sorting keys on the unsuffixed path so duplicates stay
- * adjacent and "ties by id" is the real tiebreak.
+ * then every folder labelled by its full path, sorted by the
+ * base/numeric collator on that path, ties by id. Folders sharing one
+ * full path each get a ` (${id.slice(-6)})` suffix so the picker can
+ * tell them apart; sorting keys on the unsuffixed path so duplicates
+ * stay adjacent.
  */
 export function folderTargets(organization: SidebarOrganization): FolderTarget[] {
-	const folderById = new Map(organization.folders.map((f) => [f.id, f]));
-
-	/* Full path label per folder, root first; the upward walk is
-	 * cycle-safe — corrupt parent loops just stop. */
+	const folderById = folderIndex(organization);
 	const pathOf = new Map<string, string>();
 	for (const f of organization.folders) {
-		const names: string[] = [];
-		const seen = new Set<string>();
-		let cur: SidebarFolder | null = f;
-		while (cur !== null && !seen.has(cur.id)) {
-			seen.add(cur.id);
-			names.unshift(cur.name);
-			const p = parentOf(folderById, cur);
-			cur = p === null ? null : (folderById.get(p) ?? null);
-		}
-		pathOf.set(f.id, names.join(" / "));
+		pathOf.set(f.id, folderChain(folderById, f.id).map((x) => x.name).join(" / "));
 	}
 
 	const pathCount = new Map<string, number>();
@@ -82,32 +85,16 @@ export function folderTargets(organization: SidebarOrganization): FolderTarget[]
 /**
  * Folder IDs from the root down to folderId inclusive — the chain the
  * sidebar expands after a write so the target is visible. [] for null or
- * an unknown id; a folder whose parentId names nothing reads as
- * root-level (the tree's own rule); cycle-safe.
+ * an unknown id.
  */
 export function folderPath(organization: SidebarOrganization, folderId: string | null): string[] {
 	if (folderId === null) return [];
-	const folderById = new Map(organization.folders.map((f) => [f.id, f]));
-	if (!folderById.has(folderId)) return [];
-	const ids: string[] = [];
-	const seen = new Set<string>();
-	let cur: string | null = folderId;
-	while (cur !== null && !seen.has(cur)) {
-		seen.add(cur);
-		const f = folderById.get(cur);
-		if (!f) break;
-		ids.unshift(f.id);
-		cur = parentOf(folderById, f);
-	}
-	return ids;
+	return folderChain(folderIndex(organization), folderId).map((f) => f.id);
 }
 
-/**
- * The folder a chat currently renders in — the same rule
- * buildSidebarFolderView applies: practice chats are always at the root,
- * a placement counts only when it names an existing folder, and a missing
- * entry, folderId null or an unknown id all read as root (null).
- */
+/** The folder a chat currently renders in: practice chats are always at
+ *  the root, a placement counts only when it names an existing folder,
+ *  and a missing entry, folderId null or an unknown id all read as root. */
 export function currentChatFolder(organization: SidebarOrganization, chat: ChatListItem): string | null {
 	if ((chat.kind ?? "teach") === "practice") return null;
 	if (!Object.hasOwn(organization.placements, chat.id)) return null;
@@ -129,31 +116,25 @@ export function readDragPayload(raw: string): { kind: "source" | "folder"; id: s
 	return { kind, id };
 }
 
-/**
- * Whether the sidebar may drop the chat on target (folder id or null =
- * Outside folders): the chat is in chats and is a teaching chat, the
- * target is null or an existing folder, and the target differs from
- * currentChatFolder(organization, chat).
- */
-export function canDropChat(
+/** Whether the sidebar may drop the chat on target (folder id or null =
+ *  Outside folders): exactly when the pre-send planner below would emit
+ *  a command — a real change to an existing, legal target. */
+function canDropChat(
 	organization: SidebarOrganization,
 	chats: readonly ChatListItem[],
 	chatId: string,
 	target: string | null,
 ): boolean {
-	const chat = chats.find((c) => c.id === chatId);
-	if (!chat || (chat.kind ?? "teach") === "practice") return false;
-	if (target !== null && !organization.folders.some((f) => f.id === target)) return false;
-	return currentChatFolder(organization, chat) !== target;
+	return planMoveChat(organization, chats, chatId, target).kind === "command";
 }
 
 /**
- * Sidebar drag state. dragChatId is set only by the sidebar list's own
- * dragstart (bubbled from a SourceDragRow inside it) after readDragPayload
- * confirms a source payload for a chat for which isDraggable(chat) is true;
- * drops are accepted only when the drop payload's id equals dragChatId.
+ * Sidebar chat drag state. dragChatId arms only on a dragstart bubbled
+ * from this list's own SourceDragRow payload (a teaching chat in chats);
+ * drops are accepted only when the drop payload's kind and id equal
+ * dragChatId's — foreign drags never become a move.
  */
-export function useSidebarChatDrag(deps: {
+export function useSidebarDrag(deps: {
 	organization: SidebarOrganization | null;
 	chats: readonly ChatListItem[];
 	moveChat: (chatId: string, parentId: string | null) => Promise<string | null>;
@@ -180,8 +161,13 @@ export function useSidebarChatDrag(deps: {
 			clearTimeout(armTimer.current);
 			const organization = deps.organization;
 			const payload = readDragPayload(e.dataTransfer.getData(SOURCE_DRAG_TYPE));
-			const chat = payload?.kind === "source" ? deps.chats.find((c) => c.id === payload.id) : undefined;
-			const armed = organization !== null && chat !== undefined && (chat.kind ?? "teach") !== "practice" ? chat.id : null;
+			let armed: string | null = null;
+			if (organization !== null && payload !== null && payload.kind === "source") {
+				const chat = deps.chats.find((c) => c.id === payload.id);
+				if (chat !== undefined && (chat.kind ?? "teach") !== "practice") {
+					armed = chat.id;
+				}
+			}
 			armTimer.current = setTimeout(() => {
 				setError(null);
 				if (armed !== null) setDragChatId(armed);
@@ -217,14 +203,14 @@ export function useSidebarChatDrag(deps: {
 			if (raw === "") return;
 			e.preventDefault();
 			e.stopPropagation();
-			const id = dragChatId;
+			const chatId = dragChatId;
 			setDragChatId(null);
 			setDropTarget(undefined);
 			const payload = readDragPayload(raw);
 			const organization = deps.organization;
-			if (payload === null || payload.kind !== "source" || id === null || payload.id !== id) return;
-			if (organization === null || !canDropChat(organization, deps.chats, id, target)) return;
-			void deps.moveChat(id, target).then((failure) => {
+			if (payload === null || payload.kind !== "source" || chatId === null || payload.id !== chatId) return;
+			if (organization === null || !canDropChat(organization, deps.chats, chatId, target)) return;
+			void deps.moveChat(chatId, target).then((failure) => {
 				if (failure !== null) setError(failure);
 			});
 		},
@@ -271,12 +257,11 @@ export function planMoveChat(
 }
 
 /**
- * POST the command as JSON to the shared write route. 2xx → ok
- * (createdFolderId when the body carries a string one). 400 is the
- * server's definite refusal — its message verbatim, never ambiguous.
- * Any other status, a thrown fetch or an unreadable body means the write
- * MAY have landed: ambiguous, and the caller refreshes before offering a
- * retry (no automatic retries anywhere).
+ * POST the command as JSON to the shared write route. A readable 2xx body
+ * → ok; an unreadable one means the write MAY have landed — the
+ * confirm-failure text, not success. 400 is the server's definite
+ * refusal — its message verbatim, never ambiguous. Any other status or a
+ * thrown fetch is the same confirm-failure (no automatic retries).
  */
 export async function postFolderCommand(
 	command: FolderCommand,
@@ -290,27 +275,15 @@ export async function postFolderCommand(
 			body: JSON.stringify(command),
 		});
 	} catch {
-		return { ok: false, ambiguous: true, error: FOLDER_WRITE_AMBIGUOUS };
+		return { ok: false, error: FOLDER_WRITE_AMBIGUOUS };
 	}
-	if (res.ok) {
-		try {
-			const body = (await res.json()) as { createdFolderId?: unknown } | null;
-			const createdFolderId = typeof body?.createdFolderId === "string" ? body.createdFolderId : undefined;
-			return createdFolderId === undefined ? { ok: true } : { ok: true, createdFolderId };
-		} catch {
-			return { ok: false, ambiguous: true, error: FOLDER_WRITE_AMBIGUOUS };
-		}
-	}
+	const body = (await res.json().catch(() => null)) as { error?: unknown } | null;
+	if (res.ok) return body === null ? { ok: false, error: FOLDER_WRITE_AMBIGUOUS } : { ok: true };
 	if (res.status === 400) {
-		try {
-			const body = (await res.json()) as { error?: unknown } | null;
-			const message = typeof body?.error === "string" ? body.error : undefined;
-			return { ok: false, error: message ?? "The folder change was rejected.", ambiguous: false };
-		} catch {
-			return { ok: false, error: "The folder change was rejected.", ambiguous: false };
-		}
+		const message = typeof body?.error === "string" ? body.error : undefined;
+		return { ok: false, error: message ?? "The folder change was rejected." };
 	}
-	return { ok: false, ambiguous: true, error: FOLDER_WRITE_AMBIGUOUS };
+	return { ok: false, error: FOLDER_WRITE_AMBIGUOUS };
 }
 
 /**
@@ -327,7 +300,7 @@ export function createFolderWriter(deps: {
 	return {
 		async write(command) {
 			if (inFlight) {
-				return { ok: false, ambiguous: false, error: "Another folder change is still saving." };
+				return { ok: false, error: "Another folder change is still saving." };
 			}
 			inFlight = true;
 			try {
@@ -339,6 +312,161 @@ export function createFolderWriter(deps: {
 			}
 		},
 	};
+}
+
+/** The folder picker's <select>: "Outside folders" (value "") plus one
+ *  option per target, labelled by full path — shared by the create and
+ *  move dialogs, which differ only in id/label. */
+function FolderSelect({
+	id,
+	label,
+	targets,
+	value,
+	onChange,
+	selectRef,
+}: {
+	id: string;
+	label: string;
+	targets: readonly FolderTarget[];
+	value: string | null;
+	onChange: (id: string | null) => void;
+	selectRef?: Ref<HTMLSelectElement>;
+}): ReactNode {
+	return (
+		<div className="mt-3">
+			<label htmlFor={id} className="block text-xs text-muted-foreground">
+				{label}
+			</label>
+			<select
+				id={id}
+				ref={selectRef}
+				value={value ?? ""}
+				onChange={(e) => onChange(e.target.value === "" ? null : e.target.value)}
+				data-testid={id}
+				className="mt-1 h-7 w-full rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none"
+			>
+				{targets.map((t) => (
+					<option key={t.id ?? "outside"} value={t.id ?? ""}>
+						{t.label}
+					</option>
+				))}
+			</select>
+		</div>
+	);
+}
+
+function DialogError({ testId, error }: { testId: string; error: string | null }): ReactNode {
+	if (error === null) return null;
+	return (
+		<div role="alert" data-testid={testId} className="mt-3 text-xs text-error">
+			{error}
+		</div>
+	);
+}
+
+/** Cancel/Confirm row shared by the folder dialogs. */
+function DialogActions({
+	cancelTestId,
+	confirmTestId,
+	busy,
+	confirmDisabled,
+	confirmIdle,
+	confirmBusy,
+	onCancel,
+	onConfirm,
+}: {
+	cancelTestId: string;
+	confirmTestId: string;
+	busy: boolean;
+	confirmDisabled: boolean;
+	confirmIdle: string;
+	confirmBusy: string;
+	onCancel: () => void;
+	onConfirm: () => void;
+}): ReactNode {
+	return (
+		<div className="mt-4 flex justify-end gap-2">
+			<button
+				type="button"
+				data-testid={cancelTestId}
+				onClick={onCancel}
+				disabled={busy}
+				className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
+			>
+				Cancel
+			</button>
+			<button
+				type="button"
+				data-testid={confirmTestId}
+				onClick={onConfirm}
+				disabled={busy || confirmDisabled}
+				className="rounded-sm border border-border bg-background px-3 py-1.5 text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
+			>
+				{busy ? confirmBusy : confirmIdle}
+			</button>
+		</div>
+	);
+}
+
+/** The folder dialogs' shared HostDialog frame (the delete-source-dialog
+ *  renderFrame pattern): one backdrop, busy blocks closing, each dialog
+ *  passes its own initial-focus ref. */
+function FolderDialogFrame({
+	frame,
+	busy,
+	onClose,
+	initialFocusRef,
+}: {
+	frame: ReactElement<{ children: ReactNode }>;
+	busy: boolean;
+	onClose: () => void;
+	initialFocusRef?: RefObject<HTMLElement | null>;
+}): ReactNode {
+	return (
+		<HostDialog
+			open
+			frame={frame}
+			initialFocusRef={initialFocusRef}
+			onClose={() => {
+				if (busy) return "blocked";
+				onClose();
+				return "closed";
+			}}
+			backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80" }}
+		>
+			{frame.props.children}
+		</HostDialog>
+	);
+}
+
+/** Shared submit state for the folder dialogs: busy + error around one
+ *  in-flight submit; a FOLDER_GONE failure resets the target selection to
+ *  Outside folders (onFolderGone), anything else just shows the error. */
+function useFolderSubmit({
+	onSubmit,
+	onClose,
+	onFolderGone,
+}: {
+	onSubmit: () => Promise<string | null>;
+	onClose: () => void;
+	onFolderGone?: () => void;
+}): { busy: boolean; error: string | null; submit: () => void } {
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+	const submit = async () => {
+		if (busy) return;
+		setBusy(true);
+		setError(null);
+		const failure = await onSubmit();
+		if (failure === null) {
+			onClose();
+			return;
+		}
+		setError(failure);
+		if (failure === FOLDER_GONE_MESSAGE) onFolderGone?.();
+		setBusy(false);
+	};
+	return { busy, error, submit: () => void submit() };
 }
 
 /**
@@ -397,49 +525,18 @@ export function NewFolderBody({
 					className="mt-1 h-7 w-full rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none"
 				/>
 			</div>
-			<div className="mt-3">
-				<label htmlFor="new-folder-parent" className="block text-xs text-muted-foreground">
-					Parent folder
-				</label>
-				<select
-					id="new-folder-parent"
-					value={parentId ?? ""}
-					onChange={(e) => onParent(e.target.value === "" ? null : e.target.value)}
-					data-testid="new-folder-parent"
-					className="mt-1 h-7 w-full rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none"
-				>
-					{targets.map((t) => (
-						<option key={t.id ?? "outside"} value={t.id ?? ""}>
-							{t.label}
-						</option>
-					))}
-				</select>
-			</div>
-			{error !== null && (
-				<div role="alert" data-testid="new-folder-error" className="mt-3 text-xs text-error">
-					{error}
-				</div>
-			)}
-			<div className="mt-4 flex justify-end gap-2">
-				<button
-					type="button"
-					data-testid="new-folder-cancel"
-					onClick={onCancel}
-					disabled={busy}
-					className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-				>
-					Cancel
-				</button>
-				<button
-					type="button"
-					data-testid="new-folder-create"
-					onClick={onCreate}
-					disabled={busy || name.trim() === ""}
-					className="rounded-sm border border-border bg-background px-3 py-1.5 text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
-				>
-					{busy ? "Creating…" : "Create"}
-				</button>
-			</div>
+			<FolderSelect id="new-folder-parent" label="Parent folder" targets={targets} value={parentId} onChange={onParent} />
+			<DialogError testId="new-folder-error" error={error} />
+			<DialogActions
+				cancelTestId="new-folder-cancel"
+				confirmTestId="new-folder-create"
+				busy={busy}
+				confirmDisabled={name.trim() === ""}
+				confirmIdle="Create"
+				confirmBusy="Creating…"
+				onCancel={onCancel}
+				onConfirm={onCreate}
+			/>
 		</div>
 	);
 	return renderFrame ? renderFrame(frame) : frame;
@@ -447,11 +544,12 @@ export function NewFolderBody({
 
 /**
  * The move-to-folder form's pure body — same SSR-pin pattern as
- * NewFolderBody. Move stays disabled while the target equals the current
- * folder: the planner would skip the write anyway.
+ * NewFolderBody (the testids stay move-chat-*). Move stays disabled
+ * while the target equals the current folder: the planner would skip
+ * the write anyway.
  */
-export function MoveChatBody({
-	chatTitle,
+export function MoveTargetBody({
+	title,
 	currentId,
 	targetId,
 	targets,
@@ -463,7 +561,7 @@ export function MoveChatBody({
 	selectRef,
 	renderFrame,
 }: {
-	chatTitle: string;
+	title: string;
 	currentId: string | null;
 	targetId: string | null;
 	targets: FolderTarget[];
@@ -487,73 +585,40 @@ export function MoveChatBody({
 		>
 			<h2 className="text-sm font-semibold">Move to folder</h2>
 			<div className="mt-1.5">
-				<code className="font-mono text-sm text-foreground">{chatTitle}</code>
+				<code className="font-mono text-sm text-foreground">{title}</code>
 			</div>
 			<p data-testid="move-chat-current" className="mt-2 text-xs text-muted-foreground">
 				Currently in: {currentLabel}
 			</p>
-			<div className="mt-3">
-				<label htmlFor="move-chat-target" className="block text-xs text-muted-foreground">
-					Folder
-				</label>
-				<select
-					id="move-chat-target"
-					ref={selectRef}
-					value={targetId ?? ""}
-					onChange={(e) => onTarget(e.target.value === "" ? null : e.target.value)}
-					data-testid="move-chat-target"
-					className="mt-1 h-7 w-full rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none"
-				>
-					{targets.map((t) => (
-						<option key={t.id ?? "outside"} value={t.id ?? ""}>
-							{t.label}
-						</option>
-					))}
-				</select>
-			</div>
-			{error !== null && (
-				<div role="alert" data-testid="move-chat-error" className="mt-3 text-xs text-error">
-					{error}
-				</div>
-			)}
-			<div className="mt-4 flex justify-end gap-2">
-				<button
-					type="button"
-					data-testid="move-chat-cancel"
-					onClick={onCancel}
-					disabled={busy}
-					className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
-				>
-					Cancel
-				</button>
-				<button
-					type="button"
-					data-testid="move-chat-confirm"
-					onClick={onMove}
-					disabled={busy || targetId === currentId}
-					className="rounded-sm border border-border bg-background px-3 py-1.5 text-xs text-foreground transition-colors hover:border-muted-foreground/50 disabled:cursor-not-allowed disabled:opacity-40"
-				>
-					{busy ? "Moving…" : "Move"}
-				</button>
-			</div>
+			<FolderSelect id="move-chat-target" label="Folder" targets={targets} value={targetId} onChange={onTarget} selectRef={selectRef} />
+			<DialogError testId="move-chat-error" error={error} />
+			<DialogActions
+				cancelTestId="move-chat-cancel"
+				confirmTestId="move-chat-confirm"
+				busy={busy}
+				confirmDisabled={targetId === currentId}
+				confirmIdle="Move"
+				confirmBusy="Moving…"
+				onCancel={onCancel}
+				onConfirm={onMove}
+			/>
 		</div>
 	);
 	return renderFrame ? renderFrame(frame) : frame;
 }
 
 /**
- * The new-folder dialog: state for name/parent/busy/error, reset whenever
- * it closes. Targets recompute from the live organization prop every
- * render, so a folder deleted elsewhere drops out of the picker after the
- * sidebar refreshes; the initial focus lands in the name input.
+ * The new-folder dialog — mount it only while open (`{open && …}`), so
+ * every opening is a fresh form with no reset effect. Targets recompute
+ * from the live organization prop every render: a folder deleted
+ * elsewhere drops out of the picker after the sidebar refreshes. Initial
+ * focus lands in the name input.
  */
 export function NewFolderDialog({
-	open,
 	organization,
 	onClose,
 	onSubmit,
 }: {
-	open: boolean;
 	organization: SidebarOrganization;
 	onClose: () => void;
 	/** null = done (the dialog closes); a string is the error to show. */
@@ -561,94 +626,37 @@ export function NewFolderDialog({
 }): ReactNode {
 	const [name, setName] = useState("");
 	const [parentId, setParentId] = useState<string | null>(null);
-	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState<string | null>(null);
 	const nameRef = useRef<HTMLInputElement | null>(null);
-
-	/* Fresh state per opening: closing resets the whole form (the
-	 *  delete-session-dialog rule). */
-	useEffect(() => {
-		if (!open) {
-			setName("");
-			setParentId(null);
-			setBusy(false);
-			setError(null);
-		}
-	}, [open]);
-
-	if (!open) return null;
-	const targets = folderTargets(organization);
-
-	const submit = async () => {
-		if (busy) return;
-		setBusy(true);
-		setError(null);
-		const failure = await onSubmit(name, parentId);
-		if (failure === null) {
-			onClose();
-			return;
-		}
-		setError(failure);
-		if (failure === FOLDER_GONE_MESSAGE) setParentId(null);
-		setBusy(false);
-	};
+	const { busy, error, submit } = useFolderSubmit({
+		onSubmit: () => onSubmit(name, parentId),
+		onClose,
+		onFolderGone: () => setParentId(null),
+	});
 
 	return (
 		<NewFolderBody
 			name={name}
 			parentId={parentId}
-			targets={targets}
+			targets={folderTargets(organization)}
 			busy={busy}
 			error={error}
 			onName={setName}
 			onParent={setParentId}
 			onCancel={onClose}
-			onCreate={() => void submit()}
+			onCreate={submit}
 			nameRef={nameRef}
-			renderFrame={(frame) => (
-				<HostDialog
-					open
-					frame={frame}
-					initialFocusRef={nameRef}
-					onClose={() => {
-						if (busy) return "blocked";
-						onClose();
-						return "closed";
-					}}
-					backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80" }}
-				>
-					{frame.props.children}
-				</HostDialog>
-			)}
+			renderFrame={(frame) => <FolderDialogFrame frame={frame} busy={busy} onClose={onClose} initialFocusRef={nameRef} />}
 		/>
 	);
 }
 
 /**
- * The move-chat dialog: chat === null is "closed". The stateful form is
- * keyed by chat id, so every opening starts fresh with the target at the
- * chat's current folder; initial focus lands in the target select.
+ * The move-chat dialog: mount it only while a chat is picked, keyed by
+ * chat id, so every opening is a fresh form whose target starts at the
+ * chat's current folder — a snapshot refresh can't reset the user's
+ * choice. Initial focus lands in the target select.
  */
-export function MoveChatDialog({
-	chat,
-	organization,
-	onClose,
-	onSubmit,
-}: {
-	chat: ChatListItem | null;
-	organization: SidebarOrganization;
-	onClose: () => void;
-	/** null = done (the dialog closes); a string is the error to show. */
-	onSubmit: (chatId: string, parentId: string | null) => Promise<string | null>;
-}): ReactNode {
-	/* chat === null is "closed". Keying the stateful form by chat id gives
-	 *  every opening a fresh form whose target starts at the current
-	 *  folder — a snapshot refresh can't reset the user's choice. */
-	if (chat === null) return null;
-	return <MoveChatForm key={chat.id} chat={chat} organization={organization} onClose={onClose} onSubmit={onSubmit} />;
-}
-
-function MoveChatForm({
+export function MoveTargetDialog({
 	chat,
 	organization,
 	onClose,
@@ -657,56 +665,31 @@ function MoveChatForm({
 	chat: ChatListItem;
 	organization: SidebarOrganization;
 	onClose: () => void;
+	/** null = done (the dialog closes); a string is the error to show. */
 	onSubmit: (chatId: string, parentId: string | null) => Promise<string | null>;
 }): ReactNode {
-	const [targetId, setTargetId] = useState<string | null>(() => currentChatFolder(organization, chat));
-	const [busy, setBusy] = useState(false);
-	const [error, setError] = useState<string | null>(null);
-	const selectRef = useRef<HTMLSelectElement | null>(null);
-	const targets = folderTargets(organization);
 	const currentId = currentChatFolder(organization, chat);
-
-	const submit = async () => {
-		if (busy) return;
-		setBusy(true);
-		setError(null);
-		const failure = await onSubmit(chat.id, targetId);
-		if (failure === null) {
-			onClose();
-			return;
-		}
-		setError(failure);
-		if (failure === FOLDER_GONE_MESSAGE) setTargetId(null);
-		setBusy(false);
-	};
+	const [targetId, setTargetId] = useState<string | null>(currentId);
+	const selectRef = useRef<HTMLSelectElement | null>(null);
+	const { busy, error, submit } = useFolderSubmit({
+		onSubmit: () => onSubmit(chat.id, targetId),
+		onClose,
+		onFolderGone: () => setTargetId(null),
+	});
 
 	return (
-		<MoveChatBody
-			chatTitle={chat.title}
+		<MoveTargetBody
+			title={chat.title}
 			currentId={currentId}
 			targetId={targetId}
-			targets={targets}
+			targets={folderTargets(organization)}
 			busy={busy}
 			error={error}
 			onTarget={setTargetId}
 			onCancel={onClose}
-			onMove={() => void submit()}
+			onMove={submit}
 			selectRef={selectRef}
-			renderFrame={(frame) => (
-				<HostDialog
-					open
-					frame={frame}
-					initialFocusRef={selectRef}
-					onClose={() => {
-						if (busy) return "blocked";
-						onClose();
-						return "closed";
-					}}
-					backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80" }}
-				>
-					{frame.props.children}
-				</HostDialog>
-			)}
+			renderFrame={(frame) => <FolderDialogFrame frame={frame} busy={busy} onClose={onClose} initialFocusRef={selectRef} />}
 		/>
 	);
 }

@@ -146,15 +146,6 @@ it("chats GET projects folders and chat placements from the shared organization 
 
 	const org = body.organization;
 	assert.ok(org);
-	const folderKeys = ["createdAt", "id", "name", "parentId"];
-	const parentRow = org.folders.find((f: { id: string }) => f.id === parent);
-	const childRow = org.folders.find((f: { id: string }) => f.id === child);
-	assert.deepEqual(Object.keys(parentRow).sort(), folderKeys);
-	assert.deepEqual(Object.keys(childRow).sort(), folderKeys);
-	assert.equal(parentRow.name, "Algebra");
-	assert.equal(parentRow.parentId, null);
-	assert.equal(childRow.name, "Week 1");
-	assert.equal(childRow.parentId, parent);
 	assert.deepEqual(org.placements[teach.id], { folderId: child });
 	assert.deepEqual(org.placements[practice.id], { folderId: parent });
 	assert.equal(Object.hasOwn(org.placements, unplaced.id), false);

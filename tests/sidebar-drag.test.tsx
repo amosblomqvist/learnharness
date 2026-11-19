@@ -1,10 +1,10 @@
 /**
- * SIDEBAR CHAT DRAG & DROP (chat-folders S05, 2026-11-19):
- * useSidebarChatDrag owns the gesture — a dragstart bubbled from the
- * list's own SourceDragRow payload arms it, folder headers and the
- * Outside folders zone are the only targets, and a drop rides the same
- * moveChat as the menu path. Foreign payloads, practice chats, the
- * current folder and mismatched ids never become a move.
+ * useSidebarDrag owns the gesture — a dragstart bubbled from the
+ * list's own SourceDragRow payload arms it (a teaching chat), folder
+ * headers and the Outside folders zone are the only targets, and a
+ * drop rides the same moveChat as the menu path. Foreign payloads,
+ * practice chats, the current folder and mismatched ids never become
+ * a move.
  * Same linkedom harness as source-tree-drag.test.tsx.
  */
 import React, { act, useState } from "react";
@@ -15,8 +15,9 @@ import { createRoot, type Root } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { SourceDragRow, SOURCE_DRAG_TYPE } from "../components/source-folder-tree.tsx";
 import { buildSidebarFolderView, SidebarFolderTree } from "../components/sidebar-folder-tree.tsx";
-import { useSidebarChatDrag } from "../components/sidebar-folder-actions.tsx";
-import type { ChatListItem, ChatListResponse } from "../src/core/index.ts";
+import { useSidebarDrag } from "../components/sidebar-folder-actions.tsx";
+import type { ChatListItem } from "../src/core/index.ts";
+import { chat, STAMP, type TestOrg } from "./helpers/sidebar-fixtures.ts";
 
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, {
@@ -25,27 +26,7 @@ Object.assign(globalThis, {
 	requestAnimationFrame: (cb: FrameRequestCallback) => { queueMicrotask(() => cb(0)); return 1; },
 });
 
-type TestOrg = NonNullable<ChatListResponse["organization"]>;
 type MoveChat = (chatId: string, parentId: string | null) => Promise<string | null>;
-
-const STAMP = "2026-01-01T00:00:00.000Z";
-
-function chat(id: string, overrides: Partial<ChatListItem> = {}): ChatListItem {
-	return {
-		id,
-		title: id,
-		kind: "teach",
-		createdAt: STAMP,
-		updatedAt: STAMP,
-		messageCount: 1,
-		phase: "probe",
-		pendingQuestion: false,
-		pendingProblem: false,
-		busy: false,
-		compacting: false,
-		...overrides,
-	};
-}
 
 /* Fixture per the contract: Algebra (root) → Maps; teaching t1 inside
    Algebra, teaching t2 and practice p1 at the root. */
@@ -67,7 +48,7 @@ const CHATS: ChatListItem[] = [
    while a drag is armed, drop props into the tree, error above the list. */
 function Harness({ moveChat }: { moveChat: MoveChat }) {
 	const [expanded, setExpanded] = useState(() => new Set(["alg"]));
-	const drag = useSidebarChatDrag({ organization: ORG, chats: CHATS, moveChat });
+	const drag = useSidebarDrag({ organization: ORG, chats: CHATS, moveChat });
 	const view = buildSidebarFolderView(CHATS, ORG, "", expanded, new Set());
 	return (
 		<div>
@@ -155,15 +136,20 @@ function transfer() {
 		},
 	};
 }
-async function fire(selector: string, type: string, data: ReturnType<typeof transfer>) {
-	const target = document.querySelector(selector);
-	assert.ok(target, selector);
+function dispatchDrag(el: Element, type: string, data: ReturnType<typeof transfer>) {
 	const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
 	Object.defineProperty(event, "dataTransfer", { value: data });
 	Object.defineProperty(event, "clientX", { value: 100 });
 	Object.defineProperty(event, "clientY", { value: 100 });
+	el.dispatchEvent(event);
+	return event;
+}
+async function fire(selector: string, type: string, data: ReturnType<typeof transfer>) {
+	const target = document.querySelector(selector);
+	assert.ok(target, selector);
+	let event!: ReturnType<typeof dispatchDrag>;
 	await act(async () => {
-		target.dispatchEvent(event);
+		event = dispatchDrag(target, type, data);
 		// The drag arms on the next task (see the dragstart DOM test below).
 		await new Promise((resolve) => setTimeout(resolve, 0));
 	});
@@ -177,11 +163,7 @@ it("dragstart leaves the list DOM unchanged until the next task, so the browser 
 	const row = document.querySelector('[data-source-drag-row="t2"]')!;
 
 	act(() => {
-		const event = new dom.window.Event("dragstart", { bubbles: true, cancelable: true });
-		Object.defineProperty(event, "dataTransfer", { value: data });
-		Object.defineProperty(event, "clientX", { value: 100 });
-		Object.defineProperty(event, "clientY", { value: 100 });
-		row.dispatchEvent(event);
+		dispatchDrag(row, "dragstart", data);
 	});
 	assert.equal(
 		document.querySelector('[data-testid="sidebar-list"]')!.innerHTML,
@@ -201,13 +183,8 @@ it("a dragend before the drag is armed leaves no zone behind", async () => {
 	const row = document.querySelector('[data-source-drag-row="t2"]')!;
 
 	act(() => {
-		for (const type of ["dragstart", "dragend"]) {
-			const event = new dom.window.Event(type, { bubbles: true, cancelable: true });
-			Object.defineProperty(event, "dataTransfer", { value: data });
-			Object.defineProperty(event, "clientX", { value: 100 });
-			Object.defineProperty(event, "clientY", { value: 100 });
-			row.dispatchEvent(event);
-		}
+		dispatchDrag(row, "dragstart", data);
+		dispatchDrag(row, "dragend", data);
 	});
 	await act(async () => {
 		await new Promise((resolve) => setTimeout(resolve, 0));
