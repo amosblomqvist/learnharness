@@ -6,16 +6,19 @@
 import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { serializeCitation, sideSegmentId, type LhMessage, type TextSelector, type SideChatMessage, type SideChatThread } from "@/src/core";
 import { useServerEvent, useServerResync } from "./server-events";
+import { learningModeOf, learningRequest, type LearningMode } from "@/src/core";
 
 export type SideThreadAnchor = { kind: "range"; range: Range } | { kind: "element"; element: HTMLElement } | { kind: "composer" };
 export interface SidePassage { text: string; sourceMessageId: string; selector?: Omit<TextSelector, "text"> }
 export interface SideThreadOpenArgs {
+	learningMode?: LearningMode;
 	anchor: SideThreadAnchor;
 	passage?: SidePassage;
 	sourceMessageId?: string;
 	questionCallId?: string;
 }
 export interface SideThreadState {
+	learningMode?: LearningMode;
 	threadId: string;
 	segmentId: string;
 	messages: SideChatMessage[];
@@ -28,7 +31,7 @@ export interface SideThreadState {
 	failedQuestion?: string;
 }
 export type SideThreadAction =
-	| { type: "open"; segmentId: string; anchor: SideThreadAnchor; passage?: SidePassage; thread?: SideChatThread }
+	| { type: "open"; segmentId: string; anchor: SideThreadAnchor; passage?: SidePassage; thread?: SideChatThread; learningMode?: LearningMode }
 	| { type: "snapshot"; thread: SideChatThread; answering?: boolean; text?: string }
 	| { type: "start"; threadId: string }
 	| { type: "accepted"; threadId: string }
@@ -41,9 +44,11 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 	if (action.type === "close") return null;
 	if (action.type === "open") {
 		const threadId = action.thread?.id ?? `side_${action.segmentId}`;
-		if (state?.threadId === threadId) return { ...state, ...(action.passage ? { pendingPassage: action.passage } : {}) };
+		const learningMode = action.learningMode ?? learningModeOf(action.thread?.messages ?? []);
+		if (state?.threadId === threadId) return { ...state, ...(action.learningMode ? { learningMode: action.learningMode } : {}), ...(action.passage ? { pendingPassage: action.passage } : {}) };
 		return { threadId, segmentId: action.segmentId, messages: action.thread?.messages ?? [], answering: false, streamText: "",
-			mode: state?.mode ?? "popover", anchor: action.anchor, pendingPassage: action.passage };
+			mode: state?.mode ?? "popover", anchor: action.anchor, pendingPassage: action.passage,
+			...(learningMode ? { learningMode } : {}) };
 	}
 	if (!state) return state;
 	if (action.type === "mode") return { ...state, mode: action.mode };
@@ -150,13 +155,13 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 			.then((response) => consume(response, thread.id, token))
 			.catch((error) => { if (!controller.signal.aborted && token === connection.current?.token) dispatch({ type: "error", threadId: thread.id, error: String(error.message ?? error) }); });
 	}, [chatId, consume]);
-	const open = useCallback(({ anchor, passage, sourceMessageId, questionCallId }: SideThreadOpenArgs) => {
+	const open = useCallback(({ anchor, passage, sourceMessageId, questionCallId, learningMode }: SideThreadOpenArgs) => {
 		const source = sourceMessageId ?? passage?.sourceMessageId ?? (questionCallId ? messagesRef.current.find((message) => message.role === "assistant" &&
 			message.content.some((block) => block.type === "toolCall" && block.id === questionCallId))?.id : undefined);
 		const segmentId = sideSegmentId(messagesRef.current, source);
 		if (!segmentId) return;
 		const thread = threadsRef.current.find((entry) => entry.anchor.messageId === segmentId);
-		dispatch({ type: "open", segmentId, anchor, passage, thread });
+		dispatch({ type: "open", segmentId, anchor, passage, thread, learningMode });
 		if (thread) attach(thread);
 		else { connection.current?.controller.abort(); connection.current = null; }
 	}, [attach]);
@@ -168,6 +173,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 	const ask = useCallback(async (text: string, retry = false, expectedThreadId?: string): Promise<boolean> => {
 		const current = stateRef.current;
 		if (!current || (expectedThreadId && expectedThreadId !== current.threadId) || current.answering || (!text.trim() && !retry)) return false;
+		text = learningRequest(text, current.learningMode);
 		const passage = current.pendingPassage;
 		const quote = passage ? serializeCitation({ version: 1, chatId, messageId: passage.sourceMessageId, text: passage.text,
 			...(passage.selector ?? { start: 0, end: passage.text.length, prefix: "", suffix: "" }) }) : undefined;

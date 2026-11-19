@@ -14,6 +14,8 @@ import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type PluginSu
 import { validatePluginBuiltinSubmissionAnswer } from "@/src/core";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
+import { AnswerReviewActions, useReviewAcknowledgement } from "@/components/answer-review";
+import { answerReviewOf } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { cn } from "@/lib/utils";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
@@ -582,6 +584,8 @@ export function Chat({
 
 	const localStream = status === "submitted" || status === "streaming";
 	const busy = localStream || turnInFlight || reconciliation !== "ready";
+	const review = useMemo(() => answerReviewOf(canonicalMessages), [canonicalMessages]);
+	const [reviewedAnswer, acknowledgeReview] = useReviewAcknowledgement(chatId);
 	const busyRef = useRef(busy);
 	busyRef.current = busy;
 	// The attach handoff (stream-reattach wave): the moment a resumed
@@ -1099,6 +1103,7 @@ export function Chat({
 	// server's registry mutex is the structural gate; this is the
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
+	const reviewing = !!review && reviewedAnswer !== review.answerId && !busy && !compacting && !error;
 	submissionLive.current.ready = !compacting && reconciliation === "ready";
 	// A failed model response (issue #110): Retry keeps the saved input
 	// and completed work, without another learner message. Offered from
@@ -2032,6 +2037,15 @@ export function Chat({
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
 				<DockOverlay
+					review={reviewing && review ? <AnswerReviewActions
+						onClarify={() => { openSideThread({ sourceMessageId: review.sourceMessageId, questionCallId: review.questionCallId, learningMode: "clarify", anchor: { kind: "composer" } }); sideThread.expand(); }}
+						onFeynman={() => { openSideThread({ sourceMessageId: review.sourceMessageId, questionCallId: review.questionCallId, learningMode: "feynman", anchor: { kind: "composer" } }); sideThread.expand(); }}
+						onContinue={() => {
+							void closeSideThread();
+							if (pending || pendingPlugin || activeProblem) acknowledgeReview(review.answerId);
+							else void send({ type: "text", text: "Continue to the next question." }).then(accepted => { if (accepted) acknowledgeReview(review.answerId); });
+						}}
+					/> : undefined}
 					viewReader={inputViewReader}
 					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}
 					pending={pending}
@@ -2374,6 +2388,7 @@ function TranscriptElementReporter({ onElement }: { onElement: (element: HTMLEle
 
 /** Host-only composition/test seam; never part of the plugin SDK. */
 export function DockOverlay({
+	review,
 	viewReader, viewTargets, unavailableOccurrence,
 	pending,
 	onPrepareBuiltin, onBuiltinPendingInput, onPrepareThinking, pendingThinkingInput, onPreparePluginQuestion, preparing, preparationStatus,
@@ -2406,6 +2421,7 @@ export function DockOverlay({
 	queuedSteers,
 }: {
 	viewReader?: SessionInputViewReader;
+	review?: React.ReactNode;
 	viewTargets?: SessionViewTargets;
 	unavailableOccurrence?: import("@/src/core").PluginSubmissionOccurrence;
 	pending: ReturnType<typeof pendingQuestionOf>;
@@ -2856,7 +2872,7 @@ export function DockOverlay({
 					    teach-phase check waits — the same cue that collapses it. It
 					    claims dictated speech until the learner reveals the check
 					    (the dock reclaims then). Rides the check answer on submit. */}
-					{(pending || pluginQuestion) && requiresReveal && (
+					{!review && (pending || pluginQuestion) && requiresReveal && (
 						<ReadingThinkingField
 							inputRef={readingInputRef}
 							value={readingThinking}
@@ -2884,7 +2900,7 @@ export function DockOverlay({
 							key={mode}
 							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
 						>
-							{pluginQuestion && pluginDraft ? (
+							{review ? review : pluginQuestion && pluginDraft ? (
 								<PluginQuestionDock viewReader={customViewReader} snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
 							) : unreadablePlugin ? (
 								<div className="px-4 py-3">
