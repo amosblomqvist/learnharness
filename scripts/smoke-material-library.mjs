@@ -46,6 +46,7 @@ try {
 		const search = document.querySelector('[aria-label="Search material titles"]').getBoundingClientRect(), goal = document.querySelector('[aria-label="Learning goal"]').getBoundingClientRect();
 		return { gap: Math.abs(search.left - goal.left), searchHeight: search.height, goalHeight: goal.height, overflow: document.documentElement.scrollWidth > innerWidth };
 	});
+	await page.addStyleTag({content: "::-webkit-scrollbar { width: 12px; }"});
 	const desktop = await geometry(); assert(desktop.gap <= 1.1); assert.equal(desktop.searchHeight, 44); assert.equal(desktop.goalHeight, 44); assert.equal(desktop.overflow, false);
 	if (process.env.LH_UI_SCREENSHOTS) await page.screenshot({ path: path.join(process.env.LH_UI_SCREENSHOTS, "materials-desktop.png") });
 	await page.setViewport({ width: 390, height: 844 });

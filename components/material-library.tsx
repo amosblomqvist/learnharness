@@ -72,7 +72,7 @@ export function MaterialLibrary() {
 	};
 	return <main className="flex h-dvh min-w-0 flex-col [&_button]:text-base" data-testid="material-library">
 		<TopBar><h1 className="min-w-0 truncate font-ui text-xl font-semibold">Study materials</h1></TopBar>
-		<div className="min-h-0 flex-1 overflow-y-auto">
+		<div className="min-h-0 flex-1 overflow-y-auto [scrollbar-gutter:stable]">
 			<div className="mx-auto flex w-full max-w-5xl flex-col gap-6 p-5 sm:p-6">
 				<details className="rounded-md border bg-card p-5" open={!connections || (!connections.obsidianRoot && !connections.notionConfigured && !connections.zoteroEnabled)}>
 					<summary className="cursor-pointer text-base font-semibold">Connections</summary>
@@ -103,7 +103,7 @@ export function MaterialLibrary() {
 				{error && <p role="alert" className="break-words rounded-md border border-error/40 p-4 text-sm text-error">{error}</p>}
 			</div>
 		</div>
-		<footer className="shrink-0 border-t bg-background"><div className="mx-auto flex max-w-5xl flex-wrap items-end gap-3 px-10 py-4 sm:px-11"><label className="grid min-w-40 flex-1 gap-2 text-base">What would you like to learn?<Input aria-label="Learning goal" className="min-h-11 text-base md:text-base" value={topic} onChange={event => setTopic(event.target.value)} placeholder="Optional focus or exam goal" /></label>{prepared.length ? <Button className="min-h-11" disabled={busy} onClick={() => void start()}>Start learning from selection</Button> : <Button className="min-h-11" disabled={busy || !selected.length} onClick={() => void prepare()}>{busy ? "Reading selection…" : "Review selected materials"}</Button>}</div></footer>
+		<footer className="shrink-0 overflow-y-hidden border-t bg-background [scrollbar-gutter:stable]"><div className="mx-auto flex max-w-5xl flex-wrap items-end gap-3 px-10 py-4 sm:px-11"><label className="grid min-w-40 flex-1 gap-2 text-base">What would you like to learn?<Input aria-label="Learning goal" className="min-h-11 text-base md:text-base" value={topic} onChange={event => setTopic(event.target.value)} placeholder="Optional focus or exam goal" /></label>{prepared.length ? <Button className="min-h-11" disabled={busy} onClick={() => void start()}>Start learning from selection</Button> : <Button className="min-h-11" disabled={busy || !selected.length} onClick={() => void prepare()}>{busy ? "Reading selection…" : "Review selected materials"}</Button>}</div></footer>
 		<SetupDialog open={setupOpen} onClose={() => setSetupOpen(false)} onDone={() => setSetupOpen(false)} />
 	</main>;
 }
