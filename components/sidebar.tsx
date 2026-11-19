@@ -6,7 +6,7 @@ import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, FolderPlusIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -25,6 +25,16 @@ import { PluginWidgets } from "@/components/plugins";
 import { PluginSidebarActions } from "@/components/plugin-chrome";
 import { createSidebarRefresh } from "@/components/sidebar-refresh";
 import { buildSidebarFolderView, enterKbdChat, nextKbdChat, SidebarFolderTree } from "@/components/sidebar-folder-tree";
+import {
+	createFolderWriter,
+	folderPath,
+	MoveChatDialog,
+	NewFolderDialog,
+	planCreateFolder,
+	planMoveChat,
+	postFolderCommand,
+	type SidebarOrganization,
+} from "@/components/sidebar-folder-actions";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
@@ -403,6 +413,12 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
+/** Stable empty organization for the folder dialogs while the snapshot's
+ *  organization is null (the store refused the read): the dialogs stay
+ *  mounted with only "Outside folders" as a target, and every submit
+ *  re-plans against the live ref which reports the list as unavailable. */
+const EMPTY_ORGANIZATION: SidebarOrganization = { folders: [], placements: {} };
+
 function SessionsSidebar() {
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
@@ -547,6 +563,69 @@ function SessionsSidebar() {
 	   immediate refresh instead of a patch. */
 	const chatsRef = useRef(chats);
 	chatsRef.current = chats;
+
+	/* Folder writes (chat-folders S04): ONE writer serializes the
+	   sidebar's create/move POSTs — a second submit while one is in
+	   flight is refused without posting. afterWrite ALWAYS drops the
+	   in-flight read and re-requests the snapshot (the tree renders only
+	   what GET /api/chats returns — no client-side copy of the
+	   organization), and on success expands the folder chain down to the
+	   write's parentId so the change is visible: for create-folder that
+	   is the new folder's parent chain, for move the target's. orgRef
+	   hands the once-created closures the latest organization — the
+	   writer must not plan against a stale render. */
+	const orgRef = useRef<SidebarOrganization | null>(snapshot?.organization ?? null);
+	orgRef.current = snapshot?.organization ?? null;
+	const [folderWriter] = useState(() =>
+		createFolderWriter({
+			post: (command) => postFolderCommand(command),
+			afterWrite: (command, result) => {
+				invalidate();
+				void refresh();
+				if (!result.ok) return;
+				const org = orgRef.current;
+				if (org === null) return;
+				const ids = folderPath(org, command.parentId);
+				if (ids.length === 0) return;
+				setExpandedIds((prev) => {
+					const next = new Set(prev);
+					for (const id of ids) next.add(id);
+					return next;
+				});
+			},
+		}),
+	);
+
+	/* Pre-send plans run against the freshest snapshot; the server stays
+	   authoritative. skip (already at the target) and plan errors resolve
+	   to the dialogs' string-or-null contract without a POST; only a
+	   command reaches the writer. moveChat is the single move handler —
+	   S05's drag/drop reuses it. */
+	const createFolder = useCallback(
+		async (name: string, parentId: string | null): Promise<string | null> => {
+			const org = orgRef.current;
+			if (org === null) return "The folder list is unavailable.";
+			const plan = planCreateFolder(org, name, parentId);
+			if (plan.kind === "error") return plan.error;
+			if (plan.kind !== "command") return null;
+			const result = await folderWriter.write(plan.command);
+			return result.ok ? null : result.error;
+		},
+		[folderWriter],
+	);
+	const moveChat = useCallback(
+		async (chatId: string, parentId: string | null): Promise<string | null> => {
+			const org = orgRef.current;
+			if (org === null) return "The folder list is unavailable.";
+			const plan = planMoveChat(org, chatsRef.current ?? [], chatId, parentId);
+			if (plan.kind === "error") return plan.error;
+			if (plan.kind !== "command") return null;
+			const result = await folderWriter.write(plan.command);
+			return result.ok ? null : result.error;
+		},
+		[folderWriter],
+	);
+
 	useEffect(() => {
 		const onTurnState = (e: Event) => {
 			const { id, running } = (e as CustomEvent<{ id: string; running: boolean }>).detail;
@@ -635,6 +714,12 @@ function SessionsSidebar() {
 	const ctxAnchorRef = useRef<HTMLElement | null>(null);
 	const [renamingId, setRenamingId] = useState<string | null>(null);
 	const [deleting, setDeleting] = useState<ChatListItem | null>(null);
+	/* Folder dialogs (chat-folders S04): the create dialog is a boolean;
+	   the move dialog holds the ChatListItem captured when the menu item
+	   was picked (its id is what the write uses). */
+	const [newFolderOpen, setNewFolderOpen] = useState(false);
+	const [movingChat, setMovingChat] = useState<ChatListItem | null>(null);
+	const ctxChat = chats?.find((c) => c.id === ctxChatId) ?? null;
 
 	const openContext = (e: React.MouseEvent<HTMLButtonElement>, chat: ChatListItem) => {
 		e.preventDefault(); // suppress the native menu
@@ -807,6 +892,23 @@ function SessionsSidebar() {
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
+					{/* New folder (chat-folders S04): only once the snapshot
+					    carries the organization — with organization null the
+					    folders are unknowable and the action stays hidden. */}
+					{snapshot?.organization != null && (
+						<Hint label="New folder" side="bottom">
+							<Button
+								variant="ghost"
+								size="icon-xs"
+								aria-label="New folder"
+								data-testid="new-folder"
+								title="New folder"
+								onClick={() => setNewFolderOpen(true)}
+							>
+								<FolderPlusIcon className="size-3.5" />
+							</Button>
+						</Hint>
+					)}
 					<Hint label="Search sessions" action="sessions-search" side="bottom">
 					<span className="relative flex-1">
 						<Input
@@ -982,6 +1084,25 @@ function SessionsSidebar() {
 						>
 							Rename
 						</button>
+						{/* Move to folder… (chat-folders S04): teaching chats
+						    only — practice chats always stay at the root, so
+						    the item would be a dead end — and only once the
+						    snapshot carries the organization (null = the
+						    folders are unknowable). Directly after Rename,
+						    same row classes. */}
+						{snapshot?.organization != null && ctxChat !== null && (ctxChat.kind ?? "teach") !== "practice" && (
+							<button
+								type="button"
+								data-testid="ctx-move-folder"
+								onClick={() => {
+									setCtxChatId(null);
+									setMovingChat(ctxChat);
+								}}
+								className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+							>
+								Move to folder…
+							</button>
+						)}
 						{/* Export as Markdown (owner, release polish 2026-10-06): the
 					    session-markdown engine's user-facing debut — same-origin
 						    anchor download; the route's Content-Disposition names the
@@ -1027,6 +1148,22 @@ function SessionsSidebar() {
 					chat={deleting}
 					onClose={() => setDeleting(null)}
 					onDeleted={onDeleted}
+				/>
+
+				{/* The folder dialogs (chat-folders S04) — both read the live
+				    organization snapshot for their target lists; writes ride
+				    the single folderWriter. */}
+				<NewFolderDialog
+					open={newFolderOpen}
+					organization={snapshot?.organization ?? EMPTY_ORGANIZATION}
+					onClose={() => setNewFolderOpen(false)}
+					onSubmit={createFolder}
+				/>
+				<MoveChatDialog
+					chat={movingChat}
+					organization={snapshot?.organization ?? EMPTY_ORGANIZATION}
+					onClose={() => setMovingChat(null)}
+					onSubmit={moveChat}
 				/>
 			</aside>
 	);
