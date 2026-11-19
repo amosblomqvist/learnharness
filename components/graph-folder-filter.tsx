@@ -1,9 +1,10 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from "react";
 import { FolderIcon, FunnelIcon } from "lucide-react";
 import { graphFolderCheck, toggleGraphFolder, type SourceFolder, type SourceOrganization } from "@/src/core";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
+import { useInteractionLayers, type CloseReason } from "@/components/interaction-layers";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { Hint } from "@/components/ui/hint";
 import { TreeCheckbox } from "@/components/tree-presentation";
@@ -49,7 +50,41 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 	const [open, setOpen] = useState(false);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const panelRef = useRef<HTMLDivElement>(null);
-	const popupLayer = usePopoverDismiss(rootRef, open, () => setOpen(false), { layerRootRef: panelRef });
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const enterAt = useRef<"first" | "last" | null>(null);
+	const interactions = useInteractionLayers();
+	const close = useCallback((reason: CloseReason) => {
+		if (reason === "escape") triggerRef.current?.focus({ preventScroll: true });
+		setOpen(false);
+	}, []);
+	const popupLayer = usePopoverDismiss(rootRef, open, close, { layerRootRef: panelRef });
+	const controls = () => Array.from(panelRef.current?.querySelectorAll<HTMLElement>("[data-folder-filter-control]:not(:disabled)") ?? []);
+	useLayoutEffect(() => {
+		if (!open || !enterAt.current) return;
+		const options = controls();
+		(options.at(enterAt.current === "first" ? 0 : -1) ?? panelRef.current)?.focus();
+		enterAt.current = null;
+	}, [open]);
+	const walk = (event: KeyboardEvent<HTMLDivElement>) => {
+		const { key } = event;
+		if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+		if (key !== "ArrowDown" && key !== "ArrowUp" && key !== "Home" && key !== "End") return;
+		if (!open ? !interactions.isElementEligible(triggerRef.current) : !interactions.isElementEligible(panelRef.current)) return;
+		event.preventDefault();
+		event.stopPropagation();
+		if (!open) {
+			enterAt.current = key === "End" || key === "ArrowUp" ? "last" : "first";
+			setOpen(true);
+			return;
+		}
+		const options = controls();
+		if (!options.length) return;
+		const current = options.indexOf(event.target as HTMLElement);
+		const delta = key === "ArrowDown" ? 1 : -1;
+		const start = current < 0 ? (delta === 1 ? -1 : 0) : current;
+		const index = key === "Home" ? 0 : key === "End" ? options.length - 1 : (start + delta + options.length) % options.length;
+		options[index]?.focus();
+	};
 	const active = new Set([...selected].filter((id) => listed.has(id)));
 	// Count CHOICES, not folders: a ticked folder's ticked subfolders came with
 	// it. One choice → its name on the button; several → how many (owner polish).
@@ -64,9 +99,9 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 		const check = graphFolderCheck(organization, selected, folder.id, listed);
 		return (
 			<div key={folder.id}>
-				<label data-testid={`graph-folder-option-${folder.id}`} className="flex cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 hover:bg-accent"
+				<label data-testid={`graph-folder-option-${folder.id}`} className="flex cursor-pointer items-center gap-1.5 rounded-md py-1 pr-2 hover:bg-accent has-[:focus-visible]:bg-accent"
 					style={{ paddingLeft: 8 + depth * 18 }}>
-					<TreeCheckbox checked={check.checked} indeterminate={check.indeterminate}
+					<TreeCheckbox data-folder-filter-control checked={check.checked} indeterminate={check.indeterminate}
 						aria-label={`Show folder ${folder.name}`}
 						onChange={(e) => onChange(toggleGraphFolder(organization, selected, folder.id, e.target.checked, listed))} />
 					<FolderIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
@@ -77,15 +112,19 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 		);
 	});
 	return (
-		<div ref={rootRef} className="lh-no-drag relative">
+		<div ref={rootRef} className="lh-no-drag relative" onKeyDown={walk}>
 			<Hint label={activeCount > 0 ? "Graph filtered by folder" : "Show folders"} side="bottom">
 				<button
 					type="button"
+					ref={triggerRef}
 					aria-expanded={open}
 					aria-label={soleName !== null ? `Folder filter: ${soleName}` : activeCount > 0 ? `Folder filter: ${activeCount} selected` : "Folder filter"}
 					data-testid="graph-folder-filter"
 					data-active={activeCount > 0}
-					onClick={() => setOpen((o) => !o)}
+					onClick={(event) => {
+						if (!open && event.detail === 0) enterAt.current = "first";
+						setOpen(!open);
+					}}
 					className={cn(
 						"flex h-9 items-center gap-1.5 rounded-xl transition-colors hover:bg-accent",
 						activeCount > 0
@@ -100,12 +139,16 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 				</button>
 			</Hint>
 			{open && (
-				<div ref={panelRef} data-testid="graph-folder-filter-panel" style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
+				<div ref={panelRef} role="group" aria-label="Show folders" tabIndex={-1} data-testid="graph-folder-filter-panel" style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
 					className="absolute left-0 top-full mt-2 flex max-h-[60vh] w-64 flex-col rounded-xl border bg-card/85 p-2 shadow-lg backdrop-blur">
 					<div className="mb-1 flex items-center justify-between gap-2 px-2">
 						<span className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Show folders</span>
 						{activeCount > 0 && (
-							<button type="button" data-testid="graph-folder-filter-clear" onClick={() => onChange(new Set())}
+							<button type="button" data-testid="graph-folder-filter-clear" data-folder-filter-control onClick={() => {
+								// This button disappears once cleared; keep focus inside the popup.
+								(panelRef.current?.querySelector<HTMLElement>("input[data-folder-filter-control]") ?? panelRef.current)?.focus();
+								onChange(new Set());
+							}}
 								className="text-[10px] text-muted-foreground transition-colors hover:text-foreground">Show all</button>
 						)}
 					</div>

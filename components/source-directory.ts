@@ -53,10 +53,12 @@ export function useSourceDirectory(enabled: boolean) {
 					headers: { "Content-Type": "application/json" },
 					body: JSON.stringify(action),
 				});
-				const body = await response.json() as SourceDirectory & { createdFolderId?: unknown; error?: unknown };
+				const body = await response.json() as { createdFolderId?: unknown; error?: unknown };
 				if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not save folders.");
-				version.current++; // older in-flight reads must not overwrite this result
-				setDirectory(body);
+				// The acknowledgement describes the directory at commit time; a
+				// later window's write may already be reflected in an SSE read.
+				// Never install the POST snapshot. Reconcile with a fresh GET.
+				await read();
 				setFailure("");
 				return typeof body.createdFolderId === "string" ? body.createdFolderId : undefined;
 			} catch (error) {
@@ -66,7 +68,7 @@ export function useSourceDirectory(enabled: boolean) {
 		});
 		tail.current = operation;
 		return operation;
-	}, []);
+	}, [read]);
 
 	return { directory, failure, clearFailure: () => setFailure(""), reportFailure: setFailure, change };
 }

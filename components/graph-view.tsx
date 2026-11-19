@@ -145,6 +145,21 @@ export function isNodeVisible(node: Pick<GraphNode, "name" | "statement">, query
 	return node.name.toLowerCase().includes(q) || node.statement.toLowerCase().includes(q);
 }
 
+/** Search alone retains its existing behavior. With an active folder filter,
+ * a junction can only draw if every endpoint survives the combined view. */
+export function graphVisibleIds(snapshot: Pick<GraphSnapshot, "nodes" | "impLinks">, query: string, folderVisibleIds: ReadonlySet<string> | null): Set<string> {
+	const visible = new Set<string>();
+	for (const node of snapshot.nodes) {
+		if ((folderVisibleIds === null || folderVisibleIds.has(node.id)) && isNodeVisible(node, query)) visible.add(node.id);
+	}
+	if (folderVisibleIds !== null && query.trim()) {
+		for (const { id, premises, conclusion } of snapshot.impLinks) {
+			if (!visible.has(conclusion) || !premises.every((premise) => visible.has(premise))) visible.delete(id);
+		}
+	}
+	return visible;
+}
+
 /** In-place sessions patch for a live rename (rename-shuffle fix,
  *  2026-09-23). The OLD path built a fresh snapshot object, which
  *  flowed through the [snapshot]-keyed setData effect → geometry
@@ -1074,14 +1089,8 @@ export function GraphView({
 	const filtering = query.trim() !== "" || folderVisibleIds !== null;
 	// The id set that survives the current search AND folder filter —
 	// consumed by the visibility feed and the "no matches" hint.
-	const visibleIds = useMemo(() => {
-		const set = new Set<string>();
-		if (snapshot)
-			for (const node of snapshot.nodes) {
-				if (isNodeVisible(node, query) && (folderVisibleIds === null || folderVisibleIds.has(node.id))) set.add(node.id);
-			}
-		return set;
-	}, [snapshot, query, folderVisibleIds]);
+	const visibleIds = useMemo(() => snapshot ? graphVisibleIds(snapshot, query, folderVisibleIds) : new Set<string>(),
+		[snapshot, query, folderVisibleIds]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
