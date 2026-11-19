@@ -20,7 +20,7 @@ import {
 describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 	it("pins the owner-decided defaults", () => {
 		assert.equal(CURRENT_SETTINGS_VERSION, 1);
-		assert.deepEqual(FACTORY_SETTINGS.general, { autoUpdate: true });
+		assert.deepEqual(FACTORY_SETTINGS.general, { autoUpdate: true, language: "en" });
 		assert.deepEqual(FACTORY_SETTINGS.agent, { workerRequestConcurrency: 8 });
 		// wave 7 collapse: the master switch ONLY + the extraction-UX
 		// redesign's chunk budget (2026-09-24); doubled to 8192 with the
