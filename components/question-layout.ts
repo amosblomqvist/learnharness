@@ -175,26 +175,45 @@ export function solveQuestionLayout(input: LayoutInput, step = WIDTH_STEP): Ques
 // 24px between the columns (12px each side), 16px at the card's edges —
 // with no divider, two full 16px paddings read as a doubled gap (owner).
 export const QUESTION_COLUMN_PAD = "pl-4 pr-3 pt-3 pb-2";
+/** The stacked card's question area: label, question, options and
+ *  confidence share its 16px sides (live area and probe alike). */
+export const STACKED_AREA_PAD = "px-4 pt-3";
+/** The confidence row's vertical rhythm, in either arrangement. */
+export const CONFIDENCE_ROW_PAD = "pt-1.5 pb-3.5";
 export const ANSWER_COLUMN_FRAME = "flex flex-col justify-center";
 export const ANSWER_OPTIONS_PAD = "pl-3 pr-4 pt-3";
 /** The confidence row's sides in the answer column (matches the options). */
-export const ANSWER_CONFIDENCE_PAD = "pl-3 pr-4";
 /** The answer column's own side padding (pl-3 + pr-4) and the space between
- *  the two columns' contents (pr-3 + pl-3): answered cards, whose padding is
- *  the card's, rebuild the same geometry from them. */
-export const ANSWER_COLUMN_INSET = 12 + 16;
-export const COLUMN_GAP = 12 + 12;
+ *  the two columns' contents (pr-3 + pl-3), as CSS lengths: answered cards,
+ *  whose padding is the card's, rebuild the same geometry from them. */
+export const ANSWER_COLUMN_INSET_CSS = "1.75rem";
+export const COLUMN_GAP_CSS = "1.5rem";
 
-/** The question card's horizontal chrome in the dock (px-4 container
- *  padding + the shell's 1px borders), its default inner width (46rem less
+/** The root font size (px) the rem-based geometry below scales with. */
+export function rootRem(doc: Document | undefined = typeof document === "undefined" ? undefined : document): number {
+	const px = doc ? parseFloat(getComputedStyle(doc.documentElement).fontSize) : NaN;
+	return px > 0 ? px : 16;
+}
+
+/** The question card's geometry at a root font size (px): the dock
+ *  container's width (46rem), its horizontal chrome (px-4 padding + the
+ *  shell's 1px borders), the card's default inner width (the container less
  *  that) and the column floor (owner: half the default card, 23rem). */
-export const QUESTION_CARD_CHROME = 2 * 16 + 2;
-export const QUESTION_CARD_BASE = 46 * 16 - QUESTION_CARD_CHROME;
-export const QUESTION_COLUMN_MIN = 23 * 16;
+export function questionCardGeometry(rem = 16) {
+	const chrome = 2 * rem + 2;
+	return { container: 46 * rem, chrome, base: 46 * rem - chrome, floor: 23 * rem };
+}
 
-/** The reading-font identity a solved layout depends on. */
-export function layoutFontKey(appearance: { fontFamily?: string | null; proseFontSize: number }): string {
-	return `${appearance.fontFamily ?? ""}|${appearance.proseFontSize}`;
+/** Everything a solved layout's measurements depend on besides content and
+ *  widths: the reading font and size, and the markdown styles that change
+ *  text metrics (heading weight, code ligatures). */
+export function layoutFontKey(appearance: {
+	fontFamily?: string | null;
+	proseFontSize: number;
+	codeLigatures?: boolean;
+	mdRendering?: { headingWeight?: number };
+}): string {
+	return `${appearance.fontFamily ?? ""}|${appearance.proseFontSize}|${appearance.codeLigatures ? 1 : 0}|${appearance.mdRendering?.headingWeight ?? ""}`;
 }
 
 export interface QuestionParts {
@@ -228,6 +247,17 @@ export function cloneWithImageSizes(live: HTMLElement): Node {
 	return clone;
 }
 
+/** Typing surfaces (the Other answer field) in a clone, emptied back to
+ *  their placeholder: a draft is never content the layout depends on. */
+const DRAFT_FIELD = '[role="textbox"], [contenteditable]:not([contenteditable="false"])';
+function withoutDrafts(clone: HTMLElement): HTMLElement {
+	for (const field of clone.querySelectorAll<HTMLElement>(DRAFT_FIELD)) {
+		field.replaceChildren();
+		field.dataset.empty = "true";
+	}
+	return clone;
+}
+
 /** Width of 70ch in the reading font at its current size. */
 const MEASURE_CH = 70;
 
@@ -253,24 +283,51 @@ export function createQuestionProbe(parts: QuestionParts, host: HTMLElement = pa
 		wrapper.append(el);
 		return el;
 	};
-	const qBox = place(doc.createElement("div"));
-	qBox.className = QUESTION_COLUMN_PAD;
-	qBox.append(cloneWithImageSizes(parts.question));
+	const div = (className: string) => {
+		const el = doc.createElement("div");
+		el.className = className;
+		return el;
+	};
+	// One clone of each part, MOVED between the two arrangements below.
+	// Drafts never count: a typed Other answer measures as the empty field.
+	const question = cloneWithImageSizes(parts.question) as HTMLElement;
+	const options = parts.options ? withoutDrafts(cloneWithImageSizes(parts.options) as HTMLElement) : null;
+	const confidence = options && parts.confidence ? (parts.confidence.cloneNode(true) as HTMLElement) : null;
+	// STACKED: the live stacked card's box model (16px sides throughout).
+	// flow-root sections keep each part's own margins inside its height.
+	const sBox = place(div(STACKED_AREA_PAD));
+	const sQuestion = div("flow-root");
+	const sAnswer = div("flow-root");
+	sBox.append(sQuestion, sAnswer);
+	// TWO COLUMNS: the live columns' box model.
+	const qBox = place(div(QUESTION_COLUMN_PAD));
 	let aBox: HTMLElement | null = null;
-	if (parts.options) {
-		aBox = place(doc.createElement("div"));
-		aBox.className = ANSWER_COLUMN_FRAME;
-		const pad = doc.createElement("div");
-		pad.className = ANSWER_OPTIONS_PAD;
-		pad.append(cloneWithImageSizes(parts.options));
+	let pad: HTMLElement | null = null;
+	if (options) {
+		aBox = place(div(ANSWER_COLUMN_FRAME));
+		pad = div(ANSWER_OPTIONS_PAD);
 		aBox.append(pad);
-		if (parts.confidence) {
-			// The two-column answer column draws no rule above confidence.
-			const confidence = parts.confidence.cloneNode(true) as HTMLElement;
-			confidence.classList.remove("border-t");
-			aBox.append(confidence);
-		}
 	}
+	const arrange = (mode: "stacked" | "columns") => {
+		if (mode === "stacked") {
+			sQuestion.append(question);
+			if (options) sAnswer.append(options);
+			if (confidence) {
+				confidence.className = CONFIDENCE_ROW_PAD;
+				sAnswer.append(confidence);
+			}
+			return;
+		}
+		qBox.append(question);
+		// Confidence scrolls with the options in both arrangements (owner):
+		// in the answer column's scroller, whose padding supplies its sides.
+		if (options) pad!.append(options);
+		if (confidence) {
+			confidence.className = CONFIDENCE_ROW_PAD;
+			pad!.append(confidence);
+		}
+	};
+	arrange("stacked");
 	const ch = doc.createElement("div");
 	ch.className = "lh-prose";
 	Object.assign(ch.style, { position: "absolute", width: `${MEASURE_CH}ch`, height: "0" });
@@ -342,6 +399,15 @@ export function createQuestionProbe(parts: QuestionParts, host: HTMLElement = pa
 	const chPx = ch.getBoundingClientRect().width;
 
 	return {
+		/** The stacked card's question area (at the card's inner width). */
+		stacked: sBox,
+		/** Question part and answer part heights in the stacked card. */
+		stackedHeights(width: number): [number, number] {
+			sBox.style.width = `${width}px`;
+			return [sQuestion.getBoundingClientRect().height, sAnswer.getBoundingClientRect().height];
+		},
+		/** Move the parts into the two-column boxes (after stacked measuring). */
+		toColumns() { arrange("columns"); },
 		question: qBox,
 		answer: aBox,
 		chPx,
@@ -449,13 +515,14 @@ export function curveHeight(c: MeasuredColumn, width: number): number {
  *  trigger heights and both columns' height curves. */
 export function measureQuestionContent(probe: Probe, options: Pick<MeasureOptions, "base" | "floor">): QuestionMeasure {
 	const { base, floor } = options;
-	// Stacked: both parts share the card's inner width.
-	let stackedNeed = probe.unbreakable(probe.question, base);
-	if (probe.answer) stackedNeed = Math.max(stackedNeed, probe.unbreakable(probe.answer, base));
+	// Stacked, as the live stacked card lays out: its widest unbreakable
+	// content, and the trigger — the question part at least as tall as the
+	// answer part (options + confidence), both at the default width.
+	const stackedNeed = probe.unbreakable(probe.stacked, base);
 	if (!probe.answer) return { stackedNeed };
-	const qh = probe.height(probe.question, base);
-	const ah = probe.height(probe.answer, base);
+	const [qh, ah] = probe.stackedHeights(base);
 	const triggered = twoColumnTriggered(qh, ah);
+	probe.toColumns();
 	// Not triggered: the columns are never used, the curves never needed.
 	const column = (box: HTMLElement): MeasuredColumn => {
 		const spec = probe.column(box, floor);
@@ -510,19 +577,21 @@ export function createProbeHost(root: HTMLElement): HTMLElement {
 	return host;
 }
 
-/** Rich content still settling: a diagram rendering (or its font-parity cap
- *  not yet applied), an image still loading, or web fonts loading. Solving
- *  before it settles would only be thrown away. */
 /** What the question's rendered content is made of: element counts (a
  *  diagram or formula rendering adds elements), the option text and the
  *  loaded web fonts. A solved layout is only reused for the same
  *  fingerprint, so one solved before the content settled is never reused
- *  after it. Selection state is excluded (options count only rich
- *  elements and text). */
+ *  after it. Selection state and drafts are excluded: options count only
+ *  rich elements and text outside typing fields (the Other answer). */
 export function questionContentFingerprint(parts: Pick<QuestionParts, "question" | "options">): string {
 	const options = parts.options;
-	const rich = options ? options.querySelectorAll(".katex, svg, img, code, table").length : 0;
-	return `${parts.question.getElementsByTagName("*").length}|${rich}|${options?.textContent?.length ?? 0}|${fontEpoch(parts.question.ownerDocument?.fonts)}`;
+	let rich = 0;
+	let text = options?.textContent?.length ?? 0;
+	if (options) {
+		for (const el of options.querySelectorAll(".katex, svg, img, code, table")) if (!el.closest(DRAFT_FIELD)) rich++;
+		for (const field of options.querySelectorAll(DRAFT_FIELD)) if (!field.parentElement?.closest(DRAFT_FIELD)) text -= field.textContent?.length ?? 0;
+	}
+	return `${parts.question.querySelectorAll("*").length}|${rich}|${text}|${fontEpoch(parts.question.ownerDocument?.fonts)}`;
 }
 
 /**
@@ -566,6 +635,9 @@ export function onFontsLoaded(set: FontFaceSet | undefined, listener: () => void
 	return () => { t.listeners.delete(listener); };
 }
 
+/** Rich content still settling: a diagram rendering (or its font-parity cap
+ *  not yet applied), an image still loading, or web fonts loading. Solving
+ *  before it settles would only be thrown away. */
 export function questionContentReady(parts: Pick<QuestionParts, "question" | "options">): boolean {
 	for (const part of [parts.question, parts.options]) {
 		if (!part) continue;

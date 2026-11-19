@@ -46,9 +46,10 @@ import type { PrepareBuiltinSubmission } from "./plugin-submission-adapters";
 import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-rail";
 import {
 	ANSWER_COLUMN_FRAME,
-	ANSWER_CONFIDENCE_PAD,
 	ANSWER_OPTIONS_PAD,
+	CONFIDENCE_ROW_PAD,
 	QUESTION_COLUMN_PAD,
+	STACKED_AREA_PAD,
 	cloneWithImageSizes,
 	type QuestionLayout,
 } from "@/components/question-layout";
@@ -69,10 +70,9 @@ const QC_OPTION_ROW = "flex items-start gap-3 rounded-lg border px-3 py-2 text-l
 const QC_OPTION_MARK = "mt-0.5 flex size-4 shrink-0 items-center justify-center border";
 const QC_OTHER_INPUT = "lh-input w-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground";
 const OTHER_PLACEHOLDER = "Type your own answer…";
-// The confidence row has no separator: its padding centers the slider
-// between the last option (whose list ends in 8px) and whatever follows —
-// 8+6 above, 14 below (owner).
-const CONFIDENCE_ROW_PAD = "pt-1.5 pb-3.5";
+// The confidence row has no separator: its padding (CONFIDENCE_ROW_PAD,
+// question-layout.ts) centers the slider between the last option (whose
+// list ends in 8px) and whatever follows — 8+6 above, 14 below (owner).
 const QC_CONFIDENCE_ROW = "flex items-center gap-3";
 const QC_CONFIDENCE_LABEL = "shrink-0 text-xs font-medium uppercase tracking-wide";
 const QC_CONFIDENCE_TRACK = "relative h-4 min-w-0 flex-1";
@@ -135,7 +135,7 @@ export function questionCardStandIn(doc: Document, c: QuestionCardContent): { qu
 	}
 	const options = el("div", "", list);
 	const confidence = c.kind === "quiz"
-		? el("div", cn(ANSWER_CONFIDENCE_PAD, CONFIDENCE_ROW_PAD),
+		? el("div", CONFIDENCE_ROW_PAD,
 			el("div", QC_CONFIDENCE_ROW,
 				el("span", QC_CONFIDENCE_LABEL, "Confidence"),
 				el("div", QC_CONFIDENCE_TRACK),
@@ -702,7 +702,7 @@ function QuestionDockForm({
 						Math.max(0, i + (e.key === "ArrowRight" ? 1 : -1)),
 					),
 				);
-				// Confidence scrolls with the options (stacked): keep it in view.
+				// Confidence scrolls with the options: keep it in view.
 				confidenceRef.current?.scrollIntoView({ block: "nearest" });
 			} else if (e.key === " ") {
 				if (kbdIdx === null) return; // plain Space keeps scrolling the page
@@ -758,11 +758,11 @@ function QuestionDockForm({
 		app-wide). Clicking and dragging are native. "I don't know"
 		GRAYS it out — the layout holds, no value is sent, the IDK
 		signal stands alone. No box of its own (owner, session-appearance-
-		layout): stacked, it sits right under the options inside the
-		scrolling question area (whose padding it shares); in two columns,
-		under the options in the answer column. */
+		layout): right under the options, scrolling with them and sharing
+		their padding — in the stacked question area, or in the answer
+		column's scroller (owner: the same in both arrangements). */
 	const confidenceRow = kind === "quiz" ? (
-			<div ref={confidenceRef} data-question-confidence="" className={cn(columns ? ANSWER_CONFIDENCE_PAD : undefined, CONFIDENCE_ROW_PAD)}>
+			<div ref={confidenceRef} data-question-confidence="" className={CONFIDENCE_ROW_PAD}>
 				<div className={QC_CONFIDENCE_ROW}>
 					<span
 						className={cn(
@@ -1020,41 +1020,43 @@ function QuestionDockForm({
 
 	return (
 		<div ref={rootRef} data-testid="question-dock" data-question-layout={columns ? "columns" : "stacked"} className="relative">
-			{columns ? (
-				/* Two columns (Adapt question layout): the question left, the
-				   options + confidence right, "Your thinking" full width below.
-				   The row caps at --dock-max-h; each column scrolls on its own.
-				   No divider: a shorter answer column centers its options and
-				   confidence together vertically. The options area shrinks and
-				   scrolls rather than overflowing, so centering never hides
-				   content. */
+			{/* ONE subtree for both arrangements (identity is what keeps focus,
+			    the Other caret, scroll positions and an active drag across a
+			    layout switch): only classes and attributes change.
+			    STACKED: the outer box is the question area — scrolls internally
+			    if very tall, capped by the measured column (--dock-max-h; the old
+			    fixed 55dvh cut long questions short — owner round, 2026-10-05);
+			    the inner wrappers are display: contents.
+			    TWO COLUMNS (Adapt question layout): the question left, the
+			    options + confidence right, "Your thinking" full width below. The
+			    row caps at --dock-max-h; each column scrolls on its own. No
+			    divider: a shorter answer column centers its content vertically.
+			    The question track is the flexible one, so while the dock's width
+			    morphs the answer column is never clipped. */}
+			<div
+				data-dock-height-region={columns ? "" : undefined}
+				data-dock-scroll-area={columns ? undefined : ""}
+				data-session-find-root=""
+				data-testid={columns ? "question-columns" : undefined}
+				className={columns ? "grid" : cn("max-h-[var(--dock-max-h,55dvh)] overflow-y-auto", STACKED_AREA_PAD)}
+				style={columns ? { gridTemplateColumns: `minmax(0, 1fr) ${columns.answer}px` } : undefined}
+			>
 				<div
-					data-dock-height-region=""
-					data-session-find-root=""
-					data-testid="question-columns"
-					className="grid"
-					style={{ gridTemplateColumns: `${columns.question}px ${columns.answer}px` }}
+					data-dock-scroll-area={columns ? "" : undefined}
+					className={columns ? cn("max-h-[var(--dock-max-h,55dvh)] min-w-0 overflow-y-auto", QUESTION_COLUMN_PAD) : "contents"}
 				>
-					<div data-dock-scroll-area="" className={cn("max-h-[var(--dock-max-h,55dvh)] min-w-0 overflow-y-auto", QUESTION_COLUMN_PAD)}>
-						{questionPart}
-					</div>
-					<div className={cn("max-h-[var(--dock-max-h,55dvh)] min-h-0 min-w-0", ANSWER_COLUMN_FRAME)}>
-						<div data-dock-scroll-area="" className={cn("flex min-h-0 flex-col overflow-y-auto", ANSWER_OPTIONS_PAD)}>
-							{optionList}
-						</div>
+					{questionPart}
+				</div>
+				<div className={columns ? cn("max-h-[var(--dock-max-h,55dvh)] min-h-0 min-w-0", ANSWER_COLUMN_FRAME) : "contents"}>
+					<div
+						data-dock-scroll-area={columns ? "" : undefined}
+						className={columns ? cn("flex min-h-0 flex-col overflow-y-auto", ANSWER_OPTIONS_PAD) : "contents"}
+					>
+						{optionList}
 						{confidenceRow}
 					</div>
 				</div>
-			) : (
-				/* Question area — scrolls internally if very tall; the bottom row stays put.
-				   Capped by the measured column (--dock-max-h; the old fixed 55dvh cut
-				   long questions short — owner round, 2026-10-05). */
-				<div data-dock-scroll-area="" data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
-					{questionPart}
-					{optionList}
-					{confidenceRow}
-				</div>
-			)}
+			</div>
 
 			{/* The learner's half of the dock — a composer TWIN: a labeled, bordered
 			    field with Submit docked inside, exactly like the chat composer's

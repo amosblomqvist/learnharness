@@ -5,8 +5,18 @@ import { test } from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { QuestionDock, type QuestionLayoutRequest } from "../components/question-dock.tsx";
-import { questionContentReady, type QuestionLayout } from "../components/question-layout.ts";
-import type { QuizToolInput } from "../src/core/question-core.ts";
+import {
+	CONFIDENCE_ROW_PAD,
+	QUESTION_COLUMN_PAD,
+	STACKED_AREA_PAD,
+	createQuestionProbe,
+	layoutFontKey,
+	questionCardGeometry,
+	questionContentFingerprint,
+	questionContentReady,
+	type QuestionLayout,
+} from "../components/question-layout.ts";
+import type { AskToolInput, QuizToolInput } from "../src/core/question-core.ts";
 
 // Synthetic geometry seam (linkedom has no layout): every box is 100px tall
 // and as wide as its inline width. Proves the card's arrangement and WHEN it
@@ -36,11 +46,18 @@ const input: QuizToolInput = {
 } as QuizToolInput;
 const request: QuestionLayoutRequest = { available: 1200, base: 702, floor: 368, key: "font" };
 
-async function mount(layoutRequest: QuestionLayoutRequest | null, layouts: (QuestionLayout | null)[], toolCallId = "q1") {
+const askInput = {
+	question: "Which one?", options: [{ label: "This" }, { label: "That" }],
+} as unknown as AskToolInput;
+
+async function mount(
+	layoutRequest: QuestionLayoutRequest | null, layouts: (QuestionLayout | null)[], toolCallId = "q1",
+	kind: { toolName: "quiz" | "ask_user_question"; input: QuizToolInput | AskToolInput } = { toolName: "quiz", input },
+) {
 	const host = document.createElement("div"); document.body.append(host);
 	const root = createRoot(host);
 	const render = (req: QuestionLayoutRequest | null) => act(async () => root.render(
-		<QuestionDock toolName="quiz" toolCallId={toolCallId} input={input} expanded onExpand={() => {}} onSubmit={() => {}}
+		<QuestionDock toolName={kind.toolName} toolCallId={toolCallId} input={kind.input} expanded onExpand={() => {}} onSubmit={() => {}}
 			dictationClaim={false} layoutRequest={req} onLayout={(l) => layouts.push(l)} />,
 	));
 	await render(layoutRequest);
@@ -61,7 +78,9 @@ test("adaptation off: today's stacked card, nothing measured, no layout reported
 		// scrolling area (sharing its padding), above "Your thinking".
 		const confidence = scroll.querySelector<HTMLElement>("[data-question-confidence]")!;
 		assert.ok(confidence, "confidence scrolls with the options");
-		assert.equal(confidence.previousElementSibling?.hasAttribute("data-question-options"), true);
+		// Next in reading order after the options (wrappers are display: contents).
+		const order = [...scroll.querySelectorAll("[data-question-options], [data-question-confidence]")];
+		assert.deepEqual(order, [scroll.querySelector("[data-question-options]"), confidence]);
 		assert.equal(/border-t|px-4/.test(confidence.className), false, "no separator, no second side padding");
 		assert.equal(measurements, 0);
 		assert.ok(layouts.every((l) => l === null));
@@ -69,7 +88,7 @@ test("adaptation off: today's stacked card, nothing measured, no layout reported
 	} finally { await act(async () => root.unmount()); host.remove(); }
 });
 
-test("adaptation on: question left, options + pinned confidence right, thinking full width below; typing never re-measures", async () => {
+test("adaptation on: question left, options + confidence right (one scroller), thinking full width below; typing never re-measures", async () => {
 	const layouts: (QuestionLayout | null)[] = [];
 	measurements = 0;
 	const { host, root, render } = await mount(request, layouts);
@@ -84,10 +103,16 @@ test("adaptation on: question left, options + pinned confidence right, thinking 
 		assert.ok(left!.querySelector("[data-question-part]"));
 		assert.equal(left!.querySelector("[data-question-options]"), null);
 		assert.ok(right!.querySelector("[data-question-options]"));
-		assert.equal(right!.lastElementChild?.hasAttribute("data-question-confidence"), true, "confidence pinned to the answer column's bottom");
+		// Confidence scrolls with the options, as stacked (owner): both
+		// inside the answer column's one scroller, nothing pinned beside it.
+		const scroller = right!.querySelector<HTMLElement>("[data-dock-scroll-area]")!;
+		assert.equal(right!.children.length, 1, "nothing pinned outside the scroller");
+		assert.ok(scroller.querySelector("[data-question-options]"));
+		const confidence = scroller.querySelector<HTMLElement>("[data-question-confidence]")!;
+		assert.equal(confidence.previousElementSibling?.hasAttribute("data-question-options"), true);
 		// No divider; options and confidence centered together vertically.
 		assert.equal(right!.className.includes("border-l"), false);
-		assert.equal(right!.lastElementChild!.className.includes("border-t"), false);
+		assert.equal(confidence.className.includes("border-t"), false);
 		assert.ok(right!.className.split(" ").includes("justify-center"));
 		// "Your thinking" stays outside the columns.
 		assert.equal(grid.querySelector('[data-testid="thinking-field"]'), null);
@@ -203,4 +228,154 @@ test("a content change after solving (a font finished loading) re-measures; the 
 		assert.ok(measurements > before, "different loaded fonts: never reuse a layout solved before them");
 		await act(async () => c.root.unmount()); c.host.remove();
 	} finally { delete (document as { fonts?: unknown }).fonts; }
+});
+
+const settle = () => act(async () => { await new Promise((r) => setTimeout(r, 5)); });
+
+test("crossing the threshold keeps the same nodes both ways: focus, caret, scroll and drags survive", async () => {
+	const layouts: (QuestionLayout | null)[] = [];
+	const { host, root, render } = await mount(request, layouts, "q-identity");
+	try {
+		const dock = host.querySelector('[data-testid="question-dock"]')!;
+		assert.equal(dock.getAttribute("data-question-layout"), "columns");
+		const pick = () => ({
+			radio: host.querySelector('[role="radio"]'),
+			question: host.querySelector("[data-question-part]"),
+			options: host.querySelector("[data-question-options]"),
+			slider: host.querySelector('[data-testid="confidence-slider"]'),
+			thinking: host.querySelector('[data-testid="thinking-field"] [role="textbox"]'),
+		});
+		const wide = pick();
+		await render({ ...request, available: 700 });
+		assert.equal(dock.getAttribute("data-question-layout"), "stacked");
+		const narrow = pick();
+		for (const key of Object.keys(wide) as (keyof typeof wide)[]) {
+			assert.ok(wide[key], key);
+			assert.equal(narrow[key], wide[key], `${key}: the same node after wide → narrow`);
+		}
+		await render({ ...request, available: 1100 });
+		assert.equal(dock.getAttribute("data-question-layout"), "columns");
+		const again = pick();
+		for (const key of Object.keys(wide) as (keyof typeof wide)[]) assert.equal(again[key], wide[key], `${key}: and narrow → wide`);
+		// Stacked: one scroll area holds question, options and confidence.
+		await render({ ...request, available: 700 });
+		const area = dock.querySelector<HTMLElement>("[data-dock-scroll-area]")!;
+		assert.equal(dock.querySelectorAll("[data-dock-scroll-area]").length, 1);
+		assert.ok(area.contains(wide.question) && area.contains(wide.options) && area.contains(wide.slider));
+	} finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+test("an Other draft is never measured: typing, shrinking and growing decide from the empty field", async () => {
+	const layouts: (QuestionLayout | null)[] = [];
+	const ask = { toolName: "ask_user_question" as const, input: askInput };
+	const { host, root, render } = await mount(request, layouts, "q-other", ask);
+	try {
+		const dock = host.querySelector('[data-testid="question-dock"]')!;
+		assert.equal(dock.getAttribute("data-question-layout"), "columns");
+		const options = host.querySelector<HTMLElement>("[data-question-options]")!;
+		const before = questionContentFingerprint({ question: host.querySelector<HTMLElement>("[data-question-part]")!, options });
+		const field = host.querySelector<HTMLElement>('[data-testid="other-option"] [role="textbox"]')!;
+		const measured = measurements;
+		await act(async () => {
+			field.textContent = "Synthetic draft with a long `code span` and more";
+			field.dispatchEvent(new window.Event("input", { bubbles: true }));
+		});
+		assert.equal(field.textContent!.startsWith("Synthetic draft"), true);
+		assert.equal(questionContentFingerprint({ question: host.querySelector<HTMLElement>("[data-question-part]")!, options }), before,
+			"the draft is not part of the content fingerprint");
+		await render({ ...request, available: 700 });
+		assert.equal(measurements, measured, "the shrink decides from saved measurements");
+		assert.equal(dock.getAttribute("data-question-layout"), "stacked", "and fits the narrow budget");
+		await render({ ...request, available: 1100 });
+		assert.equal(measurements, measured);
+		assert.equal(dock.getAttribute("data-question-layout"), "columns");
+		assert.equal(host.querySelector('[data-testid="other-option"] [role="textbox"]'), field, "the field (and its caret) survived both switches");
+		// The probe's clone carries the empty field, never the draft.
+		const probe = createQuestionProbe({ root: dock as HTMLElement, question: host.querySelector<HTMLElement>("[data-question-part]")!, options, confidence: null });
+		try {
+			const clone = probe.stacked.querySelector<HTMLElement>('[role="textbox"]')!;
+			assert.equal(clone.textContent, "");
+			assert.equal(clone.dataset.empty, "true");
+		} finally { probe.dispose(); }
+	} finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+test("a deferred re-measure still obeys the current budget", async () => {
+	const layouts: (QuestionLayout | null)[] = [];
+	const { host, root, render } = await mount(request, layouts, "q-deferred");
+	try {
+		const dock = host.querySelector('[data-testid="question-dock"]')!;
+		assert.equal(dock.getAttribute("data-question-layout"), "columns");
+		// New rich content starts rendering: the fingerprint changes, the
+		// replacement measurement must wait for it.
+		const busy = document.createElement("div");
+		busy.setAttribute("data-testid", "md-mermaid");
+		busy.setAttribute("aria-busy", "true");
+		host.querySelector("[data-question-part]")!.append(busy);
+		const measured = measurements;
+		await render({ ...request, available: 700 });
+		assert.equal(dock.getAttribute("data-question-layout"), "stacked", "columns that no longer fit never stay");
+		assert.equal(layouts.at(-1)?.kind, "stacked");
+		await render({ ...request, available: 1100 });
+		assert.equal(dock.getAttribute("data-question-layout"), "columns", "the earlier measurements decide meanwhile");
+		assert.equal(measurements, measured, "nothing measured while the content is unsettled");
+		busy.removeAttribute("aria-busy");
+		await render({ ...request, available: 1090 });
+		assert.ok(measurements > measured, "settled: measured afresh");
+		// A new reading font has no measurements yet; unsettled content
+		// defers them, and columns wider than the budget still give way.
+		busy.setAttribute("aria-busy", "true");
+		await render({ ...request, key: "font-2", available: 700 });
+		assert.equal(dock.getAttribute("data-question-layout"), "stacked");
+		assert.equal(layouts.at(-1)?.kind, "stacked");
+	} finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+test("fonts that finish loading with nothing new — or fail — still complete a deferred first solve", async () => {
+	for (const event of ["loadingdone", "loadingerror"]) {
+		const fonts = Object.assign(new dom.window.EventTarget(), { status: "loading", [Symbol.iterator]: () => [][Symbol.iterator]() });
+		Object.defineProperty(document, "fonts", { configurable: true, value: fonts });
+		try {
+			const layouts: (QuestionLayout | null)[] = [];
+			const { host, root } = await mount(request, layouts, `q-font-${event}`);
+			try {
+				const dock = host.querySelector('[data-testid="question-dock"]')!;
+				assert.equal(dock.getAttribute("data-question-layout"), "stacked", "waits while fonts load");
+				fonts.status = "loaded";
+				await act(async () => { fonts.dispatchEvent(new dom.window.Event(event)); });
+				await settle();
+				assert.equal(dock.getAttribute("data-question-layout"), "columns", `${event} with no new face completes the solve`);
+			} finally { await act(async () => root.unmount()); host.remove(); }
+		} finally { delete (document as { fonts?: unknown }).fonts; }
+	}
+});
+
+test("geometry follows the root font size; text-metric styles are part of the layout key", () => {
+	assert.deepEqual(questionCardGeometry(16), { container: 736, chrome: 34, base: 702, floor: 368 });
+	assert.deepEqual(questionCardGeometry(20), { container: 920, chrome: 42, base: 878, floor: 460 });
+	const a = { fontFamily: null, proseFontSize: 16, codeLigatures: true, mdRendering: { headingWeight: 600 } };
+	assert.notEqual(layoutFontKey(a), layoutFontKey({ ...a, codeLigatures: false }));
+	assert.notEqual(layoutFontKey(a), layoutFontKey({ ...a, mdRendering: { headingWeight: 700 } }));
+	assert.notEqual(layoutFontKey(a), layoutFontKey({ ...a, proseFontSize: 18 }));
+});
+
+test("the trigger measures the stacked card's own box model; columns use theirs", () => {
+	const root = document.createElement("div"); document.body.append(root);
+	const question = document.createElement("div"); question.textContent = "Q";
+	const options = document.createElement("div"); options.textContent = "O";
+	const confidence = document.createElement("div"); confidence.className = "pl-3 pr-4 pt-1.5 pb-3.5";
+	const probe = createQuestionProbe({ root, question, options, confidence });
+	try {
+		// Stacked: question, options, confidence share the 16px-sided area.
+		assert.equal(probe.stacked.className, STACKED_AREA_PAD);
+		const [q, a] = [...probe.stacked.children] as HTMLElement[];
+		assert.equal(q!.textContent, "Q");
+		assert.equal(a!.textContent, "O");
+		assert.equal(a!.lastElementChild!.className, CONFIDENCE_ROW_PAD, "confidence: the stacked row, no column insets");
+		probe.toColumns();
+		assert.equal(probe.question.className, QUESTION_COLUMN_PAD);
+		assert.equal(probe.question.textContent, "Q");
+		assert.ok(probe.answer!.textContent!.includes("O"));
+		assert.equal(probe.stacked.textContent, "", "the clones moved, not copied");
+	} finally { probe.dispose(); root.remove(); }
 });

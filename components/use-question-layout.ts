@@ -99,6 +99,10 @@ export function useQuestionLayout({ cacheId, request, identity, live, parts, onL
 	const seenVersionRef = useRef(contentVersion);
 	const staleRef = useRef(false);
 	const hostRef = useRef<HTMLElement | null>(null);
+	// A measurement waits for rich content/fonts: whatever settles it
+	// (fonts finishing — even with nothing new or a failure — a diagram, an
+	// image) must bring the solve back.
+	const deferredRef = useRef(false);
 	const enabled = !!request;
 	useIsoLayoutEffect(() => {
 		let next: QuestionLayout | null = null;
@@ -117,11 +121,21 @@ export function useQuestionLayout({ cacheId, request, identity, live, parts, onL
 			const known = measured.get(key);
 			if (!staleRef.current && known && known.content === content) {
 				// DECIDE: arithmetic over the saved measurements.
+				deferredRef.current = false;
 				next = solveMeasured(known.measure, request);
+			} else if (!questionContentReady(now)) {
+				// Not settled yet: the settling signal brings us back. Until
+				// then the CURRENT budget still rules — the previous
+				// measurements decide for it, and without any, a layout
+				// that no longer fits falls back to stacked.
+				deferredRef.current = true;
+				const current = layoutRef.current;
+				if (known) next = solveMeasured(known.measure, request);
+				else if (current && current.kind === "columns" && current.width > request.available + 0.5) {
+					next = { kind: "stacked", width: Math.max(request.base, Math.min(current.width, request.available)), binding: true };
+				} else return;
 			} else {
-				// Not settled yet: keep the current layout; the content
-				// version bump (diagram/image/font) brings us back.
-				if (!questionContentReady(now)) return;
+				deferredRef.current = false;
 				const result = measureQuestionLayout(partsRef.current(now), request, host());
 				next = result.layout;
 				staleRef.current = false;
@@ -161,19 +175,32 @@ export function useQuestionLayout({ cacheId, request, identity, live, parts, onL
 			}
 		});
 		for (const el of now.observe) if (el) ro.observe(el);
-		const offFonts = onFontsLoaded(typeof document !== "undefined" ? document.fonts : undefined, schedule);
+		const fonts = typeof document !== "undefined" ? document.fonts : undefined;
+		const offFonts = onFontsLoaded(fonts, schedule);
+		// Readiness, distinct from invalidation: a deferred solve retries
+		// when fonts stop loading, whether or not anything new loaded.
+		let alive = true;
+		const onFontsSettled = () => { if (alive && deferredRef.current && fonts?.status !== "loading") schedule(); };
+		fonts?.addEventListener?.("loadingdone", onFontsSettled);
+		fonts?.addEventListener?.("loadingerror", onFontsSettled);
+		void fonts?.ready?.then(onFontsSettled, onFontsSettled);
 		// Images with fixed sizes finish loading without changing height.
 		const root = now.root;
 		const onLoad = (e: Event) => { if ((e.target as Element | null)?.tagName === "IMG") schedule(); };
 		root.addEventListener("load", onLoad, true);
 		root.addEventListener("error", onLoad, true);
 		return () => {
+			alive = false;
 			ro.disconnect();
 			offFonts();
+			fonts?.removeEventListener?.("loadingdone", onFontsSettled);
+			fonts?.removeEventListener?.("loadingerror", onFontsSettled);
 			root.removeEventListener("load", onLoad, true);
 			root.removeEventListener("error", onLoad, true);
 			if (frame) cancelAnimationFrame(frame);
 		};
-	}, [enabled, identity]);
+		// A layout switch keeps the subtree, but observe again so a caller
+		// whose boxes did change is followed too.
+	}, [enabled, identity, layout?.kind]);
 	return layout;
 }

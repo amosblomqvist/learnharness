@@ -14,11 +14,11 @@ import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core
 import { useAppearance } from "@/components/settings/appearance";
 import { questionCardLabel, questionCardStandIn } from "@/components/question-dock";
 import {
-	ANSWER_COLUMN_INSET,
-	COLUMN_GAP,
-	QUESTION_CARD_BASE,
-	QUESTION_COLUMN_MIN,
+	ANSWER_COLUMN_INSET_CSS,
+	COLUMN_GAP_CSS,
 	layoutFontKey,
+	questionCardGeometry,
+	rootRem,
 } from "@/components/question-layout";
 import { useQuestionLayout, type QuestionLayoutRequest } from "@/components/use-question-layout";
 
@@ -61,6 +61,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 		&& (answer.kind === "quiz" || answer.kind === "ask") && (answer.options?.length ?? 0) > 0;
 	const [near, setNear] = useState(false);
 	const [cardInner, setCardInner] = useState(0);
+	const [rem, setRem] = useState(16);
 	useEffect(() => {
 		const card = cardRef.current;
 		if (!adaptable || near || !card) return;
@@ -75,15 +76,19 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 		if (!adaptable || !near || !card) return;
 		// The card's inner width (its padding included, borders not) is the
 		// question card's budget in the dock: the same transcript width.
-		const measure = () => setCardInner(card.clientWidth);
+		const measure = () => {
+			setCardInner(card.clientWidth);
+			setRem(rootRem(card.ownerDocument));
+		};
 		measure();
 		const ro = new ResizeObserver(measure);
 		ro.observe(card);
 		return () => ro.disconnect();
 	}, [adaptable, near]);
 	const fontKey = layoutFontKey(appearance);
+	const geometry = questionCardGeometry(rem);
 	const request: QuestionLayoutRequest | null = adaptable && near && cardInner > 0
-		? { available: cardInner, base: QUESTION_CARD_BASE, floor: QUESTION_COLUMN_MIN, key: fontKey }
+		? { available: cardInner, base: geometry.base, floor: geometry.floor, key: fontKey }
 		: null;
 	const multiSelect = (answer.kind === "quiz" ? parseQuizInput(input)?.multiSelect : parseAskInput(input)?.multiSelect) ?? false;
 	const label = questionCardLabel(answer.tool, answer.kind, answer.questionType);
@@ -113,7 +118,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 	});
 	const columns = layout?.kind === "columns" ? layout : null;
 	const columnStyle: CSSProperties | undefined = columns
-		? { gridTemplateColumns: `minmax(0, 1fr) ${columns.answer - ANSWER_COLUMN_INSET}px`, columnGap: COLUMN_GAP }
+		? { gridTemplateColumns: `minmax(0, 1fr) calc(${columns.answer}px - ${ANSWER_COLUMN_INSET_CSS})`, columnGap: COLUMN_GAP_CSS }
 		: undefined;
 
 	if (answer.dismissed) {

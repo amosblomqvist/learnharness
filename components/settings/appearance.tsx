@@ -25,6 +25,7 @@ import {
 	useCallback,
 	useContext,
 	useEffect,
+	useInsertionEffect,
 	useLayoutEffect,
 	useMemo,
 	useRef,
@@ -175,7 +176,7 @@ export function AppearanceProvider({
 	const colors = useMemo(() => effectiveColors(activeTheme, appearance), [activeTheme, appearance]);
 
 	// The mode lives on <html> as a class, for every `.dark`/`.light` rule
-	// and variant. A LAYOUT effect (like the vars below): descendants'
+	// and variant. A LAYOUT effect (the vars below apply earlier): descendants'
 	// passive effects run after it, so anything reading computed tokens
 	// (the graph canvas) sees the new mode, and the swap lands before paint.
 	useLayoutEffect(() => {
@@ -196,8 +197,12 @@ export function AppearanceProvider({
 	// the previously-set inline value or the stale one wins forever. Every
 	// name this effect has ever set is tracked; names absent from the new
 	// set are removed so the stylesheet value returns.
+	// An INSERTION effect: it runs before every layout effect of the
+	// commit, descendants' included, so a descendant measuring text in a
+	// layout effect (the adaptive question layout) already sees the new
+	// font and sizes rather than the previous ones.
 	const appliedNamesRef = useRef<Set<string>>(new Set());
-	useLayoutEffect(() => {
+	useInsertionEffect(() => {
 		if (appliedRef.current === key) return;
 		appliedRef.current = key;
 		const root = document.documentElement;

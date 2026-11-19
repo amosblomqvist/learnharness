@@ -54,6 +54,21 @@ describe("punctuation glue", () => {
 		assert.equal(groups("$$\nx,\n$$").glued.length, 0, "display math is not inline");
 	});
 
+	it("a link holding only code glues WHOLE: no text moves into or out of the link", () => {
+		const { glued, root } = groups("see [`foo()`](https://example.com/x), then");
+		assert.equal(glued.length, 1);
+		const group = root.querySelector(".lh-nobreak")!;
+		// (Streamdown renders links as its link-safety button.)
+		const link = group.querySelector('[data-streamdown="link"]')!;
+		assert.ok(link, "the link itself is inside the group");
+		assert.equal(link.textContent, "foo()", "the link's text is exactly its code");
+		assert.ok(group.textContent!.endsWith(","), "the comma rides beside the link, outside it");
+		// A link with more than the span is not a unit: nothing is pulled in.
+		const mixed = groups("see [the `foo()` call](https://example.com/x), then").root;
+		assert.equal(mixed.querySelector('[data-streamdown="link"]')!.textContent, "the foo() call");
+		assert.equal(mixed.querySelector('.lh-nobreak [data-streamdown="link"]'), null);
+	});
+
 	it("CJK punctuation glues like Latin", () => {
 		const { glued } = groups("用`map`，然后");
 		assert.equal(glued.length, 1);

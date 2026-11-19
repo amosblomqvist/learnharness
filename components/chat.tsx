@@ -42,7 +42,7 @@ import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { createDockMorph, createDockWidthMorph } from "@/components/dock-morph";
 import { useAppearance } from "@/components/settings/appearance";
-import { QUESTION_CARD_BASE, QUESTION_CARD_CHROME, QUESTION_COLUMN_MIN, layoutFontKey, type QuestionLayout } from "@/components/question-layout";
+import { layoutFontKey, questionCardGeometry, rootRem, type QuestionLayout } from "@/components/question-layout";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -139,11 +139,10 @@ import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/th
  */
 const COLUMN = "lh-transcript-column mx-auto w-full px-6";
 const DOCK = "mx-auto w-full max-w-[46rem] px-4";
-// The DOCK container's horizontal chrome around a question card's content
-// (px-4 padding + the shell's 1px borders): an adapted card's content width
-// plus this is the container's max width. Shared with answered cards.
-const DOCK_CHROME = QUESTION_CARD_CHROME;
-// The DOCK container's fixed width (46rem) and the plan marginalia's
+// The DOCK container's fixed width (46rem, questionCardGeometry at the
+// root font size — with its horizontal chrome, px-4 + the shell's 1px
+// borders: an adapted card's content width plus that chrome is the
+// container's max width) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
 // the same from the column's right edge. The box width is pure CSS, so
@@ -151,7 +150,6 @@ const DOCK_CHROME = QUESTION_CARD_CHROME;
 // the fade floor (owner, resize round) — below it the marginalia fades
 // out over the normal transition instead of popping away, and it stays
 // mounted while the question owns the band so widening fades it back.
-const DOCK_W = 46 * 16;
 const MARGIN_GAP = 16;
 const MARGIN_MIN_W = 220;
 // The dock overlay's gradient band (h-24) — part of the reserved tail.
@@ -2613,6 +2611,8 @@ export function DockOverlay({
 	// render-time measurement went stale during drag-resizes and the mount
 	// decision popped late).
 	const [blockW, setBlockW] = useState(0);
+	// The root font size: the dock's rem geometry in px.
+	const [rem, setRem] = useState(16);
 	const blockWRef = useRef(0);
 	// Part A of the same round (the resize mute): any block size change
 	// stamps this — the fold machine ignores scroll events for a beat after,
@@ -2629,6 +2629,7 @@ export function DockOverlay({
 		const block = blockRef.current;
 		if (!block) return;
 		const measure = () => {
+			setRem(rootRem(block.ownerDocument));
 			const next = Math.round(block.offsetWidth);
 			if (Math.abs(next - blockWRef.current) > 1) {
 				blockWRef.current = next;
@@ -2650,20 +2651,22 @@ export function DockOverlay({
 	// only geometry/font inputs — never typing state (#674).
 	const { appearance } = useAppearance();
 	const adaptive = appearance.adaptiveQuestions && !!pending && !pluginQuestion && !unreadablePlugin;
-	const transcriptCap = appearance.transcriptMaxWidth === null ? Infinity : appearance.transcriptMaxWidth * 16;
+	const transcriptCap = appearance.transcriptMaxWidth === null ? Infinity : appearance.transcriptMaxWidth * rem;
 	// Full: the transcript's text column is the block less its px-6 margins;
 	// the card's shell may line up with it (container = block - 16px).
 	const containerMax = Math.min(transcriptCap, blockW - 16);
 	const fontKey = layoutFontKey(appearance);
+	const geometry = questionCardGeometry(rem);
+	const DOCK_W = geometry.container;
 	const layoutRequest = useMemo(
 		() => (adaptive && blockW > 0
-			? { available: Math.max(containerMax - DOCK_CHROME, 0), base: QUESTION_CARD_BASE, floor: QUESTION_COLUMN_MIN, key: fontKey }
+			? { available: Math.max(containerMax - geometry.chrome, 0), base: geometry.base, floor: geometry.floor, key: fontKey }
 			: null),
-		[adaptive, blockW, containerMax, fontKey],
+		[adaptive, blockW, containerMax, fontKey, geometry.chrome, geometry.base, geometry.floor],
 	);
 	const [questionLayout, setQuestionLayout] = useState<QuestionLayout | null>(null);
-	const adaptedW = adaptive && expanded && !revealPending && questionLayout && questionLayout.width + DOCK_CHROME > DOCK_W
-		? questionLayout.width + DOCK_CHROME
+	const adaptedW = adaptive && expanded && !revealPending && questionLayout && questionLayout.width + geometry.chrome > DOCK_W
+		? questionLayout.width + geometry.chrome
 		: null;
 	const dockW = Math.min(adaptedW ?? DOCK_W, blockW || Infinity);
 	const flankW = Math.round(blockW / 2 - dockW / 2 - 2 * MARGIN_GAP);

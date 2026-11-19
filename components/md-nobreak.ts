@@ -15,6 +15,9 @@ import type { Element, ElementContent, Root, RootContent, Text } from "hast";
  * is still a `code.math-inline` element here; KaTeX renders it in place,
  * inside the wrapper. Inline = any `code` not inside `pre`.
  *
+ * A link or emphasis holding only such a span counts as the span itself.
+ * The group, not the span, is then what scrolls when too wide (globals.css).
+ *
  * Only Unicode punctuation glues (",", ".", ")", "(", quotes, CJK "，。"):
  * letters never do, so text without spaces (CJK) keeps wrapping normally.
  * Punctuation between two spans ("$a$,$b$") joins them into one group.
@@ -24,8 +27,14 @@ export const NOBREAK_CLASS = "lh-nobreak";
 const LEADING = /^\p{P}+/u;
 const TRAILING = /\p{P}+$/u;
 
+/** Inline wrappers that may hold nothing but a span ("[`f`](url)",
+ *  "**$x$**"): glued WHOLE, so no text ever moves into or out of a link. */
+const WRAPPERS = new Set(["a", "strong", "em", "b", "i", "del", "s"]);
+
 function isInlineCode(node: RootContent | ElementContent | undefined): node is Element {
-	return node?.type === "element" && node.tagName === "code";
+	if (node?.type !== "element") return false;
+	if (node.tagName === "code") return true;
+	return WRAPPERS.has(node.tagName) && node.children.length === 1 && isInlineCode(node.children[0]);
 }
 
 function glueChildren(parent: Root | Element) {

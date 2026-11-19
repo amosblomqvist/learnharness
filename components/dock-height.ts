@@ -15,8 +15,20 @@ export interface DockHeightMeasurements {
 	contentHeight: number;
 	/** Null when collapsed, in chat mode, or showing malformed input. */
 	questionHeight: number | null;
+	/** The region's height that is not scrollable content (regionChrome). */
 	questionPaddingHeight: number;
+	/** The least content a clipped scroll area must still show (owner:
+	 *  about three lines of text); below it the whole content scrolls. */
+	questionMinContentHeight?: number;
+	/** The question's UNCAPPED height (its scroll areas' hidden overflow
+	 *  added back); defaults to questionHeight. */
+	questionNaturalHeight?: number;
 }
+
+/** Owner (session-appearance-layout): a scroll area showing fewer than about
+ *  three lines is useless — the whole question card scrolls instead,
+ *  "Your thinking" included, in stacked and two-column cards alike. */
+export const MIN_VISIBLE_LINES = 3;
 
 export function dockHeightBudget(m: DockHeightMeasurements) {
 	const available = Math.max(m.columnHeight - 32, 0);
@@ -26,12 +38,16 @@ export function dockHeightBudget(m: DockHeightMeasurements) {
 	const questionMaxHeight = m.questionHeight === null
 		? null
 		: Math.max(viewportMaxHeight - (naturalHeight - m.questionHeight), 0);
-	// A cap smaller than the question's padding leaves no content viewport.
-	// Deliberately uncap the question and scroll the whole content instead;
-	// do not confuse a measured zero with an unmeasured CSS fallback.
+	// A cap that would clip the question down to less than a usable content
+	// viewport (its padding plus about three lines) is useless: deliberately
+	// uncap the question and scroll the whole content instead. A question
+	// that fits under its cap is never affected. Do not confuse a measured
+	// zero with an unmeasured CSS fallback.
 	const scrollWholeContent = questionMaxHeight === null
 		? naturalHeight > viewportMaxHeight
-		: questionMaxHeight <= m.questionPaddingHeight;
+		: questionMaxHeight <= m.questionPaddingHeight
+			|| (questionMaxHeight < (m.questionNaturalHeight ?? m.questionHeight!) - 0.5
+				&& questionMaxHeight < m.questionPaddingHeight + (m.questionMinContentHeight ?? 0));
 	return { viewportMaxHeight, shellMaxHeight, questionMaxHeight, scrollWholeContent };
 }
 
@@ -45,6 +61,50 @@ interface DockHeightElements {
 }
 
 const pixels = (value: string) => Number.parseFloat(value) || 0;
+
+const SCROLL_AREA = "[data-dock-scroll-area]";
+
+function edges(el: Element): number {
+	const cs = getComputedStyle(el);
+	return pixels(cs.paddingTop) + pixels(cs.paddingBottom) + pixels(cs.borderTopWidth) + pixels(cs.borderBottomWidth);
+}
+
+/** About MIN_VISIBLE_LINES lines of the region's reading text, in px. */
+export function minContentHeight(region: HTMLElement): number {
+	const prose = region.querySelector(".lh-prose") ?? region;
+	const cs = getComputedStyle(prose);
+	const line = pixels(cs.lineHeight) || pixels(cs.fontSize) * 1.5;
+	return MIN_VISIBLE_LINES * line;
+}
+
+/** The region's height without the current cap: a capped scroll area hides
+ *  the rest of its content as overflow. */
+export function naturalRegionHeight(region: HTMLElement, height: number): number {
+	let hidden = 0;
+	const areas = region.matches(SCROLL_AREA) ? [region] : [...region.querySelectorAll<HTMLElement>(SCROLL_AREA)];
+	for (const area of areas) hidden = Math.max(hidden, area.scrollHeight - area.clientHeight);
+	return height + hidden;
+}
+
+/** The part of the height region that is never scrollable content: a single
+ * scroll area's own padding, or — two columns, whose row has no padding —
+ * the costliest column's: its scroller's padding plus everything around the
+ * scroller inside the column (wrapper padding, rows pinned beside it). A cap
+ * at or below this leaves some scroller no content viewport at all. */
+export function regionChrome(region: HTMLElement): number {
+	if (region.matches(SCROLL_AREA)) return edges(region);
+	let chrome = 0;
+	for (const scroller of region.querySelectorAll<HTMLElement>(SCROLL_AREA)) {
+		let fixed = edges(scroller);
+		for (let el: HTMLElement = scroller; el.parentElement && el.parentElement !== region; el = el.parentElement) {
+			const parent = el.parentElement;
+			fixed += edges(parent);
+			for (const sibling of parent.children) if (sibling !== el) fixed += sibling.getBoundingClientRect().height;
+		}
+		chrome = Math.max(chrome, fixed);
+	}
+	return chrome + edges(region);
+}
 
 /** The dock's height-variable region: a two-column question's column row
  * (both columns cap at --dock-max-h and scroll on their own) or, first in
@@ -62,7 +122,6 @@ export function syncDockHeight(elements: DockHeightElements, expanded: boolean) 
 	const question = expanded ? content.querySelector<HTMLElement>(DOCK_HEIGHT_REGION) : null;
 	const height = (el: HTMLElement) => el.getBoundingClientRect().height;
 	const shellStyle = getComputedStyle(shell);
-	const questionStyle = question ? getComputedStyle(question) : null;
 	const budget = dockHeightBudget({
 		columnHeight: column.clientHeight,
 		outsideHeight: Math.max(height(block) - height(viewport), 0),
@@ -70,9 +129,9 @@ export function syncDockHeight(elements: DockHeightElements, expanded: boolean) 
 		shellBorderHeight: pixels(shellStyle.borderTopWidth) + pixels(shellStyle.borderBottomWidth),
 		contentHeight: height(content),
 		questionHeight: question ? height(question) : null,
-		questionPaddingHeight: questionStyle
-			? pixels(questionStyle.paddingTop) + pixels(questionStyle.paddingBottom)
-			: 0,
+		questionPaddingHeight: question ? regionChrome(question) : 0,
+		questionMinContentHeight: question ? minContentHeight(question) : 0,
+		...(question ? { questionNaturalHeight: naturalRegionHeight(question, height(question)) } : {}),
 	});
 	if (budget.questionMaxHeight === null) block.style.removeProperty("--dock-max-h");
 	else block.style.setProperty("--dock-max-h", budget.scrollWholeContent ? "none" : `${budget.questionMaxHeight}px`);

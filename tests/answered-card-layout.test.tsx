@@ -84,9 +84,9 @@ test("answered card: stacked until it nears the screen, then the question card's
 		assert.equal(card.getAttribute("data-question-layout"), "columns");
 		const grid = card.querySelector<HTMLElement>(":scope > .grid")!;
 		// Answer column = the question card's (incl. its 28px padding) less
-		// that padding; the question takes the rest, 24px apart.
-		assert.match(grid.getAttribute("style") ?? "", /grid-template-columns:\s*minmax\(0(px)?, 1fr\) \d+px/);
-		assert.match(grid.getAttribute("style") ?? "", /column-gap:\s*24px/);
+		// that padding; the question takes the rest, 1.5rem (24px) apart.
+		assert.match(grid.getAttribute("style") ?? "", /grid-template-columns:\s*minmax\(0(px)?, 1fr\) calc\(\d+px - 1\.75rem\)/);
+		assert.match(grid.getAttribute("style") ?? "", /column-gap:\s*1\.5rem/);
 		const [question, answers] = [...grid.children] as HTMLElement[];
 		assert.ok(question!.textContent!.includes("thrown straight up"));
 		assert.ok(answers!.querySelector('[data-testid="answered-confidence"]'), "confidence sits under the options");

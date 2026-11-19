@@ -321,9 +321,7 @@ body {
  * as the last resort (the adaptive question layout widens the card first).
  * inline-block + baseline-source:first keeps the text on the line's
  * baseline; a scroller's baseline would otherwise drop to its bottom edge.
- * KaTeX glyphs overhang their boxes: the padding (cancelled by the negative
- * margin, so lines keep their height) keeps the clip and the scroller off
- * them. */
+ * (KaTeX's glyph room: below.) */
 [data-session-surface] [data-streamdown="inline-code"],
 [data-session-surface] :not(.katex-display) > .katex {
 	display: inline-block;
@@ -342,17 +340,40 @@ body {
 }
 
 /* Punctuation touching a span stays on its line (components/md-nobreak.ts):
- * a line may otherwise break between an inline-block and a comma. */
+ * a line may otherwise break between an inline-block and a comma. The glued
+ * GROUP is then the unit that moves and, when wider than its column,
+ * scrolls — the punctuation included, never clipped outside it. Inside a
+ * group the spans themselves neither scroll nor cap their width. */
 [data-session-surface] .lh-nobreak {
+	display: inline-block;
+	max-width: 100%;
+	overflow-x: auto;
+	overflow-y: hidden;
 	white-space: nowrap;
+	vertical-align: baseline;
+	baseline-source: first;
 }
-[data-session-surface] :not(.katex-display) > .katex {
+[data-session-surface] .lh-nobreak [data-streamdown="inline-code"],
+[data-session-surface] .lh-nobreak .katex {
+	max-width: none;
+	overflow: visible;
+}
+/* KaTeX glyphs overhang their boxes: the padding (cancelled by the negative
+ * margin, so lines keep their height) keeps the clip and the scroller off
+ * them — on the formula's own scroller, or on its group's. */
+[data-session-surface] :not(.katex-display) > .katex,
+[data-session-surface] .lh-nobreak:has(.katex) {
 	padding: 0.5em 0.2em;
 	margin: -0.5em -0.2em;
 	/* The side margins shrink a shrink-to-fit parent (an option label) by
 	   0.4em; the cap gives that back so a formula never scrolls in its own
 	   label. The margin box still never exceeds the column. */
 	max-width: calc(100% + 0.4em);
+}
+/* (Display math is a block, never glued: every formula in a group is inline.) */
+[data-session-surface] .lh-nobreak .katex {
+	padding: 0;
+	margin: 0;
 }
 
 /* ============================================================
