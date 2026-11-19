@@ -34,11 +34,18 @@ function fixture({ dismissSaved = true } = {}) {
 	};
 	function Probe() { controller = useInteractionLayers(); return null; }
 	return {
-		dismissals, calls: () => calls,
+		dismissals, calls: () => calls, controller: () => controller,
 		async render(child: React.ReactNode = null) {
 			await act(async () => root!.render(<React.StrictMode><InteractionLayersProvider><Probe />{child}<StartupMessage /></InteractionLayersProvider></React.StrictMode>));
 		},
-		async offer(deadlineAt = Date.now() + 3000) { await act(async () => resolve({ message, deadlineAt })); },
+		async offer(deadlineAt = Date.now() + 3000, beforeCommit?: () => void) {
+			await act(async () => {
+				resolve({ message, deadlineAt });
+				await request;
+				await Promise.resolve(); // Let the offer's catch/then chain run before React commits.
+				beforeCommit?.();
+			});
+		},
 		async input(type: string) { await act(async () => window.dispatchEvent(new dom.window.Event(type))); },
 		async backdrop() {
 			await act(async () => { controller.requestClose(controller.getActiveModal()!.id, "backdrop"); });
@@ -97,6 +104,31 @@ for (const input of ["pointerdown", "keydown", "deadline"]) it(`skips after ${in
 	await f.offer(input === "deadline" ? Date.now() - 1 : undefined);
 	assert.equal(dialog(), null);
 	assert.deepEqual(f.dismissals, []);
+});
+
+it("does not register or focus a dialog when an eligible offer expires before React commits", async t => {
+	const f = fixture();
+	await f.render(<button id="existing-focus">Keep focus here</button>);
+	const focused = document.querySelector<HTMLElement>("#existing-focus")!;
+	focused.focus();
+	let registered = false;
+	const controller = f.controller();
+	const unsubscribe = controller.subscribe(() => { registered ||= !!controller.getActiveModal(); });
+	let now = Date.now();
+	const deadlineAt = now + 1000;
+	let reads = 0;
+	const clock = t.mock.method(Date, "now", () => { reads++; return now; });
+	try {
+		await f.offer(deadlineAt, () => {
+			assert.ok(reads >= 2, "the offer handler accepted the offer and set its timer");
+			assert.equal(dialog(), null, "React has not committed the modal");
+			now = deadlineAt;
+		});
+		assert.equal(registered, false, "the expired lease never enters the layer stack");
+		assert.equal(dialog(), null);
+		assert.equal(document.activeElement, focused);
+		assert.deepEqual(f.dismissals, []);
+	} finally { unsubscribe(); clock.mock.restore(); }
 });
 
 it("is inert without the desktop bridge", async () => {

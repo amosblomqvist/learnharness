@@ -70,7 +70,10 @@ export function StartupMessage() {
 				stopWatching();
 				return;
 			}
-			lease = controller.reserveOpening("startup-message", { onRevoke: interrupt });
+			lease = controller.reserveOpening("startup-message", {
+				allowInitialMount: () => Date.now() < result.deadlineAt,
+				onRevoke: interrupt,
+			});
 			if (lease?.activate()) {
 				openingDeadline = setTimeout(interrupt, result.deadlineAt - Date.now());
 				setOpen({ message: result.message, lease });
