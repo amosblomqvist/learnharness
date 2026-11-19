@@ -360,6 +360,20 @@ test("the child env has no LearnHarness key and the cwd is a temp dir holding on
 	await assertCleanedUp(call);
 });
 
+test("an inherited GEMINI_RESTRICTED_MODE=true does not reach the child, so the cwd stays trusted", async (t) => {
+	const saved = process.env.GEMINI_RESTRICTED_MODE;
+	t.after(() => { if (saved === undefined) delete process.env.GEMINI_RESTRICTED_MODE; else process.env.GEMINI_RESTRICTED_MODE = saved; });
+	process.env.GEMINI_RESTRICTED_MODE = "true";
+
+	const { events, calls } = await runScenario(t, [INIT, SUCCESS, HOLD]);
+	assert.equal(getLastEvent(events).type, "done");
+	const call = getOnlyCall(calls);
+	// "true" would outrank GEMINI_CLI_TRUST_WORKSPACE and let the CLI skip the empty .gemini/.env.
+	assert.equal(call.env.GEMINI_RESTRICTED_MODE, "false");
+	assert.equal(call.env.GEMINI_CLI_TRUST_WORKSPACE, "true");
+	await assertCleanedUp(call);
+});
+
 test("an MCP request that arrives before its tool_use still pairs with it", async (t) => {
 	const read: ToolUse = { id: "t_early", name: "read", arguments: { path: "early" } };
 	const { runGemini } = createFakeRun(t, [INIT, mcpCall(read, { wait: false }), JSON.stringify({ fake: "sleep", ms: 100 }), toolUse(read), awaitCalls(read), REPLY]);

@@ -89,8 +89,12 @@ const SETTINGS_FILE = "settings.json";
  * Checked against Gemini CLI 0.68.0 with sentinel keys in parent and home `.env` files, with and without that setting.
  */
 const ENV_STOP_FILES: Record<string, string> = { [join(".gemini", ".env")]: "", ".env": "" };
-/** The turn's cwd is an empty temp folder the app made, so trusting it adds nothing but the `.env` boundary above. */
-const TRUST_WORKSPACE_ENV: Readonly<Record<string, string>> = { GEMINI_CLI_TRUST_WORKSPACE: "true" };
+/**
+ * The turn's cwd is an empty temp folder the app made, so trusting it adds nothing but the `.env` boundary above.
+ * GEMINI_RESTRICTED_MODE=true outranks GEMINI_CLI_TRUST_WORKSPACE and would make the folder untrusted again, so the
+ * child gets it as "false" even when the app inherited "true". In Gemini CLI 0.68.0 it is read only for this trust check.
+ */
+const TRUST_WORKSPACE_ENV: Readonly<Record<string, string>> = { GEMINI_CLI_TRUST_WORKSPACE: "true", GEMINI_RESTRICTED_MODE: "false" };
 /** A context file name no user has, so `~/.gemini/GEMINI.md` and project context files are not loaded. */
 const NO_CONTEXT_FILE = "learnharness-no-context-file.md";
 
