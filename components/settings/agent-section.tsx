@@ -39,12 +39,8 @@
  * then Shared LAST. The server returns each agent's actual segments,
  * including its shared subset; sectionedSegments deduplicates shared
  * chunks and derives per-fragment usage from membership in those lists.
- * The row rulings: only the TOGGLE
- * grays when there's no override file (the file name is always
- * full-contrast); NO description line when there's no override (the empty
- * state is clean — toggle + name); the indicator ("Your version is
- * saved") appears ONLY when an override exists. The switch requires an
- * override FILE (route-enforced), so a file-less toggle is disabled.
+ * Each row can view the shipped text or edit its sole override. The
+ * version switch requires an override file (route-enforced).
  * The segments view re-reads on the 'lh:settings-saved' signal for the
  * agent section — the view's enabled flags derive from the record's
  * switches, and the 2026-09-26 state-echo bug was exactly this reader
@@ -60,6 +56,9 @@ import { useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
 import { useModelCatalog } from "@/components/model-catalog";
 import { Hint } from "@/components/ui/hint";
+import { Button } from "@/components/ui/button";
+import { PromptSegmentDialog, type PromptSaveOutcome } from "./prompt-segment-dialog";
+import { PromptSegmentRow } from "./prompt-segment-row";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
@@ -234,14 +233,6 @@ export function composeSearchEngine(
 	return { ...agent, search: { engine } };
 }
 
-/** The indicator under a row whose override IS the version in use (owner
- *  ruling, refined 2026-09-26: the small text states WHICH VERSION IS
- *  IN USE — "Your version is in use" when the switch is on, and NOTHING
- *  when the default composes, even if a saved override sits on disk
- *  unused. The switch's meaning becomes legible: it visibly controls
- *  this line). Exported for the pin. */
-export const PROMPT_IN_USE_HINT = "Your version is in use";
-
 /** Prompt sections in display order; Shared is deduplicated and last. */
 export interface PromptSection {
 	id: keyof PromptView | "shared";
@@ -379,9 +370,13 @@ export function AgentSection({
 	 *  state grays the row; per-engine marks ride the menu rows. */
 	const [engineKeys, setEngineKeys] = useState<Partial<Record<SearchEngineId, boolean>>>({});
 	const [prompts, setPrompts] = useState<PromptView | null>(null);
-	const [openSegment, setOpenSegment] = useState<string | null>(null);
-	const [segmentDraft, setSegmentDraft] = useState<Record<string, string>>({});
-	const [segmentStatus, setSegmentStatus] = useState<string | null>(null);
+	const [promptsFailed, setPromptsFailed] = useState(false);
+	const promptRead = useRef(0);
+	const latestAgent = useRef(agent);
+	latestAgent.current = agent;
+	const [openSegment, setOpenSegment] = useState<{ info: SegmentInfo; mode: "view" | "edit" } | null>(null);
+	const [switchPending, setSwitchPending] = useState(false);
+	const [switchError, setSwitchError] = useState<string | null>(null);
 	/** One open dropdown for the whole section: which slot (or the search
 	 *  row), which kind. */
 	const [openMenu, setOpenMenu] = useState<{ target: ModelSlotName | "search"; kind: "model" | "thinking" | "engine" | "cache" } | null>(null);
@@ -401,13 +396,20 @@ export function AgentSection({
 	 *  the settings record's agent switches (the toggle's truth lives
 	 *  here, not in the `agent` prop), so an agent-section write must
 	 *  re-read it or the toggle keeps painting its pre-write state until
-	 *  a remount. Keeps the last-good view on a failed re-read (the
-	 *  initial mount fetch below owns the loading/null state). */
-	const readPrompts = useCallback(() => {
-		fetch("/api/settings/prompts")
-			.then((r) => r.json())
-			.then((body: PromptView) => setPrompts(body))
-			.catch(() => {});
+	 *  a remount. Ignore out-of-order reads and retain the last good view
+	 *  if a refresh fails. */
+	const readPrompts = useCallback(async () => {
+		const ticket = ++promptRead.current;
+		try {
+			const res = await fetch("/api/settings/prompts");
+			if (!res.ok) throw new Error(String(res.status));
+			const body: PromptView = await res.json();
+			if (ticket !== promptRead.current) return;
+			setPrompts(body);
+			setPromptsFailed(false);
+		} catch {
+			if (ticket === promptRead.current) setPromptsFailed(true);
+		}
 	}, []);
 
 	// The shared catalog seeds the first frame and refreshes per mount and
@@ -417,14 +419,11 @@ export function AgentSection({
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
 		// one reader.
-		if (section === "agent") readPrompts();
+		if (section === "agent") void readPrompts();
 	});
 
 	useEffect(() => {
-		fetch("/api/settings/prompts")
-			.then((r) => r.json())
-			.then((body: PromptView) => setPrompts(body))
-			.catch(() => setPrompts(null));
+		void readPrompts();
 		fetch("/api/keys")
 			.then((r) => r.json())
 			.then((body: { keys: { id: string; present: boolean }[] }) => {
@@ -435,7 +434,8 @@ export function AgentSection({
 				setEngineKeys(present);
 			})
 			.catch(() => {});
-	}, []);
+		return () => { promptRead.current++; };
+	}, [readPrompts]);
 
 	// The reason line re-reads /api/search AFTER an engine write lands —
 	// the write updates the `agent` prop (the dialog's record mirror), so
@@ -467,48 +467,61 @@ export function AgentSection({
 		return () => document.removeEventListener("pointerdown", onPointerDown);
 	}, [openMenu, interactions]);
 
-	async function saveSegment(path: string, text: string) {
-		setSegmentStatus(null);
-		const res = await fetch(`/api/settings/prompts/${path}`, {
-			method: "PUT",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify({ text }),
-		});
-		if (!res.ok) {
-			setSegmentStatus(`Save failed: ${(await res.json().catch(() => ({}))).error ?? res.status}`);
-			return;
+	async function switchSegment(path: string, on: boolean) {
+		if (switchPending) return;
+		setSwitchPending(true);
+		setSwitchError(null);
+		try {
+			if (!await onSectionChange(composePromptSwitch(latestAgent.current, path, on))) setSwitchError(path);
+		} catch {
+			setSwitchError(path);
+		} finally {
+			await readPrompts();
+			setSwitchPending(false);
 		}
-		readPrompts();
-		setSegmentStatus("Saved");
-		// Auto-on (owner ruling, refined 2026-09-26): writing an override and
-		// putting it to work are ONE action — a save with the switch off was
-		// the "did something, changed nothing" trap (the composed prompt
-		// stayed the default). The file exists now, so the ON switch the
-		// agent-section validation requires is legal; the order (file, then
-		// switch) is the safe one. Saving an edit while already on rides
-		// through — the switch write is idempotent at the record level.
-		if (agent?.prompts?.[path] !== true) {
-			onSectionChange(composePromptSwitch(agent, path, true));
+	}
+
+	async function saveSegment(path: string, text: string, writeText: boolean): Promise<PromptSaveOutcome> {
+		try {
+			if (writeText) {
+				const res = await fetch(`/api/settings/prompts/${path}`, {
+					method: "PUT",
+					headers: { "content-type": "application/json" },
+					body: JSON.stringify({ text }),
+				});
+				if (!res.ok) return "save-failed";
+			}
+		} catch {
+			return "save-failed";
+		}
+		// Keep save-and-activate: the switch write must follow the file write.
+		// Report partial success separately so retry needn't rewrite the file.
+		try {
+			const saved = latestAgent.current?.prompts?.[path] === true ||
+				await onSectionChange(composePromptSwitch(latestAgent.current, path, true));
+			return saved ? "saved" : "activation-failed";
+		} catch {
+			return "activation-failed";
+		} finally {
+			await readPrompts();
 		}
 	}
 
 	async function deleteSegment(path: string) {
-		setSegmentStatus(null);
-		const res = await fetch(`/api/settings/prompts/${path}`, { method: "DELETE" });
-		if (!res.ok) {
-			setSegmentStatus(`Delete failed: ${res.status}`);
-			return;
+		try {
+			const res = await fetch(`/api/settings/prompts/${path}`, { method: "DELETE" });
+			if (!res.ok) return false;
+			// DELETE already cleared the switch on disk. Keep the Settings
+			// mirror in sync so a later whole-section write doesn't restore it.
+			if (latestAgent.current?.prompts?.[path] === true) {
+				await onSectionChange(composePromptSwitch(latestAgent.current, path, false));
+			}
+			return true;
+		} catch {
+			return false;
+		} finally {
+			await readPrompts();
 		}
-		// Auto-off — the mirror of save's auto-on: deleting the file while
-		// the switch is on would orphan an ON record switch (the agent-section
-		// validation 400s every later write while the UI's toggle can no
-		// longer reach the OFF escape hatch — the trap found in live verify
-		// 2026-09-26). Composing the OFF here keeps the record clean.
-		if (agent?.prompts?.[path] === true) {
-			onSectionChange(composePromptSwitch(agent, path, false));
-		}
-		readPrompts();
-		setSegmentStatus("Deleted");
 	}
 
 		/** The search-engine menu row — label + the quiet live-key mark. */
@@ -534,113 +547,6 @@ export function AgentSection({
 			</span>
 		</button>
 	);
-
-	const segmentRow = (info: PromptRow) => {
-		const fileExists = info.overrideText !== null;
-		const open = openSegment === info.path;
-		// The Save affordance (owner ruling, refined 2026-09-26): clickable
-		// only when there's something to save — the draft differs from
-		// what's on disk. An unchanged editor shows a grayed, inert Save
-		// (the always-active button was the "doesn't feel like it does
-		// anything" half of the report).
-		const draft = segmentDraft[info.path] ?? info.overrideText ?? "";
-		const dirty = draft !== (info.overrideText ?? "");
-		return (
-			<div key={info.path} data-testid={`prompt-segment-${info.path}`}>
-				<SettingsRow
-					label={info.path}
-					// Overhaul rulings (2026-09-26, refined): the small text
-					// states WHICH VERSION IS IN USE — nothing when the
-					// default composes (even with a saved override sitting
-					// on disk unused), "Your version is in use" when the
-					// switch is on. The switch's meaning becomes legible
-					// through this line.
-					hint={[info.usageHint, info.enabled ? PROMPT_IN_USE_HINT : undefined].filter(Boolean).join(" · ") || undefined}
-					testid={`prompt-row-${info.path}`}
-				>
-					{/* Graying ruling: ONLY the toggle dims without an
-					    override file — the file name above stays
-					    full-contrast (the whole-row dim is dead). */}
-					<span className={fileExists ? undefined : "opacity-40"}>
-						<Toggle
-							checked={info.enabled}
-							disabled={!fileExists}
-							label={`prompt ${info.path}`}
-							onChange={(on) => onSectionChange(composePromptSwitch(agent, info.path, on))}
-						/>
-					</span>
-				</SettingsRow>
-				<button
-					type="button"
-					onClick={() => {
-						setOpenSegment(open ? null : info.path);
-						setSegmentStatus(null);
-					}}
-					className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
-				>
-					{open ? "Hide text" : "Show text"}
-				</button>
-				{open && (
-					<div className="mt-1 flex flex-col gap-2">
-						<div>
-							<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">Source</p>
-							<textarea
-								readOnly
-								value={info.sourceText}
-								aria-label="The original instructions"
-								className="h-24 w-full resize-y rounded-sm border border-border bg-muted p-2 font-ui text-xs text-muted-foreground"
-							/>
-						</div>
-						<div>
-							<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">Override</p>
-							<textarea
-								value={segmentDraft[info.path] ?? info.overrideText ?? ""}
-								onChange={(e) => setSegmentDraft({ ...segmentDraft, [info.path]: e.target.value })}
-								aria-label="Your version of the instructions"
-								placeholder="Add your own instructions…"
-								className="h-24 w-full resize-y rounded-sm border border-border bg-background p-2 font-ui text-xs text-foreground outline-none"
-							/>
-						</div>
-						<div className="flex items-center gap-3">
-							<button
-								type="button"
-								disabled={!dirty}
-								onClick={() => void saveSegment(info.path, segmentDraft[info.path] ?? "")}
-								className={
-									dirty
-										? "text-xs text-foreground underline-offset-2 hover:underline"
-										: "cursor-not-allowed text-xs text-muted-foreground/40 underline-offset-2"
-								}
-							>
-								Save
-							</button>
-							{fileExists && (
-								<button
-									type="button"
-									onClick={() => void deleteSegment(info.path)}
-									className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-error hover:underline"
-								>
-									Delete
-								</button>
-							)}
-							{/* The quiet inline confirmation — next to the
-							    action, not the old path-echoing line at the
-							    section's bottom (production-copy: no file
-							    paths in user-facing status). One editor is
-							    open at a time (openSegment), so one shared
-							    status reads unambiguously. */}
-							{segmentStatus && (
-								<p className="text-xs text-muted-foreground/70" data-testid="segment-status">
-									{segmentStatus}
-								</p>
-							)}
-						</div>
-					</div>
-				)}
-			</div>
-		);
-	};
-
 
 
 	// Resolved through the SAME core resolver the server's effective
@@ -1040,8 +946,13 @@ export function AgentSection({
 			</SettingsGroup>
 
 			<SettingsGroup label="System prompts" testid="group-prompts">
+				<p className="text-xs text-muted-foreground">Use the switch to choose between the default and your saved override.</p>
+				{promptsFailed && <div className="flex items-center gap-2">
+					<p role="alert" className="text-xs text-error">Couldn't load prompt segments.</p>
+					<Button type="button" size="xs" variant="outline" onClick={() => void readPrompts()}>Retry</Button>
+				</div>}
 				{prompts === null ? (
-					<p className="text-xs text-muted-foreground/70">Loading prompt segments…</p>
+					!promptsFailed && <p className="text-xs text-muted-foreground/70">Loading prompt segments…</p>
 				) : (
 					<div className="flex flex-col gap-4">
 						{/* Teacher, Prober, Practice, Shared — shared chunks once,
@@ -1051,14 +962,24 @@ export function AgentSection({
 								<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">
 									{section.label}
 								</p>
-								<div className="flex flex-col gap-2">
-									{section.segments.map((info) => segmentRow(info))}
-								</div>
+								{section.segments.map((info) => <PromptSegmentRow key={info.path}
+									path={info.path} usageHint={info.usageHint} hasOverride={info.overrideText !== null} enabled={info.enabled}
+									busy={switchPending || promptsFailed} error={switchError === info.path ? "Couldn't switch prompt versions." : undefined}
+									onView={() => setOpenSegment({ info, mode: "view" })}
+									onEdit={() => setOpenSegment({ info, mode: "edit" })}
+									onToggle={(on) => void switchSegment(info.path, on)}
+								/>)}
 							</div>
 						))}
 					</div>
 				)}
 			</SettingsGroup>
+			{openSegment && <PromptSegmentDialog
+				path={openSegment.info.path} source={openSegment.info.sourceText} override={openSegment.info.overrideText} mode={openSegment.mode}
+				onSave={(text, writeText) => saveSegment(openSegment.info.path, text, writeText)}
+				onDelete={() => deleteSegment(openSegment.info.path)}
+				onClose={() => setOpenSegment(null)}
+			/>}
 		</>
 	);
 }

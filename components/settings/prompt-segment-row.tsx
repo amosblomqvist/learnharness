@@ -1,0 +1,37 @@
+"use client";
+
+import { Button } from "@/components/ui/button";
+import { cn } from "@/lib/utils";
+import { Toggle } from "./controls";
+
+export function PromptSegmentRow({ path, usageHint, hasOverride, enabled, busy, error, onView, onEdit, onToggle }: {
+	path: string;
+	usageHint?: string;
+	hasOverride: boolean;
+	enabled: boolean;
+	busy: boolean;
+	error?: string;
+	onView: () => void;
+	onEdit: () => void;
+	onToggle: (enabled: boolean) => void;
+}) {
+	return <div data-testid={`prompt-segment-${path}`} className="border-t border-border/50 py-2 font-ui">
+		<div data-testid={`prompt-row-${path}`} className="flex flex-wrap items-center justify-between gap-x-4 gap-y-2">
+			<div className="min-w-0 flex-1 basis-44">
+				<p className="break-all text-xs text-foreground">{path}</p>
+				{usageHint && <p className="mt-0.5 text-xs text-muted-foreground">{usageHint}</p>}
+			</div>
+			<div className="flex flex-wrap items-center gap-x-2 gap-y-1">
+				<Button type="button" size="xs" variant="outline" disabled={busy} onClick={onView}>View default</Button>
+				<Button type="button" size="xs" variant="outline" disabled={busy} onClick={onEdit}>{hasOverride ? "Edit override" : "+ Add override"}</Button>
+				<div className="flex items-center gap-2 sm:ml-2">
+					<span className="text-xs text-muted-foreground">In use: <span className="text-foreground">{enabled ? "Your version" : "Default"}</span></span>
+					<span className={cn("flex", !hasOverride && "opacity-40")}>
+						<Toggle label={`Use your override for ${path}`} title="Use your override instead of the default" checked={enabled} disabled={!hasOverride || busy} onChange={onToggle} />
+					</span>
+				</div>
+			</div>
+		</div>
+		{error && <p role="alert" className="mt-1 text-xs text-error">{error}</p>}
+	</div>;
+}
