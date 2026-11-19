@@ -50,4 +50,7 @@ export const SIDEBAR: Readonly<Record<string, string>> = {
 	"{tokens} tokens": "{tokens} token",
 	"Extraction — {phase}": "提取——{phase}",
 	"running": "运行中",
+	"All": "全部",
+	"No sessions match.": "没有匹配的会话。",
+	"No sessions yet.": "还没有会话。",
 };

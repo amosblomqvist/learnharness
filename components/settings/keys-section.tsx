@@ -289,7 +289,7 @@ function KeyTableRow({
 						</a>
 					)}
 					<span data-testid={`${testid}-status`} className="font-mono text-[11px] text-muted-foreground">
-						{keyStatusLine(status)}
+						{t(keyStatusLine(status))}
 					</span>
 				</span>
 			</button>

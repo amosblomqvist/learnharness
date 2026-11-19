@@ -214,7 +214,7 @@ export function DraftShell({
 										// input (owner refinement round, 2026-09-24) — no lesson has
 										// started yet, so the composer must not read like one is in
 										// flight.
-										placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
+										placeholder={mode === "practice" ? t("What do you want to practice?") : t("What do you want to learn?")}
 									/>
 								</div>
 								<StatsBar

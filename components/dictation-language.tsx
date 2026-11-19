@@ -55,12 +55,12 @@ function DictationLanguagePicker({ preference, disabled }: {
 	};
 
 	return <>
-		<Hint label={error ?? `Dictation language: ${label}`} side="top">
+		<Hint label={error ?? t("Dictation language: {label}", { label })} side="top">
 			<SettingsMenuTrigger
 				ref={triggerRef}
 				value={label}
 				data-testid="dictation-language"
-				aria-label={`Dictation language: ${label}`}
+				aria-label={t("Dictation language: {label}", { label })}
 				aria-expanded={open && !disabled}
 				disabled={disabled || saving}
 				onClick={() => {

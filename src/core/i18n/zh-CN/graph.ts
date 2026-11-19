@@ -74,4 +74,6 @@ export const GRAPH: Readonly<Record<string, string>> = {
 	"· {in} in / {out} out": "· 输入 {in} / 输出 {out}",
 	"Also delete the 1 selected session": "同时删除选中的 1 个会话",
 	"Also delete the {count} selected sessions": "同时删除选中的 {count} 个会话",
+	"Extracting…": "正在提取……",
+	"Extract files…": "提取文件……",
 };

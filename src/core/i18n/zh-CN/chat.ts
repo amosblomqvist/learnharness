@@ -88,4 +88,12 @@ export const CHAT: Readonly<Record<string, string>> = {
 	"Could not sync the saved session.": "保存的会话同步失败。",
 	"Go to current step": "回到当前步骤",
 	"End {label} in {title}": "结束 {label}：{title}",
+	"What do you want to learn?": "你想学什么？",
+	"What do you want to practice?": "你想练什么？",
+	"Teach": "教学",
+	"Dictate": "听写",
+	"Start dictation": "开始听写",
+	"Dictation failed: {error}": "听写失败：{error}",
+	"Stop side dictation": "停止侧边听写",
+	"Dictate side question": "用听写提问",
 };

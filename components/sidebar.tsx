@@ -813,7 +813,7 @@ function SessionsSidebar() {
 									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{f === "teach" ? "Teaching" : f === "all" ? "All" : "Practice"}
+							{f === "teach" ? t("Teaching") : f === "all" ? t("All") : t("Practice")}
 						</button>
 					))}
 				</div>
@@ -823,7 +823,7 @@ function SessionsSidebar() {
 						<div className="px-2 py-4 text-xs text-muted-foreground">{t("Loading…")}</div>
 					) : shown.length === 0 ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">
-							{query.trim() ? "No sessions match." : "No sessions yet."}
+							{query.trim() ? t("No sessions match.") : t("No sessions yet.")}
 						</div>
 					) : (
 						shown.map((c, i) =>
