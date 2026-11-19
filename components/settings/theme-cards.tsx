@@ -142,7 +142,7 @@ export function ThemeCards({
 					Export JSON
 				</button>
 			</div>
-			<div className="grid grid-cols-3 gap-3">
+			<div className="lh-theme-grid grid grid-cols-3 gap-3">
 				{themes.map((theme) => {
 					const selected = theme.id === active.id;
 					return (

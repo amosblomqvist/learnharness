@@ -321,7 +321,8 @@ export function Chat({
 	const submissionMounted = useRef(true);
 	useEffect(() => { submissionMounted.current = true; return () => { submissionMounted.current = false; submissionRunner.dispose(); }; }, [submissionRunner]);
 	useEffect(() => () => submissionRunner.dispose(), [surfaceTarget, submissionRunner]);
-	const inputViewReader = useRef<(() => PluginSessionViewInput) | null>(null) as SessionInputViewReader;
+	// This bridge also owns `changed`; React seals its own ref objects in dev.
+	const [inputViewReader] = useState<SessionInputViewReader>(() => ({ current: null }));
 	const refreshPluginActions = useRef<(() => void) | null>(null);
 	const notifyViewChanged = useCallback(() => { if (submissionMounted.current) refreshPluginActions.current?.(); }, []);
 	inputViewReader.changed = notifyViewChanged;
@@ -1664,7 +1665,7 @@ export function Chat({
 								data-plugin-chrome-title
 								aria-label="Session title"
 								title="Rename this session"
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className="lh-no-drag min-w-0 max-w-[70%] shrink bg-transparent font-title text-xl tracking-tight caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
@@ -1686,7 +1687,8 @@ export function Chat({
 								setRenaming(true);
 							}}
 							data-plugin-chrome-title
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							title={titleText}
+							className="lh-no-drag -mx-1.5 min-w-0 max-w-[70%] shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-xl tracking-tight transition-colors hover:bg-accent"
 						>
 							{titleText}
 							</button>
@@ -2501,9 +2503,9 @@ export function DockOverlay({
 	const readingInputRef = useRef<HTMLDivElement>(null);
 	const ownsDock = !!pending || !!pluginQuestion || unreadablePlugin || !!practice;
 	const initialPendingRef = useRef(pendingId);
-	const nativeViewReader = useRef<(() => NativeQuestionViewState) | null>(null) as ViewReaderRef<NativeQuestionViewState>;
-	const practiceViewReader = useRef<(() => string) | null>(null) as ViewReaderRef<string>;
-	const customViewReader = useRef<(() => { available: boolean }) | null>(null) as ViewReaderRef<{ available: boolean }>;
+	const [nativeViewReader] = useState<ViewReaderRef<NativeQuestionViewState>>(() => ({ current: null }));
+	const [practiceViewReader] = useState<ViewReaderRef<string>>(() => ({ current: null }));
+	const [customViewReader] = useState<ViewReaderRef<{ available: boolean }>>(() => ({ current: null }));
 	nativeViewReader.changed = practiceViewReader.changed = customViewReader.changed = viewReader?.changed;
 
 	// Teach-question ARRIVAL state, applied during render — BEFORE the

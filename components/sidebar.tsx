@@ -318,7 +318,7 @@ export function SessionRow({
 			onContextMenu={onContextMenu}
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 			className={cn(
-				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
+				"relative mb-1 flex min-h-14 w-full items-center gap-2 rounded-md px-3 py-3 text-left transition-colors hover:bg-accent",
 				active && "bg-accent",
 				kbdSelected && !active && "bg-accent/60 ring-1 ring-border",
 			)}
@@ -361,7 +361,7 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 	return (
 		<div
 			data-testid="session-rename-row"
-			className="relative mb-0.5 flex w-full items-center rounded-lg bg-accent px-3 py-2"
+			className="relative mb-1 flex min-h-14 w-full items-center rounded-md bg-accent px-3 py-3"
 		>
 			{/* NOTHING MOVES (owner, polish round): an idle row renders no
 			    status spacer (SessionStatus is null when not busy), so the
@@ -724,7 +724,7 @@ function SessionsSidebar() {
 					</button>
 				</PluginSidebarActions>
 
-				<div className="mx-3 mb-2 flex items-center gap-2">
+				<div className="mx-3 mb-3 flex flex-col items-stretch gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
 					<Hint label="Search sessions" action="sessions-search" side="bottom">
 					<span className="relative flex-1">
@@ -780,9 +780,9 @@ function SessionsSidebar() {
 							}}
 							placeholder="Search…"
 							aria-label="Search sessions"
-							className="h-6 rounded-sm border-border bg-background pl-6 text-xs placeholder:text-muted-foreground/60"
+							className="h-11 rounded-md border-border bg-background pl-9 text-sm placeholder:text-muted-foreground/60"
 						/>
-						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
+						<SearchIcon className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground/70" />
 					</span>
 					</Hint>
 				</div>
@@ -802,7 +802,7 @@ function SessionsSidebar() {
 							data-testid={`kind-filter-${f}`}
 							onClick={() => setFilter(f)}
 							className={cn(
-								"flex-1 rounded-sm px-2 py-1 text-[11px] uppercase tracking-wider transition-colors",
+								"min-h-9 flex-1 rounded-md px-2 py-2 text-sm transition-colors",
 								kindFilter === f
 									? "bg-accent text-foreground"
 									: "text-muted-foreground hover:text-foreground",

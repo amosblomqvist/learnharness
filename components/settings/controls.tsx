@@ -26,7 +26,7 @@ export function SettingsSection({
 	testid?: string;
 }) {
 	return (
-		<section data-testid={testid} className="px-6 py-5">
+		<section data-testid={testid} className="lh-settings-section px-6 py-5">
 			<h2 className="text-sm uppercase tracking-widest text-foreground">{title}</h2>
 			{hint && <p className="mt-1 text-xs text-muted-foreground">{hint}</p>}
 			<div className="mt-4 flex flex-col gap-3">{children}</div>
@@ -46,7 +46,7 @@ export function SettingsGroup({
 	testid?: string;
 }) {
 	return (
-		<div data-testid={testid} className="mt-5 border-t border-border/60 pt-4 first:mt-0 first:border-t-0 first:pt-0">
+		<div data-testid={testid} className="lh-settings-group mt-5 border-t border-border/60 pt-4 first:mt-0 first:border-t-0 first:pt-0">
 			<p className="mb-2 text-xs uppercase tracking-widest text-muted-foreground">{label}</p>
 			<div className="flex flex-col gap-2">{children}</div>
 		</div>
@@ -71,7 +71,7 @@ export function SettingsRow({
 	dimmed?: boolean;
 }) {
 	return (
-		<div data-testid={testid} className={cn("flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
+		<div data-testid={testid} className={cn("lh-settings-row flex items-center justify-between gap-4 py-1", dimmed && "opacity-40")}>
 			<span className="min-w-0">
 				<span className="block font-prose text-(length:--lh-prose-size)">{label}</span>
 				{hint && <span className="block text-xs text-muted-foreground/70">{hint}</span>}
@@ -95,7 +95,7 @@ export function SettingsMenuTrigger({
 		{...props}
 		disabled={disabled}
 		className={cn(
-			"flex h-7 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors",
+			"lh-settings-control flex h-7 items-center gap-1 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground transition-colors",
 			disabled || unavailable ? "cursor-not-allowed" : "hover:border-muted-foreground/50",
 			className,
 		)}
@@ -194,7 +194,7 @@ export function ThinSelect({
 			disabled={disabled}
 			onChange={(e) => onChange(e.target.value)}
 			className={cn(
-				"h-7 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none",
+				"lh-settings-control h-7 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none",
 				disabled && "cursor-not-allowed",
 			)}
 		>
