@@ -1,7 +1,8 @@
 "use client";
 
-import type { ReactNode } from "react";
+import type { DOMAttributes, ReactNode } from "react";
 import { FolderIcon, FolderOpenIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { fuzzyScore } from "@/src/core";
 import type { ChatListItem, ChatListResponse } from "@/src/core";
 
@@ -234,10 +235,19 @@ export function SidebarFolderTree({
 	view,
 	onToggleFolder,
 	renderChat,
+	drop,
 }: {
 	view: SidebarFolderView;
 	onToggleFolder: (folderId: string) => void;
 	renderChat: (chat: ChatListItem) => ReactNode;
+	/** Drag & drop (chat-folders S05): folder headers become drop targets.
+	 *  activeTarget mirrors the hook's dropTarget — undefined = no
+	 *  highlight, null = Outside folders (handled by the caller's own
+	 *  zone), a folder id highlights that header. */
+	drop?: {
+		activeTarget: string | null | undefined;
+		targetProps: (target: string) => Partial<Pick<DOMAttributes<HTMLElement>, "onDragOver" | "onDragLeave" | "onDrop">>;
+	};
 }): ReactNode {
 	const renderLevel = (nodes: readonly SidebarTreeNode[], depth: number): ReactNode =>
 		nodes.map((node) => {
@@ -256,7 +266,12 @@ export function SidebarFolderTree({
 						data-sidebar-folder={folder.id}
 						aria-expanded={node.expanded}
 						onClick={() => onToggleFolder(folder.id)}
-						className="flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						{...(drop?.targetProps(folder.id) ?? {})}
+						data-drop-active={drop ? String(drop.activeTarget === folder.id) : undefined}
+						className={cn(
+							"flex w-full items-center gap-1.5 rounded-lg py-1.5 pr-2 text-left text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground",
+							drop?.activeTarget === folder.id && "bg-accent/50",
+						)}
 						style={{ paddingLeft: 8 + depth * 12 }}
 					>
 						{node.expanded ? (

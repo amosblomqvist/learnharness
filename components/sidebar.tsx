@@ -34,7 +34,9 @@ import {
 	planMoveChat,
 	postFolderCommand,
 	type SidebarOrganization,
+	useSidebarChatDrag,
 } from "@/components/sidebar-folder-actions";
+import { SourceDragRow } from "@/components/source-folder-tree";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
@@ -626,6 +628,16 @@ function SessionsSidebar() {
 		[folderWriter],
 	);
 
+	/* Chat drag & drop (chat-folders S05): the hook owns the gesture —
+	   dragChatId arms only on a dragstart bubbled from this list's own
+	   SourceDragRow payload, folder headers plus the Outside folders zone
+	   are the targets, and a drop rides the same moveChat as the menu. */
+	const drag = useSidebarChatDrag({
+		organization: snapshot?.organization ?? null,
+		chats: kindChats ?? [],
+		moveChat,
+	});
+
 	useEffect(() => {
 		const onTurnState = (e: Event) => {
 			const { id, running } = (e as CustomEvent<{ id: string; running: boolean }>).detail;
@@ -994,7 +1006,25 @@ function SessionsSidebar() {
 					))}
 				</div>
 
-				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
+				{drag.error !== null && (
+					<div role="alert" data-testid="sidebar-folder-error" className="mx-3 mb-1 text-xs text-error">
+						{drag.error}
+					</div>
+				)}
+				<div ref={listRef} className="flex-1 overflow-y-auto p-2" {...drag.containerProps}>
+					{drag.dragChatId !== null && (
+						<div
+							data-testid="sidebar-root-drop"
+							data-drop-active={String(drag.dropTarget === null)}
+							{...drag.targetProps(null)}
+							className={cn(
+								"mb-2 rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground",
+								drag.dropTarget === null && "bg-accent/50",
+							)}
+						>
+							Outside folders
+						</div>
+					)}
 					{view === null ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">Loading…</div>
 					) : view.roots.length === 0 ? (
@@ -1005,28 +1035,46 @@ function SessionsSidebar() {
 						<SidebarFolderTree
 							view={view}
 							onToggleFolder={toggleFolder}
-							renderChat={(c) =>
-								renamingId === c.id ? (
-									<RenameRow
-										key={c.id}
-										chat={c}
-										onCommit={(next) => void commitRename(c.id, next)}
-										onCancel={() => setRenamingId(null)}
-									/>
+							drop={{ activeTarget: drag.dropTarget, targetProps: drag.targetProps }}
+							renderChat={(c) => {
+								/* Drag source (S05): only a teaching chat in the
+								   normal tree — a live organization, a blank
+								   query and no rename in flight. Practice chats,
+								   search results and the renamed row stay plain. */
+								const row =
+									renamingId === c.id ? (
+										<RenameRow
+											key={c.id}
+											chat={c}
+											onCommit={(next) => void commitRename(c.id, next)}
+											onCancel={() => setRenamingId(null)}
+										/>
+									) : (
+										<SessionRow
+											key={c.id}
+											chat={c}
+											active={pathname === `/chat/${c.id}`}
+											kbdSelected={c.id === kbdChatId}
+											onOpen={() => {
+												setKbdChatId(null);
+												router.push(`/chat/${c.id}`);
+											}}
+											onContextMenu={(e) => openContext(e, c)}
+										/>
+									);
+								const draggable =
+									snapshot?.organization != null &&
+									query.trim() === "" &&
+									(c.kind ?? "teach") !== "practice" &&
+									renamingId !== c.id;
+								return draggable ? (
+									<SourceDragRow key={c.id} kind="source" id={c.id} name={c.title} enabled>
+										{row}
+									</SourceDragRow>
 								) : (
-									<SessionRow
-										key={c.id}
-										chat={c}
-										active={pathname === `/chat/${c.id}`}
-										kbdSelected={c.id === kbdChatId}
-										onOpen={() => {
-											setKbdChatId(null);
-											router.push(`/chat/${c.id}`);
-										}}
-										onContextMenu={(e) => openContext(e, c)}
-									/>
-								)
-							}
+									row
+								);
+							}}
 						/>
 					)}
 				</div>

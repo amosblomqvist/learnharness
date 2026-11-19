@@ -8,7 +8,7 @@
  * pins aria-expanded, role=group nesting and the data attributes.
  * Same tsx classic-JSX shim as render-sidebar.test.tsx.
  */
-import React from "react";
+import React, { type ComponentProps } from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import assert from "node:assert/strict";
@@ -348,6 +348,34 @@ describe("SidebarFolderTree render", () => {
 		assert.ok(!html.includes('data-sidebar-chat="c_maps2"'));
 		assert.ok(html.includes('data-sidebar-chat="c_alg1"'), "expanded Algebra shows its direct chat");
 		assert.ok(html.includes('role="group"'), "expanded children sit inside a group");
+	});
+
+	it("drop prop marks the active folder on its header button; without drop the attribute is absent", () => {
+		const view = buildSidebarFolderView(CHATS, ORG, "", new Set(["alg", "maps"]), new Set());
+		const render = (drop?: ComponentProps<typeof SidebarFolderTree>["drop"]) =>
+			renderToStaticMarkup(
+				<SidebarFolderTree
+					view={view}
+					onToggleFolder={() => {}}
+					renderChat={(c) => <span>{c.title}</span>}
+					drop={drop}
+				/>,
+			);
+
+		const plain = render();
+		assert.ok(!plain.includes("data-drop-active"), "no drop prop → no attribute at all");
+
+		const html = render({ activeTarget: "maps", targetProps: () => ({}) });
+		const buttons = [...html.matchAll(/<button[^>]*data-sidebar-folder="([^"]+)"[^>]*>/g)];
+		assert.equal(buttons.length, FOLDERS.length, "every folder button still renders");
+		const activeById = new Map(
+			buttons.map((m) => [m[1], /data-drop-active="true"/.test(m[0])]),
+		);
+		assert.equal(activeById.get("maps"), true, "only the dragged-over folder is active");
+		for (const id of ["alg", "notes", "empty", "f10", "f2"]) {
+			assert.equal(activeById.get(id), false, `${id} carries data-drop-active="false"`);
+		}
+		assert.equal((html.match(/data-drop-active="true"/g) ?? []).length, 1);
 	});
 
 	it("expanded branches render nested chat rows with data-sidebar-chat after the subfolders", () => {

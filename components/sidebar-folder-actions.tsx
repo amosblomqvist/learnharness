@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState, type ReactElement, type ReactNode, type Ref } from "react";
+import { useEffect, useRef, useState, type DragEvent, type ReactElement, type ReactNode, type Ref } from "react";
 import { HostDialog } from "@/components/host-dialog";
+import { SOURCE_DRAG_TYPE } from "@/components/source-folder-tree";
 import type { ChatListItem, ChatListResponse } from "@/src/core";
 
 export type SidebarOrganization = NonNullable<ChatListResponse["organization"]>;
@@ -112,6 +113,116 @@ export function currentChatFolder(organization: SidebarOrganization, chat: ChatL
 	if (!Object.hasOwn(organization.placements, chat.id)) return null;
 	const folderId = organization.placements[chat.id]?.folderId;
 	return folderId != null && organization.folders.some((f) => f.id === folderId) ? folderId : null;
+}
+
+/** Parse the SourceDragRow payload; anything but { kind: "source" | "folder", id: non-empty string } → null. */
+export function readDragPayload(raw: string): { kind: "source" | "folder"; id: string } | null {
+	let item: unknown;
+	try {
+		item = JSON.parse(raw);
+	} catch {
+		return null;
+	}
+	if (!item || typeof item !== "object") return null;
+	const { kind, id } = item as { kind?: unknown; id?: unknown };
+	if ((kind !== "source" && kind !== "folder") || typeof id !== "string" || id === "") return null;
+	return { kind, id };
+}
+
+/**
+ * Whether the sidebar may drop the chat on target (folder id or null =
+ * Outside folders): the chat is in chats and is a teaching chat, the
+ * target is null or an existing folder, and the target differs from
+ * currentChatFolder(organization, chat).
+ */
+export function canDropChat(
+	organization: SidebarOrganization,
+	chats: readonly ChatListItem[],
+	chatId: string,
+	target: string | null,
+): boolean {
+	const chat = chats.find((c) => c.id === chatId);
+	if (!chat || (chat.kind ?? "teach") === "practice") return false;
+	if (target !== null && !organization.folders.some((f) => f.id === target)) return false;
+	return currentChatFolder(organization, chat) !== target;
+}
+
+/**
+ * Sidebar drag state. dragChatId is set only by the sidebar list's own
+ * dragstart (bubbled from a SourceDragRow inside it) after readDragPayload
+ * confirms a source payload for a chat for which isDraggable(chat) is true;
+ * drops are accepted only when the drop payload's id equals dragChatId.
+ */
+export function useSidebarChatDrag(deps: {
+	organization: SidebarOrganization | null;
+	chats: readonly ChatListItem[];
+	moveChat: (chatId: string, parentId: string | null) => Promise<string | null>;
+}): {
+	dragChatId: string | null;
+	/** undefined = no highlighted target; null = Outside folders; string = folder id. */
+	dropTarget: string | null | undefined;
+	error: string | null;
+	containerProps: { onDragStart(e: DragEvent): void; onDragEnd(e: DragEvent): void };
+	targetProps(target: string | null): { onDragOver(e: DragEvent): void; onDragLeave(e: DragEvent): void; onDrop(e: DragEvent): void };
+} {
+	const [dragChatId, setDragChatId] = useState<string | null>(null);
+	const [dropTarget, setDropTarget] = useState<string | null | undefined>(undefined);
+	const [error, setError] = useState<string | null>(null);
+
+	const containerProps = {
+		onDragStart(e: DragEvent) {
+			setError(null);
+			const organization = deps.organization;
+			if (organization === null) return;
+			const payload = readDragPayload(e.dataTransfer.getData(SOURCE_DRAG_TYPE));
+			if (payload === null || payload.kind !== "source") return;
+			const chat = deps.chats.find((c) => c.id === payload.id);
+			if (!chat || (chat.kind ?? "teach") === "practice") return;
+			setDragChatId(payload.id);
+		},
+		onDragEnd() {
+			setDragChatId(null);
+			setDropTarget(undefined);
+		},
+	};
+
+	const targetProps = (target: string | null) => ({
+		onDragOver(e: DragEvent) {
+			if (!Array.from(e.dataTransfer.types).includes(SOURCE_DRAG_TYPE)) return;
+			const organization = deps.organization;
+			if (dragChatId === null || organization === null || !canDropChat(organization, deps.chats, dragChatId, target)) {
+				e.dataTransfer.dropEffect = "none";
+				setDropTarget((previous) => (previous === target ? undefined : previous));
+				return;
+			}
+			e.preventDefault();
+			e.stopPropagation();
+			e.dataTransfer.dropEffect = "move";
+			setDropTarget(target);
+		},
+		onDragLeave(e: DragEvent) {
+			if (e.currentTarget.contains(e.relatedTarget as Node | null)) return;
+			setDropTarget((previous) => (previous === target ? undefined : previous));
+		},
+		onDrop(e: DragEvent) {
+			const raw = e.dataTransfer.getData(SOURCE_DRAG_TYPE);
+			if (raw === "") return;
+			e.preventDefault();
+			e.stopPropagation();
+			const id = dragChatId;
+			setDragChatId(null);
+			setDropTarget(undefined);
+			const payload = readDragPayload(raw);
+			const organization = deps.organization;
+			if (payload === null || payload.kind !== "source" || id === null || payload.id !== id) return;
+			if (organization === null || !canDropChat(organization, deps.chats, id, target)) return;
+			void deps.moveChat(id, target).then((failure) => {
+				if (failure !== null) setError(failure);
+			});
+		},
+	});
+
+	return { dragChatId, dropTarget, error, containerProps, targetProps };
 }
 
 /** Pre-send validation against the freshest snapshot (server validation

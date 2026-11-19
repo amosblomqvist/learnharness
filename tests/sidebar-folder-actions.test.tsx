@@ -12,6 +12,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+	canDropChat,
 	createFolderWriter,
 	currentChatFolder,
 	folderPath,
@@ -21,6 +22,7 @@ import {
 	planCreateFolder,
 	planMoveChat,
 	postFolderCommand,
+	readDragPayload,
 	type FolderCommand,
 	type FolderWriteResult,
 } from "../components/sidebar-folder-actions.tsx";
@@ -145,6 +147,37 @@ describe("currentChatFolder", () => {
 		assert.equal(currentChatFolder(org, chat("c_null")), null, "explicit folderId null");
 		assert.equal(currentChatFolder(org, chat("c_ghost")), null, "unknown folder id");
 		assert.equal(currentChatFolder(ORG, chat("c_prac", { kind: "practice" })), null, "practice never folders");
+	});
+});
+
+describe("readDragPayload", () => {
+	it("parses source/folder payloads; anything else is null", () => {
+		assert.deepEqual(readDragPayload(JSON.stringify({ kind: "source", id: "c1" })), { kind: "source", id: "c1" });
+		assert.deepEqual(readDragPayload(JSON.stringify({ kind: "folder", id: "f1" })), { kind: "folder", id: "f1" });
+		for (const raw of [
+			"null",
+			"3",
+			'"text"',
+			"{",
+			JSON.stringify({ kind: "source" }),
+			JSON.stringify({ kind: "source", id: "" }),
+			JSON.stringify({ kind: "other", id: "x" }),
+		]) {
+			assert.equal(readDragPayload(raw), null, raw);
+		}
+	});
+});
+
+describe("canDropChat", () => {
+	it("requires a known teaching chat and an existing target different from the current folder", () => {
+		const chats = [chat("c_alg"), chat("c_root"), chat("c_prac", { kind: "practice" })];
+		assert.equal(canDropChat(ORG, chats, "ghost", "maps"), false, "unknown chat");
+		assert.equal(canDropChat(ORG, chats, "c_prac", "maps"), false, "practice chats never folder");
+		assert.equal(canDropChat(ORG, chats, "c_root", "ghost"), false, "unknown target folder");
+		assert.equal(canDropChat(ORG, chats, "c_alg", "alg"), false, "already in that folder");
+		assert.equal(canDropChat(ORG, chats, "c_root", null), false, "root → Outside folders is a no-op");
+		assert.equal(canDropChat(ORG, chats, "c_alg", "maps"), true, "another existing folder");
+		assert.equal(canDropChat(ORG, chats, "c_alg", null), true, "folder → Outside folders");
 	});
 });
 

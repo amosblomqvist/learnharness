@@ -67,6 +67,9 @@ it("folder contents, including expanded propositions, drop into their containing
 it("folder headers and unlabelled blank space below the tree accept folder/root placement", async () => {
 	await mount(); const data = transfer(); await fire('[data-source-drag-row="b"]', "dragstart", data);
 	await fire('[data-testid="folder-row-f1"]', "drop", data);
+	// A drop ends the gesture (chat-folders S05): the root placement is a
+	// second drag, so it gets its own dragstart.
+	await fire('[data-source-drag-row="b"]', "dragstart", data);
 	await fire('[data-testid="source-root-drop"]', "drop", data);
 	assert.deepEqual(actions, [{ action: "move", kind: "source", id: "b", parentId: "f1" }, { action: "move", kind: "source", id: "b", parentId: null }]);
 	assert.equal(document.querySelector('[data-testid="source-root-drop"]')?.textContent, "");
@@ -77,6 +80,25 @@ it("dragging a folder onto its descendants neither highlights nor performs an in
 	await fire('[data-testid="prop-row-n1"]', "dragover", data);
 	assert.equal(data.dropEffect, "none"); assert.equal(document.querySelector('[data-drop-active="true"]'), null);
 	await fire('[data-testid="prop-row-n1"]', "drop", data); assert.deepEqual(actions, []);
+});
+
+it("a payload without a Chains dragstart is not a Chains move — no highlight, no action; an internal drag in the same mount still works", async () => {
+	await mount();
+	// A foreign drag (the sidebar's, or anything else) carries the same MIME
+	// and a well-formed payload but never fired this tree's dragstart.
+	const foreign = transfer();
+	foreign.setData("application/x-learnharness-source", JSON.stringify({ kind: "source", id: "b" }));
+	const over = await fire('[data-testid="folder-row-f1"]', "dragover", foreign);
+	assert.equal(over.defaultPrevented, false, "not a drop target without a local dragstart");
+	assert.equal(document.querySelector('[data-drop-active="true"]'), null);
+	await fire('[data-testid="folder-row-f1"]', "drop", foreign);
+	await fire('[data-testid="source-root-drop"]', "drop", foreign);
+	assert.deepEqual(actions, []);
+
+	const own = transfer();
+	await fire('[data-source-drag-row="b"]', "dragstart", own);
+	await fire('[data-testid="folder-row-f1"]', "drop", own);
+	assert.deepEqual(actions, [{ action: "move", kind: "source", id: "b", parentId: "f1" }]);
 });
 
 it("rename mode removes the drag surface and input chrome, retaining native text-selection gestures", async () => {

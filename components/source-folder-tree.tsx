@@ -8,7 +8,9 @@ import { chainRow } from "./chain-navigation";
 import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeSeparator, treeBranchLayout, treeRowLayout } from "./tree-presentation";
 
 export type OrganizationChange = (action: OrganizationAction) => Promise<string | void>;
-const DRAG_TYPE = "application/x-learnharness-source";
+/** The shared drag payload MIME — the sidebar's chat drags use the same
+ *  type, and each screen accepts drops only for gestures it started. */
+export const SOURCE_DRAG_TYPE = "application/x-learnharness-source";
 const RowEditing = createContext<((editing: boolean) => void) | null>(null);
 
 /** Keep the existing row as the drag surface, not the editor. A transient,
@@ -21,7 +23,7 @@ export function SourceDragRow({ kind, id, name, enabled, children, ...props }: H
 		<div {...props} data-source-drag-row={id} draggable={enabled && !editing}
 			onDragStart={(event) => {
 				if (!enabled || editing || (event.target as Element).closest('input:not([type="checkbox"]),textarea,[contenteditable="true"]')) { event.preventDefault(); return; }
-				event.dataTransfer.setData(DRAG_TYPE, JSON.stringify({ kind, id }));
+				event.dataTransfer.setData(SOURCE_DRAG_TYPE, JSON.stringify({ kind, id }));
 				event.dataTransfer.effectAllowed = "move";
 				const preview = event.currentTarget.ownerDocument.createElement("div");
 				preview.dataset.sourceDragPreview = "";
@@ -134,9 +136,12 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 		|| state.folders.some((f) => f.parentId === id && visibleFolder(f.id));
 	const dropProps = (parentId: string | null) => onAction ? {
 		onDragOver(event: DragEvent) {
-			if (!Array.from(event.dataTransfer.types).includes(DRAG_TYPE)) return;
+			if (!Array.from(event.dataTransfer.types).includes(SOURCE_DRAG_TYPE)) return;
+			/* Only a drag this tree started is a target — a foreign payload
+			   (the sidebar's chat drag, external data) never highlights. */
+			if (draggedItem === undefined) return;
 			event.preventDefault(); event.stopPropagation();
-			const valid = draggedItem?.kind !== "folder" || canMoveFolder(state, draggedItem.id, parentId);
+			const valid = draggedItem.kind !== "folder" || canMoveFolder(state, draggedItem.id, parentId);
 			event.dataTransfer.dropEffect = valid ? "move" : "none";
 			setDropTarget(valid ? parentId : undefined);
 		},
@@ -146,14 +151,16 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 			setDropTarget((previous) => previous === parentId ? undefined : previous);
 		},
 		onDrop(event: DragEvent) {
-			const raw = event.dataTransfer.getData(DRAG_TYPE);
+			const raw = event.dataTransfer.getData(SOURCE_DRAG_TYPE);
 			if (!raw) return;
 			event.preventDefault(); event.stopPropagation();
 			setDropTarget(undefined); setDraggedItem(undefined);
+			if (draggedItem === undefined) return;
 			let item: { kind?: unknown; id?: unknown };
 			try { item = JSON.parse(raw); } catch { return; }
 			if (!item || typeof item !== "object") return;
 			if ((item.kind !== "source" && item.kind !== "folder") || typeof item.id !== "string") return;
+			if (item.kind !== draggedItem.kind || item.id !== draggedItem.id) return;
 			if (item.kind === "folder" && !canMoveFolder(state, item.id, parentId)) return;
 			void onAction({ action: "move", kind: item.kind, id: item.id, parentId }).catch(() => {});
 		},
@@ -204,7 +211,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 	};
 	return <div className="flex flex-1 flex-col" onDragStart={(event) => {
 		try {
-			const item = JSON.parse(event.dataTransfer.getData(DRAG_TYPE));
+			const item = JSON.parse(event.dataTransfer.getData(SOURCE_DRAG_TYPE));
 			if (item && (item.kind === "source" || item.kind === "folder") && typeof item.id === "string") setDraggedItem(item);
 		} catch { /* An unrelated native text/file drag is not an organization move. */ }
 	}} onDragEnd={() => { setDropTarget(undefined); setDraggedItem(undefined); }}>
