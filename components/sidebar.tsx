@@ -17,7 +17,6 @@ import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { fuzzyScore } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem, ChatListResponse } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
@@ -25,6 +24,7 @@ import { notifySettingsSaved } from "@/components/settings-signal";
 import { PluginWidgets } from "@/components/plugins";
 import { PluginSidebarActions } from "@/components/plugin-chrome";
 import { createSidebarRefresh } from "@/components/sidebar-refresh";
+import { buildSidebarFolderView, enterKbdChat, nextKbdChat, SidebarFolderTree } from "@/components/sidebar-folder-tree";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
@@ -430,23 +430,59 @@ function SessionsSidebar() {
 		router.push("/chat/new");
 	}, [router]);
 
-	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
-	 * fuzzyScore — prefix beats word-boundary beats scattered. Empty query
-	 * keeps the natural list order (scores are all 0, sort is stable). */
-	const shown = useMemo(() => {
-		const q = query.trim();
-		let list = chats;
-		if (list && kindFilter !== "all") {
-			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
-		}
-		if (!list) return list;
-		if (!q) return list;
-		return list
-			.map((c) => ({ c, score: fuzzyScore(q, c.title) }))
-			.filter((r): r is { c: (typeof list)[number]; score: number } => r.score !== null)
-			.sort((a, b) => b.score - a.score)
-			.map((r) => r.c);
-	}, [chats, query, kindFilter]);
+	/* Chat folders (chat-folders S03): the session list is a TREE of the
+	   shared folders carried by the same snapshot. kindChats is the
+	   kind-filtered chat list (null until the first snapshot); view is the
+	   rendered tree — buildSidebarFolderView owns query matching, folder
+	   reveal and the visible-chat order the keyboard walk follows. */
+	const kindChats = useMemo(() => {
+		if (!chats) return null;
+		if (kindFilter === "all") return chats;
+		return chats.filter((c) => (c.kind ?? "teach") === kindFilter);
+	}, [chats, kindFilter]);
+
+	/* Expansion state (owner decisions): manual expansion is a plain Set —
+	   empty on load, every folder starts collapsed. While searching, branches
+	   open by default and explicit collapses ride searchFolds, keyed to the
+	   query text exactly like chain-table's folds — any query change resets
+	   them, and clearing the query returns to the manual set untouched. */
+	const [expandedIds, setExpandedIds] = useState<Set<string>>(() => new Set<string>());
+	const [searchFolds, setSearchFolds] = useState({ query: "", ids: new Set<string>() });
+	useEffect(() => {
+		setSearchFolds({ query, ids: new Set() });
+	}, [query]);
+	const foldedForQuery = useMemo(
+		() => (searchFolds.query === query ? searchFolds.ids : new Set<string>()),
+		[searchFolds, query],
+	);
+	const view = useMemo(
+		() =>
+			kindChats === null
+				? null
+				: buildSidebarFolderView(kindChats, snapshot?.organization ?? null, query, expandedIds, foldedForQuery),
+		[kindChats, snapshot, query, expandedIds, foldedForQuery],
+	);
+
+	const toggleFolder = useCallback(
+		(folderId: string) => {
+			if (query.trim() === "") {
+				setExpandedIds((prev) => {
+					const next = new Set(prev);
+					if (next.has(folderId)) next.delete(folderId);
+					else next.add(folderId);
+					return next;
+				});
+				return;
+			}
+			setSearchFolds((prev) => {
+				const ids = new Set(prev.query === query ? prev.ids : []);
+				if (ids.has(folderId)) ids.delete(folderId);
+				else ids.add(folderId);
+				return { query, ids };
+			});
+		},
+		[query],
+	);
 
 	/* The list snapshot (chat-folders S02): GET /api/chats carries the chat
 	   list AND the shared source organization in one payload, replaced
@@ -573,16 +609,17 @@ function SessionsSidebar() {
 	);
 
 	/* ── Keyboard seams (shortcut wave A, 2026-09-17; search-walk round
-	   2026-10-10) ── ⌘⇧F focuses the search field — and THE SEARCH OWNS THE
-	   WALK: ↑/↓ cycle the filtered list (wrap — "cycle"), Enter opens the
-	   walked row, or the FIRST match when nothing is walked (owner,
-	   2026-10-10 — the quick-open pattern: ⌘⇧F, type, Enter, done). The
-	   Alt+↑/↓/↵ global cycle was RETIRED the same round: barely used,
-	   felt laggy. The selection is a row index into `shown`, so the walk
-	   follows whatever the query + kind filter leave. Mouse and keyboard
-	   coexist: hovering doesn't claim, a click or an open clears the
-	   selection. */
-	const [kbdIndex, setKbdIndex] = useState<number | null>(null);
+	   2026-10-10; folders S03) ── ⌘⇧F focuses the search field — and THE
+	   SEARCH OWNS THE WALK: ↑/↓ cycle the visible chats in tree order
+	   (wrap — "cycle"), Enter opens the walked chat, or the FIRST visible
+	   one when nothing is walked (owner, 2026-10-10 — the quick-open
+	   pattern: ⌘⇧F, type, Enter, done). The Alt+↑/↓/↵ global cycle was
+	   RETIRED the same round: barely used, felt laggy. The selection is a
+	   CHAT ID into the view's visibleChatIds — chats inside collapsed
+	   branches never join the walk, and a snapshot refresh can't slide the
+	   highlight onto a neighbor row. Mouse and keyboard coexist: hovering
+	   doesn't claim, a click or an open clears the selection. */
+	const [kbdChatId, setKbdChatId] = useState<string | null>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
 	const listRef = useRef<HTMLDivElement>(null);
 
@@ -679,12 +716,14 @@ function SessionsSidebar() {
 		return () => window.removeEventListener("lh:kbd-sessions-search", onFocusSearch);
 	}, [open, toggle, interactions]);
 
-	// Keep the kbd-selected row in view (the rows are the container's only
-	// buttons, so the index matches).
+	// Keep the kbd-selected chat row in view — folder buttons share the
+	// list now, so the target is the row's own data attribute, not an index.
 	useEffect(() => {
-		if (kbdIndex === null) return;
-		listRef.current?.querySelectorAll("button")[kbdIndex]?.scrollIntoView({ block: "nearest" });
-	}, [kbdIndex]);
+		if (kbdChatId === null) return;
+		listRef.current
+			?.querySelector(`[data-sidebar-chat="${CSS.escape(kbdChatId)}"]`)
+			?.scrollIntoView({ block: "nearest" });
+	}, [kbdChatId]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -777,8 +816,8 @@ function SessionsSidebar() {
 							onChange={(e) => {
 								setQuery(e.target.value);
 								// The list reorders under the query every keystroke —
-								// a stale walk index would point at the wrong row.
-								setKbdIndex(null);
+								// a stale walk target would point at the wrong row.
+								setKbdChatId(null);
 							}}
 							// THE SEARCH OWNS THE WALK (owner, 2026-10-10 — the
 							// retired Alt+↑/↓/↵ cycle's successor): ↑/↓ cycle the
@@ -800,23 +839,21 @@ function SessionsSidebar() {
 								}
 								// Modified keys belong to the surface (⇧↵ etc.).
 								if (e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-								const n = shown?.length ?? 0;
-								if (n === 0) return;
+								const ids = view?.visibleChatIds ?? [];
+								if (ids.length === 0) return;
 								if (e.key === "ArrowDown" || e.key === "ArrowUp") {
 									// The rows move, not the caret.
 									e.preventDefault();
 									const dir = e.key === "ArrowDown" ? 1 : -1;
-									setKbdIndex((i) =>
-										i === null || i >= n ? (dir === 1 ? 0 : n - 1) : (i + dir + n) % n,
-										);
+									setKbdChatId((id) => nextKbdChat(ids, id, dir));
 									return;
 								}
 								if (e.key === "Enter") {
-									const target = shown![kbdIndex !== null && kbdIndex < n ? kbdIndex : 0];
+									const target = enterKbdChat(ids, kbdChatId);
 									if (!target) return;
 									e.preventDefault();
-									router.push(`/chat/${target.id}`);
-									setKbdIndex(null);
+									router.push(`/chat/${target}`);
+									setKbdChatId(null);
 									e.currentTarget.blur();
 								}
 							}}
@@ -856,35 +893,39 @@ function SessionsSidebar() {
 				</div>
 
 				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
-					{shown === null ? (
+					{view === null ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">Loading…</div>
-					) : shown.length === 0 ? (
+					) : view.roots.length === 0 ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">
 							{query.trim() ? "No sessions match." : "No sessions yet."}
 						</div>
 					) : (
-						shown.map((c, i) =>
-							renamingId === c.id ? (
-								<RenameRow
-									key={c.id}
-									chat={c}
-									onCommit={(next) => void commitRename(c.id, next)}
-									onCancel={() => setRenamingId(null)}
-								/>
-							) : (
-								<SessionRow
-									key={c.id}
-									chat={c}
-									active={pathname === `/chat/${c.id}`}
-									kbdSelected={i === kbdIndex}
-									onOpen={() => {
-										setKbdIndex(null);
-										router.push(`/chat/${c.id}`);
-									}}
-									onContextMenu={(e) => openContext(e, c)}
-								/>
-							),
-						)
+						<SidebarFolderTree
+							view={view}
+							onToggleFolder={toggleFolder}
+							renderChat={(c) =>
+								renamingId === c.id ? (
+									<RenameRow
+										key={c.id}
+										chat={c}
+										onCommit={(next) => void commitRename(c.id, next)}
+										onCancel={() => setRenamingId(null)}
+									/>
+								) : (
+									<SessionRow
+										key={c.id}
+										chat={c}
+										active={pathname === `/chat/${c.id}`}
+										kbdSelected={c.id === kbdChatId}
+										onOpen={() => {
+											setKbdChatId(null);
+											router.push(`/chat/${c.id}`);
+										}}
+										onContextMenu={(e) => openContext(e, c)}
+									/>
+								)
+							}
+						/>
 					)}
 				</div>
 
