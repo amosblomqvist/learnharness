@@ -33,7 +33,7 @@ export const sidebarRowBox = (depth: number) => ({ marginLeft: sidebarRuleInset(
 export const sidebarFolderBox = (depth: number) => ({ marginLeft: sidebarRuleInset(depth), paddingLeft: sidebarRowPadding(depth) - CHEVRON_INSET - sidebarRuleInset(depth) });
 
 export const SIDEBAR_COMPACT_ROW = "h-8";
-export const sidebarNameFont = (compact: boolean) => compact ? "font-ui text-sm leading-5" : "font-prose text-(length:--lh-prose-size)";
+export const sidebarNameFont = (compact: boolean) => compact ? "font-ui font-normal text-sm leading-5" : "font-prose font-normal text-(length:--lh-prose-size)";
 
 export function SidebarFolderRule({ depth, edge }: { depth: number; edge: "top" | "bottom" }) {
 	return <div aria-hidden="true" data-sidebar-folder-rule={edge} className={cn("pointer-events-none absolute right-0 z-10 border-b border-border/60", edge === "top" ? "top-0" : "bottom-0")} style={{ left: sidebarRuleInset(depth) }} />;
@@ -131,7 +131,7 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 					style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
 					<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground/70", open && "rotate-90")} />
 					<Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-					<span className={cn("min-w-0 flex-1 truncate font-medium", sidebarNameFont(compact))}>{folder.name}</span>
+					<span className={cn("min-w-0 flex-1 truncate", sidebarNameFont(compact))}>{folder.name}</span>
 				</button>
 			)}
 		</SourceDragRow>
