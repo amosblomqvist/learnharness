@@ -44,6 +44,7 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
 import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
+import { useT } from "@/components/i18n";
 
 /** Local rendering profile for host-mounted, display-only Markdown. Ordinary
  * transcript rendering (including SSR/static Streamdown) stays interactive. */
@@ -145,6 +146,7 @@ export function codeSource(children: ReactNode): string {
  *  still streaming (the trailing open fence), a quiet skeleton instead of a
  *  doomed parse. */
 function MermaidInline({ chart }: { chart: string }) {
+	const t = useT();
 	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const [svg, setSvg] = useState<string | null>(null);
 	const [error, setError] = useState<string | null>(null);
@@ -207,17 +209,17 @@ function MermaidInline({ chart }: { chart: string }) {
 				dangerouslySetInnerHTML={{ __html: svg ?? "" }}
 			/>
 			{!displayOnly && <div className="absolute top-0 right-0 flex items-start gap-0.5">
-				<CopyCorner getText={() => chart} label="Copy diagram source" />
+				<CopyCorner getText={() => chart} label={t("Copy diagram source")} />
 				{overlay && (
 					<Hint
 					// Full-screen overlay copy (tooltip wave) — "session view" was
 					// internal direction-speak for the same thing.
-					label="Open full-screen"
+					label={t("Open full-screen")}
 					side="bottom"
 				>
 <button
 						type="button"
-						aria-label="Expand diagram"
+						aria-label={t("Expand diagram")}
 						data-testid="md-mermaid-expand"
 												className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/md:opacity-100"
 						onClick={(e) => {
@@ -242,6 +244,7 @@ function MermaidInline({ chart }: { chart: string }) {
  *  mounts. The container/look is CSS-melted in globals.css
  *  (data-streamdown="code-block"…). */
 export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
+	const t = useT();
 	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const incomplete = useIsCodeFenceIncomplete();
 	const { children, className, node, ...rest } = props;
@@ -266,7 +269,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	const fallback = (
 		<div className="group/md relative" data-testid="md-code">
-			{!displayOnly && <CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />}
+			{!displayOnly && <CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label={t("Copy code")} />}
 			<CodeBlock
 				code={source}
 				language={language}
@@ -384,6 +387,7 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
  *  horizontal-scroller for wide ones, with the corner copy. The copy
  *  serializes the REAL DOM table (the library's own extractor → Markdown). */
 export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
+	const t = useT();
 	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const { children, node, ...rest } = props;
 	const ref = useRef<HTMLTableElement>(null);
@@ -396,7 +400,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 				// cells it hovers over; the scroll container stays under it (the
 				// corner is fixed to the wrapper, not the scrolling table).
 				className="absolute top-1 right-1 z-10"
-				label="Copy table"
+				label={t("Copy table")}
 				getText={() => (ref.current ? tableDataToMarkdown(extractTableDataFromElement(ref.current)) : "")}
 			/>}
 			<div className="overflow-x-auto">
@@ -425,6 +429,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
  *  in the MathML <annotation>; read from the DOM on click, no re-parse).
  *  Every other span passes through untouched. */
 export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
+	const t = useT();
 	const displayOnly = useContext(MarkdownDisplayOnlyContext);
 	const { children, className, node, ...rest } = props;
 	const ref = useRef<HTMLSpanElement>(null);
@@ -446,7 +451,7 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 		<span className="group/md relative block z-0" data-testid="md-math">
 			{!displayOnly && <CopyCorner
 				className="absolute top-0 right-0 z-10"
-				label="Copy equation source"
+				label={t("Copy equation source")}
 				getText={() => ref.current?.querySelector("annotation")?.textContent ?? ""}
 			/>}
 			<span ref={ref} className={className} {...rest}>

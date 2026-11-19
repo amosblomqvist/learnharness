@@ -55,6 +55,7 @@ import { NativeSubscriptionBackgroundAccess, SubscriptionConnections } from "@/c
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
 import { ThinkingMenuList } from "@/components/settings/model-menu";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { useT } from "@/components/i18n";
 
 /** The pickers' slot identity — same roster language as the Agent
  *  section's slot rows. */
@@ -160,16 +161,17 @@ export function SetupKeysBody({
 	isCustom?: boolean;
 	onCustomSaved?: () => void;
 }) {
+	const t = useT();
 	return (
 		<div className="flex flex-col gap-3 px-6 py-5" data-testid="setup-stage-keys">
 			<p className="text-xs text-muted-foreground">
-				Choose your AI provider and paste its API key. You’ll pick your models next.
+				{t("Choose your AI provider and paste its API key. You’ll pick your models next.")}
 			</p>
 			<div className="flex flex-col gap-2">
 				<div ref={menuAnchor} className="relative max-w-96">
 					<button
 						type="button"
-						aria-label="Provider"
+						aria-label={t("Provider")}
 						data-testid="setup-key-provider"
 						aria-expanded={menuOpen}
 						onClick={onToggleMenu}
@@ -203,7 +205,7 @@ export function SetupKeysBody({
 								onKeyDown={(e) => {
 									if (e.key === "Enter" && value.trim()) onSave();
 								}}
-								placeholder="Paste key…"
+								placeholder={t("Paste key…")}
 								aria-label={`${provider.label} key`}
 								data-testid="setup-key-input"
 								disabled={saving}
@@ -228,7 +230,7 @@ export function SetupKeysBody({
 					</p>
 				)}
 			</div>
-			<div className="mt-2 border-t border-border/60 pt-4"><h3 className="mb-3 font-ui text-xs text-muted-foreground">Subscriptions</h3><SubscriptionConnections setup /></div>
+			<div className="mt-2 border-t border-border/60 pt-4"><h3 className="mb-3 font-ui text-xs text-muted-foreground">{t("Subscriptions")}</h3><SubscriptionConnections setup /></div>
 		</div>
 	);
 }
@@ -258,6 +260,7 @@ export function SetupDialog(props: SetupDialogProps) {
 }
 
 function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
+	const t = useT();
 	const controller = useInteractionLayers();
 	const { catalog, failed, refresh } = useModelCatalog();
 	const providerStageSeen = useRef(false);
@@ -431,17 +434,17 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 		onSave={() => void saveKey()}
 	/>;
 
-	return <HostDialog open onClose={() => { onClose(); return "closed"; }} aria-label="Set up your models"
+	return <HostDialog open onClose={() => { onClose(); return "closed"; }} aria-label={t("Set up your models")}
 		backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80", "data-testid": "setup-backdrop" }}
 		frame={<div data-testid="setup-dialog"
 			className="settings-dialog-pop flex max-h-[85vh] w-[640px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
 			onClick={(e) => e.stopPropagation()} />}>
 				<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
-					<h2 className="font-title text-2xl tracking-tight">Set up your models</h2>
-					<Hint label="Close" binding="escape" side="left">
+					<h2 className="font-title text-2xl tracking-tight">{t("Set up your models")}</h2>
+					<Hint label={t("Close")} binding="escape" side="left">
 <button
 						type="button"
-						aria-label="Close setup"
+						aria-label={t("Close setup")}
 						data-testid="setup-close"
 						onClick={onClose}
 						className="ml-auto text-muted-foreground transition-colors hover:text-foreground"
@@ -453,17 +456,17 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 
 				{failed && (
 					<p role="alert" data-testid="setup-catalog-error" className="px-6 py-3 text-sm text-foreground">
-						Model catalog could not be loaded. Check the connection and retry. <button type="button" data-testid="setup-retry" className="underline" onClick={refresh}>Retry</button>
+						{t("Model catalog could not be loaded. Check the connection and retry.")} <button type="button" data-testid="setup-retry" className="underline" onClick={refresh}>{t("Retry")}</button>
 					</p>
 				)}
 				{stage === "loading" ? (
-					!failed && <p data-testid="setup-stage-loading" role="status" className="px-6 py-5 text-xs text-muted-foreground">Loading models…</p>
+					!failed && <p data-testid="setup-stage-loading" role="status" className="px-6 py-5 text-xs text-muted-foreground">{t("Loading models…")}</p>
 				) : stage === "keys" ? (
 					<div className="flex flex-col px-6 py-5">{keysBody}</div>
 				) : (
 					<div className="flex flex-col gap-4 overflow-y-auto px-6 py-5" data-testid="setup-stage-pickers">
 						<p className="text-xs text-muted-foreground">
-							Pick the model for each tier. All three are required before chats can start.
+							{t("Pick the model for each tier. All three are required before chats can start.")}
 						</p>
 						{SLOT_ORDER.map((slot) => {
 							const entry = picked[slot];
@@ -478,24 +481,24 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 							return (
 								<div key={slot} data-testid={`setup-slot-${slot}`} className="flex flex-col gap-1.5">
 									<span className="flex items-center gap-1.5">
-										<span className="font-ui text-sm text-foreground">{SLOT_META[slot].label}</span>
+										<span className="font-ui text-sm text-foreground">{t(SLOT_META[slot].label)}</span>
 										{!catalog?.slots?.[slot]?.model && !picked[slot] && (
 											<span
 												data-testid={`setup-needed-${slot}`}
 												className="rounded-sm border border-border px-1 py-0.5 text-[10px] font-normal tracking-wide text-muted-foreground"
 											>
-												needed
+												{t("needed")}
 											</span>
 										)}
 									</span>
-									<span className="text-xs text-muted-foreground/70">{SLOT_META[slot].roster}</span>
+									<span className="text-xs text-muted-foreground/70">{t(SLOT_META[slot].roster)}</span>
 									{slot !== "strong" && <><ChatGPTBackgroundAccess provider={entry?.provider} /><NativeSubscriptionBackgroundAccess provider={entry?.provider} /></>}
 									<div className="flex items-center gap-2">
 										<div className="relative flex-1">
 											<Hint label={entry ? `${entry.provider}:${entry.id}` : "Pick a model…"}>
 											<button
 												type="button"
-												aria-label={`${SLOT_META[slot].label} model`}
+												aria-label={`${t(SLOT_META[slot].label)} ${t("model")}`}
 												data-testid={`setup-trigger-${slot}`}
 												aria-expanded={openMenu?.slot === slot && openMenu.kind === "model"}
 												onClick={() => setOpenMenu(openMenu?.slot === slot && openMenu.kind === "model" ? null : { slot, kind: "model" })}
@@ -553,7 +556,7 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 										<div className="relative">
 											<button
 												type="button"
-												aria-label={`${SLOT_META[slot].label} thinking`}
+												aria-label={`${t(SLOT_META[slot].label)} ${t("thinking")}`}
 												data-testid={`setup-thinking-${slot}`}
 												aria-expanded={openMenu?.slot === slot && openMenu.kind === "thinking"}
 												disabled={!entry}

@@ -4,6 +4,7 @@ import { useCallback, useId, useLayoutEffect, useRef, type ReactNode } from "rea
 import { InteractionLayerOwner, useInteractionLayer, type CloseOutcome } from "./interaction-layers";
 import type { SurfaceBoundary } from "./plugin-surface-targets";
 import type { PluginSurfaceProps } from "@/src/core";
+import { useT } from "@/components/i18n";
 
 interface SurfaceRuntime {
 	signal: AbortSignal;
@@ -54,6 +55,7 @@ export function PluginSurface({ pluginId, title, background = "dimmed", onClose,
 	opener: HTMLElement | null;
 	children: ReactNode;
 }) {
+	const t = useT();
 	const root = useRef<HTMLDivElement>(null);
 	const popup = useRef<HTMLDivElement>(null);
 	const layerId = useId();
@@ -107,7 +109,7 @@ export function PluginSurface({ pluginId, title, background = "dimmed", onClose,
 				className={`pointer-events-auto absolute inset-0 flex min-h-0 flex-col overflow-hidden outline-none ${background === "opaque" ? "bg-background" : "bg-background/80 backdrop-blur-sm"}`}
 				style={{ zIndex: 100 + layer.order }}>
 			<div className="min-h-0 w-full flex-1 overflow-y-auto">{children}</div>
-			<button type="button" onClick={close} aria-label="Close" title="Close"
+			<button type="button" onClick={close} aria-label={t("Close")} title={t("Close")}
 				className="absolute right-2 top-2 z-10 size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
 				<svg viewBox="0 0 16 16" className="mx-auto size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
 					<path d="M4 4l8 8M12 4l-8 8" />

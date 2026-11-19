@@ -12,8 +12,10 @@ import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { Hint } from "@/components/ui/hint";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Button } from "@/components/ui/button";
+import { useT } from "@/components/i18n";
 
 export function PluginViewScreen({ pluginId, viewId }: { pluginId: string; viewId: string }) {
+	const t = useT();
 	const { snapshot } = usePlugins();
 	const { open } = useSettingsDialog();
 	const pathname = usePathname();
@@ -31,17 +33,17 @@ export function PluginViewScreen({ pluginId, viewId }: { pluginId: string; viewI
 			<h1 data-plugin-chrome-title className="min-w-0 truncate font-title text-3xl tracking-tight">{view?.name ?? plugin?.info.manifest?.name ?? "Plugin"}</h1>
 			<div className="min-w-4 flex-1" aria-hidden="true" />
 			<PluginTopBarActions context={{ placement: "top-bar", surface: "plugin-view", pluginId, viewId }} />
-			<Hint label="Plugin settings" side="bottom">
-				<Button variant="ghost" size="icon" aria-label="Plugin settings" title="Plugin settings" className="shrink-0" onClick={() => open(`plugin:${pluginId}`)}><SettingsIcon className="size-4" /></Button>
+			<Hint label={t("Plugin settings")} side="bottom">
+				<Button variant="ghost" size="icon" aria-label={t("Plugin settings")} title={t("Plugin settings")} className="shrink-0" onClick={() => open(`plugin:${pluginId}`)}><SettingsIcon className="size-4" /></Button>
 			</Hint>
 		</TopBar>
 		<div ref={bodyRef} className="relative flex min-h-0 min-w-0 flex-1 flex-col">
 			<div data-plugin-view-scroll="" className="relative flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
 				{snapshot.error && <p role="alert" className="px-5 py-3 text-xs text-destructive">{snapshot.error}</p>}
 				{plugin?.error && <p role="alert" className="px-5 py-3 text-xs text-destructive">{plugin.error}</p>}
-				{loading ? <p role="status" className="px-5 py-4 text-xs text-muted-foreground">Loading plugin…</p>
+				{loading ? <p role="status" className="px-5 py-4 text-xs text-muted-foreground">{t("Loading plugin…")}</p>
 					: view && plugin?.info.enabled ? <PluginMountPoint key={`${pluginId}/${viewId}/${plugin.info.revision}`} pluginId={pluginId} mount={view.mount} label={view.name} />
-						: <div className="px-5 py-4 text-sm text-muted-foreground"><p>{unavailable}</p><Link href="/" className="mt-3 inline-block underline">Back to home</Link></div>}
+						: <div className="px-5 py-4 text-sm text-muted-foreground"><p>{unavailable}</p><Link href="/" className="mt-3 inline-block underline">{t("Back to home")}</Link></div>}
 			</div>
 			<SurfaceRegion target={surfaceTarget} />
 		</div>

@@ -7,6 +7,7 @@ import { IMPORT_ACCEPT } from "@/lib/notes-import-limits.ts";
 import { useInteractionLayer, useInteractionLayers } from "@/components/interaction-layers";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { createNotesImportQueue, EMPTY_IMPORT_QUEUE, notesPath } from "./notes-import-queue";
+import { useT } from "@/components/i18n";
 
 export { MAX_IMPORT_BYTES } from "@/lib/notes-import-limits.ts";
 export { notesPath } from "./notes-import-queue";
@@ -91,6 +92,7 @@ export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () 
 /** PR198's shared Files / Folder native picker. Unlike the donor, it remains
  * available while work is running; later selections join the SAME queue. */
 export function NotesImportControl({ importing, onImportFiles }: { importing: boolean; onImportFiles: (files: FileList | null) => void }) {
+	const t = useT();
 	const filesRef = useRef<HTMLInputElement>(null);
 	const folderRef = useRef<HTMLInputElement>(null);
 	const [open, setOpen] = useState(false);
@@ -110,15 +112,15 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 			onBlur={(event) => { if (interactions.isElementEligible(panelRef.current) && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
 			<input ref={filesRef} type="file" multiple accept={IMPORT_ACCEPT} className="hidden" onChange={onChange} />
 			<input ref={folderRef} type="file" {...{ webkitdirectory: "" }} className="hidden" onChange={onChange} />
-			<Hint label="Extract files into the graph" side="bottom">
+			<Hint label={t("Extract files into the graph")} side="bottom">
 				<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" data-testid="import-notes"
 					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent">
 					<WaypointsIcon className="size-3" />{importing ? "Extracting…" : "Extract files…"}
 				</button>
 			</Hint>
 			{open && (
-				<div ref={panelRef} role="menu" aria-label="Extract files into the graph" aria-describedby={hintId} style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }} className="absolute right-0 top-full mt-1 w-52 rounded-lg border bg-card p-1 shadow-lg">
-					<div role="none"><p id={hintId} className="px-2 py-1.5 text-xs leading-relaxed text-muted-foreground">For lessons, attach material to a session instead.</p></div>
+				<div ref={panelRef} role="menu" aria-label={t("Extract files into the graph")} aria-describedby={hintId} style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }} className="absolute right-0 top-full mt-1 w-52 rounded-lg border bg-card p-1 shadow-lg">
+					<div role="none"><p id={hintId} className="px-2 py-1.5 text-xs leading-relaxed text-muted-foreground">{t("For lessons, attach material to a session instead.")}</p></div>
 					{choices.map(([label, input]) => <button key={label} type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
 						onClick={() => { setOpen(false); input.current?.click(); }}>{label}</button>)}
 				</div>

@@ -41,6 +41,7 @@ import { dispatchFocusedPluginShortcut, hasLegacyInteractionForeground, isIntera
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
 import { usePlugins } from "./plugins";
 import { dispatchPluginActionShortcut, pluginShortcutScopeLabel, usePluginShortcutRows } from "./plugin-shortcuts";
+import { useT } from "@/components/i18n";
 
 // Re-exported for the contract pin (tests/keyboard-toggle-sidebar.test.ts):
 // the dispatcher composes event names through the ONE helper — a second
@@ -167,6 +168,7 @@ export function KeyboardShortcuts() {
  *  Until the settings milestone ships an editor, this is how shortcuts
  *  stay discoverable. */
 function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
+	const t = useT();
 	const headingId = useId();
 	const { rows: pluginRows } = usePluginShortcutRows();
 	const scopes = ["global", "chat", "graph"] as const;
@@ -187,8 +189,8 @@ function CheatSheet({ open, onClose }: { open: boolean; onClose: () => void }) {
 			/>}
 		>
 				<div className="mb-4 flex items-baseline justify-between">
-					<span id={headingId} role="heading" aria-level={2} className="text-sm font-medium text-card-foreground">Keyboard shortcuts</span>
-					<span className="text-xs text-muted-foreground">Esc to close</span>
+					<span id={headingId} role="heading" aria-level={2} className="text-sm font-medium text-card-foreground">{t("Keyboard shortcuts")}</span>
+					<span className="text-xs text-muted-foreground">{t("Esc to close")}</span>
 				</div>
 				{scopes.map((scope) => {
 					const actions = KEYBOARD_ACTIONS.filter((a) => a.scope === scope);

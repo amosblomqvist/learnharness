@@ -6,6 +6,7 @@ import { MenuShell } from "./menu-shell";
 import { citationLabel, type TutorCitation } from "@/src/core";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { useT } from "@/components/i18n";
 
 /** Where a composer chip's link sits in the draft (for comment edits). */
 export type ComposerCitationSource = { start: number; end: number; link: string; host: HTMLElement };
@@ -29,12 +30,13 @@ export interface CitationChipProps {
 
 /** A sent quote, opened from its transcript chip. */
 export function CitationQuoteCard({ citation, onOpenSource }: { citation: TutorCitation; onOpenSource: () => void }) {
+	const t = useT();
 	return (
 		<div className="flex flex-col gap-2">
 			<blockquote className="max-h-64 overflow-y-auto whitespace-pre-wrap border-l-2 border-muted-foreground/30 pl-2 text-sm">{citation.text}</blockquote>
 			{citation.comment ? <p className="whitespace-pre-wrap text-sm">{citation.comment}</p> : null}
 			<button type="button" className="inline-flex items-center gap-1 self-start text-xs font-medium text-muted-foreground hover:text-foreground" onClick={onOpenSource}>
-				<ArrowUpRight aria-hidden="true" className="size-3.5" />Go to source
+				<ArrowUpRight aria-hidden="true" className="size-3.5" />{t("Go to source")}
 			</button>
 		</div>
 	);

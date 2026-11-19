@@ -77,6 +77,7 @@ import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeHeader, TreeSelectionSpacer, TreeSeparator, treeBranchLayout, treeColumnLayout, treeRowLayout } from "./tree-presentation";
+import { useT } from "@/components/i18n";
 
 /** The sortable columns (owner ruling: all three — consistency). */
 export type ChainSortCol = "name" | "props" | "created";
@@ -166,6 +167,7 @@ export function ChainTableBody({
 	selectMode?: boolean;
 	onSelect?: () => void;
 }) {
+	const t = useT();
 	const [creatingFolder, setCreatingFolder] = useState(false);
 	const tableRef = useRef<HTMLDivElement>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
@@ -321,7 +323,7 @@ export function ChainTableBody({
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
 					{chains.length} {chains.length === 1 ? "chain" : "chains"} · {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
 				</span>
-				{onOrganizationChange && <button type="button" aria-label="Add folder" data-testid="add-source-folder"
+				{onOrganizationChange && <button type="button" aria-label={t("Add folder")} data-testid="add-source-folder"
 					onClick={() => setCreatingFolder(true)} className="lh-no-drag rounded-lg p-2 text-muted-foreground hover:bg-accent"><FolderPlusIcon className="size-4" /></button>}
 				<div className="relative shrink-0">
 					<SearchIcon className="absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -330,8 +332,8 @@ export function ChainTableBody({
 						value={query}
 						data-testid="chain-table-search"
 						onChange={(e) => onQuery(e.target.value)}
-						placeholder="Search nodes…"
-						aria-label="Search nodes"
+						placeholder={t("Search nodes…")}
+						aria-label={t("Search nodes")}
 						spellCheck={false}
 						className="lh-no-drag h-8 w-56 rounded-lg border bg-background pl-8 pr-3 text-xs outline-none placeholder:text-muted-foreground focus:border-ring"
 					/>
@@ -340,7 +342,7 @@ export function ChainTableBody({
 					type="button"
 					data-testid="chain-table-close"
 					onClick={onClose}
-					aria-label="Close chains"
+					aria-label={t("Close chains")}
 					className="lh-no-drag flex size-8 shrink-0 items-center justify-center rounded-lg border border-border/70 bg-card/80 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 				>
 					<XIcon className="size-4" />
@@ -364,7 +366,7 @@ export function ChainTableBody({
 						aria-sort={sort.col === "name" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
 						{...treeColumnLayout({ grow: true, align: "left", className: "flex items-center gap-1 transition-colors hover:text-foreground" })}
 					>
-						Name {dirIcon("name")}
+						{t("Name")} {dirIcon("name")}
 					</button>
 					<button
 						type="button"
@@ -373,7 +375,7 @@ export function ChainTableBody({
 						aria-sort={sort.col === "props" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
 						{...treeColumnLayout({ widthClassName: "w-14", align: "right", className: "flex items-center justify-end gap-1 transition-colors hover:text-foreground" })}
 					>
-						Props {dirIcon("props")}
+						{t("Props")} {dirIcon("props")}
 					</button>
 					<button
 						type="button"
@@ -382,7 +384,7 @@ export function ChainTableBody({
 						aria-sort={sort.col === "created" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
 						{...treeColumnLayout({ widthClassName: "w-20", align: "right", className: "flex items-center justify-end gap-1 transition-colors hover:text-foreground" })}
 					>
-						Created {dirIcon("created")}
+						{t("Created")} {dirIcon("created")}
 					</button>
 				</TreeHeader>
 
@@ -395,7 +397,7 @@ export function ChainTableBody({
 				</div>}
 				{groups.length === 0 && (directory?.organization.folders.length ?? 0) === 0 && (
 					<div data-testid="chain-table-nomatch" className="px-4 pt-3 text-xs text-muted-foreground">
-						No matching chains.
+						{t("No matching chains.")}
 					</div>
 				)}
 
@@ -427,24 +429,24 @@ export function ChainTableBody({
 								<TreeGuide selectionColumn depth={0} data-testid={`cluster-thread-${group.key}`} />
 							)}
 							{/* The cluster row: birth-session group header. */}
-							<SourceDragRow {...chainRow(["source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={Boolean(onOrganizationChange && group.birth)} {...treeRowLayout()}>
+							<SourceDragRow {...chainRow(["source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? t("unlabeled")} enabled={Boolean(onOrganizationChange && group.birth)} {...treeRowLayout()}>
 								<RowCheckbox
 									disabled={selectMode ? group.nodeIds.length === 0 : !directory?.sources.some((s) => s.id === group.birth)}
 									checked={selectMode ? selectedCount === group.nodeIds.length && group.nodeIds.length > 0 : group.birth !== null && selectedSources.has(group.birth)}
 									indeterminate={selectMode ? selectedCount > 0 && selectedCount < group.nodeIds.length : false}
 									onToggle={(next) => { if (selectMode) onToggleNodes(group.nodeIds, next); else if (group.birth) onToggleSource(group.birth, next); }}
 									testid={`cluster-checkbox-${group.key}`}
-									label={selectMode ? `Select everything born in ${group.label ?? "unlabeled"}` : `Select source ${group.label ?? "unlabeled"}`}
+									label={selectMode ? t("Select everything born in {label}", { label: group.label ?? t("unlabeled") }) : t("Select source {label}", { label: group.label ?? t("unlabeled") })}
 								/>
-								<Expander open={open} onClick={() => toggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={`Expand cluster ${group.label ?? "unlabeled"}`} />
-								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={`Expand source ${group.label ?? "unlabeled"}`}
+								<Expander open={open} onClick={() => toggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={t("Expand cluster {label}", { label: group.label ?? t("unlabeled") })} />
+								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={t("Expand source {label}", { label: group.label ?? t("unlabeled") })}
 									onClick={() => toggleCluster(group.key)} className={`flex h-5 w-3.5 shrink-0 items-center justify-center rounded ${empty ? "text-muted-foreground/60" : "text-muted-foreground"} transition-colors hover:bg-accent hover:text-foreground`}>
 									{open ? <BookOpenIcon className="size-3.5 shrink-0" /> : <BookIcon className="size-3.5 shrink-0" />}
 								</button>
 								{onOrganizationChange && group.birth && group.kind !== null
 									? <EditableSourceName name={group.label ?? ""} muted={empty} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
-									: <span className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground/60" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
-								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
+									: <span className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground/60" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">{t("unlabeled")}</span>}</span>}
+								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">{t("notes")}</span>}
 								<TreeCell widthClassName="w-14" align="right" className="text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
 								</TreeCell>
@@ -482,7 +484,7 @@ export function ChainTableBody({
 													indeterminate={selectedInChain > 0 && selectedInChain < memberIds.length}
 													onToggle={(next) => onToggleNodes(memberIds, next)}
 													testid={`chain-checkbox-${chain.id}`}
-													label={`Select chain ${nameOf(chain.conclusion)}`}
+													label={t("Select chain {name}", { name: nameOf(chain.conclusion) })}
 												/> : <TreeSelectionSpacer />}
 												<Expander open={chainOpen} onClick={() => onToggleChain(chain.id)} testid={`chain-toggle-${chain.id}`} label={`Expand chain ${nameOf(chain.conclusion)}`} />
 												{/* The chain line: proposition names as faint-outlined
@@ -552,7 +554,7 @@ export function ChainTableBody({
 																checked={selection.has(id)}
 																onToggle={(next) => onToggleNodes([id], next)}
 																testid={`prop-checkbox-${id}`}
-																label={`Select node ${node.name}`}
+																label={t("Select node {name}", { name: node.name })}
 															/> : <TreeSelectionSpacer />}
 															<ToolContentResponse
 																mode="static"
@@ -585,7 +587,7 @@ export function ChainTableBody({
 					>
 						<span data-testid="chain-selected-summary" className="text-xs font-medium">
 							{selectMode ? <>{selection.size} {selection.size === 1 ? "node" : "nodes"} → {derived.length} {derived.length === 1 ? "chain" : "chains"}</>
-								: <>{selectedSources.size} {selectedSources.size === 1 ? "source" : "sources"}{fullySelectedFolders.size > 0 && ` · ${fullySelectedFolders.size} ${fullySelectedFolders.size === 1 ? "folder" : "folders"}`}</>}
+								: <>{selectedSources.size === 1 ? t("1 source") : t("{count} sources", { count: selectedSources.size })}{fullySelectedFolders.size > 0 && t(" · {count} folders", { count: fullySelectedFolders.size })}</>}
 						</span>
 						<button
 							type="button"
@@ -593,17 +595,17 @@ export function ChainTableBody({
 							onClick={onClear}
 							className="rounded-full px-2.5 py-1 text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 						>
-							Clear
+							{t("Clear")}
 						</button>
 						{selectMode ? (
 							<button
 								type="button"
 								data-testid="chain-practice-done"
 								onClick={onSelect}
-								aria-label={`Done picking — ${selection.size} ${selection.size === 1 ? "proposition" : "propositions"} selected`}
+								aria-label={selection.size === 1 ? t("Done picking — 1 proposition selected") : t("Done picking — {count} propositions selected", { count: selection.size })}
 								className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/80"
 							>
-								Done
+								{t("Done")}
 							</button>
 						) : (
 							<>
@@ -616,11 +618,11 @@ export function ChainTableBody({
 								type="button"
 								data-testid="chain-delete"
 								onClick={onDelete}
-								aria-label="Delete selected sources and folders"
+								aria-label={t("Delete selected sources and folders")}
 								className="flex items-center gap-1.5 rounded-full border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs font-medium text-destructive transition-colors hover:bg-destructive/20"
 							>
 								<Trash2Icon aria-hidden="true" className="size-3.5" />
-								Delete
+								{t("Delete")}
 							</button>
 							</>
 						)}

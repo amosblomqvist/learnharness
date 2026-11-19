@@ -11,6 +11,7 @@ import { highlightRange } from "./citation-source";
 import { PATH_SOURCE_ATTRIBUTE } from "./path-input-dom";
 import { UPDATE_CITATION_EVENT, type UpdateCitationDetail } from "./path-input";
 import { resolveCitationRange } from "./selection-text";
+import { useT } from "@/components/i18n";
 
 /** The comment popover for one composer citation: anchored to the cited
  *  tutor text (highlighted while open), else to the chip. */
@@ -22,6 +23,7 @@ export function CitationCommentPopover({ target, transcript, composer, onClose, 
 	/** Save-and-send: the composer's own send, run after the link updates. */
 	onSend: () => void;
 }) {
+	const t = useT();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const anchorRef = useRef<HTMLElement | null>(null);
 	const controller = useInteractionLayers();
@@ -96,7 +98,7 @@ export function CitationCommentPopover({ target, transcript, composer, onClose, 
 	return (
 		<MenuShell testid="citation-comment-popover" anchorRef={anchorRef} getAnchorRect={getAnchorRect} preferredSide="down" align="right" menuClass="w-80 rounded-xl border bg-popover p-2 text-sm shadow-xl"
 			onClose={(reason) => dismissRef.current(reason === "escape" ? "escape" : "outside")}>
-			<div ref={rootRef} role="dialog" aria-label="Edit citation comment">
+			<div ref={rootRef} role="dialog" aria-label={t("Edit citation comment")}>
 				<CitationCommentEditor
 					initial={citation.comment}
 					onDraftChange={(draft) => { draftRef.current = draft; }}

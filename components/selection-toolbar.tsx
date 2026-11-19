@@ -11,6 +11,7 @@ import {
 	isSelectionRectVisible, observeSelectionActions, resolveSelectionActionPosition,
 	type RectLike, type SelectionActionPoint,
 } from "./selection-actions";
+import { useT } from "@/components/i18n";
 
 /** One button on the toolbar. Cite is the first; side questions adds more. */
 export interface SelectionAction {
@@ -36,6 +37,7 @@ export function SelectionToolbarButtons({ capture, actions, onDone }: {
 	actions: readonly SelectionAction[];
 	onDone: () => void;
 }) {
+	const t = useT();
 	return (
 		<>
 			{actions.filter((action) => action.visible(capture)).map((action) => {
@@ -48,14 +50,14 @@ export function SelectionToolbarButtons({ capture, actions, onDone }: {
 						size="xs"
 						variant="outline"
 						disabled={disabled !== null}
-						aria-label={disabled ?? action.ariaLabel}
+						aria-label={t(disabled ?? action.ariaLabel)}
 						className="bg-popover shadow-md dark:bg-popover dark:hover:bg-accent"
 						// Keep the learner's selection alive through the click.
 						onPointerDown={(event) => event.preventDefault()}
 						onClick={() => { if (runSelectionAction(action, capture)) onDone(); }}
 					>
 						<Icon aria-hidden="true" className="size-3.5" />
-						{disabled ?? action.label}
+						{t(disabled ?? action.label)}
 					</Button>
 				);
 			})}
@@ -104,6 +106,7 @@ function selectionVisible(range: Range, viewport: HTMLElement): boolean {
 
 /** The floating toolbar over a tutor-text selection inside `viewport`. */
 export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement | null; actions: readonly SelectionAction[] }) {
+	const t = useT();
 	const controller = useOptionalInteractionLayers();
 	const [state, setState] = useState<{ capture: CapturedSelection; position: SelectionActionPoint } | null>(null);
 	const toolbarRef = useRef<HTMLDivElement>(null);
@@ -184,7 +187,7 @@ export function SelectionToolbar({ viewport, actions }: { viewport: HTMLElement 
 		<div
 			ref={toolbarRef}
 			role="toolbar"
-			aria-label="Selection actions"
+			aria-label={t("Selection actions")}
 			data-testid="selection-toolbar"
 			className="fixed z-50 flex max-w-[calc(100vw-1rem)] gap-1"
 			style={{ left: state.position.x, top: state.position.y }}

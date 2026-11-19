@@ -8,6 +8,7 @@ import { usePlugins } from "./plugins";
 import { problemMountContext } from "./plugin-problem-dock";
 import { ThinkingBlock } from "./thinking-block";
 import { SubmittedImages } from "./submitted-images";
+import { useT } from "@/components/i18n";
 
 export function PluginProblemSubmitted(props: { data: unknown; snapshot?: PluginProblemSnapshot | null; chatId: string }) {
   const { snapshot } = usePlugins();
@@ -17,10 +18,12 @@ export function PluginProblemSubmitted(props: { data: unknown; snapshot?: Plugin
 export function PluginProblemSubmittedContent({ data, snapshot, chatId, registration }: {
   data: unknown; snapshot?: PluginProblemSnapshot | null; chatId: string; registration?: ProblemRendererRegistration;
 }) {
+	const t = useT();
   const submitted = readPluginProblemSubmission(data);
-  return submitted ? <SubmittedBody submitted={submitted} snapshot={snapshot} chatId={chatId} registration={registration} /> : <p role="status">Problem unavailable</p>;
+  return submitted ? <SubmittedBody submitted={submitted} snapshot={snapshot} chatId={chatId} registration={registration} /> : <p role="status">{t("Problem unavailable")}</p>;
 }
 function SubmittedBody({ submitted, snapshot, chatId, registration }: { submitted: PluginProblemSubmission; snapshot?: PluginProblemSnapshot | null; chatId: string; registration?: ProblemRendererRegistration }) {
+	const t = useT();
   const root = useRef<HTMLDivElement>(null), header = useRef<HTMLSpanElement>(null), footer = useRef<HTMLDivElement>(null);
   const [failed, setFailed] = useState(false);
   const bound = snapshot?.problemId === submitted.problemId && snapshot.pluginId === submitted.pluginId && snapshot.typeId === submitted.typeId && snapshot.contractVersion === submitted.contractVersion;
@@ -49,7 +52,7 @@ function SubmittedBody({ submitted, snapshot, chatId, registration }: { submitte
       {submitted.processing && <pre className="mt-2 overflow-auto text-xs">{JSON.stringify(submitted.processing, null, 2)}</pre>}
     </div>}
     <SubmittedImages images={submitted.images?.submission} />
-    {(submitted.thinking !== "" || !!submitted.images?.thinking?.length) && <ThinkingBlock label="YOUR THINKING" text={submitted.thinking} images={submitted.images?.thinking} inCard />}
+    {(submitted.thinking !== "" || !!submitted.images?.thinking?.length) && <ThinkingBlock label={t("YOUR THINKING")} text={submitted.thinking} images={submitted.images?.thinking} inCard />}
     <div ref={footer} />
   </div>;
 }

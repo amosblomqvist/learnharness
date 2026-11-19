@@ -5,9 +5,11 @@ import { readPluginQuestionAnswer, readPluginQuestionCancellation } from "@/src/
 import { usePlugins } from "./plugins";
 import { SubmittedImages } from "./submitted-images";
 import { PluginQuestionAnswered } from "./plugin-question-slots";
+import { useT } from "@/components/i18n";
 
 /** Visibility boundary precedes all generic tool/input/error rendering. */
 export function PluginQuestionPart({ part, chatId }: { part: LhViewPart; chatId: string }) {
+	const t = useT();
 	const { snapshot: plugins } = usePlugins();
 	const annotation = part.pluginQuestion;
 	if (!annotation) return null;
@@ -22,7 +24,7 @@ export function PluginQuestionPart({ part, chatId }: { part: LhViewPart; chatId:
 			</>;
 		}
 		const cancellation = readPluginQuestionCancellation(part.result?.details ?? part.output, snapshot);
-		if (cancellation) return <p className="py-1 text-xs text-muted-foreground">Question dismissed</p>;
+		if (cancellation) return <p className="py-1 text-xs text-muted-foreground">{t("Question dismissed")}</p>;
 	}
 	return <p role="status" className="py-1 text-xs text-muted-foreground">{annotation.status === "unreadable" || part.state === "output-error" ? "Question unavailable" : "Preparing question…"}</p>;
 }

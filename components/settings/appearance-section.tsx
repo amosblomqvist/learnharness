@@ -47,6 +47,7 @@ import { BUNDLED_READING_FONTS, useAppearance } from "./appearance.tsx";
 import { FontMenuList } from "./model-menu";
 import { ThemeCards } from "./theme-cards.tsx";
 import { CommitInput, SettingsMenuTrigger, SettingsRow, Toggle } from "./controls.tsx";
+import { useT } from "@/components/i18n";
 
 /** The factory reading family — the DEFAULT row's identity (unset =
  *  this). Exported for tests. */
@@ -165,10 +166,11 @@ function ColorOverrideRow({
 	effective: string;
 	onCommit: (next: string) => boolean | Promise<boolean>;
 }) {
+	const t = useT();
 	const { label, note } = COLOR_LABELS[colorKey];
-	const empty = `Empty = ${themeColor}`;
+	const empty = t("Empty = {color}", { color: themeColor });
 	return (
-		<SettingsRow label={label} hint={note ? `${note} · ${empty}` : empty} testid={`row-color-${colorKey}`}>
+		<SettingsRow label={t(label)} hint={note ? `${t(note)} · ${empty}` : empty} testid={`row-color-${colorKey}`}>
 			<span className="flex items-center gap-2">
 				<span
 					aria-hidden
@@ -179,7 +181,7 @@ function ColorOverrideRow({
 				<CommitInput
 					value={value}
 					placeholder={themeColor}
-					ariaLabel={`${label.toLowerCase()} hex`}
+					ariaLabel={`${t(label)} ${t("hex")}`}
 					testid={LEGACY_TESTIDS[colorKey] ?? `input-color-${colorKey}`}
 					onCommit={onCommit}
 				/>
@@ -197,6 +199,7 @@ export function AppearanceSection({
 	/** PUT the whole appearance section; the page re-applies on success. */
 	onSectionChange: (next: AppearanceSettings) => boolean | Promise<boolean>;
 }) {
+	const t = useT();
 	const { appearance: resolved, activeTheme, colors, themes, refreshThemes } = useAppearance();
 	const md = appearance?.mdRendering;
 
@@ -298,9 +301,9 @@ export function AppearanceSection({
 			<div data-testid="group-colors" className="mt-5 flex flex-col gap-2">
 				<div className="flex items-end justify-between gap-4">
 					<p className="text-xs uppercase tracking-widest text-muted-foreground">
-						Colors{" "}
+						{t("Colors")}{" "}
 						<span className="normal-case tracking-normal text-muted-foreground/70">
-							· overrides on top of the theme, kept when you switch
+							{t("· overrides on top of the theme, kept when you switch")}
 						</span>
 					</p>
 					<button
@@ -309,7 +312,7 @@ export function AppearanceSection({
 						onClick={() => onSectionChange(clearColorOverrides(appearance))}
 						className="h-6 shrink-0 rounded-sm px-2 font-ui text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
-						Reset all
+						{t("Reset all")}
 					</button>
 				</div>
 				<div className="grid grid-cols-2 gap-x-10 gap-y-2">
@@ -325,9 +328,9 @@ export function AppearanceSection({
 					))}
 				</div>
 			</div>
-			<p className="mt-5 mb-2 text-xs uppercase tracking-widest text-muted-foreground">Typography</p>
+			<p className="mt-5 mb-2 text-xs uppercase tracking-widest text-muted-foreground">{t("Typography")}</p>
 			<SettingsRow
-				label="Reading font"
+				label={t("Reading font")}
 				hint={`Empty = ${DEFAULT_READING_FONT}`}
 				testid="row-font"
 			>
@@ -342,7 +345,7 @@ export function AppearanceSection({
 						const triggerButton = (
 							<SettingsMenuTrigger
 								value={appearance?.fontFamily || DEFAULT_READING_FONT}
-								aria-label="Reading font"
+								aria-label={t("Reading font")}
 								aria-expanded={fontMenuOpen}
 								data-testid="font-trigger"
 								onClick={openFontMenu}
@@ -352,7 +355,7 @@ export function AppearanceSection({
 						return fontMenuOpen ? (
 							triggerButton
 						) : (
-							<Hint label="Choose from your installed fonts" side="left">
+							<Hint label={t("Choose from your installed fonts")} side="left">
 								{triggerButton}
 							</Hint>
 						);
@@ -383,12 +386,12 @@ export function AppearanceSection({
 					)}
 				</span>
 			</SettingsRow>
-			<SettingsRow label="Reading font size" hint={`${resolved.proseFontSize}px`} testid="row-prose-size">
+			<SettingsRow label={t("Reading font size")} hint={`${resolved.proseFontSize}px`} testid="row-prose-size">
 				<CommitInput
 					type="number"
 					value={String(appearance?.proseFontSize ?? "")}
 					placeholder="16"
-					ariaLabel="prose font size"
+					ariaLabel={t("prose font size")}
 					testid="input-prose-size"
 					onCommit={(v) => {
 						// Empty = factory default (owner, fix wave): omit the key so the record
@@ -403,26 +406,26 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Code ligatures" testid="row-code-ligatures">
+			<SettingsRow label={t("Code ligatures")} testid="row-code-ligatures">
 				<Toggle
 					checked={resolved.codeLigatures}
-					label="Code ligatures"
+					label={t("Code ligatures")}
 					onChange={(on) => onSectionChange({ ...appearance, codeLigatures: on })}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Session names in serif" testid="row-session-serif">
+			<SettingsRow label={t("Session names in serif")} testid="row-session-serif">
 				<Toggle
 					checked={appearance?.sessionNameSerif ?? true}
-					label="session names serif"
+					label={t("session names serif")}
 					onChange={(on) => onSectionChange({ ...appearance, sessionNameSerif: on })}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Heading weight" hint={`${resolved.mdRendering.headingWeight}`} testid="row-heading-weight">
+			<SettingsRow label={t("Heading weight")} hint={`${resolved.mdRendering.headingWeight}`} testid="row-heading-weight">
 				<CommitInput
 					type="number"
 					value={String(md?.headingWeight ?? "")}
 					placeholder="900"
-					ariaLabel="heading weight"
+					ariaLabel={t("heading weight")}
 					testid="input-heading-weight"
 					onCommit={(v) => {
 						// Empty = factory default (owner, fix wave): Number("") is 0, so
@@ -450,6 +453,7 @@ export function GraphSection({
 	graph: GraphSettings | undefined;
 	onSectionChange: (next: GraphSettings) => boolean | Promise<boolean>;
 }) {
+	const t = useT();
 	// Wave 7 collapse (owner ruling 2026-09-23): the section is the MASTER
 	// SWITCH — the embedding/clustering/labeling rungs are gone; clustering
 	// is the free birth-session partition derived on read, labels ARE session
@@ -470,10 +474,10 @@ export function GraphSection({
 			    switch below arrived: off ≠ no graph, off = the graph stops
 			    growing. The testid keeps the old name's shape (row-enabled) so
 			    this stays one rename, not a test re-pin. */}
-			<SettingsRow label="Extraction" hint="Off = the graph stops growing" testid="graph-row-enabled">
+			<SettingsRow label={t("Extraction")} hint={t("Off = the graph stops growing")} testid="graph-row-enabled">
 				<Toggle
 					checked={graph?.enabled ?? true}
-					label="extraction enabled"
+					label={t("extraction enabled")}
 					onChange={(on) =>
 						// Compose, never replace-whole (the section PUT is, but the
 					// row must not drop its sibling field — fixed with the budget
@@ -486,15 +490,15 @@ export function GraphSection({
 			    round): display-only. Off = the home shows the chains view
 			    instead of the canvas. The ledgers, the pipeline, everything
 			    data keeps working — that is the extraction switch above. */}
-			<SettingsRow label="Graph rendering" hint="Off = home shows the chains view" testid="graph-row-rendering">
+			<SettingsRow label={t("Graph rendering")} hint={t("Off = home shows the chains view")} testid="graph-row-rendering">
 				<Toggle
 					checked={graph?.rendering ?? true}
-					label="graph rendering enabled"
+					label={t("graph rendering enabled")}
 					onChange={(on) => onSectionChange({ ...graph, rendering: on })}
 				/>
 			</SettingsRow>
 			<SettingsRow
-				label="Extraction chunk budget"
+				label={t("Extraction chunk budget")}
 				hint={`${resolved.extractionChunkTokens} tok`}
 				testid="graph-row-chunk-tokens"
 			>
@@ -502,7 +506,7 @@ export function GraphSection({
 					type="number"
 					value={String(graph?.extractionChunkTokens ?? "")}
 					placeholder={String(resolved.extractionChunkTokens)}
-					ariaLabel="extraction chunk budget"
+					ariaLabel={t("extraction chunk budget")}
 					testid="input-chunk-tokens"
 					onCommit={(v) => {
 						// Empty = factory default (the fix-wave discipline): absence is

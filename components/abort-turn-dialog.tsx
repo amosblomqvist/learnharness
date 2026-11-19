@@ -3,6 +3,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { useT } from "@/components/i18n";
 
 /**
  * The ESC-abort guard (owner, 2026-10-02): the global Esc → abort chain
@@ -62,6 +63,7 @@ export function AbortTurnBody({
 	busy?: boolean;
 	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 }) {
+	const t = useT();
 	const backdropDismiss = useBackdropDismiss(onClose);
 	const copy = COPY[mode];
 	const frame = (
@@ -70,11 +72,11 @@ export function AbortTurnBody({
 				onClick={(e) => e.stopPropagation()}
 			>
 				<h2 className="text-sm font-semibold text-card-foreground" data-testid="abort-turn-title">
-					{copy.title}
+					{t(copy.title)}
 				</h2>
 				<p className="mt-1.5 text-xs text-muted-foreground" data-testid="abort-turn-line">
-					{copy.line}
-					{busy && mode !== "turn" ? " The working turn stops too." : ""}
+					{t(copy.line)}
+					{busy && mode !== "turn" ? t(" The working turn stops too.") : ""}
 				</p>
 				<div className="mt-4 flex justify-end gap-2">
 					<button
@@ -83,7 +85,7 @@ export function AbortTurnBody({
 						onClick={onClose}
 						className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
 					>
-						Cancel
+						{t("Cancel")}
 					</button>
 					<button
 						type="button"
@@ -92,13 +94,13 @@ export function AbortTurnBody({
 						// Destructive red — the app's established destructive pair.
 						className="rounded-sm border border-destructive/50 bg-destructive/10 px-3 py-1.5 text-xs text-destructive transition-colors hover:bg-destructive/20"
 					>
-						{copy.action}
+						{t(copy.action)}
 					</button>
 				</div>
 			</div>
 	);
 	if (renderFrame) return renderFrame(frame);
-	return <div role="dialog" aria-modal="true" aria-label={copy.title} data-testid="abort-turn-dialog"
+	return <div role="dialog" aria-modal="true" aria-label={t(copy.title)} data-testid="abort-turn-dialog"
 		className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm"
 		{...backdropDismiss}>{frame}</div>;
 }

@@ -34,6 +34,7 @@ import {
 } from "@/src/core";
 import { SettingsRow } from "./controls.tsx";
 import { coreShortcutBindings, pluginShortcutScopeLabel, useKeymapRevision, usePluginShortcutRows } from "../plugin-shortcuts";
+import { useT } from "@/components/i18n";
 
 const SCOPES: { scope: KeyScope; label: string }[] = [
 	{ scope: "global", label: "Global" },
@@ -55,6 +56,7 @@ export function nextOverrides(
 }
 
 export function KeyboardSection() {
+	const t = useT();
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLDivElement>(null);
 	const [overrides, setOverrides] = useState<KeymapOverrides>({});
@@ -120,24 +122,25 @@ export function KeyboardSection() {
 		<>
 			{rebindError && rebinding && <p role="alert" className="text-xs text-destructive">{rebindError}</p>}
 			{SCOPES.map(({ scope, label }) => {
+				const scopeLabel = t(label);
 				const actions = KEYBOARD_ACTIONS.filter((a) => a.scope === scope);
 				if (!actions.length) return null;
 				return (
 					<div key={scope} ref={scope === "global" ? rootRef : undefined} data-testid={`kbd-scope-${scope}`}>
-						<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">{label}</p>
+						<p className="mb-1 text-xs uppercase tracking-widest text-muted-foreground/70">{scopeLabel}</p>
 						<div className="flex flex-col gap-2">
 							{actions.map((def) => {
 								const effective = overrides[def.id] ?? def.binding;
 								return (
 									<SettingsRow
 										key={def.id}
-										label={def.label}
-										hint={def.displayOnly ? "Fixed — part of this screen" : undefined}
+										label={t(def.label)}
+										hint={def.displayOnly ? t("Fixed — part of this screen") : undefined}
 										testid={`kbd-row-${def.id}`}
 									>
 										<span className="flex items-center gap-2">
 											<kbd className="rounded-sm border border-border bg-muted px-1.5 py-0.5 font-ui text-xs">
-												{rebinding === def.id ? "Press keys…" : formatBinding(effective)}
+												{rebinding === def.id ? t("Press keys…") : formatBinding(effective)}
 											</kbd>
 											{def.displayOnly ? null : rebinding === def.id ? (
 												<button
@@ -145,7 +148,7 @@ export function KeyboardSection() {
 													onClick={() => setRebinding(null)}
 													className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
 												>
-													Cancel
+													{t("Cancel")}
 												</button>
 											) : (
 												<>
@@ -155,7 +158,7 @@ export function KeyboardSection() {
 														data-testid={`kbd-rebind-${def.id}`}
 														className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
 													>
-														Rebind
+														{t("Rebind")}
 													</button>
 													{overridden(def.id) && (
 														<button
@@ -164,7 +167,7 @@ export function KeyboardSection() {
 															data-testid={`kbd-reset-${def.id}`}
 															className="text-xs text-muted-foreground/70 underline-offset-2 hover:text-foreground hover:underline"
 														>
-															Reset
+															{t("Reset")}
 														</button>
 													)}
 												</>
@@ -183,23 +186,23 @@ export function KeyboardSection() {
 					hint={`${pluginShortcutScopeLabel(row)}${row.reason ? ` · Inactive: ${row.reason}` : ""}`} testid={`kbd-row-${row.id}`}>
 					<span className="flex items-center gap-2">
 						<kbd className="rounded-sm border border-border bg-muted px-1.5 py-0.5 font-ui text-xs">{rebinding === row.id ? "Press keys…" : row.binding ? formatBinding(row.binding) : "Unbound"}</kbd>
-						{rebinding === row.id ? <button type="button" onClick={() => { setRebinding(null); setRebindError(null); }} className="text-xs text-muted-foreground">Cancel</button> : <>
-							<button type="button" data-testid={`kbd-rebind-${row.id}`} onClick={() => beginRebind(row.id)} className="text-xs text-muted-foreground hover:underline">Rebind</button>
-							{row.binding && <button type="button" data-testid={`kbd-clear-${row.id}`} onClick={() => { saveOverrides(nextOverrides(loadOverrides(), row.id, "")); setNonce(n => n + 1); }} className="text-xs text-muted-foreground hover:underline">Clear</button>}
-							{overrides[row.id] !== undefined && <button type="button" data-testid={`kbd-reset-${row.id}`} onClick={() => { saveOverrides(nextOverrides(loadOverrides(), row.id, null)); setNonce(n => n + 1); }} className="text-xs text-muted-foreground hover:underline">Reset</button>}
+						{rebinding === row.id ? <button type="button" onClick={() => { setRebinding(null); setRebindError(null); }} className="text-xs text-muted-foreground">{t("Cancel")}</button> : <>
+							<button type="button" data-testid={`kbd-rebind-${row.id}`} onClick={() => beginRebind(row.id)} className="text-xs text-muted-foreground hover:underline">{t("Rebind")}</button>
+							{row.binding && <button type="button" data-testid={`kbd-clear-${row.id}`} onClick={() => { saveOverrides(nextOverrides(loadOverrides(), row.id, "")); setNonce(n => n + 1); }} className="text-xs text-muted-foreground hover:underline">{t("Clear")}</button>}
+							{overrides[row.id] !== undefined && <button type="button" data-testid={`kbd-reset-${row.id}`} onClick={() => { saveOverrides(nextOverrides(loadOverrides(), row.id, null)); setNonce(n => n + 1); }} className="text-xs text-muted-foreground hover:underline">{t("Reset")}</button>}
 						</>}
 					</span>
 				</SettingsRow>)}</div>
 			</div>)}
 			<div className="mt-1 flex items-center justify-between">
-				<span className="text-xs text-muted-foreground/70">Stored on this device (lh:keymap) — overrides only.</span>
+				<span className="text-xs text-muted-foreground/70">{t("Stored on this device (lh:keymap) — overrides only.")}</span>
 				<button
 					type="button"
 					onClick={resetAll}
 					data-testid="kbd-reset-all"
 					className="text-xs text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
 				>
-					Reset all to defaults
+					{t("Reset all to defaults")}
 				</button>
 			</div>
 		</>

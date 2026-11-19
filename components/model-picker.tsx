@@ -15,6 +15,7 @@ import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-sig
 import { useModelCatalog } from "@/components/model-catalog";
 export { useModelCatalog } from "@/components/model-catalog";
 import { defaultOrderLevel, populateLevel, THINKING_LABEL } from "@/components/thinking-default";
+import { useT } from "@/components/i18n";
 
 /** provider:id → known contextWindow over the cached catalog, mirroring
  * the server's catalogContextLimits join. CLI aliases have no global
@@ -41,6 +42,7 @@ export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Ma
  * no-factory-fallback language: the UI never presents a default model).
  */
 export function ModelControl({ chatId, onModelChange }: { chatId?: string; onModelChange?: (model: string | undefined) => void }) {
+	const t = useT();
 	const { catalog, refresh } = useModelCatalog();
 	const [models, setModels] = useState<ModelsSettings | undefined>();
 	// A successful read with no settings is a legacy session; undefined
@@ -287,7 +289,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				// "Thinking" + its real shortcut via the registry (owner interlude
 				// 2026-09-25): ⇧⇥ cycles the level, so "Thinking (⇧⇥)" —
 				// rebind-live like every Hint suffix.
-				label="Thinking"
+				label={t("Thinking")}
 				action="cycle-thinking"
 				side="bottom"
 			>

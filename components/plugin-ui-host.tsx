@@ -18,6 +18,7 @@ import { HostDialog } from "@/components/host-dialog";
 import { findCurrentSurfaceBoundary, requireSurfaceBoundary } from "./plugin-surface-targets";
 import { PluginSurface } from "./plugin-surface-shell";
 import { isInteractionElementVisible, useInteractionLayers, type CloseOutcome, type CloseReason } from "@/components/interaction-layers";
+import { useT } from "@/components/i18n";
 export { PluginSettingsRows } from "@/components/plugin-settings-rows";
 
 export interface PluginUiFactoryOptions { signal: AbortSignal; pluginId?: string; onError?: (error: unknown) => void }
@@ -336,6 +337,7 @@ function PluginContent({ content, runtime, className }: Pick<PluginDialogProps, 
 }
 
 function PluginDialog({ title, content, onClose, runtime, opener }: PluginDialogProps & { runtime: Runtime; opener: HTMLElement | null }) {
+	const t = useT();
 	const controller = useInteractionLayers();
 	const ownerId = useRef(controller.ownerOf(opener)?.id ?? null);
 	const closing = useRef(false);
@@ -354,7 +356,7 @@ function PluginDialog({ title, content, onClose, runtime, opener }: PluginDialog
 		<div data-plugin-ui-dialog-scroll="" className="min-h-0 overflow-y-auto p-5">
 			<PluginContent content={content} runtime={runtime} />
 		</div>
-		<button type="button" aria-label="Close dialog" title="Close" onClick={close}
+		<button type="button" aria-label={t("Close dialog")} title={t("Close")} onClick={close}
 			className="absolute right-2 top-2 z-10 size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
 			<svg viewBox="0 0 16 16" className="mx-auto size-3.5" fill="none" stroke="currentColor" strokeWidth="1.5">
 				<path d="M4 4l8 8M12 4l-8 8" />

@@ -10,6 +10,7 @@ import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
 import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers } from "./interaction-layers";
 import { INTERACTION_LAYER_Z_BASE } from "./host-dialog";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { useT } from "@/components/i18n";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
  *  desktop bridge. Same validity rule as drops: a file without a usable
@@ -82,6 +83,7 @@ function AttachmentPopup({ anchorRef, rootRef, open, close, children }: {
  * aria-disabled, not disabled, so the tooltip still shows.
  */
 export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HTMLDivElement | null> }) {
+	const t = useT();
 	const controller = useOptionalInteractionLayers();
 	const pickerRef = useRef<HTMLInputElement>(null);
 	const desktop = useDesktopPaths();
@@ -160,7 +162,7 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				<button
 					ref={buttonRef}
 					type="button"
-					aria-label="Attach files"
+					aria-label={t("Attach files")}
 					aria-disabled={!desktop}
 					aria-haspopup="menu"
 					aria-expanded={open}
@@ -184,9 +186,9 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				}}>
 				{open ? <>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
+						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>{t("Files")}</button>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-						onClick={() => { void chooseFolder(); }}>Folder</button>
+						onClick={() => { void chooseFolder(); }}>{t("Folder")}</button>
 				</> : notice}
 			</div></AttachmentPopup>}
 		</div>

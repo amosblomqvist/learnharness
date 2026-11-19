@@ -10,6 +10,7 @@ import { MermaidError } from "@/components/mermaid-error";
 import { Hint } from "@/components/ui/hint";
 import { SvgImage } from "@/components/artifacts/svg-image";
 import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
+import { useT } from "@/components/i18n";
 
 /**
  * SESSION-SCOPED OVERLAYS (owner wave, 2026-09-19): the "fullscreen"
@@ -95,6 +96,7 @@ export function MermaidOverlay({
 	inverted?: boolean;
 	onClose: () => void;
 }) {
+	const t = useT();
 	// ── chart render (own instance, own ids); figure mode uses the raw svg ──
 	const [svg, setSvg] = useState<string | null>(rawSvg ?? null);
 	const [error, setError] = useState<string | null>(null);
@@ -236,12 +238,12 @@ export function MermaidOverlay({
 		>
 			<div className="mb-2 flex items-center gap-2">
 				<span className="text-sm font-medium">{mediaName}</span>
-				<span className="text-xs text-muted-foreground">from this lesson</span>
-				<Hint label="Close" binding="escape" side="left">
+				<span className="text-xs text-muted-foreground">{t("from this lesson")}</span>
+				<Hint label={t("Close")} binding="escape" side="left">
 <button
 					type="button"
 					onClick={onClose}
-					aria-label="Close"
+					aria-label={t("Close")}
 					data-testid="mermaid-overlay-close"
 					className="ml-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 				>
@@ -289,7 +291,7 @@ export function MermaidOverlay({
 							{image ? (
 								// Reuse the figure viewport without re-encoding or inverting raster bytes.
 								// eslint-disable-next-line @next/next/no-img-element
-								<img src={image.src} alt="Submitted image" draggable={false} className="block h-auto w-full" />
+								<img src={image.src} alt={t("Submitted image")} draggable={false} className="block h-auto w-full" />
 							) : rawSvg !== undefined ? (
 								<div
 									data-lh-overlay-chart
@@ -307,12 +309,12 @@ export function MermaidOverlay({
 							)}
 						</div>
 						<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-2">
-							<span className="text-xs text-muted-foreground/60">Drag to pan · scroll to zoom</span>
+							<span className="text-xs text-muted-foreground/60">{t("Drag to pan · scroll to zoom")}</span>
 							<div className="flex gap-1">
-								<Hint label="Zoom out" side="bottom">
+								<Hint label={t("Zoom out")} side="bottom">
 <button
 									type="button"
-									aria-label="Zoom out"
+									aria-label={t("Zoom out")}
 									onClick={() => stepZoom(1 / 1.25)}
 									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
 								>
@@ -329,10 +331,10 @@ export function MermaidOverlay({
 									<MaximizeIcon className="size-3.5" />
 								</button>
 </Hint>
-								<Hint label="Zoom in" side="bottom">
+								<Hint label={t("Zoom in")} side="bottom">
 <button
 									type="button"
-									aria-label="Zoom in"
+									aria-label={t("Zoom in")}
 									onClick={() => stepZoom(1.25)}
 									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
 								>
@@ -345,7 +347,7 @@ export function MermaidOverlay({
 				) : (
 					<div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
 						<span className="inline-block size-4 animate-spin rounded-full border border-current border-b-2" />
-						Rendering diagram…
+						{t("Rendering diagram…")}
 					</div>
 				)}
 			</div>

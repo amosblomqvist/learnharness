@@ -9,6 +9,7 @@ import { useSidebar } from "@/components/sidebar";
 import { useInteractionLayers } from "@/components/interaction-layers";
 import { MenuShell } from "@/components/menu-shell";
 import { Hint } from "@/components/ui/hint";
+import { useT } from "@/components/i18n";
 
 export interface PlacedPluginAction {
 	key: string;
@@ -84,13 +85,14 @@ export function PluginSidebarActions({ children }: { children: ReactNode }) {
 }
 
 export function PluginGraphActions() {
+	const t = useT();
 	const { snapshot } = usePlugins();
 	const { open } = useSidebar();
 	const actions = placedPluginActions(snapshot.plugins, GRAPH_CONTEXT);
 	if (!actions.length) return null;
 	// Only buttons intercept canvas input. Wheel events over a button still
 	// bubble to this scroll container; transparent gaps target the canvas.
-	return <div data-testid="plugin-graph-actions" aria-label="Plugin graph actions"
+	return <div data-testid="plugin-graph-actions" aria-label={t("Plugin graph actions")}
 		className={`lh-plugin-scroll lh-no-drag pointer-events-none absolute bottom-0 left-0 z-10 flex w-[3.25rem] flex-col gap-2 overflow-y-auto p-2 ${open ? "top-0" : "lh-plugin-graph-closed top-11"}`}>
 		{actions.map(item => <ActionButton key={item.key} item={item} context={GRAPH_CONTEXT} iconOnly
 			className="pointer-events-auto flex size-9 shrink-0 items-center justify-center rounded-xl border bg-card/85 text-muted-foreground shadow-lg backdrop-blur transition-colors hover:bg-accent hover:text-foreground" />)}
@@ -127,6 +129,7 @@ export function PluginSessionTopBarActions({ readContext, captureContext, refres
 }
 
 export function PluginTopBarActions({ context, captureContext }: { context: Extract<PluginActionContext, { placement: "top-bar" }>; captureContext?: () => PluginActionContext | undefined }) {
+	const t = useT();
 	const { snapshot } = usePlugins();
 	const actions = placedPluginActions(snapshot.plugins, context);
 	const root = useRef<HTMLDivElement>(null);
@@ -194,12 +197,12 @@ export function PluginTopBarActions({ context, captureContext }: { context: Extr
 			{actions.map(item => <span key={item.key} className={TOP_BUTTON}><ActionIcon action={item.action} /><span className="min-w-0 truncate">{item.action.name}</span></span>)}
 		</div>
 		{actions.slice(0, count).map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} className={TOP_BUTTON} />)}
-		{excess.length > 0 && <Hint label="More plugin actions" side="bottom"><button ref={trigger} type="button" title="More plugin actions" aria-label="More plugin actions"
+		{excess.length > 0 && <Hint label={t("More plugin actions")} side="bottom"><button ref={trigger} type="button" title={t("More plugin actions")} aria-label={t("More plugin actions")}
 			aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen(open => !open)}
 			className="flex size-9 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"><EllipsisIcon className="size-4" /></button></Hint>}
 		{menuOpen && excess.length > 0 && <MenuShell anchorRef={trigger} testid="plugin-top-bar-menu" onClose={(reason) => { setMenuOpen(false); if (reason === "escape") trigger.current?.focus(); return "closed"; }} preferredSide="down" align="right"
 			menuClass="lh-no-drag w-64 rounded-xl border border-border bg-popover p-1 shadow-lg">
-			<div role="menu" aria-label="More plugin actions">
+			<div role="menu" aria-label={t("More plugin actions")}>
 			{excess.map(item => <ActionButton key={item.key} item={item} context={context} captureContext={captureContext} menuItem onRun={() => setMenuOpen(false)}
 				className="flex w-full min-w-0 items-center gap-2 rounded-md px-2 py-2 text-left text-xs text-muted-foreground hover:bg-accent hover:text-foreground" />)}
 			</div>

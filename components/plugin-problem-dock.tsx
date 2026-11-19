@@ -13,6 +13,7 @@ import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { usePlugins } from "./plugins";
 import { finishDictation } from "./dictation";
 import type { PreparePluginProblemSubmission } from "./plugin-submission-adapters";
+import { useT } from "@/components/i18n";
 
 export function problemMountContext(snapshot: PluginProblemSnapshot, chatId: string, signal: AbortSignal): PluginProblemMountContext {
   return Object.freeze({ chatId, problemId: snapshot.problemId, contractVersion: snapshot.contractVersion,
@@ -34,6 +35,7 @@ export function PluginProblemDock(props: PluginProblemDockProps) {
 }
 /** Native practice chrome with one alternative editor; no second problem lifecycle. */
 export function PluginProblemDockContent(props: PluginProblemDockProps & { registration?: ProblemRendererRegistration }) {
+	const t = useT();
   const { snapshot, occurrence, chatId, draft, expanded, ready, available, reconciliation, registration } = props;
   const controller = useOptionalInteractionLayers();
   const root = useRef<HTMLDivElement>(null), editor = useRef<HTMLDivElement>(null);
@@ -122,8 +124,8 @@ export function PluginProblemDockContent(props: PluginProblemDockProps & { regis
       onSubmit={() => {}} preparing={props.preparing || submitting || !ready} compactionRunning={props.compactionRunning} onEscape={props.onEscape}
       customInput={{ thinking: draft.thinking, onThinkingChange(value) { draft.thinking = value; thinkingRevision.current++; render(); }, ready: canSubmit,
         editor: <div className="px-4 py-2">
-          {reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing problem…</p>}
-          {unavailable && <p role="status" className="text-sm text-muted-foreground">Problem unavailable</p>}
+          {reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">{t("Preparing problem…")}</p>}
+          {unavailable && <p role="status" className="text-sm text-muted-foreground">{t("Problem unavailable")}</p>}
           <div ref={editor} hidden={unavailable || failed} />
         </div>,
         prepare: (captureThinking, clearThinking) => { void latestSubmit.current(captureThinking, clearThinking); },

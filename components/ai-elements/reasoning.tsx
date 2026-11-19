@@ -27,6 +27,7 @@ import { transformMathDelimiters } from "@/src/core";
 import { streamdownPlugins, streamdownRehypePlugins, streamdownRemend } from "./message";
 import { mdComponents } from "@/components/md-blocks";
 import { Shimmer } from "./shimmer";
+import { useT } from "@/components/i18n";
 
 interface ReasoningContextValue {
   isStreaming: boolean;
@@ -126,7 +127,7 @@ export const Reasoning = memo(
 export type ReasoningTriggerProps = ComponentProps<
   typeof CollapsibleTrigger
 > & {
-  getThinkingMessage?: (isStreaming: boolean) => ReactNode;
+  getThinkingMessage?: (isStreaming: boolean, t: (text: string) => string) => ReactNode;
 };
 
 /* The settled label (owner round, 2026-10-05): static "Agent's thinking" —
@@ -134,11 +135,11 @@ export type ReasoningTriggerProps = ComponentProps<
    for a few seconds"), bookkeeping for information we knowingly lose. The
    label pairs with the user's collapsed "Your thinking" rows — one
    language; motion (spinner + shimmer) stays the working signal. */
-const defaultGetThinkingMessage = (isStreaming: boolean) => {
+const defaultGetThinkingMessage = (isStreaming: boolean, t: (text: string) => string) => {
   if (isStreaming) {
-    return <Shimmer duration={1}>Thinking...</Shimmer>;
+    return <Shimmer duration={1}>{t("Thinking...")}</Shimmer>;
   }
-  return <p>AGENT’S THINKING</p>;
+  return <p>{t("AGENT’S THINKING")}</p>;
 };
 
 export const ReasoningTrigger = memo(
@@ -149,6 +150,7 @@ export const ReasoningTrigger = memo(
     ...props
   }: ReasoningTriggerProps) => {
     const { isStreaming, isOpen } = useReasoning();
+    const t = useT();
 
     return (
       <CollapsibleTrigger
@@ -175,8 +177,8 @@ export const ReasoningTrigger = memo(
                 the component default (h-3) — IDENTICAL to the placeholder
                 spinner (owner, 2026-10-02): the handoff between the two
                 states must be visually seamless, one size everywhere. */}
-            {isStreaming && <BrailleSpinner label="Thinking" />}
-            {getThinkingMessage(isStreaming)}
+            {isStreaming && <BrailleSpinner label={t("Thinking")} />}
+            {getThinkingMessage(isStreaming, t)}
             <ChevronDownIcon
               className={cn(
                 "size-4 transition-transform",
