@@ -785,8 +785,18 @@ export function AntigravityInstallationStatus() {
 						read-only T3 Code runtime.
 					</p>
 					<p className="text-xs leading-relaxed text-muted-foreground">
-						Antigravity controls billing and quota externally. Verify AI claims independently—they may be
-						inaccurate, incomplete, misleading, or outdated.
+						Antigravity controls billing and quota externally. Per{" "}
+						<a
+							href="https://antigravity.google/docs/faq"
+							target="_blank"
+							rel="noreferrer"
+							className="underline underline-offset-2 hover:text-foreground"
+						>
+							Google&apos;s Antigravity FAQ
+						</a>
+						, wrapping <code className="font-mono">agy</code> in third-party apps is not supported on
+						consumer plans and can result in account suspension or termination. Verify AI claims
+						independently—they may be inaccurate, incomplete, misleading, or outdated.
 					</p>
 				</>
 			)}

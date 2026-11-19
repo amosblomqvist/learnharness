@@ -541,4 +541,9 @@ test("Refresh models button posts to /api/antigravity/models when signed in and 
 	await act(async () => refreshBtn()!.click());
 	assert(calls.includes("POST /api/antigravity/models"));
 	assert.equal(summary(), "4 models available");
+
+	const text = document.body.textContent ?? "";
+	assert.match(text, /third-party apps is not supported on consumer plans/i);
+	assert.match(text, /suspension or termination/i);
+	assert(document.querySelector('a[href="https://antigravity.google/docs/faq"]'));
 });

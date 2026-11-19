@@ -284,7 +284,7 @@ export async function createAntigravityToolBridge(
 			res.end();
 		});
 	});
-	// Hold open tool calls across 10-minute learner question pauses without hitting Node's 5-minute default requestTimeout.
+	// Raise the incoming HTTP request receipt timeout above Node's 5-minute default; this does not govern held-open SSE/tool responses.
 	httpServer.requestTimeout = ANTIGRAVITY_MCP_TOOL_TIMEOUT_MS;
 
 	let port: number;

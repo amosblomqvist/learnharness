@@ -2,7 +2,7 @@
 
 Status: accepted
 
-To integrate Google Antigravity subscriptions into LearnHarness without risking Google account suspension or maintaining hardcoded model lists and rotating private client headers, we use Google's official `agy_acp_server` (and `agy acp` CLI when installed) over ACP stdio, rather than replaying Google OAuth PKCE requests directly against `daily-cloudcode-pa.googleapis.com`.
+To integrate Google Antigravity subscriptions into LearnHarness without maintaining hardcoded model lists and rotating private client headers, we use Google's official `agy_acp_server` (and `agy acp` CLI when installed) over ACP stdio, rather than replaying Google OAuth PKCE requests directly against `daily-cloudcode-pa.googleapis.com`. Per [Google's Antigravity FAQ](https://antigravity.google/docs/faq), wrapping `agy` in third-party apps is not supported on consumer plans and can result in account suspension or termination; this decision does not eliminate that documented policy risk.
 
 ## Consequences
 

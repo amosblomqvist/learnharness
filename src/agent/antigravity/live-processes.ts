@@ -8,8 +8,9 @@ export interface LiveAntigravityProcess {
 	forceCleanupSync(): void;
 }
 
-/** Parked ACP processes stay alive up to 10 minutes idle, strictly under the
- *  30-minute MCP bridge timeout so LearnHarness owns expiry and replay. */
+/** Parked ACP processes stay alive up to 10 minutes idle as an orphan-reap
+ *  ceiling (agy 1.5.12 typically cancels held MCP calls around ~180s and hands
+ *  off to cold-replay). */
 export const LIVE_PROCESS_IDLE_TIMEOUT_MS = ANTIGRAVITY_PARK_IDLE_TIMEOUT_MS;
 
 /** Test seam (mirrors src/agent/claude-code/live-processes.ts). */
