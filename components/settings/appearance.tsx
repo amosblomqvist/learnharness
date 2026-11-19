@@ -53,6 +53,7 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
 		codeLigatures: delta?.codeLigatures ?? f.codeLigatures,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
+		compactSessionList: delta?.compactSessionList ?? f.compactSessionList,
 		mdRendering: {
 			headingWeight: delta?.mdRendering?.headingWeight ?? f.mdRendering.headingWeight,
 			boldColor: delta?.mdRendering?.boldColor ?? f.mdRendering.boldColor,

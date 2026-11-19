@@ -591,6 +591,15 @@ body {
 	display: none;
 }
 
+/* Overlay scroller (components/overlay-scroll.tsx): the native bar is hidden
+   so rows, rules and highlights run to the edge; a thin bar draws on top. */
+.lh-overlay-scroll {
+	scrollbar-width: none;
+}
+.lh-overlay-scroll::-webkit-scrollbar {
+	display: none;
+}
+
 /* Runtime font contracts: Appearance overrides the reading family and,
    independently, whether titles use serif or the reading family. Non-inline
    utilities read these vars; Source Sans 3 remains the default/loading face. */
