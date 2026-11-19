@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
-import { FolderIcon } from "lucide-react";
+import { FolderIcon, FunnelIcon } from "lucide-react";
 import { graphFolderCheck, toggleGraphFolder, type SourceFolder, type SourceOrganization } from "@/src/core";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
@@ -87,11 +87,13 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 					data-active={activeCount > 0}
 					onClick={() => setOpen((o) => !o)}
 					className={cn(
-						"flex h-9 items-center gap-1.5 rounded-xl border bg-card/85 px-2.5 shadow-lg backdrop-blur transition-colors hover:bg-accent",
-						activeCount > 0 ? "border-primary/60 text-foreground" : open ? "text-foreground" : "text-muted-foreground hover:text-foreground",
+						"flex h-9 items-center gap-1.5 rounded-xl transition-colors hover:bg-accent",
+						activeCount > 0
+							? "border border-primary/60 bg-card/85 px-2.5 text-foreground shadow-lg backdrop-blur"
+							: cn("w-[38px] justify-center", open ? "text-foreground" : "text-muted-foreground hover:text-foreground"),
 					)}
 				>
-					<FolderIcon className={cn("size-4 shrink-0", activeCount > 0 && "text-primary")} />
+					<FunnelIcon aria-hidden="true" className={cn("size-4 shrink-0", activeCount > 0 && "text-primary")} />
 					{soleName !== null
 						? <span data-testid="graph-folder-filter-name" className="max-w-40 truncate text-xs">{soleName}</span>
 						: activeCount > 0 && <span className="text-xs tabular-nums">{activeCount}</span>}
