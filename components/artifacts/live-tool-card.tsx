@@ -49,9 +49,9 @@ export function LiveToolCard({ part }: ArtifactPartProps) {
 			className="group my-1 w-full max-w-2xl select-none"
 		>
 			<summary className="flex cursor-pointer list-none items-center gap-2 text-xs text-muted-foreground [&::-webkit-details-marker]:hidden">
-				<BrailleSpinner label={t("{label} — live", { label: toolActivityLabel(tool) })} />
+				<BrailleSpinner label={t("{label} — live", { label: t(toolActivityLabel(tool)) })} />
 				<Shimmer duration={1} className="text-xs">
-					{toolActivityLabel(tool)}
+					{t(toolActivityLabel(tool))}
 				</Shimmer>
 				{arg && <span className="truncate">{arg}</span>}
 				<ChevronRight className="size-3 shrink-0 opacity-50 transition-transform group-open:rotate-90" />
