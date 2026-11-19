@@ -38,6 +38,7 @@ import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
+import { isKnownLanguageTag, resolveAppLanguage, type AppLanguage } from "./i18n.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
  *  changes (a field renamed/meaning changed); pure additions never bump. */
@@ -340,6 +341,11 @@ export const ROLE_SLOT: Readonly<Record<ModelRole, ModelSlotName>> = {
 export interface GeneralSettings {
 	/** Automatic startup/24h update checks (default ON). Manual checks bypass this. */
 	autoUpdate?: boolean;
+	/** The app language (i18n foundation, 2026-11-19): the UI chrome AND the
+	 *  language the agents are asked to teach in. Absent = English (the source
+	 *  language of every literal). Registered in core/i18n.ts — this field is
+	 *  that registry's only persisted coordinate. */
+	language?: AppLanguage;
 }
 
 /** One app-wide dictation preference, shared by every composer. */
@@ -538,7 +544,7 @@ export interface FactorySettings {
 export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	agent: { workerRequestConcurrency: 8 },
-	general: { autoUpdate: true },
+	general: { autoUpdate: true, language: "en" },
 	dictation: { language: "en" },
 	appearance: {
 		theme: "default",
@@ -586,6 +592,10 @@ function sanitizeGeneral(raw: Record<string, unknown>): GeneralSettings {
 	const out: GeneralSettings = {};
 	const autoUpdate = boolOrDrop(raw.autoUpdate);
 	if (autoUpdate !== undefined) out.autoUpdate = autoUpdate;
+	// Language (i18n foundation): a registered id or a known BCP 47 tag
+	// (en-GB, zh, zh-Hans-CN) resolves; junk drops so the factory English
+	// resumes instead of silently pinning a language the app cannot render.
+	if (isKnownLanguageTag(raw.language)) out.language = resolveAppLanguage(raw.language);
 	return out;
 }
 

@@ -32,6 +32,7 @@ import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, C
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
+import { APP_LANGUAGES, isAppLanguage } from "../core/i18n.ts";
 import { parseFileAccessSettings } from "../core/file-access.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -83,7 +84,9 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
-/** general: { autoUpdate?: boolean } */
+/** general: { autoUpdate?: boolean, language?: AppLanguage } — strict write
+ *  side (an unregistered language id is a 400, never a silent English pin;
+ *  the disk sanitizer stays tolerant for old records and aliases). */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
@@ -93,6 +96,12 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 			return { ok: false, error: "autoUpdate must be a boolean" };
 		}
 		settings.autoUpdate = raw.autoUpdate;
+	}
+	if (raw.language !== undefined) {
+		if (!isAppLanguage(raw.language)) {
+			return { ok: false, error: `language must be ${APP_LANGUAGES.map((entry) => `"${entry.id}"`).join(", ")}` };
+		}
+		settings.language = raw.language;
 	}
 	return { ok: true, settings };
 }
