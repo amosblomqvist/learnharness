@@ -17,7 +17,7 @@ import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { buildSessionTree, flattenSessionTree, folderAndDescendants, placementOf, type SessionTreeNode } from "@/src/core";
+import { buildSessionTree, flattenSessionTree, folderDeletionScope, placementOf, type FolderDeletionScope, type SessionTreeNode } from "@/src/core";
 import { useSourceDirectory } from "@/components/source-directory";
 import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, SIDEBAR_COMPACT_ROW, sidebarNameFont, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
 import { useAppearance } from "@/components/settings/appearance";
@@ -681,12 +681,12 @@ function SessionsSidebar() {
 	}, [open, pathname, refresh]);
 
 	/* ── Folders (approved plan): drag to move, right-click a folder for
-	   Rename / New subfolder / Delete (empty-everywhere only). ── */
+	   Rename / New subfolder / Delete. ── */
 	const folderDrop = useSidebarDrop(organization, changeFolders);
 	const [creatingFolder, setCreatingFolder] = useState<{ parentId: string | null } | null>(null);
 	const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
 	const [ctxFolderId, setCtxFolderId] = useState<string | null>(null);
-	const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string; copy: DeleteDialogCopy } | null>(null);
+	const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string; copy: DeleteDialogCopy; scope: FolderDeletionScope } | null>(null);
 	const folderAnchorRef = useRef<HTMLElement | null>(null);
 	const openFolderContext = (e: React.MouseEvent<HTMLButtonElement>, id: string) => {
 		e.preventDefault();
@@ -724,24 +724,27 @@ function SessionsSidebar() {
 		if (!directory) return;
 		const organization = directory.organization;
 		const folder = organization.folders.find((f) => f.id === id);
-		if (!folder) return;
+		const scope = folderDeletionScope(directory, id);
+		if (!folder || !scope) return;
 		setCtxFolderId(null);
-		const inside = new Set(folderAndDescendants(organization, id));
-		const placedInside = (sourceId: string) => inside.has(placementOf(organization, sourceId)?.folderId ?? "");
-		const sessions = directory.sources.filter((s) => s.kind === "chat" && placedInside(s.id)).length;
-		if (sessions === 0) {
-			void fetch(`/api/graph/sources/folders/${encodeURIComponent(id)}?mode=preserve-graph`, { method: "DELETE" })
+		clearFolderFailure();
+		if (scope.chatIds.length === 0) {
+			void fetch(`/api/graph/sources/folders/${encodeURIComponent(id)}?mode=preserve-graph`, {
+				method: "DELETE",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(scope),
+			})
 				.then(async (res) => { if (!res.ok) reportFolderFailure(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Could not delete the folder (${res.status}).`); })
 				.catch(() => reportFolderFailure("Could not delete the folder — network error."));
 			return;
 		}
 		const copy = folderDeleteCopy({
-			sessions,
-			subfolders: inside.size - 1,
-			notes: directory.sources.filter((s) => s.kind === "notes" && placedInside(s.id)).length,
+			sessions: scope.chatIds.length,
+			subfolders: scope.folderIds.length - 1,
+			notes: scope.noteIds.length,
 			parentName: folder.parentId === null ? null : organization.folders.find((f) => f.id === folder.parentId)?.name ?? null,
 		});
-		setDeletingFolder({ id, name: folder.name, copy });
+		setDeletingFolder({ id, name: folder.name, copy, scope });
 	};
 
 	const renderTree = (nodes: SessionTreeNode<ChatListItem>[], depth: number): React.ReactNode => nodes.map((node, index) => {
@@ -1168,8 +1171,11 @@ function SessionsSidebar() {
 				/>
 				<DeleteFolderDialog
 					folder={deletingFolder}
-					copy={deletingFolder?.copy ?? null}
 					onClose={() => setDeletingFolder(null)}
+					onStale={(message) => {
+						setDeletingFolder(null);
+						reportFolderFailure(message);
+					}}
 					onDeleted={onFolderDeleted}
 				/>
 			</aside>

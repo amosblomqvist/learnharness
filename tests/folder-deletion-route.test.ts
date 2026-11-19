@@ -3,7 +3,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, beforeEach, it } from "node:test";
-import type { GraphNode } from "../src/core/index.ts";
+import { folderDeletionScope, type GraphNode } from "../src/core/index.ts";
 
 // The sidebar's folder Delete (owner, 2026-11-18): the folder, its
 // subfolders and every session inside go; imported notes inside move to the
@@ -14,12 +14,16 @@ fs.writeFileSync(process.env.LH_AUTH_FILE, "{}\n");
 const { DELETE } = await import("../app/api/graph/sources/folders/[id]/route.ts");
 const { stores } = await import("../src/server/stores.ts");
 const { sourceDirectory } = await import("../src/server/source-organization.ts");
+const { deleteFolderWithSessions } = await import("../src/server/source-deletion.ts");
 const { beginTurn, endTurn } = await import("../src/server/turn-liveness.ts");
 beforeEach(() => { fs.rmSync(root, { recursive: true, force: true }); fs.mkdirSync(root); fs.writeFileSync(process.env.LH_AUTH_FILE!, "{}\n"); });
 after(() => fs.rmSync(root, { recursive: true, force: true }));
 
-const remove = (id: string, mode: string | null) => DELETE(
-	new Request(`http://localhost/api/graph/sources/folders/${id}${mode ? `?mode=${mode}` : ""}`, { method: "DELETE" }),
+const scopeOf = (id: string) => folderDeletionScope(sourceDirectory.read(), id);
+const remove = (id: string, mode: string | null, scope: unknown = scopeOf(id)) => DELETE(
+	new Request(`http://localhost/api/graph/sources/folders/${id}${mode ? `?mode=${mode}` : ""}`, {
+		method: "DELETE", body: JSON.stringify(scope), headers: { "Content-Type": "application/json" },
+	}),
 	{ params: Promise.resolve({ id }) },
 );
 const node = (id: string, sources: string[]): GraphNode =>
@@ -94,5 +98,46 @@ it("a running turn inside refuses with nothing deleted; the mode is required; un
 	assert.deepEqual(sourceDirectory.read().organization, before);
 	assert.equal(stores.graphStore.readNodes().length, 3);
 	assert.equal((await remove("outer", null)).status, 400);
-	assert.equal((await remove("nope", "preserve-graph")).status, 404);
+	assert.equal((await remove("nope", "preserve-graph", scopeOf("outer"))).status, 404);
+});
+
+it("rejects a stale confirmation even if a moved session was replaced and the count is unchanged", async () => {
+	const { teach, practice, kept } = setup();
+	const reviewed = scopeOf("outer")!;
+	sourceDirectory.change({ action: "move", kind: "source", id: teach.id, parentId: "side" });
+	sourceDirectory.change({ action: "move", kind: "source", id: kept.id, parentId: "inner" });
+	assert.equal(scopeOf("outer")!.chatIds.length, reviewed.chatIds.length);
+	const response = await remove("outer", "delete-nodes", reviewed);
+	assert.equal(response.status, 409);
+	assert.equal((await response.json()).code, "folder_scope_changed");
+	assert.ok([teach, practice, kept].every((chat) => stores.chatStore.getChat(chat.id)));
+	assert.deepEqual(sourceDirectory.read().organization.folders.map((f) => f.id), ["top", "outer", "inner", "side"]);
+	assert.equal(stores.graphStore.readNodes().length, 3);
+	assert.equal((await remove("outer", "preserve-graph")).status, 200, "a freshly reviewed scope can be deleted");
+	assert.ok(stores.chatStore.getChat(teach.id), "the moved-out chat survives");
+});
+
+it("requires a scope and protects the no-confirmation path for a folder that gained a session", async () => {
+	const { kept } = setup();
+	const state = sourceDirectory.read().organization;
+	state.folders.push({ id: "empty", name: "Empty", parentId: null, createdAt: "now" });
+	stores.sourceOrganizationStore.write(state);
+	const empty = scopeOf("empty")!;
+	assert.deepEqual(empty.chatIds, []);
+	assert.equal((await remove("empty", "preserve-graph", null)).status, 400);
+	sourceDirectory.change({ action: "move", kind: "source", id: kept.id, parentId: "empty" });
+	assert.equal((await remove("empty", "preserve-graph", empty)).status, 409);
+	assert.ok(stores.chatStore.getChat(kept.id));
+	sourceDirectory.change({ action: "move", kind: "source", id: kept.id, parentId: "side" });
+	assert.equal((await remove("empty", "preserve-graph", empty)).status, 200, "unchanged empty scopes still delete immediately");
+});
+
+it("rechecks after yielding for extraction wind-down, before starting destructive writes", async () => {
+	const { teach, practice, kept } = setup();
+	const pending = deleteFolderWithSessions("outer", "delete-nodes", scopeOf("outer"));
+	// The initial guard ran synchronously. Mutate before the continuation resumes.
+	sourceDirectory.change({ action: "move", kind: "source", id: kept.id, parentId: "inner" });
+	await assert.rejects(pending, { status: 409, code: "folder_scope_changed" });
+	assert.ok([teach, practice, kept].every((chat) => stores.chatStore.getChat(chat.id)));
+	assert.equal(stores.graphStore.readNodes().length, 3);
 });

@@ -2,7 +2,7 @@
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
-import type { ChatDeleteMode, ChatListItem } from "@/src/core";
+import type { ChatDeleteMode, ChatListItem, FolderDeletionScope } from "@/src/core";
 
 /** The graph-traces checkbox copy (owner, 2026-09-24 flow rework — was
  *  the delete-nodes option's body in the two-button design): the
@@ -259,12 +259,12 @@ export function DeleteSessionBody({
  *  unchecked traces box, the same retryable-failure line. */
 export function DeleteFolderDialog({
 	folder,
-	copy,
 	onClose,
 	onDeleted,
+	onStale,
 }: {
-	folder: { id: string; name: string } | null;
-	copy: DeleteDialogCopy | null;
+	folder: { id: string; name: string; copy: DeleteDialogCopy; scope: FolderDeletionScope } | null;
+	onStale: (message: string) => void;
 	onClose: () => void;
 	onDeleted: (result: { deletedChatIds: string[]; graphRevision: number }) => void;
 }) {
@@ -285,8 +285,16 @@ export function DeleteFolderDialog({
 		setBusy(true);
 		setFailure(null);
 		try {
-			const res = await fetch(`/api/graph/sources/folders/${encodeURIComponent(folder.id)}?mode=${mode}`, { method: "DELETE" });
+			const res = await fetch(`/api/graph/sources/folders/${encodeURIComponent(folder.id)}?mode=${mode}`, {
+				method: "DELETE",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(folder.scope),
+			});
 			const body = (await res.json()) as { error?: string; code?: string; graphRevision?: number; deletedChatIds?: string[] };
+			if (body.code === "folder_scope_changed" || body.code === "not_found") {
+				onStale(body.error ?? "This folder changed. Nothing was deleted.");
+				return;
+			}
 			if (!res.ok) {
 				setFailure({ code: body.code ?? "error", error: body.error ?? `Delete failed (${res.status})` });
 				setBusy(false);
@@ -299,10 +307,10 @@ export function DeleteFolderDialog({
 		}
 	};
 
-	if (!folder || !copy) return null;
+	if (!folder) return null;
 	return <DeleteSessionBody
 				chat={{ id: folder.id, title: folder.name }}
-				copy={copy}
+				copy={folder.copy}
 				traces={traces}
 				busy={busy}
 				failure={failure}

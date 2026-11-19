@@ -1,5 +1,5 @@
 import { fuzzyScore } from "./fuzzy.ts";
-import { placementOf, type SourceFolder, type SourceOrganization } from "./source-organization.ts";
+import { placementOf, type SourceDirectory, type SourceFolder, type SourceOrganization } from "./source-organization.ts";
 
 /**
  * Session-sidebar and graph views over the ONE shared source organization
@@ -164,6 +164,31 @@ export function graphFolderCheck(organization: SourceOrganization, selected: Rea
 	const count = subtree.filter((f) => selected.has(f)).length;
 	const checked = selected.has(id);
 	return { checked, indeterminate: count > 0 && count < subtree.length };
+}
+
+export interface FolderDeletionScope {
+	parentId: string | null;
+	folderIds: string[];
+	chatIds: string[];
+	noteIds: string[];
+}
+
+/** The sidebar confirmation and server guard use the same unfiltered inventory.
+ * Sort IDs so ordinary directory reordering (e.g. session activity) is irrelevant. */
+export function folderDeletionScope(directory: SourceDirectory, folderId: string): FolderDeletionScope | null {
+	const { organization, sources } = directory;
+	const folder = organization.folders.find((f) => f.id === folderId);
+	if (!folder) return null;
+	const folderIds = folderAndDescendants(organization, folderId).sort();
+	const inside = new Set(folderIds);
+	const chatIds: string[] = [], noteIds: string[] = [];
+	for (const source of sources) {
+		const placed = placementOf(organization, source.id)?.folderId;
+		if (placed == null || !inside.has(placed)) continue;
+		if (source.kind === "chat") chatIds.push(source.id);
+		if (source.kind === "notes") noteIds.push(source.id);
+	}
+	return { parentId: folder.parentId, folderIds, chatIds: chatIds.sort(), noteIds: noteIds.sort() };
 }
 
 /**
