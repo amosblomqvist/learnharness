@@ -19,7 +19,7 @@ import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
 import { buildSessionTree, flattenSessionTree, folderAndDescendants, placementOf, type SessionTreeNode } from "@/src/core";
 import { useSourceDirectory } from "@/components/source-directory";
-import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, SIDEBAR_COMPACT_ROW, SIDEBAR_ROW_HOVER, sidebarNameFont, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
+import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, SIDEBAR_COMPACT_ROW, sidebarNameFont, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
 import { useAppearance } from "@/components/settings/appearance";
 import { SourceDragRow } from "@/components/source-folder-tree";
 import { OverlayScrollArea } from "@/components/overlay-scroll";
@@ -329,9 +329,8 @@ export function SessionRow({
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 			data-session-id={chat.id}
 			className={cn(
-				"relative flex w-full items-center gap-2 pr-3 text-left",
+				"relative flex w-full items-center gap-2 pr-3 text-left hover:bg-accent",
 				compact ? SIDEBAR_COMPACT_ROW : "py-2",
-				SIDEBAR_ROW_HOVER,
 				active && "bg-accent",
 				kbdSelected && !active && "bg-accent/60 ring-1 ring-inset ring-border",
 			)}

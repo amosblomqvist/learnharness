@@ -417,7 +417,7 @@ export function AppearanceSection({
 					onChange={(on) => onSectionChange({ ...appearance, sessionNameSerif: on })}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Compact session list" hint="Single-line monospace rows in the sidebar" testid="row-compact-session-list">
+			<SettingsRow label="Compact session list" testid="row-compact-session-list">
 				<Toggle
 					checked={resolved.compactSessionList}
 					label="Compact session list"

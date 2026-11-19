@@ -51,7 +51,8 @@ describe("SessionRow", () => {
 		const html = renderToStaticMarkup(<SessionRow chat={chat} active={false} compact onOpen={() => {}} />);
 		assert.match(html, /\bh-8\b/);
 		assert.match(html, /\bfont-ui\b[^>]*>Test session/);
-		assert.match(html, /hover:duration-0/);
+		assert.match(html, /hover:bg-accent/);
+		assert.doesNotMatch(html, /transition-colors|duration-\d/);
 		assert.doesNotMatch(html, /Waiting for input|2026-01-02|session-dot/);
 		assert.match(html, /braille-spinner/);
 		assert.match(html, /aria-label="Practice session"/);

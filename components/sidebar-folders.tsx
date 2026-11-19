@@ -32,8 +32,6 @@ export const sidebarRowBox = (depth: number) => ({ marginLeft: sidebarRuleInset(
 /** Folder rows (and the new-folder row): the same box, the chevron pulled in. */
 export const sidebarFolderBox = (depth: number) => ({ marginLeft: sidebarRuleInset(depth), paddingLeft: sidebarRowPadding(depth) - CHEVRON_INSET - sidebarRuleInset(depth) });
 
-// The hovered state sets its own duration, so entry is instant and only exit fades.
-export const SIDEBAR_ROW_HOVER = "transition-colors duration-100 hover:duration-0 hover:bg-accent motion-reduce:transition-none";
 export const SIDEBAR_COMPACT_ROW = "h-8";
 export const sidebarNameFont = (compact: boolean) => compact ? "font-ui text-sm leading-5" : "font-prose text-(length:--lh-prose-size)";
 
@@ -129,7 +127,7 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 				<button type="button" data-testid={`sidebar-folder-${folder.id}`} aria-expanded={open}
 					aria-label={`${open ? "Collapse" : "Expand"} folder ${folder.name}`}
 					onClick={onToggle} onContextMenu={onContextMenu}
-					className={cn("flex w-full items-center gap-1 pr-3 text-left", compact ? SIDEBAR_COMPACT_ROW : "py-1.5", SIDEBAR_ROW_HOVER)}
+					className={cn("flex w-full items-center gap-1 pr-3 text-left hover:bg-accent", compact ? SIDEBAR_COMPACT_ROW : "py-1.5")}
 					style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
 					<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground/70", open && "rotate-90")} />
 					<Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />

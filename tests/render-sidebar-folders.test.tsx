@@ -24,7 +24,9 @@ it("folder names use the reading font by default and the same compact styling as
 	assert.match(row(0, false), /font-prose[^>]*>Physics/);
 	const compact = row(0, false, true);
 	assert.match(compact, /\bh-8\b/);
-	assert.match(compact, /hover:duration-0/);
+	const button = compact.match(/<button\b[^>]*>/)?.[0] ?? "";
+	assert.match(button, /hover:bg-accent/);
+	assert.doesNotMatch(button, /transition-colors|duration-\d/);
 	assert.match(compact, /\bfont-ui\b[^>]*>Physics/);
 });
 
