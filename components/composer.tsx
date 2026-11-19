@@ -7,6 +7,7 @@ import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { useT } from "@/components/i18n";
 
 /**
  * The chat composer — content row ONLY (the persistent rounded shell lives in
@@ -148,6 +149,7 @@ export function Composer({
 	defaultDropTarget?: boolean;
 	fileInsertion?: boolean;
 }) {
+	const t = useT();
 	const controller = useOptionalInteractionLayers();
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
@@ -216,10 +218,10 @@ export function Composer({
 					<button
 						type="submit"
 						data-testid="next-problem-button"
-						aria-label="Next problem"
+						aria-label={t("Next problem")}
 						className="flex h-10 shrink-0 items-center justify-center gap-1.5 rounded-[10px] bg-success px-4 font-ui text-xs font-medium uppercase tracking-wide text-background transition-colors hover:bg-success/85"
 					>
-						Next problem
+						{t("Next problem")}
 						<ArrowRightIcon className="size-4" />
 					</button>
 				) : (

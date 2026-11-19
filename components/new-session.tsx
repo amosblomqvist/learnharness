@@ -18,6 +18,7 @@ import { ComposerActions, NodePickerControl } from "@/components/composer-action
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
+import { useT } from "@/components/i18n";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
  *  bar lifts — resolved nodes as the learner SAW them at pick time. */
@@ -111,6 +112,7 @@ export function DraftShell({
 	 *  Passed as a node so the pick state stays in NewSession. */
 	overlay?: ReactNode;
 }) {
+	const t = useT();
 	const controller = useOptionalInteractionLayers();
 	const pathname = usePathname();
 	const bodyRef = useRef<HTMLDivElement>(null);
@@ -196,7 +198,7 @@ export function DraftShell({
 									)}
 									setup={setupCta}
 								/>
-								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
+								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{t(OPENING_PROMPT_FAILURE)}</p>}
 								<div data-attachment-composer="" className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
 									<Composer
 										busy={busy}
@@ -212,7 +214,7 @@ export function DraftShell({
 										// input (owner refinement round, 2026-09-24) — no lesson has
 										// started yet, so the composer must not read like one is in
 										// flight.
-										placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
+										placeholder={mode === "practice" ? t("What do you want to practice?") : t("What do you want to learn?")}
 									/>
 								</div>
 								<StatsBar
@@ -240,6 +242,7 @@ export function DraftShell({
 }
 
 export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
+	const t = useT();
 	const router = useRouter();
 	const [text, setText] = useState("");
 	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
@@ -376,7 +379,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 								onClick={() => setSetupOpen(true)}
 								className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 							>
-								Set up your models
+								{t("Set up your models")}
 							</button>
 						)
 					)

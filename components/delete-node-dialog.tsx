@@ -2,6 +2,7 @@
 
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
+import { useT } from "@/components/i18n";
 
 /** The 409 extraction_running line (owner phrasing, node interlude):
  *  the server's error names the extraction; the ACTIVITY DOCK is the
@@ -48,11 +49,12 @@ export function DeleteNodeBody({
 	onRun: () => void;
 	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 }) {
+	const t = useT();
 	const frame = (
 		<div
 			role="dialog"
 			aria-modal="true"
-			aria-label="Delete node"
+			aria-label={t("Delete node")}
 			data-testid="delete-node-dialog"
 			onClick={(e) => e.stopPropagation()}
 			className="w-[32rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-card p-5 shadow-xl"
@@ -81,14 +83,14 @@ export function DeleteNodeBody({
 					</code>
 				)}
 			</div>
-			{folders.length > 0 && <p className="mt-2 text-sm" data-testid="folder-removal-names">Empty folders: {folders.map((f) => f.name).join(", ")}</p>}
+			{folders.length > 0 && <p className="mt-2 text-sm" data-testid="folder-removal-names">{t("Empty folders:")} {folders.map((f) => f.name).join("、")}</p>}
 			{nodes.length > 0 && <p className="mt-2 text-sm text-muted-foreground" data-testid="node-permanence-line">
 				{nodes.length === 1
 					? "This permanently deletes the node — this cannot be undone."
 					: `This permanently deletes all ${nodes.length} nodes — this cannot be undone.`}
 			</p>}
 			<p className="mt-2 text-xs text-muted-foreground" data-testid="folder-removal-explanation">
-				{folders.length > 0 ? "Only the named empty folders are removed. " : ""}Sessions, imported source records, and non-empty folders are kept.
+				{folders.length > 0 ? "Only the named empty folders are removed. " : ""}{t("Sessions, imported source records, and non-empty folders are kept.")}
 			</p>
 			{failure && (
 				<div
@@ -106,7 +108,7 @@ export function DeleteNodeBody({
 						disabled={busy}
 						className="ml-3 text-xs text-foreground underline-offset-2 hover:underline disabled:opacity-40"
 					>
-						Try again
+						{t("Try again")}
 					</button>
 				</div>
 			)}
@@ -118,7 +120,7 @@ export function DeleteNodeBody({
 					disabled={busy}
 					className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
 				>
-					Cancel
+					{t("Cancel")}
 				</button>
 				<button
 					type="button"

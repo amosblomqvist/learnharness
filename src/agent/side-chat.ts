@@ -24,6 +24,8 @@ import { PATHS } from "../../config.ts";
 import type { SideModelTurn } from "../core/side-chat.ts";
 import type { PiEngine } from "./models.ts";
 import { readPromptOverride } from "./prompt-segments.ts";
+import { languageDirective } from "./prompt-language.ts";
+import { DEFAULT_APP_LANGUAGE, type AppLanguage } from "../core/i18n.ts";
 
 const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
 const SIDE_BASE = path.join(PROMPTS_DIR, "side-chat", "00-base.md");
@@ -41,13 +43,21 @@ function readSource(file: string): string {
 
 /** The side model's system prompt, composed fresh per call (an override
  *  switched on between questions lands on the next one). */
-export function composeSideChatInstructions(switches: Record<string, boolean> = {}): string {
+export function composeSideChatInstructions(
+	switches: Record<string, boolean> = {},
+	language: AppLanguage = DEFAULT_APP_LANGUAGE,
+): string {
 	const segments = [readSource(SIDE_BASE)];
 	for (const key of SIDE_SHARED_FRAGMENTS) {
 		const override = switches[key] === true ? readPromptOverride(key) : null;
 		segments.push(override ?? readSource(path.join(PROMPTS_DIR, ...key.split("/"))));
 	}
 	segments.push(readSource(SIDE_STYLE));
+	// The app-language directive rides last (i18n foundation, 2026-11-19):
+	// the style fragment's tone rules stay the final word on SHAPE, the
+	// directive the final word on LANGUAGE. English appends nothing.
+	const directive = languageDirective(language).trim();
+	if (directive) segments.push(directive);
 	return segments
 		.map((s) => s.trim())
 		.filter(Boolean)

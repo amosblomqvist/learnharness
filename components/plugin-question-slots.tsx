@@ -6,6 +6,7 @@ import type { PluginCleanup } from "@/src/core";
 import type { QuestionRendererRegistration } from "./plugin-manager";
 import { ToolContentResponse } from "./ai-elements/message";
 import { ThinkingBlock } from "./thinking-block";
+import { useT } from "@/components/i18n";
 
 export function questionMountContext(snapshot: PluginQuestionSnapshot, chatId: string, signal: AbortSignal): PluginQuestionMountContext {
 	return Object.freeze({ input: freezePluginQuestionValue(clonePluginQuestionJson(snapshot.input)) as unknown as PluginQuestionSnapshot["input"], chatId, questionId: snapshot.questionId, contractVersion: snapshot.contractVersion, variant: snapshot.variant, signal });
@@ -66,19 +67,20 @@ export function PluginQuestionPresentation({ snapshot, chatId, registration, ans
 }
 
 export function PluginQuestionAnswered({ snapshot, answer, chatId, registration }: { snapshot: PluginQuestionSnapshot; answer: PluginQuestionAnswer; chatId: string; registration?: QuestionRendererRegistration }) {
+	const t = useT();
 	const headerRoot = useRef<HTMLSpanElement>(null);
 	const footerRoot = useRef<HTMLDivElement>(null);
 	return <>
 		{/* Reading precedes the question, exactly as in native answered cards.
 		    Presence remains authoritative, including defined empty channels. */}
 		{(answer.readingThinking !== undefined || !!answer.images?.readingThinking?.length) && <ThinkingBlock
-			testId="reading-thinking-block" label="YOUR THINKING" text={answer.readingThinking ?? ""} images={answer.images?.readingThinking} defaultOpen
+			testId="reading-thinking-block" label={t("YOUR THINKING")} text={answer.readingThinking ?? ""} images={answer.images?.readingThinking} defaultOpen
 		/>}
 		<div data-testid="plugin-question-answered" className="rounded-2xl border bg-card px-4 py-3">
 			<div className="mb-2 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{snapshot.label}<span ref={headerRoot} className="inline-flex items-center" /></div>
 			<PluginQuestionPresentation snapshot={snapshot} answer={answer} chatId={chatId} registration={registration} headerRoot={headerRoot} footerRoot={footerRoot} />
 			{(answer.thinking !== undefined || !!answer.images?.thinking?.length) && <ThinkingBlock
-				testId="your-thinking" label="YOUR THINKING" text={answer.thinking ?? ""} images={answer.images?.thinking} inCard
+				testId="your-thinking" label={t("YOUR THINKING")} text={answer.thinking ?? ""} images={answer.images?.thinking} inCard
 			/>}
 			<div ref={footerRoot} />
 		</div>

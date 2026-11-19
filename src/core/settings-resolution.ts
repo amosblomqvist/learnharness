@@ -197,6 +197,9 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 	return {
 		general: {
 			autoUpdate: record?.general?.autoUpdate ?? FACTORY_SETTINGS.general.autoUpdate,
+			// i18n foundation: absent → English, the source language of every
+			// literal in the app (never a locale guess from the OS).
+			language: record?.general?.language ?? FACTORY_SETTINGS.general.language,
 		},
 		dictation: {
 			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,

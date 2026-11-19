@@ -8,6 +8,7 @@ import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import type { ArtifactPartProps, DemoResult } from "@/src/core";
+import { useT } from "@/components/i18n";
 
 /**
  * Demo artifact card (W6): while the part is input-available, a job activity
@@ -100,11 +101,12 @@ export function DemoOutputCard({
 	messageId?: string;
 	initialInverted?: boolean;
 }) {
+	const t = useT();
 	const result = output as DemoResult | undefined;
 	if (!result || typeof result.html !== "string" || typeof result.title !== "string") {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				Demo completed, but the result could not be displayed.
+				{t("Demo completed, but the result could not be displayed.")}
 			</div>
 		);
 	}
@@ -113,8 +115,8 @@ export function DemoOutputCard({
 		return (
 			<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="demo-card-failed">
 				<div className="flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-					Interactive demo
-					<span className="rounded bg-error/15 px-1.5 py-0.5 text-error">failed</span>
+					{t("Interactive demo")}
+					<span className="rounded bg-error/15 px-1.5 py-0.5 text-error">{t("failed")}</span>
 				</div>
 				<p className="mt-2 text-sm text-muted-foreground">{result.notes ?? "The demo could not be built."}</p>
 			</div>
@@ -136,6 +138,7 @@ function DemoFrame({
 	messageId?: string;
 	initialInverted?: boolean;
 }) {
+	const t = useT();
 	const actions = useContext(ChatActionsContext);
 	const iframeRef = useRef<HTMLIFrameElement | null>(null);
 	const [state, setState] = useState<DemoBridgeState>(INITIAL_DEMO_BRIDGE_STATE);
@@ -177,7 +180,7 @@ function DemoFrame({
 			<div className="flex items-center justify-between gap-2">
 				<div className="flex min-w-0 items-baseline gap-2">
 					<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-						interactive demo
+						{t("interactive demo")}
 					</span>
 					<span className="truncate text-xs font-medium tracking-wide text-foreground">{title}</span>
 				</div>
@@ -185,14 +188,14 @@ function DemoFrame({
 					<Toggle
 						checked={inverted}
 						onChange={toggleInverted}
-						label="Invert demo brightness"
-						title="Invert colors"
+						label={t("Invert demo brightness")}
+						title={t("Invert colors")}
 						discIcon={<InvertDiscIcon className="size-3" />}
 					/>
 					<button
 						type="button"
-						aria-label="Download demo as HTML"
-						title="Download as HTML"
+						aria-label={t("Download demo as HTML")}
+						title={t("Download as HTML")}
 						onClick={() => downloadFile(`${slugFilename(title)}.html`, html, "text/html")}
 						data-testid="demo-download"
 						className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -205,7 +208,7 @@ function DemoFrame({
 				<DemoErrorChip
 					title={title}
 					message={state.error}
-					onSend={actions ? () => actions.sendText(`The demo "${title}" threw an error: ${state.error}`) : undefined}
+					onSend={actions ? () => actions.sendText(t("The demo {title} threw an error: {error}", { title, error: state.error ?? t("unknown error") })) : undefined}
 				/>
 			)}
 			<iframe
@@ -245,12 +248,13 @@ export function DemoErrorChip({
 	message: string;
 	onSend?: () => void;
 }) {
+	const t = useT();
 	return (
 		<div
 			className="mt-2 flex flex-wrap items-center gap-2 rounded-lg bg-error/10 px-3 py-2 text-sm text-error"
 			data-testid="demo-error-chip"
 		>
-			<span className="font-medium">This demo threw an error</span>
+			<span className="font-medium">{t("This demo threw an error")}</span>
 			<span className="min-w-0 flex-1 truncate font-mono text-xs" title={message}>
 				{message}
 			</span>
@@ -261,7 +265,7 @@ export function DemoErrorChip({
 					className="rounded-md border border-error/40 px-2 py-1 text-xs font-medium hover:bg-error/15"
 					data-testid="demo-error-send"
 				>
-					Send to teacher
+					{t("Send to teacher")}
 				</button>
 			)}
 		</div>

@@ -17,6 +17,7 @@ import { useRef, useState } from "react";
 import { CheckIcon, DownloadIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { exportThemeFile, type AppearanceSettings, type Theme } from "@/src/core";
+import { useT } from "@/components/i18n";
 
 /** The selected card's frame: a 2px gap in the dialog surface, then a 1px
  *  ring in the theme accent (the check by the name does the rest). */
@@ -85,6 +86,7 @@ export function ThemeCards({
 	/** After a successful import (the catalog must be re-read). */
 	onImported: (theme: Theme) => void;
 }) {
+	const t = useT();
 	const fileRef = useRef<HTMLInputElement>(null);
 	const [importError, setImportError] = useState<string | null>(null);
 	const [busy, setBusy] = useState(false);
@@ -127,9 +129,9 @@ export function ThemeCards({
 		<div data-testid="row-theme" className="flex flex-col gap-3 py-1">
 			<div className="flex items-end justify-between gap-4">
 				<span className="min-w-0">
-					<span className="block font-prose text-(length:--lh-prose-size)">Theme</span>
+					<span className="block font-prose text-(length:--lh-prose-size)">{t("Theme")}</span>
 					<span data-testid="theme-hint" className="block text-xs text-muted-foreground/70">
-						{active.name} · {active.mode} · sets every color below
+						{active.name} · {active.mode} {t("· sets every color below")}
 					</span>
 				</span>
 				<button
@@ -139,7 +141,7 @@ export function ThemeCards({
 					className="flex h-7 shrink-0 items-center gap-2 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50"
 				>
 					<DownloadIcon className="size-3.5" />
-					Export JSON
+					{t("Export JSON")}
 				</button>
 			</div>
 			<div className="grid grid-cols-3 gap-3">
@@ -190,11 +192,11 @@ export function ThemeCards({
 					className="flex min-h-27 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/50 p-3 text-center font-ui text-xs text-muted-foreground transition-colors hover:text-foreground"
 				>
 					<UploadIcon className="size-4" />
-					<span>Import JSON</span>
+					<span>{t("Import JSON")}</span>
 					{importError ? (
 						<span data-testid="theme-import-error" className="text-error">{importError}</span>
 					) : (
-						<span className="text-muted-foreground/70">name · mode · colors</span>
+						<span className="text-muted-foreground/70">{t("name · mode · colors")}</span>
 					)}
 				</button>
 				<input

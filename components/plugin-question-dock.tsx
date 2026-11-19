@@ -17,6 +17,7 @@ import { createQuestionEditorLease, type QuestionEditorLease } from "./plugin-qu
 import { PluginQuestionPresentation, questionMountContext } from "./plugin-question-slots";
 import type { PreparePluginQuestionSubmission } from "./plugin-submission-adapters";
 import { Button } from "./ui/button";
+import { useT } from "@/components/i18n";
 
 const keyOf = (snapshot: PluginQuestionSnapshot) => pluginQuestionOccurrenceKey(snapshot.occurrence);
 
@@ -35,6 +36,7 @@ export function PluginQuestionDock(props: PluginQuestionDockProps) {
 
 /** Host-only component seam for deterministic DOM/capture fixtures, not SDK. */
 export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft, expanded, reveal, onExpand, ready, reconciliation, available, readingRef, onMicAvailable, send, dismiss, registration, prepareSubmission }: PluginQuestionDockProps & { registration?: QuestionRendererRegistration }) {
+	const t = useT();
 	const controller = useOptionalInteractionLayers();
 	const root = useRef<HTMLDivElement>(null);
 	const editor = useRef<HTMLDivElement>(null);
@@ -150,8 +152,8 @@ export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft,
 			<div className="space-y-3 px-4 py-3">
 				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{snapshot.input.type === "predict" ? "Prediction" : snapshot.label}</div>
 				<PluginQuestionPresentation snapshot={snapshot} chatId={chatId} registration={mountRegistration} failed={() => { setFailed(true); lease.current?.dispose(); }} />
-				{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing question…</p>}
-				{unavailable && <p role="status" className="text-sm text-muted-foreground">Question unavailable</p>}
+				{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">{t("Preparing question…")}</p>}
+				{unavailable && <p role="status" className="text-sm text-muted-foreground">{t("Question unavailable")}</p>}
 				<div ref={editor} className={unavailable || failed ? "hidden" : "min-w-0"} />
 			</div>
 			{/* Plugin DOM is intentionally outside the footer's native form. */}
@@ -159,17 +161,17 @@ export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft,
 				<div data-testid={snapshot.showThinking ? "thinking-field" : undefined}
 					className={snapshot.showThinking ? "rounded-[10px] border border-border/70 bg-background/60 transition-colors focus-within:border-primary/50" : undefined}>
 					{snapshot.showThinking && <>
-						<div className="px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">Your thinking</div>
+						<div className="px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">{t("Your thinking")}</div>
 						<PathInput ref={thinking} value={draft.thinking} onValueChange={value => { draft.thinking = value; render(); }} onKeyDown={event => {
 							if (composingQuestionKey(event) || pluginQuestionKeySuppressed(event)) return;
 							if (!isInteractionScopeEligible(event.currentTarget, controller)) return;
 							if (event.key === "Enter" && !event.altKey && (!event.shiftKey || event.metaKey || event.ctrlKey)) { event.preventDefault(); void submit(); }
-						}} className="field-sizing-content lh-input max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground/70" placeholder="Your thinking" />
+						}} className="field-sizing-content lh-input max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground/70" placeholder={t("Your thinking")} />
 					</>}
 					<div className="flex items-center justify-between gap-2 p-1">
-						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">↵ submits · ⇧↵ newline</span>
-						{unavailable && <Button type="button" variant="ghost" disabled={!ready || submitting} onClick={() => { if (latch.current) return; latch.current = true; void finishDictation().then(dismiss).catch(() => {}).finally(() => { latch.current = false; }); }}>Dismiss question</Button>}
-						<Button type="submit" disabled={!canSubmit} className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium">Submit answer</Button>
+						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">{t("↵ submits · ⇧↵ newline")}</span>
+						{unavailable && <Button type="button" variant="ghost" disabled={!ready || submitting} onClick={() => { if (latch.current) return; latch.current = true; void finishDictation().then(dismiss).catch(() => {}).finally(() => { latch.current = false; }); }}>{t("Dismiss question")}</Button>}
+						<Button type="submit" disabled={!canSubmit} className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium">{t("Submit answer")}</Button>
 					</div>
 				</div>
 			</form>

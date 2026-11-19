@@ -7,6 +7,7 @@ import type { CallUsage, JobKind, JobRecord } from "@/src/core";
 import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels } from "@/src/core";
 import { formatTokens, planCostLabel } from "@/components/usage-format";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { useT } from "@/components/i18n";
 
 /**
  * THE BACKGROUND-AGENTS SECTION (owner, sidebar round — the successor of
@@ -322,6 +323,7 @@ const KIND_ICON: Record<JobKind, typeof SearchIcon> = {
 type AbortState = "pending" | "failed";
 
 export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
+	const t = useT();
 	const ctx = useContext(ActivityContext);
 	const feed = feedProp ?? ctx.feed;
 	const refresh = ctx.refresh;
@@ -380,9 +382,9 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 		<section data-testid="activity-section" className="border-t border-border px-3 pb-3 pt-2">
 			<div className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground/70">
 				<ActivityIcon className="size-3" />
-				Background agents
+				{t("Background agents")}
 				{blobs.length > 0 && (
-					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title="Total running cost (inferred)">
+					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title={t("Total running cost (inferred)")}>
 						{planCostLabel(totalCost, subscriptionLabels(blobs.map((blob) => blob.model)))}
 				</span>
 				)}
@@ -422,10 +424,11 @@ function ActivityBlobRow({
 	abortState: AbortState | undefined;
 	onAbort: () => void;
 }) {
+	const t = useT();
 	const Icon = blob.process === "extraction" ? WaypointsIcon : (blob.jobKind && KIND_ICON[blob.jobKind]) || BotIcon;
 	const label =
 		blob.process === "extraction"
-			? `Extraction — ${blob.phase ?? "running"}`
+			? t("Extraction — {phase}", { phase: blob.phase ?? t("running") })
 			: blob.jobKind === "research"
 				? "Researcher"
 				: blob.jobKind === "demo"
@@ -474,7 +477,7 @@ function ActivityBlobRow({
 				onClick={onAbort}
 				disabled={abortState !== undefined}
 				title={abortState === "failed" ? "Abort failed — try again" : "End this background process"}
-				aria-label={`End ${label} in ${blob.title}`}
+				aria-label={t("End {label} in {title}", { label, title: blob.title })}
 				className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
 			>
 				<SquareIcon className="size-3" />
@@ -498,13 +501,13 @@ function ActivityBlobRow({
 						</div>
 						{blob.activity && <div className="break-words">{blob.activity}</div>}
 						<div className="flex justify-between gap-2">
-							<span>Cost</span>
+							<span>{t("Cost")}</span>
 							<span className="tabular-nums text-card-foreground">
 								{planCostLabel(blob.cost, subscriptionLabel(blob.model))}
 							</span>
 						</div>
 						<div className="flex justify-between gap-2">
-							<span>Context</span>
+							<span>{t("Context")}</span>
 							<span className="tabular-nums text-card-foreground" data-testid="activity-blob-context">
 								{blob.context === null
 									? "—"
@@ -513,19 +516,19 @@ function ActivityBlobRow({
 						</div>
 						{blob.model && (
 							<div className="flex justify-between gap-2">
-								<span>Model</span>
+								<span>{t("Model")}</span>
 								<span className="truncate text-card-foreground">{blob.model}</span>
 							</div>
 						)}
 						{blob.steps !== undefined && (
 							<div className="flex justify-between gap-2">
-								<span>Steps</span>
+								<span>{t("Steps")}</span>
 								<span className="tabular-nums text-card-foreground">{blob.steps}</span>
 							</div>
 						)}
 						{blob.chatId && (
 							<a href={`/chat/${blob.chatId}`} className="text-primary hover:underline">
-								Open session →
+								{t("Open session →")}
 							</a>
 						)}
 					</div>

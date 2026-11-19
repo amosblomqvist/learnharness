@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
 import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
+import { useT } from "@/components/i18n";
 
 /**
  * Static rendering of an answered question (tool part in `output-available`).
@@ -23,12 +24,13 @@ import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core
  * the explanation, with NO verdict chips (owner ruling 2026-09-27).
  */
 export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionAnswerData; input?: unknown }) {
+	const t = useT();
 	const answer = answerForPresentation(savedAnswer, input);
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
 	if (answer.dismissed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				<span className="font-medium">{answer.questionText}</span> — skipped
+				<span className="font-medium">{answer.questionText}</span> {t("— skipped")}
 			</div>
 		);
 	}
@@ -55,7 +57,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 		    ThinkingBlock, instead of an inset inside the answer. Same muted
 		    rail as before; the label is now plain "Your thinking". */}
 		{(answer.readingThinking || answer.images?.readingThinking?.length) && (
-			<ThinkingBlock testId="reading-thinking-block" label="YOUR THINKING" text={answer.readingThinking ?? ""} images={answer.images?.readingThinking} defaultOpen />
+			<ThinkingBlock testId="reading-thinking-block" label={t("YOUR THINKING")} text={answer.readingThinking ?? ""} images={answer.images?.readingThinking} defaultOpen />
 		)}
 		{/* [&>*:last-child]:mb-0 (owner round, 2026-10-07): on ask cards the
 		    thinking row is the last child — its my-3 stacked with the card's
@@ -181,7 +183,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 				</div>
 			)}
 			{answer.dontKnow && isQuiz && (
-				<div className="mt-2 text-sm text-muted-foreground">Answered “I don't know”.</div>
+				<div className="mt-2 text-sm text-muted-foreground">{t("Answered “I don't know”.")}</div>
 			)}
 
 			{((answer.thinking ?? answer.note) || answer.images?.thinking?.length) && (
@@ -191,7 +193,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 				    the accent lift read too light); rail only, heights identical. */
 				<ThinkingBlock
 					testId="your-thinking"
-					label="YOUR THINKING"
+					label={t("YOUR THINKING")}
 					text={answer.thinking ?? answer.note ?? ""}
 					images={answer.images?.thinking}
 					inCard
@@ -212,11 +214,11 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 						onClick={() => setWhyOpen((v) => !v)}
 						className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 					>
-						{whyOpen ? "Hide why" : "Why"}
+						{whyOpen ? t("Hide why") : t("Why")}
 					</button>
 					{whyOpen && (
 						<div className="mt-1.5 rounded-lg bg-muted py-2 text-sm text-foreground/50">
-							<span className="font-medium text-muted-foreground">Why: </span>
+							<span className="font-medium text-muted-foreground">{t("Why: ")}</span>
 							{/* Keep the first paragraph beside the label, not every paragraph:
 							   later paragraphs must retain their recovered document structure. */}
 							<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.explanation}</ToolContentResponse>
@@ -230,7 +232,7 @@ export function AnsweredCard({ answer: savedAnswer, input }: { answer: QuestionA
 			    the model's next reply IS the grading. */}
 			{isExplain && answer.committed && (
 				<div className="mt-3 rounded-lg bg-muted py-2 text-sm text-muted-foreground">
-					<span className="font-medium text-foreground">The answer: </span>
+					<span className="font-medium text-foreground">{t("The answer: ")}</span>
 					<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.committed}</ToolContentResponse>
 				</div>
 			)}

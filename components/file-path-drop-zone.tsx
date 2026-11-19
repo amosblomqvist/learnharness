@@ -5,6 +5,7 @@ import { FileSymlinkIcon, XIcon } from "lucide-react";
 import { directoryReferencePath, quoteFilePath } from "@/src/core";
 import { appendToPrimaryInput } from "@/components/dictation";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
+import { useT } from "@/components/i18n";
 
 export const BROWSER_NOTICE = "Local file paths can only be attached in the desktop app. You can paste a full path instead.";
 
@@ -15,6 +16,7 @@ export function FilePathDropZone({ children, className, onContentRoot }: {
 	className?: string;
 	onContentRoot?: (element: HTMLElement | null) => void;
 }) {
+	const t = useT();
 	const root = useRef<HTMLElement>(null);
 	useEffect(() => {
 		onContentRoot?.(root.current);
@@ -110,7 +112,7 @@ export function FilePathDropZone({ children, className, onContentRoot }: {
 			)}
 			{notice && <div role="status" className="absolute bottom-2 left-1/2 z-50 flex max-w-[90%] -translate-x-1/2 items-center gap-2 rounded-md border bg-card px-3 py-2 font-ui text-xs shadow-sm">
 				<span>{notice}</span>
-				<button type="button" aria-label="Dismiss attachment notice" onClick={() => setNotice("")} className="shrink-0 rounded-sm p-1 hover:bg-accent"><XIcon className="size-3" aria-hidden /></button>
+				<button type="button" aria-label={t("Dismiss attachment notice")} onClick={() => setNotice("")} className="shrink-0 rounded-sm p-1 hover:bg-accent"><XIcon className="size-3" aria-hidden /></button>
 			</div>}
 		</main>
 	);

@@ -6,6 +6,7 @@ import { JobsContext } from "@/components/jobs-context";
 import { ChatActionsContext } from "@/components/chat";
 import { isModelsRefusal, isProviderKeyRefusal, type JobKind, type JobRecord } from "@/src/core";
 import { BrailleSpinner } from "@/components/braille-spinner";
+import { useT } from "@/components/i18n";
 
 /**
  * The dispatch card (contracts.ts "THE ASYNC PROTOCOL" §4): the tool-call
@@ -86,6 +87,7 @@ function DispatchRefusedCard({ label, line, button }: { label: string; line: str
 }
 
 function DispatchActivityCard({ job, label }: { job: JobRecord | null; label: string }) {
+	const t = useT();
 	// Elapsed from createdAt — jobs appear here only via the jobs feed (post-mount),
 	// so no SSR/hydration mismatch.
 	const elapsed =
@@ -100,7 +102,7 @@ function DispatchActivityCard({ job, label }: { job: JobRecord | null; label: st
 				    the Braille spinner replaces the pulsing dot — one indicator
 				    everywhere. This is the ONLY dispatch-card change; the card's
 				    shape is untouched. */}
-				<BrailleSpinner label={`${label} running`} />
+				<BrailleSpinner label={t("{label} running", { label })} />
 				{label}
 				{elapsed !== null && <span className="font-normal">· {elapsed}s</span>}
 			</div>
@@ -111,7 +113,7 @@ function DispatchActivityCard({ job, label }: { job: JobRecord | null; label: st
 			)}
 			{!job && (
 				<div className="mt-1 text-sm text-muted-foreground" data-testid="dispatch-pending">
-					Dispatched…
+					{t("Dispatched…")}
 				</div>
 			)}
 		</div>

@@ -56,6 +56,7 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
+import { useT } from "@/components/i18n";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -209,6 +210,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
  *  The icon fades with the slot and is clipped by it as it collapses —
  *  no popping in either direction. */
 export function SidebarToggle() {
+	const t = useT();
 	const { open, toggle } = useSidebar();
 	return (
 		<span
@@ -217,11 +219,11 @@ export function SidebarToggle() {
 				open ? "w-0 -mr-3" : "w-9 mr-0 lh-closed-toggle",
 			)}
 		>
-			<Hint label="Open sidebar" action="toggle-sidebar">
+			<Hint label={t("Open sidebar")} action="toggle-sidebar">
 			<Button
 				variant="ghost"
 				size="icon"
-				aria-label="Open sidebar"
+				aria-label={t("Open sidebar")}
 				aria-hidden={open}
 				tabIndex={open ? -1 : 0}
 				onClick={toggle}
@@ -311,6 +313,7 @@ export function SessionRow({
 	/** Right-click opens the context menu (wave 6: Rename / Delete). */
 	onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
+	const t = useT();
 	return (
 		<button
 			type="button"
@@ -337,7 +340,7 @@ export function SessionRow({
 			    was left of the name; right-aligned keeps the titles flush with
 			    the teaching rows and reads cleaner. */}
 			{(chat.kind ?? "teach") === "practice" && (
-				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
+				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label={t("Practice session")} />
 			)}
 		</button>
 	);
@@ -348,6 +351,7 @@ export function SessionRow({
  *  "replace", the header rename's rule), Enter/blur commits, Esc discards.
  *  The meta line stays so the row never changes height mid-edit. */
 export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; onCommit: (next: string) => void; onCancel: () => void }) {
+	const t = useT();
 	const [draft, setDraft] = useState(chat.title);
 	const interactions = useOptionalInteractionLayers();
 	const inputRef = useRef<HTMLInputElement | null>(null);
@@ -386,7 +390,7 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 							onCancel();
 						}
 					}}
-					aria-label="Rename session"
+					aria-label={t("Rename session")}
 					data-testid="session-rename-input"
 					className="lh-input w-full min-w-0 truncate border-0 border-b border-border bg-transparent px-0 text-foreground outline-none"
 				/>
@@ -403,6 +407,7 @@ export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
+	const t = useT();
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
@@ -673,23 +678,23 @@ function SessionsSidebar() {
 						// of the logo, carrying its real shortcut: ⌘G jumps to
 						// the graph view (keyboard-shortcuts routes it to "/",
 						// the same destination as this logo).
-						label="Home"
+						label={t("Home")}
 						action="jump-graph"
 						side="right"
 					>
 						<Link
 							href="/"
-							aria-label="Home"
+							aria-label={t("Home")}
 							className="lh-no-drag flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
 						>
 							<LhMark className="size-6" />
 						</Link>
 					</Hint>
-					<Hint label="Close sidebar" action="toggle-sidebar">
+					<Hint label={t("Close sidebar")} action="toggle-sidebar">
 						<Button
 							variant="ghost"
 							size="icon"
-							aria-label="Close sidebar"
+							aria-label={t("Close sidebar")}
 							onClick={toggle}
 							className="lh-no-drag"
 						>
@@ -703,30 +708,30 @@ function SessionsSidebar() {
 					<button
 						type="button"
 						data-testid="new-session"
-						title="Teaching"
+						title={t("Teaching")}
 						onClick={() => void newSession()}
 						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<PlusIcon className="size-3 shrink-0" />
-						<span className="min-w-0 truncate">Teaching</span>
-						<span className="sr-only">create a new teaching session</span>
+						<span className="min-w-0 truncate">{t("Teaching")}</span>
+						<span className="sr-only">{t("create a new teaching session")}</span>
 					</button>
 					<button
 						type="button"
 						data-testid="new-session-practice"
-						title="Practice"
+						title={t("Practice")}
 						onClick={() => router.push("/chat/new?mode=practice")}
 						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<DumbbellIcon className="size-3 shrink-0" />
-						<span className="min-w-0 truncate">Practice</span>
-						<span className="sr-only">create a new practice session</span>
+						<span className="min-w-0 truncate">{t("Practice")}</span>
+						<span className="sr-only">{t("create a new practice session")}</span>
 					</button>
 				</PluginSidebarActions>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
-					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
-					<Hint label="Search sessions" action="sessions-search" side="bottom">
+					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">{t("Sessions")}</span>
+					<Hint label={t("Search sessions")} action="sessions-search" side="bottom">
 					<span className="relative flex-1">
 						<Input
 							ref={searchRef}
@@ -778,8 +783,8 @@ function SessionsSidebar() {
 									e.currentTarget.blur();
 								}
 							}}
-							placeholder="Search…"
-							aria-label="Search sessions"
+							placeholder={t("Search…")}
+							aria-label={t("Search sessions")}
 							className="h-6 rounded-sm border-border bg-background pl-6 text-xs placeholder:text-muted-foreground/60"
 						/>
 						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
@@ -808,17 +813,17 @@ function SessionsSidebar() {
 									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{f === "teach" ? "Teaching" : f === "all" ? "All" : "Practice"}
+							{f === "teach" ? t("Teaching") : f === "all" ? t("All") : t("Practice")}
 						</button>
 					))}
 				</div>
 
 				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
 					{shown === null ? (
-						<div className="px-2 py-4 text-xs text-muted-foreground">Loading…</div>
+						<div className="px-2 py-4 text-xs text-muted-foreground">{t("Loading…")}</div>
 					) : shown.length === 0 ? (
 						<div className="px-2 py-4 text-xs text-muted-foreground">
-							{query.trim() ? "No sessions match." : "No sessions yet."}
+							{query.trim() ? t("No sessions match.") : t("No sessions yet.")}
 						</div>
 					) : (
 						shown.map((c, i) =>
@@ -857,7 +862,7 @@ function SessionsSidebar() {
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
 					<div className="px-3 pb-3 pt-1">
-						<Hint label="Settings" action="open-settings" side="right">
+						<Hint label={t("Settings")} action="open-settings" side="right">
 							<button
 								type="button"
 								onClick={() => openSettings()}
@@ -865,7 +870,7 @@ function SessionsSidebar() {
 								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
 								<SettingsIcon className="size-3" />
-								Settings
+								{t("Settings")}
 							</button>
 						</Hint>
 					</div>
@@ -897,7 +902,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
-							Rename
+							{t("Rename")}
 						</button>
 						{/* Export as Markdown (owner, release polish 2026-10-06): the
 					    session-markdown engine's user-facing debut — same-origin
@@ -919,7 +924,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
-							Export as Markdown…
+							{t("Export as Markdown…")}
 						</button>
 						<button
 							type="button"
@@ -931,7 +936,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
 						>
-							Delete…
+							{t("Delete…")}
 						</button>
 						<div className="my-0.5 border-t border-border/60" aria-hidden="true" />
 						<CoverageMenuBlock chatId={ctxChatId} />

@@ -37,6 +37,7 @@ import {
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
 import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
+import { useT } from "@/components/i18n";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: LhViewMessage["role"];
@@ -266,11 +267,12 @@ export const MessageBranchPrevious = ({
   children,
   ...props
 }: MessageBranchPreviousProps) => {
+	const t = useT();
   const { goToPrevious, totalBranches } = useMessageBranch();
 
   return (
     <Button
-      aria-label="Previous branch"
+      aria-label={t("Previous branch")}
       disabled={totalBranches <= 1}
       onClick={goToPrevious}
       size="icon-sm"
@@ -289,11 +291,12 @@ export const MessageBranchNext = ({
   children,
   ...props
 }: MessageBranchNextProps) => {
+	const t = useT();
   const { goToNext, totalBranches } = useMessageBranch();
 
   return (
     <Button
-      aria-label="Next branch"
+      aria-label={t("Next branch")}
       disabled={totalBranches <= 1}
       onClick={goToNext}
       size="icon-sm"
@@ -313,6 +316,7 @@ export const MessageBranchPage = ({
   ...props
 }: MessageBranchPageProps) => {
   const { currentBranch, totalBranches } = useMessageBranch();
+  const t = useT();
 
   return (
     <ButtonGroupText
@@ -322,7 +326,7 @@ export const MessageBranchPage = ({
       )}
       {...props}
     >
-      {currentBranch + 1} of {totalBranches}
+      {t("{current} of {total}", { current: currentBranch + 1, total: totalBranches })}
     </ButtonGroupText>
   );
 };

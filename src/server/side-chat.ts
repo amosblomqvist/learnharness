@@ -279,5 +279,5 @@ async function productionEngineFor(record: ChatRecord): Promise<SideEngine | Res
 interface SideChatGlobal { __lhSideChatService?: SideChatService }
 export const sideChats: SideChatService = ((globalThis as typeof globalThis & SideChatGlobal).__lhSideChatService ??= createSideChatService({
 	chatStore: stores.chatStore, engineFor: productionEngineFor, beforeAsk: awaitCompaction,
-	instructions: () => composeSideChatInstructions(effectiveSettings().agent.prompts),
+	instructions: () => composeSideChatInstructions(effectiveSettings().agent.prompts, effectiveSettings().general.language),
 }));

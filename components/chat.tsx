@@ -124,6 +124,7 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { useT } from "@/components/i18n";
 
 /** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
@@ -295,6 +296,7 @@ export function Chat({
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
 }) {
+	const t = useT();
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
@@ -1662,8 +1664,8 @@ export function Chat({
 								onBlur={() => void commitRename(titleDraft)}
 								spellCheck={false}
 								data-plugin-chrome-title
-								aria-label="Session title"
-								title="Rename this session"
+								aria-label={t("Session title")}
+								title={t("Rename this session")}
 								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
@@ -1675,7 +1677,7 @@ export function Chat({
 					<>
 						<Hint
 							// F2 renames (registry) — surfaced on the hover.
-							label="Rename session"
+							label={t("Rename session")}
 							action="rename-session"
 							side="bottom"
 						>
@@ -1700,7 +1702,7 @@ export function Chat({
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
 					{planTree && (
-						<Hint label="Open the full plan" side="bottom">
+						<Hint label={t("Open the full plan")} side="bottom">
 <button
 							type="button"
 							data-testid="plan-chip"
@@ -1711,7 +1713,7 @@ export function Chat({
 							className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground"
 						>
 							<WaypointsIcon className="size-3.5 text-primary" aria-hidden />
-							Plan
+							{t("Plan")}
 						</button>
 </Hint>
 					)}
@@ -1733,7 +1735,7 @@ export function Chat({
 							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
 						>
 							<DumbbellIcon className="size-3" />
-							Practice
+							{t("Practice")}
 						</span>
 					) : (
 						<PhaseChip phase={phases.at(-1) ?? "probe"} />
@@ -1750,8 +1752,8 @@ export function Chat({
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
-									title="New session"
-									description="The teacher will open by probing what you already know."
+									title={t("New session")}
+									description={t("The teacher will open by probing what you already know.")}
 								/>
 							)}
 
@@ -1806,7 +1808,7 @@ export function Chat({
 														className="my-4 flex items-center justify-center gap-1.5 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground"
 													>
 														<ArrowRightIcon className="size-3" />
-														Next problem
+														{t("Next problem")}
 													</div>
 												);
 											default:
@@ -1865,7 +1867,7 @@ export function Chat({
 												{/* The rail GROUPS (owner round 4, 2026-10-05): the YOU heading
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
-												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
+												<div className="font-medium uppercase tracking-wide text-muted-foreground">{t("You")}</div>
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
@@ -1901,7 +1903,7 @@ export function Chat({
 												) {
 													return (
 														<SystemLine key={`retry-${pi}`} testId="tool-retry">
-															Retrying…
+															{t("Retrying…")}
 														</SystemLine>
 													);
 												}
@@ -1998,20 +2000,20 @@ export function Chat({
 						    BEFORE beginTurn; the settle kick runs after endTurn). */}
 							{compacting && (
 								<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
-									<BrailleSpinner label="Compacting context" />
-									<Shimmer duration={1}>COMPACTING CONTEXT…</Shimmer>
+									<BrailleSpinner label={t("Compacting context")} />
+									<Shimmer duration={1}>{t("COMPACTING CONTEXT…")}</Shimmer>
 								</span>
 							)}
 							{(status === "submitted" || turnInFlight) && (
 								<PendingTurnIndicator evaluating={evaluating} />
 							)}
-							{openingError && <p role="alert" className="text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
+							{openingError && <p role="alert" className="text-sm text-destructive">{t(OPENING_PROMPT_FAILURE)}</p>}
 							{error && (
 								<div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
-									<span>Something went wrong: {error.message}</span>
+									<span>{t("Something went wrong:")} {error.message}</span>
 									{retryable && (
 										<Button variant="outline" size="xs" data-testid="retry-failed-turn" onClick={retryFailedTurn}>
-											Retry
+											{t("Retry")}
 										</Button>
 									)}
 								</div>
@@ -2096,7 +2098,7 @@ export function Chat({
 										onClick={() => setSetupOpen(true)}
 										className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 									>
-										Set up your models
+										{t("Set up your models")}
 									</button>
 								</div>
 							)
@@ -2480,6 +2482,7 @@ export function DockOverlay({
 	 *  home and /chat/new carry, above the composer while slots are unset. */
 	setupCta?: React.ReactNode;
 }) {
+	const t = useT();
 	const controller = useOptionalInteractionLayers();
 	const { isAtBottom, scrollToBottom, scrollRef } = useStickToBottomContext();
 	// Render-fresh bottom state (flicker round): the arrival block below reads
@@ -2846,7 +2849,7 @@ export function DockOverlay({
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>
 					{setupCta}
-					{reconciliation === "failed" && <div role="alert" className="mb-2 rounded-2xl border bg-card px-4 py-3 text-sm">Could not sync the saved session. <Button type="button" variant="ghost" onClick={onRetrySync}>Retry syncing</Button></div>}
+					{reconciliation === "failed" && <div role="alert" className="mb-2 rounded-2xl border bg-card px-4 py-3 text-sm">{t("Could not sync the saved session.")} <Button type="button" variant="ghost" onClick={onRetrySync}>{t("Retry syncing")}</Button></div>}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet
 					    one-liners above the shell - right-aligned to where its corner
 					    rounding starts, truncated, no background, no container. A
@@ -2888,8 +2891,8 @@ export function DockOverlay({
 								<PluginQuestionDock viewReader={customViewReader} snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
 							) : unreadablePlugin ? (
 								<div className="px-4 py-3">
-									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing question…</p>}
-									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>Dismiss question</Button></>}
+									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">{t("Preparing question…")}</p>}
+									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">{t("Question unavailable")}</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>{t("Dismiss question")}</Button></>}
 								</div>
 							) : pending ? (
 								<QuestionDock
@@ -2974,7 +2977,7 @@ export function DockOverlay({
 				    mid-question unmount), and widening past the floor fades it
 				    back in. */}
 				{(pending || pluginQuestion) && plan && (
-					<Hint label="Open the full plan" side="bottom">
+					<Hint label={t("Open the full plan")} side="bottom">
 <button
 						type="button"
 						data-testid="plan-marginalia"

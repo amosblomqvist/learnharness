@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
 import type { ChatDeleteMode, ChatListItem } from "@/src/core";
+import { useT } from "@/components/i18n";
 
 /** The graph-traces checkbox copy (owner, 2026-09-24 flow rework — was
  *  the delete-nodes option's body in the two-button design): the
@@ -132,16 +133,17 @@ export function DeleteSessionBody({
 	onRun: () => void;
 	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 }) {
+	const t = useT();
 	const frame = (
 		<div
 			role="dialog"
 			aria-modal="true"
-			aria-label="Delete session"
+			aria-label={t("Delete session")}
 			data-testid="delete-session-dialog"
 			onClick={(e) => e.stopPropagation()}
 			className="w-[32rem] max-w-[calc(100vw-2rem)] rounded-xl border bg-card p-5 shadow-xl"
 		>
-			<h2 className="text-sm font-semibold text-destructive">Delete session?</h2>
+			<h2 className="text-sm font-semibold text-destructive">{t("Delete session?")}</h2>
 			{/* The session name below the title in JetBrains Mono (owner,
 			    2026-09-24): no code-block chrome — the font already says
 			    code. Owner, 2026-10-13 polish: normal text-sm size (was
@@ -153,8 +155,7 @@ export function DeleteSessionBody({
 				</code>
 			</div>
 			<p className="mt-2 text-sm text-muted-foreground">
-				This permanently removes the session — its messages, background jobs, and extraction records. Everything
-				it added to the graph stays unless you check below. This cannot be undone.
+			{t("This permanently removes the session — its messages, background jobs, and extraction records. Everything it added to the graph stays unless you check below. This cannot be undone.")}
 			</p>
 			<label
 				data-testid={TRACES_COPY.testid}
@@ -169,8 +170,8 @@ export function DeleteSessionBody({
 					className="mt-0.5 size-4 shrink-0 accent-primary"
 				/>
 				<span className="min-w-0">
-					<span className="block text-sm text-foreground">{TRACES_COPY.title}</span>
-					<span className="mt-1 block text-xs text-muted-foreground">{TRACES_COPY.body}</span>
+					<span className="block text-sm text-foreground">{t(TRACES_COPY.title)}</span>
+					<span className="mt-1 block text-xs text-muted-foreground">{t(TRACES_COPY.body)}</span>
 				</span>
 			</label>
 			{failure && (
@@ -187,7 +188,7 @@ export function DeleteSessionBody({
 						disabled={busy}
 						className="ml-3 text-xs text-foreground underline-offset-2 hover:underline disabled:opacity-40"
 					>
-						Try again
+						{t("Try again")}
 					</button>
 				</div>
 			)}
@@ -202,7 +203,7 @@ export function DeleteSessionBody({
 					disabled={busy}
 					className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground disabled:opacity-40"
 				>
-					Cancel
+					{t("Cancel")}
 				</button>
 				<button
 					type="button"
