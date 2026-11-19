@@ -53,6 +53,8 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 		proseFontSize: delta?.proseFontSize ?? f.proseFontSize,
 		codeLigatures: delta?.codeLigatures ?? f.codeLigatures,
 		sessionNameSerif: delta?.sessionNameSerif ?? f.sessionNameSerif,
+		transcriptMaxWidth: delta?.transcriptMaxWidth ?? f.transcriptMaxWidth,
+		adaptiveQuestions: delta?.adaptiveQuestions ?? f.adaptiveQuestions,
 		mdRendering: {
 			headingWeight: delta?.mdRendering?.headingWeight ?? f.mdRendering.headingWeight,
 			boldColor: delta?.mdRendering?.boldColor ?? f.mdRendering.boldColor,
@@ -92,6 +94,9 @@ export function appearanceVars(
 	// to the prose family — covers chat.tsx + new-session.tsx titles with
 	// zero component edits (they use the .font-title utility).
 	if (!a.sessionNameSerif) vars["--font-title"] = "var(--font-prose)";
+	// The session transcript's maximum width (rem). Absent = Full: the
+	// stylesheet's `none` returns, exactly today's full-width column.
+	if (a.transcriptMaxWidth !== null) vars["--lh-transcript-max"] = `${a.transcriptMaxWidth}rem`;
 	// Markdown heading weight (the emphasis inks ride the theme colors).
 	vars["--lh-heading-weight"] = String(a.mdRendering.headingWeight);
 	return vars;

@@ -46,6 +46,11 @@ interface DockHeightElements {
 
 const pixels = (value: string) => Number.parseFloat(value) || 0;
 
+/** The dock's height-variable region: a two-column question's column row
+ * (both columns cap at --dock-max-h and scroll on their own) or, first in
+ * document order otherwise, the single question/problem scroll area. */
+export const DOCK_HEIGHT_REGION = "[data-dock-height-region], [data-dock-scroll-area]";
+
 /** Read natural geometry before writing any constraints. Cancel the shell's
  * animated height out of both ancestor measurements, then substitute its
  * natural content and borders. This stays valid during a WAAPI height morph
@@ -54,7 +59,7 @@ export function syncDockHeight(elements: DockHeightElements, expanded: boolean) 
 	const { column, block, viewport, body, shell, content } = elements;
 	// QuestionDock keeps a laid-out form in an invisible h-0 wrapper;
 	// PracticeDock removes its form. Neither hidden form is a height input.
-	const question = expanded ? content.querySelector<HTMLElement>("[data-dock-scroll-area]") : null;
+	const question = expanded ? content.querySelector<HTMLElement>(DOCK_HEIGHT_REGION) : null;
 	const height = (el: HTMLElement) => el.getBoundingClientRect().height;
 	const shellStyle = getComputedStyle(shell);
 	const questionStyle = question ? getComputedStyle(question) : null;
@@ -139,7 +144,7 @@ export function useDockHeight({
 		for (const el of [scrollRef.current, blockRef.current, viewportRef.current, bodyRef.current, contentRef.current]) {
 			if (el) observer.observe(el);
 		}
-		const question = expanded ? contentRef.current?.querySelector("[data-dock-scroll-area]") : null;
+		const question = expanded ? contentRef.current?.querySelector(DOCK_HEIGHT_REGION) : null;
 		if (question) observer.observe(question);
 		window.addEventListener("resize", observedMeasure);
 		return () => {

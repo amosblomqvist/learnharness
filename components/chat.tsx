@@ -40,7 +40,9 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
-import { createDockMorph } from "@/components/dock-morph";
+import { createDockMorph, createDockWidthMorph } from "@/components/dock-morph";
+import { useAppearance } from "@/components/settings/appearance";
+import { QUESTION_CARD_BASE, QUESTION_CARD_CHROME, QUESTION_COLUMN_MIN, layoutFontKey, type QuestionLayout } from "@/components/question-layout";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -125,15 +127,22 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 
-/** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
  * Width tokens (wave-5 reskin, owner decision): the teaching PROSE spans the
  * full session width with a thin px-6 margin; the composer/question DOCK is
  * deliberately narrower (~46rem centered) per the reference. Same ELEMENT,
  * same place — width polish only.
+ *
+ * Transcript width (Appearance, session-appearance-layout): an optional cap
+ * on the whole transcript, centered (globals.css .lh-transcript-column).
+ * Full (unset) is exactly the full-bleed column above.
  */
-const COLUMN = "mx-auto w-full max-w-none px-6";
+const COLUMN = "lh-transcript-column mx-auto w-full px-6";
 const DOCK = "mx-auto w-full max-w-[46rem] px-4";
+// The DOCK container's horizontal chrome around a question card's content
+// (px-4 padding + the shell's 1px borders): an adapted card's content width
+// plus this is the container's max width. Shared with answered cards.
+const DOCK_CHROME = QUESTION_CARD_CHROME;
 // The DOCK container's fixed width (46rem) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
@@ -1615,8 +1624,9 @@ export function Chat({
 		    bottom exactly like the left sidebar, and the header (name + phase
 		    chip) spans from the left sidebar's edge to the panel's edge. The
 		    dock overlays the column bottom (outside the scroller); a spacer in
-		    the transcript reserves its height. */}
-		<div className="flex h-dvh">
+		    the transcript reserves its height. data-session-surface scopes the
+		    session's reading rules (no-wrap inline code/math, globals.css). */}
+		<div data-session-surface="" className="flex h-dvh">
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1953,7 +1963,7 @@ export function Chat({
 														// transcript; answered ones render as graded records.
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} toolCallId={part.toolCallId} />
 															);
 														}
 														return null;
@@ -2602,8 +2612,8 @@ export function DockOverlay({
 	// width instantly, so the fade floor never lags behind reality (the old
 	// render-time measurement went stale during drag-resizes and the mount
 	// decision popped late).
-	const [flankW, setFlankW] = useState(0);
-	const flankWRef = useRef(0);
+	const [blockW, setBlockW] = useState(0);
+	const blockWRef = useRef(0);
 	// Part A of the same round (the resize mute): any block size change
 	// stamps this — the fold machine ignores scroll events for a beat after,
 	// because a resize/rewrap re-clamps scrollTop and emits PHANTOM scroll
@@ -2619,10 +2629,10 @@ export function DockOverlay({
 		const block = blockRef.current;
 		if (!block) return;
 		const measure = () => {
-			const next = Math.round(block.offsetWidth / 2 - DOCK_W / 2 - 2 * MARGIN_GAP);
-			if (Math.abs(next - flankWRef.current) > 1) {
-				flankWRef.current = next;
-				setFlankW(next);
+			const next = Math.round(block.offsetWidth);
+			if (Math.abs(next - blockWRef.current) > 1) {
+				blockWRef.current = next;
+				setBlockW(next);
 				geometryAtRef.current = Date.now();
 			}
 		};
@@ -2631,6 +2641,36 @@ export function DockOverlay({
 		ro.observe(block);
 		return () => ro.disconnect();
 	}, []);
+
+	// ADAPT QUESTION LAYOUT (Appearance; owner-approved plan): while a NATIVE
+	// question is expanded, the whole bottom region takes the width the
+	// question card solved for (components/question-layout.ts), capped at the
+	// transcript width. Folded bars, reveal invitations, plugin questions,
+	// practice and the composer keep the default 46rem. The request carries
+	// only geometry/font inputs — never typing state (#674).
+	const { appearance } = useAppearance();
+	const adaptive = appearance.adaptiveQuestions && !!pending && !pluginQuestion && !unreadablePlugin;
+	const transcriptCap = appearance.transcriptMaxWidth === null ? Infinity : appearance.transcriptMaxWidth * 16;
+	// Full: the transcript's text column is the block less its px-6 margins;
+	// the card's shell may line up with it (container = block - 16px).
+	const containerMax = Math.min(transcriptCap, blockW - 16);
+	const fontKey = layoutFontKey(appearance);
+	const layoutRequest = useMemo(
+		() => (adaptive && blockW > 0
+			? { available: Math.max(containerMax - DOCK_CHROME, 0), base: QUESTION_CARD_BASE, floor: QUESTION_COLUMN_MIN, key: fontKey }
+			: null),
+		[adaptive, blockW, containerMax, fontKey],
+	);
+	const [questionLayout, setQuestionLayout] = useState<QuestionLayout | null>(null);
+	const adaptedW = adaptive && expanded && !revealPending && questionLayout && questionLayout.width + DOCK_CHROME > DOCK_W
+		? questionLayout.width + DOCK_CHROME
+		: null;
+	const dockW = Math.min(adaptedW ?? DOCK_W, blockW || Infinity);
+	const flankW = Math.round(blockW / 2 - dockW / 2 - 2 * MARGIN_GAP);
+	const dockRef = useRef<HTMLDivElement>(null);
+	const widthMorphRef = useRef<ReturnType<typeof createDockWidthMorph> | null>(null);
+	if (!widthMorphRef.current) widthMorphRef.current = createDockWidthMorph();
+	useIsoLayoutEffect(() => () => widthMorphRef.current?.dispose(), []);
 
 	// The reserve grows immediately, but never shrinks while a question or
 	// practice problem owns the dock: shrinking flow space could pin a nearby
@@ -2660,9 +2700,16 @@ export function DockOverlay({
 	if (!heightMorphRef.current) heightMorphRef.current = createDockMorph();
 	const retargetOpening = useCallback(() => heightMorphRef.current?.retarget(stateKey), [stateKey]);
 	useIsoLayoutEffect(() => () => heightMorphRef.current?.dispose(), []);
+	// Mid-width-morph block heights are not settled; the morph's finish
+	// offers the natural height instead (measureBlock below).
+	const offerSettled = useCallback((blockH: number) => {
+		if (!widthMorphRef.current?.animating()) offer(blockH);
+	}, [offer]);
 	useDockHeight({
 		scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-		expanded, enabled: ownsDock, mode, onScrollbarInset: setSbInset, onHeight: offer,
+		// The two-column row replaces the question scroll area as the
+		// height-variable region: reconnect the observers when it swaps.
+		expanded, enabled: ownsDock, mode: `${mode}:${questionLayout?.kind ?? "default"}`, onScrollbarInset: setSbInset, onHeight: offerSettled,
 		onLayout: retargetOpening,
 	});
 
@@ -2837,12 +2884,18 @@ export function DockOverlay({
 		// closing and ordinary typing retain their existing behavior.
 		heightMorphRef.current?.layout(el, stateKey, ownsDock && expanded, measureBlock);
 	});
+	// The width morph (adaptive question layout): AFTER the height morph has
+	// measured its natural target at the final width; same duration/easing.
+	useIsoLayoutEffect(() => {
+		const el = dockRef.current;
+		if (el) widthMorphRef.current?.layout(el, adaptedW ?? DOCK_W, measureBlock);
+	});
 
 	return (
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
 			<div ref={blockRef} className="relative bg-background pb-5">
-				<div className={DOCK}>
+				<div ref={dockRef} data-dock-width={adaptedW ?? undefined} className={DOCK} style={adaptedW ? { maxWidth: adaptedW } : undefined}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>
 					{setupCta}
@@ -2911,6 +2964,8 @@ export function DockOverlay({
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}
+									layoutRequest={layoutRequest}
+									onLayout={setQuestionLayout}
 								/>
 							) : pluginPractice ? (
 								<PluginProblemDock {...pluginPractice} viewReader={customViewReader} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
@@ -2979,7 +3034,7 @@ export function DockOverlay({
 						type="button"
 						data-testid="plan-marginalia"
 						onClick={onOpenPlan}
-						style={{ left: `calc(50% + ${DOCK_W / 2 + MARGIN_GAP}px)` }}
+						style={{ left: `calc(50% + ${dockW / 2 + MARGIN_GAP}px)` }}
 						className={`absolute bottom-5 right-4 top-0 cursor-pointer transition-[filter,opacity] duration-300 ease-out ${
 							expanded && flankW >= MARGIN_MIN_W
 								? "pointer-events-auto opacity-100 blur-0"

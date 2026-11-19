@@ -37,6 +37,7 @@ import {
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
 import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
+import { rehypeGluePunctuation } from "@/components/md-nobreak";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: LhViewMessage["role"];
@@ -370,11 +371,18 @@ export const streamdownRemend = { htmlTags: false };
 // becomes an "[Image blocked: alt]" badge. data: images were already
 // blocked by the sanitize step; the app's image and SVG cards don't render
 // through markdown. Links are unchanged.
+//
+// Punctuation glue (components/md-nobreak.ts) runs last in this list:
+// after sanitize/harden (its class survives) and before rehype-katex, which
+// Streamdown appends after the list.
 const [hardenPlugin, hardenOptions] = defaultRehypePlugins.harden as [unknown, Record<string, unknown>];
-export const streamdownRehypePlugins = Object.values({
-  ...defaultRehypePlugins,
-  harden: [hardenPlugin, { ...hardenOptions, allowedImagePrefixes: [] }],
-}) as NonNullable<StreamdownProps["rehypePlugins"]>;
+export const streamdownRehypePlugins = [
+  ...Object.values({
+    ...defaultRehypePlugins,
+    harden: [hardenPlugin, { ...hardenOptions, allowedImagePrefixes: [] }],
+  }),
+  rehypeGluePunctuation,
+] as NonNullable<StreamdownProps["rehypePlugins"]>;
 
 export const MessageResponse = memo(
   ({ className, children, ...props }: MessageResponseProps) => {
