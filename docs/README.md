@@ -1,5 +1,7 @@
 # Documentation
 
+<p align="center"><a href="README.zh-CN.md">简体中文</a> · English</p>
+
 ## User guides
 
 - [Getting started](getting-started.md) — connections, models, sessions, dictation, files, and notes imports.
