@@ -40,7 +40,7 @@ import {
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 import { citationsToReadableText, collectCitations } from "./citations.ts";
 import { messageMarkdown } from "./session-markdown.ts";
-import { normalizeOptions, seededRandom, shuffleOptions, type QuestionAnswerData } from "./question-core.ts";
+import { displayedOptionLetter, questionDisplayOptions, type QuestionAnswerData } from "./question-core.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 import { readPluginQuestionMessageAnnotation, readPluginQuestionAnswer, readPluginQuestionCancellation } from "./plugin-questions.ts";
 import { pluginProblemForCall, readPluginProblemSubmission } from "./plugin-problems.ts";
@@ -374,7 +374,8 @@ function answeredQuestionMarkdown(result: ToolResultMessage, input: Record<strin
 			answer.options
 				.map((o) => {
 					const marks = [isQuiz && correct.has(o.index) ? "correct" : "", chosen.has(o.index) ? "chosen by the learner" : ""].filter(Boolean);
-					return `- ${o.label}${marks.length > 0 ? ` *(${marks.join(", ")})*` : ""}`;
+					const letter = displayedOptionLetter(answer.optionOrder, o.index);
+					return `- ${letter ? `${letter}. ` : ""}${o.label}${marks.length > 0 ? ` *(${marks.join(", ")})*` : ""}`;
 				})
 				.join("\n"),
 		);
@@ -403,9 +404,11 @@ function openQuestionMarkdown(tool: string, input: unknown, toolCallId: string):
 	const details = typeof args.details === "string" ? args.details.trim() : "";
 	if (details) lines.push(details);
 	if (tool !== "explain" && tool !== "recall") {
-		const rawOptions = normalizeOptions(args.options as Parameters<typeof normalizeOptions>[0]);
-		const options = toolQuestionKind(tool) === "quiz" ? shuffleOptions(rawOptions, seededRandom(toolCallId)) : rawOptions;
-		if (options.length > 0) lines.push(options.map((o, index) => `${index + 1}. ${o.label}`).join("\n"));
+		const { options, optionOrder } = questionDisplayOptions(args.options as Parameters<typeof questionDisplayOptions>[0], toolQuestionKind(tool), args.multiSelect === true, toolCallId);
+		if (options.length > 0) lines.push(options.map((o, index) => {
+			const letter = displayedOptionLetter(optionOrder, index + 1);
+			return letter ? `- ${letter}. ${o.label}` : `${index + 1}. ${o.label}`;
+		}).join("\n"));
 	}
 	return lines.join("\n\n");
 }

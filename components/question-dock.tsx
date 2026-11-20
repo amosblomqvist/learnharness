@@ -20,10 +20,9 @@ import {
 	CONFIDENCE_STOPS,
 	DEFAULT_CONFIDENCE_INDEX,
 	emptyDockSelection,
-	normalizeOptions,
+	displayedOptionLetter,
+	questionDisplayOptions,
 	resolveCorrect,
-	seededRandom,
-	shuffleOptions,
 	toolQuestionKind,
 	parseAskInput,
 	parseQuizInput,
@@ -34,6 +33,7 @@ import {
 	type AskToolInput,
 	type DockSelection,
 	type ExplainToolInput,
+	type OptionOrder,
 	type QuestionAnswerData,
 	type QuestionFormDraft,
 	type QuestionData,
@@ -69,6 +69,7 @@ const QC_CONTEXT = "mb-3 text-sm text-muted-foreground";
 const QC_OPTION_LIST = "flex flex-col gap-2 pb-2";
 const QC_OPTION_ROW = "flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors";
 const QC_OPTION_MARK = "mt-0.5 flex size-4 shrink-0 items-center justify-center border";
+const QC_OPTION_LETTER = "text-[0.625rem] font-medium leading-none";
 const QC_OTHER_INPUT = "lh-input w-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground";
 const OTHER_PLACEHOLDER = "Type your own answer…";
 // The confidence row has no separator: its padding (CONFIDENCE_ROW_PAD,
@@ -103,6 +104,7 @@ export interface QuestionCardContent {
 	question: HTMLElement;
 	context: HTMLElement | null;
 	options: HTMLElement[];
+	optionOrder?: OptionOrder;
 }
 
 /**
@@ -126,7 +128,12 @@ export function questionCardStandIn(doc: Document, c: QuestionCardContent): { qu
 	if (c.context) question.append(el("div", QC_CONTEXT, ...contents(c.context)));
 	const mark = (round: boolean) => el("span", cn(QC_OPTION_MARK, round ? "rounded-full" : "rounded-sm", "border-muted-foreground/40"));
 	const list = el("div", QC_OPTION_LIST);
-	for (const option of c.options) list.append(el("button", QC_OPTION_ROW, mark(!c.multiSelect), el("span", "", ...contents(option))));
+	for (const [i, option] of c.options.entries()) {
+		const icon = mark(!c.multiSelect);
+		const letter = displayedOptionLetter(c.optionOrder, i + 1);
+		if (letter) icon.append(el("span", QC_OPTION_LETTER, letter));
+		list.append(el("button", QC_OPTION_ROW, icon, el("span", "", ...contents(option))));
+	}
 	if (c.kind === "quiz") list.append(el("button", cn(QC_OPTION_ROW, "border-dashed"), mark(true), el("span", "", "I don't know")));
 	if (c.kind === "ask") {
 		const input = el("div", cn(pathInputClassName(true), QC_OTHER_INPUT));
@@ -418,10 +425,7 @@ function QuestionDockForm({
 						? "multi-select"
 						: "single-select"
 						: "text";
-		const options = normalizeOptions(
-			(quizInput?.options ?? askInput?.options ?? []) as { label: string; value?: string }[],
-		);
-		const ordered = kind === "quiz" && options.length > 0 ? shuffleOptions(options, seededRandom(toolCallId)) : options;
+		const { options: ordered, optionOrder } = questionDisplayOptions(quizInput?.options ?? askInput?.options, kind, multi, toolCallId);
 		const q: QuestionData = {
 			id: toolCallId,
 			kind,
@@ -432,6 +436,7 @@ function QuestionDockForm({
 			context: input.details,
 			mode,
 			options: ordered,
+			optionOrder,
 			createdAt: new Date().toISOString(),
 		};
 		if (quizInput) {
@@ -908,6 +913,7 @@ function QuestionDockForm({
 			<div className={QC_OPTION_LIST} role={qd.mode === "multi-select" ? "group" : "radiogroup"}>
 				{qd.options.map((opt, i) => {
 					const isSel = sel.selected.has(i);
+					const letter = displayedOptionLetter(qd.optionOrder, i + 1);
 					return (
 						<button
 							key={opt.value}
@@ -929,7 +935,11 @@ function QuestionDockForm({
 									isSel ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
 								)}
 							>
-								{isSel && (
+								{letter ? (
+									<span data-option-letter={letter} className={cn(QC_OPTION_LETTER, !isSel && "text-muted-foreground/70")}>
+										{letter}
+									</span>
+								) : isSel && (
 									<span className={cn(qd.mode === "multi-select" ? "text-base leading-none" : "size-1.5 rounded-full bg-current")}>
 										{qd.mode === "multi-select" ? "✓" : ""}
 									</span>

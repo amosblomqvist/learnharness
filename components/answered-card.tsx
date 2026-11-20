@@ -10,7 +10,7 @@ import { PathText } from "@/components/file-path-chip";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
-import { answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
+import { answerForPresentation, displayedOptionLetter, parseAskInput, parseQuizInput } from "@/src/core";
 import { useAppearance } from "@/components/settings/appearance";
 import { questionCardLabel, questionCardStandIn } from "@/components/question-dock";
 import {
@@ -112,6 +112,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 				question: questionTextRef.current!,
 				context: detailsRef.current,
 				options: labels,
+				optionOrder: answer.optionOrder,
 			});
 			return { root: live.root, ...standIn, media: { question: live.question, options: live.options } };
 		},
@@ -201,6 +202,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 					{answer.options?.map((opt) => {
 						const sel = selectedIdx.has(opt.index);
 						const key = isQuiz && correctIdx.has(opt.index);
+						const letter = displayedOptionLetter(answer.optionOrder, opt.index);
 						return (
 							<div
 								key={opt.index}
@@ -212,6 +214,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 									!sel && key && "border-success/40",
 								)}
 							>
+								{letter && <span data-option-letter={letter} className="w-3 shrink-0 text-center text-xs font-medium text-muted-foreground/70">{letter}</span>}
 								{isQuiz && (
 									// Zapf-Dingbats-derived SVG outlines — the exact LaTeX \ding{51}/
 									// \ding{55} hand-drawn shapes (owner, round 6); see ui/glyph-mark.

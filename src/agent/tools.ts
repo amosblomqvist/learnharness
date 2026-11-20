@@ -77,6 +77,8 @@ function prepareQuestionArguments<T extends object>(args: unknown): T {
 	return args as T;
 }
 
+const optionLetterDescription = "When single-select options are lettered, the result’s `optionOrder` maps each displayed letter to its one-based position in your original `options` array, and each selected answer includes its displayed `letter`.";
+
 export const askUserQuestionTool: AgentTool<typeof askInputSchema> = {
 	name: "ask_user_question",
 	label: "ask_user_question",
@@ -84,7 +86,7 @@ export const askUserQuestionTool: AgentTool<typeof askInputSchema> = {
 		"Ask the learner a single question and pause until they answer. NOT graded — there is no correct answer. " +
 		"Use when requirements are ambiguous, preferences are needed, a decision would materially affect the lesson, " +
 		"or you need an open-ended response. ONE question per turn: call a single ask_user_question, then end your " +
-		"turn — his answer determines the next.",
+		"turn — his answer determines the next. " + optionLetterDescription,
 	parameters: askInputSchema,
 	prepareArguments: prepareQuestionArguments,
 	executionMode: "sequential",
@@ -152,6 +154,7 @@ function quizDescription(delta: { name: "quiz" | "probe"; nodeId: boolean; types
 		"choice so the learner can signal a genuine gap instead of guessing. An always-present optional thinking " +
 		"field lets the learner attach his reasoning to ANY answer; it reaches you only when non-empty. " +
 		"No free-text answers — for non-graded questions use ask_user_question instead. " +
+		optionLetterDescription + " " +
 		(delta.types
 			? "Every call declares `type` — the question's role in the teaching cycle; the field's own description says when each kind fires. "
 			: "") +

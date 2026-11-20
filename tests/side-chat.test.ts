@@ -147,11 +147,32 @@ describe("side lesson document", () => {
 		]);
 		assert.match(doc, /OPEN question/);
 		assert.match(doc, /Which limit defines the derivative\?/);
-		assert.match(doc, /\d\. Difference quotient as h→0/);
+		assert.match(doc, /- [AB]\. Difference quotient as h→0/);
 		assert.match(doc, /Explain the slope\./);
 		assert.doesNotMatch(doc, /SECRET-EXPLANATION/);
 		assert.doesNotMatch(doc, /SECRET-COMMITTED/);
 		assert.doesNotMatch(doc, /correctAnswer|"dq"/);
+	});
+
+	it("uses the same letters before and after answering a probe, without spoiling the open answer", () => {
+		const id = "lettered-probe";
+		const posed = assistant([call(id, "probe", QUIZ_ARGS)]);
+		const displayed = core.questionDisplayOptions(QUIZ_ARGS.options, "quiz", false, id);
+		const open = sideChatLessonDocument([posed]);
+		assert.doesNotMatch(open, /SECRET-EXPLANATION|chosen by the learner|\*\(correct\)\*/);
+		const qd = {
+			id, kind: "quiz", question: QUIZ_ARGS.question, mode: "single-select", ...displayed,
+			correctIndices: core.resolveCorrect(QUIZ_ARGS.correctAnswer, displayed.options).indices,
+			createdAt: new Date().toISOString(),
+		} as const;
+		const answer = core.buildAnswer(qd, { values: [displayed.options[1]!.value] }, "probe");
+		const answered = sideChatLessonDocument([posed, core.newAnswerResult(id, "probe", answer)]);
+		for (const [i, o] of displayed.options.entries()) {
+			const line = `- ${String.fromCharCode(65 + i)}. ${o.label}`;
+			assert.ok(open.includes(line));
+			assert.ok(answered.includes(line));
+		}
+		assert.match(answered, /- B\..*chosen by the learner/);
 	});
 
 	it("hides the ACTIVE problem's solution, reveals concluded ones", () => {
