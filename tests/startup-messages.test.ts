@@ -15,12 +15,12 @@ const feed = (...messages: unknown[]) => ({ schemaVersion: 1, messages });
 const fakeWindow = () => Object.assign(new EventEmitter(), { webContents: new EventEmitter(), isFocused: (): boolean => true, isDestroyed: () => false });
 const emptyStore = () => ({ read: async () => new Set(), write: async () => assert.fail("unexpected dismissal write") });
 
-it("selects the newest undismissed message by timestamp then ID, independent of array order", () => {
+it("considers only the newest message by timestamp then ID, independent of array order", () => {
 	const tie = { ...newest, id: "c", publishedAt: "2026-11-02T00:00:00.0Z" };
 	assert.deepEqual(selectMessage(feed(tie, first, newest), new Set()), tie);
-	assert.deepEqual(selectMessage(feed(newest, first, tie), new Set(["c"])), newest);
-	assert.deepEqual(selectMessage(feed(newest, first), new Set(["b"])), first);
-	assert.equal(selectMessage(feed(newest), new Set(["b"])), null);
+	assert.deepEqual(selectMessage(feed(newest, first, tie), new Set(["b"])), tie);
+	assert.equal(selectMessage(feed(newest, first, tie), new Set(["c"])), null, "no fallback even on a timestamp tie");
+	assert.equal(selectMessage(feed(newest, first), new Set(["b"])), null);
 	assert.equal(selectMessage(feed(), new Set()), null);
 });
 
@@ -41,17 +41,18 @@ it("validates the whole v1 feed including byte lengths, IDs and actual UTC dates
 	assert.ok(selectMessage(feed({ ...newest, title: "é".repeat(128), bodyMarkdown: "😀".repeat(8192), id: "x".repeat(96) }), new Set()));
 });
 
-it("fetches once without credentials and only offers once; dismissal persists independently of the window", async t => {
+it("fetches once without credentials and offers only the latest message across launches", async t => {
 	const profile = await mkdtemp(join(tmpdir(), "lh-startup-message-"));
 	t.after(() => rm(profile, { recursive: true, force: true }));
 	let requests = 0;
+	let messages = [first, newest];
 	const fetchImpl = async (url: string, init: RequestInit) => {
 		requests++;
 		assert.equal(url, "https://learnharness.ai/startup-messages.json");
 		assert.equal(init.redirect, "error");
 		assert.equal(init.credentials, "omit");
 		assert.equal(init.referrerPolicy, "no-referrer");
-		return Response.json(feed(first, newest));
+		return Response.json(feed(...messages));
 	};
 	const launch = () => {
 		const win = fakeWindow();
@@ -67,10 +68,13 @@ it("fetches once without credentials and only offers once; dismissal persists in
 	assert.equal(await initial.dismiss(first.id), false);
 	assert.deepEqual([...(await dismissalStore(profile).read())], []);
 	assert.equal(await initial.dismiss(newest.id), true);
-	assert.deepEqual((await launch().take())?.message, first);
+	assert.equal(await launch().take(), null, "dismissing the newest does not reveal older entries");
 	assert.equal(requests, 2);
+	const later = { ...newest, id: "later", title: "A later announcement", publishedAt: "2026-11-03T00:00:00Z" };
+	messages = [newest, later, first];
+	assert.deepEqual((await launch().take())?.message, later, "a new publication can still appear");
 	await writeFile(join(profile, "startup-message-dismissals.json"), "corrupt profile fixture");
-	assert.equal(await launch().take(), null, "do not re-show dismissed content when storage cannot be read");
+	assert.equal(await launch().take(), null, "skip when dismissal state cannot be read");
 });
 
 it("returns silently for HTTP, JSON, UTF-8, and streamed oversize failures", async () => {

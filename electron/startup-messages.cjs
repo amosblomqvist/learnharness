@@ -27,12 +27,13 @@ function selectMessage(feed, dismissed) {
 		const time = timestamp(publishedAt);
 		if (!validId(id) || seen.has(id) || !text(title, 256) || !text(bodyMarkdown, 32 * 1024) || !Number.isFinite(time)) return null;
 		seen.add(id);
-		if (!dismissed.has(id) && (time > newestTime || (time === newestTime && id > newest.id))) {
+		if (time > newestTime || (time === newestTime && id > newest.id)) {
 			newest = { id, title, publishedAt, bodyMarkdown };
 			newestTime = time;
 		}
 	}
-	return newest;
+	// Dismissing the latest announcement never reveals older entries.
+	return newest && !dismissed.has(newest.id) ? newest : null;
 }
 
 async function fetchFeed(signal, fetchImpl) {
