@@ -159,8 +159,7 @@ export function quizInputProblems(input: {
 // (All consumers read by key; the order is authoring guidance, nothing else.)
 export const quizInputBase = Type.Object({
 	question: Type.String({
-		description:
-			"The single quiz question to ask. ONE question per turn: ask, then end your turn — the answer determines the next question.",
+		description: "The single quiz question to ask.",
 	}),
 	options: Type.Array(Type.Object(quizOptionProps), {
 		minItems: 2,
@@ -244,9 +243,8 @@ export function questionNeedsReveal(tool: string, rawInput: unknown, phase: stri
 const predictCheckType = Type.Union([Type.Literal("predict"), Type.Literal("check")], {
 	description:
 		"REQUIRED — the question's role in the teaching cycle, as a bare word (no quotes): predict = posed BEFORE " +
-		"you teach the step (its own turn; the learner answers, then your teaching resolves it — arrives open, never " +
-		"collapsed); check = posed AFTER the step's teaching is complete (arrives collapsed behind the Check your " +
-		"understanding reveal). ONE question per turn either way.",
+		"you teach the step (arrives open, never collapsed); check = posed AFTER the step's teaching is complete " +
+		"(arrives collapsed behind the Check your understanding reveal)."
 });
 
 
@@ -304,8 +302,7 @@ export const quizDisplayInputSchema = Type.Object({
 
 export const explainInputBase = Type.Object({
 	question: Type.String({
-		description:
-			"The single question to ask. ONE question per turn: ask, then end your turn — the answer determines the next.",
+		description: "The single question to ask.",
 	}),
 	correctAnswer: Type.String({
 		description:
@@ -371,8 +368,7 @@ export const askInputSchema = Type.Object({
 	// whether options are present (the dock does exactly this). One less
 	// knob for the model to misuse.
 	question: Type.String({
-		description:
-			"The single question to ask the learner. ONE question per turn: ask, then end your turn — the answer determines the next question.",
+		description: "The single question to ask the learner.",
 	}),
 	details: Type.Optional(
 		Type.String({ description: "Optional extra context or instructions shown under the question." }),

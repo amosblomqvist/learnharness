@@ -1461,8 +1461,8 @@ describe("prompt composition", () => {
 		const prober = composeInstructions("prober");
 		assert.ok(!prober.includes("There is no rush"), "the old no-rush framing is retired");
 		assert.ok(
-			prober.includes("every wasted question is resolution the final map doesn't get"),
-			"the efficiency-is-resolution directive is in",
+			prober.includes("for the time and effort they spend answering"),
+			"the probe optimizes evidence for the learner's answering effort",
 		);
 		assert.ok(!prober.includes("Question principles"), "the teach-phase fragment never composes into the prober");
 	});

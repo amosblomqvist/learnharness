@@ -444,11 +444,19 @@ describe("tool descriptions carry mechanics only, no question-craft", () => {
 			for (const banned of ["asymmetry", "distractor", "believable", "misconception"]) {
 				assert.ok(!d.toLowerCase().includes(banned), `${name} description leaks craft: "${banned}"`);
 			}
-			for (const mechanical of ["GRADED", "ONE question per turn", "ask_user_question"]) {
+			for (const mechanical of ["GRADED", "ask_user_question"]) {
 				assert.ok(d.includes(mechanical), `${name} description lost mechanics: "${mechanical}"`);
 			}
 		});
 	}
+	it("blocking question tool descriptions and parameters do not tell the model to wait or end its turn", () => {
+		const teachExplain = teachExplainToolFor({ chatId: "chat_x", chatStore: undefined as never });
+		for (const tool of [askUserQuestionTool, teachQuiz, probeQuizTool, teachExplain, probeExplainTool]) {
+			const legacy = /pause until|wait for the answer|end your turn|one question per turn/i;
+			assert.doesNotMatch(tool.description, legacy, tool.name);
+			assert.doesNotMatch(JSON.stringify(tool.parameters), legacy, tool.name);
+		}
+	});
 	it("the teach quiz declares the `type` field and `nodeId`; the probe quiz declares neither", () => {
 		assert.ok(teachQuiz.description.includes("`type`"), "teach quiz points at the role field");
 		assert.ok(teachQuiz.description.includes("`nodeId`"), "teach quiz points at the plan-map validation");
