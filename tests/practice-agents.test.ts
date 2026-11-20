@@ -377,8 +377,8 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		const prober = composeInstructions("prober");
 		assert.match(prober, /A single question can reveal several strands/);
 		assert.match(prober, /the available quizzing tool to measure understanding/);
-		assert.match(prober, /The available format is not a reason to skip probing/);
-		assert.doesNotMatch(prober, /`probe` or `recall`/);
+		assert.match(prober, /A topic request tells you what the learner wants to learn, not what they already understand/);
+		assert.doesNotMatch(prober, /`probe` or `recall`|The available format is not a reason to skip probing/);
 		assert.match(prober, /Treat the learner's thinking field as your primary evidence/);
 		assert.match(prober, /Prefer a short set of meaningful multiple-choice options/);
 		assert.match(prober, /Use the logic of binary search/);
@@ -386,6 +386,15 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		assert.match(prober, /Go deeper when the distinction would change the lesson/);
 		assert.match(prober, /Don't present an untested boundary as a finding/);
 		assert.doesNotMatch(prober, /Binary-search every strand|escalate until it does/);
+	});
+
+	it("blocking question guidance composes for prober and teacher without changing practice", () => {
+		for (const phase of ["prober", "teacher"] as const) {
+			const prompt = composeInstructions(phase);
+			assert.match(prompt, /Use each answer to decide what to ask next/);
+			assert.doesNotMatch(prompt, /wait for the answer|ask, then end your turn|one question per turn/i);
+		}
+		assert.doesNotMatch(composeInstructions("practice"), /Use each answer to decide what to ask next/);
 	});
 
 	it("the SHARED formatting guide composes (owner, 2026-10-04 late): LaTeX delimiters in every setting", () => {

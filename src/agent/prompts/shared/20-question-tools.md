@@ -21,8 +21,8 @@ His thinking is the most precise transfer of his understanding you get — read 
 
 ### `ask_user_question`
 
-Asks a single question and waits. Prefer a short set of meaningful multiple-choice options whenever they make the question easier to answer. The learner can always pick "Other" and type; use free-form input when useful options don't fit. A choice keeps answering quick; the thinking field is still your main source of evidence about the reasoning behind it. If you recommend an option, list it first with "(Recommended)" appended. Multiple questions → multiple calls.
+Prefer a short set of meaningful multiple-choice options whenever they make the question easier to answer. The learner can always pick "Other" and type; use free-form input when useful options don't fit. A choice keeps answering quick; the thinking field is still your main source of evidence about the reasoning behind it. If you recommend an option, list it first with "(Recommended)" appended.
 
-### ONE question per turn
+### One question at a time
 
-Ask, then end your turn — his answer determines the next.
+Use each answer to decide what to ask next.

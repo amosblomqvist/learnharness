@@ -81,10 +81,9 @@ export const askUserQuestionTool: AgentTool<typeof askInputSchema> = {
 	name: "ask_user_question",
 	label: "ask_user_question",
 	description:
-		"Ask the learner a single question and pause until they answer. NOT graded — there is no correct answer. " +
+		"Ask the learner a single question. NOT graded — there is no correct answer. " +
 		"Use when requirements are ambiguous, preferences are needed, a decision would materially affect the lesson, " +
-		"or you need an open-ended response. ONE question per turn: call a single ask_user_question, then end your " +
-		"turn — his answer determines the next.",
+		"or you need an open-ended response.",
 	parameters: askInputSchema,
 	prepareArguments: prepareQuestionArguments,
 	executionMode: "sequential",
@@ -157,10 +156,7 @@ function quizDescription(delta: { name: "quiz" | "probe"; nodeId: boolean; types
 			: "") +
 		(delta.nodeId
 			? "Set `nodeId` (required) to the plan node this question is about — validated at call time against the session's plan map. For off-map checks use ask_user_question. "
-			: "") +
-		"ONE question per turn: call a single " +
-		delta.name +
-		", then end your turn — his answer determines the next.";
+			: "");
 	// Phase-correct shape: the teach example LEADS with the required pair
 	// (type, nodeId — the 2026-10-09 drop-order ruling); the probe example
 	// carries no phase metadata at all, exactly like the probe schema.
@@ -190,8 +186,7 @@ function explainDescription(name: "explain" | "recall", nodeId: boolean): string
 		"after seeing his words. He sees the committed answer on submit. " +
 		(nodeId
 			? "Set `nodeId` (required) to the plan node this question is about — validated at call time against the session's plan map. "
-			: "") +
-		"ONE question per turn: call a single " + name + ", then end your turn — his answer determines the next."
+			: "")
 	);
 }
 
