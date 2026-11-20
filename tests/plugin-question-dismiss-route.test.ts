@@ -20,7 +20,7 @@ globalThis.fetch = async () => { throw new Error("Unexpected network in dismissa
 const globals = globalThis as typeof globalThis & { __lhPlugins?: unknown };
 const previousRuntime = globals.__lhPlugins;
 let resolveQuestion: QuestionTypeResolver = () => ({ status: "unavailable" });
-globals.__lhPlugins = { host: { resolveQuestionType: (...args: Parameters<QuestionTypeResolver>) => resolveQuestion(...args) }, ready: Promise.resolve() };
+globals.__lhPlugins = { host: { resolveQuestionType: (...args: Parameters<QuestionTypeResolver>) => resolveQuestion(...args) }, ready: Promise.resolve(), dataRoot: process.env.LH_DATA_DIR };
 after(() => {
 	globals.__lhPlugins = previousRuntime;
 	globalThis.fetch = originalFetch;

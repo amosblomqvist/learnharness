@@ -17,6 +17,7 @@ export type PluginWorkerActivityMetadata = Pick<PluginTaskRecord,
 	"id" | "definitionId" | "status" | "createdAt" | "updatedAt" | "activity" | "model" | "usage">;
 
 export interface PluginWorkerServiceDeps {
+	beginActivity?: () => () => void;
 	store: PluginTaskRecordStore;
 	engineFor(model: PluginModelSpec, purpose: PluginCallPurpose, options?: PluginInferenceOptions): PiEngine | Promise<PiEngine>;
 	onUsage?: (model: PluginModelSpec, usage: Usage) => void;
@@ -284,7 +285,8 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 				};
 				schedule();
 			}
-			notify(t); queueMicrotask(() => { void execute(t, d); });
+			const end = deps.beginActivity?.();
+			notify(t); queueMicrotask(() => { void execute(t, d).finally(end); });
 			return snapshot(t);
 		},
 		list() { return [...tasks.values()].map(snapshot); },

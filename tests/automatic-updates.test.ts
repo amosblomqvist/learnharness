@@ -100,7 +100,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 					settingsReads.push(file);
 					if (settings instanceof Error) throw settings;
 					return settings;
-				}, mkdirSync() {}, appendFileSync() {},
+				}, lstatSync() { return undefined; }, mkdirSync() {}, appendFileSync() {},
 			};
 			return mainRequire(id);
 		},

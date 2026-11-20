@@ -1,3 +1,4 @@
+import { credentialFiles, isCredentialTemp, isSensitivePath as isSharedSensitivePath, SENSITIVE_HOME_PATHS } from "../../../electron/sensitive-paths.cjs";
 import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -42,76 +43,8 @@ export const WALK_TIMEOUT_MS = 10_000;
  */
 const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]);
 
-/**
- * Home-relative locations the tools never read or walk into: credential
- * stores, keys, other agents' session transcripts and settings, browser
- * profiles. Unlike EXCLUDED_DIR_NAMES these are refused for explicit paths
- * too (resolveSourcePath), not only skipped by walks. Matched
- * case-insensitively, including on case-sensitive filesystems.
- */
-const SENSITIVE_HOME_PATHS = [
-	".claude",
-	".codex",
-	".cursor",
-	".gemini",
-	".ssh",
-	".gnupg",
-	".aws",
-	".azure",
-	".config/gcloud",
-	".kube",
-	".docker",
-	".netrc",
-	".npmrc",
-	".pypirc",
-	".git-credentials",
-	"Library/Keychains",
-	"Library/Cookies",
-	"Library/Safari",
-	"Library/Application Support/Google/Chrome",
-	"Library/Application Support/BraveSoftware",
-	"Library/Application Support/Microsoft Edge",
-	"Library/Application Support/Firefox",
-	".mozilla",
-	".config/google-chrome",
-	".config/chromium",
-	".config/BraveSoftware",
-	".config/microsoft-edge",
-	"AppData/Local/Google/Chrome",
-	"AppData/Local/BraveSoftware",
-	"AppData/Local/Microsoft/Edge",
-	"AppData/Roaming/Mozilla",
-];
-
-/** Templates are deliberately included: their names do not guarantee safe contents. */
-const ENV_FILE = /^\.env(\..*)?$/i;
-const SUBSCRIPTION_FILES = ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json"];
-// Match the actual writers in store/auth.ts and electron/{chatgpt,subscription-store}.cjs.
-const CREDENTIAL_TEMP = /^(?:\.auth\.json\.tmp-\d+|(?:chatgpt|github-copilot|xai)-credentials\.json\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp)$/i;
-const ATOMIC_TEMP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
-
-function credentialFiles(authFile: string): string[] {
-	return [authFile, ...SUBSCRIPTION_FILES.map((name) => path.join(/* turbopackIgnore: true */ path.dirname(authFile), name))];
-}
-
-function isCredentialTemp(absolute: string, directory: string, authBasename: string): boolean {
-	const file = comparisonPath(absolute);
-	if (path.relative(comparisonPath(directory), path.dirname(file)) !== "") return false;
-	const name = path.basename(file);
-	const prefix = `${authBasename}.tmp-`;
-	return CREDENTIAL_TEMP.test(name) ||
-		(name.toLowerCase().startsWith(prefix.toLowerCase()) && ATOMIC_TEMP_UUID.test(name.slice(prefix.length)));
-}
-
-/** String-only check, also usable with synthetic home/credential locations.
- *  The runtime guard below additionally resolves both sources and protected roots.
- *  Only credentials are app-private denials: learning data remains readable. */
 export function isSensitivePath(absolute: string, home: string = os.homedir(), authFile: string = AUTH_FILE): boolean {
-	const file = comparisonPath(absolute);
-	return ENV_FILE.test(path.basename(file)) ||
-		SENSITIVE_HOME_PATHS.some((p) => isWithin(file, path.join(home, p), true)) ||
-		credentialFiles(authFile).some((p) => isWithin(file, p)) ||
-		isCredentialTemp(file, path.dirname(authFile), path.basename(comparisonPath(authFile)));
+	return isSharedSensitivePath(absolute, home, authFile);
 }
 
 /** An unrelated inaccessible/broken protected root must not break ordinary

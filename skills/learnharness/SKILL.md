@@ -79,11 +79,11 @@ The default is the normal installed application's data folder:
 | Windows | `%APPDATA%\LearnHarness\data` |
 | Linux | `$XDG_CONFIG_HOME/LearnHarness/data`, or `~/.config/LearnHarness/data` |
 
-This is the directory **containing** `chats/` and `graph/`, not their parent
-`LearnHarness/` profile directory. For a moved installation, backup, development
-copy, or an app configured with `LH_DATA_DIR`, use `--data-dir` explicitly. Readers
-print the selected directory and never create a missing folder or silently switch
-to another copy.
+The readers follow `data-location.json` in the desktop profile when Settings
+has selected a custom folder. If that store is unavailable, the readers report
+the error. For a backup, development copy, or an app configured with
+`LH_DATA_DIR`, pass `--data-dir` with the directory containing `chats/` and
+`graph/`. Readers print the selected directory and never create a missing folder.
 
 ## Small readers
 

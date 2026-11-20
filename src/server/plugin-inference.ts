@@ -1,3 +1,4 @@
+import { assertDataStoreWritable, mkdirDataDirectory } from "../store/data-write-gate.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { normalizeContext, type AssistantMessage, type AssistantMessageEvent, type SimpleStreamOptions, type Usage } from "@earendil-works/pi-ai";
@@ -111,8 +112,10 @@ export function createPluginInference(
 			input: usage.input, output: usage.output, cacheRead: usage.cacheRead, cacheWrite: usage.cacheWrite, totalTokens: usage.totalTokens,
 			cost: { input: usage.cost.input, output: usage.cost.output, cacheRead: usage.cost.cacheRead, cacheWrite: usage.cost.cacheWrite, total: usage.cost.total },
 		} };
-		fs.mkdirSync(directory, { recursive: true });
-		fs.appendFileSync(path.join(/* turbopackIgnore: true */ directory, "usage.jsonl"), `${JSON.stringify(row)}\n`, { mode: 0o600 });
+		const file = path.join(/* turbopackIgnore: true */ directory, "usage.jsonl");
+		mkdirDataDirectory(directory);
+		assertDataStoreWritable(file);
+		fs.appendFileSync(file, `${JSON.stringify(row)}\n`, { mode: 0o600 });
 	};
 	const engineFor = async (model: PluginModelSpec, purpose: PluginCallPurpose, options?: PluginInferenceOptions): Promise<PiEngine> => {
 		check(signal);

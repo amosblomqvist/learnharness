@@ -1,6 +1,6 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PATHS, GRAPH_FORMAT_FILE, RENDER_SETTINGS_FILE } from "../../config.ts";
+import { PATHS, GRAPH_FORMAT_FILE, RENDER_SETTINGS_FILE, onDataDirChange, assertDataStoreWritable } from "../../config.ts";
 import packageJson from "../../package.json";
 import { emit, subscribe } from "../core/events.ts";
 import { createPluginAgentService } from "../agent/plugin-agents.ts";
@@ -23,25 +23,48 @@ import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { compactionInFlight } from "./compaction.ts";
 
-export const pluginDirectory = path.join(/* turbopackIgnore: true */ PATHS.data, "plugins");
-// Explicitly staged by build-server, not discovered by Next's filesystem tracer.
-const core = {
-	directory: path.join(/* turbopackIgnore: true */ PATHS.root, "core-plugins"),
-	dataDirectory: path.join(/* turbopackIgnore: true */ PATHS.data, "core-plugin-data"),
-	ids: corePluginIds,
-};
-const coreData = { directory: core.dataDirectory, ids: core.ids };
+export let pluginDirectory = path.join(/* turbopackIgnore: true */ PATHS.data, "plugins");
+onDataDirChange((root) => {
+	pluginDirectory = path.join(/* turbopackIgnore: true */ root, "plugins");
+});
+
+import { beginDataActivity } from "../store/data-write-gate.ts";
+
+export async function disposePluginsForDataChange(): Promise<void> {
+	const global = globalThis as typeof globalThis & PluginGlobal;
+	const previous = global.__lhPlugins;
+	if (!previous) return;
+	try {
+		await previous.host.dispose(10_000);
+	} finally {
+		delete global.__lhPlugins;
+	}
+}
+
 type Host = ReturnType<typeof createPluginHost>;
-interface Runtime { host: Host; ready: Promise<void> }
+interface Runtime { host: Host; ready: Promise<void>; dataRoot: string }
 interface PluginGlobal { __lhPlugins?: Runtime }
 
 /** Single composition for every Next entry. Importing this module does not load
  * plugin code or touch plugin storage; instrumentation (or a route) initializes it. */
 function runtime(): Runtime {
 	const global = globalThis as typeof globalThis & PluginGlobal;
-	if (global.__lhPlugins) return global.__lhPlugins;
+	const dataRoot = PATHS.data;
+	assertDataStoreWritable();
+	if (global.__lhPlugins && global.__lhPlugins.dataRoot === dataRoot) return global.__lhPlugins;
+	if (global.__lhPlugins) {
+		void global.__lhPlugins.host.dispose().catch(() => {});
+		delete global.__lhPlugins;
+	}
+	const currentPluginDir = path.join(/* turbopackIgnore: true */ dataRoot, "plugins");
+	const core = {
+		directory: path.join(/* turbopackIgnore: true */ PATHS.root, "core-plugins"),
+		dataDirectory: path.join(/* turbopackIgnore: true */ dataRoot, "core-plugin-data"),
+		ids: corePluginIds,
+	};
+	const coreData = { directory: core.dataDirectory, ids: core.ids };
 	const learning = createPluginLearningData({
-		directory: PATHS.data, chatStore: stores.chatStore, graphStore: stores.graphStore,
+		directory: dataRoot, chatStore: stores.chatStore, graphStore: stores.graphStore,
 		isBusy: isTurnRunning, isCompacting: compactionInFlight,
 		readMetadata(name) {
 			assertGraphFormat();
@@ -51,7 +74,8 @@ function runtime(): Runtime {
 	});
 	const installationErrors: Record<string, string> = Object.create(null);
 	const host = createPluginHost({
-		directory: pluginDirectory, core, appVersion: packageJson.version, installationErrors,
+		directory: currentPluginDir, core, appVersion: packageJson.version, installationErrors,
+		beginActivity() { assertDataStoreWritable(); return beginDataActivity(); },
 		// The process-global runtime owns one admission slot across all plugins
 		// and every separately compiled Next route module.
 		convertDocument: createPluginDocumentConverter().convert,
@@ -59,7 +83,7 @@ function runtime(): Runtime {
 			const inference = createPluginInference({ signal, dataDirectory });
 			const agents = createPluginAgentService({
 				store: createPluginAgentRecordStore(path.join(/* turbopackIgnore: true */ dataDirectory, "agents")),
-				engineFor: inference.engineFor, onUsage: inference.onUsage, signal,
+				engineFor: inference.engineFor, onUsage: inference.onUsage, signal, beginActivity: beginDataActivity,
 				onChange: () => { if (!signal.aborted) emit("plugin-message", { pluginId: manifest.id, topic: "agents-changed" }); },
 			});
 			const workerActivity = registerPluginWorkerActivity({
@@ -68,7 +92,7 @@ function runtime(): Runtime {
 			});
 			const workers = createPluginWorkerService({
 				store: createPluginTaskRecordStore(path.join(/* turbopackIgnore: true */ dataDirectory, "tasks")),
-				engineFor: inference.engineFor, onUsage: inference.onUsage, signal,
+				engineFor: inference.engineFor, onUsage: inference.onUsage, signal, beginActivity: beginDataActivity,
 				onChange: workerActivity,
 			});
 			return { learning, inference: inference.inference, agents, workers,
@@ -86,20 +110,21 @@ function runtime(): Runtime {
 		onNotification: (notification) => emit("plugin-message", notification),
 	});
 	// Defer recovery/activation until the process-wide holder is published.
+	const endBootstrap = beginDataActivity();
 	const ready = Promise.resolve().then(async () => {
 		setPluginJobRecovery(job => recoverPluginBackgroundJob(job, {
 			jobStore: stores.jobStore, deliver: deliverJobResult,
-			readTask: (pluginId, taskId, requestId) => readPluginTaskRecord(pluginDirectory, pluginId, taskId, requestId, coreData),
+			readTask: (pluginId, taskId, requestId) => readPluginTaskRecord(currentPluginDir, pluginId, taskId, requestId, coreData),
 			registerAbort: registerJobAbort, unregisterAbort: unregisterJobAbort,
 		}));
 		// Exclusive bootstrap sweep, including disabled packages whose services
 		// will not construct. Read-only job recovery never activates plugin code.
-		for (const [id, error] of Object.entries(recoverPluginTaskRecords(pluginDirectory, coreData))) {
+		for (const [id, error] of Object.entries(recoverPluginTaskRecords(currentPluginDir, coreData))) {
 			installationErrors[id] = `Task recovery failed: ${error}`;
 		}
 		await host.initialize();
-	});
-	global.__lhPlugins = { host, ready };
+	}).finally(endBootstrap);
+	global.__lhPlugins = { host, ready, dataRoot };
 	return global.__lhPlugins;
 }
 
@@ -117,4 +142,4 @@ export async function getPluginAgentContributions(): Promise<NonNullable<AgentBu
 export async function getPluginQuestionTypeResolver(): Promise<Host["resolveQuestionType"]> {
 	return (await getPluginHost()).resolveQuestionType;
 }
-export const pluginTransport = createPluginTransport({ getHost: getPluginHost, directory: pluginDirectory });
+export const pluginTransport = createPluginTransport({ getHost: getPluginHost, directory: () => pluginDirectory });

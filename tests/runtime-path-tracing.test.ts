@@ -27,7 +27,7 @@ function paths(relative: string) {
 
 test("config opts out each mutable path producer, retaining the shipped prompt asset", () => {
 	const { file, calls, ignored } = paths("config.ts");
-	const prompt = calls.filter(call => ts.isPropertyAssignment(call.parent) && call.parent.name.getText(file) === "teacherPrompt");
+	const prompt = calls.filter(call => ts.isVariableDeclaration(call.parent) && call.parent.name.getText(file) === "TEACHER_PROMPT");
 	assert.equal(prompt.length, 1);
 	assert.equal(ignored(prompt[0]!), false, "the built-in teacher prompt must remain traceable");
 	const mutable = calls.filter(call => !prompt.includes(call));
@@ -42,11 +42,10 @@ test("selected/imported custom theme filenames never become deployment assets", 
 });
 
 test("plugin runtime and background capture paths never become deployment assets", () => {
-	for (const relative of ["src/server/plugins.ts", "src/agent/background-capture.ts"]) {
+	for (const [relative, count] of [["src/server/plugins.ts", 7], ["src/agent/background-capture.ts", 3]] as const) {
 		const { file, calls, ignored } = paths(relative);
-		const runtime = calls;
-		assert.equal(runtime.length, relative === "src/server/plugins.ts" ? 5 : 2);
-		for (const call of runtime) assert.ok(ignored(call), `Runtime path must not ship: ${call.getText(file)}`);
+		assert.equal(calls.length, count, `${relative}: expected runtime path producers`);
+		for (const call of calls) assert.ok(ignored(call), `Runtime path must not ship: ${call.getText(file)}`);
 	}
 });
 

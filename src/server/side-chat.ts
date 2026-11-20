@@ -2,6 +2,7 @@
  * behind #451's floating companion. One thread per explanation/check segment.
  * Every main request captures new raw activity across all threads. Delivery
  * is append-only; a live helper never delays the teacher. */
+import { beginDataActivity, dataMigrationInProgress } from "../store/data-write-gate.ts";
 import { emit } from "../core/events.ts";
 import type { ChatRecord, SideChatMessage, SideChatThread } from "../core/contracts.ts";
 import type { ChatStore } from "../core/ports.ts";
@@ -118,6 +119,12 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 	}
 
 	async function ask(chatId: string, input: SideAskInput): Promise<Response> {
+		if (dataMigrationInProgress()) return Response.json({ error: "A data folder change is in progress." }, { status: 409 });
+		const end = beginDataActivity();
+		try { return await startAsk(chatId, input); } finally { end(); }
+	}
+
+	async function startAsk(chatId: string, input: SideAskInput): Promise<Response> {
 		await deps.beforeAsk?.(chatId);
 		const initial = deps.chatStore.getChat(chatId);
 		if (!initial) return Response.json({ error: "Unknown chat" }, { status: 404 });
@@ -193,6 +200,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			for (const listener of [...run.listeners]) { try { listener(event); } catch { /* detached view */ } }
 		};
 		announce(chatId);
+		const endRun = beginDataActivity();
 		run.settled = (async () => {
 			let settledThread: SideChatThread | undefined;
 			try {
@@ -229,7 +237,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 				if (settledThread) broadcast({ type: "done", thread: settledThread });
 				run.listeners.clear();
 			}
-		})();
+		})().finally(endRun);
 		return responseFor(chatId, thread, run);
 	}
 

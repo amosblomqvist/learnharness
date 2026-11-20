@@ -11,7 +11,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PATHS } from "../../config.ts";
+import { PATHS, assertDataStoreWritable, mkdirDataDirectory } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { JobStore } from "../core/ports.ts";
 import type { CreateJobInit, JobPatch } from "../core/ports.ts";
@@ -19,11 +19,13 @@ import type { JobRecord } from "../core/contracts.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 /** Background jobs (data/jobs). Not in config.ts PATHS (orchestrator-owned). */
-const JOBS_DIR = path.join(/* turbopackIgnore: true */ PATHS.data, "jobs");
+function jobsDir(): string {
+	return path.join(/* turbopackIgnore: true */ PATHS.data, "jobs");
+}
 
 function jobFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid job id: ${id}`);
-	return path.join(/* turbopackIgnore: true */ JOBS_DIR, `${id}.json`);
+	return path.join(/* turbopackIgnore: true */ jobsDir(), `${id}.json`);
 }
 
 /** Use the shared retry/cleanup law, but never truncate a plugin-linked job.
@@ -37,7 +39,7 @@ function writeJob(record: JobRecord): void {
 		...(strict ? { mode: 0o600 } : {}),
 	});
 	if (strict && process.platform !== "win32") {
-		const directory = fs.openSync(JOBS_DIR, "r");
+		const directory = fs.openSync(jobsDir(), "r");
 		try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
 	}
 }
@@ -60,7 +62,7 @@ function createJob(init: CreateJobInit): JobRecord {
 		updatedAt: now,
 		...(init.plugin ? { plugin: init.plugin } : {}),
 	};
-	fs.mkdirSync(JOBS_DIR, { recursive: true });
+	mkdirDataDirectory(jobsDir());
 	writeJob(record);
 	emit("jobs-changed", { chatId: init.chatId });
 	return record;
@@ -92,9 +94,9 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 /** All jobs for a chat, newest activity first. */
 function listJobs(chatId: string): JobRecord[] {
 	try {
-		fs.mkdirSync(JOBS_DIR, { recursive: true });
+		const dir = jobsDir();
 		return fs
-			.readdirSync(/* turbopackIgnore: true */ JOBS_DIR)
+			.readdirSync(/* turbopackIgnore: true */ dir)
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getJob(f.slice(0, -5)))
 			.filter((j): j is JobRecord => j !== null && j.chatId === chatId)
@@ -117,6 +119,7 @@ function deleteJobsForChat(chatId: string): number {
 	let removed = 0;
 	for (const job of listJobs(chatId)) {
 		try {
+			assertDataStoreWritable(jobFile(job.id));
 			fs.unlinkSync(jobFile(job.id));
 			removeLeftoverTemps(jobFile(job.id));
 			removed++;

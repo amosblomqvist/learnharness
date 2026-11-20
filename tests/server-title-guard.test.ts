@@ -16,6 +16,11 @@ const mainSource = readFileSync(mainFile, "utf8");
 const mainRequire = createRequire(mainFile);
 const guardSource = readFileSync(path.join(root, "electron/server-title-guard.cjs"), "utf8");
 const backendEnv = { ELECTRON_RUN_AS_NODE: "1", LH_DESKTOP_SERVER: "1" };
+const defaultDataDir = path.join("/fixture/user-data", "data");
+const resolvedDataLocation = {
+	currentDir: defaultDataDir, defaultDir: defaultDataDir, configuredDir: null,
+	storeId: null, unavailableConfiguredDir: null, recoveryReason: null,
+};
 
 function titleFixture(platform = "darwin", env: Record<string, string> = backendEnv) {
 	const nativeWrites: unknown[] = [];
@@ -104,9 +109,10 @@ async function serverLaunch(platform: string) {
 		} : mainRequire(id),
 		process: { platform, argv: [], env: { FIXTURE: "kept" }, on() {}, execPath: "/fixture/LearnHarness", resourcesPath: "/fixture/resources with spaces" },
 		__dirname: path.dirname(mainFile),
+		resolvedDataLocation,
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
-	await runInNewContext("startServer(54321)", context);
+	await runInNewContext("startupDataLocation = resolvedDataLocation; startServer(54321)", context);
 	return launch;
 }
 
@@ -123,7 +129,9 @@ describe("backend-only preload wiring and packaging", () => {
 			assert.equal(launch.options.env.NODE_OPTIONS, undefined, "do not add NODE_OPTIONS to the child environment");
 			assert.equal(launch.options.env.ELECTRON_RUN_AS_NODE, "1");
 			assert.equal(launch.options.env.LH_DESKTOP_SERVER, "1");
-			assert.equal(launch.options.env.LH_DATA_DIR, path.join("/fixture/user-data", "data"));
+			assert.equal(launch.options.env.LH_DATA_DIR, defaultDataDir);
+			assert.equal(launch.options.env.LH_DATA_APP_ROOT, path.join("/fixture/resources with spaces"));
+			assert.deepEqual(JSON.parse(launch.options.env.LH_STARTUP_DATA_LOCATION!), resolvedDataLocation);
 			assert.equal(launch.options.env.LH_AUTH_FILE, path.join("/fixture/user-data", "auth.json"));
 			assert.equal(launch.options.env.PORT, "54321");
 			assert.equal(launch.options.env.HOSTNAME, "127.0.0.1");

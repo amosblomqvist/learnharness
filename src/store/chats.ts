@@ -10,7 +10,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash } from "node:crypto";
-import { PATHS } from "../../config.ts";
+import { PATHS, assertDataStoreWritable, mkdirDataDirectory } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
 import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
@@ -46,7 +46,7 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
 		// reads as teach — pre-practice records never migrate).
 		...(kind === "practice" ? { kind: "practice" as const } : {}),
 	};
-	fs.mkdirSync(PATHS.chats, { recursive: true });
+	mkdirDataDirectory(PATHS.chats);
 	writeChat(record);
 	emit("chats-changed", {});
 	return { ...record, version: CURRENT_CHAT_VERSION }; // the in-memory twin of what landed on disk
@@ -80,7 +80,6 @@ function getChat(id: string): ChatRecord | null {
 
 function listChats(): ChatSummary[] {
 	try {
-		fs.mkdirSync(PATHS.chats, { recursive: true });
 		return fs
 			.readdirSync(/* turbopackIgnore: true */ PATHS.chats)
 			.filter((f) => f.endsWith(".json"))
@@ -209,6 +208,7 @@ function renameChat(id: string, title: string): ChatRecord {
  *  choreography (core/graph-deletion.ts), not the store's. */
 function deleteChat(id: string): boolean {
 	try {
+		assertDataStoreWritable(chatFile(id));
 		fs.unlinkSync(chatFile(id));
 		removeLeftoverTemps(chatFile(id));
 		emit("chats-changed", {}); // only a real removal — the present-entry law

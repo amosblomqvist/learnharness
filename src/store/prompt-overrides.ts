@@ -30,7 +30,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { PROMPTS_OVERRIDE_DIR } from "../../config.ts";
+import { PROMPTS_OVERRIDE_DIR, assertDataStoreWritable, mkdirDataDirectory } from "../../config.ts";
 import { isValidSegmentPath } from "../core/prompt-segments.ts";
 import type { PromptOverrideStore } from "../core/ports.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
@@ -73,13 +73,14 @@ export const promptOverrides: PromptOverrideStore = {
 	writeOverride(segmentPath: string, text: string): void {
 		if (!isValidSegmentPath(segmentPath)) return;
 		const file = overrideFileFor(segmentPath);
-		fs.mkdirSync(path.dirname(file), { recursive: true });
+		mkdirDataDirectory(path.dirname(file));
 		writeFileAtomicSync(file, text, { allowInPlaceFallback: true });
 	},
 
 	deleteOverride(segmentPath: string): void {
 		if (!isValidSegmentPath(segmentPath)) return;
 		try {
+			assertDataStoreWritable(overrideFileFor(segmentPath));
 			fs.unlinkSync(overrideFileFor(segmentPath));
 		} catch {
 			// absent already = done

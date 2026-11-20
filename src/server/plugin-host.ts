@@ -1,3 +1,4 @@
+import { assertDataStoreWritable, mkdirDataDirectory } from "../store/data-write-gate.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { createHash, randomUUID } from "node:crypto";
@@ -39,6 +40,7 @@ export interface PluginHostDependencies {
 	/** App-owned flat built packages and a separate writable data root. */
 	core?: { directory: string; dataDirectory: string; ids: readonly string[] };
 	appVersion: string;
+	beginActivity?: () => () => void;
 	createServices(info: { manifest: PluginManifest; directory: string; dataDirectory: string; signal: AbortSignal; cleanup: (fn: PluginCleanup) => void }): {
 		learning: PluginLearningData; inference: PluginInference; agents: PluginAgentService; workers: PluginWorkerService;
 		createBackgroundTool: PluginBackendContext["createBackgroundTool"];
@@ -118,6 +120,7 @@ function readState(filename: string): State {
 	return { version: 1, enabled };
 }
 function writeState(filename: string, state: State): void {
+	assertDataStoreWritable(filename);
 	const temp = `${filename}.${randomUUID()}.tmp`;
 	try {
 		const fd = fs.openSync(temp, "wx", 0o600);
@@ -200,15 +203,24 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	let disposing: Promise<void> | undefined;
 	const assertOpen = () => { if (disposed) throw new PluginHostError(503, "Plugin host is disposed"); };
 	const change = () => { if (disposed) return; try { deps.onChange?.(); } catch { /* Observers do not own host lifecycle. */ } };
-	const enqueue = <T>(fn: () => Promise<T>): Promise<T> => {
-		const result = serial.then(fn); serial = result.catch(() => {}); return result;
+	const active = async <T>(fn: () => T | Promise<T>): Promise<T> => {
+		const end = deps.beginActivity?.();
+		try { return await fn(); } finally { end?.(); }
+	};
+	const enqueue = <T>(fn: () => Promise<T>, teardown = false): Promise<T> => {
+		const run = () => {
+			const result = serial.then(fn);
+			serial = result.catch(() => {});
+			return result;
+		};
+		return teardown ? run() : active(run);
 	};
 	const get = (id: string) => { const pkg = packages.get(id); if (!pkg) throw new PluginHostError(404, `Unknown plugin: ${id}`); return pkg; };
 	const live = (pkg: Package, activation: Activation) => !disposed && pkg.activation === activation && !activation.controller.signal.aborted;
 
-	async function deactivate(pkg: Package): Promise<string[]> {
+	async function deactivate(pkg: Package, cleanupTimeoutMs?: number): Promise<{ failures: string[]; timedOut: boolean }> {
 		const activation = pkg.activation;
-		if (!activation) return [];
+		if (!activation) return { failures: [], timedOut: false };
 		pkg.activation = undefined; // Invalidate callbacks BEFORE abort listeners and cleanup run.
 		activation.ready = false;
 		activation.handlers.clear();
@@ -218,10 +230,20 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		activation.problems.clear();
 		activation.controller.abort();
 		const failures: string[] = [];
-		for (const cleanup of activation.cleanups.splice(0).reverse()) {
-			try { await cleanup(); } catch (e) { failures.push(errorText(e)); }
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let timedOut = false;
+		const deadline = cleanupTimeoutMs === undefined ? undefined : new Promise<void>(resolve => {
+			timer = setTimeout(() => { timedOut = true; resolve(); }, cleanupTimeoutMs);
+		});
+		try {
+			for (const cleanup of activation.cleanups.splice(0).reverse()) {
+				const work = Promise.resolve().then(() => cleanup()).catch(error => { failures.push(errorText(error)); });
+				await (deadline ? Promise.race([work, deadline]) : work);
+			}
+		} finally {
+			clearTimeout(timer);
 		}
-		return failures;
+		return { failures, timedOut };
 	}
 	async function activate(pkg: Package): Promise<void> {
 		assertOpen();
@@ -247,6 +269,13 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				cleanup(() => services.workers.dispose());
 				const ctx: PluginBackendContext = {
 					manifest, directory: pkg.directory, dataDirectory, signal: activation.controller.signal, cleanup, ...services,
+					createDataDirectory(...segments) {
+						requireLive();
+						if (!segments.length || !segments.every(safeSegment)) throw new Error("Invalid plugin data directory path");
+						const target = path.join(/* turbopackIgnore: true */ dataDirectory, ...segments);
+						mkdirDataDirectory(target, 0o700);
+						return target;
+					},
 					createBackgroundTool(context, definition) { requireLive(); return services.createBackgroundTool(context, definition); },
 					registerInstructions(contribution: PluginInstructions) {
 						requireLive();
@@ -310,7 +339,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 							let subscribed = true;
 							const unsubscribe = deps.subscribeEvents?.(event => {
 								if (!subscribed || !live(pkg, activation)) return;
-								try { Promise.resolve(listener(event)).catch(() => {}); } catch { /* Isolate plugin listeners. */ }
+								try { active(() => listener(event)).catch(() => {}); } catch { /* Isolate plugin listeners. */ }
 							});
 							const off = () => { if (subscribed) { subscribed = false; unsubscribe?.(); } };
 							cleanup(off); return off;
@@ -341,7 +370,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			delete pkg.contributionWarning;
 			delete pkg.info.error;
 		} catch (e) {
-			const failures = await deactivate(pkg);
+			const { failures } = await deactivate(pkg);
 			pkg.info.status = "error";
 			pkg.info.error = [errorText(e), ...failures.map(f => `Cleanup: ${f}`)].join("; ");
 		}
@@ -393,7 +422,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		assertOpen();
 		if (initialized) return;
 		const state = readState(stateFile); // Never hide corrupt/future state or execute code first.
-		fs.mkdirSync(directory, { recursive: true });
+		mkdirDataDirectory(directory);
 		if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new Error("Unsafe plugins directory");
 		await discover(state);
 		initialized = true; change();
@@ -559,7 +588,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				pkg.info.enabled = enabled;
 				if (!enabled) {
 					delete pkg.contributionWarning;
-					const failures = await deactivate(pkg);
+					const { failures } = await deactivate(pkg);
 					pkg.info.status = failures.length || pkg.blocked ? "error" : "disabled";
 					pkg.info.error = failures.length ? `Cleanup: ${failures.join("; ")}` : pkg.restart ?? (pkg.blocked ? pkg.info.error : undefined);
 				} else {
@@ -578,7 +607,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			if (!operationId.test(operation)) throw new PluginHostError(400, "Invalid plugin operation id");
 			const handler = activation.handlers.get(operation);
 			if (!handler) throw new PluginHostError(404, `Unknown plugin operation: ${operation}`);
-			return handler(input);
+			return active(() => handler(input));
 		},
 		async convertDocument(id: string, request: Request): ReturnType<PluginFrontendContext["documents"]["toMarkdown"]> {
 			assertOpen();
@@ -590,13 +619,16 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				if (request.signal.aborted) throw new PluginHostError(409, "Document conversion was cancelled");
 			};
 			requireCurrent();
-			if (!deps.convertDocument) throw new PluginHostError(503, "Document conversion is unavailable");
+			const convert = deps.convertDocument;
+			if (!convert) throw new PluginHostError(503, "Document conversion is unavailable");
 			const signal = AbortSignal.any([activation.controller.signal, request.signal]);
-			try {
-				const result = await deps.convertDocument(request, signal);
-				requireCurrent();
-				return result;
-			} catch (error) { requireCurrent(); throw error; }
+			return active(async () => {
+				try {
+					const result = await convert(request, signal);
+					requireCurrent();
+					return result;
+				} catch (error) { requireCurrent(); throw error; }
+			});
 		},
 		asset(id: string, segments: string[]): { bytes: Uint8Array; contentType: string } {
 			assertOpen();
@@ -614,13 +646,19 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			if (!bytes) throw new PluginHostError(404, "Unknown plugin asset");
 			return { bytes: Uint8Array.from(bytes), contentType: mimeTypes[path.extname(file).toLowerCase()] ?? "application/octet-stream" };
 		},
-		dispose(): Promise<void> {
+		dispose(cleanupTimeoutMs?: number): Promise<void> {
 			if (disposing) return disposing;
 			disposed = true; // Immediately fence callers, including queued work.
 			for (const pkg of packages.values()) pkg.activation?.controller.abort();
 			disposing = enqueue(async () => {
-				for (const pkg of packages.values()) { await deactivate(pkg); pkg.info.status = "disabled"; }
-			});
+				const timedOut: string[] = [];
+				for (const pkg of packages.values()) {
+					const result = await deactivate(pkg, cleanupTimeoutMs);
+					if (result.timedOut) timedOut.push(pkg.info.id);
+					pkg.info.status = "disabled";
+				}
+				if (timedOut.length) throw new Error(`Plugin cleanup timed out (${timedOut.join(", ")}). Restart LearnHarness before moving the data folder.`);
+			}, true);
 			return disposing;
 		},
 	};

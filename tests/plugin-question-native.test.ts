@@ -216,7 +216,7 @@ test("chat-handler saves the genuine native answer before teacher construction, 
 	const global = globalThis as typeof globalThis & { __lhPlugins?: unknown };
 	const previous = global.__lhPlugins;
 	let resolutionStatus: "available" | "unavailable" | "incompatible" = "available";
-	global.__lhPlugins = { host: { resolveQuestionType: () => resolutionStatus === "available" ? { status: "available", definition, signal: contribution.signal, requireActive() {} } : { status: resolutionStatus } }, ready: Promise.resolve() };
+	global.__lhPlugins = { host: { resolveQuestionType: () => resolutionStatus === "available" ? { status: "available", definition, signal: contribution.signal, requireActive() {} } : { status: resolutionStatus } }, ready: Promise.resolve(), dataRoot: process.env.LH_DATA_DIR };
 	try {
 		const chat = stores.chatStore.createChat("Isolated native question lifecycle");
 		stores.chatStore.saveSettings(chat.id, { model: { provider: "openrouter", id: "z-ai/glm-5.3-flash" } });

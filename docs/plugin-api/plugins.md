@@ -253,6 +253,7 @@ export interface PluginBackendContext {
     readonly manifest: PluginManifest;
     readonly directory: string;
     readonly dataDirectory: string;
+    createDataDirectory(...segments: string[]): string;
     readonly signal: AbortSignal;
     cleanup(dispose: PluginCleanup): void;
     learning: PluginLearningData;
@@ -279,6 +280,7 @@ export interface PluginBackendContext {
 - [manifest](#pluginbackendcontext-manifest)
 - [directory](#pluginbackendcontext-directory)
 - [dataDirectory](#pluginbackendcontext-datadirectory)
+- [createDataDirectory](#pluginbackendcontext-createdatadirectory)
 - [signal](#pluginbackendcontext-signal)
 - [cleanup](#pluginbackendcontext-cleanup)
 - [learning](#pluginbackendcontext-learning)
@@ -316,6 +318,20 @@ Writable records: core-plugin-data/<id> or community plugins/<id>/data.
 ```ts
 readonly dataDirectory: string;
 ```
+
+### PluginBackendContext createDataDirectory
+
+Create a subdirectory below dataDirectory after verifying the active store.
+
+```ts
+createDataDirectory(...segments: string[]): string;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `segments` | `string[]` |
+
+**Returns:** `string`.
 
 ### PluginBackendContext signal
 

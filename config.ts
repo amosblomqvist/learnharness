@@ -1,38 +1,104 @@
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertOrdinary, inspectDataLocation, verifyStore } from "./electron/data-location.cjs";
+import { assertDataWritesAdmitted, configureDataWriteAccess } from "./src/store/data-write-gate.ts";
 
 /** Repository root (this file is at <root>/config.ts). */
 export const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * THE data-location seam (the Electron contract, 2026-09-17): LH_DATA_DIR
- * relocates every MUTABLE record — chat sessions, graph ledgers, the
- * embedding model cache — when set. The desktop shell points it at
- * userData so nothing is written inside the read-only .app bundle
- * (macOS translocation guarantees the bundle is read-only anyway).
- * Unset (plain web dev / repo work) it resolves to the repo's data/,
- * byte-for-byte as before. Read-only assets (prompts) stay ROOT-anchored
- * on purpose: they ship inside the app bundle by design.
+ * Mutable learning records live under PATHS.data. The machine-local location
+ * pointer (LH_DATA_CONFIG_FILE or <ROOT>/data-location.json) can select a
+ * custom folder. Packaged Electron resolves the location before the server
+ * starts and supplies its userData/data default via LH_DEFAULT_DATA_DIR.
+ *
+ * LH_DATA_DIR alone pins the folder for the session when LH_DATA_CONFIG_FILE
+ * is unset. Otherwise the fallback resolves in this order: LH_DEFAULT_DATA_DIR,
+ * LH_DATA_DIR, then <ROOT>/data.
+ *
+ * Bundled prompts stay under ROOT. Provider keys and subscription credentials
+ * stay in their local credential stores.
  */
-// Mutable runtime paths are not deployment assets. Turbopack analyzes each
-// path-producing call independently, so derived paths need their own opt-out.
-// Keep ROOT/teacherPrompt traceable: read-only shipped assets still belong.
-const DATA_ROOT = process.env.LH_DATA_DIR
-	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DATA_DIR)
-	: path.join(/* turbopackIgnore: true */ ROOT, "data");
+export const DEFAULT_DATA_ROOT = process.env.LH_DEFAULT_DATA_DIR
+	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DEFAULT_DATA_DIR)
+	: process.env.LH_DATA_DIR
+		? path.resolve(/* turbopackIgnore: true */ process.env.LH_DATA_DIR)
+		: path.join(/* turbopackIgnore: true */ ROOT, "data");
+
+export const DATA_CONFIG_FILE = process.env.LH_DATA_CONFIG_FILE
+	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DATA_CONFIG_FILE)
+	: path.join(/* turbopackIgnore: true */ ROOT, "data-location.json");
+
+/**
+ * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a
+ * flat {VAR: value} JSON map — stays on the local machine (`userData/auth.json`
+ * or `<ROOT>/auth.json`), never relocated with the learning data directory.
+ */
+export const AUTH_FILE = process.env.LH_AUTH_FILE
+	? path.resolve(/* turbopackIgnore: true */ process.env.LH_AUTH_FILE)
+	: path.join(/* turbopackIgnore: true */ ROOT, "auth.json");
+
+export const DATA_DIR_FIXED = Boolean(process.env.LH_DATA_DIR && !process.env.LH_DATA_CONFIG_FILE);
+
+/** The packaged shell and server protect the same installation resources. */
+export const DATA_APP_ROOT = process.env.LH_DESKTOP_SERVER === "1" && process.env.LH_DATA_APP_ROOT
+	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DATA_APP_ROOT)
+	: ROOT;
+
+function resolveInitialDataLocation() {
+	const desktopLocation = process.env.LH_DESKTOP_SERVER === "1" && process.env.LH_STARTUP_DATA_LOCATION;
+	if (desktopLocation) return JSON.parse(desktopLocation) as Omit<DataLocationGlobalState, "listeners">;
+	return inspectDataLocation({
+		configFile: DATA_DIR_FIXED ? null : DATA_CONFIG_FILE,
+		defaultDir: DATA_DIR_FIXED ? process.env.LH_DATA_DIR! : DEFAULT_DATA_ROOT, appRoot: DATA_APP_ROOT, authFile: AUTH_FILE,
+	});
+}
+
+interface DataLocationGlobalState {
+	currentDir: string;
+	defaultDir: string;
+	configuredDir: string | null;
+	unavailableConfiguredDir: string | null;
+	storeId: string | null;
+	recoveryReason: string | null;
+	listeners: Set<(root: string) => void>;
+}
+
+function locationState(): DataLocationGlobalState {
+	const g = globalThis as typeof globalThis & { __lhDataLocation?: DataLocationGlobalState };
+	if (!g.__lhDataLocation) {
+		const initial = resolveInitialDataLocation();
+		g.__lhDataLocation = {
+			...initial,
+			listeners: new Set(),
+		};
+	}
+	return g.__lhDataLocation;
+}
+
+const TEACHER_PROMPT = path.join(ROOT, "src", "agent", "system-prompt.md");
 
 export const PATHS = {
 	root: ROOT,
 	/** Teacher system prompt — the agent's instructions (src/agent/). */
-	teacherPrompt: path.join(ROOT, "src", "agent", "system-prompt.md"),
-	data: DATA_ROOT,
+	teacherPrompt: TEACHER_PROMPT,
+	get data(): string {
+		return locationState().currentDir;
+	},
 	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
-	chats: path.join(/* turbopackIgnore: true */ DATA_ROOT, "chats"),
-	graph: path.join(/* turbopackIgnore: true */ DATA_ROOT, "graph"),
+	get chats(): string {
+		return path.join(/* turbopackIgnore: true */ locationState().currentDir, "chats");
+	},
+	get graph(): string {
+		return path.join(/* turbopackIgnore: true */ locationState().currentDir, "graph");
+	},
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */
-	debug: path.join(/* turbopackIgnore: true */ DATA_ROOT, "debug"),
-} as const;
+	get debug(): string {
+		return path.join(/* turbopackIgnore: true */ locationState().currentDir, "debug");
+	},
+};
 
 // ─── Models ────────────────────────────────────────────────────────────────
 // BYOK ALL THE WAY DOWN (owner, 2026-09-22): there are NO factory default
@@ -64,96 +130,203 @@ export type ModelRole =
  * TRUTH (owner, 2026-09-30): edges are a derived view, never stored.
  */
 export const LEDGER_FILES = {
-	nodes: path.join(/* turbopackIgnore: true */ PATHS.graph, "nodes.jsonl"),
-	chains: path.join(/* turbopackIgnore: true */ PATHS.graph, "chains.jsonl"),
-	sessions: path.join(/* turbopackIgnore: true */ PATHS.graph, "sessions.jsonl"),
+	get nodes(): string {
+		return path.join(/* turbopackIgnore: true */ PATHS.graph, "nodes.jsonl");
+	},
+	get chains(): string {
+		return path.join(/* turbopackIgnore: true */ PATHS.graph, "chains.jsonl");
+	},
+	get sessions(): string {
+		return path.join(/* turbopackIgnore: true */ PATHS.graph, "sessions.jsonl");
+	},
 	/** Per-message extraction coverage (contracts/graph.ts CoverageEntry;
 	 *  the checkpoint's replacement for chat extractions — notes keep
 	 *  sessions.jsonl, whole-file as they are). */
-	coverage: path.join(/* turbopackIgnore: true */ PATHS.graph, "coverage.jsonl"),
-} as const;
+	get coverage(): string {
+		return path.join(/* turbopackIgnore: true */ PATHS.graph, "coverage.jsonl");
+	},
+};
 
 /**
  * Notes-import bookkeeping (NOT a ledger): one JSON map, src-id → NotesSource
  * record (contracts/graph.ts) — the file path + import time + the run's usage
  * log. Read-modify-write like a chat file, not append-only like the ledgers.
  */
-export const SOURCES_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "sources.json");
+export let SOURCES_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "sources.json");
 /** Presentation-only source names/folder placement; never extraction identity. */
-export const SOURCE_ORGANIZATION_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "source-organization.json");
+export let SOURCE_ORGANIZATION_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "source-organization.json");
 /** The layout ledger (read-modify-write like sources.json): nodeId →
  *  {x,y} resting positions from the incremental settle (core/layout.ts).
  *  Carries an updatedAt stamp for future live-physics conflict handling. */
-export const POSITIONS_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "positions.json");
+export let POSITIONS_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "positions.json");
 
 /**
  * Graph render settings (the settings-panel controls): one small JSON blob,
  * read-modify-write. Shared shape/sanitizer: src/core/render-settings.ts.
  */
-export const RENDER_SETTINGS_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "render-settings.json");
+export let RENDER_SETTINGS_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "render-settings.json");
 
 /** The graph-family FORMAT STAMP sidecar (schema-versioning wave,
  *  2026-10-10): one version for the whole family — the four JSONL ledgers,
  *  sources.json, render-settings.json. LAZY v1: absent = v1; the first
  *  graph-family write creates it. positions.json is REBUILDABLE and rides
  *  along unversioned by design (owner ruling). */
-export const GRAPH_FORMAT_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "format.json");
+export let GRAPH_FORMAT_FILE = path.join(/* turbopackIgnore: true */ PATHS.graph, "format.json");
 
 /**
  * THE USER SETTINGS RECORD (settings-storage wave, 2026-09-19): one
  * versioned, DELTA-shaped JSON blob at the data-dir seam holding every
- * non-secret product preference — general, agent (background
- * model/thinking overrides + tool toggles + prompt-override switches),
- * appearance, graph. Explicit user choices only: ABSENT keys resolve to the
- * factory defaults compiled into src/core/settings.ts (FACTORY_SETTINGS), so
- * a software update that adds a knob (new tool, new role, new appearance
- * field) needs no migration — old records simply lack the new keys. The
- * version field is a PRIVATE schema counter for breaking shape changes
- * only (field renamed/meaning changed), unrelated to the app release
- * version. Secrets (API keys, login tokens) NEVER live here — auth.json /
- * .env.local keep that role. (The `chat` default-settings section died
- * with per-session models, owner 2026-09-28 — sessions own their model
- * from birth, stamped from the strong slot.)
+ * non-secret product preference — general, agent, appearance, graph.
  */
-export const SETTINGS_FILE = path.join(/* turbopackIgnore: true */ DATA_ROOT, "settings.json");
+export let SETTINGS_FILE = path.join(/* turbopackIgnore: true */ PATHS.data, "settings.json");
 
 /**
- * User prompt-override files (settings-storage wave, 2026-09-19): the
- * per-segment system-prompt overrides mirroring the SOURCE layout
- * (src/agent/prompts/) — the shared base as prompts/system-prompt.md,
- * fragments as prompts/teacher/<file> / prompts/prober/<file>. File
- * PRESENCE alone is not the override: settings.json's agent.prompts map
- * (segmentPath → boolean) is the explicit switch, so a user can keep a
- * customized file on disk but run the source default to compare. The
- * segment list itself is ALWAYS derived from source at runtime (the
- * loader in src/store/prompt-overrides.ts) — code updates that add,
- * remove, or reorder fragments adapt automatically; an override keyed to
- * a vanished segment stops composing but stays on disk.
+ * User prompt-override files (settings-storage wave, 2026-09-19).
  */
-export const PROMPTS_OVERRIDE_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "prompts");
+export let PROMPTS_OVERRIDE_DIR = path.join(/* turbopackIgnore: true */ PATHS.data, "prompts");
 
 /**
- * Imported custom themes (theme wave, 2026-11-04): one `<id>.json` per
- * theme (core/themes.ts ThemeFile shape), written by POST /api/themes and
- * listed beside the built-in presets. The settings record names the
- * active one by id (appearance.theme).
+ * Imported custom themes (theme wave, 2026-11-04).
  */
-export const THEMES_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "themes");
+export let THEMES_DIR = path.join(/* turbopackIgnore: true */ PATHS.data, "themes");
 
-/**
- * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a
- * flat {VAR: value} JSON map — the SAME file the Electron app has always
- * hand-edited (owner decision: option A, zero migration). Desktop main.cjs
- * passes LH_AUTH_FILE pointing at userData/auth.json (mode 0600); in dev
- * (no Electron) the default is the repo-root auth.json (gitignored, same
- * pattern as .env.local — a worktree may symlink it to the master copy).
- * The SERVER reads/writes this file directly at call time (no restart to
- * change a key); it reflects the values into process.env at boot with
- * FILL-GAP precedence — real environment variables (incl. .env.local in
- * dev) always win (src/server/keys.ts). Hand-edits still work: the file is
- * re-read from disk on every API access. Secrets NEVER go in settings.json
- * — this file keeps that role, alongside .env.local.
- */
-export const AUTH_FILE = process.env.LH_AUTH_FILE
-	? path.resolve(/* turbopackIgnore: true */ process.env.LH_AUTH_FILE)
-	: path.join(/* turbopackIgnore: true */ ROOT, "auth.json");
+function syncBindings(root: string): void {
+	const graphDir = path.join(/* turbopackIgnore: true */ root, "graph");
+	SOURCES_FILE = path.join(/* turbopackIgnore: true */ graphDir, "sources.json");
+	SOURCE_ORGANIZATION_FILE = path.join(/* turbopackIgnore: true */ graphDir, "source-organization.json");
+	POSITIONS_FILE = path.join(/* turbopackIgnore: true */ graphDir, "positions.json");
+	RENDER_SETTINGS_FILE = path.join(/* turbopackIgnore: true */ graphDir, "render-settings.json");
+	GRAPH_FORMAT_FILE = path.join(/* turbopackIgnore: true */ graphDir, "format.json");
+	SETTINGS_FILE = path.join(/* turbopackIgnore: true */ root, "settings.json");
+	PROMPTS_OVERRIDE_DIR = path.join(/* turbopackIgnore: true */ root, "prompts");
+	THEMES_DIR = path.join(/* turbopackIgnore: true */ root, "themes");
+}
+
+locationState().listeners.add(syncBindings);
+syncBindings(locationState().currentDir);
+
+export function getDataLocationState(): {
+	currentDir: string;
+	defaultDir: string;
+	isCustom: boolean;
+	configuredDir: string | null;
+	unavailableConfiguredDir: string | null;
+	recoveryReason: string | null;
+	fixed: boolean;
+} {
+	const s = locationState();
+	const storeError = checkActiveStore(s);
+	return {
+		currentDir: s.currentDir,
+		defaultDir: s.defaultDir,
+		isCustom: s.currentDir !== s.defaultDir,
+		configuredDir: s.configuredDir,
+		unavailableConfiguredDir: storeError ? s.configuredDir : s.unavailableConfiguredDir,
+		recoveryReason: storeError?.message ?? s.recoveryReason,
+		fixed: DATA_DIR_FIXED,
+	};
+}
+
+export function setActiveDataDir(
+	nextDir: string,
+	options?: {
+		defaultDir?: string;
+		configuredDir?: string | null;
+		unavailableConfiguredDir?: string | null;
+		storeId?: string | null;
+	},
+): void {
+	const s = locationState();
+	const resolved = path.resolve(/* turbopackIgnore: true */ nextDir);
+	if (options?.defaultDir !== undefined) {
+		s.defaultDir = path.resolve(/* turbopackIgnore: true */ options.defaultDir);
+	}
+	s.currentDir = resolved;
+	if (options && "configuredDir" in options) {
+		s.configuredDir = options.configuredDir ? path.resolve(/* turbopackIgnore: true */ options.configuredDir) : null;
+	} else {
+		s.configuredDir = resolved === s.defaultDir ? null : resolved;
+	}
+	if (options && "unavailableConfiguredDir" in options) {
+		s.unavailableConfiguredDir = options.unavailableConfiguredDir
+			? path.resolve(/* turbopackIgnore: true */ options.unavailableConfiguredDir)
+			: null;
+	} else {
+		s.unavailableConfiguredDir = null;
+	}
+	s.storeId = options?.storeId ?? null;
+	s.recoveryReason = null;
+	for (const listener of [...s.listeners]) listener(resolved);
+}
+
+export function activeStoreId(): string | null {
+	return locationState().storeId;
+}
+
+/** Runtime identity errors belong to the current check. Startup validation
+ * failures still require the full recovery flow. */
+function checkActiveStore(s: DataLocationGlobalState): Error | null {
+	if (!s.configuredDir || s.unavailableConfiguredDir) return null;
+	let failure: Error | null = null;
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			verifyStore(s.currentDir, s.storeId);
+			return null;
+		} catch (error) {
+			failure = error instanceof Error ? error : new Error(String(error));
+		}
+	}
+	return failure;
+}
+
+/** Guard every mutable-store write, including writes to captured plugin paths. */
+export function assertDataStoreWritable(file?: string): void {
+	const s = locationState();
+	const relative = file === undefined ? "" : path.relative(s.currentDir, file);
+	if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return;
+	assertDataWritesAdmitted();
+	const storeError = checkActiveStore(s);
+	if (storeError) throw storeError;
+	if (s.unavailableConfiguredDir) {
+		throw new Error(s.recoveryReason ?? `The configured data folder "${s.unavailableConfiguredDir}" is unavailable.`);
+	}
+	let current = s.currentDir;
+	for (const segment of ["", ...relative.split(path.sep).filter(Boolean)]) {
+		current = path.join(/* turbopackIgnore: true */ current, segment);
+		const stat = fs.lstatSync(/* turbopackIgnore: true */ current, { throwIfNoEntry: false });
+		if (stat) assertOrdinary(stat, current);
+	}
+}
+
+/** Configured roots are never candidates for mkdir, even if a drive goes away
+ * between the identity check and the filesystem operation. */
+export function mkdirDataDirectory(directory: string, mode?: number): void {
+	assertDataStoreWritable(directory);
+	const s = locationState();
+	const relative = path.relative(s.currentDir, directory);
+	if (!s.configuredDir || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+		fs.mkdirSync(/* turbopackIgnore: true */ directory, { recursive: true, mode });
+		return;
+	}
+	let current = s.currentDir;
+	for (const segment of relative.split(path.sep).filter(Boolean)) {
+		current = path.join(/* turbopackIgnore: true */ current, segment);
+		try {
+			fs.mkdirSync(/* turbopackIgnore: true */ current, { mode });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			const stat = fs.lstatSync(/* turbopackIgnore: true */ current);
+			assertOrdinary(stat, current);
+			if (!stat.isDirectory()) throw error;
+		}
+	}
+}
+
+/** Subscribe to active data-directory changes across the server process. */
+export function onDataDirChange(listener: (root: string) => void): () => void {
+	const s = locationState();
+	s.listeners.add(listener);
+	return () => s.listeners.delete(listener);
+}
+
+configureDataWriteAccess({ verify: assertDataStoreWritable, mkdir: mkdirDataDirectory });

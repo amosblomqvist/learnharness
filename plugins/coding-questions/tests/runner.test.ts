@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { access, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
@@ -14,8 +15,25 @@ async function fixture(t: TestContext) {
   t.after(() => rm(root, { recursive: true, force: true }));
   const dataDirectory = path.join(root, "plugin-data");
   const questionId = "Question-Case-Preserved";
-  return { root, dataDirectory, questionId, answer: "answer" };
+  return { root, dataDirectory, questionId, answer: "answer", createDataDirectory(...segments: string[]) {
+      const directory = path.join(dataDirectory, ...segments);
+      mkdirSync(directory, { recursive: true });
+      return directory;
+    }, };
 }
+
+test("runner leaves the workspace absent when the host rejects directory creation", async t => {
+  const f = await fixture(t);
+  await assert.rejects(runTests({
+    ...f,
+    createDataDirectory(...segments) {
+      assert.deepEqual(segments, ["test-runs", f.questionId]);
+      throw new Error("The configured data folder is unavailable");
+    },
+    tests: nodeTests(""),
+  }), /data folder is unavailable/);
+  await assert.rejects(access(f.dataDirectory), { code: "ENOENT" });
+});
 
 function nodeTests(source: string, args: string[] = [], code = ""): CodingTests {
   return { program: process.execPath, args: ["-e", source, ...args], code };

@@ -6,7 +6,7 @@ import * as fs from "node:fs";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import path from "node:path";
-import { PATHS, type ModelRole } from "../../config.ts";
+import { PATHS, onDataDirChange, type ModelRole, assertDataStoreWritable, mkdirDataDirectory } from "../../config.ts";
 import type { Api, AssistantMessage, Model, SimpleStreamOptions, StreamFunction, ToolResultMessage } from "@earendil-works/pi-ai";
 
 type CaptureModel = Pick<Model<Api>, "provider" | "id" | "api">;
@@ -38,7 +38,15 @@ interface CaptureRecord {
 }
 
 /** Test seam; production always follows the configured app data root. */
-export const backgroundCaptureDir = { current: path.join(/* turbopackIgnore: true */ PATHS.debug, "background-captures") };
+let defaultBackgroundCaptureDir = path.join(/* turbopackIgnore: true */ PATHS.debug, "background-captures");
+export const backgroundCaptureDir = { current: defaultBackgroundCaptureDir };
+onDataDirChange((root) => {
+	const nextDefault = path.join(/* turbopackIgnore: true */ root, "debug", "background-captures");
+	if (backgroundCaptureDir.current === defaultBackgroundCaptureDir) {
+		backgroundCaptureDir.current = nextDefault;
+	}
+	defaultBackgroundCaptureDir = nextDefault;
+});
 
 export function backgroundCaptureEnabled(role: ModelRole): boolean {
 	const selected = process.env.LH_BACKGROUND_CAPTURE?.split(",").map((value) => value.trim());
@@ -79,7 +87,8 @@ export function createBackgroundCapture(input: { role: ModelRole; runId: string;
 	let warned = false;
 	function write() {
 		try {
-			fs.mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+			mkdirDataDirectory(path.dirname(file), 0o700);
+			assertDataStoreWritable(file);
 			fs.writeFileSync(temporary, `${JSON.stringify(record, null, 2)}\n`, { mode: 0o600 });
 			fs.renameSync(temporary, file);
 		} catch {

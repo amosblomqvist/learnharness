@@ -1,3 +1,4 @@
+import { assertDataStoreWritable, mkdirDataDirectory } from "./data-write-gate.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -95,7 +96,8 @@ export function createPluginTaskRecordStore(directory: string): PluginTaskRecord
 			jsonSafe(record);
 			const data = JSON.stringify(record, null, "\t");
 			validate(JSON.parse(data), record.id);
-			if (!directoryExists()) fs.mkdirSync(root, { recursive: true });
+			assertDataStoreWritable(file);
+			if (!directoryExists()) mkdirDataDirectory(root);
 			directoryExists();
 			const temp = path.join(root, `.${record.id}.${randomUUID()}.tmp`);
 			let descriptor: number | undefined;

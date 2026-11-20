@@ -57,6 +57,8 @@
  * be a different object in each).
  */
 
+import { onDataDirChange, PATHS } from "../../config.ts";
+import { beginDataActivity, dataMigrationInProgress } from "../store/data-write-gate.ts";
 import {
 	buildAbortSteer,
 	buildJobFailureSteer,
@@ -112,6 +114,8 @@ interface WakeState {
 	turnRunner?: TurnRunner;
 	respawn?: JobRespawn;
 	recoverPlugin?: PluginJobRecovery;
+	dataRoot: string;
+	locationGeneration: number;
 	/** chatId → steers awaiting delivery, in arrival order. The single
 	 *  delivery registry (Wave C: the agent's own follow-up queue is a
 	 *  per-run VEHICLE, not the registry — settlement reconciles here). */
@@ -140,8 +144,22 @@ interface LhWakeGlobal {
 
 function state(): WakeState {
 	const g = globalThis as typeof globalThis & LhWakeGlobal;
-	return (g.__lhWakePipeline ??= { queues: new Map(), liveAgents: new Map(), userSteers: new Map(), pumping: new Set(), lastSweepAt: 0, automaticDeferred: new WeakSet() });
+	return (g.__lhWakePipeline ??= { queues: new Map(), liveAgents: new Map(), userSteers: new Map(), pumping: new Set(), lastSweepAt: 0, dataRoot: PATHS.data, locationGeneration: 0, automaticDeferred: new WeakSet() });
 }
+
+onDataDirChange(root => {
+	const current = state();
+	if (root === current.dataRoot) return;
+	current.dataRoot = root;
+	current.locationGeneration++;
+	for (const queue of current.queues.values()) {
+		for (const entry of queue) entry.reject(new Error("The data folder changed."));
+	}
+	current.queues.clear();
+	current.userSteers.clear();
+	current.recoverPlugin = undefined;
+	current.lastSweepAt = 0;
+});
 
 /** chat-handler wires this at module init: its adapter around handleChatRequest. */
 export function setTurnRunner(run: TurnRunner): void {
@@ -487,13 +505,14 @@ function chatIdOf(steer: SteerMessage): string {
  * fires ONE turn carrying every pending marker as its input appends.
  */
 async function pump(chatId: string): Promise<void> {
-	if (!chatId) return;
+	if (!chatId || dataMigrationInProgress()) return;
 	const s = state();
 	if (s.pumping.has(chatId)) return;
 	s.pumping.add(chatId);
+	const generation = s.locationGeneration;
 	let parked = false;
 	try {
-		for (let attempt = 0; ; ) {
+		for (let attempt = 0; generation === s.locationGeneration; ) {
 			const queue = s.queues.get(chatId);
 			if (!queue || queue.length === 0) {
 				s.queues.delete(chatId);
@@ -539,7 +558,7 @@ async function pump(chatId: string): Promise<void> {
 				}
 				if (handable.length > 0) {
 					await delay(POLL_MS);
-					await waitForIdle(chatId);
+					await waitForIdle(chatId, generation);
 					continue;
 				}
 			}
@@ -547,7 +566,8 @@ async function pump(chatId: string): Promise<void> {
 			// VEHICLE 2 — THE IDLE WAKE: one server-side turn carrying EVERY
 			// pending marker as its input appends (the handler write-ahead
 			// persists them under the wake's own turn claim).
-			await waitForIdle(chatId);
+			await waitForIdle(chatId, generation);
+			if (dataMigrationInProgress() || generation !== s.locationGeneration) { parked = true; return; }
 
 			// Re-fetch AFTER the gates open — waitForIdle can wait out a quiz
 			// answer (minutes), and sending the pre-wait snapshot would clobber
@@ -559,7 +579,8 @@ async function pump(chatId: string): Promise<void> {
 
 			// The runner is required — chat-handler sets it at init. If some
 			// module instance missed the wiring, fail loudly rather than hang.
-			if (!s.turnRunner) {
+			const turnRunner = s.turnRunner;
+			if (!turnRunner) {
 				const err = new Error("wake pipeline: no turn runner wired (setTurnRunner)");
 				for (const entry of stillPending) deferOrReject(chatId, entry, err);
 				parked = true;
@@ -594,12 +615,16 @@ async function pump(chatId: string): Promise<void> {
 			// Fire the wake with cargo still registered. A 409 releases its
 			// vehicle flag and retries after the existing backoff, without
 			// appending another registry entry.
-			const status = await s.turnRunner(chatId, { type: "steers", steers }).catch((err: unknown) => {
-				console.error(`[steer ${steers.map((x) => x.id).join(",")}] wake turn crashed:`, err);
-				return -1;
-			});
-			const saved = stores.chatStore.getChat(chatId);
-			if (saved) noteSteersDurable(chatId, saved.messages);
+			const endWake = beginDataActivity();
+			const status = await (async () => {
+				const result = await turnRunner(chatId, { type: "steers", steers }).catch((err: unknown) => {
+					console.error(`[steer ${steers.map((x) => x.id).join(",")}] wake turn crashed:`, err);
+					return -1;
+				});
+				const saved = stores.chatStore.getChat(chatId);
+				if (saved) noteSteersDurable(chatId, saved.messages);
+				return result;
+			})().finally(endWake);
 			const owned = fire.filter((entry) => s.queues.get(chatId)?.includes(entry));
 			if (status === 403 || status === 409) {
 				for (const entry of owned) { entry.waking = false; entry.wakeAgent = undefined; }
@@ -716,8 +741,8 @@ function restorePendingDeliveries(chatId: string): void {
  * the learner may take arbitrarily long to answer, and that is correct —
  * the steer fires right after their answer turn completes.
  */
-async function waitForIdle(chatId: string): Promise<void> {
-	for (;;) {
+async function waitForIdle(chatId: string, generation: number): Promise<void> {
+	while (generation === state().locationGeneration && !dataMigrationInProgress()) {
 		const record = stores.chatStore.getChat(chatId);
 		if (!record || !(state().queues.get(chatId) ?? []).some((entry) => !entry.waking && !entry.deferred && !entry.handedTo)) return;
 		const blocked = isTurnRunning(chatId) || hasUnresolvedQuestion(record.messages);
@@ -756,6 +781,7 @@ const SWEEP_THROTTLE_MS = 30_000;
 /** Re-run a job's sub-agent loop — exposed for the sweep's tests (the
  *  /api/jobs poll is its only production caller, disabled under NODE_ENV=test). */
 export function recoverStaleJobs(): void {
+	if (dataMigrationInProgress()) return;
 	const s = state();
 	const now = Date.now();
 	if (now - s.lastSweepAt < SWEEP_THROTTLE_MS) return;
@@ -773,12 +799,15 @@ export function recoverStaleJobs(): void {
 				} else if (job.status === "running" && !job.result) {
 					if (job.kind === "plugin") {
 						// Canonical task reads only; never respawn plugin tools/code.
-						if (s.recoverPlugin) void s.recoverPlugin(job).catch((error: unknown) => {
-							if (stores.jobStore.getJob(job.id)?.status !== "running") return;
-							const failure = `Plugin job recovery failed: ${String(error)}`;
-							stores.jobStore.updateJob(job.id, { status: "error", error: failure, activity: "recovery failed", delivery: { kind: "failure", status: "pending" } });
-							void deliverJobResult(buildJobFailureSteer(job, failure));
-						});
+						if (s.recoverPlugin) {
+							const end = beginDataActivity();
+							void s.recoverPlugin(job).catch((error: unknown) => {
+								if (stores.jobStore.getJob(job.id)?.status !== "running") return;
+								const failure = `Plugin job recovery failed: ${String(error)}`;
+								stores.jobStore.updateJob(job.id, { status: "error", error: failure, activity: "recovery failed", delivery: { kind: "failure", status: "pending" } });
+								void deliverJobResult(buildJobFailureSteer(job, failure));
+							}).finally(end);
+						}
 						continue;
 					}
 					// The sub-agent loop itself died with the process: re-spawn.

@@ -1,3 +1,4 @@
+import { beginDataActivity, dataMigrationInProgress } from "../store/data-write-gate.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
 	createPracticeAgent,
@@ -216,6 +217,17 @@ export async function handleChatInput(
 	input: TurnInput,
 	buildAgent?: (opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent,
 	sideContext: Pick<SideChatService, "snapshot"> = sideChats,
+): Promise<Response> {
+	if (dataMigrationInProgress()) return Response.json({ error: "A data folder change is in progress." }, { status: 409 });
+	const end = beginDataActivity();
+	try { return await startChatInput(chatId, input, buildAgent, sideContext); } finally { end(); }
+}
+
+async function startChatInput(
+	chatId: string,
+	input: TurnInput,
+	buildAgent: ((opts: AgentBuildOptions & { teaching: boolean }) => TeachingAgent) | undefined,
+	sideContext: Pick<SideChatService, "snapshot">,
 ): Promise<Response> {
 	await reconcilePluginQuestionCompatibility(stores.chatStore, chatId);
 	const initialRecord = stores.chatStore.getChat(chatId);
