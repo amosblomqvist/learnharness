@@ -28,6 +28,7 @@ import type {
 	Tool,
 	ToolResultMessage,
 } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, createModels, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
@@ -35,11 +36,13 @@ import { Type } from "typebox";
 import { parseCliLine } from "../src/agent/claude-code/cli-events.ts";
 import { ClaudeCodeError } from "../src/agent/claude-code/constants.ts";
 import { LIVE_PROCESS_IDLE_TIMEOUT_MS, liveProcessIdleTimeoutMs } from "../src/agent/claude-code/live-processes.ts";
-import { CLAUDE_CODE_MODELS } from "../src/agent/claude-code/provider.ts";
+import { CLAUDE_CODE_MODELS, createClaudeCodeProvider } from "../src/agent/claude-code/provider.ts";
 import { authEnvRecord } from "../src/core/auth-env.ts";
 import { ClaudeLaunchError } from "../src/agent/claude-code/launch.ts";
 import { createClaudeCodeStreamFunction, toClaudeArgs, toEffort, type RunClaude } from "../src/agent/claude-code/stream.ts";
 import { toStreamJsonLine } from "../src/agent/claude-code/transcript.ts";
+import { runSubagent } from "../src/agent/subagents/pi-run.ts";
+import { configureWorkerRequestAdmission, createWorkerRequestScope, workerRequestStream } from "../src/agent/worker-request-admission.ts";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/claude-code/fake-claude.mjs", import.meta.url));
 const FIXTURES = fileURLToPath(new URL("./fixtures/claude-code/", import.meta.url));
@@ -946,6 +949,124 @@ test("sequential identical calls split one response and correlate results by id,
 	assert.equal(calls.length, 1);
 });
 
+function admittedClaude(runClaude: RunClaude): StreamFunction {
+	const models = createModels();
+	models.setProvider(createClaudeCodeProvider(createClaudeCodeStreamFunction(runClaude)));
+	return models.streamSimple.bind(models); // Same lazy forwarding as the production engine.
+}
+
+function singleWorkerSlot(t: TestContext): void {
+	configureWorkerRequestAdmission(() => 1);
+	t.after(() => configureWorkerRequestAdmission(() => 8));
+}
+
+function offlineWorkerTool(execute: () => Promise<string>) {
+	return { name: "read", label: "Read", description: "Read", parameters: Type.Object({ path: Type.String() }),
+		execute: async () => ({ content: [{ type: "text" as const, text: await execute() }], details: null }),
+	};
+}
+
+const HELD_READ = { id: "toolu_worker_held", name: "read", arguments: { path: "offline" } };
+
+test("worker releases its only permit before tools but continues in the same Claude child through Pi lazy forwarding", { timeout: 8000 }, async t => {
+	singleWorkerSlot(t);
+	const second = { ...HELD_READ, id: "toolu_worker_second" };
+	const source = toToolUseMessage([HELD_READ, second]);
+	source[0] = streamEvent({ type: "message_start", message: { usage: { input_tokens: 7, output_tokens: 10 } } });
+	const { runClaude, calls } = createFakeRun(t, [...source, callTool(HELD_READ), callTool(second), REPLY]);
+	const usage: number[] = [];
+	let reads = 0;
+	const result = await runSubagent([offlineWorkerTool(async () => {
+		const { child } = getOnlyCall(calls);
+		assert.equal(child.exitCode, null);
+		assert.equal(child.signalCode, null);
+		// A new admitted request must fit while the Claude tool is still running.
+		const competing = workerRequestStream(() => {
+			const stream = createAssistantMessageEventStream();
+			stream.end(fauxAssistantMessage("admitted", { stopReason: "stop" }) as AssistantMessage);
+			return stream;
+		});
+		assert.equal((await competing(getModel(), normalizeContext({ messages: [HI] }), { signal: AbortSignal.timeout(2000) }).result()).stopReason, "stop");
+		return `evidence ${++reads}`;
+	})], {
+		engine: { model: getModel(), streamFn: admittedClaude(runClaude) }, systemPrompt: "Offline", prompt: "Offline", maxTurns: 3,
+		onUsage: use => usage.push(use.output),
+	});
+	assert.deepEqual(usage, [10, 0, 0]);
+	assert.equal(result.text, "evidence 1 | evidence 2");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+for (const outcome of ["stop", "cancel", "error"] as const) {
+	test(`worker retires its parked Claude child on ${outcome} between requests`, { timeout: 8000 }, async t => {
+		const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([HELD_READ]), callTool(HELD_READ), HOLD]);
+		const controller = new AbortController();
+		let requests = 0;
+		const run = runSubagent([offlineWorkerTool(async () => {
+			const call = getOnlyCall(calls);
+			assert.equal(call.child.signalCode, null);
+			if (outcome === "cancel") {
+				controller.abort();
+				await assertCleanedUp(call); // Must retire even before the tool returns.
+			}
+			return "result";
+		})], {
+			engine: { model: getModel(), streamFn: admittedClaude(runClaude) }, systemPrompt: "Offline", prompt: "Offline", maxTurns: 3,
+			abortSignal: controller.signal, shouldStop: () => outcome === "stop",
+			beforeRequest: () => { if (++requests > 1 && outcome === "error") throw new Error("fixture preparation failed"); },
+		});
+		if (outcome === "cancel") await assert.rejects(run, { name: "AbortError" });
+		else if (outcome === "error") await assert.rejects(run, /fixture preparation failed/);
+		else await run;
+		await assertCleanedUp(getOnlyCall(calls));
+	});
+}
+
+test("a worker continuation waits for admission; cancellation retires the parked child without invoking transport", { timeout: 8000 }, async t => {
+	singleWorkerSlot(t);
+	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([HELD_READ]), callTool(HELD_READ), HOLD]);
+	const controller = new AbortController();
+	const transport = admittedClaude(runClaude);
+	let dispatches = 0;
+	const worker = createWorkerRequestScope((...args) => { dispatches++; return transport(...args); }, controller.signal);
+	t.after(() => worker.close());
+	const parked = await runTurn(worker.streamFn, [HI], { signal: controller.signal });
+	const call = getOnlyCall(calls);
+	const blocking = new AbortController();
+	t.after(() => blocking.abort());
+	let started!: () => void;
+	const occupied = new Promise<void>(resolve => { started = resolve; });
+	const blockingResult = workerRequestStream(() => {
+		started();
+		return createAssistantMessageEventStream();
+	})(getModel(), normalizeContext({ messages: [HI] }), { signal: blocking.signal }).result();
+	await occupied;
+	const continuation = worker.streamFn(getModel(), normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI, parked, toToolResult(HELD_READ, "evidence")], tools: [READ_TOOL] }), {
+		sessionId: SESSION_ID, signal: controller.signal,
+	}).result();
+	assert.equal(dispatches, 1);
+	assert.equal(call.child.signalCode, null);
+	controller.abort();
+	assert.equal((await continuation).stopReason, "aborted");
+	await assertCleanedUp(call);
+	blocking.abort();
+	assert.equal((await blockingResult).stopReason, "aborted");
+	assert.equal(dispatches, 1, "cancelled queued continuation did not reach transport");
+});
+
+test("abandoning the worker iterator before consuming the tool slice retires the child", { timeout: 8000 }, async t => {
+	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([HELD_READ]), callTool(HELD_READ), HOLD]);
+	const scope = createWorkerRequestScope(admittedClaude(runClaude));
+	t.after(() => scope.close());
+	const stream = scope.streamFn(getModel(), normalizeContext({ messages: [HI], tools: [READ_TOOL] }), { sessionId: SESSION_ID });
+	const iterator = stream[Symbol.asyncIterator]();
+	assert.equal((await stream.result()).stopReason, "toolUse"); // The iterator has not consumed the event.
+	const call = getOnlyCall(calls);
+	assert.equal(call.child.signalCode, null);
+	await iterator.return?.();
+	await assertCleanedUp(call); // Before closing the run scope.
+});
+
 test("mismatched result id starts fresh and kills the old process", async (t) => {
 	const readA: ToolUse = { id: "toolu_partial_a", name: "read", arguments: { path: "a" } };
 	const readB: ToolUse = { id: "toolu_partial_b", name: "read", arguments: { path: "b" } };
@@ -1080,6 +1201,24 @@ test("a tool result arriving after the idle timeout starts fresh with the call a
 	assert.ok(stdin.includes("contents of a"), stdin);
 });
 
+test("an admitted parked child still expires and its tool result falls back to fresh replay", { timeout: 8000 }, async t => {
+	liveProcessIdleTimeoutMs.current = 500;
+	t.after(() => (liveProcessIdleTimeoutMs.current = LIVE_PROCESS_IDLE_TIMEOUT_MS));
+	const stdinFile = join(mkdtempSync(join(tmpdir(), "claude-worker-stdin-")), "stdin.jsonl");
+	t.after(() => rmSync(dirname(stdinFile), { recursive: true, force: true }));
+	const waiting = createFakeRun(t, [...toToolUseMessage([HELD_READ]), callTool(HELD_READ), HOLD]);
+	const fresh = createFakeRun(t, readFixtureLines("text.jsonl"), { FAKE_CLAUDE_STDIN: stdinFile });
+	const scope = createWorkerRequestScope(admittedClaude((args, options) => (waiting.calls.length === 0 ? waiting : fresh).runClaude(args, options)));
+	t.after(() => scope.close());
+	const message = await runTurn(scope.streamFn, [HI]);
+	assert.equal(getOnlyCall(waiting.calls).child.signalCode, null);
+	await assertCleanedUp(getOnlyCall(waiting.calls));
+	const reply = await runTurn(scope.streamFn, [HI, message, toToolResult(HELD_READ, "worker evidence")]);
+	assert.equal(getText(reply), "hello there");
+	assert.match(readFileSync(stdinFile, "utf8"), /\[tool result read\].*worker evidence/s);
+	await assertCleanedUp(getOnlyCall(fresh.calls));
+});
+
 test("a tool result arriving late but before the idle timeout still continues the waiting process", async (t) => {
 	liveProcessIdleTimeoutMs.current = 1000;
 	t.after(() => (liveProcessIdleTimeoutMs.current = LIVE_PROCESS_IDLE_TIMEOUT_MS));
@@ -1135,14 +1274,16 @@ test("missing MCP identity fails closed without emitting executable calls", asyn
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
-test("a parallel identity failure after an admitted slice is reported on continuation, not hidden by replay", async (t) => {
+for (const worker of [false, true]) test(`a parallel identity failure after a ${worker ? "worker" : "direct"} slice is reported on continuation, not hidden by replay`, async (t) => {
 	const first: ToolUse = { id: "toolu_good_parallel", name: "read", arguments: { path: "a" } };
 	const second: ToolUse = { id: "toolu_bad_parallel", name: "read", arguments: { path: "b" } };
 	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([first, second]),
 		JSON.stringify({ fake: "start-call", id: first.id, name: first.name, arguments: first.arguments }),
 		JSON.stringify({ fake: "wait-for-message" }),
 		JSON.stringify({ fake: "call", name: second.name, arguments: second.arguments }), HOLD]);
-	const stream = createClaudeCodeStreamFunction(runClaude);
+	const scope = worker ? createWorkerRequestScope(admittedClaude(runClaude)) : undefined;
+	t.after(() => scope?.close());
+	const stream = scope?.streamFn ?? createClaudeCodeStreamFunction(runClaude);
 	const message = await runTurn(stream, [HI]);
 	getOnlyCall(calls).child.send("continue");
 	await waitForExit(getOnlyCall(calls).child);
