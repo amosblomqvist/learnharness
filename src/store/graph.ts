@@ -52,8 +52,7 @@ import type { GraphStore } from "../core/ports.ts";
 // ─── JSONL primitives ────────────────────────────────────────────────────────
 
 function appendLine<T>(file: string, record: T): void {
-	mkdirDataDirectory(path.dirname(file));
-	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
+	ensureGraphFormat(); // Creates the graph directory when writing the lazy stamp.
 	assertDataStoreWritable(file);
 	fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf-8");
 }

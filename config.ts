@@ -219,14 +219,14 @@ export function getDataLocationState(): {
 	fixed: boolean;
 } {
 	const s = locationState();
-	checkActiveStore(s);
+	const storeError = checkActiveStore(s);
 	return {
 		currentDir: s.currentDir,
 		defaultDir: s.defaultDir,
 		isCustom: s.currentDir !== s.defaultDir,
 		configuredDir: s.configuredDir,
-		unavailableConfiguredDir: s.unavailableConfiguredDir,
-		recoveryReason: s.recoveryReason,
+		unavailableConfiguredDir: storeError ? s.configuredDir : s.unavailableConfiguredDir,
+		recoveryReason: storeError?.message ?? s.recoveryReason,
 		fixed: DATA_DIR_FIXED,
 	};
 }
@@ -267,14 +267,20 @@ export function activeStoreId(): string | null {
 	return locationState().storeId;
 }
 
-function checkActiveStore(s: DataLocationGlobalState): void {
-	if (!s.configuredDir || s.unavailableConfiguredDir) return;
-	try {
-		verifyStore(s.currentDir, s.storeId);
-	} catch (error) {
-		s.unavailableConfiguredDir = s.configuredDir;
-		s.recoveryReason = (error as Error).message;
+/** Runtime identity errors belong to the current check. Startup validation
+ * failures still require the full recovery flow. */
+function checkActiveStore(s: DataLocationGlobalState): Error | null {
+	if (!s.configuredDir || s.unavailableConfiguredDir) return null;
+	let failure: Error | null = null;
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			verifyStore(s.currentDir, s.storeId);
+			return null;
+		} catch (error) {
+			failure = error instanceof Error ? error : new Error(String(error));
+		}
 	}
+	return failure;
 }
 
 /** Guard every mutable-store write, including writes to captured plugin paths. */
@@ -283,7 +289,8 @@ export function assertDataStoreWritable(file?: string): void {
 	const relative = file === undefined ? "" : path.relative(s.currentDir, file);
 	if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return;
 	assertDataWritesAdmitted();
-	checkActiveStore(s);
+	const storeError = checkActiveStore(s);
+	if (storeError) throw storeError;
 	if (s.unavailableConfiguredDir) {
 		throw new Error(s.recoveryReason ?? `The configured data folder "${s.unavailableConfiguredDir}" is unavailable.`);
 	}

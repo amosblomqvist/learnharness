@@ -682,6 +682,58 @@ describe("data directory audit regressions", () => {
 		assert.match(inspectDataLocation({ configFile, defaultDir: defaultDataDir }).recoveryReason, /Symbolic links and junctions/);
 	});
 
+	it("verifies an initialized graph store once per ledger append", async () => {
+		const target = path.join(scratchRoot, "graph-verification-store");
+		assert.equal((await post({ action: "change", path: target, copyMode: "switch" })).status, 200);
+		const { graphStore } = await import("../src/store/graph.ts");
+		const checkpoint = { chatId: "session-1", foldedAt: "2026-11-20T00:00:00.000Z" };
+		graphStore.appendCheckpoint(checkpoint);
+
+		const markerFile = path.join(target, STORE_MARKER);
+		let markerReads = 0;
+		const originalRead = fs.readFileSync;
+		const read = mock.method(fs, "readFileSync", (...args: Parameters<typeof originalRead>) => {
+			if (args[0] === markerFile) markerReads++;
+			return originalRead(...args);
+		});
+		try {
+			graphStore.appendCheckpoint({ ...checkpoint, chatId: "session-2" });
+			assert.equal(markerReads, 1);
+		} finally {
+			read.mock.restore();
+		}
+		assert.deepEqual(graphStore.readCheckpoints().map(({ chatId }) => chatId), ["session-1", "session-2"]);
+	});
+
+	it("retries a transient identity read and recovers automatically when the original marker returns", async () => {
+		const target = path.join(scratchRoot, "recoverable-identity-store");
+		assert.equal((await post({ action: "change", path: target, copyMode: "switch" })).status, 200);
+		const markerFile = path.join(target, STORE_MARKER);
+		const marker = fs.readFileSync(markerFile);
+		const originalRead = fs.readFileSync;
+		let markerReads = 0;
+		const read = mock.method(fs, "readFileSync", (...args: Parameters<typeof originalRead>) => {
+			if (args[0] === markerFile && ++markerReads === 1) throw new Error("Transient marker read error");
+			return originalRead(...args);
+		});
+		try {
+			config.assertDataStoreWritable(config.SETTINGS_FILE);
+			assert.equal(markerReads, 2);
+		} finally {
+			read.mock.restore();
+		}
+
+		fs.unlinkSync(markerFile);
+		assert.throws(() => writeSettingsRecord({ version: 1 }), /unavailable/);
+		assert.equal(getDataDirectoryStatus().unavailableConfiguredDir, target);
+		fs.writeFileSync(markerFile, marker);
+		writeSettingsRecord({ version: 1, general: { autoUpdate: false } });
+		const restored = getDataDirectoryStatus();
+		assert.equal(restored.unavailableConfiguredDir, null);
+		assert.equal(restored.recoveryReason, null);
+		assert.equal(readSettingsRecord()?.general?.autoUpdate, false);
+	});
+
 	it("detects identity mismatches and prevents chat, settings and job writers from recreating an ejected store", async () => {
 		const target = path.join(scratchRoot, "identity-store");
 		assert.equal((await post({ action: "change", path: target, copyMode: "switch" })).status, 200);
