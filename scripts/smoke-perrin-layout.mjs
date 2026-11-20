@@ -10,7 +10,7 @@ const origin = process.env.LH_UI_ORIGIN;
 assert(origin && ["localhost", "127.0.0.1"].includes(new URL(origin).hostname), "Set a local LH_UI_ORIGIN");
 const browser = await puppeteer.launch({ executablePath: process.env.LH_TEST_CHROME, headless: true,
 	args: ["--disable-background-networking", "--disable-sync", "--no-first-run"] });
-const title = "Operating systems — kernel structures, process synchronization and deadlock practice — a long synthetic session title";
+const title = "操作系统 死锁之前 简答题加计算题考查 英文题目 — 长标题布局验证";
 const shots = process.env.LH_UI_SCREENSHOTS;
 if (shots) await fs.mkdir(shots, { recursive: true });
 try {
@@ -33,12 +33,14 @@ try {
 	const inspectTitle = () => page.$eval("button[data-plugin-chrome-title]", el => ({
 		font: getComputedStyle(el).fontSize, width: el.getBoundingClientRect().width,
 		parent: el.closest("header").getBoundingClientRect().width, title: el.title,
-		truncated: el.scrollWidth > el.clientWidth, translate: getComputedStyle(el).translate,
+		truncated: el.scrollWidth > el.clientWidth, translate: getComputedStyle(el).translate, height: el.getBoundingClientRect().height, balance: Math.abs((el.getBoundingClientRect().top-el.closest("header").getBoundingClientRect().top)-(el.closest("header").getBoundingClientRect().bottom-el.getBoundingClientRect().bottom)),
 	}));
 	const desktop = await inspectTitle();
 	assert.equal(desktop.font, "20px"); assert.equal(desktop.title, title);
-	assert.equal(desktop.translate, "none");
-	assert(desktop.width <= desktop.parent * .71); assert(desktop.truncated);
+	assert.equal(desktop.translate, "none"); assert.equal(desktop.height,44); assert(desktop.balance<=1.1);
+	const columnGeometry=await page.evaluate(()=>{const col=document.querySelector("[data-session-find-root]"),dock=document.querySelector("[data-attachment-composer]"); const c=col.getBoundingClientRect(),d=dock.getBoundingClientRect(),style=getComputedStyle(col);return {left:Math.abs(d.left-c.left-parseFloat(style.paddingLeft)),right:Math.abs(c.right-parseFloat(style.paddingRight)-d.right)};});
+	assert(columnGeometry.left<=1.1 && columnGeometry.right<=1.1);
+	assert(desktop.width <= desktop.parent * .71);
 	if (shots) await page.screenshot({ path: path.join(shots, "perrin-session-desktop.png") });
 	await page.click("button[data-plugin-chrome-title]");
 	await page.waitForSelector('input[aria-label="Session title"]');
