@@ -44,6 +44,28 @@ def data_root(override: str | None = None) -> Path:
         root = base / "LearnHarness" / "data"
     else:
         raise DataError("Unknown desktop data location on this OS; specify --data-dir.")
+    if override is None:
+        pointer = root.parent / "data-location.json"
+        try:
+            with pointer.open(encoding="utf-8") as source:
+                location = json.load(source)
+        except FileNotFoundError:
+            pass
+        except (OSError, UnicodeError, ValueError) as exc:
+            raise DataError(f"Cannot read the configured data location at {pointer}: {exc}") from exc
+        else:
+            try:
+                configured = Path(location["dataDir"])
+                store_id = location["storeId"]
+                marker = configured / ".learnharness-store-id"
+                if (not configured.is_absolute() or configured.resolve() != configured or configured.is_symlink() or not configured.is_dir()
+                        or marker.is_symlink() or not marker.is_file() or marker.stat().st_size > 128
+                        or not isinstance(store_id, str) or not store_id
+                        or marker.read_text(encoding="utf-8").strip() != store_id):
+                    raise ValueError("the folder or its identity marker is unavailable")
+                root = configured
+            except (OSError, UnicodeError, ValueError, TypeError, KeyError) as exc:
+                raise DataError(f"Configured data folder unavailable ({pointer}): {exc}. Reconnect the drive or use --data-dir.") from exc
     try:
         root = root.resolve()
         if not root.is_dir():

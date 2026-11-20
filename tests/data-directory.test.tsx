@@ -608,6 +608,29 @@ describe("data directory audit regressions", () => {
 		assert.notEqual(await getPluginHost(), host);
 	});
 
+	it("resolves the desktop pointer in the read-only skill and keeps explicit overrides", { skip: process.platform !== "linux" }, () => {
+		const desktop = path.join(scratchRoot, "xdg", "LearnHarness");
+		const pointer = path.join(desktop, "data-location.json");
+		const chosen = path.join(scratchRoot, "skill-store");
+		fs.mkdirSync(chosen);
+		writeConfiguredDataDirPath(pointer, chosen);
+		const run = (...args: string[]) => spawnSync("python3", ["-B", "-c", `
+import sys
+sys.path.insert(0, "skills/learnharness/scripts")
+from _data import DataError, data_root
+try:
+    print(data_root(*sys.argv[1:]))
+except DataError as error:
+    sys.exit(str(error))
+`, ...args], { env: { ...process.env, XDG_CONFIG_HOME: path.dirname(desktop) }, encoding: "utf8", timeout: 10_000 });
+		const resolved = run();
+		assert.equal(resolved.status, 0, resolved.stderr);
+		assert.equal(resolved.stdout.trim(), chosen);
+		fs.unlinkSync(path.join(chosen, STORE_MARKER));
+		assert.match(run().stderr, /Configured data folder unavailable/);
+		assert.equal(run(defaultDataDir).stdout.trim(), defaultDataDir);
+	});
+
 	it("requires a drive or full UNC share on Windows", () => {
 		for (const input of [String.raw`\folder`, "C:folder", "/folder", String.raw`\\host`]) assert.equal(isFullPath(input, "win32"), false, input);
 		for (const input of [String.raw`C:\folder`, "C:/folder", String.raw`\\host\share\folder`]) assert.equal(isFullPath(input, "win32"), true, input);
