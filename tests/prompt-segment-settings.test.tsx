@@ -27,6 +27,7 @@ it("edits one segment with explicit saves, recoverable writes and an independent
 	let failWrite = true;
 	let failActivation = true;
 	let holdReads = false;
+	let heldAgentAck: (() => void) | undefined;
 	const writes: string[] = [];
 	const agentWrites: AgentSettings[] = [];
 	const deferredReads: { signal?: AbortSignal | null; resolve: (response: Response) => void }[] = [];
@@ -43,7 +44,9 @@ it("edits one segment with explicit saves, recoverable writes and an independent
 				agentWrites.push(next);
 				if (failActivation) return Response.json({ error: "fixture error" }, { status: 503 });
 				agent = next;
-				return Response.json({ settings: { version: 1, agent } });
+				const reply = Response.json({ settings: { version: 1, agent } });
+				if (heldAgentAck) await new Promise<void>(resolve => { heldAgentAck = resolve; });
+				return reply;
 			}
 			if (url === "/api/settings/prompts") {
 				if (holdReads) return new Promise<Response>(resolve => deferredReads.push({ signal: init?.signal, resolve }));
@@ -144,6 +147,8 @@ it("edits one segment with explicit saves, recoverable writes and an independent
 		assert.equal(agent.prompts?.[path], true);
 		assert.ok(deferredReads.length > 0);
 		assert.ok(button(row(), "Edit override").disabled, "no editor may open from the stale list");
+		await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
+		assert.equal(document.activeElement, row(), "focus returns to the prompt row when its opener is disabled");
 		holdReads = false;
 		const group = document.querySelector<HTMLElement>('[data-testid="group-prompts"]')!;
 		await click(group, "Retry");
@@ -151,17 +156,24 @@ it("edits one segment with explicit saves, recoverable writes and an independent
 		assert.ok(deferredReads.every(({ signal }) => signal?.aborted));
 		await act(async () => { for (const { resolve } of deferredReads) resolve(staleReply.clone()); });
 		assert.match(row().textContent ?? "", /In use: Your version/, "late aborted reads cannot overwrite a successful retry");
+		const research = document.querySelector<HTMLButtonElement>('[data-testid="toggle-tool-research"]')!;
+		heldAgentAck = () => assert.fail("fixture response must be held after the PUT commits");
+		await act(async () => research.click());
+		assert.equal(agent.tools?.research, false, "Research is durable before its ACK reaches Settings");
+		assert.equal(research.getAttribute("aria-checked"), "true");
 		await click(row(), "Edit override");
 		assert.equal(field().value, revisedText);
 		const count = agentWrites.length;
 		failActivation = true; // The old redundant post-delete PUT would've failed here.
 		await click(dialog()!, "Delete override");
+		assert.equal(overrideText, revisedText, "wait for older full-record ACKs before deleting");
+		await act(async () => { heldAgentAck?.(); heldAgentAck = undefined; });
 		assert.equal(dialog(), null);
 		assert.equal(agentWrites.length, count, "DELETE already cleared the switch; no mirror PUT");
 		assert.equal(agent.prompts?.[path], undefined);
+		assert.equal(research.getAttribute("aria-checked"), "false");
 		failActivation = false;
-		const research = document.querySelector<HTMLButtonElement>('[data-testid="toggle-tool-research"]')!;
-		await act(async () => research.click());
+		await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="toggle-tool-visual"]')!.click());
 		assert.equal(agentWrites.at(-1)?.prompts?.[path], undefined, "later whole-section writes omit the deleted switch");
 		assert.equal(agent.tools?.demo, false);
 		await click(row(), "+ Add override");

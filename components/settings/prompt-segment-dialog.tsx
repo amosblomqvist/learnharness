@@ -9,8 +9,9 @@ import { SettingsSegmentedControl } from "./controls";
 
 export type PromptSaveOutcome = "saved" | "save-failed" | "activation-failed";
 
-export function PromptSegmentDialog({ name, source, override, mode, onSave, onDelete, onClose }: {
+export function PromptSegmentDialog({ name, source, override, mode, returnFocusFallback, onSave, onDelete, onClose }: {
 	name: string;
+	returnFocusFallback: HTMLElement;
 	source: string;
 	override: string | null;
 	mode: "view" | "edit";
@@ -95,7 +96,7 @@ export function PromptSegmentDialog({ name, source, override, mode, onSave, onDe
 		}
 	}
 
-	return <HostDialog open onClose={requestClose} aria-labelledby={titleId} aria-describedby={nameId}
+	return <HostDialog open onClose={requestClose} returnFocusFallback={returnFocusFallback} aria-labelledby={titleId} aria-describedby={nameId}
 		backdropProps={{ className: "fixed inset-0 flex items-center justify-center bg-background/80" }}
 		frame={<div aria-busy={busy !== null} data-testid="prompt-segment-dialog" className="settings-dialog-pop mx-4 flex h-[720px] max-h-[90dvh] w-full max-w-4xl flex-col overflow-hidden rounded-md border border-border bg-card font-ui shadow-xl" />}>
 		<header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border px-4 py-3">

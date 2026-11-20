@@ -338,7 +338,7 @@ export function AgentSection({
 	graph,
 	compaction,
 	onSectionChange,
-	onPromptDeleted,
+	onDeletePromptOverride,
 	onModelsChange,
 	onCompactionChange,
 }: {
@@ -355,8 +355,8 @@ export function AgentSection({
 	compaction: CompactionSettings | undefined;
 	/** Writes the composed WHOLE agent section (replace-PUT discipline). */
 	onSectionChange: (next: AgentSettings, confirms?: (stored: AgentSettings) => boolean) => boolean | Promise<boolean>;
-	/** DELETE also clears its switch; mirror that acknowledgement without a second PUT. */
-	onPromptDeleted?: (path: string) => void;
+	/** Order the override DELETE against Settings' full-record acknowledgements. */
+	onDeletePromptOverride?: (path: string, remove: () => Promise<boolean>) => Promise<boolean>;
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
@@ -377,7 +377,7 @@ export function AgentSection({
 	const promptRead = useRef<AbortController | null>(null);
 	const latestAgent = useRef(agent);
 	latestAgent.current = agent;
-	const [openSegment, setOpenSegment] = useState<{ info: SegmentInfo; mode: "view" | "edit" } | null>(null);
+	const [openSegment, setOpenSegment] = useState<{ info: SegmentInfo; mode: "view" | "edit"; row: HTMLElement } | null>(null);
 	const [switchPending, setSwitchPending] = useState(false);
 	const switchingPrompt = useRef(false);
 	const [switchError, setSwitchError] = useState<string | null>(null);
@@ -526,10 +526,8 @@ export function AgentSection({
 
 	async function deleteSegment(path: string) {
 		try {
-			const res = await fetch(`/api/settings/prompts/${path}`, { method: "DELETE" });
-			if (!res.ok) return false;
-			onPromptDeleted?.(path);
-			return true;
+			const remove = async () => (await fetch(`/api/settings/prompts/${path}`, { method: "DELETE" })).ok;
+			return onDeletePromptOverride ? await onDeletePromptOverride(path, remove) : await remove();
 		} catch {
 			return false;
 		} finally {
@@ -955,8 +953,8 @@ export function AgentSection({
 								{section.segments.map((info) => <PromptSegmentRow key={info.path}
 									path={info.path} usageHint={info.usageHint} hasOverride={info.overrideText !== null} enabled={info.enabled}
 									busy={promptListStatus !== "ready"} switching={switchPending} error={switchError === info.path ? "Couldn't switch prompt versions." : undefined}
-									onView={() => setOpenSegment({ info, mode: "view" })}
-									onEdit={() => setOpenSegment({ info, mode: "edit" })}
+									onView={row => setOpenSegment({ info, mode: "view", row })}
+									onEdit={row => setOpenSegment({ info, mode: "edit", row })}
 									onToggle={(on) => void switchSegment(info.path, on)}
 								/>)}
 							</div>
@@ -965,7 +963,7 @@ export function AgentSection({
 				)}
 			</SettingsGroup>
 			{openSegment && <PromptSegmentDialog
-				name={promptSegmentName(openSegment.info.path)} source={openSegment.info.sourceText} override={openSegment.info.overrideText} mode={openSegment.mode}
+				name={promptSegmentName(openSegment.info.path)} returnFocusFallback={openSegment.row} source={openSegment.info.sourceText} override={openSegment.info.overrideText} mode={openSegment.mode}
 				onSave={(text, writeText) => saveSegment(openSegment.info.path, text, writeText)}
 				onDelete={() => deleteSegment(openSegment.info.path)}
 				onClose={() => setOpenSegment(null)}

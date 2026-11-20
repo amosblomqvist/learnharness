@@ -86,8 +86,11 @@ interface SettingsWriteOrder {
 	acknowledged: number;
 	record?: UserSettings;
 	fileAccessError?: string | null;
+	pendingWrites: Set<Promise<void>>;
+	promptDeletion?: Promise<void>;
 	listeners: Set<(record: UserSettings, fileAccessError: string | null) => void>;
 }
+const newWriteOrder = (): SettingsWriteOrder => ({ issued: 0, acknowledged: 0, pendingWrites: new Set(), listeners: new Set() });
 const WriteOrderContext = createContext<RefObject<SettingsWriteOrder> | null>(null);
 
 /** AppShell-level mount: the sidebar row and the mod+, chord call this.
@@ -100,7 +103,7 @@ export function SettingsDialogProvider({
 }) {
 	const interactions = useInteractionLayers();
 	const layerId = useId();
-	const writeOrder = useRef<SettingsWriteOrder>({ issued: 0, acknowledged: 0, listeners: new Set() });
+	const writeOrder = useRef(newWriteOrder());
 	const [show, setShow] = useState(false);
 	const [landOn, setLandOn] = useState<SectionId>("keys");
 	const [landOnRow, setLandOnRow] = useState<string | null>(null);
@@ -186,7 +189,7 @@ export function SettingsDialogBody({
 }) {
 	const { onAppearanceChange } = useAppearance();
 	const inheritedWriteOrder = useContext(WriteOrderContext);
-	const standaloneWriteOrder = useRef<SettingsWriteOrder>({ issued: 0, acknowledged: 0, listeners: new Set() });
+	const standaloneWriteOrder = useRef(newWriteOrder());
 	const writeOrder = inheritedWriteOrder ?? standaloneWriteOrder;
 	const { snapshot } = usePlugins();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
@@ -302,7 +305,11 @@ export function SettingsDialogBody({
 			body: object,
 			confirms?: (stored: UserSettings) => boolean,
 		): Promise<boolean> => {
-			const ticket = ++writeOrder.current.issued;
+			const authority = writeOrder.current;
+			while (authority.promptDeletion) await authority.promptDeletion;
+			const ticket = ++authority.issued;
+			const settled = Promise.withResolvers<void>();
+			authority.pendingWrites.add(settled.promise);
 			setError(null);
 			try {
 				const res = await fetch(`/api/settings/${section}`, {
@@ -340,21 +347,35 @@ export function SettingsDialogBody({
 			} catch (error) {
 				if (ticket === writeOrder.current.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
 				return false;
+			} finally {
+				authority.pendingWrites.delete(settled.promise);
+				settled.resolve();
 			}
 		},
 		[onAppearanceChange, writeOrder],
 	);
 
-	function acknowledgePromptDeletion(path: string) {
-		// DELETE durably cleared this key; it returns no full record. Advance
-		// the mirror's ACK order and patch only that key, without another PUT.
+	async function deletePromptOverride(path: string, remove: () => Promise<boolean>) {
 		const authority = writeOrder.current;
-		const stored = authority.record;
-		if (stored?.agent?.prompts?.[path] !== undefined) {
-			const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
-			authority.acknowledged = ++authority.issued;
-			authority.record = patched;
-			for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
+		while (authority.promptDeletion) await authority.promptDeletion;
+		const settled = Promise.withResolvers<void>();
+		authority.promptDeletion = settled.promise;
+		try {
+			// DELETE only acknowledges a key removal, unlike the full-record
+			// PUT replies. Land preceding ACKs before patching that one key.
+			await Promise.all(authority.pendingWrites);
+			if (!await remove()) return false;
+			const stored = authority.record;
+			if (stored?.agent?.prompts?.[path] !== undefined) {
+				const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
+				authority.acknowledged = ++authority.issued;
+				authority.record = patched;
+				for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
+			}
+			return true;
+		} finally {
+			authority.promptDeletion = undefined;
+			settled.resolve();
 		}
 	}
 
@@ -495,7 +516,7 @@ export function SettingsDialogBody({
 										onSectionChange={(next, confirms) =>
 											write("agent", next, confirms && (stored => confirms(stored.agent ?? {})))
 										}
-										onPromptDeleted={acknowledgePromptDeletion}
+										onDeletePromptOverride={deletePromptOverride}
 										onCompactionChange={(next: CompactionSettings) =>
 											write("compaction", next)
 										}
