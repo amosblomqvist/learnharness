@@ -127,14 +127,17 @@ describe("side lesson document", () => {
 	it("renders prose, learner text and answered checks in full", () => {
 		const doc = sideChatLessonDocument([
 			newUserMessage("I want to learn arithmetic"),
-			assistant([text("Addition combines counts."), call("q1", "quiz", { ...QUIZ_ARGS, question: "What is 2+2?" })]),
+			assistant([text("Addition combines counts."), call("q1", "quiz", {
+				...QUIZ_ARGS, question: "What is 2+2?", correctAnswer: "4",
+				options: [{ label: "4", value: "4" }, { label: "3", value: "3" }],
+			})]),
 			result("q1", "quiz", answeredQuiz()),
 		]);
 		assert.match(doc, /### Learner\n\nI want to learn arithmetic/);
 		assert.match(doc, /### Teacher\n\nAddition combines counts\./);
 		assert.match(doc, /Check question \(answered\)/);
-		assert.match(doc, /- 3 \*\(chosen by the learner\)\*/);
-		assert.match(doc, /- 4 \*\(correct\)\*/);
+		assert.match(doc, /- A\. 3 \*\(chosen by the learner\)\*/);
+		assert.match(doc, /- B\. 4 \*\(correct\)\*/);
 		assert.match(doc, /Verdict: incorrect/);
 		assert.match(doc, /Two pairs make four/);
 		assert.match(doc, /confidence: 70%/);

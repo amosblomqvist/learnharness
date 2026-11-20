@@ -10,7 +10,7 @@ import { PathText } from "@/components/file-path-chip";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
-import { answerForPresentation, displayedOptionLetter, parseAskInput, parseQuizInput } from "@/src/core";
+import { answeredOptionLetters, answerForPresentation, parseAskInput, parseQuizInput } from "@/src/core";
 import { useAppearance } from "@/components/settings/appearance";
 import { questionCardLabel, questionCardStandIn } from "@/components/question-dock";
 import {
@@ -42,6 +42,7 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
  */
 export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answer: QuestionAnswerData; input?: unknown; toolCallId?: string }) {
 	const answer = answerForPresentation(savedAnswer, input);
+	const optionLetters = answeredOptionLetters(savedAnswer, input);
 	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
 
 	// ADAPT QUESTION LAYOUT on the record (owner, session-appearance-layout):
@@ -112,7 +113,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 				question: questionTextRef.current!,
 				context: detailsRef.current,
 				options: labels,
-				optionOrder: answer.optionOrder,
+				optionLetters: answer.options?.map(({ index }) => optionLetters.get(index)),
 			});
 			return { root: live.root, ...standIn, media: { question: live.question, options: live.options } };
 		},
@@ -202,7 +203,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 					{answer.options?.map((opt) => {
 						const sel = selectedIdx.has(opt.index);
 						const key = isQuiz && correctIdx.has(opt.index);
-						const letter = displayedOptionLetter(answer.optionOrder, opt.index);
+						const letter = optionLetters.get(opt.index);
 						return (
 							<div
 								key={opt.index}

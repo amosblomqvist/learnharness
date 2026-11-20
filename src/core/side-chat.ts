@@ -40,6 +40,7 @@ import {
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 import { citationsToReadableText, collectCitations } from "./citations.ts";
 import { messageMarkdown } from "./session-markdown.ts";
+import { answeredOptionLetters } from "./answer-presentation.ts";
 import { displayedOptionLetter, questionDisplayOptions, type QuestionAnswerData } from "./question-core.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 import { parseQuestionInput } from "./tool-parts.ts";
@@ -371,11 +372,12 @@ function answeredQuestionMarkdown(result: ToolResultMessage, input: Record<strin
 	const correct = new Set(answer.correctIndices ?? []);
 	const isQuiz = answer.kind === "quiz";
 	if (answer.options && answer.options.length > 0) {
+		const letters = answeredOptionLetters(answer, input);
 		lines.push(
 			answer.options
 				.map((o) => {
 					const marks = [isQuiz && correct.has(o.index) ? "correct" : "", chosen.has(o.index) ? "chosen by the learner" : ""].filter(Boolean);
-					const letter = displayedOptionLetter(answer.optionOrder, o.index);
+					const letter = letters.get(o.index);
 					return `- ${letter ? `${letter}. ` : ""}${o.label}${marks.length > 0 ? ` *(${marks.join(", ")})*` : ""}`;
 				})
 				.join("\n"),

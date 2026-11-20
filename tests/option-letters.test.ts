@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
+import { answeredOptionLetters } from "../src/core/answer-presentation.ts";
 import { newAnswerResult } from "../src/core/native-messages.ts";
 import {
 	buildAnswer, compactAnswerForModel, dismissedAnswer, displayedOptionLetter, normalizeOptions,
@@ -45,6 +46,21 @@ test("ask preserves author order and Other still supplies the map without a sele
 	assert.deepEqual(compactAnswerForModel(buildAnswer(q, { other: "Mars", thinking: "Not B" })), {
 		kind: "ask", optionOrder: { A: 1, B: 2, C: 3 }, other: "Mars", thinking: "Not B",
 	});
+});
+
+test("older answers infer letters from saved rows, not from author order or a new shuffle", () => {
+	const q = question("quiz", "q2");
+	const old = buildAnswer({ ...q, optionOrder: undefined }, { values: ["v"] });
+	const original = { question: q.question, options: authored, correctAnswer: "v", explanation: "Venus." };
+	const snapshot = JSON.stringify(old);
+	assert.deepEqual([...answeredOptionLetters(old, original)], [[1, "A"], [2, "B"], [3, "C"]]);
+	assert.equal(q.options[1]?.label, "Earth", "the second saved row differs from the second authored row");
+	assert.equal(JSON.stringify(old), snapshot, "no stored change");
+	assert.deepEqual(compactAnswerForModel(old), { kind: "quiz", answers: [{ index: 3, label: "Venus" }], correct: true });
+	assert.equal(answeredOptionLetters(old, undefined).size, 0);
+	assert.equal(answeredOptionLetters(old, { ...original, multiSelect: "true" }).size, 0);
+	assert.equal(answeredOptionLetters(old, { ...original, options: authored.slice(0, 2) }).size, 0);
+	assert.equal(answeredOptionLetters({ ...old, options: old.options!.slice().reverse() }, original).size, 0);
 });
 
 test("A–Z only; legacy empty rows don't shift the original index; legacy answers stay unlettered", () => {

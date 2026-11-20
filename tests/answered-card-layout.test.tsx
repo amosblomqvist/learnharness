@@ -90,6 +90,7 @@ test("answered card: stacked until it nears the screen, then the question card's
 		const [question, answers] = [...grid.children] as HTMLElement[];
 		assert.ok(question!.textContent!.includes("thrown straight up"));
 		assert.ok(answers!.querySelector('[data-testid="answered-confidence"]'), "confidence sits under the options");
+		assert.deepEqual([...answers!.querySelectorAll("[data-option-letter]")].map((el) => el.textContent), ["A", "B", "C"], "old answer renders letters without a saved map");
 		assert.match(answers!.className, /justify-center/);
 		assert.equal(grid.contains(card.querySelector('[data-testid="your-thinking"]')), false, "thinking stays full width below");
 		assert.equal(document.querySelector("[data-question-layout-probe]"), null, "probe removed");
@@ -129,6 +130,10 @@ test("the question card stand-in mirrors the pending card: options, I don't know
 	const rows = quiz.options.firstElementChild!.children;
 	assert.equal(rows.length, 3, "two options + I don't know");
 	assert.match(rows[2]!.className, /border-dashed/);
+	for (const row of rows) {
+		assert.match(row.className, /items-center/);
+		assert.doesNotMatch(row.firstElementChild!.className, /mt-0\.5/);
+	}
 	assert.ok(quiz.confidence?.textContent?.includes("Confidence"));
 
 	const ask = questionCardStandIn(document as unknown as Document, {

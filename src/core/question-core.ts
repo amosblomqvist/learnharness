@@ -651,9 +651,13 @@ export function questionDisplayOptions(raw: RawOptions, kind: QuestionKind, mult
 	return { options: displayed, optionOrder };
 }
 
-/** Resolve a letter from a saved mapping, never re-letter old answers. */
+export function optionLetterAt(displayIndex: number): string | undefined {
+	return OPTION_LETTERS[displayIndex - 1];
+}
+
+/** Resolve a letter from a mapping. Compact results only use the saved map. */
 export function displayedOptionLetter(order: OptionOrder | undefined, displayIndex: number): string | undefined {
-	const letter = OPTION_LETTERS[displayIndex - 1];
+	const letter = optionLetterAt(displayIndex);
 	return letter && order && Object.hasOwn(order, letter) ? letter : undefined;
 }
 
