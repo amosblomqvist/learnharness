@@ -130,7 +130,7 @@ export function StatsBar({
 				<span data-testid="stats-context">
 					{contextLabel}
 				</span>
-				
+
 				<span data-testid="stats-cost">{costLabel}</span>
 			</button>
 				{open && (

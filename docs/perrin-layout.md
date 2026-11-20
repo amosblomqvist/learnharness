@@ -11,3 +11,15 @@ The application chrome adopts the non-color foundations of [Perrin UI Kit](https
 No kit palette is imported. Existing theme values, color overrides, hover colors, teaching-prose fonts/sizes, code fonts, and markdown rendering remain application-owned. Theme previews stack on narrow screens rather than overflowing their cards.
 
 Browser verification also exposed a development-mode crash: React seals its ref objects, but the session input bridges add a `changed` callback. Those bridges now use stable application-owned mutable objects. The accompanying browser smoke exercises the session and settings together without inference. Next.js is patched from 16.4.3 to 16.4.6 for the reported cache-disclosure advisories. No data migration is introduced.
+
+The Windows/Linux native controls now use the header's 60px height and update
+with desktop zoom, rather than sitting at the OS's compact height above the
+phase label. Their colors still come from the existing appearance projection.
+The sidebar footer uses matching 44px rows, 16px icons and shared text/icon axes
+for Background agents and Settings. Other inspected chrome includes the title,
+sidebar navigation, model toolbar, settings navigation and source chooser.
+
+Visible metadata uses spacing, a second line or parentheses rather than repeated
+middle-dot separators where practical: session state/time, context/plan, native
+provider status and keyboard hints. This is a UI-copy convention, not a rewrite
+of lesson text, formulas or source notes.
