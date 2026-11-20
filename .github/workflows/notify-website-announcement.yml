@@ -1,0 +1,48 @@
+name: Notify website of a desktop release announcement
+
+on:
+  release:
+    types: [published]
+
+permissions: {}
+
+jobs:
+  notify-website-announcement:
+    if: >-
+      github.repository == 'amosblomqvist/learnharness' &&
+      !github.event.release.draft && !github.event.release.prerelease
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Queue the announcement for the published tag
+        env:
+          WEBSITE_DISPATCH_TOKEN: ${{ secrets.WEBSITE_DISPATCH_TOKEN }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "$WEBSITE_DISPATCH_TOKEN" ]]; then
+            echo '::error::Missing WEBSITE_DISPATCH_TOKEN.'
+            exit 1
+          fi
+          if [[ ! "$RELEASE_TAG" =~ ^v(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$ ]]; then
+            echo '::error::Expected a canonical stable release tag.'
+            exit 1
+          fi
+          payload=$(jq -cn --arg tag "$RELEASE_TAG" \
+            '{event_type:"desktop-announcement-published",client_payload:{tag:$tag}}')
+          status=$(curl --fail-with-body --silent --show-error \
+            --connect-timeout 15 --max-time 60 \
+            --request POST \
+            --header 'Accept: application/vnd.github+json' \
+            --header "Authorization: Bearer $WEBSITE_DISPATCH_TOKEN" \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            --output /dev/null --write-out '%{http_code}' \
+            https://api.github.com/repos/amosblomqvist/learnharness-web/dispatches)
+          if [[ "$status" != '204' ]]; then
+            printf '::error::Expected dispatch HTTP 204, received %s.\n' "$status"
+            exit 1
+          fi
+          echo 'Announcement update queued. This does not confirm website deployment.'
