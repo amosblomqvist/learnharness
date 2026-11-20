@@ -566,9 +566,8 @@ importedAt: string;
 
 ### NotesSource contentFp
 
-Legacy content fingerprint. Accepted when reading old records, but
-ignored: every explicit notes import processes the whole file. New
-imports do not compute or write this field. No migration is needed.
+Legacy text fingerprint. Only completedFileHash can establish that
+the same uploaded bytes were successfully extracted.
 
 ```ts
 contentFp?: string;
