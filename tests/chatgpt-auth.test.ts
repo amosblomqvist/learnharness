@@ -682,3 +682,29 @@ test("private leases bind active account, authority revision and raw visible mod
 		assert.equal((await f.rawLease(false, expected)).accountId, catalog.accountId);
 	} finally { f.service.close(); }
 });
+
+test("Fast follows the current account's exact advertised priority tier and revokes a stale lease on removal", async () => {
+	let tiers: unknown = [{ id: "priority", name: "Fast" }];
+	const state = initial();
+	state.activeId = "scratch-plan";
+	state.registrations.push({
+		id: state.activeId, clientId: "oaiapp_scratch", issuer: "https://auth.openai.com", subject: "scratch-user",
+		tokens: { idToken: "scratch-id", accessToken: "scratch-access", scopes: [...SCOPES], expiresAt: Date.now() + 3600000 },
+	});
+	const f = fixture({ state, provider: async (url) => url.endsWith("/models") ? Response.json({ models: [
+		{ slug: "gpt-5", display_name: "Scratch", visibility: "list", service_tiers: tiers, additional_speed_tiers: ["fast"] },
+		{ slug: "hidden", display_name: "Hidden", visibility: "hide", service_tiers: [{ id: "priority" }] },
+	] }) : undefined });
+	try {
+		const current = await f.service.models();
+		assert.deepEqual(current.models, [{ id: "gpt-5", name: "Scratch", supportsFastMode: true }]);
+		const lease = { expectedAccountId: current.accountId, expectedAuthorityRevision: current.authorityRevision, selectedModelId: "gpt-5" };
+		for (const unsupported of [[{ id: "ultrafast", name: "Fast" }, { id: "Priority" }, { id: "fast" }], undefined, { id: "priority" }]) {
+			tiers = unsupported;
+			const updated = await f.service.models();
+			assert.deepEqual(updated.models, [{ id: "gpt-5", name: "Scratch" }]);
+			assert(updated.authorityRevision > current.authorityRevision);
+		}
+		await assert.rejects(f.rawLease(false, lease), /catalog/);
+	} finally { f.service.close(); }
+});

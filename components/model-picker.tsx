@@ -10,6 +10,7 @@ import { MenuShell } from "@/components/menu-shell";
 import { useInteractionLayers } from "@/components/interaction-layers";
 import { isInputShortcutScopeEligible } from "@/components/plugin-input-focus";
 import { ModelPickerPill } from "@/components/model-picker-pill";
+import { ChatSpeedSwitch } from "@/components/chat-speed-switch";
 import { Hint } from "@/components/ui/hint";
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { useModelCatalog } from "@/components/model-catalog";
@@ -300,6 +301,8 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 					aria-expanded={open === "thinking"}
 				>{effectiveLevel === undefined ? "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}</ModelPickerPill>
 			</Hint>
+
+			{entry?.supportsFastMode === true && <ChatSpeedSwitch />}
 
 			{/* The shared dropdown body (extracted 2026-09-20): the agent
 			    settings' slot selects and the setup dialog use the exact same

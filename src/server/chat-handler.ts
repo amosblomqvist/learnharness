@@ -336,7 +336,8 @@ export async function handleChatInput(
 	let conversationEngine: PiEngine;
 	let compactionEngine: PiEngine;
 	try {
-		conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
+		const fastMode = stores.settingsStore.readSettings()?.chatSpeed?.fast === true;
+		conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong"), fastMode);
 		compactionEngine = piEngineForSpec(conversation, true, undefined, retentionForSlot("strong"));
 	}
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }

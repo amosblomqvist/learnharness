@@ -20,6 +20,14 @@ let requests: { authorization: string | null; body: Record<string, any>; url: st
 let responseEvents: unknown[] = [];
 const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", value);
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
+const fastModel = piModels().getModel("openai", "gpt-6.1-sol") as Model<"openai-responses">;
+const standardOnlyModel = piModels().getModel("openai", "gpt-6-luna") as Model<"openai-responses">;
+const accountModels = [
+	{ id: model.id, name: "Scratch account model" },
+	{ id: fastModel.id, name: "Fast scratch model", supportsFastMode: true },
+	{ id: standardOnlyModel.id, name: "Scratch model without advertised priority" },
+	{ id: "unknown-capabilities", name: "Do not invent capabilities" },
+];
 const status = { available: true, pending: false, allowBackgroundUse: false, activeId: "scratch-account", accounts: [{ id: "scratch-account", email: "dummy@example.invalid", registration: "oaiapp_scratch", connected: true, planEnabled: true, background: false }], error: null };
 before(async () => {
 	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
@@ -29,12 +37,12 @@ before(async () => {
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
 		queueMicrotask(() => {
 			ipc({ channel: "lh:chatgpt", id: message.id, op: message.op,
-				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: [{ id: model.id, name: "Scratch account model" }, { id: "unknown-capabilities", name: "Do not invent capabilities" }] } }),
+				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: accountModels } }),
 			});
 		});
 		callback?.(); return true;
 	} });
-	await refreshChatGPTModels([model]);
+	await refreshChatGPTModels([model, fastModel, standardOnlyModel]);
 	globalThis.fetch = async (input, init) => {
 		const req = new Request(input, init);
 		requests.push({ authorization: req.headers.get("authorization"), body: JSON.parse(await req.text()), url: req.url });
@@ -54,7 +62,7 @@ const complete = (output: unknown[] = []) => ({ type: "response.completed", resp
 const context = () => normalizeContext({ systemPrompt: "Scratch teacher instructions", messages: [{ role: "user", content: [{ type: "text", text: "Scratch learning material" }, { type: "image", data: "c2NyYXRjaA==", mimeType: "image/png" }], timestamp: 1 }], tools: [{ name: "scratch_tool", description: "Scratch local tool", parameters: Type.Object({ value: Type.String() }) }] });
 
 test("catalog intersects supported capabilities, without inventing model limits", () => {
-	assert.equal(chatGPTModels().length, 1);
+	assert.deepEqual(chatGPTModels().map((entry) => entry.id), [model.id, fastModel.id, standardOnlyModel.id]);
 	assert.equal(chatGPTModels()[0]!.provider, "chatgpt");
 	assert.equal(chatGPTModels()[0]!.contextWindow, model.contextWindow);
 	assert.deepEqual(chatGPTModels()[0]!.input, model.input);
@@ -90,6 +98,36 @@ test("alias resolves only OAuth; native Responses body is stateless/namespaced, 
 	assert(replay.some((item: any) => item.encrypted_content === "scratch-encrypted-reasoning"));
 	assert(replay.some((item: any) => item.type === "function_call" && item.id === "fc_scratch" && item.namespace === "learnharness"));
 	assert(replay.some((item: any) => item.type === "function_call_output" && item.call_id === "call_scratch"));
+});
+
+test("Fast mode requests priority for foreground lesson operations on the selected connection", async () => {
+	responseEvents = [complete()];
+	for (const provider of ["chatgpt", "openai"]) {
+		const spec = { provider, id: fastModel.id };
+		let background = false;
+		const regularLesson = piEngineForSpec(spec, () => background);
+		const fastLesson = piEngineForSpec(spec, () => background, undefined, undefined, true);
+		requests = [];
+		await regularLesson.streamFn(regularLesson.model, context()).result();
+		await fastLesson.streamFn(fastLesson.model, context()).result();
+		background = true;
+		await fastLesson.streamFn(fastLesson.model, context()).result();
+
+		assert.equal(requests.length, 3, provider);
+		assert.deepEqual(requests.map(({ body }) => body.service_tier), [undefined, "priority", undefined], provider);
+		for (const request of requests) {
+			assert.equal(request.body.model, fastModel.id);
+			assert.equal(request.authorization, provider === "chatgpt" ? "Bearer scratch-oauth-only" : "Bearer sk-scratch-must-never-be-used");
+		}
+	}
+});
+
+test("ChatGPT strips caller-supplied tiers and limits Fast to supported models", () => {
+	const raw = { input: [], service_tier: "ultrafast" };
+	assert.equal(chatGPTPayload(raw, fastModel.id).service_tier, undefined);
+	assert.equal(chatGPTPayload(raw, fastModel.id, true).service_tier, "priority");
+	assert.equal(chatGPTPayload(raw, standardOnlyModel.id, true).service_tier, undefined);
+	assert.equal(chatGPTPayload(raw, "model-absent-from-account-catalog", true).service_tier, undefined);
 });
 
 test("mixed history never blanket-relabels API providers or reuses foreign reasoning signatures", () => {

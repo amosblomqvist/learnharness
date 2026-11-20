@@ -10,6 +10,7 @@ import {
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
+import { supportsOpenAIFastMode } from "../core/native-chat-speed.ts";
 import { lazyApi, lazyStream } from "@earendil-works/pi-ai/api/lazy";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
@@ -129,7 +130,7 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  key is resolved by pi-ai itself from the environment per request (the
  *  keys seam reflects file-saved keys into env), so the engine never
  *  hardcodes OpenRouter's. */
-export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle, cacheRetention?: () => CacheRetention | undefined): PiEngine {
+export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle, cacheRetention?: () => CacheRetention | undefined, lessonFastMode = false): PiEngine {
 	const models: Models = piModels();
 	const nativeId = nativeSubscriptionId(spec.provider);
 	const registeredModel = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
@@ -179,7 +180,20 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 				return current.streamSimple(permitImages(currentModel), context, { ...requestOptions, reasoning: currentLevel === "off" ? undefined : currentLevel });
 			}
 			const purpose = typeof background === "function" ? background : () => background;
-			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
+			// Pi's simple Responses adapter forwards onPayload and drops provider-only options.
+			if (lessonFastMode && spec.provider === "openai" && requestModel.provider === "openai" &&
+				requestModel.api === "openai-responses" && supportsOpenAIFastMode(requestModel.id) && !purpose()) {
+				return models.streamSimple(requestModel, context, {
+					...requestOptions,
+					onPayload: async (raw, nativeModel) => {
+						const replacement = await options?.onPayload?.(raw, nativeModel);
+						const body = replacement === undefined ? raw : replacement;
+						if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid OpenAI Responses request");
+						return { ...body, service_tier: "priority" };
+					},
+				});
+			}
+			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle, lessonFastMode) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
 			return stream(requestModel, context, requestOptions);
 		},
 	};
