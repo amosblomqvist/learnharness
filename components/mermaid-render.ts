@@ -32,6 +32,11 @@ export function mermaidConfig(mode: RenderedMode): MermaidConfig {
 		fontSize: MERMAID_FONT_SIZE,
 		securityLevel: "strict",
 		theme: mode === "dark" ? "dark" : "default",
+		// Mermaid 11 only enables wrapping when a capped label measures EXACTLY
+		// wrappingWidth. Native zoom can round that width (mermaid-js/mermaid#8608).
+		// Apply before measurement so foreignObject includes every wrapped line.
+		// Keep this limited to capped HTML node labels, leaving edges and titles alone.
+		themeCSS: 'g.node > g.label > foreignObject > div[style*="max-width"] { white-space: break-spaces !important; }',
 	};
 }
 
