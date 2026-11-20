@@ -537,14 +537,17 @@ export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<stri
 	}
 	const sessions: Record<string, string> = {};
 	const fileSources: Record<string, string> = {};
+	// One read of the sources map per snapshot: readSources() re-reads and
+	// re-parses sources.json on every call.
+	const sourcePaths = new Map(deps.graphStore.readSources().map((s) => [s.id, s.filePath]));
 	for (const id of sourceIds) {
 		const chat = deps.chatStore.getChat(id);
 		if (chat) {
 			sessions[id] = chat.title;
 			continue;
 		}
-		const source = deps.graphStore.readSources().find((s) => s.id === id);
-		if (source) fileSources[id] = source.filePath;
+		const filePath = sourcePaths.get(id);
+		if (filePath !== undefined) fileSources[id] = filePath;
 	}
 
 	const nodeSessions: Record<string, string[]> = {};

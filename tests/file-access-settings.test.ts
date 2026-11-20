@@ -103,13 +103,13 @@ describe("strict persisted file-access policy", () => {
 describe("settings HTTP and safe repair", () => {
 	it("section writes preserve policy, toggle OFF retains roots, and ON+empty blocks", async () => {
 		assert.equal((await put("agent", { tools: { pdf: false }, fileAccess: { restricted: true, folders: [a, b] } })).status, 200);
-		assert.equal((await put("appearance", { mode: "dark" })).status, 200);
+		assert.equal((await put("appearance", { theme: "catppuccin-mocha" })).status, 200);
 		assert.deepEqual(readSettings()?.agent?.fileAccess, { restricted: true, folders: [a, b] });
 		assert.equal((await put("agent", { tools: { pdf: false }, fileAccess: { restricted: false, folders: [a, b] } })).status, 200);
 		assert.deepEqual(readSettings()?.agent?.fileAccess, { restricted: false, folders: [a, b] });
 		assert.equal((await put("agent", { tools: { pdf: false }, fileAccess: { restricted: true, folders: [] } })).status, 200);
 		assert.throws(() => resolveSourcePath(path.join(a, "notes.md")), /allowed folders/);
-		assert.deepEqual(readSettings()?.appearance, { mode: "dark" });
+		assert.deepEqual(readSettings()?.appearance, { theme: "catppuccin-mocha" });
 	});
 	it("invalid writes return 400 without altering a valid restricted record", async () => {
 		await stored({ version: 1, agent: { fileAccess: { restricted: true, folders: [a] } } });
@@ -122,12 +122,12 @@ describe("settings HTTP and safe repair", () => {
 	});
 	it("unrelated writes cannot launder malformed policy into unrestricted access", async () => {
 		await stored({ version: 1, agent: { tools: { pdf: false }, fileAccess: { restricted: true, folders: [a, 7] } } });
-		assert.equal((await put("appearance", { mode: "light" })).status, 200);
+		assert.equal((await put("appearance", { theme: "catppuccin-latte" })).status, 200);
 		assert.deepEqual(readSettings()?.agent?.fileAccess, { restricted: true, folders: [] });
 		assert.deepEqual(readSettings()?.agent?.tools, { pdf: false });
 		assert.throws(() => resolveSourcePath(path.join(a, "notes.md")), /allowed folders/);
 		await fs.writeFile(SETTINGS_FILE, "broken JSON");
-		const response = await put("appearance", { mode: "dark" });
+		const response = await put("appearance", { theme: "catppuccin-mocha" });
 		assert.equal(response.status, 200);
 		assert.deepEqual((await response.json()).settings.agent.fileAccess, { restricted: true, folders: [] });
 		assert.equal(fileAccessConfigurationError(), null);
