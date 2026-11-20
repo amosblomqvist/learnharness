@@ -266,17 +266,20 @@ export function joinDictation(current: string, final: string): string {
  * can't clear another claimant.
  */
 export function usePluginQuestionDictationTarget(append: (text: string) => void | Promise<void>, claimed: boolean) {
+	const latestClaim = useRef(claimed);
+	latestClaim.current = claimed;
 	useEffect(() => {
 		if (!claimed) return;
 		questionTarget = append;
 		return () => {
-			if (questionTarget === append) {
-				// Cancel/discard an obsolete capture before releasing its destination.
-				if (recordingTarget === append) cancelGlobalDictation();
-				questionTarget = null;
-			}
+			// Folding transfers new captures, but must not cancel an existing one.
+			if (latestClaim.current && recordingTarget === append) cancelGlobalDictation();
+			if (questionTarget === append) questionTarget = null;
 		};
 	}, [append, claimed]);
+	useEffect(() => () => {
+		if (recordingTarget === append) cancelGlobalDictation();
+	}, [append]);
 }
 
 export function useDictationTarget(append: (text: string) => void, claimed: boolean) {
