@@ -286,14 +286,18 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 });
 
 describe("SETTINGS_SECTIONS (the route's section map)", () => {
-	it("maps exactly the eight record sections", () => {
+	it("accepts whole sidebar widths only within the drag limits", () => {
+		for (const width of [208, 288, 512]) assert.equal(SETTINGS_SECTIONS.sidebar({width}).ok, true);
+		for (const width of [207, 513, null, "288", 300.5]) assert.equal(SETTINGS_SECTIONS.sidebar({width}).ok, false);
+	});
+	it("maps the writable record sections", () => {
 		// compaction joined (owner round 14): its own section PUT — the
 		// threshold is engine behavior, not an agent-section key. The custom
 		// endpoint is NOT a section: it is one more provider in the Keys list,
 		// connected through POST /api/custom-provider.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "claudeCode"],
+			["sidebar", "general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "claudeCode"],
 		);
 	});
 });
