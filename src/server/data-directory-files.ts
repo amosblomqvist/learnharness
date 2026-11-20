@@ -43,7 +43,34 @@ async function assertEmpty(target: string): Promise<void> {
 	}
 }
 
-type Snapshot = Map<string, string>;
+type FileSnapshot = { size: number; mtimeMs: number; hash: string };
+type Snapshot = Map<string, FileSnapshot | "dir">;
+
+function sameFile(a: fs.Stats, b: fs.Stats): boolean {
+	return b.isFile() && a.dev === b.dev && a.ino === b.ino &&
+		a.size === b.size && a.mtimeMs === b.mtimeMs && a.ctimeMs === b.ctimeMs;
+}
+
+async function readFileSnapshot(from: string, stat: fs.Stats, to?: string): Promise<FileSnapshot> {
+	const hash = createHash("sha256");
+	const fd = await disk.open(from, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
+	try {
+		if (!sameFile(stat, await fd.stat())) throw new Error(`The file changed while reading: ${from}`);
+		const stream = fd.createReadStream({ autoClose: false });
+		if (to) {
+			stream.on("data", (chunk) => { hash.update(chunk); });
+			await pipeline(stream, fs.createWriteStream(to, { flags: "wx", mode: stat.mode & 0o777 }));
+			await sync(to, false);
+		} else {
+			for await (const chunk of stream) hash.update(chunk);
+		}
+		if (!sameFile(stat, await fd.stat())) throw new Error(`The file changed while reading: ${from}`);
+		return { size: stat.size, mtimeMs: stat.mtimeMs, hash: hash.digest("hex") };
+	} finally {
+		await fd.close();
+	}
+}
+
 async function snapshot(root: string, destination?: string): Promise<Snapshot> {
 	const manifest: Snapshot = new Map();
 	async function visit(relative: string, stat: fs.Stats): Promise<void> {
@@ -60,17 +87,7 @@ async function snapshot(root: string, destination?: string): Promise<Snapshot> {
 			if (to) await sync(to);
 			return;
 		}
-		const hash = createHash("sha256");
-		const fd = await disk.open(from, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
-		const stream = fd.createReadStream();
-		if (to) {
-			stream.on("data", (chunk) => { hash.update(chunk); });
-			await pipeline(stream, fs.createWriteStream(to, { flags: "wx", mode: stat.mode & 0o777 }));
-			await sync(to, false);
-		} else {
-			for await (const chunk of stream) hash.update(chunk);
-		}
-		manifest.set(relative, `${stat.size}:${hash.digest("hex")}`);
+		manifest.set(relative, await readFileSnapshot(from, stat, to));
 	}
 	for (const name of MANAGED_ITEMS) {
 		const stat = await statIfPresent(path.join(root, name));
@@ -79,8 +96,13 @@ async function snapshot(root: string, destination?: string): Promise<Snapshot> {
 	return manifest;
 }
 
-function matches(a: Snapshot, b: Snapshot): boolean {
-	return a.size === b.size && [...a].every(([file, digest]) => b.get(file) === digest);
+function matches(a: Snapshot, b: Snapshot, compareTimes = false): boolean {
+	return a.size === b.size && [...a].every(([file, entry]) => {
+		const other = b.get(file);
+		if (entry === "dir" || other === "dir" || other === undefined) return entry === other;
+		return entry.size === other.size && entry.hash === other.hash &&
+			(!compareTimes || entry.mtimeMs === other.mtimeMs);
+	});
 }
 
 export async function stageDataCopy(
@@ -99,12 +121,13 @@ export async function stageDataCopy(
 		await prepareSource();
 		checkSource();
 		const expected = await snapshot(source, stage);
-		if (!matches(expected, await snapshot(stage)) || !matches(expected, await snapshot(source))) {
+		if (!matches(expected, await snapshot(stage)) || !matches(expected, await snapshot(source), true)) {
 			throw new Error("Data copy verification failed. The folder has not been switched.");
 		}
 		checkSource();
 		const storeId = identity ? ensureStoreId(stage) : null;
 		await sync(stage);
+		const stagedRoot = await disk.lstat(stage);
 		await assertEmpty(target);
 		// Rename can replace an empty directory on POSIX. Windows needs its name
 		// freed first; rmdir refuses concurrently added contents.
@@ -117,15 +140,20 @@ export async function stageDataCopy(
 			if (emptyWindowsTarget && !(await statIfPresent(target))) await disk.mkdir(target);
 			throw error;
 		}
-		const publishedRoot = await disk.lstat(target);
-		const rollback = async () => {
-			const current = await disk.lstat(target);
+		const checkTarget = () => {
+			const current = fs.lstatSync(target);
+			if (!current.isDirectory() || current.dev !== stagedRoot.dev || current.ino !== stagedRoot.ino) {
+				throw new Error("The destination folder changed after copying.");
+			}
 			if (storeId) verifyStore(target, storeId);
+		};
+		const rollback = async () => {
+			checkTarget();
 			const extraEntries = (await disk.readdir(target)).some(name => name !== STORE_MARKER && !expected.has(name));
-			if (!current.isDirectory() || current.dev !== publishedRoot.dev || current.ino !== publishedRoot.ino ||
-				extraEntries || !matches(expected, await snapshot(target))) {
+			if (extraEntries || !matches(expected, await snapshot(target))) {
 				throw new Error("The copied folder changed after publishing. Its data was kept.");
 			}
+			checkTarget();
 			await disk.rename(target, stage);
 			try {
 				if (existingTarget) {
@@ -142,7 +170,7 @@ export async function stageDataCopy(
 			await rollback();
 			throw error;
 		}
-		return { expected, storeId, rollback };
+		return { expected, storeId, checkTarget, rollback };
 	} finally {
 		if (!published) await disk.rm(stage, { recursive: true, force: true });
 	}
@@ -153,7 +181,6 @@ export async function cleanOldData(source: string, target: string, expected: Sna
 	try {
 		checkSource();
 		if (!matches(expected, await snapshot(target))) throw new Error("The destination changed after copying.");
-		if (!matches(expected, await snapshot(source))) throw new Error("The source changed after copying.");
 	} catch (error) {
 		return [`No old data was removed: ${(error as Error).message}`];
 	}
@@ -163,16 +190,28 @@ export async function cleanOldData(source: string, target: string, expected: Sna
 		const file = path.join(source, relative);
 		try {
 			checkSource();
-			let parent = path.dirname(file);
-			while (parent !== source) {
-				assertOrdinary(await disk.lstat(parent), parent);
-				parent = path.dirname(parent);
-			}
-			const stat = await disk.lstat(file);
+			const checkParents = () => {
+				for (let parent = path.dirname(file); parent !== source; parent = path.dirname(parent)) {
+					const stat = fs.lstatSync(parent);
+					assertOrdinary(stat, parent);
+					if (!stat.isDirectory()) throw new Error("The parent folder changed after copying.");
+				}
+			};
+			checkParents();
+			const stat = fs.lstatSync(file);
 			assertOrdinary(stat, file);
-			if (kind === "dir" && stat.isDirectory()) await disk.rmdir(file);
-			else if (kind !== "dir" && stat.isFile()) await disk.unlink(file);
-			else throw new Error("The entry changed after copying.");
+			if (kind === "dir" && stat.isDirectory()) {
+				fs.rmdirSync(file);
+				continue;
+			}
+			if (kind === "dir" || !stat.isFile() || stat.size !== kind.size || stat.mtimeMs !== kind.mtimeMs ||
+				(await readFileSnapshot(file, stat)).hash !== kind.hash) {
+				throw new Error("The entry changed after copying.");
+			}
+			checkSource();
+			checkParents();
+			if (!sameFile(stat, fs.lstatSync(file))) throw new Error("The entry changed after copying.");
+			fs.unlinkSync(file);
 		} catch (error) {
 			failures.push(`${file}: ${(error as Error).message}`);
 		}

@@ -224,7 +224,7 @@ export async function mutateDataDirectory(raw: unknown, home: string = os.homedi
 				? ["Old data was kept because directory durability cannot be verified on Windows."]
 				: await cleanOldData(previousDir, targetDir, staged.expected, () => {
 					checkSource();
-					if (storeId) verifyStore(targetDir, storeId);
+					staged.checkTarget();
 				})
 			: [];
 		return { ...getDataDirectoryStatus(), cleanupFailures };

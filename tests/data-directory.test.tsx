@@ -570,12 +570,33 @@ describe("data directory audit regressions", () => {
 		assert.equal((await moving).status, 200);
 	});
 
+	it("keeps an edit made after copy verification and blocks app writes during cleanup", { skip: process.platform === "win32" }, async () => {
+		const target = path.join(scratchRoot, "edited-source-copy");
+		const stateFile = path.join(defaultDataDir, "settings.json");
+		fs.writeFileSync(stateFile, '{"original":true}');
+		const original = fs.promises.open;
+		const edit = mock.method(fs.promises, "open", async (...args: Parameters<typeof original>) => {
+			if (args[0] === path.join(target, "settings.json")) {
+				assert.throws(() => config.assertDataStoreWritable(), /change is in progress/);
+				fs.writeFileSync(stateFile, '{"modified":true}');
+			}
+			return original(...args);
+		});
+		try {
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: defaultDataDir });
+			assert.equal(response.status, 200);
+			assert.match((await response.json()).cleanupFailures.join("\n"), /settings.json: The entry changed/);
+			assert.equal(fs.readFileSync(stateFile, "utf8"), '{"modified":true}');
+			assert.equal(fs.readFileSync(path.join(target, "settings.json"), "utf8"), '{"original":true}');
+		} finally { edit.mock.restore(); }
+	});
+
 	it("moves plugin state and reports entries that cleanup could not remove", { skip: process.platform === "win32" }, async () => {
 		const target = path.join(scratchRoot, "plugin-state-copy");
 		const stateFile = path.join(defaultDataDir, "plugins-state.json");
 		fs.writeFileSync(stateFile, '{"version":1,"enabled":{}}');
-		const original = fs.promises.unlink;
-		const failure = mock.method(fs.promises, "unlink", async (file: fs.PathLike) => {
+		const original = fs.unlinkSync;
+		const failure = mock.method(fs, "unlinkSync", (file: fs.PathLike) => {
 			if (file === stateFile) throw new Error("injected cleanup failure");
 			return original(file);
 		});
