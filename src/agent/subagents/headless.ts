@@ -2,6 +2,7 @@ import * as fs from "node:fs";
 import { createRequire } from "node:module";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
+import type { PDFPageProxy } from "pdfjs-dist/legacy/build/pdf.mjs";
 import { standardFontsDir } from "./pdf-ops";
 import { svgImageSource } from "../../../lib/svg-image-source";
 
@@ -49,8 +50,22 @@ export interface RenderSvgOptions {
 }
 
 export interface RenderPdfOptions {
-	/** Render DPI — 72 is 100% zoom; the skill's guidance is 100/150/200. */
+	/** Render DPI — 72 is 100% zoom; the skill's guidance is 100/150/200.
+	 *  With fitLongSide it is the ceiling instead. */
 	dpi?: number;
+	/** Rasterize only this part of the page (fractions of the page as
+	 *  displayed, after rotation, from the top-left corner). */
+	crop?: PdfCrop;
+	/** Scale so the rendered region's longer side is about this many pixels,
+	 *  never above dpi. */
+	fitLongSide?: number;
+}
+
+export interface PdfCrop {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
 }
 
 export interface RenderedPdfPage {
@@ -551,6 +566,71 @@ export function pdfCanvasGeometry(baseWidth: number, baseHeight: number, dpi: nu
 	return { scale, ...dimensions(scale) };
 }
 
+function checkPdfCrop({ x, y, width, height }: PdfCrop): void {
+	if (![x, y, width, height].every(Number.isFinite)) throw new Error("PDF crop values must be finite numbers");
+	if (width <= 0 || height <= 0) throw new Error("PDF crop width and height must be greater than 0");
+	const slack = 1e-9;
+	if (x < 0 || y < 0 || x + width > 1 + slack || y + height > 1 + slack) throw new Error("PDF crop must lie inside the page");
+}
+
+function pdfRenderOptions(opts: RenderPdfOptions) {
+	const dpi = opts.dpi ?? 150;
+	if (!Number.isFinite(dpi) || dpi <= 0 || dpi / 72 === 0) {
+		throw new Error("PDF render DPI must be finite and positive");
+	}
+	const crop = opts.crop ?? { x: 0, y: 0, width: 1, height: 1 };
+	checkPdfCrop(crop);
+	const fitLongSide = opts.fitLongSide;
+	if (fitLongSide !== undefined && !(Number.isFinite(fitLongSide) && fitLongSide > 0)) {
+		throw new Error("PDF render fitLongSide must be finite and positive");
+	}
+	return { dpi, crop, fitLongSide };
+}
+
+/** Render an already-open page without reopening its source. The caller owns
+ * the document. Cancellation waits for the render task to settle. */
+export async function renderOpenPdfPage(page: PDFPageProxy, opts: RenderPdfOptions = {}, signal?: AbortSignal): Promise<Buffer> {
+	return paintPdfPage(page, pdfRenderOptions(opts), signal);
+}
+
+async function paintPdfPage(page: PDFPageProxy, { dpi, crop, fitLongSide }: ReturnType<typeof pdfRenderOptions>, signal?: AbortSignal): Promise<Buffer> {
+	signal?.throwIfAborted();
+	const { createCanvas } = await import("@napi-rs/canvas");
+	signal?.throwIfAborted();
+	const base = page.getViewport({ scale: 1 });
+	const regionWidth = base.width * crop.width;
+	const regionHeight = base.height * crop.height;
+	const regionDpi = fitLongSide === undefined ? dpi : Math.min(dpi, (fitLongSide * 72) / Math.max(regionWidth, regionHeight));
+	const geometry = pdfCanvasGeometry(regionWidth, regionHeight, regionDpi);
+	// Shift the displayed (rotated) page under a crop-sized canvas.
+	const viewport = page.getViewport({
+		scale: geometry.scale,
+		offsetX: -crop.x * base.width * geometry.scale,
+		offsetY: -crop.y * base.height * geometry.scale,
+	});
+	const canvas = createCanvas(geometry.width, geometry.height);
+	const ctx = canvas.getContext("2d");
+	const task = page.render({
+		canvasContext: ctx as unknown as CanvasRenderingContext2D,
+		canvas: canvas as unknown as HTMLCanvasElement,
+		viewport,
+	});
+	const abort = () => task.cancel();
+	signal?.addEventListener("abort", abort, { once: true });
+	if (signal?.aborted) abort();
+	try {
+		await task.promise;
+		signal?.throwIfAborted();
+		return providerSafePng(canvas.toBuffer("image/png"));
+	} catch (error) {
+		// pdfjs rejects a cancelled render with its own exception type.
+		signal?.throwIfAborted();
+		throw error;
+	} finally {
+		signal?.removeEventListener("abort", abort);
+	}
+}
+
 /** Render PDF pages to PNGs — the sources-v0 pdf-reader's eyes.
  *
  *  History: pdfjs ALWAYS painted the pages (scale = dpi/72, the skill's
@@ -564,10 +644,7 @@ async function renderPdfPages(
 	pages: number[],
 	opts: RenderPdfOptions = {},
 ): Promise<RenderedPdfPage[]> {
-	const dpi = opts.dpi ?? 150;
-	if (!Number.isFinite(dpi) || dpi <= 0 || dpi / 72 === 0) {
-		throw new Error("PDF render DPI must be finite and positive");
-	}
+	const renderOpts = pdfRenderOptions(opts);
 	// NATIVE CANVAS (Wave E, owner 2026-10-10): pdfjs paints into
 	// @napi-rs/canvas in this process — no browser involved. pdfjs-dist v6's
 	// own Node integration IS @napi-rs/canvas (its optionalDependency: the
@@ -576,7 +653,6 @@ async function renderPdfPages(
 	// (Skia in-process instead of a DOM canvas). Text-side pdf tools never
 	// needed a browser; now renders don't either.
 	const pdfjs = await import("pdfjs-dist/legacy/build/pdf.mjs");
-	const { createCanvas } = await import("@napi-rs/canvas");
 	const data = new Uint8Array(fs.readFileSync(path.resolve(pdfPath)));
 	// Standard-font data as a directory path (live-smoke finding 2026-09-19:
 	// without it pdfjs renders non-embedded standard fonts via fallback);
@@ -587,25 +663,8 @@ async function renderPdfPages(
 		const out: RenderedPdfPage[] = [];
 		for (const pageNo of pages) {
 			if (pageNo < 1 || pageNo > doc.numPages) continue;
-			const pg = await doc.getPage(pageNo);
-			const base = pg.getViewport({ scale: 1 });
-			const geometry = pdfCanvasGeometry(base.width, base.height, dpi);
-			const vp = pg.getViewport({ scale: geometry.scale });
-			const canvas = createCanvas(geometry.width, geometry.height);
-			const ctx = canvas.getContext("2d");
-			// pdfjs's render types speak the DOM context; @napi-rs/canvas's
-			// context is the same 2D API implemented over Skia.
-			await pg.render({
-				canvasContext: ctx as unknown as CanvasRenderingContext2D,
-				canvas: canvas as unknown as HTMLCanvasElement,
-				viewport: vp,
-			}).promise;
-			out.push({
-				page: pageNo,
-				// Skia-encoded PNG → providerSafePng for the same single-IDAT
-				// canonical form every other vision-model image gets.
-				png: providerSafePng(canvas.toBuffer("image/png")),
-			});
+			const page = await doc.getPage(pageNo);
+			out.push({ page: pageNo, png: await paintPdfPage(page, renderOpts) });
 		}
 		return out;
 	} finally {
