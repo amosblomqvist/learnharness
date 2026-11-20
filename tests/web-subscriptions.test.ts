@@ -19,13 +19,17 @@ const { createWebSubscriptionOwner, webSubscriptionOwner, webSubscriptionsEnable
 const { subscriptionControlsResponse, subscriptionBrowserResponse } = await import("../src/server/web-subscription-http.ts");
 const chat = await import("../src/agent/chatgpt-bridge.ts");
 const native = await import("../src/agent/subscription-bridge.ts");
-const { piModels } = await import("../src/agent/models.ts");
-const { refreshConnectionCatalog } = await import("../src/server/model-catalog.ts");
+const { piEngineForSpec, piModels } = await import("../src/agent/models.ts");
+const { modelCatalog, refreshConnectionCatalog, validateChatSettings, validateModelsSettings } = await import("../src/server/model-catalog.ts");
 const model = piModels().getModels("openai").find((entry) => entry.api === "openai-responses")!;
 const originalFetch = globalThis.fetch;
-globalThis.fetch = async (input) => {
-	assert.equal(String(input), "https://api.openai.com/v1/models", "unexpected network request forbidden");
-	return Response.json({ models: [{ slug: model.id, display_name: "Fixture ChatGPT", visibility: "list" }] });
+const defaultOffers = [{ slug: model.id, display_name: "Fixture ChatGPT", visibility: "list" }];
+let chatGPTOffers = defaultOffers;
+globalThis.fetch = async (input, init) => {
+	const request = new Request(input, init);
+	assert.equal(request.url, "https://api.openai.com/v1/models", "unexpected network request forbidden");
+	assert.equal(request.headers.get("authorization"), "Bearer fixture-chatgpt-access");
+	return Response.json({ models: chatGPTOffers });
 };
 const copilot = githubCopilotProvider().getModels()[0]!;
 const credentials = (id: string): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires: Date.now() + 3600000, ...(id === "github-copilot" ? { availableModelIds: [copilot.id] } : {}) });
@@ -47,6 +51,38 @@ test("ordinary web restores configured sibling credentials, private runtime leas
 	const publicState = await response.text();
 	for (const secret of ["fixture-chatgpt-access", "fixture-chatgpt-refresh", "fixture-id-token", "fixture-xai-access", "fixture-refresh"]) assert(!publicState.includes(secret));
 	assert(publicState.includes("fixture@example.invalid"));
+});
+
+test("native ChatGPT offers each GPT-6.2 model only while the account advertises it", async () => {
+	const ids = ["gpt-6.2-astra", "gpt-6.2-sol"] as const;
+	try {
+		for (const id of ids) {
+			chatGPTOffers = ids.map((slug) => ({
+				slug, display_name: `Plan offer ${slug}`, visibility: slug === id ? "list" : "hide",
+			}));
+			await refreshConnectionCatalog("chatgpt");
+			const entry = modelCatalog().models.filter((m) => m.provider === "chatgpt");
+			assert.deepEqual(entry.map((m) => m.id), [id]);
+			assert.equal(entry[0]!.name, `Plan offer ${id}`);
+			assert.equal(entry[0]!.contextWindow, 272_000);
+			assert.equal(entry[0]!.maxTokens, 128_000);
+			assert.deepEqual(entry[0]!.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+			const model = { provider: "chatgpt", id };
+			assert.equal(validateChatSettings({ model }).ok, true);
+			assert.equal(validateModelsSettings({ strong: { model } }).ok, true);
+			const engine = piEngineForSpec(model);
+			assert.equal(engine.model.api, "openai-responses");
+			assert.equal(engine.model.provider, "chatgpt");
+			assert.equal(engine.model.id, id);
+
+			const hidden = { provider: "chatgpt", id: ids.find((other) => other !== id)! };
+			assert.equal(validateChatSettings({ model: hidden }).ok, false);
+			assert.throws(() => piEngineForSpec(hidden), /catalog has no model/);
+		}
+	} finally {
+		chatGPTOffers = defaultOffers;
+		await refreshConnectionCatalog("chatgpt");
+	}
 });
 
 test("web background OFF immediately aborts background streams, retains foreground and rejects private background leases", async () => {
