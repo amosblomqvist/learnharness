@@ -34,8 +34,11 @@ export async function disposePluginsForDataChange(): Promise<void> {
 	const global = globalThis as typeof globalThis & PluginGlobal;
 	const previous = global.__lhPlugins;
 	if (!previous) return;
-	await previous.host.dispose();
-	delete global.__lhPlugins;
+	try {
+		await previous.host.dispose(10_000);
+	} finally {
+		delete global.__lhPlugins;
+	}
 }
 
 type Host = ReturnType<typeof createPluginHost>;

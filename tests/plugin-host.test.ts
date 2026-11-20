@@ -35,7 +35,7 @@ function fixture(t: TestContext) {
 		onNotification: n => notifications.push(n),
 	};
 	const host = createPluginHost(deps);
-	t.after(() => host.dispose());
+	t.after(() => host.dispose().catch(() => {}));
 	function plugin(id = "example", extra: Record<string, unknown> = {}, backend = "exports.activate = ctx => { ctx.handle('context', () => ctx); };") {
 		const dir = path.join(directory, id, "dist"); fs.mkdirSync(dir, { recursive: true });
 		fs.writeFileSync(path.join(dir, "manifest.json"), JSON.stringify({ apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.3.0", backend: "backend.cjs", ...extra }));
@@ -113,6 +113,25 @@ test("native backend path/require, fresh activations, reverse cleanup, stale cal
 	assert.equal(f.servicesCreated(), 2);
 	assert.notEqual(await f.host.call("example", "context"), old);
 	old.events.emit("late-again"); assert.equal(f.notifications.length, 1);
+});
+
+test("migration teardown aborts active plugins and bounds a stalled cleanup", async t => {
+	const f = fixture(t);
+	f.plugin("stalled", {}, `
+		exports.activate = ctx => {
+			ctx.signal.addEventListener('abort', () => ctx.learning.history.push('aborted'));
+			ctx.cleanup(() => ctx.learning.history.push('remaining'));
+			return () => new Promise(() => {});
+		};`);
+	f.plugin("working", {}, "exports.activate = ctx => () => ctx.learning.history.push('other plugin');");
+	await f.host.initialize();
+	await f.host.setEnabled("stalled", true);
+	await f.host.setEnabled("working", true);
+	await assert.rejects(f.host.dispose(5), /Plugin cleanup timed out \(stalled\)/);
+	assert.ok(f.history.includes("aborted"));
+	assert.ok(f.history.includes("remaining"));
+	assert.ok(f.history.includes("other plugin"));
+	assert.throws(() => f.host.list(), /disposed/);
 });
 
 test("activation failure tears down registered resources and exposes a diagnostic", async t => {

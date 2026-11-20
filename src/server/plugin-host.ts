@@ -218,9 +218,9 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	const get = (id: string) => { const pkg = packages.get(id); if (!pkg) throw new PluginHostError(404, `Unknown plugin: ${id}`); return pkg; };
 	const live = (pkg: Package, activation: Activation) => !disposed && pkg.activation === activation && !activation.controller.signal.aborted;
 
-	async function deactivate(pkg: Package): Promise<string[]> {
+	async function deactivate(pkg: Package, cleanupTimeoutMs?: number): Promise<{ failures: string[]; timedOut: boolean }> {
 		const activation = pkg.activation;
-		if (!activation) return [];
+		if (!activation) return { failures: [], timedOut: false };
 		pkg.activation = undefined; // Invalidate callbacks BEFORE abort listeners and cleanup run.
 		activation.ready = false;
 		activation.handlers.clear();
@@ -230,10 +230,20 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		activation.problems.clear();
 		activation.controller.abort();
 		const failures: string[] = [];
-		for (const cleanup of activation.cleanups.splice(0).reverse()) {
-			try { await cleanup(); } catch (e) { failures.push(errorText(e)); }
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let timedOut = false;
+		const deadline = cleanupTimeoutMs === undefined ? undefined : new Promise<void>(resolve => {
+			timer = setTimeout(() => { timedOut = true; resolve(); }, cleanupTimeoutMs);
+		});
+		try {
+			for (const cleanup of activation.cleanups.splice(0).reverse()) {
+				const work = Promise.resolve().then(() => cleanup()).catch(error => { failures.push(errorText(error)); });
+				await (deadline ? Promise.race([work, deadline]) : work);
+			}
+		} finally {
+			clearTimeout(timer);
 		}
-		return failures;
+		return { failures, timedOut };
 	}
 	async function activate(pkg: Package): Promise<void> {
 		assertOpen();
@@ -353,7 +363,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			delete pkg.contributionWarning;
 			delete pkg.info.error;
 		} catch (e) {
-			const failures = await deactivate(pkg);
+			const { failures } = await deactivate(pkg);
 			pkg.info.status = "error";
 			pkg.info.error = [errorText(e), ...failures.map(f => `Cleanup: ${f}`)].join("; ");
 		}
@@ -571,7 +581,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				pkg.info.enabled = enabled;
 				if (!enabled) {
 					delete pkg.contributionWarning;
-					const failures = await deactivate(pkg);
+					const { failures } = await deactivate(pkg);
 					pkg.info.status = failures.length || pkg.blocked ? "error" : "disabled";
 					pkg.info.error = failures.length ? `Cleanup: ${failures.join("; ")}` : pkg.restart ?? (pkg.blocked ? pkg.info.error : undefined);
 				} else {
@@ -629,12 +639,18 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			if (!bytes) throw new PluginHostError(404, "Unknown plugin asset");
 			return { bytes: Uint8Array.from(bytes), contentType: mimeTypes[path.extname(file).toLowerCase()] ?? "application/octet-stream" };
 		},
-		dispose(): Promise<void> {
+		dispose(cleanupTimeoutMs?: number): Promise<void> {
 			if (disposing) return disposing;
 			disposed = true; // Immediately fence callers, including queued work.
 			for (const pkg of packages.values()) pkg.activation?.controller.abort();
 			disposing = enqueue(async () => {
-				for (const pkg of packages.values()) { await deactivate(pkg); pkg.info.status = "disabled"; }
+				const timedOut: string[] = [];
+				for (const pkg of packages.values()) {
+					const result = await deactivate(pkg, cleanupTimeoutMs);
+					if (result.timedOut) timedOut.push(pkg.info.id);
+					pkg.info.status = "disabled";
+				}
+				if (timedOut.length) throw new Error(`Plugin cleanup timed out (${timedOut.join(", ")}). Restart LearnHarness before moving the data folder.`);
 			}, true);
 			return disposing;
 		},
