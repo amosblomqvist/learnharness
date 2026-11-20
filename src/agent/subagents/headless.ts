@@ -1,14 +1,14 @@
 import * as fs from "node:fs";
 import { createRequire } from "node:module";
-import * as os from "node:os";
 import * as path from "node:path";
-import { fileURLToPath, pathToFileURL } from "node:url";
+import { fileURLToPath } from "node:url";
 import { standardFontsDir } from "./pdf-ops";
+import { svgImageSource } from "../../../lib/svg-image-source";
 
 /**
  * Verification engines for sub-agents: demos use the app's own Electron
  * browser-service via puppeteer-core, with system Chrome as fallback.
- * SVGs use resvg (browser fallback); PDFs use pdfjs + Skia (no browser).
+ * SVGs use only resvg; PDFs use pdfjs + Skia (no browser).
  * No extra Chromium is shipped or downloaded.
  *
  * Chrome fallback resolution: CHROME_PATH first, then common macOS,
@@ -41,7 +41,7 @@ export interface RunDemoOptions {
 }
 
 export interface RenderSvgOptions {
-	/** Annotation images use only the static native rasterizer, never executable browser markup. */
+	/** Annotation images keep strict native input: skip ordinary figure display repairs. */
 	nativeOnly?: boolean;
 	/** Viewport size — defaults to the SVG's width/height attrs, else 900×700. */
 	width?: number;
@@ -162,14 +162,20 @@ export function browserServiceBinary(): string | null {
 const BROWSER_SERVICE_TIMEOUT_MS = 15_000;
 let browserServiceProc: import("node:child_process").ChildProcess | null = null;
 
-async function connectBrowserService(): Promise<import("puppeteer-core").Browser | null> {
+type ConnectedBrowserService = {
+	browser: import("puppeteer-core").Browser;
+	proc: import("node:child_process").ChildProcess;
+};
+
+async function connectBrowserService(): Promise<ConnectedBrowserService | null> {
 	const puppeteer = (await import("puppeteer-core")).default;
 	const { spawn } = await import("node:child_process");
 	let port: number | null = null;
+	let proc = browserServiceProc;
 
-	if (browserServiceProc && browserServiceProc.exitCode === null) {
+	if (proc && proc.exitCode === null) {
 		// Helper alive from a previous run — reuse its endpoint.
-		port = (browserServiceProc as { __cdpPort?: number }).__cdpPort ?? null;
+		port = (proc as { __cdpPort?: number }).__cdpPort ?? null;
 	}
 	if (port === null) {
 		const binary = browserServiceBinary();
@@ -182,17 +188,18 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 			path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".."),
 			"--browser-service",
 		];
-		const proc = spawn(binary, appArgs, {
+		proc = spawn(binary, appArgs, {
 			// Cast: the sanitizer is pure over a loose record; NODE_ENV is
 			// always present in a real process.env.
 			env: browserServiceSpawnEnv(process.env) as NodeJS.ProcessEnv,
 			stdio: ["ignore", "pipe", "pipe", "ipc"] as const,
 		});
 		browserServiceProc = proc;
+		const startingProc = proc;
 		port = await new Promise<number | null>((resolve) => {
 			let buf = "";
 			const timer = setTimeout(() => {
-				proc.kill();
+				startingProc.kill();
 				resolve(null);
 			}, BROWSER_SERVICE_TIMEOUT_MS);
 			const onData = (chunk: Buffer) => {
@@ -203,8 +210,8 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 					resolve(parseBrowserServiceLine(line));
 				}
 			};
-			proc.stdout!.on("data", onData);
-			proc.once("exit", () => {
+			startingProc.stdout!.on("data", onData);
+			startingProc.once("exit", () => {
 				clearTimeout(timer);
 				resolve(null);
 			});
@@ -216,46 +223,56 @@ async function connectBrowserService(): Promise<import("puppeteer-core").Browser
 		(proc as { __cdpPort?: number }).__cdpPort = port;
 	}
 
+	if (!proc) return null;
 	try {
 		const version = await fetch(`http://127.0.0.1:${port}/json/version`);
 		const info = (await version.json()) as { webSocketDebuggerUrl?: string };
 		if (!info.webSocketDebuggerUrl) return null;
 		// connect ≠ launch: browser.close() below merely disconnects — the
 		// helper stays resident for the next job (IPC-owned lifetime).
-		return await puppeteer.connect({
+		const browser = await puppeteer.connect({
 			browserWSEndpoint: info.webSocketDebuggerUrl,
 			defaultViewport: null,
 		});
+		return { browser, proc };
 	} catch {
 		return null;
 	}
 }
 
-/** Serialized helper-page use: the helper owns ONE page target (Electron's
- *  CDP has no Target.createTarget — pages must be windows the helper made),
- *  so concurrent jobs queue here instead of fighting over one webContents. */
+/** Serialize acquisition, page use and invalidation together: the helper owns
+ * ONE page target. Queued jobs must acquire after the previous job retires or
+ * discards its helper, never capture a Browser while a handshake is pending. */
 let helperPageChain: Promise<unknown> = Promise.resolve();
 
 async function withBrowserPage<T>(fn: (page: import("puppeteer-core").Page) => Promise<T>): Promise<T> {
 	// Helper first (owner ruling 2026-10-10: the app's own Chromium primary,
 	// system Chrome fallback) — deterministic across users, zero install.
-	const helper = await connectBrowserService();
-	if (helper) {
-		const run = async (): Promise<T> => {
-			const pages = await helper.pages();
-			const page = pages.find((p) => p.target().type() === "page");
-			if (!page) throw new Error("browser service: no page target");
-			try {
-				return await fn(page);
-			} finally {
-				// Drop all page state (JS heap, listeners) between jobs.
-				await page.goto("about:blank").catch(() => {});
+	const run = async (): Promise<{ value: T } | null> => {
+		const helper = await connectBrowserService();
+		if (!helper) return null;
+		const pages = await helper.browser.pages();
+		const page = pages.find((p) => p.target().type() === "page");
+		if (!page) throw new Error("browser service: no page target");
+		try {
+			return { value: await fn(page) };
+		} catch (error) {
+			if (error instanceof IsolatedPageCleanupError) {
+				// A failed retirement must never leave a live untrusted document
+				// on the shared target. The next job starts a fresh owned helper.
+				helper.proc.kill();
+				if (browserServiceProc === helper.proc) browserServiceProc = null;
 			}
-		};
-		const next = helperPageChain.then(run, run);
-		helperPageChain = next.catch(() => {});
-		return next;
-	}
+			throw error;
+		} finally {
+			// Drop all page state (JS heap, listeners) between jobs.
+			await page.goto("about:blank").catch(() => {});
+		}
+	};
+	const next = helperPageChain.then(run, run);
+	helperPageChain = next.catch(() => {});
+	const result = await next;
+	if (result) return result.value;
 
 	// Chrome fallback: per-job launch, close on the way out (old semantics).
 	const puppeteer = (await import("puppeteer-core")).default;
@@ -275,35 +292,90 @@ async function withBrowserPage<T>(fn: (page: import("puppeteer-core").Page) => P
 	}
 }
 
-/** A temp dir per invocation; removed in finally. */
-function tempDir(prefix: string): string {
-	return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
+// ─── Isolated page loading ───────────────────────────────────────────────────
+// Demo HTML is model output, so it is untrusted.
+// They load in memory on about:blank, which gives the document an opaque
+// origin like the learner's sandboxed iframe. A file:// document could read
+// any local file. As a second layer, requests for any other scheme (file:
+// included) are aborted while the page is loaded.
+
+const ISOLATED_PAGE_SCHEMES = new Set(["http:", "https:", "data:", "blob:", "about:"]);
+
+/** Request filter for isolated pages (pure; exported for tests). */
+export function isIsolatedPageRequestAllowed(url: string): boolean {
+	try {
+		return ISOLATED_PAGE_SCHEMES.has(new URL(url).protocol);
+	} catch {
+		return false;
+	}
+}
+
+type IsolatedPage = Pick<
+	import("puppeteer-core").Page,
+	"url" | "goto" | "setContent" | "setRequestInterception" | "on" | "off"
+>;
+
+class IsolatedPageCleanupError extends Error {}
+
+/** Load untrusted markup in memory with the request filter on. Cleanup first
+ * retires the document under that same guard, then disables interception.
+ * If retirement fails, leave the guard installed and discard the helper. */
+export async function loadIsolatedPage(page: IsolatedPage, html: string): Promise<() => Promise<void>> {
+	const onRequest = (request: import("puppeteer-core").HTTPRequest) => {
+		const decision = isIsolatedPageRequestAllowed(request.url()) ? request.continue() : request.abort("accessdenied");
+		void decision.catch(() => {});
+	};
+	let retirement: Promise<void> | undefined;
+	const cleanup = () => retirement ??= (async () => {
+		try {
+			await page.goto("about:blank", { timeout: 5_000 });
+			await page.setRequestInterception(false);
+			page.off("request", onRequest);
+		} catch (error) {
+			throw new IsolatedPageCleanupError("Could not retire the untrusted browser document", { cause: error });
+		}
+	})();
+	try {
+		page.on("request", onRequest);
+		await page.setRequestInterception(true);
+		// setContent retains the current origin; reset under the guard first.
+		if (page.url() !== "about:blank") await page.goto("about:blank", { timeout: 5_000 });
+		await page.setContent(html, { waitUntil: "load", timeout: 30_000 });
+		return cleanup;
+	} catch (err) {
+		await cleanup();
+		throw err;
+	}
 }
 
 // ─── Demo execution ──────────────────────────────────────────────────────────
 
 async function runDemo(html: string, opts: RunDemoOptions = {}): Promise<DemoRunResult> {
-	const settleMs = opts.settleMs ?? 2000;
-	const dir = tempDir("lh-demo-");
-	const file = path.join(dir, "demo.html");
-	fs.writeFileSync(file, html, "utf-8");
+	return withBrowserPage(page => runDemoOnPage(page, html, opts));
+}
 
+/** Production execution on an owned page; the packaged gate uses this same
+ * function with its explicitly scratch-profiled helper target. */
+export async function runDemoOnPage(page: import("puppeteer-core").Page, html: string, opts: RunDemoOptions = {}): Promise<DemoRunResult> {
+	const settleMs = opts.settleMs ?? 2000;
 	const consoleErrors: string[] = [];
 	const pageErrors: string[] = [];
 	const failedRequests: string[] = [];
 	let probeResult: unknown;
 	let probed = false;
 
+	const onConsole = (msg: import("puppeteer-core").ConsoleMessage) => {
+		if (msg.type() === "error") consoleErrors.push(msg.text());
+	};
+	const onError = (err: unknown) => pageErrors.push(err instanceof Error ? err.message : String(err));
+	const onFailed = (req: import("puppeteer-core").HTTPRequest) => failedRequests.push(`${req.url()} (${req.failure()?.errorText ?? "failed"})`);
+	page.on("console", onConsole);
+	page.on("pageerror", onError);
+	page.on("requestfailed", onFailed);
 	try {
-		await withBrowserPage(async (page) => {
-		page.on("console", (msg) => {
-			if (msg.type() === "error") consoleErrors.push(msg.text());
-		});
-		page.on("pageerror", (err) => pageErrors.push(err instanceof Error ? err.message : String(err)));
-		page.on("requestfailed", (req) => failedRequests.push(`${req.url()} (${req.failure()?.errorText ?? "failed"})`));
-
+		let cleanup: (() => Promise<void>) | undefined;
 		try {
-			await page.goto(pathToFileURL(file).href, { waitUntil: "load", timeout: 30_000 });
+			cleanup = await loadIsolatedPage(page, html);
 			await new Promise((resolve) => setTimeout(resolve, settleMs));
 			if (opts.probe) {
 				try {
@@ -314,15 +386,15 @@ async function runDemo(html: string, opts: RunDemoOptions = {}): Promise<DemoRun
 				probed = true;
 			}
 		} catch (err) {
+			if (err instanceof IsolatedPageCleanupError) throw err;
 			pageErrors.push(err instanceof Error ? err.message : String(err));
+		} finally {
+			await cleanup?.();
 		}
-		});
 	} finally {
-		try {
-			fs.rmSync(dir, { recursive: true, force: true });
-		} catch {
-			/* best-effort cleanup */
-		}
+		page.off("console", onConsole);
+		page.off("pageerror", onError);
+		page.off("requestfailed", onFailed);
 	}
 
 	return {
@@ -415,51 +487,18 @@ function crc32(buf: Buffer): number {
 }
 
 async function renderSvg(svg: string, opts: RenderSvgOptions = {}): Promise<Buffer> {
-	// NATIVE FIRST (Wave E stage 2, owner 2026-10-10): resvg rasterizes
-	// static SVG in-process — visual-maker SVGs never execute script, so a
-	// browser adds nothing but a process. White background mirrors the old
-	// Chrome page (html,body{background:#fff}); fitTo width mirrors
-	// svgViewport semantics (attrs win, viewBox-only gets the 900 default,
-	// opts override). The browser path below stays as the fallback for
-	// exotic-SVG features resvg cannot parse — failures there used to be
-	// the ONLY path, so nothing regresses.
+	// Static native rasterization only. Ordinary figures get the same two
+	// render-only repairs as their display; annotation inputs remain strict.
+	// Native errors propagate to the existing visual-maker revision/failure
+	// handling, never executable browser markup or a system Chrome fallback.
 	const { width } = svgViewport(svg, opts);
-	try {
-		const { Resvg } = await import("@resvg/resvg-js");
-		const resvg = new Resvg(svg, {
-			fitTo: { mode: "width", value: width },
-			font: { loadSystemFonts: true },
-			background: "#ffffff",
-		});
-		return providerSafePng(resvg.render().asPng());
-	} catch (error) {
-		if (opts.nativeOnly) throw error;
-		/* fall through to the browser path */
-	}
-	const dir = tempDir("lh-visual-");
-	const file = path.join(dir, "figure.html");
-	fs.writeFileSync(
-		file,
-		`<!doctype html><html><head><meta charset="utf-8"><style>html,body{margin:0;padding:0;background:#fff}svg{display:block}</style></head><body>${svg}</body></html>`,
-		"utf-8",
-	);
-
-	return withBrowserPage(async (page) => {
-		const { width, height } = svgViewport(svg, opts);
-		await page.setViewport({ width, height });
-		await page.goto(pathToFileURL(file).href, { waitUntil: "load", timeout: 30_000 });
-		const shot = (await page.screenshot({ fullPage: true, type: "png" })) as Buffer;
-		// Chrome's raw split-IDAT PNG is canonicalized before it reaches a
-		// provider (see providerSafePng) — the visual-maker feeds this exact
-		// buffer back to the vision model as its only way to "look".
-		return providerSafePng(Buffer.from(shot));
-	}).finally(() => {
-		try {
-			fs.rmSync(dir, { recursive: true, force: true });
-		} catch {
-			/* best-effort cleanup */
-		}
+	const { Resvg } = await import("@resvg/resvg-js");
+	const resvg = new Resvg(opts.nativeOnly ? svg : svgImageSource(svg), {
+		fitTo: { mode: "width", value: width },
+		font: { loadSystemFonts: true },
+		background: "#ffffff",
 	});
+	return providerSafePng(resvg.render().asPng());
 }
 
 // ─── PDF page rasterization (pdfjs paints, Skia hosts) ─────────────────

@@ -75,6 +75,7 @@ export interface EffectiveSettings {
 	general: Required<GeneralSettings>;
 	dictation: Required<DictationSettings>;
 	agent: {
+		workerRequestConcurrency: number;
 		models: Record<BackgroundModelRole, EffectiveModelSpec | undefined>;
 		/** Delta map as stored — consumers resolve absent key → enabled. */
 		tools: Record<string, boolean>;
@@ -119,6 +120,16 @@ export function resolveConversationSpec(
 		id: model.id,
 		thinkingLevel: chat?.thinkingLevel ?? strong?.thinkingLevel,
 	};
+}
+
+/** Side questions (#16): the chat's own conversation chain, under the
+ *  optional agent.models.sideQuestion override (field by field). */
+export function resolveSideQuestionSpec(chat: ChatSettings | undefined, record: UserSettings | null): EffectiveModelSpec | null {
+	const conversation = resolveConversationSpec(chat, resolveSlot(record?.models?.strong));
+	const override = record?.agent?.models?.sideQuestion;
+	const model = override?.model ?? (conversation ? { provider: conversation.provider, id: conversation.id } : undefined);
+	if (!model) return null;
+	return { provider: model.provider, id: model.id, thinkingLevel: override?.thinkingLevel ?? conversation?.thinkingLevel };
 }
 
 /** Full-chain resolution for ANY role (BYOK, owner 2026-09-22):
@@ -191,6 +202,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			language: record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language,
 		},
 		agent: {
+			workerRequestConcurrency: agent.workerRequestConcurrency ?? FACTORY_SETTINGS.agent.workerRequestConcurrency,
 			models,
 			tools: agent.tools ?? {},
 			prompts: agent.prompts ?? {},
@@ -203,10 +215,12 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			vision: resolveSlot(modelsSection.vision),
 		},
 		appearance: {
-			mode: appearance.mode ?? factoryAppearance.mode,
+			theme: appearance.theme ?? factoryAppearance.theme,
 			background: appearance.background ?? factoryAppearance.background,
+			colors: appearance.colors ?? factoryAppearance.colors,
 			fontFamily: appearance.fontFamily ?? factoryAppearance.fontFamily,
 			proseFontSize: appearance.proseFontSize ?? factoryAppearance.proseFontSize,
+			codeLigatures: appearance.codeLigatures ?? factoryAppearance.codeLigatures,
 			sessionNameSerif: appearance.sessionNameSerif ?? factoryAppearance.sessionNameSerif,
 			mdRendering: {
 				headingWeight: md.headingWeight ?? factoryMd.headingWeight,
@@ -229,6 +243,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		},
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
+			includeReasoning: record?.compaction?.includeReasoning ?? FACTORY_SETTINGS.compaction.includeReasoning,
 		},
 		customProvider: {
 			baseUrl: record?.customProvider?.baseUrl ?? "",

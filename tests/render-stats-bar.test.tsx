@@ -1,4 +1,4 @@
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { StatsBar, formatContextMeasurement } from "../components/stats-bar.tsx";

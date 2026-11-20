@@ -4,8 +4,10 @@ import assert from "node:assert/strict";
 import { it } from "node:test";
 import { parseHTML } from "linkedom";
 import { AgentSection } from "../components/settings/agent-section.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import type { AgentSettings } from "../src/core/index.ts";
 import { SEARCH_ENGINES } from "../src/core/search.ts";
+import { installModalDom } from "./modal-dom.ts";
 
 it("keyless settings keep Research interactive while search-engine setup retains its own disabled state", async () => {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
@@ -37,15 +39,15 @@ it("keyless settings keep Research interactive while search-engine setup retains
 	let written: AgentSettings | undefined;
 	try {
 		await act(async () => {
-			root.render(<AgentSection
+			root.render(<InteractionLayersProvider><AgentSection
 				agent={{ tools: { research: true } }}
 				models={undefined}
 				graph={undefined}
 				compaction={undefined}
-				onSectionChange={(next) => { written = next; }}
+				onSectionChange={(next) => { written = next; return true; }}
 				onModelsChange={() => {}}
-				onCompactionChange={() => {}}
-			/>);
+				onCompactionChange={() => true}
+			/></InteractionLayersProvider>);
 		});
 		const row = document.querySelector<HTMLElement>('[data-testid="tool-row-research"]')!;
 		const toggle = row.querySelector<HTMLButtonElement>('[data-testid="toggle-tool-research"]')!;
@@ -87,6 +89,7 @@ it(`a ${label}-only key enables the engine menu and selecting ${label} saves the
 		document: dom.document,
 		navigator: globals.navigator ?? { userAgent: "", platform: "" },
 		HTMLElement: dom.window.HTMLElement,
+		Element: dom.window.Element,
 		CustomEvent: dom.window.CustomEvent,
 		requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(performance.now()), 0),
 		cancelAnimationFrame: (id: number) => clearTimeout(id),
@@ -97,11 +100,12 @@ it(`a ${label}-only key enables the engine menu and selecting ${label} saves the
 		Object.defineProperty(globalThis, key, { configurable: true, writable: true, value });
 	}
 	const { createRoot } = await import("react-dom/client");
+	const restoreModalDom = installModalDom(dom);
 	const root = createRoot(document.getElementById("root")!);
 	let written: AgentSettings | undefined;
 	try {
-		await act(async () => root.render(<AgentSection agent={undefined} models={undefined} graph={undefined} compaction={undefined}
-			onSectionChange={(next) => { written = next; }} onModelsChange={() => {}} onCompactionChange={() => {}} />));
+		await act(async () => root.render(<InteractionLayersProvider><AgentSection agent={undefined} models={undefined} graph={undefined} compaction={undefined}
+			onSectionChange={(next) => { written = next; return true; }} onModelsChange={() => {}} onCompactionChange={() => true} /></InteractionLayersProvider>));
 		const trigger = document.querySelector<HTMLButtonElement>('[data-testid="search-engine-trigger"]')!;
 		assert.ok(!trigger.hasAttribute("disabled"));
 		await act(async () => trigger.click());
@@ -120,6 +124,7 @@ it(`a ${label}-only key enables the engine menu and selecting ${label} saves the
 		assert.equal(written?.search, undefined, "Automatic clears the explicit pin");
 	} finally {
 		act(() => root.unmount());
+		restoreModalDom();
 		for (const [key, descriptor] of previous) {
 			if (descriptor) Object.defineProperty(globalThis, key, descriptor);
 			else delete globals[key];
