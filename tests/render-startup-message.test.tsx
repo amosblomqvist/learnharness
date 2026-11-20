@@ -60,7 +60,7 @@ function fixture({ dismissSaved = true } = {}) {
 const dialog = () => document.querySelector('[role="dialog"]');
 afterEach(async () => { await act(async () => root?.unmount()); root = undefined; restore?.(); restore = undefined; });
 
-for (const method of ["button", "escape", "backdrop"]) it(`shows one accessible dialog and persists explicit ${method} dismissal`, async () => {
+for (const method of ["button", "header button", "escape", "backdrop"]) it(`shows one accessible dialog and persists explicit ${method} dismissal`, async () => {
 	const f = fixture();
 	await f.render();
 	assert.equal(f.calls(), 1);
@@ -71,8 +71,12 @@ for (const method of ["button", "escape", "backdrop"]) it(`shows one accessible 
 	assert.equal(dialog()?.getAttribute("aria-labelledby"), heading?.id);
 	assert.equal(document.activeElement, heading);
 	assert.deepEqual(f.dismissals, [], "showing does not count as dismissal");
-	if (method === "button") await act(async () => dialog()?.querySelector("button")?.click());
-	else if (method === "escape") await f.escape();
+	if (method === "button") await act(async () => dialog()?.querySelector<HTMLButtonElement>("footer button")?.click());
+	else if (method === "header button") {
+		const close = dialog()?.querySelector<HTMLButtonElement>('header button[aria-label="Close announcement"]');
+		assert.ok(close);
+		await act(async () => close.click());
+	} else if (method === "escape") await f.escape();
 	else await f.backdrop();
 	assert.equal(dialog(), null);
 	assert.deepEqual(f.dismissals, [message.id]);
@@ -143,7 +147,7 @@ it("renders basic Markdown without executable HTML, remote embeds or unsafe link
 	const html = renderToStaticMarkup(<StartupMessageBody markdown={`## Heading\n\n- **Bold**\n\n[Good](https://learnharness.ai/) [Unsafe](javascript:alert%281%29) [Local](//example.test) [Credentials](https://a:b@example.test)\n\n![Remote](https://example.test/remote)\n\n<img src="https://example.test/html" onerror="bad()">\n\n<iframe src="https://example.test/embed"></iframe>\n\n\`\`\`mermaid\na-->b\n\`\`\``} />);
 	const { document } = parseHTML(`<html><body>${html}</body></html>`);
 	assert.equal(document.querySelector("h2")?.textContent, "Heading");
-	assert.equal(document.querySelector("ul li")?.textContent, "Bold");
+	assert.equal(document.querySelector(".lh-prose ul li strong")?.textContent, "Bold", "use the session prose class and semantic emphasis");
 	assert.equal(document.querySelectorAll("a").length, 1);
 	assert.equal(document.querySelector("a")?.getAttribute("rel"), "noopener noreferrer");
 	assert.equal(document.querySelector("a")?.getAttribute("href"), "https://learnharness.ai/");
