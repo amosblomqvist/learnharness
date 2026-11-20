@@ -42,6 +42,7 @@ import { citationsToReadableText, collectCitations } from "./citations.ts";
 import { messageMarkdown } from "./session-markdown.ts";
 import { displayedOptionLetter, questionDisplayOptions, type QuestionAnswerData } from "./question-core.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
+import { parseQuestionInput } from "./tool-parts.ts";
 import { readPluginQuestionMessageAnnotation, readPluginQuestionAnswer, readPluginQuestionCancellation } from "./plugin-questions.ts";
 import { pluginProblemForCall, readPluginProblemSubmission } from "./plugin-problems.ts";
 
@@ -404,11 +405,16 @@ function openQuestionMarkdown(tool: string, input: unknown, toolCallId: string):
 	const details = typeof args.details === "string" ? args.details.trim() : "";
 	if (details) lines.push(details);
 	if (tool !== "explain" && tool !== "recall") {
-		const { options, optionOrder } = questionDisplayOptions(args.options as Parameters<typeof questionDisplayOptions>[0], toolQuestionKind(tool), args.multiSelect === true, toolCallId);
-		if (options.length > 0) lines.push(options.map((o, index) => {
-			const letter = displayedOptionLetter(optionOrder, index + 1);
-			return letter ? `- ${letter}. ${o.label}` : `${index + 1}. ${o.label}`;
-		}).join("\n"));
+		// Saved calls can contain encoded fields (e.g. multiSelect: "true").
+		// Interpret the options and selection mode exactly as the dock does.
+		const parsed = parseQuestionInput(tool, input);
+		if (parsed && "options" in parsed) {
+			const { options, optionOrder } = questionDisplayOptions(parsed.options, toolQuestionKind(tool), parsed.multiSelect === true, toolCallId);
+			if (options.length > 0) lines.push(options.map((o, index) => {
+				const letter = displayedOptionLetter(optionOrder, index + 1);
+				return letter ? `- ${letter}. ${o.label}` : `${index + 1}. ${o.label}`;
+			}).join("\n"));
+		}
 	}
 	return lines.join("\n\n");
 }

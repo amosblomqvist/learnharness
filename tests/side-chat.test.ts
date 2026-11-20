@@ -175,6 +175,30 @@ describe("side lesson document", () => {
 		assert.match(answered, /- B\..*chosen by the learner/);
 	});
 
+	for (const tool of ["quiz", "probe", "ask_user_question"]) {
+		it(`keeps ${tool} options unlettered when the saved multiSelect flag is encoded`, () => {
+			const id = `encoded-multi-${tool}`;
+			const raw = { ...QUIZ_ARGS, multiSelect: "true" };
+			const posed = assistant([call(id, tool, raw)]);
+			const parsed = core.parseQuestionInput(tool, raw);
+			assert.ok(parsed && "options" in parsed);
+			assert.equal(parsed.multiSelect, true, "the dock sees a multi-select question");
+			const kind = tool === "ask_user_question" ? "ask" : "quiz";
+			const displayed = core.questionDisplayOptions(parsed.options, kind, parsed.multiSelect, id);
+			const open = sideChatLessonDocument([posed]);
+			assert.doesNotMatch(open, /^- [A-Z]\. |SECRET-EXPLANATION|\*\(correct\)\*/m);
+			for (const [i, option] of displayed.options.entries()) assert.ok(open.includes(`${i + 1}. ${option.label}`));
+
+			const answer = core.buildAnswer({
+				id, kind, question: parsed.question, mode: "multi-select", ...displayed,
+				createdAt: "2026-01-01",
+			}, { values: [displayed.options[0]!.value] }, tool);
+			const answered = sideChatLessonDocument([posed, core.newAnswerResult(id, tool, answer)]);
+			assert.doesNotMatch(answered, /^- [A-Z]\. /m);
+			assert.ok(answered.includes(`- ${displayed.options[0]!.label} *(chosen by the learner)*`));
+		});
+	}
+
 	it("hides the ACTIVE problem's solution, reveals concluded ones", () => {
 		const active = sideChatLessonDocument([
 			assistant([text("Try this."), call("p1", "problem", { statement: "Integrate x dx.", modelSolution: "SECRET-SOLUTION x^2/2" })]),
