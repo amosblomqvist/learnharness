@@ -1596,7 +1596,7 @@ export function GraphView({
 			</div>
 
 			<NotesImportErrors errors={notesImport.errors} />
-			<NotesImportNotices notices={notesImport.notices} />
+			<NotesImportNotices notices={notesImport.notices} moves={notesImport.moves} />
 			{/* Top-right tail (owner, 2026-09-20): the pipeline cost number —
 			    just a number, hover-highlighted, dropdown breakdown — then
 			    the running-pipeline pills under it. Lives BELOW the actions
@@ -1641,6 +1641,9 @@ export function GraphView({
 											<FileTextIcon className="size-3.5 shrink-0 text-muted-foreground" />
 											<span className="min-w-0 flex-1 truncate px-2 py-1.5 text-sm text-muted-foreground">
 												{snapshot.fileSources[sourceId]}
+												{snapshot.unobservedBySource?.[sourceId]?.includes(selected.node.id) && (
+													<span className="block whitespace-normal text-xs">Not observed in the latest extraction of this file.</span>
+												)}
 											</span>
 										</div>
 									);

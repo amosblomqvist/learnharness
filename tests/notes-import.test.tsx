@@ -23,7 +23,7 @@ async function mount() {
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
 	function Harness() {
 		current = useNotesImport({ onStart: () => { starts++; }, onFinish: () => { finishes++; } });
-		return <NotesImportErrors errors={current.errors} />;
+		return <><NotesImportErrors errors={current.errors} /><NotesImportNotices notices={current.notices} moves={current.moves} /></>;
 	}
 	await act(async () => { root!.render(<Harness />); });
 }
@@ -74,7 +74,7 @@ for (const outcome of ["completed", "failed", "partial", "aborted", "busy"] as c
 	globalThis.fetch = async () => Response.json({ results: [result] });
 	await mount(); await submit([file]);
 	assert.equal(current.importing, false); assert.equal(starts, 1); assert.equal(finishes, 1);
-	assert.deepEqual(Object.keys(current).sort(), ["errors", "importing", "notices", "onImportFiles"]);
+	assert.deepEqual(Object.keys(current).sort(), ["errors", "importing", "moves", "notices", "onImportFiles"]);
 	const html = host!.innerHTML;
 	assert.doesNotMatch(html, /<button|<section|<ul|border|bg-card|rounded|shadow|Retry|Dismiss|Import complete/);
 	if (outcome === "completed") { assert.equal(html, ""); assert.deepEqual(current.errors, []); }
@@ -190,4 +190,22 @@ it("alerts/notices stay plain and escaped", () => {
 	assert.equal((html.match(/role="alert"/g) ?? []).length, 2); assert.doesNotMatch(html, /<section|<button|border|bg-/);
 	const notices = renderToStaticMarkup(<NotesImportNotices notices={["a.pdf: Scanned pages may have errors."]} />);
 	assert.match(notices, /role="status"/); assert.match(notices, /text-muted-foreground/); assert.doesNotMatch(notices, /text-red/);
+});
+
+it("lets the user skip a proposed rename without starting another request", async () => {
+	const file = new File(["note"], "new.md");
+	Object.defineProperty(file, "webkitRelativePath", { value: "Vault/new.md" });
+	let requests = 0;
+	globalThis.fetch = async () => {
+		requests++;
+		return Response.json({ results: [{ filePath: "Vault/new.md", requestIndex: 0, ok: false, outcome: "confirm-move", previousPath: "Vault/old.md" }] });
+	};
+	await mount(); await submit([file]);
+	assert.match(host!.textContent!, /Vault\/old.md/);
+	const skip = Array.from(host!.querySelectorAll("button")).find((button) => button.textContent === "Skip file");
+	assert.ok(skip);
+	await act(async () => { skip.click(); });
+	assert.equal(requests, 1);
+	assert.deepEqual(current.notices, ["Vault/new.md: Skipped by request."]);
+	assert.equal(current.importing, false);
 });

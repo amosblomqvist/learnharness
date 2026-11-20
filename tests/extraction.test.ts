@@ -56,7 +56,7 @@ import {
 	EXTRACTOR_INSTRUCTIONS,
 	NOTES_EXTRACTOR_INSTRUCTIONS,
 } from "../src/agent/subagents/extraction.ts";
-import { getGraph, simplifyChains } from "../src/core/graph.ts";
+import { getGraph, graphSnapshot, simplifyChains } from "../src/core/graph.ts";
 import { ModelsNotConfiguredError, ProviderKeyMissingError, providerKeyMissing, type ModelSlotName } from "../src/core/settings.ts";
 import { coverageOf, coverageSlots, messageViewLines } from "../src/core/coverage.ts";
 import { chatStore } from "../src/store/chats.ts";
@@ -2502,6 +2502,53 @@ describe("notes import completion and retry reliability", () => {
 		assert.equal(error.partialStats.nodes, nodes);
 		return true;
 	};
+
+	it("folder re-import skips conversion and usage, confirms a move and allows reuse of the old path", async () => {
+		const graphStore = memoryLedgers();
+		const pipeline = make(graphStore);
+		const filePath = "Vault/original.md";
+		const fileHash = createHash("sha256").update(NOTES_TEXT).digest("hex");
+		const file = { filePath, fileHash, readText: async () => NOTES_TEXT };
+		assert.equal((await pipeline.importFolderNotes(file)).outcome, "completed");
+		const original = graphStore.readSources()[0]!;
+		const unchanged = { ...file, readText: async (): Promise<string> => { throw new Error("unexpected conversion"); } };
+		assert.equal((await pipeline.importFolderNotes(unchanged)).outcome, "skipped");
+		const moved = { ...unchanged, filePath: "Vault/archive/renamed.md" };
+		assert.deepEqual(await pipeline.importFolderNotes(moved), { outcome: "confirm-move", previousPath: filePath });
+		assert.deepEqual(graphStore.readSources(), [original]);
+		assert.equal((await pipeline.importFolderNotes({ ...moved, moveFrom: filePath })).outcome, "skipped");
+		assert.deepEqual(graphStore.readSources(), [{ ...original, filePath: moved.filePath }]);
+		assert.equal((await pipeline.importFolderNotes(moved)).outcome, "skipped");
+		await assert.rejects(pipeline.importFolderNotes({ ...moved, moveFrom: filePath }), /source changed/);
+
+		assert.equal((await make(graphStore).importFolderNotes({ ...file, keepCopy: true })).outcome, "completed");
+		assert.equal(graphStore.readSources().length, 2);
+		assert.notEqual(graphStore.readSources().find((s) => s.filePath === filePath)!.id, original.id);
+		const third = { ...file, filePath: "Vault/third.md" };
+		assert.equal((await make(graphStore).importFolderNotes(third)).outcome, "completed", "ambiguous matches remain separate");
+	});
+
+	it("a failed refresh stays retryable and only a completed refresh labels older provenance", async () => {
+		const graphStore = memoryLedgers();
+		const filePath = "Vault/topic.md";
+		const file = { filePath, fileHash: "first", readText: async () => NOTES_TEXT };
+		await make(graphStore).importFolderNotes(file);
+		const original = graphStore.readSources()[0]!;
+		const nodeId = graphStore.readNodes()[0]!.id;
+		const edit = { ...file, fileHash: "changed" };
+		await assert.rejects(make(graphStore, silentModel()).importFolderNotes(edit), incomplete("failed", 0));
+		assert.equal(graphStore.readSources()[0]!.completedFileHash, undefined);
+		assert.equal(graphStore.readSources()[0]!.unobservedNodeIds, undefined);
+		const empty = make(graphStore, submitModel("submit_findings", { propositions: [], chains: [] }));
+		assert.equal((await empty.importFolderNotes(edit)).outcome, "completed");
+		const snapshot = graphSnapshot({ chatStore, graphStore });
+		assert.deepEqual(snapshot.unobservedBySource, { [original.id]: [nodeId] });
+		assert.ok(snapshot.propositions.some((n) => n.id === nodeId));
+		const restored = createExtractionPipeline({ chatStore, graphStore, extractor: submitModel("submit_findings", NOTES_FINDINGS),
+			auditor: submitModel("submit_review", { links: [{ id: "p1", linkTo: nodeId }] }) });
+		await restored.importFolderNotes(file);
+		assert.equal(graphSnapshot({ chatStore, graphStore }).unobservedBySource, undefined);
+	});
 
 	it("failure followed by an unchanged retry really extracts and preserves both usage records", async () => {
 		const ledgers = memoryLedgers();

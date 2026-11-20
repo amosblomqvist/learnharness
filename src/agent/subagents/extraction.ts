@@ -467,10 +467,11 @@ expanding the note into a full treatment of the subject.`,
 // yet (the first stretch runs bare). Ids ride VERBATIM — that is what
 // the extractor references in its chains (the merger's mixed-namespace
 // resolution passes them through).
-export function sourceDigest(graph: DerivedGraph, sourceId: string): string {
+export function sourceDigest(graph: DerivedGraph, sourceId: string, unobserved?: ReadonlySet<string>): string {
 	const nameOf = new Map(graph.nodes.map((n) => [n.id, n.name]));
-	const ours = graph.nodes.filter((n) => n.provenance.some((pt) => pt.chatId === sourceId));
-	const ourChains = graph.chains.filter((c) => c.provenance.some((pt) => pt.chatId === sourceId));
+	const ours = graph.nodes.filter((n) => !unobserved?.has(n.id) && n.provenance.some((pt) => pt.chatId === sourceId));
+	const ourChains = graph.chains.filter((c) => c.provenance.some((pt) => pt.chatId === sourceId)
+		&& !unobserved?.has(c.conclusion) && !c.premises.some((p) => unobserved?.has(p)));
 	if (ours.length === 0 && ourChains.length === 0) return "";
 	const lines: string[] = [];
 	lines.push("THE GRAPH SO FAR — everything already extracted from this source (reference these ids verbatim):");
@@ -744,10 +745,26 @@ export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
 	getChunkTokens?: () => number;
 }
 
-export interface NotesImportInput {
-	/** The source's file path — its identity (deterministic src id) AND its
-	 *  provenance label in the detail card. */
+interface NotesFileIdentity {
 	filePath: string;
+	fileHash?: string;
+	registerSource?: (filePath: string, id: string) => void;
+}
+
+interface FolderImportInput extends NotesFileIdentity {
+	fileHash: string;
+	readText: () => Promise<string>;
+	moveFrom?: string;
+	keepCopy?: boolean;
+}
+
+type CompletedNotesImport = { outcome: "completed"; stats: EmissionStats };
+type FolderImportResult =
+	| CompletedNotesImport
+	| { outcome: "skipped"; notice: string }
+	| { outcome: "confirm-move"; previousPath: string };
+
+export interface NotesImportInput extends NotesFileIdentity {
 	/** The file's raw content, VERBATIM — any format. */
 	text: string;
 }
@@ -770,11 +787,9 @@ export interface ExtractionPipeline {
 	/** Extract + audit + merge ONE chat. Single-flight per chat; resolves to
 	 *  the merger's append stats (or throws — no checkpoint on failure). */
 	runExtraction(chatId: string): Promise<EmissionStats>;
-	/** The format-agnostic front door (2026-09-13): run the same pipeline
-	 *  over ONE raw notes file. The source id is deterministic per file
-	 *  path, so re-importing the same file re-runs extraction against the
-	 *  same source identity (mappings dedupe by it). */
+	/** Explicit file imports always run extraction. */
 	importNotes(input: NotesImportInput): Promise<EmissionStats>;
+	importFolderNotes(input: FolderImportInput): Promise<FolderImportResult>;
 }
 
 /** pi's per-step usage, flattened to the persisted CallUsage fields
@@ -1261,7 +1276,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 
 	async function notesExtract(
 		jobKey: string,
-		input: { id: string; filePath: string; text: string; part?: { i: number; n: number } },
+		input: { id: string; filePath: string; text: string; unobserved?: ReadonlySet<string>; part?: { i: number; n: number } },
 	): Promise<NotesFindings> {
 		// jobKey (per-chunk jobs, owner 2026-09-28): the registry key —
 		// "src#i" for chunk jobs — so the abort signal reaches the call.
@@ -1272,7 +1287,9 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		// Same digest law as the chat door (owner, 2026-09-30 evening): the
 		// chunk extractor continues its own source, ids verbatim.
 		const graph = getGraph(graphStore);
-		const digest = sourceDigest(graph, input.id);
+		// The extractor skips ideas already in its digest. During a refresh, show
+		// prior propositions only after this edition has independently observed them.
+		const digest = sourceDigest(graph, input.id, input.unobserved);
 		const prompt = digest === "" ? view : `${digest}\n\n${view}`;
 		console.info(
 			`[extraction ${jobKey}] notes extractor starting (${view.split("\n").length} source lines` +
@@ -1297,7 +1314,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	// The notes auditor is the SAME identity-linker as the chat one (one
 	// schema now that attribution is gone) — audit() above, verbatim.
 
-	async function runNotesExtraction(input: { id: string; filePath: string; text: string; importedAt: string }): Promise<EmissionStats> {
+	async function runNotesExtraction(input: { id: string; filePath: string; text: string; importedAt: string; unobserved?: Set<string> }): Promise<EmissionStats> {
 		const { id } = input;
 		// importNotes owns the source exclusion, including metadata and cleanup.
 		const t0 = performance.now();
@@ -1350,7 +1367,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 									findings,
 									auditResult,
 									{ chatStore, graphStore },
-									{ foldedAt: input.importedAt },
+									{ foldedAt: input.importedAt, onProposition: input.unobserved?.delete.bind(input.unobserved) },
 								);
 								// Capture the committed merge BEFORE layout/usage can fail.
 								mergedStats.nodes += merged.nodes;
@@ -1406,25 +1423,71 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		}
 	}
 
-	/** Every explicit import processes the whole file. Identity, source digest,
-	 * auditor and usage history remain source-scoped; this is not exactly-once. */
-	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
-		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
-		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
-		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
+	/** Resolve by current path first. A moved source still owns its original ID,
+	 * so a new file at the vacated path may need a fresh ID. */
+	async function importFile(input: NotesImportInput): Promise<CompletedNotesImport>;
+	async function importFile(input: FolderImportInput): Promise<FolderImportResult>;
+	async function importFile(input: NotesImportInput | FolderImportInput): Promise<FolderImportResult> {
+		const folder = "readText" in input ? input : undefined;
+		const sources = graphStore.readSources();
+		const previous = sources.find((source) => source.filePath === input.filePath);
+		const pathKey = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
+		const id = previous?.id ?? (sources.some((source) => source.id === pathKey)
+			? `src_${crypto.randomBytes(6).toString("hex")}` : pathKey);
+		const pathLock = `notes-path:${input.filePath}`;
+		if (inFlight.has(pathLock) || inFlight.has(id))
+			throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
+		inFlight.add(pathLock);
 		inFlight.add(id);
 		try {
+			if (folder?.moveFrom) {
+				const from = sources.find((source) => source.filePath === folder.moveFrom);
+				if (previous || !from || from.completedFileHash !== folder.fileHash || inFlight.has(from.id))
+					throw new Error("The source changed while confirming the move. Select the folder again.");
+				// No await between verifying both paths and updating the source.
+				graphStore.upsertSource({ ...from, filePath: input.filePath });
+				return { outcome: "skipped", notice: `Moved from ${from.filePath}. Skipped unchanged file.` };
+			}
+			if (folder && previous?.completedFileHash === folder.fileHash)
+				return { outcome: "skipped", notice: "Skipped unchanged file." };
+			if (folder && !previous && !folder.keepCopy) {
+				const matches = sources.filter((source) => source.completedFileHash === folder.fileHash);
+				if (matches.length === 1) return { outcome: "confirm-move", previousPath: matches[0]!.filePath };
+			}
+
+			const text = "text" in input ? input.text : await input.readText();
+			input.registerSource?.(input.filePath, id);
 			const importedAt = new Date().toISOString();
-			graphStore.upsertSource({ id, filePath: input.filePath, importedAt });
-			return await runNotesExtraction({ id, ...input, importedAt });
+			const source = { id, filePath: input.filePath, importedAt };
+			// Invalidate the skip marker before any partial progress can commit.
+			graphStore.upsertSource({ ...source, ...(previous?.unobservedNodeIds && { unobservedNodeIds: previous.unobservedNodeIds }) });
+			const unseen = previous && input.fileHash
+				? new Set(graphStore.readNodes().filter((node) => node.provenance.some((p) => p.chatId === id)).map((node) => node.id))
+				: undefined;
+			const stats = await runNotesExtraction({ ...source, text, unobserved: unseen });
+			if (input.fileHash) {
+				try {
+					graphStore.upsertSource({
+						...source, completedFileHash: input.fileHash,
+						...(unseen?.size && { unobservedNodeIds: [...unseen] }),
+					});
+				} catch (cause) {
+					throw new NotesImportError("failed", stats, "Extraction finished but its file fingerprint could not be saved.", { cause });
+				}
+			}
+			return { outcome: "completed", stats };
 		} catch (err) {
 			if (err instanceof NotesImportError || err instanceof ModelsNotConfiguredError || err instanceof ProviderKeyMissingError) throw err;
 			throw new NotesImportError("failed", { nodes: 0, chains: 0 }, err instanceof Error ? err.message : String(err), { cause: err });
 		} finally {
 			inFlight.delete(id);
+			inFlight.delete(pathLock);
 		}
 	}
 
-	return { runExtraction, importNotes };
+	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
+		return (await importFile(input)).stats;
+	}
+	return { runExtraction, importNotes, importFolderNotes: importFile };
 }
 

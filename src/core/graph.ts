@@ -105,6 +105,7 @@ function chainKey(premises: ReadonlyArray<string>, conclusion: string): string {
  *  exactly this merge happened). The notes path passes neither and keeps
  *  the whole-file checkpoint. */
 export interface MergeSource {
+	onProposition?: (nodeId: string) => void;
 	foldedAt: string;
 	/** The batch being merged (chat path): one entry per message in the
 	 *  extracted batch — undefined (notes path / coverage-less callers) →
@@ -209,6 +210,7 @@ export function mergeFindings(
 			existingIds.add(graphNodeId);
 		}
 		mapping.set(p.id, graphNodeId);
+		source.onProposition?.(graphNodeId);
 	}
 
 	// 2. Chains — the extractor's alone since the digest-aware redesign
@@ -245,6 +247,8 @@ export function mergeFindings(
 			(p): p is string => p !== undefined && p !== conclusion,
 		);
 		if (premises.length === 0) return; // a chain IS an argument — bare propositions ride the node ledger alone
+		source.onProposition?.(conclusion);
+		for (const premise of premises) source.onProposition?.(premise);
 		const key = chainKey(premises, conclusion);
 		if (assertedByChat.has(key)) return; // this chat already asserted this argument
 		const id = idOfKey.get(key) ?? newGraphChainId();
@@ -539,15 +543,20 @@ export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<stri
 	const fileSources: Record<string, string> = {};
 	// One read of the sources map per snapshot: readSources() re-reads and
 	// re-parses sources.json on every call.
-	const sourcePaths = new Map(deps.graphStore.readSources().map((s) => [s.id, s.filePath]));
+	const sources = new Map(deps.graphStore.readSources().map((s) => [s.id, s]));
+	const unobservedBySource: Record<string, string[]> = {};
 	for (const id of sourceIds) {
 		const chat = deps.chatStore.getChat(id);
 		if (chat) {
 			sessions[id] = chat.title;
 			continue;
 		}
-		const filePath = sourcePaths.get(id);
-		if (filePath !== undefined) fileSources[id] = filePath;
+		const source = sources.get(id);
+		if (source) {
+			fileSources[id] = source.filePath;
+			if (Array.isArray(source.unobservedNodeIds) && source.unobservedNodeIds.length)
+				unobservedBySource[id] = source.unobservedNodeIds;
+		}
 	}
 
 	const nodeSessions: Record<string, string[]> = {};
@@ -600,6 +609,7 @@ export function graphSnapshot(deps: GraphDeps, sourceNames: Readonly<Record<stri
 		chains: graph.chains,
 		sessions,
 		fileSources,
+		...(Object.keys(unobservedBySource).length ? { unobservedBySource } : {}),
 		nodeSessions,
 		clusters,
 		...(Object.keys(positions).length > 0 ? { positions } : {}),
