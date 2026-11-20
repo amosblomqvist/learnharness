@@ -378,7 +378,7 @@ export function createInteractionLayers() {
 			return requestClose(snapshot.owner.id, "escape");
 		},
 		/** Return only while this exact closing generation still owns focus. */
-		restoreFocus(opener: HTMLElement | null, expectedGeneration: number, expectedFocusRevision = focusRevision, openingLease?: OpeningLease) {
+		restoreFocus(opener: HTMLElement | null, expectedGeneration: number, expectedFocusRevision = focusRevision, openingLease?: OpeningLease, fallback?: HTMLElement) {
 			if (generation !== expectedGeneration || focusRevision !== expectedFocusRevision) return false;
 			if (openingLease) {
 				const opening = leaseStates.get(openingLease);
@@ -389,6 +389,7 @@ export function createInteractionLayers() {
 				opener = opening.opener;
 			}
 			if (elementEligible(opener)) { opener!.focus({ preventScroll: true }); return true; }
+			if (fallback && elementEligible(fallback)) { fallback.focus({ preventScroll: true }); return true; }
 			const active = activeModal();
 			active?.focusInitial?.();
 			return !!active;
