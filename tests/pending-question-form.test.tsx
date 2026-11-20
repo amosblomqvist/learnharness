@@ -130,3 +130,22 @@ test("saving a unique live question preserves its mounted form and selection", a
 		assert.ok(host.querySelector('[role="radio"][aria-checked="true"]'));
 	} finally { await act(async () => root.unmount()); host.remove(); }
 });
+
+test("confidence is visible only for a concrete answer, including after returning from I don't know", async () => {
+	const host = document.createElement("div"); document.body.append(host);
+	const root = createRoot(host);
+	const pending = pendingQuestionOf([question("saved", "confidence", "Choose one")])!;
+	const slider = () => host.querySelector('[data-testid="confidence-slider"]');
+	const click = async (selector: string) => act(async () => { host.querySelector<HTMLButtonElement>(selector)!.click(); });
+	try {
+		await act(async () => root.render(<QuestionDock toolName="quiz" toolCallId={pending.toolCallId}
+			input={pending.input as QuizToolInput} expanded onExpand={() => {}} onSubmit={() => {}} dictationClaim={false} />));
+		assert.equal(slider(), null);
+		await click('[role="radio"]');
+		assert.equal(slider()?.getAttribute("aria-label"), "How sure are you?");
+		await click('[data-kbdrow="2"]');
+		assert.equal(slider(), null);
+		await click('[role="radio"]');
+		assert.ok(slider());
+	} finally { await act(async () => root.unmount()); host.remove(); }
+});

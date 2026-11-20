@@ -394,6 +394,8 @@ function QuestionDockForm({
 
 	const toggle = (idx: number) => setSel(toggleOption(selectMode, sel, idx));
 
+	const showConfidence = kind === "quiz" && !sel.dontKnow && sel.selected.size > 0;
+
 	const nativeCanSubmit =
 		qd.mode === "text"
 			? text.trim().length > 0
@@ -580,9 +582,8 @@ function QuestionDockForm({
 			} else if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
 				// Global confidence cycling (owner, UI round 2026-10-01): the
 				// SAME pattern as ↑/↓ over the rows — works wherever focus
-				// sits, no click-in, no focus ring. Dead on "I don't know"
-				// (the slider grays out and nothing is sent).
-				if (kind !== "quiz" || sel.dontKnow) return;
+				// sits, but only while the slider is visible.
+				if (!showConfidence) return;
 				e.preventDefault();
 				setConfIdx((i) =>
 					Math.min(
@@ -806,22 +807,15 @@ function QuestionDockForm({
 				ticks are background layers behind the fill (empty side only,
 				never over the color; 0/100 need no tick — the flush ends say
 				them). Keyboard: GLOBAL ←/→ (the ↑/↓ pattern; the ring is gone
-				app-wide). Clicking and dragging are native. "I don't know"
-				GRAYS it out — the layout holds, no value is sent, the IDK
-				signal stands alone. */}
-			{kind === "quiz" && (
-				<div className="border-t border-border/60 px-4 py-2.5">
+				app-wide). Clicking and dragging are native. */}
+			{showConfidence && (
+				<div className="px-4 py-2">
 					<div className="flex items-center gap-3">
-						<span
-							className={cn(
-								"shrink-0 text-xs font-medium uppercase tracking-wide",
-								sel.dontKnow ? "text-muted-foreground/50" : "text-muted-foreground",
-							)}
-						>
-							Confidence
+						<span className="shrink-0 text-xs font-medium text-muted-foreground">
+							How sure are you?
 						</span>
 						<div
-							className={cn("relative h-4 min-w-0 flex-1", sel.dontKnow && "opacity-40")}
+							className="relative h-4 min-w-0 flex-1"
 							data-testid="confidence-track"
 						>
 							{/* The RAIL is painted here, not on the input: this overlay spans
@@ -846,8 +840,7 @@ function QuestionDockForm({
 								max={100}
 								step={1}
 								value={CONFIDENCE_STOPS[confIdx]}
-								disabled={sel.dontKnow}
-								aria-label="Confidence — the probability your selected answer is correct"
+								aria-label="How sure are you?"
 								aria-valuetext={`${CONFIDENCE_STOPS[confIdx]} percent`}
 								title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
 								data-testid="confidence-slider"
@@ -876,12 +869,9 @@ function QuestionDockForm({
 						</div>
 						<span
 							data-testid="confidence-value"
-							className={cn(
-								"w-9 shrink-0 text-right font-mono text-sm tabular-nums",
-								sel.dontKnow && "text-muted-foreground/50",
-							)}
+							className="w-9 shrink-0 text-right font-mono text-sm tabular-nums"
 						>
-							{sel.dontKnow ? "—" : `${CONFIDENCE_STOPS[confIdx]}%`}
+							{CONFIDENCE_STOPS[confIdx]}%
 						</span>
 					</div>
 				</div>
@@ -893,7 +883,7 @@ function QuestionDockForm({
 			    is for dumping, soon dictated; the button submits); text mode
 			    keeps "Your answer" with Enter-to-submit. */}
 			<form
-				className="border-t border-border/60 p-1.5"
+				className="px-4 pt-2 pb-4"
 				onSubmit={(e) => {
 					e.preventDefault();
 					submit();
