@@ -45,12 +45,17 @@ export const AUTH_FILE = process.env.LH_AUTH_FILE
 
 export const DATA_DIR_FIXED = Boolean(process.env.LH_DATA_DIR && !process.env.LH_DATA_CONFIG_FILE);
 
+/** The packaged shell and server protect the same installation resources. */
+export const DATA_APP_ROOT = process.env.LH_DESKTOP_SERVER === "1" && process.env.LH_DATA_APP_ROOT
+	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DATA_APP_ROOT)
+	: ROOT;
+
 function resolveInitialDataLocation() {
 	const desktopLocation = process.env.LH_DESKTOP_SERVER === "1" && process.env.LH_STARTUP_DATA_LOCATION;
 	if (desktopLocation) return JSON.parse(desktopLocation) as Omit<DataLocationGlobalState, "listeners">;
 	return inspectDataLocation({
 		configFile: DATA_DIR_FIXED ? null : DATA_CONFIG_FILE,
-		defaultDir: DATA_DIR_FIXED ? process.env.LH_DATA_DIR! : DEFAULT_DATA_ROOT, appRoot: ROOT, authFile: AUTH_FILE,
+		defaultDir: DATA_DIR_FIXED ? process.env.LH_DATA_DIR! : DEFAULT_DATA_ROOT, appRoot: DATA_APP_ROOT, authFile: AUTH_FILE,
 	});
 }
 

@@ -6,19 +6,7 @@ import { HostDialog } from "@/components/host-dialog";
 import { Button } from "@/components/ui/button";
 import { SettingsRow } from "./controls.tsx";
 
-export type DataMigrationMode = "copy" | "switch";
-
-export interface DataDirectoryStatus {
-	currentDir: string;
-	defaultDir: string;
-	isCustom: boolean;
-	configuredDir: string | null;
-	unavailableConfiguredDir: string | null;
-	fixed: boolean;
-	platform: string;
-	recoveryReason: string | null;
-	cleanupFailures?: string[];
-}
+import type { DataDirectoryStatus, DataMigrationMode } from "@/src/server/data-directory";
 
 export const DATA_DIR_HINT =
 	"Chats, knowledge graph, settings, themes, prompts, and plugins are stored here. API keys and subscription logins stay on this machine.";
@@ -274,7 +262,7 @@ export function DataDirectorySettings({
 	const [deleteOld, setDeleteOld] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [dialogError, setDialogError] = useState("");
-	const [confirmedSource, setConfirmedSource] = useState("");
+	const [confirmedSource, setConfirmedSource] = useState<Pick<DataDirectoryStatus, "currentDir" | "copySource"> | null>(null);
 	const [cleanupFailures, setCleanupFailures] = useState<string[]>([]);
 
 	const canBrowse = typeof window !== "undefined" && typeof window.lh?.chooseAttachmentFolder === "function";
@@ -297,7 +285,7 @@ export function DataDirectorySettings({
 
 	const openChangeDialog = async () => {
 		if (!status || status.fixed) return;
-		setConfirmedSource(status.currentDir);
+		setConfirmedSource({ currentDir: status.currentDir, copySource: status.copySource });
 		setIsReset(false);
 		setCopyMode("copy");
 		setDeleteOld(false);
@@ -319,7 +307,7 @@ export function DataDirectorySettings({
 
 	const openResetDialog = () => {
 		if (!status || status.fixed) return;
-		setConfirmedSource(status.currentDir);
+		setConfirmedSource({ currentDir: status.currentDir, copySource: status.copySource });
 		setIsReset(true);
 		setTargetPath(status.defaultDir);
 		setCopyMode("switch");
@@ -349,9 +337,10 @@ export function DataDirectorySettings({
 		setBusy(true);
 		setDialogError("");
 		try {
-			const payload = isReset
-				? { action: "reset" as const, copyMode, expectedSource: confirmedSource, deleteOld: copyMode === "copy" ? deleteOld : false }
-				: { action: "change" as const, path: trimmed, copyMode, expectedSource: confirmedSource, deleteOld: copyMode === "copy" ? deleteOld : false };
+			const options = copyMode === "copy"
+				? { copyMode, expectedSource: confirmedSource?.copySource, deleteOld }
+				: { copyMode, deleteOld: false };
+			const payload = isReset ? { action: "reset", ...options } : { action: "change", path: trimmed, ...options };
 			const res = await fetch("/api/settings/data-dir", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -360,17 +349,19 @@ export function DataDirectorySettings({
 			const body = (await res.json().catch(() => ({}))) as Partial<DataDirectoryStatus> & { error?: unknown };
 			if (!res.ok) {
 				setDialogError(typeof body.error === "string" ? body.error : `Could not change data folder (${res.status})`);
+				await loadStatus();
 				return;
 			}
-			if (typeof body.currentDir === "string" && typeof body.defaultDir === "string") {
+			if (typeof body.currentDir === "string" && typeof body.defaultDir === "string" && typeof body.platform === "string") {
 				setStatus({
 					currentDir: body.currentDir,
+					copySource: body.copySource ?? null,
 					defaultDir: body.defaultDir,
 					isCustom: Boolean(body.isCustom),
 					configuredDir: body.configuredDir ?? null,
 					unavailableConfiguredDir: body.unavailableConfiguredDir ?? null,
 					fixed: Boolean(body.fixed),
-					platform: body.platform ?? "",
+					platform: body.platform,
 					recoveryReason: body.recoveryReason ?? null,
 				});
 			} else {
@@ -447,7 +438,7 @@ export function DataDirectorySettings({
 
 			{dialogOpen && status && (
 				<DataDirectoryConfirmBody
-					currentDir={confirmedSource}
+					currentDir={confirmedSource?.currentDir ?? ""}
 					platform={status.platform}
 					targetPath={targetPath}
 					onTargetPathChange={(next) => {

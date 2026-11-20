@@ -7,15 +7,14 @@ import {
 	DATA_DIR_FIXED,
 	DATA_CONFIG_FILE,
 	getDataLocationState,
-	ROOT,
+	DATA_APP_ROOT,
 	setActiveDataDir,
 } from "../../config.ts";
 import { hasExtractionsInFlight } from "../agent/subagents/extraction.ts";
 import { hasLiveJobs } from "../agent/subagents/aborts.ts";
-import { isSensitivePath } from "../agent/tools/fs-shared.ts";
 import { emit } from "../core/events.ts";
 import { beginDataMigration, blockDataWritesForRecovery, dataWriteRecoveryReason, DataDirectoryBusyError } from "../store/data-write-gate.ts";
-import { assertOrdinary, canonicalPath, DataLocationRecoveryError, inspectDataLocation, readStoreId, validateTarget, validateTree, verifyStore, writeConfiguredDataDirPath } from "../../electron/data-location.cjs";
+import { canonicalPath, DataLocationRecoveryError, inspectDataLocation, readStoreId, validateTarget, validateTree, verifyStore, writeConfiguredDataDirPath } from "../../electron/data-location.cjs";
 import { cleanOldData, createTargetDirectory, stageDataCopy } from "./data-directory-files.ts";
 import { disposePluginsForDataChange } from "./plugins.ts";
 import { hasRunningCompactions } from "./compaction.ts";
@@ -27,8 +26,14 @@ export { DataDirectoryBusyError };
 
 export type DataMigrationMode = "copy" | "switch";
 
+type DataDirectorySource = { path: string } & (
+	| { storeId: string }
+	| { storeId: null; device: string; inode: string }
+);
+
 export interface DataDirectoryStatus {
 	currentDir: string;
+	copySource: DataDirectorySource | null;
 	defaultDir: string;
 	isCustom: boolean;
 	configuredDir: string | null;
@@ -45,13 +50,13 @@ export type DataDirectoryRequest =
 			path: string;
 			copyMode: DataMigrationMode;
 			deleteOld?: boolean;
-			expectedSource?: string;
+			expectedSource?: DataDirectorySource;
 	  }
 	| {
 			action: "reset";
 			copyMode: DataMigrationMode;
 			deleteOld?: boolean;
-			expectedSource?: string;
+			expectedSource?: DataDirectorySource;
 	  }
 	| {
 			action: "retry-configured";
@@ -60,11 +65,48 @@ export type DataDirectoryRequest =
 			action: "use-default";
 	  };
 
+function describeCopySource(directory: string, stat: fs.BigIntStats, storeId: string | null): DataDirectorySource {
+	return storeId === null
+		? { path: directory, storeId, device: String(stat.dev), inode: String(stat.ino) }
+		: { path: directory, storeId };
+}
+
+function copySourceForStatus(state: ReturnType<typeof getDataLocationState>): DataDirectorySource | null {
+	if (state.unavailableConfiguredDir) return null;
+	try {
+		const stat = fs.lstatSync(/* turbopackIgnore: true */ state.currentDir, { bigint: true, throwIfNoEntry: false });
+		if (!stat?.isDirectory()) return null;
+		const storeId = state.configuredDir ? activeStoreId() : readStoreId(state.currentDir);
+		return describeCopySource(state.currentDir, stat, storeId);
+	} catch {
+		return null;
+	}
+}
+
+function parseCopySource(value: unknown): DataDirectorySource {
+	if (value && typeof value === "object") {
+		const { path: directory, storeId, device, inode } = value as Record<string, unknown>;
+		if (typeof directory === "string" && directory) {
+			if (typeof storeId === "string" && storeId) return { path: directory, storeId };
+			if (storeId === null && typeof device === "string" && typeof inode === "string") {
+				return { path: directory, storeId, device, inode };
+			}
+		}
+	}
+	throw new DataDirectoryInputError("Confirm the current source folder before copying data.");
+}
+
+function sameCopySource(confirmed: DataDirectorySource, current: DataDirectorySource): boolean {
+	if (confirmed.path !== current.path || confirmed.storeId !== current.storeId) return false;
+	return confirmed.storeId !== null ||
+		(current.storeId === null && confirmed.device === current.device && confirmed.inode === current.inode);
+}
+
 export function getDataDirectoryStatus(): DataDirectoryStatus {
 	const state = getDataLocationState();
 	const recoveryReason = dataWriteRecoveryReason();
 	return {
-		...state, platform: process.platform,
+		...state, platform: process.platform, copySource: recoveryReason ? null : copySourceForStatus(state),
 		...(recoveryReason ? { unavailableConfiguredDir: state.currentDir, recoveryReason } : {}),
 	};
 }
@@ -123,8 +165,7 @@ export function parseDataDirectoryRequest(raw: unknown): DataDirectoryRequest {
 			throw new DataDirectoryInputError("deleteOld must be a boolean.");
 		}
 		const deleteOld = copyMode === "copy" && r.deleteOld === true;
-		const expectedSource = typeof r.expectedSource === "string" ? r.expectedSource : undefined;
-		if (deleteOld && !expectedSource) throw new DataDirectoryInputError("Confirm the current source folder before deleting old data.");
+		const expectedSource = copyMode === "copy" ? parseCopySource(r.expectedSource) : undefined;
 		if (r.action === "reset") {
 			return { action: "reset", copyMode, deleteOld, expectedSource };
 		}
@@ -146,7 +187,7 @@ export async function mutateDataDirectory(raw: unknown, home: string = os.homedi
 		const state = getDataLocationState();
 		const { currentDir: previousDir, defaultDir } = state;
 		if (request.action === "retry-configured") {
-			const resolved = inspectDataLocation({ configFile: DATA_CONFIG_FILE, defaultDir, appRoot: ROOT, authFile: AUTH_FILE });
+			const resolved = inspectDataLocation({ configFile: DATA_CONFIG_FILE, defaultDir, appRoot: DATA_APP_ROOT, authFile: AUTH_FILE });
 			if (resolved.unavailableConfiguredDir || (state.configuredDir &&
 				(resolved.configuredDir !== state.configuredDir || resolved.storeId !== activeStoreId()))) {
 				throw new DataDirectoryInputError(resolved.recoveryReason ?? "The configured folder changed. Choose a folder explicitly.");
@@ -159,20 +200,22 @@ export async function mutateDataDirectory(raw: unknown, home: string = os.homedi
 
 		const recovery = request.action === "use-default";
 		const copy = !recovery && request.copyMode === "copy";
+		const expectedSource = !recovery ? request.expectedSource : undefined;
 		const deleteOld = copy && request.deleteOld;
-		if (deleteOld && request.expectedSource !== previousDir) {
-			throw new DataDirectoryInputError("The source folder changed. Reopen the confirmation before deleting old data.");
-		}
 		if (copy && state.unavailableConfiguredDir) {
 			throw new DataDirectoryInputError("Reconnect the configured data folder before copying.");
 		}
 		const sourceId = activeStoreId();
-		const sourceStat = copy ? fs.lstatSync(/* turbopackIgnore: true */ previousDir, { throwIfNoEntry: false }) : undefined;
+		let sourceStat: fs.BigIntStats | undefined;
 		const checkSource = () => {
 			if (state.configuredDir) verifyStore(previousDir, sourceId);
-			const current = fs.lstatSync(/* turbopackIgnore: true */ previousDir, { throwIfNoEntry: false });
+			const current = fs.lstatSync(/* turbopackIgnore: true */ previousDir, { bigint: true, throwIfNoEntry: false });
 			if (!current?.isDirectory() || !sourceStat || current.dev !== sourceStat.dev || current.ino !== sourceStat.ino) {
 				throw new Error("The source folder became unavailable or changed.");
+			}
+			const storeId = state.configuredDir ? sourceId : readStoreId(previousDir);
+			if (!expectedSource || !sameCopySource(expectedSource, describeCopySource(previousDir, current, storeId))) {
+				throw new Error("The source folder changed. Reopen the confirmation before copying data.");
 			}
 		};
 		let targetDir: string;
@@ -181,14 +224,12 @@ export async function mutateDataDirectory(raw: unknown, home: string = os.homedi
 			const value = request.action === "change" ? expandHomePath(request.path, home) : defaultDir;
 			targetDir = validateTarget(value, {
 				source: !recovery && !state.unavailableConfiguredDir ? previousDir : null,
-				defaultDir, appRoot: ROOT, authFile: AUTH_FILE, home,
-				protectedPath: (candidate: string) => isSensitivePath(candidate, home),
+				defaultDir, appRoot: DATA_APP_ROOT, authFile: AUTH_FILE, home,
 			});
 			isDefaultTarget = path.relative(canonicalPath(defaultDir), targetDir) === "";
 			if (copy) {
-				if (sourceStat) assertOrdinary(sourceStat, previousDir);
+				sourceStat = fs.lstatSync(/* turbopackIgnore: true */ previousDir, { bigint: true, throwIfNoEntry: false });
 				checkSource();
-				readStoreId(previousDir);
 			}
 			if (request.action === "change" && state.unavailableConfiguredDir) validateTree(targetDir);
 		} catch (error) {

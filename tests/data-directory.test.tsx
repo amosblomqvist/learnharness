@@ -32,6 +32,7 @@ const {
 } = require("../electron/data-location.cjs");
 
 const config = await import("../config.ts");
+const { getDataDirectoryStatus } = await import("../src/server/data-directory.ts");
 const { createSideChatService } = await import("../src/server/side-chat.ts");
 const { registerJobAbort, unregisterJobAbort } = await import("../src/agent/subagents/aborts.ts");
 const {
@@ -60,6 +61,36 @@ beforeEach(() => {
 });
 
 describe("electron/data-location.cjs startup resolution & unplugged drive recovery", () => {
+	it("rejects protected targets in native recovery and server settings", async () => {
+		const dotenvDir = path.join(scratchRoot, ".env.fixture");
+		const resources = path.join(scratchRoot, "app-resources");
+		const appDir = path.join(resources, "server", "standalone");
+		for (const directory of [dotenvDir, appDir]) fs.mkdirSync(directory, { recursive: true });
+
+		const response = await post({ action: "change", path: dotenvDir, copyMode: "switch" });
+		assert.equal(response.status, 400);
+		assert.match((await response.json()).error, /protected/);
+
+		const options = { configFile, defaultDir: defaultDataDir, appRoot: resources, authFile };
+		writeConfiguredDataDirPath(configFile, dotenvDir);
+		assert.match(inspectDataLocation(options).recoveryReason, /protected/);
+		const pointer = fs.readFileSync(configFile, "utf8");
+		const candidates = [dotenvDir, appDir];
+		const reasons: string[] = [];
+		const selected = await resolveStartupDataDir({
+			...options,
+			dialog: {
+				showMessageBox: async () => ({ response: candidates.length ? 1 : 3 }),
+				showOpenDialog: async () => ({ canceled: false, filePaths: [candidates.shift()] }),
+			},
+			log: (reason: string) => { reasons.push(reason); },
+		});
+		assert.equal(selected, null);
+		assert.match(reasons[0]!, /protected/);
+		assert.match(reasons[1]!, /application source tree/);
+		assert.equal(fs.readFileSync(configFile, "utf8"), pointer);
+	});
+
 	it("chooses another folder when the old volume cannot be canonicalized", async () => {
 		const oldVolume = path.join(scratchRoot, "offline-volume");
 		const source = path.join(oldVolume, "data");
@@ -202,6 +233,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 			currentDir: string;
 			defaultDir: string;
 			isCustom: boolean;
+			copySource: ReturnType<typeof getDataDirectoryStatus>["copySource"];
 		};
 		assert.equal(initialStatus.currentDir, defaultDataDir);
 		assert.equal(initialStatus.isCustom, false);
@@ -216,6 +248,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 					path: externalDir,
 					copyMode: "copy",
 					deleteOld: false,
+					expectedSource: initialStatus.copySource,
 				}),
 			}),
 		);
@@ -262,7 +295,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 					path: externalDir,
 					copyMode: "copy",
 					deleteOld: true,
-					expectedSource: defaultDataDir,
+					expectedSource: getDataDirectoryStatus().copySource,
 				}),
 			}),
 		);
@@ -330,7 +363,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 				new Request("http://localhost/api/settings/data-dir", {
 					method: "POST",
 					headers: { "Content-Type": "application/json" },
-					body: JSON.stringify(badPayload),
+					body: JSON.stringify({ ...badPayload, expectedSource: getDataDirectoryStatus().copySource }),
 				}),
 			);
 			assert.equal(res.status, 400, `expected 400 for ${JSON.stringify(badPayload)}`);
@@ -348,6 +381,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 						action: "change",
 						path: path.join(scratchRoot, "ext-busy"),
 						copyMode: "copy",
+						expectedSource: getDataDirectoryStatus().copySource,
 					}),
 				}),
 			);
@@ -429,13 +463,48 @@ function post(payload: object) {
 }
 
 describe("data directory audit regressions", () => {
+	it("requires a confirmed source for keep-old copies and rejects a different store at the same path", async () => {
+		const source = path.join(scratchRoot, "replaced-marker-source");
+		const destination = path.join(scratchRoot, "replaced-marker-destination");
+		assert.equal((await post({ action: "change", path: source, copyMode: "switch" })).status, 200);
+		const { copySource: expectedSource } = await (await getDataDirRoute()).json();
+		assert.equal(expectedSource.path, source);
+		assert.equal(expectedSource.storeId, config.activeStoreId());
+		const payload = { action: "change", path: destination, copyMode: "copy" };
+		const missing = await post(payload);
+		assert.equal(missing.status, 400);
+		assert.match((await missing.json()).error, /Confirm the current source/);
+
+		fs.unlinkSync(path.join(source, STORE_MARKER));
+		const replacementId = writeConfiguredDataDirPath(configFile, source);
+		assert.notEqual(replacementId, expectedSource.storeId);
+		config.setActiveDataDir(source, { configuredDir: source, storeId: replacementId });
+		const stale = await post({ ...payload, expectedSource });
+		assert.equal(stale.status, 400);
+		assert.match((await stale.json()).error, /source folder changed/);
+		assert.equal(fs.existsSync(destination), false);
+		assert.equal((await post({ ...payload, expectedSource: getDataDirectoryStatus().copySource })).status, 200);
+	});
+
+	it("rejects a replaced unmarked default store at the confirmed path", async () => {
+		const { copySource } = getDataDirectoryStatus();
+		assert.equal(copySource?.storeId, null);
+		fs.renameSync(defaultDataDir, path.join(scratchRoot, "original-default-store"));
+		fs.mkdirSync(defaultDataDir);
+		const target = path.join(scratchRoot, "replaced-default-destination");
+		const result = await post({ action: "change", path: target, copyMode: "copy", expectedSource: copySource });
+		assert.equal(result.status, 400);
+		assert.match((await result.json()).error, /source folder changed/);
+		assert.equal(fs.existsSync(target), false);
+	});
+
 	it("preserves an occupied destination and allows an explicit switch to its existing data", async () => {
 		const target = path.join(scratchRoot, "occupied");
 		fs.mkdirSync(target);
 		fs.writeFileSync(path.join(target, "settings.json"), "{}");
 		writeSettingsRecord({ version: 1, general: { autoUpdate: false } });
 		const change = { action: "change", path: target };
-		const rejected = await post({ ...change, copyMode: "copy" });
+		const rejected = await post({ ...change, copyMode: "copy", expectedSource: getDataDirectoryStatus().copySource });
 		assert.equal(rejected.status, 400);
 		assert.match((await rejected.json()).error, /empty/);
 		assert.equal(fs.readFileSync(path.join(target, "settings.json"), "utf8"), "{}");
@@ -454,7 +523,7 @@ describe("data directory audit regressions", () => {
 			return original(file, options);
 		});
 		try {
-			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: defaultDataDir });
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: getDataDirectoryStatus().copySource });
 			assert.equal(response.status, 400);
 			assert.match((await response.json()).error, /injected disk failure/);
 			assert.deepEqual(fs.readdirSync(target), []);
@@ -473,7 +542,7 @@ describe("data directory audit regressions", () => {
 			return original(from, to);
 		});
 		try {
-			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: defaultDataDir });
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: getDataDirectoryStatus().copySource });
 			assert.equal(response.status, 500);
 			assert.match((await response.json()).error, /injected pointer failure/);
 			assert.equal(fs.existsSync(target), false);
@@ -502,7 +571,7 @@ describe("data directory audit regressions", () => {
 			return open(...args);
 		});
 		try {
-			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: origin });
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: getDataDirectoryStatus().copySource });
 			assert.equal(response.status, 200);
 			assert.match((await response.json()).cleanupFailures.join("\n"), /location could not be flushed/);
 			assert.equal(config.PATHS.data, target);
@@ -597,7 +666,7 @@ describe("data directory audit regressions", () => {
 		fs.mkdirSync(path.join(defaultDataDir, "chats"));
 		fs.symlinkSync(outside, path.join(defaultDataDir, "chats", "linked"), "junction");
 		const target = path.join(scratchRoot, "unsafe-copy");
-		const response = await post({ action: "change", path: target, copyMode: "copy" });
+		const response = await post({ action: "change", path: target, copyMode: "copy", expectedSource: getDataDirectoryStatus().copySource });
 		assert.equal(response.status, 400);
 		assert.match((await response.json()).error, /Symbolic links and junctions/);
 		assert.equal(fs.existsSync(target), false);
@@ -635,7 +704,7 @@ describe("data directory audit regressions", () => {
 
 	it("rejects busy migrations, blocks writers during a copy, and requires the confirmed source", async () => {
 		const target = path.join(scratchRoot, "gate-target");
-		const payload = { action: "change", path: target, copyMode: "copy" };
+		const payload = { action: "change", path: target, copyMode: "copy", expectedSource: getDataDirectoryStatus().copySource! };
 		const chat = stores.chatStore.createChat("Side conversation");
 		let finishSide!: () => void;
 		const sideBlocked = new Promise<void>(resolve => { finishSide = resolve; });
@@ -651,7 +720,7 @@ describe("data directory audit regressions", () => {
 		registerJobAbort("orphaned-chat-job", new AbortController());
 		try { assert.equal((await post(payload)).status, 409); }
 		finally { unregisterJobAbort("orphaned-chat-job"); }
-		const stale = await post({ ...payload, deleteOld: true, expectedSource: target });
+		const stale = await post({ ...payload, deleteOld: true, expectedSource: { ...payload.expectedSource, path: target } });
 		assert.equal(stale.status, 400);
 		assert.match((await stale.json()).error, /source folder changed/);
 		writeSettingsRecord({ version: 1 });
@@ -693,7 +762,7 @@ describe("data directory audit regressions", () => {
 			return original(...args);
 		});
 		try {
-			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: defaultDataDir });
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: getDataDirectoryStatus().copySource });
 			assert.equal(response.status, 200);
 			assert.match((await response.json()).cleanupFailures.join("\n"), /settings.json: The entry changed/);
 			assert.equal(fs.readFileSync(stateFile, "utf8"), '{"modified":true}');
@@ -711,7 +780,7 @@ describe("data directory audit regressions", () => {
 			return original(file);
 		});
 		try {
-			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: defaultDataDir });
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: getDataDirectoryStatus().copySource });
 			assert.equal(response.status, 200);
 			assert.deepEqual((await response.json()).cleanupFailures, [`${stateFile}: injected cleanup failure`]);
 			assert.equal(fs.readFileSync(path.join(target, "plugins-state.json"), "utf8"), fs.readFileSync(stateFile, "utf8"));
@@ -790,7 +859,7 @@ except DataError as error:
 	});
 
 	it("returns 400 for an uncreatable procfs target and permits subsequent requests", { skip: process.platform !== "linux", timeout: 10_000 }, async () => {
-		const response = await post({ action: "change", path: "/proc/forbidden/child", copyMode: "copy" });
+		const response = await post({ action: "change", path: "/proc/forbidden/child", copyMode: "copy", expectedSource: getDataDirectoryStatus().copySource });
 		assert.equal(response.status, 400);
 		assert.match((await response.json()).error, /Could not prepare.*\/proc/);
 		assert.equal((await getDataDirRoute()).status, 200);

@@ -130,6 +130,7 @@ describe("backend-only preload wiring and packaging", () => {
 			assert.equal(launch.options.env.ELECTRON_RUN_AS_NODE, "1");
 			assert.equal(launch.options.env.LH_DESKTOP_SERVER, "1");
 			assert.equal(launch.options.env.LH_DATA_DIR, defaultDataDir);
+			assert.equal(launch.options.env.LH_DATA_APP_ROOT, path.join("/fixture/resources with spaces"));
 			assert.deepEqual(JSON.parse(launch.options.env.LH_STARTUP_DATA_LOCATION!), resolvedDataLocation);
 			assert.equal(launch.options.env.LH_AUTH_FILE, path.join("/fixture/user-data", "auth.json"));
 			assert.equal(launch.options.env.PORT, "54321");

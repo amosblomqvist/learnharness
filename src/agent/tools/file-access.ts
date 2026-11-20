@@ -1,5 +1,7 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
+import { isWithin } from "../../../electron/sensitive-paths.cjs";
+export { comparisonPath, isWithin } from "../../../electron/sensitive-paths.cjs";
 
 /** Learner-source policy seam, based on lickbot's #157. The server supplies
  * current preferences per operation; agents never import the settings store.
@@ -30,30 +32,6 @@ export function fileAccessPolicy(): FileAccessPolicy {
 		throw new Error("File-access configuration error: invalid policy. Repair File access in Settings → Agent → Tools.");
 	}
 	return policy;
-}
-
-/** Comparison only: preserve the accepted #421 Windows namespace/ADS
- * semantics. The returned spelling is never used for opening a file. */
-export function comparisonPath(absolute: string): string {
-	let normalized = path.resolve(absolute);
-	if (process.platform === "win32") {
-		if (normalized.startsWith("\\\\?\\UNC\\")) normalized = `\\\\${normalized.slice(8)}`;
-		else if (normalized.startsWith("\\\\?\\")) normalized = normalized.slice(4);
-		const base = path.basename(normalized);
-		const stream = base.indexOf(":");
-		if (stream !== -1) normalized = path.join(path.dirname(normalized), base.slice(0, stream));
-	}
-	return normalized;
-}
-
-/** Segment-aware containment; ignoreCase is ONLY for the existing home
- * denylist. Do not globally casefold configured allowed folders. */
-export function isWithin(absolute: string, root: string, ignoreCase = false): boolean {
-	let child = comparisonPath(absolute);
-	let parent = comparisonPath(root);
-	if (ignoreCase) { child = child.toLowerCase(); parent = parent.toLowerCase(); }
-	const rel = path.relative(parent, child);
-	return rel === "" || (rel !== ".." && !rel.startsWith(`..${path.sep}`) && !path.isAbsolute(rel));
 }
 
 /** The accepted strict canonical resolver, including missing descendants.

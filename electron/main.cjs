@@ -241,6 +241,7 @@ function startServer(port) {
 					LH_STARTUP_DATA_LOCATION: JSON.stringify(startupDataLocation),
 					LH_DEFAULT_DATA_DIR: DEFAULT_DATA_DIR(),
 					LH_DATA_CONFIG_FILE: DATA_CONFIG_FILE(),
+					LH_DATA_APP_ROOT: process.resourcesPath,
 					// The auth/keys store — the child reads AND writes this file itself
 					// (no env injection anymore: a spawn-time copy would shadow every
 					// settings-page key change until restart; env wins over file).
@@ -697,7 +698,7 @@ async function main() {
 			defaultDir: DEFAULT_DATA_DIR(),
 			dialog,
 			fsImpl: fs,
-			appRoot: path.join(__dirname, ".."),
+			appRoot: process.resourcesPath,
 			authFile: AUTH_FILE(),
 			log,
 		});

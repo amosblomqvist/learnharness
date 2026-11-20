@@ -22,14 +22,12 @@ interface TargetOptions {
 	defaultDir: string;
 	appRoot?: string;
 	authFile?: string;
-	protectedPath?: (path: string) => boolean;
 	home?: string;
 	disk?: typeof fs;
 }
 
 export const STORE_MARKER: string;
 export const MANAGED_ITEMS: readonly string[];
-export const SENSITIVE_HOME_PATHS: readonly string[];
 
 export function isFullPath(value: string, platform?: NodeJS.Platform): boolean;
 export function canonicalPath(value: string, disk?: typeof fs): string;

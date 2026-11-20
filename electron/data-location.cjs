@@ -5,39 +5,7 @@ const path = require("node:path");
 const os = require("node:os");
 const { randomUUID } = require("node:crypto");
 
-const SENSITIVE_HOME_PATHS = [
-	".claude",
-	".codex",
-	".cursor",
-	".gemini",
-	".ssh",
-	".gnupg",
-	".aws",
-	".azure",
-	".config/gcloud",
-	".kube",
-	".docker",
-	".netrc",
-	".npmrc",
-	".pypirc",
-	".git-credentials",
-	"Library/Keychains",
-	"Library/Cookies",
-	"Library/Safari",
-	"Library/Application Support/Google/Chrome",
-	"Library/Application Support/BraveSoftware",
-	"Library/Application Support/Microsoft Edge",
-	"Library/Application Support/Firefox",
-	".mozilla",
-	".config/google-chrome",
-	".config/chromium",
-	".config/BraveSoftware",
-	".config/microsoft-edge",
-	"AppData/Local/Google/Chrome",
-	"AppData/Local/BraveSoftware",
-	"AppData/Local/Microsoft/Edge",
-	"AppData/Roaming/Mozilla",
-];
+const { isSensitivePath } = require("./sensitive-paths.cjs");
 
 const STORE_MARKER = ".learnharness-store-id";
 const MANAGED_ITEMS = [
@@ -95,7 +63,7 @@ function validateTree(root, disk = fs) {
 	readStoreId(root, disk);
 }
 
-function validateTarget(value, { source, defaultDir, appRoot, authFile, protectedPath, home = os.homedir(), disk = fs }) {
+function validateTarget(value, { source, defaultDir, appRoot, authFile, home = os.homedir(), disk = fs }) {
 	if (!isFullPath(value)) throw new Error("Data directory path must be an absolute path with a drive letter or share on Windows.");
 	const normalized = path.resolve(value);
 	const original = disk.lstatSync(normalized, { throwIfNoEntry: false });
@@ -115,11 +83,9 @@ function validateTarget(value, { source, defaultDir, appRoot, authFile, protecte
 		throw new Error("Choose a dedicated subfolder for LearnHarness data.");
 	}
 	const authRoot = authFile && canonicalPath(path.dirname(authFile), disk);
-	const protectedHomePath = SENSITIVE_HOME_PATHS.some(name => {
-		const sensitive = path.join(homeRoot, name).toLowerCase();
-		return within(target.toLowerCase(), sensitive) || within(normalized.toLowerCase(), sensitive);
-	});
-	if (protectedHomePath || protectedPath?.(normalized) || protectedPath?.(target) || (authRoot && within(authRoot, target))) {
+	if (isSensitivePath(normalized, home, authFile) || isSensitivePath(target, homeRoot, authFile) ||
+		(homeRoot !== path.resolve(home) && isSensitivePath(normalized, homeRoot, authFile)) ||
+		(authRoot && within(authRoot, target))) {
 		throw new Error("Data directory cannot be in or contain a protected or credential location.");
 	}
 	if (appRoot && within(target, canonicalPath(appRoot, disk)) && path.relative(fallback, target) !== "") {
@@ -335,7 +301,7 @@ async function resolveStartupDataDir(options) {
 }
 
 module.exports = {
-	STORE_MARKER, MANAGED_ITEMS, SENSITIVE_HOME_PATHS, isFullPath, canonicalPath, assertOrdinary, validateTarget, validateTree,
+	STORE_MARKER, MANAGED_ITEMS, isFullPath, canonicalPath, assertOrdinary, validateTarget, validateTree,
 	readPointer, readStoreId, verifyStore, ensureStoreId, syncDirectory, writeConfiguredDataDirPath, DataLocationRecoveryError,
 	inspectDataLocation, resolveStartupDataDir, resolveStartupDataLocation,
 };
