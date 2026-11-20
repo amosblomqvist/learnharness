@@ -62,8 +62,7 @@ export async function runSubmitAgent<T>(opts: {
 	/** Extra tools beside the submit call (the auditor's graph-exploration
 	 *  set, 2026-09-27): a small agentic loop instead of a bare retry. */
 	extraTools?: Record<string, AgentTool<any>>;
-	/** Turn budget for the loop (default 4 = retry-only; the auditor runs
-	 *  an exploration loop instead — 16). */
+	/** Optional assistant-turn cap; omitted = no turn-count limit. */
 	maxTurns?: number;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;
@@ -74,7 +73,7 @@ export async function runSubmitAgent<T>(opts: {
 	/** Semantic validation at the submit seam: the value is schema-valid
 	 *  but may violate a PIPELINE law (coverage, echo-equality). Returning
 	 *  a problem string yields an isError result (invalidInputResult) →
-	 *  the model retries within maxTurns. null = accept. */
+	 *  the model can correct its submission. null = accept. */
 	validate?: (value: T) => string | null;
 }): Promise<T> {
 	let submitted: T | undefined;
@@ -111,7 +110,7 @@ export async function runSubmitAgent<T>(opts: {
 			engine: opts.engine,
 			systemPrompt: opts.systemPrompt,
 			prompt: opts.prompt,
-			maxTurns: opts.maxTurns ?? 4,
+			maxTurns: opts.maxTurns,
 			abortSignal: opts.signal,
 			chatId: opts.chatId,
 			onAssistantMessage: (message, step) =>

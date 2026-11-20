@@ -42,6 +42,7 @@ import { ClaudeLaunchError } from "../src/agent/claude-code/launch.ts";
 import { createClaudeCodeStreamFunction, toClaudeArgs, toEffort, type RunClaude } from "../src/agent/claude-code/stream.ts";
 import { toStreamJsonLine } from "../src/agent/claude-code/transcript.ts";
 import { runSubagent } from "../src/agent/subagents/pi-run.ts";
+import { runResearcherAgent } from "../src/agent/subagents/researcher.ts";
 import { configureWorkerRequestAdmission, createWorkerRequestScope, workerRequestStream } from "../src/agent/worker-request-admission.ts";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/claude-code/fake-claude.mjs", import.meta.url));
@@ -994,6 +995,61 @@ test("worker releases its only permit before tools but continues in the same Cla
 	});
 	assert.deepEqual(usage, [10, 0, 0]);
 	assert.equal(result.text, "evidence 1 | evidence 2");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("uncapped research through normal admission delivers a brief after thirteen Claude tool-use responses", { timeout: 8000 }, async t => {
+	const scenario: string[] = [];
+	const queries = Array.from({ length: 26 }, (_, index) => `fixture angle ${index + 1}`);
+	for (let index = 0; index < queries.length; index += 2) {
+		const calls = queries.slice(index, index + 2).map((query, offset) => ({
+			id: `toolu_research_${index + offset}`, name: "web_search", arguments: { query },
+		}));
+		const source = toToolUseMessage(calls);
+		source[0] = streamEvent({ type: "message_start", message: { usage: { input_tokens: 7, output_tokens: 10 } } });
+		// The fake CLI waits for each MCP result before proceeding. Two tool calls
+		// from one Claude response become separate Pi assistant turns.
+		scenario.push(...source, ...calls.map(callTool));
+	}
+	const url = "https://example.invalid/research-fixture";
+	const brief = `## Summary\nThe offline fixture corroborates the finding.\n\n## Findings\nThe last search corroborates fixture angle 26. [Source](${url})\n\n## Sources\n- [Fixture](${url})\n\n## Gaps\nNo independent sources in this fixture.`;
+	scenario.push(
+		streamEvent({ type: "message_start", message: { usage: {} } }),
+		streamEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: brief } }),
+		streamEvent({ type: "content_block_stop", index: 0 }),
+		streamEvent({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: {} }),
+		streamEvent({ type: "message_stop" }),
+	);
+	const { runClaude, calls } = createFakeRun(t, scenario);
+	const transport = admittedClaude(runClaude);
+	const question = "Can the offline finding be corroborated?";
+	const searched: string[] = [];
+	const usage: number[] = [];
+	let requests = 0;
+	const answer = await runResearcherAgent(question, {
+		engine: { model: getModel(), streamFn: (model, context, options) => {
+			const results = context.messages.filter((message): message is ToolResultMessage => message.role === "toolResult");
+			assert.equal(results.length, requests++);
+			assert.ok(context.messages.some(message => message.role === "user" && message.content === question));
+			if (results.length) {
+				const last = results.at(-1)!;
+				assert.equal(last.toolCallId, `toolu_research_${results.length - 1}`);
+				assert.equal(last.isError, false);
+				assert.ok(last.content.some(part => part.type === "text" && part.text.includes(`Evidence for ${queries[results.length - 1]}`)));
+			}
+			return transport(model, context, options);
+		} },
+		search: () => ({ id: "tavily", async search(query) {
+			searched.push(query);
+			return [{ title: "Fixture", url, snippet: `Evidence for ${query}` }];
+		} }),
+		onUsage: value => usage.push(value.output),
+	});
+	assert.equal(answer, brief);
+	assert.deepEqual(searched, queries);
+	assert.equal(requests, 27);
+	assert.deepEqual(usage, [...Array.from({ length: 13 }, () => [10, 0]).flat(), 0]);
 	await assertCleanedUp(getOnlyCall(calls));
 });
 

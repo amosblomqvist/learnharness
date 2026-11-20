@@ -29,6 +29,7 @@ function workerService() {
       assert.ok(definitions.has(workerId));
       assert.equal(options.purpose, 'user');
       assert.deepEqual(options.options, { timeoutMs: 120000, maxRetries: 0 }, 'use native output handling without a plugin maxTokens override');
+      assert.equal(Object.hasOwn(options, 'maxTurns'), false, 'official workers omit the optional turn cap');
       assert.ok(options.requestId);
       const prior = [...tasks.values()].find(task => task.requestId === options.requestId);
       if (prior) return structuredClone(prior);

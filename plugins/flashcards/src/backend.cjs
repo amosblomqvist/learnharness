@@ -457,7 +457,7 @@ function activate(ctx) {
           if (store.get().batches.find(b => b.id === batchId).cancelRequested) return;
           const p = plan.plans[index];
           // Leave output sizing and context fit to native Pi/provider handling.
-          const task = ctx.workers.start(plan.kind === 'file' ? 'generate-file-facts-v1' : 'generate-cues-v1', { requestId: chunk.requestId, input: plan.kind === 'file' ? { ...p.input, sourceId: plan.sourceId } : p.input, prompt: p.prompt, model: plan.model, purpose: 'user', maxTurns: 4, options: { timeoutMs: 120000, maxRetries: 0 } });
+          const task = ctx.workers.start(plan.kind === 'file' ? 'generate-file-facts-v1' : 'generate-cues-v1', { requestId: chunk.requestId, input: plan.kind === 'file' ? { ...p.input, sourceId: plan.sourceId } : p.input, prompt: p.prompt, model: plan.model, purpose: 'user', options: { timeoutMs: 120000, maxRetries: 0 } });
           change(s => { const c = s.batches.find(b => b.id === batchId).chunks.find(c => c.id === chunk.id); c.taskId = task.id; c.status = 'queued'; }, 'batch-changed');
           watch(batchId, chunk.id, task.id);
         } catch (error) {
