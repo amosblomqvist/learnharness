@@ -29,6 +29,7 @@ interface HintProps {
 	 *  submits the form the button belongs to). */
 	binding?: string
 	side?: "top" | "bottom" | "left" | "right"
+	align?: "start" | "center" | "end"
 	children: React.ReactElement
 }
 
@@ -43,12 +44,12 @@ export function hintText(label: string, action?: KeyAction, binding?: string): s
 	return live ? `${label} (${live})` : label
 }
 
-export function Hint({ label, action, binding, side = "top", children }: HintProps) {
+export function Hint({ label, action, binding, side = "top", align, children }: HintProps) {
 	return (
 		<TooltipProvider>
 			<Tooltip>
 				<TooltipTrigger asChild>{children}</TooltipTrigger>
-				<TooltipContent side={side}>{hintText(label, action, binding)}</TooltipContent>
+				<TooltipContent side={side} align={align}>{hintText(label, action, binding)}</TooltipContent>
 			</Tooltip>
 		</TooltipProvider>
 	)
