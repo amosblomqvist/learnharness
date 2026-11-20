@@ -203,13 +203,21 @@ function ensureStoreId(root, disk = fs) {
 	return id;
 }
 
-/** @param {string | null} [expectedStoreId] */
-function writeConfiguredDataDirPath(configFile, dataDir, disk = fs, expectedStoreId = null) {
+class DataLocationRecoveryError extends Error {
+	name = "DataLocationRecoveryError";
+}
+
+/**
+ * @param {string | null} [expectedStoreId]
+ * @param {(warning: string) => void} [onUnflushed]
+ */
+function writeConfiguredDataDirPath(configFile, dataDir, disk = fs, expectedStoreId = null, onUnflushed) {
 	const parent = path.dirname(configFile);
 	const prior = disk.lstatSync(configFile, { throwIfNoEntry: false });
 	if (prior && (!prior.isFile() || prior.isSymbolicLink())) throw new Error("Unsafe data-location.json pointer.");
 	const previous = prior ? disk.readFileSync(configFile) : null;
 	let changed = false;
+	let storeId = null;
 	try {
 		if (!dataDir) {
 			if (!prior) return null;
@@ -220,7 +228,7 @@ function writeConfiguredDataDirPath(configFile, dataDir, disk = fs, expectedStor
 		}
 		const resolved = path.resolve(dataDir);
 		if (path.relative(canonicalPath(resolved, disk), resolved) !== "") throw new Error("The selected data folder changed.");
-		const storeId = expectedStoreId ?? ensureStoreId(resolved, disk);
+		storeId = expectedStoreId ?? ensureStoreId(resolved, disk);
 		verifyStore(resolved, storeId, disk);
 		disk.mkdirSync(parent, { recursive: true });
 		// Flush a newly created pointer directory's entry as well.
@@ -233,7 +241,28 @@ function writeConfiguredDataDirPath(configFile, dataDir, disk = fs, expectedStor
 				if (previous) replaceFile(configFile, previous, disk);
 				else { disk.unlinkSync(configFile); syncDirectory(parent, disk); }
 			} catch (rollback) {
-				throw new Error(`${error.message} Restoring the previous location also failed: ${rollback.message}`);
+				const detail = `${error.message} Restoring the previous location also failed: ${rollback.message}`;
+				let persisted;
+				try {
+					const stat = disk.lstatSync(configFile, { throwIfNoEntry: false });
+					if (stat && (!stat.isFile() || stat.isSymbolicLink())) throw new Error("Unsafe data-location.json pointer.");
+					persisted = stat ? disk.readFileSync(configFile) : null;
+				} catch (readError) {
+					throw new DataLocationRecoveryError(`${detail} Restart to recover the data folder: ${readError.message}`);
+				}
+				if (persisted === previous || (persisted && previous && persisted.equals(previous))) throw error;
+				try {
+					const pointer = persisted && parseDataLocationText(persisted.toString("utf8"));
+					if ((!pointer && !dataDir) || (pointer && dataDir &&
+						path.relative(pointer.dataDir, dataDir) === "" && pointer.storeId === storeId)) {
+						if (pointer) verifyStore(pointer.dataDir, storeId, disk);
+						onUnflushed?.(`The folder was switched, but its saved location could not be flushed. ${detail}`);
+						return storeId;
+					}
+				} catch (reconcileError) {
+					throw new DataLocationRecoveryError(`${detail} Restart to recover the data folder: ${reconcileError.message}`);
+				}
+				throw new DataLocationRecoveryError(`${detail} Restart to recover the data folder.`);
 			}
 		}
 		throw error;
@@ -282,7 +311,7 @@ async function resolveStartupDataLocation({ configFile, defaultDir, dialog, fsIm
 		try {
 			if (response === 2) {
 				const target = validateTarget(status.defaultDir, { defaultDir, appRoot, authFile, disk: fsImpl });
-				writeConfiguredDataDirPath(configFile, null, fsImpl);
+				writeConfiguredDataDirPath(configFile, null, fsImpl, null, log);
 				return { ...status, currentDir: target, configuredDir: null, storeId: null, unavailableConfiguredDir: null, recoveryReason: null };
 			}
 			const picked = await dialog.showOpenDialog({ title: "Select Data Folder", properties: ["openDirectory"] });
@@ -293,7 +322,7 @@ async function resolveStartupDataLocation({ configFile, defaultDir, dialog, fsIm
 			});
 			validateTree(target, fsImpl);
 			const configuredDir = path.relative(target, canonicalPath(defaultDir, fsImpl)) ? target : null;
-			const storeId = writeConfiguredDataDirPath(configFile, configuredDir, fsImpl);
+			const storeId = writeConfiguredDataDirPath(configFile, configuredDir, fsImpl, null, log);
 			return { ...status, currentDir: target, configuredDir, storeId, unavailableConfiguredDir: null, recoveryReason: null };
 		} catch (error) {
 			failure = `Could not select the data folder: ${error.message}`;
@@ -308,6 +337,6 @@ async function resolveStartupDataDir(options) {
 
 module.exports = {
 	STORE_MARKER, MANAGED_ITEMS, SENSITIVE_HOME_PATHS, isFullPath, canonicalPath, assertOrdinary, validateTarget, validateTree,
-	readPointer, readStoreId, verifyStore, ensureStoreId, syncDirectory, writeConfiguredDataDirPath,
+	readPointer, readStoreId, verifyStore, ensureStoreId, syncDirectory, writeConfiguredDataDirPath, DataLocationRecoveryError,
 	inspectDataLocation, resolveStartupDataDir, resolveStartupDataLocation,
 };

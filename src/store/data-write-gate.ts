@@ -3,6 +3,7 @@ import fs from "node:fs";
 /** Shared across the separately bundled Next route modules in this process. */
 interface Gate {
 	migrating: boolean;
+	recoveryReason?: string;
 	activities: number;
 	filesystem?: {
 		verify(file?: string): void;
@@ -17,10 +18,19 @@ export class DataDirectoryBusyError extends Error {
 }
 
 export function dataMigrationInProgress(): boolean {
-	return gate.migrating;
+	return gate.migrating || Boolean(gate.recoveryReason);
+}
+
+export function dataWriteRecoveryReason(): string | undefined {
+	return gate.recoveryReason;
+}
+
+export function blockDataWritesForRecovery(reason: string): void {
+	gate.recoveryReason = reason;
 }
 
 export function assertDataWritesAdmitted(): void {
+	if (gate.recoveryReason) throw new DataDirectoryBusyError(gate.recoveryReason);
 	if (gate.migrating) throw new DataDirectoryBusyError("A data folder change is in progress. Try again when it finishes.");
 }
 

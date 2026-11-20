@@ -434,6 +434,68 @@ describe("data directory audit regressions", () => {
 		} finally { failure.mock.restore(); }
 	});
 
+	it("adopts the persisted destination when flushing and rolling back the pointer both fail", { skip: process.platform === "win32" }, async () => {
+		const origin = path.join(scratchRoot, "unflushed-origin");
+		const target = path.join(scratchRoot, "unflushed-target");
+		fs.mkdirSync(origin);
+		const oldId = writeConfiguredDataDirPath(configFile, origin);
+		config.setActiveDataDir(origin, { configuredDir: origin, storeId: oldId });
+		fs.writeFileSync(path.join(origin, "settings.json"), "{}");
+		const rename = fs.renameSync;
+		const open = fs.openSync;
+		let published = false;
+		const renameFault = mock.method(fs, "renameSync", (from: fs.PathLike, to: fs.PathLike) => {
+			if (to === configFile && published) throw new Error("injected rollback rename failure");
+			rename(from, to);
+			if (to === configFile) published = true;
+		});
+		const flushFault = mock.method(fs, "openSync", (...args: Parameters<typeof open>) => {
+			if (published && args[0] === path.dirname(configFile)) throw new Error("injected directory flush failure");
+			return open(...args);
+		});
+		try {
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: origin });
+			assert.equal(response.status, 200);
+			assert.match((await response.json()).cleanupFailures.join("\n"), /location could not be flushed/);
+			assert.equal(config.PATHS.data, target);
+			assert.equal(inspectDataLocation({ configFile, defaultDir: defaultDataDir }).currentDir, target);
+			assert.ok(fs.existsSync(path.join(origin, "settings.json")));
+			assert.doesNotThrow(() => config.assertDataStoreWritable());
+		} finally {
+			flushFault.mock.restore();
+			renameFault.mock.restore();
+		}
+	});
+
+	it("requires a restart and blocks writes when the persisted pointer cannot be reconciled", { skip: process.platform === "win32" }, () => {
+		const target = path.join(scratchRoot, "unreadable-pointer-target");
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+			import assert from 'node:assert/strict';
+			import fs from 'node:fs';
+			import path from 'node:path';
+			const target = ${JSON.stringify(target)};
+			const configFile = process.env.LH_DATA_CONFIG_FILE;
+			const config = await import('./config.ts');
+			const route = await import('./app/api/settings/data-dir/route.ts');
+			const open = fs.openSync;
+			const unlink = fs.unlinkSync;
+			const rename = fs.renameSync;
+			let published = false;
+			fs.renameSync = (...args) => { rename(...args); if (args[1] === configFile) published = true; };
+			fs.openSync = (...args) => {
+				if (published && [configFile, path.dirname(configFile)].includes(args[0])) throw new Error('injected open failure');
+				return open(...args);
+			};
+			fs.unlinkSync = (file) => { if (published && file === configFile) throw new Error('injected rollback failure'); unlink(file); };
+			const result = await route.POST(new Request('http://localhost', { method: 'POST', body:
+				JSON.stringify({ action: 'change', path: target, copyMode: 'switch' }) }));
+			assert.equal(result.status, 500, await result.text());
+			assert.match((await (await route.GET()).json()).recoveryReason, /Restart to recover/);
+			assert.throws(() => config.assertDataStoreWritable(), /Restart to recover/);
+		`], { encoding: "utf8", timeout: 30_000 });
+		assert.equal(child.status, 0, child.stderr);
+	});
+
 	it("recovery keeps prompting after a failed pointer write and leaves the original pointer intact", async () => {
 		const ejected = path.join(scratchRoot, "native-ejected");
 		const replacement = path.join(scratchRoot, "native-replacement");

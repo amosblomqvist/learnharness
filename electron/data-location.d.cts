@@ -41,5 +41,6 @@ export function readStoreId(root: string, disk?: typeof fs): string | null;
 export function verifyStore(root: string, storeId: string | null, disk?: typeof fs): void;
 export function ensureStoreId(root: string, disk?: typeof fs): string;
 export function syncDirectory(root: string, disk?: typeof fs): void;
-export function writeConfiguredDataDirPath(file: string, directory: string | null, disk?: typeof fs, expectedStoreId?: string | null): string | null;
+export class DataLocationRecoveryError extends Error {}
+export function writeConfiguredDataDirPath(file: string, directory: string | null, disk?: typeof fs, expectedStoreId?: string | null, onUnflushed?: (warning: string) => void): string | null;
 export function inspectDataLocation(options: LocationOptions): DataLocation;

@@ -14,8 +14,8 @@ import { hasExtractionsInFlight } from "../agent/subagents/extraction.ts";
 import { hasLiveJobs } from "../agent/subagents/aborts.ts";
 import { isSensitivePath } from "../agent/tools/fs-shared.ts";
 import { emit } from "../core/events.ts";
-import { beginDataMigration, DataDirectoryBusyError } from "../store/data-write-gate.ts";
-import { assertOrdinary, canonicalPath, inspectDataLocation, readPointer, readStoreId, validateTarget, validateTree, verifyStore, writeConfiguredDataDirPath } from "../../electron/data-location.cjs";
+import { beginDataMigration, blockDataWritesForRecovery, dataWriteRecoveryReason, DataDirectoryBusyError } from "../store/data-write-gate.ts";
+import { assertOrdinary, canonicalPath, DataLocationRecoveryError, inspectDataLocation, readStoreId, validateTarget, validateTree, verifyStore, writeConfiguredDataDirPath } from "../../electron/data-location.cjs";
 import { cleanOldData, createTargetDirectory, stageDataCopy } from "./data-directory-files.ts";
 import { disposePluginsForDataChange } from "./plugins.ts";
 import { hasRunningCompactions } from "./compaction.ts";
@@ -61,7 +61,12 @@ export type DataDirectoryRequest =
 	  };
 
 export function getDataDirectoryStatus(): DataDirectoryStatus {
-	return { ...getDataLocationState(), platform: process.platform };
+	const state = getDataLocationState();
+	const recoveryReason = dataWriteRecoveryReason();
+	return {
+		...state, platform: process.platform,
+		...(recoveryReason ? { unavailableConfiguredDir: state.currentDir, recoveryReason } : {}),
+	};
 }
 
 function expandHomePath(rawPath: string, home: string): string {
@@ -203,23 +208,35 @@ export async function mutateDataDirectory(raw: unknown, home: string = os.homedi
 			throw new DataDirectoryInputError(`Could not prepare "${targetDir}": ${(error as Error).message}`);
 		}
 		let storeId: string | null;
+		let durabilityWarning: string | undefined;
 		try {
-			storeId = writeConfiguredDataDirPath(DATA_CONFIG_FILE, isDefaultTarget ? null : targetDir, fs, staged?.storeId);
+			staged?.checkTarget();
+			storeId = writeConfiguredDataDirPath(DATA_CONFIG_FILE, isDefaultTarget ? null : targetDir, fs, staged?.storeId, warning => {
+				durabilityWarning = warning;
+			});
 		} catch (error) {
+			if (error instanceof DataLocationRecoveryError) {
+				blockDataWritesForRecovery(error.message);
+				throw error;
+			}
 			const message = `Could not save the data folder location: ${(error as Error).message}`;
-			if (staged) {
-				try {
-					const persisted = readPointer(DATA_CONFIG_FILE)?.dataDir ?? defaultDir;
-					if (path.relative(persisted, targetDir) !== "") await staged.rollback();
-				} catch (rollback) {
-					throw new Error(`${message} Could not restore the destination: ${(rollback as Error).message}`);
-				}
+			try {
+				await staged?.rollback();
+			} catch (rollback) {
+				throw new Error(`${message} Could not restore the destination: ${(rollback as Error).message}`);
 			}
 			throw new Error(message);
 		}
-		setActiveDataDir(targetDir, { configuredDir: isDefaultTarget ? null : targetDir, storeId });
+		try {
+			staged?.checkTarget();
+			setActiveDataDir(targetDir, { configuredDir: isDefaultTarget ? null : targetDir, storeId });
+		} catch (error) {
+			const message = `Restart to recover the data folder. ${(error as Error).message}`;
+			blockDataWritesForRecovery(message);
+			throw new DataLocationRecoveryError(message);
+		}
 		changed = true;
-		const cleanupFailures = deleteOld && staged
+		const cleanupFailures = durabilityWarning ? [durabilityWarning] : deleteOld && staged
 			? process.platform === "win32"
 				? ["Old data was kept because directory durability cannot be verified on Windows."]
 				: await cleanOldData(previousDir, targetDir, staged.expected, () => {
