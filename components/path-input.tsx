@@ -43,6 +43,12 @@ type Controller = {
  * A controlled plaintext editor. Only the source string is state; chips are atomic
  * views of it. React never reconciles the editable DOM after a native mutation.
  */
+/** The field's own box classes (the question card's layout stand-in
+ *  rebuilds an empty field from them). */
+export function pathInputClassName(singleLine: boolean): string {
+	return cn("block w-full min-w-0 outline-none data-[empty=true]:before:pointer-events-none data-[empty=true]:before:text-muted-foreground data-[empty=true]:before:content-[attr(data-placeholder)]", singleLine ? "whitespace-pre break-normal overflow-x-auto overflow-y-hidden" : "whitespace-pre-wrap break-words overflow-y-auto");
+}
+
 export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(function PathInput({
 	value, onValueChange, placeholder, autoFocus, defaultDropTarget = false, fileInsertion = true, singleLine = false, className,
 	onKeyDown, onFocus, onBlur, onInput, onPaste, onCopy, onCut,
@@ -331,7 +337,7 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 			data-empty={initial.current.value.length === 0 ? "true" : "false"}
 			data-file-path-default={fileInsertion && defaultDropTarget ? "" : undefined}
 			data-placeholder={placeholder}
-			className={cn("block w-full min-w-0 outline-none data-[empty=true]:before:pointer-events-none data-[empty=true]:before:text-muted-foreground data-[empty=true]:before:content-[attr(data-placeholder)]", singleLine ? "whitespace-pre break-normal overflow-x-auto overflow-y-hidden" : "whitespace-pre-wrap break-words overflow-y-auto", className)}
+			className={cn(pathInputClassName(singleLine), className)}
 			onKeyDown={(event) => {
 				if (composing.current || event.nativeEvent.isComposing || event.keyCode === 229) { event.stopPropagation(); return; }
 				onKeyDown?.(event);

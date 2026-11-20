@@ -223,6 +223,8 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			codeLigatures: appearance.codeLigatures ?? factoryAppearance.codeLigatures,
 			sessionNameSerif: appearance.sessionNameSerif ?? factoryAppearance.sessionNameSerif,
 			compactSessionList: appearance.compactSessionList ?? factoryAppearance.compactSessionList,
+			transcriptMaxWidth: appearance.transcriptMaxWidth ?? factoryAppearance.transcriptMaxWidth,
+			adaptiveQuestions: appearance.adaptiveQuestions ?? factoryAppearance.adaptiveQuestions,
 			mdRendering: {
 				headingWeight: md.headingWeight ?? factoryMd.headingWeight,
 				boldColor: md.boldColor ?? factoryMd.boldColor,

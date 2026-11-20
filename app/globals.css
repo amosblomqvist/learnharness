@@ -180,6 +180,16 @@ body {
 	line-height: var(--lh-prose-leading);
 }
 
+/* Transcript width (Appearance → Transcript width; session pages). The
+   setting X (rem, on <html> as --lh-transcript-max) is a DOCK-container
+   width: at X the transcript's text column lines up with the edges of a
+   bottom-region card X wide (its px-4 + borders), so the column box is
+   X - 2rem of content plus its own px-6 (3rem). Unset = Full: the calc is
+   invalid at computed-value time and max-width falls back to none. */
+.lh-transcript-column {
+	max-width: calc(var(--lh-transcript-max) + 1rem);
+}
+
 /* Session-name weight (owner, fix wave round 3): with the serif toggle
    OFF, --font-title resolves to the prose font — Source Sans 3 is loaded
    as a VARIABLE font, and without an explicit weight the titles render at
@@ -303,6 +313,67 @@ body {
 .katex-display {
 	overflow-x: auto;
 	overflow-y: hidden;
+}
+
+/* Inline code and inline math never wrap on the session page (owner,
+ * session-appearance-layout): a split box or formula reads badly. A span
+ * moves to the next line whole; one wider than its column scrolls sideways
+ * as the last resort (the adaptive question layout widens the card first).
+ * inline-block + baseline-source:first keeps the text on the line's
+ * baseline; a scroller's baseline would otherwise drop to its bottom edge.
+ * (KaTeX's glyph room: below.) */
+[data-session-surface] [data-streamdown="inline-code"],
+[data-session-surface] :not(.katex-display) > .katex {
+	display: inline-block;
+	max-width: 100%;
+	overflow-x: auto;
+	overflow-y: hidden;
+	white-space: nowrap;
+	vertical-align: baseline;
+	baseline-source: first;
+}
+/* A table's wrapper scrolls sideways only. Inline formulas' glyph room
+ * (the padding above) may reach past the last row by a fraction of a pixel,
+ * which would otherwise make the wrapper scroll vertically. */
+[data-session-surface] [data-testid="md-table"] > .overflow-x-auto {
+	overflow-y: hidden;
+}
+
+/* Punctuation touching a span stays on its line (components/md-nobreak.ts):
+ * a line may otherwise break between an inline-block and a comma. The glued
+ * GROUP is then the unit that moves and, when wider than its column,
+ * scrolls — the punctuation included, never clipped outside it. Inside a
+ * group the spans themselves neither scroll nor cap their width. */
+[data-session-surface] .lh-nobreak {
+	display: inline-block;
+	max-width: 100%;
+	overflow-x: auto;
+	overflow-y: hidden;
+	white-space: nowrap;
+	vertical-align: baseline;
+	baseline-source: first;
+}
+[data-session-surface] .lh-nobreak [data-streamdown="inline-code"],
+[data-session-surface] .lh-nobreak .katex {
+	max-width: none;
+	overflow: visible;
+}
+/* KaTeX glyphs overhang their boxes: the padding (cancelled by the negative
+ * margin, so lines keep their height) keeps the clip and the scroller off
+ * them — on the formula's own scroller, or on its group's. */
+[data-session-surface] :not(.katex-display) > .katex,
+[data-session-surface] .lh-nobreak:has(.katex) {
+	padding: 0.5em 0.2em;
+	margin: -0.5em -0.2em;
+	/* The side margins shrink a shrink-to-fit parent (an option label) by
+	   0.4em; the cap gives that back so a formula never scrolls in its own
+	   label. The margin box still never exceeds the column. */
+	max-width: calc(100% + 0.4em);
+}
+/* (Display math is a block, never glued: every formula in a group is inline.) */
+[data-session-surface] .lh-nobreak .katex {
+	padding: 0;
+	margin: 0;
 }
 
 /* ============================================================

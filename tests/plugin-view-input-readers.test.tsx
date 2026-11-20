@@ -19,8 +19,9 @@ for (const toolName of ["quiz", "ask_user_question"] as const) test(`view reads 
   try {
     await render(true); assert.ok(reader.current);
     const first = reader.current!();
-    const labels = Array.from(host.querySelectorAll('[role="radio"]')).slice(0, first.question.options.length).map(button => (button.textContent ?? "").trim());
-    assert.deepEqual(labels, first.question.options.map(option => option.label + (toolName === "ask_user_question" && option.description ? option.description.replaceAll("*", "") : "")));
+    const radios = Array.from(host.querySelectorAll('[role="radio"]')).slice(0, first.question.options.length);
+    assert.deepEqual(radios.map(button => button.querySelector('[data-option-letter]')?.textContent), ["A", "B", "C"]);
+    assert.deepEqual(radios.map(button => button.lastElementChild?.textContent), first.question.options.map(option => option.label + (toolName === "ask_user_question" && option.description ? option.description.replaceAll("*", "") : "")));
     assert.equal(first.question.context, input.details);
     if (toolName === "ask_user_question") assert.equal(first.question.options[0]!.description, "**Detail A**");
     await act(async () => {

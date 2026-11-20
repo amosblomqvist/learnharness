@@ -212,6 +212,13 @@ describe("the prober's quiz: no nodeId field at all", () => {
 // ─── the description example (owner, 2026-10-12) ─────────────────────────
 
 describe("quiz tool descriptions carry the complete, phase-correct example", () => {
+	it("describes the same letter mapping for quiz, probe, and ask", () => {
+		const quiz = teachQuizToolFor({ chatId: newChat("Letter mapping"), chatStore });
+		const sentence = "When single-select options are lettered, the result’s `optionOrder` maps each displayed letter to its one-based position in your original `options` array, and each selected answer includes its displayed `letter`.";
+		for (const tool of [quiz, probeQuizTool, askUserQuestionTool]) {
+			assert.equal(tool.description.split(sentence).length, 2, tool.name);
+		}
+	});
 	it("the canonical body is schema-valid and authoring-clean (never ship a broken exemplar)", () => {
 		assert.deepEqual(quizInputProblems(quizExampleBody), []);
 		assert.equal(Value.Check(probeQuizInputSchema, quizExampleBody), true);
