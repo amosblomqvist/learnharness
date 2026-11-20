@@ -505,6 +505,9 @@ class ClaudeProcess implements LiveProcess {
 	}
 
 	fail(message: string): void {
+		// The bridge stays open until close. A late callback must not restore
+		// a retired continuation or replace an already queued failure.
+		if (this.stopping || this.closed) return;
 		// A parallel request can fail after the admitted slice was handed to
 		// Pi. Retain that failure for its continuation instead of silently
 		// replaying and hiding the compatibility error.

@@ -1349,6 +1349,36 @@ for (const worker of [false, true]) test(`a parallel identity failure after a ${
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
+test("a late MCP compatibility error cannot restore a cancelled worker continuation", { timeout: 8000 }, async t => {
+	const retiring = createFakeRun(t, [JSON.stringify({ fake: "ignore-term" }), ...toToolUseMessage([HELD_READ]),
+		JSON.stringify({ fake: "start-call", ...HELD_READ }), JSON.stringify({ fake: "wait-for-message" }),
+		JSON.stringify({ fake: "call", name: HELD_READ.name, arguments: HELD_READ.arguments })]); // Missing tool identity.
+	const fresh = createFakeRun(t, readFixtureLines("text.jsonl"));
+	const transport = admittedClaude((args, options) => (retiring.calls.length === 0 ? retiring : fresh).runClaude(args, options));
+	const controller = new AbortController();
+	const worker = createWorkerRequestScope(transport, controller.signal);
+	t.after(() => worker.close());
+	const parked = await runTurn(worker.streamFn, [HI], { signal: controller.signal });
+	const retired = getOnlyCall(retiring.calls);
+	let stderr = "";
+	retired.child.stderr.on("data", chunk => { stderr += String(chunk); });
+	controller.abort();
+	worker.close();
+	assert.equal(retired.child.killed, true, "retirement has signalled the child");
+	retired.child.send("send late incompatible call");
+	await assertCleanedUp(retired);
+	assert.match(stderr, /compatibility error: MCP calls must include a unique claudecode\/toolUseId/,
+		"the authenticated request reached the compatibility callback during shutdown");
+	await assert.rejects(fetch(getMcpUrl(retired)), "the retired bridge is closed");
+
+	// A synthetic probe reuses the exact lookup key; real worker runs use new IDs.
+	const probe = createWorkerRequestScope(transport);
+	t.after(() => probe.close());
+	const reply = await runTurn(probe.streamFn, [HI, parked, toToolResult(HELD_READ, "evidence")]);
+	assert.equal(getText(reply), "hello there");
+	await assertCleanedUp(getOnlyCall(fresh.calls));
+});
+
 test("output after MCP admission fails continuation instead of silently replaying", async (t) => {
 	const call: ToolUse = { id: "toolu_moved_on", name: "read", arguments: { path: "a" } };
 	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([call]),
