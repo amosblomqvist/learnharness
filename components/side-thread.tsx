@@ -121,7 +121,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				data-testid="side-thread-header" onPointerDown={onDragStart}>
 				{onDragStart && <GripVertical aria-hidden="true" className="-ml-1 size-3.5 text-muted-foreground" />}
 				<MessageCircleQuestion aria-hidden="true" className="size-3.5 text-muted-foreground" />
-				<span className="flex-1 font-ui text-xs text-muted-foreground">{state.learningMode === "feynman" ? "Feynman practice · one question at a time" : "Side question"}</span>
+				<span className="flex-1 font-ui text-xs text-muted-foreground">{state.learningMode === "feynman" ? "Feynman practice: one question at a time" : "Side question"}</span>
 				<Button type="button" size="icon-xs" variant="ghost" aria-label={state.mode === "popover" ? "Dock side conversation" : "Float side conversation"}
 					title={state.mode === "popover" ? "Pin to side" : "Unpin to float"} onClick={state.mode === "popover" ? onExpand : onFloat}>
 					{state.mode === "popover" ? <Pin aria-hidden="true" /> : <PinOff aria-hidden="true" />}

@@ -72,7 +72,7 @@ try {
 	await page.waitForSelector('[data-testid="side-thread-input"]'); assert.equal(asks.length, 0); assert.equal(main.length, 0);
 	await page.click('[aria-label="Close side conversation"]');
 	await click(page, "Explain it to AI");
-	await page.waitForFunction(() => document.body.innerText.includes("Feynman practice · one question at a time"));
+	await page.waitForFunction(() => document.body.innerText.includes("Feynman practice: one question at a time"));
 	await page.type('[data-testid="side-thread-input"]', "My explanation is that the first option follows from the definition.");
 	await page.click('[aria-label="Send side question"]');
 	await page.waitForFunction(() => document.body.innerText.includes("Synthetic retry fixture"));
