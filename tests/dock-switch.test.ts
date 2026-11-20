@@ -11,10 +11,12 @@ let frames: (() => void)[] = [];
 Object.assign(win, {
 	requestAnimationFrame: (cb: () => void) => { frames.push(cb); return frames.length; },
 	cancelAnimationFrame: () => {},
-	getComputedStyle: () => ({ overflowY: "auto" }),
+	innerHeight: 600,
+	innerWidth: 800,
+	getComputedStyle: (el: Element) => ({ overflowY: el.hasAttribute("data-dock-scroll-area") || el.hasAttribute("data-dock-viewport") ? "auto" : "visible" }),
 });
 Object.assign(globalThis, { window: win, document: dom.document, HTMLElement: win.HTMLElement });
-const { captureReadingPosition, holdAcrossSwitch, restoreReadingPosition, revealFocused, scrollNearest, trackReadingPosition } = await import("../components/dock-switch.ts");
+const { captureReadingPosition, holdAcrossSwitch, restoreReadingPosition, revealFocused, scrollNearest, trackReadingPosition, visibleFocused } = await import("../components/dock-switch.ts");
 
 type Box = { top: number; height: number; scrollHeight?: number };
 const boxes = new WeakMap<Element, Box>();
@@ -87,6 +89,24 @@ test("revealFocused: only the focused control inside the card; never scrolls pas
 	assert.equal(outside.scrollTop, 0, "an ancestor above the dock's viewport is never scrolled");
 	Reflect.deleteProperty(dom.document, "activeElement");
 	dom.document.body.replaceChildren();
+});
+
+test("only visible focus gets priority: scroll clips can hide a focused editor without blurring it", () => {
+	const { viewport, root, area, editor } = dock(772);
+	Object.defineProperty(dom.document, "activeElement", { configurable: true, value: editor });
+	try {
+		assert.equal(visibleFocused(root), null, "clipped by the answer area");
+		area.scrollTop = 490;
+		assert.equal(visibleFocused(root), editor, "part of the editor is visible");
+		area.scrollTop = 500;
+		assert.equal(visibleFocused(root), editor, "the whole editor is visible");
+		boxes.get(viewport)!.height = 250;
+		assert.equal(visibleFocused(root), null, "an outer clip also counts");
+		assert.equal(dom.document.activeElement, editor, "the focus snapshot never blurs the editor");
+	} finally {
+		Reflect.deleteProperty(dom.document, "activeElement");
+		dom.document.body.replaceChildren();
+	}
 });
 
 test("moving from options in stacked layout keeps the end of the question beside the visible option", () => {

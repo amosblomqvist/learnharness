@@ -26,6 +26,33 @@ export function scrollNearest(scroller: HTMLElement, el: Element, margin = 8) {
 	else if (e.bottom > v.bottom - margin) scroller.scrollTop += Math.min(e.bottom - (v.bottom - margin), e.top - (v.top + margin));
 }
 
+/** Snapshot focus before the switch, but only if some of the control is
+ *  actually visible. Scrolling away from an editor does not blur it. */
+export function visibleFocused(root: HTMLElement): Element | null {
+	const doc = root.ownerDocument;
+	const win = doc.defaultView;
+	const el = doc.activeElement;
+	if (!win || !el || el === root || !root.contains(el)) return null;
+	if (win.getComputedStyle(el).visibility === "hidden") return null;
+	const rect = el.getBoundingClientRect();
+	let top = Math.max(rect.top, 0), bottom = Math.min(rect.bottom, win.innerHeight);
+	let left = Math.max(rect.left, 0), right = Math.min(rect.right, win.innerWidth);
+	for (let p = el.parentElement; p && top < bottom && left < right; p = p.parentElement) {
+		const { overflowX, overflowY } = win.getComputedStyle(p);
+		if (overflowY && overflowY !== "visible") {
+			const clip = view(p);
+			top = Math.max(top, clip.top);
+			bottom = Math.min(bottom, clip.bottom);
+		}
+		if (overflowX && overflowX !== "visible") {
+			const edge = p.getBoundingClientRect().left + p.clientLeft;
+			left = Math.max(left, edge);
+			right = Math.min(right, edge + p.clientWidth);
+		}
+	}
+	return top < bottom && left < right ? el : null;
+}
+
 /** Show the focused control inside `root` again: each scrolling ancestor,
  *  innermost first, up to the dock's own viewport (its whole-card scroll in
  *  very short windows). Nothing outside the dock ever scrolls. */
