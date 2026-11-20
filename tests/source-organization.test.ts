@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { it } from "node:test";
-import { applyOrganizationAction, canMoveFolder, emptySourceOrganization, folderIsEmpty, parseOrganizationAction, parseSourceOrganization, placeImportedSource } from "../src/core/source-organization.ts";
+import { applyOrganizationAction, canMoveFolder, chainSourceDirectory, emptySourceOrganization, folderIsEmpty, parseOrganizationAction, parseSourceOrganization, placeImportedSource } from "../src/core/source-organization.ts";
 import { sourceFileLabel } from "../src/core/source-label.ts";
 
 let sequence = 0;
@@ -13,6 +13,21 @@ const apply = (state: ReturnType<typeof emptySourceOrganization>, raw: unknown, 
 
 it("labels remove only the final extension, retaining spelling, punctuation and ordering prefixes", () => {
 	for (const [path, label] of [["notes/09_chapter3normal.md", "09_chapter3normal"], ["My_Notes.v2.pdf", "My_Notes.v2"], ["x/a-b.txt", "a-b"], [".hidden", ".hidden"], ["README", "README"]]) assert.equal(sourceFileLabel(path!), label);
+});
+
+it("chains projection hides only explicitly marked practice sources without mutating source or organization data", () => {
+	const state = placeImportedSource(emptySourceOrganization(), "practice", "A/practice.md", fresh);
+	const sources = [
+		{ id: "practice", kind: "chat" as const, chatKind: "practice" as const, label: "Practice", createdAt: "now" },
+		{ id: "teach", kind: "chat" as const, chatKind: "teach" as const, label: "Teach", createdAt: "now" },
+		{ id: "legacy", kind: "chat" as const, label: "Legacy teach", createdAt: "now" },
+		{ id: "notes", kind: "notes" as const, label: "Notes", createdAt: "now" },
+	];
+	const directory = { organization: state, sources }, before = structuredClone(directory);
+	const view = chainSourceDirectory(directory);
+	assert.deepEqual(view.sources.map((s) => s.id), ["teach", "legacy", "notes"]);
+	assert.equal(view.organization, state); assert.deepEqual(directory, before);
+	assert.equal(folderIsEmpty(view.organization, state.folders[0]!.id, new Set(sources.map((s) => s.id))), false);
 });
 
 it("folder import builds only needed ancestors, distinguishing same basenames by source ID", () => {

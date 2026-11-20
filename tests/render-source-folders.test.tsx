@@ -3,6 +3,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import { it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
+import { parseHTML } from "linkedom";
 import { ChainTableBody } from "../components/chain-table.tsx";
 import { DeleteSourceBody } from "../components/delete-source-dialog.tsx";
 import { sourceNameMatches } from "../components/source-folder-tree.tsx";
@@ -53,6 +54,37 @@ it("collapsed folders have no dangling rail, while expanded folders reuse the so
 	assert.match(html, /data-testid="folder-thread-f1"[^>]*bottom-\[8px\][^>]*top-\[23px\]/);
 	assert.doesNotMatch(html, /data-testid="folder-thread-f2"/);
 });
+it("shared presentation preserves deep folder rows, direct controls and native guide/column geometry", () => {
+	const deepDirectory: SourceDirectory = {
+		...directory,
+		organization: {
+			...directory.organization,
+			folders: [...directory.organization.folders,
+				{ id: "f3", name: "Section", parentId: "f2", createdAt: "2026-10-30" },
+				{ id: "f4", name: "Topic", parentId: "f3", createdAt: "2026-10-30" },
+			],
+			placements: { notes: { folderId: "f4", name: "Named book" } },
+		},
+	};
+	const { document } = parseHTML(render({ directory: deepDirectory, expandedClusters: new Set(["f1", "f2", "f3", "f4"]) }));
+	for (const [depth, id] of ["f1", "f2", "f3", "f4"].entries()) {
+		const row = document.querySelector<HTMLElement>(`[data-testid="folder-row-${id}"]`)!;
+		assert.equal(row.tagName, "DIV");
+		assert.equal(row.getAttribute("data-chain-nav-row"), JSON.stringify(["folder", id]));
+		assert.equal(row.getAttribute("data-chain-nav-depth"), String(depth));
+		assert.equal(row.style.paddingLeft, `${12 + depth * 36}px`);
+		assert.equal(document.querySelector(`[data-testid="folder-checkbox-${id}"]`)?.parentElement, row);
+		const disclosure = document.querySelector(`[data-testid="folder-toggle-${id}"]`)!;
+		assert.equal(disclosure.parentElement, row);
+		assert.equal(disclosure.getAttribute("aria-expanded"), "true");
+		assert.doesNotMatch(disclosure.outerHTML, /rounded|transition-|hover:/);
+		assert.equal(row.querySelectorAll(":scope > .w-14").length, 1);
+		assert.equal(row.querySelectorAll(":scope > .w-20").length, 1);
+		assert.equal(document.querySelector<HTMLElement>(`[data-testid="folder-thread-${id}"]`)?.style.left, `${37 + depth * 36}px`);
+	}
+	assert.equal(document.querySelector<HTMLElement>('[data-testid="cluster-group-notes"]')?.style.marginLeft, "144px");
+});
+
 it("re-import record dates do not change existing graph groups' Created dates", () => {
 	const newer = { ...directory, sources: directory.sources.map((s) => s.id === "notes" ? { ...s, createdAt: "2099-01-01" } : s) };
 	const html = render({ nodes, directory: newer, expandedClusters: new Set(["f1", "f2"]) });
@@ -88,6 +120,51 @@ it("source and folder names are searchable without needing any extracted nodes",
 	assert.equal(sourceNameMatches(directory, "notes", "Named book", "xyzxyz"), false);
 	assert.match(render({ query: "Not yet" }), /Not yet extracted/);
 });
+it("both trees hide empty and graph-backed practice sources without suppressing their shared premises in visible sources", () => {
+	const withPractice: SourceDirectory = { ...directory, sources: [...directory.sources,
+		{ id: "practice", kind: "chat", chatKind: "practice", label: "Hidden practice", createdAt: "2026-10-29" },
+		{ id: "practice-empty", kind: "chat", chatKind: "practice", label: "Hidden empty practice", createdAt: "2026-10-29" },
+	] };
+	const practiceNode: GraphNode = { ...nodes[0]!, id: "historical", provenance: [{ chatId: "practice", messageId: "m" }] };
+	const hiddenOnly: GraphNode = { ...practiceNode, id: "practice-only" };
+	const chains = [{ id: "arg_visible", premises: [practiceNode.id], conclusion: "a", provenance: [{ chatId: "notes", messageId: "m" }], createdAt: "2026-10-29" }];
+	for (const selectMode of [false, true]) {
+		for (const query of ["", "Hidden", "historical", "Course"]) {
+			const html = render({ selectMode, query, directory: withPractice, nodes: [...nodes, practiceNode, hiddenOnly], chains, expandedClusters: new Set(["f1", "f2", "notes", "practice"]), expandedChains: new Set(["arg_visible"]) });
+			assert.doesNotMatch(html, /cluster-group-practice|cluster-checkbox-practice|source-icon-practice|Hidden practice|Hidden empty practice/);
+			assert.match(html, /3 chains · 4 nodes/, "graph-wide counts still describe stored knowledge, not only visible sources");
+			if (!query) { assert.match(html, /chain-row-arg_visible/); assert.match(html, /prop-row-historical/); assert.match(html, /data-testid="folder-checkbox-f1"/); }
+			assert.doesNotMatch(html, /prop-row-practice-only|chain-row-practice-only/);
+		}
+	}
+});
+it("empty names and book icons use stronger matching dimming in both trees and expansion states, without dimming folders or disabling rows", () => {
+	for (const selectMode of [false, true]) for (const open of [false, true]) {
+		const { document } = parseHTML(render({ selectMode, nodes, expandedClusters: new Set(["f1", "f2", ...(open ? ["chat", "notes"] : [])]) }));
+		const empty = document.querySelector('[data-testid="cluster-checkbox-chat"]')!.closest('[data-chain-nav-row]')!;
+		const populated = document.querySelector('[data-testid="cluster-checkbox-notes"]')!.closest('[data-chain-nav-row]')!;
+		assert.match(empty.querySelector('[title="Rename"]')!.className, /text-muted-foreground\/60/);
+		const emptyIcon = empty.querySelector('[data-source-icon]')!;
+		assert.equal(emptyIcon.classList.contains("text-muted-foreground/60"), true);
+		assert.equal(emptyIcon.getAttribute("aria-expanded"), String(open));
+		assert.equal(emptyIcon.querySelector("svg")!.classList.contains("lucide-book-open"), open);
+		assert.equal(populated.querySelector('[data-source-icon]')!.classList.contains("text-muted-foreground/60"), false);
+		assert.doesNotMatch(populated.querySelector('[title="Rename"]')!.className, /text-muted-foreground/);
+		assert.doesNotMatch(empty.className, /opacity-|text-muted-foreground/);
+		assert.equal(empty.getAttribute("draggable"), "true");
+		if (!selectMode) assert.equal(empty.querySelector("input")!.hasAttribute("disabled"), false);
+		const folderName = document.querySelector('[data-testid="folder-row-f1"] [title="Rename"]')!;
+		assert.doesNotMatch(folderName.className, /text-muted-foreground/);
+		assert.equal(document.querySelector('[data-testid="folder-icon-f1"]')!.classList.contains("text-muted-foreground/60"), false);
+		const filtered = parseHTML(render({ selectMode, nodes, query: "Named book" })).document;
+		const name = filtered.querySelector('[data-testid="cluster-checkbox-notes"]')!.closest('[data-chain-nav-row]')!.querySelector('[title="Rename"]')!;
+		assert.doesNotMatch(name.className, /text-muted-foreground/);
+	}
+	const readOnly = parseHTML(render({ onOrganizationChange: undefined })).document;
+	assert.match(readOnly.querySelector('[data-testid="cluster-checkbox-chat"]')!.closest('[data-chain-nav-row]')!.textContent!, /Not yet extracted/);
+	assert.match(readOnly.querySelector('[data-testid="cluster-checkbox-chat"]')!.closest('[data-chain-nav-row]')!.innerHTML, /text-sm font-medium text-muted-foreground\/60/);
+});
+
 it("source confirmation explains shared-node survival and makes conversation deletion an unchecked opt-in", () => {
 	const html = renderToStaticMarkup(<DeleteSourceBody sources={directory.sources} folders={[]} deleteSessions={false} onDeleteSessions={() => {}} busy={false} failure="" onClose={() => {}} onRun={() => {}} />);
 	assert.match(html, /Knowledge supported by other sources survives/); assert.match(html, /can be extracted again/);

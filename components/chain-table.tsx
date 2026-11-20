@@ -54,12 +54,10 @@
  * Read-only toward the graph.
  */
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
 import {
 	ChevronDownIcon,
-	ChevronRightIcon,
 	ChevronUpIcon,
-	DumbbellIcon,
 	BookIcon,
 	BookOpenIcon,
 	FolderPlusIcon,
@@ -68,14 +66,17 @@ import {
 	SearchIcon,
 	XIcon,
 } from "lucide-react";
-import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
+import { chainsForSelection, chainSourceDirectory, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
 import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection } from "@/src/core";
 import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree, type OrganizationChange } from "./source-folder-tree";
 import { chainRow, useChainNavigation } from "./chain-navigation";
 import { useServerEvent, useServerResync } from "./server-events";
 import { TopBar } from "@/components/top-bar";
+import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
 import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
+import { ToolContentResponse } from "@/components/ai-elements/message";
+import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeHeader, TreeSelectionSpacer, TreeSeparator, treeBranchLayout, treeColumnLayout, treeRowLayout } from "./tree-presentation";
 
 /** The sortable columns (owner ruling: all three — consistency). */
 export type ChainSortCol = "name" | "props" | "created";
@@ -120,14 +121,18 @@ export function ChainTableBody({
 	onClose,
 	selectMode,
 	onSelect,
-	directory,
+	directory: fullDirectory,
 	onOrganizationChange,
 	selectedFolders = new Set<string>(),
 	selectedSources = new Set<string>(),
 	onToggleSource = () => {},
 	onToggleFolder = () => {},
 	keyboardActive = true,
+	sourceInventoryPending = false,
+	pickerChrome = false,
 }: {
+	sourceInventoryPending?: boolean;
+	pickerChrome?: boolean;
 	keyboardActive?: boolean;
 	directory?: SourceDirectory;
 	onOrganizationChange?: OrganizationChange;
@@ -179,15 +184,21 @@ export function ChainTableBody({
 		});
 	};
 	const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+	const directory = useMemo(() => fullDirectory && chainSourceDirectory(fullDirectory), [fullDirectory]);
+	const hiddenSourceIds = useMemo(() => new Set(fullDirectory?.sources.filter((s) => s.chatKind === "practice").map((s) => s.id)), [fullDirectory]);
 	const sourceRecords = useMemo(() => new Map(directory?.sources.map((s) => [s.id, s])), [directory]);
 	const matchesSource = useCallback((birth: string) => sourceNameMatches(directory, birth,
 		sourceRecords.get(birth)?.label ?? sessions[birth] ?? (fileSources[birth] === undefined ? null : sourceFileLabel(fileSources[birth])), query),
 	[directory, sourceRecords, sessions, fileSources, query]);
 	const chains = useMemo(() => chainsForSelection(nodes, storedChains), [nodes, storedChains]);
+	// Filter source groups, not global nodes: shared premises remain visible
+	// in teaching/notes groups. Keep the graph-wide header and pick set intact.
+	const sourceChains = useMemo(() => chains.filter((chain) =>
+		!hiddenSourceIds.has(byId.get(chain.conclusion)?.provenance[0]?.chatId ?? "")), [chains, byId, hiddenSourceIds]);
 	const searching = query.trim() !== "";
 	const allSourceNodes = useMemo(() => {
 		const membership = new Map<string, Set<string>>();
-		for (const chain of chains) {
+		for (const chain of sourceChains) {
 			const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
 			if (!birth) continue;
 			const members = membership.get(birth) ?? new Set<string>();
@@ -195,13 +206,13 @@ export function ChainTableBody({
 			membership.set(birth, members);
 		}
 		return membership;
-	}, [chains, byId]);
+	}, [sourceChains, byId]);
 
 	// The fuzzy filter: a chain is visible when ANY member matches on
 	// name, aliases, or statement; chains rank by best member score.
 	const visibleChains = useMemo(() => {
-		if (!searching) return chains;
-		const scored = chains
+		if (!searching) return sourceChains;
+		const scored = sourceChains
 			.map((chain) => {
 				const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
 				let best: number | null = birth && matchesSource(birth) ? 0 : null;
@@ -218,12 +229,14 @@ export function ChainTableBody({
 		return scored
 			.sort((a, b) => b.best - a.best || (a.chain.id < b.chain.id ? -1 : 1))
 			.map(({ chain }) => chain);
-	}, [chains, byId, query, searching, matchesSource]);
+	}, [sourceChains, byId, query, searching, matchesSource]);
 
 	// Group the visible chains by their CONCLUSION's birth (owner ruling).
 	// Unlabeled births (provenance gone / never named) form one honest
 	// muted group, sorted last under name-sort.
 	const groups = useMemo(() => {
+		// Session kinds must arrive before provenance-only source rows can render.
+		if (sourceInventoryPending) return [];
 		const map = new Map<string, ClusterGroup>();
 		for (const source of directory?.sources ?? []) {
 			if (searching && !matchesSource(source.id)) continue;
@@ -281,7 +294,7 @@ export function ChainTableBody({
 			);
 		}
 		return list;
-	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource]);
+	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource, sourceInventoryPending]);
 
 	// The derived shape under the floating bar (the agents' ACTUAL input).
 	const derived = useMemo(() => {
@@ -304,7 +317,7 @@ export function ChainTableBody({
 			    chain table names nothing, so its bar carries counts + search +
 			    close only. Search + close carve out with lh-no-drag (the mask
 			    law: later in the DOM). */}
-			<TopBar>
+			<TopBar sidebarToggle={!pickerChrome}>
 				<span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">
 					{chains.length} {chains.length === 1 ? "chain" : "chains"} · {nodes.length} {nodes.length === 1 ? "node" : "nodes"}
 				</span>
@@ -343,13 +356,13 @@ export function ChainTableBody({
 			<div className="flex min-h-0 flex-1 flex-col overflow-y-auto">
 				{/* The TOP rule (owner round 5: the table is framed — a line under
 			    the header, a line under the last group, lines between groups). */}
-				<div className="sticky top-0 z-10 flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/80 px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground/70 backdrop-blur">
+				<TreeHeader sticky>
 					<button
 						type="button"
 						data-testid="sort-name"
 						onClick={() => onSort("name")}
 						aria-sort={sort.col === "name" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
-						className="flex flex-1 items-center gap-1 text-left transition-colors hover:text-foreground"
+						{...treeColumnLayout({ grow: true, align: "left", className: "flex items-center gap-1 transition-colors hover:text-foreground" })}
 					>
 						Name {dirIcon("name")}
 					</button>
@@ -358,7 +371,7 @@ export function ChainTableBody({
 						data-testid="sort-props"
 						onClick={() => onSort("props")}
 						aria-sort={sort.col === "props" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
-						className="flex w-14 shrink-0 items-center justify-end gap-1 text-right transition-colors hover:text-foreground"
+						{...treeColumnLayout({ widthClassName: "w-14", align: "right", className: "flex items-center justify-end gap-1 transition-colors hover:text-foreground" })}
 					>
 						Props {dirIcon("props")}
 					</button>
@@ -367,11 +380,11 @@ export function ChainTableBody({
 						data-testid="sort-created"
 						onClick={() => onSort("created")}
 						aria-sort={sort.col === "created" ? (sort.dir === 1 ? "ascending" : "descending") : "none"}
-						className="flex w-20 shrink-0 items-center justify-end gap-1 text-right transition-colors hover:text-foreground"
+						{...treeColumnLayout({ widthClassName: "w-20", align: "right", className: "flex items-center justify-end gap-1 transition-colors hover:text-foreground" })}
 					>
 						Created {dirIcon("created")}
 					</button>
-				</div>
+				</TreeHeader>
 
 				{creatingFolder && onOrganizationChange && <div className="flex items-center px-3 py-2" data-testid="new-folder-row">
 					<EditableSourceName name="" initiallyEditing onCancel={() => setCreatingFolder(false)}
@@ -393,6 +406,7 @@ export function ChainTableBody({
 					renderSource={(group, depth) => {
 					const open = searching ? !foldedClusters.has(group.key) : expandedClusters.has(group.key);
 					const selectedCount = group.nodeIds.filter((id) => selection.has(id)).length;
+					const empty = group.birth === null ? group.nodeIds.length === 0 : !allSourceNodes.get(group.birth)?.size;
 					return (
 						<div
 							key={group.key}
@@ -400,8 +414,7 @@ export function ChainTableBody({
 							// The horizontal rules (owner rulings, rounds 2 + 5): between
 							// cluster groups AND under the last one — the table is framed
 							// top (header) and bottom. Never on individual rows.
-							className="relative border-b border-transparent"
-							style={{ marginLeft: depth * 36 }}
+							{...treeBranchLayout({ depth, className: "border-b border-transparent", style: { marginLeft: depth * 36 } })}
 						>
 							{/* The TREE THREAD (owner rounds 5–6): a vertical guide at the
 							    expander arrow's column (center 37px: pl-3 + checkbox 14 +
@@ -411,13 +424,10 @@ export function ChainTableBody({
 							    gap, live-measured) and terminates exactly at the LAST
 							    checkbox bottom (bottom-[8px] = 9px from the border box minus the 1px group rule, measured). */}
 							{open && group.chains.length > 0 && (
-								<div
-									data-testid={`cluster-thread-${group.key}`}
-									className="pointer-events-none absolute bottom-[8px] left-[37px] top-[23px] w-px bg-border/50"
-								/>
+								<TreeGuide selectionColumn depth={0} data-testid={`cluster-thread-${group.key}`} />
 							)}
 							{/* The cluster row: birth-session group header. */}
-							<SourceDragRow {...chainRow(["source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={Boolean(onOrganizationChange && group.birth)} className="flex items-center gap-1 px-3 py-1.5">
+							<SourceDragRow {...chainRow(["source", group.key], depth, open)} kind="source" id={group.key} name={group.label ?? "unlabeled"} enabled={Boolean(onOrganizationChange && group.birth)} {...treeRowLayout()}>
 								<RowCheckbox
 									disabled={selectMode ? group.nodeIds.length === 0 : !directory?.sources.some((s) => s.id === group.birth)}
 									checked={selectMode ? selectedCount === group.nodeIds.length && group.nodeIds.length > 0 : group.birth !== null && selectedSources.has(group.birth)}
@@ -428,19 +438,19 @@ export function ChainTableBody({
 								/>
 								<Expander open={open} onClick={() => toggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={`Expand cluster ${group.label ?? "unlabeled"}`} />
 								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={`Expand source ${group.label ?? "unlabeled"}`}
-									onClick={() => toggleCluster(group.key)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+									onClick={() => toggleCluster(group.key)} className={`flex h-5 w-3.5 shrink-0 items-center justify-center rounded ${empty ? "text-muted-foreground/60" : "text-muted-foreground"} transition-colors hover:bg-accent hover:text-foreground`}>
 									{open ? <BookOpenIcon className="size-3.5 shrink-0" /> : <BookIcon className="size-3.5 shrink-0" />}
 								</button>
 								{onOrganizationChange && group.birth && group.kind !== null
-									? <EditableSourceName name={group.label ?? ""} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
-									: <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
+									? <EditableSourceName name={group.label ?? ""} muted={empty} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
+									: <span className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground/60" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
 								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
-								<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+								<TreeCell widthClassName="w-14" align="right" className="text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
-								</span>
-								<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+								</TreeCell>
+								<TreeCell widthClassName="w-20" align="right" className="text-xs tabular-nums text-muted-foreground">
 									{group.newestCreatedAt.slice(0, 10)}
-								</span>
+								</TreeCell>
 							</SourceDragRow>
 
 							{/* The chain rows — clearly indented under the folder
@@ -452,23 +462,20 @@ export function ChainTableBody({
 									const chainOpen = expandedChains.has(chain.id);
 									const selectedInChain = memberIds.filter((id) => selection.has(id)).length;
 									return (
-										<div key={chain.id} data-testid={`chain-block-${chain.id}`} className="relative">
+										<div key={chain.id} data-testid={`chain-block-${chain.id}`} {...treeBranchLayout()}>
 												{/* The chain's own thread (owner rounds 5–6): the same
 												    bracket law one level down — at the chain arrow's column
 												    (center 73px), from the chain row's checkbox bottom
 												    (top-[22px]) to the LAST statement row's checkbox bottom
 												    (bottom-[8px]) — live-measured anchors. */}
 												{chainOpen && memberIds.length > 0 && (
-													<div
-														data-testid={`chain-thread-${chain.id}`}
-														className="pointer-events-none absolute bottom-[8px] left-[73px] top-[22px] w-px bg-border/50"
-													/>
+													<TreeGuide selectionColumn depth={1} variant="compact" data-testid={`chain-thread-${chain.id}`} />
 												)}
 											<div
 												{...chainRow(["chain", group.key, chain.id], depth + 1, chainOpen)}
 												data-testid={`chain-row-${chain.id}`}
 												aria-label={formatChainLine(chain, Object.fromEntries([...byId.entries()].map(([id, n]) => [id, { name: n.name }])))}
-												className="flex items-center gap-1 py-1 pl-12 pr-3"
+												{...treeRowLayout({ depth: 1, variant: "compact" })}
 											>
 												{selectMode ? <RowCheckbox
 													checked={selectedInChain === memberIds.length && memberIds.length > 0}
@@ -476,7 +483,7 @@ export function ChainTableBody({
 													onToggle={(next) => onToggleNodes(memberIds, next)}
 													testid={`chain-checkbox-${chain.id}`}
 													label={`Select chain ${nameOf(chain.conclusion)}`}
-												/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
+												/> : <TreeSelectionSpacer />}
 												<Expander open={chainOpen} onClick={() => onToggleChain(chain.id)} testid={`chain-toggle-${chain.id}`} label={`Expand chain ${nameOf(chain.conclusion)}`} />
 												{/* The chain line: proposition names as faint-outlined
 												    chips. THE LOGIC IS THE PAYLOAD (owner rulings,
@@ -516,12 +523,12 @@ export function ChainTableBody({
 														);
 													})}
 												</span>
-												<span className="w-14 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+												<TreeCell widthClassName="w-14" align="right" className="text-xs tabular-nums text-muted-foreground">
 													{memberIds.length}
-												</span>
-												<span className="w-20 shrink-0 text-right text-xs tabular-nums text-muted-foreground">
+												</TreeCell>
+												<TreeCell widthClassName="w-20" align="right" className="text-xs tabular-nums text-muted-foreground">
 													{dateOf(chain.conclusion)}
-												</span>
+												</TreeCell>
 											</div>
 
 											{/* The propositions — their STATEMENT text directly (owner
@@ -538,26 +545,30 @@ export function ChainTableBody({
 															key={id}
 															{...chainRow(["prop", group.key, chain.id, id], depth + 2)}
 															data-testid={`prop-row-${id}`}
-															className="flex items-start gap-2 py-1 pl-21 pr-3"
+															data-chain-statement
+															{...treeRowLayout({ depth: 2, variant: "detail" })}
 														>
 															{selectMode ? <RowCheckbox
 																checked={selection.has(id)}
 																onToggle={(next) => onToggleNodes([id], next)}
 																testid={`prop-checkbox-${id}`}
 																label={`Select node ${node.name}`}
-															/> : <span aria-hidden="true" className="size-3.5 shrink-0" />}
-															<span className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
+															/> : <TreeSelectionSpacer />}
+															<ToolContentResponse
+																mode="static"
+																className="min-w-0 flex-1 text-muted-foreground [--font-prose:var(--font-ui)] [--lh-prose-size:var(--text-xs)] [--lh-prose-leading:1.625] [&_[data-streamdown=inline-code]]:[font-size:inherit] [&_[data-streamdown=inline-code]]:[color:inherit]"
+															>
 																{node.statement}
-															</span>
-															<span className="w-14 shrink-0" />
-															<span className="w-20 shrink-0" />
+															</ToolContentResponse>
+															<TreeCell widthClassName="w-14" />
+															<TreeCell widthClassName="w-20" />
 														</div>
 													);
 												})}
 										</div>
 									);
 								})}
-							<div data-testid={`source-separator-${group.key}`} className="pointer-events-none absolute bottom-[-1px] right-0 border-b border-border/60" style={{ left: depth === 0 ? 0 : 1 }} />
+							<TreeSeparator data-testid={`source-separator-${group.key}`} outside inset={depth === 0 ? 0 : 1} />
 						</div>
 					);
 				}} />
@@ -592,7 +603,6 @@ export function ChainTableBody({
 								aria-label={`Done picking — ${selection.size} ${selection.size === 1 ? "proposition" : "propositions"} selected`}
 								className="flex items-center gap-1.5 rounded-full bg-primary px-3 py-1.5 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/80"
 							>
-								<DumbbellIcon aria-hidden="true" className="size-3.5" />
 								Done
 							</button>
 						) : (
@@ -624,18 +634,7 @@ export function ChainTableBody({
 /** The rotating chevron — collapsed points right, expanded rotates down
  *  (owner ruling: the affordance must read on every expandable row). */
 function Expander({ open, onClick, testid, label }: { open: boolean; onClick: () => void; testid: string; label: string }) {
-	return (
-		<button
-			type="button"
-			data-testid={testid}
-			onClick={onClick}
-			aria-label={label}
-			aria-expanded={open}
-			className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground/70 transition-colors hover:bg-accent hover:text-foreground"
-		>
-			<ChevronRightIcon className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} />
-		</button>
-	);
+	return <TreeDisclosure open={open} onClick={onClick} data-testid={testid} aria-label={label} />;
 }
 
 /** The checkbox — checked/indeterminate (partial chains/clusters); DOM
@@ -656,18 +655,8 @@ function RowCheckbox({
 	label: string;
 }) {
 	return (
-		<input
-			type="checkbox"
-			disabled={disabled}
-			checked={checked}
-			ref={(el) => {
-				if (el) el.indeterminate = indeterminate;
-			}}
-			data-testid={testid}
-			aria-label={label}
-			onChange={(e) => onToggle(e.target.checked)}
-			className="size-3.5 shrink-0 accent-primary"
-		/>
+		<TreeCheckbox disabled={disabled} checked={checked} indeterminate={indeterminate}
+			data-testid={testid} aria-label={label} onChange={(e) => onToggle(e.target.checked)} />
 	);
 }
 
@@ -692,8 +681,17 @@ export function ChainTableOverlay({
 	selectMode,
 	controlledSelection,
 	onSelectionChange,
+	keyboardActive = true,
+	registerInteraction = true,
+	pickerChrome = false,
 }: {
 	open: boolean;
+	/** Host knowledge picker has clearance, but no sidebar-reopen action. */
+	pickerChrome?: boolean;
+	/** A host knowledge picker registers once through its pane or modal shell. */
+	registerInteraction?: boolean;
+	/** Internal host ownership; ordinary practice keeps the existing default. */
+	keyboardActive?: boolean;
 	nodes: GraphNode[];
 	chains: GraphChain[];
 	sessions: Record<string, string>;
@@ -711,44 +709,60 @@ export function ChainTableOverlay({
 	const [deletion, setDeletion] = useState<{ sources: SourceEntry[]; folders: SourceFolder[] } | null>(null);
 	const deleteOpen = deletion !== null;
 	const [directory, setDirectory] = useState<SourceDirectory>();
+	const [directoryPending, setDirectoryPending] = useState(true);
+	const visibleDirectory = useMemo(() => directory && chainSourceDirectory(directory), [directory]);
 	const [directoryFailure, setDirectoryFailure] = useState("");
 	const [entrySelection, setEntrySelection] = useState<SourceEntrySelection>(() => ({ sources: new Set(), folders: new Set() }));
 	useEffect(() => {
-		if (!directory) return;
+		if (!visibleDirectory) return;
 		setEntrySelection((previous) => {
-			const sources = new Set([...previous.sources].filter((id) => directory.sources.some((s) => s.id === id)));
-			const folders = new Set([...previous.folders].filter((id) => directory.organization.folders.some((f) => f.id === id)));
+			const sources = new Set([...previous.sources].filter((id) => visibleDirectory.sources.some((s) => s.id === id)));
+			const folders = new Set([...previous.folders].filter((id) => visibleDirectory.organization.folders.some((f) => f.id === id)));
 			return sources.size === previous.sources.size && folders.size === previous.folders.size ? previous : { sources, folders };
 		});
-	}, [directory]);
+	}, [visibleDirectory]);
 	const requestVersion = useRef(0);
+	const directoryOpening = useRef(0);
+	const directoryRequest = useRef<AbortController | null>(null);
 	const mutationTail = useRef<Promise<unknown>>(Promise.resolve());
 	const readDirectory = useCallback(async () => {
 		const version = ++requestVersion.current;
+		directoryRequest.current?.abort();
+		const request = new AbortController();
+		directoryRequest.current = request;
 		try {
-			const response = await fetch("/api/graph/sources", { cache: "no-store" });
+			const response = await fetch("/api/graph/sources", { cache: "no-store", signal: request.signal });
 			if (!response.ok) throw new Error("Could not read source organization.");
 			const body = await response.json() as SourceDirectory;
-			if (version === requestVersion.current) { setDirectory(body); setDirectoryFailure(""); }
-		} catch (error) { if (version === requestVersion.current) setDirectoryFailure(error instanceof Error ? error.message : String(error)); }
+			if (!request.signal.aborted && version === requestVersion.current) { setDirectory(body); setDirectoryPending(false); setDirectoryFailure(""); }
+		} catch (error) { if (!request.signal.aborted && version === requestVersion.current) setDirectoryFailure(error instanceof Error ? error.message : String(error)); }
 	}, []);
 	useEffect(() => {
 		if (open) void readDirectory();
-		return () => { requestVersion.current++; };
+		return () => {
+			requestVersion.current++;
+			directoryOpening.current++;
+			directoryRequest.current?.abort();
+			directoryRequest.current = null;
+			// Keep cached organization, but require fresh source kinds on EACH opening.
+			setDirectoryPending(true);
+		};
 	}, [open, readDirectory]);
 	useServerEvent("sources-changed", () => { if (open) void readDirectory(); });
 	useServerEvent("chats-changed", () => { if (open) void readDirectory(); });
 	useServerResync(() => { if (open) void readDirectory(); });
 	const changeOrganization: OrganizationChange = (action) => {
+		const opening = directoryOpening.current;
 		// Serialize this page's edits, and invalidate older notify-then-fetch reads.
 		const operation = mutationTail.current.catch(() => {}).then(async () => {
 			try {
 				const response = await fetch("/api/graph/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
 				const body = await response.json();
 				if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not save source organization.");
-				requestVersion.current++;
-				setDirectory(body as SourceDirectory);
-				setDirectoryFailure("");
+				if (opening === directoryOpening.current) {
+					requestVersion.current++;
+					setDirectory(body as SourceDirectory); setDirectoryPending(false); setDirectoryFailure("");
+				}
 				if (action.action === "rename-source") {
 					const entry = (body as SourceDirectory).sources.find((s) => s.id === action.id);
 					window.dispatchEvent(new CustomEvent(entry?.kind === "chat" ? "lh:chat-renamed" : "lh:source-renamed", { detail: { id: action.id, title: action.name } }));
@@ -759,11 +773,11 @@ export function ChainTableOverlay({
 		mutationTail.current = operation;
 		return operation;
 	};
-	const selectedSources = new Set([...entrySelection.sources].filter((id) => directory?.sources.some((s) => s.id === id)));
+	const selectedSources = new Set([...entrySelection.sources].filter((id) => visibleDirectory?.sources.some((s) => s.id === id)));
 	const selectedFolders = new Set([...entrySelection.folders].filter((id) => directory?.organization.folders.some((f) => f.id === id)));
-	const fullySelectedFolders = new Set([...selectedFolders].filter((id) => directory && folderEntryCheck(directory, id, { sources: selectedSources, folders: selectedFolders }).checked));
+	const fullySelectedFolders = new Set([...selectedFolders].filter((id) => visibleDirectory && folderEntryCheck(visibleDirectory, id, { sources: selectedSources, folders: selectedFolders }).checked));
 	const toggleEntries = (kind: "source" | "folder", id: string, checked: boolean) => {
-		if (directory) setEntrySelection((previous) => toggleSourceEntries(directory, previous, kind, id, checked));
+		if (visibleDirectory) setEntrySelection((previous) => toggleSourceEntries(visibleDirectory, previous, kind, id, checked));
 	};
 
 	// Controlled when the caller lifts the selection (the practice pick
@@ -774,26 +788,12 @@ export function ChainTableOverlay({
 		else setInternalSelection(next);
 	};
 
-	// Esc dismisses (unless a dialog has focus — each dialog's own Esc
-	// owns its layer; all listen on window, so the guards are explicit).
-	useEffect(() => {
-		if (!open || deleteOpen) return;
-		const onKeyDown = (e: KeyboardEvent) => {
-			if (e.key === "Escape") {
-				// App Router delegates React events on document too: a child's
-				// stopPropagation cannot silence a sibling document listener.
-				if (e.defaultPrevented || (e.target instanceof Element && e.target.closest('[data-testid="source-name-input"]'))) return;
-				// THE ONE-ESC LAW (owner, keyboard round 2026-10-06): claim
-				// at the document level — the window chain (dictation →
-				// abort) must not also act. One Esc, one action.
-				e.preventDefault();
-				e.stopPropagation();
-				onClose();
-			}
-		};
-		document.addEventListener("keydown", onKeyDown);
-		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [open, deleteOpen, onClose]);
+	const rootRef = useRef<HTMLDivElement>(null);
+	const inheritedOwner = useContext(InteractionLayerOwner);
+	const layer = useInteractionLayer({
+		kind: "view", enabled: open && keyboardActive && registerInteraction, rootRef,
+		onClose: () => { onClose(); return "closed"; },
+	});
 
 	if (!open) return null;
 
@@ -813,20 +813,24 @@ export function ChainTableOverlay({
 	};
 
 	return (
-		<>
+		<InteractionLayerOwner.Provider value={registerInteraction && keyboardActive ? layer.id : inheritedOwner}>
 			<div
+				ref={rootRef}
 				data-testid="chain-table-overlay"
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
+				style={registerInteraction ? { zIndex: 100 + layer.order } : undefined}
 			>
-				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
+				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-error">{directoryFailure}</p>}
 				<ChainTableBody
-					keyboardActive={!deleteOpen}
+					pickerChrome={pickerChrome}
+					keyboardActive={keyboardActive && !deleteOpen}
 					directory={directory}
 					onOrganizationChange={directory ? changeOrganization : undefined}
 					selectedFolders={selectedFolders}
 					selectedSources={selectedSources}
 					onToggleSource={(id, next) => toggleEntries("source", id, next)}
 					onToggleFolder={(id, next) => toggleEntries("folder", id, next)}
+					sourceInventoryPending={directoryPending}
 					nodes={nodes}
 					chains={storedChains}
 					sessions={sessions}
@@ -862,6 +866,7 @@ export function ChainTableOverlay({
 				folders={deletion?.folders ?? []}
 				onClose={() => setDeletion(null)}
 				onDelete={(deleteSessions) => {
+					const opening = directoryOpening.current;
 					const operation = mutationTail.current.catch(() => {}).then(async () => {
 						let graphRevision: number | undefined;
 						try {
@@ -870,7 +875,9 @@ export function ChainTableOverlay({
 							const body = await response.json();
 							if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not delete sources.");
 							graphRevision = body.graphRevision;
-							requestVersion.current++; setDirectory(body as SourceDirectory); setDirectoryFailure("");
+							if (opening === directoryOpening.current) {
+								requestVersion.current++; setDirectory(body as SourceDirectory); setDirectoryPending(false); setDirectoryFailure("");
+							}
 							setEntrySelection({ sources: new Set(), folders: new Set() });
 						} finally {
 							// A failed response can still follow partial disk writes.
@@ -882,6 +889,6 @@ export function ChainTableOverlay({
 					mutationTail.current = operation; return operation;
 				}}
 			/>}
-		</>
+		</InteractionLayerOwner.Provider>
 	);
 }

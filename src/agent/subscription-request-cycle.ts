@@ -42,6 +42,8 @@ export class SubscriptionRequestCycle implements SubscriptionDispatchLifecycle {
  private userAborted = false;
  private stagedCommitted = false;
  private started = false;
+ private localRejection = false;
+ private rejectedContextIds = new Set<string>();
  private anyDispatch = false;
  private firstResolved = false;
  private resolveAdmission!: (admitted: boolean) => void;
@@ -54,6 +56,14 @@ export class SubscriptionRequestCycle implements SubscriptionDispatchLifecycle {
  }
  get dispatched(): boolean { return this.anyDispatch; }
  get deniedBeforeDispatch(): boolean { return this.denied !== undefined; }
+ get locallyRejected(): boolean { return this.localRejection; }
+ /** A local context refusal is not provider admission or an authorization
+  * denial. Restore automatic cargo, retain the SDK error/progress, and end
+  * without the background-denial foreground retry. */
+ rejectLocalRequest(contextIds: ReadonlySet<string> = new Set()): void {
+  this.localRejection = true;
+  for (const id of contextIds) this.rejectedContextIds.add(id);
+ }
  abort(): void { this.userAborted = true; }
  bindRelease(release: (event: AgentEvent) => void): () => void { this.release = release; return () => { this.release = undefined; }; }
  prepare(request: PrepareRequestContext): void {
@@ -106,7 +116,20 @@ export class SubscriptionRequestCycle implements SubscriptionDispatchLifecycle {
  noDispatch(kind: NoDispatchKind): void { if (!this.committed) this.denied = this.userAborted ? "all" : kind; }
  acceptsUsage(_message: AssistantMessage): boolean { return this.committed; }
  private resolveFirst(value: boolean) { if (!this.firstResolved) { this.firstResolved = true; this.resolveAdmission(value); } }
- finishNativeCycle(): { action: "settle" | "resumeForeground"; messages: AgentMessage[] } {
+ finishNativeCycle(settledMessages: readonly AgentMessage[] = this.snapshot): { action: "settle" | "resumeForeground"; messages: AgentMessage[] } {
+  if (this.localRejection) {
+   const messages = settledMessages.filter((m) => !this.automatic.has(idOf(m) ?? "") && !this.rejectedContextIds.has(idOf(m) ?? ""));
+   const retainedIds = new Set(messages.map(idOf).filter((id): id is string => !!id));
+   this.options.restoreAutomatic(this.automatic, retainedIds);
+   this.resolveFirst(this.anyDispatch);
+   for (const event of this.held) {
+    if ((event.type === "message_start" || event.type === "message_end" || event.type === "message_update") &&
+     (this.automatic.has(idOf(event.message) ?? "") || this.rejectedContextIds.has(idOf(event.message) ?? ""))) continue;
+    this.release?.(event);
+   }
+   this.held = [];
+   return { action: "settle", messages };
+  }
   if (!this.denied) { this.resolveFirst(this.anyDispatch); return { action: "settle", messages: [] }; }
   const messages = this.snapshot.filter((m) => !this.automatic.has(idOf(m) ?? ""));
   const retainedIds = new Set(messages.map(idOf).filter((id): id is string => !!id));
