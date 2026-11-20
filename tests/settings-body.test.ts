@@ -14,6 +14,7 @@ import {
 	parseModelsSettingsBody,
 	parseAppearanceSettingsBody,
 	parseGeneralSettingsBody,
+	parseClaudeLocalSettingsBody,
 	parseCompactionSettingsBody,
 	parseGraphSettingsBody,
 	SETTINGS_SECTIONS,
@@ -251,6 +252,29 @@ describe("parseGraphSettingsBody", () => {
 	});
 });
 
+describe("parseClaudeLocalSettingsBody (Local Claude route, 2026-10-27)", () => {
+	it("parses the four preference fields strictly; an empty path clears the override", () => {
+		const r = parseClaudeLocalSettingsBody({ enabled: true, allowBackgroundUse: false, systemPromptMode: "preset", binaryPath: " /usr/local/bin/claude " });
+		assert.ok(r.ok);
+		assert.deepEqual(r.settings, { enabled: true, allowBackgroundUse: false, systemPromptMode: "preset", binaryPath: "/usr/local/bin/claude" });
+		const cleared = parseClaudeLocalSettingsBody({ enabled: false, binaryPath: "" });
+		assert.ok(cleared.ok); assert.deepEqual(cleared.settings, { enabled: false });
+		for (const [body, pattern] of [
+			[{ enabled: "yes" }, /enabled must be a boolean/],
+			[{ allowBackgroundUse: 0 }, /allowBackgroundUse must be a boolean/],
+			[{ systemPromptMode: "claude_code" }, /systemPromptMode must be one of custom, preset/],
+			[{ binaryPath: "bad\u0000path" }, /binaryPath must be a plain file path/],
+			[{ binaryPath: 42 }, /binaryPath must be a plain file path/],
+		] as const) {
+			const rejected = parseClaudeLocalSettingsBody(body);
+			assert.ok(!rejected.ok); assert.match(rejected.error, pattern);
+		}
+		// Unknown keys drop (house rule) — there is no field a credential could ride in.
+		const stray = parseClaudeLocalSettingsBody({ enabled: true, accessToken: "sk-ant-oat-never" });
+		assert.ok(stray.ok); assert.deepEqual(stray.settings, { enabled: true });
+	});
+});
+
 describe("parseCompactionSettingsBody (owner round 14)", () => {
 	it("rejects non-boolean reasoning choices rather than silently changing the estimator", () => {
 		for (const includeReasoning of ["true", "false", 0, 1, null, [], {}]) {
@@ -286,14 +310,16 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 });
 
 describe("SETTINGS_SECTIONS (the route's section map)", () => {
-	it("maps exactly the eight record sections", () => {
+	it("maps exactly the ten record sections", () => {
 		// compaction joined (owner round 14): its own section PUT — the
 		// threshold is engine behavior, not an agent-section key. The custom
 		// endpoint is NOT a section: it is one more provider in the Keys list,
 		// connected through POST /api/custom-provider.
+		// claudeLocal joined (owner, 2026-10-27): the Local Claude route's
+		// opt-in/consent/prompt-mode/path preferences — never credentials.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "claudeCode"],
+			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "claudeCode", "claudeLocal"],
 		);
 	});
 });

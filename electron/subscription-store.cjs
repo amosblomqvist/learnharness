@@ -3,7 +3,10 @@ const fs = require("node:fs/promises");
 const path = require("node:path");
 const { randomUUID } = require("node:crypto");
 
-const PROVIDERS = ["github-copilot", "xai"];
+const { NATIVE_PROVIDER_IDS } = require("./native-providers.cjs");
+
+/** The credential-file providers — the registry's ids, never a second list. */
+const PROVIDERS = [...NATIVE_PROVIDER_IDS];
 const failure = (code) => Object.assign(new Error(code), { code });
 const nonempty = (value) => typeof value === "string" && value.length > 0 && !/[\x00-\x20\x7f]/.test(value);
 function validateCredential(providerId, credential) {

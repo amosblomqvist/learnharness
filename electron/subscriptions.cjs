@@ -4,8 +4,9 @@ const path = require("node:path");
 const { createRequire, registerHooks } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const { PROVIDERS, fileStore, validateCredential, safeHttps, failure } = require("./subscription-store.cjs");
+const { NATIVE_PROVIDERS, nativeProvider, loadNativeProviderSDK, createNativeProvider } = require("./native-providers.cjs");
 
-const LABELS = { "github-copilot": "GitHub Copilot", xai: "Grok" };
+const LABELS = Object.fromEntries(NATIVE_PROVIDERS.map((provider) => [provider.providerId, provider.label]));
 const APIS = new Set(["openai-responses", "openai-completions", "anthropic-messages"]);
 const clone = (value) => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 const MESSAGES = {
@@ -33,12 +34,13 @@ async function loadSubscriptionSDK(baseDirectory) {
 		try { file = resolve.resolve(id); } finally { hook.deregister(); }
 		return import(pathToFileURL(file).href);
 	};
-	const [sdk, copilot, xai] = await Promise.all([load("@earendil-works/pi-ai"), load("@earendil-works/pi-ai/providers/github-copilot"), load("@earendil-works/pi-ai/providers/xai")]);
-	return { ...sdk, ...copilot, ...xai };
+	// The registry (native-providers.cjs) names every module; this loader
+	// only knows HOW to resolve one.
+	return loadNativeProviderSDK(load);
 }
 function validEndpoint(providerId, auth, credential) {
 	if (!auth || (!(typeof auth.apiKey === "string" && auth.apiKey.length > 0) && !Object.entries(auth.headers ?? {}).some(([key, value]) => ["authorization", "x-api-key", "api-key"].includes(key.toLowerCase()) && typeof value === "string" && value.trim().length > 0))) return false;
-	const value = auth.baseUrl ?? (providerId === "xai" ? "https://api.x.ai/v1" : "https://api.individual.githubcopilot.com");
+	const value = auth.baseUrl ?? nativeProvider(providerId).defaultBaseUrl;
 	if (!safeHttps(value)) return false;
 	const url = new URL(value);
 	if (providerId === "xai") return url.origin === "https://api.x.ai" && url.pathname.replace(/\/$/, "") === "/v1" && !url.search && !url.hash;
@@ -82,7 +84,7 @@ function createSubscriptions(options) {
 		if (entry.state.credential) {
 			const auth = await entry.provider.auth.oauth.toAuth(entry.state.credential);
 			if (!validEndpoint(entry.providerId, auth, entry.state.credential)) throw failure("storage");
-			endpoint = auth.baseUrl ?? (entry.providerId === "xai" ? "https://api.x.ai/v1" : "https://api.individual.githubcopilot.com");
+			endpoint = auth.baseUrl ?? nativeProvider(entry.providerId).defaultBaseUrl;
 		}
 		if (entry.endpoint !== endpoint) { entry.endpoint = endpoint; entry.authorityRevision++; }
 	}
@@ -97,9 +99,13 @@ function createSubscriptions(options) {
 		try { sdk = options.sdk ?? await options.loadSDK(); }
 		catch { for (const entry of entries.values()) { entry.error = MESSAGES.unavailable; entry.fatal = true; changed(entry); } return; }
 		await Promise.all([...entries.values()].map(async (entry) => {
+			let native;
+			// A registry/SDK mismatch is a wiring failure, reported as such —
+			// never as a credential-file problem (reviewer issue #1).
+			try { native = createNativeProvider(sdk, entry.providerId); }
+			catch { entry.fatal = true; entry.error = MESSAGES.unavailable; changed(entry); return; }
 			try {
 				entry.state = clone(await entry.disk.read());
-				const native = entry.providerId === "github-copilot" ? sdk.githubCopilotProvider() : sdk.xaiProvider();
 				// No API-key auth method exists in this collection: ambient keys cannot become a fallback.
 				entry.provider = { ...native, auth: { oauth: native.auth.oauth } };
 				const store = {

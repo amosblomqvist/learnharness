@@ -33,6 +33,7 @@ import {
 	ROLE_SLOT,
 	type AgentSettings,
 	type BackgroundModelRole,
+	type ClaudeLocalSettings,
 	type FactorySettings,
 	type GeneralSettings,
 	type DictationSettings,
@@ -99,6 +100,9 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
+	/** Local Claude (owner, 2026-10-27): resolved concrete; binaryPath stays
+	 *  optional (absent = detect on PATH and the known locations). */
+	claudeLocal: Required<Omit<ClaudeLocalSettings, "binaryPath">> & { binaryPath?: string };
 	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
 	 *  user pins default to empty. */
 	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
@@ -250,6 +254,12 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			models: record?.customProvider?.models ?? [],
 			overrides: record?.customProvider?.overrides ?? {},
 			manualModels: record?.customProvider?.manualModels ?? [],
+		},
+		claudeLocal: {
+			enabled: record?.claudeLocal?.enabled ?? FACTORY_SETTINGS.claudeLocal.enabled,
+			allowBackgroundUse: record?.claudeLocal?.allowBackgroundUse ?? FACTORY_SETTINGS.claudeLocal.allowBackgroundUse,
+			systemPromptMode: record?.claudeLocal?.systemPromptMode ?? FACTORY_SETTINGS.claudeLocal.systemPromptMode,
+			...(record?.claudeLocal?.binaryPath ? { binaryPath: record.claudeLocal.binaryPath } : {}),
 		},
 	};
 }

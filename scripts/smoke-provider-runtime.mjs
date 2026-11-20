@@ -16,13 +16,33 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { formatProbeError, probeEnv } from "./smoke-demo-runtime.mjs";
 
+/** The native-provider registry — the checkout's own list of what to
+ *  probe, loaded before the payload-confinement hook is installed. */
+const { NATIVE_PROVIDERS, PI_SDK_SPECIFIER } = createRequire(import.meta.url)("../electron/native-providers.cjs");
+
+/** Local Claude route: a synthetic server env (allowed names, locale/XDG
+ *  prefixes, and secrets the allowlist must drop). The parent runs the
+ *  checkout's claudeChildEnv on it and hands the probe the result, so the
+ *  probe can pin that the SDK passes exactly that env to the child. */
+const CLAUDE_ENV_INPUT = Object.freeze({
+	PATH: "/offline/bin", HOME: "/offline-home", LANG: "C.UTF-8", LC_ALL: "C.UTF-8", XDG_CONFIG_HOME: "/offline-home/.config",
+	CLAUDE_CONFIG_DIR: "/offline-home/.claude", HTTPS_PROXY: "http://offline-proxy.invalid:1",
+	ANTHROPIC_API_KEY: "offline-not-a-key", CLAUDE_CODE_OAUTH_TOKEN: "offline-not-a-token", LH_DESKTOP_API_SECRET: "offline-not-a-secret",
+	OPENAI_API_KEY: "offline-not-a-key", LC_SECRET_TOKEN: "offline-not-a-token", NODE_OPTIONS: "--offline-not-an-option", NODE_ENV: "production",
+});
+/** The probe's env var carrying claudeChildEnv(CLAUDE_ENV_INPUT) as JSON. */
+const CLAUDE_CHILD_ENV_VAR = "LH_SMOKE_CLAUDE_CHILD_ENV";
+
 export function verifyProviderRuntime(standalone, runtime = process.execPath) {
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-provider-runtime-"));
 	try {
 		fs.writeFileSync(path.join(home, "auth.json"), "{}\n", { mode: 0o600 });
+		// The allowlist is checkout source (the parent always runs on Node);
+		// the probe child gets only its output.
+		const { claudeChildEnv } = createRequire(import.meta.url)("../src/agent/claude-local/env.ts");
 		const result = spawnSync(runtime, [fileURLToPath(import.meta.url), "--probe", path.resolve(standalone)], {
 			cwd: home,
-			env: { ...probeEnv(process.env, home), ELECTRON_RUN_AS_NODE: "1" },
+			env: { ...probeEnv(process.env, home), ELECTRON_RUN_AS_NODE: "1", [CLAUDE_CHILD_ENV_VAR]: JSON.stringify(claudeChildEnv(CLAUDE_ENV_INPUT)) },
 			encoding: "utf8", timeout: 30_000, maxBuffer: 128 * 1024,
 		});
 		if (result.status !== 0 || result.error) {
@@ -118,8 +138,13 @@ async function probe(standalone) {
 		}
 		// Exercise the public lazy OAuth surface offline. toAuth evaluates the
 		// real flow module and its imports but neither logs in nor refreshes.
-		for (const [name, factory] of [["github-copilot", "githubCopilotProvider"], ["xai", "xaiProvider"]]) {
-			const provider = (await import(new URL(`providers/${name}.js`, entry).href))[factory]();
+		// Every registered native provider (electron/native-providers.cjs, read
+		// at module load — it is the checkout's test plan, not a payload
+		// dependency) — the registry drives the gate, so a new provider is
+		// covered the day it is registered.
+		for (const { providerId: name, specifier, factory } of NATIVE_PROVIDERS) {
+			assert.ok(specifier.startsWith(`${PI_SDK_SPECIFIER}/`), `${name}: specifier outside Pi: ${specifier}`);
+			const provider = (await import(new URL(`${specifier.slice(PI_SDK_SPECIFIER.length + 1)}.js`, entry).href))[factory]();
 			const credential = { type: "oauth", access: name === "github-copilot" ? "tid=offline;proxy-ep=proxy.individual.githubcopilot.com;" : "offline-xai-oauth-not-a-token", refresh: "offline-refresh-not-a-token", expires: Date.now() + 3600000, availableModelIds: provider.getModels().map((model) => model.id) };
 			const auth = await provider.auth.oauth.toAuth(credential);
 			assert.equal(auth.apiKey, credential.access);
@@ -145,6 +170,50 @@ async function probe(standalone) {
 			assert.ok([...loaded].some((file) => file.includes(`${path.sep}node_modules${path.sep}${name.replaceAll("/", path.sep)}${path.sep}`)),
 				`Google runtime chain was not loaded: ${name}`);
 		}
+		// Local Claude route (2026-10-27): the Claude Agent SDK must resolve from
+		// the payload and assemble a complete query WITHOUT a process — a fake
+		// spawner captures the command line and refuses — and no platform binary
+		// package may ship (the app only ever runs the user's own install).
+		const childEnv = JSON.parse(process.env[CLAUDE_CHILD_ENV_VAR] ?? "null");
+		assert.ok(childEnv && typeof childEnv === "object", `probe started without ${CLAUDE_CHILD_ENV_VAR}`);
+		const sdkEntry = pathToFileURL(path.join(root, "node_modules/@anthropic-ai/claude-agent-sdk/sdk.mjs"));
+		const { query } = await import(sdkEntry.href);
+		let spawned;
+		const sentinel = `LH_OFFLINE_NO_SPAWN_${randomUUID()}`;
+		// The refusing spawner may surface synchronously from query() or through
+		// the iterator; either way the command line was assembled first.
+		let outcome = "constructed";
+		try {
+			const handle = query({ prompt: "Offline initialization only", options: {
+				pathToClaudeCodeExecutable: path.join(root, "offline-claude-not-a-binary"), tools: [], settingSources: [], persistSession: false, strictMcpConfig: true, systemPrompt: "offline",
+				env: { ...childEnv },
+				spawnClaudeCodeProcess: (options) => { spawned = options; throw new Error(sentinel); },
+			} });
+			outcome = await handle.next().then(() => "yielded", (error) => error?.message ?? String(error));
+			try { handle.close(); } catch { /* never started */ }
+		} catch (error) { outcome = error?.message ?? String(error); }
+		assert.ok(spawned, `Agent SDK never reached the spawner: ${outcome}`);
+		assert.ok(outcome === sentinel || outcome.includes(sentinel), `unexpected outcome after the refused spawn: ${outcome}`);
+		assert.ok(spawned.args.includes("--output-format") && spawned.args.includes("stream-json") && spawned.args.includes("--tools="), `unexpected Claude Code command line: ${spawned.args.join(" ")}`);
+		assert.ok(!("ANTHROPIC_API_KEY" in spawned.env), "the SDK must not add credentials to the child env");
+		// The SDK's `env` option REPLACES the child env (env.ts relies on it):
+		// the spawned env is the allowlist output plus exactly the variables
+		// the SDK itself sets, and nothing from this process's env.
+		const sdkVersion = JSON.parse(fs.readFileSync(path.join(root, "node_modules/@anthropic-ai/claude-agent-sdk/package.json"), "utf8")).version;
+		const SDK_ADDED_ENV = { CLAUDE_CODE_ENTRYPOINT: "sdk-ts", CLAUDE_AGENT_SDK_VERSION: sdkVersion, CLAUDE_CODE_SDK_READS_SESSION_STATE: "1" };
+		for (const name of Object.keys(SDK_ADDED_ENV)) assert.ok(!(name in childEnv), `allowlist output already carries SDK variable ${name}`);
+		assert.deepEqual({ ...spawned.env }, { ...childEnv, ...SDK_ADDED_ENV }, "the SDK must pass the allowlisted env as is (replace, not merge)");
+		const scope = path.join(root, "node_modules", "@anthropic-ai");
+		for (const name of fs.existsSync(scope) ? fs.readdirSync(scope) : []) {
+			if (!name.startsWith("claude-agent-sdk-")) continue;
+			const dir = path.join(scope, name);
+			// A dangling stub link (a broken install) holds no binary to ship.
+			if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) continue;
+			assert.ok(!fs.readdirSync(dir).some((entry) => /^claude(\.exe)?$/.test(entry)), `payload ships a bundled Claude Code binary: ${name}`);
+		}
+		assert.ok([...loaded].some((file) => file.includes(`${path.sep}node_modules${path.sep}@anthropic-ai${path.sep}claude-agent-sdk${path.sep}`)), "Agent SDK was not loaded from the payload");
+		noNetwork();
+		console.log(`[smoke-provider-runtime] claude-local: Agent SDK assembled a Claude Code command line offline (${spawned.args.length} args), no bundled binary, zero network attempts`);
 		console.log(`[smoke-provider-runtime] native Pi Google initialization passed; ${loaded.size} modules confined to ${root}; zero network attempts`);
 	} finally { hooks.deregister(); }
 }

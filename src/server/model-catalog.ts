@@ -23,19 +23,28 @@ import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
+import { CLAUDE_LOCAL, isClaudeLocalProvider } from "../core/contracts/claude-local.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
+import { claudeLocalConnected, claudeLocalModel, claudeLocalModels } from "../agent/claude-local/bridge.ts";
+import { CLAUDE_LOCAL_CATALOG_TTL_MS, refreshClaudeLocal } from "./claude-local.ts";
 
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
 		!provider || provider === "chatgpt" ? refreshChatGPTModels(piModels().getModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
+		// Local Claude: with a provider (the pre-turn path) the cached snapshot,
+		// probing only a route never probed yet; without one (the picker) a
+		// probe at most every CLAUDE_LOCAL_CATALOG_TTL_MS.
+		!provider ? refreshClaudeLocal({ maxAgeMs: CLAUDE_LOCAL_CATALOG_TTL_MS }).then(() => undefined)
+			: isClaudeLocalProvider(provider) ? refreshClaudeLocal({ cachedOnly: true }).then(() => undefined)
+				: Promise.resolve(),
 	]);
 }
 function connectionModel(provider: string, id: string): Model<Api> | undefined {
 	if (provider === CLAUDE_CODE_PROVIDER && !claudeCodeAvailable()) return undefined;
-	return provider === "chatgpt" ? chatGPTModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
+	return provider === "chatgpt" ? chatGPTModel(id) : isClaudeLocalProvider(provider) ? claudeLocalModel(id) : nativeSubscriptionId(provider) ? nativeSubscriptionModel(provider, id) : piModels().getModel(provider, id);
 }
-function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId)]; }
+function connectionProviderIds(): string[] { return [...piModels().getProviders().map((p) => p.id), "chatgpt", ...NATIVE_SUBSCRIPTIONS.map((p) => p.logicalId), CLAUDE_LOCAL.providerId]; }
 import { settingsStore } from "../store/settings.ts";
 import { effectiveSettings } from "./stores.ts";
 import { keyValue } from "./keys.ts";
@@ -156,6 +165,8 @@ export function catalogProviders(): CatalogProvider[] {
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
 		{ id: CLAUDE_CODE_PROVIDER, envVar: "", keyPresent: claudeCodeAvailable() },
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
+		// Local Claude: "key present" = the user's install probed ready.
+		{ id: CLAUDE_LOCAL.providerId, envVar: "", keyPresent: claudeLocalConnected() },
 		// The custom endpoint: a row only when usable (base URL set). keyPresent
 		// reflects usability, not key presence (keyless local servers are allowed).
 		...(customProviderUsable(effectiveSettings().customProvider)
@@ -208,7 +219,7 @@ export function catalogContextLimits(): Map<string, number> {
 			index.set(`${provider.id}:${model.id}`, model.contextWindow);
 		}
 	}
-	for (const model of [...chatGPTModels(), ...nativeSubscriptionModels()]) index.set(`${model.provider}:${model.id}`, model.contextWindow);
+	for (const model of [...chatGPTModels(), ...nativeSubscriptionModels(), ...claudeLocalModels()]) index.set(`${model.provider}:${model.id}`, model.contextWindow);
 	return index;
 }
 
@@ -224,7 +235,7 @@ export function modelCatalog(): ModelCatalogResponse {
 		.flatMap((p) => piModels().getModels(p.id))
 		.map(toModelDto)
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
-		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
+		.concat([...chatGPTModels(), ...nativeSubscriptionModels(), ...claudeLocalModels()].map(toModelDto));
 	return {
 		models,
 		defaults: catalogDefaults(),
@@ -282,10 +293,30 @@ export function validateModelsSettings(settings: ModelsSettings, stored?: Models
 	return { ok: true };
 }
 
+/** Local Claude (owner-approved v1 scope, 2026-10-27): the route serves the
+ *  CONVERSATION only — the strong slot and a chat's own model. Helper tiers
+ *  (cheap/vision) and background-role overrides refuse it at write time so
+ *  a sub-agent can never be pinned to it; the pickers hide it there too. */
+export function claudeLocalAllowedFor(slot: ModelSlotName | "role"): boolean {
+	return slot === "strong";
+}
+const CLAUDE_LOCAL_SLOT_ERROR = `${CLAUDE_LOCAL.label} is available for the conversation (strong) slot only — helper roles need an API-key or other connection`;
+
+/** The agent section's role overrides (PUT /api/settings/agent): the
+ *  same conversation-only rule as the slots. */
+export function validateAgentModelOverrides(models: Partial<Record<BackgroundModelRole, { model?: { provider: string; id: string } }>> | undefined): SettingsValidation {
+	for (const role of BACKGROUND_MODEL_ROLES) {
+		const override = models?.[role];
+		if (override?.model && isClaudeLocalProvider(override.model.provider) && !claudeLocalAllowedFor("role")) return { ok: false, error: CLAUDE_LOCAL_SLOT_ERROR };
+	}
+	return { ok: true };
+}
+
 function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: string; id: string }; thinkingLevel?: ThinkingLevel }): SettingsValidation {
 	const providers = connectionProviderIds();
 	if (slot.model) {
 		const { provider, id } = slot.model;
+		if (isClaudeLocalProvider(provider) && !claudeLocalAllowedFor(name)) return { ok: false, error: CLAUDE_LOCAL_SLOT_ERROR };
 		if (!providers.includes(provider)) {
 			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
 		}

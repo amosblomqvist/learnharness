@@ -38,10 +38,14 @@ import {
 	clampModelsLevels,
 	effectiveSettings,
 	fileAccessConfigurationError,
+	invalidateClaudeLocal,
 	promptOverrides,
+	refreshConnectionCatalog,
 	readSettingsRecord,
 	refreshWorkerRequestAdmission,
+	subscriptionRequestAuthorized,
 	themeStore,
+	validateAgentModelOverrides,
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
@@ -62,6 +66,11 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 			{ status: 404 },
 		);
 	}
+	// Local Claude's settings name an executable the server runs: the same
+	// same-origin gate as the connection controls (/api/claude-local).
+	if (section === "claudeLocal" && !subscriptionRequestAuthorized(request)) {
+		return Response.json({ error: "Local Claude controls require a same-origin LearnHarness request." }, { status: 403 });
+	}
 	const body = await request.json().catch(() => null);
 	const parsed = parser(body);
 	if (!parsed.ok) {
@@ -72,7 +81,10 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	let agentHealed: AgentSettings | undefined;
 
 	// Section-specific cross-validation (against the catalog / the prompt
-	// store) — the parsers only see shapes.
+	// store) — the parsers only see shapes. A Local Claude route that is
+	// ready but not yet probed must be known first (cached; never a probe
+	// once one has run).
+	if (section === "chat" || section === "models") await refreshConnectionCatalog("claude-local");
 	if (section === "chat") {
 		const verdict = validateChatSettings(parsed.settings as ChatSettings);
 		if (!verdict.ok) {
@@ -102,6 +114,10 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 		}
 	}
 	if (section === "agent") {
+		// Local Claude is conversation-only (owner, 2026-10-27): a background
+		// role can never be pinned to it.
+		const verdict = validateAgentModelOverrides((parsed.settings as AgentSettings).models);
+		if (!verdict.ok) return Response.json({ error: verdict.error }, { status: 400 });
 		// Orphan-heal (contract fix, interlude 2026-09-26): an ON switch
 		// whose override file is gone (or whose segment left the source
 		// tree) is healed to OFF (key dropped) inside this write — never a
@@ -148,6 +164,10 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// Only a successful durable write changes admission. Increasing the
 	// limit immediately drains queued requests; decreasing never cancels active work.
 	refreshWorkerRequestAdmission();
+	// Local Claude (2026-10-27): applied now, never a probe on this request —
+	// off / consent / prompt mode reach the bridge synchronously; turning it
+	// on or a new path re-probes on the next status read.
+	if (section === "claudeLocal") invalidateClaudeLocal();
 	const fileAccessError = fileAccessConfigurationError();
 	return Response.json({ settings: stored, ...(fileAccessError ? { fileAccessError } : {}) });
 }

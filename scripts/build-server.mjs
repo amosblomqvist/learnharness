@@ -63,6 +63,25 @@ for (const secret of ["auth.json", ...subscriptionSecrets, ".env", ".env.local"]
 	}
 }
 
+// 2c) Safety (docs/architecture.md, "Local Claude route"): the app runs
+// the user's OWN Claude Code install only. The Agent SDK's platform binary
+// packages are stubbed at install and excluded from the trace; a `claude`
+// binary inside the standalone payload means one of those guards regressed
+// and 281 MB of proprietary binary would ship in the app.
+const sdkScope = path.join(STANDALONE, "node_modules", "@anthropic-ai");
+if (exists(sdkScope)) {
+	for (const name of fs.readdirSync(sdkScope)) {
+		if (!name.startsWith("claude-agent-sdk-")) continue;
+		const dir = path.join(sdkScope, name);
+		const shipped = fs.existsSync(dir) && fs.readdirSync(dir).some((entry) => /^claude(\.exe)?$/.test(entry));
+		if (shipped) {
+			console.error(`[build-server] REFUSING: standalone contains ${name}/claude — the Agent SDK's bundled Claude Code binary would ship in the app.`);
+			console.error("             Check the package.json overrides and outputFileTracingExcludes in next.config.ts.");
+			process.exit(1);
+		}
+	}
+}
+
 // Assemble plugin assets only after refusing unsafe traced data/credentials.
 // Runtime native plugin loader is deliberately outside Next's module graph.
 // Copy it explicitly: external plugin entries must be loaded by native Node,
@@ -83,7 +102,7 @@ try {
 // Ship the complete portable skill plus its static ZIP; no application toolchain.
 buildPluginAuthoring({ root: ROOT, standalone: true });
 
-// 2c) Payload curation (2026-10-11): the trace sweep can copy repo-root
+// 2d) Payload curation (2026-10-11): the trace sweep can copy repo-root
 // plugins/ (authoring sources/tests), dist/ (previous installers), and the development Electron
 // runtime (the demo helper's dev-only require). Neither belongs in the
 // server: packaged helpers use process.execPath, the app's own binary.

@@ -30,8 +30,10 @@ interface Pose {
 	contribution: NativePluginQuestionContribution;
 }
 interface Epoch { poses: Map<number, Pose>; message?: AgentMessage }
-const ledgers = new WeakMap<Agent, PluginQuestionLedger>();
-export function pluginQuestionLedgerFor(agent: Agent): PluginQuestionLedger | undefined { return ledgers.get(agent); }
+const ledgers = new WeakMap<object, PluginQuestionLedger>();
+/** Any live agent may be asked; only a pi Agent is ever bound (the Local
+ *  Claude adapter runs without plugin contributions). */
+export function pluginQuestionLedgerFor(agent: object): PluginQuestionLedger | undefined { return ledgers.get(agent); }
 
 /** Private per-Agent proof of actual native execution, not a model-authored token. */
 export class PluginQuestionLedger {

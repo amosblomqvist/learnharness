@@ -5,8 +5,7 @@ import path from "node:path";
 import os from "node:os";
 import { createRequire } from "node:module";
 import { createModels, type OAuthCredential, type ProviderAuthInteraction } from "@earendil-works/pi-ai";
-import { githubCopilotProvider } from "@earendil-works/pi-ai/providers/github-copilot";
-import { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
+import type { xaiProvider } from "@earendil-works/pi-ai/providers/xai";
 
 const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-web-sub-"));
 process.env.LH_AUTH_FILE = path.join(directory, "auth.json");
@@ -15,6 +14,8 @@ delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
 await fs.writeFile(process.env.LH_AUTH_FILE, "{}", { mode: 0o600 });
 const require = createRequire(import.meta.url);
 const { SCOPES } = require("../electron/chatgpt.cjs");
+const { NATIVE_PROVIDERS, createNativeProvider, loadNativeProviderSDK } = require("../electron/native-providers.cjs");
+const realSDK = await loadNativeProviderSDK((specifier: string) => import(specifier));
 const { createWebSubscriptionOwner, webSubscriptionOwner, webSubscriptionsEnabled } = await import("../src/server/web-subscriptions.ts");
 const { subscriptionControlsResponse, subscriptionBrowserResponse } = await import("../src/server/web-subscription-http.ts");
 const chat = await import("../src/agent/chatgpt-bridge.ts");
@@ -27,10 +28,10 @@ globalThis.fetch = async (input) => {
 	assert.equal(String(input), "https://api.openai.com/v1/models", "unexpected network request forbidden");
 	return Response.json({ models: [{ slug: model.id, display_name: "Fixture ChatGPT", visibility: "list" }] });
 };
-const copilot = githubCopilotProvider().getModels()[0]!;
+const copilot = (createNativeProvider(realSDK, "github-copilot") as ReturnType<typeof xaiProvider>).getModels()[0]!;
 const credentials = (id: string): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires: Date.now() + 3600000, ...(id === "github-copilot" ? { availableModelIds: [copilot.id] } : {}) });
 await fs.writeFile(path.join(directory, "chatgpt-credentials.json"), JSON.stringify({ version: 1, hostId: "fixture-host", allowBackgroundUse: true, activeId: "fixture-account", registrations: [{ id: "fixture-account", clientId: "oaiapp_fixture", issuer: "https://auth.openai.com", subject: "fixture-subject", email: "fixture@example.invalid", tokens: { accessToken: "fixture-chatgpt-access", refreshToken: "fixture-chatgpt-refresh", idToken: "fixture-id-token", scopes: SCOPES, expiresAt: Date.now() + 3600000 } }] }), { mode: 0o600 });
-for (const id of ["github-copilot", "xai"]) await fs.writeFile(path.join(directory, `${id}-credentials.json`), JSON.stringify({ version: 1, allowBackgroundUse: true, connectionId: "00000000-0000-4000-8000-000000000001", credential: credentials(id) }), { mode: 0o600 });
+for (const { providerId: id } of NATIVE_PROVIDERS as { providerId: string }[]) await fs.writeFile(path.join(directory, `${id}-credentials.json`), JSON.stringify({ version: 1, allowBackgroundUse: true, connectionId: "00000000-0000-4000-8000-000000000001", credential: credentials(id) }), { mode: 0o600 });
 function request(command?: Record<string, unknown>, origin = "http://192.168.1.10:3000") {
 	return new Request(`${origin}/api/subscriptions`, { method: command ? "POST" : "GET", headers: { host: new URL(origin).host, origin, "sec-fetch-site": "same-origin", "x-learnharness-subscriptions": "1", "content-type": "application/json" }, ...(command ? { body: JSON.stringify(command) } : {}) });
 }
@@ -88,12 +89,16 @@ test("HTTP controls reject cross-origin, simple-form and private credential oper
 	delete process.env.LH_DESKTOP_SERVER; delete process.env.LH_DESKTOP_API_SECRET;
 });
 
+/** The fake SDK covers EVERY registered provider (electron/native-providers.cjs):
+ *  real provider modules with only login/refresh overridden, keyed by the
+ *  registry's factory names — a provider added to the registry is covered
+ *  here automatically, so the web loader can never drift unnoticed. */
 function fakeSDK(login: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>) {
 	const factory = (id: string) => {
-		const provider = id === "xai" ? xaiProvider() : githubCopilotProvider();
+		const provider = createNativeProvider(realSDK, id) as ReturnType<typeof xaiProvider>;
 		return { ...provider, auth: { oauth: { ...provider.auth.oauth!, login: (interaction: ProviderAuthInteraction) => login(id, interaction), refresh: async () => credentials(id) } } };
 	};
-	return { createModels, githubCopilotProvider: () => factory("github-copilot"), xaiProvider: () => factory("xai") };
+	return { createModels, ...Object.fromEntries(NATIVE_PROVIDERS.map((descriptor: { providerId: string; factory: string }) => [descriptor.factory, () => factory(descriptor.providerId)])) };
 }
 test("device browser actions preserve complete URLs privately, are origin-bound, one-use and cancellation-bound", async () => {
 	const scratch = await fs.mkdtemp(path.join(os.tmpdir(), "lh-web-action-"));

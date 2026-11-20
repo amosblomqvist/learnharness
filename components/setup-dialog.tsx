@@ -40,7 +40,7 @@ import { useEffect, useRef, useState } from "react";
 import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers } from "@/components/interaction-layers";
 import type React from "react";
-import { type ModelCatalogEntry, type ModelSlotName, type ModelsSettings, CUSTOM_PROVIDER } from "@/src/core";
+import { isClaudeLocalProvider, type ModelCatalogEntry, type ModelSlotName, type ModelsSettings, CUSTOM_PROVIDER } from "@/src/core";
 import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList } from "@/components/settings/model-menu";
 import { MenuShell } from "@/components/menu-shell";
@@ -472,9 +472,10 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 							// Unavailable metadata cannot erase or clamp a saved preference.
 							const levelsForEntry = metadata?.supportedLevels ?? (entry ? Object.keys(THINKING_LABEL) : []);
 							const available = catalog?.models ?? (failed ? [] : undefined);
-							const slotCatalog = slot === "vision"
+							// Vision: image-capable only; Local Claude: the conversation slot only.
+							const slotCatalog = (slot === "vision"
 								? available?.filter((m) => m.input.includes("image") || m.provider === CUSTOM_PROVIDER.id)
-								: available;
+								: available)?.filter((m) => slot === "strong" || !isClaudeLocalProvider(m.provider));
 							return (
 								<div key={slot} data-testid={`setup-slot-${slot}`} className="flex flex-col gap-1.5">
 									<span className="flex items-center gap-1.5">

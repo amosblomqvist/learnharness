@@ -62,6 +62,8 @@ export * from "./prices.ts";
 export * from "./context-usage.ts";
 export type { ChatGPTStatus, ChatGPTControlBridge } from "./contracts/chatgpt.ts";
 export { NATIVE_SUBSCRIPTIONS } from "./contracts/subscriptions.ts";
+export { CLAUDE_LOCAL, isClaudeLocalProvider } from "./contracts/claude-local.ts";
+export type { ClaudeLocalProviderId, ClaudeLocalSystemPromptMode, ClaudeLocalState, ClaudeLocalStatus, ClaudeLocalScope, ClaudeLocalUsageReport, ClaudeLocalControlBridge } from "./contracts/claude-local.ts";
 export type { NativeSubscriptionProviderId, NativeSubscriptionLogicalId, NativeSubscriptionStatus, NativeSubscriptionSnapshot, NativeSubscriptionScope, NativeSubscriptionControlBridge, SubscriptionInteraction, SubscriptionPrompt } from "./contracts/subscriptions.ts";
 export * from "./cost-summary.ts";
 export { CLAUDE_CODE_PROVIDER, CLAUDE_CODE_MINIMUM_VERSION, type ClaudeCodeStatus } from "./contracts/claude-code.ts";

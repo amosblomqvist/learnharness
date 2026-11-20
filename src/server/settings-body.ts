@@ -19,6 +19,7 @@ import type {
 	AgentSettings,
 	AppearanceSettings,
 	BackgroundModelRole,
+	ClaudeLocalSettings,
 	CompactionSettings,
 	CustomModelOverride,
 	GeneralSettings,
@@ -28,7 +29,7 @@ import type {
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, CLAUDE_BINARY_BASENAMES, CLAUDE_LOCAL_SYSTEM_PROMPT_MODES, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS, isSafeBinaryPath } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
@@ -439,6 +440,36 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+/** claudeLocal: { enabled?, allowBackgroundUse?, systemPromptMode?, binaryPath? }
+ *  (Local Claude route, owner 2026-10-27). Strict shapes; an empty
+ *  binaryPath clears the override (replace-whole semantics). */
+export function parseClaudeLocalSettingsBody(body: unknown): SettingsBodyResult<ClaudeLocalSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: ClaudeLocalSettings = {};
+	for (const key of ["enabled", "allowBackgroundUse"] as const) {
+		if (raw[key] === undefined) continue;
+		if (typeof raw[key] !== "boolean") return { ok: false, error: `${key} must be a boolean` };
+		settings[key] = raw[key];
+	}
+	if (raw.systemPromptMode !== undefined) {
+		if (typeof raw.systemPromptMode !== "string" || !(CLAUDE_LOCAL_SYSTEM_PROMPT_MODES as readonly string[]).includes(raw.systemPromptMode)) {
+			return { ok: false, error: `systemPromptMode must be one of ${CLAUDE_LOCAL_SYSTEM_PROMPT_MODES.join(", ")}` };
+		}
+		settings.systemPromptMode = raw.systemPromptMode as ClaudeLocalSettings["systemPromptMode"];
+	}
+	if (raw.binaryPath !== undefined && raw.binaryPath !== "") {
+		// The override is executed: absolute (on this server's platform),
+		// normalised, and named like a Claude Code executable.
+		const error = `binaryPath must be a plain file path: an absolute path to ${CLAUDE_BINARY_BASENAMES.join(", ")}`;
+		if (typeof raw.binaryPath !== "string" || !path.isAbsolute(raw.binaryPath.trim())) return { ok: false, error };
+		const resolved = path.resolve(raw.binaryPath.trim());
+		if (!isSafeBinaryPath(raw.binaryPath) || !isSafeBinaryPath(resolved)) return { ok: false, error };
+		settings.binaryPath = resolved;
+	}
+	return { ok: true, settings };
+}
+
 /** dictation: { language?: one of Nova-3's supported language codes } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
@@ -499,6 +530,7 @@ export const SETTINGS_SECTIONS = {
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
+	claudeLocal: parseClaudeLocalSettingsBody,
 } as const;
 
 export type SettingsSectionName = keyof typeof SETTINGS_SECTIONS;

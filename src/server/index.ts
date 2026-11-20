@@ -54,7 +54,8 @@ export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from ".
 export * from "./observability.ts";
 export { abortPluginWorkerActivity } from "./plugin-worker-activity.ts";
 export * from "./model-catalog.ts";
-export { subscriptionControlsResponse, subscriptionBrowserResponse } from "./web-subscription-http.ts";
+export { subscriptionControlsResponse, subscriptionBrowserResponse, subscriptionRequestAuthorized } from "./web-subscription-http.ts";
+export { claudeLocalControlsResponse, refreshClaudeLocal, invalidateClaudeLocal, claudeLocalStatusNow } from "./claude-local.ts";
 export { sessionCost } from "./pricing.ts";
 export { initializePlugins, getPluginHost, getPluginAgentContributions, getPluginQuestionTypeResolver, pluginTransport } from "./plugins.ts";
 export { createPluginDocumentRoute } from "./plugin-transport.ts";

@@ -1,4 +1,5 @@
-import type { Agent, AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
+import type { LiveAgent } from "../../agent/live-agent.ts";
 import { ToolCallIdUniquifier } from "./call-ids.ts";
 import type { ChatGPTRequestCycle } from "../../agent/chatgpt-request-cycle.ts";
 import { pluginQuestionLedgerFor } from "../../agent/plugin-question-tools.ts";
@@ -78,8 +79,9 @@ export interface PiTurnSpec {
 	 * an admission-recovery run. This hook never schedules a run itself. */
 	beforeCycle?: () => void;
 	requestCycle?: ChatGPTRequestCycle;
-	/** The per-turn agent (stateless engine — built from the record). */
-	agent: Agent;
+	/** The per-turn agent (stateless engine — built from the record): pi's
+	 *  Agent, or the Local Claude adapter — both speak LiveAgent. */
+	agent: LiveAgent;
 	/** The handler's error-masking policy for LOOP-level failures (the
 	 *  event stream itself is verbatim — provider errors ride their
 	 *  message's stopReason/errorMessage through untouched). */

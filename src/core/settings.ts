@@ -34,6 +34,7 @@ import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
+import { CLAUDE_LOCAL, type ClaudeLocalSystemPromptMode } from "./contracts/claude-local.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
@@ -165,11 +166,13 @@ export interface ProviderKeyMissing {
 /** The refusal wording's invariant tail — the matcher below keys on it
  * (the label prefix varies by provider). */
 const PROVIDER_KEY_MISSING_TAIL = "key is set — add one in Settings → Keys";
+/** The Local Claude route has no key: its refusal names the Providers card. */
+const CLAUDE_LOCAL_NOT_READY_TAIL = "is not ready — check it in Settings → Providers";
 const CLAUDE_CODE_UNAVAILABLE = "Claude Code is unavailable. Enable and set it up in Settings → Providers.";
 export function providerKeyMissing(provider: string, slots: ModelSlotName[]): ProviderKeyMissing {
 	const label = AUTH_PROVIDER_KEYS.find((p) => p.id === provider)?.label ?? provider;
 	return {
-		error: provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_UNAVAILABLE : `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
+		error: provider === CLAUDE_CODE_PROVIDER ? CLAUDE_CODE_UNAVAILABLE : provider === CLAUDE_LOCAL.providerId ? `${CLAUDE_LOCAL.label} ${CLAUDE_LOCAL_NOT_READY_TAIL}` : `No ${label} ${PROVIDER_KEY_MISSING_TAIL}`,
 		code: PROVIDER_KEY_MISSING_CODE,
 		provider,
 		slots,
@@ -180,7 +183,7 @@ export function providerKeyMissing(provider: string, slots: ModelSlotName[]): Pr
  * scary-error) — the envelope's home module owns the string so the
  * writer and the matcher can never drift. */
 export function isProviderKeyRefusal(error: string | undefined): boolean {
-	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CLAUDE_CODE_UNAVAILABLE);
+	return !!error && (error.endsWith(PROVIDER_KEY_MISSING_TAIL) || error === CLAUDE_CODE_UNAVAILABLE || error.endsWith(CLAUDE_LOCAL_NOT_READY_TAIL));
 }
 /** The typed throw for in-process seams (extraction pipeline) — the
  * ProviderKeyMissing sibling of ModelsNotConfiguredError: callers catch
@@ -488,6 +491,18 @@ export interface CompactionSettings {
 	includeReasoning?: boolean;
 }
 
+/** The Local Claude route's preferences (contracts/claude-local.ts, owner
+ *  2026-10-27): opt-in, background consent, system-prompt mode and an
+ *  optional explicit path to the user's Claude Code install. NOTHING
+ *  credential-shaped ever lives here — Claude Code keeps its own login. */
+export interface ClaudeLocalSettings {
+	enabled?: boolean;
+	allowBackgroundUse?: boolean;
+	systemPromptMode?: ClaudeLocalSystemPromptMode;
+	/** An explicit binary path (overrides PATH / known-location detection). */
+	binaryPath?: string;
+}
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -504,6 +519,7 @@ export interface UserSettings {
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
 	compaction?: CompactionSettings;
+	claudeLocal?: ClaudeLocalSettings;
 	[key: string]: unknown;
 }
 
@@ -533,6 +549,7 @@ export interface FactorySettings {
 	};
 	graph: Required<GraphSettings>;
 	compaction: Required<CompactionSettings>;
+	claudeLocal: Required<Omit<ClaudeLocalSettings, "binaryPath">>;
 }
 
 export const FACTORY_SETTINGS: FactorySettings = {
@@ -552,6 +569,10 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
 	compaction: { thresholdTokens: 150_000, includeReasoning: false },
+	// Local Claude is OPT-IN (owner, 2026-10-27): API keys / cloud providers
+	// stay the default; background consent defaults ON like the other
+	// connections; the custom prompt is the default mode.
+	claudeLocal: { enabled: false, allowBackgroundUse: true, systemPromptMode: "custom" },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -850,6 +871,34 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+/** The executables a binaryPath override may name (the native binary,
+ *  npm's Windows shim, the npm cli.js entry). */
+export const CLAUDE_BINARY_BASENAMES: readonly string[] = ["claude", "claude.exe", "claude.cmd", "cli.js"];
+/** A binary path is an absolute path (POSIX `/…`, Windows `C:\…` or `\\…`)
+ *  without control characters whose basename is a Claude Code executable;
+ *  anything else drops. The override is executed, so a settings write must
+ *  never be able to name an arbitrary program (the PUT parser additionally
+ *  applies the server platform's path.isAbsolute and normalises). */
+export function isSafeBinaryPath(value: unknown): value is string {
+	if (typeof value !== "string") return false;
+	const trimmed = value.trim();
+	if (trimmed.length === 0 || value.length > 4096 || /[\x00-\x1f\x7f]/.test(value)) return false;
+	if (!/^(\/|[A-Za-z]:[\\/]|\\\\)/.test(trimmed)) return false;
+	return CLAUDE_BINARY_BASENAMES.includes(trimmed.split(/[\\/]/).pop() ?? "");
+}
+export const CLAUDE_LOCAL_SYSTEM_PROMPT_MODES: readonly ClaudeLocalSystemPromptMode[] = ["custom", "preset"];
+
+function sanitizeClaudeLocal(raw: Record<string, unknown>): ClaudeLocalSettings {
+	const out: ClaudeLocalSettings = {};
+	const enabled = boolOrDrop(raw.enabled);
+	if (enabled !== undefined) out.enabled = enabled;
+	const background = boolOrDrop(raw.allowBackgroundUse);
+	if (background !== undefined) out.allowBackgroundUse = background;
+	if (typeof raw.systemPromptMode === "string" && (CLAUDE_LOCAL_SYSTEM_PROMPT_MODES as readonly string[]).includes(raw.systemPromptMode)) out.systemPromptMode = raw.systemPromptMode as ClaudeLocalSystemPromptMode;
+	if (isSafeBinaryPath(raw.binaryPath)) out.binaryPath = raw.binaryPath.trim();
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -887,6 +936,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.models !== null && typeof r.models === "object" && !Array.isArray(r.models)) {
 		const models = sanitizeModels(r.models as Record<string, unknown>);
 		if (Object.keys(models).length) out.models = models;
+	}
+	if (r.claudeLocal !== null && typeof r.claudeLocal === "object" && !Array.isArray(r.claudeLocal)) {
+		out.claudeLocal = sanitizeClaudeLocal(r.claudeLocal as Record<string, unknown>);
 	}
 	if (r.customProvider !== null && typeof r.customProvider === "object" && !Array.isArray(r.customProvider)) {
 		out.customProvider = sanitizeCustomProvider(r.customProvider as Record<string, unknown>);
