@@ -223,9 +223,10 @@ export function deleteSourcesTraces(graphStore: GraphStore, sourceIds: ReadonlyS
 	//    implication node carries the chain's arg_ id — stale resting spots
 	//    would pin nothing; pruning keeps the ledger honest and the
 	//    revision moving for exactly the right reason).
+	const liveChainIds = new Set(outChains.map((line) => line.id));
 	const deadChainIds = new Set(
 		chainLines
-			.filter((line) => !outChains.includes(line))
+			.filter((line) => !liveChainIds.has(line.id))
 			.map((line) => line.id),
 	);
 	const positions = graphStore.readPositions();
@@ -328,7 +329,8 @@ export function deleteNodeTraces(graphStore: GraphStore, nodeId: string): NodeDe
 	});
 
 	// The resting positions die with the node and every dead chain.
-	const deadChainIds = new Set(chainLines.filter((line) => !outChains.includes(line)).map((line) => line.id));
+	const liveChainIds = new Set(outChains.map((line) => line.id));
+	const deadChainIds = new Set(chainLines.filter((line) => !liveChainIds.has(line.id)).map((line) => line.id));
 	const positions = graphStore.readPositions();
 	const prunedPositions = Object.fromEntries(
 		Object.entries(positions).filter(([id]) => id !== nodeId && !deadChainIds.has(id)),
