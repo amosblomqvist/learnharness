@@ -415,7 +415,7 @@ MessageResponse.displayName = "MessageResponse";
  * transform. Ordinary assistant/user prose keeps MessageResponse unchanged. */
 export function ToolContentResponse({ children, ...props }: MessageResponseProps) {
   return (
-    <MessageResponse {...props}>
+    <MessageResponse mode="static" {...props}>
       {typeof children === "string" ? repairMathForDisplay(children) : children}
     </MessageResponse>
   );
