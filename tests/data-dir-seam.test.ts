@@ -1,19 +1,12 @@
-/**
- * The LH_DATA_DIR seam (Electron contract, 2026-09-17): when set, every
- * mutable record relocates under it; when unset, byte-for-byte the old
- * repo-data/ behavior. The desktop shell's whole data story rests on this,
- * so pin both directions.
- *
- * The seam is evaluated at MODULE LOAD, so the "set" case must set the env
- * BEFORE the first import of config.ts in this process (dynamic import,
- * below) and the "unset" case needs a fresh child process.
- */
+/** Data-folder configuration is evaluated at module load. A fresh process
+ * lets each environment combination resolve its own startup location. */
 import assert from "node:assert/strict";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
 import { describe, it } from "node:test";
+import { writeConfiguredDataDirPath } from "../electron/data-location.cjs";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
 const TSX_LOADER = path.join(REPO_ROOT, "node_modules", "tsx", "dist", "loader.mjs");
@@ -35,6 +28,34 @@ describe("LH_DATA_DIR seam", () => {
 		} finally {
 			delete process.env.LH_DATA_DIR;
 		}
+	});
+
+	it("uses the location pointer with LH_DATA_DIR set and the declared default when the pointer is removed", (t) => {
+		const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-seam-pointer-"));
+		t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+		const custom = path.join(root, "custom");
+		const fallback = path.join(root, "default");
+		const pointer = path.join(root, "data-location.json");
+		fs.mkdirSync(custom);
+		writeConfiguredDataDirPath(pointer, custom);
+		const env = {
+			...process.env,
+			LH_DATA_DIR: path.join(root, "startup-hint"),
+			LH_DEFAULT_DATA_DIR: fallback,
+			LH_DATA_CONFIG_FILE: pointer,
+			LH_DESKTOP_SERVER: "0",
+		};
+		const resolve = () => JSON.parse(execFileSync(
+			process.execPath,
+			["--import", TSX_LOADER, "--eval", `const m = await import(${JSON.stringify(path.join(REPO_ROOT, "config.ts"))}); console.log(JSON.stringify(m.getDataLocationState()));`],
+			{ cwd: REPO_ROOT, env, encoding: "utf-8" },
+		));
+		const configured = resolve();
+		assert.equal(configured.currentDir, custom);
+		assert.equal(configured.defaultDir, fallback);
+		assert.equal(configured.fixed, false);
+		fs.unlinkSync(pointer);
+		assert.equal(resolve().currentDir, fallback);
 	});
 
 	it("unset = the repo data/ exactly as before (fresh child process, no env)", () => {

@@ -8,21 +8,17 @@ import { assertDataWritesAdmitted, configureDataWriteAccess } from "./src/store/
 export const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
 /**
- * THE data-location seam (the Electron contract, 2026-09-17): LH_DATA_DIR
- * relocates every MUTABLE record — chat sessions, graph ledgers, the
- * embedding model cache — when set. The desktop shell points it at
- * userData so nothing is written inside the read-only .app bundle
- * (macOS translocation guarantees the bundle is read-only anyway).
- * Unset (plain web dev / repo work) it resolves to the repo's data/,
- * byte-for-byte as before. Read-only assets (prompts) stay ROOT-anchored
- * on purpose: they ship inside the app bundle by design.
+ * Mutable learning records live under PATHS.data. The machine-local location
+ * pointer (LH_DATA_CONFIG_FILE or <ROOT>/data-location.json) can select a
+ * custom folder. Packaged Electron resolves the location before the server
+ * starts and supplies its userData/data default via LH_DEFAULT_DATA_DIR.
  *
- * Custom data directory (2026-11-20): a machine-local bootstrap file
- * (`data-location.json` at `LH_DATA_CONFIG_FILE` or `<ROOT>/data-location.json`)
- * can redirect `PATHS.data` to a user-chosen folder (such as an external
- * drive) while keeping `AUTH_FILE` and subscription credentials on the
- * local machine. When `LH_DATA_DIR` is set without `LH_DATA_CONFIG_FILE`
- * (test/CLI overrides), `LH_DATA_DIR` is used directly.
+ * LH_DATA_DIR alone pins the folder for the session when LH_DATA_CONFIG_FILE
+ * is unset. Otherwise the fallback resolves in this order: LH_DEFAULT_DATA_DIR,
+ * LH_DATA_DIR, then <ROOT>/data.
+ *
+ * Bundled prompts stay under ROOT. Provider keys and subscription credentials
+ * stay in their local credential stores.
  */
 export const DEFAULT_DATA_ROOT = process.env.LH_DEFAULT_DATA_DIR
 	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DEFAULT_DATA_DIR)

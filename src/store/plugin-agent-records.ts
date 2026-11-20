@@ -69,7 +69,7 @@ export function createPluginAgentRecordStore(directory: string): PluginAgentReco
 				fs.fsyncSync(fd);
 				fs.closeSync(fd); fd = undefined;
 				assertDataStoreWritable(file);
-			fs.renameSync(temporary, file);
+				fs.renameSync(temporary, file);
 			} finally {
 				if (fd !== undefined) fs.closeSync(fd);
 				try { fs.unlinkSync(temporary); }
