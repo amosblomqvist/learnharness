@@ -27,7 +27,7 @@
 
 import * as fs from "node:fs";
 import path from "node:path";
-import { PATHS, onDataDirChange } from "../../config.ts";
+import { PATHS, onDataDirChange, assertDataStoreWritable, mkdirDataDirectory } from "../../config.ts";
 
 /** Max bytes per chat's JSONL before recording stops (with a marker). */
 const CAP_BYTES = 20 * 1024 * 1024;
@@ -70,7 +70,8 @@ function writeLine(file: string, line: Record<string, unknown>): void {
 	const text = `${JSON.stringify({ t: Date.now(), ...line })}\n`;
 	try {
 		const before = state?.bytes ?? (fs.existsSync(file) ? fs.statSync(file).size : 0);
-		fs.mkdirSync(path.dirname(file), { recursive: true });
+		mkdirDataDirectory(path.dirname(file));
+		assertDataStoreWritable(file);
 		fs.appendFileSync(file, text, "utf-8");
 		const bytes = before + Buffer.byteLength(text);
 		if (bytes > providerEventsCap.current) {

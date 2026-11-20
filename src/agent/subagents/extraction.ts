@@ -1,3 +1,4 @@
+import { assertDataStoreWritable } from "../../../config.ts";
 import * as crypto from "node:crypto";
 import type { Usage } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
@@ -690,6 +691,10 @@ function runs(): NonNullable<LhExtractionGlobal["__lhExtractionRuns"]> {
 }
 
 /** In-flight pipeline runs (oldest first) — the /api/graph/status payload. */
+export function hasExtractionsInFlight(): boolean {
+	return runs().inFlight.size > 0 || runs().running.size > 0;
+}
+
 export function extractionStatuses(): RunningExtraction[] {
 	return [...runs().running.values()].sort((a, b) => a.startedAt - b.startedAt);
 }
@@ -1095,6 +1100,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	}
 
 	async function runExtraction(chatId: string): Promise<EmissionStats> {
+		assertDataStoreWritable();
 		if (inFlight.has(chatId)) return { nodes: 0, chains: 0 };
 		inFlight.add(chatId);
 		const t0 = performance.now();
@@ -1409,6 +1415,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	/** Every explicit import processes the whole file. Identity, source digest,
 	 * auditor and usage history remain source-scoped; this is not exactly-once. */
 	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
+		assertDataStoreWritable();
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
 		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");

@@ -53,7 +53,7 @@ for (const practice of [false, true]) test(`${practice ? "plugin practice submis
 	const available = { status: "available" as const, signal: activation.signal, requireActive() {} };
 	global.__lhPlugins = { host: {
 		resolveQuestionType: () => ({ ...available, definition }), resolveProblemType: () => ({ ...available, definition: problemDefinition }),
-	}, ready: Promise.resolve() };
+	}, ready: Promise.resolve(), dataRoot: process.env.LH_DATA_DIR };
 	try {
 		const prefix: LhMessage[] = [newUserMessage("SAVED_HISTORY_PUBLIC ".repeat(6000)), { ...fauxAssistantMessage("Saved earlier lesson."), id: "earlier_lesson" }, newUserMessage("CURRENT_RETAINED ".repeat(5000))];
 		chatStore.saveMessages(chat.id, prefix);

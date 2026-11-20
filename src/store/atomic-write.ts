@@ -28,6 +28,7 @@
  *  - New files get `mode` (default 0o666 minus umask), not the old file's.
  */
 
+import { assertDataStoreWritable } from "./data-write-gate.ts";
 import fs from "node:fs"; // default import on purpose: tests patch fs.renameSync on this object, namespace imports would not see it
 import path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -39,6 +40,7 @@ const RENAME_RETRY_MS = 100;
  *  untouched, except when the in-place fallback fails midway: then the temp
  *  file beside it keeps the complete new bytes. */
 export function writeFileAtomicSync(file: string, text: string, options?: { mode?: number; allowInPlaceFallback?: boolean }): void {
+	assertDataStoreWritable(file);
 	const tmp = `${file}${TEMP_MARKER}${randomUUID()}`;
 	let target: number;
 	try {

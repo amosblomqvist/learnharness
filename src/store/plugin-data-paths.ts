@@ -1,3 +1,4 @@
+import { mkdirDataDirectory } from "./data-write-gate.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { PLUGIN_ID_PATTERN } from "../core/plugins.ts";
@@ -19,7 +20,7 @@ export function safePluginDataDirectory(communityDirectory: string, id: string, 
 		catch (error) {
 			if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
 			if (!create) return null;
-			fs.mkdirSync(directory, { recursive: directory === root }); stat = fs.lstatSync(directory);
+			mkdirDataDirectory(directory); stat = fs.lstatSync(directory);
 		}
 		if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(`Unsafe plugin data directory: ${directory}`);
 		const real = fs.realpathSync(/* turbopackIgnore: true */ directory); realRoot ??= real;

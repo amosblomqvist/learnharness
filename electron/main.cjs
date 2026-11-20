@@ -52,10 +52,11 @@ const PRODUCT_NAME = "LearnHarness";
 // Must run before the LH_DEV_URL suffix below — dev becomes
 // "LearnHarness-dev".
 app.setName(PRODUCT_NAME);
-const { inspectDataLocation, resolveStartupDataDir } = require("./data-location.cjs");
+const { inspectDataLocation, resolveStartupDataLocation } = require("./data-location.cjs");
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
 const DEFAULT_DATA_DIR = () => path.join(app.getPath("userData"), "data");
 const DATA_CONFIG_FILE = () => path.join(app.getPath("userData"), "data-location.json");
+let startupDataLocation;
 const DATA_DIR = () =>
 	inspectDataLocation({
 		configFile: DATA_CONFIG_FILE(),
@@ -236,7 +237,8 @@ function startServer(port) {
 					NODE_ENV: "production",
 					PORT: String(port),
 					HOSTNAME: "127.0.0.1", // the server defaults to 0.0.0.0 — never
-					LH_DATA_DIR: DATA_DIR(),
+					LH_DATA_DIR: startupDataLocation.currentDir,
+					LH_STARTUP_DATA_LOCATION: JSON.stringify(startupDataLocation),
 					LH_DEFAULT_DATA_DIR: DEFAULT_DATA_DIR(),
 					LH_DATA_CONFIG_FILE: DATA_CONFIG_FILE(),
 					// The auth/keys store — the child reads AND writes this file itself
@@ -690,20 +692,23 @@ async function main() {
 
 	const devUrl = process.env.LH_DEV_URL;
 	if (!devUrl) {
-		await resolveStartupDataDir({
+		startupDataLocation = await resolveStartupDataLocation({
 			configFile: DATA_CONFIG_FILE(),
 			defaultDir: DEFAULT_DATA_DIR(),
 			dialog,
 			fsImpl: fs,
+			appRoot: path.join(__dirname, ".."),
+			authFile: AUTH_FILE(),
 			log,
 		});
+		if (!startupDataLocation) { app.quit(); return; }
 	}
 
 	// Read the same record/custom theme the server uses before constructing
 	// any native window, including the external development shell.
 	appearance = readAppearance(serverDataDir({
 		devUrl, env: process.env,
-		packagedDataDir: DATA_DIR(), repoRoot: path.join(__dirname, ".."),
+		packagedDataDir: startupDataLocation?.currentDir ?? DATA_DIR(), repoRoot: path.join(__dirname, ".."),
 	}));
 	nativeTheme.themeSource = themeSourceFor(appearance.mode);
 

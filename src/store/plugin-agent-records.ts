@@ -1,3 +1,4 @@
+import { assertDataStoreWritable, mkdirDataDirectory } from "./data-write-gate.ts";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { randomUUID } from "node:crypto";
@@ -31,7 +32,7 @@ function validate(value: unknown, id: string): PluginAgentRecord {
 export function createPluginAgentRecordStore(directory: string): PluginAgentRecordStore {
 	// Plugin data directories are runtime inputs, never deployment assets.
 	const root = path.resolve(/* turbopackIgnore: true */ directory);
-	fs.mkdirSync(root, { recursive: true });
+	mkdirDataDirectory(root);
 	const filename = (id: string) => { safeId(id); return path.join(/* turbopackIgnore: true */ root, `${id}.json`); };
 	const get = (id: string): PluginAgentRecord | null => {
 		const file = filename(id);
@@ -67,7 +68,8 @@ export function createPluginAgentRecordStore(directory: string): PluginAgentReco
 				fs.writeFileSync(fd, body, "utf8");
 				fs.fsyncSync(fd);
 				fs.closeSync(fd); fd = undefined;
-				fs.renameSync(temporary, file);
+				assertDataStoreWritable(file);
+			fs.renameSync(temporary, file);
 			} finally {
 				if (fd !== undefined) fs.closeSync(fd);
 				try { fs.unlinkSync(temporary); }

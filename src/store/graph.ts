@@ -34,7 +34,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { LEDGER_FILES, POSITIONS_FILE, SOURCES_FILE } from "../../config.ts";
+import { LEDGER_FILES, POSITIONS_FILE, SOURCES_FILE, assertDataStoreWritable, mkdirDataDirectory } from "../../config.ts";
 import { assertGraphFormat, ensureGraphFormat } from "./graph-format.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 import type {
@@ -52,8 +52,9 @@ import type { GraphStore } from "../core/ports.ts";
 // ─── JSONL primitives ────────────────────────────────────────────────────────
 
 function appendLine<T>(file: string, record: T): void {
-	fs.mkdirSync(path.dirname(file), { recursive: true });
+	mkdirDataDirectory(path.dirname(file));
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
+	assertDataStoreWritable(file);
 	fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf-8");
 }
 
@@ -223,7 +224,7 @@ export const graphStore: GraphStore = {
 		} as const;
 		for (const [key, records] of Object.entries(next) as [keyof typeof files, unknown[]][]) {
 			const file = files[key];
-			fs.mkdirSync(path.dirname(file), { recursive: true });
+			mkdirDataDirectory(path.dirname(file));
 			// JSONL: one record per line, trailing newline — the reader
 			// must see exactly what appendLine would have written.
 			const body = records.map((record) => JSON.stringify(record)).join("\n") + (records.length > 0 ? "\n" : "");
@@ -259,7 +260,7 @@ function readPositionMap(): Record<string, Position> {
 }
 
 function writePositionMap(positions: Record<string, Position>): void {
-	fs.mkdirSync(path.dirname(POSITIONS_FILE), { recursive: true });
+	mkdirDataDirectory(path.dirname(POSITIONS_FILE));
 	writeFileAtomicSync(POSITIONS_FILE, JSON.stringify({ positions, updatedAt: new Date().toISOString() }, null, "\t"));
 }
 
@@ -290,7 +291,7 @@ function readSourceMap(): Record<string, NotesSource> {
 }
 
 function writeSourceMap(map: Record<string, NotesSource>): void {
-	fs.mkdirSync(path.dirname(SOURCES_FILE), { recursive: true });
+	mkdirDataDirectory(path.dirname(SOURCES_FILE));
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
 	writeFileAtomicSync(SOURCES_FILE, JSON.stringify(map, null, "\t"), { allowInPlaceFallback: true });
 }
@@ -305,6 +306,7 @@ function writeSourceMap(map: Record<string, NotesSource>): void {
 		const file = path.join(/* turbopackIgnore: true */ graphDir, legacy);
 		try {
 			if (fs.existsSync(/* turbopackIgnore: true */ file)) {
+				assertDataStoreWritable(file);
 				fs.rmSync(file);
 				console.info(`[graph-store] purged legacy ledger: ${file}`);
 			}

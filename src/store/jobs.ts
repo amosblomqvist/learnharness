@@ -11,7 +11,7 @@
 
 import * as fs from "node:fs";
 import * as path from "node:path";
-import { PATHS } from "../../config.ts";
+import { PATHS, assertDataStoreWritable, mkdirDataDirectory } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { JobStore } from "../core/ports.ts";
 import type { CreateJobInit, JobPatch } from "../core/ports.ts";
@@ -62,7 +62,7 @@ function createJob(init: CreateJobInit): JobRecord {
 		updatedAt: now,
 		...(init.plugin ? { plugin: init.plugin } : {}),
 	};
-	fs.mkdirSync(jobsDir(), { recursive: true });
+	mkdirDataDirectory(jobsDir());
 	writeJob(record);
 	emit("jobs-changed", { chatId: init.chatId });
 	return record;
@@ -95,7 +95,6 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 function listJobs(chatId: string): JobRecord[] {
 	try {
 		const dir = jobsDir();
-		fs.mkdirSync(dir, { recursive: true });
 		return fs
 			.readdirSync(/* turbopackIgnore: true */ dir)
 			.filter((f) => f.endsWith(".json"))
@@ -120,6 +119,7 @@ function deleteJobsForChat(chatId: string): number {
 	let removed = 0;
 	for (const job of listJobs(chatId)) {
 		try {
+			assertDataStoreWritable(jobFile(job.id));
 			fs.unlinkSync(jobFile(job.id));
 			removeLeftoverTemps(jobFile(job.id));
 			removed++;

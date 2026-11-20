@@ -54,7 +54,11 @@ export function isJobLive(jobId: string): boolean {
 export function fireJobAbort(jobId: string): boolean {
 	const controller = registry().get(jobId);
 	if (!controller) return false;
-	registry().delete(jobId);
+	if (controller.signal.aborted) return false;
 	controller.abort();
 	return true;
+}
+
+export function hasLiveJobs(): boolean {
+	return registry().size > 0;
 }

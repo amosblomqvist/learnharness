@@ -417,7 +417,8 @@ test("server contribution accessor uses the initialized process-global host", as
 	ctx.registerInstructions({ agents: ["teacher"], text: "Accessor contribution" });
 	const global = globalThis as typeof globalThis & { __lhPlugins?: unknown };
 	const previous = global.__lhPlugins;
-	global.__lhPlugins = { host: f.host, ready: Promise.resolve() };
+	const { PATHS } = await import("../config.ts");
+	global.__lhPlugins = { host: f.host, ready: Promise.resolve(), dataRoot: PATHS.data };
 	try {
 		const { getPluginAgentContributions } = await import("../src/server/plugins.ts");
 		const contributions = await getPluginAgentContributions();

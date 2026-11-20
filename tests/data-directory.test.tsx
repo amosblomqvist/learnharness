@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+import { Writable } from "node:stream";
 import { createRequire } from "node:module";
 import os from "node:os";
 import path from "node:path";
-import { after, beforeEach, describe, it } from "node:test";
+import { after, beforeEach, describe, it, mock } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
 
 const scratchRoot = fs.mkdtempSync(path.join(os.tmpdir(), "lh-data-dir-test-"));
@@ -23,16 +25,20 @@ process.env.LH_AUTH_FILE = authFile;
 const require = createRequire(import.meta.url);
 const {
 	inspectDataLocation,
+	isFullPath,
+	STORE_MARKER,
 	resolveStartupDataDir,
 	writeConfiguredDataDirPath,
 } = require("../electron/data-location.cjs");
 
 const config = await import("../config.ts");
+const { createSideChatService } = await import("../src/server/side-chat.ts");
+const { registerJobAbort, unregisterJobAbort } = await import("../src/agent/subagents/aborts.ts");
 const {
 	GET: getDataDirRoute,
 	POST: postDataDirRoute,
 } = await import("../app/api/settings/data-dir/route.ts");
-const { beginTurn, endTurn, stores, writeSettingsRecord, readSettingsRecord } = await import("../src/server/index.ts");
+const { beginTurn, endTurn, getPluginHost, stores, writeSettingsRecord, readSettingsRecord } = await import("../src/server/index.ts");
 const {
 	DataDirectoryConfirmBody,
 	UnavailableDataDirectoryBody,
@@ -78,10 +84,12 @@ describe("electron/data-location.cjs startup resolution & unplugged drive recove
 
 	it("prompts with Retry, Choose Folder, and Use Default Folder when the external drive is unplugged", async () => {
 		const unpluggedDir = path.join(scratchRoot, "unplugged-drive", "lh-data");
+		fs.mkdirSync(unpluggedDir, { recursive: true });
 		writeConfiguredDataDirPath(configFile, unpluggedDir);
-
+		const marker = fs.readFileSync(path.join(unpluggedDir, STORE_MARKER));
+		fs.rmSync(unpluggedDir, { recursive: true });
 		const inspected = inspectDataLocation({ configFile, defaultDir: defaultDataDir });
-		assert.equal(inspected.currentDir, defaultDataDir);
+		assert.equal(inspected.currentDir, unpluggedDir);
 		assert.equal(inspected.unavailableConfiguredDir, unpluggedDir);
 
 		// 1) Retry succeeds once the drive is reconnected
@@ -92,10 +100,11 @@ describe("electron/data-location.cjs startup resolution & unplugged drive recove
 			dialog: {
 				showMessageBox: async (opts: { buttons: string[]; detail: string }) => {
 					attempts++;
-					assert.deepEqual(opts.buttons, ["Retry", "Choose Folder…", "Use Default Folder"]);
+					assert.deepEqual(opts.buttons, ["Retry", "Choose Folder…", "Use Default Folder", "Quit"]);
 					assert.ok(opts.detail.includes(unpluggedDir));
 					// Simulate user plugging in the external drive before clicking Retry
 					fs.mkdirSync(unpluggedDir, { recursive: true });
+					fs.writeFileSync(path.join(unpluggedDir, STORE_MARKER), marker);
 					return { response: 0 };
 				},
 			},
@@ -106,6 +115,7 @@ describe("electron/data-location.cjs startup resolution & unplugged drive recove
 		// 2) Choose Folder updates data-location.json and uses the picked folder
 		fs.rmSync(path.join(scratchRoot, "unplugged-drive"), { recursive: true, force: true });
 		const alternateDir = path.join(scratchRoot, "alternate-external");
+		fs.mkdirSync(alternateDir);
 		const resolvedAfterChoose = await resolveStartupDataDir({
 			configFile,
 			defaultDir: defaultDataDir,
@@ -188,7 +198,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 		assert.equal(config.AUTH_FILE, authFile);
 	});
 
-	it("deletes LearnHarness data from the old folder when deleteOld is true, preserving unrelated files", async () => {
+	it("deletes LearnHarness data from the old folder when deleteOld is true, preserving unrelated files", { skip: process.platform === "win32" }, async () => {
 		const chat = stores.chatStore.createChat("Topology");
 		writeSettingsRecord({ version: 1, general: { autoUpdate: true } });
 		const unrelatedFile = path.join(defaultDataDir, "keep-me.txt");
@@ -204,6 +214,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 					path: externalDir,
 					copyMode: "copy",
 					deleteOld: true,
+					expectedSource: defaultDataDir,
 				}),
 			}),
 		);
@@ -300,10 +311,14 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 
 	it("handles retry-configured and use-default recovery actions for unavailable drives", async () => {
 		const missingDrive = path.join(scratchRoot, "missing-drive", "data");
-		writeConfiguredDataDirPath(configFile, missingDrive);
-		config.setActiveDataDir(defaultDataDir, {
+		fs.mkdirSync(missingDrive, { recursive: true });
+		const storeId = writeConfiguredDataDirPath(configFile, missingDrive);
+		const marker = fs.readFileSync(path.join(missingDrive, STORE_MARKER));
+		fs.rmSync(missingDrive, { recursive: true });
+		config.setActiveDataDir(missingDrive, {
 			defaultDir: defaultDataDir,
 			configuredDir: missingDrive,
+			storeId,
 			unavailableConfiguredDir: missingDrive,
 		});
 
@@ -319,6 +334,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 
 		// Simulate drive reconnecting, then retry succeeds
 		fs.mkdirSync(missingDrive, { recursive: true });
+		fs.writeFileSync(path.join(missingDrive, STORE_MARKER), marker);
 		const retryOk = await postDataDirRoute(
 			new Request("http://localhost/api/settings/data-dir", {
 				method: "POST",
@@ -335,6 +351,7 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 		config.setActiveDataDir(defaultDataDir, {
 			defaultDir: defaultDataDir,
 			configuredDir: missingDrive,
+			storeId,
 			unavailableConfiguredDir: missingDrive,
 		});
 		const useDefaultRes = await postDataDirRoute(
@@ -354,6 +371,254 @@ describe("GET / POST /api/settings/data-dir & live store relocation", () => {
 		assert.equal(defaultBody.isCustom, false);
 		assert.equal(defaultBody.unavailableConfiguredDir, null);
 		assert.equal(fs.existsSync(configFile), false);
+	});
+});
+
+function post(payload: object) {
+	return postDataDirRoute(new Request("http://localhost/api/settings/data-dir", {
+		method: "POST", body: JSON.stringify(payload),
+	}));
+}
+
+describe("data directory audit regressions", () => {
+	it("preserves an occupied destination and allows an explicit switch to its existing data", async () => {
+		const target = path.join(scratchRoot, "occupied");
+		fs.mkdirSync(target);
+		fs.writeFileSync(path.join(target, "settings.json"), "{}");
+		writeSettingsRecord({ version: 1, general: { autoUpdate: false } });
+		const change = { action: "change", path: target };
+		const rejected = await post({ ...change, copyMode: "copy" });
+		assert.equal(rejected.status, 400);
+		assert.match((await rejected.json()).error, /empty/);
+		assert.equal(fs.readFileSync(path.join(target, "settings.json"), "utf8"), "{}");
+		assert.equal((await post({ ...change, copyMode: "switch" })).status, 200);
+	});
+
+	it("removes a partial staged copy and leaves the empty destination and source intact", async () => {
+		const target = path.join(scratchRoot, "failed-copy");
+		fs.mkdirSync(target);
+		writeSettingsRecord({ version: 1 });
+		const original = fs.createWriteStream;
+		const failure = mock.method(fs, "createWriteStream", (...[file, options]: Parameters<typeof original>) => {
+			if (String(file).includes(".learnharness-copy-")) {
+				return new Writable({ write(_chunk, _encoding, done) { done(new Error("injected disk failure")); } });
+			}
+			return original(file, options);
+		});
+		try {
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: defaultDataDir });
+			assert.equal(response.status, 400);
+			assert.match((await response.json()).error, /injected disk failure/);
+			assert.deepEqual(fs.readdirSync(target), []);
+			assert.equal(fs.readdirSync(scratchRoot).some(name => name.startsWith(".learnharness-copy-")), false);
+			assert.ok(fs.existsSync(path.join(defaultDataDir, "settings.json")));
+			assert.equal(config.PATHS.data, defaultDataDir);
+		} finally { failure.mock.restore(); }
+	});
+
+	it("keeps the source and active location when the pointer rename fails", async () => {
+		const target = path.join(scratchRoot, "failed-pointer");
+		writeSettingsRecord({ version: 1 });
+		const original = fs.renameSync;
+		const failure = mock.method(fs, "renameSync", (...[from, to]: Parameters<typeof original>) => {
+			if (to === configFile) throw new Error("injected pointer failure");
+			return original(from, to);
+		});
+		try {
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: defaultDataDir });
+			assert.equal(response.status, 500);
+			assert.match((await response.json()).error, /injected pointer failure/);
+			assert.equal(fs.existsSync(target), false);
+			assert.ok(fs.existsSync(path.join(defaultDataDir, "settings.json")));
+			assert.equal(config.PATHS.data, defaultDataDir);
+		} finally { failure.mock.restore(); }
+	});
+
+	it("recovery keeps prompting after a failed pointer write and leaves the original pointer intact", async () => {
+		const ejected = path.join(scratchRoot, "native-ejected");
+		const replacement = path.join(scratchRoot, "native-replacement");
+		fs.mkdirSync(ejected);
+		fs.mkdirSync(replacement);
+		writeConfiguredDataDirPath(configFile, ejected);
+		const previous = fs.readFileSync(configFile, "utf8");
+		fs.rmSync(ejected, { recursive: true });
+		const original = fs.renameSync;
+		const injection = mock.method(fs, "renameSync", (...[from, to]: Parameters<typeof original>) => {
+			if (to === configFile) throw new Error("injected native pointer failure");
+			return original(from, to);
+		});
+		let prompted = false;
+		try {
+			const selected = await resolveStartupDataDir({
+				configFile, defaultDir: defaultDataDir,
+				dialog: {
+					showMessageBox: async (opts: { detail: string; cancelId: number }) => {
+						if (!prompted) { prompted = true; return { response: 1 }; }
+						assert.match(opts.detail, /injected native pointer failure/);
+						return { response: opts.cancelId };
+					},
+					showOpenDialog: async () => ({ filePaths: [replacement], canceled: false }),
+				},
+			});
+			assert.equal(selected, null);
+			assert.equal(fs.readFileSync(configFile, "utf8"), previous);
+		} finally { injection.mock.restore(); }
+	});
+
+	it("reports a pointer removal failure and leaves the custom folder active", async () => {
+		const target = path.join(scratchRoot, "failed-reset");
+		assert.equal((await post({ action: "change", path: target, copyMode: "switch" })).status, 200);
+		const original = fs.unlinkSync;
+		const failure = mock.method(fs, "unlinkSync", (file: fs.PathLike) => {
+			if (file === configFile) throw new Error("injected pointer removal failure");
+			return original(file);
+		});
+		try {
+			const response = await post({ action: "reset", copyMode: "switch" });
+			assert.equal(response.status, 500);
+			assert.match((await response.json()).error, /injected pointer removal failure/);
+			assert.equal(config.PATHS.data, target);
+		} finally { failure.mock.restore(); }
+	});
+
+	it("rejects a symlink or junction in the managed tree and nested canonical targets", async () => {
+		const outside = path.join(scratchRoot, "outside-tree");
+		fs.mkdirSync(outside);
+		fs.mkdirSync(path.join(defaultDataDir, "chats"));
+		fs.symlinkSync(outside, path.join(defaultDataDir, "chats", "linked"), "junction");
+		const target = path.join(scratchRoot, "unsafe-copy");
+		const response = await post({ action: "change", path: target, copyMode: "copy" });
+		assert.equal(response.status, 400);
+		assert.match((await response.json()).error, /Symbolic links and junctions/);
+		assert.equal(fs.existsSync(target), false);
+		const alias = path.join(scratchRoot, "source-alias");
+		fs.symlinkSync(defaultDataDir, alias, "junction");
+		const nested = await post({ action: "change", path: path.join(alias, "new"), copyMode: "switch" });
+		assert.equal(nested.status, 400);
+		assert.equal(fs.existsSync(path.join(defaultDataDir, "new")), false);
+		const configured = path.join(scratchRoot, "linked-startup");
+		fs.mkdirSync(path.join(configured, "plugins"), { recursive: true });
+		writeConfiguredDataDirPath(configFile, configured);
+		fs.symlinkSync(outside, path.join(configured, "plugins", "linked"), "junction");
+		assert.match(inspectDataLocation({ configFile, defaultDir: defaultDataDir }).recoveryReason, /Symbolic links and junctions/);
+	});
+
+	it("detects identity mismatches and prevents chat, settings and job writers from recreating an ejected store", async () => {
+		const target = path.join(scratchRoot, "identity-store");
+		assert.equal((await post({ action: "change", path: target, copyMode: "switch" })).status, 200);
+		fs.rmSync(target, { recursive: true });
+		assert.throws(() => stores.chatStore.createChat("After eject"), /unavailable/);
+		assert.throws(() => writeSettingsRecord({ version: 1 }), /unavailable/);
+		assert.throws(() => stores.jobStore.createJob({ kind: "research", chatId: "missing", toolCallId: "missing" }), /unavailable/);
+		assert.equal(fs.existsSync(target), false);
+		fs.mkdirSync(target);
+		fs.writeFileSync(path.join(target, STORE_MARKER), "a215e4e7-a55b-4f64-9b0a-686ab95c58a7");
+		assert.equal((await post({ action: "retry-configured" })).status, 400);
+		assert.equal(inspectDataLocation({ configFile, defaultDir: defaultDataDir }).unavailableConfiguredDir, target);
+		const dismissed = await resolveStartupDataDir({
+			configFile, defaultDir: defaultDataDir,
+			dialog: { showMessageBox: async (options: { cancelId: number }) => ({ response: options.cancelId }) },
+		});
+		assert.equal(dismissed, null);
+		assert.ok(fs.existsSync(configFile));
+	});
+
+	it("rejects busy migrations, blocks writers during a copy, and requires the confirmed source", async () => {
+		const target = path.join(scratchRoot, "gate-target");
+		const payload = { action: "change", path: target, copyMode: "copy" };
+		const chat = stores.chatStore.createChat("Side conversation");
+		let finishSide!: () => void;
+		const sideBlocked = new Promise<void>(resolve => { finishSide = resolve; });
+		const side = createSideChatService({
+			chatStore: stores.chatStore,
+			beforeAsk: () => sideBlocked,
+			engineFor: async () => new Response(null, { status: 503 }),
+			instructions: () => "",
+		});
+		const asking = side.ask(chat.id, { text: "Why?", quotes: [] });
+		try { assert.equal((await post(payload)).status, 409); }
+		finally { finishSide(); await asking; }
+		registerJobAbort("orphaned-chat-job", new AbortController());
+		try { assert.equal((await post(payload)).status, 409); }
+		finally { unregisterJobAbort("orphaned-chat-job"); }
+		const stale = await post({ ...payload, deleteOld: true, expectedSource: target });
+		assert.equal(stale.status, 400);
+		assert.match((await stale.json()).error, /source folder changed/);
+		writeSettingsRecord({ version: 1 });
+		let notify!: () => void;
+		let release!: () => void;
+		const reachedStage = new Promise<void>(resolve => { notify = resolve; });
+		const allowStage = new Promise<void>(resolve => { release = resolve; });
+		const original = fs.promises.mkdtemp;
+		const wait = mock.method(fs.promises, "mkdtemp", async (...args: Parameters<typeof original>) => {
+			notify();
+			await allowStage;
+			return original(...args);
+		});
+		const moving = post(payload);
+		try {
+			await reachedStage;
+			assert.equal((await post(payload)).status, 409);
+			assert.equal(beginTurn("another-turn"), false);
+			assert.throws(() => stores.chatStore.createChat("During copy"), /in progress/);
+			assert.equal((await getDataDirRoute()).status, 200);
+		} finally {
+			release();
+			await moving;
+			wait.mock.restore();
+		}
+		assert.equal((await moving).status, 200);
+	});
+
+	it("moves plugin state and reports entries that cleanup could not remove", { skip: process.platform === "win32" }, async () => {
+		const target = path.join(scratchRoot, "plugin-state-copy");
+		const stateFile = path.join(defaultDataDir, "plugins-state.json");
+		fs.writeFileSync(stateFile, '{"version":1,"enabled":{}}');
+		const original = fs.promises.unlink;
+		const failure = mock.method(fs.promises, "unlink", async (file: fs.PathLike) => {
+			if (file === stateFile) throw new Error("injected cleanup failure");
+			return original(file);
+		});
+		try {
+			const response = await post({ action: "change", path: target, copyMode: "copy", deleteOld: true, expectedSource: defaultDataDir });
+			assert.equal(response.status, 200);
+			assert.deepEqual((await response.json()).cleanupFailures, [`${stateFile}: injected cleanup failure`]);
+			assert.equal(fs.readFileSync(path.join(target, "plugins-state.json"), "utf8"), fs.readFileSync(stateFile, "utf8"));
+		} finally { failure.mock.restore(); }
+	});
+
+	it("refuses persisted moves in LH_DATA_DIR-only sessions", () => {
+		const env = { ...process.env };
+		delete env.LH_DATA_CONFIG_FILE;
+		const child = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+			const route = await import('./app/api/settings/data-dir/route.ts');
+			const result = await route.POST(new Request('http://localhost', { method: 'POST', body:
+				JSON.stringify({ action: 'reset', copyMode: 'switch' }) }));
+			console.log(result.status, await result.text());
+		`], { env, encoding: "utf8", timeout: 30_000 });
+		assert.equal(child.status, 0, child.stderr);
+		assert.match(child.stdout, /400.*LH_DATA_DIR fixes/);
+	});
+
+	it("disposes the old plugin host before the new store becomes active", async () => {
+		const host = await getPluginHost();
+		const target = path.join(scratchRoot, "plugin-host-switch");
+		assert.equal((await post({ action: "change", path: target, copyMode: "switch" })).status, 200);
+		assert.throws(() => host.list(), /disposed/);
+		assert.notEqual(await getPluginHost(), host);
+	});
+
+	it("requires a drive or full UNC share on Windows", () => {
+		for (const input of [String.raw`\folder`, "C:folder", "/folder", String.raw`\\host`]) assert.equal(isFullPath(input, "win32"), false, input);
+		for (const input of [String.raw`C:\folder`, "C:/folder", String.raw`\\host\share\folder`]) assert.equal(isFullPath(input, "win32"), true, input);
+	});
+
+	it("returns 400 for an uncreatable procfs target and permits subsequent requests", { skip: process.platform !== "linux", timeout: 10_000 }, async () => {
+		const response = await post({ action: "change", path: "/proc/forbidden/child", copyMode: "copy" });
+		assert.equal(response.status, 400);
+		assert.match((await response.json()).error, /Could not prepare.*\/proc/);
+		assert.equal((await getDataDirRoute()).status, 200);
+		assert.equal((await post({ action: "change", path: path.join(scratchRoot, "after-proc"), copyMode: "switch" })).status, 200);
 	});
 });
 

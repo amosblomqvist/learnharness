@@ -7,7 +7,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { THEMES_DIR } from "../../config.ts";
+import { THEMES_DIR, assertDataStoreWritable, mkdirDataDirectory } from "../../config.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 import type { ThemeStore } from "../core/ports.ts";
 import { isBuiltinThemeId, isThemeId, sanitizeThemeFile, type Theme, type ThemeFile } from "../core/themes.ts";
@@ -47,14 +47,15 @@ export const themeStore: ThemeStore = {
 
 	writeTheme(id: string, theme: ThemeFile): void {
 		if (!isThemeId(id) || isBuiltinThemeId(id)) throw new Error(`Invalid custom theme id "${id}"`);
-		fs.mkdirSync(THEMES_DIR, { recursive: true });
+		mkdirDataDirectory(THEMES_DIR);
 		const file: ThemeFile = { name: theme.name, mode: theme.mode, colors: theme.colors };
 		writeFileAtomicSync(fileFor(id), `${JSON.stringify(file, null, "\t")}\n`);
 	},
 
 	deleteTheme(id: string): void {
 		if (!isThemeId(id) || isBuiltinThemeId(id)) return;
-		fs.rmSync(fileFor(id), { force: true });
+		assertDataStoreWritable(fileFor(id));
+	fs.rmSync(fileFor(id), { force: true });
 		removeLeftoverTemps(fileFor(id));
 	},
 };

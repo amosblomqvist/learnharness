@@ -21,6 +21,7 @@
  * second writer. Handoff restores the teacher TTL with a fresh timestamp.
  */
 
+import { dataMigrationInProgress } from "../store/data-write-gate.ts";
 import { emit } from "../core/events.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 
@@ -57,7 +58,7 @@ const MAX_TURN_MS = 30 * 60_000;
  * the existing TTL behavior and need not pass an owner.
  */
 export function beginTurn(chatId: string, preparationOwner?: object): boolean {
-	if (isTurnRunning(chatId)) return false;
+	if (dataMigrationInProgress() || isTurnRunning(chatId)) return false;
 	clearTurnFailure(chatId);
 	if (preparationOwner) owners().set(chatId, { token: preparationOwner, preparing: true });
 	else owners().delete(chatId);
@@ -109,4 +110,8 @@ export function isTurnRunning(chatId: string): boolean {
 		return false;
 	}
 	return true;
+}
+
+export function hasRunningTurns(): boolean {
+	return [...inFlight.keys()].some(isTurnRunning);
 }

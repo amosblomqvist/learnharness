@@ -12,6 +12,7 @@ import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 import type { PluginAgentRecordStore } from "../core/ports.ts";
 export type { PluginAgentRecordStore } from "../core/ports.ts";
 export interface PluginAgentServiceDeps {
+	beginActivity?: () => () => void;
 	store: PluginAgentRecordStore;
 	engineFor(model: PluginModelSpec, purpose: PluginCallPurpose): Promise<PiEngine> | PiEngine;
 	onUsage?: (model: PluginModelSpec, usage: Usage) => void;
@@ -138,6 +139,7 @@ export function createPluginAgentService(deps: PluginAgentServiceDeps): PluginAg
 		commit(s, { ...s.record, status: s.record.pending.length ? "waiting" : "interrupted", error: "Run cancelled" });
 	};
 	const launch = (s: Session, d: PluginAgentDefinition, purpose: PluginCallPurpose) => {
+		const end = deps.beginActivity?.();
 		const run: Run = { controller: new AbortController(), cancelled: false };
 		s.run = run; // Reserve the writer before engine resolution or any other await.
 		const active = () => {
@@ -253,6 +255,7 @@ export function createPluginAgentService(deps: PluginAgentServiceDeps): PluginAg
 					try { commit(s, { ...s.record, status: "error", error: errorText(error) }); } catch { /* commit already failed closed */ }
 				}
 			} finally {
+				end?.();
 				if (s.run === run) s.run = undefined;
 				if (!disposed) { s.partial = undefined; notify(s); }
 			}

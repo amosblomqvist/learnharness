@@ -1,6 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { assertOrdinary, inspectDataLocation, verifyStore } from "./electron/data-location.cjs";
+import { assertDataWritesAdmitted, configureDataWriteAccess } from "./src/store/data-write-gate.ts";
 
 /** Repository root (this file is at <root>/config.ts). */
 export const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -32,67 +34,24 @@ export const DATA_CONFIG_FILE = process.env.LH_DATA_CONFIG_FILE
 	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DATA_CONFIG_FILE)
 	: path.join(/* turbopackIgnore: true */ ROOT, "data-location.json");
 
-function readConfiguredDirFromDisk(configFile: string): string | null {
-	try {
-		const parsed = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ configFile, "utf8")) as { dataDir?: unknown };
-		if (typeof parsed?.dataDir !== "string") return null;
-		const trimmed = parsed.dataDir.trim();
-		if (!trimmed || trimmed.includes("\0") || !path.isAbsolute(trimmed)) return null;
-		return path.resolve(/* turbopackIgnore: true */ trimmed);
-	} catch {
-		return null;
-	}
-}
+/**
+ * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a
+ * flat {VAR: value} JSON map — stays on the local machine (`userData/auth.json`
+ * or `<ROOT>/auth.json`), never relocated with the learning data directory.
+ */
+export const AUTH_FILE = process.env.LH_AUTH_FILE
+	? path.resolve(/* turbopackIgnore: true */ process.env.LH_AUTH_FILE)
+	: path.join(/* turbopackIgnore: true */ ROOT, "auth.json");
 
-function isAccessibleDir(dirPath: string): boolean {
-	try {
-		const stat = fs.statSync(/* turbopackIgnore: true */ dirPath);
-		if (!stat.isDirectory()) return false;
-		fs.accessSync(/* turbopackIgnore: true */ dirPath, fs.constants.R_OK | fs.constants.W_OK | fs.constants.X_OK);
-		return true;
-	} catch {
-		return false;
-	}
-}
+export const DATA_DIR_FIXED = Boolean(process.env.LH_DATA_DIR && !process.env.LH_DATA_CONFIG_FILE);
 
-function resolveInitialDataLocation(): {
-	currentDir: string;
-	defaultDir: string;
-	configuredDir: string | null;
-	unavailableConfiguredDir: string | null;
-} {
-	const useConfigFile = Boolean(process.env.LH_DATA_CONFIG_FILE) || !process.env.LH_DATA_DIR;
-	if (!useConfigFile) {
-		return {
-			currentDir: DEFAULT_DATA_ROOT,
-			defaultDir: DEFAULT_DATA_ROOT,
-			configuredDir: null,
-			unavailableConfiguredDir: null,
-		};
-	}
-	const configured = readConfiguredDirFromDisk(DATA_CONFIG_FILE);
-	if (!configured || configured === DEFAULT_DATA_ROOT) {
-		return {
-			currentDir: DEFAULT_DATA_ROOT,
-			defaultDir: DEFAULT_DATA_ROOT,
-			configuredDir: null,
-			unavailableConfiguredDir: null,
-		};
-	}
-	if (isAccessibleDir(configured)) {
-		return {
-			currentDir: configured,
-			defaultDir: DEFAULT_DATA_ROOT,
-			configuredDir: configured,
-			unavailableConfiguredDir: null,
-		};
-	}
-	return {
-		currentDir: DEFAULT_DATA_ROOT,
-		defaultDir: DEFAULT_DATA_ROOT,
-		configuredDir: configured,
-		unavailableConfiguredDir: configured,
-	};
+function resolveInitialDataLocation() {
+	const desktopLocation = process.env.LH_DESKTOP_SERVER === "1" && process.env.LH_STARTUP_DATA_LOCATION;
+	if (desktopLocation) return JSON.parse(desktopLocation) as Omit<DataLocationGlobalState, "listeners">;
+	return inspectDataLocation({
+		configFile: DATA_DIR_FIXED ? null : DATA_CONFIG_FILE,
+		defaultDir: DATA_DIR_FIXED ? process.env.LH_DATA_DIR! : DEFAULT_DATA_ROOT, appRoot: ROOT, authFile: AUTH_FILE,
+	});
 }
 
 interface DataLocationGlobalState {
@@ -100,6 +59,8 @@ interface DataLocationGlobalState {
 	defaultDir: string;
 	configuredDir: string | null;
 	unavailableConfiguredDir: string | null;
+	storeId: string | null;
+	recoveryReason: string | null;
 	listeners: Set<(root: string) => void>;
 }
 
@@ -249,14 +210,19 @@ export function getDataLocationState(): {
 	isCustom: boolean;
 	configuredDir: string | null;
 	unavailableConfiguredDir: string | null;
+	recoveryReason: string | null;
+	fixed: boolean;
 } {
 	const s = locationState();
+	checkActiveStore(s);
 	return {
 		currentDir: s.currentDir,
 		defaultDir: s.defaultDir,
 		isCustom: s.currentDir !== s.defaultDir,
 		configuredDir: s.configuredDir,
 		unavailableConfiguredDir: s.unavailableConfiguredDir,
+		recoveryReason: s.recoveryReason,
+		fixed: DATA_DIR_FIXED,
 	};
 }
 
@@ -266,6 +232,7 @@ export function setActiveDataDir(
 		defaultDir?: string;
 		configuredDir?: string | null;
 		unavailableConfiguredDir?: string | null;
+		storeId?: string | null;
 	},
 ): void {
 	const s = locationState();
@@ -286,7 +253,65 @@ export function setActiveDataDir(
 	} else {
 		s.unavailableConfiguredDir = null;
 	}
+	s.storeId = options?.storeId ?? null;
+	s.recoveryReason = null;
 	for (const listener of [...s.listeners]) listener(resolved);
+}
+
+export function activeStoreId(): string | null {
+	return locationState().storeId;
+}
+
+function checkActiveStore(s: DataLocationGlobalState): void {
+	if (!s.configuredDir || s.unavailableConfiguredDir) return;
+	try {
+		verifyStore(s.currentDir, s.storeId);
+	} catch (error) {
+		s.unavailableConfiguredDir = s.configuredDir;
+		s.recoveryReason = (error as Error).message;
+	}
+}
+
+/** Guard every mutable-store write, including writes to captured plugin paths. */
+export function assertDataStoreWritable(file?: string): void {
+	const s = locationState();
+	const relative = file === undefined ? "" : path.relative(s.currentDir, file);
+	if (relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return;
+	assertDataWritesAdmitted();
+	checkActiveStore(s);
+	if (s.unavailableConfiguredDir) {
+		throw new Error(s.recoveryReason ?? `The configured data folder "${s.unavailableConfiguredDir}" is unavailable.`);
+	}
+	let current = s.currentDir;
+	for (const segment of ["", ...relative.split(path.sep).filter(Boolean)]) {
+		current = path.join(/* turbopackIgnore: true */ current, segment);
+		const stat = fs.lstatSync(/* turbopackIgnore: true */ current, { throwIfNoEntry: false });
+		if (stat) assertOrdinary(stat, current);
+	}
+}
+
+/** Configured roots are never candidates for mkdir, even if a drive goes away
+ * between the identity check and the filesystem operation. */
+export function mkdirDataDirectory(directory: string, mode?: number): void {
+	assertDataStoreWritable(directory);
+	const s = locationState();
+	const relative = path.relative(s.currentDir, directory);
+	if (!s.configuredDir || relative === ".." || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+		fs.mkdirSync(/* turbopackIgnore: true */ directory, { recursive: true, mode });
+		return;
+	}
+	let current = s.currentDir;
+	for (const segment of relative.split(path.sep).filter(Boolean)) {
+		current = path.join(/* turbopackIgnore: true */ current, segment);
+		try {
+			fs.mkdirSync(/* turbopackIgnore: true */ current, { mode });
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") throw error;
+			const stat = fs.lstatSync(/* turbopackIgnore: true */ current);
+			assertOrdinary(stat, current);
+			if (!stat.isDirectory()) throw error;
+		}
+	}
 }
 
 /** Subscribe to active data-directory changes across the server process. */
@@ -296,11 +321,4 @@ export function onDataDirChange(listener: (root: string) => void): () => void {
 	return () => s.listeners.delete(listener);
 }
 
-/**
- * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a
- * flat {VAR: value} JSON map — stays on the local machine (`userData/auth.json`
- * or `<ROOT>/auth.json`), never relocated with the learning data directory.
- */
-export const AUTH_FILE = process.env.LH_AUTH_FILE
-	? path.resolve(/* turbopackIgnore: true */ process.env.LH_AUTH_FILE)
-	: path.join(/* turbopackIgnore: true */ ROOT, "auth.json");
+configureDataWriteAccess({ verify: assertDataStoreWritable, mkdir: mkdirDataDirectory });

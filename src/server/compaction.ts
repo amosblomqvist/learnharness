@@ -27,6 +27,7 @@
  * marker's id.
  */
 
+import { dataMigrationInProgress } from "../store/data-write-gate.ts";
 import type { AgentMessage } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 import {
@@ -314,7 +315,7 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
 		await concurrent;
 		return;
 	}
-	if (deps.canStart?.() === false) return;
+	if (dataMigrationInProgress() || deps.canStart?.() === false) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
 	const model = deps.includeReasoning ? deps.engine.model : undefined;
@@ -342,7 +343,7 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
  * whatever this leaves running.
  */
 export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: string): void {
-	if (state().inFlight.has(chatId)) return;
+	if (dataMigrationInProgress() || state().inFlight.has(chatId)) return;
 	const deps = buildDeps();
 	if (!deps || deps.canStart?.() === false) return;
 	const record = deps.chatStore.getChat(chatId);
@@ -353,4 +354,8 @@ export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: s
 	void run.finally(() => {
 		if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
 	});
+}
+
+export function hasRunningCompactions(): boolean {
+	return state().inFlight.size > 0;
 }

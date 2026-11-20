@@ -1,3 +1,4 @@
+import { SENSITIVE_HOME_PATHS } from "../../../electron/data-location.cjs";
 import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -49,39 +50,7 @@ const EXCLUDED_DIR_NAMES = new Set(["node_modules", ".git", "Library", ".Trash"]
  * too (resolveSourcePath), not only skipped by walks. Matched
  * case-insensitively, including on case-sensitive filesystems.
  */
-const SENSITIVE_HOME_PATHS = [
-	".claude",
-	".codex",
-	".cursor",
-	".gemini",
-	".ssh",
-	".gnupg",
-	".aws",
-	".azure",
-	".config/gcloud",
-	".kube",
-	".docker",
-	".netrc",
-	".npmrc",
-	".pypirc",
-	".git-credentials",
-	"Library/Keychains",
-	"Library/Cookies",
-	"Library/Safari",
-	"Library/Application Support/Google/Chrome",
-	"Library/Application Support/BraveSoftware",
-	"Library/Application Support/Microsoft Edge",
-	"Library/Application Support/Firefox",
-	".mozilla",
-	".config/google-chrome",
-	".config/chromium",
-	".config/BraveSoftware",
-	".config/microsoft-edge",
-	"AppData/Local/Google/Chrome",
-	"AppData/Local/BraveSoftware",
-	"AppData/Local/Microsoft/Edge",
-	"AppData/Roaming/Mozilla",
-];
+
 
 /** Templates are deliberately included: their names do not guarantee safe contents. */
 const ENV_FILE = /^\.env(\..*)?$/i;

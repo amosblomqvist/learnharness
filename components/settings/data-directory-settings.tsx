@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState, type ReactElement, type ReactNode } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement, type ReactNode } from "react";
 import { FolderOpenIcon, HardDriveIcon } from "lucide-react";
 import { HostDialog } from "@/components/host-dialog";
 import { Button } from "@/components/ui/button";
@@ -14,10 +14,20 @@ export interface DataDirectoryStatus {
 	isCustom: boolean;
 	configuredDir: string | null;
 	unavailableConfiguredDir: string | null;
+	fixed: boolean;
+	platform: string;
+	recoveryReason: string | null;
+	cleanupFailures?: string[];
 }
 
 export const DATA_DIR_HINT =
 	"Chats, knowledge graph, settings, themes, prompts, and plugins are stored here. API keys and subscription logins stay on this machine.";
+
+function folderPlaceholder(platform?: string): string {
+	if (platform === "win32") return "D:\\LearnHarnessData";
+	if (platform === "darwin") return "/Volumes/ExternalDrive/LearnHarnessData";
+	return "/path/to/LearnHarnessData";
+}
 
 export function DataDirectoryConfirmBody({
 	currentDir,
@@ -34,6 +44,7 @@ export function DataDirectoryConfirmBody({
 	error,
 	onCancel,
 	onConfirm,
+	platform,
 	renderFrame,
 }: {
 	currentDir: string;
@@ -50,6 +61,7 @@ export function DataDirectoryConfirmBody({
 	error: string;
 	onCancel: () => void;
 	onConfirm: () => void;
+	platform?: string;
 	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 }) {
 	const frame = (
@@ -88,7 +100,7 @@ export function DataDirectoryConfirmBody({
 							readOnly={isReset}
 							disabled={busy}
 							onChange={(e) => onTargetPathChange(e.target.value)}
-							placeholder="/Volumes/ExternalDrive/LearnHarnessData"
+							placeholder={folderPlaceholder(platform)}
 							aria-label="New data directory path"
 							data-testid="data-dir-target-input"
 							className="h-8 min-w-0 flex-1 rounded-sm border border-border bg-background px-2.5 font-mono text-xs text-foreground outline-none placeholder:text-muted-foreground/60 read-only:opacity-80"
@@ -129,7 +141,7 @@ export function DataDirectoryConfirmBody({
 								Copy existing data into the new folder
 							</span>
 							<span className="mt-0.5 block text-xs text-muted-foreground">
-								All your chats, knowledge graph, settings, themes, prompts, and plugins will be copied to the new folder before switching.
+								Choose an empty folder. Your chats, knowledge graph, settings, themes, prompts, and plugins will be copied before switching.
 							</span>
 						</span>
 					</label>
@@ -165,7 +177,7 @@ export function DataDirectoryConfirmBody({
 									name="data-dir-old-data"
 									value="delete"
 									checked={deleteOld}
-									disabled={busy}
+									disabled={busy || platform === "win32"}
 									data-testid="data-dir-delete-old"
 									onChange={() => onDeleteOldChange(true)}
 									className="mt-0.5 size-3.5 shrink-0 accent-primary"
@@ -173,7 +185,9 @@ export function DataDirectoryConfirmBody({
 								<span className="min-w-0 text-xs">
 									<span className="font-medium text-foreground">Delete old data after copying</span>
 									<span className="block text-[11px] text-muted-foreground">
-										Removes LearnHarness data from the previous folder once everything is copied.
+										{platform === "win32"
+											? "The previous folder is kept on Windows because the directory cannot be flushed."
+											: "Removes LearnHarness data from the previous folder after verifying the copy."}
 									</span>
 								</span>
 							</label>
@@ -194,7 +208,7 @@ export function DataDirectoryConfirmBody({
 					/>
 					<span className="min-w-0">
 						<span className="block text-xs font-medium text-foreground">
-							Switch to the folder as-is (do not copy)
+							Use the data already there
 						</span>
 						<span className="mt-0.5 block text-xs text-muted-foreground">
 							Uses whatever data is already in the selected folder (or starts empty) and keeps the old folder untouched.
@@ -260,6 +274,8 @@ export function DataDirectorySettings({
 	const [deleteOld, setDeleteOld] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const [dialogError, setDialogError] = useState("");
+	const [confirmedSource, setConfirmedSource] = useState("");
+	const [cleanupFailures, setCleanupFailures] = useState<string[]>([]);
 
 	const canBrowse = typeof window !== "undefined" && typeof window.lh?.chooseAttachmentFolder === "function";
 
@@ -280,6 +296,8 @@ export function DataDirectorySettings({
 	}, [loadStatus]);
 
 	const openChangeDialog = async () => {
+		if (!status || status.fixed) return;
+		setConfirmedSource(status.currentDir);
 		setIsReset(false);
 		setCopyMode("copy");
 		setDeleteOld(false);
@@ -300,10 +318,11 @@ export function DataDirectorySettings({
 	};
 
 	const openResetDialog = () => {
-		if (!status) return;
+		if (!status || status.fixed) return;
+		setConfirmedSource(status.currentDir);
 		setIsReset(true);
 		setTargetPath(status.defaultDir);
-		setCopyMode("copy");
+		setCopyMode("switch");
 		setDeleteOld(false);
 		setDialogError("");
 		setDialogOpen(true);
@@ -331,8 +350,8 @@ export function DataDirectorySettings({
 		setDialogError("");
 		try {
 			const payload = isReset
-				? { action: "reset" as const, copyMode, deleteOld: copyMode === "copy" ? deleteOld : false }
-				: { action: "change" as const, path: trimmed, copyMode, deleteOld: copyMode === "copy" ? deleteOld : false };
+				? { action: "reset" as const, copyMode, expectedSource: confirmedSource, deleteOld: copyMode === "copy" ? deleteOld : false }
+				: { action: "change" as const, path: trimmed, copyMode, expectedSource: confirmedSource, deleteOld: copyMode === "copy" ? deleteOld : false };
 			const res = await fetch("/api/settings/data-dir", {
 				method: "POST",
 				headers: { "Content-Type": "application/json" },
@@ -350,10 +369,14 @@ export function DataDirectorySettings({
 					isCustom: Boolean(body.isCustom),
 					configuredDir: body.configuredDir ?? null,
 					unavailableConfiguredDir: body.unavailableConfiguredDir ?? null,
+					fixed: Boolean(body.fixed),
+					platform: body.platform ?? "",
+					recoveryReason: body.recoveryReason ?? null,
 				});
 			} else {
 				await loadStatus();
 			}
+			setCleanupFailures(body.cleanupFailures ?? []);
 			setDialogOpen(false);
 			onChanged?.();
 		} catch (err) {
@@ -385,11 +408,18 @@ export function DataDirectorySettings({
 							<span className="block">Loading data folder…</span>
 						)}
 						<span className="mt-0.5 block">{DATA_DIR_HINT}</span>
+						{status?.fixed && <span className="block">LH_DATA_DIR fixes the data folder for this session.</span>}
+						{cleanupFailures.length > 0 && (
+							<div role="alert" className="mt-1 text-warning">
+								The new folder is active. Some old data was kept.
+								<ul>{cleanupFailures.map((failure) => <li key={failure}>{failure}</li>)}</ul>
+							</div>
+						)}
 					</>
 				}
 			>
 				<div className="flex items-center gap-2">
-					{status?.isCustom && (
+					{status?.isCustom && !status.fixed && (
 						<Button
 							type="button"
 							size="xs"
@@ -407,7 +437,7 @@ export function DataDirectorySettings({
 						variant="outline"
 						className="cursor-pointer"
 						data-testid="data-dir-change"
-						disabled={!status}
+						disabled={!status || status.fixed || Boolean(status.unavailableConfiguredDir)}
 						onClick={() => void openChangeDialog()}
 					>
 						Change…
@@ -417,7 +447,8 @@ export function DataDirectorySettings({
 
 			{dialogOpen && status && (
 				<DataDirectoryConfirmBody
-					currentDir={status.currentDir}
+					currentDir={confirmedSource}
+					platform={status.platform}
 					targetPath={targetPath}
 					onTargetPathChange={(next) => {
 						setTargetPath(next);
@@ -471,6 +502,7 @@ export function UnavailableDataDirectoryBody({
 	onStartChooseFolder,
 	onApplyChosenFolder,
 	onUseDefault,
+	platform,
 	renderFrame,
 }: {
 	unavailableDir: string;
@@ -486,6 +518,7 @@ export function UnavailableDataDirectoryBody({
 	onStartChooseFolder: () => void;
 	onApplyChosenFolder: () => void;
 	onUseDefault: () => void;
+	platform?: string;
 	renderFrame?: (frame: ReactElement<{ children: ReactNode }>) => ReactNode;
 }) {
 	const frame = (
@@ -524,7 +557,7 @@ export function UnavailableDataDirectoryBody({
 							value={folderDraft}
 							disabled={busy}
 							onChange={(e) => onFolderDraftChange(e.target.value)}
-							placeholder="/Volumes/ExternalDrive/LearnHarnessData"
+							placeholder={folderPlaceholder(platform)}
 							aria-label="Recovery data folder path"
 							data-testid="data-dir-recovery-input"
 							className="h-8 min-w-0 flex-1 rounded-sm border border-border bg-background px-2.5 font-mono text-xs text-foreground outline-none"
@@ -611,19 +644,28 @@ export function DataDirectoryStartupGuard() {
 	const [busy, setBusy] = useState(false);
 	const [error, setError] = useState("");
 
+	const unavailable = useRef<string | null>(null);
 	useEffect(() => {
 		let alive = true;
-		fetch("/api/settings/data-dir", { cache: "no-store" })
-			.then((r) => (r.ok ? (r.json() as Promise<DataDirectoryStatus>) : null))
-			.then((data) => {
-				if (alive && data?.unavailableConfiguredDir) {
-					setStatus(data);
-					setFolderDraft(data.unavailableConfiguredDir);
+		const refresh = async () => {
+			try {
+				const response = await fetch("/api/settings/data-dir", { cache: "no-store" });
+				if (!response.ok) return;
+				const next = (await response.json()) as DataDirectoryStatus;
+				if (!alive) return;
+				setStatus(next.unavailableConfiguredDir ? next : null);
+				if (next.unavailableConfiguredDir !== unavailable.current) {
+					unavailable.current = next.unavailableConfiguredDir;
+					setFolderDraft(next.unavailableConfiguredDir ?? "");
+					setError("");
 				}
-			})
-			.catch(() => {});
+			} catch { /* The next check can recover from a transient connection failure. */ }
+		};
+		void refresh();
+		const timer = window.setInterval(() => void refresh(), 5000);
 		return () => {
 			alive = false;
+			window.clearInterval(timer);
 		};
 	}, []);
 
@@ -674,6 +716,7 @@ export function DataDirectoryStartupGuard() {
 	return (
 		<UnavailableDataDirectoryBody
 			unavailableDir={status.unavailableConfiguredDir}
+			platform={status.platform}
 			defaultDir={status.defaultDir}
 			choosingFolder={choosingFolder}
 			folderDraft={folderDraft}
@@ -684,7 +727,7 @@ export function DataDirectoryStartupGuard() {
 			canBrowse={canBrowse}
 			onBrowse={() => void handleChoose()}
 			busy={busy}
-			error={error}
+			error={error || status.recoveryReason || ""}
 			onRetry={() => void postAction({ action: "retry-configured" })}
 			onStartChooseFolder={() => void handleChoose()}
 			onApplyChosenFolder={() => void postAction({ action: "change", path: folderDraft.trim(), copyMode: "switch" })}

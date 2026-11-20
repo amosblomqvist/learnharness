@@ -19,7 +19,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
-import { SETTINGS_FILE } from "../../config.ts";
+import { SETTINGS_FILE, mkdirDataDirectory } from "../../config.ts";
 import {
 	sanitizeUserSettings,
 	type UserSettings,
@@ -119,7 +119,7 @@ export function writeSettings(raw: unknown): UserSettings {
 		// the write explicitly supplies a valid file-access preference.
 		settings.agent = { ...settings.agent, fileAccess: { restricted: true, folders: [] } };
 	}
-	fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+	mkdirDataDirectory(path.dirname(SETTINGS_FILE));
 	writeFileAtomicSync(SETTINGS_FILE, JSON.stringify(settings, null, "\t"), { allowInPlaceFallback: true });
 	return settings;
 }
