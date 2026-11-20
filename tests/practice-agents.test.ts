@@ -373,13 +373,13 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		assert.match(teacher, /nothing to rush/, "the goal reiteration composes");
 	});
 
-	it("the prober doctrine steers difficulty by evidence (owner round, 2026-10-07)", () => {
+	it("the prober uses the learner's reasoning to adapt and need not force a miss", () => {
 		const prober = composeInstructions("prober");
-		assert.match(prober, /Enter near the top, not the bottom/);
-		assert.match(prober, /Strands inform each other/);
-		assert.match(prober, /never descending into already-bracketed territory/);
-		// the confidence + thinking signals are wired into question selection
-		assert.match(prober, /the verdict, his confidence, and his thinking field together set where the next question should sit/);
+		assert.match(prober, /A single question can reveal several strands/);
+		assert.match(prober, /Read the thinking field alongside the verdict and confidence/);
+		assert.match(prober, /Go deeper when the distinction would change the lesson/);
+		assert.match(prober, /Don't present an untested boundary as a finding/);
+		assert.doesNotMatch(prober, /Binary-search every strand|escalate until it does/);
 	});
 
 	it("the SHARED formatting guide composes (owner, 2026-10-04 late): LaTeX delimiters in every setting", () => {
