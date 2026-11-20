@@ -1,3 +1,4 @@
+import { isSidebarWidth } from "./sidebar-width.ts";
 /**
  * THE USER SETTINGS RECORD's shape + sanitizer (settings-storage wave,
  * 2026-09-19): one versioned, DELTA-shaped record at the data-dir seam
@@ -493,6 +494,7 @@ export interface CompactionSettings {
 export interface UserSettings {
 	version: number;
 	general?: GeneralSettings;
+	sidebar?: { width?: number };
 	dictation?: DictationSettings;
 	/** Explicit app-wide opt-in; absent/invalid is off, including older records. */
 	claudeCode?: { enabled?: boolean };
@@ -862,6 +864,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	const out: UserSettings = {
 		version: typeof r.version === "number" && Number.isInteger(r.version) && r.version >= 1 ? r.version : CURRENT_SETTINGS_VERSION,
 	};
+	if (r.sidebar !== undefined) {
+		const width = (r.sidebar as { width?: unknown } | null)?.width;
+		out.sidebar = isSidebarWidth(width) ? {width} : {};
+	}
 	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
 		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
 	}
