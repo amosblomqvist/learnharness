@@ -14,7 +14,10 @@ it("derives prompt titles from segment paths without a mapping", () => {
 	assert.equal(promptSegmentName("system-prompt.md"), "System prompt");
 });
 
-it("edits one segment with explicit saves, recoverable writes and an independent list refresh", async () => {
+it("edits one segment with recoverable Settings writes and refreshes without Promise.withResolvers", async (t) => {
+	const nativeDeferred = Object.getOwnPropertyDescriptor(Promise, "withResolvers");
+	Reflect.deleteProperty(Promise, "withResolvers");
+	t.after(() => { if (nativeDeferred) Object.defineProperty(Promise, "withResolvers", nativeDeferred); });
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	Object.assign(dom.document, { oninput: null }); // Allow React's native input event path in LinkeDOM.
 	const textarea = dom.window.HTMLTextAreaElement.prototype;
@@ -30,34 +33,39 @@ it("edits one segment with explicit saves, recoverable writes and an independent
 	let heldAgentAck: (() => void) | undefined;
 	const writes: string[] = [];
 	const agentWrites: AgentSettings[] = [];
-	const deferredReads: { signal?: AbortSignal | null; resolve: (response: Response) => void }[] = [];
-	const promptView = () => Response.json({ teacher: [], prober: [], practice: [
+	// Node's native Response.json() reader itself uses Promise.withResolvers.
+	const replyJson = (data: unknown, status = 200) => {
+		const body = JSON.stringify(data);
+		return { status, ok: status >= 200 && status < 300, json: async () => JSON.parse(body) };
+	};
+	const deferredReads: { signal?: AbortSignal | null; resolve: (response: ReturnType<typeof replyJson>) => void }[] = [];
+	const promptView = () => replyJson({ teacher: [], prober: [], practice: [
 		{ path, sourceText, overrideText, enabled: !!agent.prompts?.[path] && overrideText !== null, shared: false },
 	] });
 	const globals = {
 		React, window: dom.window, document: dom.document, Element: dom.window.Element,
 		HTMLElement: dom.window.HTMLElement, IS_REACT_ACT_ENVIRONMENT: true,
 		fetch: async (url: string, init?: RequestInit) => {
-			if (url === "/api/settings") return Response.json({ settings: { version: 1, agent } });
+			if (url === "/api/settings") return replyJson({ settings: { version: 1, agent } });
 			if (url === "/api/settings/agent" && init?.method === "PUT") {
 				const next: AgentSettings = JSON.parse(String(init.body));
 				agentWrites.push(next);
-				if (failActivation) return Response.json({ error: "fixture error" }, { status: 503 });
+				if (failActivation) return replyJson({ error: "fixture error" }, 503);
 				agent = next;
-				const reply = Response.json({ settings: { version: 1, agent } });
+				const reply = replyJson({ settings: { version: 1, agent } });
 				if (heldAgentAck) await new Promise<void>(resolve => { heldAgentAck = resolve; });
 				return reply;
 			}
 			if (url === "/api/settings/prompts") {
-				if (holdReads) return new Promise<Response>(resolve => deferredReads.push({ signal: init?.signal, resolve }));
+				if (holdReads) return new Promise<ReturnType<typeof replyJson>>(resolve => deferredReads.push({ signal: init?.signal, resolve }));
 				return promptView();
 			}
 			if (url === `/api/settings/prompts/${path}` && init?.method === "PUT") {
 				const { text } = JSON.parse(String(init.body));
 				writes.push(text);
-				if (failWrite) return Response.json({ error: "fixture error" }, { status: 503 });
+				if (failWrite) return replyJson({ error: "fixture error" }, 503);
 				overrideText = text;
-				return Response.json({ path, text });
+				return replyJson({ path, text });
 			}
 			if (url === `/api/settings/prompts/${path}` && init?.method === "DELETE") {
 				overrideText = null;
@@ -65,11 +73,11 @@ it("edits one segment with explicit saves, recoverable writes and an independent
 				const prompts = { ...agent.prompts };
 				delete prompts[path];
 				agent = { ...agent, prompts };
-				return Response.json({ path, deleted: true, switchCleared });
+				return replyJson({ path, deleted: true, switchCleared });
 			}
-			if (url === "/api/keys") return Response.json({ keys: [] });
-			if (url === "/api/models") return Response.json({ models: [], slots: {} });
-			if (url === "/api/search") return Response.json({ available: false });
+			if (url === "/api/keys") return replyJson({ keys: [] });
+			if (url === "/api/models") return replyJson({ models: [], slots: {} });
+			if (url === "/api/search") return replyJson({ available: false });
 			throw new Error(`Unexpected fetch: ${url}`);
 		},
 	};
@@ -154,7 +162,7 @@ it("edits one segment with explicit saves, recoverable writes and an independent
 		await click(group, "Retry");
 		assert.match(row().textContent ?? "", /In use: Your version/);
 		assert.ok(deferredReads.every(({ signal }) => signal?.aborted));
-		await act(async () => { for (const { resolve } of deferredReads) resolve(staleReply.clone()); });
+		await act(async () => { for (const { resolve } of deferredReads) resolve(staleReply); });
 		assert.match(row().textContent ?? "", /In use: Your version/, "late aborted reads cannot overwrite a successful retry");
 		const research = document.querySelector<HTMLButtonElement>('[data-testid="toggle-tool-research"]')!;
 		heldAgentAck = () => assert.fail("fixture response must be held after the PUT commits");
@@ -166,8 +174,15 @@ it("edits one segment with explicit saves, recoverable writes and an independent
 		const count = agentWrites.length;
 		failActivation = true; // The old redundant post-delete PUT would've failed here.
 		await click(dialog()!, "Delete override");
-		assert.equal(overrideText, revisedText, "wait for older full-record ACKs before deleting");
+		assert.match(dialog()!.querySelector('[role="alert"]')!.textContent ?? "", /Settings is still saving/);
+		assert.equal(overrideText, revisedText, "a pending full-record ACK prevents dispatch");
+		assert.equal(button(dialog()!, "Close").disabled, false);
+		await click(dialog()!, "Close");
 		await act(async () => { heldAgentAck?.(); heldAgentAck = undefined; });
+		assert.equal(dialog(), null);
+		assert.equal(overrideText, revisedText, "a declined delete must not run when the ACK arrives");
+		await click(row(), "Edit override");
+		await click(dialog()!, "Delete override");
 		assert.equal(dialog(), null);
 		assert.equal(agentWrites.length, count, "DELETE already cleared the switch; no mirror PUT");
 		assert.equal(agent.prompts?.[path], undefined);

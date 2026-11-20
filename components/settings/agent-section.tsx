@@ -57,7 +57,7 @@ import { defaultOrderLevel, populateLevel } from "@/components/thinking-default"
 import { useModelCatalog } from "@/components/model-catalog";
 import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
-import { PromptSegmentDialog, type PromptSaveOutcome } from "./prompt-segment-dialog";
+import { PromptSegmentDialog, type PromptDeleteOutcome, type PromptSaveOutcome } from "./prompt-segment-dialog";
 import { PromptSegmentRow, promptSegmentName } from "./prompt-segment-row";
 import type React from "react";
 import {
@@ -356,7 +356,7 @@ export function AgentSection({
 	/** Writes the composed WHOLE agent section (replace-PUT discipline). */
 	onSectionChange: (next: AgentSettings, confirms?: (stored: AgentSettings) => boolean) => boolean | Promise<boolean>;
 	/** Order the override DELETE against Settings' full-record acknowledgements. */
-	onDeletePromptOverride?: (path: string, remove: () => Promise<boolean>) => Promise<boolean>;
+	onDeletePromptOverride?: (path: string, remove: () => Promise<boolean>) => Promise<PromptDeleteOutcome>;
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
@@ -524,15 +524,16 @@ export function AgentSection({
 		}
 	}
 
-	async function deleteSegment(path: string) {
+	async function deleteSegment(path: string): Promise<PromptDeleteOutcome> {
+		let outcome: PromptDeleteOutcome = "delete-failed";
 		try {
 			const remove = async () => (await fetch(`/api/settings/prompts/${path}`, { method: "DELETE" })).ok;
-			return onDeletePromptOverride ? await onDeletePromptOverride(path, remove) : await remove();
+			outcome = onDeletePromptOverride ? await onDeletePromptOverride(path, remove) : await remove() ? "deleted" : "delete-failed";
 		} catch {
-			return false;
-		} finally {
-			void readPrompts();
+			// The same UI handles rejected requests and non-OK responses.
 		}
+		if (outcome !== "settings-busy") void readPrompts();
+		return outcome;
 	}
 
 		/** The search-engine menu row — label + the quiet live-key mark. */

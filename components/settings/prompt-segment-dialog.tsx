@@ -8,6 +8,7 @@ import { PromptText } from "./prompt-text";
 import { SettingsSegmentedControl } from "./controls";
 
 export type PromptSaveOutcome = "saved" | "save-failed" | "activation-failed";
+export type PromptDeleteOutcome = "deleted" | "delete-failed" | "settings-busy";
 
 export function PromptSegmentDialog({ name, source, override, mode, returnFocusFallback, onSave, onDelete, onClose }: {
 	name: string;
@@ -16,7 +17,7 @@ export function PromptSegmentDialog({ name, source, override, mode, returnFocusF
 	override: string | null;
 	mode: "view" | "edit";
 	onSave: (text: string, writeText: boolean) => Promise<PromptSaveOutcome>;
-	onDelete: () => Promise<boolean>;
+	onDelete: () => Promise<PromptDeleteOutcome>;
 	onClose: () => void;
 }) {
 	const editing = mode === "edit";
@@ -88,7 +89,9 @@ export function PromptSegmentDialog({ name, source, override, mode, returnFocusF
 		setBusy("delete");
 		setError(null);
 		try {
-			if (await onDelete()) onClose();
+			const result = await onDelete();
+			if (result === "deleted") onClose();
+			else if (result === "settings-busy") setError("Settings is still saving. Try deleting the override again after the save finishes.");
 			else setError("Couldn't delete the override.");
 		} finally {
 			pending.current = false;

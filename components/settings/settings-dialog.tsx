@@ -86,11 +86,17 @@ interface SettingsWriteOrder {
 	acknowledged: number;
 	record?: UserSettings;
 	fileAccessError?: string | null;
-	pendingWrites: Set<Promise<void>>;
+	pendingWrites: number;
 	promptDeletion?: Promise<void>;
 	listeners: Set<(record: UserSettings, fileAccessError: string | null) => void>;
 }
-const newWriteOrder = (): SettingsWriteOrder => ({ issued: 0, acknowledged: 0, pendingWrites: new Set(), listeners: new Set() });
+const newWriteOrder = (): SettingsWriteOrder => ({ issued: 0, acknowledged: 0, pendingWrites: 0, listeners: new Set() });
+// Settings runs on supported browsers that predate Promise.withResolvers.
+function settingsCompletion() {
+	let resolve!: () => void;
+	const promise = new Promise<void>(done => { resolve = done; });
+	return { promise, resolve };
+}
 const WriteOrderContext = createContext<RefObject<SettingsWriteOrder> | null>(null);
 
 /** AppShell-level mount: the sidebar row and the mod+, chord call this.
@@ -308,8 +314,7 @@ export function SettingsDialogBody({
 			const authority = writeOrder.current;
 			while (authority.promptDeletion) await authority.promptDeletion;
 			const ticket = ++authority.issued;
-			const settled = Promise.withResolvers<void>();
-			authority.pendingWrites.add(settled.promise);
+			authority.pendingWrites++;
 			setError(null);
 			try {
 				const res = await fetch(`/api/settings/${section}`, {
@@ -348,8 +353,7 @@ export function SettingsDialogBody({
 				if (ticket === writeOrder.current.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
 				return false;
 			} finally {
-				authority.pendingWrites.delete(settled.promise);
-				settled.resolve();
+				authority.pendingWrites--;
 			}
 		},
 		[onAppearanceChange, writeOrder],
@@ -357,14 +361,13 @@ export function SettingsDialogBody({
 
 	async function deletePromptOverride(path: string, remove: () => Promise<boolean>) {
 		const authority = writeOrder.current;
-		while (authority.promptDeletion) await authority.promptDeletion;
-		const settled = Promise.withResolvers<void>();
+		// DELETE only acknowledges a key removal. Don't patch a mirror that
+		// hasn't seen preceding full-record ACKs, and never queue a delete.
+		if (authority.promptDeletion || authority.pendingWrites) return "settings-busy" as const;
+		const settled = settingsCompletion();
 		authority.promptDeletion = settled.promise;
 		try {
-			// DELETE only acknowledges a key removal, unlike the full-record
-			// PUT replies. Land preceding ACKs before patching that one key.
-			await Promise.all(authority.pendingWrites);
-			if (!await remove()) return false;
+			if (!await remove()) return "delete-failed" as const;
 			const stored = authority.record;
 			if (stored?.agent?.prompts?.[path] !== undefined) {
 				const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
@@ -372,7 +375,7 @@ export function SettingsDialogBody({
 				authority.record = patched;
 				for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
 			}
-			return true;
+			return "deleted" as const;
 		} finally {
 			authority.promptDeletion = undefined;
 			settled.resolve();
