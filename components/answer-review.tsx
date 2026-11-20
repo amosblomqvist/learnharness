@@ -22,7 +22,7 @@ export function useReviewAcknowledgement(chatId: string) {
 export function AnswerReviewActions({ onClarify, onFeynman, onContinue, disabled = false }: {
 	onClarify(): void; onFeynman(): void; onContinue(): void; disabled?: boolean;
 }) {
-	return <section data-testid="answer-review" aria-label="After-answer review" className="space-y-3 p-4">
+	return <section data-testid="answer-review" aria-label="After-answer review" className="mt-2 space-y-3 rounded-xl border bg-card p-5">
 		<p className="font-prose text-sm text-muted-foreground">Review the feedback, then choose how to continue.</p>
 		<div className="flex flex-wrap items-center gap-2">
 			<Button type="button" variant="outline" disabled={disabled} onClick={onClarify}>Ask about this answer</Button>

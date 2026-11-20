@@ -53,6 +53,21 @@ try {
 	await page.goto(`${origin}/chat/${created.id}`, { waitUntil: "networkidle2" });
 	await page.waitForSelector('[data-testid="answer-review"]');
 	assert(!(await page.evaluate(() => document.body.innerText)).includes("NEXT QUESTION HELD FOR LEARNER"));
+	const spacing = () => page.evaluate(() => {
+		const panel=document.querySelector('[data-testid="answer-review"]'), col=panel.parentElement;
+		const feedback=[...col.querySelectorAll('p')].find(p=>p.textContent==='Correct. Your reasoning identifies the key distinction.');
+		const title=document.querySelector('button[data-plugin-chrome-title]'), header=title.closest('header');
+		const a=panel.getBoundingClientRect(), b=feedback.getBoundingClientRect(), c=col.getBoundingClientRect(), t=title.getBoundingClientRect(), h=header.getBoundingClientRect();
+		return { gap:a.top-b.bottom, axis:Math.abs(a.left-c.left-parseFloat(getComputedStyle(col).paddingLeft)), titleHeight:t.height, titleBalance:Math.abs((t.top-h.top)-(h.bottom-t.bottom)), overflow:document.documentElement.scrollWidth>innerWidth };
+	});
+	const desktop=await spacing(); console.log('Desktop spacing',desktop); assert(desktop.gap>=16 && desktop.gap<=40); assert(desktop.axis<1.1); assert.equal(desktop.overflow,false);
+	if(process.env.LH_UI_SCREENSHOTS)await page.screenshot({path:path.join(process.env.LH_UI_SCREENSHOTS,'lesson-spacing-desktop.png')});
+	await page.setViewport({width:390,height:844});
+	await page.click('[aria-label="Close sidebar"]');
+	await page.waitForFunction(()=>document.querySelector('[data-session-find-root]').getBoundingClientRect().width>350);
+	const mobile=await spacing(); console.log('Mobile spacing',mobile);assert(mobile.axis<1.1);assert(mobile.gap>=16 && mobile.gap<=40);assert.equal(mobile.overflow,false);
+	if(process.env.LH_UI_SCREENSHOTS)await page.screenshot({path:path.join(process.env.LH_UI_SCREENSHOTS,'lesson-spacing-mobile.png')});
+	await page.setViewport({width:1440,height:1000});
 	await click(page, "Ask about this answer");
 	await page.waitForSelector('[data-testid="side-thread-input"]'); assert.equal(asks.length, 0); assert.equal(main.length, 0);
 	await page.click('[aria-label="Close side conversation"]');
