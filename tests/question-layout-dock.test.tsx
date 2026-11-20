@@ -10,6 +10,7 @@ import {
 	QUESTION_COLUMN_PAD,
 	STACKED_AREA_PAD,
 	createQuestionProbe,
+	dockContainerMax,
 	layoutFontKey,
 	questionCardGeometry,
 	questionContentFingerprint,
@@ -353,6 +354,10 @@ test("fonts that finish loading with nothing new — or fail — still complete 
 test("geometry follows the root font size; text-metric styles are part of the layout key", () => {
 	assert.deepEqual(questionCardGeometry(16), { container: 736, chrome: 34, base: 702, floor: 368 });
 	assert.deepEqual(questionCardGeometry(20), { container: 920, chrome: 42, base: 878, floor: 460 });
+	// Full: px-6 vs px-4 is 0.5rem per side — 1rem in all, at any root size.
+	assert.equal(dockContainerMax(1330, 16, null), 1314);
+	assert.equal(dockContainerMax(1330, 20, null), 1310);
+	assert.equal(dockContainerMax(1330, 20, 46), 920, "a set width caps in rem");
 	const a = { fontFamily: null, proseFontSize: 16, codeLigatures: true, mdRendering: { headingWeight: 600 } };
 	assert.notEqual(layoutFontKey(a), layoutFontKey({ ...a, codeLigatures: false }));
 	assert.notEqual(layoutFontKey(a), layoutFontKey({ ...a, mdRendering: { headingWeight: 700 } }));

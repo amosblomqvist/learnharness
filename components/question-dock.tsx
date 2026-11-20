@@ -54,6 +54,7 @@ import {
 	type QuestionLayout,
 } from "@/components/question-layout";
 import { useQuestionLayout, type QuestionLayoutRequest } from "@/components/use-question-layout";
+import { captureReadingPosition, holdAcrossSwitch, restoreReadingPosition, revealFocused, trackReadingPosition } from "@/components/dock-switch";
 
 export type { QuestionLayoutRequest } from "@/components/use-question-layout";
 
@@ -726,6 +727,18 @@ function QuestionDockForm({
 			?.scrollIntoView({ block: "nearest" });
 	}, [kbdIdx]);
 
+	const switchPosition = useRef<ReturnType<typeof captureReadingPosition> | null>(null);
+	const readingPosition = useRef<{ id: string; anchors: ReturnType<typeof captureReadingPosition> } | null>(null);
+	const holdingPosition = useRef(false);
+	const trackPosition = layoutRequest != null;
+	useIsoLayoutEffect(() => {
+		const question = questionPartRef.current;
+		if (!trackPosition || !question) return;
+		return trackReadingPosition(question, () => optionsRef.current, (anchors) => {
+			if (!holdingPosition.current) readingPosition.current = { id: qd.id, anchors };
+		});
+	}, [trackPosition, qd.id]);
+
 	// ADAPTIVE LAYOUT (Appearance → Adapt question layout): solved by the
 	// shared hook (components/use-question-layout.ts) — the answered card
 	// in the transcript uses the same one. The thinking field is never an
@@ -742,8 +755,32 @@ function QuestionDockForm({
 		},
 		parts: (live) => ({ root: live.root, question: live.question, options: live.options, confidence: confidenceRef.current }),
 		onLayout,
+		onSwitch: (_, to) => {
+			const question = questionPartRef.current;
+			const saved = readingPosition.current;
+			const anchors = saved?.id === qd.id ? saved.anchors : question ? captureReadingPosition(question, optionsRef.current, to?.kind === "columns") : [];
+			switchPosition.current = to?.kind === "columns" ? anchors : anchors.filter((a) => a.edge === "top" && a.section === question);
+		},
 	});
 	const columns = layout?.kind === "columns" ? layout : null;
+
+	// Across a switch the same nodes stay (focus, caret, drags), but the
+	// scrolling element changes. Transfer the reading anchor, then give
+	// focus priority if the layout would otherwise hide a focused control.
+	const arrangement = columns ? "columns" : "stacked";
+	useIsoLayoutEffect(() => {
+		const root = rootRef.current;
+		const anchors = switchPosition.current;
+		switchPosition.current = null;
+		if (!anchors || !root) return;
+		const focused = root.ownerDocument.activeElement;
+		if (!anchors.length && !root.contains(focused)) return;
+		holdingPosition.current = true;
+		return holdAcrossSwitch(root, () => {
+			restoreReadingPosition(anchors);
+			revealFocused(root);
+		}, { onStop: () => { holdingPosition.current = false; } });
+	}, [arrangement, qd.id]);
 
 	/* Confidence (owner, 2026-10-01; UI rounds same day): a snapped
 		slider below the options and above "Your thinking" — the

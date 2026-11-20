@@ -204,6 +204,15 @@ export function questionCardGeometry(rem = 16) {
 	return { container: 46 * rem, chrome, base: 46 * rem - chrome, floor: 23 * rem };
 }
 
+/** The widest the dock container may grow (px): the Transcript width
+ *  setting (rem; null = Full) or, at Full, the bottom block less 1rem — the
+ *  transcript's px-6 and the dock's px-4 differ by 0.5rem per side, so the
+ *  card's shell then lines up with the transcript's text. */
+export function dockContainerMax(blockWidth: number, rem: number, transcriptMaxWidth: number | null): number {
+	const cap = transcriptMaxWidth === null ? Infinity : transcriptMaxWidth * rem;
+	return Math.min(cap, blockWidth - rem);
+}
+
 /** Everything a solved layout's measurements depend on besides content and
  *  widths: the reading font and size, and the markdown styles that change
  *  text metrics (heading weight, code ligatures). */

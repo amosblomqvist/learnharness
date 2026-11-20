@@ -82,13 +82,20 @@ export interface UseQuestionLayout {
 	/** The parts measured (default: the live parts + confidence). */
 	parts: (live: LiveQuestion) => QuestionParts;
 	onLayout?: (layout: QuestionLayout | null) => void;
+	/** Called just BEFORE the arrangement changes (columns ⇄ stacked; null
+	 *  lays out stacked), while the DOM still shows the old one. */
+	onSwitch?: (from: QuestionLayout | null, to: QuestionLayout | null) => void;
 }
 
-export function useQuestionLayout({ cacheId, request, identity, live, parts, onLayout }: UseQuestionLayout): QuestionLayout | null {
+const arrangement = (l: QuestionLayout | null) => (l?.kind === "columns" ? "columns" : "stacked");
+
+export function useQuestionLayout({ cacheId, request, identity, live, parts, onLayout, onSwitch }: UseQuestionLayout): QuestionLayout | null {
 	const [layout, setLayout] = useState<QuestionLayout | null>(null);
 	const [contentVersion, bumpContent] = useReducer((n: number) => n + 1, 0);
 	const onLayoutRef = useRef(onLayout);
 	onLayoutRef.current = onLayout;
+	const onSwitchRef = useRef(onSwitch);
+	onSwitchRef.current = onSwitch;
 	const liveRef = useRef(live);
 	liveRef.current = live;
 	const partsRef = useRef(parts);
@@ -143,6 +150,7 @@ export function useQuestionLayout({ cacheId, request, identity, live, parts, onL
 			}
 		}
 		if (sameLayout(layoutRef.current, next)) return;
+		if (arrangement(layoutRef.current) !== arrangement(next)) onSwitchRef.current?.(layoutRef.current, next);
 		layoutRef.current = next;
 		// Same commit for both: a caller's width and the columns land together.
 		setLayout(next);

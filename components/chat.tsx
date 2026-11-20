@@ -42,7 +42,7 @@ import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
 import { createDockMorph, createDockWidthMorph } from "@/components/dock-morph";
 import { useAppearance } from "@/components/settings/appearance";
-import { layoutFontKey, questionCardGeometry, rootRem, type QuestionLayout } from "@/components/question-layout";
+import { dockContainerMax, layoutFontKey, questionCardGeometry, rootRem, type QuestionLayout } from "@/components/question-layout";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
 import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -2651,10 +2651,9 @@ export function DockOverlay({
 	// only geometry/font inputs — never typing state (#674).
 	const { appearance } = useAppearance();
 	const adaptive = appearance.adaptiveQuestions && !!pending && !pluginQuestion && !unreadablePlugin;
-	const transcriptCap = appearance.transcriptMaxWidth === null ? Infinity : appearance.transcriptMaxWidth * rem;
-	// Full: the transcript's text column is the block less its px-6 margins;
-	// the card's shell may line up with it (container = block - 16px).
-	const containerMax = Math.min(transcriptCap, blockW - 16);
+	// Full: the card's shell may line up with the transcript's text column
+	// (dockContainerMax: block - 1rem); a set width caps it there.
+	const containerMax = dockContainerMax(blockW, rem, appearance.transcriptMaxWidth);
 	const fontKey = layoutFontKey(appearance);
 	const geometry = questionCardGeometry(rem);
 	const DOCK_W = geometry.container;
