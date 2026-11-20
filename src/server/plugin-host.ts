@@ -269,6 +269,13 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				cleanup(() => services.workers.dispose());
 				const ctx: PluginBackendContext = {
 					manifest, directory: pkg.directory, dataDirectory, signal: activation.controller.signal, cleanup, ...services,
+					createDataDirectory(...segments) {
+						requireLive();
+						if (!segments.length || !segments.every(safeSegment)) throw new Error("Invalid plugin data directory path");
+						const target = path.join(/* turbopackIgnore: true */ dataDirectory, ...segments);
+						mkdirDataDirectory(target, 0o700);
+						return target;
+					},
 					createBackgroundTool(context, definition) { requireLive(); return services.createBackgroundTool(context, definition); },
 					registerInstructions(contribution: PluginInstructions) {
 						requireLive();

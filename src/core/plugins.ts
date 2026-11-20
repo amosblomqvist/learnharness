@@ -139,6 +139,8 @@ export interface PluginBackendContext {
 	readonly directory: string;
 	/** Writable records: core-plugin-data/<id> or community plugins/<id>/data. */
 	readonly dataDirectory: string;
+	/** Create a subdirectory below dataDirectory after verifying the active store. */
+	createDataDirectory(...segments: string[]): string;
 	/** Aborted when this backend activation ends. Recheck after awaits before
 	 * plugin-owned side effects; abort does not force-stop arbitrary code. */
 	readonly signal: AbortSignal;

@@ -731,6 +731,28 @@ describe("data directory audit regressions", () => {
 		assert.match(child.stdout, /400.*LH_DATA_DIR fixes/);
 	});
 
+	it("guards a captured plugin workspace creator after a store is unplugged", async () => {
+		const target = path.join(scratchRoot, "plugin-offline-store");
+		assert.equal((await post({ action: "change", path: target, copyMode: "switch" })).status, 200);
+		const plugin = path.join(target, "plugins", "workspace-test", "dist");
+		fs.mkdirSync(plugin, { recursive: true });
+		fs.writeFileSync(path.join(plugin, "manifest.json"), JSON.stringify({
+			apiVersion: 1, id: "workspace-test", name: "Workspace test", version: "1.0.0", minAppVersion: "0.3.0",
+			backend: "backend.cjs",
+		}));
+		fs.writeFileSync(path.join(plugin, "backend.cjs"), `
+			exports.activate = ctx => { ctx.handle("create-directory", () => ctx.createDataDirectory); };
+		`);
+		const host = await getPluginHost();
+		await host.setEnabled("workspace-test", true);
+		const createDirectory = await host.call("workspace-test", "create-directory") as (...segments: string[]) => string;
+		assert.equal(createDirectory("test-runs"), path.join(target, "plugins", "workspace-test", "data", "test-runs"));
+		assert.throws(() => createDirectory(".."), /Invalid plugin data directory path/);
+		fs.rmSync(target, { recursive: true });
+		assert.throws(() => createDirectory("test-runs", "question"), /unavailable/);
+		assert.ok(!fs.existsSync(target));
+	});
+
 	it("disposes the old plugin host before the new store becomes active", async () => {
 		const host = await getPluginHost();
 		const target = path.join(scratchRoot, "plugin-host-switch");

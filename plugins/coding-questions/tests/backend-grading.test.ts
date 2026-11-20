@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
@@ -34,6 +35,12 @@ test("public registered grader executes the supplied recipe after submission, re
   let disposed = 0;
   const cleanup = activate({
     dataDirectory,
+    signal: new AbortController().signal,
+    createDataDirectory(...segments: string[]) {
+      const directory = path.join(dataDirectory, ...segments);
+      mkdirSync(directory, { recursive: true });
+      return directory;
+    },
     registerQuestionType(value: PluginQuestionTypeDefinition) { assert.equal(typeof value.gradeAnswer, "function"); grade = value.gradeAnswer!; return () => { disposed++; }; },
     registerProblemType() { return () => { disposed++; }; },
     registerInstructions() { return () => { disposed++; }; },

@@ -1,3 +1,4 @@
+import { mkdirSync } from "node:fs";
 import assert from "node:assert/strict";
 import { mkdtemp, readdir, rm } from "node:fs/promises";
 import os from "node:os";
@@ -15,6 +16,12 @@ test("practice processor observes repeated submissions, keeps thinking/solution 
   let disposed = 0;
   const cleanup = activate({
     dataDirectory,
+    signal: new AbortController().signal,
+    createDataDirectory(...segments: string[]) {
+      const directory = path.join(dataDirectory, ...segments);
+      mkdirSync(directory, { recursive: true });
+      return directory;
+    },
     registerQuestionType() { return () => { disposed++; }; },
     registerProblemType(value: PluginProblemTypeDefinition) { processSubmission = value.processSubmission!; return () => { disposed++; }; },
     registerInstructions() { return () => { disposed++; }; },

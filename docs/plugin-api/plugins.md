@@ -253,6 +253,7 @@ export interface PluginBackendContext {
     readonly manifest: PluginManifest;
     readonly directory: string;
     readonly dataDirectory: string;
+    createDataDirectory(...segments: string[]): string;
     readonly signal: AbortSignal;
     cleanup(dispose: PluginCleanup): void;
     learning: PluginLearningData;

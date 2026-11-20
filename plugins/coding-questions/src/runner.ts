@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import type { CodingTestResult, CodingTests } from "./test-result.ts";
 
@@ -167,8 +167,8 @@ async function observeProcess(
 }
 
 /** Run the teacher's process recipe verbatim, without interpreting its language. */
-export async function runTests({ dataDirectory, questionId, answer, tests, signal }: {
-  dataDirectory: string;
+export async function runTests({ createDataDirectory, questionId, answer, tests, signal }: {
+  createDataDirectory: (...segments: string[]) => string;
   questionId: string;
   answer: string;
   tests: CodingTests;
@@ -178,14 +178,9 @@ export async function runTests({ dataDirectory, questionId, answer, tests, signa
   if (!questionId || questionId === "." || questionId === ".." || /[/\\\0]/u.test(questionId) || path.isAbsolute(questionId)) {
     throw new Error("questionId must be a single safe path segment");
   }
-  const runsDirectory = path.resolve(dataDirectory, "test-runs");
-  const questionDirectory = path.resolve(runsDirectory, questionId);
-  if (path.dirname(questionDirectory) !== runsDirectory) {
-    throw new Error("questionId must be a single safe path segment");
-  }
   let workspace: string | undefined;
   try {
-    await mkdir(questionDirectory, { recursive: true });
+    const questionDirectory = createDataDirectory("test-runs", questionId);
     checkAbort(signal);
     workspace = await mkdtemp(path.join(questionDirectory, "attempt-"));
     checkAbort(signal);

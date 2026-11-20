@@ -8,11 +8,11 @@ export function activate(ctx: PluginBackendContext): () => void {
     gradeAnswer(context) {
       if (typeof context.answer !== "string") throw new Error("Coding answers must be strings.");
       return runTests({
-        dataDirectory: ctx.dataDirectory,
+        createDataDirectory: (...segments) => ctx.createDataDirectory(...segments),
         questionId: context.questionId,
         answer: context.answer,
         tests: readTests(context.input.payload),
-        signal: context.signal,
+        signal: AbortSignal.any([ctx.signal, context.signal]),
       });
     },
   });
@@ -21,11 +21,11 @@ export function activate(ctx: PluginBackendContext): () => void {
     processSubmission(context) {
       if (typeof context.submission !== "string") throw new Error("Coding submissions must be strings.");
       return runTests({
-        dataDirectory: ctx.dataDirectory,
+        createDataDirectory: (...segments) => ctx.createDataDirectory(...segments),
         questionId: context.problemId,
         answer: context.submission,
         tests: readTests(context.input.payload),
-        signal: context.signal,
+        signal: AbortSignal.any([ctx.signal, context.signal]),
       });
     },
   });
