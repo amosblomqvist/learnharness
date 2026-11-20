@@ -4,9 +4,8 @@ import { useCallback, useEffect, useRef, useState, type ReactElement, type React
 import { FolderOpenIcon, HardDriveIcon } from "lucide-react";
 import { HostDialog } from "@/components/host-dialog";
 import { Button } from "@/components/ui/button";
+import type { DataDirectoryStatus, DataMigrationMode } from "@/src/core";
 import { SettingsRow } from "./controls.tsx";
-
-import type { DataDirectoryStatus, DataMigrationMode } from "@/src/server/data-directory";
 
 export const DATA_DIR_HINT =
 	"Chats, knowledge graph, settings, themes, prompts, and plugins are stored here. API keys and subscription logins stay on this machine.";

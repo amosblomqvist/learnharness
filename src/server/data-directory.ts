@@ -12,6 +12,7 @@ import {
 } from "../../config.ts";
 import { hasExtractionsInFlight } from "../agent/subagents/extraction.ts";
 import { hasLiveJobs } from "../agent/subagents/aborts.ts";
+import type { DataDirectorySource, DataDirectoryStatus, DataMigrationMode } from "../core/contracts/data-directory.ts";
 import { emit } from "../core/events.ts";
 import { beginDataMigration, blockDataWritesForRecovery, dataWriteRecoveryReason, DataDirectoryBusyError } from "../store/data-write-gate.ts";
 import { canonicalPath, DataLocationRecoveryError, inspectDataLocation, readStoreId, validateTarget, validateTree, verifyStore, writeConfiguredDataDirPath } from "../../electron/data-location.cjs";
@@ -23,26 +24,6 @@ import { hasRunningTurns } from "./turn-liveness.ts";
 
 export class DataDirectoryInputError extends Error {}
 export { DataDirectoryBusyError };
-
-export type DataMigrationMode = "copy" | "switch";
-
-type DataDirectorySource = { path: string } & (
-	| { storeId: string }
-	| { storeId: null; device: string; inode: string }
-);
-
-export interface DataDirectoryStatus {
-	currentDir: string;
-	copySource: DataDirectorySource | null;
-	defaultDir: string;
-	isCustom: boolean;
-	configuredDir: string | null;
-	unavailableConfiguredDir: string | null;
-	recoveryReason: string | null;
-	fixed: boolean;
-	platform: NodeJS.Platform;
-	cleanupFailures?: string[];
-}
 
 export type DataDirectoryRequest =
 	| {
