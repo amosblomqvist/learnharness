@@ -2,7 +2,7 @@
  * Teaching-session phases derived sequentially from transcript events,
  * not from plan-tree occupancy or an explicit plan-acceptance flag:
  *
- * - probe: until probe_done has a successful tool result.
+ * - probe: until a learner handoff or a successful probe_done result.
  * - plan: after probe completion, until a node-tagged teaching question call.
  * - teach: from that first call onward, without waiting for its answer.
  *
@@ -24,7 +24,7 @@ export type Phase3 = "probe" | "plan" | "teach";
  * calls) an output.
  */
 export interface PhaseMessage {
-	parts: ReadonlyArray<{ type: string; state?: string; input?: unknown; output?: unknown; pluginQuestion?: unknown }>;
+	parts: ReadonlyArray<{ type: string; state?: string; input?: unknown; output?: unknown; pluginQuestion?: unknown; data?: unknown }>;
 }
 
 /** A quiz call's part input carries `nodeId` iff it is tagged (teach-only —
@@ -63,6 +63,7 @@ function advance(
 ): Phase3 {
 	if (!parts) return phase;
 	for (const part of parts) {
+		if (phase === "probe" && part.type === "data-probe-handoff" && (part.data as {learnerRequested?: boolean} | null)?.learnerRequested === true) phase = "plan";
 		// STRICTLY SEQUENTIAL: probe → plan only via a concluded probe_done,
 		// plan → teach only via the first nodeId-tagged quiz CALL (the call,
 		// not its answer — an errored-and-retried call still proves teaching
@@ -152,6 +153,7 @@ export function phaseAt3Lh(messages: readonly LhMessage[], upToIndex?: number): 
 	for (let i = 0; i <= last; i++) {
 		const m = messages[i]!;
 		const role = (m as { role?: string }).role;
+		if (m.role === "custom" && m.customType === "learner-handoff" && phase === "probe") phase = "plan";
 		if (role === "toolResult") {
 			if (phase === "probe" && concluded.has(m.id)) phase = "plan";
 		} else if (role === "assistant") {

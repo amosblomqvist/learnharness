@@ -28,11 +28,12 @@
  * turn rides one composition.
  */
 
-import type { QuestionAnswerData } from "./question-core.ts";
+import { dismissedAnswer, type QuestionAnswerData } from "./question-core.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { validatePluginSubmissionImageArray, validatePluginSubmissionImages, type PluginSubmissionImages, type PluginSubmissionOccurrence } from "./plugin-submissions.ts";
 import type { LhMessage } from "./native-messages.ts";
 import {
+	hasProbeDone,
 	activeProblemOf,
 	activeProblemOccurrenceOf,
 	concludedByDismissalPair,
@@ -62,6 +63,7 @@ export type ChatInput =
 	| PluginProblemSubmissionInput
 	| { type: "text"; text: string; images?: ImageContent[] }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData; occurrence?: PluginSubmissionOccurrence }
+	| { type: "end-probe"; lastMessageId: string }
 	| { type: "continue" }
 	/** The failed-turn retry (issue #110): the banner's Retry button. */
 	| { type: "retry" }
@@ -259,6 +261,9 @@ export function parseChatInput(input: unknown): ChatInput {
 			const { images: _images, ...fields } = answer;
 			return { type: "answer", toolCallId: i.toolCallId, answer: { ...fields, ...(images ? { images } : {}) }, ...(occurrence ? { occurrence } : {}) };
 		}
+		case "end-probe":
+			if (typeof i.lastMessageId !== "string" || !i.lastMessageId) throw new ChatInputError("Missing session position");
+			return { type: "end-probe", lastMessageId: i.lastMessageId };
 		case "continue":
 			return { type: "continue" };
 		case "retry":
@@ -307,6 +312,18 @@ export function inputAppends(
 			throw new ChatInputError("Plugin problem submissions require canonical server validation");
 		case "plugin-question-answer":
 			throw new ChatInputError("Plugin question answers require canonical server validation");
+		case "end-probe": {
+			if (record.kind === "practice" || hasProbeDone(record.messages)) throw new ChatInputError("This session is not probing");
+			const tail = record.messages.filter(m => !(m.role === "custom" && m.customType === "compaction")).at(-1);
+			if (!tail || tail.id !== input.lastMessageId) throw new ChatInputError("The session changed. Reopen the session before ending the probe.");
+			const skips = questionCallsOf(record.messages).filter(call => call.status === "answerable" || call.status === "malformed").map(call => {
+				const question = (call.input as { question?: unknown } | null)?.question;
+				return newAnswerResult(call.toolCallId, call.tool, dismissedAnswer(toolQuestionKind(call.tool), typeof question === "string" ? question : ""));
+			});
+			return [...skips, { id: newMessageId(), role: "custom", customType: "learner-handoff", display: true,
+				content: "The learner ended the diagnostic and chose to start teaching now. Use the stated goal and evidence from actual answers to plan the lesson and begin teaching. Treat untested topics as unknown; do not restart the diagnostic.",
+				details: { learnerRequested: true }, timestamp: Date.now() }];
+		}
 		case "text":
 			return [...dismissalConclusion(record), newUserMessage(input.text, input.images)];
 		case "answer": {

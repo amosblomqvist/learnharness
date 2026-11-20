@@ -63,6 +63,7 @@
  * camera never moves.
  */
 
+import { GraphSessionCoverage } from "@/components/graph-session-coverage";
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import { PluginGraphActions } from "@/components/plugin-chrome";
@@ -1595,6 +1596,7 @@ export function GraphView({
 				/>
 			</div>
 
+			<GraphSessionCoverage />
 			<NotesImportErrors errors={notesImport.errors} />
 			<NotesImportNotices notices={notesImport.notices} />
 			{/* Top-right tail (owner, 2026-09-20): the pipeline cost number —
