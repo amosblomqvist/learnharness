@@ -52,11 +52,11 @@ export const probeDoneInputSchema = Type.Object({
 					}),
 					assessment: Type.String({
 						description:
-							"Describe the learner's reasoning and what the lesson can build on. Include relevant gaps, misconceptions, " +
-							"and uncertainties. Report a boundary only if the evidence supports it.",
+							"Describe what the learner reliably reasons from (the floor) and where their reasoning runs out (the ceiling), " +
+							"as supported by the evidence. Include relevant misconceptions and distinguish untested bounds from observed gaps.",
 					}),
 				}),
-				{ minItems: 1, description: "The strands that matter for the lesson, each with an evidence-based account of the learner's understanding." },
+				{ minItems: 1, description: "The strands the lesson depends on, with what the evidence shows and what still needs checking." },
 			),
 			summary: Type.Optional(
 				Type.String({
