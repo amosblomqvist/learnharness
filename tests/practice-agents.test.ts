@@ -376,7 +376,10 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 	it("the prober uses the learner's reasoning to adapt and need not force a miss", () => {
 		const prober = composeInstructions("prober");
 		assert.match(prober, /A single question can reveal several strands/);
-		assert.match(prober, /Read the thinking field alongside the verdict and confidence/);
+		assert.match(prober, /the available quizzing tool to measure understanding/);
+		assert.doesNotMatch(prober, /`probe` or `recall`/);
+		assert.match(prober, /Treat the learner's thinking field as your primary evidence/);
+		assert.match(prober, /Prefer a short set of meaningful multiple-choice options/);
 		assert.match(prober, /Go deeper when the distinction would change the lesson/);
 		assert.match(prober, /Don't present an untested boundary as a finding/);
 		assert.doesNotMatch(prober, /Binary-search every strand|escalate until it does/);
