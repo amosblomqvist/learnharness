@@ -23,3 +23,9 @@ Visible metadata uses spacing, a second line or parentheses rather than repeated
 middle-dot separators where practical: session state/time, context/plan, native
 provider status and keyboard hints. This is a UI-copy convention, not a rewrite
 of lesson text, formulas or source notes.
+
+The native overlay stops before the header's 1px bottom border; otherwise it
+paints over the right-hand end of the separator. Windows/Linux app status and
+actions keep a 24px gap before the native control area, including the floating
+home actions. This leaves application controls and window controls in distinct
+groups without changing colors.

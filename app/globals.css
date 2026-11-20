@@ -576,6 +576,14 @@ body {
 	max-width: max(0px, calc(100% - 5.5rem - var(--lh-wco-right, 0px)));
 }
 
+/* Separate application status/actions from native window controls. */
+.lh-electron:is([data-lh-platform="win32"], [data-lh-platform="linux"]) .lh-wco-gutter {
+ padding-right: calc(1.5rem + var(--lh-wco-right, 0px));
+}
+.lh-electron:is([data-lh-platform="win32"], [data-lh-platform="linux"]) .lh-wco-floating {
+ right: calc(1.5rem + var(--lh-wco-right, 0px));
+}
+
 /* A closed graph rail starts below the floating toggle/native lights band.
    Like the existing light gutter, its physical clearance survives desktop zoom. */
 .lh-electron[data-lh-platform="darwin"] .lh-plugin-graph-closed {

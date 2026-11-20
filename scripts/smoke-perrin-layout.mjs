@@ -46,6 +46,12 @@ try {
 	const columnGeometry=await page.evaluate(()=>{const col=document.querySelector("[data-session-find-root]"),dock=document.querySelector("[data-attachment-composer]"); const c=col.getBoundingClientRect(),d=dock.getBoundingClientRect(),style=getComputedStyle(col);return {col:{left:c.left,right:c.right,width:c.width},dock:{left:d.left,right:d.right,width:d.width},left:Math.abs(d.left-c.left-parseFloat(style.paddingLeft)),right:Math.abs(c.right-parseFloat(style.paddingRight)-d.right)};});
 	console.log("Column geometry",columnGeometry); assert(columnGeometry.left<=1.1 && columnGeometry.right<=1.1);
 	assert(desktop.width <= desktop.parent * .71);
+	const nativeGutter=await page.evaluate(()=>{
+ const root=document.documentElement;root.classList.add('lh-electron');root.dataset.lhPlatform='win32';root.style.setProperty('--lh-wco-right','138px');
+ const value=parseFloat(getComputedStyle(document.querySelector('header')).paddingRight);
+ root.classList.remove('lh-electron');delete root.dataset.lhPlatform;root.style.removeProperty('--lh-wco-right');return value;
+});
+ assert.equal(nativeGutter,162);
 	if (shots) await page.screenshot({ path: path.join(shots, "perrin-session-desktop.png") });
 	await page.click("button[data-plugin-chrome-title]");
 	await page.waitForSelector('input[aria-label="Session title"]');

@@ -75,6 +75,6 @@ it('native titlebar follows the 60px header at every supported zoom without chan
  const {chromeOverlay}=require('../electron/appearance-chrome.cjs');
  for(const zoom of [.75,.9,1,1.1,1.25,1.5,1.75,2]){
   const appearance={mode:'dark',background:'#141414'};
-  assert.deepEqual(chromeOverlay(appearance,zoom),{...chromeColors(appearance),height:Math.round(60*zoom)});
+  assert.deepEqual(chromeOverlay(appearance,zoom),{...chromeColors(appearance),height:Math.round(59*zoom)});
  }
 });

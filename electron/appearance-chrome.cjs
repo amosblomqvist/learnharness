@@ -80,9 +80,9 @@ function chromeColors(appearance) {
 }
 
 // Native overlay dimensions are device-independent pixels; the renderer's
-// 60 CSS-pixel header scales with web zoom. Recompute on every zoom change.
+// 60px header scales with web zoom. Leave its 1px bottom border uncovered.
 function chromeOverlay(appearance, zoom = 1) {
- return { ...chromeColors(appearance), height: Math.round(60 * zoom) };
+ return { ...chromeColors(appearance), height: Math.round(59 * zoom) };
 }
 
 module.exports = { chromeOverlay, PRESET_APPEARANCE, COLOR_KEYS, normalizeAppearance, themeSourceFor, serverDataDir, readAppearance, chromeColors };
