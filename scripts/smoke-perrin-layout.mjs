@@ -38,8 +38,8 @@ try {
 	const desktop = await inspectTitle();
 	assert.equal(desktop.font, "20px"); assert.equal(desktop.title, title);
 	assert.equal(desktop.translate, "none"); assert.equal(desktop.height,44); assert(desktop.balance<=1.1);
-	const columnGeometry=await page.evaluate(()=>{const col=document.querySelector("[data-session-find-root]"),dock=document.querySelector("[data-attachment-composer]"); const c=col.getBoundingClientRect(),d=dock.getBoundingClientRect(),style=getComputedStyle(col);return {left:Math.abs(d.left-c.left-parseFloat(style.paddingLeft)),right:Math.abs(c.right-parseFloat(style.paddingRight)-d.right)};});
-	assert(columnGeometry.left<=1.1 && columnGeometry.right<=1.1);
+	const columnGeometry=await page.evaluate(()=>{const col=document.querySelector("[data-session-find-root]"),dock=document.querySelector("[data-attachment-composer]"); const c=col.getBoundingClientRect(),d=dock.getBoundingClientRect(),style=getComputedStyle(col);return {col:{left:c.left,right:c.right,width:c.width},dock:{left:d.left,right:d.right,width:d.width},left:Math.abs(d.left-c.left-parseFloat(style.paddingLeft)),right:Math.abs(c.right-parseFloat(style.paddingRight)-d.right)};});
+	console.log("Column geometry",columnGeometry); assert(columnGeometry.left<=1.1 && columnGeometry.right<=1.1);
 	assert(desktop.width <= desktop.parent * .71);
 	if (shots) await page.screenshot({ path: path.join(shots, "perrin-session-desktop.png") });
 	await page.click("button[data-plugin-chrome-title]");
