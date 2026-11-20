@@ -38,7 +38,6 @@ import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
 	CURRENT_SETTINGS_VERSION,
-	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
@@ -47,7 +46,7 @@ import {
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
-import { AgentSection } from "./agent-section.tsx";
+import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -276,6 +275,10 @@ export function SettingsDialogBody({
 		const applyLoaded = (loaded: UserSettings | null, fileAccessError: string | null = null) => {
 			if (!alive) return;
 			const unchanged = authority.acknowledged === acknowledgedAtRead;
+			if (unchanged && loaded) {
+				authority.record = loaded;
+				authority.fileAccessError = fileAccessError;
+			}
 			setRecord(unchanged ? loaded : authority.record ?? loaded);
 			setFileAccessError(unchanged ? fileAccessError : authority.fileAccessError ?? null);
 		};
@@ -297,6 +300,7 @@ export function SettingsDialogBody({
 		async (
 			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
 			body: object,
+			confirms?: (stored: UserSettings) => boolean,
 		): Promise<boolean> => {
 			const ticket = ++writeOrder.current.issued;
 			setError(null);
@@ -332,7 +336,7 @@ export function SettingsDialogBody({
 					onAppearanceChange(stored.appearance);
 				}
 				notifySettingsSaved(section);
-				return true;
+				return confirms?.(stored) ?? true;
 			} catch (error) {
 				if (ticket === writeOrder.current.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
 				return false;
@@ -340,6 +344,19 @@ export function SettingsDialogBody({
 		},
 		[onAppearanceChange, writeOrder],
 	);
+
+	function acknowledgePromptDeletion(path: string) {
+		// DELETE durably cleared this key; it returns no full record. Advance
+		// the mirror's ACK order and patch only that key, without another PUT.
+		const authority = writeOrder.current;
+		const stored = authority.record;
+		if (stored?.agent?.prompts?.[path] !== undefined) {
+			const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
+			authority.acknowledged = ++authority.issued;
+			authority.record = patched;
+			for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
+		}
+	}
 
 	const frame = (
 		<div
@@ -475,9 +492,10 @@ export function SettingsDialogBody({
 										onModelsChange={(next: ModelsSettings) =>
 											void write("models", next)
 										}
-										onSectionChange={(next: AgentSettings) =>
-											write("agent", next)
+										onSectionChange={(next, confirms) =>
+											write("agent", next, confirms && (stored => confirms(stored.agent ?? {})))
 										}
+										onPromptDeleted={acknowledgePromptDeletion}
 										onCompactionChange={(next: CompactionSettings) =>
 											write("compaction", next)
 										}

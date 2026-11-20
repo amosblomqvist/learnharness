@@ -58,7 +58,7 @@ import { useModelCatalog } from "@/components/model-catalog";
 import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { PromptSegmentDialog, type PromptSaveOutcome } from "./prompt-segment-dialog";
-import { PromptSegmentRow } from "./prompt-segment-row";
+import { PromptSegmentRow, promptSegmentName } from "./prompt-segment-row";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
@@ -76,7 +76,7 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
 import { cn } from "@/lib/utils";
-import { SettingsGroup, SettingsRow, SettingsMenuTrigger, Toggle, CommitInput } from "./controls.tsx";
+import { SettingsGroup, SettingsRow, SettingsMenuTrigger, SettingsSegmentedControl, Toggle, CommitInput } from "./controls.tsx";
 import { ModelMenuList, ThinkingMenuList } from "./model-menu";
 import { ChatGPTBackgroundAccess } from "./chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess } from "./subscription-connections";
@@ -338,6 +338,7 @@ export function AgentSection({
 	graph,
 	compaction,
 	onSectionChange,
+	onPromptDeleted,
 	onModelsChange,
 	onCompactionChange,
 }: {
@@ -353,7 +354,9 @@ export function AgentSection({
 	 *  behavior, not an agent-section key; owner round 14, Agent tab). */
 	compaction: CompactionSettings | undefined;
 	/** Writes the composed WHOLE agent section (replace-PUT discipline). */
-	onSectionChange: (next: AgentSettings) => boolean | Promise<boolean>;
+	onSectionChange: (next: AgentSettings, confirms?: (stored: AgentSettings) => boolean) => boolean | Promise<boolean>;
+	/** DELETE also clears its switch; mirror that acknowledgement without a second PUT. */
+	onPromptDeleted?: (path: string) => void;
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
@@ -370,12 +373,13 @@ export function AgentSection({
 	 *  state grays the row; per-engine marks ride the menu rows. */
 	const [engineKeys, setEngineKeys] = useState<Partial<Record<SearchEngineId, boolean>>>({});
 	const [prompts, setPrompts] = useState<PromptView | null>(null);
-	const [promptsFailed, setPromptsFailed] = useState(false);
-	const promptRead = useRef(0);
+	const [promptListStatus, setPromptListStatus] = useState<"loading" | "ready" | "failed">("loading");
+	const promptRead = useRef<AbortController | null>(null);
 	const latestAgent = useRef(agent);
 	latestAgent.current = agent;
 	const [openSegment, setOpenSegment] = useState<{ info: SegmentInfo; mode: "view" | "edit" } | null>(null);
 	const [switchPending, setSwitchPending] = useState(false);
+	const switchingPrompt = useRef(false);
 	const [switchError, setSwitchError] = useState<string | null>(null);
 	/** One open dropdown for the whole section: which slot (or the search
 	 *  row), which kind. */
@@ -398,17 +402,20 @@ export function AgentSection({
 	 *  re-read it or the toggle keeps painting its pre-write state until
 	 *  a remount. Ignore out-of-order reads and retain the last good view
 	 *  if a refresh fails. */
-	const readPrompts = useCallback(async () => {
-		const ticket = ++promptRead.current;
+	const readPrompts = useCallback(async (background = false) => {
+		promptRead.current?.abort();
+		const request = new AbortController();
+		promptRead.current = request;
+		if (!background) setPromptListStatus("loading");
 		try {
-			const res = await fetch("/api/settings/prompts");
+			const res = await fetch("/api/settings/prompts", { signal: request.signal });
 			if (!res.ok) throw new Error(String(res.status));
 			const body: PromptView = await res.json();
-			if (ticket !== promptRead.current) return;
+			if (request.signal.aborted) return;
 			setPrompts(body);
-			setPromptsFailed(false);
+			setPromptListStatus("ready");
 		} catch {
-			if (ticket === promptRead.current) setPromptsFailed(true);
+			if (!request.signal.aborted && !background) setPromptListStatus("failed");
 		}
 	}, []);
 
@@ -419,7 +426,7 @@ export function AgentSection({
 		// agent section, but this view (the toggles' truth) never re-read —
 		// the settings-saved law (every reader re-reads) was missing this
 		// one reader.
-		if (section === "agent") void readPrompts();
+		if (section === "agent" && !switchingPrompt.current) void readPrompts();
 	});
 
 	useEffect(() => {
@@ -434,7 +441,7 @@ export function AgentSection({
 				setEngineKeys(present);
 			})
 			.catch(() => {});
-		return () => { promptRead.current++; };
+		return () => promptRead.current?.abort();
 	}, [readPrompts]);
 
 	// The reason line re-reads /api/search AFTER an engine write lands —
@@ -468,15 +475,24 @@ export function AgentSection({
 	}, [openMenu, interactions]);
 
 	async function switchSegment(path: string, on: boolean) {
-		if (switchPending) return;
+		if (switchingPrompt.current || promptListStatus !== "ready") return;
+		switchingPrompt.current = true;
 		setSwitchPending(true);
 		setSwitchError(null);
+		let saved = false;
 		try {
-			if (!await onSectionChange(composePromptSwitch(latestAgent.current, path, on))) setSwitchError(path);
+			saved = await onSectionChange(composePromptSwitch(latestAgent.current, path, on), stored => (stored.prompts?.[path] === true) === on);
 		} catch {
-			setSwitchError(path);
+			// A rejected write is handled below just like a negative acknowledgement.
 		} finally {
-			await readPrompts();
+			if (saved) {
+				// Only the acknowledged version changes; don't clear/dim the list
+				// while its ordinary canonical refresh catches up.
+				const update = (segments: SegmentInfo[]) => segments.map(s => s.path === path ? { ...s, enabled: on } : s);
+				setPrompts(view => view && { teacher: update(view.teacher), prober: update(view.prober), practice: update(view.practice) });
+			} else setSwitchError(path);
+			switchingPrompt.current = false;
+			void readPrompts(saved);
 			setSwitchPending(false);
 		}
 	}
@@ -497,13 +513,14 @@ export function AgentSection({
 		// Keep save-and-activate: the switch write must follow the file write.
 		// Report partial success separately so retry needn't rewrite the file.
 		try {
-			const saved = latestAgent.current?.prompts?.[path] === true ||
-				await onSectionChange(composePromptSwitch(latestAgent.current, path, true));
+			// A mirrored ON is not proof: the route can clear it (e.g. on
+			// deletion). Require the switch in the actual write acknowledgement.
+			const saved = await onSectionChange(composePromptSwitch(latestAgent.current, path, true), stored => stored.prompts?.[path] === true);
 			return saved ? "saved" : "activation-failed";
 		} catch {
 			return "activation-failed";
 		} finally {
-			await readPrompts();
+			void readPrompts();
 		}
 	}
 
@@ -511,16 +528,12 @@ export function AgentSection({
 		try {
 			const res = await fetch(`/api/settings/prompts/${path}`, { method: "DELETE" });
 			if (!res.ok) return false;
-			// DELETE already cleared the switch on disk. Keep the Settings
-			// mirror in sync so a later whole-section write doesn't restore it.
-			if (latestAgent.current?.prompts?.[path] === true) {
-				await onSectionChange(composePromptSwitch(latestAgent.current, path, false));
-			}
+			onPromptDeleted?.(path);
 			return true;
 		} catch {
 			return false;
 		} finally {
-			await readPrompts();
+			void readPrompts();
 		}
 	}
 
@@ -771,31 +784,9 @@ export function AgentSection({
 							hint="How both tutors check your understanding"
 							testid="quiz-mechanics-row"
 						>
-							<div
-								role="radiogroup"
-								aria-label="Quizzing mechanics"
-								className="flex rounded-lg border border-border/60 bg-muted/30 p-0.5"
-								>
-								{(["choice", "free"] as const).map((m) => {
-									const active = m === "free" ? free : !free;
-									return (
-										<button
-											key={m}
-											type="button"
-											role="radio"
-											aria-checked={active}
-											data-testid={`quiz-mechanics-${m}`}
-											onClick={() => onSectionChange(composeQuizMechanics(agent, m))}
-											className={cn(
-												"h-8 rounded-md px-3 text-sm font-medium transition-colors",
-												active ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground",
-											)}
-										>
-											{m === "choice" ? "Multiple choice" : "Free recall"}
-										</button>
-									);
-								})}
-							</div>
+							<SettingsSegmentedControl label="Quizzing mechanics" testidPrefix="quiz-mechanics"
+								options={[{ value: "choice", label: "Multiple choice" }, { value: "free", label: "Free recall" }]}
+								value={free ? "free" : "choice"} onChange={(next) => onSectionChange(composeQuizMechanics(agent, next))} />
 						</SettingsRow>
 					);
 				})()}
@@ -947,13 +938,12 @@ export function AgentSection({
 
 			<SettingsGroup label="System prompts" testid="group-prompts">
 				<p className="text-xs text-muted-foreground">Use the switch to choose between the default and your saved override.</p>
-				{promptsFailed && <div className="flex items-center gap-2">
-					<p role="alert" className="text-xs text-error">Couldn't load prompt segments.</p>
+				{promptListStatus !== "ready" && <div className="flex items-center gap-2">
+					{promptListStatus === "failed" ? <p role="alert" className="text-xs text-error">Couldn't load prompt segments.</p> :
+						<p role="status" className="text-xs text-muted-foreground">{prompts ? "Refreshing prompt segments…" : "Loading prompt segments…"}</p>}
 					<Button type="button" size="xs" variant="outline" onClick={() => void readPrompts()}>Retry</Button>
 				</div>}
-				{prompts === null ? (
-					!promptsFailed && <p className="text-xs text-muted-foreground/70">Loading prompt segments…</p>
-				) : (
+				{prompts && (
 					<div className="flex flex-col gap-4">
 						{/* Teacher, Prober, Practice, Shared — shared chunks once,
 						    each agent's own section in prompt-assembly order. */}
@@ -964,7 +954,7 @@ export function AgentSection({
 								</p>
 								{section.segments.map((info) => <PromptSegmentRow key={info.path}
 									path={info.path} usageHint={info.usageHint} hasOverride={info.overrideText !== null} enabled={info.enabled}
-									busy={switchPending || promptsFailed} error={switchError === info.path ? "Couldn't switch prompt versions." : undefined}
+									busy={promptListStatus !== "ready"} switching={switchPending} error={switchError === info.path ? "Couldn't switch prompt versions." : undefined}
 									onView={() => setOpenSegment({ info, mode: "view" })}
 									onEdit={() => setOpenSegment({ info, mode: "edit" })}
 									onToggle={(on) => void switchSegment(info.path, on)}
@@ -975,7 +965,7 @@ export function AgentSection({
 				)}
 			</SettingsGroup>
 			{openSegment && <PromptSegmentDialog
-				path={openSegment.info.path} source={openSegment.info.sourceText} override={openSegment.info.overrideText} mode={openSegment.mode}
+				name={promptSegmentName(openSegment.info.path)} source={openSegment.info.sourceText} override={openSegment.info.overrideText} mode={openSegment.mode}
 				onSave={(text, writeText) => saveSegment(openSegment.info.path, text, writeText)}
 				onDelete={() => deleteSegment(openSegment.info.path)}
 				onClose={() => setOpenSegment(null)}
