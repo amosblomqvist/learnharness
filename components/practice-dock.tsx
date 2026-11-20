@@ -1,8 +1,9 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import type { ViewReaderRef } from "./session-view-readers";
 import { ChevronRightIcon } from "lucide-react";
+import { FloatGrip } from "@/components/float-grip";
+import type { ViewReaderRef } from "./session-view-readers";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Button } from "@/components/ui/button";
 import { joinDictation, useDictationTarget } from "@/components/dictation";
@@ -63,9 +64,18 @@ export interface PracticeDockProps {
 	 *  and say so in the hint row. The server registry is the real gate;
 	 *  this is the affordance. */
 	compactionRunning?: boolean;
+	/** Float mode (owner round, 2026-11-19): the card is free of the bottom
+	 *  band — a drag grip heads the card (components/float-grip.tsx), the
+	 *  collapse machine is the learner's own. Absent keeps the band card
+	 *  byte-identical. */
+	floating?: boolean;
+	/** The grip reports the panel's clamped absolute top-left; the host applies it. */
+	onFloatPosition?: (x: number, y: number) => void;
+	/** Closes the panel to the chip; absent hides the button (no dead control). */
+	onMinimize?: () => void;
 }
 
-export function PracticeDock({ viewReader, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
+export function PracticeDock({ viewReader, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false, floating, onFloatPosition, onMinimize }: PracticeDockProps) {
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLElement>(null);
 	const [nativeThinking, setNativeThinking] = useState("");
@@ -93,12 +103,12 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 			},
 			[],
 		),
-		true,
+		expanded,
 	);
 
 	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, thinking]);
 	const submit = () => {
-		if (compactionRunning || preparing) return;
+		if (!expanded || compactionRunning || preparing) return;
 		const prepare = customInput?.prepare ?? onPrepareSubmission;
 		if (prepare) {
 			if (customInput ? !customInput.ready : (!thinkingRef.current.trim() && !hasPendingInput)) return;
@@ -115,10 +125,8 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 		onSubmit(text);
 	};
 
-	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): dictation
-	 * means the field is often never focused — the window-level Enter
-	 * (typing surfaces and buttons excluded) submits the trace. Mounted
-	 * while the dock is — collapsed bar included (the trace survives). */
+	/* The floating card keeps its form mounted while minimized, but its
+	 * global Enter lane is inactive then; the visible composer owns Enter. */
 	useEnterSubmits(submit, rootRef);
 
 	/* ── the collapsed bar ── */
@@ -140,6 +148,9 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 	/* ── the expanded form ── */
 	return (
 		<div ref={element => { rootRef.current = element; }} data-testid="practice-dock" data-problem={problemCallId}>
+			{/* The floating header (owner round, 2026-11-19) heads the card
+			    before anything of the problem — one object with its chip. */}
+			{floating && expanded && <FloatGrip label="Practice" onFloatPosition={onFloatPosition} onMinimize={onMinimize} />}
 			{!expanded && bar}
 			<div hidden={!expanded}>
 			{/* The agent's half: the 'Problem' eyebrow (mirroring the quiz
