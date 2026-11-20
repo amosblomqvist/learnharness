@@ -2859,6 +2859,7 @@ export function DockOverlay({
 					    (the dock reclaims when expanded). Rides the check answer on submit. */}
 					{(pending || pluginQuestion) && requiresReveal && (
 						<ReadingThinkingField
+							key={pendingId}
 							inputRef={readingInputRef}
 							value={readingThinking}
 							revision={readingThinkingRevision}

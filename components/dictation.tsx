@@ -282,7 +282,7 @@ export function usePluginQuestionDictationTarget(append: (text: string) => void 
 	}, [append]);
 }
 
-export function useDictationTarget(append: (text: string) => void, claimed: boolean) {
+export function useDictationTarget(append: (text: string) => void, claimed: boolean, retireOnUnmount = false) {
 	useEffect(() => {
 		if (!claimed) return;
 		questionTarget = append;
@@ -290,6 +290,9 @@ export function useDictationTarget(append: (text: string) => void, claimed: bool
 			if (questionTarget === append) questionTarget = null;
 		};
 	}, [append, claimed]);
+	useEffect(() => () => {
+		if (retireOnUnmount && recordingTarget === append) cancelGlobalDictation();
+	}, [append, retireOnUnmount]);
 }
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";

@@ -604,7 +604,6 @@ test("renderer replacement cancels an old capture rather than delivering it to t
 	assert.equal(f.dictation.active, false); assert.deepEqual(replacementSpeech, []); assert.deepEqual(f.state.speech, []); assert.deepEqual(f.state.fallback, []);
 });
 
-
 test("folded teaching check routes new dictation to reading and preserves an active question capture", async () => {
 	const f = await fixture({ check: true, thinking: true });
 	const speak = async (text: string) => {
