@@ -643,4 +643,27 @@ describe("append-only main-request delivery", () => {
 		assert.equal(chatStore.getChat(f.chatId)!.turns?.length ?? 0, 0);
 		assert.match(chatStore.getChat(f.chatId)!.sideChats![0]!.messages.at(-1)!.error!, /Not dispatched/);
 	});
+
+	it("sends a namespaced routing session for opencode-go only", async () => {
+		const f = fixture();
+		const sessions: (string | undefined)[] = [];
+		const engineFor = (provider: string): PiEngine => ({
+			model: { ...createFauxCore({}).getModel(), provider },
+			streamFn: (_model, _context, options) => {
+				sessions.push(options?.sessionId);
+				const stream = createAssistantMessageEventStream();
+				stream.push({ type: "done", reason: "stop", message: fauxAssistantMessage("Helper answer") });
+				return stream;
+			},
+		});
+		const go = createSideChatService({ chatStore, instructions: () => "Helper", engineFor: async () => engineFor("opencode-go") });
+		await (await go.ask(f.chatId, { anchor: f.anchor, text: "Why?", quotes: [] })).text();
+		await go.settled(f.chatId, "side_explanation");
+		assert.equal(sessions.at(-1), `side_${f.chatId}_side_explanation`);
+
+		const other = createSideChatService({ chatStore, instructions: () => "Helper", engineFor: async () => engineFor("openrouter") });
+		await (await other.ask(f.chatId, { threadId: "side_explanation", text: "Follow-up", quotes: [] })).text();
+		await other.settled(f.chatId, "side_explanation");
+		assert.equal(sessions.at(-1), undefined);
+	});
 });

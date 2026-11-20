@@ -86,6 +86,8 @@ export async function streamSideAnswer(opts: {
 	onText?: (text: string) => void;
 	/** Existing opt-in diagnostic identity, NOT a reusable provider session. */
 	chatId?: string;
+	/** Provider routing session for models that require one (OpenCode Go). */
+	sessionId?: string;
 	runId?: string;
 }): Promise<SideAnswerResult> {
 	const now = Date.now();
@@ -111,6 +113,7 @@ export async function streamSideAnswer(opts: {
 		const stream = backgroundCaptureStream(opts.engine.streamFn, capture)(opts.engine.model, normalizeContext({ systemPrompt: opts.instructions, messages, tools: [] }), {
 			signal: opts.signal,
 			reasoning: opts.engine.level === "off" ? undefined : opts.engine.level,
+			...(opts.sessionId ? { sessionId: opts.sessionId } : {}),
 			...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
 		});
 		for await (const event of stream) {

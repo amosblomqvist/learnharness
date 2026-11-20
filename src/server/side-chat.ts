@@ -197,6 +197,8 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 			let settledThread: SideChatThread | undefined;
 			try {
 				const result = await streamSideAnswer({ engine, instructions, turns, signal: run.controller.signal, chatId, runId: run.answerId,
+					// Go needs a routing session; namespace it away from the teacher's chatId.
+					sessionId: engine.model.provider === "opencode-go" ? `side_${chatId}_${thread.id}` : undefined,
 					onText: (text) => { run.text = text; run.updatedAt = new Date().toISOString(); broadcast({ type: "text", text }); },
 				});
 				const at = new Date().toISOString();
