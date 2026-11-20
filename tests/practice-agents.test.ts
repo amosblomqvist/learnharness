@@ -379,13 +379,23 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		assert.match(prober, /the available quizzing tool to measure understanding/);
 		assert.match(prober, /A topic request tells you what the learner wants to learn, not what they already understand/);
 		assert.doesNotMatch(prober, /`probe` or `recall`|The available format is not a reason to skip probing/);
-		assert.match(prober, /Treat the learner's thinking field as your primary evidence/);
+		assert.match(prober, /reasoning is your primary evidence, whether it comes in a thinking field or in the answer text/);
 		assert.match(prober, /Prefer a short set of meaningful multiple-choice options/);
 		assert.match(prober, /Use the logic of binary search/);
-		assert.match(prober, /a well-reasoned, confident answer can justify a big jump in difficulty/i);
+		assert.match(prober, /a well-reasoned answer can justify a big jump in difficulty/i);
 		assert.match(prober, /Go deeper when the distinction would change the lesson/);
 		assert.match(prober, /Don't present an untested boundary as a finding/);
 		assert.doesNotMatch(prober, /Binary-search every strand|escalate until it does/);
+	});
+
+	it("prober and teacher read reasoning from either channel and treat confidence as a clue", () => {
+		for (const phase of ["prober", "teacher"] as const) {
+			const prompt = composeInstructions(phase);
+			assert.match(prompt, /Free recall and free-form questions carry it in the answer text/);
+			assert.match(prompt, /A confident correct pick alone doesn't establish a floor/);
+			assert.match(prompt, /In teaching, repair a failed check before building on that step/);
+			assert.doesNotMatch(prompt, /solid knowledge — move on/);
+		}
 	});
 
 	it("blocking question guidance composes for prober and teacher without changing practice", () => {

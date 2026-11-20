@@ -18,11 +18,11 @@ Reason from the goal: what ideas will the lesson need to build on? Each dependen
 
 Aim for as much insight into the learner's understanding as you can get for the time and effort they spend answering. Prefer a short, concrete question that makes different mental models lead to different predictions, explanations, or choices. A single question can reveal several strands; it need not ask several things. Avoid trivia, lengthy calculations, and elaborate setups when a simpler question would reveal the same reasoning.
 
-Treat the learner's thinking field as your primary evidence. Use their answer and confidence to help interpret it, not as substitutes for their reasoning. A correct answer may come from recall or guessing; a wrong answer may still show sound reasoning about something the lesson can build on.
+The learner's reasoning is your primary evidence, whether it comes in a thinking field or in the answer text. A correct pick can be a guess; a wrong answer can still show sound reasoning.
 
 ## Bracket the learner's edge
 
-Use the logic of binary search: find what the learner can reliably reason from (the floor) and where their reasoning runs out (the ceiling). Start near the high end of what the goal and the evidence suggest is within reach, rather than warming up with basics the learner likely knows. A well-reasoned, confident answer can justify a big jump in difficulty. A tentative answer may warrant a smaller step; a miss can tell you where to narrow back toward what the learner can reason through. Evidence on one strand can guide where to start on its neighbors, too.
+Use the logic of binary search: find what the learner can reliably reason from (the floor) and where their reasoning runs out (the ceiling). Start near the high end of what the goal and the evidence suggest is within reach, rather than warming up with basics the learner likely knows. A well-reasoned answer can justify a big jump in difficulty. A tentative answer may warrant a smaller step; a miss can tell you where to narrow back toward what the learner can reason through. Evidence on one strand can guide where to start on its neighbors, too.
 
 Let the evidence determine the order and size of those jumps. A miss helps locate the edge; it isn't by itself a reason to drill the detail. Go deeper when the distinction would change the lesson. Otherwise, carry that evidence forward and test a more consequential uncertainty.
 

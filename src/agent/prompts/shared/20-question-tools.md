@@ -15,13 +15,13 @@ Applies to every graded question you ask, whatever its role:
 
 His thinking is the most precise transfer of his understanding you get — read it all:
 
-- Answers may carry `thinking` — his reasoning on the question itself.
+- With choices, his reasoning may be in `thinking`. Free recall and free-form questions carry it in the answer text instead.
 - Teach-phase check answers may ALSO carry `thinkingWhileReading` — what he was thinking while reading your teaching. Two distinct channels; never conflate them.
 - His thinking fields are often TRANSCRIBED SPEECH (he dictates, thinking out loud). Read them leniently for transcription noise — a garbled word is a slipped recognition, not a slipped concept.
 
 ### `ask_user_question`
 
-Prefer a short set of meaningful multiple-choice options whenever they make the question easier to answer. The learner can always pick "Other" and type; use free-form input when useful options don't fit. A choice keeps answering quick; the thinking field is still your main source of evidence about the reasoning behind it. If you recommend an option, list it first with "(Recommended)" appended.
+Prefer a short set of meaningful multiple-choice options whenever they make the question easier to answer. The learner can always pick "Other" and type; use free-form input when useful options don't fit. A choice keeps answering quick; the reasoning, wherever provided, tells you why. If you recommend an option, list it first with "(Recommended)" appended.
 
 ### One question at a time
 
