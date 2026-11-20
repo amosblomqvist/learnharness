@@ -353,7 +353,7 @@ export function SettingsDialogBody({
 		>
 			{/* Header — the app's quiet CMU title language. */}
 			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
-				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
+				<h2 className="lh-settings-heading">Settings</h2>
 				<Hint
 						// Esc closes through the shared interaction owner.
 						label="Close"
@@ -364,7 +364,7 @@ export function SettingsDialogBody({
 					type="button"
 					aria-label="Close settings"
 					data-testid="settings-close"
-					className="ml-auto size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					className="ml-auto size-11 rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					onClick={onClose}
 				>
 					<svg
@@ -380,13 +380,13 @@ export function SettingsDialogBody({
 					</Hint>
 			</header>
 
-			<div className="flex min-h-0 flex-1">
+			<div className="lh-settings-columns flex min-h-0 flex-1">
 				{/* Left nav — mono labels and theme-inherited decorative icons,
 					    active = bg-accent. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
+					className="lh-settings-nav flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-auto border-r border-border p-2"
 				>
 					{navSections.map((s, index) => (
 						<div key={s.id} className="shrink-0">

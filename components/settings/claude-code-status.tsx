@@ -8,8 +8,8 @@ import { Toggle } from "./controls";
 export function claudeCodeStatusLabel(status: ClaudeCodeStatus | null): string {
 	switch (status?.state) {
 		case "not-found": return "Not found";
-		case "meets-minimum": return `Version ${status.version} · meets minimum`;
-		case "update-required": return `Version ${status.version} · update required`;
+		case "meets-minimum": return `Version ${status.version}; meets minimum`;
+		case "update-required": return `Version ${status.version}; update required`;
 		default: return "Version could not be checked";
 	}
 }

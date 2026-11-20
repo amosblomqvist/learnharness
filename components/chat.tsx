@@ -125,15 +125,9 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 
-/** One width for everything: transcript, cards, and the bottom blob share this column. */
-/**
- * Width tokens (wave-5 reskin, owner decision): the teaching PROSE spans the
- * full session width with a thin px-6 margin; the composer/question DOCK is
- * deliberately narrower (~46rem centered) per the reference. Same ELEMENT,
- * same place — width polish only.
- */
-const COLUMN = "mx-auto w-full max-w-none px-6";
-const DOCK = "mx-auto w-full max-w-[46rem] px-4";
+/** One reading column for prose, answered cards and the active dock. */
+const COLUMN = "mx-auto w-full max-w-[46rem] px-4";
+const DOCK = COLUMN;
 // The DOCK container's fixed width (46rem) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
@@ -321,7 +315,8 @@ export function Chat({
 	const submissionMounted = useRef(true);
 	useEffect(() => { submissionMounted.current = true; return () => { submissionMounted.current = false; submissionRunner.dispose(); }; }, [submissionRunner]);
 	useEffect(() => () => submissionRunner.dispose(), [surfaceTarget, submissionRunner]);
-	const inputViewReader = useRef<(() => PluginSessionViewInput) | null>(null) as SessionInputViewReader;
+	// This bridge also owns `changed`; React seals its own ref objects in dev.
+	const [inputViewReader] = useState<SessionInputViewReader>(() => ({ current: null }));
 	const refreshPluginActions = useRef<(() => void) | null>(null);
 	const notifyViewChanged = useCallback(() => { if (submissionMounted.current) refreshPluginActions.current?.(); }, []);
 	inputViewReader.changed = notifyViewChanged;
@@ -1664,7 +1659,7 @@ export function Chat({
 								data-plugin-chrome-title
 								aria-label="Session title"
 								title="Rename this session"
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className="lh-no-drag min-w-0 max-w-[70%] shrink h-11 bg-transparent font-ui text-xl font-semibold leading-7 caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
@@ -1686,7 +1681,8 @@ export function Chat({
 								setRenaming(true);
 							}}
 							data-plugin-chrome-title
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							title={titleText}
+							className="lh-no-drag -mx-1.5 min-w-0 max-w-[70%] shrink h-11 cursor-text truncate rounded-md px-1.5 text-left font-ui text-xl font-semibold leading-7 transition-colors hover:bg-accent"
 						>
 							{titleText}
 							</button>
@@ -1747,7 +1743,7 @@ export function Chat({
 					<SessionMessageNavigation />
 					<TranscriptElementReporter onElement={setTranscriptElement} />
 					<ConversationContent className="min-h-full gap-0 p-0">
-						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
+						<div data-session-find-root="" data-testid="session-column" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
 									title="New session"
@@ -2501,9 +2497,9 @@ export function DockOverlay({
 	const readingInputRef = useRef<HTMLDivElement>(null);
 	const ownsDock = !!pending || !!pluginQuestion || unreadablePlugin || !!practice;
 	const initialPendingRef = useRef(pendingId);
-	const nativeViewReader = useRef<(() => NativeQuestionViewState) | null>(null) as ViewReaderRef<NativeQuestionViewState>;
-	const practiceViewReader = useRef<(() => string) | null>(null) as ViewReaderRef<string>;
-	const customViewReader = useRef<(() => { available: boolean }) | null>(null) as ViewReaderRef<{ available: boolean }>;
+	const [nativeViewReader] = useState<ViewReaderRef<NativeQuestionViewState>>(() => ({ current: null }));
+	const [practiceViewReader] = useState<ViewReaderRef<string>>(() => ({ current: null }));
+	const [customViewReader] = useState<ViewReaderRef<{ available: boolean }>>(() => ({ current: null }));
 	nativeViewReader.changed = practiceViewReader.changed = customViewReader.changed = viewReader?.changed;
 
 	// Teach-question ARRIVAL state, applied during render — BEFORE the
@@ -2839,7 +2835,7 @@ export function DockOverlay({
 	});
 
 	return (
-		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
+		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ left: sbInset, right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
 			<div ref={blockRef} className="relative bg-background pb-5">
 				<div className={DOCK}>

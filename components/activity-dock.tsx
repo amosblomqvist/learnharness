@@ -377,10 +377,10 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 	// rows match the session rows' hover. Empty means empty: the header sits
 	// alone (the cost span is population, not decoration).
 	return (
-		<section data-testid="activity-section" className="border-t border-border px-3 pb-3 pt-2">
-			<div className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground/70">
-				<ActivityIcon className="size-3" />
-				Background agents
+		<section data-testid="activity-section" className="border-t border-border px-3 pt-2">
+			<div data-testid="activity-header" className="flex min-h-11 items-center gap-2 px-2 font-ui text-sm text-muted-foreground">
+				<ActivityIcon className="size-4 shrink-0" />
+				<span>Background agents</span>
 				{blobs.length > 0 && (
 					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title="Total running cost (inferred)">
 						{planCostLabel(totalCost, subscriptionLabels(blobs.map((blob) => blob.model)))}

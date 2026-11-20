@@ -630,7 +630,7 @@ function QuestionDockForm({
 									: kind === "explain"
 										? "Explain"
 											: "Question"}
-					{qd.mode === "multi-select" && " · select all that apply"}
+					{qd.mode === "multi-select" && " (select all that apply)"}
 				</div>
 				<div className="mb-3 font-medium">
 					<ToolContentResponse>{qd.question}</ToolContentResponse>
@@ -974,7 +974,7 @@ function QuestionDockForm({
 					)}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning ? "compacting session…" : "↵ submit; ⇧↵ newline"}
 						</span>
 						<Button
 							type="submit"

@@ -28,7 +28,7 @@
 }
 
 /* Palette (owner's hexes): main #141414, raised #1C1C1C, edges #434343.
-   Mono chrome = JetBrains Mono; prose = Source Sans 3; titles = CMU Serif.
+   System chrome follows Perrin UI Kit; prose = Source Sans 3; titles = CMU Serif.
    Dark is the default variant (:root) and the `.dark` class on <html>.
    THEMES (theme wave, 2026-11-04): the active theme's colors land as
    inline variables on <html> (app/layout.tsx first paint, then the
@@ -100,11 +100,11 @@
 }
 
 @theme inline {
-	/* Chrome/code = JetBrains Mono; sans surfaces follow the reading font
+	/* Chrome = system UI; code = JetBrains Mono; sans surfaces follow the reading font
 	   (Source Sans 3 by default). The loading-face variables attach in
 	   app/layout.tsx. Keep the sans alias pointed at the RUNTIME prose token,
 	   not the loading face, so font-sans also honors Appearance changes. */
-	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
+	--font-ui: system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
 	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
 	--font-sans: var(--font-prose);
 	/* The modular type ladder — each size carries its own line-height.
@@ -574,6 +574,14 @@ body {
 .lh-electron .lh-wco-floating {
 	right: calc(0.5rem + var(--lh-wco-right, 0px));
 	max-width: max(0px, calc(100% - 5.5rem - var(--lh-wco-right, 0px)));
+}
+
+/* Separate application status/actions from native window controls. */
+.lh-electron:is([data-lh-platform="win32"], [data-lh-platform="linux"]) .lh-wco-gutter {
+ padding-right: calc(1.5rem + var(--lh-wco-right, 0px));
+}
+.lh-electron:is([data-lh-platform="win32"], [data-lh-platform="linux"]) .lh-wco-floating {
+ right: calc(1.5rem + var(--lh-wco-right, 0px));
 }
 
 /* A closed graph rail starts below the floating toggle/native lights band.

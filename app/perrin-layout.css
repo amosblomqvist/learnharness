@@ -1,0 +1,38 @@
+/* Non-color foundations adapted from Perrin UI Kit (MIT).
+   See docs/perrin-ui-kit-LICENSE. Theme and reading tokens stay app-owned. */
+:root {
+	--lh-space-1: 4px;
+	--lh-space-2: 8px;
+	--lh-space-3: 12px;
+	--lh-space-4: 16px;
+	--lh-space-5: 24px;
+	--lh-space-6: 32px;
+	--lh-section-gap: 24px;
+	--lh-panel-padding: 20px;
+	--lh-control-radius: 8px;
+}
+
+.lh-settings-section { padding: var(--lh-panel-padding); }
+.lh-settings-section > h2 { font: 600 20px/1.5 var(--font-ui); letter-spacing: normal; text-transform: none; }
+.lh-settings-section > p { font-size: 14px; line-height: 1.5; }
+.lh-settings-section > div { margin-top: var(--lh-section-gap); gap: var(--lh-space-4); }
+.lh-settings-group { margin-top: var(--lh-section-gap); padding-top: var(--lh-space-4); }
+.lh-settings-group:first-child { margin-top: 0; padding-top: 0; }
+.lh-settings-group > p { font-size: 14px; font-weight: 600; letter-spacing: normal; text-transform: none; }
+.lh-settings-row { min-height: 44px; gap: var(--lh-space-4); padding-block: var(--lh-space-2); }
+.lh-settings-row > span > span:last-child:not(:first-child) { font-size: 13px; line-height: 1.5; margin-top: var(--lh-space-1); }
+.lh-settings-control { min-height: 36px; border-radius: var(--lh-control-radius); padding-inline: var(--lh-space-3); font-size: 14px; }
+.lh-settings-nav { padding: var(--lh-space-3); gap: var(--lh-space-2); }
+.lh-settings-nav button { min-height: 44px; border-radius: var(--lh-control-radius); font-size: 14px; }
+.lh-settings-heading { font: 600 20px/1.5 var(--font-ui); }
+
+@media (max-width: 640px) {
+	.lh-settings-columns { flex-direction: column; }
+	.lh-settings-nav { width: 100%; flex-direction: row; border-right: 0; border-bottom: 1px solid var(--border); }
+	.lh-settings-nav > div { flex-shrink: 0; }
+	.lh-settings-nav hr { display: none; }
+	.lh-settings-nav button { white-space: nowrap; }
+	.lh-settings-row { flex-wrap: wrap; }
+	.lh-settings-row > span { flex: 1 1 160px; }
+	.lh-theme-grid { grid-template-columns: minmax(0, 1fr); }
+}

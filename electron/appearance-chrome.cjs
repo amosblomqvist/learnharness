@@ -79,4 +79,10 @@ function chromeColors(appearance) {
 	return { color, symbolColor: contrast("#e5e5e5") > contrast("#1a1a1a") ? "#e5e5e5" : "#1a1a1a" };
 }
 
-module.exports = { PRESET_APPEARANCE, COLOR_KEYS, normalizeAppearance, themeSourceFor, serverDataDir, readAppearance, chromeColors };
+// Native overlay dimensions are device-independent pixels; the renderer's
+// 60px header scales with web zoom. Leave its 1px bottom border uncovered.
+function chromeOverlay(appearance, zoom = 1) {
+ return { ...chromeColors(appearance), height: Math.round(59 * zoom) };
+}
+
+module.exports = { chromeOverlay, PRESET_APPEARANCE, COLOR_KEYS, normalizeAppearance, themeSourceFor, serverDataDir, readAppearance, chromeColors };

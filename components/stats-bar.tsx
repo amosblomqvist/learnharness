@@ -125,12 +125,12 @@ export function StatsBar({
 				onClick={() => setOpen((o) => !o)}
 				aria-expanded={open}
 				data-testid="stats-summary"
-				className="flex items-center gap-1.5 tabular-nums transition-colors hover:text-foreground"
+				className="flex items-center gap-3 tabular-nums transition-colors hover:text-foreground"
 			>
 				<span data-testid="stats-context">
 					{contextLabel}
 				</span>
-				<span aria-hidden>·</span>
+
 				<span data-testid="stats-cost">{costLabel}</span>
 			</button>
 				{open && (
@@ -182,7 +182,7 @@ export function StatsBar({
 										return (
 											<li key={`${turn.messageId}-${i}`} className="flex items-center justify-between gap-2">
 												<span className="truncate text-muted-foreground">
-													#{i + 1} · {prettyModel(turn.model, true)}
+													#{i + 1}: {prettyModel(turn.model, true)}
 												</span>
 												<span className="flex shrink-0 items-center gap-2 tabular-nums text-card-foreground">
 													<span className="text-muted-foreground">{turn.steps.length} steps</span>

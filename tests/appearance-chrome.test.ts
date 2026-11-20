@@ -67,6 +67,14 @@ it("native glyphs contrast against final paint, not the theme's mode label", () 
 it("external desktop development reads the server's directory rather than the shell's -dev profile", () => {
 	const base = { packagedDataDir: "/fixture/packaged/data", repoRoot: "/fixture/repo", env: {} };
 	assert.equal(serverDataDir(base), base.packagedDataDir);
-	assert.equal(serverDataDir({ ...base, devUrl: "http://127.0.0.1:9000" }), "/fixture/repo/data");
+	assert.equal(serverDataDir({ ...base, devUrl: "http://127.0.0.1:9000" }), path.join("/fixture/repo", "data"));
 	assert.equal(serverDataDir({ ...base, devUrl: "http://127.0.0.1:9000", env: { LH_DATA_DIR: data } }), data);
+});
+
+it('native titlebar follows the 60px header at every supported zoom without changing colors',()=>{
+ const {chromeOverlay}=require('../electron/appearance-chrome.cjs');
+ for(const zoom of [.75,.9,1,1.1,1.25,1.5,1.75,2]){
+  const appearance={mode:'dark',background:'#141414'};
+  assert.deepEqual(chromeOverlay(appearance,zoom),{...chromeColors(appearance),height:Math.round(59*zoom)});
+ }
 });
