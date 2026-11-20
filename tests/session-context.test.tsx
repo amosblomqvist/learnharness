@@ -94,7 +94,7 @@ describe("DeleteSessionDialog — the node-dialog shape (owner flow rework 2026-
 				onRun={() => {}}
 			/>,
 		);
-		// unchecked by default (preserve-graph) — React SSR omits the
+		// unchecked by default (preserve) — React SSR omits the
 		// attribute when false, so pin its ABSENCE on the rendered input
 		assert.ok(!/"checked"/.test(html), "unchecked by default");
 		// plain-language consequences on the checkbox body

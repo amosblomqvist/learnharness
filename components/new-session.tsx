@@ -17,7 +17,10 @@ import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
-import type { ChatSettings, GraphSnapshot } from "@/src/core";
+import type { ChatKind, ChatSettings, GraphSnapshot, PluginSessionKindId } from "@/src/core";
+import { isPluginSessionKindId } from "@/src/core";
+import { sessionKindOf } from "@/components/session-kind-catalog";
+import { useKindCatalog } from "@/components/session-kind-icon";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
  *  bar lifts — resolved nodes as the learner SAW them at pick time. */
@@ -46,7 +49,7 @@ const DOCK = "mx-auto w-full max-w-[46rem] px-4";
 export async function startDraftSession(
 	text: string,
 	fetchLike: typeof fetch,
-	mode?: "practice",
+	mode?: "practice" | PluginSessionKindId,
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
@@ -60,7 +63,7 @@ export async function startDraftSession(
 	return starter.start(
 		mode === "practice"
 			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			: mode ? { title: t, kind: mode } : { title: t },
 		fetchLike,
 		settingsIdentity,
 	);
@@ -83,6 +86,7 @@ export function DraftShell({
 	onOpenPicker,
 	onClearPicks,
 	overlay,
+	pluginKind,
 }: {
 	busy: boolean;
 	text: string;
@@ -93,6 +97,11 @@ export function DraftShell({
 	 *  created session carries kind:"practice" and the copy changes
 	 *  (the practice agent opens; no probing). */
 	mode?: "teach" | "practice";
+	/** A plugin session kind's draft (stage C, owner C3): titled "New
+	 *  <label> session" while available; read-only with the stage-B notice
+	 *  while its plugin is disabled or missing. The draft is teaching-shaped
+	 *  (plugin kinds open with the prober, P1). */
+	pluginKind?: { label: string | null; pluginName: string; available: boolean };
 	/** The first-run CTA (fix wave chunk B): the same "Set up your models"
 	 *  affordance home carries, rendered above the draft shell — passed by
 	 *  NewSession, which owns the configured state and the SetupDialog. */
@@ -178,7 +187,7 @@ export function DraftShell({
 						<Conversation className="h-full min-w-0 flex-1" initial="instant">
 							<ConversationContent className="min-h-full gap-0 p-0">
 								<ConversationEmptyState
-									title={mode === "practice" ? "New practice session" : "New session"}
+									title={pluginKind ? (pluginKind.available && pluginKind.label ? `New ${pluginKind.label} session` : "New session") : mode === "practice" ? "New practice session" : "New session"}
 									description={
 										mode === "practice"
 											? "Pick nodes from your knowledge graph, describe what you want to practice, or bring your own problem."
@@ -197,6 +206,11 @@ export function DraftShell({
 									setup={setupCta}
 								/>
 								{startError && <p role="alert" className="pointer-events-auto mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
+								{pluginKind && !pluginKind.available ? (
+									<p role="status" data-testid="session-kind-unavailable" className="pointer-events-auto rounded-sm border border-border bg-card px-4 py-3 font-ui text-sm text-muted-foreground">
+										This kind of session needs the &ldquo;{pluginKind.pluginName}&rdquo; plugin, which is disabled or not installed.
+									</p>
+								) : (
 								<div data-attachment-composer="" className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
 									<Composer
 										busy={busy}
@@ -215,6 +229,7 @@ export function DraftShell({
 										placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
 									/>
 								</div>
+								)}
 								<StatsBar
 									dictationSlot={<DictationBar dictation={dictation} />}
 									turns={[]}
@@ -239,8 +254,22 @@ export function DraftShell({
 	);
 }
 
-export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
+export function NewSession({ initialConfigured, mode = "teach", initialKind }: {
+	initialConfigured: boolean;
+	mode?: ChatKind;
+	/** Plugin kinds: the server's first-paint resolution (page.tsx). */
+	initialKind?: { label: string | null; pluginName: string; available: boolean };
+}) {
 	const router = useRouter();
+	const kindCatalog = useKindCatalog();
+	const pluginKindId = isPluginSessionKindId(mode) ? mode as PluginSessionKindId : null;
+	// The live catalog wins once it has loaded (plugins-changed reloads it);
+	// before that, the server's resolution paints the first frame.
+	const liveKind = pluginKindId ? sessionKindOf(kindCatalog, pluginKindId) : undefined;
+	const pluginKind = !pluginKindId ? undefined
+		: !kindCatalog.ready ? initialKind ?? { label: null, pluginName: pluginKindId.split(":")[0]!, available: false }
+		: liveKind ? { label: liveKind.label, pluginName: liveKind.pluginName, available: true }
+		: { label: null, pluginName: initialKind?.pluginName ?? pluginKindId.split(":")[0]!, available: false };
 	const [text, setText] = useState("");
 	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
 	 * finish-first send calls THIS send after the dictation flush — which
@@ -290,9 +319,10 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
 	const [setupOpen, setSetupOpen] = useState(false);
 
+	const kindAvailable = pluginKind?.available ?? true;
 	const send = useCallback(() => {
 		const draft = textRef.current.trim();
-		if (!draft || startingRef.current) return;
+		if (!draft || startingRef.current || !kindAvailable) return;
 		if (!configured) {
 			setSetupOpen(true);
 			return;
@@ -315,7 +345,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		startingRef.current = true;
 		setBusy(true);
 		setStartError(false);
-		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
+		void startDraftSession(draft, fetch, mode === "practice" || pluginKindId ? (pluginKindId ?? "practice") : undefined, mode === "practice" ? picksRef.current : undefined,
 			starterRef.current, JSON.stringify(catalog?.slots.strong))
 			.then((target) => {
 				if (target) router.push(target);
@@ -326,7 +356,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				setBusy(false);
 				setStartError(true);
 			});
-	}, [router, configured, zeroKeys, catalog, mode]);
+	}, [router, configured, zeroKeys, catalog, mode, pluginKindId, kindAvailable]);
 
 	return (
 		<>
@@ -336,7 +366,8 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				text={text}
 				onChange={applyText}
 				onSend={send}
-				mode={mode}
+				mode={mode === "practice" ? "practice" : "teach"}
+				pluginKind={pluginKind}
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}

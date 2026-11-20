@@ -829,11 +829,11 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		return { dA, dB, xId, yId, zId };
 	}
 
-	it("delete-nodes: the shared node survives with the other session's content; the orphan dies; the creator's aliases are stripped (owner ruling 2026-09-23)", () => {
+	it("purge: the shared node survives with the other session's content; the orphan dies; the creator's aliases are stripped (owner ruling 2026-09-23)", () => {
 		const { dA, dB, xId, yId, zId } = buildTwoSessionScenario();
 		const zLineBefore = JSON.stringify(graphStore.readNodes().find((n) => n.id === zId));
 
-		const stats = deleteChatTraces(graphDeps, dA.id, "delete-nodes");
+		const stats = deleteChatTraces(graphDeps, dA.id, "purge");
 		assert.deepEqual(stats, {
 			nodesRemoved: 1,
 			chainsRemoved: 1,
@@ -877,17 +877,17 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		graphStore.appendNode({ id: "n_del_append_probe", name: "Probe", statement: "Probe statement", aliases: [], createdAt: "2026-09-23T00:04:00.000Z", provenance: [{ chatId: "chat_foreign_probe", messageId: "" }] });
 		assert.equal(graphStore.readNodes().length, nodesBefore + 1);
 		// Idempotent: a second run finds nothing.
-		assert.deepEqual(deleteChatTraces(graphDeps, dA.id, "delete-nodes"), { ...stats, nodesRemoved: 0, chainsRemoved: 0, coverageRemoved: 0, checkpointsRemoved: 0 } satisfies ChatDeletionStats);
+		assert.deepEqual(deleteChatTraces(graphDeps, dA.id, "purge"), { ...stats, nodesRemoved: 0, chainsRemoved: 0, coverageRemoved: 0, checkpointsRemoved: 0 } satisfies ChatDeletionStats);
 	});
 
-	it("preserve-graph: only the extraction bookkeeping dies — the graph ledgers are byte-identical", () => {
+	it("preserve: only the extraction bookkeeping dies — the graph ledgers are byte-identical", () => {
 		const { dA, dB, xId, yId, zId } = buildTwoSessionScenario();
 		const before = {
 			nodes: graphStore.readNodes(),
 			chains: graphStore.readChains(),
 			positions: graphStore.readPositions(),
 		};
-		const stats = deleteChatTraces(graphDeps, dA.id, "preserve-graph");
+		const stats = deleteChatTraces(graphDeps, dA.id, "preserve");
 		assert.deepEqual(stats, {
 			nodesRemoved: 0,
 			chainsRemoved: 0,
@@ -904,18 +904,18 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 
 	it("deleteChatSession: the orchestration's gates and the sync block", async () => {
 		// 404 — unknown chat.
-		assert.deepEqual(await deleteChatSession("chat_missing_delete", "delete-nodes"), { ok: false, status: 404, code: "not_found", error: "No such session" });
+		assert.deepEqual(await deleteChatSession("chat_missing_delete", "purge"), { ok: false, status: 404, code: "not_found", error: "No such session" });
 
 		const { dA } = buildTwoSessionScenario();
 		// 409 — a turn in flight.
 		beginTurn(dA.id);
-		const turnedAway = await deleteChatSession(dA.id, "delete-nodes");
+		const turnedAway = await deleteChatSession(dA.id, "purge");
 		assert.deepEqual(turnedAway, { ok: false, status: 409, code: "turn_in_flight", error: "A turn is running in this session — try again when it finishes", jobIds: [] });
 		endTurn(dA.id);
 		// 409 — running background jobs; a refused delete keeps its notice.
 		rememberTurnFailure(dA.id, "The reply could not be saved.");
 		const job = jobStore.createJob({ kind: "research", chatId: dA.id, toolCallId: "del-call-1" });
-		const jobsBlocked = await deleteChatSession(dA.id, "delete-nodes");
+		const jobsBlocked = await deleteChatSession(dA.id, "purge");
 		assert.ok(!jobsBlocked.ok && jobsBlocked.status === 409, "refused with 409");
 		if (jobsBlocked.code === "jobs_running") assert.deepEqual(jobsBlocked.jobIds, [job.id]);
 		assert.match(await settledTurnResponse(dA.id).text(), /The reply could not be saved\./);
@@ -924,10 +924,10 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		// Success — a terminal job rides along; the chat record dies last.
 		const doneJob = jobStore.createJob({ kind: "research", chatId: dA.id, toolCallId: "del-call-2" });
 		jobStore.updateJob(doneJob.id, { status: "done", activity: "delivered" });
-		const outcome = await deleteChatSession(dA.id, "delete-nodes");
+		const outcome = await deleteChatSession(dA.id, "purge");
 		assert.equal(outcome.ok, true);
 		if (outcome.ok) {
-			assert.equal(outcome.mode, "delete-nodes");
+			assert.equal(outcome.mode, "purge");
 			assert.equal(outcome.stats.nodesRemoved, 1);
 			assert.equal(outcome.jobsRemoved, 1);
 			assert.ok(outcome.graphRevision > 0, "the version stamp moved");
@@ -936,7 +936,7 @@ describe("session deletion (deleteChatTraces + deleteChatSession, wave 6)", () =
 		assert.doesNotMatch(await settledTurnResponse(dA.id).text(), /"type":"error"/, "deletion clears its transient notice");
 		assert.equal(jobStore.getJob(doneJob.id), null, "the chat's job records are gone");
 		// And a second call is an honest 404.
-		assert.deepEqual(await deleteChatSession(dA.id, "delete-nodes"), { ok: false, status: 404, code: "not_found", error: "No such session" });
+		assert.deepEqual(await deleteChatSession(dA.id, "purge"), { ok: false, status: 404, code: "not_found", error: "No such session" });
 	});
 });
 

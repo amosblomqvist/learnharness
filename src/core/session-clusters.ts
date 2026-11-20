@@ -13,7 +13,7 @@
  * (getGraph merges lines by id, first line defines, provenance unions in
  * line order — so provenance[0] is the birth point of the surviving
  * lines). This makes deletion self-healing with ZERO special handling:
- * delete-nodes strips a session's create lines and its provenance points;
+ * purge strips a session's create lines and its provenance points;
  * a SURVIVING shared node re-attributes to its earliest remaining
  * contributor (provenance[0] walks forward), and a node left with NO
  * provenance at all is simply unclustered. The partition is derived on

@@ -10,7 +10,7 @@
  * flight (the dock is the source of truth for that); failures are logged
  * by the pipeline and leave coverage untouched — the button stays honest.
  */
-import { extraction, extractionStatuses, getChat, resolveChatRecord, runRecordExtraction, stores } from "@/src/server";
+import { extraction, extractionStatuses, getChat, pluginRecordExtractionEnabled, resolveChatRecord, runRecordExtraction, stores } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -38,6 +38,10 @@ export async function POST(request: Request) {
 			return Response.json({ error: "The plugin that owns this session's record is disabled or not installed", code: "record-kind-unavailable", recordKindId: target.recordKindId }, { status: 409 });
 		}
 		if (target.status === "plugin") {
+			// Stage C (owner q54): the record's host-owned switch refuses honestly.
+			if (!pluginRecordExtractionEnabled(target.recordKindId)) {
+				return Response.json({ error: `Extraction into ${target.label} is turned off`, code: "record-extraction-disabled", recordKindId: target.recordKindId }, { status: 409 });
+			}
 			void runRecordExtraction({ chatStore: stores.chatStore }, chatId, target, "manual").catch((err: unknown) => {
 				console.error(`[chat ${chatId}] manual record extraction failed:`, err);
 			});

@@ -38,6 +38,7 @@ export interface PreparedPluginSessionKind {
 	readonly record: string;
 	readonly prompts: { readonly prober: string; readonly teacher: string };
 	readonly tools: { readonly prober: Readonly<Record<string, boolean>>; readonly teacher: Readonly<Record<string, boolean>> };
+	readonly icon?: string;
 }
 
 export interface PreparedPluginRecordKind {
@@ -47,6 +48,7 @@ export interface PreparedPluginRecordKind {
 	readonly label: string;
 	readonly chunkTokens: number;
 	readonly extract: PluginRecordKindDefinition["extract"];
+	readonly purge?: NonNullable<PluginRecordKindDefinition["purge"]>;
 }
 
 const NATIVE_TOOL_NAME = /^[A-Za-z_][A-Za-z0-9_-]{0,63}$/;
@@ -79,6 +81,7 @@ export function preparePluginSessionKind(pluginId: string, definition: PluginSes
 	if (!object(prompts) || !text(prompts.prober) || !text(prompts.teacher)) throw new Error("Plugin session kind requires nonempty prompts.prober and prompts.teacher");
 	const tools = definition.tools as unknown;
 	if (tools !== undefined && !object(tools)) throw new Error("Plugin session kind tools must be an object keyed by phase");
+	if (definition.icon !== undefined && !text(definition.icon)) throw new Error("Plugin session kind icon must be nonempty SVG markup");
 	return Object.freeze({
 		id: `${pluginId}:${localId}` as PluginSessionKindId,
 		localId,
@@ -87,6 +90,7 @@ export function preparePluginSessionKind(pluginId: string, definition: PluginSes
 		record: definition.record,
 		prompts: Object.freeze({ prober: prompts.prober, teacher: prompts.teacher }),
 		tools: Object.freeze({ prober: toolDelta(tools?.prober, "prober"), teacher: toolDelta(tools?.teacher, "teacher") }),
+		...(definition.icon !== undefined ? { icon: definition.icon } : {}),
 	});
 }
 
@@ -97,6 +101,7 @@ export function preparePluginRecordKind(pluginId: string, definition: PluginReco
 	const chunkTokens = definition.chunkTokens ?? RECORD_CHUNK_TOKENS_DEFAULT;
 	if (!Number.isInteger(chunkTokens) || chunkTokens < RECORD_CHUNK_TOKENS_MIN) throw new Error(`Plugin record kind chunkTokens must be an integer of at least ${RECORD_CHUNK_TOKENS_MIN}`);
 	if (typeof definition.extract !== "function") throw new Error("Plugin record kind requires an extract(batch) function");
+	if (definition.purge !== undefined && typeof definition.purge !== "function") throw new Error("Plugin record kind purge must be a function");
 	return Object.freeze({
 		id: `${pluginId}:${localId}` as PluginSessionKindId,
 		localId,
@@ -104,6 +109,7 @@ export function preparePluginRecordKind(pluginId: string, definition: PluginReco
 		label: definition.label,
 		chunkTokens,
 		extract: definition.extract.bind(definition),
+		...(definition.purge ? { purge: definition.purge.bind(definition) } : {}),
 	});
 }
 

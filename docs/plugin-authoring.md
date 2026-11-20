@@ -84,7 +84,7 @@ a plugin.
 | Dedicated plugin settings | `registerSettings` below |
 | Inspect the current session, including unsent input | Session top-bar `context.view`; [view context](plugin-view-context.md) |
 | Add instructions or tools to existing agents | `registerInstructions`, `registerTools` below |
-| A new kind of teaching session, or a record sessions extract into | Backend `registerSessionKind`, `registerRecordKind` below |
+| A new kind of teaching session, or a record sessions extract into | Backend `registerSessionKind`, `registerRecordKind`; frontend `registerRecordView` below |
 | Custom teaching question and editor | `registerQuestionType` + `registerQuestionRenderer`; [question contract](plugin-question-contract.md) |
 | Custom practice problem and editor | `registerProblemType` + `registerProblemRenderer`; [problem contract](plugin-problem-contract.md) |
 | Transform learner input or attach images | `registerSubmissionInterceptor`; [session extensions](plugin-session-extension-contract.md) |
@@ -579,7 +579,13 @@ the shape of the learner's tool toggles: `false` removes a native tool, absent k
 and the learner's own `false` still wins. `probe_done` and `plan_init` are always kept.
 Other plugins' instructions, tools and question types still apply additively unless
 they narrow themselves with `sessionKinds`. `record` names where the session extracts:
-`"graph"` for the native graph, or any plugin's full record kind id.
+`"graph"` for the native graph, or any plugin's full record kind id. An optional `icon`
+(trusted SVG markup, like action icons) marks the kind in the app; without one the host
+shows its generic plugin icon.
+
+Every active session kind gets a door: a sidebar button after Teaching and Practice that
+opens a draft at `/chat/new?kind=<pluginId>:<localId>`, titled "New <label> session", and
+its own segment in the sidebar's session filter. Session rows show the kind's icon.
 
 A record kind owns extraction and storage; the host owns chunking, triggering and
 coverage bookkeeping. After a turn, once a session's uncovered raw-transcript tokens
@@ -588,16 +594,44 @@ consecutive saved messages, unfiltered: learner turns, assistant text, thinking 
 calls, tool results and host markers. Filtering is the extractor's first step. Resolving
 marks the batch covered; rejecting leaves it uncovered for a later retry. Delivery is
 at-least-once and `batchId` is deterministic for the same messages, so make writes
-idempotent by `batchId`. Editing a saved message re-opens its coverage. Batches of one
-record kind run one at a time across sessions; `batch.signal` aborts on cancellation,
+idempotent by `batchId`. Editing a saved message re-opens its coverage. The host runs
+extraction batches and purge hooks for one record kind one at a time across sessions;
+different record kinds can run independently. `batch.signal` aborts on cancellation,
 session deletion or plugin deactivation, and an aborted batch is never marked covered.
+Both hooks must await their record writes before returning.
 A kind recording into `"graph"` keeps the native extractor and its teacher-prose view.
 
 The host keeps coverage at `ctx.dataDirectory/records/<localId>/coverage.jsonl`; that
 file is reserved, while the rest of the plugin's data directory, including the record
 itself, is the plugin's. When a session is deleted the host removes its coverage rows,
-even if the plugin is disabled. Removing the session's entries from the record itself is
-the plugin's decision.
+even if the plugin is disabled.
+
+Removing the session's entries from the record itself goes through the optional
+`purge(chatId, signal)`. With it, the delete dialog offers "Also remove its <label>
+traces" (unchecked by default), exactly like the graph's checkbox; the host calls `purge`
+after the session's extraction has stopped and before removing the session. A rejection
+keeps the session and reports the failure, so
+make `purge` idempotent: a refused deletion is retried with the same call. Without
+`purge`, the dialog offers no such choice. While the record's plugin is unavailable the
+choice is shown disabled. The session `DELETE` route takes `mode=preserve` or
+`mode=purge`.
+
+The host also owns the record's lifecycle controls. The plugin's settings page shows an
+"Extraction into <label>" switch per record kind (on by default; stored in the app's
+settings, not the plugin's): off means no post-turn trigger, no coverage ring and a
+refused manual extract (`409`, code `record-extraction-disabled`). The coverage ring in a
+session's top bar measures against the record's own `chunkTokens` and goes inert while the
+record's plugin is unavailable.
+
+A frontend shows a record on the home screen with
+`ctx.registerRecordView({ recordKind, mount(container, signal) })`, where `recordKind` is
+one of the plugin's own local record kind ids. The body is entirely the plugin's; the host
+owns the frame around it: the home header, a record dropdown next to the sidebar toggle
+(only rendered when at least one plugin record view exists besides the graph), and the
+composer, whose mode switch lists the session kinds that record into the shown record.
+On the graph those are Teach, Practice and any kind with `record: "graph"`. A record kind
+without a view is still extracted into, just not offered on home. Node picks stay with
+the graph.
 
 When a session kind is unavailable (plugin disabled, missing or no longer registering
 it), its saved sessions open read-only: turns and side questions are refused with `409`

@@ -26,11 +26,18 @@ import { createCoverageLedger } from "../store/coverage.ts";
 import type { PluginRecordKindResolution } from "./plugin-host.ts";
 import { getPluginHost } from "./plugins.ts";
 import { resolveChatSessionKind } from "./session-kinds.ts";
+import { recordExtractionEnabled } from "../core/settings-resolution.ts";
+import { settingsStore } from "../store/settings.ts";
 import { stores } from "./stores.ts";
 
 export const recordKinds: RecordKindRegistry = createRecordKindRegistry([
 	{ id: NATIVE_GRAPH_RECORD_KIND, label: "Knowledge graph", coverage: stores.coverage },
 ]);
+
+/** A plugin record's host-owned extraction switch, read fresh (stage C, q54). */
+export function pluginRecordExtractionEnabled(recordKindId: string): boolean {
+	return recordExtractionEnabled(settingsStore.readSettings(), recordKindId);
+}
 
 /** The host-owned coverage ledger inside a plugin record's reserved folder. */
 export const RECORD_COVERAGE_FILE = "coverage.jsonl";

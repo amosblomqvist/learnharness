@@ -28,7 +28,10 @@
 - [PluginPageActionContext](#pluginpageactioncontext)
 - [PluginRecordBatch](#pluginrecordbatch)
 - [PluginRecordKindDefinition](#pluginrecordkinddefinition)
+- [PluginRecordKindSummary](#pluginrecordkindsummary)
+- [PluginRecordView](#pluginrecordview)
 - [PluginSessionKindDefinition](#pluginsessionkinddefinition)
+- [PluginSessionKindSummary](#pluginsessionkindsummary)
 - [PluginSessionKindToolDelta](#pluginsessionkindtooldelta)
 - [PluginSettingsRegistration](#pluginsettingsregistration)
 - [PluginToolContext](#plugintoolcontext)
@@ -717,6 +720,7 @@ export interface PluginFrontendContext {
     readonly signal: AbortSignal;
     cleanup(dispose: PluginCleanup): void;
     registerView(view: PluginView): () => void;
+    registerRecordView(view: PluginRecordView): () => void;
     registerAction(action: PluginAction): () => void;
     placeAction(placement: PluginActionPlacement): () => void;
     refreshActions(): void;
@@ -753,7 +757,7 @@ export interface PluginFrontendContext {
 }
 ```
 
-**Related types:** [PluginAction](plugins.md#pluginaction), [PluginActionPlacement](plugins.md#pluginactionplacement), [PluginCleanup](plugins.md#plugincleanup), [PluginCodeBlockRenderer](plugins.md#plugincodeblockrenderer), [PluginManifest](plugins.md#pluginmanifest), [PluginNotification](plugins.md#pluginnotification), [PluginProblemRenderer](plugin-problems.md#pluginproblemrenderer), [PluginQuestionRenderer](plugin-questions.md#pluginquestionrenderer), [PluginSettingsRegistration](plugins.md#pluginsettingsregistration), [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginSubmissionInterceptor](plugin-submissions.md#pluginsubmissioninterceptor), [PluginToolRenderer](plugins.md#plugintoolrenderer), [PluginUi](plugin-ui.md#pluginui), [PluginView](plugins.md#pluginview), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle), [ServerEvent](events.md#serverevent).
+**Related types:** [PluginAction](plugins.md#pluginaction), [PluginActionPlacement](plugins.md#pluginactionplacement), [PluginCleanup](plugins.md#plugincleanup), [PluginCodeBlockRenderer](plugins.md#plugincodeblockrenderer), [PluginManifest](plugins.md#pluginmanifest), [PluginNotification](plugins.md#pluginnotification), [PluginProblemRenderer](plugin-problems.md#pluginproblemrenderer), [PluginQuestionRenderer](plugin-questions.md#pluginquestionrenderer), [PluginRecordView](plugins.md#pluginrecordview), [PluginSettingsRegistration](plugins.md#pluginsettingsregistration), [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginSubmissionInterceptor](plugin-submissions.md#pluginsubmissioninterceptor), [PluginToolRenderer](plugins.md#plugintoolrenderer), [PluginUi](plugin-ui.md#pluginui), [PluginView](plugins.md#pluginview), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle), [ServerEvent](events.md#serverevent).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -761,6 +765,7 @@ export interface PluginFrontendContext {
 - [signal](#pluginfrontendcontext-signal)
 - [cleanup](#pluginfrontendcontext-cleanup)
 - [registerView](#pluginfrontendcontext-registerview)
+- [registerRecordView](#pluginfrontendcontext-registerrecordview)
 - [registerAction](#pluginfrontendcontext-registeraction)
 - [placeAction](#pluginfrontendcontext-placeaction)
 - [refreshActions](#pluginfrontendcontext-refreshactions)
@@ -827,6 +832,21 @@ registerView(view: PluginView): () => void;
 | Parameter | Type |
 | --- | --- |
 | `view` | `PluginView` |
+
+**Returns:** `() => void`.
+
+### PluginFrontendContext registerRecordView
+
+Show one of this plugin's record kinds on home. Invalid or duplicate
+registrations throw; returned unregister removes it from home only.
+
+```ts
+registerRecordView(view: PluginRecordView): () => void;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `view` | `PluginRecordView` |
 
 **Returns:** `() => void`.
 
@@ -1447,12 +1467,12 @@ export interface PluginInfo {
     status: "disabled" | "active" | "error";
     error?: string;
     revision: string;
-    sessionKinds?: PluginKindSummary[];
-    recordKinds?: PluginKindSummary[];
+    sessionKinds?: PluginSessionKindSummary[];
+    recordKinds?: PluginRecordKindSummary[];
 }
 ```
 
-**Related types:** [PluginKindSummary](plugins.md#pluginkindsummary), [PluginManifest](plugins.md#pluginmanifest).
+**Related types:** [PluginManifest](plugins.md#pluginmanifest), [PluginRecordKindSummary](plugins.md#pluginrecordkindsummary), [PluginSessionKindSummary](plugins.md#pluginsessionkindsummary).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -1517,7 +1537,7 @@ revision: string;
 Session kinds this active plugin currently registers (full ids).
 
 ```ts
-sessionKinds?: PluginKindSummary[];
+sessionKinds?: PluginSessionKindSummary[];
 ```
 
 ### PluginInfo recordKinds
@@ -1525,7 +1545,7 @@ sessionKinds?: PluginKindSummary[];
 Record kinds this active plugin currently registers (full ids).
 
 ```ts
-recordKinds?: PluginKindSummary[];
+recordKinds?: PluginRecordKindSummary[];
 ```
 
 ## PluginInstructions
@@ -2009,6 +2029,7 @@ export interface PluginRecordKindDefinition {
     label: string;
     chunkTokens?: number;
     extract(batch: PluginRecordBatch): void | Promise<void>;
+    purge?(chatId: string, signal: AbortSignal): void | Promise<void>;
 }
 ```
 
@@ -2020,6 +2041,7 @@ export interface PluginRecordKindDefinition {
 - [label](#pluginrecordkinddefinition-label)
 - [chunkTokens](#pluginrecordkinddefinition-chunktokens)
 - [extract](#pluginrecordkinddefinition-extract)
+- [purge](#pluginrecordkinddefinition-purge)
 
 ### PluginRecordKindDefinition id
 
@@ -2047,7 +2069,8 @@ chunkTokens?: number;
 
 Fold one batch into the record. Resolving marks the batch covered; rejecting
 leaves it uncovered for a later retry. Delivery is at-least-once: make writes
-idempotent by batchId. Batches for one record kind run one at a time.
+idempotent by batchId. The host runs extraction batches and purge hooks
+for the same record kind one at a time, across all sessions.
 
 ```ts
 extract(batch: PluginRecordBatch): void | Promise<void>;
@@ -2058,6 +2081,104 @@ extract(batch: PluginRecordBatch): void | Promise<void>;
 | `batch` | `PluginRecordBatch` |
 
 **Returns:** `void \| Promise<void>`.
+
+### PluginRecordKindDefinition purge
+
+Remove what one session contributed, when the learner deletes the session
+and asks for its traces to go too. Resolving lets the deletion finish;
+rejecting refuses it (the session is kept and the learner can retry), so
+make it idempotent. The host waits for the hook to settle before starting
+another write to this record kind. Honor the signal and await all record
+writes. Without purge, deletion keeps the plugin's record data untouched.
+
+```ts
+purge?(chatId: string, signal: AbortSignal): void | Promise<void>;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `chatId` | `string` |
+| `signal` | `AbortSignal` |
+
+**Returns:** `void \| Promise<void>`.
+
+## PluginRecordKindSummary
+
+Public SDK type, exported as `PluginRecordKindSummary`. Import with `import type`; the SDK has no runtime exports.
+
+Host-derived summary of a registered record kind.
+
+```ts
+export interface PluginRecordKindSummary extends PluginKindSummary {
+    chunkTokens: number;
+    purge: boolean;
+}
+```
+
+**Related types:** [PluginKindSummary](plugins.md#pluginkindsummary).
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [chunkTokens](#pluginrecordkindsummary-chunktokens)
+- [purge](#pluginrecordkindsummary-purge)
+
+### PluginRecordKindSummary chunkTokens
+
+```ts
+chunkTokens: number;
+```
+
+### PluginRecordKindSummary purge
+
+Whether the record can remove one session's traces (offered on deletion).
+
+```ts
+purge: boolean;
+```
+
+## PluginRecordView
+
+Public SDK type, exported as `PluginRecordView`. Import with `import type`; the SDK has no runtime exports.
+
+A plugin record's body on the home page. The plugin owns everything inside
+the container; the host owns the frame (header, record switcher, composer).
+
+```ts
+export interface PluginRecordView {
+    recordKind: string;
+    mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promise<void | PluginCleanup>;
+}
+```
+
+**Related types:** [PluginCleanup](plugins.md#plugincleanup).
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [recordKind](#pluginrecordview-recordkind)
+- [mount](#pluginrecordview-mount)
+
+### PluginRecordView recordKind
+
+Local id of a record kind this plugin registers in its backend.
+
+```ts
+recordKind: string;
+```
+
+### PluginRecordView mount
+
+Mount the record body; the signal aborts on leaving the record, home or disable.
+
+```ts
+mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promise<void | PluginCleanup>;
+```
+
+| Parameter | Type |
+| --- | --- |
+| `container` | `HTMLElement` |
+| `signal` | `AbortSignal` |
+
+**Returns:** `void \| PluginCleanup \| Promise<void \| PluginCleanup>`.
 
 ## PluginSessionKindDefinition
 
@@ -2080,6 +2201,7 @@ export interface PluginSessionKindDefinition {
         prober?: PluginSessionKindToolDelta;
         teacher?: PluginSessionKindToolDelta;
     };
+    icon?: string;
 }
 ```
 
@@ -2096,6 +2218,7 @@ export interface PluginSessionKindDefinition {
 - [tools](#pluginsessionkinddefinition-tools)
 - [tools.prober](#pluginsessionkinddefinition-toolsprober)
 - [tools.teacher](#pluginsessionkinddefinition-toolsteacher)
+- [icon](#pluginsessionkinddefinition-icon)
 
 ### PluginSessionKindDefinition id
 
@@ -2161,6 +2284,50 @@ prober?: PluginSessionKindToolDelta;
 
 ```ts
 teacher?: PluginSessionKindToolDelta;
+```
+
+### PluginSessionKindDefinition icon
+
+Trusted SVG markup for the host's doors, mode switch and session rows.
+
+```ts
+icon?: string;
+```
+
+## PluginSessionKindSummary
+
+Public SDK type, exported as `PluginSessionKindSummary`. Import with `import type`; the SDK has no runtime exports.
+
+Host-derived summary of a registered session kind.
+
+```ts
+export interface PluginSessionKindSummary extends PluginKindSummary {
+    record: string;
+    icon?: string;
+}
+```
+
+**Related types:** [PluginKindSummary](plugins.md#pluginkindsummary).
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [record](#pluginsessionkindsummary-record)
+- [icon](#pluginsessionkindsummary-icon)
+
+### PluginSessionKindSummary record
+
+The record it extracts into: "graph" or a full record kind id.
+
+```ts
+record: string;
+```
+
+### PluginSessionKindSummary icon
+
+Trusted SVG markup, when the definition supplies one.
+
+```ts
+icon?: string;
 ```
 
 ## PluginSessionKindToolDelta

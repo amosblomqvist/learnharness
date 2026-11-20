@@ -26,8 +26,10 @@ import type {
 	GraphSettings,
 	ModelsSettings,
 	ModelSlot,
+	RecordsSettings,
 	RoleModelOverride,
 } from "../core/settings.ts";
+import { parsePluginKindId } from "../core/session-kinds.ts";
 import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
@@ -439,6 +441,22 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
+/** records: { "<pluginId>:<recordKindId>": { extraction?: boolean } } —
+ *  replace-whole like every section (stage C, owner q54). */
+export function parseRecordsSettingsBody(body: unknown): SettingsBodyResult<RecordsSettings> {
+	const raw = asRecord(body);
+	if (!raw) return { ok: false, error: "Invalid JSON body" };
+	const settings: RecordsSettings = {};
+	for (const [id, value] of Object.entries(raw)) {
+		if (!parsePluginKindId(id)) return { ok: false, error: `"${id}" is not a plugin record kind id` };
+		const entry = asRecord(value);
+		if (!entry) return { ok: false, error: `${id} must be an object` };
+		if (entry.extraction !== undefined && typeof entry.extraction !== "boolean") return { ok: false, error: `${id}.extraction must be a boolean` };
+		settings[id] = entry.extraction === undefined ? {} : { extraction: entry.extraction };
+	}
+	return { ok: true, settings };
+}
+
 /** dictation: { language?: one of Nova-3's supported language codes } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
@@ -495,6 +513,7 @@ export const SETTINGS_SECTIONS = {
 	agent: parseAgentSettingsBody,
 	appearance: parseAppearanceSettingsBody,
 	graph: parseGraphSettingsBody,
+	records: parseRecordsSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
 	dictation: parseDictationSettingsBody,

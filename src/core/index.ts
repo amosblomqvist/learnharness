@@ -110,4 +110,4 @@ export type * from "./plugin-ui.ts";
 export type * from "./plugin-tree.ts";
 export * from "./plugin-agents.ts";
 // Session kinds (stage B): id grammar shared by host and client chrome.
-export { isSessionKindId, isPluginSessionKindId, parsePluginKindId, sessionShapeOf } from "./session-kinds.ts";
+export { isSessionKindId, isPluginSessionKindId, parsePluginKindId, sessionShapeOf, PLUGIN_KIND_LOCAL_ID_PATTERN } from "./session-kinds.ts";

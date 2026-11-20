@@ -17,7 +17,7 @@
  *
  * Two modes (owner-locked semantics):
  *
- *   preserve-graph  the chat's extraction bookkeeping dies — its coverage
+ *   preserve        the chat's extraction bookkeeping dies — its coverage
  *                   rows and its legacy checkpoint lines — and NOTHING else:
  *                   nodes and chains stay byte-identical.
  *                   The graph keeps the session's contributions; the
@@ -25,7 +25,7 @@
  *                   a title (nodeSessions filters unknown ids at read
  *                   time — no UI ghosting).
  *
- *   delete-nodes    "this session never happened": every trace of the
+ *   purge           "this session never happened": every trace of the
  *                   chat leaves the ledgers — its provenance points on
  *                   every node and chain line, its link lines (their
  *                   phrasings die with them), its coverage/checkpoint
@@ -62,10 +62,11 @@ import type {
 import type { GraphStore } from "./ports.ts";
 import type { GraphLedgers } from "./graph.ts";
 
-/** The two deletion modes (owner-locked 2026-09-22). Machine-checkable on
+/** The two deletion modes (owner-locked 2026-09-22; renamed preserve|purge when
+ *  plugin records gained the same choice, stage C 2026-11-19). Machine-checkable on
  *  the API as the required `mode` query param — no default, so no
  *  accidental destructive choice. */
-export type ChatDeleteMode = "preserve-graph" | "delete-nodes";
+export type ChatDeleteMode = "preserve" | "purge";
 
 /** What one deletion removed from the ledgers (the DELETE response's
  *  stats; the UI can show "3 topics, 2 links removed" from this). */
@@ -101,14 +102,14 @@ export function deleteChatTraces(ledgers: GraphLedgers, chatId: string, mode: Ch
  * `ledgers` is the graph store plus the graph record's coverage ledger
  * (host-owned since 2026-11-16; the deletion still purges both). */
 export function deleteSourcesTraces(ledgers: GraphLedgers, sourceIds: ReadonlySet<string>, mode: ChatDeleteMode): ChatDeletionStats {
-	if (mode !== "preserve-graph" && mode !== "delete-nodes") {
+	if (mode !== "preserve" && mode !== "purge") {
 		throw new Error(`Unknown deletion mode: ${mode as string}`);
 	}
 	const { graphStore, coverage: coverageLedger } = ledgers;
 
 	// The bookkeeping rows die in BOTH modes — coverage and checkpoints
 	// are extraction state, not graph content (owner semantics: even
-	// preserve-graph deletes "the chat's coverage rows").
+	// preserve deletes "the chat's coverage rows").
 	if (sourceIds.size === 0) return { ...EMPTY_STATS };
 	const coverage = coverageLedger.read().filter((row) => !sourceIds.has(row.chatId));
 	const checkpoints = graphStore.readCheckpoints().filter((row) => !sourceIds.has(row.chatId));
@@ -125,12 +126,12 @@ export function deleteSourcesTraces(ledgers: GraphLedgers, sourceIds: ReadonlySe
 		coverageLedger.rewrite(coverage);
 	};
 
-	if (mode === "preserve-graph") {
+	if (mode === "preserve") {
 		if (stats.coverageRemoved > 0 || stats.checkpointsRemoved > 0) rewriteBookkeeping();
 		return stats;
 	}
 
-	// ── delete-nodes: the full purge ──────────────────────────────────────
+	// ── purge: the full purge ─────────────────────────────────────────────
 	const nodeLines = graphStore.readNodes();
 	const chainLines = graphStore.readChains();
 
@@ -253,7 +254,7 @@ export function deleteSourcesTraces(ledgers: GraphLedgers, sourceIds: ReadonlySe
 /**
  * FULL DEATH for one node, by id (owner ruling 2026-09-23): the user
  * pointing at the node IS the intent — references from other sessions do
- * NOT preserve it. The remedy for undeletable nodes (preserve-graph
+ * NOT preserve it. The remedy for undeletable nodes (preserve
  * orphans from session deletion; notes-import nodes with no chat behind
  * them), and the deliberate inverse of the chat cascade above: that one
  * deletes a SESSION and lets nodes survive on foreign references; this

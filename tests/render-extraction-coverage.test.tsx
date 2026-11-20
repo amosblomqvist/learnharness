@@ -9,6 +9,7 @@ import {
 	CoverageRingDetail,
 	CoverageRingGlyph,
 	fetchGraphRead,
+	ringBasis,
 	ringFill,
 	type SessionCoverage,
 } from "../components/extraction-coverage.tsx";
@@ -34,6 +35,19 @@ function coverage(over: Partial<SessionCoverage> = {}): SessionCoverage {
 		...over,
 	};
 }
+
+describe("ringBasis — follow the session's record", () => {
+	const graph = { enabled: true, chunkTokens: 4096 };
+	const record = { id: "fixture:notebook", label: "Notebook", chunkTokens: 500, available: true };
+	it("uses the plugin budget even when graph extraction is off", () => {
+		assert.deepEqual(ringBasis(coverage({ record }), { ...graph, enabled: false }), { status: "ready", chunkTokens: 500 });
+		assert.deepEqual(ringBasis(coverage(), graph), { status: "ready", chunkTokens: 4096 });
+	});
+	it("hides switched-off extraction and distinguishes an unavailable record", () => {
+		assert.equal(ringBasis(coverage({ record: { ...record, extraction: false } }), graph), null);
+		assert.deepEqual(ringBasis(coverage({ record: { ...record, available: false, chunkTokens: null } }), graph), { status: "unavailable" });
+	});
+});
 
 describe("fetchGraphRead — one truth with the extraction trigger (2026-10-02)", () => {
 	// The meter's denominator MUST be the number the server's

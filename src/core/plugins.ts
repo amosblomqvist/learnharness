@@ -52,15 +52,28 @@ export interface PluginInfo {
 	/** Changes only after server restart, not merely after enable/disable. */
 	revision: string;
 	/** Session kinds this active plugin currently registers (full ids). */
-	sessionKinds?: PluginKindSummary[];
+	sessionKinds?: PluginSessionKindSummary[];
 	/** Record kinds this active plugin currently registers (full ids). */
-	recordKinds?: PluginKindSummary[];
+	recordKinds?: PluginRecordKindSummary[];
 }
 /** Host-derived summary of a registered session or record kind. */
 export interface PluginKindSummary {
 	/** Full id: "<pluginId>:<localId>". */
 	id: string;
 	label: string;
+}
+/** Host-derived summary of a registered session kind. */
+export interface PluginSessionKindSummary extends PluginKindSummary {
+	/** The record it extracts into: "graph" or a full record kind id. */
+	record: string;
+	/** Trusted SVG markup, when the definition supplies one. */
+	icon?: string;
+}
+/** Host-derived summary of a registered record kind. */
+export interface PluginRecordKindSummary extends PluginKindSummary {
+	chunkTokens: number;
+	/** Whether the record can remove one session's traces (offered on deletion). */
+	purge: boolean;
 }
 export interface PluginNotification {
 	pluginId: string;
@@ -166,6 +179,8 @@ export interface PluginSessionKindDefinition {
 	/** This kind's job and method for each phase. */
 	prompts: { prober: string; teacher: string };
 	tools?: { prober?: PluginSessionKindToolDelta; teacher?: PluginSessionKindToolDelta };
+	/** Trusted SVG markup for the host's doors, mode switch and session rows. */
+	icon?: string;
 }
 /** One host-chunked batch of a session's raw saved transcript. */
 export interface PluginRecordBatch {
@@ -191,8 +206,16 @@ export interface PluginRecordKindDefinition {
 	chunkTokens?: number;
 	/** Fold one batch into the record. Resolving marks the batch covered; rejecting
 	 * leaves it uncovered for a later retry. Delivery is at-least-once: make writes
-	 * idempotent by batchId. Batches for one record kind run one at a time. */
+	 * idempotent by batchId. The host runs extraction batches and purge hooks
+	 * for the same record kind one at a time, across all sessions. */
 	extract(batch: PluginRecordBatch): void | Promise<void>;
+	/** Remove what one session contributed, when the learner deletes the session
+	 * and asks for its traces to go too. Resolving lets the deletion finish;
+	 * rejecting refuses it (the session is kept and the learner can retry), so
+	 * make it idempotent. The host waits for the hook to settle before starting
+	 * another write to this record kind. Honor the signal and await all record
+	 * writes. Without purge, deletion keeps the plugin's record data untouched. */
+	purge?(chatId: string, signal: AbortSignal): void | Promise<void>;
 }
 /** Backend activation scope, once per enabled plugin per server, not per window.
  * Trusted Node code must cooperate with cancellation; no forced process isolation. */
@@ -264,6 +287,14 @@ export interface PluginBackendModule {
 	 * Activation failures mark this plugin as errored. Modules remain cached, so
 	 * put activation side effects here rather than at module top level. */
 	activate(context: PluginBackendContext): void | PluginCleanup | Promise<void | PluginCleanup>;
+}
+/** A plugin record's body on the home page. The plugin owns everything inside
+ * the container; the host owns the frame (header, record switcher, composer). */
+export interface PluginRecordView {
+	/** Local id of a record kind this plugin registers in its backend. */
+	recordKind: string;
+	/** Mount the record body; the signal aborts on leaving the record, home or disable. */
+	mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promise<void | PluginCleanup>;
 }
 export interface PluginView {
 	id: string;
@@ -358,6 +389,9 @@ export interface PluginFrontendContext {
 	/** Register a plugin-owned body view with host chrome. Invalid/duplicate IDs
 	 * throw; returned unregister removes the view without deleting plugin data. */
 	registerView(view: PluginView): () => void;
+	/** Show one of this plugin's record kinds on home. Invalid or duplicate
+	 * registrations throw; returned unregister removes it from home only. */
+	registerRecordView(view: PluginRecordView): () => void;
 	/** Register an invokable action and optional shortcut, but no button placement.
 	 * Invalid/duplicate registrations throw. Returns unregister; shortcut scope and
 	 * default are captured here, not changed by refreshActions. */

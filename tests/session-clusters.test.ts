@@ -98,7 +98,7 @@ describe("birthSessionPartition", () => {
 	});
 
 	it("deletion re-attribution: a stripped birth falls to the earliest remaining contributor; no provenance = unclustered", () => {
-		// What delete-nodes leaves behind: the birth session's points are
+		// What purge leaves behind: the birth session's points are
 		// stripped from surviving lines — the merged provenance walks forward.
 		const reattributed = node("survivor", "S", [pt("chat2"), pt("chat3")]);
 		assert.equal(birthSessionOf(reattributed), "chat2");

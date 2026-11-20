@@ -2,7 +2,8 @@ import { clearOpeningPrompt, OPENING_PROMPT_FAILURE, stashOpeningPrompt } from "
 
 interface SessionCreation {
 	title: string;
-	kind?: "practice";
+	/** practice, or a plugin session kind's full id (stage C). */
+	kind?: "practice" | `${string}:${string}`;
 	graphContext?: { propositions: readonly { id: string; name: string; statement: string }[] };
 }
 

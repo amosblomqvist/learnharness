@@ -33,7 +33,7 @@ import { fileAccessPolicy } from "./file-access.ts";
 import { collectToolCallIds } from "./pi/call-ids.ts";
 import { providerEventNote } from "../agent/provider-events.ts";
 import { effectiveSettings, stores } from "./stores.ts";
-import { resolveChatRecord } from "./record-kinds.ts";
+import { pluginRecordExtractionEnabled, resolveChatRecord } from "./record-kinds.ts";
 import { triggerRecordExtraction } from "./record-extraction.ts";
 import { resolveChatSessionKind, sessionKindUnavailableResponse, type ChatSessionKind } from "./session-kinds.ts";
 import { getPluginAgentContributions, getPluginHost } from "./plugins.ts";
@@ -922,7 +922,8 @@ export async function handleChatInput(
 						// (extraction-UX redesign, 2026-09-24): the trigger compares
 						// against it and the pipeline's batches share it.
 						triggerExtraction({ chatStore: stores.chatStore, coverage: target.coverage }, extraction, chatId, effective.graph.extractionChunkTokens);
-					} else if (target.status === "plugin") {
+					} else if (target.status === "plugin" && pluginRecordExtractionEnabled(target.recordKindId)) {
+						// Stage C (owner q54): the record's own host-owned switch.
 						triggerRecordExtraction({ chatStore: stores.chatStore }, chatId, target);
 					}
 				}, (err) => console.error(`[chat ${chatId}] extraction trigger failed:`, err));

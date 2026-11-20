@@ -35,14 +35,15 @@ test("activation explicitly registers gallery sidebar and teaching/practice-only
     assert.equal(fixture.records.length, 0, "Rejected contexts must not call openSurface");
     for (const kind of ["teaching", "practice"] as const) {
       const target = Object.freeze({}) as Extract<Parameters<PluginAction["run"]>[0], { surface: "session" }>["surfaceTarget"];
+      const sessionKindId = kind === "practice" ? "practice" : "teach";
       const view = Object.freeze({
-        sessionId: "synthetic", kind, title: "Synthetic session", messages: [], transcript: [],
+        sessionId: "synthetic", kind, sessionKindId, title: "Synthetic session", messages: [], transcript: [],
         status: "ready" as const, reconciliation: "ready" as const, busy: false, compacting: false,
         phase: kind === "practice" ? "practice" as const : "teach" as const,
         contextTokens: null, queuedSteers: [], composer: { text: "" },
         input: { type: "unavailable" as const, expanded: false, revealed: false },
       });
-      await surface.run({ placement: "top-bar", surface: "session", sessionId: "synthetic", kind, surfaceTarget: target, view });
+      await surface.run({ placement: "top-bar", surface: "session", sessionId: "synthetic", kind, sessionKindId, surfaceTarget: target, view });
       assert.equal(fixture.records.findLast(record => record.method === "openSurface")!.target, target);
     }
     assert.equal(fixture.records.filter(record => record.method === "openSurface").length, 2);
@@ -55,8 +56,8 @@ test("activation explicitly registers gallery sidebar and teaching/practice-only
 function sessionContext() {
   const surfaceTarget = Object.freeze({}) as Extract<Parameters<PluginAction["run"]>[0], { surface: "session" }>["surfaceTarget"];
   return {
-    placement: "top-bar", surface: "session", sessionId: "synthetic", kind: "teaching", surfaceTarget,
-    view: { sessionId: "synthetic", kind: "teaching", title: "Synthetic session", messages: [], transcript: [],
+    placement: "top-bar", surface: "session", sessionId: "synthetic", kind: "teaching", sessionKindId: "teach", surfaceTarget,
+    view: { sessionId: "synthetic", kind: "teaching", sessionKindId: "teach", title: "Synthetic session", messages: [], transcript: [],
       status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "teach",
       contextTokens: null, queuedSteers: [], composer: { text: "" }, input: { type: "unavailable", expanded: false, revealed: false } },
   } satisfies Parameters<PluginAction["run"]>[0];

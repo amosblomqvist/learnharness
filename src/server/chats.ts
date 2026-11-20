@@ -4,7 +4,8 @@ import { coverageOf, rawCoverageSlots } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
 import { titleFromPrompt } from "../core/contracts.ts";
 import { graphRevision } from "./graph.ts";
-import { purgePluginRecordCoverage, resolveChatRecord } from "./record-kinds.ts";
+import { pluginRecordExtractionEnabled, purgePluginRecordCoverage, resolveChatRecord } from "./record-kinds.ts";
+import { withRecordLock } from "./record-lock.ts";
 import { pluginDataRoots } from "./plugins.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
@@ -19,7 +20,7 @@ import { sideChats } from "./side-chat.ts";
  *
  * deleteChatSession (wave 6, session deletion — the FIRST destructive
  * operation on the graph ledgers) is the one real orchestration here:
- * gates → extraction wind-down → one synchronous deletion block. See
+ * gates → extraction wind-down → optional plugin purge → synchronous deletion. See
  * core/graph-deletion.ts for the ledger semantics and the atomicity
  * argument.
  */
@@ -40,6 +41,11 @@ export type ChatDeleteOutcome =
 	| { ok: false; status: 404; code: "not_found"; error: string }
 	| { ok: false; status: 409; code: "turn_in_flight" | "jobs_running"; error: string; jobIds: string[] }
 	| { ok: false; status: 503; code: "extraction_winding_down"; error: string }
+	/** Plugin records (stage C, owner q52): purge asked of a record that is
+	 *  unavailable or declares no purge, or whose purge failed — the session
+	 *  is kept and nothing was deleted. */
+	| { ok: false; status: 409; code: "record-kind-unavailable" | "purge-unsupported"; error: string }
+	| { ok: false; status: 500; code: "purge_failed"; error: string }
 	| {
 			ok: true;
 			mode: ChatDeleteMode;
@@ -60,7 +66,8 @@ export type ChatDeleteOutcome =
  *      CANCELLED (abortExtraction: spend stops, nothing merges), then
  *      awaited off the registry. A timeout is a retryable 503, never a
  *      forced race.
- *   3. THE SYNC BLOCK — everything below runs without a single await:
+ *   3. OPTIONAL PLUGIN PURGE — queued alongside extraction for that record.
+ *   4. THE SYNC BLOCK — everything below runs without a single await:
  *      no extraction append can interleave (the event loop never yields
  *      mid-block), so the read-filter-write of the ledger rewrites is
  *      atomic against the pipeline. Ledgers first, jobs next, the chat
@@ -99,11 +106,63 @@ export function runningWorkBlocker(chatId: string): Extract<ChatDeleteOutcome, {
 }
 
 export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): Promise<ChatDeleteOutcome> {
-	if (!stores.chatStore.getChat(chatId)) {
+	const chat = stores.chatStore.getChat(chatId);
+	if (!chat) {
 		return { ok: false, status: 404, code: "not_found", error: "No such session" };
+	}
+	// Only a requested purge resolves the plugin record. Plain deletion can
+	// still run with its plugin unavailable.
+	const record = mode === "purge" ? await resolveChatRecord(chat.kind) : null;
+	if (record?.status === "unavailable") {
+		return { ok: false, status: 409, code: "record-kind-unavailable", error: "This session's record belongs to a plugin that is disabled or not installed — delete it without removing its traces, or enable the plugin first" };
+	}
+	if (record?.status === "plugin" && !record.definition.purge) {
+		return { ok: false, status: 409, code: "purge-unsupported", error: `${record.label} cannot remove a session's traces` };
 	}
 	const blocker = runningWorkBlocker(chatId);
 	if (blocker) return blocker;
+	const windDown = await windDownExtraction(chatId);
+	if (windDown) return windDown;
+
+	if (record?.status === "plugin" && record.definition.purge) {
+		const purge = record.definition.purge;
+		let hookCompleted = false;
+		try {
+			return await withRecordLock<ChatDeleteOutcome>(record.recordKindId, record.signal, async () => {
+				// A different chat's extract may have kept this purge queued. Check
+				// again after admission and after the hook, not only at request time.
+				const before = deletionBlocker(chatId);
+				if (before) return before;
+				record.requireActive();
+				await purge(chatId, record.signal);
+				record.signal.throwIfAborted();
+				record.requireActive();
+				hookCompleted = true;
+				return deletionBlocker(chatId) ?? finishChatDeletion(chatId, mode);
+			});
+		} catch (error) {
+			if (hookCompleted) throw error; // Don't misreport a host deletion failure as a purge failure.
+			console.error(`[chat ${chatId}] ${record.recordKindId} purge failed:`, error);
+			return { ok: false, status: 500, code: "purge_failed", error: `${record.label} could not remove this session's traces — the session was kept; try again` };
+		}
+	}
+
+	return deletionBlocker(chatId) ?? finishChatDeletion(chatId, mode);
+}
+
+function deletionBlocker(chatId: string): Extract<ChatDeleteOutcome, { ok: false }> | null {
+	if (!stores.chatStore.getChat(chatId)) return { ok: false, status: 404, code: "not_found", error: "No such session" };
+	const work = runningWorkBlocker(chatId);
+	if (work) return work;
+	if (!extractionStatuses().some((run) => run.chatId === chatId)) return null;
+	// Don't wait while holding the record lock: the run may be queued behind us.
+	abortExtraction(chatId);
+	return { ok: false, status: 503, code: "extraction_winding_down", error: "The session's extraction is still winding down — try again in a moment" };
+}
+
+/** Step 2 of the choreography: true-cancel the chat's extraction runs and
+ *  wait for them to leave the registry; a timeout is a retryable 503. */
+async function windDownExtraction(chatId: string): Promise<Extract<ChatDeleteOutcome, { status: 503 }> | null> {
 	if (extractionStatuses().some((run) => run.chatId === chatId)) {
 		abortExtraction(chatId); // true cancellation — spend stops, nothing merges
 		const deadline = Date.now() + WIND_DOWN_TIMEOUT_MS;
@@ -119,13 +178,7 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 			await new Promise((resolve) => setTimeout(resolve, WIND_DOWN_POLL_MS));
 		}
 	}
-
-	// A result wake or a worker may have started during extraction wind-down.
-	// Recheck immediately before the synchronous purge, with no await gap.
-	const lateBlocker = runningWorkBlocker(chatId);
-	if (lateBlocker) return lateBlocker;
-
-	return finishChatDeletion(chatId, mode);
+	return null;
 }
 
 /** Source deletion has already purged the selected batch's graph traces.
@@ -155,7 +208,8 @@ function finishChatRecordDeletion(chatId: string): number {
 	// Plugin record coverage is host bookkeeping (stage B): the chat's rows
 	// leave every plugin record ledger, whether or not its plugin is enabled
 	// (chat ids are unique — no kind resolution needed). The plugin's own
-	// record data is its concern (purge hook: stage C).
+	// record data is its concern (its purge hook ran before this block when
+	// the learner asked for the session's traces to go too).
 	purgePluginRecordCoverage(chatId, pluginDataRoots);
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	if (stores.chatStore.deleteChat(chatId)) {
@@ -189,7 +243,9 @@ export interface SessionCoverage {
 	/** Plugin session kinds only (stage B): the record the session extracts
 	 *  into. Counts are over the RAW transcript; available false = the kind or
 	 *  record plugin is disabled/missing (counts read as nothing covered). */
-	record?: { id: string | null; label: string | null; chunkTokens: number | null; available: boolean };
+	record?: { id: string | null; label: string | null; chunkTokens: number | null; available: boolean;
+		/** Plugin records only (stage C, q54): the record's host-owned extraction switch. */
+		extraction?: boolean };
 }
 
 /** The per-session coverage block (see SessionCoverage). Null when the
@@ -222,7 +278,7 @@ export async function sessionCoverage(chatId: string): Promise<SessionCoverage |
 		lastFoldedAt,
 		...(pluginKind ? {
 			record: target.status === "plugin"
-				? { id: target.recordKindId, label: target.label, chunkTokens: target.chunkTokens, available: true }
+				? { id: target.recordKindId, label: target.label, chunkTokens: target.chunkTokens, available: true, extraction: pluginRecordExtractionEnabled(target.recordKindId) }
 				: target.status === "graph"
 					? { id: target.recordKindId, label: target.label, chunkTokens: null, available: true }
 					: { id: target.status === "unavailable" ? target.recordKindId : null, label: null, chunkTokens: null, available: false },

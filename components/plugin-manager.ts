@@ -4,7 +4,7 @@ import type {
 	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration, PluginPageActionContext, PluginActionShortcut,
 } from "@/src/core";
 
-import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, isSessionKindId, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
+import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, isSessionKindId, PLUGIN_KIND_LOCAL_ID_PATTERN, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
 import { orderSubmissionInterceptors, type SubmissionInterceptorRegistration } from "./plugin-submission-runner.ts";
 
 export type PluginMount = (container: HTMLElement, signal: AbortSignal) => ReturnType<PluginView["mount"]>;
@@ -16,6 +16,12 @@ export type CodeBlockRegistration = PluginRendererRegistration<PluginCodeBlockRe
 export type ToolRendererRegistration = PluginRendererRegistration<PluginToolRenderer>;
 export type QuestionRendererRegistration = PluginRendererRegistration<import("@/src/core").PluginQuestionRenderer>;
 export type ProblemRendererRegistration = PluginRendererRegistration<import("@/src/core").PluginProblemRenderer>;
+/** A plugin record's home body; recordKindId is the full "<pluginId>:<localId>". */
+export interface RecordViewRegistration {
+	readonly pluginId: string;
+	readonly recordKindId: string;
+	readonly mount: PluginMount;
+}
 export interface FrontendPlugin {
 	info: PluginInfo;
 	phase: "disabled" | "loading" | "active" | "error";
@@ -34,6 +40,7 @@ export interface PluginSnapshot {
 	readonly toolRenderers: readonly ToolRendererRegistration[];
 	readonly questionRenderers?: readonly QuestionRendererRegistration[];
 	readonly problemRenderers?: readonly ProblemRendererRegistration[];
+	readonly recordViews?: readonly RecordViewRegistration[];
 	directory: string;
 	conflicts: readonly { id: string; error: string }[];
 	loading: boolean;
@@ -58,6 +65,7 @@ interface Lifecycle {
 	toolRenderers: Map<string, ToolRendererRegistration>;
 	questionRenderers: Map<string, QuestionRendererRegistration>;
 	problemRenderers: Map<string, ProblemRendererRegistration>;
+	recordViews: Map<string, RecordViewRegistration>;
 	submissionInterceptors: Map<string, SubmissionInterceptorRegistration>;
 	settings?: PluginSettingsRegistration;
 	notifications: Set<(event: PluginNotification) => void>;
@@ -145,6 +153,7 @@ export class PluginFrontendManager {
 			toolRenderers: Object.freeze([...this.lives.values()].flatMap(life => [...life.toolRenderers.values()])),
 			questionRenderers: Object.freeze([...this.lives.values()].flatMap(life => [...life.questionRenderers.values()])),
 			problemRenderers: Object.freeze([...this.lives.values()].flatMap(life => [...life.problemRenderers.values()])),
+			recordViews: Object.freeze([...this.lives.values()].flatMap(life => [...life.recordViews.values()])),
 			plugins: this.infos.map(info => {
 			const life = this.lives.get(info.id);
 			return {
@@ -202,7 +211,7 @@ export class PluginFrontendManager {
 		if (life.teardown) return life.teardown;
 		life.controller.abort();
 		life.views.clear(); life.actions.clear(); life.placements.clear(); life.actionBusy.clear(); life.settings = undefined;
-		life.codeBlocks.clear(); life.toolRenderers.clear(); life.questionRenderers.clear(); life.problemRenderers.clear(); life.submissionInterceptors.clear();
+		life.codeBlocks.clear(); life.toolRenderers.clear(); life.questionRenderers.clear(); life.problemRenderers.clear(); life.recordViews.clear(); life.submissionInterceptors.clear();
 		life.notifications.clear(); life.events.clear(); life.resyncs.clear();
 		const cleanups = [...life.cleanups].reverse();
 		life.cleanups.clear();
@@ -252,7 +261,7 @@ export class PluginFrontendManager {
 			const life: Lifecycle = {
 				id: info.id, revision: info.revision, controller: new AbortController(), cleanups: new Set(),
 				activation: Promise.resolve(), tasks: new Set(),
-				views: new Map(), actions: new Map(), shortcuts: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(), questionRenderers: new Map(), problemRenderers: new Map(), submissionInterceptors: new Map(),
+				views: new Map(), actions: new Map(), shortcuts: new Map(), placements: new Map(), actionBusy: new Set(), codeBlocks: new Map(), toolRenderers: new Map(), questionRenderers: new Map(), problemRenderers: new Map(), recordViews: new Map(), submissionInterceptors: new Map(),
 				notifications: new Set(), events: new Set(), resyncs: new Set(), phase: "loading",
 			};
 			this.cleanupErrors.delete(info.id);
@@ -360,6 +369,15 @@ export class PluginFrontendManager {
 			manifest, signal: life.controller.signal,
 			cleanup: cleanup => { this.addCleanup(life, cleanup); },
 			registerView: view => register(life.views, view, "mount"),
+			registerRecordView: view => {
+				if (!this.current(life)) return () => {};
+				if (!view || typeof view.recordKind !== "string" || !PLUGIN_KIND_LOCAL_ID_PATTERN.test(view.recordKind)) throw new Error("Plugin record view recordKind must be one of this plugin's record kind ids");
+				if (typeof view.mount !== "function") throw new Error("Plugin record view mount must be a function");
+				if (life.recordViews.has(view.recordKind)) throw new Error(`Duplicate plugin record view: ${view.recordKind}`);
+				const registration: RecordViewRegistration = Object.freeze({ pluginId: life.id, recordKindId: `${life.id}:${view.recordKind}`, mount: view.mount.bind(view) });
+				life.recordViews.set(view.recordKind, registration); this.publish();
+				return () => { if (life.recordViews.get(view.recordKind) === registration) { life.recordViews.delete(view.recordKind); this.publish(); } };
+			},
 			registerAction: action => register(life.actions, action, "run"),
 			placeAction: placement => {
 				if (!this.current(life)) return () => {};

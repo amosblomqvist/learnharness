@@ -266,6 +266,14 @@ export function extractionEnabled(graph: { enabled: boolean }): boolean {
 }
 
 /**
+ * A plugin record's extraction switch (stage C, owner q54): host-owned,
+ * default on, independent of graph.enabled. Reads the raw delta record.
+ */
+export function recordExtractionEnabled(settings: { records?: Record<string, { extraction?: boolean }> } | null | undefined, recordKindId: string): boolean {
+	return settings?.records?.[recordKindId]?.extraction !== false;
+}
+
+/**
  * The RENDERING gate (owner, 2026-10-06): graph off = the home shows the
  * chains view, not the canvas. Display-only by construction — every data
  * path (ledgers, extraction, tools) never consults this.

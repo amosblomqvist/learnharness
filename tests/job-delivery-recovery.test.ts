@@ -300,7 +300,7 @@ test("deleting legacy completed work needs no preceding recovery poll", async ()
 	const owner = chat(true);
 	const old = stores.jobStore.createJob({ kind: "research", chatId: owner.id, toolCallId: "legacy-delete" });
 	stores.jobStore.updateJob(old.id, { result });
-	const outcome = await deleteChatSession(owner.id, "preserve-graph");
+	const outcome = await deleteChatSession(owner.id, "preserve");
 	assert(outcome.ok);
 	assert.equal(stores.jobStore.getJob(old.id), null);
 	assert.equal(stores.chatStore.getChat(owner.id), null);
@@ -309,11 +309,11 @@ test("deleting legacy completed work needs no preceding recovery poll", async ()
 test("deletion still refuses a computing worker or a live turn", async () => {
 	const owner = chat();
 	const computing = stores.jobStore.createJob({ kind: "research", chatId: owner.id, toolCallId: "computing-delete" });
-	const blocked = await deleteChatSession(owner.id, "preserve-graph");
+	const blocked = await deleteChatSession(owner.id, "preserve");
 	assert(!blocked.ok && blocked.code === "jobs_running");
 	stores.jobStore.updateJob(computing.id, { status: "done" });
 	assert(beginTurn(owner.id));
-	const live = await deleteChatSession(owner.id, "preserve-graph");
+	const live = await deleteChatSession(owner.id, "preserve");
 	assert(!live.ok && live.code === "turn_in_flight");
 	endTurn(owner.id);
 });
@@ -322,7 +322,7 @@ test("deleting a session discards its pending deliveries without starting a turn
 	const owner = chat(true); const { job, steer } = pending(owner.id);
 	let wakes = 0; setTurnRunner(async () => { wakes++; return 500; });
 	const delivery = deliverJobResult(steer);
-	const outcome = await deleteChatSession(owner.id, "preserve-graph");
+	const outcome = await deleteChatSession(owner.id, "preserve");
 	assert(outcome.ok);
 	await delivery; await delay(450);
 	assert.equal(stores.jobStore.getJob(job.id), null);

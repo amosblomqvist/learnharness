@@ -81,8 +81,8 @@ describe("P1 — registration at activation", () => {
 		assert.throws(() => live.registerRecordKind({ id: "notebook", label: "dup", extract() {} }), /Duplicate/);
 		assert.throws(() => live.registerInstructions({ agents: ["teacher"], sessionKinds: ["Lesson"] as never, text: "x" }), /sessionKinds/);
 		const info = host.list().find((plugin) => plugin.id === PLUGIN)!;
-		assert.deepEqual(info.sessionKinds, [{ id: LESSON, label: "Fixture lesson" }, { id: GRAPH_LESSON, label: "Fixture graph lesson" }]);
-		assert.deepEqual(info.recordKinds, [{ id: NOTEBOOK, label: "Fixture notebook" }]);
+		assert.deepEqual(info.sessionKinds?.map(({ id, label, record }) => ({ id, label, record })), [{ id: LESSON, label: "Fixture lesson", record: NOTEBOOK }, { id: GRAPH_LESSON, label: "Fixture graph lesson", record: "graph" }]);
+		assert.deepEqual(info.recordKinds?.map(({ id, label }) => ({ id, label })), [{ id: NOTEBOOK, label: "Fixture notebook" }]);
 		const off = live.registerSessionKind({ id: "temporary", label: "Temp", record: "graph", prompts: { prober: "a", teacher: "b" } });
 		assert.equal(host.resolveSessionKind(`${PLUGIN}:temporary`).status, "available");
 		off(); off();
@@ -201,7 +201,7 @@ describe("P3 — host-chunked raw batches; coverage = what the extractor saw", (
 		assert.deepEqual(await runRecordExtraction({ chatStore }, chat.id, target, "manual"), { status: "nothing" });
 		const cov = (await sessionCoverage(chat.id))!;
 		assert.equal(cov.uncoveredCount, 0);
-		assert.deepEqual(cov.record, { id: NOTEBOOK, label: "Fixture notebook", chunkTokens: 500, available: true });
+		assert.deepEqual(cov.record, { id: NOTEBOOK, label: "Fixture notebook", chunkTokens: 500, available: true, extraction: true });
 	});
 
 	it("a rejected extract leaves the batch uncovered and redelivers the same batchId", async () => {
@@ -300,7 +300,7 @@ describe("P5 — unavailable kinds open read-only and refuse model work honestly
 		const files = pluginRecordCoverageFiles(pluginDataRoots);
 		assert.ok(files.includes(path.join(ctx.dataDirectory, "records", "notebook", "coverage.jsonl")));
 		await withPluginDisabled(async () => {
-			const outcome = await deleteChatSession(chat.id, "preserve-graph");
+			const outcome = await deleteChatSession(chat.id, "preserve");
 			assert.equal(outcome.ok, true);
 		});
 		for (const file of files) assert.ok(!fs.readFileSync(file, "utf8").includes(chat.id));

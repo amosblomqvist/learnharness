@@ -5,6 +5,7 @@ import { useActivity } from "@/components/activity-dock";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { useSettingsSaved } from "@/components/settings-signal";
+import { useServerEvent, useServerResync } from "@/components/server-events";
 import { formatTokens } from "@/components/usage-format";
 import { Hint } from "@/components/ui/hint";
 import { timeAgo } from "@/components/sidebar";
@@ -40,6 +41,22 @@ export interface SessionCoverage {
 	uncoveredTokens: number;
 	running: boolean;
 	lastFoldedAt: string | null;
+	/** Plugin session kinds only: the record the session extracts into. */
+	record?: { id: string | null; label: string | null; chunkTokens: number | null; available: boolean; extraction?: boolean };
+}
+
+/** What the ring measures against (stage C, owner C4): a plugin record's own
+ *  chunk budget and switch, or the graph's. "unavailable" = the record's
+ *  plugin is disabled or missing (q65) — the ring stays, inert. Null = no
+ *  ring (switch off, or no honest read yet). */
+export type RingBasis = { status: "ready"; chunkTokens: number } | { status: "unavailable" } | null;
+export function ringBasis(coverage: SessionCoverage | null, graph: GraphRead | null): RingBasis {
+	if (coverage === null) return null;
+	const record = coverage.record;
+	if (record && !record.available) return { status: "unavailable" };
+	if (record && record.chunkTokens !== null) return record.extraction === false ? null : { status: "ready", chunkTokens: record.chunkTokens };
+	if (graph === null || !graph.enabled) return null;
+	return { status: "ready", chunkTokens: graph.chunkTokens };
 }
 
 /** One session's coverage read — null on transport/404 (callers render
@@ -151,6 +168,9 @@ export function CoverageMenuBlock({ chatId }: { chatId: string }) {
 	}, [load, coverage?.running, extracting]);
 
 	if (coverage === null) return null;
+	// A plugin record that is unavailable or switched off cannot extract:
+	// no Extract affordance that would only be refused (stage C, C4).
+	if (coverage.record && (!coverage.record.available || coverage.record.extraction === false)) return null;
 
 	const onExtract = async () => {
 		setExtracting(true);
@@ -248,7 +268,10 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 	const [nonce, setNonce] = useState(0);
 	const rootRef = useRef<HTMLDivElement>(null);
 	const panelRef = useRef<HTMLDivElement>(null);
-	const popupLayer = usePopoverDismiss(rootRef, open && graph !== null && graph.enabled && coverage !== null, () => setOpen(false), { layerRootRef: panelRef });
+	const basis = ringBasis(coverage, graph);
+	const ready = basis?.status === "ready";
+	const popupLayer = usePopoverDismiss(rootRef, open && ready, () => setOpen(false), { layerRootRef: panelRef });
+	useEffect(() => { if (!ready) setOpen(false); }, [ready]);
 
 	// The activity/refresh chain (the dispatch's seam): runs can fire from
 	// OTHER surfaces (the sidebar menu's Extract, the turn pipeline, another
@@ -258,9 +281,12 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 	const feed = useActivity().feed;
 	const runHere = feed.extractions.some((run) => run.chatId === chatId);
 
+	const refreshRecord = useCallback(() => setNonce((n) => n + 1), []);
 	useSettingsSaved((section) => {
-		if (section === "graph") setNonce((n) => n + 1);
+		if (section === "graph" || section === "records") refreshRecord();
 	});
+	useServerEvent("plugins-changed", refreshRecord);
+	useServerResync(refreshRecord);
 
 	useEffect(() => {
 		let alive = true;
@@ -294,11 +320,22 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 		return () => clearInterval(timer);
 	}, [chatId, coverage?.running]);
 
-	// Vanishes entirely when the graph is off, or before the first honest
-	// read (no fake zeros — the doctrine).
-	if (graph === null || !graph.enabled || coverage === null) return null;
+	// Vanishes entirely when the record's extraction is off, or before the
+	// first honest read (no fake zeros — the doctrine).
+	if (basis === null || coverage === null) return null;
+	if (basis.status === "unavailable") {
+		return (
+			<div className="lh-no-drag relative shrink-0">
+				<Hint label="Extraction is paused: this session's record plugin is disabled or not installed" side="bottom">
+					<span data-testid="coverage-ring-unavailable" className="relative flex size-5 items-center justify-center opacity-40">
+						<CoverageRingGlyph fill={0} running={false} />
+					</span>
+				</Hint>
+			</div>
+		);
+	}
 
-	const fill = ringFill(coverage.uncoveredTokens, graph.chunkTokens);
+	const fill = ringFill(coverage.uncoveredTokens, basis.chunkTokens);
 	return (
 		<div ref={rootRef} className="lh-no-drag relative shrink-0">
 			<Hint
@@ -325,7 +362,7 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 					style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
 					className="absolute top-full right-0 mt-1.5 w-64 rounded-xl border bg-card p-3 text-xs shadow-xl"
 				>
-					<CoverageRingDetail coverage={coverage} chunkTokens={graph.chunkTokens} />
+					<CoverageRingDetail coverage={coverage} chunkTokens={basis.chunkTokens} />
 				</div>
 			)}
 		</div>

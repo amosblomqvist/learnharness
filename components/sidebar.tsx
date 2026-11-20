@@ -5,6 +5,9 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
 import { DeleteSessionDialog } from "@/components/delete-session-dialog";
+import { SessionKindIcon, useKindCatalog } from "@/components/session-kind-icon";
+import { isPluginSessionKindId } from "@/src/core";
+import { matchesSessionFilter, recordOfKind, sessionFilters, sessionKindOf, type CatalogSessionKind, type SessionFilter } from "@/components/session-kind-catalog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
 import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
@@ -301,8 +304,13 @@ export function SessionRow({
 	onOpen,
 	kbdSelected = false,
 	onContextMenu,
+	kind,
 }: {
 	chat: ChatListItem;
+	/** The row's plugin session kind from the live catalog (stage C, C3):
+	 *  its icon rides the far right like practice's dumbbell; a kind whose
+	 *  plugin is inactive shows the puzzle fallback. */
+	kind?: CatalogSessionKind;
 	active: boolean;
 	onOpen: () => void;
 	/** Keyboard-cycle highlight (shortcut wave A: Alt+↑/↓ + Alt+Enter) —
@@ -338,6 +346,13 @@ export function SessionRow({
 			    the teaching rows and reads cleaner. */}
 			{(chat.kind ?? "teach") === "practice" && (
 				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
+			)}
+			{isPluginSessionKindId(chat.kind) && (
+				<SessionKindIcon
+					icon={kind?.icon}
+					label={kind ? `${kind.label} session` : "Plugin session (plugin unavailable)"}
+					className="size-3.5 text-muted-foreground/70"
+				/>
 			)}
 		</button>
 	);
@@ -396,10 +411,11 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 	);
 }
 
-/** The three-way kind filter (practice sessions, owner 2026-10-04):
- *  Teaching / All / Practice — a client-side filter over the same
- *  snapshot, persisted in localStorage, defaulting to All. */
-export type SessionKindFilter = "teach" | "all" | "practice";
+/** The kind filter (practice sessions, owner 2026-10-04): Teaching /
+ *  Practice / one segment per active plugin session kind (stage C, owner
+ *  C3) / All — a client-side filter over the same snapshot, persisted in
+ *  localStorage, defaulting to All. */
+export type SessionKindFilter = SessionFilter;
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
@@ -407,10 +423,15 @@ function SessionsSidebar() {
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
-	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
+	const [storedFilter, setKindFilter] = useState<SessionKindFilter>("all");
+	const catalog = useKindCatalog();
+	const filters = useMemo(() => sessionFilters(catalog), [catalog]);
+	// A stored plugin-kind filter whose plugin went inactive reads as All
+	// (its segment is gone) without forgetting the choice for re-enable.
+	const kindFilter: SessionKindFilter = filters.includes(storedFilter) ? storedFilter : "all";
 	useEffect(() => {
 		const stored = window.localStorage.getItem(KIND_FILTER_KEY);
-		if (stored === "teach" || stored === "all" || stored === "practice") setKindFilter(stored);
+		if (stored === "teach" || stored === "all" || stored === "practice" || isPluginSessionKindId(stored ?? undefined)) setKindFilter(stored as SessionKindFilter);
 	}, []);
 	const setFilter = useCallback((f: SessionKindFilter) => {
 		setKindFilter(f);
@@ -435,7 +456,7 @@ function SessionsSidebar() {
 		const q = query.trim();
 		let list = chats;
 		if (list && kindFilter !== "all") {
-			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
+			list = list.filter((c) => matchesSessionFilter(c.kind, kindFilter));
 		}
 		if (!list) return list;
 		if (!q) return list;
@@ -722,6 +743,22 @@ function SessionsSidebar() {
 						<span className="min-w-0 truncate">Practice</span>
 						<span className="sr-only">create a new practice session</span>
 					</button>
+					{/* Every session kind is a door (owner C3): plugin kinds
+					    follow the native pair, in plugin order. */}
+					{catalog.sessionKinds.map((kind) => (
+						<button
+							key={kind.id}
+							type="button"
+							data-testid={`new-session-kind-${kind.id}`}
+							title={kind.label}
+							onClick={() => router.push(`/chat/new?kind=${encodeURIComponent(kind.id)}`)}
+							className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						>
+							<SessionKindIcon icon={kind.icon} className="size-3" />
+							<span className="min-w-0 truncate">{kind.label}</span>
+							<span className="sr-only">create a new {kind.label} session</span>
+						</button>
+					))}
 				</PluginSidebarActions>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
@@ -794,21 +831,21 @@ function SessionsSidebar() {
 				    Practice / All — the real modes first, "All" as the escape
 				    hatch on the right, mirroring the create-buttons above.
 				    Persisted client-side. */}
-				<div className="mx-3 flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="session-kind-filter">
-					{(["teach", "practice", "all"] as const).map((f) => (
+				<div className="mx-3 flex flex-wrap items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="session-kind-filter">
+					{filters.map((f) => (
 						<button
 							key={f}
 							type="button"
 							data-testid={`kind-filter-${f}`}
 							onClick={() => setFilter(f)}
 							className={cn(
-								"flex-1 rounded-sm px-2 py-1 text-[11px] uppercase tracking-wider transition-colors",
+								"min-w-0 flex-1 truncate rounded-sm px-2 py-1 text-[11px] uppercase tracking-wider transition-colors",
 								kindFilter === f
 									? "bg-accent text-foreground"
 									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{f === "teach" ? "Teaching" : f === "all" ? "All" : "Practice"}
+							{f === "teach" ? "Teaching" : f === "all" ? "All" : f === "practice" ? "Practice" : sessionKindOf(catalog, f)?.label ?? f}
 						</button>
 					))}
 				</div>
@@ -833,6 +870,7 @@ function SessionsSidebar() {
 								<SessionRow
 									key={c.id}
 									chat={c}
+									kind={sessionKindOf(catalog, c.kind)}
 									active={pathname === `/chat/${c.id}`}
 									kbdSelected={i === kbdIndex}
 									onOpen={() => {
@@ -942,6 +980,7 @@ function SessionsSidebar() {
 				    by the component itself, lives here for state locality. */}
 				<DeleteSessionDialog
 					chat={deleting}
+					record={recordOfKind(catalog, deleting?.kind)}
 					onClose={() => setDeleting(null)}
 					onDeleted={onDeleted}
 				/>

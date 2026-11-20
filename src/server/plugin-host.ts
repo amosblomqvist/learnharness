@@ -13,7 +13,7 @@ import type { PluginQuestionVariant } from "../core/plugin-questions.ts";
 import type { NativePluginQuestionDefinition } from "../agent/plugin-question-tools.ts";
 import { preparePluginProblemType, createPluginProblemParameters, type NativePluginProblemDefinition } from "../core/plugin-problems.ts";
 import type { NativePluginProblemContribution } from "../agent/plugin-problem-tools.ts";
-import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginKindSummary, PluginLearningData, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
+import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginRecordKindSummary, PluginSessionKindSummary, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
 import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
 import type { ServerEvent } from "../core/events.ts";
@@ -624,13 +624,22 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		conflicts(): { id: string; error: string }[] { assertOpen(); return conflicts.map(value => ({ ...value })); },
 		list(): PluginInfo[] {
 			assertOpen();
-			const summaries = (pkg: Package, kinds: "sessionKinds" | "recordKinds"): PluginKindSummary[] | undefined => {
+			const liveActivation = (pkg: Package) => {
 				const activation = pkg.activation;
-				if (!pkg.info.enabled || !activation?.ready || !live(pkg, activation) || !activation[kinds].size) return undefined;
-				return [...activation[kinds].values()].map(kind => ({ id: kind.id, label: kind.label }));
+				return pkg.info.enabled && activation?.ready && live(pkg, activation) ? activation : undefined;
+			};
+			const sessionSummaries = (pkg: Package): PluginSessionKindSummary[] | undefined => {
+				const activation = liveActivation(pkg);
+				if (!activation?.sessionKinds.size) return undefined;
+				return [...activation.sessionKinds.values()].map(kind => ({ id: kind.id, label: kind.label, record: kind.record, ...(kind.icon ? { icon: kind.icon } : {}) }));
+			};
+			const recordSummaries = (pkg: Package): PluginRecordKindSummary[] | undefined => {
+				const activation = liveActivation(pkg);
+				if (!activation?.recordKinds.size) return undefined;
+				return [...activation.recordKinds.values()].map(kind => ({ id: kind.id, label: kind.label, chunkTokens: kind.chunkTokens, purge: kind.purge !== undefined }));
 			};
 			return [...packages.values()].map(pkg => {
-				const { info } = pkg, sessionKinds = summaries(pkg, "sessionKinds"), recordKinds = summaries(pkg, "recordKinds");
+				const { info } = pkg, sessionKinds = sessionSummaries(pkg), recordKinds = recordSummaries(pkg);
 				return { ...info, ...(info.manifest ? { manifest: { ...info.manifest } } : {}), ...(sessionKinds ? { sessionKinds } : {}), ...(recordKinds ? { recordKinds } : {}) };
 			}).sort((a, b) => a.id.localeCompare(b.id));
 		},

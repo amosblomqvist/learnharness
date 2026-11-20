@@ -50,6 +50,12 @@ describe("startDraftSession — the create-on-send contract", () => {
 		assert.deepEqual(calls[0]!.body, { title: "teach me orbital mechanics" });
 	});
 
+	it("creates the exact plugin kind without attaching graph picks", async () => {
+		const { f, calls } = fakeFetch("c_plugin");
+		assert.equal(await startDraftSession("Opening text", f, "fixture:lesson", [{ id: "n", name: "Node", statement: "A fact" }]), "/chat/c_plugin");
+		assert.deepEqual(calls.map((call) => call.body), [{ title: "Opening text", kind: "fixture:lesson" }]);
+	});
+
 	it("no settings PUT on create — the server stamps the newborn (per-session models, owner 2026-09-28)", async () => {
 		const { f, calls } = fakeFetch("c_3");
 		await startDraftSession("hello", f);
@@ -96,6 +102,16 @@ describe("startDraftSession — the create-on-send contract", () => {
 });
 
 describe("DraftShell — the sessionless surface", () => {
+	it("titles a plugin draft and hides its composer when the kind becomes unavailable", () => {
+		const props = { busy: false, text: "keep my draft", onChange() {}, onSend() {} };
+		const pluginKind = { label: "Notebook lesson", pluginName: "Fixture", available: true };
+		const available = renderToStaticMarkup(<DraftShell {...props} pluginKind={pluginKind} />);
+		assert.match(available, /New Notebook lesson session/);
+		assert.match(available, /data-testid="composer"/);
+		const unavailable = renderToStaticMarkup(<DraftShell {...props} pluginKind={{ ...pluginKind, available: false }} />);
+		assert.match(unavailable, /data-testid="session-kind-unavailable"/);
+		assert.doesNotMatch(unavailable, /data-testid="composer"/);
+	});
 	it("storage failure leaves the full draft editable beside the approved error", () => {
 		const html = renderToStaticMarkup(<DraftShell busy={false} text="keep all my text" onChange={() => {}} onSend={() => {}} startError />);
 		assert.ok(html.includes('role="alert"'));

@@ -14,14 +14,14 @@
  * abort, deactivation or crash leaves the batch uncovered, so it is
  * redelivered later with the SAME batchId (batchTag over the member
  * fingerprints) — at-least-once; plugins make writes idempotent by batchId.
- * Batches of one record kind run one at a time, process-wide (the plugin's
- * write is inside extract — the audit-lock analog).
+ * Batches and purge hooks for one record kind share a process-wide FIFO.
  */
 
 import { batchRuns, batchTag, coverageOf, rawCoverageSlots } from "../core/coverage.ts";
 import type { ChatStore } from "../core/ports.ts";
 import { claimExtraction, extractionRunSignal, finishExtractionRun, releaseExtraction, setExtractionPhase } from "../agent/subagents/extraction.ts";
 import type { ChatRecordTarget } from "./record-kinds.ts";
+import { withRecordLock } from "./record-lock.ts";
 
 type PluginTarget = Extract<ChatRecordTarget, { status: "plugin" }>;
 
@@ -29,32 +29,6 @@ export type RecordExtractionOutcome =
 	| { status: "done"; batches: number }
 	| { status: "busy" | "below-threshold" | "nothing" | "missing" }
 	| { status: "failed" | "aborted"; batches: number; error: unknown };
-
-interface RecordLocks { __lhRecordExtractionLocks?: Map<string, Promise<void>> }
-/** Process-wide FIFO per record kind (globalThis: one truth across Next
- *  route module instances — the extraction-registry idiom). */
-async function withRecordLock<T>(recordKindId: string, signal: AbortSignal, critical: () => Promise<T>): Promise<T> {
-	const g = globalThis as typeof globalThis & RecordLocks;
-	const locks = (g.__lhRecordExtractionLocks ??= new Map());
-	const prev = locks.get(recordKindId) ?? Promise.resolve();
-	let release!: () => void;
-	const mine = new Promise<void>((resolve) => (release = resolve));
-	const tail = prev.then(() => mine);
-	locks.set(recordKindId, tail);
-	try {
-		await new Promise<void>((resolve, reject) => {
-			const onAbort = () => reject(signal.reason ?? Object.assign(new Error("extraction aborted while waiting"), { name: "AbortError" }));
-			if (signal.aborted) return onAbort();
-			signal.addEventListener("abort", onAbort, { once: true });
-			void prev.then(() => { signal.removeEventListener("abort", onAbort); resolve(); });
-		});
-		signal.throwIfAborted();
-		return await critical();
-	} finally {
-		release();
-		if (locks.get(recordKindId) === tail) locks.delete(recordKindId);
-	}
-}
 
 /**
  * Run one chat's uncovered raw transcript through a plugin record.
@@ -87,7 +61,8 @@ export async function runRecordExtraction(
 			const signal = AbortSignal.any([extractionRunSignal(jobKey) ?? new AbortController().signal, target.signal]);
 			try {
 				setExtractionPhase(jobKey, "waiting", "chat");
-				await withRecordLock(target.recordKindId, signal, async () => {
+				const extracted = await withRecordLock(target.recordKindId, signal, async () => {
+					if (!deps.chatStore.getChat(chatId)) return false;
 					target.requireActive();
 					setExtractionPhase(jobKey, "extracting", "chat");
 					await target.definition.extract(Object.freeze({
@@ -106,7 +81,9 @@ export async function runRecordExtraction(
 					if (!deps.chatStore.getChat(chatId)) throw new Error("The session was deleted during extraction");
 					const foldedAt = (deps.now?.() ?? new Date()).toISOString();
 					for (const slot of batch) target.coverage.append({ chatId, fp: slot.fp, tokens: slot.tokens, foldedAt });
+					return true;
 				});
+				if (!extracted) return { status: "missing" };
 				completed++;
 			} catch (error) {
 				const aborted = signal.aborted;

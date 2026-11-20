@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { SurfaceRegion, usePageSurfaceBoundary, useSurfaceChromeStyle } from "./plugin-surfaces";
-import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
+import { ChevronDownIcon, CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
@@ -11,7 +11,7 @@ import { ComposerActions, NodePickerControl } from "@/components/composer-action
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
-import { useOptionalInteractionLayers } from "./interaction-layers";
+import { useInteractionLayers, useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
@@ -19,7 +19,74 @@ import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
 import { SessionStarter } from "@/components/start-session";
-import type { TurnUsage } from "@/src/core";
+import type { ChatKind, TurnUsage } from "@/src/core";
+import { MenuShell } from "@/components/menu-shell";
+import { PluginMountPoint } from "@/components/plugins";
+import { SessionKindIcon, useKindCatalog } from "@/components/session-kind-icon";
+import { GRAPH_RECORD_ID, kindsForRecord, type HomeRecord } from "@/components/session-kind-catalog";
+
+/** Home's shown record, persisted client-side (stage C, owner C2). */
+const HOME_RECORD_KEY = "lh:home-record";
+
+/**
+ * The record switcher (stage C, owner C2/J1): a compact dropdown in the home
+ * header next to the sidebar toggle. Rendered by Home only when a plugin
+ * record view exists besides the graph — never a one-entry dropdown.
+ */
+function RecordSwitcher({ records, current, onPick }: { records: readonly HomeRecord[]; current: HomeRecord; onPick: (id: string) => void }) {
+	const [open, setOpen] = useState(false);
+	const triggerRef = useRef<HTMLButtonElement>(null);
+	const interactions = useInteractionLayers();
+	useEffect(() => {
+		if (!open) return;
+		const dismissOutside = (event: PointerEvent) => {
+			const menu = document.querySelector<HTMLElement>('[data-testid="home-record-menu"]');
+			if (!interactions.isElementEligible(menu)) return;
+			if (!(event.target instanceof Node) || menu?.contains(event.target) || triggerRef.current?.contains(event.target)) return;
+			setOpen(false);
+		};
+		document.addEventListener("pointerdown", dismissOutside);
+		return () => document.removeEventListener("pointerdown", dismissOutside);
+	}, [open, interactions]);
+	return <>
+		<button
+			ref={triggerRef}
+			type="button"
+			data-testid="home-record-switcher"
+			aria-controls={open ? "home-record-options" : undefined}
+			aria-expanded={open}
+			aria-label={`Shown record: ${current.label}`}
+			onClick={() => setOpen((value) => !value)}
+			className="lh-no-drag flex h-7 max-w-64 items-center gap-1 rounded-md border border-border/60 bg-background/80 px-2 text-xs text-muted-foreground transition-colors hover:text-foreground"
+		>
+			<span className="min-w-0 truncate">{current.label}</span>
+			<ChevronDownIcon aria-hidden="true" className="size-3 shrink-0" />
+		</button>
+		{open && <MenuShell
+			anchorRef={triggerRef}
+			testid="home-record-menu"
+			preferredSide="down"
+			align="left"
+			onClose={(reason) => { setOpen(false); if (reason === "escape") triggerRef.current?.focus(); return "closed"; }}
+			menuClass="flex w-56 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
+		>
+			<div id="home-record-options" role="group" aria-label="Shown record" className="contents">
+			{records.map((record) => (
+				<button
+					key={record.id}
+					type="button"
+					aria-pressed={record.id === current.id}
+					data-testid={`home-record-${record.id}`}
+					onClick={() => { onPick(record.id); setOpen(false); triggerRef.current?.focus(); }}
+					className={"flex items-center rounded-lg px-2.5 py-1.5 text-left transition-colors hover:bg-accent " + (record.id === current.id ? "bg-accent text-foreground" : "text-foreground")}
+				>
+					<span className="min-w-0 truncate">{record.label}</span>
+				</button>
+			))}
+			</div>
+		</MenuShell>}
+	</>;
+}
 
 /**
  * Home — the knowledge graph is the main view, full-bleed edge to edge
@@ -100,7 +167,33 @@ export function Home({
 	 *  may carry proposition picks from the chain table (the chip above
 	 *  the composer opens the picker; the picks seed the opening prompt).
 	 *  Not enforcing any input format — the picks are a convenience. */
-	const [mode, setMode] = useState<"teach" | "practice">("teach");
+	const [chosenMode, setMode] = useState<ChatKind>("teach");
+	/* ONE RECORD AT A TIME (stage C, owner C2): the graph, or an active
+	 * plugin record that registered a view. The choice persists; a record
+	 * that disappears falls back to the graph (kept in storage for when its
+	 * plugin returns). The mode switch lists the kinds writing into it. */
+	const kindCatalog = useKindCatalog();
+	const [storedRecord, setStoredRecord] = useState<string>(GRAPH_RECORD_ID);
+	// Storage is a preference, never a requirement: unavailable storage
+	// (blocked, or absent in a test shell) keeps the in-memory choice.
+	useEffect(() => {
+		try {
+			const stored = window.localStorage?.getItem(HOME_RECORD_KEY);
+			if (stored) setStoredRecord(stored);
+		} catch { /* in-memory only */ }
+	}, []);
+	const pickRecord = useCallback((id: string) => {
+		setStoredRecord(id);
+		try { window.localStorage?.setItem(HOME_RECORD_KEY, id); } catch { /* in-memory only */ }
+	}, []);
+	const homeRecords = kindCatalog.homeRecords;
+	const record = homeRecords.find((entry) => entry.id === storedRecord) ?? homeRecords[0]!;
+	// A stored plugin record waits for the first plugin listing instead of
+	// flashing (and loading) the graph first.
+	const recordPending = storedRecord !== GRAPH_RECORD_ID && !kindCatalog.ready;
+	const onGraph = record.id === GRAPH_RECORD_ID;
+	const kinds = useMemo(() => kindsForRecord(kindCatalog, record.id), [kindCatalog, record.id]);
+	const mode: ChatKind = kinds.some((kind) => kind.id === chosenMode) ? chosenMode : kinds[0]?.id ?? "teach";
 	const [practiceProps, setPracticeProps] = useState<{ id: string; name: string; statement: string }[]>([]);
 	const [chainSelectOpen, setChainSelectOpen] = useState(false);
 	// The chain table is CONTROLLED off this id set (the lifted pick).
@@ -120,7 +213,7 @@ export function Home({
 	};
 	const begin = async () => {
 		const t = topicRef.current.trim();
-		if (!t || startingRef.current) return;
+		if (!t || startingRef.current || recordPending || kinds.length === 0) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
 		if (!configured) {
@@ -152,10 +245,12 @@ export function Home({
 			// graph-context marker as message[0] (a separate custom message
 			// before the learner's first user message, propositions + the
 			// chains among them); the prompt stays the learner's own words.
+			// Picks are graph-only (stage C, C2): a plugin record's
+			// sessions start from the learner's words alone.
 			const target = await starterRef.current.start({
 				title: t,
-				...(mode === "practice" ? { kind: "practice" } : {}),
-				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
+				...(mode !== "teach" ? { kind: mode } : {}),
+				...(onGraph && practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
 			router.push(target);
 		} catch {
@@ -186,6 +281,16 @@ export function Home({
 			    chrome's survivors; data, extraction, and the pick flow are
 			    untouched, and the chain table stays behind its button. */}
 			<div ref={bodyRef} className="absolute inset-0">
+			{/* A plugin record's view (stage C, owner C1): the body is the
+			    plugin's; the host frames it below the header, scrolling
+			    clear of the floating composer. */}
+			{recordPending ? null : !onGraph && "mount" in record ? (
+				<main className="absolute inset-0 flex flex-col pt-13" data-testid="home-record-view">
+					<div data-plugin-view-scroll="" className="flex min-h-0 flex-1 flex-col overflow-y-auto pb-44">
+						<PluginMountPoint key={record.id} pluginId={record.pluginId} mount={record.mount} label={record.label} />
+					</div>
+				</main>
+			) : (
 			<main className="absolute inset-0">
 				{rendering ? (
 					<GraphView
@@ -203,13 +308,14 @@ export function Home({
 					/>
 				)}
 			</main>
+			)}
 
 
 			{/* New session — same floating blob as the chat composer, docked
 			    OVER the graph (no gradient: the graph runs clean under it to the
 			    bottom edge). Matches chat.tsx's DOCK geometry (max-w-[46rem]
 			    px-4) so nothing shifts when a session starts (owner). */}
-			<div className="pointer-events-none absolute inset-x-0 bottom-0 pb-5">
+			{kinds.length > 0 && !recordPending && <div className="pointer-events-none absolute inset-x-0 bottom-0 pb-5">
 				<div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-4">
 					{/* The pick bar (owner vision, 2026-10-04): the chain
 					    table's selection is PERSISTENT — picked
@@ -219,7 +325,7 @@ export function Home({
 					    shows the pick HINT so the affordance is discoverable;
 					    teaching mode with nothing picked renders nothing. */}
 					<ComposerActions
-						picker={(practiceProps.length > 0 || mode === "practice") && (
+						picker={onGraph && (practiceProps.length > 0 || mode === "practice") && (
 							<NodePickerControl
 								count={practiceProps.length}
 								onOpen={() => setChainSelectOpen(true)}
@@ -298,30 +404,32 @@ export function Home({
 					<StatsBar
 						dictationSlot={<DictationBar dictation={dictation} />}
 						turns={[] as TurnUsage[]}
-						leadingSlot={
+						leadingSlot={kinds.length > 1 ? (
 							<div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="home-mode-switch">
-								{(["teach", "practice"] as const).map((m) => (
+								{kinds.map((kind) => (
 									<button
-										key={m}
+										key={kind.id}
 										type="button"
-										data-testid={`home-mode-${m}`}
-										onClick={() => setMode(m)}
+										data-testid={`home-mode-${kind.id}`}
+										aria-pressed={mode === kind.id}
+										onClick={() => setMode(kind.id)}
 										className={
-											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
-											(mode === m
+											"flex min-w-0 items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
+											(mode === kind.id
 												? "bg-accent text-foreground"
 												: "text-muted-foreground hover:text-foreground")
 										}
 									>
-										{m === "practice" ? <DumbbellIcon aria-hidden="true" className="size-3" /> : null}
-										{m === "teach" ? "Teach" : "Practice"}
+										{kind.id === "practice" ? <DumbbellIcon aria-hidden="true" className="size-3" />
+											: kind.icon ? <SessionKindIcon icon={kind.icon} className="size-3" /> : null}
+										<span className="min-w-0 truncate">{kind.label}</span>
 									</button>
 								))}
 							</div>
-						}
+						) : undefined}
 					/>
 				</div>
-			</div>
+			</div>}
 
 			<SurfaceRegion target={surfaceTarget} />
 			</div>
@@ -332,6 +440,11 @@ export function Home({
 				<div className="pointer-events-auto">
 					<SidebarToggle />
 				</div>
+				{homeRecords.length > 1 && (
+					<div className="pointer-events-auto">
+						<RecordSwitcher records={homeRecords} current={record} onPick={pickRecord} />
+					</div>
+				)}
 			</header>
 
 			{/* First-run setup (unconfigured): the CTA's target and the send

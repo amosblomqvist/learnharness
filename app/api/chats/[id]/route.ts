@@ -68,18 +68,22 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 }
 
 /**
- * DELETE /api/chats/[id]?mode=preserve-graph|delete-nodes — session deletion
+ * DELETE /api/chats/[id]?mode=preserve|purge — session deletion
  * (wave 6, owner rulings 2026-09-22/23). The mode is REQUIRED and explicit:
  * no default, because the two differ in destructiveness —
  *
- *   preserve-graph  the session record, its jobs, and its extraction
+ *   preserve        the session record, its jobs, and its extraction
  *                   bookkeeping (coverage/checkpoint rows) die; the graph
  *                   keeps every contribution the session merged.
- *   delete-nodes    "this session never happened": every ledger trace of
+ *   purge           "this session never happened": every ledger trace of
  *                   the session goes too — provenance, link lines,
  *                   events, mappings — and orphaned nodes die entirely
  *                   (shared nodes survive automatically, their other
- *                   sessions' content intact).
+ *                   sessions' content intact). A session whose record
+ *                   is a plugin record asks that record's purge(chatId)
+ *                   instead (409 when the record is unavailable or has no
+ *                   purge, 500 purge_failed when it throws — the session
+ *                   is kept either way).
  *
  * Gates are the server orchestration's (server/chats.ts deleteChatSession):
  * 409 while a turn or background job is running, 503 while the session's
@@ -90,10 +94,10 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 export async function DELETE(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	const mode = new URL(req.url).searchParams.get("mode");
-	if (mode !== "preserve-graph" && mode !== "delete-nodes") {
+	if (mode !== "preserve" && mode !== "purge") {
 		return Response.json(
 			{
-				error: 'mode is required and must be "preserve-graph" or "delete-nodes"',
+				error: 'mode is required and must be "preserve" or "purge"',
 				code: "bad_mode",
 			},
 			{ status: 400 },

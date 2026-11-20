@@ -37,6 +37,7 @@ import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
+import { parsePluginKindId } from "./session-kinds.ts";
 import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
 
 /** The schema version this code understands. Bump ONLY for breaking shape
@@ -488,6 +489,11 @@ export interface CompactionSettings {
 	includeReasoning?: boolean;
 }
 
+/** Plugin record kinds' host-owned switches, keyed by full record kind id
+ *  (session/record kinds stage C, owner q54: graph.enabled stays graph-only).
+ *  extraction absent = on; off = no trigger, no ring, manual extract refused. */
+export type RecordsSettings = Record<string, { extraction?: boolean }>;
+
 /** THE record. Every section optional (delta); unknown top-level keys are
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
@@ -503,6 +509,7 @@ export interface UserSettings {
 	customProvider?: CustomProviderSettings;
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
+	records?: RecordsSettings;
 	compaction?: CompactionSettings;
 	[key: string]: unknown;
 }
@@ -833,6 +840,18 @@ function sanitizeGraph(raw: Record<string, unknown>): GraphSettings {
 	return out;
 }
 
+/** Plugin record switches: only full plugin record kind ids with a boolean
+ *  extraction survive (clamp-never-reject: anything else drops). */
+function sanitizeRecords(raw: Record<string, unknown>): RecordsSettings {
+	const out: RecordsSettings = {};
+	for (const [id, value] of Object.entries(raw)) {
+		if (!parsePluginKindId(id) || value === null || typeof value !== "object" || Array.isArray(value)) continue;
+		const extraction = boolOrDrop((value as Record<string, unknown>).extraction);
+		out[id] = extraction === undefined ? {} : { extraction };
+	}
+	return out;
+}
+
 /** clamp-never-reject (the sanitizer's discipline): a finite positive
  *  number floors to COMPACTION_THRESHOLD_FLOOR, anything else drops (the
  *  factory default resolves at read time). Exported for the PUT parser's
@@ -893,6 +912,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
+	}
+	if (r.records !== null && typeof r.records === "object" && !Array.isArray(r.records)) {
+		out.records = sanitizeRecords(r.records as Record<string, unknown>);
 	}
 	if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);

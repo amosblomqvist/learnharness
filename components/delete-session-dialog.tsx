@@ -3,9 +3,10 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
 import type { ChatDeleteMode, ChatListItem } from "@/src/core";
+import type { ChatRecordView } from "@/components/session-kind-catalog";
 
 /** The graph-traces checkbox copy (owner, 2026-09-24 flow rework — was
- *  the delete-nodes option's body in the two-button design): the
+ *  the purge option's body in the two-button design): the
  *  graph-touching consequence says so, shared-topic survival included.
  *  Exported pure for render pins: the copy is design, not implementation. */
 export const TRACES_COPY = {
@@ -14,6 +15,33 @@ export const TRACES_COPY = {
 	title: "Also remove its graph traces",
 	body: "This session’s topics, links, and events leave the graph too. Topics other sessions or imported notes also cover survive; topics only this session created are removed entirely.",
 };
+
+/** What the dialog offers for a session's record (stage C, owner C4/q52):
+ *  the graph keeps its exact copy; a plugin record that declares purge gets
+ *  the same checkbox in its own words; an unavailable record shows it
+ *  disabled with the reason; a record without purge (or no record —
+ *  practice) offers nothing. Pure, for render pins. */
+export interface DeletionChoice {
+	intro: string;
+	traces: { title: string; body: string; disabled: boolean } | null;
+}
+export function deletionChoice(record: ChatRecordView): DeletionChoice {
+	const removes = "This permanently removes the session — its messages, background jobs, and extraction records.";
+	switch (record.status) {
+		case "graph":
+			return { intro: `${removes} Everything it added to the graph stays unless you check below. This cannot be undone.`, traces: { title: TRACES_COPY.title, body: TRACES_COPY.body, disabled: false } };
+		case "none":
+			return { intro: "This permanently removes the session — its messages and background jobs. This cannot be undone.", traces: null };
+		case "plugin":
+			return record.record.purge
+				? { intro: `${removes} Everything it added to ${record.record.label} stays unless you check below. This cannot be undone.`,
+					traces: { title: `Also remove its ${record.record.label} traces`, body: `${record.record.pluginName} removes what this session added to ${record.record.label}.`, disabled: false } }
+				: { intro: `${removes} Everything it added to ${record.record.label} stays. This cannot be undone.`, traces: null };
+		case "unavailable":
+			return { intro: `${removes} Its record stays as it is. This cannot be undone.`,
+				traces: { title: "Also remove its traces", body: "Unavailable while the plugin that owns this session's record is disabled or not installed.", disabled: true } };
+	}
+}
 
 /**
  * Session deletion (wave 6 chunk A; owner flow rework 2026-09-24) — THE
@@ -26,9 +54,9 @@ export const TRACES_COPY = {
  *     JetBrains Mono at normal text-sm size (was sized-up text-lg), no
  *     code-block chrome;
  *   - ONE unchecked-by-default checkbox "Also remove its graph traces"
- *     (unchecked = preserve-graph: the session record, its jobs, and its
+ *     (unchecked = preserve: the session record, its jobs, and its
  *     extraction bookkeeping die; the graph keeps every contribution.
- *     checked = delete-nodes: the session's ledger traces go too);
+ *     checked = purge: the session's ledger traces go too);
  *   - a bottom row Cancel + destructive-red Delete, exactly the node
  *     dialog's pair.
  *
@@ -40,11 +68,14 @@ export const TRACES_COPY = {
  */
 export function DeleteSessionDialog({
 	chat,
+	record = { status: "graph" },
 	onClose,
 	onDeleted,
 }: {
 	/** The session up for deletion; null = closed. */
 	chat: Pick<ChatListItem, "id" | "title"> | null;
+	/** What the session extracts into, from the client kind catalog. */
+	record?: ChatRecordView;
 	onClose: () => void;
 	/** Success path — the sidebar owns navigation + list patching. */
 	onDeleted: (id: string, mode: ChatDeleteMode, graphRevision: number) => void;
@@ -66,9 +97,10 @@ export function DeleteSessionDialog({
 		}
 	}, [chat]);
 
+	const choice = deletionChoice(record);
 	const run = async () => {
 		if (!chat || busy) return;
-		const mode: ChatDeleteMode = traces ? "delete-nodes" : "preserve-graph";
+		const mode: ChatDeleteMode = traces && choice.traces && !choice.traces.disabled ? "purge" : "preserve";
 		setBusy(true);
 		setFailure(null);
 		try {
@@ -97,6 +129,7 @@ export function DeleteSessionDialog({
 
 	return <DeleteSessionBody
 				chat={chat}
+				choice={choice}
 				traces={traces}
 				busy={busy}
 				failure={failure}
@@ -114,6 +147,7 @@ export function DeleteSessionDialog({
  *  node-dialog body pattern). The wrapper owns state + effects + portal. */
 export function DeleteSessionBody({
 	chat,
+	choice = deletionChoice({ status: "graph" }),
 	traces,
 	busy,
 	failure,
@@ -123,7 +157,8 @@ export function DeleteSessionBody({
 	renderFrame,
 }: {
 	chat: Pick<ChatListItem, "id" | "title">;
-	/** The graph-traces checkbox — unchecked by default (preserve-graph). */
+	choice?: DeletionChoice;
+	/** The traces checkbox — unchecked by default (preserve). */
 	traces: boolean;
 	busy: boolean;
 	failure: { code: string; error: string } | null;
@@ -152,27 +187,26 @@ export function DeleteSessionBody({
 					{chat.title}
 				</code>
 			</div>
-			<p className="mt-2 text-sm text-muted-foreground">
-				This permanently removes the session — its messages, background jobs, and extraction records. Everything
-				it added to the graph stays unless you check below. This cannot be undone.
-			</p>
-			<label
-				data-testid={TRACES_COPY.testid}
-				className="mt-4 flex cursor-pointer items-start gap-2.5 rounded-lg border border-border/60 px-4 py-3"
-			>
-				<input
-					type="checkbox"
-					data-testid={TRACES_COPY.checkbox}
-					checked={traces}
-					onChange={(e) => onTraces(e.target.checked)}
-					disabled={busy}
-					className="mt-0.5 size-4 shrink-0 accent-primary"
-				/>
-				<span className="min-w-0">
-					<span className="block text-sm text-foreground">{TRACES_COPY.title}</span>
-					<span className="mt-1 block text-xs text-muted-foreground">{TRACES_COPY.body}</span>
-				</span>
-			</label>
+			<p className="mt-2 text-sm text-muted-foreground">{choice.intro}</p>
+			{choice.traces && (
+				<label
+					data-testid={TRACES_COPY.testid}
+					className={"mt-4 flex items-start gap-2.5 rounded-lg border border-border/60 px-4 py-3 " + (choice.traces.disabled ? "opacity-60" : "cursor-pointer")}
+				>
+					<input
+						type="checkbox"
+						data-testid={TRACES_COPY.checkbox}
+						checked={traces && !choice.traces.disabled}
+						onChange={(e) => onTraces(e.target.checked)}
+						disabled={busy || choice.traces.disabled}
+						className="mt-0.5 size-4 shrink-0 accent-primary"
+					/>
+					<span className="min-w-0">
+						<span className="block text-sm text-foreground">{choice.traces.title}</span>
+						<span className="mt-1 block text-xs text-muted-foreground">{choice.traces.body}</span>
+					</span>
+				</label>
+			)}
 			{failure && (
 				<div
 					role="alert"
