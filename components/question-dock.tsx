@@ -1,8 +1,16 @@
 "use client";
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import {
+	useCallback,
+	useEffect,
+	useLayoutEffect,
+	useMemo,
+	useRef,
+	useState,
+} from "react";
 import type { ViewReaderRef, NativeQuestionViewState } from "./session-view-readers";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
+import { FloatGrip } from "@/components/float-grip";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
@@ -16,14 +24,11 @@ import { cn } from "@/lib/utils";
 import {
 	buildAnswer,
 	toClientQuestion,
+	questionDataFor,
 	normalizeQuizType,
 	CONFIDENCE_STOPS,
 	DEFAULT_CONFIDENCE_INDEX,
 	emptyDockSelection,
-	normalizeOptions,
-	resolveCorrect,
-	seededRandom,
-	shuffleOptions,
 	toolQuestionKind,
 	parseAskInput,
 	parseQuizInput,
@@ -37,7 +42,6 @@ import {
 	type QuestionAnswerData,
 	type QuestionFormDraft,
 	type QuestionData,
-	type QuestionMode,
 	type QuizToolInput,
 	type SelectMode,
 	type Phase3,
@@ -110,6 +114,17 @@ export interface QuestionDockProps {
 	 *  and say so in the hint row. The server registry is the real gate;
 	 *  this is the affordance. */
 	compactionRunning?: boolean;
+	/** Float mode (owner round, 2026-11-19): the card is free of the bottom
+	 *  band — a drag grip heads the card, the maximize/minimize machine is
+	 *  the learner's own (scroll never collapses a floating card). Absent
+	 *  keeps the band card byte-identical. */
+	floating?: boolean;
+	/** The grip reports the panel's ABSOLUTE viewport top-left on every
+	 *  drag move and arrow step (already clamped here); the host applies it. */
+	onFloatPosition?: (x: number, y: number) => void;
+	/** Closes the panel to the chip. The minimize button hides when absent
+	 *  (no dead control). */
+	onMinimize?: () => void;
 }
 
 export function QuestionDock({
@@ -131,6 +146,9 @@ export function QuestionDock({
 	dictationClaim = true,
 	compactionRunning = false,
 	workingRef,
+	floating,
+	onFloatPosition,
+	onMinimize,
 }: QuestionDockProps) {
 	// The probe-phase names (owner, 2026-10-09) canonicalize onto their
 	// teach twins for every dock concern — parse dispatch, labels, kinds:
@@ -153,8 +171,16 @@ export function QuestionDock({
 	if (!parsed) {
 		return <MalformedQuestion />;
 	}
+	// The floating header's eyebrow carries the dock's OWN kind label
+	// (owner round, 2026-11-19) — the same naming the collapsed bar uses,
+	// so a floating card and its chip read as one object.
+	const isPrediction = (canonical === "quiz" || canonical === "explain") && "type" in parsed && normalizeQuizType(parsed.type) === "predict";
+	const floatLabel = isPrediction ? "Prediction" : toolLabel ?? (canonical === "quiz" ? "Check" : canonical === "explain" ? "Explain" : "Question");
 	return (
 		<>
+			{floating && expanded && (
+				<FloatGrip label={floatLabel} onFloatPosition={onFloatPosition} onMinimize={onMinimize} />
+			)}
 			{!expanded && (
 				<QuestionDockBar
 					toolName={canonical}
@@ -162,12 +188,7 @@ export function QuestionDock({
 					onExpand={onExpand}
 					variant={reveal ? "reveal" : "collapsed"}
 					toolLabel={toolLabel}
-					label={
-						(canonical === "quiz" || canonical === "explain") &&
-						normalizeQuizType((parsed as { type?: unknown }).type) === "predict"
-							? "Prediction"
-							: undefined
-					}
+					label={isPrediction ? "Prediction" : undefined}
 				/>
 			)}
 			<div className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
@@ -177,7 +198,7 @@ export function QuestionDock({
 					toolCallId={toolCallId}
 					input={parsed}
 					phase={phase}
-					active={expanded}
+					active={expanded && !floating}
 					onSubmit={onSubmit}
 					onPrepareSubmission={onPrepareSubmission}
 					hasPendingInput={hasPendingInput}
@@ -286,56 +307,9 @@ function QuestionDockForm({
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLDivElement>(null);
 
-	// Canonical QuestionData, built once per question. Quiz options are
-	// deterministically shuffled (seeded by toolCallId) so position never leaks
-	// correctness AND server/client render the same order (hydration-safe);
-	// the display order is snapshotted into the answer record at submit time.
-	const qd = useMemo<QuestionData>(() => {
-		const quizInput = kind === "quiz" ? (input as QuizToolInput) : null;
-		const askInput = kind === "ask" ? (input as AskToolInput) : null;
-		const explainInput = kind === "explain" ? (input as ExplainToolInput) : null;
-		const multi = input instanceof Object && "multiSelect" in input ? input.multiSelect === true : false;
-		const mode: QuestionMode =
-			kind === "quiz"
-				? multi
-					? "multi-select"
-					: "single-select"
-				: askInput?.options?.length
-					? multi
-						? "multi-select"
-						: "single-select"
-						: "text";
-		const options = normalizeOptions(
-			(quizInput?.options ?? askInput?.options ?? []) as { label: string; value?: string }[],
-		);
-		const ordered = kind === "quiz" && options.length > 0 ? shuffleOptions(options, seededRandom(toolCallId)) : options;
-		const q: QuestionData = {
-			id: toolCallId,
-			kind,
-			// The role (owner 2026-10-03): predict questions gate by it in the
-			// view (never collapsed) and the answered card tucks the explanation.
-			questionType: kind === "quiz" ? normalizeQuizType((input as { type?: unknown }).type) : undefined,
-			question: input.question,
-			context: input.details,
-			mode,
-			options: ordered,
-			createdAt: new Date().toISOString(),
-		};
-		if (quizInput) {
-			const resolved = resolveCorrect(quizInput.correctAnswer, ordered);
-			if (resolved.error) console.error("[quiz] correctAnswer did not resolve:", resolved.error);
-			q.correctIndices = resolved.indices;
-			q.explanation = quizInput.explanation;
-		}
-		if (explainInput) {
-			// The commitment rides the question data (never sent to the
-			// client before answering) and snapshots into the answer at submit.
-			// One field, reasoning included — no separate explanation
-			// (owner ruling 2026-09-27).
-			q.committedAnswer = explainInput.correctAnswer;
-		}
-		return q;
-	}, [toolCallId, kind, input]);
+	// The dock and the parked composer share one canonical builder so option
+	// order, grading keys, explanations, and explain commitments cannot drift.
+	const qd = useMemo<QuestionData>(() => questionDataFor(toolCallId, toolName, input as never), [toolCallId, toolName, input]);
 
 	// The selection state machine lives in question-core (pure, tested):
 	// single-select displaces, multi-select coexists — picking the ask
@@ -419,7 +393,7 @@ function QuestionDockForm({
 	const viewPresentationKey = JSON.stringify({ ...toClientQuestion(qd), questionType: qd.questionType });
 	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, sel, other, text, thinking, confIdx, viewPresentationKey]);
 	const submit = () => {
-		if (!canSubmit || compactionRunning || preparing) return;
+		if (!active || !canSubmit || compactionRunning || preparing) return;
 		if (onPrepareSubmission) {
 			onPrepareSubmission({ question: qd, isCurrent: () => mounted.current && currentQuestion.current === qd && isInteractionScopeEligible(rootRef.current, controller), capture: captureRequest });
 			return;
@@ -534,6 +508,10 @@ function QuestionDockForm({
 			// treat that as a claim. Eligibility, not focus alone, owns rows.
 			if (!isInteractionScopeEligible(rootRef.current, controller)) return;
 			const t = e.target as HTMLElement | null;
+			// The floating grip's arrows MOVE the card (owner round,
+			// 2026-11-19) — one key, one meaning: never walk rows or cycle
+			// confidence from a keypress born inside the grip.
+			if (t?.closest?.('[data-testid="dock-float-grip"]')) return;
 			// A TYPING field is where keys mean text (owner round 4): the
 			// thinking/answer fields, search boxes, renames — never a range
 			// input, whose focus after a click or drag must not kill the

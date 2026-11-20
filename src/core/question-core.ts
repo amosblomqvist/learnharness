@@ -700,6 +700,131 @@ export function toClientQuestion(qd: QuestionData): ClientQuestion {
 	};
 }
 
+/**
+ * Canonical QuestionData for an authored tool input — the ONE builder the
+ * dock and the chip-lane share (owner round, 2026-11-19): quiz options are
+ * deterministically shuffled (seeded by toolCallId) so position never leaks
+ * correctness AND every submit path sees the same order. The secrets resolve
+ * here too (correctIndices via resolveCorrect, explanation, the explain
+ * commitment) — a second attachment point was a second chance for the two
+ * submit paths to disagree.
+ */
+type QuestionToolInput = QuizToolInput | AskToolInput | ExplainToolInput;
+
+function isQuizToolInput(input: QuestionToolInput): input is QuizToolInput {
+	return "options" in input && "correctAnswer" in input && "explanation" in input;
+}
+
+function isAskToolInput(input: QuestionToolInput): input is AskToolInput {
+	return !("correctAnswer" in input);
+}
+
+function isExplainToolInput(input: QuestionToolInput): input is ExplainToolInput {
+	return "correctAnswer" in input && !("options" in input);
+}
+
+export function questionDataFor(toolCallId: string, tool: string, input: QuestionToolInput): QuestionData {
+	const kind = tool === "quiz" || tool === "probe" ? "quiz" : tool === "explain" || tool === "recall" ? "explain" : "ask";
+	const quizInput = kind === "quiz" && isQuizToolInput(input) ? input : null;
+	const askInput = kind === "ask" && isAskToolInput(input) ? input : null;
+	const multi = "multiSelect" in input && input.multiSelect === true;
+	const mode: QuestionMode =
+		kind === "quiz"
+			? multi ? "multi-select" : "single-select"
+			: askInput?.options?.length
+				? multi ? "multi-select" : "single-select"
+				: "text";
+	const explainInput = kind === "explain" && isExplainToolInput(input) ? input : null;
+	const options = normalizeOptions(quizInput?.options ?? askInput?.options ?? []);
+	const ordered = kind === "quiz" && options.length > 0 ? shuffleOptions(options, seededRandom(toolCallId)) : options;
+	const resolved = quizInput ? resolveCorrect(quizInput.correctAnswer, ordered) : undefined;
+	if (resolved?.error) console.error("[quiz] correctAnswer did not resolve:", resolved.error);
+	return {
+		id: toolCallId,
+		kind,
+		questionType: "type" in input ? normalizeQuizType(input.type) : undefined,
+		question: input.question,
+		context: input.details,
+		mode,
+		options: ordered,
+		...(resolved ? { correctIndices: resolved.indices } : {}),
+		...(quizInput ? { explanation: quizInput.explanation } : {}),
+		...(explainInput ? { committedAnswer: explainInput.correctAnswer } : {}),
+		createdAt: new Date().toISOString(),
+	};
+}
+
+/**
+ * Composer prose → an AnswerRequest, for answering from the parked chip
+ * without reopening the dock (owner round, 2026-11-19). Matching is EXACT
+ * against the authored surface — an option's label or value, case- and
+ * whitespace-insensitive, or its 1-based displayed number. Never a partial
+ * or fuzzy guess: an unmatched token throws BEFORE anything is sent, so the
+ * composer draft survives for the learner to fix.
+ *
+ * - text-mode: the raw words, trimmed (grading is the model's job).
+ * - single-select: one label/value/number; several candidates throw.
+ * - multi-select: comma/newline-separated entries, each resolving uniquely.
+ *   The whole string is tried first, so a literal comma-bearing label wins
+ *   over splitting.
+ * - ask options: prose matching nothing is a free-form reply → `other`
+ *   (ask is ungraded and supports Other; nothing is lost).
+ * - quiz unknown: throws — never graded wrong, never repaired into the
+ *   correct answer the learner did not pick.
+ * - The learner's raw prose rides `thinking` whenever option values resolve.
+ *   No confidence is implied; the caller adds a saved one if it has it.
+ */
+function optionMenu(question: QuestionData): string {
+	return question.options.map((option, i) => `${i + 1}. ${option.label}`).join("\n");
+}
+
+type TokenMatch = { index: number } | { problem: string };
+
+function matchToken(question: QuestionData, token: string): TokenMatch {
+	const needle = token.toLowerCase();
+	let index: number | undefined;
+	for (const [i, option] of question.options.entries()) {
+		if (needle !== option.label.toLowerCase() && needle !== option.value.toLowerCase()) continue;
+		if (index !== undefined) return { problem: `"${token}" matches more than one option — reply with its display number.` };
+		index = i + 1;
+	}
+	if (index !== undefined) return { index };
+	if (/^\d+$/.test(token)) {
+		const n = Number(token);
+		if (n >= 1 && n <= question.options.length) return { index: n };
+	}
+	return { problem: `"${token}" is not one of this question's options.` };
+}
+
+export function answerRequestForText(question: QuestionData, text: string): AnswerRequest {
+	const trimmed = text.trim();
+	if (question.mode === "text") return { text: trimmed };
+	if (trimmed.length === 0) {
+		throw new Error(`Type an answer first. Reply with an exact option label, value, or display number.\n${optionMenu(question)}`);
+	}
+	const whole = matchToken(question, trimmed);
+	if ("index" in whole) return { values: [question.options[whole.index - 1]!.value], thinking: trimmed };
+	if (question.kind === "ask" && question.mode === "single-select") return { other: trimmed };
+	const tokens = trimmed.split(/[\n,]+/).map((token) => token.trim()).filter((token) => token.length > 0);
+	const indices = new Set<number>();
+	for (const token of tokens) {
+		const match = matchToken(question, token);
+		if (!("index" in match)) {
+			if (question.kind === "ask" && indices.size === 0) return { other: trimmed };
+			throw new Error(`${match.problem} Reply with an exact option label, value, or display number.\n${optionMenu(question)}`);
+		}
+		if (indices.has(match.index)) throw new Error(`"${token}" is listed twice — name each option once.`);
+		indices.add(match.index);
+	}
+	if (question.mode === "single-select" && indices.size > 1) {
+		throw new Error(`This question takes exactly one answer, not ${indices.size}.\n${optionMenu(question)}`);
+	}
+	return {
+		values: [...indices].sort((a, b) => a - b).map((index) => question.options[index - 1]!.value),
+		thinking: trimmed,
+	};
+}
+
 function formatOptionRef(options: QuizOption[], index: number): string {
 	const opt = options.find((o, i) => i + 1 === index);
 	return `${index}. ${opt ? opt.label : "(unknown)"}`;

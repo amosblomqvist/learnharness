@@ -67,7 +67,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, ChevronRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { PluginQuestionDock } from "./plugin-question-dock";
@@ -112,6 +112,9 @@ import { Button } from "@/components/ui/button";
 import {
 	activeProblemOf,
 	pendingQuestionOf,
+	parseQuestionInput,
+	questionDataFor,
+	answerRequestForText,
 	malformedQuestionsOf,
 	dismissedAnswer,
 	endsInFailedTurn,
@@ -570,6 +573,7 @@ export function Chat({
 	// listener is mount-scoped; the value it needs is render-scoped).
 	const pendingRef = useRef(pending);
 	pendingRef.current = pending;
+	const [nativeDockParked, setNativeDockParked] = useState(false);
 
 	// THE ACTIVE PRACTICE PROBLEM (practice sessions, 2026-10-04): the
 	// same dock-ownership rule as a pending question — an active problem
@@ -1106,7 +1110,7 @@ export function Chat({
 	// recovers from it. Later compaction requires new input instead.
 	const retryable = !pluginOwnsDock && (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
 	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
-	const sendAllowed = !pluginOwnsDock && reconciliation === "ready" && !pending && !activeProblem && !compacting && !submissionRunner.occupied;
+	const sendAllowed = !pluginOwnsDock && reconciliation === "ready" && ((!pending && !activeProblem) || nativeDockParked) && !compacting && !submissionRunner.occupied;
 	const pendingTextTarget = textTarget();
 	const pendingTextInput = !!pendingTextTarget && !!pluginManager?.hasPendingSubmissionInput(pendingTextTarget);
 	const pendingThinkingTarget = thinkingTarget();
@@ -1550,6 +1554,40 @@ export function Chat({
 	const onSend = () => {
 		if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller) || submissionRunner.occupied) return;
 		if (openingDraftRef.current !== null) { deliverOpeningPrompt(textRef.current.trim(), true); return; }
+		if (nativeDockParked) {
+			const original = pendingRef.current;
+			const parsed = original ? parseQuestionInput(original.tool, original.input) : undefined;
+			if (original && parsed) {
+				const question = questionDataFor(original.toolCallId, original.tool, parsed);
+				const target = builtinTarget(question);
+				if (!target || busyRef.current || compacting) return;
+				let captured = "", revision = 0;
+				void runSubmission(target, () => {
+					captured = textRef.current.trim(); revision = composerEditRevision.current;
+					const raw = answerRequestForText(question, captured);
+					const { thinking, ...answer } = raw;
+					return { type: "answer", answer: { ...answer, images: [] }, thinking: { text: thinking ?? "", images: [] }, readingThinking: { text: requiresReveal ? readingThinkingRef.current : "", images: [] } };
+				}, () => !busyRef.current && pendingQuestionOf(submissionLive.current.nativeMessages)?.key === original.key, async (prepared, attempt) => {
+					if (prepared.type !== "answer") return false;
+					const raw = validatePluginBuiltinSubmissionAnswer(question, prepared.answer);
+					const answer = buildAnswer(question, { ...raw, thinking: prepared.thinking.text, readingThinking: prepared.readingThinking.text }, original.tool);
+					const images = submissionImages(prepared, target.channels);
+					attempt.deliver();
+					return send({ type: "answer", toolCallId: original.toolCallId, occurrence: target.question.occurrence, answer: { ...answer, ...(images ? { images } : {}) } }, () => {
+						if (composerEditRevision.current === revision && textRef.current.trim() === captured) applyText("");
+						attempt.accepted();
+					}, original.key, attempt.refused);
+				});
+				return;
+			}
+			if (activeProblemRef.current && !activeProblemRef.current.pluginProblem) {
+				const revision = composerEditRevision.current;
+				prepareThinking(() => textRef.current.trim(), captured => {
+					if (composerEditRevision.current === revision && textRef.current.trim() === captured) applyText("");
+				});
+				return;
+			}
+		}
 		void prepareText();
 	};
 
@@ -2081,6 +2119,7 @@ export function Chat({
 					cliContextWindow={cliContextWindowOf(nativeMessages)}
 					pricing={pricing}
 					onReserve={setDockReserve}
+					onFloatDockState={setNativeDockParked}
 					dictationSlot={<DictationBar dictation={dictation} disabled={pluginOwnsDock && !pluginMicAvailable} />}
 					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
@@ -2124,7 +2163,7 @@ export function Chat({
 							// applies.
 							nextProblem={nextReady}
 							onNext={sendNext}
-							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+							placeholder={nativeDockParked ? "Answer here, or enter an option label or number." : nextReady ? "Ask anything, or press Enter for the next one." : undefined}
 						/>
 					}
 					onSubmitAnswer={(output) => {
@@ -2382,6 +2421,7 @@ export function DockOverlay({
 	onSaveQuestionDraft,
 	workingRef,
 	practice, pluginPractice,
+	onFloatDockState,
 	compactionRunning,
 	onSubmitThinking,
 	requiresReveal,
@@ -2437,6 +2477,11 @@ export function DockOverlay({
 	 *  {toolCallId, input} — dock ownership exactly like a pending
 	 *  question (the composer is replaced); null in teaching sessions. */
 	practice: { toolCallId: string; input: unknown } | null;
+	/** Reports the float-dock's parked state (owner round, 2026-11-19):
+	 *  true while the builtin question card is parked on its chip — the
+	 *  composer's Enter then carries the answer (answer-without-open),
+	 *  never while the panel floats open. */
+	onFloatDockState?: (parked: boolean) => void;
 	pluginPractice?: Omit<PluginProblemDockProps, "expanded" | "onExpand">;
 	/** (commit, text) — the practice dock's two submit lanes. */
 	onSubmitThinking: (text: string) => void;
@@ -2496,8 +2541,32 @@ export function DockOverlay({
 	// revealed, the normal collapse machine rules apply untouched.
 	const [revealed, setRevealed] = useState(false);
 	const revealPending = requiresReveal && !revealed;
-
-	const pendingId = pluginQuestion ? pluginQuestionOccurrenceKey(pluginQuestion.occurrence) : unreadablePlugin ? "unreadable-plugin-question" : pending?.key ?? null;
+	const nativeFloating = !!(pending || practice) && !pluginQuestion && !unreadablePlugin && !pluginPractice;
+	const [floatOpen, setFloatOpen] = useState(!requiresReveal);
+	const [floatPos, setFloatPos] = useState({ x: 24, y: 48 });
+	const [floatViewport, setFloatViewport] = useState({ width: 900, height: 700 });
+	const nativeFloatingRef = useRef(nativeFloating);
+	nativeFloatingRef.current = nativeFloating;
+	useEffect(() => {
+		const resize = () => {
+			const width = window.innerWidth, height = window.innerHeight;
+			setFloatViewport({ width, height });
+			// Reposition to stay on-screen, clamped by the panel's real width
+			// once measured — a narrow phone can never park the card off-right
+			// (the old fixed 96px sliver overflowed the page).
+			requestAnimationFrame(() => {
+				setFloatPos(position => {
+					const panel = document.querySelector<HTMLElement>('[data-testid="dock-float-panel"]');
+					const limitX = Math.max(8, width - (panel?.offsetWidth ?? Math.min(736, width - 32)) - 8);
+					return { x: Math.max(8, Math.min(position.x, limitX)), y: Math.max(8, Math.min(position.y, height - 48)) };
+				});
+			});
+		};
+		resize();
+		window.addEventListener("resize", resize);
+		return () => window.removeEventListener("resize", resize);
+	}, []);
+	const pendingId = pluginQuestion ? pluginQuestionOccurrenceKey(pluginQuestion.occurrence) : unreadablePlugin ? "unreadable-plugin-question" : pending?.key ?? practice?.toolCallId ?? null;
 	const readingInputRef = useRef<HTMLDivElement>(null);
 	const ownsDock = !!pending || !!pluginQuestion || unreadablePlugin || !!practice;
 	const initialPendingRef = useRef(pendingId);
@@ -2528,7 +2597,13 @@ export function DockOverlay({
 			// Painted in THIS render — no stale-open frame, no after-paint flip.
 			setExpanded(probeArrivalExpanded(atBottomRef.current));
 		}
+		setFloatOpen(!requiresReveal);
 	}
+
+	useLayoutEffect(() => {
+		onFloatDockState?.(nativeFloating && !floatOpen);
+	}, [nativeFloating, floatOpen, onFloatDockState]);
+	useEffect(() => () => { onFloatDockState?.(false); }, [onFloatDockState]);
 
 	// New question MID-SESSION (flicker round): the open/closed state itself
 	// is decided DURING RENDER above; this effect only owns the reveal
@@ -2539,7 +2614,7 @@ export function DockOverlay({
 	// frame-by-frame 2026-09-26, d peaked ~405px). On session mount the dock
 	// starts in its initial state — no scroll, no morph.
 	useEffect(() => {
-		if (!pendingId || pendingId === initialPendingRef.current) return;
+		if (nativeFloating || !pendingId || pendingId === initialPendingRef.current) return;
 		if (!requiresReveal && atBottomRef.current) void suppressFoldDuringReveal();
 		// fire only when a NEW question lands
 	}, [pendingId]);
@@ -2570,6 +2645,8 @@ export function DockOverlay({
 		: practice
 			? `practice:${pluginPractice?.snapshot.problemId ?? practice.toolCallId}`
 			: "chat";
+	const bandMode = nativeFloating ? "chat" : mode;
+	const bandOwnsDock = ownsDock && !nativeFloating;
 
 	useLayoutEffect(() => {
 		if (!viewReader || !viewTargets) return;
@@ -2580,12 +2657,12 @@ export function DockOverlay({
 			if (pending) {
 				const state = nativeViewReader.current?.();
 				const target = state && state.question.id === pending.toolCallId ? viewTargets.answer(state.question) : undefined;
-				return target && state ? { ...target, expanded, revealed: !revealPending, available: true, draft: { ...state.draft, readingThinking } }
+				return target && state ? { ...target, expanded: nativeFloating ? floatOpen : expanded, revealed: nativeFloating ? floatOpen : !revealPending, available: true, draft: { ...state.draft, readingThinking } }
 					: { type: "unavailable", occurrence: { messageId: pending.messageId, contentIndex: pending.contentIndex, toolCallId: pending.toolCallId, toolName: pending.tool }, expanded, revealed: !revealPending };
 			}
 			if (pluginPractice && viewTargets.pluginProblem) return { ...viewTargets.pluginProblem, input: pluginPractice.snapshot.input, expanded,
 				available: customViewReader.current?.().available ?? false, draft: pluginPractice.draft };
-			if (practice && viewTargets.thinking) return { ...viewTargets.thinking, expanded, draft: { thinking: practiceViewReader.current?.() ?? "" } };
+			if (practice && viewTargets.thinking) return { ...viewTargets.thinking, expanded: nativeFloating ? floatOpen : expanded, draft: { thinking: practiceViewReader.current?.() ?? "" } };
 			return viewTargets.text;
 		};
 		viewReader.current = read;
@@ -2638,7 +2715,7 @@ export function DockOverlay({
 	const reserveRef = useRef(0);
 	const offer = useCallback((blockH: number) => {
 		const next = blockH + GRADIENT_H;
-		if (next <= reserveRef.current + 0.5 && pendingRef.current) return;
+		if (next <= reserveRef.current + 0.5 && pendingRef.current && !nativeFloatingRef.current) return;
 		// Stamp growth at the source, including child-only field resizes, so
 		// stick-to-bottom's catch-up is not mistaken for the learner leaving.
 		if (shouldStampGeometryMute(next, reserveRef.current, pendingRef.current)) geometryAtRef.current = Date.now();
@@ -2655,14 +2732,14 @@ export function DockOverlay({
 	// effect below. Short windows scroll the reading/question/answer body;
 	// the stats/model toolbar remains outside that overflow viewport.
 	const [sbInset, setSbInset] = useState(0);
-	const stateKey = dockStateKey(mode, ownsDock, expanded);
+	const stateKey = dockStateKey(bandMode, bandOwnsDock, expanded);
 	const heightMorphRef = useRef<ReturnType<typeof createDockMorph> | null>(null);
 	if (!heightMorphRef.current) heightMorphRef.current = createDockMorph();
 	const retargetOpening = useCallback(() => heightMorphRef.current?.retarget(stateKey), [stateKey]);
 	useIsoLayoutEffect(() => () => heightMorphRef.current?.dispose(), []);
 	useDockHeight({
 		scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-		expanded, enabled: ownsDock, mode, onScrollbarInset: setSbInset, onHeight: offer,
+		expanded, enabled: bandOwnsDock, mode: bandMode, onScrollbarInset: setSbInset, onHeight: offer,
 		onLayout: retargetOpening,
 	});
 
@@ -2728,7 +2805,8 @@ export function DockOverlay({
 		});
 	};
 	const expandAndReveal = () => {
-		setRevealed(true); // the teach-check invitation was accepted (W5)
+		setRevealed(true);
+		if (nativeFloating) { setFloatOpen(true); return; }
 		setExpanded(true);
 		void suppressFoldDuringReveal();
 	};
@@ -2744,7 +2822,7 @@ export function DockOverlay({
 	// a focused button activates natively) — this listener claims only
 	// the dead case: plain focus with Enter doing nothing.
 	useEffect(() => {
-		if ((!pending && !pluginQuestion && !unreadablePlugin) || expanded) return;
+		if (nativeFloating || (!pending && !pluginQuestion && !unreadablePlugin) || expanded) return;
 		const onKeyDown = (e: KeyboardEvent) => {
 			if (e.key !== "Enter" || e.altKey || e.defaultPrevented || pluginQuestionKeySuppressed(e) || composingQuestionKey(e) || !isInteractionScopeEligible(blockRef.current, controller)) return;
 			if (e.shiftKey && !e.metaKey && !e.ctrlKey) return;
@@ -2764,12 +2842,13 @@ export function DockOverlay({
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [pending, pluginQuestion, unreadablePlugin, expanded, controller]);
+	}, [nativeFloating, pending, pluginQuestion, unreadablePlugin, expanded, controller]);
 
 	useEffect(() => {
 		const el = scrollRef.current;
 		if (!el) return;
 		const onScroll = () => {
+			if (nativeFloatingRef.current) return;
 			if (!pendingRef.current) return;
 			// Resize mute (owner, resize round): a geometry change re-clamps
 			// scrollTop and the browser emits the clamp as a scroll event —
@@ -2835,8 +2914,85 @@ export function DockOverlay({
 		// The private controller owns only this shell's height animation. Late
 		// child layout can retarget an opening over its remaining original time;
 		// closing and ordinary typing retain their existing behavior.
-		heightMorphRef.current?.layout(el, stateKey, ownsDock && expanded, measureBlock);
+		heightMorphRef.current?.layout(el, stateKey, bandOwnsDock && expanded, measureBlock);
 	});
+
+	const chipQuestion = pending
+		? parseQuestionInput(pending.tool, pending.input)?.question ?? "Question"
+		: practice && typeof practice.input === "object" && practice.input !== null && "statement" in practice.input && typeof practice.input.statement === "string" ? practice.input.statement : "Problem";
+	// The chip: kind label + preview + Open. Rendered INSIDE the band shell
+	// in chip mode (composer stays live) — compact, one row, never tall.
+	const floatChip = nativeFloating ? (
+		<button
+			type="button"
+			data-testid="dock-float-chip"
+			aria-label="Open question card"
+			onClick={expandAndReveal}
+			aria-expanded={floatOpen}
+			className="mb-2 flex min-h-11 w-full cursor-pointer items-center gap-2.5 rounded-xl border bg-card px-3 py-2 text-left text-sm transition-colors hover:bg-accent/40 focus-visible:outline-2 focus-visible:outline-primary"
+		>
+			<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
+				{pending ? "Question" : "Practice"}
+			</span>
+			<span className="min-w-0 flex-1 truncate text-muted-foreground">{chipQuestion}</span>
+			<span className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
+				Open <ChevronRightIcon className="size-3.5" />
+			</span>
+		</button>
+	) : null;
+	// Keep the editor mounted while minimized so selections and reasoning survive.
+	const floatingPanel = nativeFloating ? (
+		<div
+			data-testid="dock-float-panel"
+			hidden={!floatOpen}
+			aria-hidden={!floatOpen}
+			className="pointer-events-auto fixed z-50 overflow-y-auto overscroll-contain rounded-2xl border bg-card shadow-lg"
+			style={{ left: floatPos.x, top: floatPos.y, width: Math.max(288, Math.min(736, floatViewport.width - 32)), maxHeight: Math.max(48, floatViewport.height - floatPos.y - 8), "--dock-max-h": "none" } as React.CSSProperties}
+		>
+			{pending ? (
+				<QuestionDock
+					viewReader={nativeViewReader}
+					toolName={pending.tool as "quiz" | "probe" | "ask_user_question" | "explain" | "recall"}
+					toolCallId={pending.toolCallId}
+					input={pending.input as never}
+					expanded={floatOpen}
+					reveal={false}
+					phase={phase}
+					onExpand={expandAndReveal}
+					onSubmit={onSubmitAnswer}
+					onPrepareSubmission={onPrepareBuiltin}
+					hasPendingInput={onBuiltinPendingInput}
+					preparing={preparing}
+					initialDraft={initialQuestionDraft}
+					onSaveDraft={onSaveQuestionDraft}
+					workingRef={workingRef}
+					onEscape={dictationCancel}
+					dictationClaim={floatOpen}
+					compactionRunning={compactionRunning}
+					floating
+					onFloatPosition={(x, y) => setFloatPos({ x, y })}
+					onMinimize={() => setFloatOpen(false)}
+				/>
+			) : (
+				<PracticeDock
+					viewReader={practiceViewReader}
+					problemCallId={practice!.toolCallId}
+					input={practice!.input as { statement: string }}
+					expanded={floatOpen}
+					onExpand={() => {}}
+					onSubmit={onSubmitThinking}
+					onPrepareSubmission={onPrepareThinking}
+					hasPendingInput={pendingThinkingInput}
+					preparing={preparing}
+					onEscape={dictationCancel}
+					compactionRunning={compactionRunning}
+					floating
+					onFloatPosition={(x, y) => setFloatPos({ x, y })}
+					onMinimize={() => setFloatOpen(false)}
+				/>
+			)}
+		</div>
+	) : null;
 
 	return (
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
@@ -2856,7 +3012,7 @@ export function DockOverlay({
 					    teach-phase check waits — the same cue that collapses it. It
 					    claims dictated speech until the learner reveals the check
 					    (the dock reclaims then). Rides the check answer on submit. */}
-					{(pending || pluginQuestion) && requiresReveal && (
+					{pluginQuestion && requiresReveal && (
 						<ReadingThinkingField
 							inputRef={readingInputRef}
 							value={readingThinking}
@@ -2881,8 +3037,8 @@ export function DockOverlay({
 						    bottom margin) in the natural content measurement. */}
 						<div
 							ref={contentRef}
-							key={mode}
-							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
+							key={bandMode}
+							className={bandMode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
 						>
 							{pluginQuestion && pluginDraft ? (
 								<PluginQuestionDock viewReader={customViewReader} snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
@@ -2891,48 +3047,14 @@ export function DockOverlay({
 									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing question…</p>}
 									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>Dismiss question</Button></>}
 								</div>
-							) : pending ? (
-								<QuestionDock
-									viewReader={nativeViewReader}
-									toolName={pending.tool as "quiz" | "probe" | "ask_user_question" | "explain" | "recall"}
-									toolCallId={pending.toolCallId}
-									input={pending.input as never}
-									expanded={expanded}
-									reveal={revealPending}
-									phase={phase}
-									onExpand={expandAndReveal}
-									onSubmit={onSubmitAnswer}
-									onPrepareSubmission={onPrepareBuiltin}
-									hasPendingInput={onBuiltinPendingInput}
-									preparing={preparing}
-									initialDraft={initialQuestionDraft}
-									onSaveDraft={onSaveQuestionDraft}
-									workingRef={workingRef}
-									onEscape={dictationCancel}
-									dictationClaim={!revealPending}
-									compactionRunning={compactionRunning}
-								/>
 							) : pluginPractice ? (
 								<PluginProblemDock {...pluginPractice} viewReader={customViewReader} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
-							) : practice ? (
-								<PracticeDock
-									viewReader={practiceViewReader}
-									problemCallId={practice.toolCallId}
-									input={practice.input as { statement: string }}
-									expanded={expanded}
-									onExpand={() => {
-										setExpanded(true);
-										void suppressFoldDuringReveal();
-									}}
-									onSubmit={onSubmitThinking}
-									onPrepareSubmission={onPrepareThinking}
-									hasPendingInput={pendingThinkingInput}
-									preparing={preparing}
-									onEscape={dictationCancel}
-									compactionRunning={compactionRunning}
-								/>
 							) : (
-								composer
+								<>
+									{floatChip}
+									{(!nativeFloating || !floatOpen) && composer}
+									{nativeFloating && !floatOpen && <p className="px-3 pb-2 text-xs text-muted-foreground">Enter submits your answer. Open the card to review its options.</p>}
+								</>
 							)}
 						</div>
 					</div>
@@ -2991,6 +3113,10 @@ export function DockOverlay({
 </Hint>
 				)}
 			</div>
+			{/* The floating card (owner round, 2026-11-19): freed from the
+			    band — fixed, draggable, scrollable. Rooted OUTSIDE the band's
+			    geometry so the reserve never measures it. */}
+			{floatingPanel}
 		</div>
 	);
 }
