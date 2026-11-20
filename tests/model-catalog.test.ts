@@ -126,6 +126,15 @@ describe("the model catalog projection", () => {
 		assert.deepEqual(bare, { model: { provider: "openrouter", id: "qwen/qwen3.8-flash" } });
 	});
 
+	it("publishes Fast separately for OpenAI API models and account-advertised ChatGPT models", () => {
+		const model = piModels().getModel("openai", "gpt-6.1-sol");
+		assert(model);
+		assert.equal(toModelDto(model).supportsFastMode, true);
+		assert.equal(toModelDto({ ...model, provider: "chatgpt" }).supportsFastMode, undefined);
+		assert.equal(toModelDto({ ...model, provider: "chatgpt", supportsFastMode: true }).supportsFastMode, true);
+		assert.equal(toModelDto({ ...model, provider: "custom", supportsFastMode: true }).supportsFastMode, undefined);
+	});
+
 	it("toModelDto projects the raw catalog model verbatim", () => {
 		const raw = glmModel();
 		const dto = toModelDto(raw);

@@ -19,6 +19,7 @@
 
 import { clampThinkingLevel, getSupportedThinkingLevels, type Api, type Model } from "@earendil-works/pi-ai";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
+import { supportsOpenAIFastMode } from "../core/native-chat-speed.ts";
 import { piModels } from "../agent/models.ts";
 import { customProviderAvailable } from "./custom-provider.ts";
 import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } from "../agent/chatgpt-bridge.ts";
@@ -172,8 +173,11 @@ function keyedProviderIds(): Set<string> {
 }
 
 /** Project one catalog model to the client DTO. */
-export function toModelDto(model: Model<Api>): ModelDto {
+export function toModelDto(model: Model<Api> & { supportsFastMode?: boolean }): ModelDto {
+	const fast = model.provider === "chatgpt" ? model.supportsFastMode === true
+		: model.provider === "openai" && model.api === "openai-responses" && supportsOpenAIFastMode(model.id);
 	return {
+		...(fast ? { supportsFastMode: true } : {}),
 		id: model.id,
 		name: model.name,
 		provider: model.provider,

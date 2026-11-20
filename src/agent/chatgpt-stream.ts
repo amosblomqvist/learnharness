@@ -2,12 +2,13 @@ import type { Api, AssistantMessage, Model, SimpleStreamOptions, StreamFunction,
 import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
-import { chatGPTAbortController, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTDenial } from "./chatgpt-bridge.ts";
+import { chatGPTAbortController, chatGPTModel, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTDenial } from "./chatgpt-bridge.ts";
 import type { AdmissionScope, ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 import { capturePreparedBackgroundPayload } from "./background-capture.ts";
 
 const USAGE = "https://chatgpt.com/settings/usage";
 export function chatGPTStreamError(message: string): string {
+	if (/service[_ ]tier|priority processing|fast mode/i.test(message)) return "Fast processing is unavailable for this request. Turn off Fast mode or choose another model.";
 	if (/subscription_sharing_usage_limit_exceeded|quota|429/.test(message)) return `ChatGPT plan usage limit reached. Manage usage at ${USAGE}. No API-key fallback was used.`;
 	if (/scope|authorization_context|permission/.test(message)) return "ChatGPT plan permission is missing. Reconnect in Providers and authorize plan use. No API-key fallback was used.";
 	if (/expired|invalid_grant|401|invalid_user/.test(message)) return "Your ChatGPT session expired. Reconnect in Providers. No API-key fallback was used.";
@@ -20,9 +21,10 @@ export function chatGPTStreamError(message: string): string {
 }
 
 /** Restrict the body at the final payload seam, even if caller samplingParams add fields. */
-export function chatGPTPayload(raw: unknown, selectedModelId: string): Record<string, unknown> {
+export function chatGPTPayload(raw: unknown, selectedModelId: string, fastMode = false): Record<string, unknown> {
 	const payload = raw as Record<string, unknown>;
 	const out: Record<string, unknown> = { model: selectedModelId, store: false, stream: true };
+	if (fastMode && chatGPTModel(selectedModelId)?.supportsFastMode === true) out.service_tier = "priority";
 	for (const key of ["instructions", "reasoning", "include", "text", "tool_choice", "parallel_tool_calls", "prompt_cache_key"]) {
 		if (payload[key] !== undefined) out[key] = payload[key];
 	}
@@ -45,7 +47,7 @@ export function chatGPTHistory(context: TranscriptContext, logicalModel: Model<A
 function empty(model: Model<Api>): AssistantMessage {
 	return { role: "assistant", api: model.api, provider: "chatgpt", model: model.id, content: [], stopReason: "error", timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
-export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDispatchLifecycle): StreamFunction<Api, SimpleStreamOptions> {
+export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDispatchLifecycle, lessonFastMode = false): StreamFunction<Api, SimpleStreamOptions> {
 	return (logicalModel, context, options) => {
 		const output = new AssistantMessageEventStream();
 		const purpose = background();
@@ -84,7 +86,7 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 					},
 					onPayload: async (raw, model) => {
 						const replacement = await options?.onPayload?.(raw, model);
-						const payload = chatGPTPayload(replacement === undefined ? raw : replacement, logicalModel.id);
+						const payload = chatGPTPayload(replacement === undefined ? raw : replacement, logicalModel.id, lessonFastMode && !purpose);
 						check();
 						capturePreparedBackgroundPayload(payload, logicalModel);
 						return payload;

@@ -492,6 +492,8 @@ export interface CompactionSettings {
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
 	version: number;
+	/** Request priority processing for supported models in foreground native lessons. */
+	chatSpeed?: { fast: boolean };
 	general?: GeneralSettings;
 	dictation?: DictationSettings;
 	/** Explicit app-wide opt-in; absent/invalid is off, including older records. */
@@ -862,6 +864,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	const out: UserSettings = {
 		version: typeof r.version === "number" && Number.isInteger(r.version) && r.version >= 1 ? r.version : CURRENT_SETTINGS_VERSION,
 	};
+	if (r.chatSpeed !== undefined) {
+		const speed = r.chatSpeed;
+		out.chatSpeed = { fast: !!speed && typeof speed === "object" && !Array.isArray(speed) && (speed as {fast?: unknown}).fast === true };
+	}
 	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
 		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
 	}
