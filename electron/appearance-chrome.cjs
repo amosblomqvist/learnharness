@@ -4,6 +4,7 @@
  * pinned to core's full catalog in appearance-chrome.test.ts. */
 const fs = require("node:fs");
 const path = require("node:path");
+const { inspectDataLocation } = require("./data-location.cjs");
 
 const PRESET_APPEARANCE = {
 	default: { mode: "dark", background: "#141414" },
@@ -38,7 +39,16 @@ function themeSourceFor(mode) {
  * separate -dev userData. Packaged uses the path given to its child. */
 function serverDataDir({ devUrl, env, packagedDataDir, repoRoot }) {
 	if (!devUrl) return packagedDataDir;
-	return env.LH_DATA_DIR ? path.resolve(env.LH_DATA_DIR) : path.join(repoRoot, "data");
+	if (env.LH_DATA_DIR && !env.LH_DATA_CONFIG_FILE) return path.resolve(env.LH_DATA_DIR);
+	const defaultDir = env.LH_DEFAULT_DATA_DIR
+		? path.resolve(env.LH_DEFAULT_DATA_DIR)
+		: env.LH_DATA_DIR
+			? path.resolve(env.LH_DATA_DIR)
+			: path.join(repoRoot, "data");
+	const configFile = env.LH_DATA_CONFIG_FILE
+		? path.resolve(env.LH_DATA_CONFIG_FILE)
+		: path.join(repoRoot, "data-location.json");
+	return inspectDataLocation({ configFile, defaultDir }).currentDir;
 }
 
 function readAppearance(dataDir) {

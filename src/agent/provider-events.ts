@@ -27,7 +27,7 @@
 
 import * as fs from "node:fs";
 import path from "node:path";
-import { PATHS } from "../../config.ts";
+import { PATHS, onDataDirChange } from "../../config.ts";
 
 /** Max bytes per chat's JSONL before recording stops (with a marker). */
 const CAP_BYTES = 20 * 1024 * 1024;
@@ -36,7 +36,15 @@ const CAP_BYTES = 20 * 1024 * 1024;
 export const providerEventsCap = { current: CAP_BYTES };
 
 /** Test seam (the toolTimeoutMs idiom): redirect the output directory. */
-export const providerEventsDir = { current: path.join(PATHS.debug, "provider-events") };
+let defaultProviderEventsDir = path.join(PATHS.debug, "provider-events");
+export const providerEventsDir = { current: defaultProviderEventsDir };
+onDataDirChange((root) => {
+	const nextDefault = path.join(/* turbopackIgnore: true */ root, "debug", "provider-events");
+	if (providerEventsDir.current === defaultProviderEventsDir) {
+		providerEventsDir.current = nextDefault;
+	}
+	defaultProviderEventsDir = nextDefault;
+});
 
 /** The model shape the observer receives (structural — pi passes Model). */
 export interface ProviderEventModel {

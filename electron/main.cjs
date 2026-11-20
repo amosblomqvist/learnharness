@@ -52,8 +52,16 @@ const PRODUCT_NAME = "LearnHarness";
 // Must run before the LH_DEV_URL suffix below — dev becomes
 // "LearnHarness-dev".
 app.setName(PRODUCT_NAME);
+const { inspectDataLocation, resolveStartupDataDir } = require("./data-location.cjs");
 const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
-const DATA_DIR = () => path.join(app.getPath("userData"), "data");
+const DEFAULT_DATA_DIR = () => path.join(app.getPath("userData"), "data");
+const DATA_CONFIG_FILE = () => path.join(app.getPath("userData"), "data-location.json");
+const DATA_DIR = () =>
+	inspectDataLocation({
+		configFile: DATA_CONFIG_FILE(),
+		defaultDir: DEFAULT_DATA_DIR(),
+		fsImpl: fs,
+	}).currentDir;
 
 // Resolve the saved palette before window creation; renderer reports keep
 // it current after live saves. This helper needs no compiled server bundle.
@@ -229,6 +237,8 @@ function startServer(port) {
 					PORT: String(port),
 					HOSTNAME: "127.0.0.1", // the server defaults to 0.0.0.0 — never
 					LH_DATA_DIR: DATA_DIR(),
+					LH_DEFAULT_DATA_DIR: DEFAULT_DATA_DIR(),
+					LH_DATA_CONFIG_FILE: DATA_CONFIG_FILE(),
 					// The auth/keys store — the child reads AND writes this file itself
 					// (no env injection anymore: a spawn-time copy would shadow every
 					// settings-page key change until restart; env wins over file).
@@ -678,10 +688,21 @@ async function main() {
 
 	await app.whenReady();
 
+	const devUrl = process.env.LH_DEV_URL;
+	if (!devUrl) {
+		await resolveStartupDataDir({
+			configFile: DATA_CONFIG_FILE(),
+			defaultDir: DEFAULT_DATA_DIR(),
+			dialog,
+			fsImpl: fs,
+			log,
+		});
+	}
+
 	// Read the same record/custom theme the server uses before constructing
 	// any native window, including the external development shell.
 	appearance = readAppearance(serverDataDir({
-		devUrl: process.env.LH_DEV_URL, env: process.env,
+		devUrl, env: process.env,
 		packagedDataDir: DATA_DIR(), repoRoot: path.join(__dirname, ".."),
 	}));
 	nativeTheme.themeSource = themeSourceFor(appearance.mode);
@@ -689,7 +710,6 @@ async function main() {
 	// Dev mode: point at a running `next dev` server (LH_DEV_URL) — no
 	// spawn, no packaging, full HMR. The rest of this shell still applies
 	// (guards, menu, single instance).
-	const devUrl = process.env.LH_DEV_URL;
 	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
 	if (!devUrl) {
 		desktopAPISecret = randomBytes(32).toString("hex");

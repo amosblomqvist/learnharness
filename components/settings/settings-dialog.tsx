@@ -46,6 +46,7 @@ import {
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
+import { DataDirectorySettings, DataDirectoryStartupGuard } from "./data-directory-settings.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -129,6 +130,7 @@ export function SettingsDialogProvider({
 	return (
 		<ChatGPTUIProvider><NativeSubscriptionUIProvider><WriteOrderContext.Provider value={writeOrder}><DialogContext.Provider value={{ open }}>
 			{children}
+			<DataDirectoryStartupGuard />
 			{show && (
 				<SettingsDialog onClose={close} initialSection={landOn} initialRow={landOnRow} navigationRequest={navigationRequest} layerId={layerId} />
 			)}
@@ -448,6 +450,20 @@ export function SettingsDialogBody({
 									title="General"
 									testid="section-general"
 								>
+									<DataDirectorySettings
+										onChanged={() => {
+											fetch("/api/settings")
+												.then((r) => (r.ok ? r.json() : null))
+												.then((body: { settings?: UserSettings | null; fileAccessError?: string } | null) => {
+													if (!body) return;
+													const next = body.settings ?? { version: CURRENT_SETTINGS_VERSION };
+													setRecord(next);
+													setFileAccessError(body.fileAccessError ?? null);
+													onAppearanceChange(next.appearance);
+												})
+												.catch(() => {});
+										}}
+									/>
 									<UpdateSettings
 										autoUpdate={record.general?.autoUpdate ?? true}
 										onAutoUpdateChange={(on) =>
