@@ -60,6 +60,33 @@ beforeEach(() => {
 });
 
 describe("electron/data-location.cjs startup resolution & unplugged drive recovery", () => {
+	it("chooses another folder when the old volume cannot be canonicalized", async () => {
+		const oldVolume = path.join(scratchRoot, "offline-volume");
+		const source = path.join(oldVolume, "data");
+		const target = path.join(scratchRoot, "alternate-volume");
+		fs.mkdirSync(source, { recursive: true });
+		fs.mkdirSync(target);
+		writeConfiguredDataDirPath(configFile, source);
+		fs.rmSync(oldVolume, { recursive: true });
+		const original = fs.lstatSync;
+		const unavailable = mock.method(fs, "lstatSync", (...args: Parameters<typeof original>) => {
+			if (args[0] === oldVolume) throw Object.assign(new Error("Volume is offline"), { code: "ENODEV" });
+			return original(...args);
+		});
+		try {
+			let prompts = 0;
+			const selected = await resolveStartupDataDir({
+				configFile, defaultDir: defaultDataDir,
+				dialog: {
+					showMessageBox: async () => ({ response: prompts++ ? 3 : 1 }),
+					showOpenDialog: async () => ({ canceled: false, filePaths: [target] }),
+				},
+			});
+			assert.equal(selected, target);
+			assert.equal(inspectDataLocation({ configFile, defaultDir: defaultDataDir }).currentDir, target);
+		} finally { unavailable.mock.restore(); }
+	});
+
 	it("returns defaultDir when data-location.json is absent or points to an accessible custom folder", async () => {
 		let dialogCalls = 0;
 		const dialog = {
@@ -142,6 +169,27 @@ describe("electron/data-location.cjs startup resolution & unplugged drive recove
 });
 
 describe("GET / POST /api/settings/data-dir & live store relocation", () => {
+	it("switches from an offline volume without resolving the old volume's ancestors", async () => {
+		const oldVolume = path.join(scratchRoot, "offline-server-volume");
+		const source = path.join(oldVolume, "data");
+		const target = path.join(scratchRoot, "alternate-server-volume");
+		fs.mkdirSync(source, { recursive: true });
+		fs.mkdirSync(target);
+		const storeId = writeConfiguredDataDirPath(configFile, source);
+		config.setActiveDataDir(source, { configuredDir: source, storeId });
+		fs.rmSync(oldVolume, { recursive: true });
+		const original = fs.lstatSync;
+		const unavailable = mock.method(fs, "lstatSync", (...args: Parameters<typeof original>) => {
+			if (args[0] === oldVolume) throw Object.assign(new Error("Volume is offline"), { code: "ENODEV" });
+			return original(...args);
+		});
+		try {
+			const response = await post({ action: "change", path: target, copyMode: "switch" });
+			assert.equal(response.status, 200);
+			assert.equal(config.PATHS.data, target);
+		} finally { unavailable.mock.restore(); }
+	});
+
 	it("copies data and keeps old data by default, while keeping auth.json on the local machine", async () => {
 		// Seed data in defaultDataDir
 		const chat = stores.chatStore.createChat("Linear Algebra");

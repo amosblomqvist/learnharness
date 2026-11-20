@@ -180,8 +180,7 @@ export async function mutateDataDirectory(raw: unknown, home: string = os.homedi
 		try {
 			const value = request.action === "change" ? expandHomePath(request.path, home) : defaultDir;
 			targetDir = validateTarget(value, {
-				source: !recovery && (!state.unavailableConfiguredDir || (state.configuredDir && path.relative(previousDir, value) !== ""))
-					? previousDir : null,
+				source: !recovery && !state.unavailableConfiguredDir ? previousDir : null,
 				defaultDir, appRoot: ROOT, authFile: AUTH_FILE, home,
 				protectedPath: (candidate: string) => isSensitivePath(candidate, home),
 			});

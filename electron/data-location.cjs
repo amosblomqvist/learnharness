@@ -317,7 +317,6 @@ async function resolveStartupDataLocation({ configFile, defaultDir, dialog, fsIm
 			const picked = await dialog.showOpenDialog({ title: "Select Data Folder", properties: ["openDirectory"] });
 			if (picked.canceled || !picked.filePaths[0]) continue;
 			const target = validateTarget(picked.filePaths[0], {
-				source: status.configuredDir && path.relative(status.configuredDir, picked.filePaths[0]) !== "" ? status.configuredDir : null,
 				defaultDir, appRoot, authFile, disk: fsImpl,
 			});
 			validateTree(target, fsImpl);
