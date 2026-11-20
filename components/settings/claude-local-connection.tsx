@@ -94,7 +94,7 @@ export function ClaudeLocalDialogBody({ status, busy, error, onChange, onProbe, 
 		</div>
 		<p className="mt-3 text-xs text-foreground" role="status" data-testid="claude-local-state">{claudeLocalStateLine(status)}</p>
 		{status.binary && <p className="mt-1 font-mono text-[11px] text-muted-foreground" data-testid="claude-local-path">{status.binary.path}</p>}
-		{status.error && status.state !== "ready" && <p role="alert" className="mt-2 text-xs text-red-400" data-testid="claude-local-error">{status.error}</p>}
+		{status.error && status.state !== "ready" && <p role="alert" className="mt-2 text-xs text-error" data-testid="claude-local-error">{status.error}</p>}
 		{usage && <p className="mt-2 text-xs text-muted-foreground" data-testid="claude-local-usage">{usage}</p>}
 		<div className="mt-4 flex items-center gap-3 text-xs text-foreground">
 			<Toggle label="Allow background use" checked={status.allowBackgroundUse} disabled={busy || !status.enabled} onChange={(allowBackgroundUse) => onChange({ allowBackgroundUse })} />
@@ -117,7 +117,7 @@ export function ClaudeLocalDialogBody({ status, busy, error, onChange, onProbe, 
 			</label>
 			<span className="leading-relaxed text-muted-foreground">Optional. Set it when Claude Code is installed somewhere LearnHarness does not look (PATH, ~/.local/bin, Homebrew, npm global).</span>
 		</div>
-		{error && <p role="alert" className="mt-3 text-xs text-red-400">{error}</p>}
+		{error && <p role="alert" className="mt-3 text-xs text-error">{error}</p>}
 		<ConnectionFooter testid="claude-local-footer" leading={<Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" disabled={busy} onClick={onProbe}>Re-check</Button>}>
 			<span />
 		</ConnectionFooter>
@@ -174,7 +174,7 @@ export function ClaudeLocalConnection({ initialStatus, labelClassName }: { initi
 		<ConnectionRow label={CLAUDE_LOCAL.title} labelClassName={labelClassName} action={status.enabled ? "Manage…" : "Set up…"} disabled={false} onAction={() => setOpen(true)}>
 			{status.enabled && <span className="font-ui text-[11px] text-muted-foreground" data-testid="claude-local-row-state">{status.state === "ready" ? "ready" : status.state.replace(/-/g, " ")}</span>}
 		</ConnectionRow>
-		{status.enabled && status.state !== "ready" && status.error && <p role="alert" className="text-xs text-red-400">{status.error}</p>}
+		{status.enabled && status.state !== "ready" && status.error && <p role="alert" className="text-xs text-error">{status.error}</p>}
 		{open && <ConnectionDialog label={`${CLAUDE_LOCAL.title} settings`} testid="claude-local-dialog" backdropTestid="claude-local-backdrop" busy={busy} onClose={() => { if (busy) return "blocked"; setOpen(false); return "closed"; }}>
 			<ClaudeLocalDialogBody status={status} busy={busy} error={error} web={web} onChange={(next) => void change(next)} onProbe={() => void run(probe)} />
 			<div className="mt-2 flex justify-end"><Button variant="outline" size="sm" disabled={busy} onClick={() => setOpen(false)}>Close</Button></div>
