@@ -467,10 +467,18 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 		}
 	}
 	const calls = new Map<string, { name: string; args: Record<string, unknown> | undefined }>();
+	const answeredInputs = new Map<ToolResultMessage, Record<string, unknown>>();
 	for (const m of messages) {
-		if (m.role !== "assistant") continue;
-		for (const block of (m as AssistantMessage).content) {
-			if (block.type === "toolCall") calls.set(block.id, { name: block.name, args: block.arguments as Record<string, unknown> | undefined });
+		if (m.role === "assistant") {
+			for (const block of (m as AssistantMessage).content) {
+				if (block.type === "toolCall") calls.set(block.id, { name: block.name, args: block.arguments as Record<string, unknown> | undefined });
+			}
+		} else if (m.role === "toolResult" && !m.isError && (QUESTION_TOOLS as readonly string[]).includes(m.toolName)) {
+			// Like the transcript, pair the answer with the preceding call,
+			// not the last reuse of its ID in the whole session. The call can
+			// predate the compaction cut even when the answer is retained.
+			const call = calls.get(m.toolCallId);
+			if (call?.name === m.toolName && call.args) answeredInputs.set(m, call.args);
 		}
 	}
 	const pluginQuestions = sidePluginQuestions(messages);
@@ -536,7 +544,7 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 				const md = problemMarkdown(pluginProblem.input, result.toolCallId === activeProblem);
 				if (md) blocks.push(md);
 			} else if ((QUESTION_TOOLS as readonly string[]).includes(result.toolName)) {
-				const md = answeredQuestionMarkdown(result, calls.get(result.toolCallId)?.args);
+				const md = answeredQuestionMarkdown(result, answeredInputs.get(result));
 				if (md) blocks.push(md);
 			} else if (result.toolName === PRACTICE_PROBLEM_TOOL) {
 				const md = problemMarkdown(calls.get(result.toolCallId)?.args, result.toolCallId === activeProblem);

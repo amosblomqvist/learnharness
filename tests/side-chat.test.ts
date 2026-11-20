@@ -202,6 +202,36 @@ describe("side lesson document", () => {
 		});
 	}
 
+	for (const olderMulti of [true, false]) {
+		it(`uses each reused call ID's preceding occurrence (older ${olderMulti ? "multi" : "single"}-select)`, () => {
+			const id = "call_0";
+			const posed = (when: string, multi: boolean) => assistant([call(id, "ask_user_question", {
+				question: `${when} question`,
+				options: ["one", "two", "three"].map((option) => ({ label: `${when} ${option}` })),
+				...(multi ? { multiSelect: "true" } : {}),
+			})]);
+			const answered = (when: string) => result(id, "ask_user_question", {
+				kind: "ask", questionText: `${when} question`, dontKnow: false, answers: [],
+				options: ["one", "two", "three"].map((option, i) => ({ index: i + 1, label: `${when} ${option}` })),
+			});
+			const older = answered("Older");
+			const history = [posed("Older", olderMulti), older, posed("Later", !olderMulti), answered("Later")];
+			const cut = newCompactionMarker("PRIVATE SUMMARY", { firstKeptMessageId: older.id, tokensBefore: 1, at: "2026-01-01" });
+			for (const record of [history, [...history, cut]]) {
+				const doc = sideChatLessonDocument(record);
+				assert.match(doc, olderMulti ? /^- Older one$/m : /^- A\. Older one$/m);
+				assert.match(doc, olderMulti ? /^- A\. Later one$/m : /^- Later one$/m);
+			}
+		});
+	}
+
+	it("does not infer letters from a call that only appears after the answer", () => {
+		const answer = result("call_0", "quiz", answeredQuiz());
+		const doc = sideChatLessonDocument([answer, assistant([call("call_0", "quiz", QUIZ_ARGS)])]);
+		assert.match(doc, /^- 3 \*\(chosen by the learner\)\*$/m);
+		assert.doesNotMatch(doc, /^- A\. 3/m);
+	});
+
 	it("hides the ACTIVE problem's solution, reveals concluded ones", () => {
 		const active = sideChatLessonDocument([
 			assistant([text("Try this."), call("p1", "problem", { statement: "Integrate x dx.", modelSolution: "SECRET-SOLUTION x^2/2" })]),
