@@ -57,14 +57,14 @@ const DATA_DIR = () => path.join(app.getPath("userData"), "data");
 
 // Resolve the saved palette before window creation; renderer reports keep
 // it current after live saves. This helper needs no compiled server bundle.
-const { normalizeAppearance, themeSourceFor, serverDataDir, readAppearance, chromeColors } = require("./appearance-chrome.cjs");
+const { normalizeAppearance, themeSourceFor, serverDataDir, readAppearance, chromeColors, chromeOverlay } = require("./appearance-chrome.cjs");
 let appearance = normalizeAppearance(null);
 
 function applyChrome(win) {
 	if (win.isDestroyed()) return;
 	const colors = chromeColors(appearance);
 	win.setBackgroundColor(colors.color);
-	if (process.platform !== "darwin") win.setTitleBarOverlay(colors);
+	if (process.platform !== "darwin") win.setTitleBarOverlay(chromeOverlay(appearance, win.webContents.getZoomFactor()));
 }
 
 /** The packaged standalone server (extraResources → Resources/server).
@@ -335,11 +335,10 @@ function createWindow(url) {
 			? { titleBarStyle: "hiddenInset", trafficLightPosition: { x: 16, y: 22.5 } }
 			: {
 				titleBarStyle: "hidden",
-				// Native min/max/close on the right, at the OS's compact default
-				// height. Do not force the zoom-invariant native overlay to match
-				// the renderer's 60 CSS px bar: zooming out would cover its border.
+				// Match the native controls to the renderer header. applyZoom
+				// updates its physical height so scaling never covers the border.
 				// The renderer reserves the actual width via env(titlebar-area-*).
-				titleBarOverlay: chromeColors(appearance),
+				titleBarOverlay: chromeOverlay(appearance),
 				// Keep the custom bar alone; Alt reveals the native menu.
 				autoHideMenuBar: true,
 			}),
@@ -410,6 +409,7 @@ function createWindow(url) {
 	// claimed keys never reach before-input-event, so exactly one of the
 	// two applies any given zoom keypress.
 	win.webContents.on("did-finish-load", () => {
+		applyChrome(win);
 		win.webContents.send("lh:zoom", win.webContents.getZoomFactor());
 	});
 	win.webContents.on("before-input-event", (event, input) => {
@@ -608,6 +608,7 @@ function zoomStep(win, dir) {
 function applyZoom(win, factor) {
 	factor = Math.min(2, Math.max(0.75, factor)); // ladder clamps; ⌘0 = 1
 	win.webContents.setZoomFactor(factor);
+	applyChrome(win);
 	win.webContents.send("lh:zoom", factor);
 }
 

@@ -35,6 +35,11 @@ try {
 		parent: el.closest("header").getBoundingClientRect().width, title: el.title,
 		truncated: el.scrollWidth > el.clientWidth, translate: getComputedStyle(el).translate, height: el.getBoundingClientRect().height, balance: Math.abs((el.getBoundingClientRect().top-el.closest("header").getBoundingClientRect().top)-(el.closest("header").getBoundingClientRect().bottom-el.getBoundingClientRect().bottom)),
 	}));
+	const footer=await page.evaluate(()=>{
+ const a=document.querySelector('[data-testid="activity-header"]'),b=document.querySelector('[data-testid="settings-entry"]');
+ const r=e=>e.getBoundingClientRect();return {height:[r(a).height,r(b).height],iconDelta:Math.abs(r(a.querySelector('svg')).left-r(b.querySelector('svg')).left),textDelta:Math.abs(r(a.querySelector('span')).left-r(b.querySelector('span')).left),rowGap:r(b).top-r(a).bottom};
+});
+ assert.deepEqual(footer.height,[44,44]);assert(footer.iconDelta<1);assert(footer.textDelta<1);assert.equal(footer.rowGap,0);
 	const desktop = await inspectTitle();
 	assert.equal(desktop.font, "20px"); assert.equal(desktop.title, title);
 	assert.equal(desktop.translate, "none"); assert.equal(desktop.height,44); assert(desktop.balance<=1.1);

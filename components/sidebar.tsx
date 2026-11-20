@@ -281,10 +281,10 @@ export function timeAgo(iso: string, now = new Date()): string {
  *  still rides the API payload, so this is a one-line flip back if it's
  *  ever wanted. */
 function sessionMeta(chat: ChatListItem): string {
-	if (chat.compacting) return `Compacting context · ${timeAgo(chat.updatedAt)}`;
-	if (chat.pendingQuestion) return `Waiting for input · ${timeAgo(chat.updatedAt)}`;
+	if (chat.compacting) return `Compacting context (${timeAgo(chat.updatedAt)})`;
+	if (chat.pendingQuestion) return `Waiting for input (${timeAgo(chat.updatedAt)})`;
 	if ((chat.kind ?? "teach") === "practice" && chat.pendingProblem) {
-		return `Problem waiting · ${timeAgo(chat.updatedAt)}`;
+		return `Problem waiting (${timeAgo(chat.updatedAt)})`;
 	}
 	if (chat.busy) return "Working…";
 	return timeAgo(chat.updatedAt);
@@ -856,16 +856,16 @@ function SessionsSidebar() {
 					{/* Settings entry (settings-app wave): same row language as
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
-					<div className="px-3 pb-3 pt-1">
+					<div className="px-3 pb-3">
 						<Hint label="Settings" action="open-settings" side="right">
 							<button
 								type="button"
 								onClick={() => openSettings()}
 								data-testid="settings-entry"
-								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+								className="flex min-h-11 w-full items-center gap-2 rounded-md px-2 text-left font-ui text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
-								<SettingsIcon className="size-3" />
-								Settings
+								<SettingsIcon className="size-4 shrink-0" />
+								<span>Settings</span>
 							</button>
 						</Hint>
 					</div>
