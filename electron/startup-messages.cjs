@@ -113,11 +113,13 @@ function startMessages(win, store, { fetchImpl = globalThis.fetch, windowMs = ST
 	const painted = () => { didPaint = true; onFocus(); };
 	const onKey = (_event, input) => { if (input.type === "keyDown") stop(); };
 	const onPointer = (_event, input) => { if (input.type === "mouseDown" || input.type === "mouseWheel") stop(); };
-	let navigating = false;
+	let initialUrl;
 	const onNavigate = details => {
 		if (!details.isMainFrame) return;
-		if (navigating) stop();
-		else navigating = true;
+		if (initialUrl === undefined) initialUrl = details.url;
+		// Next.js hydration replaces history at the same URL. It is not a
+		// route change; a reload or a different URL still cancels the offer.
+		else if (!details.isSameDocument || details.url !== initialUrl) stop();
 	};
 	win.once("ready-to-show", painted);
 	win.on("focus", onFocus);

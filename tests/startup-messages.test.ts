@@ -98,7 +98,16 @@ it("skips and aborts when the first window is no longer quiet or the deadline el
 		(win: ReturnType<typeof fakeWindow>) => win.webContents.emit("before-mouse-event", {}, { type: "mouseDown" }),
 		(win: ReturnType<typeof fakeWindow>) => win.emit("blur"),
 		(win: ReturnType<typeof fakeWindow>) => win.emit("closed"),
-		(win: ReturnType<typeof fakeWindow>) => { win.webContents.emit("did-start-navigation", { isMainFrame: true }); win.webContents.emit("did-start-navigation", { isMainFrame: true }); },
+		(win: ReturnType<typeof fakeWindow>) => {
+			const url = "http://127.0.0.1:9000/";
+			win.webContents.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false, url });
+			win.webContents.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false, url });
+		},
+		(win: ReturnType<typeof fakeWindow>) => {
+			const url = "http://127.0.0.1:9000/";
+			win.webContents.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false, url });
+			win.webContents.emit("did-start-navigation", { isMainFrame: true, isSameDocument: true, url: `${url}settings` });
+		},
 		() => {},
 	]) {
 		const win = fakeWindow();
@@ -115,6 +124,16 @@ it("skips and aborts when the first window is no longer quiet or the deadline el
 		assert.equal(aborted, true);
 		assert.equal(await service.take(), null);
 	}
+});
+
+it("allows the same-URL history update during hydration without cancelling startup", async () => {
+	const win = fakeWindow();
+	const service = startMessages(win, emptyStore(), { fetchImpl: async () => Response.json(feed(newest)) });
+	const url = "http://127.0.0.1:9000/";
+	win.webContents.emit("did-start-navigation", { isMainFrame: true, isSameDocument: false, url });
+	win.emit("ready-to-show");
+	win.webContents.emit("did-start-navigation", { isMainFrame: true, isSameDocument: true, url });
+	assert.deepEqual((await service.take())?.message, newest);
 });
 
 it("waits for paint and first focus within the startup window without focusing the window itself", async () => {
