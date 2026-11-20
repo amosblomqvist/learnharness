@@ -45,12 +45,12 @@
  *     return to pending and the pump restarts — no stranding, no loss.
  *
  *   Worker status ends at computation completion; JobRecord.delivery owns
- *     the pending result or abort notice independently. Registry entries
- *     survive in-flight wakes, so duplicate submissions share one promise.
- *     Failed starts stay pending without timers or worker errors. Recovery
- *     restores known pending deliveries and re-spawns unfinished workers;
- *     registration also restores pending delivery before the first poll.
- *     Legacy terminal jobs without delivery metadata are never replayed.
+ *     pending notices independently. Registry entries survive in-flight
+ *     wakes, so duplicates share one promise. Failed starts remain pending
+ *     without worker errors. Recovery restores known pending deliveries and
+ *     re-spawns unfinished BUILTIN workers only. Plugin recovery reads
+ *     canonical task records through an injected seam, never replaying
+ *     plugin code. Legacy terminal jobs without delivery metadata are not replayed.
  *
  * All mutable state lives on globalThis (the turn-liveness lesson: Next dev
  * gives each route entry its own module instances — a module-level Map would
@@ -59,14 +59,16 @@
 
 import {
 	buildAbortSteer,
+	buildJobFailureSteer,
 	buildSubagentSteer,
 	isSubagentFailure,
 	steerDelivered,
 	type JobRecord,
 	type SteerMessage,
 } from "../core/contracts.ts";
-import type { TurnInput } from "../core/input-events.ts";
-import { danglingQuestionOf, endsInDismissal, type LhMessage } from "../core/native-messages.ts";
+import type { TurnInput, UserSteerInput } from "../core/input-events.ts";
+import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, newUserSteer, type LhMessage } from "../core/native-messages.ts";
+import { prepareSubmissionImages, submissionImagePolicyKey } from "./submission-images.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
@@ -82,6 +84,10 @@ export type TurnRunner = (chatId: string, input: TurnInput) => Promise<number>;
 
 /** Re-runs a job's sub-agent loop (crash recovery for orphaned jobs). */
 export type JobRespawn = (jobId: string) => void;
+export type PluginJobRecovery = (job: JobRecord) => Promise<void>;
+export function setPluginJobRecovery(recover: PluginJobRecovery): void {
+	state().recoverPlugin = recover;
+}
 
 interface QueuedSteer {
 	steer: SteerMessage;
@@ -105,6 +111,7 @@ interface QueuedSteer {
 interface WakeState {
 	turnRunner?: TurnRunner;
 	respawn?: JobRespawn;
+	recoverPlugin?: PluginJobRecovery;
 	/** chatId → steers awaiting delivery, in arrival order. The single
 	 *  delivery registry (Wave C: the agent's own follow-up queue is a
 	 *  per-run VEHICLE, not the registry — settlement reconciles here). */
@@ -307,14 +314,30 @@ export interface UserSteerEntry {
 	handedTo?: Agent;
 }
 
-/** The steer route's live hand-off (composer steering, 2026-10-03).
- *  Synchronous by design — no interleaving between the live-agent check
- *  and the queue() means a settling turn can never race the hand-off.
- *  Returns false when no turn is live: the caller 409s and the client
- *  falls back to a plain text send (the settle race). The registry copy
- *  is the stranding safety net: if this agent dies undelivered (question
- *  termination, abort), reconcileUserSteers keeps it parked for the
- *  chat's next run. */
+/** Async composer admission keeps the live agent private. Future chat settings
+ * are deliberately irrelevant: this steer belongs to the captured live run.
+ * Settling keeps the existing send fallback; replacements must never retarget. */
+export async function prepareAndSteerChat(chatId: string, input: UserSteerInput): Promise<"accepted" | "settled" | "stale"> {
+	const agent = state().liveAgents.get(chatId);
+	if (!agent) return "settled";
+	const model = agent.state.model;
+	const session = stores.chatStore.getChat(chatId);
+	if (!model || !session) return "stale";
+	const policy = submissionImagePolicyKey({ model });
+	const { text, id } = input;
+	const images = await prepareSubmissionImages(input.images, { model });
+	const currentSession = stores.chatStore.getChat(chatId);
+	if (!currentSession || currentSession.createdAt !== session.createdAt || currentSession.kind !== session.kind) return "stale";
+	const current = state().liveAgents.get(chatId);
+	if (!current) return "settled";
+	if (current !== agent || current.state.model !== model || submissionImagePolicyKey({ model }) !== policy) return "stale";
+	// No await may separate the identity/policy check from this registry handoff.
+	return steerLiveChat(chatId, newUserSteer(text, id, images)) ? "accepted" : "settled";
+}
+
+/** Synchronous live handoff. The registry copy preserves the existing
+ * memory-only stranding safety net: undelivered steers ride the next run.
+ * No live agent means the caller may fall back to an ordinary send. */
 export function steerLiveChat(chatId: string, message: LhMessage): boolean {
 	const agent = state().liveAgents.get(chatId);
 	if (!agent) return false;
@@ -411,19 +434,11 @@ export interface AbortOutcome {
  * reason, the teacher still learns. The dock's END button reaches this
  * through POST /api/activity/abort (body {kind: "job", id: jobId}); the
  * route is master's thin composition — this is the job-side mechanism.
- * Four things happen, in order:
- *
- *   1. KILL the spend: fire the job's registered AbortController (the
- *      runner registered it at loop start) — the in-flight model call
- *      aborts, not just the next loop check. The runner unwinds silently
- *      (its catch checks abortSignal.aborted; finishJob checks status).
- *   2. REFUSE if computation already finished. Queued results belong to
- *      the session, not to an abortable background worker.
- *   3. SAVE error "Aborted by learner" and a pending abort delivery together.
- *      Delivery acknowledgement never overwrites the worker's outcome.
- *   4. STEER the teacher: a one-line abort note (buildAbortSteer) through
- *      the same wake pipeline, so the teacher's promise of a result
- *      doesn't hang silently in the lesson.
+ * Completed computation cannot be aborted: its pending result belongs to
+ * the session. For unfinished computation, save error "Aborted by learner"
+ * and its pending abort notice BEFORE firing synchronous worker callbacks.
+ * Then kill the registered worker and queue the deterministic abort marker.
+ * Delivery acknowledgement never overwrites the computation outcome.
  *
  * The runner writes the usage folded so far in its finally (merge patch),
  * so an aborted job's money record survives the kill.
@@ -437,11 +452,11 @@ export function abortJob(jobId: string): AbortOutcome {
 		return { ok: false, reason: "not_running" };
 	}
 
-	fireJobAbort(jobId);
 	stores.jobStore.updateJob(jobId, {
 		status: "error", error: "Aborted by learner", activity: "aborted",
 		delivery: { kind: "abort", status: "pending" },
 	});
+	fireJobAbort(jobId);
 	void deliverJobResult(buildAbortSteer(job)).catch(() => {
 		/* The saved pending abort notice remains owned by the session. */
 	});
@@ -564,7 +579,9 @@ async function pump(chatId: string): Promise<void> {
 			// hands them to that turn once the text-claim lands — until then,
 			// settlement re-pumps and lands them right after it). The pause is
 			// derived from the tail, so any user message un-holds by construction.
-			if (endsInDismissal(fresh.messages) || !automaticFollowUpAllowed(chatId)) {
+			// An interrupted question-recovery request also waits for explicit
+			// input; a queued job must not restart its replacement turn.
+			if (endsInDismissal(fresh.messages) || endsInQuestionRecovery(fresh.messages) || !automaticFollowUpAllowed(chatId)) {
 				parked = true;
 				return;
 			}
@@ -675,9 +692,16 @@ function restorePendingDeliveries(chatId: string): void {
 	if (!record) return;
 	noteSteersDurable(chatId, record.messages);
 	for (const stored of stores.jobStore.listJobs(chatId)) {
-		const job = isJobLive(stored.id) ? stored : normalizeLegacyResult(stored);
+		const live = isJobLive(stored.id);
+		// Plugin result preparation persists an honest generic fallback before
+		// awaiting the author formatter. Do not deliver that fallback early
+		// while the live formatter still owns preparation; a restart has no
+		// registration and can restore it without replaying author code.
+		if (stored.kind === "plugin" && live && !(state().queues.get(chatId) ?? []).some((entry) => jobIdOf(entry.steer) === stored.id)) continue;
+		const job = live ? stored : normalizeLegacyResult(stored);
 		if (job.delivery?.status !== "pending") continue;
 		const steer = job.delivery.kind === "abort" ? buildAbortSteer(job)
+			: job.delivery.kind === "failure" ? buildJobFailureSteer(job, job.error ?? "Background job recovery or delivery failed")
 			: job.result ? buildSubagentSteer(job, job.result as never) : undefined;
 		if (!steer) continue;
 		if (steerDelivered(record.messages, steer.id)) finalizeSteer(steer);
@@ -696,14 +720,14 @@ async function waitForIdle(chatId: string): Promise<void> {
 	for (;;) {
 		const record = stores.chatStore.getChat(chatId);
 		if (!record || !(state().queues.get(chatId) ?? []).some((entry) => !entry.waking && !entry.deferred && !entry.handedTo)) return;
-		const blocked = isTurnRunning(chatId) || danglingQuestionOf(record.messages) !== null;
+		const blocked = isTurnRunning(chatId) || hasUnresolvedQuestion(record.messages);
 		if (!blocked) {
 			await delay(GRACE_MS);
 			const recheck = stores.chatStore.getChat(chatId);
 			if (
 				!isTurnRunning(chatId) &&
 				recheck &&
-				danglingQuestionOf(recheck.messages) === null
+				!hasUnresolvedQuestion(recheck.messages)
 			) {
 				return;
 			}
@@ -747,6 +771,16 @@ export function recoverStaleJobs(): void {
 					restorePendingDeliveries(job.chatId);
 					void pump(job.chatId);
 				} else if (job.status === "running" && !job.result) {
+					if (job.kind === "plugin") {
+						// Canonical task reads only; never respawn plugin tools/code.
+						if (s.recoverPlugin) void s.recoverPlugin(job).catch((error: unknown) => {
+							if (stores.jobStore.getJob(job.id)?.status !== "running") return;
+							const failure = `Plugin job recovery failed: ${String(error)}`;
+							stores.jobStore.updateJob(job.id, { status: "error", error: failure, activity: "recovery failed", delivery: { kind: "failure", status: "pending" } });
+							void deliverJobResult(buildJobFailureSteer(job, failure));
+						});
+						continue;
+					}
 					// The sub-agent loop itself died with the process: re-spawn.
 					if (!s.respawn) continue;
 					stores.jobStore.updateJob(job.id, { activity: "recovering: re-running" });

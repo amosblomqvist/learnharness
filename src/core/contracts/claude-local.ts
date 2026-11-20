@@ -1,6 +1,6 @@
 /**
  * The Local Claude route's contract (owner-approved design, 2026-10-27;
- * docs/architecture.md §8.1): lesson turns run through the user's OWN
+ * docs/architecture.md, "Local Claude route"): lesson turns run through the user's OWN
  * installed Claude Code binary via the Claude Agent SDK. The app never
  * collects, stores or forwards a Claude credential — Claude Code keeps its
  * own login — so there is no sign-in control anywhere, no credential file,

@@ -81,13 +81,14 @@ describe("sessionFindRanges — the displayed-text DOM seam", () => {
 		assert.ok((ranges[0]!.startContainer as Text).data.includes("session"));
 	});
 
-	it("hidden subtrees never match: hidden attr, menus, katex MathML duplicate, textareas (display:none is browser-verified)", () => {
+	it("hidden subtrees never match: hidden attr, menus, katex MathML duplicate, draft editors (display:none is browser-verified)", () => {
 		mount(`<div data-session-find-root="">
 			<p>needle visible</p>
 			<p hidden>needle hidden-attr</p>
 			<div data-lh-menu><p>needle menu</p></div>
 			<span class="katex-mathml">needle mathml</span>
 			<textarea>needle draft</textarea>
+			<div contenteditable="true" data-file-path-input>needle path draft <span contenteditable="false">notes.pdf</span></div>
 		</div>`);
 		const ranges = sessionFindRanges(document.body as unknown as HTMLElement, "needle");
 		assert.equal(ranges.length, 1);

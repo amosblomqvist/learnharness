@@ -135,7 +135,7 @@ describe("parseAskInput", () => {
 		assert.ok(parseAskInput({ question: "Which topics?", options: [{ label: "Physics" }, { label: "Logic" }], multiSelect: true }));
 	});
 
-	it("the live crash shape — stringified options — does not parse", () => {
+	it("stringified options with invalid string entries still do not parse", () => {
 		assert.equal(parseAskInput({ question: "q", options: "[]" }), undefined);
 	});
 });

@@ -65,7 +65,7 @@ async function runAgent(steps: FakeStep[] | ((blocks: string[], turn: number) =>
 	const runtime = runtimeFor(async () => fake.query, options.runtime);
 	const agent = new ClaudeLocalAgent({
 		systemPrompt: options.systemPrompt ?? "You teach.", model, thinkingLevel: "medium", tools: options.tools ?? [lookup, quiz],
-		messages: (options.messages ?? ["What's the weather in Oslo?"]).map(newUserMessage), convertToLlm: toLlmMessages, finishTurn: stopper, runtime, purpose: options.purpose, lifecycle: options.lifecycle, onProviderEvent: options.onProviderEvent,
+		messages: (options.messages ?? ["What's the weather in Oslo?"]).map((text) => newUserMessage(text)), convertToLlm: toLlmMessages, finishTurn: stopper, runtime, purpose: options.purpose, lifecycle: options.lifecycle, onProviderEvent: options.onProviderEvent,
 	});
 	const events: AgentEvent[] = [];
 	agent.subscribe((event) => { events.push(event); options.onEvent?.(event, agent); });

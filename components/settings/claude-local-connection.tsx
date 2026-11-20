@@ -113,7 +113,7 @@ export function ClaudeLocalDialogBody({ status, busy, error, onChange, onProbe, 
 		<div className="mt-4 flex flex-col gap-1 text-xs text-foreground">
 			<label className="flex items-center gap-3" htmlFor="claude-local-binary-path">
 				<span className="shrink-0">Claude Code path</span>
-				<span className="flex-1"><CommitInput value={status.binaryPath} placeholder="detected automatically" ariaLabel="Claude Code path" testid="claude-local-binary-path" onCommit={(binaryPath) => onChange({ binaryPath })} /></span>
+				<span className="flex-1"><CommitInput value={status.binaryPath} placeholder="detected automatically" ariaLabel="Claude Code path" testid="claude-local-binary-path" onCommit={(binaryPath) => { onChange({ binaryPath }); return true; }} /></span>
 			</label>
 			<span className="leading-relaxed text-muted-foreground">Optional. Set it when Claude Code is installed somewhere LearnHarness does not look (PATH, ~/.local/bin, Homebrew, npm global).</span>
 		</div>
@@ -125,7 +125,7 @@ export function ClaudeLocalDialogBody({ status, busy, error, onChange, onProbe, 
 }
 
 /** The compact row + its dialog. `initialStatus` seeds tests and SSR. */
-export function ClaudeLocalConnection({ initialStatus }: { initialStatus?: ClaudeLocalStatus } = {}) {
+export function ClaudeLocalConnection({ initialStatus, labelClassName }: { initialStatus?: ClaudeLocalStatus; labelClassName?: string } = {}) {
 	const hub = useNotifyHub();
 	const [status, setStatus] = useState<ClaudeLocalStatus>(initialStatus ?? emptyClaudeLocalStatus());
 	const [open, setOpen] = useState(false);
@@ -171,11 +171,11 @@ export function ClaudeLocalConnection({ initialStatus }: { initialStatus?: Claud
 		if (settings.enabled !== status.enabled || settings.binaryPath !== savedPath) return probe();
 	});
 	return <div className="flex flex-col gap-2" data-testid="claude-local-connection">
-		<ConnectionRow label={CLAUDE_LOCAL.title} action={status.enabled ? "Manage…" : "Set up…"} disabled={false} onAction={() => setOpen(true)}>
+		<ConnectionRow label={CLAUDE_LOCAL.title} labelClassName={labelClassName} action={status.enabled ? "Manage…" : "Set up…"} disabled={false} onAction={() => setOpen(true)}>
 			{status.enabled && <span className="font-ui text-[11px] text-muted-foreground" data-testid="claude-local-row-state">{status.state === "ready" ? "ready" : status.state.replace(/-/g, " ")}</span>}
 		</ConnectionRow>
 		{status.enabled && status.state !== "ready" && status.error && <p role="alert" className="text-xs text-red-400">{status.error}</p>}
-		{open && <ConnectionDialog label={`${CLAUDE_LOCAL.title} settings`} testid="claude-local-dialog" backdropTestid="claude-local-backdrop" busy={busy} onClose={() => { if (!busy) setOpen(false); }}>
+		{open && <ConnectionDialog label={`${CLAUDE_LOCAL.title} settings`} testid="claude-local-dialog" backdropTestid="claude-local-backdrop" busy={busy} onClose={() => { if (busy) return "blocked"; setOpen(false); return "closed"; }}>
 			<ClaudeLocalDialogBody status={status} busy={busy} error={error} web={web} onChange={(next) => void change(next)} onProbe={() => void run(probe)} />
 			<div className="mt-2 flex justify-end"><Button variant="outline" size="sm" disabled={busy} onClick={() => setOpen(false)}>Close</Button></div>
 		</ConnectionDialog>}

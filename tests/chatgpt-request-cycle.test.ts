@@ -15,6 +15,7 @@ process.env.LH_DATA_DIR = path.join(scratch, "data");
 process.env.LH_AUTH_FILE = path.join(scratch, "auth.json");
 fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
 const { runPiTurn } = await import("../src/server/pi/ui-stream.ts");
+const { projectedContextTokens } = await import("../src/server/compaction.ts");
 import { newUserMessage, newNextMessage, newThinkingMessage, newAnswerResult, reconstructRequestCause, concludedByDismissalPair, type LhMessage } from "../src/core/native-messages.ts";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
@@ -69,10 +70,13 @@ after(() => {
  if (originalConnected) Object.defineProperty(process, "connected", originalConnected); else delete (process as { connected?: boolean }).connected;
 });
 const automatic = (id = "auto") => ({ id, role: "custom" as const, customType: "subagent-steer" as const, content: "Automatic result", details: { jobId: "dummy-job" }, display: true, timestamp: 2 });
-async function nativeRun(where: typeof cut, staged: boolean, withLearner = true, commitThrows = false, lateAutomatic = false, withTool = false) {
+async function nativeRun(where: typeof cut, staged: boolean, withLearner = true, commitThrows = false, lateAutomatic = false, withTool = false, localBudget?: "first" | "internal" | "combined-first" | "combined-internal") {
  epoch++; revision++; background = true; cut = where; leases = []; fetches = 0; toolFirst = withTool;
  await refreshChatGPTModels([model]);
- const seed = newUserMessage("Initial learner"); const marker = automatic(); const learner = { ...newUserMessage("New learner"), id: "learner-late" };
+ const combined = localBudget?.startsWith("combined-");
+ const seed = newUserMessage("Initial learner"); const marker = automatic();
+ const learner = { ...newUserMessage(combined ? "L".repeat(2600) : "New learner"), id: "learner-late" };
+ const reference = { id: "side-combined", role: "custom", customType: "side-question", content: "S".repeat(2600), details: {}, display: false, timestamp: 2 } as AgentMessage;
  const messages = staged ? [seed, marker] : [seed];
  const purpose = { background: staged };
  let restored = 0, committed = 0, usage = 0, settled = 0, executed = 0, handedLate = false;
@@ -84,10 +88,29 @@ async function nativeRun(where: typeof cut, staged: boolean, withLearner = true,
  });
  const raw = piEngineForSpec({ provider: "chatgpt", id: model.id }, () => purpose.background, cycle);
  const engine = { ...raw, streamFn: (m: any, context: any, opts: any) => raw.streamFn(m, context, { ...opts, onPayload: async (payload: unknown) => { if (lateAutomatic && !handedLate) { handedLate = true; agent.steer(marker); } if (cut === "payload") { cut = "none"; await Promise.resolve(); revoke(); } return payload; } }) };
- const agent = createTeacherAgent(undefined, { engine, messages, chatId: "scratch-native-session", tools: withTool ? { again: { name: "again", label: "again", description: "scratch", parameters: Type.Object({}), execute: async () => { executed++; return { content: [{ type: "text" as const, text: "Done" }], details: {} }; } } } : {}, callPurpose: purpose, requestCycle: cycle, onUsage: () => usage++ });
+ const agent = createTeacherAgent(undefined, {
+  validateContext: (actual) => {
+   if (localBudget === "first" || (localBudget === "internal" && executed > 0)) throw new Error("Side-chat context budget exceeded; Retry or select a larger model.");
+   if (combined && actual.some((message) => (message as { id?: string }).id === "side-combined")) {
+    const live = actual.filter((message) => (message as { role: string }).role !== "system") as LhMessage[];
+    assert.ok(projectedContextTokens(live.filter((message) => message.id !== "side-combined"), 100) < 1000, "steer alone fits synthetic budget");
+    assert.ok(projectedContextTokens(live.filter((message) => message.id !== learner.id), 100) < 1000, "side alone fits synthetic budget");
+    assert.ok(projectedContextTokens(live, 100) > 1000, "actual combined request does not fit");
+    cycle.rejectLocalRequest(new Set(["side-combined"]));
+    throw new Error("Side-chat context budget exceeded; Retry or select a larger model.");
+   }
+  },
+  ...(localBudget === "combined-internal" ? { contextUpdates: () => executed > 0 ? [reference] : [] } : {}),
+  engine, messages, chatId: "scratch-native-session", tools: withTool ? { again: {
+   name: "again", label: "again", description: "scratch", parameters: Type.Object({}), execute: async () => {
+    executed++; if (localBudget === "combined-internal") agent.steer(learner);
+    return { content: [{ type: "text" as const, text: "Done" }], details: {} };
+   },
+  } } : {}, callPurpose: purpose, requestCycle: cycle, onUsage: () => usage++,
+ });
  if (!staged && !lateAutomatic) agent.steer(marker);
  if (withLearner) agent.steer(learner);
- const handle = runPiTurn({ agent, requestCycle: cycle, onFinish: (m) => { settled++; final = m; resolve(); } });
+ const handle = runPiTurn({ agent, requestCycle: cycle, beforeCycle: () => { if (localBudget === "combined-first") agent.steer(reference); }, onFinish: (m) => { settled++; final = m; resolve(); } });
  const firstView = new Response(handle.subscribe()).text();
  await finished;
  const wire = await firstView; const replay = await new Response(handle.subscribe()).text();
@@ -137,6 +160,68 @@ test("unfinished foreground ordinary-tool chain recovers without rerunning the c
  assert.equal(r.fetches, 2); assert.equal(r.executed, 1); assert.equal(r.usage, 2); assert.deepEqual(r.leases, [false, true, false]);
  assert.equal(r.final.filter((m) => m.role === "toolResult").length, 1);
  assert(!r.wire.includes('"id":"auto"'));
+});
+
+test("local first-call context refusal restores unadmitted automatic input and retains an actionable SDK error without a lease or retry", async () => {
+ const r = await nativeRun("none", true, true, false, false, false, "first");
+ assert.equal(r.fetches, 0); assert.deepEqual(r.leases, []); assert.equal(r.usage, 0); assert.equal(r.committed, 0); assert.equal(r.restored, 1);
+ assert.equal(await r.cycle.admission, false); assert(!r.wire.includes('"id":"auto"')); assert.match(r.wire, /Side-chat context budget exceeded/);
+ assert.equal(r.final.filter((m) => m.role === "assistant" && m.stopReason === "error").length, 1);
+ assert.equal(r.final.filter((m) => (m as { id?: string }).id === "learner-late").length, 1);
+});
+test("local internal context refusal keeps completed tools and restores new automatic input without another lease or foreground recovery", async () => {
+ const r = await nativeRun("none", false, false, false, true, true, "internal");
+ assert.equal(r.fetches, 1); assert.equal(r.executed, 1); assert.deepEqual(r.leases, [false]); assert.equal(r.usage, 1); assert.equal(r.restored, 1);
+ assert.equal(r.final.filter((m) => m.role === "toolResult").length, 1); assert.match(r.wire, /Side-chat context budget exceeded/);
+ assert(!r.wire.includes('"id":"auto"'));
+});
+
+for (const phase of ["first", "internal"] as const) test(`actual ${phase}-cycle combined steering/reference refusal has no extra native lease, dispatch or recovery`, async () => {
+ const first = phase === "first";
+ const r = await nativeRun("none", first, first, false, !first, !first, first ? "combined-first" : "combined-internal");
+ assert.equal(r.fetches, first ? 0 : 1); assert.deepEqual(r.leases, first ? [] : [false]);
+ assert.equal(r.executed, first ? 0 : 1); assert.equal(r.usage, first ? 0 : 1); assert.equal(r.restored, 1);
+ assert.equal(r.final.filter((m) => (m as { id?: string }).id === "learner-late").length, 1);
+ assert.equal(r.final.filter((m) => m.role === "toolResult").length, first ? 0 : 1);
+ assert.equal(r.final.filter((m) => (m as { id?: string }).id === "side-combined").length, 0);
+ assert(!r.wire.includes('"id":"auto"')); assert(!r.wire.includes('"id":"side-combined"'));
+ assert.match(r.wire, /Side-chat context budget exceeded/);
+ assert.equal(r.final.filter((m) => m.role === "assistant" && m.stopReason === "error").length, 1);
+});
+
+for (const admission of ["accepted", "denied"] as const) test(`handler publishes side delivery only after native admission: ${admission}`, async () => {
+ epoch++; revision++; background = true; cut = admission === "denied" ? "lease" : "none"; leases = []; fetches = 0; toolFirst = false;
+ await refreshChatGPTModels([model]);
+ const { chatStore } = await import("../src/store/chats.ts");
+ const { handleChatInput } = await import("../src/server/chat-handler.ts");
+ const { runningTurn } = await import("../src/server/turn-runs.ts");
+ const { sideConversationEntries } = await import("../src/core/side-chat.ts");
+ const chat = chatStore.createChat(`Native side admission ${admission}`);
+ chatStore.saveSettings(chat.id, { model: { provider: "chatgpt", id: model.id } });
+ const previous = { role: "assistant", id: "previous_teacher", api: "openai-responses", provider: "chatgpt", model: model.id,
+  content: [{ type: "text", text: "An earlier completed explanation." }], stopReason: "stop", timestamp: 1,
+  usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } },
+ } as LhMessage;
+ const original = [newUserMessage("Initial learner"), previous]; chatStore.saveMessages(chat.id, original);
+ const threads = [{ id: "side_native", anchor: { messageId: previous.id, partId: `${previous.id}-t0`, blockIndex: 0, blockText: "An earlier completed explanation." },
+  open: true, createdAt: "2026-11-07T00:00:00Z", messages: [
+   { id: "native_q", role: "user" as const, text: "RAW NATIVE QUESTION", at: "2026-11-07T00:00:00Z" },
+   { id: "native_a", role: "assistant" as const, text: "RAW NATIVE REPLY", at: "2026-11-07T00:00:00Z" },
+  ],
+ }];
+ chatStore.updateSideChats(chat.id, () => threads);
+ const input = admission === "denied" ? { type: "steers", steers: [automatic("handler-auto")] } : { type: "text", text: "Continue the lesson" };
+ const response = await handleChatInput(chat.id, input as Parameters<typeof handleChatInput>[1], (opts) => {
+  assert.equal(chatStore.getChat(chat.id)!.messages.filter((m) => m.role === "custom" && m.customType === "side-question").length, 0);
+  return createTeacherAgent(undefined, { ...opts, tools: {} });
+ }, { snapshot: () => threads });
+ const turn = runningTurn(chat.id); if (turn) await new Response(turn.subscribe()).text();
+ assert.equal(response.status, admission === "denied" ? 403 : 200);
+ assert.equal(fetches, admission === "denied" ? 0 : 1); assert.deepEqual(leases, [admission === "denied"]);
+ const saved = chatStore.getChat(chat.id)!;
+ assert.deepEqual(saved.messages.slice(0, original.length), original); assert.deepEqual(saved.sideChats, threads);
+ assert.equal(saved.messages.filter((m) => m.role === "custom" && m.customType === "side-question").length, admission === "denied" ? 0 : 2);
+ assert.equal(sideConversationEntries(saved).length, admission === "denied" ? 2 : 0, "unadmitted references must stay deliverable");
 });
 
 test("full native record reconstruction preserves original causes and reports genuine ambiguity", () => {

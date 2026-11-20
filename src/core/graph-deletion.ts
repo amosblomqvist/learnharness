@@ -43,10 +43,9 @@
  * aliases) are stripped and its provenance points removed (owner ruling
  * 2026-09-23: all traces, identity survives).
  *
- * Not touched, by design:
- *   - imported-notes sources (src_…) — a different front door with its
- *     own lifecycle (re-import dedupes by path hash); this wave deletes
- *     CHATS.
+ * This contribution purge also accepts imported-source IDs. Source records,
+ * conversations and organizational placement remain caller-owned; this
+ * module rewrites graph ledgers only.
  *
  * Resurrection safety: the deletion runs as ONE synchronous block (no
  * awaits — atomic vs the event loop, so no extraction append can
@@ -94,6 +93,12 @@ const EMPTY_STATS: ChatDeletionStats = {
  * and returns zero stats).
  */
 export function deleteChatTraces(graphStore: GraphStore, chatId: string, mode: ChatDeleteMode): ChatDeletionStats {
+	return deleteSourcesTraces(graphStore, new Set([chatId]), mode);
+}
+
+/** The same provenance rules for a selected batch, with one ledger rewrite
+ * rather than reparsing/rewriting the whole graph once per imported file. */
+export function deleteSourcesTraces(graphStore: GraphStore, sourceIds: ReadonlySet<string>, mode: ChatDeleteMode): ChatDeletionStats {
 	if (mode !== "preserve-graph" && mode !== "delete-nodes") {
 		throw new Error(`Unknown deletion mode: ${mode as string}`);
 	}
@@ -101,8 +106,9 @@ export function deleteChatTraces(graphStore: GraphStore, chatId: string, mode: C
 	// The bookkeeping rows die in BOTH modes — coverage and checkpoints
 	// are extraction state, not graph content (owner semantics: even
 	// preserve-graph deletes "the chat's coverage rows").
-	const coverage = graphStore.readCoverage().filter((row) => row.chatId !== chatId);
-	const checkpoints = graphStore.readCheckpoints().filter((row) => row.chatId !== chatId);
+	if (sourceIds.size === 0) return { ...EMPTY_STATS };
+	const coverage = graphStore.readCoverage().filter((row) => !sourceIds.has(row.chatId));
+	const checkpoints = graphStore.readCheckpoints().filter((row) => !sourceIds.has(row.chatId));
 	const stats: ChatDeletionStats = {
 		...EMPTY_STATS,
 		coverageRemoved: graphStore.readCoverage().length - coverage.length,
@@ -125,8 +131,8 @@ export function deleteChatTraces(graphStore: GraphStore, chatId: string, mode: C
 	// mtimes stable so the graph revision only moves when something really
 	// changed.)
 	const touched =
-		nodeLines.some((line) => line.provenance.some((pt) => pt.chatId === chatId)) ||
-		chainLines.some((line) => line.provenance.some((pt) => pt.chatId === chatId));
+		nodeLines.some((line) => line.provenance.some((pt) => sourceIds.has(pt.chatId))) ||
+		chainLines.some((line) => line.provenance.some((pt) => sourceIds.has(pt.chatId)));
 	if (!touched) {
 		if (stats.coverageRemoved > 0 || stats.checkpointsRemoved > 0) {
 			graphStore.rewriteLedgers({ coverage, checkpoints });
@@ -142,10 +148,13 @@ export function deleteChatTraces(graphStore: GraphStore, chatId: string, mode: C
 	//    and counting it would keep nodes alive whose lines we would then
 	//    drop, dangling the chain.)
 	const survives = (points: ReadonlyArray<{ chatId: string }>): boolean =>
-		points.some((pt) => pt.chatId !== chatId);
+		points.some((pt) => !sourceIds.has(pt.chatId));
+	const touchedNodes = new Set(nodeLines.filter((line) => line.provenance.some((pt) => sourceIds.has(pt.chatId))).map((line) => line.id));
 	const live = new Set<string>();
 	for (const line of nodeLines) {
-		if (survives(line.provenance)) live.add(line.id);
+		// Unrelated provenance-free legacy nodes are outside this deletion's
+		// blast radius, not orphans created by removing this source.
+		if (!touchedNodes.has(line.id) || survives(line.provenance)) live.add(line.id);
 	}
 
 	// 2. Node lines. Per-line (each line is ONE extraction run's append, so
@@ -163,7 +172,7 @@ export function deleteChatTraces(graphStore: GraphStore, chatId: string, mode: C
 		if (!live.has(line.id)) continue; // the whole node dies
 		const first = !seenIds.has(line.id);
 		seenIds.add(line.id);
-		const points = line.provenance.filter((pt) => pt.chatId !== chatId);
+		const points = line.provenance.filter((pt) => !sourceIds.has(pt.chatId));
 		if (points.length === line.provenance.length) {
 			outNodes.push(line); // untouched by this chat
 			continue;
@@ -192,7 +201,7 @@ export function deleteChatTraces(graphStore: GraphStore, chatId: string, mode: C
 	const outChains: GraphChain[] = [];
 	for (const line of chainLines) {
 		if (deadNodes.has(line.conclusion) || line.premises.some((premise) => deadNodes.has(premise))) continue;
-		const points = line.provenance.filter((pt) => pt.chatId !== chatId);
+		const points = line.provenance.filter((pt) => !sourceIds.has(pt.chatId));
 		// An assertion dies when THIS deletion empties its provenance — a
 		// line that already had no points is foreign/legacy data, not this
 		// chat's trace; it rides untouched.

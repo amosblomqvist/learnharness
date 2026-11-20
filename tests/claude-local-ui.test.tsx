@@ -10,6 +10,8 @@ import { createRoot, type Root } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
 import { ClaudeLocalConnection, ClaudeLocalDialogBody, CLAUDE_LOCAL_DISCLOSURE, claudeLocalStateLine, claudeLocalUsageLine, emptyClaudeLocalStatus } from "../components/settings/claude-local-connection.tsx";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 import { ModelMenuList } from "../components/settings/model-menu.tsx";
 import { toModelDto } from "../src/server/model-catalog.ts";
 import { piModels } from "../src/agent/models.ts";
@@ -17,6 +19,7 @@ import type { ClaudeLocalStatus } from "../src/core/contracts/claude-local.ts";
 
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
+installModalDom(dom);
 const originalFetch = globalThis.fetch;
 let root: Root | undefined, host: HTMLDivElement | undefined;
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; globalThis.fetch = originalFetch; });
@@ -77,7 +80,7 @@ async function flip(toggleTestid: string, initial: ClaudeLocalStatus) {
 		return method === "PUT" ? Response.json({ ok: true }) : Response.json(initial);
 	};
 	host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-	await act(async () => root!.render(<ClaudeLocalConnection initialStatus={initial} />));
+	await act(async () => root!.render(<InteractionLayersProvider><ClaudeLocalConnection initialStatus={initial} /></InteractionLayersProvider>));
 	const manage = [...document.querySelectorAll<HTMLButtonElement>("button")].find((el) => el.textContent === (initial.enabled ? "Manage…" : "Set up…"));
 	assert(manage); await act(async () => manage.click());
 	requests.length = 0;
@@ -103,7 +106,7 @@ test("review P2: a toggle while the saved override is not found keeps the path (
 		return Response.json(missing);
 	};
 	host = document.createElement("div"); document.body.append(host); root = createRoot(host);
-	await act(async () => root!.render(<ClaudeLocalConnection initialStatus={missing} />));
+	await act(async () => root!.render(<InteractionLayersProvider><ClaudeLocalConnection initialStatus={missing} /></InteractionLayersProvider>));
 	const manage = [...document.querySelectorAll<HTMLButtonElement>("button")].find((el) => el.textContent === "Manage…");
 	assert(manage); await act(async () => manage.click());
 	assert.equal(document.querySelector<HTMLInputElement>('[data-testid="claude-local-binary-path"]')?.value, saved, "the field shows the saved override");

@@ -1,6 +1,6 @@
 /**
- * The Claude Agent SDK seam (Local Claude route, docs/architecture.md
- * §8.1): the ONE place that imports `@anthropic-ai/claude-agent-sdk`.
+ * The Claude Agent SDK seam (docs/architecture.md, "Local Claude
+ * route"): the ONE place that imports `@anthropic-ai/claude-agent-sdk`.
  * Lazy, so the proprietary SDK never loads unless the route is used, and
  * injectable, so every unit test runs against a fake `query` and no test
  * ever spawns a `claude` process (the suite stays offline — testing law).

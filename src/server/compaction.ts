@@ -41,6 +41,7 @@ import {
 	serializeForSummary,
 	toLlmMessages,
 	type CompactionDetails,
+	type ChatRecord,
 	type LhMessage,
 	type LhMarkerMessage,
 } from "../core/index.ts";
@@ -48,6 +49,7 @@ import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
 import type { PiEngine } from "../agent/models.ts";
 import { runSubagent } from "../agent/subagents/pi-run.ts";
+import { isTurnRunning } from "./turn-liveness.ts";
 
 /** The summarizer's system prompt — server-owned operational framing,
  *  not model-facing doctrine (buildCompactionPrompt carries the shape). */
@@ -69,7 +71,7 @@ async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ s
 		totalTokens: 0,
 		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
 	};
-	const { text } = await runSubagent([], {
+	const { text, newMessages } = await runSubagent([], {
 		// The engine override is always present (the chat's own conversation
 		// engine — owner ruling), so the role label never resolves an
 		// engine; "researcher" is the least-wrong existing ModelRole label
@@ -79,10 +81,18 @@ async function subagentSummarizer(prompt: string, engine: PiEngine): Promise<{ s
 		engine,
 		systemPrompt: SUMMARIZER_SYSTEM_PROMPT,
 		maxTurns: 1,
+		// Operational work for the foreground conversation, not a worker task.
+		bypassWorkerRequestAdmission: true,
 		onUsage: (u) => {
 			usage = u;
 		},
 	});
+	// A provider-declared incomplete response is not a usable checkpoint,
+	// even when it contains nonempty text. Match Pi's compaction failure
+	// semantics: leave the existing history and prior summary untouched.
+	if (newMessages.some((message) => message.role === "assistant" && message.stopReason === "length")) {
+		throw new Error("Compaction summary hit the output limit and is incomplete");
+	}
 	return { summary: text, usage };
 }
 
@@ -103,9 +113,14 @@ export interface CompactionDeps {
 	 *  effective-trigger ruling. The catalog window lookup is the
 	 *  caller's (chat-handler has the model id at hand). */
 	thresholdTokens: number;
+	/** Opt-in reasoning accounting; absent/false uses the original heuristic. */
+	includeReasoning?: boolean;
 	/** The composed system prompt's token estimate (chars/4) — the
 	 *  projection the provider actually receives starts with it. */
 	systemPromptTokens: number;
+	/** Trigger against a prospective request without recording/summarizing
+	 * its new cargo. The cut and summary still use only saved history. */
+	projectMessages?: (record: ChatRecord) => readonly LhMessage[];
 	/** Injectable summarizer (tests); default = the sub-agent one-shot. */
 	summarize?: Summarizer;
 }
@@ -154,27 +169,35 @@ export function effectiveThresholdTokens(settingTokens: number | undefined, cont
  *  marker (that usage described context the next request will NOT
  *  carry), so the fallback path runs the plain heuristic over the
  *  CUT-HONORED projection (never the dropped span) plus the additive
- *  prompt term the anchor would have covered. */
-export function projectedContextTokens(messages: readonly LhMessage[], systemPromptTokens: number): number {
-	const est = estimateContextTokens(messages);
+ *  prompt term the anchor would have covered. Supplying a model opts into
+ *  reasoning-aware estimates; the service supplies it only when enabled. */
+export function projectedContextTokens(messages: readonly LhMessage[], systemPromptTokens: number, model?: PiEngine["model"]): number {
+	const est = estimateContextTokens(messages, model);
 	if (est.lastUsageIndex !== null) return est.tokens;
-	return estimateTokens(toLlmMessages(messages as readonly AgentMessage[]) as unknown as readonly LhMessage[]) + systemPromptTokens;
+	return estimateTokens(toLlmMessages(messages as readonly AgentMessage[]) as unknown as readonly LhMessage[], model) + systemPromptTokens;
 }
 
 // ─── the compaction run ─────────────────────────────────────────────────────
 
 /** Run one compaction for the chat (the registry mutex is HELD by the
  *  caller — ensureCompacted). Reads the record fresh, cuts, summarizes,
- *  appends the marker, records usage, notifies. Never throws upward
- *  past the registry cleanup. */
+ *  inserts the marker after the summarized messages, records usage,
+ *  notifies. Never throws upward past the registry cleanup. */
 async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
+	// The actual start seam, shared by preflight, background, and manual
+	// callers. An earlier request check is insufficient: a competing answer
+	// may claim ownership while ensureCompacted awaits the structural gate.
+	// There is no await between this check and starting the summary; an
+	// already-running compaction is still awaited by every preflight.
+	if (isTurnRunning(chatId)) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
 	const messages = record.messages;
-	const tokensBefore = projectedContextTokens(messages, deps.systemPromptTokens);
+	const model = deps.includeReasoning ? deps.engine.model : undefined;
+	const tokensBefore = projectedContextTokens(deps.projectMessages?.(record) ?? messages, deps.systemPromptTokens, model);
 	if (tokensBefore <= deps.thresholdTokens) return; // settled beneath while we waited
 
-	const cut = compactionCutIndex(messages);
+	const cut = compactionCutIndex(messages, undefined, model);
 	if (cut <= 0 || cut >= messages.length) return; // no history can be dropped
 
 	// The previous compaction's kept boundary (chained compactions
@@ -201,7 +224,14 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 		spanStart = prevKept;
 		priorSummary = previous.content;
 	}
-	const spanText = serializeForSummary(messages.slice(spanStart, cut));
+	const span = messages.slice(spanStart, cut);
+	// The separately supplied prior summary replaces all summary markers
+	// in this span. Without a resolved prior boundary, retain the existing
+	// legacy fallback rather than silently discarding summary-only context.
+	const summaryMessages = priorSummary
+		? span.filter((m) => m.role !== "custom" || m.customType !== "compaction")
+		: span;
+	const spanText = serializeForSummary(summaryMessages);
 	const fullSpan = priorSummary ? `[SYSTEM NOTE — prior compaction summary, still authoritative where not superseded]\n${priorSummary}\n\n${spanText}` : spanText;
 
 	const prompt = buildCompactionPrompt({
@@ -225,7 +255,13 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 			at: new Date().toISOString(),
 		};
 		const marker = newCompactionMarker(trimmed, details);
-		deps.chatStore.saveMessages(chatId, [...messages, marker]);
+		// Re-read: the learner may skip or toggle while the summary runs.
+		// The marker goes where the summarized chat ended, so the result
+		// matches compacting first and acting after (#518).
+		const current = deps.chatStore.getChat(chatId);
+		if (!current) throw new Error(`Chat not found: ${chatId}`);
+		const end = messages.length;
+		deps.chatStore.saveMessages(chatId, [...current.messages.slice(0, end), marker, ...current.messages.slice(end)]);
 		// The money channel: the summary is a real model call on the
 		// session's own engine — its usage keys to the marker (provenance:
 		// the transcript shows the compaction divider at the marker).
@@ -270,17 +306,30 @@ export async function ensureCompacted(deps: CompactionDeps, chatId: string): Pro
 	// injected summarizer.
 	if (process.env.NODE_ENV === "test" && !deps.summarize) return;
 	await awaitCompaction(chatId);
+	// Another fresh preflight may have started a summary after our initial
+	// structural check. Join it BEFORE any eligibility/threshold early exit:
+	// those checks govern new runs, never permission to bypass a live one.
+	const concurrent = state().inFlight.get(chatId);
+	if (concurrent) {
+		await concurrent;
+		return;
+	}
 	if (deps.canStart?.() === false) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
-	if (projectedContextTokens(record.messages, deps.systemPromptTokens) <= deps.thresholdTokens) return;
-	if (state().inFlight.has(chatId)) return; // a concurrent caller started it while we awaited
+	const model = deps.includeReasoning ? deps.engine.model : undefined;
+	if (projectedContextTokens(deps.projectMessages?.(record) ?? record.messages, deps.systemPromptTokens, model) <= deps.thresholdTokens) return;
+	const admitted = state().inFlight.get(chatId);
+	if (admitted) {
+		await admitted;
+		return;
+	}
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
 	try {
 		await run;
 	} finally {
-		state().inFlight.delete(chatId);
+		if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
 	}
 }
 
@@ -298,8 +347,10 @@ export function kickCompaction(buildDeps: () => CompactionDeps | null, chatId: s
 	if (!deps || deps.canStart?.() === false) return;
 	const record = deps.chatStore.getChat(chatId);
 	if (!record) return;
-	if (projectedContextTokens(record.messages, deps.systemPromptTokens) <= deps.thresholdTokens) return;
+	if (projectedContextTokens(record.messages, deps.systemPromptTokens, deps.includeReasoning ? deps.engine.model : undefined) <= deps.thresholdTokens) return;
 	const run = compact(deps, chatId);
 	state().inFlight.set(chatId, run);
-	void run.finally(() => state().inFlight.delete(chatId));
+	void run.finally(() => {
+		if (state().inFlight.get(chatId) === run) state().inFlight.delete(chatId);
+	});
 }

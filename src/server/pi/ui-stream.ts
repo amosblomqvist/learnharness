@@ -2,6 +2,7 @@ import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import type { LiveAgent } from "../../agent/live-agent.ts";
 import { ToolCallIdUniquifier } from "./call-ids.ts";
 import type { ChatGPTRequestCycle } from "../../agent/chatgpt-request-cycle.ts";
+import { pluginQuestionLedgerFor } from "../../agent/plugin-question-tools.ts";
 
 /**
  * THE NATIVE WIRE (Wave D, owner-approved 2026-09-26): one agent turn, streamed
@@ -26,11 +27,14 @@ import type { ChatGPTRequestCycle } from "../../agent/chatgpt-request-cycle.ts";
  *   carries the same full partial a SECOND time as `assistantMessageEvent`
  *   — nothing in this app ever reads it, and re-serializing it per chunk
  *   doubled every stream frame. Client reads `event.message`, always.
- * - Question tools (quiz / ask_user_question): NO suppression (owner ruling,
+ * - Builtin question tools (quiz / ask_user_question): NO suppression (owner ruling,
  *   Wave D fork 2) — the closing `tool_execution_end` with the in-memory
  *   "Question posed" placeholder flows to the client, which ignores it
  *   (question tools are client-owned; the answer arrives as the input event).
  *   The placeholder still never persists and never reaches the model.
+ *   Plugin questions instead suppress only private-ledger-attested pose ACKs
+ *   from every carrier, after ID correlation; admitted assistant copies carry
+ *   visibility-only attempts until canonical settlement creates authority.
  * - Tool-call validation gating survives by construction: `tool_execution_end`
  *   only fires after the call cleared the boundary (an invalid call arrives
  *   as isError — never a clean end), so the dock's mount rule keys on it.
@@ -71,6 +75,9 @@ export type TurnWireEvent =
 	| { type: "error"; errorText: string };
 
 export interface PiTurnSpec {
+	/** Fresh reference cargo for an already-selected native run, including
+	 * an admission-recovery run. This hook never schedules a run itself. */
+	beforeCycle?: () => void;
 	requestCycle?: ChatGPTRequestCycle;
 	/** The per-turn agent (stateless engine — built from the record): pi's
 	 *  Agent, or the Local Claude adapter — both speak LiveAgent. */
@@ -125,6 +132,7 @@ export interface PiTurnHandle {
 export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	const { agent, onError, onFinish, onSettleError, onSettleFailure, usedToolCallIds, updateFlushMs = 100, requestCycle } = spec;
 	const uniquifier = usedToolCallIds ? new ToolCallIdUniquifier(usedToolCallIds) : undefined;
+	const questions = pluginQuestionLedgerFor(agent);
 
 	let settled = false;
 	let sawAbort = false;
@@ -228,7 +236,8 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	const settleWith = () => {
 		try {
 			const settled_ = [...agent.state.messages].filter((m) => (m as { role?: string }).role !== "system");
-			onFinish((uniquifier?.remapSettled(settled_) as AgentMessage[]) ?? settled_, sawAbort);
+			const mapped = (uniquifier?.remapSettled(settled_) as AgentMessage[]) ?? settled_;
+			onFinish(questions?.settled(settled_, mapped) ?? mapped, sawAbort);
 		} catch (err) {
 			console.error("[turn] settlement failed:", err);
 			try { onSettleFailure?.(err, reportedErrorText); }
@@ -244,14 +253,15 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 		if (settled) return;
 		// THE LACAN FIX: ids uniquify HERE, before any view — the one seam
 		// every consumer downstream shares. No uniquifier → verbatim.
-		const uniqued = uniquifier ? uniquifier.event(event) : event;
+		const mapped = uniquifier ? uniquifier.event(event) : event;
+		const uniqued = questions ? questions.wire(event, mapped) : mapped;
 		// WIRE DIET: slim the one event pi double-stuffs — our views read
 		// `message`, never `assistantMessageEvent` (same full partial twice).
-		const wire: TurnWireEvent =
-			uniqued.type === "message_update"
-				? { type: "message_update", message: uniqued.message }
-				: uniqued;
-		send(wire);
+		if (uniqued) {
+			const wire: TurnWireEvent = uniqued.type === "message_update"
+				? { type: "message_update", message: uniqued.message } : uniqued;
+			send(wire);
+		}
 		if (event.type === "message_end") {
 			const m = event.message as { role?: string; stopReason?: string } | undefined;
 			if (m?.role === "assistant" && m.stopReason === "aborted") sawAbort = true;
@@ -270,11 +280,13 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 	void (async () => {
 		try {
 			do {
+				spec.beforeCycle?.();
 				await agent.continue();
 				if (!requestCycle) break;
 				const denied = requestCycle.deniedBeforeDispatch;
-				const outcome = requestCycle.finishNativeCycle();
-				if (denied) agent.state.messages = outcome.messages;
+				const locallyRejected = requestCycle.locallyRejected;
+				const outcome = requestCycle.finishNativeCycle(agent.state.messages);
+				if (denied || locallyRejected) agent.state.messages = outcome.messages;
 				if (outcome.action !== "resumeForeground") {
 					handle({ type: "agent_end", messages: [...agent.state.messages] });
 					break;

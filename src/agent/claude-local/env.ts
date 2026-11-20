@@ -1,6 +1,6 @@
 /**
  * The child environment for the user's Claude Code (Local Claude route,
- * docs/architecture.md §8.1). The Agent SDK's `env` option REPLACES the
+ * docs/architecture.md, "Local Claude route"). The Agent SDK's `env` option REPLACES the
  * child's environment wholesale (verified in sdk.mjs: `{...options.env}`),
  * so this is an ALLOWLIST, never a copy of process.env with deletions:
  *

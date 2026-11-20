@@ -1,6 +1,6 @@
 /**
  * The agent-side view of the Local Claude route (docs/architecture.md
- * §8.1): the server's probe (src/server/claude-local.ts) pushes a snapshot
+ * "Local Claude route"): the server's probe (src/server/claude-local.ts) pushes a snapshot
  * — status, catalog, how to launch the user's binary — and the agent
  * layer reads it here. Same discipline as subscription-bridge.ts: the
  * agent layer never imports the server; it is TOLD what is current.

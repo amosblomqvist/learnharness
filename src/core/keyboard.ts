@@ -36,7 +36,8 @@ export type KeyAction =
 	| "question-pick-row"
 	| "question-submit"
 	| "open-settings"
-	| "toggle-user-thinking";
+	| "toggle-user-thinking"
+	| "toggle-question-thread";
 
 /** Where the cheat sheet groups an action (display only — dispatch is
  *  global; a seam that isn't mounted simply no-ops). */
@@ -69,6 +70,7 @@ export const KEYBOARD_ACTIONS: readonly KeyActionDef[] = [
 	{ id: "new-session", label: "New session", scope: "global", binding: "mod+n" },
 	{ id: "rename-session", label: "Rename session", scope: "chat", binding: "f2" },
 	{ id: "toggle-user-thinking", label: "Toggle all your thinking", scope: "chat", binding: "mod+t" },
+	{ id: "toggle-question-thread", label: "Question · ask for a nudge (side thread)", scope: "chat", binding: "mod+j" },
 	// Mod+F is surface-scoped: graph node search and session text Find share
 	// one action/binding. Only the currently mounted surface listens.
 	{ id: "find", label: "Find", scope: "global", binding: "mod+f" },
@@ -87,17 +89,20 @@ export const KEYBOARD_ACTIONS: readonly KeyActionDef[] = [
 	{ id: "question-submit", label: "Question · submit", scope: "chat", binding: "enter", displayOnly: true },
 ];
 
+export type KeymapAction = KeyAction | `plugin:${string}:${string}`;
+export type KeymapOverrides = Partial<Record<KeymapAction, string>>;
+export const KEYMAP_CHANGED_EVENT = "lh:keymap-changed";
 const STORAGE_KEY = "lh:keymap";
 
 /** localStorage overrides ({actionId: binding}) — read once per module
  *  instance; the settings editor will write this key. Guarded: SSR and a
  *  corrupt/absent store both fall back to defaults. */
-export function loadOverrides(): Partial<Record<KeyAction, string>> {
+export function loadOverrides(): KeymapOverrides {
 	if (typeof window === "undefined") return {};
 	try {
 		const raw = window.localStorage.getItem(STORAGE_KEY);
 		if (!raw) return {};
-		const parsed = JSON.parse(raw) as Partial<Record<KeyAction, string>>;
+		const parsed = JSON.parse(raw) as KeymapOverrides;
 		if (parsed && typeof parsed === "object") return parsed;
 	} catch {
 		/* corrupt store = defaults */
@@ -108,7 +113,7 @@ export function loadOverrides(): Partial<Record<KeyAction, string>> {
 /** Write the full overrides map ({actionId: binding}) — the settings
  *  editor's rebind/reset persistence. Guarded: SSR no-ops. An empty
  *  map clears the store entirely (all-defaults). */
-export function saveOverrides(overrides: Partial<Record<KeyAction, string>>): void {
+export function saveOverrides(overrides: KeymapOverrides): void {
 	if (typeof window === "undefined") return;
 	try {
 		if (Object.keys(overrides).length) window.localStorage.setItem(STORAGE_KEY, JSON.stringify(overrides));
@@ -116,6 +121,7 @@ export function saveOverrides(overrides: Partial<Record<KeyAction, string>>): vo
 	} catch {
 		/* storage unavailable = overrides don't persist, defaults keep working */
 	}
+	window.dispatchEvent?.(new window.Event(KEYMAP_CHANGED_EVENT));
 }
 
 /** The live key map: defaults with user overrides applied. */
@@ -147,6 +153,9 @@ export function bindingForAction(id: KeyAction): string {
  * Normalize a KeyboardEvent to a canonical binding string. Rules:
  * - mod matches BOTH meta (⌘) and ctrl — Ctrl+K works on a Mac keyboard too.
  * - a printable key ("?") bakes its shift in: "shift+/?" collapses to "?".
+ * - with mod or alt held, a single non-ASCII character falls back to its
+ *   physical A–Z/comma position (Russian Ctrl+"л" → mod+k). ASCII characters
+ *   keep following `key`, including AZERTY/Dvorak mappings.
  */
 export function eventBinding(e: KeyboardEvent): string {
 	const mod = e.metaKey || e.ctrlKey;
@@ -159,7 +168,19 @@ export function eventBinding(e: KeyboardEvent): string {
 	if (mod) mods.push("mod");
 	if (e.altKey) mods.push("alt");
 	if (e.shiftKey) mods.push("shift");
-	return [...mods, e.key.toLowerCase()].join("+");
+	return [...mods, modifiedKey(e)].join("+");
+}
+
+/** The key part of a modified binding. A non-ASCII `key` (the layout's own
+ *  letter) falls back to `code` — KeyK → "k", Comma → "," — the only keys the
+ *  registry binds by character. */
+function modifiedKey(e: KeyboardEvent): string {
+	const key = e.key.toLowerCase();
+	// Inspect the reported character: lowercasing can expand it (İ → i̇).
+	if (e.key.length !== 1 || e.key <= "\x7f" || !(e.metaKey || e.ctrlKey || e.altKey)) return key;
+	if (e.code === "Comma") return ",";
+	const letter = /^Key([A-Z])$/.exec(e.code);
+	return letter?.[1] ? letter[1].toLowerCase() : key;
 }
 
 /** The window event name a registry action dispatches/answers on —
@@ -202,6 +223,7 @@ const KEY_GLYPH: Record<string, string> = {
 	tab: "⇥",
 	escape: "Esc",
 	space: "Space",
+	" ": "Space",
 };
 
 /** Format a binding for display: "mod+shift+f" → "⌘⇧F". */

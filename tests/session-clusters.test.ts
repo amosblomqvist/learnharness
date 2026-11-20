@@ -169,9 +169,9 @@ describe("graphSnapshot birth-session clusters", () => {
 			label: "Learning session",
 			members: ["a", "b", "c"],
 		});
-		assert.deepEqual(byLabel.get("/vault/notes.md"), {
+		assert.deepEqual(byLabel.get("notes"), {
 			id: "src_notes",
-			label: "/vault/notes.md",
+			label: "notes",
 			members: ["d", "e", "f"],
 		}, "a notes file is a birth-session too (owner ruling)");
 		// A 2-proposition session renders no hull (the presentation rule).

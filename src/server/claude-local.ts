@@ -1,5 +1,5 @@
 /**
- * The Local Claude route's server owner (docs/architecture.md §8.1): finds
+ * The Local Claude route's server owner (docs/architecture.md, "Local Claude route"): finds
  * the user's OWN Claude Code install, gates its version, asks it — through
  * the Agent SDK, without ever sending a prompt — what login it holds and
  * which models the plan offers, and publishes the result to the agent

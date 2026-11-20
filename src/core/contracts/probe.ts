@@ -1,5 +1,5 @@
 /**
- * Probe-phase contracts (the probe→teach split, docs/probe-teach-split.md).
+ * Probe-phase contracts (the probe→teach split, docs/archive/probe-teach-split.md).
  *
  * The prober concludes its phase with `probe_done` — a server-side tool
  * whose INPUT is the learner assessment (authored by the model, streamed to

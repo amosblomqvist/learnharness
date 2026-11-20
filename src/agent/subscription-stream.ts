@@ -4,6 +4,7 @@ import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages"
 import { NATIVE_SUBSCRIPTIONS, type NativeSubscriptionScope } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionBackgroundAllowed, subscriptionScope, subscriptionScopeCurrent, subscriptionAdmissionScope, subscriptionLease, subscriptionAbortController, subscriptionDenial } from "./subscription-bridge.ts";
 import { markUnadmittedUsage, type SubscriptionDispatchLifecycle } from "./subscription-request-cycle.ts";
+import { capturePreparedBackgroundPayload } from "./background-capture.ts";
 
 export function nativeSubscriptionError(provider: string, message: string): string {
 	const label = NATIVE_SUBSCRIPTIONS.find((p) => p.logicalId === provider)?.label ?? "Subscription";
@@ -59,9 +60,14 @@ export function nativeSubscriptionStream(provider: Provider, background: () => b
 					},
 					onPayload: async (raw, model) => {
 						const replacement = await options?.onPayload?.(raw, model); check();
-						if (replacement === undefined) return raw;
+						if (replacement === undefined) {
+							capturePreparedBackgroundPayload(raw, logicalModel);
+							return raw;
+						}
 						if (!replacement || typeof replacement !== "object" || Array.isArray(replacement)) throw new Error("Invalid model payload override");
-						return { ...replacement, model: (raw as { model: string }).model };
+						const payload = { ...replacement, model: (raw as { model: string }).model };
+						capturePreparedBackgroundPayload(payload, logicalModel);
+						return payload;
 					},
 				});
 				for await (const event of source) {

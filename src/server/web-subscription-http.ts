@@ -1,19 +1,12 @@
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
+import { subscriptionRequestOrigin } from "./desktop-access.ts";
 import { webSubscriptionOwner, webSubscriptionsEnabled, webSubscriptionStatus } from "./web-subscriptions.ts";
 
+// Lives in desktop-access.ts so proxy.ts can share it without loading the
+// subscription runtime; re-exported for existing callers.
+export { subscriptionRequestOrigin };
+
 const HEADERS = { "Cache-Control": "no-store", "Referrer-Policy": "no-referrer", "X-Content-Type-Options": "nosniff" };
-/** Same-origin browser controls, not user authentication. Web/dev deliberately
- * retains the existing shared-server/API-key trust model. Never trust forwarded
- * origins or add CORS grants here. A public deployment needs its own access gate. */
-export function subscriptionRequestOrigin(request: Request): string | undefined {
-	try {
-		const url = new URL(request.url);
-		const host = request.headers.get("host") ?? url.host;
-		const addressed = new URL(`${url.protocol}//${host}`);
-		if (!["http:", "https:"].includes(addressed.protocol) || addressed.username || addressed.password || addressed.pathname !== "/" || addressed.search || addressed.hash) return;
-		return addressed.origin;
-	} catch { return; }
-}
 /** Exported for the Local Claude controls (same rules, same header). */
 export function subscriptionRequestAuthorized(request: Request): boolean { return authorized(request); }
 function authorized(request: Request): boolean {

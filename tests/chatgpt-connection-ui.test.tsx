@@ -12,9 +12,13 @@ import { SettingsDialogBody } from "../components/settings/settings-dialog.tsx";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { ModelControl } from "../components/model-picker.tsx";
 import type { ChatGPTStatus, ChatGPTControlBridge } from "../src/core/index.ts";
+import { completedWithin } from "./completion.ts";
+import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
+import { installModalDom } from "./modal-dom.ts";
 
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, localStorage: { getItem: () => null, setItem() {} } });
+installModalDom(dom);
 const originalFetch = globalThis.fetch;
 let root: Root | undefined, host: HTMLDivElement | undefined;
 const account = (id = "private-registration-id", email = "learner@example.invalid", connected = true) => ({ id, email, registration: "private-issued-client", connected, planEnabled: connected, canSignInAgain: !connected });
@@ -23,7 +27,7 @@ const connected = (allowBackgroundUse = true): ChatGPTStatus => ({ ...disconnect
 const storageError = "ChatGPT credentials could not be read or saved. Check local file access, then reconnect before making requests.";
 const warning = "Account disconnected locally. Remote revocation could not be confirmed.";
 const errorReply = () => ({ error: storageError } as ChatGPTStatus);
-function deferred<T>() { let resolve!: (v: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { promise, resolve }; }
+function deferred<T>() { let resolve!: (v: T) => void; let reject!: (error: unknown) => void; const promise = new Promise<T>((done, fail) => { resolve = done; reject = fail; }); return { promise, resolve, reject }; }
 function fixture(initial = disconnected(), overrides: Partial<ChatGPTControlBridge> = {}) {
  let status = initial;
  const calls = { login: [] as (string | undefined)[], cancel: 0, consent: [] as boolean[], disconnect: [] as string[], select: [] as string[], logout: 0 };
@@ -54,7 +58,7 @@ function recoveryController({ writeFails = false, tokens = "valid" }: { writeFai
 }
 async function mount(children: React.ReactNode = <ChatGPTConnection />) {
  host = document.createElement("div"); document.body.append(host); root = createRoot(host);
- await act(async () => root!.render(<ChatGPTUIProvider>{children}</ChatGPTUIProvider>));
+ await act(async () => root!.render(<InteractionLayersProvider><ChatGPTUIProvider>{children}</ChatGPTUIProvider></InteractionLayersProvider>));
 }
 const byTest = (id: string) => document.querySelector<HTMLElement>(`[data-testid="${id}"]`)!;
 async function click(element: HTMLElement) { assert(element); await act(async () => element.click()); }
@@ -68,25 +72,31 @@ async function begin() { await click(byTest("chatgpt-login")); await click(byTes
 async function confirmDisconnect() { await click(byTest("chatgpt-disconnect")); await click(byTest("chatgpt-confirm-disconnect")); }
 afterEach(async () => { await act(async () => root?.unmount()); host?.remove(); root = undefined; host = undefined; delete window.lh; globalThis.fetch = originalFetch; });
 
-test("Providers is the first/default page; General is last and other pages keep relative order", () => {
+test("Providers is the first/default page; General closes the native group before Core/Community plugins", () => {
  const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
  const ids = [...html.matchAll(/data-testid="settings-nav-([^"]+)"/g)].map((m) => m[1]);
- assert.deepEqual(ids, ["keys", "agent", "appearance", "graph", "keyboard", "general"]);
- assert.match(html, /settings-nav-keys[^>]*aria-current="true"/); assert.match(html, />Providers<\/button>/);
- assert.doesNotMatch(html, />Model providers<\/button>/);
+ assert.deepEqual(ids, ["keys", "agent", "appearance", "graph", "keyboard", "general", "core-plugins", "plugins"]);
+ assert.match(html, /settings-nav-keys[^>]*aria-current="true"/);
+ assert.equal(parseHTML(html).document.querySelector('[data-testid="settings-nav-keys"]')?.textContent, "Providers");
 });
 
-test("Providers has exactly four ordered sections; unknown variables stay masked/read-only at the end of Model API keys", async () => {
+test("Providers has five ordered sections including External CLI; unknown variables stay masked/read-only at the end of Model API keys", async () => {
  globalThis.fetch = async (url) => {
+  if (url === "/api/claude-code") return Response.json({ state: "not-found", version: null, minimumVersion: "2.1.259" });
   assert.equal(url, "/api/keys");
   return Response.json({ providers: [{ id: "openai", envVar: "OPENAI_API_KEY", label: "OpenAI" }], keys: [{ id: "FUTURE_VAR", info: null, present: true, masked: "…abcd", source: "file", shadowedByEnv: false }] });
  };
  fixture(); await mount(<KeysSection />);
  const headings = [...document.querySelectorAll('[data-testid^="group-"] > p')].map((el) => el.textContent);
- assert.deepEqual(headings, ["Model API keys", "Subscriptions", "Dictation", "Search"]);
+ assert.deepEqual(headings, ["Model API keys", "Subscriptions", "External CLI", "Dictation", "Search"]);
+ assert(byTest("claude-code-installation").closest('[data-testid="group-external-cli"]'));
  assert(byTest("key-deepgram_api_key").closest('[data-testid="group-dictation"]'));
  assert(byTest("key-tavily_api_key").closest('[data-testid="group-search"]'));
  assert(byTest("key-brave_api_key").closest('[data-testid="group-search"]'));
+ assert(byTest("key-exa_api_key").closest('[data-testid="group-search"]'));
+ assert(byTest("key-firecrawl_api_key").closest('[data-testid="group-search"]'));
+ assert(byTest("key-ollama_api_key").closest('[data-testid="group-search"]'));
+ assert(!document.querySelector('[data-testid="key-ollama_base_url"]'));
  assert(byTest("unknown-FUTURE_VAR").closest('[data-testid="group-provider-keys"]'));
  assert(byTest("group-unknown-keys").parentElement?.lastElementChild === byTest("group-unknown-keys"));
  assert.equal(byTest("unknown-FUTURE_VAR").textContent, "FUTURE_VAR…abcd"); assert(!byTest("unknown-FUTURE_VAR").querySelector("input, button"));
@@ -214,7 +224,7 @@ test("email-only connected selector and Manage remain responsive; account select
 test("Disconnect is the quiet red left-footer action below identity; confirmation Cancel never forgets", async () => {
  assert.deepEqual(CHATGPT_DISCONNECT_COPY, { title: "Disconnect account?", body: "This removes the saved account and its credentials from this device." });
  const f = fixture(connected()); await mount(); await click(button("Manage…"));
- assert.equal(byTest("chatgpt-account-actions").textContent, "Disconnect"); assert.match(byTest("chatgpt-disconnect").className, /text-red/);
+ assert.equal(byTest("chatgpt-account-actions").textContent, "Disconnect"); assert.match(byTest("chatgpt-disconnect").className, /text-error/);
  assert.equal(byTest("chatgpt-account-footer").firstElementChild, byTest("chatgpt-account-actions"));
  assert.equal(byTest("chatgpt-account-footer").lastElementChild?.lastElementChild, button("Close"));
  assert(!byTest("chatgpt-account-footer").contains(byTest("chatgpt-add-accounts")));
@@ -312,12 +322,12 @@ test("connected setup row retains the email dropdown before muted Manage", async
  fixture(connected()); await mount(<ChatGPTConnection setup />);
  const row = byTest("chatgpt-connection").firstElementChild!; assert.equal(row.children[1]!.tagName, "SELECT"); assert.equal(row.children[2]!.textContent, "Manage…"); assert.match(row.children[2]!.className, /text-muted-foreground/);
 });
-test("Add accounts reuses the existing dialog's initial focus for the pre-auth transition", async () => {
+test("Add accounts applies heading default focus for the pre-auth transition", async () => {
  const previous = HTMLElement.prototype.focus; const focused: HTMLElement[] = [];
  HTMLElement.prototype.focus = function () { focused.push(this); };
  try {
   fixture(connected()); await mount(); await click(button("Manage…")); await click(byTest("chatgpt-add-accounts"));
-  assert(focused.at(-1) === document.querySelector('select[aria-label="Saved ChatGPT account"]'));
+  assert(focused.at(-1) === byTest("chatgpt-account-dialog").querySelector("h2"));
  } finally { HTMLElement.prototype.focus = previous; }
 });
 
@@ -357,7 +367,7 @@ test("signed-out legacy accounts remain manageable/forgettable without pretendin
 test("unconfirmed provider outcome is exactly the approved concise dismissible warning, never permanent red success/navigation advice", async () => {
  const f = fixture(connected(), { disconnect: async () => { const result = { ...disconnected(), accounts: [], error: warning }; f.push(result); return result; } });
  await mount(); await click(button("Manage…")); await confirmDisconnect();
- const alert = byTest("chatgpt-revocation-warning"); assert.equal(alert.textContent, warning); assert.doesNotMatch(alert.className, /text-red/);
+ const alert = byTest("chatgpt-revocation-warning"); assert.equal(alert.textContent, warning); assert.doesNotMatch(alert.className, /text-error/);
  assert(!document.querySelector('[data-testid="chatgpt-disconnect"]')); assert(byTest("chatgpt-login"));
  await click(button("Dismiss", byTest("chatgpt-account-dialog"))); assert(!document.querySelector('[role="alert"]'));
  assert(!document.body.textContent?.includes("ChatGPT Settings"));
@@ -494,26 +504,57 @@ test("canceled attempt's late reply cannot release a newer pending attempt or ap
  await act(async () => f.complete()); assert.deepEqual(f.calls.consent, []); assert.equal(f.status.allowBackgroundUse, true); assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]'));
 });
 
-test("real main/control bridge: immediate pending, actual cancellation, verified callback, then explicit global draft persistence", async () => {
+for (const holdSave of [false, true]) test(`real main/control bridge: immediate pending, actual cancellation, verified callback, then explicit global draft persistence${holdSave ? " (completion held beyond old wait budget)" : ""}`, async () => {
  const require = createRequire(import.meta.url); const { createChatGPT, SCOPES } = require("../electron/chatgpt.cjs"); const { chatGPTControl } = require("../electron/chatgpt-ipc.cjs");
  const { privateKey, publicKey } = await generateKeyPair("RS256"); const jwk = { ...await exportJWK(publicKey), kid: "ui-fixture", alg: "RS256", use: "sig" };
- let saved: any = null, authorize!: URL, tokenCalls = 0; const listeners = new Set<() => void>();
- const service = createChatGPT({ store: { secure() {}, async read() { return saved; }, async write(s: any) { saved = structuredClone(s); } }, openExternal: async (url: string) => { authorize = new URL(url); }, onChange: () => { for (const cb of listeners) cb(); }, fetch: async (url: string, init: RequestInit) => {
+ const consentCompleted = deferred<ChatGPTStatus>(), saveEntered = deferred<void>(), releaseSave = deferred<void>();
+ let saved: any = null, authorize!: URL, tokenCalls = 0, completionArmed = false; const listeners = new Set<() => void>();
+ const service = createChatGPT({ store: { secure() {}, async read() { return saved; }, async write(s: any) {
+  if (holdSave && s.allowBackgroundUse === false) { saveEntered.resolve(); await releaseSave.promise; }
+  saved = structuredClone(s);
+ } }, openExternal: async (url: string) => { authorize = new URL(url); }, onChange: ({ status }: { status: ChatGPTStatus }) => {
+  if (completionArmed && !status.pending && status.error) consentCompleted.reject(new Error(`Fixture sign-in failed: ${status.error}`));
+  for (const cb of listeners) cb();
+ }, fetch: async (url: string, init: RequestInit) => {
   if (url.endsWith("jwks.json")) return Response.json({ keys: [jwk] });
   assert.equal(url, "https://auth.openai.com/api/accounts/oauth/token"); tokenCalls++;
   const form = init.body as URLSearchParams;
   const jwt = await new SignJWT({ nonce: authorize.searchParams.get("nonce"), email: "fixture@example.invalid" }).setProtectedHeader({ alg: "RS256", kid: "ui-fixture" }).setIssuer("https://auth.openai.com").setSubject("fixture-subject").setAudience(form.get("client_id")!).setIssuedAt().setExpirationTime("1h").sign(privateKey);
   return Response.json({ access_token: "fixture-access", refresh_token: "fixture-refresh", id_token: jwt, token_type: "Bearer", expires_in: 3600, scope: SCOPES.join(" ") });
  } });
- window.lh = { expandWindow() {}, chatgpt: { status: () => chatGPTControl({ op: "status" }, service), login: (id) => chatGPTControl({ op: "login", id }, service), cancel: () => chatGPTControl({ op: "cancel" }, service), select: (id) => chatGPTControl({ op: "select", id }, service), disconnect: (id) => chatGPTControl({ op: "disconnect", id }, service), logout: (id) => chatGPTControl({ op: "logout", id }, service), consent: (enabled) => chatGPTControl({ op: "consent", enabled }, service), onChange: (cb) => { listeners.add(cb); return () => listeners.delete(cb); } } };
+ window.lh = { expandWindow() {}, chatgpt: { status: () => chatGPTControl({ op: "status" }, service), login: (id) => chatGPTControl({ op: "login", id }, service), cancel: () => chatGPTControl({ op: "cancel" }, service), select: (id) => chatGPTControl({ op: "select", id }, service), disconnect: (id) => chatGPTControl({ op: "disconnect", id }, service), logout: (id) => chatGPTControl({ op: "logout", id }, service), consent: (enabled) => {
+  const reply = chatGPTControl({ op: "consent", enabled }, service);
+  void reply.then(consentCompleted.resolve, consentCompleted.reject);
+  return reply;
+ }, onChange: (cb) => { listeners.add(cb); return () => listeners.delete(cb); } } };
  try {
   await mount(); await begin(); assert.equal((await service.status()).pending, true); await click(button("Cancel", byTest("chatgpt-account-dialog"))); assert.equal((await service.status()).pending, false); assert.equal(tokenCalls, 0);
   await click(byTest("chatgpt-login")); await click(toggle()); await click(byTest("chatgpt-proceed"));
   const callback = new URL(authorize.searchParams.get("redirect_uri")!); callback.search = new URLSearchParams({ state: authorize.searchParams.get("state")!, code: "fixture-code", client_id: "oaiapp_ui_fixture" }).toString();
-  await act(async () => { const response = await originalFetch(callback); await response.text(); for (let i = 0; i < 100 && (saved.allowBackgroundUse !== false || (await service.status()).pending); i++) await new Promise((r) => setImmediate(r)); });
+  await act(async () => {
+   completionArmed = true;
+   // Callback acknowledgment is not verified login, nor is login completion
+   // the subsequent consent save. Wait for the actual control reply.
+   const waiting = completedWithin(consentCompleted.promise, "verified sign-in and global draft persistence");
+   let settled = false; void waiting.then(() => { settled = true; }, () => { settled = true; });
+   const response = await originalFetch(callback); assert.equal(response.status, 200); await response.text();
+   if (holdSave) {
+    await completedWithin(saveEntered.promise, "held global draft save");
+    // Regression only: the OLD loop returns with the save still held.
+    for (let i = 0; i < 100 && (saved.allowBackgroundUse !== false || (await service.status()).pending); i++) await new Promise((r) => setImmediate(r));
+    assert.equal((await service.status()).pending, false, "verification finished before the consent save");
+    assert.equal(saved.allowBackgroundUse, undefined, "the old assertion would run before the global draft was saved");
+    assert.equal(settled, false, "the corrected wait must still await persistence");
+    releaseSave.resolve();
+   }
+   const status = await waiting;
+   assert.equal(status.error, null); assert.equal(status.pending, false);
+   assert.equal(status.allowBackgroundUse, false); assert.equal(status.accounts[0]!.connected, true);
+  });
   assert.equal(tokenCalls, 1); assert.equal(saved.allowBackgroundUse, false); assert.equal(saved.registrations[0].background, undefined);
+  assert.equal(document.querySelector('[role="alert"]'), null);
   assert(!document.querySelector('[data-testid="chatgpt-account-dialog"]')); assert(button("Manage…"));
- } finally { await act(async () => service.close()); }
+ } finally { releaseSave.resolve(); await act(async () => service.close()); }
 });
 
 test("browser-only sign-in is disabled; foreground toolbar has no plan badge or background action", async () => {
