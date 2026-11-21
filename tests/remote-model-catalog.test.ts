@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
+import { normalizeContext } from "@earendil-works/pi-ai";
 import { AUTH_PROVIDER_ENV_VARS } from "../src/core/auth-keys.ts";
 
 const scratch = fs.mkdtempSync(path.join(os.tmpdir(), "lh-manual-catalog-"));
@@ -24,14 +25,30 @@ const row = {
 	cost: { input: 1, output: 3, cacheRead: 0.1, cacheWrite: 0 }, contextWindow: 120_000, maxTokens: 12_000,
 };
 
-function startupModel(snapshotPath: string) {
+const baseten = {
+	...row, id: "test-baseten-wire", provider: "baseten", api: "openai-completions", baseUrl: "https://inference.baseten.co/v1",
+	compat: {
+		thinkingFormat: "baseten", chatTemplateArgs: { enable_thinking: { $var: "thinking.enabled" } },
+		maxTokensField: "max_tokens", supportsDeveloperRole: false, supportsReasoningEffort: true, supportsUsageInStreaming: false,
+	},
+};
+const xai = {
+	...row, id: "test-xai-wire", provider: "xai", baseUrl: "https://api.x.ai/v1",
+	compat: { supportsLongCacheRetention: false, supportsReasoningEffort: true },
+	inputLimits: { maxRequestBytes: 20_000_000, images: { maxPerRequest: 10, resize: { maxWidth: 1600, maxHeight: 1700, maxBytes: 2_000_000, jpegQuality: 85 } } },
+};
+
+function startupModels(snapshotPath: string) {
 	const result = spawnSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
-		globalThis.fetch = () => { throw new Error("startup must not fetch"); };
+		let fetches = 0;
+		globalThis.fetch = () => { fetches++; throw new Error("startup must not fetch"); };
 		const { initializeModelCatalog } = await import("./src/server/remote-model-catalog.ts");
 		const { piModels } = await import("./src/agent/models.ts");
 		initializeModelCatalog();
-		const model = piModels().getModel("openai", "test-new-vision");
-		console.log(JSON.stringify(model?.name ?? null));
+		const coordinates = ${JSON.stringify([row, baseten, xai].map(({ provider, id }) => [provider, id]))};
+		const models = coordinates.map(([provider, id]) => piModels().getModel(provider, id));
+		if (fetches) throw new Error("startup attempted to fetch");
+		console.log(JSON.stringify(models));
 	`], { env: { ...process.env, LH_DATA_DIR: snapshotPath }, encoding: "utf-8", timeout: 15_000 });
 	assert.equal(result.status, 0, result.stderr);
 	return JSON.parse(result.stdout);
@@ -74,12 +91,7 @@ test("manual catalog refresh extends picker and engine, keeps routes and survive
 		{ ...row, id: "bad-host", baseUrl: "https://unexpected.invalid/v1" },
 		{ ...row, id: "bad-path", baseUrl: `${row.baseUrl}/other` },
 		{ ...row, id: "bad-api", api: "anthropic-messages" },
-		{ ...row, id: "bad-provider", provider: "chatgpt" },
 		{ ...row, id: "bad-kind", type: "image" },
-		{ ...row, id: "bad-cost", cost: { ...row.cost, input: -1 } },
-		{ ...row, id: "bad-limit", maxTokens: 0 },
-		{ ...row, id: "bad-input", input: ["audio"] },
-		{ ...row, id: "bad-thinking-map", thinkingLevelMap: { high: {} } },
 	] }));
 	const first = refreshModelCatalog();
 	assert.equal(refreshModelCatalog(), first);
@@ -103,6 +115,11 @@ test("manual catalog refresh extends picker and engine, keeps routes and survive
 		() => new Response(null, { status: 503 }),
 		() => Response.json({ notModels: 1 }),
 		() => new Response("x".repeat(2 * 1024 * 1024 + 1)),
+		...[
+			{ provider: "chatgpt" }, { cost: { ...row.cost, input: -1 } }, { maxTokens: 0 },
+			{ input: ["audio"] }, { thinkingLevelMap: { high: {} } }, { compat: { supportsLongCacheRetention: "no" } },
+			{ inputLimits: { images: { resize: { maxWidth: 20_000 } } } }, { samplingParams: { arbitrary: "unsupported" } },
+		].map((overrides) => () => Response.json([{ ...row, ...overrides, id: "bad-eligible" }])),
 	]) {
 		pending.push(fail);
 		await assert.rejects(refreshModelCatalog());
@@ -114,8 +131,78 @@ test("manual catalog refresh extends picker and engine, keeps routes and survive
 	pending.push(() => Response.json([{ ...row, id: "test-second-vision" }]));
 	assert.equal(await refreshModelCatalog(), "updated");
 	assert.ok(collection.getModel("openai", row.id), "omissions must not invalidate a pin");
-	assert.equal(startupModel(scratch), row.name);
+	assert.equal(startupModels(scratch)[0]?.name, row.name);
+});
+
+test("wire behavior survives validated refresh and offline restore; mixed shard failure is atomic", async (t) => {
+	delete process.env.OPENAI_API_KEY;
+	process.env.BASETEN_API_KEY = "synthetic-baseten-key";
+	process.env.XAI_API_KEY = "synthetic-xai-key";
+	const shards = new Map<string, unknown[]>([
+		["baseten", [baseten]], ["xai", [{ ...xai, compat: { ...xai.compat, openRouterRouting: { only: ["ignored"] } } }]],
+	]);
+	const requests: string[] = [];
+	t.mock.method(globalThis, "fetch", async (url: URL) => {
+		assert.equal(url.origin, "https://pi.dev");
+		const provider = url.pathname.split("/").at(-1)!;
+		requests.push(provider);
+		assert.ok(shards.has(provider));
+		return Response.json(shards.get(provider));
+	});
+	assert.equal(await refreshModelCatalog(), "updated");
+	assert.deepEqual(requests.sort(), ["baseten", "xai"]);
+	const good = fs.readFileSync(snapshot, "utf-8");
+	const live = [baseten, xai].map(({ provider, id }) => piModels().getModel(provider, id));
+	const [, restoredBaseten, restoredXai] = startupModels(scratch);
+	assert.deepEqual(restoredBaseten.compat, baseten.compat);
+	assert.deepEqual(restoredXai.compat, xai.compat);
+	assert.deepEqual(restoredXai.inputLimits, xai.inputLimits);
+
+	// A legitimate new xAI row must not become selectable if another keyed
+	// shard contains an eligible row requiring an unknown Baseten template.
+	shards.set("baseten", [{ ...baseten, id: "test-unreviewed-template", compat: { ...baseten.compat, chatTemplateArgs: { unreviewed: true } } }]);
+	shards.set("xai", [{ ...xai, id: "test-xai-pending" }]);
+	requests.length = 0;
+	await assert.rejects(refreshModelCatalog(), /Unsupported pi.dev model template/);
+	assert.deepEqual(requests.sort(), ["baseten", "xai"]);
+	assert.equal(fs.readFileSync(snapshot, "utf-8"), good);
+	assert.deepEqual([baseten, xai].map(({ provider, id }) => piModels().getModel(provider, id)), live);
+	assert.equal(piModels().getModel("xai", "test-xai-pending"), undefined);
+
+	for (const { provider, id, baseUrl } of [baseten, xai]) {
+		const engine = piEngineForSpec({ provider, id, thinkingLevel: "high" }, true, undefined, () => "long");
+		const requests: { url: string; body: Record<string, unknown> }[] = [];
+		const result = await engine.streamFn(engine.model, normalizeContext({
+			systemPrompt: "Synthetic review fixture.",
+			messages: [{ role: "user", content: "Hello", timestamp: 1 }],
+		}), {
+			maxTokens: 1234, sessionId: "synthetic-session",
+			fetch: async (input, init) => {
+				requests.push({ url: String(input), body: JSON.parse(String(init?.body)) });
+				const chunk = { id: "fixture", choices: [{ index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: "stop" }] };
+				return new Response(provider === "baseten" ? `data: ${JSON.stringify(chunk)}\n\ndata: [DONE]\n\n` : "data: [DONE]\n\n", {
+					headers: { "content-type": "text/event-stream" },
+				});
+			},
+		}).result();
+		assert.equal(requests.length, 1, result.errorMessage);
+		const { url, body } = requests[0]!;
+		assert.equal(url, `${baseUrl}/${provider === "baseten" ? "chat/completions" : "responses"}`);
+		assert.equal(body.model, id);
+		if (provider === "baseten") {
+			assert.deepEqual(body.chat_template_args, { enable_thinking: true });
+			assert.equal(body.reasoning_effort, "high");
+			assert.equal(body.max_tokens, 1234);
+			assert.equal(body.max_completion_tokens, undefined);
+			assert.equal((body.messages as { role: string }[])[0]?.role, "system");
+			assert.equal(body.stream_options, undefined);
+		} else {
+			assert.equal(body.prompt_cache_retention, undefined);
+			assert.equal(body.prompt_cache_options, undefined);
+			assert.deepEqual(engine.model.inputLimits, xai.inputLimits);
+		}
+	}
 
 	fs.writeFileSync(snapshot, "invalid json");
-	assert.equal(startupModel(scratch), null);
+	assert.deepEqual(startupModels(scratch), [null, null, null]);
 });

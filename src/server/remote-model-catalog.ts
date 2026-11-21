@@ -1,7 +1,8 @@
 import fs from "node:fs";
 import path from "node:path";
+import { isDeepStrictEqual } from "node:util";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
-import type { Api, Model } from "@earendil-works/pi-ai";
+import { hasApi, type Api, type Model } from "@earendil-works/pi-ai";
 import { z } from "zod";
 import { PATHS } from "../../config.ts";
 import { setModelCatalogOverlay } from "../agent/models.ts";
@@ -32,6 +33,10 @@ const rate = z.number().min(0).max(1_000_000);
 const rates = z.object({ input: rate, output: rate, cacheRead: rate, cacheWrite: rate });
 const tokens = z.number().int().positive().max(100_000_000);
 const thinking = z.string().max(32).regex(/^[\w-]*$/).nullable().optional();
+const byteLimit = z.number().int().positive().max(1024 ** 3).optional();
+const imageDimension = z.number().int().positive().max(8192).optional();
+const imageCount = z.number().int().positive().max(10_000).optional();
+const cacheSeconds = z.number().positive().max(30 * 24 * 3600).optional();
 const rowSchema = z.object({
 	type: z.literal("chat").optional(),
 	id,
@@ -41,28 +46,56 @@ const rowSchema = z.object({
 	reasoning: z.boolean(),
 	thinkingLevelMap: z.object({ off: thinking, minimal: thinking, low: thinking, medium: thinking, high: thinking, xhigh: thinking, max: thinking }).optional(),
 	input: z.array(z.enum(["text", "image"])).min(1).max(2).refine((values) => values.includes("text") && new Set(values).size === values.length),
+	inputLimits: z.strictObject({
+		maxRequestBytes: byteLimit,
+		images: z.strictObject({
+			maxPerMessage: imageCount, maxPerRequest: imageCount,
+			resize: z.strictObject({ maxWidth: imageDimension, maxHeight: imageDimension, maxBytes: byteLimit, jpegQuality: z.number().int().min(1).max(100).optional() }).optional(),
+		}).optional(),
+	}).optional(),
+	promptCache: z.strictObject({ short: cacheSeconds, long: cacheSeconds }).optional(),
 	cost: rates.extend({ tiers: z.array(rates.extend({ inputTokensAbove: tokens })).max(8).optional() }),
 	contextWindow: tokens,
 	maxTokens: tokens,
 });
 
-// Optional wire flags needed by some new models. Never import headers,
-// fallback models, gateway routing preferences, or raw request arguments.
-const completionsCompat = z.object({
-	supportsStore: z.boolean().optional(),
-	supportsDeveloperRole: z.boolean().optional(),
-	supportsReasoningEffort: z.boolean().optional(),
-	requiresReasoningContentOnAssistantMessages: z.boolean().optional(),
+// Pi 1.5.2 wire flags, per transport. Unknown behavior fails closed; the
+// descriptors below are bounded values, never arbitrary request arguments.
+const flag = z.boolean().optional();
+const sessionAffinity = z.enum(["openai", "openai-nosession", "openrouter"]).optional();
+const cacheKeyMode = z.enum(["auto", "enabled", "disabled"]).optional();
+const commonOpenAI = {
+	supportsDeveloperRole: flag, supportsMidConvoSystemMessages: flag, supportsStrictMode: flag,
+	supportsOpenAIGrammarTools: flag, supportsLongCacheRetention: flag,
+	sessionAffinityFormat: sessionAffinity, promptCacheKeyMode: cacheKeyMode,
+};
+const completionsCompat = z.strictObject({
+	...commonOpenAI,
+	supportsStore: flag, supportsReasoningEffort: flag, supportsUsageInStreaming: flag, supportsFinishReason: flag,
+	requiresToolResultName: flag, requiresAssistantAfterToolResult: flag, requiresNonNullAssistantContent: flag,
+	requiresToolsWithToolHistory: flag, requiresThinkingAsText: flag, requiresReasoningContentOnAssistantMessages: flag,
 	maxTokensField: z.enum(["max_tokens", "max_completion_tokens"]).optional(),
-	thinkingFormat: z.enum(["openai", "openrouter", "deepseek", "together", "zai", "qwen", "qwen-chat-template", "string-thinking", "ant-ling"]).optional(),
-	zaiToolStream: z.boolean().optional(),
+	thinkingFormat: z.enum(["openai", "openrouter", "deepseek", "together", "baseten", "zai", "qwen", "chat-template", "qwen-chat-template", "string-thinking", "ant-ling"]).optional(),
+	zaiToolStream: flag, supportsThinkingTokenBudget: flag, supportsMidConvoToolAdditions: flag, sendSessionAffinityHeaders: flag,
+	thinkingTokenBudgetField: z.enum(["thinking_token_budget", "thinking_budget", "thinking_budget_tokens"]).optional(),
+	cacheControlFormat: z.literal("anthropic").optional(),
+	vllmPriority: z.number().int().min(-1000).max(1000).optional(),
 });
-const anthropicCompat = z.object({
-	forceAdaptiveThinking: z.boolean().optional(),
-	supportsTemperature: z.boolean().optional(),
-	supportsEagerToolInputStreaming: z.boolean().optional(),
-	supportsCacheControlOnTools: z.boolean().optional(),
+const responsesCompat = z.strictObject({
+	...commonOpenAI,
+	supportsAdditionalTools: flag, supportsToolSearch: flag, supportsExplicitPromptCacheMode: flag,
+	supportsMidConvoEffort: flag, supportsMaxOutputTokens: flag,
+	// Present in bundled data for xAI, even though today's Responses adapter ignores it.
+	supportsReasoningEffort: flag,
 });
+const anthropicCompat = z.strictObject({
+	forceAdaptiveThinking: flag, supportsTemperature: flag, supportsEagerToolInputStreaming: flag, supportsCacheControlOnTools: flag,
+	supportsLongCacheRetention: flag, sendSessionAffinityHeaders: flag, sessionAffinityFormat: z.literal("openrouter").optional(),
+	allowEmptySignature: flag, supportsStrictTools: flag, supportsMidConvoEffort: flag,
+	supportsMidConvoSystemMessages: flag, supportsMidConvoToolChanges: flag, supportsMessageThreads: flag,
+});
+const mistralCompat = z.strictObject({ supportsMidConvoSystemMessages: flag });
+const noCompat = z.strictObject({});
 
 const record = (value: unknown): value is Record<string, unknown> => typeof value === "object" && value !== null && !Array.isArray(value);
 
@@ -75,27 +108,64 @@ function catalogRows(body: unknown): unknown[] {
 	return rows;
 }
 
+function checkedCompat(api: Api, baselines: readonly Model<Api>[], raw: unknown): Model<Api>["compat"] {
+	if (raw === undefined) return undefined;
+	if (!record(raw)) throw new Error("Invalid pi.dev model compatibility");
+	// Ignore feed-controlled routing/fallback choices. If a thinking format
+	// needs a template, accept only an exact profile shipped for this route
+	// and pass the bundled copy, never arbitrary feed arguments.
+	const { openRouterRouting: _or, vercelGatewayRouting: _vg, allowedFallbackModels: _af, chatTemplateArgs, chatTemplateKwargs, ...claims } = raw;
+	switch (api) {
+		case "openai-completions": {
+			const flags = completionsCompat.parse(claims);
+			if (flags.thinkingFormat === "baseten" || flags.thinkingFormat === "chat-template" || chatTemplateArgs !== undefined || chatTemplateKwargs !== undefined) {
+				const trusted = baselines.filter((model) => hasApi(model, "openai-completions")).find((model) =>
+					model.compat?.thinkingFormat === flags.thinkingFormat
+					&& isDeepStrictEqual(model.compat?.chatTemplateArgs, chatTemplateArgs)
+					&& isDeepStrictEqual(model.compat?.chatTemplateKwargs, chatTemplateKwargs));
+				if (!trusted) throw new Error("Unsupported pi.dev model template");
+				return { ...flags, chatTemplateArgs: trusted.compat?.chatTemplateArgs, chatTemplateKwargs: trusted.compat?.chatTemplateKwargs };
+			}
+			return flags;
+		}
+		default:
+			if (chatTemplateArgs !== undefined || chatTemplateKwargs !== undefined) throw new Error("Unexpected pi.dev model template");
+			if (api === "openai-responses") return responsesCompat.parse(claims);
+			if (api === "anthropic-messages") return anthropicCompat.parse(claims);
+			if (api === "mistral-conversations") return mistralCompat.parse(claims);
+			noCompat.parse(claims);
+			return undefined;
+	}
+}
+
 function checkedModels(provider: string, rows: readonly unknown[]): Model<Api>[] {
 	const baseline = builtins.get(provider);
 	if (!baseline) return [];
 	const known = new Set(baseline.map((model) => model.id));
 	const models = new Map<string, Model<Api>>();
 	for (const row of rows) {
-		if (!record(row) || (row.provider !== undefined && row.provider !== provider)) continue;
-		const result = rowSchema.safeParse(row);
-		if (!result.success) continue;
-		const { id, api, baseUrl, ...metadata } = result.data;
-		// The bundled Pi catalog owns existing entries. Only admit new IDs
-		// for an exact API + URL pair that this provider already uses.
-		if (known.has(id)) continue;
-		const route = baseline.find((model) => model.api === api && model.baseUrl === baseUrl);
-		if (!route || (route.api === "google-generative-ai" && id.includes(":"))) continue;
-		const compat = route.api === "openai-completions" ? completionsCompat.safeParse(row.compat)
-			: route.api === "anthropic-messages" ? anthropicCompat.safeParse(row.compat) : undefined;
+		if (!record(row) || typeof row.id !== "string") throw new Error("Invalid pi.dev model");
+		// Deliberate skips: non-chat kinds, bundled IDs and routes the shipped
+		// provider cannot use. An eligible but invalid row fails the refresh.
+		if (row.type === "image" || row.type === "classifier" || known.has(row.id)) continue;
+		if (typeof row.api !== "string" || !row.api || typeof row.baseUrl !== "string" || !row.baseUrl) throw new Error("Invalid pi.dev model route");
+		const routes = baseline.filter((model) => model.api === row.api && model.baseUrl === row.baseUrl);
+		const route = routes[0];
+		if (!route) continue;
+		const { id, api: _api, baseUrl: _baseUrl, ...metadata } = rowSchema.parse(row);
+		if ((row.provider !== undefined && row.provider !== provider) || models.has(id) || (route.api === "google-generative-ai" && id.includes(":"))) {
+			throw new Error("Invalid pi.dev model identity");
+		}
+		// Model.samplingParams and its per-level variant allow arbitrary
+		// request keys in Pi. Do not silently import models that require them.
+		for (const raw of [row.samplingParams, row.samplingParamsByThinkingLevel]) {
+			if (raw !== undefined && (!record(raw) || Object.keys(raw).length)) throw new Error("Unsupported pi.dev sampling parameters");
+		}
+		const compat = checkedCompat(route.api, routes, row.compat);
 		models.set(id, {
 			...metadata, id, provider, api: route.api, baseUrl: route.baseUrl,
 			...(route.headers ? { headers: route.headers } : {}),
-			...(compat?.success ? { compat: compat.data } : {}),
+			...(compat ? { compat } : {}),
 		});
 	}
 	return [...models.values()];
