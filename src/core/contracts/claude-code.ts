@@ -1,4 +1,6 @@
 export const CLAUDE_CODE_PROVIDER = "claude-code";
+/** Human label for the Claude Code provider in model menus and refusals. */
+export const CLAUDE_CODE_LABEL = "Claude Code";
 
 /** Installation/version only. Never an authentication, quota, or billing verdict. */
 export interface ClaudeCodeStatus {
