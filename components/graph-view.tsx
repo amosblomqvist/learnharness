@@ -452,6 +452,7 @@ function GraphSettingsControl({
 				// User language (tooltip wave) — "rendering" is internal.
 				label="Graph display settings"
 				side="bottom"
+				align="end"
 			>
 				<button
 				type="button"

@@ -302,13 +302,14 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 	return (
 		<div ref={rootRef} className="lh-no-drag relative shrink-0">
 			<Hint
-				// Trimmed (owner, subtlety round 2026-09-25).
-				label="How much of this session isn't mapped yet"
+				label="Not yet mapped to the knowledge graph"
 				side="bottom"
+				align="end"
 			>
 				<button
 					type="button"
 					data-testid="coverage-ring"
+					aria-label="Knowledge graph coverage"
 					onClick={() => setOpen((o) => !o)}
 					aria-expanded={open}
 					className="relative flex size-5 cursor-pointer items-center justify-center transition-opacity hover:opacity-80"
