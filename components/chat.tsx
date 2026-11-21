@@ -100,7 +100,7 @@ import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
 import type { SessionInputViewReader, SessionViewTargets, NativeQuestionViewState, ViewReaderRef } from "./session-view-readers";
 import type { JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
-import type { LhViewMessage } from "@/src/core";
+import { isSubagentSteer, newestLearnerTurnFrom } from "./transcript-rows";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
 	CompactionCutDivider,
@@ -248,10 +248,6 @@ export function PendingTurnIndicator({ evaluating }: { evaluating: boolean }) {
 	);
 }
 
-function isSubagentSteer(m: LhViewMessage): boolean {
-	return (m.metadata as { subagentResult?: unknown } | undefined)?.subagentResult != null;
-}
-
 /**
  * The teaching session. All chat state lives in useChat; the server persists
  * the canonical transcript after every turn.
@@ -351,9 +347,7 @@ export function Chat({
 	const textTarget = (): Extract<PluginSubmissionTarget, { type: "text" }> | undefined => surfaceTarget ? { type: "text", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget, channels: ["content"] } : undefined;
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
-	// Keep the newest learner turn (including its answer and any live tail)
-	// fully laid out. Marker-only user rows don't start a learner turn.
-	const newestTurnFrom = messages.findLastIndex((m) => m.role === "user" && m.parts.some((p) => p.type === "text" || p.type === "image"));
+	const newestTurnFrom = newestLearnerTurnFrom(messages);
 	const sideEntries = useMemo(() => sideEntryPoints(nativeMessages, messages), [nativeMessages, messages]);
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
