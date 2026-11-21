@@ -370,6 +370,7 @@ export interface GraphSnapshot {
     chains: GraphChain[];
     sessions: Record<string, string>;
     fileSources: Record<string, string>;
+    unobservedBySource?: Record<string, string[]>;
     nodeSessions: Record<string, string[]>;
     clusters: Cluster[];
     positions?: Record<string, Position>;
@@ -388,6 +389,7 @@ export interface GraphSnapshot {
 - [chains](#graphsnapshot-chains)
 - [sessions](#graphsnapshot-sessions)
 - [fileSources](#graphsnapshot-filesources)
+- [unobservedBySource](#graphsnapshot-unobservedbysource)
 - [nodeSessions](#graphsnapshot-nodesessions)
 - [clusters](#graphsnapshot-clusters)
 - [positions](#graphsnapshot-positions)
@@ -471,6 +473,14 @@ the detail card shows the path as plain text, not a link.
 fileSources: Record<string, string>;
 ```
 
+### GraphSnapshot unobservedBySource
+
+Earlier propositions to label on their individual file provenance entries.
+
+```ts
+unobservedBySource?: Record<string, string[]>;
+```
+
 ### GraphSnapshot nodeSessions
 
 nodeId → chatIds that touched the node (click-through provenance).
@@ -508,8 +518,7 @@ Public SDK type, exported as `NotesSource`. Import with `import type`; the SDK h
 
 Imported notes source processed by the extractor → auditor → merger pipeline.
 Provenance identifies the file rather than a chat message, and the source
-owns its extraction usage log. IDs are src_ plus a deterministic file-path
-hash, so re-importing the same path uses the same source identity.
+owns its extraction usage log. The ID stays with the source across confirmed file moves.
 
 ```ts
 export interface NotesSource {
@@ -517,6 +526,8 @@ export interface NotesSource {
     filePath: string;
     importedAt: string;
     contentFp?: string;
+    completedFileHash?: string;
+    unobservedNodeIds?: string[];
     extractions?: ExtractionRunUsage[];
 }
 ```
@@ -529,6 +540,8 @@ export interface NotesSource {
 - [filePath](#notessource-filepath)
 - [importedAt](#notessource-importedat)
 - [contentFp](#notessource-contentfp)
+- [completedFileHash](#notessource-completedfilehash)
+- [unobservedNodeIds](#notessource-unobservednodeids)
 - [extractions](#notessource-extractions)
 
 ### NotesSource id
@@ -553,12 +566,27 @@ importedAt: string;
 
 ### NotesSource contentFp
 
-Legacy content fingerprint. Accepted when reading old records, but
-ignored: every explicit notes import processes the whole file. New
-imports do not compute or write this field. No migration is needed.
+Legacy text fingerprint. Only completedFileHash can establish that
+the same uploaded bytes were successfully extracted.
 
 ```ts
 contentFp?: string;
+```
+
+### NotesSource completedFileHash
+
+SHA-256 of the uploaded bytes for a fully completed extraction.
+
+```ts
+completedFileHash?: string;
+```
+
+### NotesSource unobservedNodeIds
+
+Earlier propositions from this file unobserved in its latest completed refresh.
+
+```ts
+unobservedNodeIds?: string[];
 ```
 
 ### NotesSource extractions

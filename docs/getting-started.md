@@ -49,7 +49,9 @@ For lessons, attach material to a session instead. Use the graph's **Extract fil
 - Within the accepted extensions, PDFs are recognized by their `%PDF-` header and converted locally, without OCR. Image-only pages are skipped and counted; scanner text can be inaccurate. Check the import's notices.
 - Other files are read as UTF-8. A zero byte in the first 8 KiB causes rejection before source registration or model calls. This catches many binary files renamed to `.txt`, but is not complete binary detection; UTF-16 text is not decoded correctly and is often rejected. Save text as UTF-8.
 - Imported text then goes through model-based proposition/chain extraction. Local PDF conversion does not make the whole import offline.
-- Completed chunks survive later failures. Retry is explicit and reprocesses the file; unchanged content is not automatically skipped. The file queue does not survive a page reload.
+- Picking a folder again skips byte-identical files whose last extraction completed. A failed or partial import can be retried. Picking individual files still runs extraction each time. The queue lasts until the page reloads.
+- When a new path matches exactly one previously imported file, you can confirm a move to keep its source history or import a separate copy. Files that are present together in your selection keep separate identities. A move combined with edits requires a separate import.
+- After a refresh, the proposition card labels earlier findings the latest extraction did not observe in that source. The earlier findings and their other sources stay in the graph.
 
 The graph stores propositions and reasoning chains with source provenance, **not mastery scores**. A proposition's presence is not proof that you understood or retained it. Automatic session extraction can be disabled independently of graph rendering.
 

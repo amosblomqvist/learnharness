@@ -2,8 +2,8 @@
  * POST /api/graph/import — the format-agnostic front door's transport
  * (vision §1, 2026-09-13): raw personal-notes files in, one extraction run
  * per file through the SAME pipeline the sessions use. Multipart form data
- * (field "files"); the pipeline mints a deterministic source id per file
- * path, persists the source record (the file's provenance + the run's usage),
+ * (field "files"); the pipeline resolves the source by its import path,
+ * persists its provenance and the run's usage,
  * and runs
  * extractor → auditor → merger over the raw text.
  *
@@ -20,6 +20,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
+import { createHash } from "node:crypto";
 import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
 import { IMPORT_EXTENSIONS, MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, UNSUPPORTED_TYPE_MESSAGE, validNotesPath } from "@/lib/notes-import-limits.ts";
 import { FormBodyLimitError, readBoundedFormData } from "@/lib/bounded-form-data.ts";
@@ -35,7 +36,8 @@ export const dynamic = "force-dynamic";
 
 interface ImportResult {
 	requestIndex: number;
-	outcome: "completed" | "failed" | "partial" | "aborted" | "busy";
+	previousPath?: string;
+	outcome: "completed" | "skipped" | "confirm-move" | "failed" | "partial" | "aborted" | "busy";
 	filePath: string;
 	ok: boolean;
 	stats?: EmissionStats;
@@ -58,9 +60,7 @@ const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 type NotesFile = { kind: "notes"; text: string; notice?: string } | { kind: "refused"; error: string };
 
 /** A PDF becomes page-marked Markdown; any other accepted file is read as text. */
-async function readNotesFile(file: File): Promise<NotesFile> {
-	if (!IMPORT_EXTENSIONS.test(file.name)) return { kind: "refused", error: UNSUPPORTED_TYPE_MESSAGE };
-	const bytes = new Uint8Array(await file.arrayBuffer());
+async function readNotesFile(bytes: Uint8Array<ArrayBuffer>): Promise<NotesFile> {
 	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) {
 		if (bytes.subarray(0, 8192).includes(0)) return { kind: "refused", error: "This file isn't plain text." };
 		return { kind: "notes", text: new TextDecoder().decode(bytes) };
@@ -109,6 +109,14 @@ export async function POST(request: Request) {
 	if (files.some((file, i) => !validNotesPath(paths[i]!, file.name))) {
 		return Response.json({ results: [], error: "Import contains an unsafe or mismatched relative path" }, { status: 400 });
 	}
+	const folder = form.get("mode") === "folder";
+	const moveFrom = form.get("moveFrom");
+	const keepCopy = form.get("keepCopy") === "true";
+	if ((folder && paths.some((path) => !path.includes("/"))) ||
+		((moveFrom !== null || keepCopy) && (!folder || files.length !== 1)) ||
+		(moveFrom !== null && (keepCopy || typeof moveFrom !== "string" || !validNotesPath(moveFrom, moveFrom)))) {
+		return Response.json({ results: [], error: "Invalid folder import decision" }, { status: 400 });
+	}
 	const results: ImportResult[] = [];
 	const queue = files.map((file, requestIndex) => ({ file, requestIndex, filePath: paths[requestIndex]! }));
 	const workers = Array.from({ length: Math.min(3, files.length) }, async () => {
@@ -116,15 +124,29 @@ export async function POST(request: Request) {
 			const next = queue.shift();
 			if (!next) return;
 			const { file, requestIndex, filePath } = next;
+			let sourceChanged = false;
 			try {
-				const notes = await readNotesFile(file);
-				if (notes.kind === "refused") {
-					results.push({ filePath, requestIndex, outcome: "failed", ok: false, error: notes.error });
-					continue;
-				}
-				sourceDirectory.registerImport(filePath);
-				const stats = await extraction.importNotes({ filePath, text: notes.text });
-				results.push({ filePath, requestIndex, outcome: "completed", ok: true, stats, ...(notes.notice ? { notice: notes.notice } : {}) });
+				if (!IMPORT_EXTENSIONS.test(file.name)) throw new Error(UNSUPPORTED_TYPE_MESSAGE);
+				const bytes = new Uint8Array(await file.arrayBuffer());
+				const identity = {
+					filePath, fileHash: createHash("sha256").update(bytes).digest("hex"),
+					registerSource(path: string, id: string) {
+						sourceDirectory.registerImport(path, id);
+						sourceChanged = true;
+					},
+				};
+				let notice: string | undefined;
+				const readText = async () => {
+					const notes = await readNotesFile(bytes);
+					if (notes.kind === "refused") throw new Error(notes.error);
+					notice = notes.notice;
+					return notes.text;
+				};
+				const result = folder
+					? await extraction.importFolderNotes({ ...identity, readText, keepCopy, moveFrom: moveFrom ?? undefined })
+					: { outcome: "completed" as const, stats: await extraction.importNotes({ ...identity, text: await readText() }) };
+				if (moveFrom && result.outcome === "skipped") sourceChanged = true;
+				results.push({ filePath, requestIndex, ok: result.outcome !== "confirm-move", ...(notice && { notice }), ...result });
 			} catch (err) {
 				if (err instanceof ModelsNotConfiguredError) {
 					results.push({ filePath, ok: false, requestIndex, outcome: "failed", error: err.envelope.error,
@@ -138,7 +160,7 @@ export async function POST(request: Request) {
 						...(err instanceof NotesImportError ? { stats: err.partialStats } : {}),
 						error: err instanceof Error ? err.message : String(err) });
 				}
-			} finally { emit("sources-changed", {}); }
+			} finally { if (sourceChanged) emit("sources-changed", {}); }
 		}
 	});
 	await Promise.all(workers);
