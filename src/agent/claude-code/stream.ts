@@ -201,6 +201,17 @@ class ClaudeTurn {
 				return;
 			}
 
+			case "signatureDelta": {
+				const found = this.getBlock(event.index);
+				if (!found) return;
+
+				const { block } = found;
+				if (block.type !== "thinking") return;
+
+				block.thinkingSignature = (block.thinkingSignature ?? "") + event.signature;
+				return;
+			}
+
 			case "toolInputDelta": {
 				const found = this.getBlock(event.index);
 				if (!found) return;
