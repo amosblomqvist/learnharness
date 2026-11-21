@@ -4,6 +4,7 @@
 
 - [Getting started](getting-started.md) — connections, models, sessions, dictation, files, and notes imports.
 - [Keyboard shortcuts](keyboard.md) — defaults, rebinding, and navigation.
+- [Anki export](anki-export.md) — turn a session's questions into an Anki deck (.apkg).
 - [Claude Code](claude-code.md) — use an installed CLI and troubleshoot its connection.
 - [Custom and local models](custom-providers.md) — configure an OpenAI-compatible endpoint.
 - [Context, caching, and costs](compaction-accounting.md) — understand the session meters and advanced cache preferences.
