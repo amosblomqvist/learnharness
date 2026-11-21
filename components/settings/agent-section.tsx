@@ -54,7 +54,9 @@ import { MenuShell } from "@/components/menu-shell";
 import { useInteractionLayers } from "@/components/interaction-layers";
 import { useSettingsSaved } from "@/components/settings-signal";
 import { defaultOrderLevel, populateLevel } from "@/components/thinking-default";
-import { useModelCatalog } from "@/components/model-catalog";
+import { RefreshCw } from "lucide-react";
+import { refreshRemoteModelCatalog, useModelCatalog } from "@/components/model-catalog";
+import type { ModelCatalogRefreshOutcome } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { PromptSegmentDialog, type PromptDeleteOutcome, type PromptSaveOutcome } from "./prompt-segment-dialog";
@@ -92,6 +94,34 @@ const SLOT_META: Record<ModelSlotName, { label: string; roster: string }> = {
 /** The owner's final toggleable-tool list (confirm with the user before
  *  changing — the Teacher stream settled this 2026-09-19). */
 export const TOGGLE_TOOLS = ["research", "demo", "visual", "pdf"] as const;
+
+const CATALOG_REFRESH_MESSAGES: Record<ModelCatalogRefreshOutcome | "pending" | "failed", string> = {
+	pending: "Refreshing…",
+	updated: "Model catalog updated.",
+	unchanged: "No catalog changes found.",
+	"no-providers": "No configured providers support catalog refresh.",
+	failed: "Could not refresh. Your current catalog is still available.",
+};
+
+function ModelCatalogRefreshRow() {
+	const [state, setState] = useState<keyof typeof CATALOG_REFRESH_MESSAGES>();
+	const pending = state === "pending";
+	async function refresh() {
+		setState("pending");
+		try { setState(await refreshRemoteModelCatalog()); }
+		catch { setState("failed"); }
+	}
+	return <SettingsRow label="Model catalog" testid="model-catalog-refresh-row" hint={
+		<span role="status" className={state === "failed" ? "text-destructive" : undefined}>
+			{state ? CATALOG_REFRESH_MESSAGES[state] : "Check Pi for new models"}
+		</span>
+	}>
+		<Button type="button" variant="outline" size="icon-sm" aria-label="Refresh model catalog" title="Refresh model catalog" aria-busy={pending}
+			disabled={pending} onClick={() => void refresh()}>
+			<RefreshCw aria-hidden="true" className={pending ? "animate-spin" : undefined} />
+		</Button>
+	</SettingsRow>;
+}
 
 const THINKING_LEVELS: readonly ThinkingLevel[] = ["off", "minimal", "low", "medium", "high", "xhigh", "max"];
 
@@ -709,6 +739,7 @@ export function AgentSection({
 						</SettingsRow>
 					);
 				})}
+				<ModelCatalogRefreshRow />
 				<SettingsRow
 					label="Concurrent worker requests"
 					hint="Maximum simultaneous background-worker model requests. Direct conversations are not limited."
@@ -792,7 +823,7 @@ export function AgentSection({
 				{TOGGLE_TOOLS.map((id) => (
 					<SettingsRow
 						key={id}
-						label={`Tool · ${id}`}
+						label={`Tool: ${id}`}
 						testid={`tool-row-${id}`}
 					>
 						<Toggle
