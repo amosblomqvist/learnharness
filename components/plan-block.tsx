@@ -166,8 +166,16 @@ const NO_EDGES: ReadonlyArray<{ from: string; to: string }> = [];
  * display:none reads 0 widths); the chart layout stays until it shows.
  */
 export function usePlanLayout(plan: { nodes: readonly LayoutNode[]; edges: ReadonlyArray<{ from: string; to: string }> } | null) {
-	const nodes = plan?.nodes ?? NO_NODES;
-	const edges = plan?.edges ?? NO_EDGES;
+	// Canonical reads can recreate the same plan, and status changes do not
+	// move its boxes. Key the chart and real-font probe on ordered geometry
+	// inputs, not the identities of the record's arrays or view objects.
+	const geometryKey = plan?.nodes.length ? JSON.stringify([
+		plan.nodes.map(({ id, title }) => ({ id, title })),
+		plan.edges.map(({ from, to }) => ({ from, to })),
+	]) : "";
+	const [nodes, edges] = useMemo((): readonly [readonly LayoutNode[], ReadonlyArray<{ from: string; to: string }>] => (
+		geometryKey ? JSON.parse(geometryKey) : [NO_NODES, NO_EDGES]
+	), [geometryKey]);
 	const { appearance: { fontFamily } } = useAppearance();
 	const sentinel = useRef<SVGTextElement>(null);
 	const measurer = useRef<SVGTextElement>(null);
@@ -178,7 +186,7 @@ export function usePlanLayout(plan: { nodes: readonly LayoutNode[]; edges: Reado
 		const watch = sentinel.current;
 		const el = measurer.current;
 		const box = breaker.current;
-		if (!watch || !el || !box || typeof el.getComputedTextLength !== "function") return;
+		if (nodes.length === 0 || !watch || !el || !box || typeof el.getComputedTextLength !== "function") return;
 		const measure = () => {
 			if (watch.getComputedTextLength() === 0) return; // not rendered yet
 			setMeasured({ nodes, edges, layout: blockLayout(nodes, edges, probeMeasure(el, box)) });
