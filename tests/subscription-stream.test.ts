@@ -28,7 +28,7 @@ before(async () => {
 	process.env.XAI_API_KEY = "fixture-must-never-be-used"; process.env.COPILOT_GITHUB_TOKEN = "fixture-api-route-only";
 	Object.defineProperty(process, "connected", { configurable: true, value: true });
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
-		sends++; queueMicrotask(() => emit({ channel: "lh:subscriptions", id: message.id, op: message.op, ...(denied && message.op === "lease" ? { ok: false, error: "fixture expired refresh" } : { ok: true, value: message.op === "snapshot" ? snapshot() : { scope: message.scope, auth: { apiKey: "fixture-oauth-only", ...(message.scope.providerId === "github-copilot" ? { baseUrl: "https://api.business.githubcopilot.com", headers: { "x-fixture-auth": "native-retained" } } : {}) } } }) }));
+		sends++; queueMicrotask(() => emit({ channel: "lh:subscriptions", id: message.id, op: message.op, ...(denied && message.op === "lease" ? { ok: false, error: "fixture expired refresh" } : { ok: true, value: message.op === "snapshot" ? snapshot() : { scope: message.scope, auth: { apiKey: "fixture-oauth-only", ...(message.scope.providerId === "github-copilot" ? { baseUrl: "https://api.business.githubcopilot.com", headers: { "x-fixture-auth": "native-retained" }, ...(message.scope.selectedModelId === "auto" ? { modelId: "kimi-k3" } : {}) } : {}) } } }) }));
 		callback?.(); return true;
 	} });
 	await refreshSubscriptionModels();
@@ -81,6 +81,30 @@ for (const p of NATIVE_SUBSCRIPTIONS) test(`${p.providerId}: every SDK transport
 		assert(!JSON.stringify(record).includes("fixture-oauth-only"));
 		assert(!JSON.stringify(record).includes("native-retained"));
 	}
+});
+test("github-copilot auto omits the model field so the account's server-side routing answers", async () => {
+	let body: Record<string, unknown> | undefined, requests = 0;
+	const engine = piEngineForSpec({ provider: "github-copilot-subscription", id: "auto" }, false);
+	assert.equal(engine.model.id, "auto");
+	const result = await engine.streamFn(engine.model, context, {
+		fetch: async (input, init) => {
+			requests++;
+			const request = new Request(input, init);
+			body = await request.json();
+			assert.equal(request.headers.get("authorization"), "Bearer fixture-oauth-only");
+			const chunk = (value: unknown) => `data: ${JSON.stringify(value)}\n\n`;
+			return new Response([
+				chunk({ id: "chatcmpl-fixture", object: "chat.completion.chunk", created: 0, model: "auto", choices: [{ index: 0, delta: { role: "assistant", content: "AUTO_OK" }, finish_reason: null }] }),
+				chunk({ id: "chatcmpl-fixture", object: "chat.completion.chunk", created: 0, model: "auto", choices: [{ index: 0, delta: {}, finish_reason: "stop" }] }),
+				chunk({ id: "chatcmpl-fixture", object: "chat.completion.chunk", created: 0, model: "auto", choices: [], usage: { prompt_tokens: 1, completion_tokens: 1, total_tokens: 2 } }),
+				"data: [DONE]\n\n",
+			].join(""), { status: 200, headers: { "content-type": "text/event-stream" } });
+		},
+	}).result();
+	assert.equal(requests, 1);
+	assert(body && !("model" in body), "the auto route must not pin a model id upstream");
+	assert.equal(result.stopReason, "stop");
+	assert.equal(result.model, "auto");
 });
 test("failed OAuth lease never dispatches despite valid-looking ambient keys; forbidden auth overrides do not dispatch", async () => {
 	let requests = 0; denied = true;

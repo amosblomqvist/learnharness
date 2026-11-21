@@ -48,8 +48,21 @@ export function nativeSubscriptionStream(provider: Provider, background: () => b
 				const auth = await subscriptionLease(scope, purpose); check();
 				const authKeys = new Set(Object.keys(auth.headers ?? {}).map((key) => key.toLowerCase()));
 				if (Object.keys(options?.headers ?? {}).some((key) => authKeys.has(key.toLowerCase()))) throw new Error("Authorization override forbidden");
-				const nativeModel = provider.getModels().find((model) => model.id === logicalModel.id && model.api === logicalModel.api);
+				const backendModelId = (auth as { modelId?: string }).modelId;
+				const nativeModel = backendModelId
+					? provider.getModels().find((model) => model.id === backendModelId)
+					: provider.getModels().find((model) => model.id === logicalModel.id && model.api === logicalModel.api);
 				if (!nativeModel) throw new Error("Native model unavailable");
+				// GitHub Copilot's "Auto" route is selected by OMITTING the model
+				// field; every concrete id is rejected for accounts whose plan only
+				// offers Auto. The lease still names a concrete transport so the
+				// request shape and stream parser stay deterministic.
+				const autoRoute = logicalModel.id === "auto";
+				const routePayload = (payload: unknown): unknown => {
+					if (!autoRoute || !payload || typeof payload !== "object" || Array.isArray(payload)) return payload;
+					const { model: _omitted, ...rest } = payload as Record<string, unknown>;
+					return rest;
+				};
 				const transport = { ...nativeModel, ...(auth.baseUrl ? { baseUrl: auth.baseUrl } : {}) };
 				const fetch = options?.fetch ?? globalThis.fetch;
 				const source = provider.streamSimple(transport, subscriptionHistory(normalizeContext(context), logicalModel, nativeId), {
@@ -61,19 +74,22 @@ export function nativeSubscriptionStream(provider: Provider, background: () => b
 					onPayload: async (raw, model) => {
 						const replacement = await options?.onPayload?.(raw, model); check();
 						if (replacement === undefined) {
-							capturePreparedBackgroundPayload(raw, logicalModel);
-							return raw;
+							const payload = routePayload(raw);
+							capturePreparedBackgroundPayload(payload, logicalModel);
+							return payload as typeof raw;
 						}
 						if (!replacement || typeof replacement !== "object" || Array.isArray(replacement)) throw new Error("Invalid model payload override");
-						const payload = { ...replacement, model: (raw as { model: string }).model };
+						const payload = routePayload({ ...replacement, model: (raw as { model: string }).model });
 						capturePreparedBackgroundPayload(payload, logicalModel);
-						return payload;
+						return payload as typeof replacement;
 					},
 				});
 				for await (const event of source) {
 					check();
 					const message = "partial" in event ? event.partial : event.type === "done" ? event.message : event.error;
-					partial = { ...message, provider: logicalModel.provider };
+					// The record keeps the LEARNER-VISIBLE identity (`auto`), never the
+					// internal transport model the lease happened to pick.
+					partial = { ...message, provider: logicalModel.provider, model: logicalModel.id };
 					if (event.type === "error") throw new Error(event.error.errorMessage ?? "Native stream failed");
 					if (event.type === "done") { if (!terminal) { terminal = true; output.push({ ...event, message: partial }); } }
 					else if (!terminal) output.push({ ...event, partial });
