@@ -2448,6 +2448,47 @@ describe("chain simplification (the merger's maintenance pass, owner 2026-09-30 
 		assert.deepEqual(kept.map((c) => c.id), ["arg_1", "arg_1"], "the superset key's every line went, the kept key's every line stayed");
 	});
 
+	it("cycles do not poison ancestry memoization or make simplification order-dependent", () => {
+		const cycle = [
+			chain("arg_ab", ["n_a"], "n_b", "2026-09-30T01:00:00.000Z"),
+			chain("arg_ba", ["n_b"], "n_a", "2026-09-30T01:00:00.000Z"),
+			chain("arg_ca", ["n_c"], "n_a", "2026-09-30T00:30:00.000Z"),
+		];
+		const yChains = [
+			chain("arg_ay", ["n_a"], "n_y", "2026-09-30T02:00:00.000Z"),
+			chain("arg_dy", ["n_d"], "n_y", "2026-09-30T03:00:00.000Z"),
+		];
+		const zChains = [
+			chain("arg_bz", ["n_b"], "n_z", "2026-09-30T02:00:00.000Z"),
+			chain("arg_cz", ["n_c"], "n_z", "2026-09-30T03:00:00.000Z"),
+		];
+
+		const yFirst = simplifyChains([...yChains, ...zChains, ...cycle]).map((c) => c.id).sort();
+		const zFirst = simplifyChains([...zChains, ...yChains, ...cycle]).map((c) => c.id).sort();
+		const expected = ["arg_ab", "arg_ay", "arg_ba", "arg_bz", "arg_ca", "arg_dy"];
+		assert.deepEqual(yFirst, expected, "transitive ancestor behind cycle is still recognized when visited mid-cycle first");
+		assert.deepEqual(zFirst, expected, "simplification result must not depend on input order");
+	});
+
+	it("longer cycles propagate upstream ancestors to every cycle member", () => {
+		const kept = simplifyChains([
+			chain("arg_ay", ["n_a"], "n_y", "2026-09-30T02:00:00.000Z"),
+			chain("arg_dy", ["n_d"], "n_y", "2026-09-30T03:00:00.000Z"),
+			chain("arg_bz", ["n_b"], "n_z", "2026-09-30T02:00:00.000Z"),
+			chain("arg_rz", ["n_root"], "n_z", "2026-09-30T03:00:00.000Z"),
+			chain("arg_cw", ["n_c"], "n_w", "2026-09-30T02:00:00.000Z"),
+			chain("arg_rw", ["n_root"], "n_w", "2026-09-30T03:00:00.000Z"),
+			chain("arg_ab", ["n_a"], "n_b", "2026-09-30T01:00:00.000Z"),
+			chain("arg_bc", ["n_b"], "n_c", "2026-09-30T01:00:00.000Z"),
+			chain("arg_ca", ["n_c"], "n_a", "2026-09-30T01:00:00.000Z"),
+			chain("arg_ra", ["n_root"], "n_a", "2026-09-30T00:30:00.000Z"),
+		]);
+		assert.deepEqual(
+			kept.map((c) => c.id).sort(),
+			["arg_ab", "arg_ay", "arg_bc", "arg_bz", "arg_ca", "arg_cw", "arg_dy", "arg_ra"],
+		);
+	});
+
 	it("the merge applies it live: a redundant arrival is skipped silently, stats count appends and drops", async () => {
 		const { chatId } = fixtureChat();
 		const ledgers = memoryLedgers();
