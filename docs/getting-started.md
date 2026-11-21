@@ -31,7 +31,7 @@ Sessions are saved locally, including earlier messages when context is compacted
 2. Add it under **Settings → Providers → Dictation** and choose the language below the key. **Multilingual** supports automatic recognition and mixed-language speech.
 3. Use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
 
-Audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
+Audio streams from your browser directly to Deepgram using a short-lived token. LearnHarness opts these requests out of Deepgram's [Model Improvement Program](https://developers.deepgram.com/docs/the-deepgram-model-improvement-partnership-program); Deepgram says it then [doesn't store audio or transcripts after responding](https://developers.deepgram.com/trust-security/your-data), though it still records request metadata and usage logs. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
 
 ## Use local files in a session
 
