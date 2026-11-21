@@ -79,23 +79,72 @@ type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | 
  *  name, e.g. DEEPGRAM_API_KEY — KeysSection's openRow state), not the
  *  row's testid. */
 const DialogContext = createContext<{ open: (section?: string, row?: string) => void }>({ open: () => {} });
+type DialogSettingsSection = "general" | "agent" | "models" | "appearance" | "graph" | "compaction";
+type SectionBodyInput =
+	| object
+	| ((record: UserSettings | undefined, fileAccessError: string | null) => object | null);
+
 // Authority belongs to the persistent Settings host, not a particular field or
-// open/close lifetime: a delayed response must not roll back a newer ACK.
+// open/close lifetime: writes serialize FIFO, and a delayed read cannot roll
+// back a newer canonical state.
 interface SettingsWriteOrder {
 	issued: number;
-	acknowledged: number;
+	revision: number;
 	record?: UserSettings;
 	fileAccessError?: string | null;
 	pendingWrites: number;
+	needsRefresh: boolean;
+	queue: Promise<void>;
 	promptDeletion?: Promise<void>;
 	listeners: Set<(record: UserSettings, fileAccessError: string | null) => void>;
 }
-const newWriteOrder = (): SettingsWriteOrder => ({ issued: 0, acknowledged: 0, pendingWrites: 0, listeners: new Set() });
+const newWriteOrder = (): SettingsWriteOrder => ({
+	issued: 0,
+	revision: 0,
+	pendingWrites: 0,
+	needsRefresh: false,
+	queue: Promise.resolve(),
+	listeners: new Set(),
+});
 // Settings runs on supported browsers that predate Promise.withResolvers.
 function settingsCompletion() {
 	let resolve!: () => void;
 	const promise = new Promise<void>(done => { resolve = done; });
 	return { promise, resolve };
+}
+function isRecordObject(value: unknown): value is Record<string, unknown> {
+	return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+function isCanonicalSettingsRecord(value: unknown): value is UserSettings {
+	return isRecordObject(value) && typeof value.version === "number" &&
+		Number.isInteger(value.version) && value.version >= 1;
+}
+function isCanonicalSectionAck(value: unknown, section: DialogSettingsSection): value is UserSettings {
+	return isCanonicalSettingsRecord(value) && isRecordObject(value[section]);
+}
+function parseSettingsRead(body: unknown) {
+	if (!isRecordObject(body) || !("settings" in body)) return null;
+	const { settings, fileAccessError } = body;
+	if (settings !== null && !isCanonicalSettingsRecord(settings)) return null;
+	if (fileAccessError !== undefined && typeof fileAccessError !== "string") return null;
+	return {
+		record: settings ?? { version: CURRENT_SETTINGS_VERSION },
+		fileAccessError: fileAccessError ?? null,
+	};
+}
+function publishCanonical(
+	authority: SettingsWriteOrder,
+	stored: UserSettings,
+	fileAccessError: string | null,
+	onAppearanceChange: (next: AppearanceSettings | undefined) => void,
+) {
+	authority.revision++;
+	authority.record = stored;
+	authority.fileAccessError = fileAccessError;
+	for (const apply of authority.listeners) apply(stored, fileAccessError);
+	// Every accepted response is a full canonical record, including
+	// appearance saved by an earlier, still-pending section request.
+	onAppearanceChange(stored.appearance);
 }
 const WriteOrderContext = createContext<RefObject<SettingsWriteOrder> | null>(null);
 
@@ -194,6 +243,8 @@ export function SettingsDialogBody({
 	initialRow?: string | null;
 }) {
 	const { onAppearanceChange } = useAppearance();
+	const appearanceChangeRef = useRef(onAppearanceChange);
+	appearanceChangeRef.current = onAppearanceChange;
 	const inheritedWriteOrder = useContext(WriteOrderContext);
 	const standaloneWriteOrder = useRef(newWriteOrder());
 	const writeOrder = inheritedWriteOrder ?? standaloneWriteOrder;
@@ -201,7 +252,7 @@ export function SettingsDialogBody({
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
-	const [error, setError] = useState<string | null>(null);
+	const [error, setError] = useState<{ key: string; message: string } | null>(null);
 	const [fileAccessError, setFileAccessError] = useState<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
@@ -279,84 +330,133 @@ export function SettingsDialogBody({
 	// A GET started before a newer acknowledged save cannot roll it back.
 	useEffect(() => {
 		const authority = writeOrder.current;
-		const acknowledgedAtRead = authority.acknowledged;
+		const revisionAtRead = authority.revision;
+		const issuedAtRead = authority.issued;
+		const idleAtRead = authority.pendingWrites === 0 && !authority.promptDeletion;
 		let alive = true;
 		const applyLoaded = (loaded: UserSettings | null, fileAccessError: string | null = null) => {
 			if (!alive) return;
-			const unchanged = authority.acknowledged === acknowledgedAtRead;
-			if (unchanged && loaded) {
+			const unchanged = authority.revision === revisionAtRead;
+			const canAdopt = unchanged && loaded !== null && (
+				!authority.needsRefresh ||
+				(idleAtRead && authority.issued === issuedAtRead && authority.pendingWrites === 0 && !authority.promptDeletion)
+			);
+			if (canAdopt) {
+				const hadNeedsRefresh = authority.needsRefresh;
+				authority.needsRefresh = false;
 				authority.record = loaded;
 				authority.fileAccessError = fileAccessError;
+				if (hadNeedsRefresh) appearanceChangeRef.current(loaded.appearance);
 			}
-			setRecord(unchanged ? loaded : authority.record ?? loaded);
-			setFileAccessError(unchanged ? fileAccessError : authority.fileAccessError ?? null);
+			setRecord(canAdopt ? loaded : (authority.record ?? loaded));
+			setFileAccessError(canAdopt ? fileAccessError : (authority.fileAccessError ?? null));
 		};
 		fetch("/api/settings")
 			.then((r) =>
 				r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)),
 			)
-			.then((body: { settings: UserSettings | null; fileAccessError?: string }) =>
-				applyLoaded(body.settings ?? { version: CURRENT_SETTINGS_VERSION }, body.fileAccessError ?? null),
-			)
+			.then((body: unknown) => {
+				const loaded = parseSettingsRead(body);
+				applyLoaded(loaded?.record ?? null, loaded?.fileAccessError);
+			})
 			.catch(() => applyLoaded(null));
 		return () => { alive = false; };
 	}, [writeOrder]);
 
-	/** ONE writer for the whole dialog: PUT the whole section, keep the
-	 *  record mirror in sync, surface route errors inline (a 400 is a
+	const refreshCanonical = useCallback(async (authority: SettingsWriteOrder): Promise<boolean> => {
+		try {
+			const res = await fetch("/api/settings", { cache: "no-store" });
+			if (!res.ok) return false;
+			const loaded = parseSettingsRead(await res.json());
+			if (!loaded) return false;
+			publishCanonical(authority, loaded.record, loaded.fileAccessError, appearanceChangeRef.current);
+			authority.needsRefresh = false;
+			return true;
+		} catch {
+			return false;
+		}
+	}, []);
+
+	/** ONE writer for the whole dialog: serialize section PUTs FIFO in
+	 *  click order, compose deferred section updates from the latest
+	 *  confirmed record, and surface route errors inline (a 400 is a
 	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
-		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
-			body: object,
+		(
+			section: DialogSettingsSection,
+			bodyOrCompose: SectionBodyInput,
 			confirms?: (stored: UserSettings) => boolean,
+			field?: string,
 		): Promise<boolean> => {
 			const authority = writeOrder.current;
-			while (authority.promptDeletion) await authority.promptDeletion;
-			const ticket = ++authority.issued;
-			authority.pendingWrites++;
-			setError(null);
-			try {
-				const res = await fetch(`/api/settings/${section}`, {
-					method: "PUT",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify(body),
-				});
-				if (!res.ok) {
-					const detail = (await res.json().catch(() => ({}))) as {
-						error?: string;
-					};
-					if (ticket === writeOrder.current.issued) setError(`${section}: ${detail.error ?? res.status}`);
-					return false;
-				}
-				// Only the acknowledged record is canonical: never substitute the
-				// request body, including when normalization leaves the old value.
-				const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
-				const stored = reply?.settings;
-				if (!stored || typeof stored !== "object" || Array.isArray(stored) || stored.version !== 1 ||
-					!stored[section] || typeof stored[section] !== "object" || Array.isArray(stored[section])) {
-					if (ticket === writeOrder.current.issued) setError(`${section}: Could not confirm saved settings. Your input has been kept.`);
-					return false;
-				}
-				if (ticket >= writeOrder.current.acknowledged) {
-					writeOrder.current.acknowledged = ticket;
-					writeOrder.current.record = stored;
-					writeOrder.current.fileAccessError = reply?.fileAccessError ?? null;
-					for (const apply of writeOrder.current.listeners) apply(stored, writeOrder.current.fileAccessError);
-					// Every accepted response is a full canonical record, including
-					// appearance saved by an earlier, still-pending section request.
-					onAppearanceChange(stored.appearance);
-				}
-				notifySettingsSaved(section);
-				return confirms?.(stored) ?? true;
-			} catch (error) {
-				if (ticket === writeOrder.current.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
+			const key = field === undefined ? section : `${section}:${field}`;
+			const fail = (message: string | number) => {
+				setError({ key, message: `${section}: ${message}` });
 				return false;
-			} finally {
-				authority.pendingWrites--;
-			}
+			};
+			const clearError = () => setError(current => current?.key === key ? null : current);
+			const unconfirmed = "Could not confirm saved settings.";
+			authority.issued++;
+			authority.pendingWrites++;
+			const result = authority.queue.then(async () => {
+				let awaitingAck = false;
+				try {
+					while (authority.promptDeletion) await authority.promptDeletion;
+					if (authority.needsRefresh && !await refreshCanonical(authority)) {
+						return fail(unconfirmed);
+					}
+
+					const body = typeof bodyOrCompose === "function"
+						? bodyOrCompose(authority.record, authority.fileAccessError ?? null)
+						: bodyOrCompose;
+					if (body === null) {
+						clearError();
+						return true;
+					}
+
+					const payload = JSON.stringify(body);
+					// Until the route rejects the write or returns its canonical
+					// record, transport and response failures leave its outcome unknown.
+					awaitingAck = true;
+					const res = await fetch(`/api/settings/${section}`, {
+						method: "PUT",
+						headers: { "content-type": "application/json" },
+						body: payload,
+					});
+					if (!res.ok) {
+						authority.needsRefresh = res.status !== 400 && res.status !== 404;
+						awaitingAck = false;
+						const detail: unknown = await res.json().catch(() => null);
+						return fail(isRecordObject(detail) && typeof detail.error === "string" ? detail.error : res.status);
+					}
+
+					const reply: unknown = await res.json().catch(() => null);
+					const stored = isRecordObject(reply) ? reply.settings : undefined;
+					const fileAccessError = isRecordObject(reply) ? reply.fileAccessError : undefined;
+					if (!isCanonicalSectionAck(stored, section) ||
+						(fileAccessError !== undefined && typeof fileAccessError !== "string")) {
+						authority.needsRefresh = true;
+						return fail(`${unconfirmed} Your input has been kept.`);
+					}
+
+					awaitingAck = false;
+					publishCanonical(authority, stored, fileAccessError ?? null, appearanceChangeRef.current);
+					authority.needsRefresh = false;
+					notifySettingsSaved(section);
+					const confirmed = confirms?.(stored) ?? true;
+					if (confirmed) clearError();
+					return confirmed;
+				} catch (error) {
+					if (awaitingAck) authority.needsRefresh = true;
+					return fail(error instanceof Error ? error.message : String(error));
+				} finally {
+					authority.pendingWrites--;
+				}
+			});
+			authority.queue = result.then(() => {});
+			return result;
 		},
-		[onAppearanceChange, writeOrder],
+		[refreshCanonical, writeOrder],
 	);
 
 	async function deletePromptOverride(path: string, remove: () => Promise<boolean>) {
@@ -371,7 +471,7 @@ export function SettingsDialogBody({
 			const stored = authority.record;
 			if (stored?.agent?.prompts?.[path] !== undefined) {
 				const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
-				authority.acknowledged = ++authority.issued;
+				authority.revision++;
 				authority.record = patched;
 				for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
 			}
@@ -468,7 +568,7 @@ export function SettingsDialogBody({
 							className="m-4 rounded-sm border border-error/40 px-3 py-2 text-xs text-error"
 							data-testid="settings-error"
 						>
-							{error}
+							{error.message}
 						</p>
 					)}
 					{selected === "plugins" || selected === "core-plugins" ? <PluginsSection origin={selected === "core-plugins" ? "core" : "community"} onOpenSettings={pluginId => setActive(`plugin:${pluginId}`)} />
@@ -518,6 +618,14 @@ export function SettingsDialogBody({
 										}
 										onSectionChange={(next, confirms) =>
 											write("agent", next, confirms && (stored => confirms(stored.agent ?? {})))
+										}
+										onSectionEdit={(field, compose, confirms) =>
+											write(
+												"agent",
+												(current, currentFileAccessError) => compose(current?.agent, currentFileAccessError),
+												confirms && (stored => confirms(stored.agent ?? {})),
+												field,
+											)
 										}
 										onDeletePromptOverride={deletePromptOverride}
 										onCompactionChange={(next: CompactionSettings) =>
