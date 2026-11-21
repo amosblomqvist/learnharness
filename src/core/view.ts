@@ -420,6 +420,7 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 			});
 			return;
 		}
+		case "learner-handoff":
 		case "probe-handoff": {
 			out.push({
 				id: marker.id,

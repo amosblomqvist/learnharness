@@ -275,6 +275,33 @@ after(() => {
 });
 
 describe("teacher chat flow (scripted model)", () => {
+	it("end-probe skips the open question and constructs a teacher in the same turn", async () => {
+		const chat = createConfiguredChat("Manual handoff fixture"); createdChats.push(chat.id);
+		const {engine} = scriptedTeacher(() => [
+			fauxAssistantMessage([fauxToolCall("quiz", QUIZ_INPUT, {id: "open"})], {stopReason: "toolUse"}),
+			fauxAssistantMessage([fauxText("Begin the lesson.")]),
+		]);
+		const roles: boolean[] = [];
+		const factory: NonNullable<Parameters<typeof handleChatRequest>[1]> = opts => {
+			roles.push(opts.teaching);
+			return createTeacherAgent(undefined, {engine, messages: opts.messages});
+		};
+		await drainTurn(post(chat.id, {type:"text", text:"Teach me."}), factory);
+		const before = chatStore.getChat(chat.id)!.messages;
+		const event = {type:"end-probe", lastMessageId: before.at(-1)!.id};
+		assert.equal((await handleChatRequest(post(chat.id, {...event, lastMessageId:"stale"}), factory)).status, 400);
+		await drainTurn(post(chat.id, event), factory);
+		const after = chatStore.getChat(chat.id)!.messages;
+		assert.deepEqual(roles, [false, true]);
+		assert.deepEqual(after.slice(0,before.length), before);
+		assert.equal(danglingQuestionOf(after), null);
+		const skipped = after[before.length]!;
+		assert.ok(skipped.role === "toolResult" && (skipped.details as { dismissed?: boolean })?.dismissed);
+		assert.equal((await handleChatRequest(post(chat.id, event), factory)).status, 400);
+		const {phaseTimeline, phaseAt3Lh} = await import("../src/core/phases.ts");
+		assert.equal(phaseAt3Lh(after), "plan"); assert.equal(phaseTimeline(projectView(after)).at(-1), "plan");
+	});
+
 	it("quiz tool call persists as a pending part; the answer continues the lesson", async () => {
 		const { engine, calls } = scriptedTeacher(defaultLesson);
 		const chat = createConfiguredChat("Test: solar system");
