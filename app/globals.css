@@ -5,6 +5,20 @@
 
 @custom-variant dark (&:is(.dark *));
 
+/* ── Narrow-viewport variants (mobile web pass, 2026-11-14) ─────────────
+   `narrow` is the phone layout: below 40rem (640px) — the Electron
+   window floor (electron/main.cjs minWidth). Everything at or above
+   640px keeps the unchanged desktop layout, and Electron can never
+   reach this branch. `coarse` is touch-first input (larger targets,
+   no keyboard-only hints).
+
+   Both are CSS-only, so layout never depends on a JS width listener.
+   The one place JS must branch (the sidebar's drawer presentation)
+   reads the same media query in SidebarProvider — keep the two
+   spellings in sync (NARROW_QUERY in components/sidebar.tsx). */
+@custom-variant narrow (@media (width < 40rem));
+@custom-variant coarse (@media (pointer: coarse));
+
 /*
  * THE SKIN — wave 5. Design tokens, the single place to restyle the app.
  *
@@ -83,6 +97,14 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	/* Safe-area insets (phones): zero wherever the platform reports no
+	   inset, so the desktop layout is untouched. Reserved for edge-pinned
+	   and fixed surfaces — the app shell itself stays inside the browser's
+	   own insets while viewport-fit=cover is not adopted. */
+	--lh-safe-top: env(safe-area-inset-top, 0px);
+	--lh-safe-right: env(safe-area-inset-right, 0px);
+	--lh-safe-bottom: env(safe-area-inset-bottom, 0px);
+	--lh-safe-left: env(safe-area-inset-left, 0px);
 }
 
 /* The light variant: the colors come from the active light theme (inline

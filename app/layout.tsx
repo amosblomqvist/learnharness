@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { JetBrains_Mono, Source_Sans_3 } from "next/font/google";
 import { connection } from "next/server";
 import "katex/dist/katex.min.css";
@@ -20,6 +20,34 @@ export const metadata: Metadata = {
 	title: "Learning Harness",
 	description: "A teacher agent with a memory — sessions, quizzes, and a knowledge graph of what you know.",
 };
+
+/**
+ * The phone viewport (narrow-viewport pass, 2026-11-14). width/initialScale
+ * restate Next's defaults; the two additions are:
+ *
+ * - interactiveWidget: Android Chrome shrinks the LAYOUT viewport when the
+ *   keyboard opens, so the sticky composer stays above it. The default
+ *   (resizes-visual) leaves the dock hidden behind the keyboard.
+ * - themeColor + colorScheme: the active theme's background and mode, so
+ *   the browser's status bar matches the app. Read per request like the
+ *   first-paint theme (connection() keeps it out of prerenders) — a theme
+ *   switch is a reload, exactly as the appearance settings already behave.
+ *
+ * viewportFit stays unset on purpose: extending under the notch would make
+ * the shell own the safe-area insets (body + three page roots), and that
+ * needs a real-device pass before it is worth the layout change.
+ */
+export async function generateViewport(): Promise<Viewport> {
+	await connection();
+	const { theme, vars } = readThemeBoot();
+	return {
+		width: "device-width",
+		initialScale: 1,
+		interactiveWidget: "resizes-content",
+		colorScheme: theme.mode,
+		themeColor: vars["--background"],
+	};
+}
 
 export default async function RootLayout({ children }: { children: React.ReactNode }) {
 	// The theme is server-rendered — its class AND its color variables —
