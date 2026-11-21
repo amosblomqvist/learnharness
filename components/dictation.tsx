@@ -826,10 +826,14 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 					disabled={disabled || blocked}
 					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
-					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
+					// min-w-9: a flex sibling may never squeeze this to zero
+					// (it collapsed to an invisible sliver at 320px before the
+					// narrow-viewport pass). Phones get the icon alone — the
+					// label is the first thing that can go — and a 40px target.
+					className="flex h-7 w-full min-w-9 items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground narrow:w-9 narrow:px-0 coarse:h-10"
 				>
-					<MicIcon className="size-3.5" />
-					<span className="max-w-full truncate">{error ?? "Dictate"}</span>
+					<MicIcon className="size-3.5 shrink-0" />
+					<span className="max-w-full truncate narrow:hidden">{error ?? "Dictate"}</span>
 				</button>
 			</Hint>
 		);
