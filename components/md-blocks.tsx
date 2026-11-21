@@ -58,7 +58,7 @@ export const MarkdownDisplayOnlyContext = createContext(false);
  *  execCommand path is the belt under that: a failed write would otherwise
  *  be a silent no-op, which is exactly what the owner saw. Returns whether
  *  the copy landed (drives the Copied pill). */
-async function copyText(text: string): Promise<boolean> {
+export async function copyText(text: string): Promise<boolean> {
 	try {
 		await navigator.clipboard.writeText(text);
 		return true;
