@@ -23,6 +23,7 @@ dist/
 
 # dev auth/keys store (auth-keys wave): repo-root auth.json — secrets never committed
 auth.json
+antigravity-profile/
 chatgpt-credentials.json*
 github-copilot-credentials.json*
 xai-credentials.json*

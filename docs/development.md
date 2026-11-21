@@ -58,7 +58,7 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 
 Ordinary Next development can read `.env.local`. Real environment keys take precedence over saved keys. Saved auth is restrictive-permission plaintext, not an encrypted vault. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.
 
-Provider-specific setup and limitations: [Claude Code](claude-code.md), [custom endpoints](custom-providers.md), [context/cost accounting](compaction-accounting.md).
+Provider-specific setup and limitations: [Claude Code](claude-code.md), [Antigravity](antigravity.md), [custom endpoints](custom-providers.md), [context/cost accounting](compaction-accounting.md).
 
 ### Subscription connections in web/dev
 

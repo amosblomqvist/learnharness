@@ -39,6 +39,7 @@ import { searchAvailable, searchProvider } from "./search.ts";
 import { prepareSubmissionImages, prepareSubmissionImageChannels, prepareProblemSubmissionImageChannels, submissionImagePolicyKey } from "./submission-images.ts";
 import { preparePluginProblemSubmission, requirePluginProblemTarget, type ProblemTypeResolver } from "./plugin-problems.ts";
 import { providerKeyPresent } from "./keys.ts";
+import { ANTIGRAVITY_PROVIDER } from "../core/contracts/antigravity.ts";
 import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
 import {
 	extractionEnabled,
@@ -100,7 +101,10 @@ import type {CallUsage} from "../core/contracts.ts";
 /** Fresh check only at new background-run admission; never cancel a run
  * already in progress when the opt-in is switched off. */
 function connectionBackgroundAllowed(provider: string): boolean {
-	return subscriptionBackgroundAllowed(provider) && (provider !== CLAUDE_CODE_PROVIDER || providerKeyPresent(provider));
+	return (
+		subscriptionBackgroundAllowed(provider) &&
+		((provider !== CLAUDE_CODE_PROVIDER && provider !== ANTIGRAVITY_PROVIDER) || providerKeyPresent(provider))
+	);
 }
 
 function settlementErrorText(error: unknown): string {
@@ -374,7 +378,10 @@ export async function handleChatInput(
 		// Retry's transient SDK prefix omits ALL tail failures. Keep the saved
 		// history in the metadata-only view so omission cannot revive a report
 		// invalidated by a genuine provider failure. New live responses win.
-		const saved = conversation.provider === CLAUDE_CODE_PROVIDER ? stores.chatStore.getChat(chatId)?.messages ?? [] : [];
+		const saved =
+			conversation.provider === CLAUDE_CODE_PROVIDER || conversation.provider === ANTIGRAVITY_PROVIDER
+				? stores.chatStore.getChat(chatId)?.messages ?? []
+				: [];
 		const savedIds = new Set(saved.map((message) => message.id));
 		const reportHistory = saved.length ? [...saved, ...live.filter((message) => !savedIds.has(message.id))] : live;
 		const window = sideContextWindow(reportHistory, conversationEngine.model, contextWindow, input.type === "retry");

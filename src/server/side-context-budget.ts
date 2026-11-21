@@ -1,3 +1,4 @@
+import { ANTIGRAVITY_PROVIDER } from "../core/contracts/antigravity.ts";
 import { retryDrops } from "../core/input-events.ts";
 import { cliContextWindowOf, type LhMessage } from "../core/native-messages.ts";
 import { CLAUDE_CODE_API, CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
@@ -9,9 +10,15 @@ export const SIDE_CONTEXT_BUDGET_ERROR = "New side-chat exchanges exceed the sel
  * recognizable local pre-dispatch failures, but never through a real response
  * without metadata or a compaction boundary. This does not change UI statistics. */
 export function sideContextWindow(messages: readonly LhMessage[], selected: { provider: string; id: string }, catalogWindow: number | undefined, retry: boolean): number | undefined {
-	if (selected.provider !== CLAUDE_CODE_PROVIDER) return catalogWindow;
-	const report = cliContextWindowOf(retry ? messages.filter((message) => !isLocalSideBudgetFailure(message, selected.id)) : messages);
-	return report?.model === `${selected.provider}:${selected.id}` ? report.tokens : undefined;
+	if (selected.provider === CLAUDE_CODE_PROVIDER) {
+		const report = cliContextWindowOf(retry ? messages.filter((message) => !isLocalSideBudgetFailure(message, selected.id)) : messages);
+		return report?.model === `${selected.provider}:${selected.id}` ? report.tokens : undefined;
+	}
+	if (selected.provider === ANTIGRAVITY_PROVIDER) {
+		const report = cliContextWindowOf(messages);
+		return report?.model === `${selected.provider}:${selected.id}` ? report.tokens : catalogWindow;
+	}
+	return catalogWindow;
 }
 
 /** Historical local failures have no new persisted discriminator. Require the
