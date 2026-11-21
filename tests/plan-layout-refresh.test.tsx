@@ -9,16 +9,23 @@ const plan = {
 	edges: [{ from: "a", to: "b" }],
 };
 
-test("real-font plan measurement follows geometry and font changes, not fresh record identities", async () => {
+test("real-font plan measurement follows geometry, font and visibility changes, not fresh record identities", async () => {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	const fonts = Object.assign(new EventTarget(), { ready: Promise.resolve() });
 	Object.defineProperty(dom.document, "fonts", { value: fonts });
 	Object.defineProperty(dom.document, "createRange", { value: () => ({ setStart() {}, setEnd() {}, getClientRects: () => [] }) });
 	const frames = new Map<number, FrameRequestCallback>();
 	let nextFrame = 0;
+	let notifyResize: (() => void) | undefined;
+	class ResizeObserverStub {
+		constructor(private readonly callback: () => void) {}
+		observe() { notifyResize = this.callback; }
+		disconnect() { notifyResize = undefined; }
+	}
 	const globals = {
 		React, window: dom.window, document: dom.document, IS_REACT_ACT_ENVIRONMENT: true,
 		getComputedStyle: () => ({ fontSize: "12px" }),
+		ResizeObserver: ResizeObserverStub,
 		requestAnimationFrame: (callback: FrameRequestCallback) => { frames.set(++nextFrame, callback); return nextFrame; },
 		cancelAnimationFrame: (id: number) => { frames.delete(id); },
 	};
@@ -29,13 +36,21 @@ test("real-font plan measurement follows geometry and font changes, not fresh re
 	const root = createRoot(rootEl as unknown as Element);
 	let measures = 0;
 	let paintWidth = 6;
+	let visible = false;
 	function Harness({ data }: { data: typeof plan }) {
 		const { layout, probe } = usePlanLayout(data);
 		return <div data-width={layout.nodeW.get("a")} data-font={layout.fontSize}>
 			<svg>
 				<text ref={element => {
 					probe.sentinel.current = element;
-					if (element) element.getComputedTextLength = () => { measures++; return 100; };
+					if (element) {
+						element.getComputedTextLength = () => { if (!visible) return 0; measures++; return 100; };
+						element.getBBox = () => {
+							const width = visible ? 100 : 0;
+							const height = visible ? 12 : 0;
+							return { x: 0, y: 0, top: 0, left: 0, width, height, right: width, bottom: height, toJSON: () => ({ width, height }) };
+						};
+					}
 				}} />
 				<text ref={element => {
 					probe.measurer.current = element;
@@ -53,9 +68,15 @@ test("real-font plan measurement follows geometry and font changes, not fresh re
 	try {
 		await render(plan);
 		await flushFrames();
-		const initial = measures;
-		assert.ok(initial > 0);
+		assert.equal(measures, 0, "keep the estimated layout while hidden");
+		assert.ok(notifyResize);
+		visible = true;
+		await act(async () => { notifyResize?.(); });
+		assert.equal(measures, 1, "measure once when a previously hidden plan becomes visible");
 		assert.equal(rootEl.firstElementChild!.getAttribute("data-font"), "12");
+		const initial = measures;
+		await act(async () => { notifyResize?.(); });
+		assert.equal(measures, initial, "unchanged probe bounds do not trigger measurement");
 		const restamped = structuredClone(plan);
 		restamped.nodes[0]!.status = "visited";
 		await render(restamped);

@@ -62,17 +62,38 @@ const PROBE_TYPE = `${LABEL_TYPE} font-medium`;
  *  measurement, even when this sample keeps exactly the same dimensions. */
 const SENTINEL_TEXT = "Hamburgefonstiv 0123 漢字";
 
-/** The hidden probe a diagram carries (rendered by PlanDiagram, inside its
- *  own <svg> so it inherits exactly the cascade the real labels do —
- *  subtrees may redefine --font-prose, e.g. chain-table.tsx):
+/** The hidden probe a diagram carries in a fixed-size sibling SVG. It
+ *  inherits the same reading font (including subtree --font-prose overrides)
+ *  without inheriting the diagram's changing viewBox scale:
  *  - sentinel: fixed text the ResizeObserver watches;
  *  - measurer: SVG <text> whose width answers `width(line)`;
  *  - breaker: HTML block where the browser's own line breaker lays out each
  *    title, answering `lines(title)`. */
-export interface PlanProbe {
+interface PlanProbe {
 	sentinel: RefObject<SVGTextElement | null>;
 	measurer: RefObject<SVGTextElement | null>;
 	breaker: RefObject<HTMLDivElement | null>;
+}
+
+/** Keep this outside the drawing's viewBox and any pan/zoom transform.
+ * It shares the reading-font cascade and display:none ancestors. */
+export function PlanLayoutProbe({ probe }: { probe: PlanProbe }) {
+	return (
+		<svg aria-hidden="true" visibility="hidden" data-plan-probe="" width={1} height={1}
+			className="pointer-events-none absolute top-0 left-0 overflow-hidden"
+			style={{ fontFamily: "var(--font-prose)" }}
+		>
+			<text ref={probe.sentinel} className={PROBE_TYPE}>{SENTINEL_TEXT}</text>
+			<text ref={probe.measurer} className={PROBE_TYPE} />
+			<foreignObject width={1} height={1} overflow="visible">
+				<div
+					ref={probe.breaker}
+					className={PROBE_TYPE}
+					style={{ width: "max-content", whiteSpace: "normal", overflowWrap: "normal", wordBreak: "normal", hyphens: "none" }}
+				/>
+			</foreignObject>
+		</svg>
+	);
 }
 
 const graphemes = new Intl.Segmenter(undefined, { granularity: "grapheme" });
@@ -158,9 +179,10 @@ const NO_EDGES: ReadonlyArray<{ from: string; to: string }> = [];
  *   directly: a font can change a title without changing the sentinel.
  *   The scheduled frame reads AFTER the Appearance provider's layout
  *   effect applies the font variables (its effect runs after ours).
- * - A ResizeObserver still covers size/visibility changes under the
- *   diagram's own cascade. The sentinel is never rewritten, so measuring
- *   can't retrigger it.
+ * - A ResizeObserver covers changes to the sentinel's actual font metrics
+ *   and hidden-to-visible transitions. The sentinel is never rewritten and
+ *   its SVG is not scaled by the diagram's viewBox, so measuring and width
+ *   drags don't retrigger it.
  *
  * Does NOT measure while the diagram has no layout box (an ancestor with
  * display:none reads 0 widths); the chart layout stays until it shows.
@@ -281,10 +303,9 @@ const MONO_TEXT = `fill-foreground ${LABEL_TYPE}`;
  *  var(--font-prose): node titles render in the READING font, not the mono
  *  UI font (owner, 2026-09-26) — and the runtime var rides the Appearance
  *  reading-font override (the utility can't: @theme inline bakes literals —
- *  the --font-title trap). It also carries the plan's hidden probe, so the
- *  probe measures under this exact cascade. */
+ *  the --font-title trap). Its hidden sibling probe uses the same token. */
 export function PlanDiagram({
-	plan,
+	layout,
 	nodes,
 	edges,
 	statusOf,
@@ -298,7 +319,7 @@ export function PlanDiagram({
 	fill,
 }: {
 	/** usePlanLayout's result for these same nodes + edges. */
-	plan: { layout: PlanLayout; probe: PlanProbe };
+	layout: PlanLayout;
 	nodes: readonly LayoutNode[];
 	edges: ReadonlyArray<{ from: string; to: string }>;
 	statusOf: (id: string) => PlanNodeStatus;
@@ -326,7 +347,6 @@ export function PlanDiagram({
 	 *  flank's width and the band's height rather than run width-first. */
 	fill?: boolean;
 }) {
-	const { layout, probe } = plan;
 	// Pad only the full-extent render — the plan window's override viewBox is
 	// a deliberate viewport crop, and the popup keeps its own fit margins.
 	const pad = viewBoxOverride ? 0 : (padUnits ?? 0);
@@ -479,22 +499,6 @@ export function PlanDiagram({
 					</g>
 				);
 			})}
-			{/* The probe (usePlanLayout): a fixed-text sentinel the resize
-			    observer watches, the measurer whose text gets swapped per
-			    line, and the HTML breaker where the browser breaks each
-			    title into lines (words never split: no overflow-wrap, no
-			    hyphens). Hidden, but laid out under this svg's own cascade. */}
-			<g aria-hidden="true" visibility="hidden" data-plan-probe="">
-				<text ref={probe.sentinel} className={PROBE_TYPE}>{SENTINEL_TEXT}</text>
-				<text ref={probe.measurer} className={PROBE_TYPE} />
-				<foreignObject width={1} height={1} overflow="visible">
-					<div
-						ref={probe.breaker}
-						className={PROBE_TYPE}
-						style={{ width: "max-content", whiteSpace: "normal", overflowWrap: "normal", wordBreak: "normal", hyphens: "none" }}
-					/>
-				</foreignObject>
-			</g>
 		</svg>
 	);
 }
@@ -527,7 +531,7 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 		    cap keeps node text at or below chat prose size while still filling
 		    the column when it can (owner, plan-graph refinement round 1). */}
 		<PlanDiagram
-			plan={plan}
+			layout={plan.layout}
 			nodes={data.nodes}
 			edges={data.edges}
 			statusOf={statusOf}
@@ -536,6 +540,7 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 			textCap={appearance.proseFontSize}
 			monochrome
 		/>
+		<PlanLayoutProbe probe={plan.probe} />
 		</button>
 </Hint>
 	);
@@ -766,7 +771,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 							}}
 						>
 							<PlanDiagram
-								plan={plan}
+								layout={plan.layout}
 								nodes={tree.nodes}
 								edges={tree.edges}
 								statusOf={statusOf}
@@ -776,6 +781,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 								naturalSize
 							/>
 						</div>
+						<PlanLayoutProbe probe={plan.probe} />
 						<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-2">
 							<span className="text-xs text-muted-foreground/60">Drag to pan · scroll to zoom</span>
 							<div className="flex gap-1">

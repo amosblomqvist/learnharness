@@ -271,9 +271,15 @@ describe("plan block render", () => {
 		assert.ok(!/x="12"/.test(html), "no left-inset text");
 		// Each line centers on its own row — no font-specific baseline offset (#671).
 		assert.match(html, /<text[^>]*dominant-baseline="central"/);
-		// The measuring probe rides inside the diagram's own svg (same
-		// cascade as the labels), hidden, at the heaviest label weight.
-		assert.match(html, /<g aria-hidden="true" visibility="hidden" data-plan-probe=""><text class="text-xs font-medium">Hamburgefonstiv/);
+		// The probe is a hidden, out-of-flow sibling in the same font
+		// cascade. Its fixed viewport must not inherit the chart's scale.
+		const probe = html.match(/<\/svg><svg ([^>]*data-plan-probe=""[^>]*)><text class="text-xs font-medium">Hamburgefonstiv/);
+		assert.ok(probe, "the measuring probe follows the visible SVG as a sibling");
+		assert.match(probe[1]!, /aria-hidden="true" visibility="hidden"/);
+		assert.match(probe[1]!, /width="1" height="1"/);
+		assert.match(probe[1]!, /\babsolute\b/);
+		assert.match(probe[1]!, /font-family:var\(--font-prose\)/);
+		assert.doesNotMatch(probe[1]!, /viewBox=/);
 		// …plus the HTML block where the browser breaks lines: never inside a
 		// word, never hyphenated.
 		assert.match(html, /<foreignObject[^>]*><div class="text-xs font-medium" style="width:max-content;white-space:normal;overflow-wrap:normal;word-break:normal;hyphens:none"><\/div><\/foreignObject>/);
@@ -332,6 +338,7 @@ describe("plan popup (live derivation)", () => {
 	it("derives statuses at click time: latest tagged call → current, earlier → visited (glowing)", () => {
 		const html = renderToStaticMarkup(<PlanPopup messages={messages()} onClose={() => {}} />);
 		assert.match(html, /data-testid="plan-popup"/);
+		assert.match(html, /<\/svg><\/div><svg [^>]*data-plan-probe=""/, "the probe sits outside the popup's pan/zoom transform");
 		assert.match(html, /data-testid="plan-node-a" data-status="visited"/);
 		assert.match(html, /data-testid="plan-node-b" data-status="current"/);
 		assert.match(html, /data-testid="plan-node-c" data-status="upcoming"/);
