@@ -1,6 +1,6 @@
 # LearnHarness (reeschan fork)
 
-Terms for the parts this fork adds on top of upstream LearnHarness: model access through external CLIs, explainer pages, and fork releases.
+Terms for the parts this fork adds on top of upstream LearnHarness: model access through external CLIs, explainer pages, sending propositions to shared memory, and fork releases.
 
 ## Model access
 
@@ -37,6 +37,16 @@ _Avoid_: simulation, widget
 **Explainer**:
 A figure-led, self-contained HTML page a sub-agent writes with the visual-explainer kit, shown in the lesson and downloadable.
 _Avoid_: visual explainer page, report, recap page
+
+## Shared memory
+
+**Shared memory**:
+A memory store outside LearnHarness that several coding agents share. The learner chooses which propositions from the knowledge graph to send there.
+_Avoid_: external memory, memory sync
+
+**Sent record**:
+The note of which proposition was sent to shared memory, with what content, and which memory it became. It shows whether a proposition is unsent, changed since sending, or gone from the graph.
+_Avoid_: ledger, sync state
 
 ## Distribution
 
