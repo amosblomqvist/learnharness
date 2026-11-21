@@ -152,17 +152,20 @@ it("waits for paint and first focus within the startup window without focusing t
 	assert.deepEqual((await result as { message: unknown }).message, newest);
 });
 
-it("has a separate publication-only, tag-only notifier", () => {
+it("has exactly one publication-only, tag-only website notifier", () => {
 	const { load } = require("js-yaml");
 	const file = (name: string) => readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8");
-	const { on, permissions, jobs } = load(file("notify-website-announcement"));
+	const { on, permissions, jobs } = load(file("notify-website"));
 	assert.deepEqual(on, { release: { types: ["published"] } });
 	assert.deepEqual(permissions, {});
-	const job = jobs["notify-website-announcement"];
+	assert.deepEqual(Object.keys(jobs), ["notify-website"]);
+	assert.throws(() => file("notify-website-announcement"), { code: "ENOENT" });
+	const job = jobs["notify-website"];
 	assert.match(job.if, /github\.repository == 'amosblomqvist\/learnharness'/);
 	assert.match(job.if, /!github\.event\.release\.draft && !github\.event\.release\.prerelease/);
 	assert.equal(job.steps.length, 1);
 	assert.deepEqual(job.steps[0].env, { WEBSITE_DISPATCH_TOKEN: "${{ secrets.WEBSITE_DISPATCH_TOKEN }}", RELEASE_TAG: "${{ github.event.release.tag_name }}" });
-	assert.match(job.steps[0].run, /event_type:"desktop-announcement-published",client_payload:\{tag:\$tag\}/);
-	assert.match(file("notify-website"), /event_type:"desktop-release-published",client_payload:\{tag:\$tag\}/);
+	assert.match(job.steps[0].run, /event_type:"desktop-release-published",client_payload:\{tag:\$tag\}/);
+	assert.equal([...job.steps[0].run.matchAll(/--request POST\b/g)].length, 1);
+	assert.match(job.steps[0].run, /https:\/\/api\.github\.com\/repos\/amosblomqvist\/learnharness-web\/dispatches/);
 });
