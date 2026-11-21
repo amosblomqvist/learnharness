@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* The bare .container utility is unused. Its viewport breakpoints still
+   trigger document-wide style/layout work on long transcripts. */
+@source not inline("container");
 
 @custom-variant dark (&:is(.dark *));
 
