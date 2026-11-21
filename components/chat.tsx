@@ -313,7 +313,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, readStats, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const controller = useOptionalInteractionLayers();
@@ -1296,18 +1296,25 @@ export function Chat({
 	// guess so the static paint has a sane tail. The first layout effect
 	// replaces it with the measured truth before paint.
 	const [dockReserve, setDockReserve] = useState(208);
+	const statsRequest = useRef<AbortController | null>(null);
 	const syncTurns = useCallback(async () => {
+		statsRequest.current?.abort();
+		const request = new AbortController();
+		statsRequest.current = request;
 		try {
-			const record = await readRecord({ adoption: "none" });
-			if (!record) return;
-			if (Array.isArray(record.turns)) setTurns(record.turns);
-			setPricing(record.pricing);
+			const stats = await readStats(request.signal);
+			if (!stats || request.signal.aborted) return;
+			if (Array.isArray(stats.turns)) setTurns(stats.turns);
+			setPricing(stats.pricing);
 		} catch {
 			// transient blip: stats stay on the last known figures
+		} finally {
+			if (statsRequest.current === request) statsRequest.current = null;
 		}
-	}, [readRecord]);
+	}, [readStats]);
 	useEffect(() => {
 		void syncTurns();
+		return () => statsRequest.current?.abort();
 	}, [syncTurns]);
 	// After the learner's own turn ends the log has a fresh entry — and the
 	// Post-turn settle (the SLIMMED watch — push-architecture S3,
