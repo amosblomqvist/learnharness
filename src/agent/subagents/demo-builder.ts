@@ -5,6 +5,8 @@ import { serverExecute } from "../tool-execute.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
 import type { DemoResult } from "../../core/contracts.ts";
+import { artifactThemeCss, injectArtifactTheme, isThemedDemo } from "../../core/artifact-theme.ts";
+import { DEFAULT_THEME } from "../../core/themes.ts";
 import { getHeadless, type DemoRunResult, type HeadlessApi } from "./headless.ts";
 import { healToolRecord } from "../tools/heal.ts";
 
@@ -61,7 +63,22 @@ Build quality:
 - The demo must directly serve the brief: every control named in the brief must exist and do the thing.
 - Controls need labels; sliders/inputs need current-value readouts. A learner should operate it unguided.
 - Smooth enough interaction; requestAnimationFrame for animation, not setInterval when it matters.
-- Dark-mode neutral: pick a clean light background for the demo area so it reads on any card.
+
+Theme (the demo sits inside a card in the learner's chosen app theme, which may be dark or light):
+- Put <meta name="lh-theme" content="app"> in <head>. The app then injects its theme as CSS variables on
+  :root and leaves the page transparent, so the demo shows on the card's own background.
+- Variables: --lh-text, --lh-muted (secondary text, gridlines), --lh-border, --lh-surface (the card color
+  behind the page), --lh-raised (panels, inputs, buttons), --lh-accent, --lh-chart-1 … --lh-chart-6
+  (distinct series colors; chart-1 for the main mark), --lh-success, --lh-error, --lh-warning, --lh-font,
+  --lh-mono, --lh-radius.
+- Never set a background on html or body, never wrap the demo in an outer card or border, and never
+  define --lh-* yourself. Color everything through the variables.
+- Give every var() a fallback for a plain white page, which is how a downloaded copy renders:
+  color: var(--lh-text, #1f2328).
+- Canvas cannot use CSS variables. Read them in a helper, e.g.
+  const css = (n, f) => getComputedStyle(document.documentElement).getPropertyValue(n).trim() || f;
+  call it on every draw, and redraw on window "lh-theme-change" (fired when the learner switches themes;
+  the page is not reloaded, so keep state).
 
 THE HOUSE RULE — never deliver untested:
 1. Call write_demo with the complete HTML document.
@@ -74,6 +91,12 @@ THE HOUSE RULE — never deliver untested:
    its controls, what to try) — NEVER the HTML itself.
 
 Never claim success you did not see: a PASSED run_demo is the only definition of done.`;
+
+/** Test what the learner gets: a themed demo runs with the default theme
+ *  injected, so its --lh-* variables resolve. Exported for tests. */
+export function asLearnerSees(html: string): string {
+	return isThemedDemo(html) ? injectArtifactTheme(html, artifactThemeCss(DEFAULT_THEME.colors, DEFAULT_THEME.mode)) : html;
+}
 
 interface BuilderState {
 	html: string | null;
@@ -129,7 +152,7 @@ export function createDemoBuilderTools(
 				if (reason) return `HEADLESS UNAVAILABLE: ${reason}`;
 				let result: DemoRunResult;
 				try {
-					result = await headless.runDemo(state.html, probe ? { probe } : undefined);
+					result = await headless.runDemo(asLearnerSees(state.html), probe ? { probe } : undefined);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
 					onActivity?.("run_demo: browser error");
@@ -237,7 +260,7 @@ export async function runDemoBuilder(input: DemoBuilderInput, opts: DemoBuilderO
 		opts.onActivity?.("final verification");
 		let verify: DemoRunResult;
 		try {
-			verify = await headless.runDemo(state.html);
+			verify = await headless.runDemo(asLearnerSees(state.html));
 		} catch (err) {
 			const msg = err instanceof Error ? err.message : String(err);
 			return { title, html: "", tested: true, notes: `FAILED: final verification crashed — ${msg}` };
