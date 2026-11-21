@@ -4,7 +4,7 @@ import { serverExecute } from "../tool-execute.ts";
 import { safeFetch } from "./safe-fetch.ts";
 // The search-hit shape lives in the core port since the search wave
 // (2026-09-20); this alias keeps callers churn-free.
-import type { SearchHit as WebSearchResult, SearchProvider } from "../../core/search.ts";
+import type { SearchContext, SearchHit as WebSearchResult, SearchProvider } from "../../core/search.ts";
 export type { WebSearchResult };
 import { Readability } from "@mozilla/readability";
 import { parseHTML } from "linkedom";
@@ -135,7 +135,7 @@ const webFetchInput = Type.Object({
 	url: Type.String({ description: "The URL to fetch" }),
 });
 
-export function createWebTools(search: () => SearchProvider | null): Record<string, AgentTool<any>> {
+export function createWebTools(search: () => SearchProvider | null, job?: Pick<SearchContext, "model" | "onUsage">): Record<string, AgentTool<any>> {
 	return {
 		web_search: {
 			name: "web_search",
@@ -143,20 +143,21 @@ export function createWebTools(search: () => SearchProvider | null): Record<stri
 			description: "Search the web. One search per call — use one call per search angle. " +
 				"Returns an array of results with title, url, and snippet.",
 			parameters: webSearchInput,
-			execute: serverExecute("web_search", webSearchInput, async ({ query, count }): Promise<WebSearchResult[] | string> => {
+			execute: serverExecute("web_search", webSearchInput, async ({ query, count }, { signal }): Promise<WebSearchResult[] | string> => {
 				const provider = search();
 				if (!provider) {
 					return (
 						"web_search is not available: no search engine is configured. " +
-						"Set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key in settings. Report in your brief that web search is unavailable."
+						"Set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key in settings, or choose OpenAI web search there when the researcher's model uses an OpenAI API key or a ChatGPT connection. " +
+						"Report in your brief that web search is unavailable."
 					);
 				}
 				try {
-					return await provider.search(query, count ?? 5);
+					return await provider.search(query, count ?? 5, { ...job, signal });
 				} catch (err) {
 					return `web_search failed: ${err instanceof Error ? err.message : String(err)}`;
 				}
-			}),
+			}, () => search()?.timeoutMs),
 		},
 
 		web_fetch: {

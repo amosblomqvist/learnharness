@@ -92,7 +92,7 @@ export interface ResearcherRunOptions {
  * the loop scripted.
  */
 export async function runResearcherAgent(prompt: string, opts: ResearcherRunOptions = {}): Promise<string> {
-	const tools = Object.values(createWebTools(opts.search ?? (() => null)));
+	const tools = Object.values(createWebTools(opts.search ?? (() => null), { model: opts.engine?.model, onUsage: opts.onUsage }));
 	if (opts.pdfDir) tools.push(...Object.values(createPdfReadTools(opts.pdfDir)));
 	const { text } = await runSubagent(tools, {
 		role: "researcher",

@@ -5,6 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { toolTimeoutMs } from "../src/agent/tool-execute.ts";
 import { createWebTools } from "../src/agent/tools/web.ts";
 import { safeFetchOverride } from "../src/agent/tools/safe-fetch.ts";
 import { jobTools } from "../src/agent/tools/jobs.ts";
@@ -29,7 +30,8 @@ describe("web_search on the injected port (web.ts)", () => {
 		assert.ok(web_search, "web_search is still exposed without a provider");
 		const out = await web_search!.execute!("c1", { query: "anything" });
 		const missing = "web_search is not available: no search engine is configured. " +
-			"Set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key in settings. Report in your brief that web search is unavailable.";
+			"Set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key in settings, or choose OpenAI web search there when the researcher's model uses an OpenAI API key or a ChatGPT connection. " +
+			"Report in your brief that web search is unavailable.";
 		assert.equal(out.details, missing);
 		assert.deepEqual(out.content, [{ type: "text", text: missing }]);
 		assert.notEqual(out.isError, true, "missing keys remain ordinary recoverable text, not a native error");
@@ -48,6 +50,38 @@ describe("web_search on the injected port (web.ts)", () => {
 		const out = await web_search!.execute!("c1", { query: "sigma.js latest version" });
 		assert.deepEqual(seen, [{ query: "sigma.js latest version", count: 5 }]);
 		assert.deepEqual(out.details, [{ title: "sigma.js", url: "https://www.sigmajs.org/", snippet: "v3 released" }]);
+	});
+
+	it("lends the provider the call's abort signal and the job's model and usage recorder", async () => {
+		const job = { model: { provider: "chatgpt", id: "scratch-model" }, onUsage: () => {} };
+		const run = new AbortController();
+		const seen: unknown[] = [];
+		const provider: SearchProvider = {
+			id: "openai",
+			async search(_query, _count, context) {
+				seen.push(context?.model, context?.onUsage, context?.signal?.aborted);
+				run.abort();
+				seen.push(context?.signal?.aborted);
+				return [];
+			},
+		};
+		await createWebTools(() => provider, job).web_search!.execute!("c1", { query: "q" }, run.signal).catch(() => {});
+		assert.deepEqual(seen, [job.model, job.onUsage, false, true], "aborting the run reaches a search in flight");
+	});
+
+	it("an engine that asks for longer outlives the shared tool limit; others are still cut off", async () => {
+		const slow = (timeoutMs?: number): SearchProvider => ({
+			id: "openai",
+			timeoutMs,
+			search: () => new Promise((resolve) => setTimeout(() => resolve([{ title: "t", url: "https://example.invalid/", snippet: "" }]), 400)), // past the limit and its 250ms grace
+		});
+		const shared = toolTimeoutMs.current;
+		toolTimeoutMs.current = 20;
+		try {
+			const out = await createWebTools(() => slow(2_000)).web_search!.execute!("c1", { query: "q" });
+			assert.match(JSON.stringify(out.details), /example\.invalid/);
+			await assert.rejects(createWebTools(() => slow()).web_search!.execute!("c2", { query: "q" }), /timed out after 20ms/);
+		} finally { toolTimeoutMs.current = shared; }
 	});
 
 	it("provider errors surface as error strings, never thrown", async () => {
@@ -105,6 +139,36 @@ describe("web_search on the injected port (web.ts)", () => {
 		} finally {
 			safeFetchOverride.current = undefined;
 		}
+	});
+});
+
+describe("researcher loop on a search engine that runs through its model", () => {
+	it("hands each search the loop's own model and folds the search's usage into the job's recorder", async () => {
+		const faux = createFauxCore({});
+		faux.setResponses([
+			fauxAssistantMessage([fauxToolCall("web_search", { query: "q" }, { id: "search1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("## Summary\nDone.")]),
+		]);
+		const model = faux.getModel();
+		const spent = { ...fauxAssistantMessage([]).usage, input: 4242 };
+		const models: unknown[] = [];
+		const provider: SearchProvider = {
+			id: "openai",
+			async search(_query, _count, context) {
+				models.push(context?.model);
+				context?.onUsage?.(spent);
+				return [];
+			},
+		};
+		const recorded: number[] = [];
+		await runResearcherAgent("question", {
+			engine: { model, streamFn: faux.streamSimple },
+			search: () => provider,
+			onUsage: (usage) => recorded.push(usage.input),
+		});
+		assert.deepEqual(models, [model]);
+		assert.ok(recorded.includes(4242), "the search call is recorded beside the loop's own steps");
+		assert.equal(recorded.length, 3, "two loop steps and one search");
 	});
 });
 
