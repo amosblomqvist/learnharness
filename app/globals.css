@@ -476,6 +476,13 @@ body {
 	height: auto !important;
 }
 
+/* Keep glyph advances (including fallback emoji) consistent between the
+   scaled plan and its unscaled label probe. Leave the HTML line breaker
+   and other SVGs alone. */
+:is(svg[aria-label="Plan diagram"], svg[data-plan-probe]) text {
+	text-rendering: geometricPrecision;
+}
+
 /* ============================================================
  * Session status — the braille spinner (the one working indicator)
  * ============================================================ */

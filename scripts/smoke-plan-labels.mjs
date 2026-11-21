@@ -71,8 +71,8 @@ const FONTS = [
 ];
 // Label sizes. text-xs is 11px and the build bakes it into the CSS (setting
 // --text-xs at runtime changes nothing), so other sizes come from one injected
-// rule on the plan's .text-xs — the hidden measuring probe carries that class
-// too. check() asserts the size really applied.
+// rule on .text-xs in both the drawing and its hidden measuring SVG.
+// check() asserts the size really applied.
 const SIZES = [null, "7px", "16px", "24px"];
 
 const results = [];
@@ -242,7 +242,13 @@ async function setFont(page, stack, size) {
 				rule.id = "smoke-label-size";
 				document.head.appendChild(rule);
 			}
-			rule.textContent = z ? `svg[aria-label="Plan diagram"] .text-xs { font-size: ${z} !important; }` : "";
+			// The matrix reads every plan block, including offscreen ones. Lay out
+			// just those older rows while forcing sizes so their probes observe
+			// the new metrics before we compare the labels with their boxes.
+			rule.textContent = z ? `
+				[data-older-transcript-row]:has([data-testid="plan-block-full"]) { content-visibility: visible; }
+				:is(svg[aria-label="Plan diagram"], svg[data-plan-probe]) .text-xs { font-size: ${z} !important; }
+			` : "";
 		},
 		stack,
 		size,
@@ -263,7 +269,7 @@ async function pickReadingFont(page, family) {
 	await page.keyboard.press("Enter");
 	await saved;
 	await page.keyboard.press("Escape");
-	await page.waitForFunction((f) => getComputedStyle(document.querySelector("[data-testid=plan-block-full] svg")).fontFamily.includes(f), {}, family);
+	await page.waitForFunction((f) => getComputedStyle(document.querySelector('[data-testid=plan-block-full] svg[aria-label="Plan diagram"]')).fontFamily.includes(f), {}, family);
 	await page.evaluate(() => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r))));
 }
 
@@ -304,8 +310,9 @@ async function installRegressionFonts(page) {
 }
 
 async function planSnapshot(page) {
-	return page.$eval("[data-testid=plan-block-full] svg", (svg) => {
-		const sample = svg.querySelector("[data-plan-probe] text").getBBox();
+	return page.$eval("[data-testid=plan-block-full]", (block) => {
+		const svg = block.querySelector(':scope > svg[aria-label="Plan diagram"]');
+		const sample = block.querySelector(":scope > svg[data-plan-probe] > text:first-of-type").getBBox();
 		return {
 			sentinel: [sample.width, sample.height],
 			font: getComputedStyle(svg).fontFamily,
@@ -395,7 +402,7 @@ async function shoot(page, selector, file) {
  *  own fetch), and box widths hold still for three polls in a row. */
 async function openChat(page, origin, id, font) {
 	await page.goto(`${origin}/chat/${id}`, { waitUntil: "load", timeout: 120_000 });
-	await page.waitForSelector("[data-testid=plan-block-full] svg", { timeout: 60_000 });
+	await page.waitForSelector('[data-testid=plan-block-full] svg[aria-label="Plan diagram"]', { timeout: 60_000 });
 	await page.waitForFunction(
 		(fontPattern) => {
 			const svg = document.querySelector("[data-testid=plan-block-full] svg[aria-label='Plan diagram']");
