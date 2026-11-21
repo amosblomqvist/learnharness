@@ -341,7 +341,7 @@ it("plugin asynchronous callbacks retain pending text and reconcile the latest s
 	assert.equal(input.value, "normalized"); assert.equal(input.disabled, false);
 }));
 
-it("a late older Settings record cannot roll back a newer acknowledged field", async () => fixture(async f => {
+it("an earlier Settings acknowledgement leaves a newer draft intact", async () => fixture(async f => {
 	const first = deferred<Response>(), second = deferred<Response>();
 	let writes = 0;
 	f.setFetch(async (_url, init) => {
@@ -351,15 +351,17 @@ it("a late older Settings record cannot roll back a newer acknowledged field", a
 	await f.render(<SettingsDialogBody initialSection="appearance" onClose={() => {}} />);
 	const input = f.input('[data-testid="input-prose-size"]');
 	await f.type(input, "16"); await f.key(input, "Escape");
+	assert.equal(writes, 1);
 	await f.type(input, "20"); await f.key(input, "Escape");
+	assert.equal(writes, 1, "second write waits in FIFO behind the in-flight write");
+	await act(async () => first.resolve(Response.json({ settings: { version: 1, appearance: { proseFontSize: 16 } } })));
+	assert.equal(input.value, "20", "older acknowledged controlled props must not replace a dirty newer draft");
 	assert.equal(writes, 2);
 	await act(async () => second.resolve(Response.json({ settings: { version: 1, appearance: { proseFontSize: 20 } } })));
 	assert.equal(input.value, "20");
-	await act(async () => first.resolve(Response.json({ settings: { version: 1, appearance: { proseFontSize: 16 } } })));
-	assert.equal(input.value, "20", "older acknowledged controlled props must not replace a clean newer field");
 }));
 
-it("an older Settings failure cannot add a stale error after a newer accepted save", async () => fixture(async f => {
+it("a successful retry of the same Settings field clears an earlier error", async () => fixture(async f => {
 	const first = deferred<Response>(), second = deferred<Response>();
 	let writes = 0;
 	f.setFetch(async (_url, init) => {
@@ -369,9 +371,12 @@ it("an older Settings failure cannot add a stale error after a newer accepted sa
 	await f.render(<SettingsDialogBody initialSection="appearance" onClose={() => {}} />);
 	const input = f.input('[data-testid="input-prose-size"]');
 	await f.type(input, "16"); await f.key(input, "Escape");
+	assert.equal(writes, 1);
 	await f.type(input, "20"); await f.key(input, "Escape");
-	await act(async () => second.resolve(Response.json({ settings: { version: 1, appearance: { proseFontSize: 20 } } })));
+	assert.equal(writes, 1);
 	await act(async () => first.resolve(Response.json({ error: "Old save failed" }, { status: 400 })));
+	assert.equal(writes, 2);
+	await act(async () => second.resolve(Response.json({ settings: { version: 1, appearance: { proseFontSize: 20 } } })));
 	assert.equal(input.value, "20");
 	assert.equal(document.querySelector('[data-testid="settings-error"]'), null);
 }));
@@ -392,13 +397,17 @@ it("Settings ACK authority survives close/reopen and protects the live appearanc
 	await act(async () => settings.open("appearance"));
 	let input = f.input('[data-testid="input-prose-size"]');
 	await f.type(input, "16"); await f.key(input, "Escape");
+	assert.equal(writes, 1);
 	await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="settings-close"]')!.click());
 	await act(async () => settings.open("appearance"));
 	input = f.input('[data-testid="input-prose-size"]'); assert.equal(input.value, "16");
 	await f.type(input, "20"); await f.key(input, "Escape");
-	await act(async () => second.resolve(Response.json({ settings: stored })));
-	assert.equal(input.value, "20"); assert.equal(liveSize, 20);
+	assert.equal(writes, 1, "reopened edit waits in the persistent provider FIFO");
 	await act(async () => first.resolve(Response.json({ settings: { version: 1, appearance: { proseFontSize: 16 } } })));
+	assert.equal(liveSize, 16);
+	assert.equal(input.value, "20");
+	assert.equal(writes, 2);
+	await act(async () => second.resolve(Response.json({ settings: stored })));
 	assert.equal(input.value, "20"); assert.equal(liveSize, 20);
 }));
 
@@ -407,6 +416,7 @@ it("a newer nonappearance acknowledgement applies its full canonical live appear
 	const { AppearanceProvider, useAppearance } = await import("../components/settings/appearance.tsx");
 	const appearanceSave = deferred<Response>(), generalSave = deferred<Response>();
 	let settings!: ReturnType<typeof useSettingsDialog>, liveSize = 0;
+	const putSections: string[] = [];
 	let stored: UserSettings = { version: 1, appearance: { proseFontSize: 12 } };
 	Object.defineProperty(window, "lh", { configurable: true, value: {
 		getUpdateState: async () => ({ status: "idle", version: null, revision: 1 }), onUpdateStatus: () => () => {},
@@ -414,6 +424,7 @@ it("a newer nonappearance acknowledgement applies its full canonical live appear
 	f.setFetch(async (url, init) => {
 		if (init?.method !== "PUT") return Response.json({ settings: stored });
 		const section = String(url).split("/").at(-1)!;
+		putSections.push(section);
 		stored = { ...stored, [section]: JSON.parse(String(init.body)) };
 		return section === "appearance" ? appearanceSave.promise : generalSave.promise;
 	});
@@ -422,14 +433,18 @@ it("a newer nonappearance acknowledgement applies its full canonical live appear
 	await act(async () => settings.open("appearance"));
 	const input = f.input('[data-testid="input-prose-size"]');
 	await f.type(input, "16"); await f.key(input, "Escape");
+	assert.deepEqual(putSections, ["appearance"]);
 	await act(async () => settings.open("general"));
 	await act(async () => document.querySelector<HTMLButtonElement>('[data-testid="toggle-auto-update"]')!.click());
-	await act(async () => generalSave.resolve(Response.json({ settings: stored })));
-	assert.equal(liveSize, 16, "the authoritative full snapshot includes the earlier saved appearance");
+	assert.deepEqual(putSections, ["appearance"], "general save queues behind appearance in FIFO");
 	await act(async () => appearanceSave.resolve(Response.json({ settings: { version: 1, appearance: { proseFontSize: 16 } } })));
-	await act(async () => settings.open("appearance"));
-	assert.equal(f.input('[data-testid="input-prose-size"]').value, "16");
+	assert.deepEqual(putSections, ["appearance", "general"]);
 	assert.equal(liveSize, 16);
+	await act(async () => generalSave.resolve(Response.json({ settings: { ...stored, appearance: { proseFontSize: 18 } } })));
+	assert.equal(liveSize, 18, "the authoritative full snapshot from a non-appearance ACK applies live appearance");
+	await act(async () => settings.open("appearance"));
+	assert.equal(f.input('[data-testid="input-prose-size"]').value, "18");
+	assert.equal(liveSize, 18);
 }));
 
 for (const arrival of ["before", "after", "failure-after"] as const) {
@@ -486,3 +501,82 @@ it("server appearance refresh cannot undo a newer canonical live save", async ()
 	await f.render(<AppearanceProvider initialAppearance={{ proseFontSize: 12 }} initialTheme={DEFAULT_THEME}><SettingsDialogProvider><Probe /></SettingsDialogProvider></AppearanceProvider>);
 	assert.equal(input.value, "20"); assert.equal(liveSize, 20);
 }));
+
+for (const outcome of ["acknowledged", "lost response", "validation error", "refresh unavailable"] as const) {
+	it(`overlapping Agent saves preserve the confirmed quiz mode (${outcome})`, async () => fixture(async f => {
+		const first = deferred<Response>();
+		const writes: AgentSettings[] = [];
+		let settings: UserSettings = { version: 1, agent: { tools: { explain: true, research: true } } };
+		let reads = 0;
+		f.setFetch(async (url, init) => {
+			switch (String(url)) {
+				case "/api/settings":
+					reads++;
+					if (outcome === "refresh unavailable" && reads === 2) {
+						return Response.json({ error: "Unavailable" }, { status: 503 });
+					}
+					return Response.json({ settings });
+				case "/api/settings/agent": {
+					const agent = JSON.parse(String(init?.body)) as AgentSettings;
+					writes.push(agent);
+					if (writes.length !== 1 || outcome !== "validation error") settings = { ...settings, agent };
+					return writes.length === 1 ? first.promise : Response.json({ settings });
+				}
+				case "/api/settings/prompts":
+					return Response.json({ prober: [], teacher: [], practice: [] });
+				case "/api/models":
+					return Response.json({ models: [], slots: {}, providers: [] });
+				case "/api/search":
+					return Response.json({ available: false });
+				case "/api/keys":
+					return Response.json({ keys: [] });
+				default:
+					assert.fail(`unexpected fetch: ${url}`);
+			}
+		});
+		const render = () => f.render(<SettingsDialogBody initialSection="agent" onClose={() => {}} />);
+		const button = (id: string) => {
+			const control = document.querySelector<HTMLButtonElement>(`[data-testid="${id}"]`);
+			assert.ok(control, id);
+			return control;
+		};
+		const click = (id: string) => act(async () => button(id).click());
+
+		await render();
+		assert.equal(button("quiz-mechanics-free").getAttribute("aria-checked"), "true");
+		await click("quiz-mechanics-choice");
+		await click("toggle-tool-research");
+		const writesBeforeAck = writes.length;
+		await act(async () => {
+			if (outcome === "validation error") {
+				first.resolve(Response.json({ error: "Quiz save rejected" }, { status: 400 }));
+			} else if (outcome === "acknowledged") {
+				first.resolve(Response.json({ settings }));
+			} else {
+				first.reject(new Error("Connection dropped"));
+			}
+		});
+
+		if (outcome === "refresh unavailable") {
+			assert.equal(writes.length, 1, "no PUT may use stale settings after a failed refresh");
+			assert.match(document.querySelector('[data-testid="settings-error"]')?.textContent ?? "", /Could not confirm saved settings/);
+			await click("toggle-tool-research");
+		}
+
+		const explain = outcome === "validation error";
+		assert.deepEqual(writes, [
+			{ tools: { explain: false, research: true } },
+			{ tools: { explain, research: false } },
+		], "the second edit preserves the quiz mode actually saved by the first request");
+		assert.equal(writesBeforeAck, 1);
+		assert.equal(reads, outcome === "refresh unavailable" ? 3 : outcome === "lost response" ? 2 : 1);
+		if (outcome === "validation error") {
+			assert.match(document.querySelector('[data-testid="settings-error"]')?.textContent ?? "", /Quiz save rejected/);
+		}
+
+		await f.render(null);
+		await render();
+		assert.equal(button(explain ? "quiz-mechanics-free" : "quiz-mechanics-choice").getAttribute("aria-checked"), "true");
+		assert.equal(button("toggle-tool-research").getAttribute("aria-checked"), "false");
+	}));
+}
