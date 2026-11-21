@@ -400,18 +400,24 @@ function OpenSetupDialog({ onClose, onDone }: SetupDialogProps) {
 				...(level ? { thinkingLevel: level } : {}),
 			};
 		}
-		const res = await fetch("/api/settings/models", {
-			method: "PUT",
-			headers: { "content-type": "application/json" },
-			body: JSON.stringify(models),
-		}).catch(() => null);
-		if (!res || !res.ok) {
+		try {
+			const res = await fetch("/api/settings/models", {
+				method: "PUT",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(models),
+			});
+			if (!res.ok) {
+				const body = (await res.json().catch(() => ({}))) as { error?: string };
+				setError(`Save failed: ${body.error ?? res.status}`);
+				return;
+			}
+			notifySettingsSaved("models");
+			onDone(models);
+		} catch {
+			setError("Save failed. Check your connection and try again.");
+		} finally {
 			setSaving(false);
-			setError(res ? `Save failed: ${(await res.json().catch(() => ({}))).error ?? res.status}` : "Save failed. Check your connection and try again.");
-			return;
 		}
-		notifySettingsSaved("models");
-		onDone(models);
 	}
 
 	const keysBody = <SetupKeysBody
