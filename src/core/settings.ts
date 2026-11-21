@@ -469,6 +469,11 @@ export interface GraphSettings {
 	 *  switch, not a data switch (the extraction master above is the
 	 *  data switch). Default on. */
 	rendering?: boolean;
+	/** BAIDU OCR FOR PDF: opt-in OCR processing for scanned/image-only PDF pages.
+	 *  Default off for maximum extraction speed (skips image-only pages and uses
+	 *  native digital text). When enabled, runs Baidu OCR on image pages with
+	 *  proportional performance trade-off. */
+	ocrBaiduEnabled?: boolean;
 	/** The chunk budget (extraction-UX redesign, owner 2026-09-24): the
 	 *  transcript-token share of the extractor's context — a run fires
 	 *  when a chat's UNCOVERED tokens reach it, and the run batches the
@@ -584,7 +589,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		adaptiveQuestions: true,
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
 	},
-	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
+	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096, ocrBaiduEnabled: false },
 	compaction: { thresholdTokens: 150_000, includeReasoning: false },
 };
 
@@ -866,6 +871,8 @@ function sanitizeGraph(raw: Record<string, unknown>): GraphSettings {
 	if (enabled !== undefined) out.enabled = enabled;
 	const rendering = boolOrDrop(raw.rendering);
 	if (rendering !== undefined) out.rendering = rendering;
+	const ocrBaiduEnabled = boolOrDrop(raw.ocrBaiduEnabled);
+	if (ocrBaiduEnabled !== undefined) out.ocrBaiduEnabled = ocrBaiduEnabled;
 	const rawTokens = raw.extractionChunkTokens;
 	if (typeof rawTokens === "number" && Number.isFinite(rawTokens) && rawTokens > 0) {
 		out.extractionChunkTokens = Math.max(EXTRACTION_CHUNK_TOKENS_FLOOR, Math.floor(rawTokens));
