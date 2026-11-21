@@ -625,6 +625,13 @@ body {
 	}
 }
 
+/* Preview estimate: Chromium remembers the measured height once a row is
+   shown. Don't contain the newest turn or the question dock. */
+[data-older-transcript-row] {
+	content-visibility: auto;
+	contain-intrinsic-block-size: auto 800px;
+}
+
 /* Source-message arrival: a brief, static theme-colored spotlight. */
 .lh-source-passage {
 	scroll-margin-top: 1rem;
