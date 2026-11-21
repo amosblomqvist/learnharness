@@ -15,6 +15,7 @@ import { lazyApi, lazyStream } from "@earendil-works/pi-ai/api/lazy";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import { antigravityProvider } from "./providers/antigravity.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
@@ -117,6 +118,7 @@ export function piModels() {
 				: provider));
 		}
 		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
+		collection.setProvider(antigravityProvider());
 	}
 	providerSource?.sync(collection);
 	return collection;
