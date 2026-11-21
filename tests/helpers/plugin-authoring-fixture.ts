@@ -27,7 +27,7 @@ export function markdownAnchors(text: string): Set<string> {
 
 export function seedAuthoringReferenceFixture(root: string) {
 	const source = path.resolve(import.meta.dirname, "../..");
-	for (const id of ["flashcards", "coding-questions", "drawing-pad", "rich-code-blocks", "ui-showcase"]) {
+	for (const id of ["flashcards", "coding-questions", "drawing-pad", "rich-code-blocks", "listening", "ui-showcase"]) {
 		for (const name of [".gitignore", "README.md", "LICENSE", "THIRD-PARTY.md", "FSRS-LICENSE.txt", "manifest.json", "package.json", "package-lock.json", "tsconfig.json", "src", "scripts", "tests", "licenses"]) {
 			const from = path.join(source, "plugins", id, name);
 			if (!fs.existsSync(from)) continue;
