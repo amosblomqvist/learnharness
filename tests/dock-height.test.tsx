@@ -4,10 +4,10 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
-import { QuestionDock } from "../components/question-dock.tsx";
-import { PracticeDock } from "../components/practice-dock.tsx";
 
-const dom = parseHTML("<html><body></body></html>");
+const dom = parseHTML("<!doctype html><html><body></body></html>");
+// Linkedom omits compatMode; browser-loaded KaTeX expects standards mode.
+Object.defineProperty(dom.document, "compatMode", { value: "CSS1Compat" });
 Object.assign(globalThis, {
 	window: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement,
 	IS_REACT_ACT_ENVIRONMENT: true,
@@ -30,8 +30,12 @@ Object.assign(globalThis, {
 		overflowY: el.style.overflowY || (el.classList.contains("overflow-y-auto") ? "auto" : "visible"),
 	}),
 });
-// Import after installing window so the hook uses its browser layout effect.
-const { dockHeightBudget, syncDockHeight, useDockHeight, forwardDockWheel } = await import("../components/dock-height.ts");
+// Install browser globals before importing any UI: the shared Markdown/plugin
+// renderer graph can transitively import chat.tsx and dock-height.ts. A static
+// dock import would select the hook's SSR effect before this setup ever runs.
+const { QuestionDock } = await import("../components/question-dock.tsx");
+const { PracticeDock } = await import("../components/practice-dock.tsx");
+const { dockHeightBudget, minContentHeight, regionChrome, syncDockHeight, useDockHeight, forwardDockWheel } = await import("../components/dock-height.ts");
 
 const normal = {
 	columnHeight: 700, outsideHeight: 60, beforeShellHeight: 0,
@@ -55,9 +59,66 @@ describe("dockHeightBudget — whole dock, not just its question", () => {
 		assert.equal(result.questionMaxHeight, 0);
 		assert.equal(result.scrollWholeContent, true);
 	});
-	it("switches before padding would leave a zero-sized content viewport, without an invented minimum", () => {
+	it("switches before padding would leave a zero-sized content viewport (no line minimum given)", () => {
 		assert.equal(dockHeightBudget({ ...normal, columnHeight: 306 }).scrollWholeContent, true);
 		assert.equal(dockHeightBudget({ ...normal, columnHeight: 307 }).scrollWholeContent, false);
+	});
+	it("two columns: the region's chrome is the costliest column's padding and pinned rows, not the row's zero padding", () => {
+		// The review's case: a positive budget that only fits the answer
+		// column's padding left it 0px of options, yet passed the check.
+		const region = document.createElement("div");
+		region.setAttribute("data-dock-height-region", "");
+		const left = document.createElement("div");
+		left.setAttribute("data-dock-scroll-area", "");
+		const frame = document.createElement("div");
+		const scroller = document.createElement("div");
+		scroller.setAttribute("data-dock-scroll-area", "");
+		const pinned = document.createElement("div");
+		Object.defineProperty(pinned, "getBoundingClientRect", { value: () => ({ height: 37.5 }) });
+		frame.append(scroller, pinned);
+		region.append(left, frame);
+		assert.equal(regionChrome(region), 12 + 37.5, "answer column: scroller padding + the pinned row");
+		pinned.remove();
+		assert.equal(regionChrome(region), 12);
+		// Stacked: the single scroll area's own padding, as before.
+		assert.equal(regionChrome(left), 12);
+		// A positive cap that cannot hold the chrome scrolls the whole content.
+		assert.equal(dockHeightBudget({ ...normal, columnHeight: 306 + 37.5, questionPaddingHeight: 12 + 37.5 }).scrollWholeContent, true);
+		assert.equal(dockHeightBudget({ ...normal, columnHeight: 307 + 37.5, questionPaddingHeight: 12 + 37.5 }).scrollWholeContent, false);
+	});
+	it("a clipped scroll area must keep about three lines, or the whole content scrolls", () => {
+		// normal: question 600 tall, chrome 12; three 24px lines = 72.
+		const min = { ...normal, questionMinContentHeight: 72 };
+		// The cap is columnHeight - 294 here; 307 → 13: far below three lines.
+		assert.equal(dockHeightBudget({ ...min, columnHeight: 307 }).scrollWholeContent, true);
+		// Cap 12 + 72 = 84 exactly is enough; one pixel less is not.
+		assert.equal(dockHeightBudget({ ...min, columnHeight: 294 + 84 }).questionMaxHeight, 84);
+		assert.equal(dockHeightBudget({ ...min, columnHeight: 294 + 84 }).scrollWholeContent, false);
+		assert.equal(dockHeightBudget({ ...min, columnHeight: 293 + 84 }).scrollWholeContent, true);
+		// A question that fits under its cap is never affected: a short one
+		// (60px, under three lines of content) keeps its normal layout.
+		const short = { ...min, questionHeight: 60, contentHeight: 260 };
+		assert.equal(dockHeightBudget({ ...short, columnHeight: 400 }).questionMaxHeight! >= 60, true);
+		assert.equal(dockHeightBudget({ ...short, columnHeight: 400 }).scrollWholeContent, false);
+		// Measured while already capped: the hidden overflow still counts.
+		// (Cap 90 for a region currently drawn 90 tall; five lines = 120.)
+		const capped = { ...min, questionMinContentHeight: 120, questionHeight: 90, contentHeight: 290, columnHeight: 384 };
+		assert.equal(dockHeightBudget(capped).questionMaxHeight, 90);
+		assert.equal(dockHeightBudget(capped).scrollWholeContent, false, "looks unclipped without it");
+		assert.equal(dockHeightBudget({ ...capped, questionNaturalHeight: 600 }).scrollWholeContent, true);
+	});
+	it("three lines are measured from the region's reading text", () => {
+		const region = document.createElement("div");
+		const prose = document.createElement("div");
+		prose.className = "lh-prose";
+		region.append(prose);
+		const saved = globalThis.getComputedStyle;
+		globalThis.getComputedStyle = ((el: Element) => ({ lineHeight: el === prose ? "24px" : "normal", fontSize: "16px" })) as typeof getComputedStyle;
+		try {
+			assert.equal(minContentHeight(region), 72);
+			prose.remove();
+			assert.equal(minContentHeight(region), 72, "line-height normal: 1.5 × the font size");
+		} finally { globalThis.getComputedStyle = saved; }
 	});
 	it("never creates negative caps, even if the toolbar exceeds the column", () => {
 		const result = dockHeightBudget({ ...normal, columnHeight: 20 });
@@ -90,9 +151,10 @@ Object.defineProperty(dom.window.HTMLElement.prototype, "offsetWidth", { configu
 Object.defineProperty(dom.window.HTMLElement.prototype, "scrollHeight", { configurable: true, get() { return Number(this.dataset.scrollHeight ?? 0); } });
 
 const ignoreHeight = () => {};
-function Fixture({ expanded = true, practice = false, enabled = true, inspected, onHeight = ignoreHeight }: {
+function Fixture({ expanded = true, practice = false, enabled = true, inspected, onHeight = ignoreHeight, onLayout }: {
 	expanded?: boolean; practice?: boolean; enabled?: boolean; inspected?: (block: HTMLDivElement) => void;
 	onHeight?: (height: number) => void;
+	onLayout?: () => void;
 }) {
 	const scrollRef = useRef<HTMLDivElement>(null);
 	const blockRef = useRef<HTMLDivElement>(null);
@@ -102,7 +164,7 @@ function Fixture({ expanded = true, practice = false, enabled = true, inspected,
 	const contentRef = useRef<HTMLDivElement>(null);
 	const [inset, setInset] = useState(0);
 	useDockHeight({ scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-		expanded, enabled, mode: practice ? "practice:p1" : "question:q1", onScrollbarInset: setInset, onHeight });
+		expanded, enabled, mode: practice ? "practice:p1" : "question:q1", onScrollbarInset: setInset, onHeight, onLayout });
 	// Like DockOverlay's later morph/reserve layout effect: constraints must
 	// already be applied in this same commit, not an after-paint correction.
 	useLayoutEffect(() => { if (blockRef.current) inspected?.(blockRef.current); });
@@ -217,6 +279,71 @@ describe("measured question/practice DOM and observer lifecycle", () => {
 			assert.notEqual(part(host, "content"), oldContent);
 			assert.ok(observers.at(-1)!.elements.has(part(host, "content")));
 		});
+	});
+	it("notifies the morph after constraints for child-only growth, even during a height animation", async () => {
+		await withFixture(async (host, render) => {
+			const measuredCaps: string[] = [];
+			const reserves: number[] = [];
+			await render({ onLayout: () => measuredCaps.push(part(host, "shell").style.maxHeight), onHeight: h => reserves.push(h) });
+			const before = measuredCaps.length;
+			const previousReserve = reserves.at(-1);
+			animating = true;
+			try {
+				// Late editor/preparation DOM changes: no Fixture/parent render.
+				sizes.content = sizes.content! + 150;
+				sizes.column = 500;
+				await act(async () => observers.at(-1)!.callback());
+				assert.equal(measuredCaps.length, before + 1);
+				assert.equal(measuredCaps.at(-1), "408px", "constraints precede the opening retarget notification");
+				assert.equal(part(host, "block").style.getPropertyValue("--dock-max-h"), "56px");
+				assert.equal(reserves.at(-1), previousReserve, "mid-morph reserve remains suppressed");
+			} finally { animating = false; }
+		});
+	});
+	it("ignores queued callbacks from replaced observers and after unmount", async () => {
+		let old: TestObserver;
+		let current: TestObserver;
+		let count = 0;
+		await withFixture(async (_host, render) => {
+			const onLayout = () => { count++; };
+			await render({ onLayout });
+			old = observers.at(-1)!;
+			await render({ practice: true, onLayout });
+			current = observers.at(-1)!;
+			const before = count;
+			await act(async () => old.callback());
+			assert.equal(count, before);
+			await act(async () => current.callback());
+			assert.equal(count, before + 1);
+		});
+		const before = count;
+		await act(async () => current!.callback());
+		assert.equal(count, before);
+	});
+	it("disconnects on Activity hide, retains the DOM, and reconnects on show", async () => {
+		resetSizes();
+		const host = document.createElement("div"); document.body.append(host);
+		const root = createRoot(host);
+		let count = 0;
+		const onLayout = () => { count++; };
+		const render = async (hidden: boolean) => {
+			await act(async () => root.render(<React.Activity mode={hidden ? "hidden" : "visible"}><Fixture onLayout={onLayout} /></React.Activity>));
+		};
+		try {
+			await render(false);
+			const content = part(host, "content");
+			const old = observers.at(-1)!;
+			await render(true);
+			assert.equal(old.disconnected, true);
+			assert.equal(part(host, "content"), content);
+			const before = count;
+			await act(async () => old.callback());
+			assert.equal(count, before);
+			await render(false);
+			assert.notEqual(observers.at(-1), old);
+			assert.equal(part(host, "content"), content);
+			assert.ok(count > before);
+		} finally { await act(async () => root.unmount()); host.remove(); }
 	});
 	it("keeps the DOM synchronizer deterministic when observed again with the same dimensions", async () => {
 		await withFixture(async (host, render) => {

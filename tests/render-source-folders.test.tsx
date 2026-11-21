@@ -48,12 +48,49 @@ it("nested folders aggregate unique graph member counts, keep three-column sorti
 	assert.match(html, /data-testid="sort-name"/); assert.match(html, /data-testid="sort-props"/); assert.match(html, /data-testid="sort-created"/);
 	assert.match(html, /lucide-book-open/); assert.match(html, /draggable="true"/);
 });
-it("collapsed folders have no dangling rail, while expanded folders reuse the source/chain bracket grammar", () => {
-	assert.doesNotMatch(render(), /data-testid="folder-thread-/);
+it("collapsed folders have no dangling rail; an open folder's rail runs to its bottom rule and a rule heads its contents", () => {
+	assert.doesNotMatch(render(), /data-testid="folder-thread-|data-testid="folder-head-separator-/);
 	const html = render({ expandedClusters: new Set(["f1"]) });
-	assert.match(html, /data-testid="folder-thread-f1"[^>]*bottom-\[8px\][^>]*top-\[23px\]/);
+	assert.match(html, /data-testid="folder-thread-f1"[^>]*bottom-0[^>]*top-\[23px\]/);
 	assert.doesNotMatch(html, /data-testid="folder-thread-f2"/);
+	assert.match(html, /data-testid="folder-head-separator-f1"[^>]*bottom-\[-1px\][^>]*style="left:37px"/, "starts at the rail, in the folder row's border pixel");
+	assert.doesNotMatch(html, /data-testid="folder-head-separator-f2"/);
+	const nested = render({ expandedClusters: new Set(["f1", "f2"]) });
+	assert.match(nested, /data-testid="folder-head-separator-f2"[^>]*style="left:73px"/);
+	// Sources' chain rails keep the checkbox bracket (chains carry no rules).
+	assert.match(render({ nodes, chains: [{ id: "c1", premises: ["a"], conclusion: "b", provenance: [{ chatId: "notes", messageId: "m" }], createdAt: "2026-10-29" }], expandedClusters: new Set(["f1", "f2", "notes"]) }), /data-testid="cluster-thread-notes"[^>]*bottom-\[8px\]/);
 });
+it("shared presentation preserves deep folder rows, direct controls and native guide/column geometry", () => {
+	const deepDirectory: SourceDirectory = {
+		...directory,
+		organization: {
+			...directory.organization,
+			folders: [...directory.organization.folders,
+				{ id: "f3", name: "Section", parentId: "f2", createdAt: "2026-10-30" },
+				{ id: "f4", name: "Topic", parentId: "f3", createdAt: "2026-10-30" },
+			],
+			placements: { notes: { folderId: "f4", name: "Named book" } },
+		},
+	};
+	const { document } = parseHTML(render({ directory: deepDirectory, expandedClusters: new Set(["f1", "f2", "f3", "f4"]) }));
+	for (const [depth, id] of ["f1", "f2", "f3", "f4"].entries()) {
+		const row = document.querySelector<HTMLElement>(`[data-testid="folder-row-${id}"]`)!;
+		assert.equal(row.tagName, "DIV");
+		assert.equal(row.getAttribute("data-chain-nav-row"), JSON.stringify(["folder", id]));
+		assert.equal(row.getAttribute("data-chain-nav-depth"), String(depth));
+		assert.equal(row.style.paddingLeft, `${12 + depth * 36}px`);
+		assert.equal(document.querySelector(`[data-testid="folder-checkbox-${id}"]`)?.parentElement, row);
+		const disclosure = document.querySelector(`[data-testid="folder-toggle-${id}"]`)!;
+		assert.equal(disclosure.parentElement, row);
+		assert.equal(disclosure.getAttribute("aria-expanded"), "true");
+		assert.doesNotMatch(disclosure.outerHTML, /rounded|transition-|hover:/);
+		assert.equal(row.querySelectorAll(":scope > .w-14").length, 1);
+		assert.equal(row.querySelectorAll(":scope > .w-20").length, 1);
+		assert.equal(document.querySelector<HTMLElement>(`[data-testid="folder-thread-${id}"]`)?.style.left, `${37 + depth * 36}px`);
+	}
+	assert.equal(document.querySelector<HTMLElement>('[data-testid="cluster-group-notes"]')?.style.marginLeft, "144px");
+});
+
 it("re-import record dates do not change existing graph groups' Created dates", () => {
 	const newer = { ...directory, sources: directory.sources.map((s) => s.id === "notes" ? { ...s, createdAt: "2099-01-01" } : s) };
 	const html = render({ nodes, directory: newer, expandedClusters: new Set(["f1", "f2"]) });

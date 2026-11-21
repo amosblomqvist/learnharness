@@ -26,6 +26,7 @@ import { parseStreamingJson, parseToolCallArguments } from "@earendil-works/pi-a
 
 import { externalCliEnv } from "../../core/auth-env.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
+import { offerWorkerContinuation } from "../worker-request-admission.ts";
 import { ClaudeLaunchError, createClaudeLauncher } from "./launch.ts";
 import { parseCliLine, type CliBlock, type CliEvent, type CliUsage } from "./cli-events.ts";
 import { ClaudeCodeError } from "./constants.ts";
@@ -414,6 +415,7 @@ class ClaudeProcess implements LiveProcess {
 	private stopping = false;
 	private killTimer: NodeJS.Timeout | undefined;
 	private signal: AbortSignal | undefined;
+	private workerOwner: AbortSignal | undefined;
 	private sourceCalls: ToolCall[] = [];
 	private sourceComplete = false;
 	private admitted: PendingToolCall[] = [];
@@ -475,6 +477,7 @@ class ClaudeProcess implements LiveProcess {
 		this.turn = turn;
 		this.turn.setContextWindow(this.contextWindow);
 		this.sourceComplete = this.sourceCalls.length > 0;
+		this.workerOwner = undefined;
 		this.setSignal(signal);
 		if (this.stopping) return;
 		for (const call of admitted) {
@@ -485,6 +488,13 @@ class ClaudeProcess implements LiveProcess {
 	}
 
 	kill(): void {
+		this.pendingError = undefined;
+		this.workerOwner = undefined;
+		this.setSignal(undefined);
+		this.stopChild();
+	}
+
+	private stopChild(): void {
 		removeLiveProcess(this);
 		if (this.stopping || this.closed) return;
 		this.stopping = true;
@@ -495,13 +505,18 @@ class ClaudeProcess implements LiveProcess {
 	}
 
 	fail(message: string): void {
+		// The bridge stays open until close. A late callback must not restore
+		// a retired continuation or replace an already queued failure.
+		if (this.stopping || this.closed) return;
 		// A parallel request can fail after the admitted slice was handed to
 		// Pi. Retain that failure for its continuation instead of silently
 		// replaying and hiding the compatibility error.
 		if (this.sessionId && this.turn.finished && this.toolCallIds.length > 0) this.pendingError = message;
 		this.turn.fail(message, "error");
-		this.kill();
-		if (this.pendingError) addLiveProcess(this);
+		if (this.pendingError) {
+			this.stopChild();
+			addLiveProcess(this);
+		} else this.kill();
 	}
 
 	consumeFailure(owner: symbol, turn: ClaudeTurn): boolean {
@@ -539,8 +554,23 @@ class ClaudeProcess implements LiveProcess {
 		this.toolCallIds = pending.map((call) => call.id);
 		this.turn.admit(calls);
 		this.conversation.push(...structuredClone(conversationForReuse([this.turn.getMessage()])));
-		if (this.sessionId) addLiveProcess(this);
-		else this.kill(); // No trusted scope: return the batch, then use fresh replay.
+		if (this.sessionId) {
+			addLiveProcess(this);
+			const parkedTurn = this.turn;
+			const request = this.signal;
+			offerWorkerContinuation(request, {
+				message: parkedTurn.getMessage(),
+				handoff: owner => {
+					if (this.turn !== parkedTurn || this.signal !== request || (!this.pendingError && (this.stopping || this.closed))) return;
+					// Successful slice cleanup may still abort the request signal.
+					// A parked child (or its pending continuation error) now belongs
+					// to the worker; continueTurn installs the next request signal.
+					this.workerOwner = owner;
+					this.setSignal(owner);
+					return () => { if (this.turn === parkedTurn && this.workerOwner === owner) this.kill(); };
+				},
+			});
+		} else this.kill(); // No trusted scope: return the batch, then use fresh replay.
 	}
 
 	private readonly abort = () => {
@@ -600,7 +630,9 @@ class ClaudeProcess implements LiveProcess {
 		clearTimeout(this.killTimer);
 		removeLiveProcess(this);
 		if (this.pendingError) addLiveProcess(this);
-		this.signal?.removeEventListener("abort", this.abort);
+		// A parked worker still owns the pending error after the child exits.
+		// Keep the abort listener until that error is consumed or retired.
+		if (!this.pendingError || !this.workerOwner) this.setSignal(undefined);
 		if (this.stderr.trim()) console.error("claude CLI stderr:", this.stderr.trim());
 		this.turn.fail(message, "error");
 		removeTurnResources(this.bridge, this.files).catch((error: unknown) => {

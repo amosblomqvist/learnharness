@@ -28,7 +28,7 @@ import {
 	mergeManualModels,
 } from "../src/server/custom-provider.ts";
 import { piModels } from "../src/agent/models.ts";
-import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
+import { getSupportedThinkingLevels, normalizeContext } from "@earendil-works/pi-ai";
 
 // ─── normalizeBaseUrl ────────────────────────────────────────────────────────
 describe("normalizeBaseUrl", () => {
@@ -349,6 +349,84 @@ describe("discoverModels", () => {
 		assert.equal(byId["ctx"]!.context, 32768);
 		assert.equal(byId["ctx"]!.maxTokens, undefined);
 		assert.equal(byId["plain"]!.context, undefined);
+	});
+	it("reads nested token limits as independent fallbacks", async () => {
+		const limit = { context: 1050000, input: 922000, output: 128000 };
+		const data = [
+			{ id: "nested", limit },
+			{ id: "flat", context_length: 32768, max_output_tokens: 4096, limit },
+			{ id: "mixed", meta: { n_ctx: 65536 }, limit },
+			{ id: "invalid", limit: { input: 922000, context: -1, output: "128000" } },
+		];
+		stubFetch(() => ({ status: 200, body: { data } }));
+		const result = await discoverModels("http://h/v1");
+		assert.ok(result.ok);
+		assert.deepEqual(result.models, [
+			{ id: "flat", context: 32768, maxTokens: 4096 },
+			{ id: "invalid" },
+			{ id: "mixed", context: 65536, maxTokens: 128000 },
+			{ id: "nested", context: 1050000, maxTokens: 128000 },
+		]);
+	});
+	it("discovered nested limits restore serialized output room while pins still win", async () => {
+		stubFetch(() => ({ status: 200, body: { data: [{ id: "gpt-6.1-sol", reasoning: true, limit: { context: 1050000, output: 128000 } }] } }));
+		const result = await discoverModels("http://h/v1");
+		assert.ok(result.ok);
+		const models = piModels();
+		const context = normalizeContext({ systemPrompt: "Offline", messages: [{ role: "user", content: "x".repeat(21861), timestamp: 1 }] });
+		let fetched = false;
+		globalThis.fetch = async () => { fetched = true; throw new Error("CLOSED: unexpected inference fetch"); };
+		try {
+			for (const [rows, overrides, expected] of [
+				[[{ id: "gpt-6.1-sol", reasoning: true }], undefined, 1],
+				[result.models, undefined, 128000],
+				[result.models, { "gpt-6.1-sol": { context: 32768, maxTokens: 4096 } }, 4096],
+			] as const) {
+				models.setProvider(buildOpenAiCompatibleProvider({ baseUrl: "http://h/v1", models: rows, overrides }));
+				let payload: unknown;
+				const reply = await models.streamSimple(models.getModel("custom", "gpt-6.1-sol")!, context, {
+					reasoning: "high", onPayload: (value) => { payload = value; throw new Error("CLOSED: payload captured"); },
+				}).result();
+				assert.match(reply.errorMessage ?? "", /CLOSED: payload captured/);
+				assert.equal((payload as { max_completion_tokens: number }).max_completion_tokens, expected);
+			}
+			assert.equal(fetched, false, "serialization stops before any provider request");
+		} finally { models.deleteProvider("custom"); }
+	});
+	it("validates nested fields independently and skips invalid higher-priority metadata", async () => {
+		const cases: { row: Record<string, unknown>; limits: { context?: number; maxTokens?: number } }[] = [
+			{ row: { context_length: 0, meta: { n_ctx: -1 }, max_output_tokens: "4096", limit: { context: 65536, output: 8192 } }, limits: { context: 65536, maxTokens: 8192 } },
+			{ row: { max_output_tokens: 4096, limit: { context: 65536, output: 8192 } }, limits: { context: 65536, maxTokens: 4096 } },
+			{ row: { limit: { context: 1, output: 1 } }, limits: { context: 1, maxTokens: 1 } },
+			{ row: { limit: { input: 922000, output: 8192 } }, limits: { maxTokens: 8192 } },
+			...[-1, 0, 1.5, "65536", true, null, [], {}].map((value) => ({ row: { limit: { context: value, output: 8192 } }, limits: { maxTokens: 8192 } })),
+			...[-1, 0, 1.5, "8192", true, null, [], {}].map((value) => ({ row: { limit: { context: 65536, output: value } }, limits: { context: 65536 } })),
+			...[null, [], [{ context: 65536, output: 8192 }], "limits", 65536].map((limit) => ({ row: { limit }, limits: {} })),
+		];
+		for (const { row, limits } of cases) {
+			stubFetch(() => ({ status: 200, body: { data: [{ id: "fixture", ...row }] } }));
+			const result = await discoverModels("http://h/v1");
+			assert.ok(result.ok);
+			assert.deepEqual(result.models, [{ id: "fixture", ...limits }], JSON.stringify(row));
+		}
+	});
+	it("detects llama.cpp's runtime context from meta.n_ctx, not n_ctx_train", async () => {
+		stubFetch(() => ({
+			status: 200,
+			body: {
+				data: [
+					{ id: "llamacpp", owned_by: "llamacpp", meta: { n_ctx: 65536, n_ctx_train: 262144, n_vocab: 151936 } },
+					{ id: "train-only", owned_by: "llamacpp", meta: { n_ctx_train: 262144 } },
+					{ id: "top-level-wins", context_length: 32768, meta: { n_ctx: 65536 } },
+				],
+			},
+		}));
+		const r = await discoverModels("http://h/v1");
+		assert.ok(r.ok);
+		const byId = Object.fromEntries(r.models.map((m) => [m.id, m]));
+		assert.equal(byId["llamacpp"]!.context, 65536);
+		assert.equal(byId["train-only"]!.context, undefined, "the training maximum is not what the server accepts");
+		assert.equal(byId["top-level-wins"]!.context, 32768);
 	});
 	it("detects reasoning from endpoint metadata only — never from the model name", async () => {
 		stubFetch(() => ({

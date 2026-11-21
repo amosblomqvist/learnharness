@@ -1,4 +1,3 @@
-import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { AssistantMessage, Usage } from "@earendil-works/pi-ai";
 import { createWebTools } from "../tools/web.ts";
 import { createPdfReadTools } from "../tools/pdf-read.ts";
@@ -104,7 +103,6 @@ export interface ResearcherRunOptions {
  * the loop scripted.
  */
 export async function runResearcherAgent(prompt: string, opts: ResearcherRunOptions = {}): Promise<string> {
-	if (opts.abortSignal?.aborted) throw new DOMException("aborted", "AbortError");
 	const tools = Object.values(createWebTools(opts.search ?? (() => null)));
 	if (opts.pdfDir) tools.push(...Object.values(createPdfReadTools(opts.pdfDir)));
 	const shared = {
@@ -116,10 +114,14 @@ export async function runResearcherAgent(prompt: string, opts: ResearcherRunOpti
 		onToolStart: opts.onToolStart,
 		chatId: opts.chatId,
 	};
-	// Reserve the twelfth call for synthesis instead of ending on a tool result.
-	const research = await runSubagent(tools, { ...shared, prompt, maxTurns: 11 });
+	const research = await runSubagent(tools, { ...shared, prompt });
 	if (hasCompletedBrief(research)) return research.text;
-	if (opts.abortSignal?.aborted) throw new DOMException("aborted", "AbortError");
+	if (!research.newMessages.some((message) => message.role === "toolResult")) {
+		// The job runner already handles an empty first answer. With no tool
+		// results there is no gathered evidence to synthesize on a second call.
+		if (!research.text.trim()) return research.text;
+		throw new Error("the researcher did not produce a complete final brief");
+	}
 	const final = await runSubagent([], {
 		...shared,
 		maxTurns: 1,

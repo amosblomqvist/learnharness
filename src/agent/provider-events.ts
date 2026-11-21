@@ -53,7 +53,7 @@ function fileFor(chatId: string): string {
 	// chat ids are app-minted (chat_<base36>) — sanitize against any future
 	// id scheme putting path-hostile characters in here.
 	const safe = chatId.replace(/[^a-zA-Z0-9_-]/g, "_");
-	return path.join(providerEventsDir.current, `${safe}.jsonl`);
+	return path.join(/* turbopackIgnore: true */ providerEventsDir.current, `${safe}.jsonl`);
 }
 
 function writeLine(file: string, line: Record<string, unknown>): void {

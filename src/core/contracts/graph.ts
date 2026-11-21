@@ -20,25 +20,20 @@
 
 import type { CallUsage, ExtractionRunUsage } from "./chat.ts";
 
-/** One relation of the DERIVED view — chains are the stored truth (owner,
- *  2026-09-30: "the graph is a lossy image of what is truly stored"), and
- *  the snapshot derives UNTYPED arrows from them: every premise → the
- *  chain's implication node, the implication node → the conclusion.
- *  Nothing stores or mutates these — they are rebuilt after every change
- *  and never converted back. */
+/** Directed relation derived from stored reasoning chains, not an independent
+ * ledger record. Canvas edges connect a single premise directly to its
+ * conclusion, or multiple premises through a derived implication node.
+ * Logical edges connect proposition premises directly to conclusions. */
 export interface GraphEdge {
 	from: string;
 	to: string;
 }
 
-/** One stored REASONING CHAIN — an argument: premises that JOINTLY entail
- *  the conclusion (chains-primary, owner 2026-09-30). Independent arguments
- *  for the same conclusion are separate chains (they may share `conclusion`);
- *  co-premises within one chain are used TOGETHER. The snapshot derives an
- *  implication NODE per chain (id = the chain id — the arg_ namespace is its
- *  own, collision-free with n_) plus untyped edges premises → imp →
- *  conclusion. A chain referencing a dead node dies with it (full death
- *  cascades through every referencing chain). */
+/** Stored argument whose premises jointly entail its conclusion. Independent
+ * arguments remain separate chains even when their conclusion is shared.
+ * Multi-premise chains produce a derived implication node with the chain's
+ * arg_ ID; single-premise chains render as direct arrows. Removing a
+ * proposition cascades to chains referencing it. */
 export interface GraphChain {
 	/** "arg_" + nanoid-like (store-assigned, the node-minting pattern). */
 	id: string;
@@ -53,27 +48,23 @@ export interface GraphChain {
 	createdAt: string;
 }
 
-/** What one extraction run merged into the graph ledgers — the merger's
- *  output, also persisted in extraction-run usage records (contracts/chat).
- *  `chains` is OPTIONAL IN OLD RECORDS ONLY: usage history from the
- *  pre-chains era carries `edges` instead — tolerated at read, never
- *  written again (no-backward-compat regime, owner 2026-09-30). */
+/** Counts merged into graph ledgers by one extraction run, also saved with
+ * extraction usage. Older usage records may omit chains and carry edge counts
+ * instead; current merges write chain counts. */
 export interface EmissionStats {
 	/** New graph nodes appended. */
 	nodes: number;
 	/** New reasoning chains appended. */
 	chains?: number;
-	/** Chains the simplification pass removed in this merge (owner,
-	 *  2026-09-30 evening — ancestry-cover / prefer-fewest-premises).
-	 *  Maintenance, not extraction: appends are counted in `chains`
-	 *  regardless. Undefined when nothing dropped (pre-simplification
-	 *  records read as zero). */
+	/** Chains removed by simplification during this merge, separate from new
+	 * appends counted in chains. Omitted when none are removed; records without
+	 * this field contribute zero removals. */
 	droppedChains?: number;
 }
 
-/** One provenance point — message-granular (DECIDED 2026-09-02): nodes and
- *  edges record every (chat, message) where they came up, deep-linkable to
- *  the exact transcript point. */
+/** Source location for a proposition or reasoning-chain assertion. A message
+ * ID anchors to a native transcript passage; chat-level and imported-file
+ * provenance can omit that anchor by using an empty messageId. */
 export interface ProvenancePoint {
 	/** The chat this point anchors to — or a notes source id ("src_…"):
 	 *  imports carry no message anchors (provenance is the file itself,
@@ -82,14 +73,10 @@ export interface ProvenancePoint {
 	messageId: string;
 }
 
-/** One imported notes file — the format-agnostic front door's bookkeeping
- *  (DECIDED 2026-09-13): personal notes in ARBITRARY formats run through the
- *  same extractor → auditor → merger pipeline, with the file itself as the
- *  provenance anchor. There is no chat: the detail card shows the file path
- *  as a STATIC entry (not a link). The run's usage log lives here,
- *  mirroring ChatRecord.extractions. Ids are "src_" + hash of the file
- *  path — deterministic, so re-importing the same file re-runs extraction
- *  against the same source id (mappings dedupe by it). */
+/** Imported notes source processed by the extractor → auditor → merger pipeline.
+ * Provenance identifies the file rather than a chat message, and the source
+ * owns its extraction usage log. IDs are src_ plus a deterministic file-path
+ * hash, so re-importing the same path uses the same source identity. */
 export interface NotesSource {
 	id: string;
 	filePath: string;
@@ -154,14 +141,10 @@ export interface SessionCheckpoint {
 	foldedAt: string;
 }
 
-/** coverage.jsonl line (vision-extraction-coverage.md, settled 2026-09-15):
- *  ONE MESSAGE of one chat has been extracted — by content fingerprint over
- *  exactly what the extraction view sees. The MESSAGE is the unit of
- *  coverage; "uncovered" is derived (fingerprint the current transcript,
- *  diff) — never dual-tracked. A quiz answer merging into the asking
- *  message changes its fingerprint: the message re-opens itself, only
- *  itself. Chat extractions write these instead of whole-chat checkpoints;
- *  notes imports keep the checkpoint (a file is one shot). */
+/** coverage.jsonl entry marking one extracted message by its extraction-view
+ * fingerprint. Uncovered content is derived by comparing current fingerprints;
+ * an answer changing a question's view reopens only that message. Chat
+ * extraction records message coverage; notes imports use source checkpoints. */
 export interface CoverageEntry {
 	chatId: string;
 	/** sha256 of the message's view lines — "covered" means exactly this. */
@@ -285,11 +268,8 @@ export interface AuditVerdicts {
 	links: IdentityLink[];
 }
 
-/** The GET /api/graph payload — everything the home view's PURE renderer needs. */
-
-/** One rendered cluster in the snapshot payload (vision §1). Members are
- * node ids; the renderer draws the hull from member positions at draw
- * time and gates the label inversely on the node-label zoom control. */
+/** Rendered cluster in a graph snapshot. Members are proposition node IDs;
+ * hull geometry is derived from their positions at render time. */
 export interface Cluster {
 	/** The labeling record id when claimed; unlabeled clusters still
 	 * appear (hull, no name) with a member-hash id. */
@@ -300,26 +280,25 @@ export interface Cluster {
 	members: string[];
 }
 
+/** Graph projection containing stored propositions/chains and derived rendering,
+ * layout and provenance data. Derived arrows/junctions are not stored arguments. */
 export interface GraphSnapshot {
-	/** Proposition nodes + the DERIVED implication nodes (one per chain,
-	 *  id = chain id) — what the canvas renders. */
+	/** Canvas nodes: propositions plus derived implication nodes for multi-premise
+	 * chains. Each implication node uses its chain's ID. */
 	nodes: GraphNode[];
 	/** The STORED proposition nodes alone (no derived implication nodes)
 	 *  — the stored truth, like `chains`: consumers that read the world
 	 *  (the chain table) take this list, never the canvas image. */
 	propositions: GraphNode[];
-	/** DERIVED untyped arrows: premise → imp → conclusion. A lossy image
-	 *  of the stored chains — rebuilt after every change, never stored. */
+	/** Derived canvas arrows: direct premise → conclusion for single-premise
+	 * chains, or premise → implication node → conclusion for multi-premise chains.
+	 * Rebuilt from chains, not stored separately. */
 	edges: GraphEdge[];
-	/** DERIVED LOGICAL arrows: every chain contracted to direct premise→
-	 *  conclusion over PROPOSITION ids only (the imp hop collapsed). The
-	 *  depth pass consumes these — inference depth is a property of
-	 *  propositions, never of the geometry point (owner, 2026-09-30). */
+	/** Derived direct premise → conclusion arrows over proposition IDs only.
+	 * Depth calculations use these rather than implication-node geometry. */
 	logicalEdges: GraphEdge[];
-	/** DERIVED imp linkage (one per MULTI-premise live chain): the depth
-	 *  pass anchors each junction at the average of the highest premise
-	 *  row and the conclusion's row (owner, 2026-09-30) — strictly
-	 *  above the premises, strictly below the conclusion. */
+	/** Derived junction linkage for each live multi-premise chain. Layout uses
+	 * premise/conclusion rows to position its implication node between them. */
 	impLinks: Array<{ id: string; premises: string[]; conclusion: string }>;
 	/** The STORED reasoning chains (merged by (premises, conclusion) at
 	 *  read): the chain table's and the practice pipeline's input — they

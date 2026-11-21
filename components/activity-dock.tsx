@@ -67,12 +67,30 @@ export interface FeedExtraction {
 	startedAt: number;
 }
 
+export interface FeedPluginWorker {
+	id: string;
+	taskId: string;
+	pluginId: string;
+	definitionId: string;
+	status: "queued" | "running";
+	title: string;
+	createdAt: string;
+	updatedAt: string;
+	activity?: string;
+	model: { provider: string; id: string };
+	usage?: FeedUsage;
+	costUsd: number | null;
+	contextLimit: number | null;
+}
+
 export interface ActivityFeed {
 	jobs: FeedJob[];
+	/** Optional for older payloads and consumers; current server always sends it. */
+	pluginWorkers?: FeedPluginWorker[];
 	extractions: FeedExtraction[];
 }
 
-const EMPTY_FEED: ActivityFeed = { jobs: [], extractions: [] };
+const EMPTY_FEED: ActivityFeed = { jobs: [], pluginWorkers: [], extractions: [] };
 
 // ─── The activity feed (composition root: the root layout) ───────────────────
 
@@ -109,7 +127,7 @@ export function ActivityProvider({ children }: { children: React.ReactNode }) {
 				if (res.ok) {
 					const data = (await res.json()) as Partial<ActivityFeed>;
 					if (alive)
-						setFeed({ jobs: data.jobs ?? [], extractions: data.extractions ?? [] });
+						setFeed({ jobs: data.jobs ?? [], pluginWorkers: data.pluginWorkers ?? [], extractions: data.extractions ?? [] });
 				}
 			} catch {
 				// transport blip: keep the last feed, announce again next event
@@ -169,13 +187,13 @@ export interface ActivityBlob {
 	/** job.id, or the extraction job's row id (source id, or "src#i" for
 	 *  chunk jobs — unique per row, per-chunk jobs owner 2026-09-28). */
 	id: string;
-	process: "job" | "extraction";
+	process: "job" | "plugin-worker" | "extraction";
 	/** Sub-agent kind for jobs (extraction blobs have none). */
 	jobKind?: JobKind;
 	/** Extraction phase (extracting/auditing/merging/embedding); jobs carry none. */
 	phase?: string;
 	title: string;
-	chatId: string;
+	chatId?: string;
 	/** ms epoch — blobs order oldest-first and elapsed counts from it. */
 	startedAt: number;
 	/** Inferred USD cost (jobCost) — null renders "—". */
@@ -219,7 +237,7 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			id: job.id,
 			process: "job",
 			jobKind: job.kind,
-			title: job.title,
+			title: job.kind === "plugin" ? job.plugin?.label || job.plugin?.toolName || "Plugin worker" : job.title,
 			chatId: job.chatId,
 			startedAt: Date.parse(job.createdAt) || 0,
 			cost: job.costUsd ?? null,
@@ -239,6 +257,20 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			steps: usage?.steps,
 		};
 	});
+	for (const task of feed.pluginWorkers ?? []) {
+		const last = task.usage?.lastStep;
+		blobs.push({
+			id: task.id, process: "plugin-worker", jobKind: "plugin", title: task.title,
+			startedAt: Date.parse(task.createdAt) || 0,
+			cost: task.costUsd ?? null,
+			context: task.contextLimit !== null && last?.inputTokens !== undefined
+				? { used: last.inputTokens + (last.outputTokens ?? 0) + (last.cacheReadTokens ?? 0) + (last.cacheWriteTokens ?? 0), limit: task.contextLimit }
+				: null,
+			activity: task.activity ?? task.status,
+			model: task.usage?.model ?? `${task.model.provider}:${task.model.id}`,
+			steps: task.usage?.steps,
+		});
+	}
 	for (const run of feed.extractions) {
 		blobs.push({
 			id: run.id,
@@ -283,6 +315,7 @@ const KIND_ICON: Record<JobKind, typeof SearchIcon> = {
 	demo: PlayIcon,
 	visual: PenToolIcon,
 	pdf: FileTextIcon, // sources v0 — type-forced entry (JobKind grew "pdf")
+	plugin: BotIcon,
 };
 
 /** Abort states per blob id: pending (fired) / failed (backend absent). */
@@ -401,48 +434,55 @@ function ActivityBlobRow({
 						? "Figure maker"
 						: blob.jobKind === "pdf"
 							? "PDF reader"
-							: "Sub-agent";
+							: blob.jobKind === "plugin"
+								? "Plugin worker"
+								: "Sub-agent";
 	return (
 		<div
 			data-testid={`activity-blob-${blob.process}`}
-			className="relative rounded-lg px-2 py-1.5 text-xs transition-colors hover:bg-accent"
+			data-activity-id={blob.id}
+			className="rounded-lg px-2 py-1.5 text-xs transition-colors hover:bg-accent"
 		>
-			<button
-				type="button"
-				onClick={onToggleDetail}
-				aria-expanded={detailOpen}
-				className="flex w-full items-center gap-2 pr-7 text-left"
-			>
-				<Icon className="size-3.5 shrink-0 text-muted-foreground" />
-				<span className="min-w-0 flex-1">
-					<span className="block truncate font-medium text-card-foreground">{blob.title}</span>
-					{blob.activity ? (
-						<span className="block truncate text-muted-foreground" title={blob.activity}>
-							{blob.activity}
+			<div className="relative">
+				<button
+					type="button"
+					onClick={onToggleDetail}
+					aria-expanded={detailOpen}
+					className="flex w-full items-center gap-2 pr-7 text-left"
+				>
+					<Icon className="size-3.5 shrink-0 text-muted-foreground" />
+					<span className="min-w-0 flex-1">
+						<span className="block truncate font-medium text-card-foreground" title={blob.title}>
+							{blob.title}
 						</span>
-					) : (
-						<span className="block truncate text-muted-foreground/80">{label}</span>
-					)}
-				</span>
-				<span className="flex shrink-0 items-center gap-2 tabular-nums text-muted-foreground">
-					<span data-testid="activity-blob-cost">{planCostLabel(blob.cost, subscriptionLabel(blob.model))}</span>
-					<span data-testid="activity-blob-elapsed">{formatElapsed(now - blob.startedAt)}</span>
-				</span>
-			</button>
-			{/* The explicit END always on the blob's face (SCOPE) — the popover
-			    is for DETAIL, not the control. A failed abort locks the button and
-			    says why; a succeeded one just makes the blob vanish on refresh. */}
-			<button
-				type="button"
-				data-testid="activity-abort"
-				onClick={onAbort}
-				disabled={abortState !== undefined}
-				title={abortState === "failed" ? "Abort failed — try again" : "End this background process"}
-				aria-label={`End ${label} in ${blob.title}`}
-				className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
-			>
-				<SquareIcon className="size-3" />
-			</button>
+						{blob.activity ? (
+							<span className="block truncate text-muted-foreground" title={blob.activity}>
+								{blob.activity}
+							</span>
+						) : (
+							<span className="block truncate text-muted-foreground/80">{label}</span>
+						)}
+					</span>
+					<span className="flex shrink-0 items-center gap-2 tabular-nums text-muted-foreground">
+						<span data-testid="activity-blob-cost">{planCostLabel(blob.cost, subscriptionLabel(blob.model))}</span>
+						<span data-testid="activity-blob-elapsed">{formatElapsed(now - blob.startedAt)}</span>
+					</span>
+				</button>
+				{/* The explicit END always on the blob's face (SCOPE) — the popover
+				    is for DETAIL, not the control. A failed abort locks the button and
+				    says why; a succeeded one just makes the blob vanish on refresh. */}
+				<button
+					type="button"
+					data-testid="activity-abort"
+					onClick={onAbort}
+					disabled={abortState !== undefined}
+					title={abortState === "failed" ? "Abort failed — try again" : "End this background process"}
+					aria-label={`End ${label} in ${blob.title}`}
+					className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
+				>
+					<SquareIcon className="size-3" />
+				</button>
+			</div>
 
 			{detailOpen && (
 				<div
@@ -457,9 +497,6 @@ function ActivityBlobRow({
 						</span>
 					</div>
 					<div className="flex flex-col gap-1 text-muted-foreground">
-						<div className="truncate text-card-foreground" title={blob.title}>
-							{blob.title}
-						</div>
 						{blob.activity && <div className="break-words">{blob.activity}</div>}
 						<div className="flex justify-between gap-2">
 							<span>Cost</span>
@@ -487,9 +524,11 @@ function ActivityBlobRow({
 								<span className="tabular-nums text-card-foreground">{blob.steps}</span>
 							</div>
 						)}
-						<a href={`/chat/${blob.chatId}`} className="text-primary hover:underline">
-							Open session →
-						</a>
+						{blob.chatId && (
+							<a href={`/chat/${blob.chatId}`} className="text-primary hover:underline">
+								Open session →
+							</a>
+						)}
 					</div>
 					<div className="mt-2 text-muted-foreground/80">
 					{abortState === "failed" && "Abort failed — try again"}

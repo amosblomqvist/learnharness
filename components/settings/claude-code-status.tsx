@@ -103,7 +103,7 @@ export function ClaudeCodeInstallationStatus() {
 			<span className="font-prose text-(length:--lh-prose-size) text-foreground">Claude Code</span>
 			<Toggle label="Claude Code" checked={enabled} disabled={!loaded || saving} onChange={(next) => void save(next)} />
 		</div>
-		{error && <p role="alert" className="text-xs text-red-400">{error}</p>}
+		{error && <p role="alert" className="text-xs text-error">{error}</p>}
 		{enabled && <>
 			<div className="flex flex-wrap items-center gap-3">
 				<span role="status" className="text-xs text-muted-foreground">{busy ? "Checking…" : claudeCodeStatusLabel(status)}</span>

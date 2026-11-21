@@ -1,25 +1,28 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState } from "react";
+import type { ViewReaderRef, NativeQuestionViewState } from "./session-view-readers";
 import { ArrowDownIcon, ChevronRightIcon, PlayIcon } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { finishDictation, isDictationActive, joinDictation, useDictationTarget } from "@/components/dictation";
 import { useEnterSubmits } from "@/components/enter-submits";
-import { PathInput } from "@/components/path-input";
+import { useOptionalInteractionLayers } from "./interaction-layers";
+import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { PathInput, pathInputClassName } from "@/components/path-input";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { ToolContentResponse } from "@/components/ai-elements/message";
+import { QuestionPreview } from "@/components/question-preview";
 import { cn } from "@/lib/utils";
 import {
 	buildAnswer,
-	repairMathForDisplay,
+	toClientQuestion,
 	normalizeQuizType,
 	CONFIDENCE_STOPS,
 	DEFAULT_CONFIDENCE_INDEX,
 	emptyDockSelection,
-	normalizeOptions,
+	displayedOptionLetter,
+	questionDisplayOptions,
 	resolveCorrect,
-	seededRandom,
-	shuffleOptions,
 	toolQuestionKind,
 	parseAskInput,
 	parseQuizInput,
@@ -38,7 +41,115 @@ import {
 	type SelectMode,
 	type Phase3,
 } from "@/src/core";
+import type { PrepareBuiltinSubmission } from "./plugin-submission-adapters";
 import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-rail";
+import {
+	ANSWER_COLUMN_FRAME,
+	ANSWER_OPTIONS_PAD,
+	CONFIDENCE_ROW_PAD,
+	QUESTION_COLUMN_PAD,
+	STACKED_AREA_PAD,
+	cloneWithImageSizes,
+	type QuestionLayout,
+} from "@/components/question-layout";
+import { useQuestionLayout, type QuestionLayoutRequest } from "@/components/use-question-layout";
+import { captureReadingPosition, holdAcrossSwitch, restoreReadingPosition, revealFocused, trackReadingPosition, visibleFocused } from "@/components/dock-switch";
+
+export type { QuestionLayoutRequest } from "@/components/use-question-layout";
+
+const useIsoLayoutEffect = typeof window === "undefined" ? useEffect : useLayoutEffect;
+
+// ─── The question card's static geometry ────────────────────────────────────
+// Shared by the card's JSX and by questionCardStandIn below (answered cards
+// measure a stand-in of the question card, so both solve the same layout).
+const QC_LABEL = "mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground";
+const QC_QUESTION = "mb-3 font-medium";
+const QC_CONTEXT = "mb-3 text-sm text-muted-foreground";
+const QC_OPTION_LIST = "flex flex-col gap-2 pb-2";
+const QC_OPTION_ROW = "flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors";
+const QC_OPTION_MARK = "flex size-4 shrink-0 items-center justify-center border";
+const QC_OPTION_LETTER = "text-[0.625rem] font-medium leading-none";
+const QC_OTHER_INPUT = "lh-input w-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground";
+const OTHER_PLACEHOLDER = "Type your own answer…";
+// The confidence row has no separator: its padding (CONFIDENCE_ROW_PAD,
+// question-layout.ts) centers the slider between the last option (whose
+// list ends in 8px) and whatever follows — 8+6 above, 14 below (owner).
+const QC_CONFIDENCE_ROW = "flex items-center gap-3";
+const QC_CONFIDENCE_LABEL = "shrink-0 text-xs font-medium uppercase tracking-wide";
+const QC_CONFIDENCE_TRACK = "relative h-4 min-w-0 flex-1";
+// Balanced gaps (owner): the rail is inset 8px in its track on both ends,
+// so label→rail is the 12px flex gap + 8px. The slot fits "100%" exactly,
+// so rail→"100%" is that same 12px + 8px; shorter values sit CENTERED in
+// it, splitting their spare width across both sides.
+const QC_CONFIDENCE_VALUE = "w-[4ch] shrink-0 text-center font-mono text-sm tabular-nums";
+
+/** The question card's label: the tool's own name for probe-phase calls. */
+export function questionCardLabel(tool: string | undefined, kind: string, questionType: string | undefined): string {
+	if (tool === "probe") return "Probe";
+	if (tool === "recall") return "Recall";
+	if (kind === "quiz") return questionType === "predict" ? "Prediction" : "Check";
+	if (kind === "explain") return "Explain";
+	return "Question";
+}
+
+/** What an answered card knows of the question it answered. Rendered
+ *  content (question, context, option labels) is the card's own LIVE
+ *  markdown, cloned — never rendered twice. */
+export interface QuestionCardContent {
+	label: string;
+	kind: "quiz" | "ask";
+	multiSelect: boolean;
+	/** Containers whose children are the rendered markdown. */
+	question: HTMLElement;
+	context: HTMLElement | null;
+	options: HTMLElement[];
+	optionLetters?: readonly (string | undefined)[];
+}
+
+/**
+ * A detached stand-in of the pending question card's question part, option
+ * list and confidence row, built from the same classes as its JSX, for the
+ * layout probe: the answered card's layout is then exactly the one the
+ * question card had (owner: "exactly when the question card would").
+ */
+export function questionCardStandIn(doc: Document, c: QuestionCardContent): { question: HTMLElement; options: HTMLElement; confidence: HTMLElement | null } {
+	const el = (tag: string, className: string, ...children: (Node | string)[]) => {
+		const node = doc.createElement(tag);
+		node.className = className;
+		node.append(...children);
+		return node;
+	};
+	const contents = (live: HTMLElement) => [...live.childNodes].map((n) => (n instanceof HTMLElement ? cloneWithImageSizes(n) : n.cloneNode(true)));
+	const question = el("div", "",
+		el("div", QC_LABEL, c.label + (c.multiSelect ? " · select all that apply" : "")),
+		el("div", QC_QUESTION, ...contents(c.question)),
+	);
+	if (c.context) question.append(el("div", QC_CONTEXT, ...contents(c.context)));
+	const mark = (round: boolean) => el("span", cn(QC_OPTION_MARK, round ? "rounded-full" : "rounded-sm", "border-muted-foreground/40"));
+	const list = el("div", QC_OPTION_LIST);
+	for (const [i, option] of c.options.entries()) {
+		const icon = mark(!c.multiSelect);
+		const letter = c.optionLetters?.[i];
+		if (letter) icon.append(el("span", QC_OPTION_LETTER, letter));
+		list.append(el("button", QC_OPTION_ROW, icon, el("span", "", ...contents(option))));
+	}
+	if (c.kind === "quiz") list.append(el("button", cn(QC_OPTION_ROW, "border-dashed"), mark(true), el("span", "", "I don't know")));
+	if (c.kind === "ask") {
+		const input = el("div", cn(pathInputClassName(true), QC_OTHER_INPUT));
+		input.dataset.empty = "true";
+		input.dataset.placeholder = OTHER_PLACEHOLDER;
+		list.append(el("div", cn(QC_OPTION_ROW, "border-dashed"), mark(!c.multiSelect), input));
+	}
+	const options = el("div", "", list);
+	const confidence = c.kind === "quiz"
+		? el("div", CONFIDENCE_ROW_PAD,
+			el("div", QC_CONFIDENCE_ROW,
+				el("span", QC_CONFIDENCE_LABEL, "Confidence"),
+				el("div", QC_CONFIDENCE_TRACK),
+				el("span", QC_CONFIDENCE_VALUE, "50%")))
+		: null;
+	return { question, options, confidence };
+}
 
 /**
  * The question dock — a pending quiz/ask REPLACES the chat composer: the
@@ -61,6 +172,8 @@ import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-
  */
 
 export interface QuestionDockProps {
+	/** Private click-time view read: no draft save or dictation flush. */
+	viewReader?: ViewReaderRef<NativeQuestionViewState>;
 	toolName: "quiz" | "probe" | "ask_user_question" | "explain" | "recall";
 	toolCallId: string;
 	input: QuizToolInput | AskToolInput | ExplainToolInput;
@@ -75,12 +188,18 @@ export interface QuestionDockProps {
 	reveal?: boolean;
 	onExpand: () => void;
 	onSubmit: (output: QuestionAnswerData) => void;
+	onPrepareSubmission?: PrepareBuiltinSubmission;
+	hasPendingInput?: (question: QuestionData) => boolean;
+	preparing?: boolean;
 	/** Restore only this call's unconfirmed submission after recovery. */
 	initialDraft?: QuestionFormDraft;
 	onSaveDraft?: (draft: QuestionFormDraft) => void;
 	/** Escape in a question field stops dictation (STT wave) — threaded
 	 *  from the page that owns the dictation hook. */
 	onEscape?: () => void;
+	/** The learner's current unsubmitted working (thinking, or the typed
+	 *  answer in text mode), kept current for the side thread's nudges. */
+	workingRef?: { current: string };
 	/** The keyboard machine (wave B) is armed only while the dock is
 	 *  expanded — the collapsed bar keeps its native Enter-to-expand. */
 	active?: boolean;
@@ -97,9 +216,14 @@ export interface QuestionDockProps {
 	 *  and say so in the hint row. The server registry is the real gate;
 	 *  this is the affordance. */
 	compactionRunning?: boolean;
+	/** Adaptive layout (Appearance → Adapt question layout); null/absent = off. */
+	layoutRequest?: QuestionLayoutRequest | null;
+	/** Reports the solved layout (null when off or unmounted). */
+	onLayout?: (layout: QuestionLayout | null) => void;
 }
 
 export function QuestionDock({
+	viewReader,
 	toolName,
 	toolCallId,
 	input,
@@ -107,12 +231,18 @@ export function QuestionDock({
 	reveal = false,
 	onExpand,
 	onSubmit,
+	onPrepareSubmission,
+	hasPendingInput,
+	preparing,
 	initialDraft,
 	onSaveDraft,
 	onEscape,
 	phase = "probe",
 	dictationClaim = true,
 	compactionRunning = false,
+	workingRef,
+	layoutRequest,
+	onLayout,
 }: QuestionDockProps) {
 	// The probe-phase names (owner, 2026-10-09) canonicalize onto their
 	// teach twins for every dock concern — parse dispatch, labels, kinds:
@@ -130,8 +260,8 @@ export function QuestionDock({
 	// bridge), so this is pure defense in depth — but it is STRUCTURAL now:
 	// anything that slips through renders the quiet fallback, never a
 	// crash on `.map` over model-authored bytes.
-	const parsed =
-		canonical === "quiz" ? parseQuizInput(input) : canonical === "explain" ? parseExplainInput(input) : parseAskInput(input);
+	const parsed = useMemo(() =>
+		canonical === "quiz" ? parseQuizInput(input) : canonical === "explain" ? parseExplainInput(input) : parseAskInput(input), [canonical, input]);
 	if (!parsed) {
 		return <MalformedQuestion />;
 	}
@@ -154,34 +284,28 @@ export function QuestionDock({
 			)}
 			<div className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
 				<QuestionDockForm
+					viewReader={viewReader}
 					toolName={toolName}
 					toolCallId={toolCallId}
 					input={parsed}
 					phase={phase}
 					active={expanded}
 					onSubmit={onSubmit}
+					onPrepareSubmission={onPrepareSubmission}
+					hasPendingInput={hasPendingInput}
+					preparing={preparing}
 					initialDraft={initialDraft}
 					onSaveDraft={onSaveDraft}
 					onEscape={onEscape}
+					workingRef={workingRef}
 					dictationClaim={dictationClaim}
 					compactionRunning={compactionRunning}
+					layoutRequest={layoutRequest}
+					onLayout={onLayout}
 				/>
 			</div>
 		</>
 	);
-}
-
-/** A plain-text teaser of a question for the collapsed bar: unwrap math, flatten common LaTeX. */
-function teaserText(q: string): string {
-	return repairMathForDisplay(q)
-		.replace(/\\\(([\s\S]*?)\\\)/g, "$1") // \(...\) inline math
-		.replace(/\\\[([\s\S]*?)\\\]/g, "$1") // \[...\] display math
-		.replace(/\$\$?([^$]*)\$\$?/g, "$1") // standard $...$/$$...$$ math
-		.replace(/\\frac\{([^{}]*)\}\{([^{}]*)\}/g, "$1/$2")
-		.replace(/\\([a-zA-Z]+)/g, "$1")
-		.replace(/[{}]/g, "")
-		.replace(/\s+/g, " ")
-		.trim();
 }
 
 /** The collapsed strip. Two species (W5): "collapsed" is the scroll minimization
@@ -221,7 +345,9 @@ export function QuestionDockBar({
 				</span>
 				<span className="min-w-0 flex-1">
 					<span className="block text-sm font-medium">Check your understanding</span>
-					<span className="block truncate text-xs text-muted-foreground">{teaserText(question)}</span>
+					<span className="block text-xs text-muted-foreground">
+						<QuestionPreview>{question}</QuestionPreview>
+					</span>
 				</span>
 				<span className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
 					Open <ChevronRightIcon className="size-3.5" />
@@ -241,7 +367,9 @@ export function QuestionDockBar({
 							toolLabel ??
 							(toolName === "quiz" ? "Check" : toolName === "explain" ? "Explain" : "Question")}
 			</span>
-			<span className="min-w-0 flex-1 truncate text-muted-foreground">{teaserText(question)}</span>
+			<span className="min-w-0 flex-1 text-muted-foreground">
+				<QuestionPreview>{question}</QuestionPreview>
+			</span>
 			<span className="flex shrink-0 items-center gap-1 text-xs font-medium">
 				Answer <ArrowDownIcon className="size-3.5" />
 			</span>
@@ -251,19 +379,31 @@ export function QuestionDockBar({
 
 /** The expanded question: label, question, options, and the unified bottom row. */
 function QuestionDockForm({
+	viewReader,
 	toolName,
 	toolCallId,
 	input,
 	phase = "probe",
 	active,
 	onSubmit,
+	onPrepareSubmission,
+	hasPendingInput,
+	preparing,
 	initialDraft,
 	onSaveDraft,
 	onEscape,
 	dictationClaim = true,
 	compactionRunning = false,
+	workingRef,
+	layoutRequest,
+	onLayout,
 }: Omit<QuestionDockProps, "expanded" | "onExpand" | "reveal">) {
 	const kind = toolQuestionKind(toolName);
+	const controller = useOptionalInteractionLayers();
+	const rootRef = useRef<HTMLDivElement>(null);
+	const questionPartRef = useRef<HTMLDivElement>(null);
+	const optionsRef = useRef<HTMLDivElement>(null);
+	const confidenceRef = useRef<HTMLDivElement>(null);
 
 	// Canonical QuestionData, built once per question. Quiz options are
 	// deterministically shuffled (seeded by toolCallId) so position never leaks
@@ -284,10 +424,7 @@ function QuestionDockForm({
 						? "multi-select"
 						: "single-select"
 						: "text";
-		const options = normalizeOptions(
-			(quizInput?.options ?? askInput?.options ?? []) as { label: string; value?: string }[],
-		);
-		const ordered = kind === "quiz" && options.length > 0 ? shuffleOptions(options, seededRandom(toolCallId)) : options;
+		const { options: ordered, optionOrder } = questionDisplayOptions(quizInput?.options ?? askInput?.options, kind, multi, toolCallId);
 		const q: QuestionData = {
 			id: toolCallId,
 			kind,
@@ -298,6 +435,7 @@ function QuestionDockForm({
 			context: input.details,
 			mode,
 			options: ordered,
+			optionOrder,
 			createdAt: new Date().toISOString(),
 		};
 		if (quizInput) {
@@ -325,6 +463,11 @@ function QuestionDockForm({
 	const [thinking, setThinking] = useState(initialDraft?.thinking ?? "");
 	const [other, setOther] = useState(initialDraft?.other ?? "");
 	const [text, setText] = useState(initialDraft?.text ?? "");
+	// Mirrors the working out for the side thread (nudges respond to it).
+	useEffect(() => {
+		if (workingRef) workingRef.current = (qd.mode === "text" ? text : thinking).trim();
+	}, [workingRef, qd.mode, text, thinking]);
+	useEffect(() => () => { if (workingRef) workingRef.current = ""; }, [workingRef]);
 	/* Refs MIRROR the two dictation-target fields ("nothing gets lost"
 	 * round, owner 2026-10-01): the run's flush lands via setState, which
 	 * a closure waiting through `await finishDictation()` cannot observe
@@ -368,13 +511,36 @@ function QuestionDockForm({
 
 	const toggle = (idx: number) => setSel(toggleOption(selectMode, sel, idx));
 
-	const canSubmit =
+	const nativeCanSubmit =
 		qd.mode === "text"
 			? text.trim().length > 0
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
+	const canSubmit = nativeCanSubmit || hasPendingInput?.(qd) === true;
+	const currentQuestion = useRef(qd); currentQuestion.current = qd;
+	const mounted = useRef(true);
+	useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
+	const formValues = useRef({ sel, other, confIdx }); formValues.current = { sel, other, confIdx };
+	useLayoutEffect(() => {
+		if (!viewReader) return;
+		const read = (): NativeQuestionViewState => {
+			const { sel, other, confIdx } = formValues.current;
+			return { question: qd, draft: { dontKnow: sel.dontKnow,
+				values: [...sel.selected].flatMap(index => qd.options[index] ? [qd.options[index]!.value] : []),
+				otherSelected: sel.otherSelected, other, text: answerTextRef.current, thinking: thinkingTextRef.current,
+				...(kind === "quiz" ? { confidence: CONFIDENCE_STOPS[confIdx] } : {}) } };
+		};
+		viewReader.current = read;
+		return () => { if (viewReader.current === read) viewReader.current = null; };
+	}, [viewReader, qd, kind]);
+	const viewPresentationKey = JSON.stringify({ ...toClientQuestion(qd), questionType: qd.questionType });
+	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, sel, other, text, thinking, confIdx, viewPresentationKey]);
 	const submit = () => {
-		if (!canSubmit || compactionRunning) return;
+		if (!canSubmit || compactionRunning || preparing) return;
+		if (onPrepareSubmission) {
+			onPrepareSubmission({ question: qd, isCurrent: () => mounted.current && currentQuestion.current === qd && isInteractionScopeEligible(rootRef.current, controller), capture: captureRequest });
+			return;
+		}
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while
 		 * a run is live with reasoning still in Deepgram's hands. Stop the
 		 * run, let the last finals land in the target field, and only then
@@ -387,8 +553,8 @@ function QuestionDockForm({
 		}
 		void finishDictation().then(doSubmit);
 	};
-	const doSubmit = () => {
-		if (!canSubmit) return;
+	const captureRequest = (): AnswerRequest => {
+		const { sel, other, confIdx } = formValues.current;
 		const req: AnswerRequest = {
 			dontKnow: sel.dontKnow,
 			values: [...sel.selected].map((i) => qd.options[i]!.value),
@@ -408,13 +574,17 @@ function QuestionDockForm({
 			text: answerTextRef.current,
 			confidenceIndex: confIdx,
 		});
-		onSubmit(buildAnswer(qd, req, toolName));
+		return req;
+	};
+	const doSubmit = () => {
+		if (!canSubmit) return;
+		onSubmit(buildAnswer(qd, captureRequest(), toolName));
 	};
 
 	/* ENTER SUBMITS FROM ANYWHERE (owner round 6, 2026-10-05): the same
 	 * law as the practice dock — dictated answers rarely focus the field.
 	 * Rides submit() so the dictation-flush law is shared, not forked. */
-	useEnterSubmits(submit);
+	useEnterSubmits(submit, rootRef);
 
 	// Selecting Other never clears the thinking field — two channels, the
 	// answer and the reasoning behind it, side by side.
@@ -436,7 +606,6 @@ function QuestionDockForm({
 	   The listener is document-level and lives only while the dock is
 	   expanded — collapsed, the bar's native Enter expands it. */
 	const [kbdIdx, setKbdIdx] = useState<number | null>(null);
-	const rootRef = useRef<HTMLDivElement>(null);
 	const otherInputRef = useRef<HTMLDivElement>(null);
 	const thinkingRef = useRef<HTMLDivElement>(null);
 	// One row past the options is the trailing row: quiz → don't-know,
@@ -478,6 +647,9 @@ function QuestionDockForm({
 	useEffect(() => {
 		if (!active || rowCount === 0) return;
 		const onKeyDown = (e: KeyboardEvent) => {
+			// Tab is already default-prevented by provider capture; do not
+			// treat that as a claim. Eligibility, not focus alone, owns rows.
+			if (!isInteractionScopeEligible(rootRef.current, controller)) return;
 			const t = e.target as HTMLElement | null;
 			// A TYPING field is where keys mean text (owner round 4): the
 			// thinking/answer fields, search boxes, renames — never a range
@@ -535,6 +707,8 @@ function QuestionDockForm({
 						Math.max(0, i + (e.key === "ArrowRight" ? 1 : -1)),
 					),
 				);
+				// Confidence scrolls with the options: keep it in view.
+				confidenceRef.current?.scrollIntoView({ block: "nearest" });
 			} else if (e.key === " ") {
 				if (kbdIdx === null) return; // plain Space keeps scrolling the page
 				e.preventDefault();
@@ -557,278 +731,382 @@ function QuestionDockForm({
 			?.scrollIntoView({ block: "nearest" });
 	}, [kbdIdx]);
 
-	return (
-		<div ref={rootRef} data-testid="question-dock">
-			{/* Question area — scrolls internally if very tall; the bottom row stays put.
-			    Capped by the measured column (--dock-max-h; the old fixed 55dvh cut
-			    long questions short — owner round, 2026-10-05). */}
-			<div data-dock-scroll-area="" data-session-find-root="" className="max-h-[var(--dock-max-h,55dvh)] overflow-y-auto px-4 pt-3">
-				<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-					{toolName === "probe"
-						? "Probe"
-						: toolName === "recall"
-							? "Recall"
-							: kind === "quiz"
-								? qd.questionType === "predict"
-									? "Prediction"
-									: "Check"
-									: kind === "explain"
-										? "Explain"
-											: "Question"}
-					{qd.mode === "multi-select" && " · select all that apply"}
-				</div>
-				<div className="mb-3 font-medium">
-					<ToolContentResponse>{qd.question}</ToolContentResponse>
-				</div>
-				{qd.context && (
-					<div className="mb-3 text-sm text-muted-foreground">
-						<ToolContentResponse>{qd.context}</ToolContentResponse>
+	const switchPosition = useRef<{ anchors: ReturnType<typeof captureReadingPosition>; focused: Element | null } | null>(null);
+	const readingPosition = useRef<{ id: string; anchors: ReturnType<typeof captureReadingPosition> } | null>(null);
+	const holdingPosition = useRef(false);
+	const trackPosition = layoutRequest != null;
+	useIsoLayoutEffect(() => {
+		const question = questionPartRef.current;
+		if (!trackPosition || !question) return;
+		return trackReadingPosition(question, () => optionsRef.current, (anchors) => {
+			if (!holdingPosition.current) readingPosition.current = { id: qd.id, anchors };
+		});
+	}, [trackPosition, qd.id]);
+
+	// ADAPTIVE LAYOUT (Appearance → Adapt question layout): solved by the
+	// shared hook (components/use-question-layout.ts) — the answered card
+	// in the transcript uses the same one. The thinking field is never an
+	// input, so typing cannot trigger a re-measure.
+	const layout = useQuestionLayout({
+		cacheId: qd.id,
+		request: layoutRequest ?? null,
+		identity: qd,
+		live: () => {
+			const root = rootRef.current;
+			const question = questionPartRef.current;
+			if (!root || !question) return null;
+			return { root, question, options: optionsRef.current, observe: [question, optionsRef.current] };
+		},
+		parts: (live) => ({ root: live.root, question: live.question, options: live.options, confidence: confidenceRef.current }),
+		onLayout,
+		onSwitch: (_, to) => {
+			const question = questionPartRef.current;
+			const saved = readingPosition.current;
+			const anchors = saved?.id === qd.id ? saved.anchors : question ? captureReadingPosition(question, optionsRef.current, to?.kind === "columns") : [];
+			const root = rootRef.current;
+			switchPosition.current = {
+				anchors: to?.kind === "columns" ? anchors : anchors.filter((a) => a.edge === "top" && a.section === question),
+				focused: root && visibleFocused(root),
+			};
+		},
+	});
+	const columns = layout?.kind === "columns" ? layout : null;
+
+	// Across a switch the same nodes stay (focus, caret, drags), but the
+	// scrolling element changes. Transfer the reading anchor, then give
+	// focus priority only if the control was visible before switching.
+	const arrangement = columns ? "columns" : "stacked";
+	useIsoLayoutEffect(() => {
+		const root = rootRef.current;
+		const position = switchPosition.current;
+		switchPosition.current = null;
+		if (!position || !root) return;
+		const { anchors, focused } = position;
+		if (!anchors.length && !focused) return;
+		holdingPosition.current = true;
+		return holdAcrossSwitch(root, () => {
+			restoreReadingPosition(anchors);
+			if (focused && root.ownerDocument.activeElement === focused) revealFocused(root);
+		}, { onStop: () => { holdingPosition.current = false; } });
+	}, [arrangement, qd.id]);
+
+	/* Confidence (owner, 2026-10-01; UI rounds same day): a snapped
+		slider below the options and above "Your thinking" — the
+		learner's stated probability that his selected answer is
+		correct. The thumb's POSITION is the raw fraction; the painted
+		RAIL overlays exactly the thumb-center range (inset half a disc
+		per side), so 0 and 100 rest flush against the rail's very
+		ends. Fill + handle wear the stop's ramp color; SOLID stop
+		ticks are background layers behind the fill (empty side only,
+		never over the color; 0/100 need no tick — the flush ends say
+		them). Keyboard: GLOBAL ←/→ (the ↑/↓ pattern; the ring is gone
+		app-wide). Clicking and dragging are native. "I don't know"
+		GRAYS it out — the layout holds, no value is sent, the IDK
+		signal stands alone. No box of its own (owner, session-appearance-
+		layout): right under the options, scrolling with them and sharing
+		their padding — in the stacked question area, or in the answer
+		column's scroller (owner: the same in both arrangements). */
+	const confidenceRow = kind === "quiz" ? (
+			<div ref={confidenceRef} data-question-confidence="" className={CONFIDENCE_ROW_PAD}>
+				<div className={QC_CONFIDENCE_ROW}>
+					<span
+						className={cn(
+							QC_CONFIDENCE_LABEL,
+							sel.dontKnow ? "text-muted-foreground/50" : "text-muted-foreground",
+						)}
+					>
+						Confidence
+					</span>
+					<div
+						className={cn(QC_CONFIDENCE_TRACK, sel.dontKnow && "opacity-40")}
+						data-testid="confidence-track"
+					>
+						{/* The RAIL is painted here, not on the input: this overlay spans
+							exactly the thumb-CENTER range (inset 8px = half the 16px disc,
+							left and right), so at 0 and 100 the disc sits flush against the
+							rail's very ends — no bare stub poking past it (owner round 4).
+							STACKING LAW (owner round 5): the input is absolute too — a
+							positioned overlay paints above an in-flow input no matter the
+							DOM order, which put the rail OVER the disc. Both positioned,
+							input later in DOM → the disc rides on top. The wrapper's height
+							is pinned (h-4) so the rail's top-1/2 and the disc's track share
+							one box — centered by construction, not by hope. */}
+						<div
+							aria-hidden
+							data-testid="confidence-rail"
+							className="pointer-events-none absolute top-1/2 left-2 right-2 h-1.5 -translate-y-1/2 rounded-full border border-border"
+							style={confidenceRailStyle(CONFIDENCE_STOPS[confIdx]!)}
+						/>
+						<input
+							type="range"
+							min={0}
+							max={100}
+							step={1}
+							value={CONFIDENCE_STOPS[confIdx]}
+							disabled={sel.dontKnow}
+							aria-label="Confidence — the probability your selected answer is correct"
+							aria-valuetext={`${CONFIDENCE_STOPS[confIdx]} percent`}
+							title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
+							data-testid="confidence-slider"
+							onChange={(e) => {
+								// Snap to the nearest stop; the rendered VALUE is the stop's own
+								// percent, so the thumb always rests at its true fraction (50 =
+								// halfway). Keyboard needs no handler here: the dock machine treats
+								// a focused range as non-typing (see the guard above) and its ←/→
+								// branch preventDefaults, which also cancels the native 1% step.
+								const v = Number(e.target.value);
+								let best = 0;
+								for (let i = 1; i < CONFIDENCE_STOPS.length; i++) {
+									if (Math.abs(CONFIDENCE_STOPS[i]! - v) < Math.abs(CONFIDENCE_STOPS[best]! - v)) best = i;
+								}
+								setConfIdx(best);
+							}}
+							style={{ color: CONFIDENCE_COLORS[confIdx] }}
+							className={cn(
+								"absolute inset-0 h-4 w-full cursor-pointer appearance-none bg-transparent outline-none",
+								"[&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent",
+								"[&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current",
+								"[&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent",
+								"[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current",
+							)}
+						/>
 					</div>
+					<span
+						data-testid="confidence-value"
+						className={cn(
+							// Balanced gaps (owner): the rail is inset 8px in its
+							// track on both ends, so label→rail is the 12px flex gap
+							// + 8px. The slot fits "100%" exactly, so rail→"100%" is
+							// that same 12px + 8px; shorter values sit CENTERED in
+							// it, splitting their spare width across both sides.
+							QC_CONFIDENCE_VALUE,
+							sel.dontKnow && "text-muted-foreground/50",
+						)}
+					>
+						{sel.dontKnow ? "—" : `${CONFIDENCE_STOPS[confIdx]}%`}
+					</span>
+				</div>
+			</div>
+	) : null;
+
+	// The question part (label, question, context) and the answer list are
+	// shared by both arrangements; the refs feed the layout probe.
+	const questionPart = (
+		<div ref={questionPartRef} data-question-part="">
+			<div className={QC_LABEL}>
+				{questionCardLabel(toolName, kind, qd.questionType)}
+				{qd.mode === "multi-select" && " · select all that apply"}
+			</div>
+			<div className={QC_QUESTION}>
+				<ToolContentResponse>{qd.question}</ToolContentResponse>
+			</div>
+			{qd.context && (
+				<div className={QC_CONTEXT}>
+					<ToolContentResponse>{qd.context}</ToolContentResponse>
+				</div>
+			)}
+		</div>
+	);
+	const optionList = qd.mode === "text" ? null : (
+		<div ref={optionsRef} data-question-options="">
+			<div className={QC_OPTION_LIST} role={qd.mode === "multi-select" ? "group" : "radiogroup"}>
+				{qd.options.map((opt, i) => {
+					const isSel = sel.selected.has(i);
+					const letter = displayedOptionLetter(qd.optionOrder, i + 1);
+					return (
+						<button
+							key={opt.value}
+							type="button"
+							role={qd.mode === "multi-select" ? "checkbox" : "radio"}
+							aria-checked={isSel}
+							data-kbdrow={i}
+							onClick={() => toggle(i)}
+							className={cn(
+								QC_OPTION_ROW,
+								isSel ? "border-primary bg-accent" : "hover:bg-accent/50",
+								i === kbdIdx && !isSel && "ring-1 ring-border bg-accent/40",
+							)}
+						>
+							<span
+								className={cn(
+									QC_OPTION_MARK,
+									qd.mode === "multi-select" ? "rounded-sm" : "rounded-full",
+									isSel ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
+								)}
+							>
+								{letter ? (
+									<span data-option-letter={letter} className={cn(QC_OPTION_LETTER, !isSel && "text-muted-foreground/70")}>
+										{letter}
+									</span>
+								) : isSel && (
+									<span className={cn(qd.mode === "multi-select" ? "text-base leading-none" : "size-1.5 rounded-full bg-current")}>
+										{qd.mode === "multi-select" ? "✓" : ""}
+									</span>
+								)}
+							</span>
+							<span>
+								<ToolContentResponse>{opt.label}</ToolContentResponse>
+								{kind !== "quiz" && opt.description && (
+									// Option subtext renders in Source Sans 3 (owner's mockup);
+									// the "I don't know" copy stays JetBrains Mono. QUIZ options render
+									// NO description (owner ruling 2026-09-26): the model used them to
+									// telegraph correctness — the schema dropped the field and old
+									// records must not leak either. Same MessageResponse path as the
+									// label (owner, 2026-10-12): descriptions are full markdown —
+									// LaTeX included — not plain text.
+									<ToolContentResponse className="lh-prose block text-xs text-muted-foreground">
+										{opt.description}
+									</ToolContentResponse>
+								)}
+							</span>
+						</button>
+					);
+				})}
+
+				{kind === "quiz" && (
+					<button
+						type="button"
+						onClick={() =>
+							setSel((prev) => ({ ...prev, selected: new Set(), otherSelected: false, dontKnow: !prev.dontKnow }))
+						}
+						data-kbdrow={optionCount}
+						aria-pressed={sel.dontKnow}
+						className={cn(
+							// Option-row layout + radio circle (owner); the dashed
+							// outline stays — this is the deliberate non-answer.
+							QC_OPTION_ROW, "border-dashed",
+							sel.dontKnow ? "border-primary text-foreground" : "text-muted-foreground",
+							kbdIdx === optionCount && !sel.dontKnow && "ring-1 ring-border bg-accent/40",
+						)}
+					>
+						<span
+							className={cn(
+								QC_OPTION_MARK, "rounded-full",
+								sel.dontKnow
+									? "border-primary bg-primary text-primary-foreground"
+									: "border-muted-foreground/40",
+							)}
+						>
+							{sel.dontKnow && <span className="size-1.5 rounded-full bg-current" />}
+						</span>
+						<span>I don't know</span>
+					</button>
 				)}
 
-				{qd.mode !== "text" && (
-					<div className="flex flex-col gap-2 pb-2" role={qd.mode === "multi-select" ? "group" : "radiogroup"}>
-						{qd.options.map((opt, i) => {
-							const isSel = sel.selected.has(i);
-							return (
-								<button
-									key={opt.value}
-									type="button"
-									role={qd.mode === "multi-select" ? "checkbox" : "radio"}
-									aria-checked={isSel}
-									data-kbdrow={i}
-									onClick={() => toggle(i)}
-									className={cn(
-										"flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
-										isSel ? "border-primary bg-accent" : "hover:bg-accent/50",
-										i === kbdIdx && !isSel && "ring-1 ring-border bg-accent/40",
-									)}
-								>
-									<span
-										className={cn(
-											"mt-0.5 flex size-4 shrink-0 items-center justify-center border",
-											qd.mode === "multi-select" ? "rounded-sm" : "rounded-full",
-											isSel ? "border-primary bg-primary text-primary-foreground" : "border-muted-foreground/40",
-										)}
-									>
-										{isSel && (
-											<span className={cn(qd.mode === "multi-select" ? "text-base leading-none" : "size-1.5 rounded-full bg-current")}>
-												{qd.mode === "multi-select" ? "✓" : ""}
-											</span>
-										)}
-									</span>
-									<span>
-										<ToolContentResponse>{opt.label}</ToolContentResponse>
-										{kind !== "quiz" && opt.description && (
-											// Option subtext renders in Source Sans 3 (owner's mockup);
-											// the "I don't know" copy stays JetBrains Mono. QUIZ options render
-											// NO description (owner ruling 2026-09-26): the model used them to
-											// telegraph correctness — the schema dropped the field and old
-											// records must not leak either. Same MessageResponse path as the
-											// label (owner, 2026-10-12): descriptions are full markdown —
-											// LaTeX included — not plain text.
-											<ToolContentResponse className="lh-prose block text-xs text-muted-foreground">
-												{opt.description}
-											</ToolContentResponse>
-										)}
-									</span>
-								</button>
-							);
-						})}
-
-						{kind === "quiz" && (
-							<button
-								type="button"
-								onClick={() =>
-									setSel((prev) => ({ ...prev, selected: new Set(), otherSelected: false, dontKnow: !prev.dontKnow }))
+				{kind === "ask" && (
+					<div
+						role={qd.mode === "multi-select" ? "checkbox" : "radio"}
+						aria-checked={sel.otherSelected}
+						data-testid="other-option"
+						data-kbdrow={optionCount}
+						onClick={selectOther}
+						className={cn(
+							QC_OPTION_ROW,
+							sel.otherSelected ? "border-primary bg-accent" : "border-dashed hover:bg-accent/50",
+							kbdIdx === optionCount && !sel.otherSelected && "ring-1 ring-border bg-accent/40",
+						)}
+					>
+						<span
+							className={cn(
+								QC_OPTION_MARK,
+								qd.mode === "multi-select" ? "rounded-sm" : "rounded-full",
+								sel.otherSelected
+									? "border-primary bg-primary text-primary-foreground"
+									: "border-muted-foreground/40",
+							)}
+						>
+							{sel.otherSelected && (
+								<span className={cn(qd.mode === "multi-select" ? "text-base leading-none" : "size-1.5 rounded-full bg-current")}>
+									{qd.mode === "multi-select" ? "✓" : ""}
+								</span>
+							)}
+						</span>
+						<PathInput
+							ref={otherInputRef}
+							singleLine
+							value={other}
+							onValueChange={(value) => {
+								setOther(value);
+								// Typing selects the row — displacing in
+								// single-select, alongside the siblings in multi.
+								setSel((prev) => (prev.otherSelected ? prev : toggleOther(selectMode, prev)));
+							}}
+							onKeyDown={(e) => {
+								if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
+								// Esc escapes the typing (owner refinement round,
+								// 2026-09-24): focus leaves the input, the row STAYS
+								// selected — deselection is the next Space's job, acting
+								// on the row — and the arrow walk resumes from this
+								// row (kbdIdx pins it). stopPropagation keeps the
+								// window chain from reading this Esc as abort-turn.
+								if (e.key === "Escape") {
+									controller?.claimEscape(e);
+									e.preventDefault();
+									e.stopPropagation();
+									e.currentTarget.blur();
+									setKbdIdx(optionCount);
 								}
-								data-kbdrow={optionCount}
-								aria-pressed={sel.dontKnow}
-								className={cn(
-									// Option-row layout + radio circle (owner); the dashed
-									// outline stays — this is the deliberate non-answer.
-									"flex items-start gap-3 rounded-lg border border-dashed px-3 py-2 text-left text-sm outline-none transition-colors",
-									sel.dontKnow ? "border-primary text-foreground" : "text-muted-foreground",
-									kbdIdx === optionCount && !sel.dontKnow && "ring-1 ring-border bg-accent/40",
-								)}
-							>
-								<span
-									className={cn(
-										"mt-0.5 flex size-4 shrink-0 items-center justify-center rounded-full border",
-										sel.dontKnow
-											? "border-primary bg-primary text-primary-foreground"
-											: "border-muted-foreground/40",
-									)}
-								>
-									{sel.dontKnow && <span className="size-1.5 rounded-full bg-current" />}
-								</span>
-								<span>I don't know</span>
-							</button>
-						)}
-
-						{kind === "ask" && (
-							<div
-								role={qd.mode === "multi-select" ? "checkbox" : "radio"}
-								aria-checked={sel.otherSelected}
-								data-testid="other-option"
-								data-kbdrow={optionCount}
-								onClick={selectOther}
-								className={cn(
-									"flex items-start gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors",
-									sel.otherSelected ? "border-primary bg-accent" : "border-dashed hover:bg-accent/50",
-									kbdIdx === optionCount && !sel.otherSelected && "ring-1 ring-border bg-accent/40",
-								)}
-							>
-								<span
-									className={cn(
-										"mt-0.5 flex size-4 shrink-0 items-center justify-center border",
-										qd.mode === "multi-select" ? "rounded-sm" : "rounded-full",
-										sel.otherSelected
-											? "border-primary bg-primary text-primary-foreground"
-											: "border-muted-foreground/40",
-									)}
-								>
-									{sel.otherSelected && (
-										<span className={cn(qd.mode === "multi-select" ? "text-base leading-none" : "size-1.5 rounded-full bg-current")}>
-											{qd.mode === "multi-select" ? "✓" : ""}
-										</span>
-									)}
-								</span>
-								<PathInput
-									ref={otherInputRef}
-									singleLine
-									value={other}
-									onValueChange={(value) => {
-										setOther(value);
-										// Typing selects the row — displacing in
-										// single-select, alongside the siblings in multi.
-										setSel((prev) => (prev.otherSelected ? prev : toggleOther(selectMode, prev)));
-									}}
-									onKeyDown={(e) => {
-										// Esc escapes the typing (owner refinement round,
-										// 2026-09-24): focus leaves the input, the row STAYS
-										// selected — deselection is the next Space's job, acting
-										// on the row — and the arrow walk resumes from this
-										// row (kbdIdx pins it). stopPropagation keeps the
-										// window chain from reading this Esc as abort-turn.
-										if (e.key === "Escape") {
-											e.preventDefault();
-											e.stopPropagation();
-											e.currentTarget.blur();
-											setKbdIdx(optionCount);
-										}
-											// Enter submits directly (owner, keyboard round 2026-10-06):
-											// the custom answer is a single-line input — no newline
-											// to protect, and typing has already selected the row, so
-											// the payload is ready. Every Enter (shift or not — nothing
-											// else could ever happen in a one-line field) rides the
-											// same submit seam as the button, dictation finish-first
-											// included.
-											if (e.key === "Enter") {
-												e.preventDefault();
-												submit();
-											}
-									}}
-									placeholder="Type your own answer…"
-									className="lh-input w-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground"
-									onClick={(e) => e.stopPropagation()}
-								/>
-							</div>
-						)}
+									// Enter submits directly (owner, keyboard round 2026-10-06):
+									// the custom answer is a single-line input — no newline
+									// to protect, and typing has already selected the row, so
+									// the payload is ready. Every Enter (shift or not — nothing
+									// else could ever happen in a one-line field) rides the
+									// same submit seam as the button, dictation finish-first
+									// included.
+									if (e.key === "Enter") {
+										e.preventDefault();
+										submit();
+									}
+							}}
+							placeholder={OTHER_PLACEHOLDER}
+							className={QC_OTHER_INPUT}
+							onClick={(e) => e.stopPropagation()}
+						/>
 					</div>
 				)}
 			</div>
+		</div>
+	);
 
-			{/* Confidence (owner, 2026-10-01; UI rounds same day): a snapped
-				slider below the options and above "Your thinking" — the
-				learner's stated probability that his selected answer is
-				correct. The thumb's POSITION is the raw fraction; the painted
-				RAIL overlays exactly the thumb-center range (inset half a disc
-				per side), so 0 and 100 rest flush against the rail's very
-				ends. Fill + handle wear the stop's ramp color; SOLID stop
-				ticks are background layers behind the fill (empty side only,
-				never over the color; 0/100 need no tick — the flush ends say
-				them). Keyboard: GLOBAL ←/→ (the ↑/↓ pattern; the ring is gone
-				app-wide). Clicking and dragging are native. "I don't know"
-				GRAYS it out — the layout holds, no value is sent, the IDK
-				signal stands alone. */}
-			{kind === "quiz" && (
-				<div className="border-t border-border/60 px-4 py-2.5">
-					<div className="flex items-center gap-3">
-						<span
-							className={cn(
-								"shrink-0 text-xs font-medium uppercase tracking-wide",
-								sel.dontKnow ? "text-muted-foreground/50" : "text-muted-foreground",
-							)}
-						>
-							Confidence
-						</span>
-						<div
-							className={cn("relative h-4 min-w-0 flex-1", sel.dontKnow && "opacity-40")}
-							data-testid="confidence-track"
-						>
-							{/* The RAIL is painted here, not on the input: this overlay spans
-								exactly the thumb-CENTER range (inset 8px = half the 16px disc,
-								left and right), so at 0 and 100 the disc sits flush against the
-								rail's very ends — no bare stub poking past it (owner round 4).
-								STACKING LAW (owner round 5): the input is absolute too — a
-								positioned overlay paints above an in-flow input no matter the
-								DOM order, which put the rail OVER the disc. Both positioned,
-								input later in DOM → the disc rides on top. The wrapper's height
-								is pinned (h-4) so the rail's top-1/2 and the disc's track share
-								one box — centered by construction, not by hope. */}
-							<div
-								aria-hidden
-								data-testid="confidence-rail"
-								className="pointer-events-none absolute top-1/2 left-2 right-2 h-1.5 -translate-y-1/2 rounded-full border border-border"
-								style={confidenceRailStyle(CONFIDENCE_STOPS[confIdx]!)}
-							/>
-							<input
-								type="range"
-								min={0}
-								max={100}
-								step={1}
-								value={CONFIDENCE_STOPS[confIdx]}
-								disabled={sel.dontKnow}
-								aria-label="Confidence — the probability your selected answer is correct"
-								aria-valuetext={`${CONFIDENCE_STOPS[confIdx]} percent`}
-								title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
-								data-testid="confidence-slider"
-								onChange={(e) => {
-									// Snap to the nearest stop; the rendered VALUE is the stop's own
-									// percent, so the thumb always rests at its true fraction (50 =
-									// halfway). Keyboard needs no handler here: the dock machine treats
-									// a focused range as non-typing (see the guard above) and its ←/→
-									// branch preventDefaults, which also cancels the native 1% step.
-									const v = Number(e.target.value);
-									let best = 0;
-									for (let i = 1; i < CONFIDENCE_STOPS.length; i++) {
-										if (Math.abs(CONFIDENCE_STOPS[i]! - v) < Math.abs(CONFIDENCE_STOPS[best]! - v)) best = i;
-									}
-									setConfIdx(best);
-								}}
-								style={{ color: CONFIDENCE_COLORS[confIdx] }}
-								className={cn(
-									"absolute inset-0 h-4 w-full cursor-pointer appearance-none bg-transparent outline-none",
-									"[&::-webkit-slider-runnable-track]:h-4 [&::-webkit-slider-runnable-track]:bg-transparent",
-									"[&::-webkit-slider-thumb]:size-4 [&::-webkit-slider-thumb]:appearance-none [&::-webkit-slider-thumb]:rounded-full [&::-webkit-slider-thumb]:bg-current",
-									"[&::-moz-range-track]:h-4 [&::-moz-range-track]:bg-transparent",
-									"[&::-moz-range-thumb]:size-4 [&::-moz-range-thumb]:appearance-none [&::-moz-range-thumb]:rounded-full [&::-moz-range-thumb]:border-0 [&::-moz-range-thumb]:bg-current",
-								)}
-							/>
-						</div>
-						<span
-							data-testid="confidence-value"
-							className={cn(
-								"w-9 shrink-0 text-right font-mono text-sm tabular-nums",
-								sel.dontKnow && "text-muted-foreground/50",
-							)}
-						>
-							{sel.dontKnow ? "—" : `${CONFIDENCE_STOPS[confIdx]}%`}
-						</span>
+	return (
+		<div ref={rootRef} data-testid="question-dock" data-question-layout={columns ? "columns" : "stacked"} className="relative">
+			{/* ONE subtree for both arrangements (identity is what keeps focus,
+			    the Other caret, scroll positions and an active drag across a
+			    layout switch): only classes and attributes change.
+			    STACKED: the outer box is the question area — scrolls internally
+			    if very tall, capped by the measured column (--dock-max-h; the old
+			    fixed 55dvh cut long questions short — owner round, 2026-10-05);
+			    the inner wrappers are display: contents.
+			    TWO COLUMNS (Adapt question layout): the question left, the
+			    options + confidence right, "Your thinking" full width below. The
+			    row caps at --dock-max-h; each column scrolls on its own. No
+			    divider: a shorter answer column centers its content vertically.
+			    The question track is the flexible one, so while the dock's width
+			    morphs the answer column is never clipped. */}
+			<div
+				data-dock-height-region={columns ? "" : undefined}
+				data-dock-scroll-area={columns ? undefined : ""}
+				data-session-find-root=""
+				data-testid={columns ? "question-columns" : undefined}
+				className={columns ? "grid" : cn("max-h-[var(--dock-max-h,55dvh)] overflow-y-auto", STACKED_AREA_PAD)}
+				style={columns ? { gridTemplateColumns: `minmax(0, 1fr) ${columns.answer}px` } : undefined}
+			>
+				<div
+					data-dock-scroll-area={columns ? "" : undefined}
+					className={columns ? cn("max-h-[var(--dock-max-h,55dvh)] min-w-0 overflow-y-auto", QUESTION_COLUMN_PAD) : "contents"}
+				>
+					{questionPart}
+				</div>
+				<div className={columns ? cn("max-h-[var(--dock-max-h,55dvh)] min-h-0 min-w-0", ANSWER_COLUMN_FRAME) : "contents"}>
+					<div
+						data-dock-scroll-area={columns ? "" : undefined}
+						className={columns ? cn("flex min-h-0 flex-col overflow-y-auto", ANSWER_OPTIONS_PAD) : "contents"}
+					>
+						{optionList}
+						{confidenceRow}
 					</div>
 				</div>
-			)}
+			</div>
 
 			{/* The learner's half of the dock — a composer TWIN: a labeled, bordered
 			    field with Submit docked inside, exactly like the chat composer's
@@ -857,12 +1135,14 @@ function QuestionDockForm({
 								setText(value);
 							}}
 							onKeyDown={(e) => {
+								if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 								// Esc ends dictation (the dictate decisions: click-again
 								// or Esc) — stopPropagation claims it (keyboard wave
 								// A) so the window chain doesn't also abort a turn.
 								if (e.key === "Escape" && onEscape) {
 									e.preventDefault();
 									e.stopPropagation();
+									controller?.claimEscape(e);
 									onEscape();
 									return;
 								}
@@ -885,12 +1165,14 @@ function QuestionDockForm({
 								setThinking(value);
 							}}
 							onKeyDown={(e) => {
+								if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 								// Esc ends dictation (the dictate decisions: click-again
 								// or Esc) — stopPropagation claims it (keyboard wave
 								// A) so the window chain doesn't also abort a turn.
 								if (e.key === "Escape" && onEscape) {
 									e.preventDefault();
 									e.stopPropagation();
+									controller?.claimEscape(e);
 									onEscape();
 									return;
 								}
@@ -917,7 +1199,7 @@ function QuestionDockForm({
 						</span>
 						<Button
 							type="submit"
-							disabled={!canSubmit || compactionRunning}
+							disabled={!canSubmit || compactionRunning || preparing}
 							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 						>
 							Submit answer

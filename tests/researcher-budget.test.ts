@@ -60,117 +60,93 @@ function recordingSearch() {
 	return { provider, queries };
 }
 
-function researchTurns(interimText = false): AssistantMessage[] {
-	return Array.from({ length: 11 }, (_, index) => {
-		const call = fauxToolCall("web_search", { query: `query-${index + 1}` }, { id: `search-${index + 1}` });
-		const content = interimText && index === 10 ? [fauxText("I still need to examine this source."), call] : [call];
-		return fauxAssistantMessage(content, { stopReason: "toolUse" });
-	});
+function searchTurn(): AssistantMessage {
+	return fauxAssistantMessage([
+		fauxText("I will examine this source."),
+		fauxToolCall("web_search", { query: "stationarity" }, { id: "search-1" }),
+	], { stopReason: "toolUse" });
 }
 
-describe("researcher budget finalization", () => {
-	it("returns an early completed brief without another model call", async () => {
-		const { engine, requests } = scriptedEngine([
-			researchTurns()[0]!,
-			fauxAssistantMessage(BRIEF),
-			() => { throw new Error("Unexpected extra model call"); },
-		]);
-		const search = recordingSearch();
-		const usage: Usage[] = [];
-		const result = await runResearcherAgent(QUESTION, { engine, search: () => search.provider, onUsage: (value) => usage.push(value) });
-		assert.equal(result, BRIEF);
-		assert.equal(requests.length, 2);
-		assert.equal(usage.length, 2);
-		assert.deepEqual(search.queries, ["query-1"]);
-	});
-
-	for (const interimText of [false, true]) {
-		it(`reserves the twelfth call for a tool-free brief after ${interimText ? "text and a tool call" : "tool-only turns"}`, async () => {
-			const { engine, requests } = scriptedEngine([...researchTurns(interimText), fauxAssistantMessage(BRIEF)]);
+describe("researcher finalization", () => {
+	for (const initial of [
+		{ label: "empty", message: fauxAssistantMessage("") },
+		{ label: "truncated", message: fauxAssistantMessage("Partial findings", { stopReason: "length" }) },
+	]) {
+		it(`synthesizes the original evidence once when the research response is ${initial.label}`, async () => {
+			const { engine, requests } = scriptedEngine([searchTurn(), initial.message, fauxAssistantMessage(BRIEF)]);
 			const search = recordingSearch();
 			const usage: Usage[] = [];
-			const activity: string[] = [];
+			const tools: string[] = [];
 			const result = await runResearcherAgent(QUESTION, {
-				engine,
-				search: () => search.provider,
+				engine, search: () => search.provider,
 				onUsage: (value) => usage.push(value),
-				onToolStart: (name) => activity.push(name),
+				onToolStart: (name) => tools.push(name),
 			});
 			assert.equal(result, BRIEF);
-			assert.equal(requests.length, 12, "the final brief stays inside the original call budget");
-			assert.equal(usage.length, 12, "the final call is included in spending");
-			assert.equal(search.queries.length, 11);
-			assert.equal(activity.length, 11);
-			assert.ok(requests[0]!.tools.includes("web_search"));
-			const final = requests.at(-1)!;
-			assert.deepEqual(final.tools, [], "the closing call cannot continue searching");
-			assert.equal(final.questionCopies, 1, "the original question is preserved once");
-			assert.match(final.transcript, /evidence:query-11/, "the closing call sees the last executed search result");
+			assert.equal(requests.length, 3);
+			assert.equal(usage.length, 3);
+			assert.deepEqual(search.queries, ["stationarity"]);
+			assert.deepEqual(tools, ["web_search"]);
+			assert.ok(requests[1]!.tools.includes("web_search"));
+			const final = requests[2]!;
+			assert.deepEqual(final.tools, []);
+			assert.equal(final.questionCopies, 1);
+			assert.match(final.transcript, /evidence:stationarity/);
+			assert.match(final.transcript, /no further tools/);
 			assert.equal(final.model, requests[0]!.model);
 			assert.equal(final.reasoning, "high");
 		});
 	}
 
-	for (const initial of [
-		{ label: "empty", message: fauxAssistantMessage("") },
-		{ label: "truncated", message: fauxAssistantMessage("Partial findings", { stopReason: "length" }) },
-	]) {
-		it(`finishes a research response that is ${initial.label} with one bounded closing call`, async () => {
-			const { engine, requests } = scriptedEngine([initial.message, fauxAssistantMessage(BRIEF)]);
-			assert.equal(await runResearcherAgent(QUESTION, { engine }), BRIEF);
-			assert.equal(requests.length, 2);
-			assert.deepEqual(requests[1]!.tools, []);
-		});
-	}
+	it("keeps failed search results so the final brief can report gaps", async () => {
+		const gaps = "## Gaps\nSearch is unavailable. No sources were verified.";
+		const { engine, requests } = scriptedEngine([searchTurn(), fauxAssistantMessage(""), fauxAssistantMessage(gaps)]);
+		assert.equal(await runResearcherAgent(QUESTION, { engine, search: () => null }), gaps);
+		assert.equal(requests.length, 3);
+		assert.match(requests[2]!.transcript, /no search engine is configured/);
+		assert.deepEqual(requests[2]!.tools, []);
+	});
 
-	for (const final of [
-		{ label: "empty", message: fauxAssistantMessage("") },
-		{ label: "truncated", message: fauxAssistantMessage("Unfinished brief", { stopReason: "length" }) },
-		{ label: "tool-calling", message: fauxAssistantMessage([fauxText("Interim text"), fauxToolCall("web_search", { query: "one more" })], { stopReason: "toolUse" }) },
-	]) {
-		it(`rejects a closing response that is ${final.label} without another attempt`, async () => {
-			const { engine, requests } = scriptedEngine([...researchTurns(), final.message, fauxAssistantMessage("Unexpected retry")]);
-			const search = recordingSearch();
-			await assert.rejects(runResearcherAgent(QUESTION, { engine, search: () => search.provider }));
-			assert.equal(requests.length, 12);
-			assert.equal(search.queries.length, 11, "an undeclared closing tool is never executed");
-		});
-	}
-
-	it("propagates a provider failure during research without dispatching a closing call", async () => {
-		const { engine, requests } = scriptedEngine([
-			fauxAssistantMessage("", { stopReason: "error", errorMessage: "Provider unavailable" }),
-			fauxAssistantMessage("Unexpected retry"),
-		]);
-		await assert.rejects(runResearcherAgent(QUESTION, { engine }), /Provider unavailable/);
+	it("rejects truncated text without tool results in a single request", async () => {
+		const { engine, requests } = scriptedEngine([fauxAssistantMessage("Partial", { stopReason: "length" })]);
+		await assert.rejects(runResearcherAgent(QUESTION, { engine }), /complete final brief/);
 		assert.equal(requests.length, 1);
 	});
 
-	it("propagates a provider failure in the closing call without retrying it", async () => {
-		const { engine, requests } = scriptedEngine([
-			...researchTurns(),
-			fauxAssistantMessage("", { stopReason: "error", errorMessage: "Closing request failed" }),
-			fauxAssistantMessage("Unexpected retry"),
-		]);
-		const search = recordingSearch();
-		await assert.rejects(runResearcherAgent(QUESTION, { engine, search: () => search.provider }), /Closing request failed/);
-		assert.equal(requests.length, 12);
-	});
+	for (const final of [
+		{ label: "blank", message: fauxAssistantMessage("  ") },
+		{ label: "truncated", message: fauxAssistantMessage("Partial", { stopReason: "length" }) },
+		{ label: "tool-calling", message: searchTurn() },
+	]) {
+		it(`rejects a ${final.label} closing response without another search or provider request`, async () => {
+			const { engine, requests } = scriptedEngine([searchTurn(), fauxAssistantMessage(""), final.message]);
+			const search = recordingSearch();
+			await assert.rejects(runResearcherAgent(QUESTION, { engine, search: () => search.provider }), /complete final brief/);
+			assert.equal(requests.length, 3);
+			assert.deepEqual(search.queries, ["stationarity"]);
+		});
+	}
 
-	it("honors cancellation at the research budget without dispatching the closing request", async () => {
+	for (const phase of ["research", "closing"]) {
+		it(`propagates provider errors during ${phase} without retrying`, async () => {
+			const responses = [searchTurn()];
+			if (phase === "closing") responses.push(fauxAssistantMessage(""));
+			responses.push(fauxAssistantMessage("", { stopReason: "error", errorMessage: "Provider unavailable" }));
+			const { engine, requests } = scriptedEngine(responses);
+			await assert.rejects(runResearcherAgent(QUESTION, { engine }), /Provider unavailable/);
+			assert.equal(requests.length, phase === "closing" ? 3 : 2);
+		});
+	}
+
+	it("honors cancellation before the closing request", async () => {
 		const controller = new AbortController();
-		const { engine, requests } = scriptedEngine([...researchTurns(), fauxAssistantMessage("Unexpected closing request")]);
-		const search = recordingSearch();
+		const { engine, requests } = scriptedEngine([searchTurn(), fauxAssistantMessage("")]);
 		let calls = 0;
 		await assert.rejects(runResearcherAgent(QUESTION, {
 			engine,
-			search: () => search.provider,
 			abortSignal: controller.signal,
-			onUsage: () => {
-				calls++;
-				if (calls === 11) controller.abort();
-			},
+			onUsage: () => { if (++calls === 2) controller.abort(); },
 		}), { name: "AbortError" });
-		assert.equal(requests.length, 11);
+		assert.equal(requests.length, 2);
 	});
 });
