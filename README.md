@@ -86,3 +86,15 @@ Security vulnerabilities: report privately as described in [SECURITY.md](SECURIT
 [AGPL-3.0](LICENSE)
 
 The app is free and open forever. If we ever charge for anything, it will be for convenience — managed keys, hosting — never for features you can run locally.
+
+## Star History
+
+<div align=center>
+<a href="https://www.star-history.com/?repos=amosblomqvist%2Flearnharness&type=timeline&legend=bottom-right">
+ <picture>
+   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/chart?repos=amosblomqvist/learnharness&type=timeline&theme=dark&legend=bottom-right" />
+   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/chart?repos=amosblomqvist/learnharness&type=timeline&legend=bottom-right" />
+   <img alt="Star History Chart" src="https://api.star-history.com/chart?repos=amosblomqvist/learnharness&type=timeline&legend=bottom-right" />
+ </picture>
+</a>
+</div>
