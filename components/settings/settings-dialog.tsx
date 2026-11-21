@@ -39,8 +39,8 @@ import { useInteractionLayers, type CloseOutcome } from "@/components/interactio
 import {
 	CURRENT_SETTINGS_VERSION,
 	FACTORY_SETTINGS,
+	type DictationProvider,
 	type GeneralSettings,
-	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
@@ -49,13 +49,13 @@ import {
 import { useAppearance } from "./appearance.tsx";
 import { SettingsGroup, SettingsRow, SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
-import { AgentSection } from "./agent-section.tsx";
+import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
-import { useDictationActive } from "@/components/dictation-state";
+import { isDictationActive, useDictationActive } from "@/components/dictation-state";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { PluginsSection } from "./plugins-section.tsx";
@@ -79,15 +79,17 @@ type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | 
 
 type WritableSection = "general" | "agent" | "models" | "appearance" | "graph" | "compaction";
 const queuedSections = new Set<WritableSection>(["agent", "general"]);
-const pendingSettingsWrites = new Map<Promise<boolean>, WritableSection>();
+const pendingSettingsWrites = new Set<Promise<boolean>>();
+let pendingDictationProviderSave: Promise<boolean> | undefined;
 
 /** Wait for queued edits, including writes from a dialog that has closed. */
-export async function waitForPendingSettingsWrites(section?: WritableSection) {
-	for (;;) {
-		const writes = [...pendingSettingsWrites].filter(([, name]) => !section || name === section).map(([write]) => write);
-		if (!writes.length) return;
-		await Promise.all(writes);
-	}
+async function waitForPendingSettingsWrites() {
+	while (pendingSettingsWrites.size) await Promise.all(pendingSettingsWrites);
+}
+
+/** Dictation observes the latest explicit provider save even after Settings closes. */
+export function getPendingDictationProviderSave(): Promise<boolean> | undefined {
+	return pendingDictationProviderSave;
 }
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
@@ -105,10 +107,18 @@ interface SettingsWriteOrder {
 	fileAccessError?: string | null;
 	pending: Map<WritableSection, Promise<boolean>>;
 	sectionAcknowledgements: Map<WritableSection, number>;
+	pendingWrites: number;
+	promptDeletion?: Promise<void>;
 	listeners: Set<(record: UserSettings, fileAccessError: string | null) => void>;
 }
 function createWriteOrder(): SettingsWriteOrder {
-	return { issued: 0, acknowledged: 0, pending: new Map(), sectionAcknowledgements: new Map(), listeners: new Set() };
+	return { issued: 0, acknowledged: 0, pending: new Map(), sectionAcknowledgements: new Map(), pendingWrites: 0, listeners: new Set() };
+}
+// Settings runs on supported browsers that predate Promise.withResolvers.
+function settingsCompletion() {
+	let resolve!: () => void;
+	const promise = new Promise<void>(done => { resolve = done; });
+	return { promise, resolve };
 }
 const WriteOrderContext = createContext<RefObject<SettingsWriteOrder> | null>(null);
 
@@ -335,11 +345,14 @@ export function SettingsDialogBody({
 		<S extends WritableSection,>(
 			section: S,
 			change: object | ((current: UserSettings[S]) => object),
+			confirms?: (stored: UserSettings) => boolean,
 		): Promise<boolean> => {
 			const authority = writeOrder.current;
 			const queued = queuedSections.has(section);
 			setError(null);
+			authority.pendingWrites++;
 			const save = async () => {
+				while (authority.promptDeletion) await authority.promptDeletion;
 				const ticket = ++authority.issued;
 				const seenSections = new Map(authority.sectionAcknowledgements);
 				try {
@@ -388,18 +401,21 @@ export function SettingsDialogBody({
 						if (full || section === "appearance") onAppearanceChange(canonical.appearance);
 					}
 					notifySettingsSaved(section);
-					return true;
+					return confirms?.(stored) ?? true;
 				} catch (error) {
 					if (queued || ticket === authority.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
 					return false;
 				}
 			};
-			if (!queued) return save();
-			const previous = authority.pending.get(section);
+			const previous = queued ? authority.pending.get(section) : undefined;
 			const pending = previous ? previous.then(save) : save();
-			authority.pending.set(section, pending);
-			pendingSettingsWrites.set(pending, section);
+			if (queued) {
+				authority.pending.set(section, pending);
+				pendingSettingsWrites.add(pending);
+			}
 			const clear = () => {
+				authority.pendingWrites--;
+				if (!queued) return;
 				if (authority.pending.get(section) === pending) authority.pending.delete(section);
 				pendingSettingsWrites.delete(pending);
 			};
@@ -410,10 +426,52 @@ export function SettingsDialogBody({
 	);
 
 	const general = pendingGeneralEdits.reduce<GeneralSettings | undefined>((value, edit) => edit(value), record?.general);
-	const writeGeneral = (edit: (current: GeneralSettings | undefined) => GeneralSettings) => {
+	const writeGeneral = (
+		edit: (current: GeneralSettings | undefined) => GeneralSettings,
+		confirms?: (stored: UserSettings) => boolean,
+	) => {
 		setPendingGeneralEdits((edits) => [...edits, edit]);
-		void write("general", edit).finally(() => setPendingGeneralEdits((edits) => edits.filter((item) => item !== edit)));
+		return write("general", edit, confirms).finally(() => {
+			setPendingGeneralEdits((edits) => edits.filter((item) => item !== edit));
+		});
 	};
+
+	function saveDictationProvider(dictationProvider: DictationProvider) {
+		if (isDictationActive()) return;
+		const pending = writeGeneral(
+			(current) => ({ ...current, dictationProvider }),
+			(stored) => (stored.general?.dictationProvider ?? FACTORY_SETTINGS.general.dictationProvider) === dictationProvider,
+		);
+		pendingDictationProviderSave = pending;
+		const clear = () => {
+			if (pendingDictationProviderSave === pending) pendingDictationProviderSave = undefined;
+		};
+		void pending.then(clear, clear);
+	}
+
+	async function deletePromptOverride(path: string, remove: () => Promise<boolean>) {
+		const authority = writeOrder.current;
+		// DELETE only acknowledges a key removal. Don't patch a mirror that
+		// hasn't seen preceding full-record ACKs, and never queue a delete.
+		if (authority.promptDeletion || authority.pendingWrites) return "settings-busy" as const;
+		const settled = settingsCompletion();
+		authority.promptDeletion = settled.promise;
+		try {
+			if (!await remove()) return "delete-failed" as const;
+			const stored = authority.record;
+			if (stored?.agent?.prompts?.[path] !== undefined) {
+				const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
+				authority.acknowledged = ++authority.issued;
+				authority.sectionAcknowledgements.set("agent", authority.acknowledged);
+				authority.record = patched;
+				for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
+			}
+			return "deleted" as const;
+		} finally {
+			authority.promptDeletion = undefined;
+			settled.resolve();
+		}
+	}
 
 	const frame = (
 		<div
@@ -525,7 +583,7 @@ export function SettingsDialogBody({
 									<UpdateSettings
 										autoUpdate={general?.autoUpdate ?? true}
 										onAutoUpdateChange={(on) =>
-											writeGeneral((current) => ({ ...current, autoUpdate: on }))
+											void writeGeneral((current) => ({ ...current, autoUpdate: on }))
 										}
 									/>
 									<SettingsGroup label="Dictation" testid="group-dictation-settings">
@@ -538,7 +596,7 @@ export function SettingsDialogBody({
 											onChange={(event) => {
 												const dictationProvider = event.target.value;
 												if (dictationProvider === "deepgram" || dictationProvider === "openai") {
-													writeGeneral((current) => ({ ...current, dictationProvider }));
+													saveDictationProvider(dictationProvider);
 												}
 											}}
 												className="rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground"
@@ -561,12 +619,12 @@ export function SettingsDialogBody({
 									testid="section-agent"
 								>
 									<AgentSection
-										onSectionEdit={(edit) => write("agent", (current) => {
+										onSectionEdit={(edit, confirms) => write("agent", (current) => {
 											const safeCurrent = writeOrder.current.fileAccessError
 												? { ...current, fileAccess: { restricted: true, folders: current?.fileAccess?.folders ?? [] } }
 												: current;
 											return edit(safeCurrent);
-										})}
+										}, confirms && (stored => confirms(stored.agent ?? {})))}
 										agent={record.agent}
 										fileAccessError={fileAccessError}
 										models={record.models}
@@ -575,9 +633,10 @@ export function SettingsDialogBody({
 										onModelsChange={(next: ModelsSettings) =>
 											void write("models", next)
 										}
-										onSectionChange={(next: AgentSettings) =>
-											write("agent", next)
+										onSectionChange={(next, confirms) =>
+											write("agent", next, confirms && (stored => confirms(stored.agent ?? {})))
 										}
+										onDeletePromptOverride={deletePromptOverride}
 										onCompactionChange={(next: CompactionSettings) =>
 											write("compaction", next)
 										}

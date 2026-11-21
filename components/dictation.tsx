@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
-import { useSettingsDialog, waitForPendingSettingsWrites } from "@/components/settings/settings-dialog";
+import { getPendingDictationProviderSave, useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
 import { DICTATION_STOP_PCM_BYTES, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, deepgramListenUrl, pcm16Wav, type DictationLanguage, type DictationProvider } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
@@ -610,8 +610,12 @@ export function useDictation({ append, destination = "primary", disabled = false
 		limitReachedRef.current = false;
 		const gen = ++genRef.current;
 		try {
-			await waitForPendingSettingsWrites("general");
-			if (gen !== genRef.current) return;
+			const providerSave = getPendingDictationProviderSave();
+			if (providerSave) {
+				const saved = await providerSave;
+				if (gen !== genRef.current) return;
+				if (!saved) throw new Error("Could not save the speech provider. Open Settings and try again.");
+			}
 			const provider = await getProvider();
 			if (gen !== genRef.current) return;
 			providerRef.current = provider;

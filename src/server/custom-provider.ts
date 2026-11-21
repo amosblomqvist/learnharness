@@ -244,11 +244,13 @@ function extractModels(body: unknown): CustomModel[] | null {
 			const model: CustomModel = { id: row.id };
 			if (detectImage(row)) model.image = true;
 			if (detectReasoning(row)) model.reasoning = true;
+			const limit = isRecord(row.limit) ? row.limit : {};
 			const context =
 				firstPositive(row, CONTEXT_KEYS) ??
-				(isRecord(row.meta) ? firstPositive(row.meta, META_CONTEXT_KEYS) : undefined);
+				(isRecord(row.meta) ? firstPositive(row.meta, META_CONTEXT_KEYS) : undefined) ??
+				firstPositive(limit, ["context"]);
 			if (context) model.context = context;
-			const maxTokens = firstPositive(row, MAX_TOKEN_KEYS);
+			const maxTokens = firstPositive(row, MAX_TOKEN_KEYS) ?? firstPositive(limit, ["output"]);
 			if (maxTokens) model.maxTokens = maxTokens;
 			byId.set(row.id, model);
 		}

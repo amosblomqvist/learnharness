@@ -7,6 +7,7 @@ import {
 	type Model,
 	type Models,
 	type MutableModels,
+	type Provider,
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
@@ -53,6 +54,30 @@ export interface PiEngine {
 
 export type { ThinkingLevel };
 
+// Route handlers can have separate module instances in Next.js. All of
+// their collections see the same validated overlay without changing auth.
+const CATALOG_KEY = Symbol.for("lh.model-catalog-overlay");
+const catalogGlobal = globalThis as typeof globalThis & { [CATALOG_KEY]?: ReadonlyMap<string, readonly Model<Api>[]> };
+
+export function setModelCatalogOverlay(models: ReadonlyMap<string, readonly Model<Api>[]>): void {
+	catalogGlobal[CATALOG_KEY] = models;
+}
+
+function withCatalogOverlay(provider: Provider): Provider {
+	return {
+		...provider,
+		getModels: () => {
+			const extra = catalogGlobal[CATALOG_KEY]?.get(provider.id);
+			return extra?.length ? [...provider.getModels(), ...extra] : provider.getModels();
+		},
+		getAllModels: () => {
+			const base = provider.getAllModels?.() ?? provider.getModels();
+			const extra = catalogGlobal[CATALOG_KEY]?.get(provider.id);
+			return extra?.length ? [...base, ...extra] : base;
+		},
+	};
+}
+
 let collection: ReturnType<typeof createModels> | undefined;
 interface ProviderSource {
 	sync(models: MutableModels): void;
@@ -87,9 +112,9 @@ export function piModels() {
 			// Keep the native Bedrock implementation reachable by standalone tracing.
 			// Pi's default Node-only loader hides this import from bundlers. Only
 			// replace its lazy forwarding; preserve the native factory's auth/catalog.
-			collection.setProvider(provider.id === "amazon-bedrock"
+			collection.setProvider(withCatalogOverlay(provider.id === "amazon-bedrock"
 				? { ...provider, ...lazyApi(() => import("@earendil-works/pi-ai/api/bedrock-converse-stream")) }
-				: provider);
+				: provider));
 		}
 		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
 	}
@@ -180,7 +205,12 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 			}
 			const purpose = typeof background === "function" ? background : () => background;
 			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
-			return stream(requestModel, context, requestOptions);
+			// Direct Anthropic auth is resolved per request. Keep full replay: Pi's
+			// message-thread fingerprint does not include that rotating credential.
+			const wireModel = requestModel.provider === "anthropic" && requestModel.api === "anthropic-messages"
+				? { ...requestModel, compat: { ...requestModel.compat, supportsMessageThreads: false } }
+				: requestModel;
+			return stream(wireModel, context, requestOptions);
 		},
 	};
 }
