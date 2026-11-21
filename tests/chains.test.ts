@@ -155,6 +155,14 @@ describe("resolveTargetId", () => {
 		assert.equal(resolveTargetId("node_2", nodes), "node_2");
 	});
 
+	it("prefers an exact id over a node whose name equals that id", () => {
+		const clashing = [
+			{ id: "node_a", name: "node_b" },
+			{ id: "node_b", name: "Other" },
+		];
+		assert.equal(resolveTargetId("node_b", clashing), "node_b");
+	});
+
 	it("resolves by case-insensitive name match", () => {
 		assert.equal(resolveTargetId("first concept", nodes), "node_1");
 		assert.equal(resolveTargetId("FIRST CONCEPT", nodes), "node_1");
