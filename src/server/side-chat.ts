@@ -20,7 +20,7 @@ import { usageWasAdmitted } from "../agent/subscription-request-cycle.ts";
 import { composeSideChatInstructions, streamSideAnswer } from "../agent/side-chat.ts";
 import { effectiveSettings, stores } from "./stores.ts";
 import { providerKeyPresent } from "./keys.ts";
-import { refreshConnectionCatalog } from "./model-catalog.ts";
+import { refreshConnectionCatalog, withContextWindow } from "./model-catalog.ts";
 import { awaitCompaction } from "./compaction.ts";
 
 export type SideStreamEvent =
@@ -271,7 +271,7 @@ async function productionEngineFor(record: ChatRecord): Promise<SideEngine | Res
 	if (!providerKeyPresent(spec.provider)) return Response.json(providerKeyMissingEnvelope(spec.provider, ["strong"]), { status: 503 });
 	try {
 		let denied = false;
-		const engine = piEngineForSpec(spec, false, { captured() {}, beforeDispatch() {}, noDispatch() { denied = true; } },
+		const engine = piEngineForSpec(withContextWindow(spec), false, { captured() {}, beforeDispatch() {}, noDispatch() { denied = true; } },
 			() => stores.settingsStore.readSettings()?.models?.strong?.cacheRetention);
 		return { ...engine, sideUsageAdmitted: () => !denied };
 	} catch { return Response.json({ error: "The selected model is unavailable." }, { status: 503 }); }

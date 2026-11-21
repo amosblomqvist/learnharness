@@ -496,7 +496,8 @@ export interface GraphSettings {
 
 /**
  * COMPACTION (owner round 14, 2026-10-05): the context-fitting mechanic's
- * user-facing controls: the trigger threshold and opt-in reasoning accounting.
+ * user-facing controls: a trigger threshold, opt-in reasoning accounting,
+ * and per-model windows bounded by the account's reported limits.
  * The effective trigger is min(this, model contextWindow − 16k reserve)
  * (owner ruling: on big models the setting rules; on small ones the
  * window rules before the provider overflows).
@@ -513,6 +514,8 @@ export interface CompactionSettings {
 	/** Use saved output usage for replayable same-model Responses reasoning.
 	 *  Absent = false: preserve the original readable-content heuristic. */
 	includeReasoning?: boolean;
+	/** Explicit per-provider/model window choices; capped by live metadata. */
+	contextWindows?: Record<string, number>;
 }
 
 /** THE record. Every section optional (delta); unknown top-level keys are
@@ -585,7 +588,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
-	compaction: { thresholdTokens: 150_000, includeReasoning: false },
+	compaction: { thresholdTokens: 150_000, includeReasoning: false, contextWindows: {} },
 };
 
 /** The chunk budget's validated floor (GraphSettings.extractionChunkTokens
@@ -878,6 +881,7 @@ function sanitizeGraph(raw: Record<string, unknown>): GraphSettings {
  *  factory default resolves at read time). Exported for the PUT parser's
  *  reject-with-rationale (the graph chunk-budget precedent). */
 export const COMPACTION_THRESHOLD_FLOOR = 32_000;
+export const CONTEXT_WINDOW_CEILING = 10_000_000;
 
 function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	const out: CompactionSettings = {};
@@ -886,6 +890,14 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	const rawTokens = raw.thresholdTokens;
 	if (typeof rawTokens === "number" && Number.isFinite(rawTokens) && rawTokens > 0) {
 		out.thresholdTokens = Math.max(COMPACTION_THRESHOLD_FLOOR, Math.floor(rawTokens));
+	}
+	if (raw.contextWindows && typeof raw.contextWindows === "object" && !Array.isArray(raw.contextWindows)) {
+		const windows: Record<string, number> = {};
+		for (const [key, value] of Object.entries(raw.contextWindows)) {
+			if (!/^chatgpt:[^\s:]+:[^\s:]+$/.test(key) || key.length > 512) continue;
+			if (typeof value === "number" && Number.isSafeInteger(value) && value >= COMPACTION_THRESHOLD_FLOOR && value <= CONTEXT_WINDOW_CEILING) windows[key] = value;
+		}
+		if (Object.keys(windows).length) out.contextWindows = windows;
 	}
 	return out;
 }
@@ -934,7 +946,7 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
 	}
-	if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
+	if (r.compaction !== null && typeof r.compaction === "object" && !Array.isArray(r.compaction)) {
 		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). One
@@ -943,7 +955,7 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	// 2026-09-28) — a fossil copy on disk must never resurrect through
 	// reads (and any later write flushes it from the file for good).
 	for (const [key, value] of Object.entries(r)) {
-		if (key === "chat") continue;
+		if (key === "chat" || key === "compaction") continue;
 		if (!(key in out)) out[key] = value;
 	}
 	return out;

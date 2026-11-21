@@ -10,6 +10,7 @@ import { piEngineForSpec, type PiEngine } from "../agent/models.ts";
 import { connectionBackgroundAllowed as subscriptionBackgroundAllowed, connectionScopeCurrent, isSubscriptionProvider } from "../agent/subscription-connections.ts";
 import { nativeSubscriptionError } from "../agent/subscription-stream.ts";
 import { chatGPTStreamError } from "../agent/chatgpt-stream.ts";
+import { chatGPTCatalogScope, chatGPTScopeCurrent } from "../agent/chatgpt-bridge.ts";
 import { SubscriptionRequestCycle, type SubscriptionDispatchLifecycle } from "../agent/subscription-request-cycle.ts";
 import { reconstructRequestCause } from "../core/native-messages.ts";
 import { createJobRunner } from "../agent/subagents/runner.ts";
@@ -60,7 +61,7 @@ import { samePluginQuestionOccurrence } from "../core/plugin-questions.ts";
 import { composeInstructions } from "../agent/teacher-agent.ts";
 import { ensureCompacted, kickCompaction, effectiveThresholdTokens, projectedContextTokens, compactionInFlight } from "./compaction.ts";
 import { COMPACTION_RESERVE_TOKENS } from "../core/compaction.ts";
-import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
+import { refreshConnectionCatalog, withContextWindow } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages, type LhMessage } from "../core/native-messages.ts";
@@ -165,7 +166,14 @@ setTurnRunner(async (chatId, input) => {
  *  FRESH so a settings PUT between dispatch and spawn lands. */
 function resolveEngine(role: ModelRole): PiEngine | undefined {
 	const spec = resolveRoleSpec(role, stores.settingsStore.readSettings());
-	return spec ? piEngineForSpec(spec, true, undefined, retentionForSlot(ROLE_SLOT[role])) : undefined;
+	return spec ? piEngineForSpec(withContextWindow(spec), true, undefined, retentionForSlot(ROLE_SLOT[role])) : undefined;
+}
+
+
+
+/** Only a known catalog limit can cap compaction; CLI model values are placeholders. */
+export function compactionThresholdForSpec(setting: number | undefined, spec: { contextWindow?: number }): number {
+	return effectiveThresholdTokens(setting, spec.contextWindow);
 }
 
 /** Slot policy is independent of model overrides. Read fresh per operation,
@@ -334,14 +342,16 @@ export async function handleChatInput(
 		noDispatch: (kind) => requestCycle?.noDispatch(kind),
 	};
 	let conversationEngine: PiEngine;
+	const conversationWithContext = withContextWindow(conversation);
 	let compactionEngine: PiEngine;
 	try {
-		conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
-		compactionEngine = piEngineForSpec(conversation, true, undefined, retentionForSlot("strong"));
+		conversationEngine = piEngineForSpec(conversationWithContext, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
+		compactionEngine = piEngineForSpec(conversationWithContext, true, undefined, retentionForSlot("strong"));
 	}
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
 	const capturedPolicy = submissionImagePolicyKey(conversationEngine);
-	const capturedConversation = JSON.stringify(conversation);
+	const capturedChatGPTScope = chatGPTCatalogScope(conversationEngine.model);
+	const capturedConversation = JSON.stringify(conversationWithContext);
 	try {
 		switch (input.type) {
 			case "text": case "thinking":
@@ -362,8 +372,8 @@ export async function handleChatInput(
 		throw err;
 	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
-	const contextWindow = catalogContextLimits().get(modelIdForCompaction);
-	const thresholdTokens = effectiveThresholdTokens(effective.compaction?.thresholdTokens, contextWindow);
+	const contextWindow = conversationWithContext.contextWindow;
+	const thresholdTokens = compactionThresholdForSpec(effective.compaction?.thresholdTokens, conversationWithContext);
 	const systemPromptTokens = Math.ceil(composeInstructions(record.kind === "practice" ? "practice" : "teacher").length / 4);
 	const estimateModel = effective.compaction.includeReasoning ? conversationEngine.model : undefined;
 	const fitsSideContext = (messages: readonly LhMessage[]) => {
@@ -447,9 +457,11 @@ export async function handleChatInput(
 		if (record.createdAt !== capturedSession.createdAt || record.kind !== capturedSession.kind) return false;
 		try {
 			if (checkModel) {
+				if (capturedChatGPTScope && !chatGPTScopeCurrent(capturedChatGPTScope)) return false;
 				const spec = resolveConversationSpec(record.settings, effectiveSettings().models.strong);
-				if (!spec || JSON.stringify(spec) !== capturedConversation) return false;
-				const checked = piEngineForSpec(spec, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
+				const currentConversation = spec && withContextWindow(spec);
+				if (!currentConversation || JSON.stringify(currentConversation) !== capturedConversation) return false;
+				const checked = piEngineForSpec(currentConversation, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
 				if (submissionImagePolicyKey(checked) !== capturedPolicy || checked.level !== conversationEngine.level) return false;
 			}
 			assertPluginQuestionInputAllowed(record.messages, input);
@@ -928,7 +940,8 @@ export async function handleChatInput(
 						const spec = resolveConversationSpec(stores.chatStore.getChat(chatId)?.settings, fresh.models.strong);
 						if (!spec || !connectionBackgroundAllowed(spec.provider)) return null;
 						let kickEngine: PiEngine;
-						try { kickEngine = piEngineForSpec(spec, true, undefined, retentionForSlot("strong")); } catch { return null; }
+						const kickWithContext = withContextWindow(spec);
+						try { kickEngine = piEngineForSpec(kickWithContext, true, undefined, retentionForSlot("strong")); } catch { return null; }
 						const kickModelId = `${kickEngine.model.provider}:${kickEngine.model.id}`;
 						const freshRecord = stores.chatStore.getChat(chatId);
 						if (!freshRecord) return null;
@@ -939,10 +952,7 @@ export async function handleChatInput(
 							modelId: kickModelId,
 							kind: freshRecord.kind === "practice" ? "practice" : hasProbeDone(freshRecord.messages) ? "teach" : "probe",
 							includeReasoning: fresh.compaction.includeReasoning,
-							thresholdTokens: effectiveThresholdTokens(
-								fresh.compaction?.thresholdTokens,
-								catalogContextLimits().get(kickModelId),
-							),
+							thresholdTokens: compactionThresholdForSpec(fresh.compaction?.thresholdTokens, kickWithContext),
 							systemPromptTokens: Math.ceil(composeInstructions(freshRecord.kind === "practice" ? "practice" : "teacher").length / 4),
 						};
 					}, chatId);
