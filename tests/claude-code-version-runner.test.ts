@@ -10,7 +10,7 @@ import { readClaudeVersion } from "../src/agent/claude-code/installation.ts";
 import { createClaudeLauncher } from "../src/agent/claude-code/launch.ts";
 
 const unsupportedShebang = process.platform === "win32" || /\s/.test(process.execPath);
-function fixture(t: TestContext, mode: "normal" | "oversize" | "hang", name = "claude") {
+function fixture(t: TestContext, mode: "normal" | "oversize" | "hang" | "env-check", name = "claude") {
 	const dir = mkdtempSync(join(tmpdir(), "lh-version-runner-"));
 	t.after(() => rmSync(dir, { recursive: true, force: true }));
 	const bin = join(dir, "bin"); mkdirSync(bin);
@@ -22,6 +22,10 @@ process.on("SIGTERM", () => {});
 setInterval(() => {}, 1000);
 ` : mode === "oversize" ? 'process.stdout.write("x".repeat(100000));' : `
 if (JSON.stringify(process.argv.slice(2)) !== '["--version"]') process.exit(2);
+${mode === "env-check" ? `
+if (process.env.LH_DESKTOP_API_SECRET !== undefined || process.env.LH_DESKTOP_SERVER !== undefined) process.exit(3);
+if (process.env.ANTHROPIC_AUTH_TOKEN !== "synthetic-version-token") process.exit(4);
+` : ""}
 process.stdout.write("2.1.310 (Claude Code)\\n");
 `;
 	writeFileSync(binary, `#!${process.execPath}\n${body}`, { mode: 0o755 });
@@ -31,6 +35,23 @@ process.stdout.write("2.1.310 (Claude Code)\\n");
 test("production version runner directly executes a spaced/metacharacter filename with only --version", { skip: unsupportedShebang }, async (t) => {
 	const { binary } = fixture(t, "normal", "claude ; fixture");
 	assert.equal(await readClaudeVersion(binary), "2.1.310 (Claude Code)\n");
+});
+
+test("production version probe excludes desktop authority but retains native CLI auth", { skip: unsupportedShebang }, async (t) => {
+	const names = ["LH_DESKTOP_API_SECRET", "LH_DESKTOP_SERVER", "ANTHROPIC_AUTH_TOKEN"] as const;
+	const saved = names.map((name) => [name, process.env[name]] as const);
+	t.after(() => {
+		for (const [name, value] of saved) {
+			if (value === undefined) delete process.env[name]; else process.env[name] = value;
+		}
+	});
+	process.env.LH_DESKTOP_API_SECRET = "v".repeat(64);
+	process.env.LH_DESKTOP_SERVER = "1";
+	process.env.ANTHROPIC_AUTH_TOKEN = "synthetic-version-token";
+	const { binary } = fixture(t, "env-check");
+	assert.equal(await readClaudeVersion(binary), "2.1.310 (Claude Code)\n");
+	assert.equal(process.env.LH_DESKTOP_API_SECRET, "v".repeat(64));
+	assert.equal(process.env.LH_DESKTOP_SERVER, "1", "the probe cannot change the parent mode");
 });
 
 test("production version runner bounds stdout", { skip: unsupportedShebang }, async (t) => {

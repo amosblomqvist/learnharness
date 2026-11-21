@@ -373,13 +373,38 @@ describe("practice prompt composition (own directory + the formatting appendix)"
 		assert.match(teacher, /nothing to rush/, "the goal reiteration composes");
 	});
 
-	it("the prober doctrine steers difficulty by evidence (owner round, 2026-10-07)", () => {
+	it("the prober brackets the learner's edge without a rigid question sequence or forced miss", () => {
 		const prober = composeInstructions("prober");
-		assert.match(prober, /Enter near the top, not the bottom/);
-		assert.match(prober, /Strands inform each other/);
-		assert.match(prober, /never descending into already-bracketed territory/);
-		// the confidence + thinking signals are wired into question selection
-		assert.match(prober, /the verdict, his confidence, and his thinking field together set where the next question should sit/);
+		assert.match(prober, /A single question can reveal several strands/);
+		assert.match(prober, /the available quizzing tool to measure understanding/);
+		assert.match(prober, /A topic request tells you what the learner wants to learn, not what they already understand/);
+		assert.doesNotMatch(prober, /`probe` or `recall`|The available format is not a reason to skip probing/);
+		assert.match(prober, /reasoning is your primary evidence, whether it comes in a thinking field or in the answer text/);
+		assert.match(prober, /Prefer a short set of meaningful multiple-choice options/);
+		assert.match(prober, /Use the logic of binary search/);
+		assert.match(prober, /a well-reasoned answer can justify a big jump in difficulty/i);
+		assert.match(prober, /Go deeper when the distinction would change the lesson/);
+		assert.match(prober, /Don't present an untested boundary as a finding/);
+		assert.doesNotMatch(prober, /Binary-search every strand|escalate until it does/);
+	});
+
+	it("prober and teacher read reasoning from either channel and treat confidence as a clue", () => {
+		for (const phase of ["prober", "teacher"] as const) {
+			const prompt = composeInstructions(phase);
+			assert.match(prompt, /Free recall and free-form questions carry it in the answer text/);
+			assert.match(prompt, /A confident correct pick alone doesn't establish a floor/);
+			assert.match(prompt, /In teaching, repair a failed check before building on that step/);
+			assert.doesNotMatch(prompt, /solid knowledge — move on/);
+		}
+	});
+
+	it("blocking question guidance composes for prober and teacher without changing practice", () => {
+		for (const phase of ["prober", "teacher"] as const) {
+			const prompt = composeInstructions(phase);
+			assert.match(prompt, /Use each answer to decide what to ask next/);
+			assert.doesNotMatch(prompt, /wait for the answer|ask, then end your turn|one question per turn/i);
+		}
+		assert.doesNotMatch(composeInstructions("practice"), /Use each answer to decide what to ask next/);
 	});
 
 	it("the SHARED formatting guide composes (owner, 2026-10-04 late): LaTeX delimiters in every setting", () => {

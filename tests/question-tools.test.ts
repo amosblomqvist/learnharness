@@ -212,6 +212,13 @@ describe("the prober's quiz: no nodeId field at all", () => {
 // ─── the description example (owner, 2026-10-12) ─────────────────────────
 
 describe("quiz tool descriptions carry the complete, phase-correct example", () => {
+	it("describes the same letter mapping for quiz, probe, and ask", () => {
+		const quiz = teachQuizToolFor({ chatId: newChat("Letter mapping"), chatStore });
+		const sentence = "When single-select options are lettered, the result’s `optionOrder` maps each displayed letter to its one-based position in your original `options` array, and each selected answer includes its displayed `letter`.";
+		for (const tool of [quiz, probeQuizTool, askUserQuestionTool]) {
+			assert.equal(tool.description.split(sentence).length, 2, tool.name);
+		}
+	});
 	it("the canonical body is schema-valid and authoring-clean (never ship a broken exemplar)", () => {
 		assert.deepEqual(quizInputProblems(quizExampleBody), []);
 		assert.equal(Value.Check(probeQuizInputSchema, quizExampleBody), true);
@@ -444,11 +451,19 @@ describe("tool descriptions carry mechanics only, no question-craft", () => {
 			for (const banned of ["asymmetry", "distractor", "believable", "misconception"]) {
 				assert.ok(!d.toLowerCase().includes(banned), `${name} description leaks craft: "${banned}"`);
 			}
-			for (const mechanical of ["GRADED", "ONE question per turn", "ask_user_question"]) {
+			for (const mechanical of ["GRADED", "ask_user_question"]) {
 				assert.ok(d.includes(mechanical), `${name} description lost mechanics: "${mechanical}"`);
 			}
 		});
 	}
+	it("blocking question tool descriptions and parameters do not tell the model to wait or end its turn", () => {
+		const teachExplain = teachExplainToolFor({ chatId: "chat_x", chatStore: undefined as never });
+		for (const tool of [askUserQuestionTool, teachQuiz, probeQuizTool, teachExplain, probeExplainTool]) {
+			const legacy = /pause until|wait for the answer|end your turn|one question per turn/i;
+			assert.doesNotMatch(tool.description, legacy, tool.name);
+			assert.doesNotMatch(JSON.stringify(tool.parameters), legacy, tool.name);
+		}
+	});
 	it("the teach quiz declares the `type` field and `nodeId`; the probe quiz declares neither", () => {
 		assert.ok(teachQuiz.description.includes("`type`"), "teach quiz points at the role field");
 		assert.ok(teachQuiz.description.includes("`nodeId`"), "teach quiz points at the plan-map validation");

@@ -38,7 +38,6 @@ import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
 	CURRENT_SETTINGS_VERSION,
-	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
@@ -47,7 +46,7 @@ import {
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
-import { AgentSection } from "./agent-section.tsx";
+import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -102,10 +101,18 @@ interface SettingsWriteOrder {
 	fileAccessError?: string | null;
 	pending: Map<WritableSection, Promise<boolean>>;
 	sectionAcknowledgements: Map<WritableSection, number>;
+	pendingWrites: number;
+	promptDeletion?: Promise<void>;
 	listeners: Set<(record: UserSettings, fileAccessError: string | null) => void>;
 }
 function createWriteOrder(): SettingsWriteOrder {
-	return { issued: 0, acknowledged: 0, pending: new Map(), sectionAcknowledgements: new Map(), listeners: new Set() };
+	return { issued: 0, acknowledged: 0, pending: new Map(), sectionAcknowledgements: new Map(), pendingWrites: 0, listeners: new Set() };
+}
+// Settings runs on supported browsers that predate Promise.withResolvers.
+function settingsCompletion() {
+	let resolve!: () => void;
+	const promise = new Promise<void>(done => { resolve = done; });
+	return { promise, resolve };
 }
 const WriteOrderContext = createContext<RefObject<SettingsWriteOrder> | null>(null);
 
@@ -330,11 +337,14 @@ export function SettingsDialogBody({
 		<S extends WritableSection,>(
 			section: S,
 			change: object | ((current: UserSettings[S]) => object),
+			confirms?: (stored: UserSettings) => boolean,
 		): Promise<boolean> => {
 			const authority = writeOrder.current;
 			const queued = queuedSections.has(section);
 			setError(null);
+			authority.pendingWrites++;
 			const save = async () => {
+				while (authority.promptDeletion) await authority.promptDeletion;
 				const ticket = ++authority.issued;
 				const seenSections = new Map(authority.sectionAcknowledgements);
 				try {
@@ -383,18 +393,21 @@ export function SettingsDialogBody({
 						if (full || section === "appearance") onAppearanceChange(canonical.appearance);
 					}
 					notifySettingsSaved(section);
-					return true;
+					return confirms?.(stored) ?? true;
 				} catch (error) {
 					if (queued || ticket === authority.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
 					return false;
 				}
 			};
-			if (!queued) return save();
-			const previous = authority.pending.get(section);
+			const previous = queued ? authority.pending.get(section) : undefined;
 			const pending = previous ? previous.then(save) : save();
-			authority.pending.set(section, pending);
-			pendingSettingsWrites.set(pending, section);
+			if (queued) {
+				authority.pending.set(section, pending);
+				pendingSettingsWrites.set(pending, section);
+			}
 			const clear = () => {
+				authority.pendingWrites--;
+				if (!queued) return;
 				if (authority.pending.get(section) === pending) authority.pending.delete(section);
 				pendingSettingsWrites.delete(pending);
 			};
@@ -403,6 +416,30 @@ export function SettingsDialogBody({
 		},
 		[onAppearanceChange, writeOrder],
 	);
+
+	async function deletePromptOverride(path: string, remove: () => Promise<boolean>) {
+		const authority = writeOrder.current;
+		// DELETE only acknowledges a key removal. Don't patch a mirror that
+		// hasn't seen preceding full-record ACKs, and never queue a delete.
+		if (authority.promptDeletion || authority.pendingWrites) return "settings-busy" as const;
+		const settled = settingsCompletion();
+		authority.promptDeletion = settled.promise;
+		try {
+			if (!await remove()) return "delete-failed" as const;
+			const stored = authority.record;
+			if (stored?.agent?.prompts?.[path] !== undefined) {
+				const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
+				authority.acknowledged = ++authority.issued;
+				authority.sectionAcknowledgements.set("agent", authority.acknowledged);
+				authority.record = patched;
+				for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
+			}
+			return "deleted" as const;
+		} finally {
+			authority.promptDeletion = undefined;
+			settled.resolve();
+		}
+	}
 
 	const frame = (
 		<div
@@ -530,12 +567,12 @@ export function SettingsDialogBody({
 									testid="section-agent"
 								>
 									<AgentSection
-										onSectionEdit={(edit) => write("agent", (current) => {
+										onSectionEdit={(edit, confirms) => write("agent", (current) => {
 											const safeCurrent = writeOrder.current.fileAccessError
 												? { ...current, fileAccess: { restricted: true, folders: current?.fileAccess?.folders ?? [] } }
 												: current;
 											return edit(safeCurrent);
-										})}
+										}, confirms && (stored => confirms(stored.agent ?? {})))}
 										agent={record.agent}
 										fileAccessError={fileAccessError}
 										models={record.models}
@@ -544,9 +581,10 @@ export function SettingsDialogBody({
 										onModelsChange={(next: ModelsSettings) =>
 											void write("models", next)
 										}
-										onSectionChange={(next: AgentSettings) =>
-											write("agent", next)
+										onSectionChange={(next, confirms) =>
+											write("agent", next, confirms && (stored => confirms(stored.agent ?? {})))
 										}
+										onDeletePromptOverride={deletePromptOverride}
 										onCompactionEdit={(edit) => write("compaction", edit)}
 										onCompactionChange={(next: CompactionSettings) =>
 											write("compaction", next)

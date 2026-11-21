@@ -19,6 +19,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const order: string[] = [];
 	const intervals: { callback: () => void; delay: number }[] = [];
 	const handles = new Map<string, (event: unknown) => unknown>();
+	const listeners = new Map<string, (event: unknown) => void>();
 	const windows: FakeWindow[] = [];
 	let enumerationFails = false;
 	let userData = "/fixture/custom-user-data";
@@ -81,7 +82,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	const electron = {
 		app, BrowserWindow: FakeWindow,
 		Menu: { buildFromTemplate: (value: typeof menu) => value, setApplicationMenu: (value: typeof menu) => { menu = value; } },
-		ipcMain: { on() {}, handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
+		ipcMain: { on: (channel: string, fn: (event: unknown) => void) => listeners.set(channel, fn), handle: (channel: string, fn: (event: unknown) => unknown) => handles.set(channel, fn) },
 		nativeTheme: { shouldUseDarkColors: true, themeSource: "system", on() {} },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
@@ -113,7 +114,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	runInContext(mainSource, context, { filename: mainFile });
 	const run = (code: string) => runInContext(code, context);
 	return {
-		run, updater, windows, intervals, handles, settingsReads, order, app,
+		run, updater, windows, intervals, handles, listeners, settingsReads, order, app,
 		setSettings: (value: unknown) => { settings = JSON.stringify(value); },
 		setSettingsFailure: (value: string | Error) => { settings = value; },
 		setEnumerationFailure: (value: boolean) => { enumerationFails = value; },
@@ -272,6 +273,33 @@ describe("startup, timer, trusted IPC and menu wiring", () => {
 		sender.mainFrame.url = "https://untrusted.invalid/";
 		assert.throws(() => check(event), /Untrusted/);
 		assert.equal(f.updater.checks, 1);
+	});
+
+	it("restart-to-install IPC accepts only a live owned main frame at the exact app origin", async () => {
+		const f = fixture(); await f.run("main()");
+		const win = f.windows[0]!;
+		const sender = win.webContents;
+		const install = f.listeners.get("lh:update-install")!;
+		const foreign = f.window().webContents; // Same URL, but not registered by createWindow.
+		f.run("serverProcess = fixtureChild");
+		for (const bad of [
+			{ sender: {}, senderFrame: sender.mainFrame },
+			{ sender, senderFrame: { url: sender.mainFrame.url } },
+			{ sender, senderFrame: undefined },
+			{ sender: foreign, senderFrame: foreign.mainFrame },
+		]) install(bad);
+		const ownUrl = sender.mainFrame.url;
+		for (const url of ["https://untrusted.invalid/", "http://127.0.0.1:9001/", "not a URL"]) {
+			sender.mainFrame.url = url; // Navigation changes the current frame's URL, not its identity.
+			install({ sender, senderFrame: sender.mainFrame });
+		}
+		assert.deepEqual(f.order, [], "untrusted requests neither kill the server nor reach quit-and-install");
+		sender.mainFrame.url = ownUrl;
+		install({ sender, senderFrame: sender.mainFrame });
+		assert.deepEqual(f.order, ["SIGTERM", "install"], "legitimate Restart still stops the server before installation");
+		win.emit("closed");
+		install({ sender, senderFrame: sender.mainFrame });
+		assert.deepEqual(f.order, ["SIGTERM", "install"], "closing the window revokes its membership");
 	});
 
 	it("menu restores/focuses a minimized window, opens General, and manually checks while OFF", async () => {

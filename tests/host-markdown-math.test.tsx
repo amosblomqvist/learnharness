@@ -16,7 +16,7 @@ function render(text: string, host = true) {
   return parseHTML(`<html><body>${renderToStaticMarkup(host ? <HostMarkdown text={text} />
     : <ToolContentResponse mode="static" controls={false} isAnimating={false} linkSafety={{ enabled: false }}>{text}</ToolContentResponse>)}</body></html>`).document;
 }
-const annotations = (doc: Document) => [...doc.querySelectorAll("annotation")].map(node => node.textContent);
+const annotations = (doc: Document) => [...doc.querySelectorAll(".katex[data-tex]")].map(node => node.getAttribute("data-tex"));
 function displayOnly(doc: Document) {
   assert.equal(doc.querySelector("button,details,summary,input,[role='button'],[data-plugin-renderer]"), null);
 }
