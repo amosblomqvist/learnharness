@@ -2,7 +2,7 @@ import * as fsSync from "node:fs";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import { AUTH_FILE } from "../../../config.ts";
+import { AUTH_FILE, PATHS } from "../../../config.ts";
 import { comparisonPath, guardSourcePath, isWithin, realSourcePath as realOrMissing, resolvePolicy, type ResolvedFileAccessPolicy } from "./file-access.ts";
 
 /**
@@ -89,6 +89,18 @@ const SUBSCRIPTION_FILES = ["chatgpt-credentials.json", "github-copilot-credenti
 // Match the actual writers in store/auth.ts and electron/{chatgpt,subscription-store}.cjs.
 const CREDENTIAL_TEMP = /^(?:\.auth\.json\.tmp-\d+|(?:chatgpt|github-copilot|xai)-credentials\.json\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp)$/i;
 const ATOMIC_TEMP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+// Plugin secrets, matching the writer in plugins/listening/src/settings-store.ts:
+// credentials.json and its ".credentials.json-<uuid>.tmp" in a plugin data folder.
+const PLUGIN_CREDENTIAL = /^(?:credentials\.json|\.credentials\.json-[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp)$/i;
+
+/** Plugin data folders, as src/server/plugins.ts lays them out: core-plugin-data/<id> and plugins/<id>/data. */
+function isPluginCredential(absolute: string, dataDir: string): boolean {
+	const file = comparisonPath(absolute);
+	if (!PLUGIN_CREDENTIAL.test(path.basename(file))) return false;
+	const parts = path.relative(comparisonPath(dataDir), path.dirname(file)).toLowerCase().split(path.sep);
+	return (parts.length === 2 && parts[0] === "core-plugin-data") ||
+		(parts.length === 3 && parts[0] === "plugins" && parts[2] === "data");
+}
 
 function credentialFiles(authFile: string): string[] {
 	return [authFile, ...SUBSCRIPTION_FILES.map((name) => path.join(/* turbopackIgnore: true */ path.dirname(authFile), name))];
@@ -111,7 +123,8 @@ export function isSensitivePath(absolute: string, home: string = os.homedir(), a
 	return ENV_FILE.test(path.basename(file)) ||
 		SENSITIVE_HOME_PATHS.some((p) => isWithin(file, path.join(home, p), true)) ||
 		credentialFiles(authFile).some((p) => isWithin(file, p)) ||
-		isCredentialTemp(file, path.dirname(authFile), path.basename(comparisonPath(authFile)));
+		isCredentialTemp(file, path.dirname(authFile), path.basename(comparisonPath(authFile))) ||
+		isPluginCredential(file, PATHS.data);
 }
 
 /** An unrelated inaccessible/broken protected root must not break ordinary
@@ -158,7 +171,8 @@ function sourcePathCheck(home = os.homedir()): (absolute: string) => boolean {
 	const homeRoots = sensitiveHomeLocations(home).map(protectedRealPath);
 	const files = credentialFiles(AUTH_FILE).map(protectedRealPath);
 	const credentialDir = protectedRealPath(path.dirname(AUTH_FILE));
-	return (absolute) => isSensitivePath(absolute, home) ||
+	const dataDir = protectedRealPath(PATHS.data);
+	return (absolute) => isSensitivePath(absolute, home) || isPluginCredential(absolute, dataDir) ||
 		homeRoots.some((p) => isWithin(absolute, p, true)) ||
 		files.some((p) => isWithin(absolute, p)) || isCredentialTemp(absolute, credentialDir, path.basename(comparisonPath(AUTH_FILE)));
 }
