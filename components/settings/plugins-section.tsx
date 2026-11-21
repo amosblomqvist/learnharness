@@ -1,10 +1,12 @@
 "use client";
 
+import { useState } from "react";
 import { RefreshCw, Settings } from "lucide-react";
 import { usePlugins } from "@/components/plugins";
 import type { FrontendPlugin } from "@/components/plugin-manager";
 import { Button } from "@/components/ui/button";
 import { SettingsRow, SettingsSection, Toggle } from "./controls";
+import { PluginCatalogBrowser } from "./plugin-catalog-browser";
 
 export const PLUGIN_TRUST_WARNING = "Only enable plugins you trust. Plugins run trusted local code with broad file and network access; they are not sandboxed. A broken plugin may require restarting LearnHarness.";
 
@@ -12,9 +14,12 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 	const { manager, snapshot } = usePlugins();
 	const core = origin === "core";
 	const plugins = snapshot.plugins.filter(plugin => plugin.info.origin === origin);
+	const [browse, setBrowse] = useState(false);
 	return <SettingsSection title={core ? "Core plugins" : "Community plugins"} testid={core ? "section-core-plugins" : "section-plugins"}>
 		{!core && <>
 		<p className="font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING}</p>
+		<Button variant="outline" size="sm" onClick={() => setBrowse(value => !value)} aria-expanded={browse}>{browse ? "Hide catalog" : "Browse plugins"}</Button>
+		{browse && <PluginCatalogBrowser />}
 		<details data-testid="plugin-install-help" className="text-xs text-muted-foreground">
 			<summary className="w-fit cursor-pointer list-none text-muted-foreground underline underline-offset-2 hover:text-foreground [&::-webkit-details-marker]:hidden">How to install a plugin</summary>
 			<ol className="mt-2 list-decimal space-y-2 pl-5">

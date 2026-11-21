@@ -77,6 +77,8 @@ See the [documentation index](docs/README.md) for all guides, [development](docs
 
 For trusted local plugins, start with the [authoring guide and capability map](docs/plugin-authoring.md). It links the question, practice-problem, submission, view-context and UI contracts. Use [`examples/plugins/`](examples/plugins/) for small runnable templates, [`plugins/`](plugins/) for feature source projects, and the [host architecture](docs/plugin-architecture.md) for internals.
 
+Community plugin authors can submit a reviewed listing to the [in-app catalog](plugin-catalog/README.md). Browse it in Settings → Community plugins; installations remain disabled until you enable them.
+
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 
 Security vulnerabilities: report privately as described in [SECURITY.md](SECURITY.md), not in public issues.
