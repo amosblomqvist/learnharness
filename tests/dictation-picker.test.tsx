@@ -244,8 +244,15 @@ for (const source of ["none", "file", "env"] as const) test(`Language is below t
 	assert.equal(byTest("dictation-setup-hint").querySelectorAll("a").length, 1);
 	assert.match(rows[1]!.querySelector(".font-prose")!.className, /text-\(length:--lh-prose-size\)/);
 	assert.equal(trigger().disabled, false, "language is independent of key ownership");
-	await click(byTest("key-deepgram_api_key-row"));
-	if (source !== "env") assert.ok(byTest("key-deepgram_api_key-editor"));
+	if (source === "env") {
+		assert.equal(document.querySelector('[data-testid="key-deepgram_api_key-action"]'), null);
+		assert.equal(document.querySelector('[data-testid="key-deepgram_api_key-get-key"]'), null);
+		await click(byTest("key-deepgram_api_key-row"));
+		assert.equal(document.querySelector('[data-testid="key-deepgram_api_key-editor"]'), null);
+	} else {
+		await click(byTest("key-deepgram_api_key-action"));
+		assert.ok(byTest("key-deepgram_api_key-editor"));
+	}
 	assert.ok(byTest("dictation-setup-hint"), "guidance remains visible while the key is edited");
 	await click(trigger());
 	assert(menu());
