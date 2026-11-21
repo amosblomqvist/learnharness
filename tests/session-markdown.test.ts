@@ -9,7 +9,8 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { LhMessage } from "../src/core/native-messages.ts";
+import { newAnswerResult, type LhMessage } from "../src/core/native-messages.ts";
+import { buildAnswer, type QuestionData } from "../src/core/question-core.ts";
 import { messageMarkdown, sessionMarkdown } from "../src/core/session-markdown.ts";
 import { serializeCitation } from "../src/core/citations.ts";
 import { messageViewLines } from "../src/core/coverage.ts";
@@ -132,6 +133,93 @@ describe("messageMarkdown", () => {
 		assert.equal(messageMarkdown(result("r1", "j1", "research", { brief: "long" }), "r1"), "### Tool · r1\n\n*research result delivered*");
 		assert.equal(messageMarkdown(result("r2", "j2", "research", {}, true), "r2"), null, "a failed call is retry context");
 		assert.equal(messageMarkdown(user("u3", "   "), "u3"), null, "empty text renders nothing");
+	});
+
+	it("renders OptionAnswer labels and thinking from real buildAnswer/newAnswerResult records", () => {
+		const askQuestion: QuestionData = {
+			id: "ask-1",
+			kind: "ask",
+			question: "Which topics should we cover first?",
+			mode: "multi-select",
+			options: [
+				{ label: "Visual intuition", value: "visual" },
+				{ label: "Formal proofs", value: "proofs" },
+			],
+			createdAt: "2026-11-21T00:00:00Z",
+		};
+		const askAnswer = buildAnswer(
+			askQuestion,
+			{ values: ["visual", "proofs"], other: "Worked examples", thinking: "Prefer pictures before symbols" },
+			"ask_user_question",
+		);
+		const askMd = messageMarkdown(newAnswerResult("ask-1", "ask_user_question", askAnswer), "r1", false)!;
+		assert.ok(!askMd.includes("[object Object]"), "must not stringify OptionAnswer objects");
+		assert.match(askMd, /The learner chose: Visual intuition, Formal proofs, Worked examples/);
+		assert.match(askMd, /\*\(his thinking: Prefer pictures before symbols\)\*/);
+
+		const quizQuestion: QuestionData = {
+			id: "quiz-1",
+			kind: "quiz",
+			question: "What does the chain rule multiply?",
+			mode: "single-select",
+			options: [
+				{ label: "Local rates of change", value: "rates" },
+				{ label: "Function values", value: "values" },
+			],
+			correctIndices: [1],
+			explanation: "Rates compose multiplicatively.",
+			createdAt: "2026-11-21T00:00:00Z",
+		};
+		const quizAnswer = buildAnswer(quizQuestion, { values: ["rates"], thinking: "dy/dx = (dy/du)(du/dx)" }, "quiz");
+		const quizMd = messageMarkdown(newAnswerResult("quiz-1", "quiz", quizAnswer), "r2", false)!;
+		assert.match(quizMd, /The learner answered correctly\./);
+		assert.match(quizMd, /\*\(his thinking: dy\/dx = \(dy\/du\)\(du\/dx\)\)\*/);
+
+		const explainQuestion: QuestionData = {
+			id: "exp-1",
+			kind: "explain",
+			question: "Why does continuity matter here?",
+			mode: "text",
+			options: [],
+			committedAnswer: "Limits pass through continuous functions.",
+			createdAt: "2026-11-21T00:00:00Z",
+		};
+		const explainAnswer = buildAnswer(
+			explainQuestion,
+			{ text: "Small input changes stay small", thinking: "Recalling epsilon-delta" },
+			"explain",
+		);
+		const explainMd = messageMarkdown(newAnswerResult("exp-1", "explain", explainAnswer), "r3", false)!;
+		assert.match(explainMd, /The learner answered in his own words: Small input changes stay small/);
+		assert.match(explainMd, /\*\(his thinking: Recalling epsilon-delta\)\*/);
+	});
+
+	it("prefers thinking over legacy note and handles fallback/malformed answer entries safely", () => {
+		const both = messageMarkdown(
+			result("r1", "q1", "probe", { questionText: "Q?", correct: true, thinking: "current", note: "legacy" }),
+			"r1",
+			false,
+		)!;
+		assert.match(both, /\*\(his thinking: current\)\*/);
+		assert.ok(!both.includes("legacy"));
+
+		const blankThinking = messageMarkdown(
+			result("r2", "q2", "quiz", { questionText: "Q?", correct: true, thinking: "   ", note: "legacy fallback" }),
+			"r2",
+			false,
+		)!;
+		assert.match(blankThinking, /\*\(his thinking: legacy fallback\)\*/);
+
+		const malformedAnswers = messageMarkdown(
+			result("r3", "a3", "ask_user_question", {
+				questionText: "Pick one",
+				answers: [{ label: "  First  ", value: "first" }, { label: "", value: "second_val" }, {}, null],
+			}),
+			"r3",
+			false,
+		)!;
+		assert.match(malformedAnswers, /The learner chose: First, second_val/);
+		assert.ok(!malformedAnswers.includes("[object Object]"));
 	});
 });
 

@@ -73,6 +73,24 @@ function outcomeLabel(outcome: string): string {
 	return spaced.charAt(0).toUpperCase() + spaced.slice(1);
 }
 
+/** Extract a display label from either a current OptionAnswer or a legacy string entry. */
+function answerOptionLabel(entry: unknown): string | null {
+	if (typeof entry === "string") return entry.trim() || null;
+	if (entry && typeof entry === "object") {
+		const opt = entry as { label?: unknown; value?: unknown };
+		if (typeof opt.label === "string" && opt.label.trim()) return opt.label.trim();
+		if (typeof opt.value === "string" && opt.value.trim()) return opt.value.trim();
+	}
+	return null;
+}
+
+/** Read learner thinking from the current `thinking` key or legacy `note` key. */
+function learnerThinkingOf(out: { thinking?: unknown; note?: unknown } | undefined): string | undefined {
+	if (typeof out?.thinking === "string" && out.thinking.trim()) return out.thinking.trim();
+	if (typeof out?.note === "string" && out.note.trim()) return out.note.trim();
+	return undefined;
+}
+
 /** One tool result's learner-visible outcome, rendered as body lines. */
 function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { heading: string; body: string[] } {
 	const pluginAnswer = readPluginQuestionAnswer(result.details);
@@ -95,13 +113,15 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 				questionText: string;
 				correct: boolean;
 				dontKnow: boolean;
+				thinking: string;
 				note: string;
 				text: string;
-				answers: string[];
+				answers: ReadonlyArray<string | { label?: string; value?: string }>;
 				other: string;
 				dismissed: boolean;
 		  }>
 		| undefined;
+	const thinking = learnerThinkingOf(out);
 
 	if (
 		result.toolName === "quiz" ||
@@ -124,7 +144,7 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 		else if (out?.correct === true) body.push("The learner answered correctly.");
 		else if (out?.correct === false) body.push("The learner answered incorrectly.");
 		else if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered in his own words: ${out.text.trim()}`);
-		if (typeof out?.note === "string" && out.note) body.push(`*(his thinking: ${out.note})*`);
+		if (thinking) body.push(`*(his thinking: ${thinking})*`);
 		return { heading, body };
 	}
 
@@ -159,13 +179,15 @@ function toolResultBody(result: ToolResultMessage, ctx?: MarkdownContext): { hea
 		const question = typeof out?.questionText === "string" && out.questionText ? out.questionText : "(no question text)";
 		const body = [`**Q:** ${question}`];
 		const chosen = [
-			...(Array.isArray(out?.answers) ? out!.answers! : []),
+			...(Array.isArray(out?.answers)
+				? out.answers.map(answerOptionLabel).filter((label): label is string => label !== null)
+				: []),
 			...(typeof out?.other === "string" && out.other.trim() ? [out.other.trim()] : []),
 		];
 		if (typeof out?.text === "string" && out.text.trim()) body.push(`The learner answered: ${out.text.trim()}`);
 		else if (chosen.length > 0) body.push(`The learner chose: ${chosen.join(", ")}`);
 		else if (out?.dismissed === true) body.push("The learner skipped this question.");
-		if (typeof out?.note === "string" && out.note) body.push(`*(his thinking: ${out.note})*`);
+		if (thinking) body.push(`*(his thinking: ${thinking})*`);
 		return { heading: "Question", body };
 	}
 
