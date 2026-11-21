@@ -17,6 +17,7 @@ const PRESET_APPEARANCE = {
 	ivory: { mode: "light", background: "#faf9f5" },
 	pastel: { mode: "light", background: "#f2f0e8" },
 	"nvchad-onedark": { mode: "dark", background: "#1e222a" },
+	"soft-graphite": { mode: "dark", background: "#1e1e1e" },
 };
 const HEX = /^#[0-9a-f]{3}([0-9a-f]{3})?$/i;
 const COLOR_KEYS = ["background", "surface", "border", "text", "textMuted", "accent", "bold", "italic", "code", "error", "success", "warning"];

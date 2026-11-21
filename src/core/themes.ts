@@ -140,7 +140,8 @@ function builtin(name: string, mode: ThemeMode, c: ThemeColors): Theme {
  *  accents; orange accent, blue/purple/aqua emphasis. Ivory: warm ivory
  *  page, terracotta accent, blue/green/clay emphasis. Pastel: a gray-cream
  *  page with soft green, purple and orange inks. NvChad Onedark: base46's
- *  onedark. */
+ *  onedark. Soft Graphite: Default's monochrome rules on a softer
+ *  #1e1e1e/#d4d4d4 pair (~11:1), with muted terminal-style status inks. */
 export const BUILTIN_THEMES: readonly Theme[] = [
 	{
 		id: DEFAULT_THEME_ID,
@@ -202,6 +203,11 @@ export const BUILTIN_THEMES: readonly Theme[] = [
 		background: "#1e222a", surface: "#282c34", border: "#42464e", text: "#abb2bf", textMuted: "#565c64",
 		accent: "#61afef", bold: "#c882e7", italic: "#a3b8ef", code: "#e7c787",
 		error: "#e06c75", success: "#98c379", warning: "#e7c787",
+	}),
+	builtin("Soft Graphite", "dark", {
+		background: "#1e1e1e", surface: "#262626", border: "#4d4d4d", text: "#d4d4d4", textMuted: "#8d8d8d",
+		accent: "#8d8d8d", bold: "#f5f5f5", italic: "#d4d4d4", code: "#d4d4d4",
+		error: "#f07178", success: "#98c379", warning: "#ffcc66",
 	}),
 ];
 
