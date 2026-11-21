@@ -1,0 +1,4 @@
+# Check out text files with LF on every platform, as they are stored.
+# Git for Windows otherwise converts them to CRLF (core.autocrlf=true),
+# so Windows checkouts differ from Linux/macOS ones byte for byte.
+* text=auto eol=lf
