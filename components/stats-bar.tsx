@@ -1,10 +1,12 @@
 "use client";
 
-import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { createPortal } from "react-dom";
+import * as Popper from "@radix-ui/react-popper";
 import { CLAUDE_CODE_PROVIDER, sessionCacheHitRate, subscriptionLabels, subscriptionLabel, type cliContextWindowOf, type SessionPricing, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
-import { usePopoverDismiss } from "@/components/popover-dismiss";
+import { useInteractionLayer, useInteractionLayers } from "@/components/interaction-layers";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 
 export function formatContextMeasurement(tokens: number | null, limit: number | null): string {
@@ -78,9 +80,25 @@ export function StatsBar({
 	}, [onModelChange]);
 	// Same dropdown discipline as the model control (owner, df4433f treatment,
 	// stats round 1): close on any pointerdown outside the bar or on Escape.
+	// The popover renders in the portal container, outside the bar (#610: the
+	// dock sits inside Conversation, whose overflow clips both axes), so
+	// pointerdowns inside it count as inside too, like the attachment menu.
 	const barRef = useRef<HTMLDivElement>(null);
 	const panelRef = useRef<HTMLDivElement>(null);
-	const popupLayer = usePopoverDismiss(barRef, open && !!(chatId || turns.length), () => setOpen(false), { layerRootRef: panelRef });
+	const detailOpen = open && !!(chatId || turns.length);
+	const interactions = useInteractionLayers();
+	const popupLayer = useInteractionLayer({ kind: "popup", enabled: detailOpen, rootRef: panelRef, anchorRef: barRef,
+		onClose: () => { setOpen(false); return "closed"; } });
+	useEffect(() => {
+		if (!detailOpen) return;
+		const onPointerDown = (e: PointerEvent) => {
+			if (!interactions.isElementEligible(panelRef.current)) return;
+			const target = e.target as Node;
+			if (barRef.current && !barRef.current.contains(target) && !panelRef.current?.contains(target)) setOpen(false);
+		};
+		document.addEventListener("pointerdown", onPointerDown);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [detailOpen, interactions]);
 	// The picker reports its effective selection. CLI windows are session-
 	// scoped; unknown metadata always means usage-only, never a guessed maximum.
 	const { catalog } = useModelCatalog();
@@ -105,21 +123,24 @@ export function StatsBar({
 			// control wave caught this live: buttons rendered, clicks never landed).
 			className="pointer-events-auto relative flex items-center justify-between gap-3 px-3 pt-2 text-xs text-muted-foreground"
 		>
-			{/* The summary button + its popover: the popover anchors to this
-			    wrapper, CENTERED over the button itself (owner, stats round 2)
-			    — not over the whole bar row, which made it line up oddly. The
-			    outside-close ref anchors HERE too (owner, round 3): on the whole
-			    bar it wrapped the model control, so clicking model/thinking never
-			    counted as outside — the asymmetry the owner observed. */}
+			{/* The summary button + its popover: the popover anchors to the
+			    button, CENTERED over it (owner, stats round 2) — not over the
+			    whole bar row, which made it line up oddly — and kept 8px inside
+			    the window. The outside-close ref anchors on this wrapper (owner,
+			    round 3): on the whole bar it wrapped the model control, so
+			    clicking model/thinking never counted as outside — the asymmetry
+			    the owner observed. */}
 			{/* The leading slot (2026-10-04): the leftmost control surface —
 			    the home composer's mode switch. */}
 			{leadingSlot}
 			{/* The left side: the session-data summary — only once a session
 			    exists (turns). Pre-chat renders nothing (see the header). */}
 			{(chatId || turns.length > 0) && (
+			<Popper.Root>
 			<div ref={barRef} className="relative">
 				{/* No tooltip — the numbers describe themselves and the popover
 			    speaks on click (owner, subtlety round 2026-09-25). */}
+			<Popper.Anchor asChild>
 			<button
 				type="button"
 				onClick={() => setOpen((o) => !o)}
@@ -133,12 +154,17 @@ export function StatsBar({
 				<span aria-hidden>·</span>
 				<span data-testid="stats-cost">{costLabel}</span>
 			</button>
-				{open && (
-					<div
+			</Popper.Anchor>
+				{open && createPortal(
+					<Popper.Content
 						ref={panelRef}
 						data-testid="stats-detail"
+						side="top"
+						align="center"
+						sideOffset={6}
+						collisionPadding={8}
 						style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }}
-						className="absolute bottom-full left-1/2 mb-1.5 w-72 -translate-x-1/2 rounded-xl border bg-card p-3 text-xs shadow-xl"
+						className="w-72 rounded-xl border bg-card p-3 text-xs text-muted-foreground shadow-xl"
 					>
 						<div className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 							Session stats
@@ -194,9 +220,11 @@ export function StatsBar({
 								</ul>
 							</>
 						)}
-					</div>
+					</Popper.Content>,
+					interactions.getPortalContainer(barRef.current)!,
 				)}
 			</div>
+			</Popper.Root>
 			)}
 			{/* The middle slot: dictation (owner, 2026-09-17). flex-1 lets the
 			    meter expand into the row's free width; justify-center keeps the

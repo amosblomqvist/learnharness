@@ -30,7 +30,7 @@ test("cache hit rate appears only inside expanded session stats, follows the ses
 			cacheWriteTokens: write, reasoningTokens: 90_000 }],
 	});
 	const render = (turns: TurnUsage[]) => root.render(<InteractionLayersProvider><StatsBar chatId="fixture" turns={turns} contextTokens={42_000} /></InteractionLayersProvider>);
-	const cacheRow = () => host.querySelector('[data-testid="stats-cache-hit-rate"]');
+	const cacheRow = () => document.querySelector('[data-testid="stats-cache-hit-rate"]');
 	const summary = () => host.querySelector<HTMLButtonElement>('[data-testid="stats-summary"]')!;
 	try {
 		await act(async () => render([turn(900)]));
@@ -40,7 +40,7 @@ test("cache hit rate appears only inside expanded session stats, follows the ses
 		assert(!host.textContent?.includes("Cache hit rate"), "no new chip in the collapsed bar");
 
 		await act(async () => summary().click());
-		const detail = host.querySelector('[data-testid="stats-detail"]')!;
+		const detail = document.querySelector('[data-testid="stats-detail"]')!;
 		assert.equal(cacheRow()?.textContent, "Cache hit rate90.0%");
 		assert(detail.contains(cacheRow()));
 		const labels = [...detail.querySelectorAll(".flex.justify-between > span:first-child")].map((el) => el.textContent);
@@ -58,7 +58,7 @@ test("cache hit rate appears only inside expanded session stats, follows the ses
 		await act(async () => render([turn(900)]));
 		assert.equal(cacheRow()?.textContent, "Cache hit rate90.0%");
 		await act(async () => summary().click());
-		assert.equal(host.querySelector('[data-testid="stats-detail"]'), null);
+		assert.equal(document.querySelector('[data-testid="stats-detail"]'), null);
 		assert.equal(cacheRow(), null);
 		assert.equal(summary().textContent, collapsedSummary);
 	} finally {
