@@ -45,6 +45,8 @@ export interface PracticeToolContext {
 	 *  Each absent context (tests) = absent from the registry. */
 	graph?: GraphToolContext;
 	jobs?: JobToolContext;
+	/** The existing drawing-agent toggle applies in practice too. */
+	visualEnabled?: boolean;
 }
 
 /** TURN-SCOPED GATE STATE (the BKT incident, 2026-10-05): the gates used
@@ -214,6 +216,7 @@ export function practiceTools(ctx: PracticeToolContext, gate: PracticeGate = cre
 		grep: grepTool,
 		...(jobs?.research ? { research: jobs.research } : {}),
 		...(jobs ? { pdf: jobs.pdf! } : {}),
+		...(jobs && ctx.visualEnabled !== false ? { visual: jobs.visual! } : {}),
 		...(ctx.graph ? proberGraphTools(ctx.graph) : {}),
 	});
 }
