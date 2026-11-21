@@ -42,6 +42,12 @@ npm run dev -- -H 0.0.0.0     # then browse to http://<this machine's IP>:3000
 
 The API accepts `localhost` and IP addresses as the host name. To use any other name (`mymac.local`, a reverse-proxy domain), list it in `LH_ALLOWED_HOSTS`. Browser writes must come from the same origin as the page.
 
+### Install on a phone
+
+The browser build ships a web app manifest (`app/manifest.ts`), so a phone can add it to the home screen and open it standalone. Serve it over **HTTPS** — a tailnet address or a reverse proxy — because browsers only offer installation (and microphone access) in a secure context; plain `http://<ip>` is not one.
+
+The icons are committed outputs of `scripts/make-pwa-icons.mjs`, rendered from `build/icon-flat.svg` like the desktop icons. There is no service worker and no offline mode: the app still needs the server for every session.
+
 ## Configuration
 
 Nonsecret settings are deltas in `<data root>/settings.json`; absent values resolve through `src/core/settings.ts` and `settings-resolution.ts`. Models and role overrides are settings, not environment variables. [Prompt overrides](../src/agent/prompts/README.md) live under `<data root>/prompts/` and require explicit enable switches.
