@@ -14,6 +14,8 @@ import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type PluginSu
 import { validatePluginBuiltinSubmissionAnswer } from "@/src/core";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
+import { AnswerReviewActions, useReviewAcknowledgement } from "@/components/answer-review";
+import { answerReviewOf } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { cn } from "@/lib/utils";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
@@ -590,6 +592,8 @@ export function Chat({
 
 	const localStream = status === "submitted" || status === "streaming";
 	const busy = localStream || turnInFlight || reconciliation !== "ready";
+	const review = useMemo(() => answerReviewOf(canonicalMessages), [canonicalMessages]);
+	const [reviewedAnswer, acknowledgeReview] = useReviewAcknowledgement(chatId);
 	const busyRef = useRef(busy);
 	busyRef.current = busy;
 	// The attach handoff (stream-reattach wave): the moment a resumed
@@ -1033,9 +1037,10 @@ export function Chat({
 			toggle: () => recording.toggleFor({ id: destinationId, append: (text) => sideThread.saveDraft(id, joinDictation(sideThread.draftFor(id), text), true) }),
 			finish: () => recording.finishFor(destinationId) };
 	};
-	const renderSideEntry = (sourceMessageId?: string) => {
+	const renderSideEntry = (sourceMessageId?: string, suppressEmpty = false) => {
 		if (!sourceMessageId) return null;
 		const hasHistory = sideThread.threads.some((thread) => thread.anchor.messageId === sourceMessageId && thread.messages.length > 0);
+		if (suppressEmpty && !hasHistory) return null;
 		return <div className="mt-1 flex justify-end">
 			<Button type="button" variant="ghost" size="icon-xs" data-testid="side-conversation-button" data-side-segment-id={sourceMessageId}
 				data-has-history={hasHistory} aria-label={hasHistory ? "Open side conversation" : "Ask a side question"}
@@ -1107,6 +1112,7 @@ export function Chat({
 	// server's registry mutex is the structural gate; this is the
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
+	const reviewing = !!review && reviewedAnswer !== review.answerId && !busy && !compacting && !error;
 	submissionLive.current.ready = !compacting && reconciliation === "ready";
 	// A failed model response (issue #110): Retry keeps the saved input
 	// and completed work, without another learner message. Offered from
@@ -1607,6 +1613,16 @@ export function Chat({
 
 	usePluginShortcutPage(`/chat/${encodeURIComponent(chatId)}`, captureActionContext);
 
+	const reviewActions = reviewing && review ? <AnswerReviewActions
+						onClarify={() => { openSideThread({ sourceMessageId: review.sourceMessageId, questionCallId: review.questionCallId, learningMode: "clarify", anchor: { kind: "composer" } }); sideThread.expand(); }}
+						onFeynman={() => { openSideThread({ sourceMessageId: review.sourceMessageId, questionCallId: review.questionCallId, learningMode: "feynman", anchor: { kind: "composer" } }); sideThread.expand(); }}
+						onContinue={() => {
+							void closeSideThread();
+							if (pending || pendingPlugin || activeProblem) acknowledgeReview(review.answerId);
+							else void send({ type: "text", text: "Continue to the next question." }).then(accepted => { if (accepted) acknowledgeReview(review.answerId); });
+						}}
+					/> : undefined;
+
 	return (
 		<ChatActionsContext.Provider
 			value={{
@@ -1984,7 +2000,7 @@ export function Chat({
 												}
 											})}
 										</MessageContent>
-										{m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length))}
+										{m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length), reviewing && mi === messages.length - 1)}
 									</Message>
 									)}
 								</Fragment>
@@ -2033,6 +2049,7 @@ export function Chat({
 									)}
 								</div>
 							)}
+							{reviewActions}
 						</div>
 
 						{/* The dock's reserved tail (DockOverlay reports its height):
@@ -2049,6 +2066,7 @@ export function Chat({
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
 				<DockOverlay
+					review={reviewActions}
 					viewReader={inputViewReader}
 					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}
 					pending={pending}
@@ -2391,6 +2409,7 @@ function TranscriptElementReporter({ onElement }: { onElement: (element: HTMLEle
 
 /** Host-only composition/test seam; never part of the plugin SDK. */
 export function DockOverlay({
+	review,
 	viewReader, viewTargets, unavailableOccurrence,
 	pending,
 	onPrepareBuiltin, onBuiltinPendingInput, onPrepareThinking, pendingThinkingInput, onPreparePluginQuestion, preparing, preparationStatus,
@@ -2423,6 +2442,7 @@ export function DockOverlay({
 	queuedSteers,
 }: {
 	viewReader?: SessionInputViewReader;
+	review?: React.ReactNode;
 	viewTargets?: SessionViewTargets;
 	unavailableOccurrence?: import("@/src/core").PluginSubmissionOccurrence;
 	pending: ReturnType<typeof pendingQuestionOf>;
@@ -2516,7 +2536,7 @@ export function DockOverlay({
 
 	const pendingId = pluginQuestion ? pluginQuestionOccurrenceKey(pluginQuestion.occurrence) : unreadablePlugin ? "unreadable-plugin-question" : pending?.key ?? null;
 	const readingInputRef = useRef<HTMLDivElement>(null);
-	const ownsDock = !!pending || !!pluginQuestion || unreadablePlugin || !!practice;
+	const ownsDock = !review && (!!pending || !!pluginQuestion || unreadablePlugin || !!practice);
 	const initialPendingRef = useRef(pendingId);
 	// Stable reader objects with `changed` from the start (React's development
 	// server renderer seals useRef objects, so assigning `changed` onto refs
@@ -2586,7 +2606,7 @@ export function DockOverlay({
 	const bodyRef = useRef<HTMLDivElement>(null);
 	const shellRef = useRef<HTMLDivElement>(null);
 	const contentRef = useRef<HTMLDivElement>(null);
-	const mode = pluginQuestion ? `plugin-question:${pendingId}` : unreadablePlugin ? "unreadable-plugin-question" : pending
+	const mode = review ? "review" : pluginQuestion ? `plugin-question:${pendingId}` : unreadablePlugin ? "unreadable-plugin-question" : pending
 		? `question:${pending.key}`
 		: practice
 			? `practice:${pluginPractice?.snapshot.problemId ?? practice.toolCallId}`
@@ -2691,15 +2711,16 @@ export function DockOverlay({
 	// practice problem owns the dock: shrinking flow space could pin a nearby
 	// learner back to the bottom. Composer mode may give space back.
 	const reserveRef = useRef(0);
+	const gradientH = review ? 24 : GRADIENT_H;
 	const offer = useCallback((blockH: number) => {
-		const next = blockH + GRADIENT_H;
+		const next = blockH + gradientH;
 		if (next <= reserveRef.current + 0.5 && pendingRef.current) return;
 		// Stamp growth at the source, including child-only field resizes, so
 		// stick-to-bottom's catch-up is not mistaken for the learner leaving.
 		if (shouldStampGeometryMute(next, reserveRef.current, pendingRef.current)) geometryAtRef.current = Date.now();
 		reserveRef.current = next;
 		onReserve(next);
-	}, [onReserve]);
+	}, [onReserve, gradientH]);
 
 	// The overlay must not paint over the scroller's scrollbar (owner, scroll
 	// round 2): the scroller reserves symmetric gutters (scrollbar-gutter:
@@ -2908,7 +2929,7 @@ export function DockOverlay({
 
 	return (
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
-			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
+			<div className="bg-gradient-to-t from-background via-background/85 to-transparent" style={{ height: gradientH }} />
 			<div ref={blockRef} className="relative bg-background pb-5">
 				<div ref={dockRef} data-dock-width={adaptedW ?? undefined} className={DOCK} style={adaptedW ? { maxWidth: adaptedW } : undefined}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
@@ -2924,7 +2945,7 @@ export function DockOverlay({
 					    teach-phase check waits — the same cue that collapses it. It
 					    claims dictated speech until the learner reveals the check
 					    (the dock reclaims then). Rides the check answer on submit. */}
-					{(pending || pluginQuestion) && requiresReveal && (
+					{!review && (pending || pluginQuestion) && requiresReveal && (
 						<ReadingThinkingField
 							inputRef={readingInputRef}
 							value={readingThinking}
@@ -2943,7 +2964,7 @@ export function DockOverlay({
 							claim={revealPending}
 						/>
 					)}
-					<div ref={shellRef} data-attachment-composer="" className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
+					<div ref={shellRef} hidden={!!review} data-attachment-composer="" className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
 						{preparationStatus}
 						{/* Include descendant margins (notably practice thinking's
 						    bottom margin) in the natural content measurement. */}
@@ -2952,7 +2973,7 @@ export function DockOverlay({
 							key={mode}
 							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
 						>
-							{pluginQuestion && pluginDraft ? (
+							{review ? null : pluginQuestion && pluginDraft ? (
 								<PluginQuestionDock viewReader={customViewReader} snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
 							) : unreadablePlugin ? (
 								<div className="px-4 py-3">
