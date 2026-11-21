@@ -8,8 +8,8 @@
  * The server (src/server/keys.ts) is the only intended writer: it applies
  * shape validation before setAuthVar and env precedence on top of
  * authVars(). Ordinary reads never throw (absent/corrupt file = {} =
- * "no keys yet"); custom-only pair reads/writes below are deliberately
- * strict so an unreadable private record is never overwritten as {}.
+ * "no keys yet"); every write reads strictly (only an absent file is {})
+ * so an unreadable or corrupt record is never overwritten as {}.
  * Ordinary writes preserve unknown string vars verbatim
  * (forward-compat: future entries — e.g. a plans-login token — ride along
  * untouched until a catalog entry adopts them).
@@ -23,14 +23,30 @@ import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
 import { CUSTOM_AUTH_BINDING, parseCustomAuthBinding, type CustomAuthBinding } from "../core/custom-provider-auth.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
 
+/** The strict read behind every write: only an absent file is {}. An
+ *  unreadable, corrupt or non-object file throws, so a hand-edit typo is
+ *  never rewritten as a one-key file (issue #523). */
+function readStoredMap(): Record<string, unknown> {
+	let text: string;
+	try { text = fs.readFileSync(AUTH_FILE, "utf8"); }
+	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw new Error("Authorization storage unavailable"); }
+	let raw: unknown;
+	try { raw = JSON.parse(text); } catch { throw new Error("Authorization storage unavailable"); }
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Authorization storage unavailable");
+	return raw as Record<string, unknown>;
+}
+
+/** The ordinary string projection: non-string values drop. */
+function stringVars(raw: Record<string, unknown>): Record<string, string> {
+	return Object.fromEntries(
+		Object.entries(raw).filter(([, v]) => typeof v === "string") as [string, string][],
+	);
+}
+
 /** The flat string→string map, or {} for absent/corrupt/non-object. */
 function readMap(): Record<string, string> {
 	try {
-		const raw = JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8"));
-		if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {};
-		return Object.fromEntries(
-			Object.entries(raw).filter(([, v]) => typeof v === "string") as [string, string][],
-		);
+		return stringVars(readStoredMap());
 	} catch {
 		return {}; // absent or corrupt — the documented state is "no keys yet"
 	}
@@ -51,13 +67,13 @@ export const authStore: AuthStore = {
 	},
 	setAuthVar(name, value) {
 		assertOrdinaryVar(name);
-		const map = readMap();
+		const map = stringVars(readStoredMap());
 		map[name] = value;
 		writeMap(map);
 	},
 	deleteAuthVar(name) {
 		assertOrdinaryVar(name);
-		const map = readMap();
+		const map = stringVars(readStoredMap());
 		if (!(name in map)) return; // absent = silent success, idempotent
 		delete map[name];
 		writeMap(map);
@@ -65,16 +81,10 @@ export const authStore: AuthStore = {
 };
 
 /** Custom writes must never turn an unreadable/corrupt private file into {}.
- * Other providers retain their existing adapter semantics. Unknown JSON values
- * survive custom-only updates, not just the ordinary string projection. */
+ * Unknown JSON values survive custom-only updates, not just the ordinary
+ * string projection. */
 function readCustomMap(): Record<string, unknown> {
-	let text: string;
-	try { text = fs.readFileSync(AUTH_FILE, "utf8"); }
-	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw new Error("Custom authorization storage unavailable"); }
-	let raw: unknown;
-	try { raw = JSON.parse(text); } catch { throw new Error("Custom authorization storage unavailable"); }
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Custom authorization storage unavailable");
-	const map = raw as Record<string, unknown>;
+	const map = readStoredMap();
 	if (Object.hasOwn(map, CUSTOM_AUTH_BINDING) && !parseCustomAuthBinding(map[CUSTOM_AUTH_BINDING])) throw new Error("Invalid custom authorization record");
 	if (Object.hasOwn(map, CUSTOM_PROVIDER.envVar) && typeof map[CUSTOM_PROVIDER.envVar] !== "string") throw new Error("Invalid custom credential record");
 	return map;
