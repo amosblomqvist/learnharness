@@ -701,6 +701,31 @@ describe("the compaction service", () => {
 		assert.ok(activeCompactionOf(chatStore.getChat(chatId)!.messages));
 		assert.equal(summarizeCalls, before + 1);
 	});
+
+	it("compacts chats whose pre-cut span includes learner inline images without crashing", async () => {
+		const chat = chatStore.createChat("compact: inline images");
+		const image = { type: "image" as const, mimeType: "image/png", data: "B".repeat(3_000) };
+		chatStore.saveMessages(chat.id, [
+			newUserMessage("check this diagram", [image]),
+			newUserMessage("", [image]),
+			big("m1"),
+			big("m2"),
+			newUserMessage("recent"),
+		]);
+		let seenPrompt = "";
+		await ensureCompacted({
+			...depsOf(chat.id, 40_000),
+			summarize: async (prompt, engine) => {
+				seenPrompt = prompt;
+				return depsOf(chat.id, 40_000).summarize!(prompt, engine);
+			},
+		}, chat.id);
+		const record = chatStore.getChat(chat.id)!;
+		assert.ok(activeCompactionOf(record.messages), "compaction marker landed");
+		assert.ok(seenPrompt.includes("[LEARNER] check this diagram\n[image: image/png]"));
+		assert.ok(seenPrompt.includes("[LEARNER] [image: image/png]"));
+		assert.ok(!seenPrompt.includes("BBBB"));
+	});
 });
 
 // Issue #518: the learner can skip or toggle while the summary call runs.
