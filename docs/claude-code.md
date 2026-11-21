@@ -5,7 +5,7 @@ LearnHarness can use an externally installed **Claude Code CLI** as a model prov
 ## Set up
 
 1. [Install and authenticate Claude Code](https://code.claude.com/docs/en/setup) outside LearnHarness, on **the machine running the LearnHarness server**, under its OS user. No always-running CLI process is needed.
-2. Make the executable discoverable in that server's `PATH` or a common user/native installation location. On Windows, a directly runnable `claude.exe` is required; `claude.cmd` alone does not qualify. Desktop launch environments may differ from terminals.
+2. Make the executable discoverable in that server's `PATH` or a common user/native installation location. On Windows, a directly runnable `claude.exe` is required; `claude.cmd` alone does not qualify. For a global npm install, LearnHarness also looks for the `claude.exe` inside the package (`<npm prefix>\node_modules\@anthropic-ai\claude-code\bin`), which the `claude.cmd` shim launches. Desktop launch environments may differ from terminals.
 3. Enable **Settings → Providers → External CLI → Claude Code**. This app-wide opt-in is **off by default**. Use **Check again** to refresh installation status.
 4. Select a Claude Code model: `opus`, `sonnet`, `haiku`, or `fable`. These are CLI aliases, not pinned underlying versions.
 

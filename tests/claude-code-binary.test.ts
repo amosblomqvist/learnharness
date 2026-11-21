@@ -63,6 +63,19 @@ test("windows finds native claude.exe and does not advertise unsupported .cmd-on
 	assert.equal(resolveWith(["C:\\bin\\claude"], env, "win32", winHome), null);
 });
 
+test("windows finds the native claude.exe inside a global npm install, behind its .cmd shim", () => {
+	const winHome = "C:\\Users\\u";
+	const npmPrefix = `${winHome}\\AppData\\Roaming\\npm`;
+	const packaged = `${npmPrefix}\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe`;
+	const env = { PATH: `C:\\bin;${npmPrefix}`, APPDATA: `${winHome}\\AppData\\Roaming` };
+	assert.equal(resolveWith([`${npmPrefix}\\claude.cmd`, packaged], env, "win32", winHome), packaged);
+	// A custom npm prefix moves the package with it.
+	const custom = "D:\\npm\\node_modules\\@anthropic-ai\\claude-code\\bin\\claude.exe";
+	assert.equal(resolveWith([packaged, custom], { ...env, npm_config_prefix: "D:\\npm" }, "win32", winHome), custom);
+	// A claude.exe directly on PATH or in the native installer's dir still wins.
+	assert.equal(resolveWith([packaged, `${winHome}\\.local\\bin\\claude.exe`], env, "win32", winHome), `${winHome}\\.local\\bin\\claude.exe`);
+});
+
 test("windows prefers claude.exe anywhere over claude.cmd, which Node cannot spawn without a shell", () => {
 	const winHome = "C:\\Users\\u";
 	const env = { PATH: "C:\\bin", APPDATA: `${winHome}\\AppData\\Roaming` };
