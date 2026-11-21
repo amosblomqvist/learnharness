@@ -215,9 +215,9 @@ export async function handleChatRequest(
  * (TurnInput's steer kind appends the marker under the same claim).
  */
 /** The session's composed system prompt size (compaction's estimate). */
-function sessionPromptTokens(kind: ChatSessionKind): number {
+function sessionPromptTokens(kind: ChatSessionKind, switches: Record<string, boolean>): number {
 	const prompt = kind.status === "plugin"
-		? composeSessionKindInstructions("teacher", kind.definition.prompts.teacher)
+		? composeSessionKindInstructions("teacher", kind.definition.prompts.teacher, switches)
 		: composeInstructions(kind.id === "practice" ? "practice" : "teacher");
 	return Math.ceil(prompt.length / 4);
 }
@@ -387,7 +387,7 @@ export async function handleChatInput(
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
 	const contextWindow = catalogContextLimits().get(modelIdForCompaction);
 	const thresholdTokens = effectiveThresholdTokens(effective.compaction?.thresholdTokens, contextWindow);
-	const systemPromptTokens = sessionPromptTokens(sessionKind);
+	const systemPromptTokens = sessionPromptTokens(sessionKind, effective.agent.prompts);
 	const estimateModel = effective.compaction.includeReasoning ? conversationEngine.model : undefined;
 	const fitsSideContext = (messages: readonly LhMessage[]) => {
 		const live = messages.filter((message) => (message as { role: string }).role !== "system");
@@ -980,7 +980,7 @@ export async function handleChatInput(
 								fresh.compaction?.thresholdTokens,
 								catalogContextLimits().get(kickModelId),
 							),
-							systemPromptTokens: sessionPromptTokens(sessionKind),
+							systemPromptTokens: sessionPromptTokens(sessionKind, fresh.agent.prompts),
 						};
 					}, chatId);
 			},

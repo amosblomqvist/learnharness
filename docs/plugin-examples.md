@@ -10,6 +10,7 @@ building or exercising it: plugins are trusted local code, not sandboxed extensi
 | Start here | Role | What to learn |
 | --- | --- | --- |
 | [Hello plugin](../examples/plugins/hello-plugin/README.md) | Minimal starter; no build | Frontend activation, a view, explicit action placements, a host button/dialog and per-mount cleanup |
+| [Takeaway Notebook](../examples/plugins/takeaway-notebook/README.md) | Optional no-build example | Full prompt recipes, session-scoped tools and questions, custom record extraction and a Home record view |
 | [UI Showcase](../plugins/ui-showcase/README.md) | Runnable Community developer gallery | All 15 public UI methods, controlled values, family-local Reset and overlay ownership |
 | [Flashcards](../plugins/flashcards/README.md) | Core source reference | A complete feature: knowledge/document input, durable worker outcomes, plugin-owned storage, tree, review surfaces and settings |
 | [Coding questions](../plugins/coding-questions/README.md) | Core source reference | Teaching questions and repeated practice submissions, controlled editors, processing observations and saved-result rendering |
@@ -55,6 +56,7 @@ The downloaded authoring kit preserves the repository layout:
     hello-plugin/
     managed-agent/
     teaching-extension/
+    takeaway-notebook/
   plugins/
     flashcards/
     coding-questions/

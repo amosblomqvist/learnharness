@@ -131,6 +131,36 @@ describe("P2 — the session kind replaces only its phase text and narrows nativ
 		assert.ok(composed.length < native.length, "the native teacher fragments are replaced");
 	});
 
+	it("an ordered prompt recipe keeps exactly the requested text and effective host segments", async () => {
+		const segment = "shared/15-accuracy.md";
+		const hostText = fs.readFileSync(path.resolve("src/agent/prompts", segment), "utf8").trim();
+		const definition = { id: "custom-prompt", label: "Custom prompt", record: "graph", prompts: {
+			prober: [{ text: "Only this." }],
+			teacher: [{ text: "Before" }, { segment }, { text: "After" }],
+		} };
+		const off = (await freshContext()).registerSessionKind(definition);
+		const override = path.join(data, "prompts", segment);
+		try {
+			const resolved = host.resolveSessionKind(`${PLUGIN}:custom-prompt`);
+			if (resolved.status !== "available") throw Error("unavailable");
+			definition.prompts.teacher[0]!.text = "Mutation";
+			const { prober, teacher } = resolved.definition.prompts;
+			assert.equal(composeSessionKindInstructions("prober", prober), "Only this.");
+			assert.equal(composeSessionKindInstructions("teacher", teacher), ["Before", hostText, "After"].join("\n\n---\n\n"));
+			fs.mkdirSync(path.dirname(override), { recursive: true });
+			fs.writeFileSync(override, "Learner override");
+			assert.equal(composeSessionKindInstructions("teacher", teacher, { [segment]: true }), "Before\n\n---\n\nLearner override\n\n---\n\nAfter");
+			assert.equal(composeSessionKindInstructions("teacher", teacher), ["Before", hostText, "After"].join("\n\n---\n\n"));
+		} finally { off(); fs.rmSync(override, { force: true }); }
+	});
+
+	it("rejects unknown host segments and malformed or empty recipes at registration", async () => {
+		const live = await freshContext();
+		for (const invalid of [[{ segment: "shared/99-absent.md" }], [{ segment: "../outside.md" }], [{ text: "x", segment: "shared/15-accuracy.md" }], [{ text: " " }], []]) {
+			assert.throws(() => live.registerSessionKind({ id: "invalid-recipe", label: "Invalid", record: "graph", prompts: { prober: "Probe", teacher: invalid } }), /prompts\.teacher/);
+		}
+	});
+
 	it("builds prober and teacher agents with the kind's prompts, delta and kind-scoped contributions", () => {
 		const contributions = host.agentContributions.bind(host);
 		const opts = { engine: engine(), chatId: "chat-kind", pluginContributions: contributions, sessionKind: kind(), toolToggles: {} };

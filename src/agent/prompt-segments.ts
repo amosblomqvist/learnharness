@@ -106,29 +106,42 @@ export function effectivePromptSegments(
 	agent: PromptAgent,
 	switches: Record<string, boolean>,
 ): PromptSegmentInfo[] {
-	return listSourceSegments(agent).map((segment) => {
-		let sourceText: string;
-		try {
-			sourceText = fs.readFileSync(segment.file, "utf-8");
-		} catch {
-			sourceText = ""; // source unreadable — the agent loader would crash anyway
-		}
-		const overrideText = readPromptOverride(segment.path);
-		return {
-			path: segment.path,
-			sourceText,
-			overrideText,
-			enabled: switches[segment.path] === true && overrideText !== null,
-			shared: segment.shared,
-		};
-	});
+	return listSourceSegments(agent).map((segment) => readSegment(segment, switches));
 }
 
-/** Every known segment path across both agents (route validation). */
-export function allSegmentPaths(): string[] {
-	const paths = new Set<string>();
+type SourceSegment = ReturnType<typeof listSourceSegments>[number];
+
+function readSegment(segment: SourceSegment, switches: Record<string, boolean>): PromptSegmentInfo {
+	let sourceText: string;
+	try { sourceText = fs.readFileSync(segment.file, "utf-8"); }
+	catch { sourceText = ""; }
+	const overrideText = readPromptOverride(segment.path);
+	return { path: segment.path, sourceText, overrideText, enabled: switches[segment.path] === true && overrideText !== null, shared: segment.shared };
+}
+
+function allSourceSegments(): Map<string, SourceSegment> {
+	const segments = new Map<string, SourceSegment>();
 	for (const agent of ["prober", "teacher", "practice"] as const) {
-		for (const segment of listSourceSegments(agent)) paths.add(segment.path);
+		for (const segment of listSourceSegments(agent)) segments.set(segment.path, segment);
 	}
-	return [...paths].sort();
+	return segments;
+}
+
+/** Every known segment path across the native agents. */
+export function allSegmentPaths(): string[] {
+	return [...allSourceSegments().keys()].sort();
+}
+
+/** Read only the shipped segments a plugin actually selected for its recipe. */
+export function referencedPromptTexts(paths: readonly string[], switches: Record<string, boolean>): ReadonlyMap<string, string> {
+	if (paths.length === 0) return new Map();
+	const sources = allSourceSegments();
+	const texts = new Map<string, string>();
+	for (const id of new Set(paths)) {
+		const segment = sources.get(id);
+		if (!segment) throw new Error(`Unknown host prompt segment: ${id}`);
+		const { enabled, overrideText, sourceText } = readSegment(segment, switches);
+		texts.set(id, enabled ? overrideText! : sourceText);
+	}
+	return texts;
 }

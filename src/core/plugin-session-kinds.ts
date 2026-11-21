@@ -15,7 +15,7 @@
  * nothing.
  */
 
-import type { PluginRecordKindDefinition, PluginSessionKindDefinition } from "./plugins.ts";
+import type { PluginPromptPart, PluginRecordKindDefinition, PluginSessionKindDefinition, PluginSessionKindPrompt } from "./plugins.ts";
 import { PLUGIN_KIND_LOCAL_ID_PATTERN, isRecordKindRef } from "./session-kinds.ts";
 import type { PluginSessionKindId } from "./contracts/chat.ts";
 
@@ -36,7 +36,7 @@ export interface PreparedPluginSessionKind {
 	readonly label: string;
 	/** "graph" or a full plugin record kind id. */
 	readonly record: string;
-	readonly prompts: { readonly prober: string; readonly teacher: string };
+	readonly prompts: { readonly prober: PluginSessionKindPrompt; readonly teacher: PluginSessionKindPrompt };
 	readonly tools: { readonly prober: Readonly<Record<string, boolean>>; readonly teacher: Readonly<Record<string, boolean>> };
 	readonly icon?: string;
 }
@@ -72,13 +72,28 @@ function toolDelta(value: unknown, phase: "prober" | "teacher"): Readonly<Record
 	return Object.freeze(delta);
 }
 
-export function preparePluginSessionKind(pluginId: string, definition: PluginSessionKindDefinition): PreparedPluginSessionKind {
+function preparePhasePrompt(value: unknown, phase: "prober" | "teacher", knownSegments: ReadonlySet<string>): PluginSessionKindPrompt {
+	if (typeof value === "string" && text(value)) return value;
+	if (!Array.isArray(value) || value.length === 0) throw new Error(`Plugin session kind prompts.${phase} requires nonempty text or an ordered prompt list`);
+	return Object.freeze(Array.from(value, (part: unknown, index): PluginPromptPart => {
+		if (object(part) && Object.keys(part).length === 1) {
+			if (typeof part.text === "string" && text(part.text) && Object.hasOwn(part, "text")) return Object.freeze({ text: part.text });
+			if (typeof part.segment === "string" && Object.hasOwn(part, "segment")) {
+				if (!knownSegments.has(part.segment)) throw new Error(`Plugin session kind prompts.${phase}[${index}] references an unknown host segment: ${part.segment}`);
+				return Object.freeze({ segment: part.segment });
+			}
+		}
+		throw new Error(`Plugin session kind prompts.${phase}[${index}] must specify exactly one of text or segment`);
+	}));
+}
+
+export function preparePluginSessionKind(pluginId: string, definition: PluginSessionKindDefinition, knownSegments: ReadonlySet<string> = new Set()): PreparedPluginSessionKind {
 	if (!object(definition)) throw new Error("Invalid plugin session kind definition");
 	const localId = localIdOf(definition.id, "session kind");
 	if (!text(definition.label)) throw new Error("Plugin session kind requires a nonempty label");
 	if (!isRecordKindRef(definition.record)) throw new Error('Plugin session kind record must be "graph" or a "<pluginId>:<recordKindId>" id');
 	const prompts = definition.prompts as unknown;
-	if (!object(prompts) || !text(prompts.prober) || !text(prompts.teacher)) throw new Error("Plugin session kind requires nonempty prompts.prober and prompts.teacher");
+	if (!object(prompts)) throw new Error("Plugin session kind requires prompts.prober and prompts.teacher");
 	const tools = definition.tools as unknown;
 	if (tools !== undefined && !object(tools)) throw new Error("Plugin session kind tools must be an object keyed by phase");
 	if (definition.icon !== undefined && !text(definition.icon)) throw new Error("Plugin session kind icon must be nonempty SVG markup");
@@ -88,7 +103,7 @@ export function preparePluginSessionKind(pluginId: string, definition: PluginSes
 		pluginId,
 		label: definition.label,
 		record: definition.record,
-		prompts: Object.freeze({ prober: prompts.prober, teacher: prompts.teacher }),
+		prompts: Object.freeze({ prober: preparePhasePrompt(prompts.prober, "prober", knownSegments), teacher: preparePhasePrompt(prompts.teacher, "teacher", knownSegments) }),
 		tools: Object.freeze({ prober: toolDelta(tools?.prober, "prober"), teacher: toolDelta(tools?.teacher, "teacher") }),
 		...(definition.icon !== undefined ? { icon: definition.icon } : {}),
 	});

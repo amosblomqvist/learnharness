@@ -5,7 +5,7 @@ import { providerEventObserver } from "./provider-events.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import { PATHS } from "../../config.ts";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
-import { effectivePromptSegments } from "./prompt-segments.ts";
+import { effectivePromptSegments, referencedPromptTexts } from "./prompt-segments.ts";
 import {
 	askUserQuestionTool,
 	createProberTools,
@@ -22,7 +22,7 @@ import { makeNarrationGuard, narrationGuardApplies, SEND_TO_USER_DELIVERY_RULE }
 import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, TOGGLEABLE_TOOLS, type EnabledTools } from "../core/pending.ts";
-import type { PluginToolContext } from "../core/plugins.ts";
+import type { PluginSessionKindDefinition, PluginSessionKindPrompt, PluginToolContext } from "../core/plugins.ts";
 import type { ChatKind } from "../core/contracts/chat.ts";
 import { applySessionKindToolDelta } from "../core/plugin-session-kinds.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
@@ -95,29 +95,27 @@ export function composeInstructions(kind: AgentKind, switches?: Record<string, b
 		.join("\n\n---\n\n");
 }
 
-/**
- * A plugin session kind's phase prompt (stage B, owner P2 2026-11-17): the
- * kind is the one contribution that REPLACES — its phase text stands in for
- * the native agent's own fragments, between the shared base
- * (system-prompt.md) and the shared/ appendix, both of which keep their
- * per-segment overrides. Plugin text itself is not user-overridable in v1.
- */
-export function composeSessionKindInstructions(phase: "prober" | "teacher", phaseText: string, switches?: Record<string, boolean>): string {
-	const shared = effectivePromptSegments(phase, switches ?? {}).filter((s) => s.shared);
-	const [base, ...appendix] = shared;
-	return [base, phaseText, ...appendix]
-		.map((s) => (typeof s === "string" ? s : s ? (s.enabled ? s.overrideText! : s.sourceText) : ""))
-		.map((t) => t.trim())
-		.filter(Boolean)
-		.join("\n\n---\n\n");
+/** A string replaces the native phase fragments. An ordered recipe replaces
+ * the whole phase prompt, including the shared base and appendix. */
+export function composeSessionKindInstructions(phase: "prober" | "teacher", prompt: PluginSessionKindPrompt, switches: Record<string, boolean> = {}): string {
+	let texts: string[];
+	if (typeof prompt === "string") {
+		const [base = "", ...appendix] = effectivePromptSegments(phase, switches).filter((s) => s.shared)
+			.map((s) => s.enabled ? s.overrideText! : s.sourceText);
+		texts = [base, prompt, ...appendix];
+	} else {
+		const referenced = referencedPromptTexts(prompt.flatMap((part) => "segment" in part ? [part.segment] : []), switches);
+		texts = prompt.map((part) => "segment" in part ? referenced.get(part.segment)! : part.text);
+	}
+	return texts.map((text) => text.trim()).filter(Boolean).join("\n\n---\n\n");
 }
 
 /** The session-kind facts an agent build needs (the handler resolves them). */
 export interface AgentSessionKind {
 	/** Exact kind id: "teach", "practice" or "<pluginId>:<localId>". */
 	id: ChatKind;
-	/** Plugin kinds only: per-phase prompt text replacing the native fragments. */
-	prompts?: { prober: string; teacher: string };
+	/** Plugin kinds only: per-phase prompt text or full ordered recipes. */
+	prompts?: PluginSessionKindDefinition["prompts"];
 	/** Plugin kinds only: per-phase native tool delta (false removes; forced tools stay). */
 	tools?: { prober: Readonly<Record<string, boolean>>; teacher: Readonly<Record<string, boolean>> };
 }

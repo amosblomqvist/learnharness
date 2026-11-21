@@ -1,0 +1,10 @@
+# Takeaway Notebook
+
+An optional, no-build example for a LearnHarness build with **ordered session-kind prompts**. It is not installed by default. Copy `examples/plugins/takeaway-notebook/` into the plugins directory shown under **Settings → Community plugins** as `takeaway-notebook/`, keeping `dist/manifest.json` where it is. Refresh the list and enable **Takeaway Notebook**.
+
+1. Start a **Takeaway lesson** from the sidebar or select **Notebook** on Home. Try “Teach me why the sky is blue in one short example.” Lesson turns use the app's configured conversation model and may incur cost.
+2. Answer the **One-sentence teach-back** question. The teacher should respond with one plain `Takeaway: …` line. Later, ask what the notebook remembers about the topic to see the `notebook_search` tool.
+3. Extraction is automatic after enough new transcript accumulates. To see a short session's result immediately, open its coverage menu and choose **Extract**. Go back to Home → **Notebook** to see the note grouped by session. Extraction and lookup are local and make no model calls.
+4. To remove the notes when deleting the session, check **Also remove its Notebook traces**. Ordinary deletion keeps them under “Deleted session.”
+
+`dist/backend.cjs` registers the lesson and notebook record, builds both phase prompts from one host accuracy segment and short plugin text, removes the built-in question and background tools for this kind, and adds two teacher-only tools: a host-managed text question and a local lookup. Its extractor ignores learner-supplied and private text, saves only explicit markers from delivered assistant prose, and is safe to retry by batch id. This is an append-only notebook, not a transcript synchronizer: editing a source message does not retract previously saved notes. The plugin's `data/takeaways.json` holds notes; the host manages coverage separately. `dist/main.js` supplies the answer editor and the Home record view. It uses plain text DOM nodes for saved takeaways.

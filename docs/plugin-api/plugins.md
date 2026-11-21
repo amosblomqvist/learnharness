@@ -26,11 +26,13 @@
 - [PluginManifest](#pluginmanifest)
 - [PluginNotification](#pluginnotification)
 - [PluginPageActionContext](#pluginpageactioncontext)
+- [PluginPromptPart](#pluginpromptpart)
 - [PluginRecordBatch](#pluginrecordbatch)
 - [PluginRecordKindDefinition](#pluginrecordkinddefinition)
 - [PluginRecordKindSummary](#pluginrecordkindsummary)
 - [PluginRecordView](#pluginrecordview)
 - [PluginSessionKindDefinition](#pluginsessionkinddefinition)
+- [PluginSessionKindPrompt](#pluginsessionkindprompt)
 - [PluginSessionKindSummary](#pluginsessionkindsummary)
 - [PluginSessionKindToolDelta](#pluginsessionkindtooldelta)
 - [PluginSettingsRegistration](#pluginsettingsregistration)
@@ -1943,6 +1945,35 @@ viewId: string;
 pathname: string;
 ```
 
+## PluginPromptPart
+
+Public SDK type, exported as `PluginPromptPart`. Import with `import type`; the SDK has no runtime exports.
+
+```ts
+export type PluginPromptPart = {
+    readonly text: string;
+} | {
+    readonly segment: string;
+};
+```
+
+**Member index** (including nested object members; inherited members are defined in the linked base types):
+
+- [text](#pluginpromptpart-text)
+- [segment](#pluginpromptpart-segment)
+
+### PluginPromptPart text
+
+```ts
+readonly text: string;
+```
+
+### PluginPromptPart segment
+
+```ts
+readonly segment: string;
+```
+
 ## PluginRecordBatch
 
 Public SDK type, exported as `PluginRecordBatch`. Import with `import type`; the SDK has no runtime exports.
@@ -2184,9 +2215,8 @@ mount(container: HTMLElement, signal: AbortSignal): void | PluginCleanup | Promi
 
 Public SDK type, exported as `PluginSessionKindDefinition`. Import with `import type`; the SDK has no runtime exports.
 
-A teaching-shaped session kind (prober → probe_done → teacher). Its prompts
-replace the native phase fragments between the shared base and the shared
-appendix; every other plugin contribution still applies additively.
+A teaching-shaped session kind (prober → probe_done → teacher). Other
+plugins' matching instruction contributions still apply additively.
 
 ```ts
 export interface PluginSessionKindDefinition {
@@ -2194,8 +2224,8 @@ export interface PluginSessionKindDefinition {
     label: string;
     record: string;
     prompts: {
-        prober: string;
-        teacher: string;
+        prober: PluginSessionKindPrompt;
+        teacher: PluginSessionKindPrompt;
     };
     tools?: {
         prober?: PluginSessionKindToolDelta;
@@ -2205,7 +2235,7 @@ export interface PluginSessionKindDefinition {
 }
 ```
 
-**Related types:** [PluginSessionKindToolDelta](plugins.md#pluginsessionkindtooldelta).
+**Related types:** [PluginSessionKindPrompt](plugins.md#pluginsessionkindprompt), [PluginSessionKindToolDelta](plugins.md#pluginsessionkindtooldelta).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -2248,21 +2278,21 @@ This kind's job and method for each phase.
 
 ```ts
 prompts: {
-    prober: string;
-    teacher: string;
+    prober: PluginSessionKindPrompt;
+    teacher: PluginSessionKindPrompt;
 };
 ```
 
 ### PluginSessionKindDefinition prompts.prober
 
 ```ts
-prober: string;
+prober: PluginSessionKindPrompt;
 ```
 
 ### PluginSessionKindDefinition prompts.teacher
 
 ```ts
-teacher: string;
+teacher: PluginSessionKindPrompt;
 ```
 
 ### PluginSessionKindDefinition tools
@@ -2293,6 +2323,22 @@ Trusted SVG markup for the host's doors, mode switch and session rows.
 ```ts
 icon?: string;
 ```
+
+## PluginSessionKindPrompt
+
+Public SDK type, exported as `PluginSessionKindPrompt`. Import with `import type`; the SDK has no runtime exports.
+
+A phase prompt: a string replaces the native phase fragments but keeps the
+shared base and appendix. A nonempty ordered list defines the whole phase
+prompt: nothing else is inherited. `{ segment }` names a shipped host
+segment (e.g. `shared/15-accuracy.md`) and honors enabled learner overrides;
+`{ text }` inserts literal plugin text. Unknown segment ids are rejected.
+
+```ts
+export type PluginSessionKindPrompt = string | readonly PluginPromptPart[];
+```
+
+**Related types:** [PluginPromptPart](plugins.md#pluginpromptpart).
 
 ## PluginSessionKindSummary
 

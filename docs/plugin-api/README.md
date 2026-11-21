@@ -127,6 +127,7 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 | [PluginProblemSubmissionValidationContext](plugin-problems.md#pluginproblemsubmissionvalidationcontext) | `plugin-problems` |
 | [PluginProblemTypeDefinition](plugin-problems.md#pluginproblemtypedefinition) | `plugin-problems` |
 | [PluginProblemValidationContext](plugin-problems.md#pluginproblemvalidationcontext) | `plugin-problems` |
+| [PluginPromptPart](plugins.md#pluginpromptpart) | `plugins` |
 | [PluginQuestionAnnotationRead](plugin-questions.md#pluginquestionannotationread) | `plugin-questions` |
 | [PluginQuestionAnswer](plugin-questions.md#pluginquestionanswer) | `plugin-questions` |
 | [PluginQuestionAnswerState](plugin-questions.md#pluginquestionanswerstate) | `plugin-questions` |
@@ -154,6 +155,7 @@ The SDK is **type-only**. Call the contexts supplied by LearnHarness, not runtim
 | [PluginRecordView](plugins.md#pluginrecordview) | `plugins` |
 | [PluginSessionKindDefinition](plugins.md#pluginsessionkinddefinition) | `plugins` |
 | [PluginSessionKindId](contracts-chat.md#pluginsessionkindid) | `contracts-chat` |
+| [PluginSessionKindPrompt](plugins.md#pluginsessionkindprompt) | `plugins` |
 | [PluginSessionKindSummary](plugins.md#pluginsessionkindsummary) | `plugins` |
 | [PluginSessionKindToolDelta](plugins.md#pluginsessionkindtooldelta) | `plugins` |
 | [PluginSessionViewContext](plugin-view-context.md#pluginsessionviewcontext) | `plugin-view-context` |
@@ -265,4 +267,4 @@ These are reachable through public data, event, inheritance or helper-type relat
 
 Standard JavaScript/DOM types (`Promise`, `AbortSignal`, `File`, `HTMLElement`, and utility types) use their standard contracts. Pi model/messages/tools and TypeBox schemas use the exact peer versions declared by the bundled SDK's `package.json`. Supply those peers when typechecking; they are development types, not permission to import private LearnHarness runtime modules.
 
-Coverage: **151 public types**, **55 supporting declarations**, **936 declared member signatures/variants**. Generation contains no build timestamps or absolute source paths.
+Coverage: **153 public types**, **55 supporting declarations**, **938 declared member signatures/variants**. Generation contains no build timestamps or absolute source paths.

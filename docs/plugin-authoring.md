@@ -572,9 +572,21 @@ definitions throw. Active registrations appear on the plugin's `sessionKinds` /
 `recordKinds` summaries.
 
 A session kind is teaching-shaped: a prober phase that ends with `probe_done`, then a
-teacher phase. `prompts.prober` and `prompts.teacher` replace the native phase fragments
-between the shared base prompt and the shared appendix (voice, accuracy, formatting and
-similar); they are not user-overridable. `tools.prober` / `tools.teacher` are deltas in
+teacher phase. Set `prompts.prober` and `prompts.teacher` independently:
+
+- A **string** replaces the native phase fragments between the shared base prompt and
+  the shared appendix.
+- A **nonempty ordered list** defines the entire phase prompt. Each `{ text: "…" }`
+  inserts plugin text; each `{ segment: "shared/15-accuracy.md" }` inserts that shipped
+  host segment, honoring its enabled learner override. Use the same paths shown in the
+  agent prompt settings, including `system-prompt.md` for the shared base. Unknown
+  paths fail registration. No base, phase, or shared fragments are added implicitly.
+
+Neither form makes plugin text user-overridable. Matching plugin instructions and
+model-specific delivery rules still apply separately. See the [Takeaway Notebook
+example](../examples/plugins/takeaway-notebook/README.md) for two short ordered recipes.
+
+`tools.prober` / `tools.teacher` are deltas in
 the shape of the learner's tool toggles: `false` removes a native tool, absent keeps it,
 and the learner's own `false` still wins. `probe_done` and `plan_init` are always kept.
 Other plugins' instructions, tools and question types still apply additively unless

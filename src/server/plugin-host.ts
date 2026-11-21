@@ -11,6 +11,7 @@ import type { ChatKind } from "../core/contracts/chat.ts";
 import { preparePluginRecordKind, preparePluginSessionKind, type PreparedPluginRecordKind, type PreparedPluginSessionKind } from "../core/plugin-session-kinds.ts";
 import type { PluginQuestionVariant } from "../core/plugin-questions.ts";
 import type { NativePluginQuestionDefinition } from "../agent/plugin-question-tools.ts";
+import { allSegmentPaths } from "../agent/prompt-segments.ts";
 import { preparePluginProblemType, createPluginProblemParameters, type NativePluginProblemDefinition } from "../core/plugin-problems.ts";
 import type { NativePluginProblemContribution } from "../agent/plugin-problem-tools.ts";
 import type { PluginAgentKind, PluginBackendContext, PluginBackendModule, PluginCleanup, PluginFrontendContext, PluginInfo, PluginInference, PluginInstructions, PluginLearningData, PluginRecordKindSummary, PluginSessionKindSummary, PluginManifest, PluginNotification, PluginToolContext, PluginTools } from "../core/plugins.ts";
@@ -323,7 +324,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					},
 					registerSessionKind(definition) {
 						requireLive();
-						const registered = preparePluginSessionKind(manifest.id, definition);
+						const registered = preparePluginSessionKind(manifest.id, definition, new Set(allSegmentPaths()));
 						if (activation.sessionKinds.has(registered.localId)) throw new Error(`Duplicate plugin session kind: ${registered.localId}`);
 						activation.sessionKinds.set(registered.localId, registered);
 						if (activation.ready) change();

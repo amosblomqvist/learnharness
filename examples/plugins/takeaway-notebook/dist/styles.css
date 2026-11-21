@@ -1,0 +1,6 @@
+.lh-notebook-view { width: min(100%, 42rem); margin: 0 auto; padding: 1.5rem; }
+.lh-notebook-view h2 { font-size: 1.25em; font-weight: 600; }
+.lh-notebook-view h3 { margin-top: 1rem; font-weight: 600; }
+.lh-notebook-view ul { list-style: disc; padding-inline-start: 1.25em; }
+.lh-notebook-view li { margin-top: .25rem; overflow-wrap: anywhere; }
+.lh-notebook-answer { width: 100%; min-height: 3rem; padding: .5rem; border: 1px solid var(--border); border-radius: .375rem; background: transparent; }

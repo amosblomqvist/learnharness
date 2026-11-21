@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "id": "takeaway-notebook",
+  "name": "Takeaway Notebook",
+  "version": "1.0.0",
+  "minAppVersion": "0.6.1",
+  "description": "Developer example: short teach-back lessons and a local record of takeaways.",
+  "main": "main.js",
+  "backend": "backend.cjs",
+  "styles": "styles.css"
+}

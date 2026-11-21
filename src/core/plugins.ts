@@ -167,9 +167,16 @@ export interface PluginTools {
  * `false` removes that native tool; absent or `true` keeps it. A user's own
  * `false` still wins. probe_done (prober) and plan_init (teacher) are always kept. */
 export type PluginSessionKindToolDelta = Record<string, boolean>;
-/** A teaching-shaped session kind (prober → probe_done → teacher). Its prompts
- * replace the native phase fragments between the shared base and the shared
- * appendix; every other plugin contribution still applies additively. */
+/** A phase prompt: a string replaces the native phase fragments but keeps the
+ * shared base and appendix. A nonempty ordered list defines the whole phase
+ * prompt: nothing else is inherited. `{ segment }` names a shipped host
+ * segment (e.g. `shared/15-accuracy.md`) and honors enabled learner overrides;
+ * `{ text }` inserts literal plugin text. Unknown segment ids are rejected. */
+export type PluginSessionKindPrompt = string | readonly PluginPromptPart[];
+export type PluginPromptPart = { readonly text: string } | { readonly segment: string };
+
+/** A teaching-shaped session kind (prober → probe_done → teacher). Other
+ * plugins' matching instruction contributions still apply additively. */
 export interface PluginSessionKindDefinition {
 	/** Local id (lowercase words joined by hyphens); the full id is "<pluginId>:<id>". */
 	id: string;
@@ -177,7 +184,7 @@ export interface PluginSessionKindDefinition {
 	/** The record this kind extracts into: "graph" or any plugin's full record kind id. */
 	record: string;
 	/** This kind's job and method for each phase. */
-	prompts: { prober: string; teacher: string };
+	prompts: { prober: PluginSessionKindPrompt; teacher: PluginSessionKindPrompt };
 	tools?: { prober?: PluginSessionKindToolDelta; teacher?: PluginSessionKindToolDelta };
 	/** Trusted SVG markup for the host's doors, mode switch and session rows. */
 	icon?: string;
