@@ -311,6 +311,21 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 		assert.ok(!out.toolRows[1]!.present);
 	});
 
+	it("the Anthropic workspace ID sits right after a stored Anthropic key, never among the tools", () => {
+		const withAnthropic = [...providers, { id: "anthropic", envVar: "ANTHROPIC_API_KEY", label: "Anthropic" }];
+		const curated = (id: string, present = false): AuthKeyStatus => ({ ...synth(id, present), info: { id, label: id, description: "d", docsUrl: "https://x" } });
+		// Absent and nothing to qualify: no row anywhere.
+		const none = classifyKeys([curated("ANTHROPIC_WORKSPACE_ID")], withAnthropic);
+		assert.equal(none.providerRows.length, 0);
+		assert.ok(!none.toolRows.some((r) => r.id === "ANTHROPIC_WORKSPACE_ID"));
+		// An Anthropic key offers the (unset) workspace row directly after it.
+		const offered = classifyKeys([synth("ANTHROPIC_API_KEY", true), synth("GROQ_API_KEY", true), curated("ANTHROPIC_WORKSPACE_ID")], withAnthropic);
+		assert.deepEqual(offered.providerRows.map((r) => r.id), ["ANTHROPIC_API_KEY", "ANTHROPIC_WORKSPACE_ID", "GROQ_API_KEY"]);
+		// A stored workspace ID stays visible (and deletable) without the key.
+		const orphan = classifyKeys([curated("ANTHROPIC_WORKSPACE_ID", true)], withAnthropic);
+		assert.deepEqual(orphan.providerRows.map((r) => r.id), ["ANTHROPIC_WORKSPACE_ID"]);
+	});
+
 	it("unknown file vars surface read-only, out of the provider rows", () => {
 		const out = classifyKeys([synth("PLANS_LOGIN_TOKEN", true)], providers);
 		assert.equal(out.unknownRows.length, 1);

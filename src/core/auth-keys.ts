@@ -66,7 +66,18 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models.",
 		docsUrl: "https://ollama.com/settings/keys",
 	},
+	{
+		id: "ANTHROPIC_WORKSPACE_ID",
+		label: "Anthropic workspace ID",
+		description: "Sent as the anthropic-workspace-id header on Anthropic API requests. Needed only when the Anthropic API key is not scoped to a workspace.",
+		docsUrl: "https://console.anthropic.com/settings/workspaces",
+	},
 ] as const;
+
+/** The Anthropic workspace selector: not a credential of its own, it
+ *  qualifies ANTHROPIC_API_KEY, so it lives with the model keys instead of
+ *  the tools groups. */
+export const ANTHROPIC_WORKSPACE_KEY = "ANTHROPIC_WORKSPACE_ID";
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
 
@@ -204,6 +215,10 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
+		case "ANTHROPIC_WORKSPACE_ID":
+			return value.startsWith("wrkspc_")
+				? nonEmpty(12)
+				: { ok: false, error: `${id} must start with "wrkspc_" (Anthropic's workspace ID format)` };
 		default:
 			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
 	}
