@@ -9,7 +9,7 @@
  *    store or env — env wins, keyed via server/keys.ts keyValue).
  *  - Setting a key is ALL the user does — auto-detection: explicit
  *    agent.search.engine pins the preference (when several keys are
- *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama);
+ *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama → Parallel);
  *    without a pin, the first keyed engine wins.
  *  - An explicit choice does NOT silently fall back to another engine:
  *    engine pinned but its key missing = honestly unavailable (reason
@@ -211,6 +211,53 @@ export function ollamaProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
 	};
 }
 
+/** Parallel (parallel.ai) Search API.
+ *  VERIFIED against a live call 2026-11-08: POST https://api.parallel.ai/v1/search
+ *  with the key in `x-api-key`; body {search_queries: string[], objective?,
+ *  mode?, max_chars_total?}; response
+ *  {search_id, results: [{url, title, publish_date, excerpts: string[]}]}.
+ *
+ *  Two shape differences from the other engines, both absorbed here:
+ *  - there is no result-count parameter (max_chars_total bounds the excerpts,
+ *    not the rows), so `count` slices the list after the fact;
+ *  - a search is a set of short keyword queries plus an optional objective, so
+ *    the researcher's one free-text query rides as both (their docs ask for
+ *    "3-6 words each" — a longer sentence still works, and the objective is
+ *    what actually steers relevance). */
+export function parallelProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
+	return {
+		id: "parallel",
+		async search(query: string, count: number): Promise<SearchHit[]> {
+			const limit = Math.min(20, Math.max(1, Math.floor(count)));
+			const resp = await fetchFn("https://api.parallel.ai/v1/search", {
+				method: "POST",
+				headers: { "content-type": "application/json", "x-api-key": apiKey },
+				body: JSON.stringify({
+					search_queries: [query],
+					objective: query,
+					// Bound the payload the way the port expects: our snippets cap
+					// at 500 chars each, so nothing above that is worth paying for.
+					max_chars_total: Math.min(8000, limit * 500),
+				}),
+				signal: AbortSignal.timeout(30_000),
+			});
+			if (!resp.ok) throw new Error(`Parallel search API ${resp.status}`);
+			const data = await searchJson(resp, "Parallel");
+			if (!data || typeof data !== "object" || !Array.isArray((data as { results?: unknown }).results)) {
+				throw new Error("Parallel search API returned an invalid response");
+			}
+			return (data as { results: unknown[] }).results.flatMap((result): SearchHit[] => {
+				if (!result || typeof result !== "object") return [];
+				const row = result as { title?: unknown; url?: unknown; excerpts?: unknown };
+				const excerpts = Array.isArray(row.excerpts)
+					? row.excerpts.filter((v): v is string => typeof v === "string").join(" ")
+					: "";
+				return searchHit(row.title, row.url, excerpts);
+			}).slice(0, limit);
+		},
+	};
+}
+
 /** Match Exa's bounded result contract for the other new adapters. */
 function searchHit(title: unknown, url: unknown, snippet: unknown): SearchHit[] {
 	if (typeof url !== "string" || !url.trim()) return [];
@@ -270,7 +317,7 @@ export function resolveSearchEngineFor(
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key",
+		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, Ollama, or Parallel search API key",
 		key: null,
 	};
 }
@@ -308,6 +355,8 @@ export function searchProvider(): SearchProvider | null {
 			return firecrawlProvider(resolved.key);
 		case "ollama":
 			return ollamaProvider(resolved.key);
+		case "parallel":
+			return parallelProvider(resolved.key);
 		default:
 			return null;
 	}
