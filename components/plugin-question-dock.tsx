@@ -22,7 +22,7 @@ const keyOf = (snapshot: PluginQuestionSnapshot) => pluginQuestionOccurrenceKey(
 
 interface PluginQuestionDockProps {
 	viewReader?: import("./session-view-readers").ViewReaderRef<{ available: boolean }>;
-	snapshot: PluginQuestionSnapshot; chatId: string; draft: PluginQuestionDraft; expanded: boolean; reveal: boolean; onExpand(): void;
+	snapshot: PluginQuestionSnapshot; chatId: string; draft: PluginQuestionDraft; expanded: boolean; reveal: boolean; dictationClaim?: boolean; onExpand(): void;
 	prepareSubmission?: PreparePluginQuestionSubmission;
 	ready: boolean; reconciliation: "ready" | "syncing" | "failed"; available: boolean; readingRef: RefObject<HTMLDivElement | null>;
 	onMicAvailable(available: boolean): void; send(input: ChatInput): Promise<boolean>; dismiss(): Promise<void>;
@@ -34,7 +34,7 @@ export function PluginQuestionDock(props: PluginQuestionDockProps) {
 }
 
 /** Host-only component seam for deterministic DOM/capture fixtures, not SDK. */
-export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft, expanded, reveal, onExpand, ready, reconciliation, available, readingRef, onMicAvailable, send, dismiss, registration, prepareSubmission }: PluginQuestionDockProps & { registration?: QuestionRendererRegistration }) {
+export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft, expanded, reveal, dictationClaim = !reveal, onExpand, ready, reconciliation, available, readingRef, onMicAvailable, send, dismiss, registration, prepareSubmission }: PluginQuestionDockProps & { registration?: QuestionRendererRegistration }) {
 	const controller = useOptionalInteractionLayers();
 	const root = useRef<HTMLDivElement>(null);
 	const editor = useRef<HTMLDivElement>(null);
@@ -139,8 +139,8 @@ export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft,
 		if (snapshot.showThinking) { draft.thinking = joinDictation(draft.thinking, text); render(); }
 		else if (!failed && speechLease === lease.current && now.registration && leaseRegistration.current === now.registration && now.available) await speechLease?.append(text);
 	}, [key, snapshot.showThinking, speechLease, reveal, failed, draft]);
-	usePluginQuestionDictationTarget(append, !reveal);
-	const micAvailable = reveal || snapshot.showThinking || (!!registration && leaseRegistration.current === registration && !!lease.current?.speech && available && !failed);
+	usePluginQuestionDictationTarget(append, dictationClaim);
+	const micAvailable = !dictationClaim || snapshot.showThinking || (!!registration && leaseRegistration.current === registration && !!lease.current?.speech && available && !failed);
 	useEffect(() => { onMicAvailable(micAvailable); return () => onMicAvailable(false); }, [micAvailable, onMicAvailable]);
 	const unavailable = canonicalReady && (!available || !registration || failed);
 	const canSubmit = canonicalReady && ready && available && !!registration && leaseRegistration.current === registration && leaseKey.current === key && !failed && !!lease.current?.ready && draft.answer.status === "ready" && !submitting;

@@ -17,10 +17,8 @@ import { isInteractionScopeEligible } from "./plugin-input-focus";
  * channel (never conflated with the quiz thinking), and disappears with
  * the question.
  *
- * Dictation: while the check sits UNREVEALED this field is the primary
- * target (the dock releases its claim — dictated reading-thoughts land
- * here, not in the hidden quiz field); once the learner reveals the
- * check, the dock reclaims and this field is plain typing.
+ * Dictation: while the check is folded this field is the primary target.
+ * The expanded dock claims new recordings for its question input.
  */
 export function ReadingThinkingField({
 	value,
@@ -41,7 +39,7 @@ export function ReadingThinkingField({
 	 *  flush lands here — the field is the live claim), then reveals.
 	 *  Absent = the check is open: Enter keeps the dumping convention. */
 	onOpen?: () => void;
-	/** Primary dictation claim — true while the check is behind its reveal. */
+	/** Primary dictation claim — true while the teaching check is folded. */
 	claim: boolean;
 	inputRef?: RefObject<HTMLDivElement | null>;
 }) {
@@ -50,15 +48,18 @@ export function ReadingThinkingField({
 	// Appends may arrive back-to-back before React commits. Like Chat's
 	// submit mirror, this ref includes every edit synchronously.
 	const draftRef = useRef(value);
+	const onChangeRef = useRef(onChange);
+	onChangeRef.current = onChange;
 	useLayoutEffect(() => { draftRef.current = value; setDraft(value); }, [revision, value]);
 	const applyDraft = useCallback((next: string) => {
 		draftRef.current = next;
 		setDraft(next);
-		onChange(next);
-	}, [onChange]);
+		onChangeRef.current(next);
+	}, []);
 	useDictationTarget(
 		useCallback((text: string) => applyDraft(joinDictation(draftRef.current, text)), [applyDraft]),
 		claim,
+		true,
 	);
 	return (
 		<div
