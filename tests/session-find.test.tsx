@@ -53,6 +53,12 @@ describe("stepSessionMatch — wraparound navigation", () => {
 		assert.equal(stepSessionMatch(1, 3, -1), 0);
 		assert.equal(stepSessionMatch(-1, 0, 1), -1);
 	});
+
+	it("starts from the last match when stepping back with nothing selected", () => {
+		assert.equal(stepSessionMatch(-1, 3, -1), 2);
+		assert.equal(stepSessionMatch(-1, 3, 1), 0);
+		assert.equal(stepSessionMatch(-1, 1, -1), 0);
+	});
 });
 
 describe("sessionFindRanges — the displayed-text DOM seam", () => {

@@ -16,5 +16,8 @@ export function findSessionTextMatches(text: string, query: string): SessionText
 
 export function stepSessionMatch(index: number, count: number, direction: 1 | -1): number {
 	if (!count) return -1;
+	// -1 means nothing is selected yet: forward starts at the first match,
+	// backward starts at the last, matching the wraparound order.
+	if (index < 0) return direction === 1 ? 0 : count - 1;
 	return ((index + direction) % count + count) % count;
 }
