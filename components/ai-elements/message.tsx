@@ -1,5 +1,6 @@
 "use client";
 
+import { transcriptMath } from "@/components/transcript-math";
 import { Button } from "@/components/ui/button";
 import {
   ButtonGroup,
@@ -14,7 +15,6 @@ import {
 import { cn } from "@/lib/utils";
 import { cjk } from "@streamdown/cjk";
 import { code } from "@streamdown/code";
-import { createMathPlugin } from "@streamdown/math";
 
 import { ChevronLeftIcon, ChevronRightIcon } from "lucide-react";
 import type { ComponentProps, HTMLAttributes, ReactElement } from "react";
@@ -355,7 +355,7 @@ export const streamdownPlugins = {
     remarkPluginsAfter: [...cjk.remarkPluginsAfter, remarkBreaks],
   },
   code,
-  math: createMathPlugin({ singleDollarTextMath: true }),
+  math: transcriptMath,
 } as unknown as PluginConfig;
 
 // Remend's incomplete-HTML heuristic mistakes `<b` in `$a<b$` for a
