@@ -294,3 +294,46 @@ export async function documentToMarkdown(doc: PDFDocumentProxy, pageNumbers?: re
 export function joinPages(pages: readonly PdfPage[]): string {
 	return pages.flatMap((p) => (p.kind === "text" ? [`--- Page ${p.number} ---\n\n${p.markdown}`] : [])).join("\n\n");
 }
+
+const CONTENTS_HEADING = /^(?:table\s+of\s+)?(?:contents|daftar\s+isi|inhalt|sommaire|índice|indice)$/i;
+const INDEX_HEADING = /^(?:index|indeks|stichwortverzeichnis|index\s+des\s+termes)$/i;
+/** A dot-leader / whitespace-padded TOC entry ending in a page number. */
+const CONTENTS_ENTRY = /^.{2,80}?(?:\.{2,}|…{2,}|\s{2,})\s*(?:\d{1,4}|[ivxlcdm]{1,7})$/i;
+/** A back-of-book index reference: `term, 12` / `term 12, 14, 99`. */
+const INDEX_ENTRY = /^\s*[^,]{2,60},\s*\d{1,4}(?:\s*[-,–]\s*\d{1,4})?(?:\s*,\s*\d{1,4})*\s*$/;
+
+/**
+ * Drops navigational front/back matter (table of contents, index) that would
+ * otherwise cost extractor+auditor calls for propositions the book already
+ * states. Conservative: a page is only dropped when its heading matches AND
+ * every nonblank body line looks like an entry; anything ambiguous is kept.
+ */
+export function filterNonContentPages(pages: readonly PdfPage[]): { pages: PdfPage[]; skippedCount: number; skippedTypes: ("contents" | "index")[] } {
+	const kept: PdfPage[] = [];
+	const skippedTypes: ("contents" | "index")[] = [];
+	let skippedCount = 0;
+	for (const page of pages) {
+		if (page.kind !== "text") {
+			kept.push(page);
+			continue;
+		}
+		const lines = page.markdown.split("\n").map((l) => l.trim()).filter(Boolean);
+		const heading = lines[0] ?? "";
+		const body = lines.slice(1);
+		const contents = CONTENTS_HEADING.test(heading.replace(/^#+\s*/, ""))
+			&& body.length >= 3
+			&& body.every((l) => CONTENTS_ENTRY.test(l));
+		const index = !contents
+			&& INDEX_HEADING.test(heading.replace(/^#+\s*/, ""))
+			&& body.length >= 3
+			&& body.every((l) => INDEX_ENTRY.test(l));
+		if (!contents && !index) {
+			kept.push(page);
+			continue;
+		}
+		skippedCount++;
+		const kind = contents ? "contents" : "index";
+		if (!skippedTypes.includes(kind)) skippedTypes.push(kind);
+	}
+	return { pages: kept, skippedCount, skippedTypes };
+}

@@ -20,7 +20,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
+import { convertPdf, extraction, filterNonContentPages, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
 import { IMPORT_EXTENSIONS, MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, UNSUPPORTED_TYPE_MESSAGE, validNotesPath } from "@/lib/notes-import-limits.ts";
 import { FormBodyLimitError, readBoundedFormData } from "@/lib/bounded-form-data.ts";
 import {
@@ -72,11 +72,18 @@ async function readNotesFile(file: File): Promise<NotesFile> {
 		case "too-long":
 			return { kind: "refused", error: "Too long. Max 1,000 pages." };
 		case "converted": {
-			const text = joinPages(pdf.pages);
+			const filtered = filterNonContentPages(pdf.pages);
+			const text = joinPages(filtered.pages);
+			if (filtered.skippedCount > 0 && !filtered.pages.some((page) => page.kind === "text" && page.markdown.trim())) {
+				return { kind: "refused", error: "No content remains after skipping contents/index pages." };
+			}
 			if (!text) return { kind: "refused", error: "OCR not supported yet." };
-			const skipped = pdf.pages.filter((page) => page.kind === "image-only").length;
+			const skipped = filtered.pages.filter((page) => page.kind === "image-only").length;
 			const omission = skipped > 0 ? ` Skipped ${skipped} image-only ${skipped === 1 ? "page" : "pages"}; OCR is not supported.` : "";
-			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}` };
+			const navigation = filtered.skippedCount > 0
+				? ` Skipped ${filtered.skippedCount} ${filtered.skippedTypes.join("/")} ${filtered.skippedCount === 1 ? "page" : "pages"}.`
+				: "";
+			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}${navigation}` };
 		}
 	}
 }

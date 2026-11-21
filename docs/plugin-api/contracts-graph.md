@@ -517,6 +517,11 @@ export interface NotesSource {
     filePath: string;
     importedAt: string;
     contentFp?: string;
+    resume?: {
+        fp: string;
+        chunks: number;
+        done: number;
+    };
     extractions?: ExtractionRunUsage[];
 }
 ```
@@ -529,6 +534,10 @@ export interface NotesSource {
 - [filePath](#notessource-filepath)
 - [importedAt](#notessource-importedat)
 - [contentFp](#notessource-contentfp)
+- [resume](#notessource-resume)
+- [resume.fp](#notessource-resumefp)
+- [resume.chunks](#notessource-resumechunks)
+- [resume.done](#notessource-resumedone)
 - [extractions](#notessource-extractions)
 
 ### NotesSource id
@@ -553,12 +562,47 @@ importedAt: string;
 
 ### NotesSource contentFp
 
-Legacy content fingerprint. Accepted when reading old records, but
-ignored: every explicit notes import processes the whole file. New
-imports do not compute or write this field. No migration is needed.
+Legacy content fingerprint, ignored by extraction. New imports use
+resume.fp for incomplete runs and do not write this field.
 
 ```ts
 contentFp?: string;
+```
+
+### NotesSource resume
+
+Incomplete-run checkpoint: fp is 32 lowercase hex characters; chunks
+and done are positive safe integers with done <= chunks. Persisted
+after each leading merge, before layout and usage. A full prefix can
+remain if cleanup fails; a matching retry skips all model calls and
+clears it. Completion clears it so the next explicit import runs whole.
+Changed text or chunk budget clears an incompatible checkpoint before
+extraction. Disk reads discard invalid resume data, not its source.
+
+```ts
+resume?: {
+    fp: string;
+    chunks: number;
+    done: number;
+};
+```
+
+### NotesSource resume.fp
+
+```ts
+fp: string;
+```
+
+### NotesSource resume.chunks
+
+```ts
+chunks: number;
+```
+
+### NotesSource resume.done
+
+```ts
+done: number;
 ```
 
 ### NotesSource extractions

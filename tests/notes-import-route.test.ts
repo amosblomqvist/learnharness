@@ -204,6 +204,58 @@ it("PDFs with nothing to import are refused before any model call", async () => 
 	}
 });
 
+it("a text-only navigation PDF is refused with the contents/index error before any model call", async () => {
+	let calls = 0;
+	extraction.importNotes = async () => { calls++; return { nodes: 0, chains: 0 }; };
+	const pdf = tinyPdf([
+		["Table of Contents", "Chapter 1: Intro ...... 1", "Chapter 2: Core ....... 15", "Chapter 3: Advanced ... 40"],
+		["Index", "Abstraction, 12, 14, 99", "Algorithm, 5, 23, 45", "Array, 18, 32"],
+	].map((lines) => ({
+		runs: lines.map((text, i) => ({ text, x: 72, y: 700 - i * 30, size: i === 0 ? 20 : 10 })),
+	})));
+	const response = await POST(upload([{ name: "navigation.pdf", bytes: pdf }]));
+	assert.equal(response.status, 200);
+	assert.deepEqual((await response.json()).results, [{
+		filePath: "navigation.pdf",
+		requestIndex: 0,
+		outcome: "failed",
+		ok: false,
+		error: "No content remains after skipping contents/index pages.",
+	}]);
+	assert.equal(calls, 0);
+});
+
+for (const { heading, entries } of [
+	{
+		heading: "Table of Contents",
+		entries: ["Chapter 1: Intro ...... 1", "Chapter 2: Core ....... 15", "Chapter 3: Advanced ... 40"],
+	},
+	{
+		heading: "Index",
+		entries: ["Abstraction, 12, 14, 99", "Algorithm, 5, 23, 45", "Array, 18, 32"],
+	},
+]) {
+	for (const entryCount of [2, 3]) {
+		it(`a ${heading} PDF with ${entryCount} entries and ${4 - entryCount} prose lines reaches the pipeline intact`, async () => {
+			const received: string[] = [];
+			extraction.importNotes = async ({ text }) => { received.push(text); return { nodes: 0, chains: 0 }; };
+			const prose = ["Plants make sugar using sunlight.", "Roots absorb water from the soil."].slice(0, 4 - entryCount);
+			const body = [...entries.slice(0, entryCount), ...prose];
+			const pdf = tinyPdf([{
+				runs: [heading, ...body].map((text, i) => ({ text, x: 72, y: 700 - i * 30, size: i === 0 ? 20 : 10 })),
+			}]);
+			const response = await POST(upload([{ name: "mixed.pdf", bytes: pdf }]));
+			assert.equal(response.status, 200);
+			const { results } = await response.json();
+			assert.equal(results.length, 1);
+			assert.equal(results[0].ok, true);
+			assert.equal(results[0].outcome, "completed");
+			assert.equal(results[0].notice, "Scanned pages may have errors.");
+			assert.deepEqual(received, [`--- Page 1 ---\n\n# ${heading}\n\n${body.join("\n\n")}`]);
+		});
+	}
+}
+
 it("PDF notices count only image-only pages, not blanks, and preserve the scanner caveat for text-only PDFs", async () => {
 	extraction.importNotes = async () => ({ nodes: 0, chains: 0 });
 	const text = { runs: [{ text: "Text page", x: 72, y: 600 }] };

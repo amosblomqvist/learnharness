@@ -281,7 +281,14 @@ function readSourceMap(): Record<string, NotesSource> {
 		if (!isRecord(parsed)) return {};
 		const out: Record<string, NotesSource> = {};
 		for (const [id, value] of Object.entries(parsed)) {
-			if (isNotesSource(value)) out[id] = value;
+			if (!isNotesSource(value)) continue;
+			if (value.resume !== undefined && !isNotesResume(value.resume)) {
+				const source = { ...value };
+				delete source.resume;
+				out[id] = source;
+			} else {
+				out[id] = value;
+			}
 		}
 		return out;
 	} catch {
@@ -316,3 +323,8 @@ function writeSourceMap(map: Record<string, NotesSource>): void {
 
 const isNotesSource = (v: unknown): v is NotesSource =>
 	isRecord(v) && isString(v.id) && isString(v.filePath) && isString(v.importedAt);
+
+const isNotesResume = (v: unknown): v is NonNullable<NotesSource["resume"]> =>
+	isRecord(v) && isString(v.fp) && /^[0-9a-f]{32}$/.test(v.fp) &&
+	typeof v.chunks === "number" && Number.isSafeInteger(v.chunks) && v.chunks > 0 &&
+	typeof v.done === "number" && Number.isSafeInteger(v.done) && v.done > 0 && v.done <= v.chunks;
