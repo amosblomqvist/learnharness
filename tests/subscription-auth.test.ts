@@ -12,17 +12,18 @@ const require = createRequire(import.meta.url);
 const { createSubscriptions, loadSubscriptionSDK, validEndpoint, publicError } = require("../electron/subscriptions.cjs");
 const { fileStore, validateState } = require("../electron/subscription-store.cjs");
 const { subscriptionControl } = require("../electron/subscription-ipc.cjs");
-const ids = ["github-copilot", "xai"] as const;
-const credential = (id: string, expires = Date.now() + 3600000): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires, ...(id === "github-copilot" ? { availableModelIds: [githubCopilotProvider().getModels()[0]!.id] } : {}) });
+const { antigravityProvider } = require("../electron/antigravity-provider.cjs");
+const ids = ["github-copilot", "xai", "antigravity"] as const;
+const credential = (id: string, expires = Date.now() + 3600000): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : id === "antigravity" ? "fixture-antigravity-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires, ...(id === "github-copilot" ? { availableModelIds: [githubCopilotProvider().getModels()[0]!.id] } : id === "antigravity" ? { projectId: "fixture-project" } : {}) });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { resolve, promise }; }
 async function fixture(options: { login?: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>; refresh?: (id: string, value: OAuthCredential, signal: AbortSignal) => Promise<OAuthCredential>; stores?: Record<string, unknown> } = {}) {
 	const directory = await fs.mkdtemp(path.join(os.tmpdir(), "lh-subscription-auth-"));
 	let refreshes = 0;
 	const factory = (id: string) => {
-		const native = id === "xai" ? xaiProvider() : githubCopilotProvider();
+		const native = id === "xai" ? xaiProvider() : id === "antigravity" ? antigravityProvider({ disableLoopback: true }) : githubCopilotProvider();
 		return { ...native, auth: { ...native.auth, oauth: { ...native.auth.oauth!, login: (interaction: ProviderAuthInteraction) => options.login?.(id, interaction) ?? Promise.resolve(credential(id)), refresh: async (value: OAuthCredential, signal: AbortSignal) => { refreshes++; return options.refresh?.(id, value, signal) ?? { ...credential(id), refresh: "fixture-rotated" }; } } } };
 	};
-	const sdk = { createModels, githubCopilotProvider: () => factory("github-copilot"), xaiProvider: () => factory("xai") };
+	const sdk = { createModels, githubCopilotProvider: () => factory("github-copilot"), xaiProvider: () => factory("xai"), antigravityProvider: () => factory("antigravity") };
 	const updates: any[] = [], opened: string[] = [];
 	const controller = createSubscriptions({ directory, sdk, stores: options.stores, openExternal: async (url: string) => { opened.push(url); }, onChange: (snapshot: unknown) => updates.push(snapshot) });
 	await controller.ready;
@@ -35,7 +36,7 @@ async function fixture(options: { login?: (id: string, interaction: ProviderAuth
 test("main loader resolves Pi's import-only PUBLIC package exports and native OAuth without a CLI or network", async () => {
 	const sdk = await loadSubscriptionSDK(path.resolve(import.meta.dirname, ".."));
 	assert.equal(typeof sdk.createModels, "function");
-	for (const [id, factory] of [["github-copilot", sdk.githubCopilotProvider], ["xai", sdk.xaiProvider]] as const) {
+	for (const [id, factory] of [["github-copilot", sdk.githubCopilotProvider], ["xai", sdk.xaiProvider], ["antigravity", sdk.antigravityProvider]] as const) {
 		const provider = factory(), store = new sdk.InMemoryCredentialStore(); await store.modify(id, () => credential(id));
 		const models = sdk.createModels({ credentials: store }); models.setProvider({ ...provider, auth: { oauth: provider.auth.oauth } });
 		const resolved = await models.getAuth(provider.getModels()[0]); assert.equal(resolved.auth.apiKey, credential(id).access);
@@ -205,6 +206,9 @@ test("enterprise domains are preserved; derived endpoints and control errors are
 	validateState("github-copilot", { version: 1, allowBackgroundUse: true, connectionId: "b5ac22b7-dfe3-4e52-ae0a-6da2990d4aef", credential: value });
 	assert(validEndpoint("github-copilot", { apiKey: "fixture", baseUrl: "https://copilot-api.company.ghe.com" }, value));
 	for (const baseUrl of ["http://api.individual.githubcopilot.com", "https://attacker.example/", "https://user:pass@api.individual.githubcopilot.com", "https://api.individual.githubcopilot.com/path"]) assert(!validEndpoint("github-copilot", { apiKey: "fixture", baseUrl }, value));
+	assert(validEndpoint("antigravity", { apiKey: "fixture", baseUrl: "https://daily-cloudcode-pa.googleapis.com" }, credential("antigravity")));
+	assert(validEndpoint("antigravity", { apiKey: "fixture", baseUrl: "https://cloudcode-pa.googleapis.com" }, credential("antigravity")));
+	for (const baseUrl of ["http://daily-cloudcode-pa.googleapis.com", "https://attacker.example/", "https://daily-cloudcode-pa.googleapis.com/path"]) assert(!validEndpoint("antigravity", { apiKey: "fixture", baseUrl }, credential("antigravity")));
 	await assert.rejects(subscriptionControl({ op: "status" }, { status: async () => { throw new Error("private-token-response"); } }), (error: Error) => !error.message.includes("private-token-response"));
 	assert(!publicError(new Error("private-token-response")).includes("private-token-response"));
 });

@@ -6,7 +6,7 @@ import path from "node:path";
 import { spawnSync } from "node:child_process";
 import test from "node:test";
 
-for (const name of ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json"]) {
+for (const name of ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json", "antigravity-credentials.json"]) {
 	for (const secret of [name, `${name}.fixture.tmp`]) test(`payload curator refuses web credentials: ${secret}`, () => {
 		const root = mkdtempSync(path.join(tmpdir(), "lh-sub-payload-"));
 		try {
