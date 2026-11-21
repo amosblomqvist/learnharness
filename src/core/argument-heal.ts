@@ -79,11 +79,13 @@ export function healEncodedArguments(
 		if (fixed === undefined && prop.type === "boolean" && typeof parsed === "boolean") {
 			fixed = parsed;
 		}
-		if (
-			fixed === undefined &&
-			(prop.type === "number" || prop.type === "integer") &&
-			typeof parsed === "number"
-		) {
+		// An integer field must not accept a fractional JSON number: healing
+		// "1.5" into 1.5 only changes the validation error and loses the raw
+		// string. Leave it for validation to reject honestly.
+		if (fixed === undefined && prop.type === "integer" && Number.isInteger(parsed)) {
+			fixed = parsed;
+		}
+		if (fixed === undefined && prop.type === "number" && typeof parsed === "number") {
 			fixed = parsed;
 		}
 		if (fixed === undefined && prop.type === "array" && Array.isArray(parsed)) fixed = parsed;
