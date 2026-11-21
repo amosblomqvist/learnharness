@@ -339,17 +339,28 @@ describe("pi thinking truth (pinned against pi-ai upgrades)", () => {
 		assert.throws(() => piEngineFor("prober"), /no configured model for role "prober"/);
 	});
 });
-/** Runs fn with PATH and HOME pointed at a temp dir, so the CLI lookup only
- *  finds a claude binary when installed is true. */
+/** Runs fn with PATH and the home directories (HOME, plus USERPROFILE and
+ *  APPDATA on Windows) pointed at a temp dir, so the CLI lookup only finds a
+ *  claude binary when installed is true. */
 function withClaudeInstalled(installed: boolean, fn: () => void, enabled = true): void {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), "claude-catalog-"));
-	const saved = { PATH: process.env.PATH, HOME: process.env.HOME, npm_config_prefix: process.env.npm_config_prefix };
+	const saved = {
+		PATH: process.env.PATH,
+		HOME: process.env.HOME,
+		USERPROFILE: process.env.USERPROFILE,
+		APPDATA: process.env.APPDATA,
+		npm_config_prefix: process.env.npm_config_prefix,
+	};
 	const settings = readSettings();
 	writeSettings({ ...(settings ?? { version: 1 }), claudeCode: { enabled } });
 
-	if (installed) fs.writeFileSync(path.join(dir, "claude"), "#!/bin/sh\n", { mode: 0o755 });
+	if (installed) fs.writeFileSync(path.join(dir, process.platform === "win32" ? "claude.exe" : "claude"), "#!/bin/sh\n", { mode: 0o755 });
 	process.env.PATH = dir;
 	process.env.HOME = dir;
+	if (process.platform === "win32") {
+		process.env.USERPROFILE = dir;
+		process.env.APPDATA = dir;
+	}
 	delete process.env.npm_config_prefix;
 
 	try {
