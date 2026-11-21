@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider, searxngProvider } from "../src/server/search.ts";
 import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
@@ -285,9 +285,9 @@ describe("ollamaProvider (hosted search only)", () => {
 	});
 });
 
-describe("five-engine catalog and resolution", () => {
+describe("six-engine catalog and resolution", () => {
 	it("pins the approved Automatic order independently of table-driven tests", () => {
-		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama"]);
+		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama", "searxng"]);
 		assert.equal(isSearchEngineId("chatgpt"), false);
 		assert.equal(isSearchEngineId("deepseek"), false);
 		for (const value of [null, {}, 1, "", "toString"]) assert.equal(isSearchEngineId(value), false);
@@ -365,4 +365,61 @@ it("Firecrawl drops invalid result rows and normalizes only search descriptions"
 		{ title: "https://example.org", url: "https://example.org", snippet: "x".repeat(500) },
 		{ title: "https://example.com", url: "https://example.com", snippet: "" },
 	]);
+});
+
+describe("searxngProvider (self-hosted, base URL instead of a key)", () => {
+	it("GETs {base}/search with q + format=json, keeps a path prefix, sends no credentials", async () => {
+		const seen: string[] = [];
+		const provider = searxngProvider("https://search.example.test/searxng/", async (url, init) => {
+			seen.push(url);
+			assert.equal(init.method, undefined, "plain GET");
+			assert.equal(init.body, undefined);
+			assert.deepEqual(Object.keys(init.headers as Record<string, string>), ["accept"]);
+			return Response.json({ results: [{ title: "T", url: "https://example.org/a", content: "line1\nline2" }] });
+		});
+		assert.deepEqual(await provider.search("evidence & proof", 5), [{ title: "T", url: "https://example.org/a", snippet: "line1 line2" }]);
+		const url = new URL(seen[0]!);
+		assert.equal(url.origin + url.pathname, "https://search.example.test/searxng/search");
+		assert.equal(url.searchParams.get("q"), "evidence & proof");
+		assert.equal(url.searchParams.get("format"), "json");
+	});
+
+	it("allows a loopback instance (the user's own server) and trims the page to count", async () => {
+		const rows = Array.from({ length: 30 }, (_, i) => ({ title: `r${i}`, url: `https://example.org/${i}`, content: "" }));
+		let called = "";
+		const provider = searxngProvider("http://127.0.0.1:8888", async (url) => { called = url; return Response.json({ results: rows }); });
+		assert.equal((await provider.search("q", 3)).length, 3);
+		assert.ok(called.startsWith("http://127.0.0.1:8888/search?"));
+		assert.equal((await provider.search("q", 0)).length, 1);
+		assert.equal((await provider.search("q", 2.8)).length, 2);
+	});
+
+	it("drops invalid rows and normalizes snippets", async () => {
+		const provider = searxngProvider("http://127.0.0.1:8888", stubFetch({ results: [
+			null, 1, { url: "file:///tmp/private" }, { url: "not a URL" },
+			{ title: 42, url: "https://example.org", content: "x".repeat(700) },
+			{ url: "https://example.com", content: 123 },
+		] }, () => {}));
+		assert.deepEqual(await provider.search("q", 10), [
+			{ title: "https://example.org", url: "https://example.org", snippet: "x".repeat(500) },
+			{ title: "https://example.com", url: "https://example.com", snippet: "" },
+		]);
+	});
+
+	it("explains a 403 (JSON format disabled) and reports other failures without bodies or retries", async () => {
+		let calls = 0;
+		const forbidden = searxngProvider("http://127.0.0.1:8888", async () => { calls++; return new Response("<html>Forbidden</html>", { status: 403 }); });
+		await assert.rejects(forbidden.search("q", 5), /SearXNG search API 403 \(is format=json enabled/);
+		for (const status of [429, 500, 502]) {
+			const provider = searxngProvider("http://127.0.0.1:8888", async () => { calls++; return new Response("body-not-echoed", { status }); });
+			await assert.rejects(provider.search("q", 5), { message: `SearXNG search API ${status}` });
+		}
+		assert.equal(calls, 4);
+		for (const invalid of [null, {}, [], { results: null }]) {
+			const provider = searxngProvider("http://127.0.0.1:8888", async () => new Response(JSON.stringify(invalid)));
+			await assert.rejects(provider.search("q", 5), { message: "SearXNG search API returned an invalid response" });
+		}
+		const html = searxngProvider("http://127.0.0.1:8888", async () => new Response("<html>not json</html>"));
+		await assert.rejects(html.search("q", 5), { message: "SearXNG search API returned an invalid response" });
+	});
 });

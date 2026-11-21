@@ -77,9 +77,9 @@ for (const { id, envVar, url, header, prefix, payload } of engines) {
 	});
 }
 
-it("all five saved keys follow the approved Automatic order as keys are removed", () => {
+it("all six saved keys follow the approved Automatic order as keys are removed", () => {
 	for (const { id, envVar } of SEARCH_ENGINES) {
-		const fake = id === "tavily" ? "tvly-fake-key-1234567890" : id === "firecrawl" ? "fc-fake-key-1234567890" : `${id}-fake-key-1234567890`;
+		const fake = id === "tavily" ? "tvly-fake-key-1234567890" : id === "firecrawl" ? "fc-fake-key-1234567890" : id === "searxng" ? "http://127.0.0.1:8888" : `${id}-fake-key-1234567890`;
 		assert.equal(saveKey(envVar, fake).ok, true);
 	}
 	for (const { id, envVar } of SEARCH_ENGINES) {
@@ -99,4 +99,22 @@ it("a configured later engine does not become a network-error fallback", async (
 	assert.equal(searchStatus().engine, "exa" satisfies SearchEngineId);
 	await assert.rejects(searchProvider()!.search("q", 5), /Exa search API 429/);
 	assert.deepEqual(urls, ["https://api.exa.ai/search"]);
+});
+
+it("searxng: saving an instance URL activates search, rejects non-URLs, and calls the instance", async () => {
+	assert.equal(saveKey("SEARXNG_URL", "not a url").ok, false);
+	assert.equal(saveKey("SEARXNG_URL", "http://user:pass@127.0.0.1:8888").ok, false, "no embedded credentials");
+	assert.equal(saveKey("SEARXNG_URL", "  http://127.0.0.1:8888/  ").ok, true);
+	assert.equal(searchStatus().engine, "searxng");
+	const urls: string[] = [];
+	globalThis.fetch = async (input) => { urls.push(String(input)); return Response.json({ results: [{ title: "A", url: "https://example.org", content: "c" }] }); };
+	assert.deepEqual(await searchProvider()!.search("evidence", 5), [{ title: "A", url: "https://example.org", snippet: "c" }]);
+	assert.deepEqual(urls, ["http://127.0.0.1:8888/search?q=evidence&format=json"]);
+	assert.equal(saveKey("TAVILY_API_KEY", "tvly-fake-key-1234567890").ok, true);
+	assert.equal(searchStatus().engine, "tavily", "SearXNG is last in the Automatic order");
+	writeSettings({ version: 1, agent: { search: { engine: "searxng" } } });
+	assert.equal(searchStatus().engine, "searxng");
+	deleteKey("SEARXNG_URL");
+	assert.equal(searchStatus().available, false);
+	assert.match(searchStatus().reason, /instance URL is missing — set the SEARXNG_URL key/);
 });
