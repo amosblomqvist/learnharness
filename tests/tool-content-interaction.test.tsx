@@ -1,6 +1,7 @@
 import React, { act } from "react";
 (globalThis as { React?: typeof React }).React = React;
 import assert from "node:assert/strict";
+import { katexMatrixRows } from "./katex-html-fixture.ts";
 import { test } from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
@@ -24,7 +25,7 @@ test("actual select → submit → saved result → historical Why uses source d
 	try {
 		await act(async () => root.render(<QuestionDock toolName="probe" toolCallId="interactive_source" input={input} expanded
 			dictationClaim={false} onExpand={() => {}} onSubmit={a => { answer = a; }} />));
-		assert.equal(host.querySelectorAll("mtr").length, 2, "the live matrix retains two rows");
+		assert.equal(katexMatrixRows(host), 2, "the live matrix retains two rows");
 		const choice = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(button => button.querySelector(".katex"))!;
 		assert.ok(choice);
 		await act(async () => choice.click());
@@ -47,12 +48,12 @@ test("actual select → submit → saved result → historical Why uses source d
 		await act(async () => root.render(<AnsweredCard answer={persisted.details} input={input} />));
 		const why = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent === "Why")!;
 		await act(async () => why.click());
-		assert.equal(host.querySelectorAll("mtr").length, 4, "question and revealed explanation retain their rows");
+		assert.equal(katexMatrixRows(host), 4, "question and revealed explanation retain their rows");
 		const paragraphs = host.querySelectorAll('[data-testid="tucked-explanation"] p');
 		assert.equal(paragraphs.length, 2, "recovered paragraphs remain distinct in Why");
 		assert.ok(paragraphs[0]!.parentElement!.classList.contains("[&>p:first-child]:inline"));
 		assert.ok(!paragraphs[0]!.parentElement!.classList.contains("[&_p]:inline"));
-		const annotations = [...host.querySelectorAll('annotation[encoding="application/x-tex"]')].map(n => n.textContent);
+		const annotations = [...host.querySelectorAll('.katex[data-tex]')].map(n => n.getAttribute('data-tex'));
 		assert.equal(annotations.filter(t => t === String.raw`\nabla f`).length, 3);
 		assert.deepEqual(persisted.details, saved);
 		assert.deepEqual(input, before);

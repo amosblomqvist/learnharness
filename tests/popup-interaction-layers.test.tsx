@@ -10,6 +10,7 @@ import { createPortal } from "react-dom";
 import { installModalDom } from "./modal-dom.ts";
 import { KeysSection } from "../components/settings/keys-section.tsx";
 import { usePluginMenuDismiss } from "../components/plugin-model-picker.tsx";
+import { GraphFolderFilterControl } from "../components/graph-folder-filter.tsx";
 
 async function withDom(run: (controller: () => InteractionLayersController, render: (node: React.ReactNode) => Promise<void>) => Promise<void>) {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
@@ -103,6 +104,38 @@ test("popup keeps arrow wrapping and consumes blocked Escape without native Tab 
 	assert.equal(escape.defaultPrevented, true);
 	assert(document.querySelector('[data-testid="test-menu"]'));
 	assert(document.querySelector('[data-testid="parent"]'));
+}));
+
+test("graph folder filter has scoped keyboard focus, including Show all and Escape return", async () => withDom(async (controller, render) => {
+	function Filter() {
+		const [selected, setSelected] = useState<ReadonlySet<string>>(new Set(["alpha"]));
+		const folder = (id: string, name: string) => ({ id, name, parentId: null, createdAt: "now" });
+		return <HostDialog open onClose={() => { throw new Error("Escape reached the parent"); }} aria-label="Filter parent">
+			<GraphFolderFilterControl organization={{ version: 1, folders: [folder("alpha", "Alpha"), folder("beta", "Beta")], placements: {} }}
+				listed={new Set(["alpha", "beta"])} selected={selected} onChange={setSelected} />
+		</HostDialog>;
+	}
+	await render(<Filter />);
+	const trigger = document.querySelector<HTMLButtonElement>('[data-testid="graph-folder-filter"]')!;
+	const focusedTestId = () => document.activeElement?.getAttribute("data-testid");
+	const focusedLabel = () => document.activeElement?.getAttribute("aria-label");
+	await act(async () => { trigger.focus(); });
+	await key(controller(), trigger, "ArrowDown");
+	assert.equal(focusedTestId(), "graph-folder-filter-clear");
+	await key(controller(), document.activeElement!, "ArrowDown");
+	assert.equal(focusedLabel(), "Show folder Alpha");
+	await key(controller(), document.activeElement!, "End");
+	assert.equal(focusedLabel(), "Show folder Beta");
+	await key(controller(), document.activeElement!, "ArrowDown");
+	assert.equal(focusedTestId(), "graph-folder-filter-clear");
+	await click('[data-testid="graph-folder-filter-clear"]');
+	assert.equal(focusedLabel(), "Show folder Alpha", "focus survives removal of Show all");
+	assert.equal((await key(controller(), document.activeElement!, "Tab")).defaultPrevented, true);
+	assert.equal(focusedLabel(), "Show folder Alpha");
+	await key(controller(), document.activeElement!, "Escape");
+	assert.equal(document.querySelector('[data-testid="graph-folder-filter-panel"]'), null);
+	assert.equal(document.activeElement, trigger);
+	assert(document.querySelector('[aria-label="Filter parent"]'));
 }));
 
 function NestedMenus() {

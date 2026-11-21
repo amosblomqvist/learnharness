@@ -421,8 +421,8 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 
 /** KaTeX display equations are wrapped in a SPAN.katex-display (rehype-katex
  *  renders them as spans with display:block CSS — NOT divs; verified in the
- *  static render). They gain the corner copy (the raw TeX — KaTeX embeds it
- *  in the MathML <annotation>; read from the DOM on click, no re-parse).
+ *  static render). The corner copies TeX from the formula's data-tex,
+ *  falling back to the MathML annotation for older markup. No re-parse.
  *  Every other span passes through untouched. */
 export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 	const displayOnly = useContext(MarkdownDisplayOnlyContext);
@@ -447,7 +447,9 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 			{!displayOnly && <CopyCorner
 				className="absolute top-0 right-0 z-10"
 				label="Copy equation source"
-				getText={() => ref.current?.querySelector("annotation")?.textContent ?? ""}
+				getText={() => ref.current?.querySelector(".katex[data-tex]")?.getAttribute("data-tex")
+					?? ref.current?.querySelector('annotation[encoding="application/x-tex"]')?.textContent
+					?? ""}
 			/>}
 			<span ref={ref} className={className} {...rest}>
 				{children}

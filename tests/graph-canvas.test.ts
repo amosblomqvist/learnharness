@@ -335,6 +335,22 @@ describe("wrapRegionLabel (wave 7: session names / file paths)", () => {
 		const lines = wrapRegionLabel("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa", W, 2, measure);
 		assert.ok(measure(lines[1]!) <= W, "ellipsized tail fits");
 	});
+
+	it("splits and ellipsizes between whole characters, never inside an emoji or accent", () => {
+		// Like canvas measureText: emoji draw 11px wide, every other glyph 5px —
+		// including half of one broken pair. Family (ZWJ, 11 UTF-16 units),
+		// flag (2 code points), e + combining accent, rocket (surrogate pair).
+		const chars = (s: string) => [...new Intl.Segmenter("en", { granularity: "grapheme" }).segment(s)].map((g) => g.segment);
+		const glyphs = (s: string) => chars(s).reduce((w, c) => w + (/\p{Extended_Pictographic}|\p{Regional_Indicator}/u.test(c) ? 11 : 5), 0);
+		const word = "👨‍👩‍👧‍👦🇨🇦é🚀".repeat(4);
+		const lines = wrapRegionLabel(word, W, 3, glyphs);
+		assert.equal(lines.length, 3);
+		for (const line of lines) {
+			assert.ok(line.isWellFormed(), `half a surrogate pair in ${JSON.stringify(line)}`);
+			for (const c of chars(line.replace(/…$/, ""))) assert.ok(chars(word).includes(c), `broken character ${JSON.stringify(c)}`);
+			assert.ok(glyphs(line) <= W, `${JSON.stringify(line)} wider than the line`);
+		}
+	});
 });
 
 

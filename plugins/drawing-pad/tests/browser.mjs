@@ -32,6 +32,8 @@ try {
     html.dark{color-scheme:dark}html.light{color-scheme:light}
     *{box-sizing:border-box} body{margin:0;background:var(--background);color:var(--foreground);font-family:monospace} #bar{height:48px;display:flex;gap:12px;padding:8px 240px;background:var(--card)} button{font:inherit;font-size:12px;padding:6px 10px;background:var(--card);color:var(--foreground);border:1px solid var(--border);border-radius:6px;cursor:pointer} button[data-variant=secondary]{background:var(--border)}button:disabled{opacity:.4}button svg{display:block;width:16px;height:16px}input{background:var(--background);color:var(--foreground);border:1px solid var(--border)}
     #sidebar{position:fixed;left:0;top:48px;width:220px;bottom:0;background:var(--card)}#pad{position:fixed;left:220px;top:48px;right:0;bottom:0;background:var(--background)}#close-pad{position:absolute;right:12px;top:10px;z-index:10}#settings{position:fixed;inset:150px 300px;background:var(--card);z-index:50;padding:24px}.lh-prose{font-family:serif;font-size:16px;line-height:1.5}.lh-prose p{margin:0 0 8px}#settings[hidden]{display:none}
+    /* Match Streamdown's code line layout without loading the host Tailwind stylesheet. */
+    [data-streamdown="code-block-body"] code > span { display: block; }
     </style></head><body><div id="bar"><button id="draw">Loading</button><button id="settings-open">Settings</button></div><aside id="sidebar">Fixture sidebar</aside><div id="settings" hidden><label>Dark mode ink color <input id="dark-ink"></label><label>Light mode ink color <input id="light-ink"></label><label>Image scale (%) <input id="image-scale" type="number"></label><p id="setting-error"></p><button id="blur-target">Done editing</button></div><script type="module" src="/fixture.js"></script></body></html>`;
   server = http.createServer((request, response) => {
     const url = new URL(request.url, "http://fixture");
@@ -94,6 +96,11 @@ try {
   };
   const label = () => run(() => document.querySelector("#draw").textContent);
   const selectedTool = () => run(() => document.querySelector('.drawing-pad-tools button[data-variant="secondary"]')?.getAttribute("aria-label"));
+  const editButtons = () => run(() => ["Undo", "Clear"].map(name => {
+    const button = [...document.querySelectorAll(".drawing-pad-tools button")]
+      .find(button => (button.getAttribute("aria-label") ?? button.textContent) === name);
+    return [button.disabled, getComputedStyle(button).opacity];
+  }));
   const chord = async (key, shift = false, modifier = "Meta", commands) => {
     await page.keyboard.down(modifier); if (shift) await page.keyboard.down("Shift");
     await page.keyboard.press(key, commands ? { commands } : {}); if (shift) await page.keyboard.up("Shift"); await page.keyboard.up(modifier);
@@ -246,10 +253,13 @@ try {
   const stylus = await page.createCDPSession(), penBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await stylus.send("Input.dispatchMouseEvent", { type: "mousePressed", x: penBox.x + penBox.width * .3, y: penBox.y + penBox.height * .7, button: "left", buttons: 1, pointerType: "pen", force: 0 });
   assert.equal(await ink(), originalPen, "zero-pressure contact is hover");
+  assert.deepEqual(await editButtons(), [[true, "1"], [true, "1"]], "buttons lock as soon as the pen owns the pointer, even before ink starts");
   await run(() => {
     const canvas = document.querySelector(".drawing-pad-ink"), r = canvas.getBoundingClientRect(), pointerId = window.fixture.lastPenId;
     canvas.dispatchEvent(new PointerEvent("pointermove", { bubbles: true, pointerId, pointerType: "pen", pressure: .8, buttons: 32, button: 5, clientX: r.x + r.width * .4, clientY: r.y + r.height * .725 }));
   });
+  // Live eraser previews repaint once per animation frame.
+  await run(() => new Promise(resolve => requestAnimationFrame(() => resolve())));
   assert.equal(await ink(), 0, "held eraser bit removes the entire intersected stroke");
   await run(() => {
     const canvas = document.querySelector(".drawing-pad-ink"), r = canvas.getBoundingClientRect(), pointerId = window.fixture.lastPenId;
@@ -383,6 +393,24 @@ try {
   await page.screenshot({ path: path.join(evidence, "diagram-sheet.png") });
   group("capture waits for the actual asynchronous host Mermaid renderer");
 
+  const codeLines = Array.from({ length: 39 }, (_, line) => `value_${line} = ${line}`);
+  // Only this last line reaches the sampled columns, well before the right edge.
+  codeLines.push(`value_39 = "${"M".repeat(28)}"`);
+  const longCode = { ...diagram, question: { ...diagram.question,
+    question: `Read this code.\n\n\`\`\`python\n${codeLines.join("\n")}\n\`\`\`` } };
+  await call("navigate", "long-code", "teaching", longCode); await open();
+  assert.ok((await referenceSize())[1] > 600, "the reference uses the code block's full height, not its offscreen placeholder");
+  const tailPixels = await run(async () => {
+    const image = document.querySelector(".drawing-pad-background"); await image.decode();
+    const canvas = document.createElement("canvas"); canvas.width = image.naturalWidth; canvas.height = image.naturalHeight;
+    const context = canvas.getContext("2d"); context.drawImage(image, 0, 0);
+    // Count bright glyph pixels near the bottom of the fixture's dark reference.
+    const pixels = context.getImageData(150, canvas.height - 40, 85, 38).data;
+    return pixels.filter((red, i) => i % 4 === 0 && Math.max(red, pixels[i + 1], pixels[i + 2]) > 100).length;
+  });
+  assert.ok(tailPixels > 30, "the final source line is painted into the frozen PNG, not just allocated space");
+  group("long code blocks freeze at full height with the last line visible");
+
   await call("navigate", "mount-replay", "teaching", question);
   await run(() => { window.fixture.replayOnOpen = true; });
   const mountsBefore = await run(() => window.fixture.contentMounts);
@@ -399,6 +427,45 @@ try {
   assert.equal(await ink(), replayInk); assert.equal(await bg(), replayBackground); assert.equal(await label(), "Draw (unsent)");
   await button("Undo"); assert.equal(await ink(), 0);
   group("replaying a mounted sheet preserves frozen reference, ink and editable Undo history");
+
+  assert.deepEqual(await editButtons(), [[true, "0.4"], [true, "0.4"]], "empty history remains visibly disabled");
+  await stroke(); const committedInk = await ink();
+  const available = await editButtons();
+  assert.deepEqual(available, [[false, "1"], [false, "1"]]);
+  const heldBox = await (await page.$(".drawing-pad-ink")).boundingBox();
+  await page.mouse.move(heldBox.x + heldBox.width * .3, heldBox.y + heldBox.height * .6); await page.mouse.down();
+  await page.mouse.move(heldBox.x + heldBox.width * .5, heldBox.y + heldBox.height * .65, { steps: 4 });
+  assert.deepEqual(await editButtons(), [[true, "1"], [true, "1"]], "Undo and Clear remain disabled without fading during a stroke");
+  // Bypass the native disabled click suppression to check the handler guards too.
+  await run(() => {
+    for (const button of document.querySelectorAll(".drawing-pad-tools button")) {
+      if (button.getAttribute("aria-label") === "Undo" || button.textContent === "Clear") button.dispatchEvent(new MouseEvent("click"));
+    }
+  });
+  await page.mouse.up();
+  assert.deepEqual(await editButtons(), available, "both commands are available again after release");
+  assert.ok(await ink() > committedInk, "the held stroke still commits");
+  await button("Undo"); assert.equal(await ink(), committedInk, "neither blocked command removed the earlier stroke");
+  await button("Clear"); assert.equal(await ink(), 0);
+  assert.deepEqual(await editButtons(), [[true, "0.4"], [true, "0.4"]], "clearing restores the normal disabled appearance");
+  group("Undo and Clear stay visually steady but disabled during a stroke");
+
+  const firstPen = await page.createCDPSession();
+  const firstPenX = heldBox.x + heldBox.width * .3, firstPenY = heldBox.y + heldBox.height * .6;
+  const emptyButtons = await editButtons();
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mousePressed", x: firstPenX, y: firstPenY, button: "left", buttons: 1, pointerType: "pen", force: .7 });
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 40, y: firstPenY + 10, buttons: 1, pointerType: "pen", force: .5 });
+  assert.deepEqual(await editButtons(), emptyButtons, "the first live stroke does not brighten Undo or Clear");
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 50, y: firstPenY + 12, buttons: 1, pointerType: "pen", force: 0 });
+  assert.equal(await label(), "Draw (unsent)", "zero pressure committed the first segment before release");
+  assert.deepEqual(await editButtons(), emptyButtons, "a mid-gesture commit does not brighten the still-disabled controls");
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: firstPenX + 60, y: firstPenY + 14, buttons: 1, pointerType: "pen", force: .7 });
+  assert.deepEqual(await editButtons(), emptyButtons, "resuming pressure does not change the toolbar appearance");
+  await firstPen.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: firstPenX + 60, y: firstPenY + 14, button: "left", pointerType: "pen", force: 0 });
+  await firstPen.detach();
+  assert.deepEqual(await editButtons(), available, "release enables and brightens Undo and Clear");
+  await button("Clear"); assert.equal(await ink(), 0);
+  group("a pressure gap during the first pen gesture keeps editing controls dim until release");
 
   const activeBox = await (await page.$(".drawing-pad-ink")).boundingBox();
   await page.mouse.move(activeBox.x + activeBox.width * .3, activeBox.y + activeBox.height * .7); await page.mouse.down();
@@ -644,6 +711,192 @@ try {
   await run(() => { window.fixture.fontFetchMode = "normal"; }); await open();
   assert.deepEqual(await pageStyles(), stylesBefore);
   group("closing during font embedding aborts font fetches and reopening recovers without stylesheet mutation");
+
+  // Repaint economy: full display repaints are counted through clearRect, which
+  // only a full repaint calls. A fresh page keeps the theme step to one sheet.
+  await page.reload({ waitUntil: "networkidle0" }); await page.waitForFunction(() => window.fixtureReady);
+  await call("navigate", "repaint-economy", "teaching", question); await open();
+  await run(() => {
+    const native = CanvasRenderingContext2D.prototype.clearRect;
+    window.fixture.clears = 0; window.fixture.frames = 0; window.fixture.nativeClearRect = native;
+    CanvasRenderingContext2D.prototype.clearRect = function (...args) {
+      if (this.canvas.classList?.contains("drawing-pad-ink")) window.fixture.clears++;
+      return native.apply(this, args);
+    };
+    const tick = () => { if (window.fixture.frames === undefined) return; window.fixture.frames++; requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  });
+  const counts = () => run(() => ({ clears: window.fixture.clears, frames: window.fixture.frames }));
+  const awaitFrame = () => run(() => new Promise(resolve => requestAnimationFrame(() => resolve())));
+  const canvasData = () => run(() => document.querySelector(".drawing-pad-ink").toDataURL());
+  const economyBox = await (await page.$(".drawing-pad-ink")).boundingBox();
+  const at = (fx, fy) => [economyBox.x + economyBox.width * fx, economyBox.y + economyBox.height * fy];
+  const forcedRepaint = async () => {
+    const tool = await selectedTool(), before = (await counts()).clears;
+    await button("Hand"); await panBy(40, 0); await panBy(-40, 0); await button(tool);
+    assert.ok((await counts()).clears > before, "the forced repaint really repainted");
+    return canvasData();
+  };
+  const matchesFullRepaint = async message => { const shown = await canvasData(); assert.equal(await forcedRepaint(), shown, message); };
+  await button("Pen"); let economy = await counts();
+  for (let i = 0; i < 20; i++) {
+    const [x, y] = at(.15 + (i % 5) * .15, .3 + Math.floor(i / 5) * .08);
+    await page.mouse.move(x, y); await page.mouse.down(); await page.mouse.move(x + 40, y + 15, { steps: 10 }); await page.mouse.up();
+  }
+  assert.equal((await counts()).clears, economy.clears, "20 pen strokes cause no full repaint");
+  await matchesFullRepaint("20 incrementally painted pen strokes equal a full repaint");
+  economy = await counts();
+  const pressurePen = await page.createCDPSession(), [px, py] = at(.2, .75);
+  await pressurePen.send("Input.dispatchMouseEvent", { type: "mousePressed", x: px, y: py, button: "left", buttons: 1, pointerType: "pen", force: .2 });
+  for (let i = 1; i <= 12; i++) await pressurePen.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: px + i * 12, y: py + Math.sin(i) * 10, buttons: 1, pointerType: "pen", force: .2 + .06 * i });
+  await pressurePen.send("Input.dispatchMouseEvent", { type: "mouseReleased", x: px + 144, y: py, button: "left", pointerType: "pen", force: 0 });
+  await pressurePen.detach();
+  assert.equal((await counts()).clears, economy.clears, "a pressure-varying pen stroke causes no full repaint");
+  await matchesFullRepaint("a pressure-varying pen stroke equals a full repaint");
+  await page.mouse.click(...at(.85, .8)); await matchesFullRepaint("a single-tap dot equals a full repaint");
+  const [sx, sy] = at(.15, .3);
+  await button("Eraser"); await page.mouse.move(sx + 20, sy - 20); await page.mouse.down(); await page.mouse.move(sx + 20, sy + 30, { steps: 6 }); await page.mouse.up();
+  await button("Pen"); await matchesFullRepaint("the canvas after an eraser gesture equals a full repaint");
+  group("repaint economy: pen strokes, pressure strokes and dots paint incrementally, pixel-identical to a full repaint");
+
+  await button("Eraser"); economy = await counts();
+  const [ex, ey] = at(.55, .12);
+  await page.mouse.move(ex, ey); await page.mouse.down(); await page.mouse.move(ex + 300, ey + 20, { steps: 100 }); await page.mouse.up();
+  assert.equal((await counts()).clears, economy.clears, "an eraser sweep over empty space repaints nothing");
+  const beforeSweep = await ink(), [tx, ty] = at(.3, .38);
+  await page.mouse.move(tx + 20, ty - 25); await page.mouse.down(); economy = await counts();
+  await page.mouse.move(tx + 20, ty + 35, { steps: 100 });
+  const sweeping = await counts();
+  assert.ok(sweeping.clears - economy.clears <= sweeping.frames - economy.frames, `eraser repaints ${sweeping.clears - economy.clears} within ${sweeping.frames - economy.frames} frames`);
+  await page.mouse.up(); assert.ok(await ink() < beforeSweep, "the swept stroke is erased");
+  await button("Pen"); await matchesFullRepaint("the canvas after an eraser sweep equals a full repaint");
+  group("repaint economy: eraser moves repaint at most once per frame and never over empty space");
+
+  const inkBeforeHeld = await ink(), [hx, hy] = at(.45, .9);
+  await page.mouse.move(hx, hy); await page.mouse.down(); await page.mouse.move(hx + 80, hy, { steps: 8 }); await page.mouse.up();
+  assert.ok(await ink() > inkBeforeHeld, "the stroke to erase is drawn");
+  await button("Eraser"); await page.mouse.move(hx + 40, hy); await page.mouse.down(); await awaitFrame(); await awaitFrame();
+  assert.equal(await ink(), inkBeforeHeld, "a stationary eraser contact erases the stroke before any movement");
+  await page.mouse.up(); assert.equal(await ink(), inkBeforeHeld, "releasing the stationary eraser keeps the stroke erased");
+  await button("Undo"); await button("Undo"); assert.equal(await ink(), inkBeforeHeld, "Undo restores the stroke, then removes it");
+  await button("Pen"); await matchesFullRepaint("the canvas after a stationary eraser equals a full repaint");
+  group("repaint economy: a stationary eraser contact erases immediately");
+
+  const inkOffset = () => run(() => {
+    const canvas = document.querySelector(".drawing-pad-ink"), { width, height } = canvas;
+    const data = canvas.getContext("2d").getImageData(0, 0, width, height).data;
+    let minX = Infinity, minY = Infinity;
+    for (let y = 0; y < height; y++) for (let x = 0; x < width; x++) if (data[(y * width + x) * 4 + 3]) { if (x < minX) minX = x; if (y < minY) minY = y; }
+    const image = document.querySelector(".drawing-pad-background"), ratio = width / canvas.getBoundingClientRect().width;
+    return [minX / ratio - parseFloat(image.style.left), minY / ratio - parseFloat(image.style.top)];
+  });
+  const panOffset = await inkOffset(), [cx, cy] = at(.5, .5);
+  await button("Hand"); await page.mouse.move(cx, cy); await page.mouse.down(); economy = await counts();
+  for (let i = 1; i <= 60; i++) {
+    await page.mouse.move(cx + 2 * i, cy + i); await awaitFrame();
+    assert.deepEqual(await inkOffset(), panOffset, `ink and reference move together (move ${i})`);
+  }
+  const panned = await counts(); await page.mouse.up();
+  assert.ok(panned.clears - economy.clears <= panned.frames - economy.frames + 1, `pan repaints ${panned.clears - economy.clears} within ${panned.frames - economy.frames} frames`);
+  await panBy(-120, -60); await button("Pen");
+  group("repaint economy: a pan repaints at most once per frame and never shows ink and reference at different offsets");
+
+  await button("Undo"); await matchesFullRepaint("Undo equals a full repaint");
+  let previousBackground = await bg(); await call("setTheme", "light");
+  await page.waitForFunction(previous => document.querySelector(".drawing-pad-background")?.src !== previous, { timeout: 30000 }, previousBackground); await waitForSheet();
+  await matchesFullRepaint("a theme change equals a full repaint");
+  previousBackground = await bg(); await call("setTheme", "dark");
+  await page.waitForFunction(previous => document.querySelector(".drawing-pad-background")?.src !== previous, { timeout: 30000 }, previousBackground); await waitForSheet();
+  await page.setViewport({ width: 1400, height: 800, deviceScaleFactor: 1 });
+  await page.waitForFunction(() => document.querySelector(".drawing-pad-ink").width === document.querySelector(".drawing-pad-viewport").clientWidth);
+  await matchesFullRepaint("a resize equals a full repaint");
+  await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 });
+  await page.waitForFunction(() => document.querySelector(".drawing-pad-ink").width === document.querySelector(".drawing-pad-viewport").clientWidth);
+  await button("Clear"); await matchesFullRepaint("Clear equals a full repaint"); assert.equal(await ink(), 0);
+  group("repaint economy: Undo, theme change, resize and Clear leave the canvas equal to a full repaint");
+
+  await stroke(); const beforeCulling = await canvasData(); economy = await counts();
+  await button("Hand"); for (let i = 0; i < 4; i++) await panBy(400, 0);
+  assert.equal(await ink(), 0, "the stroke is fully off-screen"); assert.ok((await counts()).clears > economy.clears);
+  assert.ok(images(await call("submit", { accept: false }))[0], "off-screen ink is still exported");
+  for (let i = 0; i < 4; i++) await panBy(-400, 0);
+  assert.equal(await canvasData(), beforeCulling, "panning back repaints culled ink exactly"); await button("Pen");
+  group("repaint economy: off-screen strokes are skipped in full repaints, restored exactly, and still exported");
+
+  // A DPR-only change need not notify the CSS ResizeObserver. Ordinary input
+  // must reconcile density, without making subsequent strokes repaint fully.
+  const density = () => run(() => {
+    const canvas = document.querySelector(".drawing-pad-ink"), rect = canvas.getBoundingClientRect();
+    return { css: [rect.width, rect.height], pixels: [canvas.width, canvas.height], scale: canvas.getContext("2d").getTransform().a };
+  });
+  const initialDensity = await density();
+  await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 2 }); await awaitFrame(); await awaitFrame();
+  assert.deepEqual((await density()).css, initialDensity.css, "only density changes, not the CSS viewport");
+  await stroke(-.2);
+  assert.deepEqual(await density(), { css: initialDensity.css, pixels: initialDensity.pixels.map(size => size * 2), scale: 2 }, "the next pen stroke reconciles backing size and transform");
+  economy = await counts(); await stroke(-.15);
+  assert.equal((await counts()).clears, economy.clears, "normal strokes stay incremental at the new density");
+  await matchesFullRepaint("DPR-only pen reconciliation equals a full repaint");
+  await page.setViewport({ width: 1600, height: 900, deviceScaleFactor: 1 }); await awaitFrame(); await awaitFrame();
+  await button("Eraser"); assert.deepEqual(await density(), initialDensity, "a tool switch also reconciles a DPR-only decrease");
+  economy = await counts(); await button("Pen");
+  assert.equal((await counts()).clears, economy.clears, "ordinary tool switches do not repaint unchanged ink");
+  await matchesFullRepaint("DPR-only tool reconciliation equals a full repaint");
+  group("DPR-only changes reconcile on ordinary pen/tool input without full per-stroke repainting");
+
+  // Controlled context loss: reset() really discards the bitmap and transform;
+  // isContextLost/events supply a deterministic lifecycle, not a driver crash.
+  const loseInk = () => run(() => {
+    const canvas = document.querySelector(".drawing-pad-ink"), context = canvas.getContext("2d");
+    window.fixture.lostCanvas = canvas; window.fixture.inkLost = true;
+    Object.defineProperty(context, "isContextLost", { configurable: true, value: () => window.fixture.inkLost });
+    context.reset();
+    const event = new Event("contextlost", { cancelable: true }); canvas.dispatchEvent(event);
+    return event.defaultPrevented;
+  });
+  const restoreInk = () => run(() => {
+    const canvas = window.fixture.lostCanvas, context = canvas.getContext("2d");
+    window.fixture.inkLost = false; canvas.dispatchEvent(new Event("contextrestored"));
+    delete context.isContextLost;
+  });
+  const intact = await canvasData();
+  assert.equal(await loseInk(), false, "do not cancel the browser's automatic restoration");
+  assert.equal(await ink(), 0); await restoreInk();
+  assert.equal(await canvasData(), intact, "restoration reconstructs committed ink without a camera/content change");
+  await matchesFullRepaint("restored committed ink equals a full repaint");
+  group("context recovery: a discarded bitmap and transform rebuild without changing the drawing");
+
+  const [rx, ry] = at(.25, .55);
+  await page.mouse.move(rx, ry); await page.mouse.down(); await page.mouse.move(rx + 30, ry + 15);
+  await loseInk(); await page.mouse.move(rx + 60, ry + 25);
+  assert.equal(await ink(), 0, "live input does not paint or mark the lost bitmap current");
+  await restoreInk(); assert.ok(await ink() > 0);
+  await page.mouse.move(rx + 90, ry + 35); await page.mouse.up();
+  await matchesFullRepaint("a pen stroke spanning context restoration retains all segments and the world transform");
+  // Also recover when the entire commit happens while the context is lost.
+  await loseInk(); await stroke(-.1); assert.equal(await ink(), 0);
+  await restoreInk(); await matchesFullRepaint("a stroke committed while lost is reconstructed on restore");
+  group("context recovery: active and committed-while-lost pen strokes survive with exact pixels");
+
+  await button("Eraser"); const beforeRestoreErase = await ink();
+  await page.mouse.move(...at(.4, .725)); await page.mouse.down();
+  await loseInk(); await restoreInk();
+  assert.ok(await ink() < beforeRestoreErase, "restoration includes the held whole-stroke eraser preview");
+  await page.mouse.up(); await button("Pen"); await matchesFullRepaint("restored eraser preview commits exactly");
+  await loseInk(); await button("Hand"); await panBy(55, -35);
+  assert.equal(await ink(), 0); await restoreInk(); await button("Pen");
+  await matchesFullRepaint("camera changes during loss restore with the latest transform");
+  group("context recovery: held eraser preview and a camera change restore the current display");
+
+  await loseInk(); const detached = await run(() => window.fixture.lostCanvas.isConnected);
+  assert.equal(detached, true); await close(); await restoreInk();
+  assert.equal(await run(() => {
+    const canvas = window.fixture.lostCanvas;
+    return !canvas.isConnected && canvas.getContext("2d").getImageData(0, 0, canvas.width, canvas.height).data.every(value => value === 0);
+  }), true, "a disposed sheet does not repaint on a late restore event");
+  await open(); assert.ok(await ink() > 0); await matchesFullRepaint("remount after context loss reconstructs retained ink");
+  group("context recovery: teardown retires restore handlers and remount retains work");
+  await run(() => { CanvasRenderingContext2D.prototype.clearRect = window.fixture.nativeClearRect; window.fixture.frames = undefined; });
 
   // Keep the theme checks scoped to one saved reference rather than re-capturing
   // every retained sheet from the independent lifecycle groups above.

@@ -184,6 +184,24 @@ math/array/3D/chemfig packages, but those are not additional advertised families
 No raw SVG/HTML/JS, shell, remote resource, uploaded data-file or audio input path
 is provided by this plugin.
 
+## Rendering compatibility and errors
+
+The renderer makes a compilation-only copy of each complete TikZ block. In a
+literal preamble it removes redundant top-level `\documentclass` and
+`\documentstyle` declarations (the fixed standalone wrapper still owns layout)
+and supplies `amsmath` immediately before `\begin{document}`. Loading it after
+authored packages preserves explicit package options. Class/style options are
+not applied; they do not select an alternative document class. Comments, grouped
+commands and document content are not stripped. Token-changing TeX primitives
+are not expanded or guessed at. Other packages/libraries still need declarations.
+
+The original code block, saved chat history and model instructions are unchanged.
+There is no model repair request or retry loop. Genuine compilation failures show
+a bounded plain-text TeX diagnostic and, when available, the corresponding original
+source line beside the host's readable-source fallback. Full TeX transcripts and
+source dumps are not written to persistent logs. Diagnostic messages are limited
+to **2 KiB UTF-8**; normal Worker deadlines and output checks still apply.
+
 ## Lifetimes, limits and safety
 
 - Incomplete and pending fences show source without compiling incomplete input.

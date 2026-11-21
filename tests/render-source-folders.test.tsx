@@ -48,11 +48,17 @@ it("nested folders aggregate unique graph member counts, keep three-column sorti
 	assert.match(html, /data-testid="sort-name"/); assert.match(html, /data-testid="sort-props"/); assert.match(html, /data-testid="sort-created"/);
 	assert.match(html, /lucide-book-open/); assert.match(html, /draggable="true"/);
 });
-it("collapsed folders have no dangling rail, while expanded folders reuse the source/chain bracket grammar", () => {
-	assert.doesNotMatch(render(), /data-testid="folder-thread-/);
+it("collapsed folders have no dangling rail; an open folder's rail runs to its bottom rule and a rule heads its contents", () => {
+	assert.doesNotMatch(render(), /data-testid="folder-thread-|data-testid="folder-head-separator-/);
 	const html = render({ expandedClusters: new Set(["f1"]) });
-	assert.match(html, /data-testid="folder-thread-f1"[^>]*bottom-\[8px\][^>]*top-\[23px\]/);
+	assert.match(html, /data-testid="folder-thread-f1"[^>]*bottom-0[^>]*top-\[23px\]/);
 	assert.doesNotMatch(html, /data-testid="folder-thread-f2"/);
+	assert.match(html, /data-testid="folder-head-separator-f1"[^>]*bottom-\[-1px\][^>]*style="left:37px"/, "starts at the rail, in the folder row's border pixel");
+	assert.doesNotMatch(html, /data-testid="folder-head-separator-f2"/);
+	const nested = render({ expandedClusters: new Set(["f1", "f2"]) });
+	assert.match(nested, /data-testid="folder-head-separator-f2"[^>]*style="left:73px"/);
+	// Sources' chain rails keep the checkbox bracket (chains carry no rules).
+	assert.match(render({ nodes, chains: [{ id: "c1", premises: ["a"], conclusion: "b", provenance: [{ chatId: "notes", messageId: "m" }], createdAt: "2026-10-29" }], expandedClusters: new Set(["f1", "f2", "notes"]) }), /data-testid="cluster-thread-notes"[^>]*bottom-\[8px\]/);
 });
 it("shared presentation preserves deep folder rows, direct controls and native guide/column geometry", () => {
 	const deepDirectory: SourceDirectory = {
