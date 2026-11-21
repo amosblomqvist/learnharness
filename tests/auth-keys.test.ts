@@ -15,7 +15,7 @@ describe("the catalog", () => {
 	it("lists the curated app-service keys (provider keys live in the provider table)", () => {
 		assert.deepEqual(
 			AUTH_KEYS.map((k) => k.id),
-			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY"],
+			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY", "ANTHROPIC_WORKSPACE_ID"],
 		);
 		for (const k of AUTH_KEYS) {
 			assert.ok(k.label.length > 0, `${k.id} has a label`);
@@ -50,6 +50,14 @@ describe("validateKeyShape (the 400 gate — curated keys)", () => {
 		assert.ok(!validateKeyShape("TAVILY_API_KEY", "sk-or-v1-abcdefghij").ok, "wrong family");
 		assert.ok(!validateKeyShape("TAVILY_API_KEY", "tvly-").ok, "prefix alone is a truncation");
 		assert.ok(!validateKeyShape("TAVILY_API_KEY", "  ").ok, "empty fails");
+	});
+
+	it("Anthropic workspace ID: wrkspc_ prefix required, no whitespace", () => {
+		assert.ok(validateKeyShape("ANTHROPIC_WORKSPACE_ID", "wrkspc_01AbCdEfGhIjKlMn").ok);
+		assert.ok(validateKeyShape("ANTHROPIC_WORKSPACE_ID", "  wrkspc_01AbCdEfGhIjKlMn \n").ok, "paste whitespace is trimmed");
+		assert.ok(!validateKeyShape("ANTHROPIC_WORKSPACE_ID", "sk-ant-api03-abcdefghij").ok, "a key is not a workspace");
+		assert.ok(!validateKeyShape("ANTHROPIC_WORKSPACE_ID", "wrkspc_").ok, "prefix alone is a truncation");
+		assert.ok(!validateKeyShape("ANTHROPIC_WORKSPACE_ID", "wrkspc_01 AbCd").ok, "inner whitespace fails");
 	});
 
 	it("Firecrawl: fc- prefix required, length floor past it", () => {
