@@ -35,6 +35,7 @@ export const SEARCH_ENGINES = [
 	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
 	{ id: "firecrawl", label: "Firecrawl", envVar: "FIRECRAWL_API_KEY" },
 	{ id: "ollama", label: "Ollama", envVar: "OLLAMA_API_KEY" },
+	{ id: "specstream", label: "SpecStream", envVar: "SPECSTREAM_API_KEY" },
 ] as const;
 
 export type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];

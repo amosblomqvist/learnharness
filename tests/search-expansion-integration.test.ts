@@ -27,12 +27,13 @@ after(() => {
 });
 
 const engines = [
-	{ id: "exa", envVar: "EXA_API_KEY", url: "https://api.exa.ai/search", header: "x-api-key", prefix: "", payload: { results: [] } },
-	{ id: "firecrawl", envVar: "FIRECRAWL_API_KEY", url: "https://api.firecrawl.dev/v2/search", header: "authorization", prefix: "Bearer ", payload: { success: true, data: { web: [] } } },
-	{ id: "ollama", envVar: "OLLAMA_API_KEY", url: "https://ollama.com/api/web_search", header: "authorization", prefix: "Bearer ", payload: { results: [] } },
+	{ id: "exa", envVar: "EXA_API_KEY", url: "https://api.exa.ai/search", header: "x-api-key", prefix: "", payload: { results: [] }, exactUrl: true },
+	{ id: "firecrawl", envVar: "FIRECRAWL_API_KEY", url: "https://api.firecrawl.dev/v2/search", header: "authorization", prefix: "Bearer ", payload: { success: true, data: { web: [] } }, exactUrl: true },
+	{ id: "ollama", envVar: "OLLAMA_API_KEY", url: "https://ollama.com/api/web_search", header: "authorization", prefix: "Bearer ", payload: { results: [] }, exactUrl: true },
+	{ id: "specstream", envVar: "SPECSTREAM_API_KEY", url: "https://api.specstream.ai/v1/web-search?", header: "authorization", prefix: "Bearer ", payload: { data: { sources: [] } }, exactUrl: false },
 ] as const;
 
-for (const { id, envVar, url, header, prefix, payload } of engines) {
+for (const { id, envVar, url, header, prefix, payload, exactUrl } of engines) {
 	it(`${id}: saving, rotating, env override, pinning and deleting use the live shared composition`, async () => {
 		const fake = id === "firecrawl" ? "fc-fake-key-1234567890" : `${id}-fake-key-1234567890`;
 		assert.equal(searchStatus().available, false);
@@ -43,7 +44,8 @@ for (const { id, envVar, url, header, prefix, payload } of engines) {
 		let calls = 0;
 		globalThis.fetch = async (input, init) => {
 			calls++;
-			assert.equal(String(input), url);
+			if (exactUrl) assert.equal(String(input), url);
+			else assert.ok(String(input).startsWith(url), String(input));
 			assert.equal((init?.headers as Record<string, string>)[header], `${prefix}${expectedKey}`);
 			return Response.json(payload);
 		};
@@ -77,7 +79,7 @@ for (const { id, envVar, url, header, prefix, payload } of engines) {
 	});
 }
 
-it("all five saved keys follow the approved Automatic order as keys are removed", () => {
+it("all six saved keys follow the approved Automatic order as keys are removed", () => {
 	for (const { id, envVar } of SEARCH_ENGINES) {
 		const fake = id === "tavily" ? "tvly-fake-key-1234567890" : id === "firecrawl" ? "fc-fake-key-1234567890" : `${id}-fake-key-1234567890`;
 		assert.equal(saveKey(envVar, fake).ok, true);

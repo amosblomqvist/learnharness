@@ -9,7 +9,7 @@
  *    store or env — env wins, keyed via server/keys.ts keyValue).
  *  - Setting a key is ALL the user does — auto-detection: explicit
  *    agent.search.engine pins the preference (when several keys are
- *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama);
+ *    present the order is Tavily → Brave → Exa → Firecrawl → Ollama → SpecStream);
  *    without a pin, the first keyed engine wins.
  *  - An explicit choice does NOT silently fall back to another engine:
  *    engine pinned but its key missing = honestly unavailable (reason
@@ -211,6 +211,37 @@ export function ollamaProvider(apiKey: string, fetchFn: FetchLike = fetch): Sear
 	};
 }
 
+/** SpecStream's Search API (`GET /v1/web-search`, fast tier). */
+export function specstreamProvider(apiKey: string, fetchFn: FetchLike = fetch): SearchProvider {
+	return {
+		id: "specstream",
+		async search(query: string, count: number): Promise<SearchHit[]> {
+			const url = new URL("https://api.specstream.ai/v1/web-search");
+			url.searchParams.set("q", query);
+			url.searchParams.set("num", String(Math.min(100, Math.max(1, Math.floor(count)))));
+			url.searchParams.set("speed", "fast");
+			const resp = await fetchFn(url.toString(), {
+				headers: {
+					accept: "application/json",
+					authorization: `Bearer ${apiKey}`,
+				},
+				signal: AbortSignal.timeout(30_000),
+			});
+			if (!resp.ok) throw new Error(`SpecStream search API ${resp.status}`);
+			const data = await searchJson(resp, "SpecStream");
+			const payload = data && typeof data === "object" ? (data as { data?: unknown }).data : undefined;
+			if (!payload || typeof payload !== "object" || !Array.isArray((payload as { sources?: unknown }).sources)) {
+				throw new Error("SpecStream search API returned an invalid response");
+			}
+			return (payload as { sources: unknown[] }).sources.flatMap((result): SearchHit[] => {
+				if (!result || typeof result !== "object") return [];
+				const row = result as { title?: unknown; url?: unknown; snippet?: unknown };
+				return searchHit(row.title, row.url, row.snippet);
+			});
+		},
+	};
+}
+
 /** Match Exa's bounded result contract for the other new adapters. */
 function searchHit(title: unknown, url: unknown, snippet: unknown): SearchHit[] {
 	if (typeof url !== "string" || !url.trim()) return [];
@@ -270,7 +301,7 @@ export function resolveSearchEngineFor(
 	return {
 		available: false,
 		engine: null,
-		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, or Ollama search API key",
+		reason: "no search engine configured — set a Tavily, Brave, Exa, Firecrawl, Ollama, or SpecStream search API key",
 		key: null,
 	};
 }
@@ -308,6 +339,8 @@ export function searchProvider(): SearchProvider | null {
 			return firecrawlProvider(resolved.key);
 		case "ollama":
 			return ollamaProvider(resolved.key);
+		case "specstream":
+			return specstreamProvider(resolved.key);
 		default:
 			return null;
 	}
