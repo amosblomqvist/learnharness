@@ -912,11 +912,13 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		out.compaction = sanitizeCompaction(r.compaction);
 	}
 	// Unknown top-level keys ride along untouched (forward-compat). Known
-	// sections (including the retired `chat` section) never fall through here,
-	// so invalid or wrong-typed known sections drop cleanly instead of
-	// leaking raw values back onto the record.
+	// sections never fall through here, so invalid or wrong-typed known
+	// sections drop cleanly instead of leaking raw values back onto the
+	// record. The retired `chat` section (died with per-session models,
+	// owner, 2026-09-28) is stripped the same way so a fossil copy on disk
+	// never resurrects through reads.
 	for (const [key, value] of Object.entries(r)) {
-		if (KNOWN_TOP_LEVEL_KEYS.has(key)) continue;
+		if (KNOWN_TOP_LEVEL_KEYS.has(key) || key in out) continue;
 		out[key] = value;
 	}
 	return out;
