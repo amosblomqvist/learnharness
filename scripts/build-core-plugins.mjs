@@ -64,6 +64,11 @@ export function buildCorePlugins(root, { run = runNpm } = {}) {
 	const ids = readCoreCatalog(root), source = path.join(root, "plugins"), out = path.join(root, "core-plugins");
 	directory(source);
 	if (exists(out)) safeTree(out); // Never clean away accidentally misplaced data or linked files.
+	if (process.env.LH_PREBUILT_CORE_PLUGINS === "1" && exists(out)) {
+		validateCorePackages(root, out);
+		console.log(`[core-plugins] reusing pre-built ${ids.join(", ")} at ${out}`);
+		return;
+	}
 	const staged = fs.mkdtempSync(path.join(root, ".core-plugins-build-"));
 	const previous = path.join(root, `.core-plugins-backup-${randomUUID()}`);
 	try {
