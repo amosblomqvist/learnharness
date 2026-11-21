@@ -60,7 +60,8 @@ test("builtin pending input enables an initially empty selection and crosses pre
 	const render = async () => { await act(async () => root.render(<QuestionDock toolName="quiz" toolCallId="shuffle-call" input={{ question: "Which?", options: [{ label: "Left", value: "left" }, { label: "Right", value: "right" }], correctAnswer: "right", explanation: "Because" }} expanded onExpand={() => {}} onSubmit={() => assert.fail("must not pregrade before hooks")}
 		preparing={preparing} initialDraft={{ selection: { selected: new Set(), otherSelected: false, dontKnow: false }, thinking: "retained native thinking", other: "", text: "", confidenceIndex: 0 }} hasPendingInput={question => { rendered = question; return pending; }} onPrepareSubmission={capture => { preparations++; rendered = capture.question; assert.equal(capture.isCurrent(), true); raw = capture.capture(); }} />)); };
 	await render(); const button = () => document.querySelector('button[type="submit"]')!;
-	assert.equal(button().hasAttribute("disabled"), true);
+	// Thinking alone submits: the pick is read from it (components/answer-intent.ts).
+	assert.equal(button().hasAttribute("disabled"), false);
 	pending = true; preparing = true; await render(); assert.equal(button().hasAttribute("disabled"), true);
 	await act(async () => { document.querySelector("form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
 	assert.equal(preparations, 0); assert.doesNotMatch(document.body.textContent ?? "", /Preparing submission|Cancel/);

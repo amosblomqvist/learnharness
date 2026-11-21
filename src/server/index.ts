@@ -49,6 +49,7 @@ export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";
 export * from "./dismissal-park.ts";
 export * from "./compaction.ts";
+export { AnswerIntentUnavailable, inferAnswerIntent } from "./answer-intent.ts";
 export { sideChats, createSideChatService, type SideChatService, type SideChatDeps, type SideStreamEvent } from "./side-chat.ts";
 export { runPiTurn, piTurnResponse, type PiTurnHandle, type PiTurnSpec } from "./pi/ui-stream.ts";
 export * from "./observability.ts";

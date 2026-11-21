@@ -70,6 +70,11 @@ fallback Esc cancellation.
   thinking field**, **Enter submits**; **Shift+Enter** inserts a newline;
   **Mod+Enter** also submits. A question still needs an answer, and practice
   needs nonempty thinking. Submission is disabled during compaction.
+- Submitting while dictating finishes dictation first, so its words are part of
+  the answer. You do not need to stop it before **Enter**.
+- A select question submitted with thinking but no picked option uses the
+  **Cheap** model to read which option your thinking chose ("I'd say B"). If it
+  can't tell, nothing is sent and you pick one.
 - The composer's action follows its state: send text (or steer a running turn),
   Stop when busy with no sendable text, or **Next problem** when empty in the
   practice pause.
