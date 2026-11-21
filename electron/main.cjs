@@ -52,8 +52,8 @@ const PRODUCT_NAME = "LearnHarness";
 // Must run before the LH_DEV_URL suffix below — dev becomes
 // "LearnHarness-dev".
 app.setName(PRODUCT_NAME);
-const AUTH_FILE = () => path.join(app.getPath("userData"), "auth.json");
-const DATA_DIR = () => path.join(app.getPath("userData"), "data");
+const AUTH_FILE = () => process.env.LH_AUTH_FILE || path.join(app.getPath("userData"), "auth.json");
+const DATA_DIR = () => process.env.LH_DATA_DIR || path.join(app.getPath("userData"), "data");
 
 // Resolve the saved palette before window creation; renderer reports keep
 // it current after live saves. This helper needs no compiled server bundle.
@@ -71,6 +71,13 @@ function applyChrome(win) {
  *  In dev LH_DEV_URL short-circuits everything: no spawn, no packaging —
  *  the window points at the running `next dev` server (full HMR). */
 function serverEntry() {
+	if (process.env.LH_SERVER_ENTRY && fs.existsSync(process.env.LH_SERVER_ENTRY)) {
+		return process.env.LH_SERVER_ENTRY;
+	}
+	const local = path.join(__dirname, "..", ".next", "standalone", "server.js");
+	if (fs.existsSync(local)) {
+		return local;
+	}
 	// extraResources ships the whole .next payload under server/standalone/
 	// (copied from .next with an explicit filter — see electron-builder.yml).
 	return path.join(process.resourcesPath, "server", "standalone", "server.js");
@@ -213,8 +220,9 @@ function log(line) {
 
 function startServer(port) {
 	return new Promise((resolve, reject) => {
+		const nodeBin = process.env.NODE_BIN || process.execPath;
 		const child = spawn(
-			process.execPath,
+			nodeBin,
 			// Only the macOS backend needs this: Next's native title setter
 			// otherwise checks this Node-mode process in as a foreground app.
 			process.platform === "darwin"
