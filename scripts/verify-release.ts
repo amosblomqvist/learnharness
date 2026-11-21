@@ -265,6 +265,9 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 	}
 	if (config.productName !== PRODUCT_NAME) bad(`productName is ${JSON.stringify(config.productName)}, expected "${PRODUCT_NAME}"`);
 	if (config.artifactName != null) bad("a top-level artifactName now overrides target defaults — expected names no longer hold");
+	if (!isPlainObject(config.toolsets) || config.toolsets.appimage !== "1.0.3") {
+		bad(`toolsets.appimage is ${JSON.stringify(isPlainObject(config.toolsets) ? config.toolsets.appimage : undefined)}, expected "1.0.3"`);
+	}
 	const sameTargets = (actual: unknown, expected: Array<Record<string, unknown>>) =>
 		JSON.stringify(actual) === JSON.stringify(expected);
 	if (!isPlainObject(config.mac)) bad("mac section missing");

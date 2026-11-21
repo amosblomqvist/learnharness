@@ -11,6 +11,8 @@
 #     profile; the profile + team env vars are baked into desktop:dist).
 appId: com.learnharness.LearnHarness
 productName: LearnHarness
+toolsets:
+  appimage: "1.0.3"
 directories:
   output: dist
 # Icons (owner ruling, 2026-10-13) — per-platform sources in build/:
