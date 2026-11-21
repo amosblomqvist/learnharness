@@ -36,8 +36,9 @@ export function onSettingsSaved(handler: (section: SettingsSection) => void): ()
 		const section = (e as CustomEvent<{ section?: SettingsSection }>).detail?.section;
 		if (section !== undefined) handler(section);
 	};
-	window.addEventListener(SETTINGS_SAVED_EVENT, listener);
-	return () => window.removeEventListener(SETTINGS_SAVED_EVENT, listener);
+	const target = window;
+	target.addEventListener(SETTINGS_SAVED_EVENT, listener);
+	return () => target.removeEventListener(SETTINGS_SAVED_EVENT, listener);
 }
 
 /** Reader subscription: re-invokes whenever a writer lands, with the

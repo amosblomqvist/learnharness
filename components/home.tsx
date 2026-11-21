@@ -117,7 +117,7 @@ export function Home({
 			void begin();
 			return;
 		}
-		void dictation.finish().then(() => begin());
+		void dictation.finish().then(() => begin(), () => {});
 	};
 	const begin = async () => {
 		const t = topicRef.current.trim();

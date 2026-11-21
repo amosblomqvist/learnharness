@@ -145,7 +145,9 @@ export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft,
 	const unavailable = canonicalReady && (!available || !registration || failed);
 	const canSubmit = canonicalReady && ready && available && !!registration && leaseRegistration.current === registration && leaseKey.current === key && !failed && !!lease.current?.ready && draft.answer.status === "ready" && !submitting;
 	return <div ref={root} data-testid="plugin-question-dock">
-		{!expanded && <QuestionDockBar toolName="explain" question={snapshot.input.question} toolLabel={snapshot.label} variant={reveal ? "reveal" : "collapsed"} onExpand={() => { void finishDictation().then(onExpand); }} />}
+		{!expanded && <QuestionDockBar toolName="explain" question={snapshot.input.question} toolLabel={snapshot.label} variant={reveal ? "reveal" : "collapsed"} onExpand={() => { void finishDictation().then(() => {
+			if (keyOf(current.current.snapshot) === key && isInteractionScopeEligible(root.current, controller)) onExpand();
+		}, () => {}); }} />}
 		<div className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
 			<div className="space-y-3 px-4 py-3">
 				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{snapshot.input.type === "predict" ? "Prediction" : snapshot.label}</div>

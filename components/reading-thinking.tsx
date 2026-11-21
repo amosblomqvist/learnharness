@@ -51,14 +51,17 @@ export function ReadingThinkingField({
 	// submit mirror, this ref includes every edit synchronously.
 	const draftRef = useRef(value);
 	useLayoutEffect(() => { draftRef.current = value; setDraft(value); }, [revision, value]);
+	const onChangeRef = useRef(onChange);
+	onChangeRef.current = onChange;
 	const applyDraft = useCallback((next: string) => {
 		draftRef.current = next;
 		setDraft(next);
-		onChange(next);
-	}, [onChange]);
+		onChangeRef.current(next);
+	}, []);
 	useDictationTarget(
 		useCallback((text: string) => applyDraft(joinDictation(draftRef.current, text)), [applyDraft]),
 		claim,
+		true,
 	);
 	return (
 		<div

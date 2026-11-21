@@ -517,7 +517,10 @@ function QuestionDockForm({
 			: sel.dontKnow || (sel.otherSelected && other.trim().length > 0) || sel.selected.size > 0;
 
 	const canSubmit = nativeCanSubmit || hasPendingInput?.(qd) === true;
-	const currentQuestion = useRef(qd); currentQuestion.current = qd;
+	// A rerender can rebuild the same question while transcription is pending.
+	// Ignore its local display timestamp, but retain the full grading input.
+	const questionRevision = JSON.stringify({ ...qd, createdAt: undefined });
+	const currentQuestion = useRef(questionRevision); currentQuestion.current = questionRevision;
 	const mounted = useRef(true);
 	useEffect(() => { mounted.current = true; return () => { mounted.current = false; }; }, []);
 	const formValues = useRef({ sel, other, confIdx }); formValues.current = { sel, other, confIdx };
@@ -535,10 +538,13 @@ function QuestionDockForm({
 	}, [viewReader, qd, kind]);
 	const viewPresentationKey = JSON.stringify({ ...toClientQuestion(qd), questionType: qd.questionType });
 	useLayoutEffect(() => { viewReader?.changed?.(); }, [viewReader, sel, other, text, thinking, confIdx, viewPresentationKey]);
+	const submitPending = useRef(false);
+	const submitState = useRef({ canSubmit, compactionRunning });
+	submitState.current = { canSubmit, compactionRunning };
 	const submit = () => {
-		if (!canSubmit || compactionRunning || preparing) return;
+		if (!canSubmit || compactionRunning || preparing || submitPending.current) return;
 		if (onPrepareSubmission) {
-			onPrepareSubmission({ question: qd, isCurrent: () => mounted.current && currentQuestion.current === qd && isInteractionScopeEligible(rootRef.current, controller), capture: captureRequest });
+			onPrepareSubmission({ question: qd, isCurrent: () => mounted.current && currentQuestion.current === questionRevision && isInteractionScopeEligible(rootRef.current, controller), capture: captureRequest });
 			return;
 		}
 		/* FINISH DICTATION FIRST (owner, 2026-10-01): Enter may arrive while
@@ -551,7 +557,10 @@ function QuestionDockForm({
 			doSubmit();
 			return;
 		}
-		void finishDictation().then(doSubmit);
+		submitPending.current = true;
+		void finishDictation().then(() => {
+			if (mounted.current && currentQuestion.current === questionRevision) doSubmit();
+		}, () => {}).finally(() => { submitPending.current = false; });
 	};
 	const captureRequest = (): AnswerRequest => {
 		const { sel, other, confIdx } = formValues.current;
@@ -577,7 +586,8 @@ function QuestionDockForm({
 		return req;
 	};
 	const doSubmit = () => {
-		if (!canSubmit) return;
+		const { canSubmit, compactionRunning } = submitState.current;
+		if (compactionRunning || (qd.mode === "text" ? !answerTextRef.current.trim() : !canSubmit)) return;
 		onSubmit(buildAnswer(qd, captureRequest(), toolName));
 	};
 
