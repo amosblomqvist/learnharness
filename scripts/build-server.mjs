@@ -99,6 +99,40 @@ for (const extra of ["plugins", "dist", path.join("node_modules", "electron")]) 
 	}
 }
 
+// 2d) External-module links (#897): Turbopack reaches each server external
+// that the project root cannot resolve through .next/node_modules/<name>-<hash>,
+// a symlink to the traced package. The Windows installer copies that link as
+// a plain directory, so the package then finds its dependencies only by
+// walking up to standalone/node_modules. That works when the target is a
+// top-level package there. A nested target (0.7.0: shiki under
+// @streamdown/code/node_modules) loses its sibling dependencies. The server
+// 500s on Windows while every symlink-preserving smoke passes.
+const externalLinks = (directory) =>
+	!exists(directory)
+		? []
+		: fs.readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+				const full = path.join(directory, entry.name);
+				if (entry.isSymbolicLink()) return [full];
+				return entry.isDirectory() && entry.name.startsWith("@") ? externalLinks(full) : [];
+			});
+const tracedModules = path.join(fs.realpathSync(STANDALONE), "node_modules");
+for (const link of externalLinks(path.join(STANDALONE, ".next", "node_modules"))) {
+	let target;
+	try {
+		target = path.relative(tracedModules, fs.realpathSync(link));
+	} catch {
+		target = "(missing)";
+	}
+	const parts = target.split(path.sep);
+	const topLevel = !path.isAbsolute(target) && parts[0] !== ".." && parts.length === (parts[0].startsWith("@") ? 2 : 1);
+	if (!topLevel) {
+		console.error(`[build-server] REFUSING: external module link ${path.relative(STANDALONE, link)} → node_modules/${target} is not a top-level package.`);
+		console.error("             Installers that copy links as directories leave it unable to load its nested dependencies.");
+		console.error("             Make the package resolvable from the project root (e.g. a direct dependency).");
+		process.exit(1);
+	}
+}
+
 // 3) Sanity: the runtime-read prompt assets must be present (the teacher
 //    agent reads them from disk at request time).
 for (const asset of [
