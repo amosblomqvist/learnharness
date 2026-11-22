@@ -9,7 +9,7 @@
  * component in the first place.
  */
 
-import { createMermaidPlugin } from "@streamdown/mermaid";
+type MermaidPlugin = ReturnType<typeof import("@streamdown/mermaid").createMermaidPlugin>;
 import type { MermaidConfig } from "mermaid";
 import type { RenderedMode } from "@/src/core";
 
@@ -35,12 +35,18 @@ export function mermaidConfig(mode: RenderedMode): MermaidConfig {
 	};
 }
 
-const plugin = createMermaidPlugin();
+let pluginPromise: Promise<MermaidPlugin> | null = null;
+
+function getMermaidPlugin(): Promise<MermaidPlugin> {
+	pluginPromise ??= import("@streamdown/mermaid").then(({ createMermaidPlugin }) => createMermaidPlugin());
+	return pluginPromise;
+}
 
 /** Render one chart source to an svg string. The id is unique per call —
  *  mermaid caches rendered ids, and a repeated id across charts/renders
  *  returns the stale svg (the bug streamdown's own id minting avoids). */
 export async function renderMermaid(chart: string, mode: RenderedMode): Promise<string> {
+	const plugin = await getMermaidPlugin();
 	const id = `lh-mermaid-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 9)}`;
 	const { svg } = await plugin.getMermaid(mermaidConfig(mode)).render(id, chart);
 	return svg;
