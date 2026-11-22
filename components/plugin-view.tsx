@@ -10,7 +10,7 @@ import { TopBar } from "@/components/top-bar";
 import { PluginTopBarActions } from "@/components/plugin-chrome";
 import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { Hint } from "@/components/ui/hint";
-import { useSettingsDialog } from "@/components/settings/settings-dialog";
+import { useSettingsDialog } from "@/components/settings/settings-dialog-provider";
 import { Button } from "@/components/ui/button";
 
 export function PluginViewScreen({ pluginId, viewId }: { pluginId: string; viewId: string }) {

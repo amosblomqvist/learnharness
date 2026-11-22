@@ -12,7 +12,7 @@ import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
-import { SettingsDialogProvider, useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
+import { SettingsDialogProvider, useSettingsDialog } from "@/components/settings/settings-dialog-provider.tsx";
 import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
