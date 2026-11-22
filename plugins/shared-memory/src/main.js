@@ -118,10 +118,13 @@ export function activate(ctx) {
       summary.textContent = view.summary;
       if (!view.loaded) { list.replaceChildren(el('li', 'sm-muted', 'Loading…')); return; }
       if (!view.items.length) { list.replaceChildren(el('li', 'sm-muted', 'Nothing to send.')); return; }
+      // Rebuilding the rows replaces the focused checkbox; keep keyboard focus on the same proposition.
+      const active = list.ownerDocument.activeElement;
+      const focusedId = active && list.contains(active) ? active.dataset.propositionId : undefined;
       list.replaceChildren(...view.items.map(item => {
         const row = el('li', 'sm-item');
         const label = el('label', 'sm-item-label');
-        const box = el('input'); box.type = 'checkbox'; box.checked = selected.has(item.id); box.disabled = busy;
+        const box = el('input'); box.type = 'checkbox'; box.checked = selected.has(item.id); box.disabled = busy; box.dataset.propositionId = item.id;
         box.addEventListener('change', () => { if (box.checked) selected.add(item.id); else selected.delete(item.id); render(); });
         const head = el('span', 'sm-item-head');
         head.append(el('span', 'sm-item-name', item.name ?? item.id), el('span', 'sm-state', stateLabels[item.state] ?? String(item.state ?? '')));
@@ -131,6 +134,10 @@ export function activate(ctx) {
         if (item.reason) row.append(el('p', 'sm-error', `Failed (${item.reason.kind}): ${item.reason.message}`));
         return row;
       }));
+      if (focusedId !== undefined) {
+        const box = [...list.querySelectorAll('input[type="checkbox"]')].find(input => input.dataset.propositionId === focusedId);
+        if (box && !box.disabled) box.focus();
+      }
     }
 
     selectAll.addEventListener('change', () => {

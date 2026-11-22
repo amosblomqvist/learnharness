@@ -3,7 +3,7 @@
   "id": "shared-memory",
   "name": "Shared Memory",
   "version": "0.1.0",
-  "minAppVersion": "0.4.1",
+  "minAppVersion": "0.6.0",
   "description": "Send knowledge-graph propositions to a shared-memory MCP server, one memory per proposition. Sends only what you select; writes to shared memory cannot be undone.",
   "main": "main.js",
   "backend": "backend.cjs",
