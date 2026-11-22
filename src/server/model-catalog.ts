@@ -181,7 +181,9 @@ function keyedProviderIds(): Set<string> {
 /** Project one catalog model to the client DTO. `providerNames` carries the
  *  learner's own name for providers they configured (custom endpoints), so
  *  the picker never shows a generated id. */
-export function toModelDto(model: Model<Api>, providerNames?: ReadonlyMap<string, string>): ModelDto {
+export function toModelDto(model: Model<Api>, providerNamesOrIndex?: ReadonlyMap<string, string> | number): ModelDto {
+	// A bare `.map(toModelDto)` passes the numeric index here; ignore it.
+	const providerNames = typeof providerNamesOrIndex === "number" ? undefined : providerNamesOrIndex;
 	const providerName = providerNames?.get(model.provider);
 	return {
 		id: model.id,

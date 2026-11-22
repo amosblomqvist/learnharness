@@ -194,20 +194,20 @@ describe("custom endpoints — more than one", () => {
 
 		const list = endpoints();
 		assert.equal(list.length, 2);
-		assert.equal(list[0].id, "custom", "the migrated endpoint keeps its id");
-		assert.deepEqual(list[0].models, CONNECTED.customProvider.models);
-		assert.deepEqual(list[1].models, [{ id: "second-1" }]);
+		assert.equal(list[0]!.id, "custom", "the migrated endpoint keeps its id");
+		assert.deepEqual(list[0]!.models, CONNECTED.customProvider.models);
+		assert.deepEqual(list[1]!.models, [{ id: "second-1" }]);
 	});
 
 	it("a name can be changed without re-probing the endpoint", async () => {
 		seed(CONNECTED);
-		const id = (await storedIds())[0];
+		const id = (await storedIds())[0]!;
 		answerWith(200, "OK", { data: [{ id: "disc-1" }, { id: "disc-2" }] });
 
 		const res = await post({ id, name: "Home server", baseUrl: BASE });
 		assert.equal(res.status, 200);
 		assert.equal((await res.json()).name, "Home server");
-		assert.equal(endpoints()[0].name, "Home server");
+		assert.equal(endpoints()[0]!.name, "Home server");
 		const get = await route.GET(new Request("http://localhost/api/custom-provider")).json();
 		assert.equal(get.endpoints[0].name, "Home server");
 		assert.equal(get.endpoints[0].id, id);
@@ -226,8 +226,8 @@ describe("custom endpoints — more than one", () => {
 		assert.equal(res.status, 200);
 
 		const list = endpoints();
-		assert.deepEqual(list[1].overrides, { "second-1": { context: 128000 } });
-		assert.deepEqual(list[0].overrides, CONNECTED.customProvider.overrides, "the first endpoint's pins are untouched");
+		assert.deepEqual(list[1]!.overrides, { "second-1": { context: 128000 } });
+		assert.deepEqual(list[0]!.overrides, CONNECTED.customProvider.overrides, "the first endpoint's pins are untouched");
 	});
 
 	it("disconnecting one endpoint leaves the other connected", async () => {
@@ -262,13 +262,13 @@ describe("custom endpoints — more than one", () => {
 		const res = await post({ name: "Offline rename" });
 		assert.equal(res.status, 200);
 		assert.equal(probes, 0, "renaming never needs the server to answer");
-		assert.equal(endpoints()[0].name, "Offline rename");
-		assert.deepEqual(endpoints()[0].models, CONNECTED.customProvider.models, "models are untouched");
-		assert.equal(endpoints()[0].baseUrl, BASE, "the address is untouched");
+		assert.equal(endpoints()[0]!.name, "Offline rename");
+		assert.deepEqual(endpoints()[0]!.models, CONNECTED.customProvider.models, "models are untouched");
+		assert.equal(endpoints()[0]!.baseUrl, BASE, "the address is untouched");
 
 		const cleared = await post({ name: "" });
 		assert.equal(cleared.status, 200);
-		assert.equal(endpoints()[0].name, undefined, "an empty name falls back to the default");
+		assert.equal(endpoints()[0]!.name, undefined, "an empty name falls back to the default");
 	});
 
 	it("a hand-edited id can never shadow a built-in provider", async () => {

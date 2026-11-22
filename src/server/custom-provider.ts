@@ -10,6 +10,8 @@ import { openAICompletionsApi } from "@earendil-works/pi-ai/api/openai-completio
 import { configureProviderSource, piModels } from "../agent/models.ts";
 import { readSettings } from "../store/settings.ts";
 import { CustomBodyLimitError, readBoundedJson } from "./custom-provider-body.ts";
+import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
+import { CUSTOM_PROVIDER_ID } from "../core/settings.ts";
 import { customBindingMatches } from "../core/custom-provider-auth.ts";
 import { customAuthState, customKeyAuthorized } from "./custom-provider-auth.ts";
 import {
@@ -116,10 +118,11 @@ function toPiModel(
 
 /** Build an OpenAI-compatible provider from parts. baseUrl must be normalized. */
 export function buildOpenAiCompatibleProvider(input: {
-	/** The endpoint's id — its models carry it as their provider. */
-	id: string;
+	/** The endpoint's id — its models carry it as their provider.
+	 *  Defaults to the legacy `custom` id for pre-multi-provider callers. */
+	id?: string;
 	/** The learner's name for it (the picker's group label). */
-	name: string;
+	name?: string;
 	baseUrl: string;
 	models: readonly CustomModel[];
 	/** User pins by model id (see CustomModelOverride) — absent = none. */
@@ -128,15 +131,17 @@ export function buildOpenAiCompatibleProvider(input: {
 	apiKey?: string;
 }): Provider<Api> {
 	const overrides = input.overrides ?? {};
+	const id = input.id ?? CUSTOM_PROVIDER_ID;
+	const name = input.name ?? CUSTOM_PROVIDER.label;
 	return createProvider<Api>({
-		id: input.id,
-		name: input.name,
+		id,
+		name,
 		baseUrl: input.baseUrl,
 		auth: { apiKey: {
-			name: `${input.name} API key`,
-			resolve: async () => ({ auth: { apiKey: input.apiKey ?? KEYLESS_PLACEHOLDER }, source: input.apiKey ? `${input.name} key` : "keyless" }),
+			name: `${name} API key`,
+			resolve: async () => ({ auth: { apiKey: input.apiKey ?? KEYLESS_PLACEHOLDER }, source: input.apiKey ? `${name} key` : "keyless" }),
 		} },
-		models: input.models.map((m) => toPiModel(m, input.baseUrl, overrides, input.id)),
+		models: input.models.map((m) => toPiModel(m, input.baseUrl, overrides, id)),
 		api: openAICompletionsApi(),
 	});
 }

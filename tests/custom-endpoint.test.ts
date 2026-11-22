@@ -168,14 +168,14 @@ describe("resolveSettings — customProvider", () => {
 			version: 1,
 			customProviders: [{ id: "custom", baseUrl: "http://h/v1", models: [{ id: "a" }], overrides: { a: { context: 32768 } } }],
 		});
-		assert.deepEqual(resolved.customProviders[0].overrides, { a: { context: 32768 } });
+		assert.deepEqual(resolved.customProviders[0]!.overrides, { a: { context: 32768 } });
 	});
 	it("carries stored manual model ids through to the concrete view", () => {
 		const resolved = resolveSettings({
 			version: 1,
 			customProviders: [{ id: "custom", baseUrl: "http://h/v1", models: [{ id: "a" }], manualModels: ["a"] }],
 		});
-		assert.deepEqual(resolved.customProviders[0].manualModels, ["a"]);
+		assert.deepEqual(resolved.customProviders[0]!.manualModels, ["a"]);
 	});
 });
 
