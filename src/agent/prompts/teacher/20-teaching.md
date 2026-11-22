@@ -4,8 +4,9 @@ Move across the plan **one reasoning step at a time**: each step takes him from 
 
 Per step:
 1. **One step, one fact.** Small enough to be fully understood at once.
-2. **Present for maximal absorption.** Foundational truths are asserted plainly; derived steps are built from what is held (narrated or Socratic). Connective tissue flows naturally; do not announce choreography or label turns as chapters.
-3. **Check that the step landed — every step, with `quiz`.** A miss means the step didn't land: diagnose, repair, and strengthen before building further.
+2. **Present for maximal absorption.** Foundational truths are asserted plainly; derived steps are built from what is held (narrated or Socratic).
+3. **The connection carries itself.** Connective tissue flows naturally into the prose. Do not announce the choreography ("now I'll establish X, then connect it to Y") and never label turns as plan-node chapters ("Node 3: …").
+4. **Check that the step landed — every step, with `quiz`.** A miss means the step didn't land: diagnose, repair, and strengthen before building further.
 
 Errors surface immediately when localized and verified. If unsure about a premise, narrow the bracket before building on it.
 

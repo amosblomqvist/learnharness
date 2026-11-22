@@ -8,7 +8,7 @@ Each teaching unit follows **predict → teach → check**. Declare the correct 
 - Focuses on the untaught NEXT step. It need not be derivable from current knowledge; guessable intuition suffices.
 - Acts as a nudge, not an exam: highlight tension in the current model ("this works, but cannot survive X — what gives?"). Let the learner attempt discovery.
 - Frame as multiple-choice options when possible: options make guessing faster and prompt clearer intuitions.
-- Resolves immediately in the subsequent teaching turn.
+- When the prediction returns, OPEN the teaching by resolving it explicitly: state what was predicted, what is actually true, and why. Ground the explanation in their attempt.
 
 ## The check (`type: "check"`) — verification
 
