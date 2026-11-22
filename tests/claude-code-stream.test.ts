@@ -28,6 +28,7 @@ import type {
 	Tool,
 	ToolResultMessage,
 } from "@earendil-works/pi-ai";
+import { createAssistantMessageEventStream, createModels, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { normalizeContext } from "@earendil-works/pi-ai/utils/transcript";
 import { Agent } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
@@ -35,11 +36,14 @@ import { Type } from "typebox";
 import { parseCliLine } from "../src/agent/claude-code/cli-events.ts";
 import { ClaudeCodeError } from "../src/agent/claude-code/constants.ts";
 import { LIVE_PROCESS_IDLE_TIMEOUT_MS, liveProcessIdleTimeoutMs } from "../src/agent/claude-code/live-processes.ts";
-import { CLAUDE_CODE_MODELS } from "../src/agent/claude-code/provider.ts";
+import { CLAUDE_CODE_MODELS, createClaudeCodeProvider } from "../src/agent/claude-code/provider.ts";
 import { authEnvRecord } from "../src/core/auth-env.ts";
 import { ClaudeLaunchError } from "../src/agent/claude-code/launch.ts";
 import { createClaudeCodeStreamFunction, toClaudeArgs, toEffort, type RunClaude } from "../src/agent/claude-code/stream.ts";
 import { toStreamJsonLine } from "../src/agent/claude-code/transcript.ts";
+import { runSubagent } from "../src/agent/subagents/pi-run.ts";
+import { runResearcherAgent } from "../src/agent/subagents/researcher.ts";
+import { configureWorkerRequestAdmission, createWorkerRequestScope, workerRequestStream } from "../src/agent/worker-request-admission.ts";
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/claude-code/fake-claude.mjs", import.meta.url));
 const FIXTURES = fileURLToPath(new URL("./fixtures/claude-code/", import.meta.url));
@@ -843,6 +847,36 @@ test("preserves existing CLI environment authentication without a subscription g
 	assert.equal(getFlagValue(call.args, "--setting-sources"), "user");
 });
 
+test("Fable selection reaches the fake CLI unchanged without desktop API authority", async (t) => {
+	const names = ["LH_DESKTOP_API_SECRET", "LH_DESKTOP_SERVER", "ANTHROPIC_AUTH_TOKEN"] as const;
+	const saved = names.map((name) => [name, process.env[name]] as const);
+	t.after(() => {
+		for (const [name, value] of saved) {
+			if (value === undefined) delete process.env[name]; else process.env[name] = value;
+		}
+	});
+	process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
+	process.env.LH_DESKTOP_SERVER = "1";
+	process.env.ANTHROPIC_AUTH_TOKEN = "synthetic-native-cli-token";
+	const model = CLAUDE_CODE_MODELS.find((entry) => entry.id === "fable");
+	assert.ok(model);
+	const { runClaude, calls } = createFakeRun(t, readFixtureLines("text.jsonl"));
+	const context = normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI] });
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(model, context, { reasoning: "low" }));
+	const call = getOnlyCall(calls);
+	assert.equal(getFlagValue(call.args, "--model"), "fable");
+	assert.equal(getFlagValue(call.args, "--effort"), "low");
+	assert.equal(call.env.LH_DESKTOP_API_SECRET, undefined);
+	assert.equal(call.env.LH_DESKTOP_SERVER, undefined);
+	assert.equal(call.env.ANTHROPIC_AUTH_TOKEN, "synthetic-native-cli-token", "native authentication is retained");
+	assert.equal(process.env.LH_DESKTOP_API_SECRET, "d".repeat(64), "the parent keeps its own capability");
+	assert.equal(process.env.LH_DESKTOP_SERVER, "1");
+	const done = events.find((event) => event.type === "done");
+	assert.ok(done && done.type === "done");
+	assert.equal(done.message.model, "fable");
+	assert.equal(done.message.stopReason, "stop");
+});
+
 test("does not inject credentials reflected only from LearnHarness's key store", async (t) => {
 	const name = "ANTHROPIC_API_KEY";
 	const record = authEnvRecord();
@@ -914,6 +948,179 @@ test("sequential identical calls split one response and correlate results by id,
 	assert.equal(toolMessage.usage.totalTokens, 9);
 	assert.equal(second.usage.totalTokens, 0, "splitting one response must not charge its tokens twice");
 	assert.equal(calls.length, 1);
+});
+
+function admittedClaude(runClaude: RunClaude): StreamFunction {
+	const models = createModels();
+	models.setProvider(createClaudeCodeProvider(createClaudeCodeStreamFunction(runClaude)));
+	return models.streamSimple.bind(models); // Same lazy forwarding as the production engine.
+}
+
+function singleWorkerSlot(t: TestContext): void {
+	configureWorkerRequestAdmission(() => 1);
+	t.after(() => configureWorkerRequestAdmission(() => 8));
+}
+
+function offlineWorkerTool(execute: () => Promise<string>) {
+	return { name: "read", label: "Read", description: "Read", parameters: Type.Object({ path: Type.String() }),
+		execute: async () => ({ content: [{ type: "text" as const, text: await execute() }], details: null }),
+	};
+}
+
+const HELD_READ = { id: "toolu_worker_held", name: "read", arguments: { path: "offline" } };
+
+test("worker releases its only permit before tools but continues in the same Claude child through Pi lazy forwarding", { timeout: 8000 }, async t => {
+	singleWorkerSlot(t);
+	const second = { ...HELD_READ, id: "toolu_worker_second" };
+	const source = toToolUseMessage([HELD_READ, second]);
+	source[0] = streamEvent({ type: "message_start", message: { usage: { input_tokens: 7, output_tokens: 10 } } });
+	const { runClaude, calls } = createFakeRun(t, [...source, callTool(HELD_READ), callTool(second), REPLY]);
+	const usage: number[] = [];
+	let reads = 0;
+	const result = await runSubagent([offlineWorkerTool(async () => {
+		const { child } = getOnlyCall(calls);
+		assert.equal(child.exitCode, null);
+		assert.equal(child.signalCode, null);
+		// A new admitted request must fit while the Claude tool is still running.
+		const competing = workerRequestStream(() => {
+			const stream = createAssistantMessageEventStream();
+			stream.end(fauxAssistantMessage("admitted", { stopReason: "stop" }) as AssistantMessage);
+			return stream;
+		});
+		assert.equal((await competing(getModel(), normalizeContext({ messages: [HI] }), { signal: AbortSignal.timeout(2000) }).result()).stopReason, "stop");
+		return `evidence ${++reads}`;
+	})], {
+		engine: { model: getModel(), streamFn: admittedClaude(runClaude) }, systemPrompt: "Offline", prompt: "Offline", maxTurns: 3,
+		onUsage: use => usage.push(use.output),
+	});
+	assert.deepEqual(usage, [10, 0, 0]);
+	assert.equal(result.text, "evidence 1 | evidence 2");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("uncapped research through normal admission delivers a brief after thirteen Claude tool-use responses", { timeout: 8000 }, async t => {
+	const scenario: string[] = [];
+	const queries = Array.from({ length: 26 }, (_, index) => `fixture angle ${index + 1}`);
+	for (let index = 0; index < queries.length; index += 2) {
+		const calls = queries.slice(index, index + 2).map((query, offset) => ({
+			id: `toolu_research_${index + offset}`, name: "web_search", arguments: { query },
+		}));
+		const source = toToolUseMessage(calls);
+		source[0] = streamEvent({ type: "message_start", message: { usage: { input_tokens: 7, output_tokens: 10 } } });
+		// The fake CLI waits for each MCP result before proceeding. Two tool calls
+		// from one Claude response become separate Pi assistant turns.
+		scenario.push(...source, ...calls.map(callTool));
+	}
+	const url = "https://example.invalid/research-fixture";
+	const brief = `## Summary\nThe offline fixture corroborates the finding.\n\n## Findings\nThe last search corroborates fixture angle 26. [Source](${url})\n\n## Sources\n- [Fixture](${url})\n\n## Gaps\nNo independent sources in this fixture.`;
+	scenario.push(
+		streamEvent({ type: "message_start", message: { usage: {} } }),
+		streamEvent({ type: "content_block_start", index: 0, content_block: { type: "text", text: "" } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "text_delta", text: brief } }),
+		streamEvent({ type: "content_block_stop", index: 0 }),
+		streamEvent({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: {} }),
+		streamEvent({ type: "message_stop" }),
+	);
+	const { runClaude, calls } = createFakeRun(t, scenario);
+	const transport = admittedClaude(runClaude);
+	const question = "Can the offline finding be corroborated?";
+	const searched: string[] = [];
+	const usage: number[] = [];
+	let requests = 0;
+	const answer = await runResearcherAgent(question, {
+		engine: { model: getModel(), streamFn: (model, context, options) => {
+			const results = context.messages.filter((message): message is ToolResultMessage => message.role === "toolResult");
+			assert.equal(results.length, requests++);
+			assert.ok(context.messages.some(message => message.role === "user" && message.content === question));
+			if (results.length) {
+				const last = results.at(-1)!;
+				assert.equal(last.toolCallId, `toolu_research_${results.length - 1}`);
+				assert.equal(last.isError, false);
+				assert.ok(last.content.some(part => part.type === "text" && part.text.includes(`Evidence for ${queries[results.length - 1]}`)));
+			}
+			return transport(model, context, options);
+		} },
+		search: () => ({ id: "tavily", async search(query) {
+			searched.push(query);
+			return [{ title: "Fixture", url, snippet: `Evidence for ${query}` }];
+		} }),
+		onUsage: value => usage.push(value.output),
+	});
+	assert.equal(answer, brief);
+	assert.deepEqual(searched, queries);
+	assert.equal(requests, 27);
+	assert.deepEqual(usage, [...Array.from({ length: 13 }, () => [10, 0]).flat(), 0]);
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+for (const outcome of ["stop", "cancel", "error"] as const) {
+	test(`worker retires its parked Claude child on ${outcome} between requests`, { timeout: 8000 }, async t => {
+		const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([HELD_READ]), callTool(HELD_READ), HOLD]);
+		const controller = new AbortController();
+		let requests = 0;
+		const run = runSubagent([offlineWorkerTool(async () => {
+			const call = getOnlyCall(calls);
+			assert.equal(call.child.signalCode, null);
+			if (outcome === "cancel") {
+				controller.abort();
+				await assertCleanedUp(call); // Must retire even before the tool returns.
+			}
+			return "result";
+		})], {
+			engine: { model: getModel(), streamFn: admittedClaude(runClaude) }, systemPrompt: "Offline", prompt: "Offline", maxTurns: 3,
+			abortSignal: controller.signal, shouldStop: () => outcome === "stop",
+			beforeRequest: () => { if (++requests > 1 && outcome === "error") throw new Error("fixture preparation failed"); },
+		});
+		if (outcome === "cancel") await assert.rejects(run, { name: "AbortError" });
+		else if (outcome === "error") await assert.rejects(run, /fixture preparation failed/);
+		else await run;
+		await assertCleanedUp(getOnlyCall(calls));
+	});
+}
+
+test("a worker continuation waits for admission; cancellation retires the parked child without invoking transport", { timeout: 8000 }, async t => {
+	singleWorkerSlot(t);
+	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([HELD_READ]), callTool(HELD_READ), HOLD]);
+	const controller = new AbortController();
+	const transport = admittedClaude(runClaude);
+	let dispatches = 0;
+	const worker = createWorkerRequestScope((...args) => { dispatches++; return transport(...args); }, controller.signal);
+	t.after(() => worker.close());
+	const parked = await runTurn(worker.streamFn, [HI], { signal: controller.signal });
+	const call = getOnlyCall(calls);
+	const blocking = new AbortController();
+	t.after(() => blocking.abort());
+	let started!: () => void;
+	const occupied = new Promise<void>(resolve => { started = resolve; });
+	const blockingResult = workerRequestStream(() => {
+		started();
+		return createAssistantMessageEventStream();
+	})(getModel(), normalizeContext({ messages: [HI] }), { signal: blocking.signal }).result();
+	await occupied;
+	const continuation = worker.streamFn(getModel(), normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI, parked, toToolResult(HELD_READ, "evidence")], tools: [READ_TOOL] }), {
+		sessionId: SESSION_ID, signal: controller.signal,
+	}).result();
+	assert.equal(dispatches, 1);
+	assert.equal(call.child.signalCode, null);
+	controller.abort();
+	assert.equal((await continuation).stopReason, "aborted");
+	await assertCleanedUp(call);
+	blocking.abort();
+	assert.equal((await blockingResult).stopReason, "aborted");
+	assert.equal(dispatches, 1, "cancelled queued continuation did not reach transport");
+});
+
+test("abandoning the worker iterator before consuming the tool slice retires the child", { timeout: 8000 }, async t => {
+	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([HELD_READ]), callTool(HELD_READ), HOLD]);
+	const scope = createWorkerRequestScope(admittedClaude(runClaude));
+	t.after(() => scope.close());
+	const stream = scope.streamFn(getModel(), normalizeContext({ messages: [HI], tools: [READ_TOOL] }), { sessionId: SESSION_ID });
+	const iterator = stream[Symbol.asyncIterator]();
+	assert.equal((await stream.result()).stopReason, "toolUse"); // The iterator has not consumed the event.
+	const call = getOnlyCall(calls);
+	assert.equal(call.child.signalCode, null);
+	await iterator.return?.();
+	await assertCleanedUp(call); // Before closing the run scope.
 });
 
 test("mismatched result id starts fresh and kills the old process", async (t) => {
@@ -1050,6 +1257,24 @@ test("a tool result arriving after the idle timeout starts fresh with the call a
 	assert.ok(stdin.includes("contents of a"), stdin);
 });
 
+test("an admitted parked child still expires and its tool result falls back to fresh replay", { timeout: 8000 }, async t => {
+	liveProcessIdleTimeoutMs.current = 500;
+	t.after(() => (liveProcessIdleTimeoutMs.current = LIVE_PROCESS_IDLE_TIMEOUT_MS));
+	const stdinFile = join(mkdtempSync(join(tmpdir(), "claude-worker-stdin-")), "stdin.jsonl");
+	t.after(() => rmSync(dirname(stdinFile), { recursive: true, force: true }));
+	const waiting = createFakeRun(t, [...toToolUseMessage([HELD_READ]), callTool(HELD_READ), HOLD]);
+	const fresh = createFakeRun(t, readFixtureLines("text.jsonl"), { FAKE_CLAUDE_STDIN: stdinFile });
+	const scope = createWorkerRequestScope(admittedClaude((args, options) => (waiting.calls.length === 0 ? waiting : fresh).runClaude(args, options)));
+	t.after(() => scope.close());
+	const message = await runTurn(scope.streamFn, [HI]);
+	assert.equal(getOnlyCall(waiting.calls).child.signalCode, null);
+	await assertCleanedUp(getOnlyCall(waiting.calls));
+	const reply = await runTurn(scope.streamFn, [HI, message, toToolResult(HELD_READ, "worker evidence")]);
+	assert.equal(getText(reply), "hello there");
+	assert.match(readFileSync(stdinFile, "utf8"), /\[tool result read\].*worker evidence/s);
+	await assertCleanedUp(getOnlyCall(fresh.calls));
+});
+
 test("a tool result arriving late but before the idle timeout still continues the waiting process", async (t) => {
 	liveProcessIdleTimeoutMs.current = 1000;
 	t.after(() => (liveProcessIdleTimeoutMs.current = LIVE_PROCESS_IDLE_TIMEOUT_MS));
@@ -1105,14 +1330,16 @@ test("missing MCP identity fails closed without emitting executable calls", asyn
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
-test("a parallel identity failure after an admitted slice is reported on continuation, not hidden by replay", async (t) => {
+for (const worker of [false, true]) test(`a parallel identity failure after a ${worker ? "worker" : "direct"} slice is reported on continuation, not hidden by replay`, async (t) => {
 	const first: ToolUse = { id: "toolu_good_parallel", name: "read", arguments: { path: "a" } };
 	const second: ToolUse = { id: "toolu_bad_parallel", name: "read", arguments: { path: "b" } };
 	const { runClaude, calls } = createFakeRun(t, [...toToolUseMessage([first, second]),
 		JSON.stringify({ fake: "start-call", id: first.id, name: first.name, arguments: first.arguments }),
 		JSON.stringify({ fake: "wait-for-message" }),
 		JSON.stringify({ fake: "call", name: second.name, arguments: second.arguments }), HOLD]);
-	const stream = createClaudeCodeStreamFunction(runClaude);
+	const scope = worker ? createWorkerRequestScope(admittedClaude(runClaude)) : undefined;
+	t.after(() => scope?.close());
+	const stream = scope?.streamFn ?? createClaudeCodeStreamFunction(runClaude);
 	const message = await runTurn(stream, [HI]);
 	getOnlyCall(calls).child.send("continue");
 	await waitForExit(getOnlyCall(calls).child);
@@ -1120,6 +1347,36 @@ test("a parallel identity failure after an admitted slice is reported on continu
 	assert.match(getErrorMessage(events) ?? "", /compatibility error.*claudecode\/toolUseId/);
 	assert.equal(calls.length, 1, "must not hide the compatibility failure by spawning again");
 	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a late MCP compatibility error cannot restore a cancelled worker continuation", { timeout: 8000 }, async t => {
+	const retiring = createFakeRun(t, [JSON.stringify({ fake: "ignore-term" }), ...toToolUseMessage([HELD_READ]),
+		JSON.stringify({ fake: "start-call", ...HELD_READ }), JSON.stringify({ fake: "wait-for-message" }),
+		JSON.stringify({ fake: "call", name: HELD_READ.name, arguments: HELD_READ.arguments })]); // Missing tool identity.
+	const fresh = createFakeRun(t, readFixtureLines("text.jsonl"));
+	const transport = admittedClaude((args, options) => (retiring.calls.length === 0 ? retiring : fresh).runClaude(args, options));
+	const controller = new AbortController();
+	const worker = createWorkerRequestScope(transport, controller.signal);
+	t.after(() => worker.close());
+	const parked = await runTurn(worker.streamFn, [HI], { signal: controller.signal });
+	const retired = getOnlyCall(retiring.calls);
+	let stderr = "";
+	retired.child.stderr.on("data", chunk => { stderr += String(chunk); });
+	controller.abort();
+	worker.close();
+	assert.equal(retired.child.killed, true, "retirement has signalled the child");
+	retired.child.send("send late incompatible call");
+	await assertCleanedUp(retired);
+	assert.match(stderr, /compatibility error: MCP calls must include a unique claudecode\/toolUseId/,
+		"the authenticated request reached the compatibility callback during shutdown");
+	await assert.rejects(fetch(getMcpUrl(retired)), "the retired bridge is closed");
+
+	// A synthetic probe reuses the exact lookup key; real worker runs use new IDs.
+	const probe = createWorkerRequestScope(transport);
+	t.after(() => probe.close());
+	const reply = await runTurn(probe.streamFn, [HI, parked, toToolResult(HELD_READ, "evidence")]);
+	assert.equal(getText(reply), "hello there");
+	await assertCleanedUp(getOnlyCall(fresh.calls));
 });
 
 test("output after MCP admission fails continuation instead of silently replaying", async (t) => {

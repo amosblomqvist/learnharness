@@ -68,6 +68,18 @@ export function refreshWorkerRequestAdmission(): void {
 
 type StreamArgs = Parameters<StreamFunction>;
 type Terminal = Extract<AssistantMessageEvent, { type: "done" | "error" }>;
+type Continuation = { message: AssistantMessage; handoff: (owner: AbortSignal) => (() => void) | undefined };
+const CONTINUATIONS_KEY = Symbol.for("lh.worker-request-admission.continuations.v1");
+const continuationGlobal = globalThis as typeof globalThis & { [CONTINUATIONS_KEY]?: WeakMap<AbortSignal, { offer?: Continuation }> };
+const continuations = continuationGlobal[CONTINUATIONS_KEY] ??= new WeakMap();
+
+/** The native Claude adapter offers a real, parked tool continuation. Key it
+ * by the internal request signal so it survives Pi's lazy stream forwarding;
+ * no provider ID, stop reason alone, or transcript field grants a handoff. */
+export function offerWorkerContinuation(signal: AbortSignal | undefined, offer: Continuation): void {
+	const request = signal && continuations.get(signal);
+	if (request) request.offer = offer;
+}
 
 /** One pull-through consumer, no copied event queue. Native producers retain
  * their own buffering; result-only callers drain and discard rather than retain.
@@ -82,6 +94,8 @@ class WorkerRequestStream extends AssistantMessageEventStream {
 	private invoked = false;
 	private constructing = false;
 	private claimed = false;
+	private deliveredContinuation = false;
+	private retireContinuation?: () => void;
 	private cancelAdmission?: () => void;
 	private readonly controller = new AbortController();
 	private readonly ready: Promise<void>;
@@ -89,7 +103,7 @@ class WorkerRequestStream extends AssistantMessageEventStream {
 	private readonly signal?: AbortSignal;
 	private readonly onAbort = () => this.cancel();
 
-	constructor(private readonly streamFn: StreamFunction, private readonly args: StreamArgs) {
+	constructor(private readonly streamFn: StreamFunction, private readonly args: StreamArgs, private readonly owner?: AbortSignal) {
 		super();
 		this.ready = new Promise((resolve) => { this.resolveReady = resolve; });
 		this.signal = args[2]?.signal;
@@ -120,6 +134,12 @@ class WorkerRequestStream extends AssistantMessageEventStream {
 		if (this.final) return;
 		this.final = message;
 		if (synthetic) this.syntheticTerminal = { type: "error", reason: message.stopReason === "aborted" ? "aborted" : "error", error: message };
+		const signal = this.controller.signal;
+		const offer = continuations.get(signal)?.offer;
+		if (message.stopReason === "toolUse" && offer?.message === message && this.owner && !this.owner.aborted && !signal.aborted && !this.signal?.aborted) {
+			this.retireContinuation = offer.handoff(this.owner);
+		}
+		continuations.delete(signal);
 		this.signal?.removeEventListener("abort", this.onAbort);
 		this.cancelAdmission?.();
 		// Release BEFORE resolving result or yielding any terminal to Agent/tools.
@@ -158,6 +178,7 @@ class WorkerRequestStream extends AssistantMessageEventStream {
 			if (this.final) return;
 			this.invoked = true;
 			const [model, context, options] = this.args;
+			if (this.owner) continuations.set(this.controller.signal, {});
 			// Runtime thenables are tolerated for faulty/custom setup, even though
 			// the native StreamFunction contract itself returns synchronously.
 			let source: AssistantMessageEventStream;
@@ -214,6 +235,7 @@ class WorkerRequestStream extends AssistantMessageEventStream {
 				if ("partial" in event) this.partial = event.partial;
 				if (event.type === "done" || event.type === "error") {
 					this.finish(event.type === "done" ? event.message : event.error);
+					this.deliveredContinuation = event.type === "done" && event.message === this.final && !!this.retireContinuation;
 					terminal = true;
 				}
 				yield event;
@@ -234,6 +256,7 @@ class WorkerRequestStream extends AssistantMessageEventStream {
 				yield { type: "error", reason: this.final.stopReason, error: this.final };
 			}
 		} finally {
+			if (!this.deliveredContinuation) this.retireContinuation?.();
 			if (!terminal) this.cancel();
 			else this.stopSource();
 		}
@@ -245,13 +268,20 @@ class WorkerRequestStream extends AssistantMessageEventStream {
 		// An unstarted async generator's return() skips its finally block. Also
 		// cancel BEFORE a pending next(), rather than queuing return behind it.
 		const originalReturn = iterator.return.bind(iterator);
-		iterator.return = (value) => { this.cancel(); return originalReturn(value); };
+		iterator.return = (value) => {
+			// Pi returns from for-await after consuming a done event. An early
+			// return instead abandons a continuation not yet seen by the caller.
+			if (!this.deliveredContinuation) this.retireContinuation?.();
+			this.cancel();
+			return originalReturn(value);
+		};
 		return iterator;
 	}
 	// Existing PluginStream cancellation closes its source via end(message).
 	// Treat that public SDK seam as ownership cleanup too, not just resolution.
 	override end(message?: AssistantMessage): void {
 		if (!this.final) this.finish(message ?? this.failure(true), message === undefined);
+		this.retireContinuation?.();
 		this.stopSource();
 		this.resolveReady();
 	}
@@ -264,9 +294,17 @@ class WorkerRequestStream extends AssistantMessageEventStream {
 }
 
 /** Idempotent across duplicated Next modules, with explicit shared metadata. */
-export function workerRequestStream(streamFn: StreamFunction): StreamFunction {
+export function workerRequestStream(streamFn: StreamFunction, owner?: AbortSignal): StreamFunction {
 	if ((streamFn as StreamFunction & { [WRAPPED_KEY]?: boolean })[WRAPPED_KEY]) return streamFn;
-	const wrapped: StreamFunction = (...args) => new WorkerRequestStream(streamFn, args);
+	const wrapped: StreamFunction = (...args) => new WorkerRequestStream(streamFn, args, owner);
 	Object.defineProperty(wrapped, WRAPPED_KEY, { value: true });
 	return wrapped;
+}
+
+/** One owner per background run, not per admitted model request. Closing the
+ * scope also retires a parked child when the job exits on a tool turn. */
+export function createWorkerRequestScope(streamFn: StreamFunction, signal?: AbortSignal) {
+	const scope = new AbortController();
+	const owner = signal ? AbortSignal.any([signal, scope.signal]) : scope.signal;
+	return { streamFn: workerRequestStream(streamFn, owner), close: () => scope.abort() };
 }

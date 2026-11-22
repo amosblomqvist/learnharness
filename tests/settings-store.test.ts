@@ -63,6 +63,21 @@ describe("the settings store", () => {
 		}
 	});
 
+	it("compact session list is off by default and persists either checkbox state", () => {
+		assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, false);
+		for (const compactSessionList of [true, false]) {
+			const appearance = { compactSessionList, fontFamily: "Georgia" };
+			const parsed = parseAppearanceSettingsBody(appearance);
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, appearance: parsed.settings });
+			assert.deepEqual(readSettings()?.appearance, appearance);
+			assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, compactSessionList);
+		}
+		assert.equal(parseAppearanceSettingsBody({ compactSessionList: "true" }).ok, false);
+		fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: 1, appearance: { compactSessionList: "true" } }));
+		assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, false);
+	});
+
 	it("reads null on first boot (no record)", () => {
 		fs.rmSync(SETTINGS_FILE, { force: true });
 		assert.equal(readSettings(), null);

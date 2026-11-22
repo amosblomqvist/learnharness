@@ -30,6 +30,27 @@ import { buildProbeHandoffSteer, buildSubagentSteer } from "../src/core/contract
 import { dismissedAnswer } from "../src/core/question-core.ts";
 import { buildAnswer, type QuestionData } from "../src/core/question-core.ts";
 
+it("usage-only reads neither adopt a transcript nor supersede a canonical read", async () => {
+	const transcript = Promise.withResolvers<Response>();
+	const lateStats = Promise.withResolvers<Response>();
+	let calls = 0;
+	const m = new SessionModel({ chatId: "chat_stats", initialMessages: [], fetch: async url => {
+		if (url === "/api/chats/chat_stats") return transcript.promise;
+		assert.equal(url, "/api/chats/chat_stats?view=stats");
+		return ++calls === 1 ? Response.json({ turns: [], messages: [newUserMessage("not canonical")] }) : lateStats.promise;
+	} });
+	const adoption = m.readRecord();
+	assert.deepEqual((await m.readStats())?.turns, []);
+	assert.deepEqual(m.getState().nativeMessages, []);
+	transcript.resolve(Response.json({ messages: [newUserMessage("canonical")] }));
+	assert.ok(await adoption, "a newer stats request did not invalidate the canonical read");
+	const cancel = new AbortController();
+	const read = m.readStats(cancel.signal);
+	cancel.abort();
+	lateStats.resolve(Response.json({ turns: [] }));
+	assert.equal(await read, undefined, "ignore a late stats response even if the fetch completed despite cancellation");
+});
+
 const realFetch = globalThis.fetch;
 afterEach(() => {
 	globalThis.fetch = realFetch;

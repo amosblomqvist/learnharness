@@ -4,7 +4,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 import { normalizeContext, type AssistantMessage, type AssistantMessageEvent, type Model, type Api, type StreamFunction } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
-import { configureWorkerRequestAdmission, refreshWorkerRequestAdmission, workerRequestStream } from "../src/agent/worker-request-admission.ts";
+import { configureWorkerRequestAdmission, createWorkerRequestScope, refreshWorkerRequestAdmission, workerRequestStream } from "../src/agent/worker-request-admission.ts";
 import { usageWasAdmitted } from "../src/agent/subscription-request-cycle.ts";
 
 const key = Symbol.for("lh.worker-request-admission.pool.v1");
@@ -218,6 +218,21 @@ class PullStream extends AssistantMessageEventStream {
 		return super.result();
 	}
 }
+
+test("a scoped worker still aborts generic sources after successful tool use", async () => {
+	let sourceSignal: AbortSignal | undefined;
+	const scope = createWorkerRequestScope((_model, _context, options) => {
+		sourceSignal = options?.signal;
+		const source = new AssistantMessageEventStream();
+		finish(source, message("toolUse"));
+		return source;
+	});
+	try {
+		const events = await collect(scope.streamFn(model, context));
+		assert.equal(events.at(-1)?.type, "done");
+		assert.equal(sourceSignal?.aborted, true, "toolUse alone does not opt a provider into handoff");
+	} finally { scope.close(); }
+});
 
 test("result-only drains lazy source with iterator-first setup and no competing consumer", async () => {
 	const source = new PullStream(1000);

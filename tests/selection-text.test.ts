@@ -53,7 +53,7 @@ describe("selectorFromBoundaries", () => {
 	});
 
 	it("widens a boundary inside a formula to the whole formula", () => {
-		const v = viewport(`<div data-source-message-id="m"><p>so <span class="katex"><annotation encoding="application/x-tex">x^2</annotation><span class="katex-html" aria-hidden="true">x2</span></span> grows</p></div>`);
+		const v = viewport(`<div data-source-message-id="m"><p>so <span class="katex" data-tex="x^2"><span class="katex-html" aria-hidden="true">x2</span></span> grows</p></div>`);
 		const { text, chunks } = readSourceText(sourceElements(v, "m"));
 		const so = chunks[0]!;
 		const inner = v.querySelector(".katex-html")!.firstChild!;
