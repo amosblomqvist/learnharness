@@ -15,6 +15,8 @@ export type SelectionDismissReason = "interaction" | "cancel";
 const EDGE = 8;
 const MULTI_CLICK_SETTLE_MS = 500;
 const SCROLL_SETTLE_MS = 150;
+const TOUCH_UP_SETTLE_MS = 150;
+const TOUCH_SELECTION_SETTLE_MS = 180;
 
 export function resolveSelectionActionPosition({ bounds, selectionRect, pointer, viewport }: {
 	bounds: RectLike;
@@ -56,6 +58,7 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	const document = element.ownerDocument;
 	let pointerDown = false;
 	let gesture = false;
+	let lastPointerType = "mouse";
 	let shown = false;
 	let timer: number | undefined;
 	let frame: number | undefined;
@@ -88,11 +91,30 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	};
 
 	const pointerDownCapture = (event: PointerEvent) => {
+		lastPointerType = event.pointerType || "mouse";
 		if (onAction(event.target)) { clearPending(); return; }
 		if (shown || timer !== undefined) dismiss("interaction");
 		pointerDown = true;
 		const target = event.target as Element | null;
 		gesture = event.button === 0 && !event.defaultPrevented && element.contains(target) && !target?.closest("button, [role=button]");
+	};
+	const pointerUp = (event: PointerEvent) => {
+		if (event.pointerType === "mouse") return;
+		pointerDown = false;
+		if (!gesture) return;
+		gesture = false;
+		schedule(TOUCH_UP_SETTLE_MS, null);
+	};
+	const pointerCancel = (event: PointerEvent) => {
+		pointerDown = false;
+		gesture = false;
+		if (event.pointerType === "mouse") {
+			cancel();
+			return;
+		}
+		// Touch/stylus: the browser takes over the gesture for native text
+		// selection or scrolling; let selectionchange report once settled.
+		schedule(TOUCH_SELECTION_SETTLE_MS, null);
 	};
 	const mouseUp = (event: MouseEvent) => {
 		pointerDown = false;
@@ -105,7 +127,10 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 		pointerDown = false;
 	};
 	const cancel = () => { if (shown || timer !== undefined) dismiss("cancel"); };
-	const contextMenu = () => dismiss("interaction");
+	const contextMenu = () => {
+		if (lastPointerType !== "mouse") return;
+		dismiss("interaction");
+	};
 	const focusIn = (event: FocusEvent) => { if (shown && !onAction(event.target)) dismiss("interaction"); };
 	const scroll = () => {
 		if (pointerDown) return; // autoscroll while dragging keeps the gesture
@@ -117,18 +142,20 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 	};
 
 	document.addEventListener("pointerdown", pointerDownCapture, true);
+	document.addEventListener("pointerup", pointerUp, true);
 	document.addEventListener("mouseup", mouseUp, true);
 	document.addEventListener("keydown", keyDown, true);
 	document.addEventListener("focusin", focusIn, true);
 	element.addEventListener("contextmenu", contextMenu);
 	element.addEventListener("scroll", scroll, true);
-	view.addEventListener("pointercancel", cancel);
+	view.addEventListener("pointercancel", pointerCancel);
 	view.addEventListener("blur", cancel);
 	view.addEventListener("resize", cancel);
 
 	return {
 		selectionChanged() {
 			if (pointerDown) { if (shown) dismiss("cancel"); return; }
+			if (lastPointerType !== "mouse") { schedule(TOUCH_SELECTION_SETTLE_MS, null); return; }
 			if (timer === undefined && frame === undefined) schedule(0, null);
 		},
 		cancel() { clearPending(); shown = false; },
@@ -136,12 +163,13 @@ export function observeSelectionActions({ element, getActionElement, restoreAfte
 			clearPending();
 			if (scrollTimer !== undefined) view.clearTimeout(scrollTimer);
 			document.removeEventListener("pointerdown", pointerDownCapture, true);
+			document.removeEventListener("pointerup", pointerUp, true);
 			document.removeEventListener("mouseup", mouseUp, true);
 			document.removeEventListener("keydown", keyDown, true);
 			document.removeEventListener("focusin", focusIn, true);
 			element.removeEventListener("contextmenu", contextMenu);
 			element.removeEventListener("scroll", scroll, true);
-			view.removeEventListener("pointercancel", cancel);
+			view.removeEventListener("pointercancel", pointerCancel);
 			view.removeEventListener("blur", cancel);
 			view.removeEventListener("resize", cancel);
 		},
