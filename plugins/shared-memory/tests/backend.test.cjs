@@ -411,6 +411,61 @@ test('when neither the sent record nor the unrecorded memory can be saved, the r
   assert.equal(h.server.writes[1].supersedes, 'mem-1');
 });
 
+test('an unrecorded memory keeps its proposition listed as changed, even when the content returns to the recorded one', async t => {
+  const h = await harness(t, graphOf([node('p1')]));
+  await h.send(['p1']);
+  h.graph = graphOf([node('p1', { statement: 'Revised p1.' })]);
+  const recordFile = path.join(h.directory, 'sent-record.json');
+  const saved = fs.readFileSync(recordFile);
+  h.server.behavior = () => { fs.rmSync(recordFile); fs.mkdirSync(recordFile); };
+  assert.equal((await h.send(['p1'])).results[0].reason.kind, 'unrecorded');
+  fs.rmSync(recordFile, { recursive: true });
+  fs.writeFileSync(recordFile, saved);
+
+  // Shared memory now holds the revised content, so the original content is not "sent" any more.
+  h.graph = graphOf([node('p1')]);
+  h.server.behavior = () => undefined;
+  assert.deepEqual(await h.states(), { p1: 'changed' });
+  await h.send(['p1']);
+  assert.equal(h.server.writes[2].supersedes, 'mem-2');
+  assert.deepEqual(await h.list(), []);
+});
+
+test('an unrecorded first memory of a proposition gone from the graph is listed as removed and retired', async t => {
+  const h = await harness(t, graphOf([node('p1')]));
+  const recordFile = path.join(h.directory, 'sent-record.json');
+  h.server.behavior = () => { fs.mkdirSync(recordFile); };
+  assert.equal((await h.send(['p1'])).results[0].reason.kind, 'unrecorded');
+  fs.rmSync(recordFile, { recursive: true });
+
+  h.graph = graphOf([]);
+  h.server.behavior = () => undefined;
+  h.activate();
+  assert.deepEqual(await h.list(), [{ id: 'p1', name: 'Name p1', statement: null, state: 'removed' }]);
+  await h.send(['p1']);
+  assert.equal(h.server.writes[1].title, '廃止: Name p1');
+  assert.equal(h.server.writes[1].supersedes, 'mem-1');
+  assert.deepEqual(await h.list(), []);
+});
+
+test('a new activation sees a record that the previous activation saved after it was disabled', async t => {
+  const h = await harness(t, graphOf([node('p1')]));
+  const gate = deferred();
+  h.server.behavior = async () => { await gate.promise; };
+  const sending = h.send(['p1']);
+  await until(() => h.server.writes.length === 1, 'first write');
+
+  // Disable and enable again while the write is in flight; the old activation records it afterwards.
+  h.activate();
+  gate.resolve();
+  await sending;
+  h.server.behavior = () => undefined;
+  assert.deepEqual(await h.list(), []);
+  h.graph = graphOf([node('p1', { statement: 'Revised p1.' })]);
+  await h.send(['p1']);
+  assert.equal(h.server.writes[1].supersedes, 'mem-1');
+});
+
 test('the sent record survives a new activation', async t => {
   const h = await harness(t, graphOf([node('p1'), node('p2')]));
   await h.send(['p1', 'p2']);

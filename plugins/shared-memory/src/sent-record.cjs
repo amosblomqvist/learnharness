@@ -60,18 +60,30 @@ function openStore(directory) {
     }
     return savedRecord.propositions;
   };
-  let records = loadRecords();
+  loadRecords(); // Fail activation early on an unreadable or invalid sent record.
 
   const unrecordedFile = path.join(directory, UNRECORDED_FILE);
-  const savedUnrecorded = readJson(unrecordedFile, 'unrecorded memories');
-  if (savedUnrecorded !== undefined && (!savedUnrecorded || savedUnrecorded.version !== FORMAT_VERSION || !savedUnrecorded.memories
-    || typeof savedUnrecorded.memories !== 'object'
-    || Object.values(savedUnrecorded.memories).some(entry => !entry || typeof entry.memoryId !== 'string' || !entry.memoryId || typeof entry.writtenAt !== 'string'))) {
-    throw new Error('Unsupported or invalid Shared Memory unrecorded memories. No data was changed.');
-  }
-  // An entry older than the proposition's saved record was already superseded by that record's write.
-  const unrecorded = Object.fromEntries(Object.entries(savedUnrecorded?.memories ?? {})
-    .filter(([id, entry]) => !(Object.hasOwn(records, id) && records[id].sentAt >= entry.writtenAt)));
+  const validUnrecorded = entry => entry && typeof entry === 'object' && typeof entry.memoryId === 'string' && entry.memoryId !== ''
+    && typeof entry.name === 'string' && (entry.previousMemoryId === null || typeof entry.previousMemoryId === 'string');
+  const loadUnrecordedFile = () => {
+    const saved = readJson(unrecordedFile, 'unrecorded memories');
+    if (saved === undefined) return {};
+    if (!saved || saved.version !== FORMAT_VERSION || !saved.memories || typeof saved.memories !== 'object'
+      || Object.values(saved.memories).some(entry => !validUnrecorded(entry))) {
+      throw new Error('Unsupported or invalid Shared Memory unrecorded memories. No data was changed.');
+    }
+    return saved.memories;
+  };
+  loadUnrecordedFile();
+  // Changes this store could not write to the file: an entry, or null for a cleared one.
+  const notWritten = {};
+  const loadUnrecorded = records => {
+    const merged = { ...loadUnrecordedFile() };
+    for (const [id, entry] of Object.entries(notWritten)) { if (entry) merged[id] = entry; else delete merged[id]; }
+    // An entry whose proposition's sent record has moved on since it was written was superseded by
+    // that record's write (a send passes the unrecorded memory as supersedes), so it is stale.
+    return Object.fromEntries(Object.entries(merged).filter(([id, entry]) => (records[id]?.memoryId ?? null) === entry.previousMemoryId));
+  };
 
   const savedSettings = readJson(settingsFile, 'settings');
   let settings;
@@ -84,23 +96,35 @@ function openStore(directory) {
   }
 
   return {
-    record: id => (Object.hasOwn(records, id) ? { ...records[id] } : undefined),
-    records: () => Object.values(records).map(entry => ({ ...entry })),
+    /**
+     * The sent record and the unrecorded memories as they are on disk now, so writes made by
+     * an earlier activation of this plugin are seen. Unrecorded memories are memories written to
+     * shared memory whose sent-record entry could not be saved: { memoryId, name, previousMemoryId }.
+     */
+    snapshot() {
+      const records = loadRecords();
+      return { records: structuredClone(records), unrecorded: structuredClone(loadUnrecorded(records)) };
+    },
     /** Replace one proposition's entry; memory state changes only after a durable write. */
     saveRecord(entry) {
       // Re-read from disk so another store's writes are not lost (all synchronous).
-      const next = { ...loadRecords(),[entry.propositionId]: { ...entry } };
+      const next = { ...loadRecords(), [entry.propositionId]: { ...entry } };
       atomicWrite(recordFile, JSON.stringify({ version: FORMAT_VERSION, propositions: next }));
-      records = next;
     },
-    /** The memory id written for a proposition but missing from the sent record, if any. */
-    unrecorded: id => unrecorded[id]?.memoryId,
-    /** Set (memoryId) or clear (undefined) one proposition's unrecorded memory. Throws when the file cannot be written. */
-    saveUnrecorded(id, memoryId) {
-      if (memoryId === undefined && !Object.hasOwn(unrecorded, id)) return;
-      if (memoryId === undefined) delete unrecorded[id];
-      else unrecorded[id] = { memoryId, writtenAt: new Date().toISOString() };
-      atomicWrite(unrecordedFile, JSON.stringify({ version: FORMAT_VERSION, memories: unrecorded }));
+    /**
+     * Set ({ memoryId, name, previousMemoryId }) or clear (undefined) one proposition's unrecorded
+     * memory. Throws when the file cannot be written; this store then still remembers the change.
+     */
+    saveUnrecorded(id, entry) {
+      try {
+        const next = { ...loadUnrecordedFile() };
+        if (entry) next[id] = { ...entry }; else delete next[id];
+        atomicWrite(unrecordedFile, JSON.stringify({ version: FORMAT_VERSION, memories: next }));
+        delete notWritten[id];
+      } catch (error) {
+        notWritten[id] = entry ? { ...entry } : null;
+        throw error;
+      }
     },
     settings: () => ({ ...settings }),
     saveSettings(next) {

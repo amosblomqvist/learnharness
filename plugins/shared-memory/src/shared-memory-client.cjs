@@ -5,6 +5,8 @@ const { McpError, ErrorCode } = require('@modelcontextprotocol/sdk/types.js');
 
 /** Fixed per-write deadline (connection included). Deliberately not a setting. */
 const WRITE_TIMEOUT_MS = 15_000;
+// Shared memory may still have stored the memory; its id is unknown, so a resend cannot supersede it.
+const TIMEOUT_MESSAGE = `No response from shared memory within ${WRITE_TIMEOUT_MS / 1000} seconds. The memory may still have been written; sending again can create a duplicate.`;
 
 /** A classified write failure: unreachable, timeout or rejected (server message verbatim). */
 class WriteFailure extends Error {
@@ -69,10 +71,10 @@ function createSharedMemoryClient(url) {
       if (typeof id !== 'string' || !id) throw new WriteFailure('rejected', `Shared memory returned no memory id: ${text}`);
       return id;
     } catch (error) {
-      if (timedOut) { await discard(); throw new WriteFailure('timeout', `No response from shared memory within ${WRITE_TIMEOUT_MS / 1000} seconds.`); }
+      if (timedOut) { await discard(); throw new WriteFailure('timeout', TIMEOUT_MESSAGE); }
       if (error instanceof WriteFailure) throw error;
       await discard();
-      if (error instanceof McpError && error.code === ErrorCode.RequestTimeout) throw new WriteFailure('timeout', `No response from shared memory within ${WRITE_TIMEOUT_MS / 1000} seconds.`);
+      if (error instanceof McpError && error.code === ErrorCode.RequestTimeout) throw new WriteFailure('timeout', TIMEOUT_MESSAGE);
       if (error instanceof McpError && error.code !== ErrorCode.ConnectionClosed) throw new WriteFailure('rejected', serverMessage(error));
       if (error instanceof StreamableHTTPError && Number.isInteger(error.code) && error.code >= 100) throw new WriteFailure('rejected', httpMessage(error));
       throw new WriteFailure('unreachable', `Could not connect to shared memory at ${url}: ${networkMessage(error)}`);

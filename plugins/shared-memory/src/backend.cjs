@@ -34,17 +34,30 @@ function activate(ctx) {
     return graph;
   }
 
-  /** Every proposition known to the graph or the sent record, with its current state. */
+  /**
+   * Every proposition known to the graph, the sent record or the unrecorded memories, with its
+   * current state. `pending` is a memory written but missing from the sent record: the next
+   * write for that proposition must supersede it.
+   */
   function classify(graph) {
     const index = indexGraph(graph), entries = new Map();
+    const { records, unrecorded } = store.snapshot();
     for (const node of graph.propositions) {
-      const record = store.record(node.id), content = describe(index, node), print = fingerprint(content);
-      const state = !record || record.retired ? UNSENT : record.fingerprint === print ? SENT : CHANGED;
-      entries.set(node.id, { id: node.id, name: node.name, statement: node.statement, state, node, content, fingerprint: print, record });
+      const record = records[node.id], pending = unrecorded[node.id], content = describe(index, node), contentFingerprint = fingerprint(content);
+      // A pending memory may hold other content than the record says, so it always needs a new write.
+      const state = !record || record.retired ? UNSENT : record.fingerprint === contentFingerprint && !pending ? SENT : CHANGED;
+      entries.set(node.id, { id: node.id, name: node.name, statement: node.statement, state, node, content, fingerprint: contentFingerprint, record, pending });
     }
-    for (const record of store.records()) {
+    for (const record of Object.values(records)) {
       if (entries.has(record.propositionId)) continue;
-      entries.set(record.propositionId, { id: record.propositionId, name: record.name, statement: null, state: record.retired ? RETIRED : REMOVED, record });
+      const pending = unrecorded[record.propositionId];
+      entries.set(record.propositionId, { id: record.propositionId, name: record.name, statement: null, state: record.retired && !pending ? RETIRED : REMOVED, record, pending });
+    }
+    // A first write whose record could not be saved, for a proposition gone from the graph since.
+    for (const [id, pending] of Object.entries(unrecorded)) {
+      if (entries.has(id)) continue;
+      const record = { propositionId: id, name: pending.name, memoryId: pending.memoryId, fingerprint: '', sentAt: '', retired: false };
+      entries.set(id, { id, name: pending.name, statement: null, state: REMOVED, record, pending });
     }
     return entries;
   }
@@ -61,14 +74,16 @@ function activate(ctx) {
 
   // The memory one actionable proposition becomes, and the sent-record entry
   // that replaces its old one once the write has succeeded.
+  // A memory written but not recorded locally must be replaced, not duplicated.
   function plan(entry, scope) {
-    const previous = entry.record?.memoryId;
+    const previous = entry.pending?.memoryId ?? entry.record?.memoryId;
+    const sentAt = new Date().toISOString();
     if (entry.state === REMOVED) {
-      return { args: writeArguments(retirementMemory(entry.record.name), scope, previous), next: memoryId => ({ ...entry.record, memoryId, sentAt: new Date().toISOString(), retired: true }) };
+      return { args: writeArguments(retirementMemory(entry.record.name), scope, previous), next: memoryId => ({ ...entry.record, memoryId, sentAt, retired: true }) };
     }
     return {
       args: writeArguments(propositionMemory(entry.node, entry.content), scope, previous),
-      next: memoryId => ({ propositionId: entry.id, name: entry.name, memoryId, fingerprint: entry.fingerprint, sentAt: new Date().toISOString(), retired: false }),
+      next: memoryId => ({ propositionId: entry.id, name: entry.name, memoryId, fingerprint: entry.fingerprint, sentAt, retired: false }),
     };
   }
 
@@ -92,9 +107,6 @@ function activate(ctx) {
           results.push({ id, outcome: 'skipped', state: entry?.state ?? null });
         } else {
           const { args, next } = plan(entry, scope);
-          // A memory written but not recorded locally must be replaced, not duplicated.
-          const lost = store.unrecorded(id);
-          if (lost) args.supersedes = lost;
           let memoryId;
           try {
             memoryId = await client.write(args);
@@ -109,14 +121,16 @@ function activate(ctx) {
           }
           try {
             store.saveRecord(next(memoryId));
-            // A stale entry left by a failed clear is dropped on the next load (older than the record).
-            try { store.saveUnrecorded(id, undefined); } catch { /* see above */ }
+            // A failed clear leaves a stale entry, which the next load drops (the record has moved on).
+            if (entry.pending) { try { store.saveUnrecorded(id, undefined); } catch { /* see above */ } }
             failures.delete(id);
             results.push({ id, outcome: 'written', state: entry.state, memoryId });
           } catch (error) {
             let message = error.message;
             // The store keeps the id in memory even when its own file cannot be written.
-            try { store.saveUnrecorded(id, memoryId); } catch { message += ' The written memory is remembered only until Shared Memory restarts.'; }
+            // previousMemoryId is what the sent record holds now, which tells later loads whether a record superseded this memory.
+            const previousMemoryId = entry.pending ? entry.pending.previousMemoryId : entry.record?.memoryId ?? null;
+            try { store.saveUnrecorded(id, { memoryId, name: entry.name, previousMemoryId }); } catch { message += ' The written memory is remembered only until Shared Memory restarts.'; }
             const reason = { kind: 'unrecorded', message };
             failures.set(id, reason);
             results.push({ id, outcome: 'failed', state: entry.state, reason, memoryId });
