@@ -11,10 +11,21 @@ export interface Run {
 	rotated?: boolean;
 }
 
+/** A filled vector rectangle in PDF points (origin bottom-left), color 0..1. */
+export interface Rect {
+	x: number;
+	y: number;
+	width: number;
+	height: number;
+	rgb: [number, number, number];
+}
+
 export interface TinyPage {
 	runs?: Run[];
 	/** A full-page picture: ordinary XObject, stencil mask, or inline bitmap. */
 	image?: boolean | "mask" | "inline";
+	rects?: Rect[];
+	rotation?: 90 | 180 | 270;
 }
 
 const WIDTH = 612;
@@ -36,6 +47,7 @@ function content(page: TinyPage): string {
 	const ops: string[] = [];
 	if (page.image === "inline") ops.push(`q ${WIDTH} 0 0 ${HEIGHT} 0 0 cm BI /W 2 /H 2 /CS /G /BPC 8 ID \x80\x40\x40\x80 EI Q`);
 	else if (page.image) ops.push(`q ${WIDTH} 0 0 ${HEIGHT} 0 0 cm /${page.image === "mask" ? "Mask" : "Im1"} Do Q`);
+	for (const r of page.rects ?? []) ops.push(`q ${r.rgb.join(" ")} rg ${r.x} ${r.y} ${r.width} ${r.height} re f Q`);
 	for (const run of page.runs ?? []) {
 		const matrix = run.rotated ? `0 1 -1 0 ${run.x} ${run.y}` : `1 0 0 1 ${run.x} ${run.y}`;
 		ops.push(`BT /F1 ${run.size ?? 10} Tf ${run.invisible ? 3 : 0} Tr ${matrix} Tm ${pdfString(run.text)} Tj ET`);
@@ -60,7 +72,7 @@ export function tinyPdf(pages: readonly TinyPage[]): Uint8Array<ArrayBuffer> {
 	for (const [i, page] of pages.entries()) {
 		const stream = content(page);
 		objects.push(
-			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${WIDTH} ${HEIGHT}] /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R /Mask ${maskId} 0 R >> >> /Contents ${7 + i * 2} 0 R >>`,
+			`<< /Type /Page /Parent 2 0 R /MediaBox [0 0 ${WIDTH} ${HEIGHT}]${page.rotation ? ` /Rotate ${page.rotation}` : ""} /Resources << /Font << /F1 3 0 R >> /XObject << /Im1 4 0 R /Mask ${maskId} 0 R >> >> /Contents ${7 + i * 2} 0 R >>`,
 			`<< /Length ${stream.length} >>\nstream\n${stream}\nendstream`,
 		);
 	}

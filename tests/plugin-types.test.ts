@@ -70,8 +70,11 @@ backend.registerTools({ agents:["teacher"], create:context=>[backend.createBackg
   prepare:()=>({input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, maxTurns:3}),
   format:outcome=>({text:outcome.status === "succeeded" ? "Ready" : outcome.error.message})
 })] });
-// @ts-expect-error workers require an explicit model-call turn budget
-backend.workers.start("note", {requestId:"missing-budget", input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, purpose:"background"});
+// Omission and explicit undefined both mean no turn-count limit.
+backend.workers.start("note", {requestId:"unbounded", input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, purpose:"background"});
+backend.workers.start("note", {requestId:"undefined-budget", input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, purpose:"background", maxTurns:undefined});
+// @ts-expect-error an explicit turn cap must be numeric
+backend.workers.start("note", {requestId:"invalid-budget", input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, purpose:"background", maxTurns:"4"});
 const snapshot: GraphSnapshot = backend.learning.graph();
 const node: GraphNode | undefined = backend.learning.readGraphFile("nodes.jsonl")[0];
 // @ts-expect-error A typed graph ledger is not an unvalidated arbitrary record.

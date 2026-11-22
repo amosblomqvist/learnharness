@@ -102,7 +102,7 @@ describe("md-blocks — tables", () => {
 			assert.equal(table.querySelectorAll("td").length, 4);
 			assert.equal(table.querySelector("code")?.textContent, "foo_bar");
 			assert.equal(table.querySelector("strong")?.textContent, "Bold");
-			assert.equal(table.querySelector("annotation")?.textContent, "x^2");
+			assert.equal(table.querySelector(".katex[data-tex]")?.getAttribute("data-tex"), "x^2");
 			assert.ok(table.textContent.includes("Guide"), "link text survives the normal link-safety renderer");
 			assert.equal(wrapper.querySelectorAll('button[aria-label="Copy table"]').length, 1);
 		}

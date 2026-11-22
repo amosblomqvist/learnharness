@@ -630,6 +630,32 @@ describe("research runner (async protocol §3)", () => {
 		assert.deepEqual(search.queries, ["sigma.js latest version (5)"]);
 	});
 
+	it("research beyond twelve tool turns delivers one final brief and accounts for every turn", async () => {
+		const chat = chatStore.createChat("Test: uncapped research"); trackChat(chat.id);
+		const toolCallId = "call-uncapped-research";
+		chatStore.saveMessages(chat.id, nativeToolMessages("which version?", "research", toolCallId, RESEARCH_INPUT));
+		const job = jobStore.createJob({ kind: "research", chatId: chat.id, toolCallId }); trackJob(job.id);
+		const delivery = fakeDeliver(), search = stubSearch();
+		const runner = createJobRunner({ chatStore, jobStore, deliver: delivery.deliver, searchProvider: () => search });
+		researchModelOverride.current = fauxEngine([
+			...Array.from({ length: 15 }, (_, index) => fauxAssistantMessage([
+				fauxText("Progress, not the final brief."),
+				fauxToolCall("web_search", { query: `source ${index}` }, { id: `search_${index}` }),
+			], { stopReason: "toolUse" })),
+			fauxAssistantMessage(BRIEF),
+		]);
+		try { await runner.runJob(job.id); }
+		finally { researchModelOverride.current = undefined; }
+		const done = jobStore.getJob(job.id)!;
+		assert.equal(done.status, "done"); assert.equal(done.error, undefined);
+		assert.equal((done.result as ResearchResult).brief, BRIEF);
+		assert.ok((done.result as ResearchResult).sources.some(source => source.url === "https://www.sigmajs.org/docs"));
+		assert.equal(done.usage?.steps, 16); assert.equal(done.usage?.calls?.length, 16);
+		assert.equal(search.queries.length, 15);
+		assert.equal(delivery.steers.length, 1);
+		assert.ok(delivery.steers[0]!.content.includes(BRIEF));
+	});
+
 	it("a keyless fetch-only researcher still completes and delivers a sourced job result", async () => {
 		const url = "https://example.com/supplied-source";
 		const brief = `## Summary\nVerified supplied source. [Source](${url})\n\n## Sources\n- Source (${url})`;
@@ -1461,8 +1487,8 @@ describe("prompt composition", () => {
 		const prober = composeInstructions("prober");
 		assert.ok(!prober.includes("There is no rush"), "the old no-rush framing is retired");
 		assert.ok(
-			prober.includes("every wasted question is resolution the final map doesn't get"),
-			"the efficiency-is-resolution directive is in",
+			prober.includes("for the time and effort they spend answering"),
+			"the probe optimizes evidence for the learner's answering effort",
 		);
 		assert.ok(!prober.includes("Question principles"), "the teach-phase fragment never composes into the prober");
 	});
@@ -1641,9 +1667,9 @@ describe("abort (src/server/jobs.ts abortJob)", () => {
 			// model slots wave: the stamp is the ENGINE's actual model,
 			// provider-qualified — the scripted faux engine here.
 			assert.equal(job.usage!.model, "faux:faux-1");
-			// faux estimates tokens from the prompt/response text — the
-			// pinned fact is that the ONE completed step's spend survived.
-			assert.ok(job.usage!.inputTokens! > 0, "input tokens billed");
+			// This is a fresh faux session; its prompt can be entirely cache writes.
+			assert.ok((job.usage!.inputTokens ?? 0) + (job.usage!.cacheWriteTokens ?? 0) > 0, "the completed step's prompt usage survived");
+			assert.ok(job.usage!.cacheWriteTokens! > 0, "cache writes survived");
 			assert.ok(job.usage!.outputTokens! > 0, "output tokens billed");
 		} finally {
 			researchModelOverride.current = undefined;

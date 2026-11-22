@@ -35,7 +35,7 @@ Object.assign(globalThis, {
 // dock import would select the hook's SSR effect before this setup ever runs.
 const { QuestionDock } = await import("../components/question-dock.tsx");
 const { PracticeDock } = await import("../components/practice-dock.tsx");
-const { dockHeightBudget, syncDockHeight, useDockHeight, forwardDockWheel } = await import("../components/dock-height.ts");
+const { dockHeightBudget, minContentHeight, regionChrome, syncDockHeight, useDockHeight, forwardDockWheel } = await import("../components/dock-height.ts");
 
 const normal = {
 	columnHeight: 700, outsideHeight: 60, beforeShellHeight: 0,
@@ -59,9 +59,66 @@ describe("dockHeightBudget — whole dock, not just its question", () => {
 		assert.equal(result.questionMaxHeight, 0);
 		assert.equal(result.scrollWholeContent, true);
 	});
-	it("switches before padding would leave a zero-sized content viewport, without an invented minimum", () => {
+	it("switches before padding would leave a zero-sized content viewport (no line minimum given)", () => {
 		assert.equal(dockHeightBudget({ ...normal, columnHeight: 306 }).scrollWholeContent, true);
 		assert.equal(dockHeightBudget({ ...normal, columnHeight: 307 }).scrollWholeContent, false);
+	});
+	it("two columns: the region's chrome is the costliest column's padding and pinned rows, not the row's zero padding", () => {
+		// The review's case: a positive budget that only fits the answer
+		// column's padding left it 0px of options, yet passed the check.
+		const region = document.createElement("div");
+		region.setAttribute("data-dock-height-region", "");
+		const left = document.createElement("div");
+		left.setAttribute("data-dock-scroll-area", "");
+		const frame = document.createElement("div");
+		const scroller = document.createElement("div");
+		scroller.setAttribute("data-dock-scroll-area", "");
+		const pinned = document.createElement("div");
+		Object.defineProperty(pinned, "getBoundingClientRect", { value: () => ({ height: 37.5 }) });
+		frame.append(scroller, pinned);
+		region.append(left, frame);
+		assert.equal(regionChrome(region), 12 + 37.5, "answer column: scroller padding + the pinned row");
+		pinned.remove();
+		assert.equal(regionChrome(region), 12);
+		// Stacked: the single scroll area's own padding, as before.
+		assert.equal(regionChrome(left), 12);
+		// A positive cap that cannot hold the chrome scrolls the whole content.
+		assert.equal(dockHeightBudget({ ...normal, columnHeight: 306 + 37.5, questionPaddingHeight: 12 + 37.5 }).scrollWholeContent, true);
+		assert.equal(dockHeightBudget({ ...normal, columnHeight: 307 + 37.5, questionPaddingHeight: 12 + 37.5 }).scrollWholeContent, false);
+	});
+	it("a clipped scroll area must keep about three lines, or the whole content scrolls", () => {
+		// normal: question 600 tall, chrome 12; three 24px lines = 72.
+		const min = { ...normal, questionMinContentHeight: 72 };
+		// The cap is columnHeight - 294 here; 307 → 13: far below three lines.
+		assert.equal(dockHeightBudget({ ...min, columnHeight: 307 }).scrollWholeContent, true);
+		// Cap 12 + 72 = 84 exactly is enough; one pixel less is not.
+		assert.equal(dockHeightBudget({ ...min, columnHeight: 294 + 84 }).questionMaxHeight, 84);
+		assert.equal(dockHeightBudget({ ...min, columnHeight: 294 + 84 }).scrollWholeContent, false);
+		assert.equal(dockHeightBudget({ ...min, columnHeight: 293 + 84 }).scrollWholeContent, true);
+		// A question that fits under its cap is never affected: a short one
+		// (60px, under three lines of content) keeps its normal layout.
+		const short = { ...min, questionHeight: 60, contentHeight: 260 };
+		assert.equal(dockHeightBudget({ ...short, columnHeight: 400 }).questionMaxHeight! >= 60, true);
+		assert.equal(dockHeightBudget({ ...short, columnHeight: 400 }).scrollWholeContent, false);
+		// Measured while already capped: the hidden overflow still counts.
+		// (Cap 90 for a region currently drawn 90 tall; five lines = 120.)
+		const capped = { ...min, questionMinContentHeight: 120, questionHeight: 90, contentHeight: 290, columnHeight: 384 };
+		assert.equal(dockHeightBudget(capped).questionMaxHeight, 90);
+		assert.equal(dockHeightBudget(capped).scrollWholeContent, false, "looks unclipped without it");
+		assert.equal(dockHeightBudget({ ...capped, questionNaturalHeight: 600 }).scrollWholeContent, true);
+	});
+	it("three lines are measured from the region's reading text", () => {
+		const region = document.createElement("div");
+		const prose = document.createElement("div");
+		prose.className = "lh-prose";
+		region.append(prose);
+		const saved = globalThis.getComputedStyle;
+		globalThis.getComputedStyle = ((el: Element) => ({ lineHeight: el === prose ? "24px" : "normal", fontSize: "16px" })) as typeof getComputedStyle;
+		try {
+			assert.equal(minContentHeight(region), 72);
+			prose.remove();
+			assert.equal(minContentHeight(region), 72, "line-height normal: 1.5 × the font size");
+		} finally { globalThis.getComputedStyle = saved; }
 	});
 	it("never creates negative caps, even if the toolbar exceeds the column", () => {
 		const result = dockHeightBudget({ ...normal, columnHeight: 20 });

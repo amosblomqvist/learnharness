@@ -54,14 +54,14 @@ const canonical = (value: unknown): string => JSON.stringify(value, (_k, v) => v
 function acceptedOptions(value: PluginWorkerStartOptions): PluginWorkerStartOptions {
 	if (typeof value?.requestId !== "string" || !value.requestId.length) throw new Error("Invalid worker requestId");
 	if (typeof value.prompt !== "string") throw new Error("Explicit worker prompt required");
-	if (!Number.isSafeInteger(value.maxTurns) || value.maxTurns < 1) throw new Error("Invalid worker maxTurns");
+	if (value.maxTurns !== undefined && (!Number.isSafeInteger(value.maxTurns) || value.maxTurns < 1)) throw new Error("Invalid worker maxTurns");
 	if (value.timeoutMs !== undefined && (!Number.isSafeInteger(value.timeoutMs) || value.timeoutMs < 1)) throw new Error("Invalid worker timeoutMs");
 	if (value.purpose !== "user" && value.purpose !== "background") throw new Error("Invalid worker purpose");
 	const model = value.model;
 	if (!model || typeof model.provider !== "string" || !model.provider.trim() || typeof model.id !== "string" || !model.id.trim()) throw new Error("Explicit worker model required");
 	if (model.thinkingLevel !== undefined && !["off", "minimal", "low", "medium", "high", "xhigh", "max"].includes(model.thinkingLevel)) throw new Error("Invalid worker thinkingLevel");
 	const options: PluginInferenceOptions = JSON.parse(JSON.stringify(validatePluginInferenceOptions(value.options)));
-	return { requestId: value.requestId, input: json(value.input), prompt: value.prompt, model: { provider: model.provider, id: model.id, ...(model.thinkingLevel === undefined ? {} : { thinkingLevel: model.thinkingLevel }) }, purpose: value.purpose, maxTurns: value.maxTurns,
+	return { requestId: value.requestId, input: json(value.input), prompt: value.prompt, model: { provider: model.provider, id: model.id, ...(model.thinkingLevel === undefined ? {} : { thinkingLevel: model.thinkingLevel }) }, purpose: value.purpose, ...(value.maxTurns === undefined ? {} : { maxTurns: value.maxTurns }),
 		...(Object.keys(options).length ? { options } : {}), ...(value.timeoutMs === undefined ? {} : { timeoutMs: value.timeoutMs }) };
 }
 interface Task {
@@ -173,7 +173,7 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 					...(tool.prepareArguments ? { prepareArguments: (...args) => { active(); return tool.prepareArguments!(...args); } } : {}),
 					execute: async (...args) => { active(); return tool.execute(...args); } };
 			});
-			tools.push({ name: "submit_result", label: "Submit result", description: "Submit the final task result. Correct schema/semantic errors and retry before the turn budget ends.",
+			tools.push({ name: "submit_result", label: "Submit result", description: "Submit the final task result. Correct schema/semantic errors and retry if the result is rejected.",
 				parameters: Type.Object({ result: d.resultSchema }, { additionalProperties: false }), executionMode: "sequential",
 				execute: async (_id, args) => {
 					active();
@@ -235,7 +235,8 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 			});
 			if (!terminal(t.record)) {
 				active();
-				finish(t, "failed", { code: t.record.turns >= t.record.maxTurns ? "max_turns" : "no_result", message: t.record.turns >= t.record.maxTurns ? "Worker exhausted maxTurns without an accepted result" : "Worker finished without submitting a result" });
+				const exhausted = t.record.maxTurns !== undefined && t.record.turns >= t.record.maxTurns;
+				finish(t, "failed", { code: exhausted ? "max_turns" : "no_result", message: exhausted ? "Worker exhausted maxTurns without an accepted result" : "Worker finished without submitting a result" });
 			}
 		} catch (error) {
 			if (!terminal(t.record) && !t.poisoned && !disposed) {

@@ -77,7 +77,7 @@ describe("notes transcriber", () => {
 		const text = await transcribePdf(FIXTURE, pages, [1, 2, 3], {
 			engine: fauxEngine([pageEcho, pageEcho, pageEcho]),
 			headless,
-			onUsage: (u, model) => { assert.ok(u.input > 0); usage.push(model); },
+			onUsage: (u, model) => { assert.ok(u.output > 0, "each call bills its usage"); usage.push(model); },
 		});
 		// Every fixture page is text-poor (< 200 chars), so all three render.
 		assert.deepEqual([...headless.rendered].sort(), [1, 2, 3]);

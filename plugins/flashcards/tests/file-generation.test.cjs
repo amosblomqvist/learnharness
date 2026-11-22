@@ -2,8 +2,7 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const { instructions, resultSchema, validateResult, validateFileInput, prepareFileChunks } = require('../src/file-generation.cjs');
-const entry = Object.freeze({ maxTokens: 8192, contextWindow: 100000 });
-const chunks = (markdown, options = {}) => prepareFileChunks({ name: 'Notes.md', markdown, chunkBudget: 4000, entry, ...options });
+const chunks = (markdown, options = {}) => prepareFileChunks({ name: 'Notes.md', markdown, chunkBudget: 4000, ...options });
 const tokensFor = prompt => Math.ceil(Buffer.byteLength(instructions + JSON.stringify(resultSchema) + prompt, 'utf8') / 3) + 256;
 const fact = (statement = 'Water freezes at the stated conditions.', question = 'What happens under these conditions?') => ({ name: 'Freezing', statement, cards: [{ question, answer: 'Water freezes.' }] });
 function assertCoverage(source, plans, start = 0, end = source.length) {
@@ -135,7 +134,7 @@ test('long blocks split only at code-point boundaries using source characters, w
     assert.equal(plan.tokens, tokensFor(plan.prompt));
     assert.ok(Math.ceil(plan.input.markdown.length / 4) <= budget);
     assert.ok(plan.tokens > budget);
-    assert.equal(plan.maxTokens, 8192);
+    assert.equal(Object.hasOwn(plan, 'maxTokens'), false);
   }
 });
 
@@ -155,23 +154,19 @@ test('positive source budgets are independent of prompt/schema and filename over
   assert.deepEqual(chunks('abcde', { chunkBudget: 1 }).map(plan => plan.input.markdown), ['abcd', 'e']);
 });
 
-test('output allowances honor provider/context caps, reserve 256 tokens and require at least 1024', () => {
-  const [full] = chunks('A short supported fact.');
-  const tokens = full.tokens;
-  assert.equal(chunks('A short supported fact.', { entry: { maxTokens: 20000, contextWindow: 100000 } })[0].maxTokens, 8192);
-  assert.equal(chunks('A short supported fact.', { entry: { maxTokens: 2048, contextWindow: 100000 } })[0].maxTokens, 2048);
-  assert.equal(chunks('A short supported fact.', { entry: { maxTokens: 8192, contextWindow: tokens + 256 + 1500 } })[0].maxTokens, 1500);
-  assert.equal(chunks('A short supported fact.', { entry: { contextWindow: tokens + 256 + 1024 } })[0].maxTokens, 1024);
-  assert.equal(chunks('A short supported fact.', { entry: {} })[0].maxTokens, 8192);
-  assert.throws(() => chunks('A short supported fact.', { entry: { maxTokens: 8192, contextWindow: tokens + 256 + 1023 } }), /output allowance/);
-  for (const entry of [null, { maxTokens: 1023 }, { maxTokens: NaN }, { contextWindow: 0 }, { contextWindow: 1.5 }]) assert.throws(() => chunks('x', { entry }), /model|allowance/i);
+test('file plans need no model limits and retain estimates without an output allowance', () => {
+  const [plan] = chunks('A short supported fact.');
+  assert.deepEqual(Object.keys(plan), ['start', 'end', 'input', 'prompt', 'tokens']);
+  assert.equal(plan.tokens, tokensFor(plan.prompt));
+  assert.ok(plan.tokens > 0);
+  assertCoverage('A short supported fact.', [plan]);
 });
 
 test('retry ranges preserve separate exact spans, never bridge gaps or merge adjacent ranges, and do not mutate inputs', () => {
   const source = '😀 FIRST SPAN\n\nexcluded middle\n\nSECOND SPAN 😀';
   const firstEnd = source.indexOf('excluded'), secondStart = source.indexOf('SECOND');
   const ranges = Object.freeze([Object.freeze({ start: 0, end: firstEnd }), Object.freeze({ start: secondStart, end: source.length })]);
-  const options = Object.freeze({ name: 'Retry.md', markdown: source, chunkBudget: 4000, entry, ranges, fileSourceId: 'ignored', start: 99 });
+  const options = Object.freeze({ name: 'Retry.md', markdown: source, chunkBudget: 4000, ranges, fileSourceId: 'ignored', start: 99 });
   const before = JSON.stringify(options), plans = prepareFileChunks(options);
   assert.equal(plans.length, 2);
   assertCoverage(source, [plans[0]], 0, firstEnd);
