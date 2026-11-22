@@ -32,7 +32,7 @@ import { PluginSidebarActions } from "@/components/plugin-chrome";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
-import { StartupMessage, type StartupMessageOffer } from "@/components/startup-message";
+import { StartupMessage, type StartupMessageOffer } from "@/components/startup-message-host";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
