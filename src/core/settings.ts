@@ -850,6 +850,24 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+const KNOWN_TOP_LEVEL_KEYS: ReadonlySet<string> = new Set([
+	"version",
+	"chat",
+	"general",
+	"dictation",
+	"claudeCode",
+	"agent",
+	"appearance",
+	"models",
+	"customProvider",
+	"graph",
+	"compaction",
+]);
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -857,54 +875,51 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
  * app). Never throws. Non-objects → null.
  */
 export function sanitizeUserSettings(raw: unknown): UserSettings | null {
-	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return null;
-	const r = raw as Record<string, unknown>;
+	if (!isPlainObject(raw)) return null;
+	const r = raw;
 	const out: UserSettings = {
 		version: typeof r.version === "number" && Number.isInteger(r.version) && r.version >= 1 ? r.version : CURRENT_SETTINGS_VERSION,
 	};
-	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
-		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
+	if (isPlainObject(r.general)) {
+		out.general = sanitizeGeneral(r.general);
 	}
-	if (r.dictation !== undefined) {
-		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
+	if (isPlainObject(r.dictation)) {
+		out.dictation = isDictationLanguage(r.dictation.language)
+			? { language: r.dictation.language }
 			: {};
 	}
-	if (r.claudeCode !== undefined) {
-		const raw = r.claudeCode;
-		out.claudeCode = raw !== null && typeof raw === "object" && !Array.isArray(raw)
-			&& typeof (raw as Record<string, unknown>).enabled === "boolean"
-			? { enabled: (raw as { enabled: boolean }).enabled } : {};
+	if (isPlainObject(r.claudeCode)) {
+		out.claudeCode = typeof r.claudeCode.enabled === "boolean"
+			? { enabled: r.claudeCode.enabled }
+			: {};
 	}
-	if (r.agent !== null && typeof r.agent === "object" && !Array.isArray(r.agent)) {
-		out.agent = sanitizeAgent(r.agent as Record<string, unknown>);
+	if (isPlainObject(r.agent)) {
+		out.agent = sanitizeAgent(r.agent);
 	}
-	if (r.appearance !== null && typeof r.appearance === "object" && !Array.isArray(r.appearance)) {
-		out.appearance = sanitizeAppearance(r.appearance as Record<string, unknown>);
+	if (isPlainObject(r.appearance)) {
+		out.appearance = sanitizeAppearance(r.appearance);
 	}
-	if (r.models !== null && typeof r.models === "object" && !Array.isArray(r.models)) {
-		const models = sanitizeModels(r.models as Record<string, unknown>);
-		if (Object.keys(models).length) out.models = models;
+	if (isPlainObject(r.models)) {
+		out.models = sanitizeModels(r.models);
 	}
-	if (r.customProvider !== null && typeof r.customProvider === "object" && !Array.isArray(r.customProvider)) {
-		out.customProvider = sanitizeCustomProvider(r.customProvider as Record<string, unknown>);
+	if (isPlainObject(r.customProvider)) {
+		out.customProvider = sanitizeCustomProvider(r.customProvider);
 	}
-	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
-		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
+	if (isPlainObject(r.graph)) {
+		out.graph = sanitizeGraph(r.graph);
 	}
-	if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
-		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
+	if (isPlainObject(r.compaction)) {
+		out.compaction = sanitizeCompaction(r.compaction);
 	}
-	// Unknown top-level keys ride along untouched (forward-compat). One
-	// known-DEAD key is stripped instead of riding: `chat` (the old
-	// default-settings section) died with per-session models (owner,
-	// 2026-09-28) — a fossil copy on disk must never resurrect through
-	// reads (and any later write flushes it from the file for good).
+	// Unknown top-level keys ride along untouched (forward-compat). Known
+	// sections never fall through here, so invalid or wrong-typed known
+	// sections drop cleanly instead of leaking raw values back onto the
+	// record. The retired `chat` section (died with per-session models,
+	// owner, 2026-09-28) is stripped the same way so a fossil copy on disk
+	// never resurrects through reads.
 	for (const [key, value] of Object.entries(r)) {
-		if (key === "chat") continue;
-		if (!(key in out)) out[key] = value;
+		if (KNOWN_TOP_LEVEL_KEYS.has(key) || key in out) continue;
+		out[key] = value;
 	}
 	return out;
 }

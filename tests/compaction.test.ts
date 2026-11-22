@@ -341,6 +341,37 @@ describe("serializeForSummary + buildCompactionPrompt", () => {
 		assert.ok(serializeForSummary([marker]).includes("LEGACY SUMMARY"));
 	});
 
+	it("serializes array-content learner messages and omits raw image base64 from learner and tool results", () => {
+		const link = serializeCitation({ version: 1, chatId: "c", messageId: "m", text: "x y", start: 0, end: 3, prefix: "", suffix: "" });
+		const png = { type: "image" as const, mimeType: "image/png", data: "P".repeat(4_000) };
+		const jpeg = { type: "image" as const, mimeType: "image/jpeg", data: "J".repeat(500) };
+		const untypedImage = { type: "image" as const, mimeType: "  ", data: "U".repeat(200) };
+		const imageToolResult: LhMessage = {
+			id: "r_img",
+			role: "toolResult",
+			toolCallId: "c_img",
+			toolName: "read",
+			content: [png, { type: "text", text: "caption after image" }],
+			isError: false,
+			timestamp: 2,
+		} as never;
+		const textArrayUser: LhMessage = { ...newUserMessage(""), content: [{ type: "text", text: "array text" }] };
+		const text = serializeForSummary([
+			newUserMessage(`see ${link}`, [png]),
+			newUserMessage("", [jpeg, untypedImage]),
+			textArrayUser,
+			imageToolResult,
+		]);
+		assert.ok(text.includes("[LEARNER] see \n\n> Tutor quote:\n> x y\n\n\n[image: image/png]"));
+		assert.ok(text.includes("[LEARNER] [image: image/jpeg]\n[image]"));
+		assert.ok(text.includes("[LEARNER] array text"));
+		assert.ok(text.includes("[RESULT for read] [image: image/png]\ncaption after image"));
+		assert.ok(!text.includes("lh-citation:"));
+		assert.ok(!text.includes("PPPP"));
+		assert.ok(!text.includes("JJJJ"));
+		assert.ok(!text.includes("UUUU"));
+	});
+
 	it("the prompt demands the four sections in order and carries the plan tree verbatim", () => {
 		const prompt = buildCompactionPrompt({ spanText: "TRANSCRIPT", planTreeText: "- [done] A (a1)\n- A → B", kind: "teach" });
 		const order = ["The learner's understanding", "The teaching arc", "The plan dependency tree", "The current moment"].map(

@@ -115,4 +115,12 @@ describe("the settings store", () => {
 		fs.writeFileSync(SETTINGS_FILE, "{not json", "utf-8");
 		assert.equal(readSettings(), null);
 	});
+
+	it("non-object agent section fails closed cleanly without spreading string or array indices", () => {
+		fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+		for (const agent of ["corrupt", [1, 2], null, 42]) {
+			fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: 1, agent }), "utf-8");
+			assert.deepEqual(readSettings()?.agent, { fileAccess: { restricted: true, folders: [] } }, JSON.stringify(agent));
+		}
+	});
 });

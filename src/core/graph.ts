@@ -322,19 +322,24 @@ export function simplifyChains(lines: GraphChain[]): GraphChain[] {
 		else bucket.push(line.premises);
 	}
 	const ancestryMemo = new Map<string, Set<string>>();
-	const ancestry = (id: string, visiting: Set<string>): Set<string> => {
+	const ancestry = (id: string): Set<string> => {
 		const memo = ancestryMemo.get(id);
 		if (memo !== undefined) return memo;
+		// Self-contained iterative walk per root so cycle cutoffs never
+		// memoize a truncated ancestor set for another node.
 		const out = new Set<string>();
-		if (visiting.has(id)) return out;
-		visiting.add(id);
-		for (const premises of premisesOf.get(id) ?? []) {
-			for (const premise of premises) {
-				out.add(premise);
-				for (const ancestor of ancestry(premise, visiting)) out.add(ancestor);
+		const stack = [id];
+		while (stack.length > 0) {
+			const current = stack.pop()!;
+			for (const premises of premisesOf.get(current) ?? []) {
+				for (const premise of premises) {
+					if (!out.has(premise)) {
+						out.add(premise);
+						stack.push(premise);
+					}
+				}
 			}
 		}
-		visiting.delete(id);
 		ancestryMemo.set(id, out);
 		return out;
 	};
@@ -370,7 +375,7 @@ export function simplifyChains(lines: GraphChain[]): GraphChain[] {
 					// premise, or reachable behind one.
 					const covered = new Set(k.premises);
 					for (const p of k.premises) {
-						for (const ancestor of ancestry(p, new Set())) covered.add(ancestor);
+						for (const ancestor of ancestry(p)) covered.add(ancestor);
 					}
 					return candidate.premises.every((p) => covered.has(p));
 			});

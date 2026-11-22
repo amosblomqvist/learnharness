@@ -15,7 +15,9 @@ import {
 	BACKGROUND_MODEL_ROLES,
 	isHexColor,
 	sanitizeUserSettings,
+	slotsConfigured,
 } from "../src/core/settings.ts";
+import { resolveSettings } from "../src/core/settings-resolution.ts";
 
 describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 	it("pins the owner-decided defaults", () => {
@@ -240,6 +242,44 @@ describe("sanitizeUserSettings", () => {
 		const out = sanitizeUserSettings({ agent: { tools: { quiz: false, demo: true, visual: "x" } } });
 		assert.ok(out);
 		assert.deepEqual(out.agent?.tools, { quiz: false, demo: true });
+	});
+
+	it("invalid models slots drop instead of leaking raw entries through unknown-key preservation", () => {
+		const out = sanitizeUserSettings({
+			version: 1,
+			models: {
+				strong: { model: "corrupt" },
+				cheap: { thinkingLevel: "banana" },
+				vision: { model: { provider: 123, id: "x" } },
+			},
+		});
+		assert.ok(out);
+		assert.deepEqual(out.models, {});
+		assert.equal(slotsConfigured(out.models), false);
+		assert.deepEqual(resolveSettings(out).models, { strong: null, cheap: null, vision: null });
+		assert.deepEqual(sanitizeUserSettings({ version: 1, models: {} })?.models, {});
+	});
+
+	it("non-object known sections drop instead of leaking verbatim, while unknown sections survive", () => {
+		const sections = [
+			"general",
+			"dictation",
+			"claudeCode",
+			"agent",
+			"appearance",
+			"models",
+			"customProvider",
+			"graph",
+			"compaction",
+		] as const;
+		for (const section of sections) {
+			for (const bad of [null, [], "corrupt", 42, true]) {
+				const out = sanitizeUserSettings({ version: 1, [section]: bad, futureSection: { keep: 1 } });
+				assert.ok(out);
+				assert.equal(section in out, false, `${section} with ${JSON.stringify(bad)} must drop`);
+				assert.deepEqual(out.futureSection, { keep: 1 });
+			}
+		}
 	});
 
 	it("BACKGROUND_MODEL_ROLES matches the six override roles (practice trio deleted 2026-10-04, sideQuestion added)", () => {
