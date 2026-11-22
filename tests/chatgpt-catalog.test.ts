@@ -1,7 +1,8 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { piModels } from "../src/agent/models.ts";
-import { refreshConnectionCatalog } from "../src/server/model-catalog.ts";
+import { chatGPTSupportedModels, refreshConnectionCatalog } from "../src/server/model-catalog.ts";
+import { getSupportedThinkingLevels } from "@earendil-works/pi-ai";
 import { refreshChatGPTModels, chatGPTModels, chatGPTStatus, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTAbortController } from "../src/agent/chatgpt-bridge.ts";
 const send = Object.getOwnPropertyDescriptor(process, "send"), connected = Object.getOwnPropertyDescriptor(process, "connected");
 const desktopMarker = process.env.LH_DESKTOP_SERVER, desktopSecret = process.env.LH_DESKTOP_API_SECRET;
@@ -62,4 +63,38 @@ test("account-offered GPT-6.1 Terra resolves from the bundled Responses catalog"
   provider: "chatgpt", id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)", api: "openai-responses",
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
  }]);
+});
+test("an account that offers GPT-6.2 Sol gets it in the subscription catalog", async () => {
+ const refresh = refreshConnectionCatalog("chatgpt");
+ reply(pending.at(-1), { ...value("B", 10, "B", 4), models: [
+  { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
+  { id: "gpt-6.2-sol", name: "GPT-6.2 Sol (account)" },
+ ] });
+ await refresh;
+ assert.deepEqual(chatGPTModels().map(({ id, name }) => ({ id, name })), [
+  { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
+  { id: "gpt-6.2-sol", name: "GPT-6.2 Sol (account)" },
+ ]);
+ const sol = chatGPTModels().find((m) => m.id === "gpt-6.2-sol");
+ assert(sol);
+ assert.equal(sol.provider, "chatgpt"); assert.equal(sol.api, "openai-responses");
+ assert.deepEqual(sol.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+ assert.equal(sol.contextWindow, 272000);
+ assert.equal(sol.thinkingLevelMap?.off, null);
+ assert(!getSupportedThinkingLevels(sol).includes("off"));
+});
+test("an account that omits GPT-6.2 does not get it, and unknown 6.2 ids stay out", async () => {
+ const refresh = refreshConnectionCatalog("chatgpt");
+ reply(pending.at(-1), { ...value("B", 11, "B", 5), models: [
+  { id: "gpt-6.1-sol", name: "GPT-6.1 Sol" },
+  { id: "gpt-6.2-unknown", name: "Unknown" },
+ ] });
+ await refresh;
+ assert.deepEqual(chatGPTModels().map(({ id }) => id), ["gpt-6.1-sol"]);
+});
+test("GPT-6.2 backports carry upstream list prices and never shadow a bundled entry", () => {
+ const supported = chatGPTSupportedModels();
+ for (const id of ["gpt-6.2-sol", "gpt-6.2-astra"]) assert.equal(supported.filter((m) => m.id === id).length, 1);
+ assert.deepEqual(supported.find((m) => m.id === "gpt-6.2-astra")?.cost, { input: 8, output: 40, cacheRead: 0.4, cacheWrite: 10 });
+ assert.equal(supported.find((m) => m.id === "gpt-6.2-sol")?.provider, "openai");
 });
