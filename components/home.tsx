@@ -1,12 +1,18 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { SurfaceRegion, usePageSurfaceBoundary, useSurfaceChromeStyle } from "./plugin-surfaces";
 import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
-import { GraphView } from "@/components/graph-view";
-import { MinimalHome } from "@/components/minimal-home";
-import { SetupDialog } from "@/components/setup-dialog";
+const GraphView = lazy(() =>
+	import("@/components/graph-view").then((m) => ({ default: m.GraphView })),
+);
+const MinimalHome = lazy(() =>
+	import("@/components/minimal-home").then((m) => ({ default: m.MinimalHome })),
+);
+const SetupDialog = lazy(() =>
+	import("@/components/setup-dialog").then((m) => ({ default: m.SetupDialog })),
+);
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
@@ -188,22 +194,24 @@ export function Home({
 			    untouched, and the chain table stays behind its button. */}
 			<div ref={bodyRef} className="absolute inset-0">
 			<main className="absolute inset-0">
-				{rendering ? (
-					<GraphView
-						folderFilterSlot={folderFilterSlot}
-						chainSelectOpen={chainSelectOpen}
-						practiceSelection={pickedIds}
-						onPracticeSelectionChange={setPracticeProps}
-						onChainSelectClose={() => setChainSelectOpen(false)}
-					/>
-				) : (
-					<MinimalHome
-						chainSelectOpen={chainSelectOpen}
-						practiceSelection={pickedIds}
-						onPracticeSelectionChange={setPracticeProps}
-						onChainSelectClose={() => setChainSelectOpen(false)}
-					/>
-				)}
+				<Suspense fallback={null}>
+					{rendering ? (
+						<GraphView
+							folderFilterSlot={folderFilterSlot}
+							chainSelectOpen={chainSelectOpen}
+							practiceSelection={pickedIds}
+							onPracticeSelectionChange={setPracticeProps}
+							onChainSelectClose={() => setChainSelectOpen(false)}
+						/>
+					) : (
+						<MinimalHome
+							chainSelectOpen={chainSelectOpen}
+							practiceSelection={pickedIds}
+							onPracticeSelectionChange={setPracticeProps}
+							onChainSelectClose={() => setChainSelectOpen(false)}
+						/>
+					)}
+				</Suspense>
 			</main>
 
 
@@ -346,14 +354,18 @@ export function Home({
 			    interception's landing surface — stage 1 is the self-contained
 			    first-key screen (zero-keys wave); Save never sends — the
 			    draft stays for the learner to send (owner 2026-10-09). */}
-			<SetupDialog
-				open={setupOpen}
-				onClose={() => setSetupOpen(false)}
-				onDone={() => {
-					setSetupOpen(false);
-					// Save only saves: the draft waits in the composer.
-				}}
-				/>
+			{setupOpen && (
+				<Suspense fallback={null}>
+					<SetupDialog
+						open={setupOpen}
+						onClose={() => setSetupOpen(false)}
+						onDone={() => {
+							setSetupOpen(false);
+							// Save only saves: the draft waits in the composer.
+						}}
+					/>
+				</Suspense>
+			)}
 		</div>
 	);
 }

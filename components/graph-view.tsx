@@ -63,7 +63,7 @@
  * camera never moves.
  */
 
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Suspense, lazy, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GraphFolderFilterControl, useGraphFolderSelection } from "@/components/graph-folder-filter";
 import { useSourceDirectory } from "@/components/source-directory";
@@ -83,9 +83,17 @@ import { useServerEvent, useServerResync } from "@/components/server-events";
 import { MenuShell } from "@/components/menu-shell.tsx";
 import { useInteractionLayers } from "@/components/interaction-layers";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
-import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
-import { ChainTableOverlay } from "@/components/chain-table.tsx";
-import { ToolContentResponse } from "@/components/ai-elements/message";
+export { NodeCardText } from "./graph-node-card-text.tsx";
+
+const LazyDeleteNodeDialog = lazy(() =>
+	import("@/components/delete-node-dialog.tsx").then((m) => ({ default: m.DeleteNodeDialog })),
+);
+const LazyChainTableOverlay = lazy(() =>
+	import("@/components/chain-table.tsx").then((m) => ({ default: m.ChainTableOverlay })),
+);
+const LazyNodeCardText = lazy(() =>
+	import("./graph-node-card-text.tsx").then((m) => ({ default: m.NodeCardText })),
+);
 import { Hint } from "@/components/ui/hint";
 import {
 	ARROW_LENGTH_LADDER,
@@ -909,32 +917,7 @@ export function GraphChromeRow({
 	);
 }
 
-/** The detail card's name and statement, as a pure seam for render pins
- *  (the GraphChromeRow pattern). Both are extractor tool arguments, so
- *  they render through ToolContentResponse like other tool content: math
- *  and Markdown, never streamed. `.lh-prose` sets the chat font and size
- *  in unlayered CSS that beats Tailwind's type utilities — the variable
- *  overrides are what keep the card's own type. */
-const NODE_CARD_TYPE = "[--font-prose:var(--font-ui)] " +
-	"[&_[data-streamdown=inline-code]]:[font-size:inherit] [&_[data-streamdown=inline-code]]:[color:inherit]";
-export function NodeCardText({ name, statement }: Pick<GraphNode, "name" | "statement">) {
-	return (
-		<>
-			<ToolContentResponse
-				mode="static"
-				className={`${NODE_CARD_TYPE} font-medium [--lh-prose-size:var(--text-sm)] [--lh-prose-leading:1.375]`}
-			>
-				{name}
-			</ToolContentResponse>
-			<ToolContentResponse
-				mode="static"
-				className={`${NODE_CARD_TYPE} mt-1 text-muted-foreground [--lh-prose-size:var(--text-xs)] [--lh-prose-leading:1.625]`}
-			>
-				{statement}
-			</ToolContentResponse>
-		</>
-	);
-}
+
 
 /** Keep the existing placement policy as static Markdown finishes rendering:
  * diagrams, plugin blocks and font reflow can resize a card after selection. */
@@ -1564,20 +1547,24 @@ export function GraphView({
 
 			{/* The full-death confirm dialog (node interlude) — portaled to
 			    body by the component itself, lives here for state locality. */}
-			<DeleteNodeDialog
-				nodes={deletingNode ? [deletingNode] : null}
-				onClose={() => setDeletingNode(null)}
-				onDeleted={(nodeIds, graphRevision) => {
-					// Close the dialog; close the detail card if it pointed here
-					// (the refetch would close it anyway, but the same frame
-					// should not show a card for a node the user just killed).
-					setDeletingNode(null);
-					if (selected && nodeIds.includes(selected.node.id)) setSelected(null);
-					// The wave-6 chain: every listener refetches on this. Clusters
-					// shrink / unrender below the minimum on the server's read.
-					window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { graphRevision } }));
-				}}
-			/>
+			{deletingNode && (
+				<Suspense fallback={null}>
+					<LazyDeleteNodeDialog
+						nodes={[deletingNode]}
+						onClose={() => setDeletingNode(null)}
+						onDeleted={(nodeIds, graphRevision) => {
+							// Close the dialog; close the detail card if it pointed here
+							// (the refetch would close it anyway, but the same frame
+							// should not show a card for a node the user just killed).
+							setDeletingNode(null);
+							if (selected && nodeIds.includes(selected.node.id)) setSelected(null);
+							// The wave-6 chain: every listener refetches on this. Clusters
+							// shrink / unrender below the minimum on the server's read.
+							window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { graphRevision } }));
+						}}
+					/>
+				</Suspense>
+			)}
 
 
 
@@ -1671,7 +1658,9 @@ export function GraphView({
 					// over home.tsx's drag surface (2026-09-17).
 					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 				>
-					<NodeCardText name={selected.node.name} statement={selected.node.statement} />
+					<Suspense fallback={<><div className="font-medium text-sm">{selected.node.name}</div><div className="mt-1 text-xs text-muted-foreground">{selected.node.statement}</div></>}>
+						<LazyNodeCardText name={selected.node.name} statement={selected.node.statement} />
+					</Suspense>
 					{selected.sourceIds.length > 0 ? (
 						<div className="mt-3 flex flex-col gap-1">
 							<div className="text-xs text-muted-foreground">Sessions</div>
@@ -1720,29 +1709,33 @@ export function GraphView({
 			    surface covering a drag band must paint AFTER everything it
 			    covers. (DeleteNodeDialog is body-portaled — DOM-irrelevant
 			    here.) */}
-			<ChainTableOverlay
-				open={chainsOpen}
-				nodes={snapshot?.propositions ?? []}
-				chains={snapshot?.chains ?? []}
-				sessions={snapshot?.sessions ?? {}}
-				fileSources={snapshot?.fileSources ?? {}}
-				onClose={() => {
-					setChainsOpen(false);
-					onChainSelectClose?.();
-				}}
-				selectMode={chainSelectOpen}
-				controlledSelection={practiceSelection}
-				onSelectionChange={(ids) => {
-					// Resolve ids → nodes against the live snapshot; the
-					// caller holds the pick set (count + seed).
-					const props = snapshot?.propositions ?? [];
-					const picked: { id: string; name: string; statement: string }[] = [];
-					for (const id of ids) {
-						const n = props.find((node) => node.id === id);
-						if (n) picked.push({ id: n.id, name: n.name, statement: n.statement });
-					}
-					onPracticeSelectionChange?.(picked);
-				}}
-			/>		</div>
+			{chainsOpen && (
+				<Suspense fallback={null}>
+					<LazyChainTableOverlay
+						open={chainsOpen}
+						nodes={snapshot?.propositions ?? []}
+						chains={snapshot?.chains ?? []}
+						sessions={snapshot?.sessions ?? {}}
+						fileSources={snapshot?.fileSources ?? {}}
+						onClose={() => {
+							setChainsOpen(false);
+							onChainSelectClose?.();
+						}}
+						selectMode={chainSelectOpen}
+						controlledSelection={practiceSelection}
+						onSelectionChange={(ids) => {
+							// Resolve ids → nodes against the live snapshot; the
+							// caller holds the pick set (count + seed).
+							const props = snapshot?.propositions ?? [];
+							const picked: { id: string; name: string; statement: string }[] = [];
+							for (const id of ids) {
+								const n = props.find((node) => node.id === id);
+								if (n) picked.push({ id: n.id, name: n.name, statement: n.statement });
+							}
+							onPracticeSelectionChange?.(picked);
+						}}
+					/>
+				</Suspense>
+			)}		</div>
 	);
 }
