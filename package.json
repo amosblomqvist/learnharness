@@ -27,8 +27,8 @@
 		"desktop:dist": "rm -rf dist .next/standalone && npm run build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs && node scripts/smoke-server.mjs && DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} APPLE_KEYCHAIN_PROFILE=LH_NOTARY APPLE_TEAM_ID=JS6XN22HY6 electron-builder --mac --arm64"
 	},
 	"dependencies": {
-		"@earendil-works/pi-agent-core": "1.5.2",
-		"@earendil-works/pi-ai": "1.5.2",
+		"@earendil-works/pi-agent-core": "1.6.0",
+		"@earendil-works/pi-ai": "1.6.0",
 		"@modelcontextprotocol/sdk": "1.32.1",
 		"@mozilla/readability": "^0.6.0",
 		"@radix-ui/react-focus-scope": "1.1.16",
