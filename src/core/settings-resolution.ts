@@ -31,6 +31,7 @@ import {
 	FACTORY_SETTINGS,
 	MODEL_SLOTS,
 	ROLE_SLOT,
+	customProviderName,
 	type AgentSettings,
 	type BackgroundModelRole,
 	type FactorySettings,
@@ -67,6 +68,18 @@ export interface EffectiveModelSpec {
 	thinkingLevel?: ThinkingLevel;
 }
 
+/** A fully-resolved custom endpoint: identity, the name the UI shows, and the
+ *  config that decides which models it offers. */
+export interface EffectiveCustomProvider {
+	id: string;
+	name: string;
+	baseUrl: string;
+	authMode: "keyless" | "apiKey";
+	models: CustomModel[];
+	overrides: Record<string, CustomModelOverride>;
+	manualModels: string[];
+}
+
 /** The concrete appearance view — same shape as the factory's. */
 export type EffectiveAppearance = FactorySettings["appearance"];
 
@@ -99,9 +112,9 @@ export interface EffectiveSettings {
 	/** Compaction (owner round 14): resolved concrete — absent record
 	 *  section resolves to the factory 150k. */
 	compaction: Required<CompactionSettings>;
-	/** Custom endpoint, resolved concrete: baseUrl defaults "", models and
-	 *  user pins default to empty. */
-	customProvider: { baseUrl: string; models: CustomModel[]; overrides: Record<string, CustomModelOverride>; manualModels: string[] };
+	/** The custom endpoints, resolved concrete: the name they read as, base URL
+	 *  ("" when unset), and empty models/pins. Order is the record's. */
+	customProviders: EffectiveCustomProvider[];
 }
 
 /** The conversation pair's chain (BYOK, owner 2026-09-22): the chat's own
@@ -248,12 +261,15 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
 			includeReasoning: record?.compaction?.includeReasoning ?? FACTORY_SETTINGS.compaction.includeReasoning,
 		},
-		customProvider: {
-			baseUrl: record?.customProvider?.baseUrl ?? "",
-			models: record?.customProvider?.models ?? [],
-			overrides: record?.customProvider?.overrides ?? {},
-			manualModels: record?.customProvider?.manualModels ?? [],
-		},
+		customProviders: (record?.customProviders ?? []).map((cp) => ({
+			id: cp.id,
+			name: customProviderName(cp),
+			baseUrl: cp.baseUrl ?? "",
+			authMode: cp.authMode ?? "keyless",
+			models: cp.models ?? [],
+			overrides: cp.overrides ?? {},
+			manualModels: cp.manualModels ?? [],
+		})),
 	};
 }
 

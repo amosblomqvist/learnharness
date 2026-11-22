@@ -260,8 +260,15 @@ export interface CustomModelOverride {
 	reasoning?: boolean;
 }
 
-/** The single custom endpoint's stored config (delta section). */
+/** One custom OpenAI-compatible endpoint's stored config (delta section). */
 export interface CustomProviderSettings {
+	/** THE endpoint's identity, and the pi-ai provider id its models carry.
+	 *  The endpoint migrated from the single-endpoint era keeps `custom`;
+	 *  every added one is `custom-<8 hex>`. */
+	id: string;
+	/** What the learner calls it ("Work gateway", "Local llama"). Absent
+	 *  falls back to a stable default — see customProviderName. */
+	name?: string;
 	/** Server-owned random authorization nonce; never a credential hash. */
 	credentialBindingId?: string;
 	/** Explicit authentication intent; never inferred from a saved key. */
@@ -303,12 +310,53 @@ export function normalizeBaseUrl(raw: string): string {
 	return url.toString().replace(/\/+$/, "");
 }
 
-/** THE single source of "is the custom endpoint usable?": a non-empty base URL.
- *  Key presence is deliberately excluded (keyless local servers are allowed). */
+/** THE single source of "is this custom endpoint usable?": a non-empty base
+ *  URL. Key presence is deliberately excluded (keyless local servers are
+ *  allowed). */
 export function customProviderUsable(
 	cp: CustomProviderSettings | undefined,
 ): cp is CustomProviderSettings & { baseUrl: string } {
 	return Boolean(cp?.baseUrl);
+}
+
+/** The usable endpoints of a stored list, in stored order. */
+export function usableCustomProviders(
+	list: readonly CustomProviderSettings[] | undefined,
+): (CustomProviderSettings & { baseUrl: string })[] {
+	return (list ?? []).filter(customProviderUsable);
+}
+
+/** The id the single-endpoint era wrote, and the pi-ai provider id a migrated
+ *  endpoint keeps: its saved model pins and CUSTOM_OPENAI_API_KEY survive. */
+export const CUSTOM_PROVIDER_ID = "custom";
+
+/** How many endpoints a record may hold — a stop, not a quota. */
+export const CUSTOM_PROVIDER_LIMIT = 20;
+
+/** LEGACY id, or an id minted by the server (`custom-<8 hex>`). Nothing else
+ *  is a custom endpoint — a hand-edited id must never shadow a built-in. */
+const CUSTOM_PROVIDER_ID_RE = /^custom(?:-[a-f0-9]{8})?$/;
+
+export function isCustomProviderId(id: string | undefined): boolean {
+	return typeof id === "string" && CUSTOM_PROVIDER_ID_RE.test(id);
+}
+
+/** The learner-facing name: their own word for it, else a stable default that
+ *  never leaves two rows looking identical. */
+export function customProviderName(cp: { id: string; name?: string }): string {
+	const named = cp.name?.trim();
+	if (named) return named;
+	return cp.id === CUSTOM_PROVIDER_ID ? "Custom endpoint" : `Custom endpoint ${cp.id.slice("custom-".length)}`;
+}
+
+/** A long enough name to read, short enough to fit a row. */
+const CUSTOM_PROVIDER_NAME_MAX = 60;
+
+/** Trimmed, single-line, bounded — or absent (the default applies). */
+function sanitizeCustomProviderName(raw: unknown): string | undefined {
+	if (typeof raw !== "string") return undefined;
+	const name = raw.replace(/\s+/g, " ").trim().slice(0, CUSTOM_PROVIDER_NAME_MAX);
+	return name || undefined;
 }
 
 /** First-run gate (model-slots wave, owner 2026-09-20): the app refuses
@@ -526,7 +574,10 @@ export interface UserSettings {
 	agent?: AgentSettings;
 	/** The strong/cheap/vision model slots (model slots wave, 2026-09-20). */
 	models?: ModelsSettings;
-	/** The custom OpenAI-compatible endpoint (non-secret config only). */
+	/** The custom OpenAI-compatible endpoints (non-secret config only). */
+	customProviders?: CustomProviderSettings[];
+	/** READ-ONLY fossil from the single-endpoint era: the sanitizer folds it
+	 *  into customProviders and never writes it back. */
 	customProvider?: CustomProviderSettings;
 	appearance?: AppearanceSettings;
 	graph?: GraphSettings;
@@ -709,11 +760,15 @@ export function sanitizeCustomModelOverrides(
 	return out;
 }
 
-/** The customProvider section: normalized base URL (invalid → dropped) and
+/** One endpoint: identity + name, normalized base URL (invalid → dropped) and
  *  discovered models (ids trimmed, dupes/empties dropped; image kept only when
- *  true; token counts only as positive ints). Clamp-never-reject. */
-function sanitizeCustomProvider(raw: Record<string, unknown>): CustomProviderSettings {
-	const out: CustomProviderSettings = {};
+ *  true; token counts only as positive ints). Clamp-never-reject. The id is
+ *  the caller's (already validated); an entry with no usable id is dropped by
+ *  the list sanitizer, never renamed. */
+function sanitizeCustomProvider(raw: Record<string, unknown>, id: string): CustomProviderSettings {
+	const out: CustomProviderSettings = { id };
+	const name = sanitizeCustomProviderName(raw.name);
+	if (name) out.name = name;
 	if (typeof raw.credentialBindingId === "string" && /^[a-f0-9]{32}$/.test(raw.credentialBindingId)) out.credentialBindingId = raw.credentialBindingId;
 	if (raw.authMode === "keyless" || raw.authMode === "apiKey") out.authMode = raw.authMode;
 	if (typeof raw.baseUrl === "string") {
@@ -743,6 +798,30 @@ function sanitizeCustomProvider(raw: Record<string, unknown>): CustomProviderSet
 	if (Object.keys(overrides).length) out.overrides = overrides;
 	const manualModels = parseModelIds(raw.manualModels);
 	if (manualModels.length) out.manualModels = manualModels;
+	return out;
+}
+
+/** THE customProviders section. Accepts the list, and folds a record written
+ *  by the single-endpoint era (`customProvider`) in as the `custom` entry so
+ *  the learner's endpoint survives the upgrade untouched. Ids are validated
+ *  (an invalid one is DROPPED, never remapped onto a built-in), duplicates
+ *  collapse onto the first, and the list is capped. */
+function sanitizeCustomProviders(raw: unknown, legacy: unknown): CustomProviderSettings[] {
+	const rows = Array.isArray(raw) ? raw : [];
+	const out: CustomProviderSettings[] = [];
+	const seen = new Set<string>();
+	for (const row of rows) {
+		if (out.length >= CUSTOM_PROVIDER_LIMIT) break;
+		if (row === null || typeof row !== "object" || Array.isArray(row)) continue;
+		const rec = row as Record<string, unknown>;
+		const id = typeof rec.id === "string" ? rec.id.trim() : "";
+		if (!isCustomProviderId(id) || seen.has(id)) continue;
+		seen.add(id);
+		out.push(sanitizeCustomProvider(rec, id));
+	}
+	if (!seen.has(CUSTOM_PROVIDER_ID) && legacy !== null && typeof legacy === "object" && !Array.isArray(legacy)) {
+		out.unshift(sanitizeCustomProvider(legacy as Record<string, unknown>, CUSTOM_PROVIDER_ID));
+	}
 	return out;
 }
 
@@ -928,8 +1007,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 		const models = sanitizeModels(r.models as Record<string, unknown>);
 		if (Object.keys(models).length) out.models = models;
 	}
-	if (r.customProvider !== null && typeof r.customProvider === "object" && !Array.isArray(r.customProvider)) {
-		out.customProvider = sanitizeCustomProvider(r.customProvider as Record<string, unknown>);
+	if (r.customProviders !== undefined || r.customProvider !== undefined) {
+		const providers = sanitizeCustomProviders(r.customProviders, r.customProvider);
+		if (providers.length) out.customProviders = providers;
 	}
 	if (r.graph !== null && typeof r.graph === "object" && !Array.isArray(r.graph)) {
 		out.graph = sanitizeGraph(r.graph as Record<string, unknown>);
@@ -937,13 +1017,14 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 	}
-	// Unknown top-level keys ride along untouched (forward-compat). One
-	// known-DEAD key is stripped instead of riding: `chat` (the old
+	// Unknown top-level keys ride along untouched (forward-compat). Two known
+	// DEAD keys are stripped instead of riding: `chat` (the old
 	// default-settings section) died with per-session models (owner,
-	// 2026-09-28) — a fossil copy on disk must never resurrect through
-	// reads (and any later write flushes it from the file for good).
+	// 2026-09-28), and `customProvider` (the single-endpoint section) is now
+	// folded into customProviders above — a fossil copy on disk must never
+	// resurrect through reads (and any later write flushes it for good).
 	for (const [key, value] of Object.entries(r)) {
-		if (key === "chat") continue;
+		if (key === "chat" || key === "customProvider" || key === "customProviders") continue;
 		if (!(key in out)) out[key] = value;
 	}
 	return out;

@@ -1,16 +1,17 @@
 # Custom and local models
 
-LearnHarness supports **one custom OpenAI-compatible endpoint with multiple models**, including a local model server. The setup/UI builds on PR #62 by Daniel Buckner and Abhishek Thakur. Pi handles inference, message conversion, tools, streaming, and reasoning effort. [Claude Code](claude-code.md) is a separate provider.
+LearnHarness supports **several custom OpenAI-compatible endpoints, each with its own name, URL, credentials, and models** — including a local model server. The setup/UI builds on PR #62 by Daniel Buckner and Abhishek Thakur. Pi handles inference, message conversion, tools, streaming, and reasoning effort. [Claude Code](claude-code.md) is a separate provider.
 
 ## Connect
 
-1. Open **Settings → Providers → + Add a provider → Custom endpoint**, or use the first-run provider picker.
-2. Enter the complete API base URL, such as `http://localhost:11434/v1`. LearnHarness **does not append `/v1`**. HTTP/HTTPS and private-network addresses are supported; embedded credentials, query strings, fragments, and discovery redirects are rejected.
-3. Choose **Keyless** or **API key**. Keyless ignores saved/environment custom keys. API key uses `CUSTOM_OPENAI_API_KEY`; a real environment value overrides a saved value, and the editor identifies environment ownership.
-4. Optionally enter model IDs, separated by commas or whitespace, for servers without working model discovery.
-5. Click **Connect**, then select Strong, Cheap, and Vision models.
+1. Open **Settings → Providers → + Add a provider → Custom endpoint**, or use the first-run provider picker. Choose it again for each further endpoint; a record holds up to 20.
+2. Name it. The name is what the providers list and the model picker show, so name two endpoints that share a host differently.
+3. Enter the complete API base URL, such as `http://localhost:11434/v1`. LearnHarness **does not append `/v1`**. HTTP/HTTPS and private-network addresses are supported; embedded credentials, query strings, fragments, and discovery redirects are rejected.
+4. Choose **Keyless** or **API key**. Keyless ignores saved/environment custom keys. Each endpoint keeps its own key; the one migrated from the single-endpoint era also honors `CUSTOM_OPENAI_API_KEY`, where a real environment value overrides a saved one.
+5. Optionally enter model IDs, separated by commas or whitespace, for servers without working model discovery.
+6. Click **Connect**, then select Strong, Cheap, and Vision models. Models carry their endpoint's id, so two endpoints may offer a model with the same name.
 
-A key is bound to the canonical endpoint URL and authentication mode. Changing the URL requires a new effective key or explicit consent to reuse it; it is never silently forwarded. Clearing authentication selects Keyless. Use this editor—not generic key management—to change custom credentials.
+A key is bound to ONE endpoint's canonical URL and authentication mode. Changing that URL requires a new effective key or explicit consent to reuse it; it is never silently forwarded, and it never authorizes another endpoint. Clearing authentication selects Keyless. Use this editor—not generic key management—to change custom credentials.
 
 Connect requests `GET <base>/models`; reported metadata wins over duplicate entered IDs. A nonfatal discovery failure can fall back to entered IDs. At the same URL, fallback preserves the previous model snapshot/pins; a different URL starts its own snapshot. **401/403, redirects, response-size, and model-count violations fail even with entered IDs.** A failed connect without fallback leaves configuration unchanged.
 
@@ -38,11 +39,11 @@ Every custom-engine image-bearing request attempts delivery even when discovery 
 
 ## Editing, credentials, and recovery
 
-Nonsecret configuration lives in `settings.json.customProvider`; saved keys and an internal binding live in `auth.json`. Authorization requires matching binding IDs, URL, and mode. A crash between auth/settings writes leaves the provider disabled rather than sending a key to a mismatched endpoint. Keyless also needs a valid nonsecret binding but never resolves a key. Missing private storage can initialize; malformed/unreadable storage fails closed without overwrite.
+Nonsecret configuration lives in `settings.json.customProviders` (an array; a record written by the single-endpoint era is read as its `custom` entry). Saved keys live in `auth.json` beside an internal binding per endpoint. Authorization requires matching endpoint id, binding id, URL, and mode. A crash between auth/settings writes leaves the provider disabled rather than sending a key to a mismatched endpoint. Keyless also needs a valid nonsecret binding but never resolves a key. Missing private storage can initialize; malformed/unreadable storage fails closed without overwrite.
 
 If authorization is interrupted, reload and explicitly reconnect. An environment key changing endpoints does not authorize a shadowed saved key for that new URL. Disconnect prevents a latent environment key from reviving the provider. These are crash/restart guards, not a power-loss/fsync transaction guarantee.
 
-Stale editor saves return **409**: reload and retry. Mutations preserve unrelated settings changes; failed edits do not claim success. Each new model operation resolves current endpoint, credentials, limits, and effort; in-flight requests keep their setup. Disconnecting/removing a model does not remap saved selections or rewrite history.
+The endpoint migrated from the single-endpoint era keeps the id `custom`; added ones are `custom-<8 hex>`. **Disconnect forgets one endpoint** and leaves the others connected. Stale editor saves return **409**: reload and retry. Mutations preserve unrelated settings changes; failed edits do not claim success. Each new model operation resolves current endpoint, credentials, limits, and effort; in-flight requests keep their setup. Disconnecting/removing a model does not remap saved selections or rewrite history.
 
 Discovery limits are **15 seconds**, **8 MiB**, and **10,000 models**; configuration bodies are bounded to **64 KiB**. Desktop capability/same-origin browser checks are not multi-user authentication.
 

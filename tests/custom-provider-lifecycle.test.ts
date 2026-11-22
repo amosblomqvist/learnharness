@@ -23,8 +23,8 @@ const { createReadTool } = await import("../src/agent/tools/read.ts");
 const { installCustomProviderSource } = await import("../src/server/custom-provider.ts");
 let requests: { url: string; auth: string | null; body: Record<string, unknown> }[];
 function configure(baseUrl = "http://first/v1", reasoning = false, maxTokens = 512, authMode: "keyless" | "apiKey" = "apiKey") {
-	const key = authMode === "apiKey" ? readCustomAuth().fileKey() ?? "first-key" : undefined;
-	writeSettings({ version: 1, customProvider: authorizeFixture({ baseUrl, authMode, models: [{ id: "m", context: 16384, maxTokens, reasoning }] }, key) });
+	const key = authMode === "apiKey" ? readCustomAuth("custom").fileKey() ?? "first-key" : undefined;
+	writeSettings({ version: 1, customProviders: [authorizeFixture({ id: "custom", baseUrl, authMode, models: [{ id: "m", context: 16384, maxTokens, reasoning }] }, key)] });
 }
 function answer() {
 	return new Response(`data: ${JSON.stringify({ id: "fake", choices: [{ index: 0, delta: { role: "assistant", content: "ok" }, finish_reason: null }] })}\n\ndata: ${JSON.stringify({ choices: [{ index: 0, delta: {}, finish_reason: "stop" }], usage: { prompt_tokens: 1, completion_tokens: 1 } })}\n\ndata: [DONE]\n\n`, { headers: { "content-type": "text/event-stream" } });
@@ -46,7 +46,7 @@ test("native requests revalidate endpoint/model/key/limits with no fallback and 
 	let release!: () => void;
 	globalThis.fetch = async (url, init) => { capture(url, init); started(); return new Promise<Response>((resolve) => { release = () => resolve(answer()); }); };
 	const inFlight = run(engine); await ready;
-	configure("http://second/v1", false, 1024); persistCustomAuth(readCustomAuth().binding, "second-key");
+	configure("http://second/v1", false, 1024); persistCustomAuth("custom", readCustomAuth("custom").binding, "second-key");
 	globalThis.fetch = async (url, init) => { capture(url, init); return answer(); };
 	assert.equal((await run(engine)).stopReason, "stop");
 	release(); assert.equal((await inFlight).stopReason, "stop");
@@ -54,7 +54,7 @@ test("native requests revalidate endpoint/model/key/limits with no fallback and 
 	assert.equal(requests[0]!.auth, "Bearer first-key"); assert.equal(requests[0]!.body.max_completion_tokens, 512);
 	assert.match(requests[1]!.url, /^http:\/\/second\/v1\/chat\/completions$/);
 	assert.equal(requests[1]!.auth, "Bearer second-key"); assert.equal(requests[1]!.body.max_completion_tokens, 1024);
-	writeSettings({ version: 1, customProvider: { ...readSettings()!.customProvider, models: [{ id: "other" }] } });
+	writeSettings({ version: 1, customProviders: [{ ...readSettings()!.customProviders![0], models: [{ id: "other" }] }] });
 	assert.ok(piModels().getProvider("custom"), "provider stays authorized while this model is removed");
 	assert.equal((await run(engine)).stopReason, "error");
 	writeSettings({ version: 1 }); assert.equal((await run(engine)).stopReason, "error");
@@ -63,7 +63,7 @@ test("native requests revalidate endpoint/model/key/limits with no fallback and 
 });
 test("current key changes without configuration edits are reflected on the next operation", async () => {
 	const engine = piEngineForSpec({ provider: "custom", id: "m" });
-	await run(engine); persistCustomAuth(readCustomAuth().binding, "rotated-key"); await run(engine);
+	await run(engine); persistCustomAuth("custom", readCustomAuth("custom").binding, "rotated-key"); await run(engine);
 	assert.deepEqual(requests.map((r) => r.auth), ["Bearer first-key", "Bearer rotated-key"]);
 });
 test("original saved thinking preference recovers after capability expansion and contracts again", async () => {
@@ -117,13 +117,13 @@ test("backend image rejection surfaces once, never retries without images", asyn
 });
 test("existing engine refuses nonce mismatch on EVERY operation, without falling back to env", async () => {
 	const engine = piEngineForSpec({ provider: "custom", id: "m" }); await run(engine);
-	persistCustomAuth({ ...readCustomAuth().binding!, id: "b".repeat(32) }, "different-key");
+	persistCustomAuth("custom", { ...readCustomAuth("custom").binding!, id: "b".repeat(32) }, "different-key");
 	assert.equal((await run(engine)).stopReason, "error"); assert.equal(requests.length, 1);
 });
 test("keyless publication never reads the credential lookup", async () => {
 	configure("http://first/v1", false, 512, "keyless");
 	let credentialLookups = 0;
-	installCustomProviderSource((inspect, cp) => { if (inspect) credentialLookups++; return customAuthState(inspect, cp); });
+	installCustomProviderSource((id, inspect, cp) => { if (inspect) credentialLookups++; return customAuthState(id, inspect, cp); });
 	try { assert.equal((await run(piEngineForSpec({ provider: "custom", id: "m" }))).stopReason, "stop"); assert.equal(credentialLookups, 0); assert.equal(requests[0]!.auth, "Bearer not-needed"); }
 	finally { installCustomProviderSource(); }
 });

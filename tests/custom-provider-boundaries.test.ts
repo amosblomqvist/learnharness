@@ -16,12 +16,14 @@ const { authorizeFixture } = await import("./helpers/custom-provider-auth.ts");
 const { readCustomAuth } = await import("../src/store/auth.ts");
 const { persistCustomAuth } = await import("../src/server/custom-provider-auth.ts");
 const settingsFile = path.join(scratch, "settings.json");
-const seed = (cp: import("../src/core/settings.ts").CustomProviderSettings = { baseUrl: "http://old/v1", authMode: "keyless", models: [{ id: "m" }] }, key?: string) => fs.writeFileSync(settingsFile, JSON.stringify({ version: 1, customProvider: authorizeFixture(cp, key) }));
-const setFileKey = (key: string) => { const auth = readCustomAuth(); persistCustomAuth({ ...auth.binding!, fileKeyBaseUrl: auth.binding!.baseUrl }, key); };
+const seed = (cp: Partial<import("../src/core/settings.ts").CustomProviderSettings> = {}, key?: string) => fs.writeFileSync(settingsFile, JSON.stringify({ version: 1, customProviders: [authorizeFixture({ id: "custom", baseUrl: "http://old/v1", authMode: "keyless", models: [{ id: "m" }], ...cp }, key)] }));
+const setFileKey = (key: string) => { const auth = readCustomAuth("custom"); persistCustomAuth("custom", { ...auth.binding!, fileKeyBaseUrl: auth.binding!.baseUrl }, key); };
 const current = () => JSON.parse(fs.readFileSync(settingsFile, "utf8"));
 const get = (inspect = false) => route.GET(new Request(`http://localhost/api/custom-provider${inspect ? "?authMode=apiKey" : ""}`));
-function mutate(body: unknown, method = "POST", headers: Record<string, string> = {}) {
-	return route.POST(new Request("http://localhost/api/custom-provider", { method, headers: { origin: "http://localhost", "content-type": "application/json", "if-match": get().headers.get("etag")!, ...headers }, ...(body === undefined ? {} : { body: JSON.stringify(body) }) }));
+function mutate(body: unknown, method = "POST", headers: Record<string, string> = {}, addNew = false) {
+	const id = addNew ? "" : (current().customProviders?.[0]?.id ?? "");
+	const payload = body && typeof body === "object" ? { id, ...(body as object) } : body;
+	return route.POST(new Request("http://localhost/api/custom-provider", { method, headers: { origin: "http://localhost", "content-type": "application/json", "if-match": get().headers.get("etag")!, ...headers }, ...(payload === undefined ? {} : { body: JSON.stringify(payload) }) }));
 }
 let requests: { url: string; authorization: string | null }[];
 beforeEach(() => {
@@ -44,7 +46,7 @@ test("keyless probe never forwards a stored key, and clearing removes authentica
 	assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "keyless", key: "do-not-use-this" })).status, 200);
 	assert.equal(requests[0]?.authorization, null);
 	assert.equal(keys.keyValue(CUSTOM_PROVIDER.envVar), undefined);
-	assert.equal(current().customProvider.authMode, "keyless");
+	assert.equal(current().customProviders[0].authMode, "keyless");
 });
 test("new keys have no arbitrary minimum; the exact probed key is stored", async () => {
 	assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", key: " k " })).status, 200);
@@ -87,19 +89,19 @@ test("changing destination cannot silently reuse an existing credential", async 
 });
 test("same-URL unbound development key needs existing explicit reuse consent", async () => {
 	seed({ baseUrl: "http://old/v1", authMode: "apiKey", models: [{ id: "m" }] }, "legacy-key");
-	const { CUSTOM_AUTH_BINDING } = await import("../src/core/custom-provider-auth.ts");
-	const file = path.join(scratch, "auth.json"); const map = JSON.parse(fs.readFileSync(file, "utf8")); delete map[CUSTOM_AUTH_BINDING]; fs.writeFileSync(file, JSON.stringify(map));
-	assert.equal((await get().json()).keyReuseRequired, true);
+	const { CUSTOM_AUTH_BINDING, CUSTOM_AUTH_ENTRIES } = await import("../src/core/custom-provider-auth.ts");
+	const file = path.join(scratch, "auth.json"); const map = JSON.parse(fs.readFileSync(file, "utf8")); delete map[CUSTOM_AUTH_BINDING]; delete map[CUSTOM_AUTH_ENTRIES]; fs.writeFileSync(file, JSON.stringify(map));
+	assert.equal((await get().json()).endpoints[0].keyReuseRequired, true);
 	assert.equal((await mutate({ baseUrl: "http://old/v1", authMode: "apiKey" })).status, 400); assert.equal(requests.length, 0);
 	assert.equal((await mutate({ baseUrl: "http://old/v1", authMode: "apiKey", reuseKey: true })).status, 200);
-	assert.equal(requests[0]?.authorization, "Bearer legacy-key"); assert.equal((await get().json()).keyReuseRequired, false);
+	assert.equal(requests[0]?.authorization, "Bearer legacy-key"); assert.equal((await get().json()).endpoints[0].keyReuseRequired, false);
 });
 test("generic custom/reserved key writes cannot bypass the atomic binding seam", async () => {
 	const ordinary = await import("../app/api/keys/[id]/route.ts");
-	const { CUSTOM_AUTH_BINDING } = await import("../src/core/custom-provider-auth.ts");
+	const { CUSTOM_AUTH_BINDING, CUSTOM_AUTH_ENTRIES } = await import("../src/core/custom-provider-auth.ts");
 	const { authStore } = await import("../src/store/auth.ts");
 	const before = fs.readFileSync(path.join(scratch, "auth.json"), "utf8");
-	for (const id of [CUSTOM_PROVIDER.envVar, CUSTOM_AUTH_BINDING]) {
+	for (const id of [CUSTOM_PROVIDER.envVar, CUSTOM_AUTH_BINDING, CUSTOM_AUTH_ENTRIES]) {
 		const context = { params: Promise.resolve({ id }) };
 		assert.equal((await ordinary.PUT(new Request("http://localhost", { method: "PUT", body: JSON.stringify({ value: "bypass" }) }), context)).status, 404);
 		assert.equal((await ordinary.DELETE(new Request("http://localhost", { method: "DELETE" }), context)).status, 404);
@@ -107,7 +109,7 @@ test("generic custom/reserved key writes cannot bypass the atomic binding seam",
 		assert.throws(() => authStore.setAuthVar(id, "bypass")); assert.throws(() => authStore.deleteAuthVar(id));
 	}
 	assert.equal(fs.readFileSync(path.join(scratch, "auth.json"), "utf8"), before);
-	assert.ok(!keys.keyStatuses().some(row => row.id === CUSTOM_AUTH_BINDING)); assert.equal(process.env[CUSTOM_AUTH_BINDING], undefined);
+	for (const name of [CUSTOM_AUTH_BINDING, CUSTOM_AUTH_ENTRIES]) { assert.ok(!keys.keyStatuses().some(row => row.id === name)); assert.equal(process.env[name], undefined); }
 });
 test("same target can retain its effective key", async () => {
 	seed({ baseUrl: "http://old/v1", authMode: "apiKey", models: [{ id: "m" }] }, "retained");
@@ -119,7 +121,7 @@ test("environment ownership is shown; consent uses the environment key in probe 
 	process.env[CUSTOM_PROVIDER.envVar] = "environment-secret";
 	authEnvRecord().realEnv.add(CUSTOM_PROVIDER.envVar);
 	try {
-		assert.equal((await get(true).json()).keySource, "env");
+		assert.equal((await get(true).json()).endpoints[0].keySource, "env");
 		assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", key: "shadowed" })).status, 400);
 		assert.equal((await mutate({ baseUrl: "http://new/v1", authMode: "apiKey", reuseKey: true })).status, 200);
 		assert.equal(requests[0]?.authorization, "Bearer environment-secret");
@@ -193,7 +195,7 @@ test("after discovery preserves unrelated edits and rejects intervening custom e
 	assert.deepEqual(current().appearance, { theme: "catppuccin-mocha" }); assert.equal(current().claudeCode.enabled, true);
 	globalThis.fetch = async () => { seed({ baseUrl: "http://changed", authMode: "keyless", models: [] }); return Response.json({ data: [{ id: "m" }] }); };
 	assert.equal((await mutate({ baseUrl: "http://h", authMode: "keyless" })).status, 409);
-	assert.equal(current().customProvider.baseUrl, "http://changed");
+	assert.equal(current().customProviders[0].baseUrl, "http://changed");
 });
 test("after discovery rejects a changed effective key", async () => {
 	seed({ baseUrl: "http://old/v1", authMode: "apiKey", models: [{ id: "m" }] }, "before");
@@ -204,7 +206,7 @@ test("after discovery rejects a changed effective key", async () => {
 test("offline pins accept 512/1, retain support declaration, and do not probe", async () => {
 	const res = await mutate({ overrides: { m: { context: 1, maxTokens: 512, reasoning: false } } }, "PATCH");
 	assert.equal(res.status, 200); assert.equal(requests.length, 0);
-	assert.deepEqual(current().customProvider.overrides.m, { context: 1, maxTokens: 512, reasoning: false });
+	assert.deepEqual(current().customProviders[0].overrides.m, { context: 1, maxTokens: 512, reasoning: false });
 });
 test("settings-write failure restores previous key/config and reports failure", async () => {
 	setFileKey("old-key");

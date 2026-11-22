@@ -47,9 +47,9 @@ describe("normalizeBaseUrl", () => {
 // ─── customProviderUsable ────────────────────────────────────────────────────
 describe("customProviderUsable", () => {
 	it("is true exactly when a base URL is set (the key is optional)", () => {
-		assert.equal(customProviderUsable({ baseUrl: "https://h/v1" }), true);
-		assert.equal(customProviderUsable({ baseUrl: "" }), false);
-		assert.equal(customProviderUsable({}), false);
+		assert.equal(customProviderUsable({ id: "custom", baseUrl: "https://h/v1" }), true);
+		assert.equal(customProviderUsable({ id: "custom", baseUrl: "" }), false);
+		assert.equal(customProviderUsable({ id: "custom" }), false);
 		assert.equal(customProviderUsable(undefined), false);
 	});
 });
@@ -69,14 +69,14 @@ describe("sanitizeUserSettings — customProvider", () => {
 				],
 			},
 		});
-		const cp = out?.customProvider;
+		const cp = out?.customProviders?.[0];
 		assert.equal(cp?.baseUrl, "https://host:8000/v1");
 		assert.deepEqual(cp?.models, [{ id: "llama-3" }, { id: "gpt" }]);
 	});
 	it("keeps image:true and drops a non-array models list / invalid base URL", () => {
 		const out = sanitizeUserSettings({ customProvider: { baseUrl: "ftp://x", models: "nope" } });
-		assert.equal(out?.customProvider?.baseUrl, undefined);
-		assert.equal(out?.customProvider?.models, undefined);
+		assert.equal(out?.customProviders?.[0]?.baseUrl, undefined);
+		assert.equal(out?.customProviders?.[0]?.models, undefined);
 	});
 	it("keeps reasoning:true and drops a non-true reasoning flag", () => {
 		const out = sanitizeUserSettings({
@@ -85,7 +85,7 @@ describe("sanitizeUserSettings — customProvider", () => {
 				models: [{ id: "thinker", reasoning: true }, { id: "plain", reasoning: "yes" }],
 			},
 		});
-		assert.deepEqual(out?.customProvider?.models, [{ id: "thinker", reasoning: true }, { id: "plain" }]);
+		assert.deepEqual(out?.customProviders?.[0]?.models, [{ id: "thinker", reasoning: true }, { id: "plain" }]);
 	});
 });
 
@@ -105,7 +105,7 @@ describe("sanitizeUserSettings / sanitizeCustomModelOverrides — pins", () => {
 				},
 			},
 		});
-		assert.deepEqual(out?.customProvider?.overrides, {
+		assert.deepEqual(out?.customProviders?.[0]?.overrides, {
 			llama: { context: 131072, maxTokens: 8192, reasoning: true },
 			qwen: { context: 10 },
 			quiet: { reasoning: false },
@@ -123,7 +123,7 @@ describe("sanitizeUserSettings / sanitizeCustomModelOverrides — pins", () => {
 	});
 	it("drops an invalid overrides section from the record entirely", () => {
 		const out = sanitizeUserSettings({ customProvider: { baseUrl: "https://h/v1", overrides: "nope" } });
-		assert.equal(out?.customProvider?.overrides, undefined);
+		assert.equal(out?.customProviders?.[0]?.overrides, undefined);
 	});
 });
 
@@ -161,21 +161,21 @@ describe("parseCustomModelOverridesBody — the strict write side", () => {
 // ─── resolution ──────────────────────────────────────────────────────────
 describe("resolveSettings — customProvider", () => {
 	it("resolves an absent section to concrete defaults", () => {
-		assert.deepEqual(resolveSettings(null).customProvider, { baseUrl: "", models: [], overrides: {}, manualModels: [] });
+		assert.deepEqual(resolveSettings(null).customProviders, []);
 	});
 	it("carries stored pins through to the concrete view", () => {
 		const resolved = resolveSettings({
 			version: 1,
-			customProvider: { baseUrl: "http://h/v1", models: [{ id: "a" }], overrides: { a: { context: 32768 } } },
+			customProviders: [{ id: "custom", baseUrl: "http://h/v1", models: [{ id: "a" }], overrides: { a: { context: 32768 } } }],
 		});
-		assert.deepEqual(resolved.customProvider.overrides, { a: { context: 32768 } });
+		assert.deepEqual(resolved.customProviders[0].overrides, { a: { context: 32768 } });
 	});
 	it("carries stored manual model ids through to the concrete view", () => {
 		const resolved = resolveSettings({
 			version: 1,
-			customProvider: { baseUrl: "http://h/v1", models: [{ id: "a" }], manualModels: ["a"] },
+			customProviders: [{ id: "custom", baseUrl: "http://h/v1", models: [{ id: "a" }], manualModels: ["a"] }],
 		});
-		assert.deepEqual(resolved.customProvider.manualModels, ["a"]);
+		assert.deepEqual(resolved.customProviders[0].manualModels, ["a"]);
 	});
 });
 
@@ -194,9 +194,9 @@ describe("manual model ids", () => {
 	});
 	it("the sanitizer keeps a clean manual list and drops an empty one", () => {
 		const kept = sanitizeUserSettings({ version: 1, customProvider: { baseUrl: "http://h/v1", manualModels: [" a ", "a", "b"] } });
-		assert.deepEqual(kept?.customProvider?.manualModels, ["a", "b"]);
+		assert.deepEqual(kept?.customProviders?.[0]?.manualModels, ["a", "b"]);
 		const dropped = sanitizeUserSettings({ version: 1, customProvider: { baseUrl: "http://h/v1", manualModels: [] } });
-		assert.equal(dropped?.customProvider?.manualModels, undefined);
+		assert.equal(dropped?.customProviders?.[0]?.manualModels, undefined);
 	});
 	it("mergeManualModels adds typed ids with defaults and never replaces discovered metadata", () => {
 		const merged = mergeManualModels([{ id: "b", image: true, context: 65536 }], ["c", "b", "a"]);
@@ -213,6 +213,8 @@ describe("buildOpenAiCompatibleProvider / syncCustomProvider", () => {
 
 	it("maps ids to defaults and marks image-capable models image-input", () => {
 		const provider = buildOpenAiCompatibleProvider({
+			id: "custom",
+			name: "Custom endpoint",
 			baseUrl: "http://h/v1",
 			models: [{ id: "m1" }, { id: "m2", image: true }],
 		});
@@ -232,6 +234,8 @@ describe("buildOpenAiCompatibleProvider / syncCustomProvider", () => {
 
 	it("carries endpoint token limits when present", () => {
 		const provider = buildOpenAiCompatibleProvider({
+			id: "custom",
+			name: "Custom endpoint",
 			baseUrl: "http://h/v1",
 			models: [{ id: "big", context: 196608, maxTokens: 393216 }],
 		});
@@ -242,6 +246,8 @@ describe("buildOpenAiCompatibleProvider / syncCustomProvider", () => {
 
 	it("a user pin beats the endpoint, which beats the compiled default", () => {
 		const provider = buildOpenAiCompatibleProvider({
+			id: "custom",
+			name: "Custom endpoint",
 			baseUrl: "http://h/v1",
 			models: [{ id: "pinned", context: 32768, maxTokens: 4096 }, { id: "detected", context: 65536 }, { id: "bare" }],
 			overrides: { pinned: { context: 131072, maxTokens: 16384 } },
@@ -256,6 +262,8 @@ describe("buildOpenAiCompatibleProvider / syncCustomProvider", () => {
 
 	it("the thinking pin is tri-state: false beats a detected-true endpoint, true beats silence", () => {
 		const provider = buildOpenAiCompatibleProvider({
+			id: "custom",
+			name: "Custom endpoint",
 			baseUrl: "http://h/v1",
 			models: [{ id: "liar", reasoning: true }, { id: "silent" }],
 			overrides: { liar: { reasoning: false }, silent: { reasoning: true } },
@@ -269,6 +277,8 @@ describe("buildOpenAiCompatibleProvider / syncCustomProvider", () => {
 
 	it("gives a reasoning-capable model the standard thinking levels (others stay \"off\")", () => {
 		const provider = buildOpenAiCompatibleProvider({
+			id: "custom",
+			name: "Custom endpoint",
 			baseUrl: "http://h/v1",
 			models: [{ id: "thinker", reasoning: true }, { id: "plain" }],
 		});
@@ -281,7 +291,7 @@ describe("buildOpenAiCompatibleProvider / syncCustomProvider", () => {
 	});
 
 	it("registers the native provider in the shared collection", () => {
-		piModels().setProvider(buildOpenAiCompatibleProvider({ baseUrl: "http://h/v1", models: [{ id: "live" }] }));
+		piModels().setProvider(buildOpenAiCompatibleProvider({ id: "custom", name: "Custom endpoint", baseUrl: "http://h/v1", models: [{ id: "live" }] }));
 		assert.ok(piModels().getProvider(CUSTOM_PROVIDER.id), "provider registered");
 		assert.ok(piModels().getModel(CUSTOM_PROVIDER.id, "live"), "model resolvable");
 		piModels().deleteProvider(CUSTOM_PROVIDER.id);
@@ -382,7 +392,7 @@ describe("discoverModels", () => {
 				[result.models, undefined, 128000],
 				[result.models, { "gpt-6.1-sol": { context: 32768, maxTokens: 4096 } }, 4096],
 			] as const) {
-				models.setProvider(buildOpenAiCompatibleProvider({ baseUrl: "http://h/v1", models: rows, overrides }));
+				models.setProvider(buildOpenAiCompatibleProvider({ id: "custom", name: "Custom endpoint", baseUrl: "http://h/v1", models: rows, overrides }));
 				let payload: unknown;
 				const reply = await models.streamSimple(models.getModel("custom", "gpt-6.1-sol")!, context, {
 					reasoning: "high", onPayload: (value) => { payload = value; throw new Error("CLOSED: payload captured"); },
