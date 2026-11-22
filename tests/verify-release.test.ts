@@ -1,5 +1,11 @@
-/** Offline unit and CLI tests for scripts/verify-release.ts (12 release assets:
- * 5 installers, mac updater ZIP, 3 blockmaps, and 3 latest*.yml feeds). */
+/**
+ * The final release gate (scripts/verify-release.ts) — pure-function tests
+ * plus CLI end-to-end runs, all offline against fixtures. The expected asset
+ * names asserted here are the ones verified against the INSTALLED
+ * app-builder-lib 26.16.1 (see the script header for the derivation):
+ * 12 assets — 5 installers (dmg / NSIS exe / AppImage / deb / pacman), the mac
+ * updater ZIP, its/exe/dmg blockmaps, and the three latest*.yml feeds.
+ */
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import * as fs from "node:fs";

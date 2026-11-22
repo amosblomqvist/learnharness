@@ -443,9 +443,32 @@ function createWindow(url, beforeLoad) {
  * lights, is impossible without rebuilding the window). */
 const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
 
-/* Auto-update via GitHub Releases (Mac ZIP/Squirrel.Mac, Win NSIS, Linux
- * AppImage/DebUpdater/PacmanUpdater; deb and pacman may prompt for elevation).
- * Disabled in dev; errors log without crashing. */
+/* ── Auto-update (Wave C, owner 2026-10-10: silent download + restart ─────
+ * banner; checks at startup + every 24h) ─────────────────────────────────
+ *
+ * Feed: GitHub Releases (electron-builder.yml publish → app-update.yml,
+ * baked + signed into the bundle). macOS needs the app signed (it is —
+ * Developer ID) and updates ride the zip target (Squirrel.Mac); blockmaps
+ * give differential downloads for free. Windows uses NSIS; Linux uses
+ * AppImage, DebUpdater, or PacmanUpdater (6.8.9 supports deb and pacman;
+ * installation can request administrator permission via the package manager).
+ *
+ * Hard rules:
+ *  - DEV NEVER UPDATES: !app.isPackaged skips the updater entirely — the
+ *    dev world runs `next dev` and has no signed bundle.
+ *  - THE UPDATER CAN NEVER TAKE THE APP DOWN: every event and check is
+ *    caught and logged (feed down, disk full, bad signature — all just
+ *    log lines; the app keeps working, update or no update).
+ *  - LH_UPDATE_FEED (env): overrides the baked GitHub feed with a generic
+ *    local server — the pre-release verification drill (serve
+ *    latest-mac.yml + zip + blockmap from any localhost HTTP dir and
+ *    watch a real installed copy find/download/restart). Test-only seam.
+ *
+ * Install path: the downloaded update applies on quit (autoInstallOnAppQuit
+ * — Squirrel.Mac stages natively and swaps on relaunch). The renderer
+ * banner asks for an immediate restart via "lh:update-install"; on macOS/
+ * Windows we kill the child server FIRST so Squirrel's bundle swap cannot
+ * race before-quit, while on Linux before-quit stops it after install succeeds. */
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let autoUpdater = null; // electron-updater's, packaged builds only
 // Observational only: this snapshot NEVER gates a check, download or install.

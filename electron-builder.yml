@@ -181,11 +181,12 @@ linux:
   category: Education
   # Match Electron's app_id/WM_CLASS to the installed desktop launcher.
   syncDesktopName: true
-  # All three targets update via electron-updater 6.8.9: AppImage replaces its
-  # own file; deb (dpkg/apt) and pacman (pacman -U, no -Sy) may request elevation.
+  # All three targets update via electron-updater 6.8.9. AppImage replaces its
+  # own file; deb and pacman use the system package manager and may request
+  # administrator permission.
 pacman:
-  # Explicit Arch runtime deps: drops http-parser (removed from Arch repos;
-  # still in app-builder-lib 26.16.1's default pacman depends list).
+  # Explicit Arch runtime deps: app-builder-lib 26.16.1's default pacman list
+  # includes http-parser, which was removed from Arch's official repositories.
   depends:
     - c-ares
     - ffmpeg

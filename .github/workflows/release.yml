@@ -226,9 +226,13 @@ jobs:
             dist/*.blockmap
             dist/latest*.yml
 
-  # Final read-only gate after packaging: require the tag's single draft to
-  # hold all 12 expected assets (5 installers, mac updater ZIP, 3 blockmaps,
-  # 3 latest*.yml feeds) matching package.json version. Skipped on dispatch.
+  # The last gate before a human publishes: after ALL three packaging jobs
+  # have uploaded, fail the run unless the tag's single draft release holds
+  # exactly the 12 verified assets (5 installers + mac updater ZIP + their
+  # blockmaps + 3 latest*.yml feeds) and the feeds reference those uploads
+  # by exact name at the package.json version. Read-only: it never creates,
+  # edits, publishes, or deletes anything. Manual rehearsals upload nothing,
+  # so there is no draft to verify and the job stays skipped.
   verify:
     name: Verify draft release
     needs: package
