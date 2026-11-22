@@ -1,0 +1,16 @@
+.sm-root { color: var(--foreground, inherit); font-size: 14px; line-height: 1.5; padding: 16px; max-width: 900px; margin: 0 auto; }
+.sm-root .sm-toolbar { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin: 12px 0; }
+.sm-root .sm-button { display: inline-flex; }
+.sm-root .sm-check, .sm-root .sm-item-label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+.sm-root input[type="checkbox"] { accent-color: var(--primary, #888); }
+.sm-root .sm-muted { color: var(--muted-foreground, #888); font-size: 12px; margin: 0; }
+.sm-root .sm-status, .sm-root .sm-summary { margin: 0 0 8px; }
+.sm-root .sm-status:empty, .sm-root .sm-summary:empty, .sm-root .sm-error:empty { display: none; }
+.sm-root .sm-error { color: var(--destructive, #dc5555); white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
+.sm-root .sm-list { list-style: none; margin: 0; padding: 0; border: 1px solid var(--border, #8885); border-radius: 10px; overflow: hidden; }
+.sm-root .sm-list > li { padding: 10px 12px; }
+.sm-root .sm-list > li + li { border-top: 1px solid var(--border, #8885); }
+.sm-root .sm-item-head { display: flex; align-items: baseline; flex-wrap: wrap; gap: 4px 10px; min-width: 0; }
+.sm-root .sm-item-name { font-weight: 600; overflow-wrap: anywhere; }
+.sm-root .sm-state { color: var(--muted-foreground, #888); font-size: 12px; }
+.sm-root .sm-statement { margin: 4px 0 0 26px; color: var(--muted-foreground, #888); overflow-wrap: anywhere; }

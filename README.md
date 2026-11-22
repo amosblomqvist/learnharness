@@ -33,6 +33,7 @@ On top of upstream LearnHarness, this fork adds:
 - **External CLI providers** for Codex and Gemini CLI alongside Claude Code
 - **Explainer**, a diagram-led HTML page sub-agent tool for lessons
 - **Fork releases** for Windows x64 builds and isolated auto-updates
+- **Shared Memory**, a core plugin that manually sends knowledge-graph propositions to shared memory
 
 ### Course packs
 

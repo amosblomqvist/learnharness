@@ -24,9 +24,9 @@ of replacing these primary examples.
 
 ## Core references are not Community packages
 
-The four IDs **`flashcards`**, **`coding-questions`**, **`drawing-pad`** and
-**`rich-code-blocks`** are reserved for app-shipped Core plugins, even when a Core
-package is disabled, broken or missing. Their sources are included for study and
+The five IDs **`flashcards`**, **`coding-questions`**, **`drawing-pad`**,
+**`rich-code-blocks`** and **`shared-memory`** are reserved for app-shipped Core plugins, even when a Core
+package is disabled, broken or missing. The sources of the four included here are for study and
 adaptation, not installation as Community duplicates. Enable the app-supplied features
 in **Settings → Core plugins**. App updates supply Core code; writable records live
 under `<learning data>/core-plugin-data/<id>/`, separate from that code.
@@ -108,7 +108,7 @@ and copies required assets/notices. Build cleanup refuses symlinked `dist/` and
 misplaced `dist/data/` and preserves sibling `data/`. It does not start/build the host,
 install/enable a plugin, call a model or update Core code. For a newly identified
 Community fork or UI Showcase, follow the [Community installation guide](plugin-authoring.md#package-and-installation);
-do not install the four reserved-ID references.
+do not install the reserved-ID references.
 
 ## Reading routes
 
