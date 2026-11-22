@@ -50,6 +50,7 @@ import {
 	isKnownAuthKey,
 	isProviderEnvVar,
 	maskKey,
+	providerKeyEnvVars,
 	validateKeyShape,
 } from "../core/auth-keys.ts";
 import { authStore } from "../store/auth.ts";
@@ -99,7 +100,7 @@ export function initAuthEnv(): void {
 		// Provider env vars are managed names too (provider-keys interlude):
 		// an env-exported OPENAI_API_KEY with a file copy gets honest shadow
 		// semantics, exactly like the curated vars.
-		...AUTH_PROVIDER_KEYS.map((p) => p.envVar),
+		...AUTH_PROVIDER_ENV_VARS,
 		CUSTOM_PROVIDER.envVar,
 	]);
 	if (envKeysIgnored()) {
@@ -203,7 +204,7 @@ export function providerKeyPresent(provider: string): boolean {
 	if (provider === CLAUDE_CODE_PROVIDER) return claudeCodeAvailable();
 	if (isSubscriptionProvider(provider)) return subscriptionConnected(provider);
 	const info = AUTH_PROVIDER_KEYS.find((p) => p.id === provider);
-	return info ? keyValue(info.envVar) !== undefined : true;
+	return !info || providerKeyEnvVars(info).some((envVar) => keyValue(envVar) !== undefined);
 }
 
 /**

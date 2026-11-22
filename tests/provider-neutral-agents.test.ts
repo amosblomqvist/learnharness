@@ -249,13 +249,25 @@ describe("provider-neutral raw agent loops", { concurrency: false }, () => {
 		// or model refresh: this is a broad resolver contract, not wire coverage.
 		await isolated({}, async () => {
 			const env = Object.fromEntries(AUTH_PROVIDER_KEYS.map(({ envVar }) => [envVar, `dummy-resolver-${envVar}`]));
+			for (const { legacyEnvVar } of AUTH_PROVIDER_KEYS) {
+				if (legacyEnvVar) env[legacyEnvVar] = `dummy-resolver-${legacyEnvVar}`;
+			}
 			const models = createModels({ authContext: { env: async (name) => env[name], fileExists: async () => false } });
 			for (const provider of builtinProviders()) models.setProvider(provider);
-			for (const { id, envVar } of AUTH_PROVIDER_KEYS) {
+			for (const { id, envVar, legacyEnvVar } of AUTH_PROVIDER_KEYS) {
 				const resolved = await models.getAuth(id);
 				assert.ok(resolved, id);
 				assert.equal(resolved.source, envVar, id);
 				assert.equal(resolved.auth.apiKey, env[envVar], id);
+				if (legacyEnvVar) {
+				const preferred = env[envVar];
+				assert.ok(preferred, envVar);
+					delete env[envVar];
+					const legacy = await models.getAuth(id);
+					assert.equal(legacy?.source, legacyEnvVar, id);
+					assert.equal(legacy?.auth.apiKey, env[legacyEnvVar], id);
+				env[envVar] = preferred;
+				}
 			}
 			// In particular, intentionally shared variables must serve BOTH rows.
 			for (const envVar of new Set(AUTH_PROVIDER_KEYS.map((p) => p.envVar))) {

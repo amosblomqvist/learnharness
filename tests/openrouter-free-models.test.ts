@@ -8,7 +8,7 @@ import { callCost } from "../src/server/pricing.ts";
 
 const specimens = [
 	{ id: "recursive/flint-v1.0:free", input: ["text"] },
-	{ id: "xingchen-agi/xing4.0-29b-a4b:free", input: ["text"] },
+	{ id: "baidu/ernie-5.5-flash-preview:free", input: ["text"] },
 	{ id: "nvidia/nemotron-3.5-super-vl:free", input: ["text", "image"] },
 	{ id: "openrouter/free", input: ["text", "image"] },
 ];
@@ -52,7 +52,7 @@ describe("bundled OpenRouter free catalog (offline, no live discovery)", { concu
 		});
 	}
 	it("removed/unknown native models remain unpriced and unresolvable, never aliased to a paid fallback", () => {
-		for (const id of ["openai/gpt-3.5-turbo", "removed/no-such-model"]) {
+		for (const id of ["openai/gpt-3.5-turbo", "xingchen-agi/xing4.0-29b-a4b:free", "removed/no-such-model"]) {
 			assert.equal(callCost({ inputTokens: 1, outputTokens: 1 }, `openrouter:${id}`), null);
 			assert.throws(() => piEngineForSpec({ provider: "openrouter", id }), /catalog has no model/);
 		}

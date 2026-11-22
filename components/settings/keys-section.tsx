@@ -30,7 +30,9 @@ import {
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
 	CUSTOM_PROVIDER,
 	normalizeBaseUrl,
+	providerKeyEnvVars,
 	type AuthKeyStatus,
+	type AuthProviderInfo,
 	type CustomModel,
 	type CustomModelOverride,
 } from "@/src/core";
@@ -46,11 +48,7 @@ import { DictationLanguageSetting } from "@/components/dictation-language";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
-export interface ProviderKeyInfo {
-	id: string;
-	envVar: string;
-	label: string;
-}
+export type ProviderKeyInfo = AuthProviderInfo;
 
 interface KeysResponse {
 	keys: AuthKeyStatus[];
@@ -110,7 +108,7 @@ export function classifyKeys(
 } {
 	const byId = new Map(statuses.map((s) => [s.id, s]));
 	const isTool = (id: string) => (TOOL_IDS as readonly string[]).includes(id);
-	const providerEnv = new Set((providers ?? []).map((p) => p.envVar));
+	const providerEnv = new Set((providers ?? []).flatMap(providerKeyEnvVars));
 	const synth = (id: string): AuthKeyStatus => ({
 		id,
 		info: null,
@@ -137,15 +135,17 @@ export function classifyKeys(
 		providerRows,
 		toolRows: TOOL_IDS.map((id) => byId.get(id) ?? synth(id)),
 		unknownRows,
-		addable: (providers ?? []).filter((p) => !byId.has(p.envVar)),
+		addable: (providers ?? []).filter((p) => !providerKeyEnvVars(p).some((envVar) => byId.has(envVar))),
 	};
 }
 
 /** A key row names its credential, not whichever provider sorts first.
  * Pi exposes Zen and Go separately but both read OPENCODE_API_KEY. */
 export function providerKeyLabel(id: string, providers: readonly ProviderKeyInfo[] | undefined): string | undefined {
-	const matches = providers?.filter((p) => p.envVar === id);
+	const matches = providers?.filter((p) => providerKeyEnvVars(p).includes(id));
 	if (matches?.some((p) => p.id === "opencode") && matches.some((p) => p.id === "opencode-go")) return "OpenCode (Zen / Go)";
+	if (matches?.length && id === "QWEN_TOKEN_PLAN_API_KEY") return "Qwen Token Plan";
+	if (matches?.length && id === "QWEN_TOKEN_PLAN_CN_API_KEY") return "Qwen Token Plan CN";
 	return matches?.[0]?.label;
 }
 

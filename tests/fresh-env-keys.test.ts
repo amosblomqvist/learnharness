@@ -56,6 +56,8 @@ fs.writeFileSync(AUTH, JSON.stringify({ OPENAI_API_KEY: "sk-file-fresh-file-fres
 //    switch the FILE value must win, and the env copy must be deleted)
 process.env.OPENROUTER_API_KEY = "sk-or-env-env-env";
 process.env.OPENAI_API_KEY = "sk-openai-env-env-env";
+process.env.QWEN_TOKEN_PLAN_API_KEY = "fixture-qwen-legacy-env-key";
+process.env.QWEN_TOKEN_PLAN_TEAM_API_KEY = "fixture-qwen-team-env-key";
 
 // THE SWITCH — set before first import (exactly how the launcher boots).
 process.env.LH_IGNORE_ENV_KEYS = "1";
@@ -77,6 +79,8 @@ describe("the fresh-user switch (boot under LH_IGNORE_ENV_KEYS=1)", () => {
 
 	it("THE ENGINE PATH: env-only keys are DELETED from the process — pi-ai's native per-request env resolution finds nothing", () => {
 		assert.equal(process.env.OPENROUTER_API_KEY, undefined, "deleted from process.env at boot");
+		assert.equal(process.env.QWEN_TOKEN_PLAN_API_KEY, undefined);
+		assert.equal(process.env.QWEN_TOKEN_PLAN_TEAM_API_KEY, undefined);
 	});
 
 	it("the env copy of a file-backed var is deleted; the FILE value is what fills the env (only auth.json counts)", () => {

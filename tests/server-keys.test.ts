@@ -34,6 +34,9 @@ for (const varName of [
 	"GOOGLE_CSE_ID",
 	"OPENAI_API_KEY",
 	"FUTURE_PLANS_TOKEN",
+	"QWEN_TOKEN_PLAN_API_KEY",
+	"QWEN_TOKEN_PLAN_TEAM_API_KEY",
+	"QWEN_TOKEN_PLAN_INDIVIDUAL_API_KEY",
 ]) {
 	delete process.env[varName];
 }
@@ -49,16 +52,18 @@ fs.writeFileSync(
 	JSON.stringify({
 		OPENROUTER_API_KEY: "sk-or-v1-filefilefile",
 		FUTURE_PLANS_TOKEN: "opaque-plans-token",
+		QWEN_TOKEN_PLAN_API_KEY: "fixture-qwen-shared-key",
 	}),
 );
 // Real env (set BEFORE the module's first import → boot snapshots it):
 process.env.OPENROUTER_API_KEY = "sk-or-v1-envvalue99";
 
 // Import AFTER env setup — module init runs the boot fill-gap + snapshot.
-const { deleteKey, initAuthEnv, keyStatuses, keyValue, resolveKeyStatuses, saveKey, isWritableAuthKey } = await import(
+const { deleteKey, initAuthEnv, keyStatuses, keyValue, providerKeyPresent, resolveKeyStatuses, saveKey, isWritableAuthKey } = await import(
 	"../src/server/keys.ts"
 );
 const { authStore } = await import("../src/store/auth.ts");
+const { catalogProviders } = await import("../src/server/model-catalog.ts");
 
 const ENV_OWNED = "sk-or-v1-envvalue99";
 
@@ -107,6 +112,20 @@ describe("boot fill-gap + precedence", () => {
 		assert.equal(keyValue("OPENROUTER_API_KEY"), ENV_OWNED);
 		assert.equal(keyValue("FUTURE_PLANS_TOKEN"), "opaque-plans-token");
 		assert.equal(keyValue("DEEPGRAM_API_KEY"), undefined);
+	});
+
+	it("keeps a saved legacy Qwen key editable and available to both existing providers", () => {
+		const legacy = "QWEN_TOKEN_PLAN_API_KEY";
+		assert.equal(authStore.authVars()[legacy], "fixture-qwen-shared-key");
+		assert.equal(process.env[legacy], "fixture-qwen-shared-key");
+		assert.equal(keyStatuses().find((row) => row.id === legacy)?.source, "file");
+		assert.ok(isWritableAuthKey(legacy));
+		for (const id of ["qwen-token-plan", "qwen-token-plan-individual"]) {
+			assert.ok(providerKeyPresent(id), id);
+			assert.equal(catalogProviders().find((row) => row.id === id)?.keyPresent, true);
+		}
+		assert.equal(authStore.authVars().QWEN_TOKEN_PLAN_TEAM_API_KEY, undefined);
+		assert.equal(authStore.authVars().QWEN_TOKEN_PLAN_INDIVIDUAL_API_KEY, undefined);
 	});
 });
 

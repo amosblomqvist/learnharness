@@ -51,15 +51,27 @@ test("account/full and catalog authority changes reject outstanding old leases w
  ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch: 2, authorityRevision: 3, revision: 8 }, status: status("B"), invalidate: "none" });
  assert.equal(chatGPTModels().length, 0); await assert.rejects(chatGPTLease(newScope, false));
 });
-test("account-offered GPT-6.1 Terra resolves from the bundled Responses catalog", async () => {
+test("account-offered GPT-6.1 Terra and GPT-6.2 models use bundled Responses metadata", async () => {
+ const offered = [
+  { id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)" },
+  { id: "gpt-6.2-sol", name: "GPT-6.2 Sol (account)" },
+  { id: "gpt-6.2-astra", name: "GPT-6.2 Astra (account)" },
+ ];
  const refresh = refreshConnectionCatalog("chatgpt");
  reply(pending.at(-1), { ...value("B", 9, "B", 3), models: [
-  { id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)" },
+  ...offered,
   { id: "not-in-the-bundled-catalog", name: "Unsupported" },
  ] });
  await refresh;
- assert.deepEqual(chatGPTModels().map(({ provider, id, name, api, cost }) => ({ provider, id, name, api, cost })), [{
-  provider: "chatgpt", id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)", api: "openai-responses",
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
- }]);
+ const models = chatGPTModels();
+ assert.deepEqual(models.map(({ id, name }) => ({ id, name })), offered);
+ for (const model of models) {
+  const bundled = piModels().getModel("openai", model.id);
+  assert.ok(bundled, model.id);
+  assert.equal(model.provider, "chatgpt");
+  assert.equal(model.api, "openai-responses");
+  assert.equal(model.contextWindow, bundled.contextWindow);
+  assert.equal(model.maxTokens, bundled.maxTokens);
+  assert.deepEqual(model.cost, { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 });
+ }
 });

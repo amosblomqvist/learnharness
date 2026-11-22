@@ -20,7 +20,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { AUTH_PROVIDER_KEYS, isProviderEnvVar } from "../src/core/auth-keys.ts";
+import { AUTH_PROVIDER_KEYS, isProviderEnvVar, providerKeyEnvVars } from "../src/core/auth-keys.ts";
 import { builtinProviders } from "../node_modules/@earendil-works/pi-ai/dist/providers/all.js";
 import { findEnvKeys } from "../node_modules/@earendil-works/pi-ai/dist/env-api-keys.js";
 
@@ -46,26 +46,26 @@ const truthyEnv = new Proxy({} as Record<string, string>, {
 
 /** The truth, derived from pi-ai at test time. */
 function deriveProviders() {
-	const rows: Array<{ id: string; envVar: string; label: string }> = [];
+	const rows: Array<{ id: string; envVars: string[]; label: string }> = [];
 	for (const p of builtinProviders()) {
 		const keys = findEnvKeys(p.id, truthyEnv);
 		if (!keys || EXCLUDED_PROVIDERS.has(p.id)) continue;
 		const first = keys[0];
 		if (!first) continue; // unreachable with the truthy proxy — satisfies the checker
-		const envVar = p.id === "anthropic" ? "ANTHROPIC_API_KEY" : first;
-		rows.push({ id: p.id, envVar, label: p.name });
+		const envVars = p.id.startsWith("qwen-token-plan") ? keys : [p.id === "anthropic" ? "ANTHROPIC_API_KEY" : first];
+		rows.push({ id: p.id, envVars, label: p.name });
 	}
 	rows.sort((a, b) => a.id.localeCompare(b.id));
 	return rows;
 }
 
 describe("AUTH_PROVIDER_KEYS — the no-drift pin against pi-ai", () => {
-	it("is EXACTLY pi-ai's plain-key provider table (id, envVar, label), exclusions applied", () => {
+	it("is EXACTLY pi-ai's plain-key provider table (id, envVars, label), exclusions applied", () => {
 		const truth = deriveProviders();
 		const mine = [...AUTH_PROVIDER_KEYS].sort((a, b) => a.id.localeCompare(b.id));
 		assert.deepEqual(
-			mine.map((p) => [p.id, p.envVar, p.label]),
-			truth.map((p) => [p.id, p.envVar, p.label]),
+			mine.map((p) => [p.id, providerKeyEnvVars(p), p.label]),
+			truth.map((p) => [p.id, p.envVars, p.label]),
 			"pi-ai's provider env-key table changed — regenerate AUTH_PROVIDER_KEYS (src/core/auth-keys.ts) from the derivation in this test",
 		);
 	});
@@ -85,7 +85,7 @@ describe("AUTH_PROVIDER_KEYS — the no-drift pin against pi-ai", () => {
 	});
 
 	it("isProviderEnvVar: exactly the table's distinct env vars", () => {
-		for (const p of AUTH_PROVIDER_KEYS) assert.ok(isProviderEnvVar(p.envVar), `${p.envVar} is a provider var`);
+		for (const envVar of AUTH_PROVIDER_KEYS.flatMap(providerKeyEnvVars)) assert.ok(isProviderEnvVar(envVar), `${envVar} is a provider var`);
 		assert.ok(!isProviderEnvVar("OPENROUTER_API_KEYS"), "typo'd name is not one");
 		assert.ok(!isProviderEnvVar("DEEPGRAM_API_KEY"), "curated ≠ provider — separate surfaces");
 	});

@@ -20,7 +20,7 @@ import {
 	sectionedSegments,
 } from "../components/settings/agent-section.tsx";
 import { nextOverrides } from "../components/settings/keyboard-section.tsx";
-import { classifyKeys, keyStatusLine, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
+import { classifyKeys, keyStatusLine, providerKeyLabel, type ProviderKeyInfo } from "../components/settings/keys-section.tsx";
 import type { AgentSettings, AuthKeyStatus, ModelsSettings } from "../src/core";
 import { resolveSettings, slotsConfigured } from "../src/core";
 import { setupStage } from "../components/setup-dialog.tsx";
@@ -315,6 +315,19 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 		const out = classifyKeys([synth("PLANS_LOGIN_TOKEN", true)], providers);
 		assert.equal(out.unknownRows.length, 1);
 		assert.equal(out.providerRows.length, 0);
+	});
+
+	it("keeps a Qwen legacy key in the editable provider rows", () => {
+		const legacy = synth("QWEN_TOKEN_PLAN_API_KEY", true);
+		const qwen = [{
+			id: "qwen-token-plan", envVar: "QWEN_TOKEN_PLAN_TEAM_API_KEY",
+			legacyEnvVar: legacy.id, label: "Qwen Token Plan Team",
+		}];
+		const out = classifyKeys([legacy], qwen);
+		assert.deepEqual(out.providerRows, [legacy]);
+		assert.deepEqual(out.unknownRows, []);
+		assert.deepEqual(out.addable, []);
+		assert.equal(providerKeyLabel(legacy.id, qwen), "Qwen Token Plan");
 	});
 
 	it("providers seam absent = addable empty, nothing crashes", () => {

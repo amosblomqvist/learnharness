@@ -9,7 +9,7 @@ import { setModelCatalogOverlay } from "../agent/models.ts";
 import { AUTH_PROVIDER_KEYS } from "../core/auth-keys.ts";
 import type { ModelCatalogRefreshOutcome } from "../core/contracts/models.ts";
 import { writeFileAtomicSync } from "../store/atomic-write.ts";
-import { keyValue } from "./keys.ts";
+import { providerKeyPresent } from "./keys.ts";
 import { readBoundedJson } from "./custom-provider-body.ts";
 
 const FILE = path.join(/* turbopackIgnore: true */ PATHS.data, "model-catalog.json");
@@ -215,7 +215,7 @@ async function fetchShard(provider: string, signal: AbortSignal): Promise<Model<
 }
 
 async function refresh(state: State): Promise<ModelCatalogRefreshOutcome> {
-	const configured = AUTH_PROVIDER_KEYS.filter(({ id, envVar }) => builtins.has(id) && keyValue(envVar) !== undefined);
+	const configured = AUTH_PROVIDER_KEYS.filter(({ id }) => builtins.has(id) && providerKeyPresent(id));
 	if (!configured.length) return "no-providers";
 	const controller = new AbortController();
 	const signal = AbortSignal.any([controller.signal, AbortSignal.timeout(REQUEST_TIMEOUT_MS)]);

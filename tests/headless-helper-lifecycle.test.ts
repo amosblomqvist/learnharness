@@ -16,6 +16,10 @@ function deferred() {
 /** Production entry point, with only process/CDP transport mocked. No process,
  * browser, DNS lookup or socket is actually opened by this fixture. */
 function lifecycleFixture() {
+	const previousElectronDist = process.env.ELECTRON_OVERRIDE_DIST_PATH;
+	// The helper's spawn is mocked. Resolve a fixture path without making
+	// Electron download a binary on the first require after a clean install.
+	process.env.ELECTRON_OVERRIDE_DIST_PATH = "fixture-electron-dist";
 	const killed: number[] = [];
 	const spawned = deferred(), heldLoad = deferred(), releaseLoad = deferred();
 	let pauseHandshake = false, connections = 0;
@@ -67,6 +71,7 @@ function lifecycleFixture() {
 		const id = Number(new URL(options.browserWSEndpoint!).pathname.slice(1));
 		return helpers[id - 1]!.browser;
 	});
+	mock.method(puppeteer, "launch", async () => { throw new Error("Unexpected Chrome launch in the helper fixture"); });
 	return {
 		helpers, killed, spawned, heldLoad, releaseLoad, connections: () => connections,
 		pauseHandshake() { pauseHandshake = true; },
@@ -76,6 +81,8 @@ function lifecycleFixture() {
 			// this fixture's module-global helper, or start a real process.
 			for (const helper of helpers) { helper.owner.alive = false; helper.proc.exitCode = 0; }
 			mock.restoreAll(); syncBuiltinESMExports();
+			if (previousElectronDist === undefined) delete process.env.ELECTRON_OVERRIDE_DIST_PATH;
+			else process.env.ELECTRON_OVERRIDE_DIST_PATH = previousElectronDist;
 		},
 	};
 }

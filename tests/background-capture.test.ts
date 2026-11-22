@@ -31,7 +31,8 @@ const { createBackgroundCapture, backgroundCaptureEnabled, backgroundCaptureDir,
 const { runSubagent } = await import("../src/agent/subagents/pi-run.ts");
 const { streamSimple } = await import("@earendil-works/pi-ai/api/openai-completions");
 const { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall } = await import("@earendil-works/pi-ai");
-const model = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../node_modules/@earendil-works/pi-ai/dist/providers/data/nvidia.json"), "utf8"))["openai-completions"]["chat:deepseek-ai/deepseek-v4.1-flash"] as Model<"openai-completions">;
+const model = JSON.parse(fs.readFileSync(path.join(import.meta.dirname, "../node_modules/@earendil-works/pi-ai/dist/providers/data/nvidia.json"), "utf8"))["openai-completions"]["chat:z-ai/glm-5.3-flash"] as Model<"openai-completions">;
+assert.ok(model, "Use the installed reasoning-capable NVIDIA model definition");
 const identity = { provider: model.provider, id: model.id, api: model.api };
 const { runPdfReaderAgent } = await import("../src/agent/subagents/pdf-reader.ts");
 const { runVisualMaker } = await import("../src/agent/subagents/visual-maker.ts");

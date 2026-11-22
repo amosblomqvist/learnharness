@@ -80,6 +80,7 @@ export function isKnownAuthKey(id: string): boolean {
 export interface AuthProviderInfo {
 	id: string;
 	envVar: string;
+	legacyEnvVar?: string;
 	label: string;
 }
 
@@ -99,8 +100,9 @@ export interface AuthProviderInfo {
  * account-scoped pair. Anthropic keeps ANTHROPIC_API_KEY only — its
  * AUTH_TOKEN/OAUTH_TOKEN alternates stay env-only. openai-codex exposes
  * no env-key (naturally absent). Providers sharing one env var (moonshotai
- * / moonshotai-cn, opencode / opencode-go, Qwen Token Plan variants,
- * xiaomi variants) each keep their own row — the UI groups as it wishes.
+ * / moonshotai-cn, opencode / opencode-go, xiaomi variants) each keep their own row. Qwen
+ * Token Plan providers prefer their plan-specific key and still accept the
+ * legacy shared key for their region.
  */
 export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "ant-ling", envVar: "ANT_LING_API_KEY", label: "Ant Ling" },
@@ -124,10 +126,10 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "opencode", envVar: "OPENCODE_API_KEY", label: "OpenCode Zen" },
 	{ id: "opencode-go", envVar: "OPENCODE_API_KEY", label: "OpenCode Go" },
 	{ id: "openrouter", envVar: "OPENROUTER_API_KEY", label: "OpenRouter" },
-	{ id: "qwen-token-plan", envVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan" },
-	{ id: "qwen-token-plan-cn", envVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan CN" },
-	{ id: "qwen-token-plan-individual", envVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan Individual" },
-	{ id: "qwen-token-plan-individual-cn", envVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan Individual CN" },
+	{ id: "qwen-token-plan", envVar: "QWEN_TOKEN_PLAN_TEAM_API_KEY", legacyEnvVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan Team" },
+	{ id: "qwen-token-plan-cn", envVar: "QWEN_TOKEN_PLAN_TEAM_CN_API_KEY", legacyEnvVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan Team CN" },
+	{ id: "qwen-token-plan-individual", envVar: "QWEN_TOKEN_PLAN_INDIVIDUAL_API_KEY", legacyEnvVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan Individual" },
+	{ id: "qwen-token-plan-individual-cn", envVar: "QWEN_TOKEN_PLAN_INDIVIDUAL_CN_API_KEY", legacyEnvVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan Individual CN" },
 	{ id: "radius", envVar: "RADIUS_API_KEY", label: "Radius" },
 	{ id: "together", envVar: "TOGETHER_API_KEY", label: "Together" },
 	{ id: "typesafe", envVar: "TYPESAFE_API_KEY", label: "TypeSafe" },
@@ -154,10 +156,15 @@ export const CUSTOM_PROVIDER = {
 	label: "Custom endpoint",
 } as const;
 
+/** Pi's preferred key name followed by the legacy alias it still accepts. */
+export function providerKeyEnvVars({ envVar, legacyEnvVar }: AuthProviderInfo): string[] {
+	return legacyEnvVar ? [envVar, legacyEnvVar] : [envVar];
+}
+
 /** Every distinct env var a model-provider key rides in (the write side's
  *  writability check — see isProviderEnvVar below; also drives which
  *  PRESENT provider vars surface as status rows). */
-export const AUTH_PROVIDER_ENV_VARS: ReadonlySet<string> = new Set(AUTH_PROVIDER_KEYS.map((p) => p.envVar));
+export const AUTH_PROVIDER_ENV_VARS: ReadonlySet<string> = new Set(AUTH_PROVIDER_KEYS.flatMap(providerKeyEnvVars));
 
 /** Is this env-var name the key of SOME pi-ai model provider? */
 export function isProviderEnvVar(envVar: string): boolean {
