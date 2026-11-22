@@ -421,7 +421,10 @@ describe("desktop release workflow", () => {
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
 		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
+	});
 
+	it("installs bsdtar before Linux packaging and uploads .pacman artifacts", () => {
+		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
 		const bsdtarIndex = packaging.steps.findIndex(step => step.run?.includes("libarchive-tools"));
 		assert.ok(bsdtarIndex >= 0 && bsdtarIndex < buildIndex, "install bsdtar on Linux before electron-builder builds pacman");
 		assert.equal(packaging.steps[bsdtarIndex]?.if, "runner.os == 'Linux'");
