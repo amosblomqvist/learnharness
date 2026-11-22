@@ -28,7 +28,7 @@ Build **on each target OS**. Next traces native binaries for its build machine; 
    This environment-prefix syntax is for a POSIX shell; CI uses Bash on every OS.
 3. `npm run build`
 4. `node scripts/smoke-provider-runtime.mjs` — check the **fresh trace before curation**, including native provider initialization and fixture payloads, not real sign-in/generation.
-5. `node scripts/build-server.mjs` — copy static assets, validate prompt assets, refuse known data/credential leaks, and remove only standalone-root old installers/development Electron.
+5. `node scripts/build-server.mjs` — copy static assets, validate prompt assets, refuse known data/credential leaks and external-module links that are not top-level packages, and remove only standalone-root old installers/development Electron.
 6. `node scripts/smoke-server.mjs --electron` — check renderer/demo dependencies, providers, gzip backpressure, and isolated standalone HTTP boot under Electron's Node.
 7. Package with Electron Builder using the appropriate local/release policy below.
 
