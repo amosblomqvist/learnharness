@@ -185,22 +185,18 @@ linux:
   # own file; deb and pacman use the system package manager and may request
   # administrator permission.
 pacman:
-  # Explicit Arch runtime deps: app-builder-lib 26.16.1's default pacman list
-  # includes http-parser, which was removed from Arch's official repositories.
+  # Runtime libraries dynamically linked by the bundled Electron binary on Arch.
   depends:
-    - c-ares
-    - ffmpeg
     - gtk3
-    - libevent
-    - libvpx
-    - libxslt
-    - libxss
-    - minizip
     - nss
-    - re2
-    - snappy
+    - alsa-lib
+    - mesa
+    - libxss
+    - libxtst
     - libnotify
-    - libappindicator-gtk3
+    - xdg-utils
+    - at-spi2-core
+    - libsecret
 publish:
   # Update feed = GitHub Releases (decided 2026-10-08): latest-mac.yml +
   # zip/blockmap live on releases; electron-updater reads them anonymously.
