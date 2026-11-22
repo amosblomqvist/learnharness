@@ -23,8 +23,6 @@ function activate(ctx) {
   // Activation only opens local plugin data; shared memory is contacted on send.
   const store = openStore(ctx.dataDirectory);
   const failures = new Map();
-  // Memories written to shared memory whose sent-record entry could not be saved.
-  const unrecorded = new Map();
   let run = null, disposed = false;
   const active = () => !disposed && !ctx.signal?.aborted;
   const notify = (topic, data) => { if (active()) ctx.events.emit(topic, data); };
@@ -95,7 +93,7 @@ function activate(ctx) {
         } else {
           const { args, next } = plan(entry, scope);
           // A memory written but not recorded locally must be replaced, not duplicated.
-          const lost = unrecorded.get(id);
+          const lost = store.unrecorded(id);
           if (lost) args.supersedes = lost;
           let memoryId;
           try {
@@ -111,12 +109,15 @@ function activate(ctx) {
           }
           try {
             store.saveRecord(next(memoryId));
-            unrecorded.delete(id);
+            // A stale entry left by a failed clear is dropped on the next load (older than the record).
+            try { store.saveUnrecorded(id, undefined); } catch { /* see above */ }
             failures.delete(id);
             results.push({ id, outcome: 'written', state: entry.state, memoryId });
           } catch (error) {
-            unrecorded.set(id, memoryId);
-            const reason = { kind: 'unrecorded', message: error.message };
+            let message = error.message;
+            // The store keeps the id in memory even when its own file cannot be written.
+            try { store.saveUnrecorded(id, memoryId); } catch { message += ' The written memory is remembered only until Shared Memory restarts.'; }
+            const reason = { kind: 'unrecorded', message };
             failures.set(id, reason);
             results.push({ id, outcome: 'failed', state: entry.state, reason, memoryId });
             run.stopRequested = true;

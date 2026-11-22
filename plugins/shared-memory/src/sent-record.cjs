@@ -6,6 +6,9 @@ const { randomUUID } = require('node:crypto');
 const FORMAT_VERSION = 1;
 const RECORD_FILE = 'sent-record.json';
 const SETTINGS_FILE = 'settings.json';
+// Memories written to shared memory whose sent-record entry could not be saved.
+// Kept apart from the sent record so it survives a failure to write that file.
+const UNRECORDED_FILE = 'unrecorded.json';
 const DEFAULT_SETTINGS = Object.freeze({ url: 'http://127.0.0.1:7820/mcp', scope: 'project:learning' });
 
 // Write to a temporary sibling, flush it, then rename over the target.
@@ -42,7 +45,7 @@ function validRecord(entry, id) {
     && typeof entry.sentAt === 'string' && typeof entry.retired === 'boolean';
 }
 
-/** Sent record and settings under the plugin's own data directory. */
+/** Sent record, unrecorded memories and settings under the plugin's own data directory. */
 function openStore(directory) {
   fs.mkdirSync(directory, { recursive: true });
   const recordFile = path.join(directory, RECORD_FILE);
@@ -58,6 +61,17 @@ function openStore(directory) {
     return savedRecord.propositions;
   };
   let records = loadRecords();
+
+  const unrecordedFile = path.join(directory, UNRECORDED_FILE);
+  const savedUnrecorded = readJson(unrecordedFile, 'unrecorded memories');
+  if (savedUnrecorded !== undefined && (!savedUnrecorded || savedUnrecorded.version !== FORMAT_VERSION || !savedUnrecorded.memories
+    || typeof savedUnrecorded.memories !== 'object'
+    || Object.values(savedUnrecorded.memories).some(entry => !entry || typeof entry.memoryId !== 'string' || !entry.memoryId || typeof entry.writtenAt !== 'string'))) {
+    throw new Error('Unsupported or invalid Shared Memory unrecorded memories. No data was changed.');
+  }
+  // An entry older than the proposition's saved record was already superseded by that record's write.
+  const unrecorded = Object.fromEntries(Object.entries(savedUnrecorded?.memories ?? {})
+    .filter(([id, entry]) => !(Object.hasOwn(records, id) && records[id].sentAt >= entry.writtenAt)));
 
   const savedSettings = readJson(settingsFile, 'settings');
   let settings;
@@ -78,6 +92,15 @@ function openStore(directory) {
       const next = { ...loadRecords(),[entry.propositionId]: { ...entry } };
       atomicWrite(recordFile, JSON.stringify({ version: FORMAT_VERSION, propositions: next }));
       records = next;
+    },
+    /** The memory id written for a proposition but missing from the sent record, if any. */
+    unrecorded: id => unrecorded[id]?.memoryId,
+    /** Set (memoryId) or clear (undefined) one proposition's unrecorded memory. Throws when the file cannot be written. */
+    saveUnrecorded(id, memoryId) {
+      if (memoryId === undefined && !Object.hasOwn(unrecorded, id)) return;
+      if (memoryId === undefined) delete unrecorded[id];
+      else unrecorded[id] = { memoryId, writtenAt: new Date().toISOString() };
+      atomicWrite(unrecordedFile, JSON.stringify({ version: FORMAT_VERSION, memories: unrecorded }));
     },
     settings: () => ({ ...settings }),
     saveSettings(next) {

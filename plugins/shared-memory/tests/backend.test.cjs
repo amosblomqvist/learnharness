@@ -375,6 +375,42 @@ test('a memory whose sent record could not be saved is superseded by the next se
   assert.equal(Object.hasOwn(h.server.writes[2], 'supersedes'), false);
 });
 
+test('a memory whose sent record could not be saved is still superseded after a new activation', async t => {
+  const h = await harness(t, graphOf([node('p1')]));
+  const recordFile = path.join(h.directory, 'sent-record.json');
+  h.server.behavior = (_args, index) => { if (index === 0) fs.mkdirSync(recordFile); };
+  assert.equal((await h.send(['p1'])).results[0].reason.kind, 'unrecorded');
+
+  fs.rmSync(recordFile, { recursive: true });
+  h.server.behavior = () => undefined;
+  h.activate();
+  assert.deepEqual(await h.states(), { p1: 'unsent' });
+  await h.send(['p1']);
+  assert.equal(h.server.writes[1].supersedes, 'mem-1');
+
+  // Once recorded, the next change supersedes the recorded memory, also after another activation.
+  h.graph = graphOf([node('p1', { statement: 'Revised p1.' })]);
+  h.activate();
+  await h.send(['p1']);
+  assert.equal(h.server.writes[2].supersedes, 'mem-2');
+});
+
+test('when neither the sent record nor the unrecorded memory can be saved, the reason says so', async t => {
+  const h = await harness(t, graphOf([node('p1')]));
+  h.server.behavior = (_args, index) => {
+    if (index === 0) for (const file of ['sent-record.json', 'unrecorded.json']) fs.mkdirSync(path.join(h.directory, file));
+  };
+  const [result] = (await h.send(['p1'])).results;
+  assert.equal(result.reason.kind, 'unrecorded');
+  assert.match(result.reason.message, /remembered only until Shared Memory restarts/);
+
+  // Within the same activation the memory is still superseded, not duplicated.
+  for (const file of ['sent-record.json', 'unrecorded.json']) fs.rmSync(path.join(h.directory, file), { recursive: true });
+  h.server.behavior = () => undefined;
+  await h.send(['p1']);
+  assert.equal(h.server.writes[1].supersedes, 'mem-1');
+});
+
 test('the sent record survives a new activation', async t => {
   const h = await harness(t, graphOf([node('p1'), node('p2')]));
   await h.send(['p1', 'p2']);
