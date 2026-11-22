@@ -1,71 +1,6 @@
 /**
- * verify-release.ts — the final desktop-release gate (2026-10-13).
- *
- * Runs in the release workflow's LAST job, after all three packaging jobs
- * have uploaded to the tag's single draft GitHub Release, and fails the
- * workflow unless that draft holds exactly what end users and
- * electron-updater need. The workflow never publishes; this script only
- * reads (release list via the workflow's read-only token, update feeds
- * downloaded by the workflow's own gh steps).
- *
- * Every expected file name below was verified against the INSTALLED
- * builder (app-builder-lib 26.15.3) — these are the artifacts it actually
- * emits for this repo's electron-builder.yml, not pattern guesses:
- *
- *   mac (dmg + zip, arm64; no user artifactName there):
- *     dmg    LearnHarness-<v>-arm64.dmg       + .blockmap (createBlockmap)
- *     zip    LearnHarness-<v>-arm64-mac.zip   + .blockmap (createBlockmap;
- *            Squirrel.Mac updates from the ZIP — it IS the updater payload)
- *     feed   latest-mac.yml — files[0] is the ZIP (writeUpdateInfoFiles
- *            sorts zip first) and the legacy top-level path/sha512 point
- *            at it.
- *   win (nsis x64; artifactName "${productName}-${version}-${arch}-setup.${ext}"):
- *     exe    LearnHarness-<v>-x64-setup.exe   + .blockmap (createBlockmap)
- *     feed   latest.yml — a single file entry, the exe.
- *   linux (AppImage + deb, x64; artifactName "${productName}-${version}-${arch}.${ext}"
- *            is user-forced at the linux level, so it overrides BOTH targets'
- *            default name formats, and ${arch} expands per target ext:
- *            x64→x86_64 for AppImage, x64→amd64 for deb):
- *     image  LearnHarness-<v>-x86_64.AppImage (no blockmap in 26.15.3)
- *     deb    LearnHarness-<v>-amd64.deb       (no blockmap)
- *     feed   latest-linux.yml — the AppImage and deb entries merged by
- *            writeUpdateInfoFiles (order not deterministic; checked as a set).
- *
- * GitHub asset names equal these file names (all are already "safe" GitHub
- * names, so electron-publish uploads under the plain name) and every yml
- * files[].url equals the uploaded asset name.
- *
- * Draft selection is FAIL-CLOSED and replicates the existing matching used
- * by the workflow's draft job and electron-builder's GitHub publisher:
- * tag_name equals the tag ("v0.2.0") OR the bare version ("0.2.0"). Zero
- * matches, 2+ matches, or a published match → fail. A draft matched only
- * via the bare unprefixed form is a reported hazard: electron-builder
- * matches both spellings, so a later run could create a SECOND draft under
- * the v-tag and split the assets across two releases.
- *
- * CLI (cwd = the checked-out tag revision):
- *   tsx scripts/verify-release.ts select <releases.json> --tag <tag>
- *     → one JSON object on stdout: {releaseId, matchedTagName, warnings,
- *       assets:[{id,name,size,state}]}; diagnostics on stderr. Used by the
- *       workflow to locate the draft and its asset ids.
- *   tsx scripts/verify-release.ts verify <releases.json> <metadata-dir> --tag <tag>
- *     → full gate; human report on stdout; exit 0 only when everything
- *       below passes.
- *
- * The gate checks, and fails closed on any of:
- *   - tag ≠ "v" + package.json version, or a malformed release list;
- *   - electron-builder.yml/package.json drifting from the shapes the
- *     expected names were derived from (update this file's expectations
- *     when the packaging config changes — deliberately strict);
- *   - draft selection problems (above);
- *   - expected assets missing, zero-size, not in state "uploaded",
- *     duplicated, or unexpected extras (stale names from an older run);
- *   - update feeds that do not parse, carry the wrong version, reference
- *     a path/URL instead of a bare asset name (traversal / untrusted
- *     origin), reference an asset the release does not hold, disagree
- *     with the API-reported asset size, lack/misplace entries (mac ZIP
- *     must be first and back the legacy path/sha512), or carry an
- *     implausible sha512.
+ * verify-release.ts — read-only release workflow gate verifying that the tag's
+ * single draft GitHub Release holds all 12 expected assets and valid update feeds.
  */
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -87,12 +22,12 @@ export type DraftSelection =
 	| { ok: true; release: ReleaseRecord; warnings: string[] }
 	| Failures;
 
-/** The full expected asset inventory for one version (11 files). */
+/** The full expected asset inventory for one version (12 files). */
 export type ExpectedAssets = {
 	version: string;
 	mac: { dmg: string; zip: string; feed: string };
 	win: { exe: string; feed: string };
-	linux: { appImage: string; deb: string; feed: string };
+	linux: { appImage: string; deb: string; pacman: string; feed: string };
 	/** Every asset name the draft must hold, and no others. */
 	files: string[];
 };
@@ -127,20 +62,23 @@ export function expectedAssets(version: string): ExpectedAssets {
 		exe: `${PRODUCT_NAME}-${version}-x64-setup.exe`,
 		feed: "latest.yml",
 	};
+	// Shared linux.artifactName ("${productName}-${version}-${arch}.${ext}") expands
+	// ${arch} per target ext in app-builder-lib 26.16.1: x86_64 (AppImage), amd64 (deb), x64 (pacman).
 	const linux = {
 		appImage: `${PRODUCT_NAME}-${version}-x86_64.AppImage`,
 		deb: `${PRODUCT_NAME}-${version}-amd64.deb`,
+		pacman: `${PRODUCT_NAME}-${version}-x64.pacman`,
 		feed: "latest-linux.yml",
 	};
-	// Sidecar differential-update blockmaps: emitted for dmg, mac zip and
-	// NSIS exe (createBlockmap); AppImage/deb have none in app-builder-lib 26.15.3.
+	// Sidecar differential-update blockmaps: emitted for dmg, mac zip, and
+	// NSIS exe; AppImage/deb/pacman have none in app-builder-lib 26.16.1.
 	const blockmaps = [mac.dmg, mac.zip, win.exe].map((name) => `${name}.blockmap`);
 	return {
 		version,
 		mac,
 		win,
 		linux,
-		files: [mac.dmg, mac.zip, win.exe, linux.appImage, linux.deb, ...blockmaps, mac.feed, win.feed, linux.feed],
+		files: [mac.dmg, mac.zip, win.exe, linux.appImage, linux.deb, linux.pacman, ...blockmaps, mac.feed, win.feed, linux.feed],
 	};
 }
 
@@ -288,7 +226,11 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 		if (config.linux.artifactName !== "${productName}-${version}-${arch}.${ext}") {
 			bad(`linux.artifactName changed (${JSON.stringify(config.linux.artifactName)}) — expected names no longer hold`);
 		}
-		if (!sameTargets(config.linux.target, [{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] }])) {
+		if (!sameTargets(config.linux.target, [
+			{ target: "AppImage", arch: ["x64"] },
+			{ target: "deb", arch: ["x64"] },
+			{ target: "pacman", arch: ["x64"] },
+		])) {
 			bad(`linux.target changed (${JSON.stringify(config.linux.target)}) — expected names no longer hold`);
 		}
 	}
@@ -343,7 +285,7 @@ export function feedExpectations(expected: ExpectedAssets): FeedExpectation[] {
 	return [
 		{ file: expected.mac.feed, urls: [expected.mac.zip, expected.mac.dmg], first: expected.mac.zip },
 		{ file: expected.win.feed, urls: [expected.win.exe] },
-		{ file: expected.linux.feed, urls: [expected.linux.appImage, expected.linux.deb] },
+		{ file: expected.linux.feed, urls: [expected.linux.appImage, expected.linux.deb, expected.linux.pacman] },
 	];
 }
 

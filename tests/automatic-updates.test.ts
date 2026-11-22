@@ -13,7 +13,7 @@ const mainFile = fileURLToPath(new URL("../electron/main.cjs", import.meta.url))
 const mainSource = readFileSync(mainFile, "utf8");
 const mainRequire = createRequire(mainFile);
 
-function fixture({ packaged = true, updaterMissing = false } = {}) {
+function fixture({ packaged = true, updaterMissing = false, platform = "darwin" } = {}) {
 	let settings: string | Error = JSON.stringify({ version: 1, general: { autoUpdate: true } });
 	const settingsReads: string[] = [];
 	const order: string[] = [];
@@ -40,6 +40,16 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		quitAndInstall() { order.push("install"); }
 	}
 	const updater = new FakeUpdater();
+	class FakePacmanUpdater {
+		static installWithCommandRunner(installerPath: string, commandRunner: (args: string[]) => void) {
+			try {
+				commandRunner(["pacman", "-U", "--noconfirm", installerPath]);
+			} catch {
+				commandRunner(["pacman", "-Sy", "--noconfirm"]);
+				commandRunner(["pacman", "-U", "--noconfirm", installerPath]);
+			}
+		}
+	}
 	class FakeWebContents extends EventEmitter {
 		mainFrame = { url: "http://127.0.0.1:9000/" };
 		messages: { channel: string; value: unknown }[] = [];
@@ -94,7 +104,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 			if (id === "./dev-server-readiness.cjs") return { waitForDevServer: async () => {} };
 			if (id === "electron-updater") {
 				if (updaterMissing) throw new Error("missing updater");
-				return { autoUpdater: updater };
+				return { autoUpdater: updater, PacmanUpdater: FakePacmanUpdater };
 			}
 			if (id === "node:fs") return {
 				readFileSync: (file: string) => {
@@ -105,7 +115,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 			};
 			return mainRequire(id);
 		},
-		process: { argv: [], env: { LH_DEV_URL: "http://127.0.0.1:9000" }, platform: "darwin", on() {} },
+		process: { argv: [], env: { LH_DEV_URL: "http://127.0.0.1:9000" }, platform, on() {} },
 		__dirname: path.dirname(mainFile), URL, AbortController,
 		setInterval: (callback: () => void, delay: number) => intervals.push({ callback, delay }),
 		setTimeout() {},
@@ -114,7 +124,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 	runInContext(mainSource, context, { filename: mainFile });
 	const run = (code: string) => runInContext(code, context);
 	return {
-		run, updater, windows, intervals, handles, listeners, settingsReads, order, app,
+		run, updater, PacmanUpdater: FakePacmanUpdater, windows, intervals, handles, listeners, settingsReads, order, app,
 		setSettings: (value: unknown) => { settings = JSON.stringify(value); },
 		setSettingsFailure: (value: string | Error) => { settings = value; },
 		setEnumerationFailure: (value: boolean) => { enumerationFails = value; },
@@ -327,5 +337,26 @@ describe("startup, timer, trusted IPC and menu wiring", () => {
 		const f = fixture(); f.setSettings({ general: { autoUpdate: false } }); await f.run("main()");
 		f.windows[0]!.webContents.fails = true; f.windows[0]!.webContents.loading = false;
 		f.menuCheck(); assert.equal(f.updater.checks, 1);
+	});
+
+	it("pacman updater runs only pacman -U and keeps the server alive if install fails on Linux", () => {
+		const f = fixture({ platform: "linux" });
+		f.run("serverProcess = fixtureChild; setupAutoUpdater()");
+		const calls: string[][] = [];
+		f.updater.quitAndInstall = () => {
+			f.order.push("install");
+			try {
+				f.PacmanUpdater.installWithCommandRunner("/tmp/LearnHarness-0.7.0-x64.pacman", (args) => {
+					calls.push(Array.from(args));
+					throw new Error("elevation canceled");
+				});
+			} catch (err) {
+				f.updater.emit("error", err);
+			}
+		};
+		f.run("installUpdateNow()");
+		assert.deepEqual(calls, [["pacman", "-U", "--noconfirm", "/tmp/LearnHarness-0.7.0-x64.pacman"]]);
+		assert.deepEqual(f.order, ["install"], "failed Linux install must not kill the running server");
+		assert.equal(f.state().status, "error");
 	});
 });
