@@ -63,3 +63,24 @@ test("account-offered GPT-6.1 Terra resolves from the bundled Responses catalog"
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
  }]);
 });
+
+test("GPT-6.2 metadata admits only the exact models offered by this ChatGPT account", async () => {
+ const sol = { id: "gpt-6.2-sol", name: "Account Sol label" };
+ const astra = { id: "gpt-6.2-astra", name: "Account Astra label" };
+ const refresh = refreshConnectionCatalog("chatgpt");
+ reply(pending.at(-1), { ...value("B", 10, "B", 4), models: [sol] });
+ await refresh;
+ assert.deepEqual(chatGPTModels().map(({ id, name }) => ({ id, name })), [sol]);
+
+ const refreshed = refreshConnectionCatalog("chatgpt");
+ reply(pending.at(-1), { ...value("B", 11, "B", 5), models: [astra, sol, { id: "gpt-6.2-unknown", name: "Unknown" }] });
+ await refreshed;
+ assert.deepEqual(chatGPTModels().map(({ id, name }) => ({ id, name })), [astra, sol]);
+ for (const model of chatGPTModels()) {
+  assert.equal(model.provider, "chatgpt");
+  assert.equal(model.api, "openai-responses");
+  assert.deepEqual(model.input, ["text", "image"]);
+  assert.equal(model.thinkingLevelMap?.off, null);
+  assert.equal(model.cost.output, 0);
+ }
+});

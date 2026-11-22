@@ -6,10 +6,10 @@
  * /api/settings/* — the per-chat settings PUT is retired from the UI;
  * legacy records' per-chat overrides still resolve server-side).
  *
- * pi-ai owns ALL the data: the catalog (id/name/cost/context/modality/
+ * pi-ai owns the API-key catalog (id/name/cost/context/modality/
  * thinkingLevelMap) and the per-model thinking truth
- * (getSupportedThinkingLevels / clampThinkingLevel). This module only
- * projects and validates — no second registry to drift out of sync.
+ * (getSupportedThinkingLevels / clampThinkingLevel). ChatGPT subscription
+ * entries additionally require a match in the account's live catalog.
  *
  * Federation: `getModels()` is called per keyed provider (federated, the
  * model-slots wave), so a provider appears in the picker exactly when its
@@ -26,10 +26,35 @@ import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } f
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
+// Responses metadata backported from pi-ai 1.6.0 for the subscription picker.
+// The account's live catalog still determines eligibility, display name, and order.
+const chatGPT62Models = [
+	{ id: "gpt-6.2-astra", name: "GPT-6.2 Astra" },
+	{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol" },
+].map((model): Model<"openai-responses"> => ({
+	...model, type: "chat", api: "openai-responses", provider: "chatgpt", baseUrl: "https://api.openai.com/v1",
+	input: ["text", "image"], contextWindow: 272_000, maxTokens: 128_000,
+	inputLimits: {
+		maxRequestBytes: 512 * 1024 * 1024,
+		images: { maxPerRequest: 1500, resize: { maxWidth: 2000, maxHeight: 2000, maxBytes: 4_718_592, jpegQuality: 80 } },
+	},
+	reasoning: true, thinkingLevelMap: { off: null, minimal: null, low: "low", medium: "medium", high: "high", xhigh: "xhigh", max: "max" },
+	cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+	compat: {
+		supportsStrictMode: true, supportsOpenAIGrammarTools: true, supportsAdditionalTools: true,
+		supportsToolSearch: true, supportsMidConvoSystemMessages: true,
+		supportsExplicitPromptCacheMode: true, supportsMidConvoEffort: true,
+	},
+}));
+
+const chatGPTModelMetadata = [
+	...getBuiltinModels("openai").filter((model): model is Model<"openai-responses"> => model.api === "openai-responses"),
+	...chatGPT62Models,
+];
+
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
-		// The subscription bridge still trusts only the bundled OpenAI catalog.
-		!provider || provider === "chatgpt" ? refreshChatGPTModels(getBuiltinModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+		!provider || provider === "chatgpt" ? refreshChatGPTModels(chatGPTModelMetadata) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
 	]);
 }
