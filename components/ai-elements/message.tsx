@@ -31,12 +31,13 @@ import {
 import remarkBreaks from "remark-breaks";
 import {
   defaultRehypePlugins,
+  parseMarkdownIntoBlocks,
   Streamdown,
   type PluginConfig,
   type StreamdownProps,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
-import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
+import { joinSplitMathBlocks, repairMathForDisplay, transformMathDelimiters } from "@/src/core";
 import { rehypeGluePunctuation } from "@/components/md-nobreak";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
@@ -364,6 +365,11 @@ export const streamdownPlugins = {
 // separate sanitization/hardening and all other Markdown repairs stay enabled.
 export const streamdownRemend = { htmlTags: false };
 
+// Streamdown's block split can cut a display formula in two when `$$` also
+// appears in code; static mode parses the whole text and is unaffected.
+export const streamdownBlocks = (markdown: string): string[] =>
+  joinSplitMathBlocks(parseMarkdownIntoBlocks(markdown));
+
 // Model output must not load remote images: a rendered
 // ![x](https://host/?d=...) sends data out with no click. Streamdown's
 // default harden step allows every image prefix, so this keeps its
@@ -406,6 +412,7 @@ export const MessageResponse = memo(
         plugins={streamdownPlugins}
         rehypePlugins={streamdownRehypePlugins}
         remend={streamdownRemend}
+        parseMarkdownIntoBlocksFn={streamdownBlocks}
         {...props}
       >
         {content}
