@@ -324,6 +324,22 @@ export function keptIndexFor(messages: readonly LhMessage[], marker: LhMarkerMes
 
 // ─── the summarizer input (pi's mirror: labeled text, truncated results) ─────
 
+function userContentToSummaryText(content: unknown): string {
+	if (typeof content === "string") return citationsToReadableText(content);
+	if (!Array.isArray(content)) return "";
+	const parts: string[] = [];
+	for (const block of content as Array<string | { type?: string; text?: string }>) {
+		if (typeof block === "string") {
+			if (block) parts.push(citationsToReadableText(block));
+		} else if (block?.type === "text" && typeof block.text === "string" && block.text) {
+			parts.push(citationsToReadableText(block.text));
+		} else if (block?.type === "image") {
+			parts.push("[image]");
+		}
+	}
+	return parts.join("\n");
+}
+
 /** Serialize a message span as labeled text for the summarizer. Tool
  * results truncate at ~2k chars (the kept tail carries them verbatim for
  * the model; the SUMMARY only needs their gist). */
@@ -332,7 +348,7 @@ export function serializeForSummary(messages: readonly LhMessage[]): string {
 	for (const m of messages) {
 		const role = (m as { role?: string }).role;
 		if (role === "user") {
-			lines.push(`[LEARNER] ${citationsToReadableText((m as { content: string }).content)}`);
+			lines.push(`[LEARNER] ${userContentToSummaryText((m as { content?: unknown }).content)}`);
 		} else if (role === "assistant") {
 			const assistant = m as AssistantMessage;
 			const blocks: string[] = [];
