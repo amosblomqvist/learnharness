@@ -143,11 +143,17 @@ if (process.argv.includes("--browser-service")) {
 				win.focus();
 			}
 		});
-		main();
+		main().catch((error) => {
+			log(`startup failed: ${error?.stack ?? error}`);
+			killServer();
+			app.exit(1);
+		});
 	}
 }
 
 let serverProcess = null;
+const serverSpawnErrors = new WeakMap();
+const serverExits = new WeakMap();
 let chatgpt = null;
 let chatgptChild = null;
 let subscriptions = null;
@@ -240,36 +246,134 @@ function startServer(port) {
 			},
 		);
 		serverProcess = child;
-		chatgptChild = attachChatGPTChild(child, chatgpt);
-		subscriptionChild = attachSubscriptionChild(child, subscriptions);
-		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
-		child.stdout.on("data", fwd);
-		child.stderr.on("data", fwd);
-		child.on("exit", (code, signal) => {
-			log(`server exited (code=${code} signal=${signal})`);
-			serverProcess = null;
-			chatgptChild?.dispose();
-			chatgptChild = null;
-			subscriptionChild?.dispose();
-			subscriptionChild = null;
+		const ownChatGPTChild = attachChatGPTChild(child, chatgpt);
+		const ownSubscriptionChild = attachSubscriptionChild(child, subscriptions);
+		chatgptChild = ownChatGPTChild;
+		subscriptionChild = ownSubscriptionChild;
+		const cleanupChild = () => {
+			if (serverProcess === child) serverProcess = null;
+			if (chatgptChild === ownChatGPTChild) {
+				chatgptChild.dispose();
+				chatgptChild = null;
+			}
+			if (subscriptionChild === ownSubscriptionChild) {
+				subscriptionChild.dispose();
+				subscriptionChild = null;
+			}
 			chatgpt?.close();
 			subscriptions?.close();
+		};
+		const fwd = (buf) => buf.toString().trimEnd().split("\n").forEach((l) => l && log(`server: ${l}`));
+		child.stdout?.on("data", fwd);
+		child.stderr?.on("data", fwd);
+		child.on("error", (err) => {
+			serverSpawnErrors.set(child, err);
+			log(`server spawn error: ${err?.message ?? err}`);
+			cleanupChild();
+		});
+		child.on("exit", (code, signal) => {
+			serverExits.set(child, { code, signal });
+			log(`server exited (code=${code} signal=${signal})`);
+			cleanupChild();
 		});
 		resolve(child);
 	});
 }
 
 /** No "ready" event exists — poll until the server answers (docs-confirmed). */
-function waitUntilUp(url, tries = 150) {
+function waitUntilUp(url, tries = 150, options = {}) {
+	const { signal, child } = options ?? {};
 	return new Promise((resolve, reject) => {
+		let settled = false;
+		let timer = null;
+		let activeReq = null;
+
+		const cleanup = () => {
+			if (timer) {
+				clearTimeout(timer);
+				timer = null;
+			}
+			if (activeReq) {
+				const req = activeReq;
+				activeReq = null;
+				req.destroy?.();
+			}
+			signal?.removeEventListener("abort", onAbort);
+			child?.removeListener?.("exit", onChildExit);
+			child?.removeListener?.("error", onChildError);
+		};
+
+		const succeed = (value) => {
+			if (settled) return;
+			settled = true;
+			activeReq = null;
+			cleanup();
+			resolve(value);
+		};
+
+		const fail = (error) => {
+			if (settled) return;
+			settled = true;
+			cleanup();
+			reject(error);
+		};
+
+		const onAbort = () => fail(signal.reason ?? new Error("Server startup aborted"));
+		const onChildExit = (code, sig) => fail(new Error(`server exited before ready (code=${code} signal=${sig})`));
+		const onChildError = (err) => fail(err);
+
+		if (signal?.aborted) {
+			onAbort();
+			return;
+		}
+		if (child) {
+			const spawnError = serverSpawnErrors.get(child);
+			if (spawnError) {
+				fail(spawnError);
+				return;
+			}
+			const exitInfo = serverExits.get(child);
+			if (exitInfo) {
+				onChildExit(exitInfo.code, exitInfo.signal);
+				return;
+			}
+			if (child.exitCode != null || child.signalCode != null) {
+				onChildExit(child.exitCode, child.signalCode);
+				return;
+			}
+		}
+
+		signal?.addEventListener("abort", onAbort, { once: true });
+		child?.once?.("exit", onChildExit);
+		child?.once?.("error", onChildError);
+
 		const attempt = (n) => {
-			const req = http.get(url, (res) => {
-				res.resume();
-				resolve(res.statusCode !== undefined);
-			});
+			if (settled) return;
+			let req;
+			try {
+				req = http.get(url, (res) => {
+					if (activeReq === req) activeReq = null;
+					if (settled) {
+						res.destroy?.();
+						return;
+					}
+					res.on?.("error", () => {});
+					res.resume();
+					succeed(res.statusCode !== undefined);
+				});
+			} catch (err) {
+				fail(err);
+				return;
+			}
+			if (!settled) activeReq = req;
 			req.on("error", () => {
-				if (n <= 0) reject(new Error(`server never answered on ${url}`));
-				else setTimeout(() => attempt(n - 1), 200);
+				if (activeReq === req) activeReq = null;
+				if (settled) return;
+				if (n <= 0) fail(new Error(`server never answered on ${url}`));
+				else timer = setTimeout(() => {
+					timer = null;
+					attempt(n - 1);
+				}, 200);
 			});
 		};
 		attempt(tries);
@@ -289,7 +393,7 @@ function killServer() {
 		} catch {
 			/* already gone */
 		}
-	}, 3000);
+	}, 3000)?.unref?.();
 }
 
 /** Links leaving the app window may open only in a browser or mail client:
@@ -719,9 +823,24 @@ async function main() {
 		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
-		await startServer(new URL(url).port);
-		await waitUntilUp(url);
-		log(`server up: ${url}`);
+		const startup = new AbortController();
+		const cancelStartup = () => startup.abort(new Error("Packaged startup cancelled by application quit"));
+		app.once("before-quit", cancelStartup);
+		try {
+			const child = await startServer(new URL(url).port);
+			await waitUntilUp(url, 150, { signal: startup.signal, child });
+			if (startup.signal.aborted) return;
+			log(`server up: ${url}`);
+		} catch (error) {
+			if (!startup.signal.aborted) {
+				log(`packaged server startup failed: ${error?.message ?? error}`);
+				killServer();
+				app.exit(1);
+			}
+			return;
+		} finally {
+			app.removeListener("before-quit", cancelStartup);
+		}
 	} else {
 		log(`dev mode: ${devUrl} — waiting for server`);
 		const { waitForDevServer } = require("./dev-server-readiness.cjs");
