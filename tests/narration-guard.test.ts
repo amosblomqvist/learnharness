@@ -4,7 +4,7 @@ import { describe, it } from "node:test";
 import { QUESTION_TOOLS } from "../src/core/pending.ts";
 import {
 	isNarrationBlock, makeNarrationGuard, narrationGuardApplies, NARRATION_BLOCK_REASON,
-	NARRATION_GUARD_MAX_BLOCKS, SEND_TO_USER_DELIVERY_RULE,
+	NARRATION_GUARD_MAX_BLOCKS, NARRATION_RETRY_RULE, SEND_TO_USER_DELIVERY_RULE, deliveryRule,
 } from "../src/agent/narration-guard.ts";
 import { sendToUserApplies } from "../src/agent/tools/send-to-user.ts";
 
@@ -44,7 +44,10 @@ describe("narrationGuardApplies", () => {
 		});
 	}
 	it("pins the approved delivery and retry wording", () => {
-		assert.equal(SEND_TO_USER_DELIVERY_RULE, "## Delivering your prose\n\nDeliver learner-facing prose through `send_to_user`; ordinary response text may be converted into summarized thinking instead of reaching the learner. Send the complete explanation, example, or commentary before calling the accompanying question tool. Question-only turns do not require an extra message. A question whose response contains narration but no delivered prose may be rejected so you can deliver the missing explanation and retry.");
+		assert.equal(SEND_TO_USER_DELIVERY_RULE, "## Delivering your prose\n\nDeliver learner-facing prose through `send_to_user`; ordinary response text may be converted into summarized thinking instead of reaching the learner. Send the complete explanation, example, or commentary before calling the accompanying question tool. Question-only turns do not require an extra message. When a `send_to_user` message is the last thing you do in a turn, set `final: true` on it. Leave it off if any tool call follows, including a question tool.");
+		assert.equal(NARRATION_RETRY_RULE, "A question whose response contains narration but no delivered prose may be rejected so you can deliver the missing explanation and retry.");
+		assert.equal(deliveryRule(false), SEND_TO_USER_DELIVERY_RULE, "unguarded agents get no retry warning");
+		assert.equal(deliveryRule(true), `${SEND_TO_USER_DELIVERY_RULE} ${NARRATION_RETRY_RULE}`);
 		assert.equal(NARRATION_BLOCK_REASON, "This response contains narration but no delivered learner-facing prose. Write the explanation or commentary the learner needs through `send_to_user`, then retry this question. Deliver learner-facing content, not internal reasoning.");
 	});
 });

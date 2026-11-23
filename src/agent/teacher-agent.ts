@@ -18,7 +18,7 @@ import { practiceTools, createPracticeGate, type PracticeGate, type PracticeTool
 import { pluginProblemTools, isPluginProblemPoseAcknowledgment, type NativePluginProblemContribution } from "./plugin-problem-tools.ts";
 import { healToolRecord, withArgumentHeal } from "./tools/heal.ts";
 import { sendToUserApplies, sendToUserTool } from "./tools/send-to-user.ts";
-import { makeNarrationGuard, narrationGuardApplies, SEND_TO_USER_DELIVERY_RULE } from "./narration-guard.ts";
+import { deliveryRule, makeNarrationGuard, narrationGuardApplies } from "./narration-guard.ts";
 import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, TOGGLEABLE_TOOLS, type EnabledTools } from "../core/pending.ts";
@@ -214,14 +214,15 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const composedPrompt = opts.promptSwitches
 		? composeInstructions(kind, opts.promptSwitches)
 		: composedInstructions[kind]!;
-	const builtinPrompt = narrationGuard ? `${composedPrompt}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composedPrompt;
+	const offersOutput = sendToUserApplies(kind, engine.model, opts.tools !== undefined);
+	const builtinPrompt = offersOutput ? `${composedPrompt}\n\n---\n\n${deliveryRule(narrationGuard)}` : composedPrompt;
 	// Bind native read and preserve the kind/model-aware Claude output gate
 	// before resolving additive plugins. Explicit registries remain caller-owned.
 	const builtinTools = [
 		...tools.map((tool) => tool.name === "read" && tool.execute === readTool.execute
 			? { ...tool, execute: createReadTool(engine.model).execute as AgentTool<any>["execute"] }
 			: tool),
-		...(sendToUserApplies(kind, engine.model, opts.tools !== undefined)
+		...(offersOutput
 			? [withArgumentHeal(sendToUserTool)]
 			: []),
 	];
