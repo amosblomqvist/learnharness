@@ -106,6 +106,9 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 	/** CLI-reported effective context budget, not a catalog model maximum.
 	 * App-only metadata: never transmitted as provider/model message content. */
 	cliContextWindow?: number;
+	/** Harness tools the model called by their bare name in this response; the CLI rejected them
+	 * before MCP, so their arguments (a send_to_user message, say) never ran. App-only metadata. */
+	cliRejectedBareCalls?: string[];
 	/** Host-owned occurrence annotations, never model input. */
 	lhQuestions?: PluginQuestionOccurrenceMap;
 	/** Exact binding for genuine plugin-question results (details stays public envelope). */

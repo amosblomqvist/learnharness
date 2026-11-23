@@ -99,6 +99,7 @@ A record message: a native pi message (or our marker) plus the record id.
 export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | LhMarkerMessage) & {
     id: string;
     cliContextWindow?: number;
+    cliRejectedBareCalls?: string[];
     lhQuestions?: PluginQuestionOccurrenceMap;
     lhQuestionOccurrence?: PluginQuestionOccurrence;
 };
@@ -110,6 +111,7 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 
 - [id](#lhmessage-id)
 - [cliContextWindow](#lhmessage-clicontextwindow)
+- [cliRejectedBareCalls](#lhmessage-clirejectedbarecalls)
 - [lhQuestions](#lhmessage-lhquestions)
 - [lhQuestionOccurrence](#lhmessage-lhquestionoccurrence)
 
@@ -126,6 +128,15 @@ App-only metadata: never transmitted as provider/model message content.
 
 ```ts
 cliContextWindow?: number;
+```
+
+### LhMessage cliRejectedBareCalls
+
+Harness tools the model called by their bare name in this response; the CLI rejected them
+before MCP, so their arguments (a send_to_user message, say) never ran. App-only metadata.
+
+```ts
+cliRejectedBareCalls?: string[];
 ```
 
 ### LhMessage lhQuestions

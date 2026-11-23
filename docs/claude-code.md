@@ -35,6 +35,8 @@ Official references: [memory switch](https://code.claude.com/docs/en/env-vars#va
 
 The persisted LearnHarness transcript—not a CLI saved session—is authoritative. A child normally exits after its final response. It can stay alive while tools await results, including a learner question, and resume only for the same owner/session and compatible history, tools, model, prompt, effort, and environment.
 
+A harness tool called by its bare name (without `mcp__learnharness__`) is left for the CLI to reject, and the response records it in `cliRejectedBareCalls`. When the rejected call was `send_to_user`, the teacher's narration guard rejects a question in that response until the message is resent through MCP, so the learner never gets the question before the explanation (sharing the guard's two-block budget per run).
+
 Held children expire after **10 minutes** idle. The CLI MCP timeout is **30 minutes**, providing headroom rather than a general model deadline. If no eligible child remains after timeout/restart/configuration change, the next call starts fresh and replays active history as labelled user/assistant/tool text, preserving user/tool images. This is not CLI `--resume` or exact native-role/thinking restoration. Admitted compatibility failures are reported, not silently hidden by replay.
 
 Abort terminates the child and active stream. Cancelling a queued tool request prevents later admission but cannot undo already admitted work. Normal exit, failure, abort, and idle expiry close bridge calls/listeners and remove temporary directories, escalating process termination if necessary. Cleanup is not guaranteed after an OS crash or forced server termination.

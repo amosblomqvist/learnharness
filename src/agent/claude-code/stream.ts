@@ -145,7 +145,7 @@ function getAssistantErrorMessage(error: string, text: string): string {
 }
 
 class ClaudeTurn {
-	private readonly output: AssistantMessage & Pick<LhMessage, "cliContextWindow">;
+	private readonly output: AssistantMessage & Pick<LhMessage, "cliContextWindow" | "cliRejectedBareCalls">;
 	private readonly contentIndexes = new Map<number, number>();
 	private readonly partialJson = new Map<number, string>();
 	private readonly toolBlocks = new Map<number, ToolCall>();
@@ -299,6 +299,9 @@ class ClaudeTurn {
 					// tool, answers it with an error result and the model retries under the MCP name.
 					if (this.harnessToolNames.has(block.name)) {
 						this.skippedBareCall = true;
+						// Recorded for the whole response: a later question must not hide a lost send_to_user (#791).
+						const rejected = (this.output.cliRejectedBareCalls ??= []);
+						if (!rejected.includes(block.name)) rejected.push(block.name);
 						return;
 					}
 					this.fail("claude CLI emitted an unsupported native tool call", "error");
