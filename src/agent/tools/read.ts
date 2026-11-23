@@ -51,6 +51,14 @@ function readTextSlice(text: string, offset: number | undefined, limit: number |
 	if (startLine >= totalLines) {
 		throw new Error(`Offset ${offset} is beyond end of file (${totalLines} lines total)`);
 	}
+	// A first line over the byte ceiling would leave nothing to show and point
+	// back at the same offset. Show its start (whole characters only) instead.
+	const firstLine = Buffer.from(allLines[startLine]!, "utf-8");
+	if (firstLine.length > MAX_BYTES) {
+		const start = new TextDecoder("utf-8", { ignoreBOM: true }).decode(firstLine.subarray(0, MAX_BYTES), { stream: true });
+		const next = startLine + 1 < totalLines ? ` Use offset=${startLine + 2} to continue.` : "";
+		return `${start}\n\n[Line ${startLine + 1} of ${totalLines} is ${formatSize(firstLine.length)}, showing its first ${formatSize(MAX_BYTES)}.${next}]`;
+	}
 	// honor an explicit limit first (never beyond EOF)
 	let selected = allLines.slice(startLine, limit !== undefined ? startLine + limit : totalLines);
 	// then the 2000-line ceiling

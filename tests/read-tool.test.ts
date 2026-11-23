@@ -101,6 +101,20 @@ describe("read tool — text semantics", () => {
 		assert.ok(out.length < 52_000, "the 50KB ceiling must cut the 80KB body");
 	});
 
+	it("a line over 50KB shows its start, and the notice moves on to the next line", async () => {
+		const file = write("long-line.txt", `${"x".repeat(80_000)}\nnext`);
+		const out = (await run({ path: file })).text;
+		assert.equal(out, `${"x".repeat(50 * 1024)}\n\n[Line 1 of 2 is 78.1KB, showing its first 50.0KB. Use offset=2 to continue.]`);
+		assert.equal((await run({ path: file, limit: 1 })).text, out);
+	});
+
+	it("a long last line is cut between characters and has nowhere to continue", async () => {
+		// 3-byte characters: 51200 is not a multiple of 3, so a plain byte cut splits one
+		const file = write("long-last.txt", `first\n${"\u4e2d".repeat(20_000)}`);
+		const out = (await run({ path: file, offset: 2 })).text;
+		assert.equal(out, `${"\u4e2d".repeat(17_066)}\n\n[Line 2 of 2 is 58.6KB, showing its first 50.0KB.]`);
+	});
+
 	it("an explicit limit that stops short gets a remaining-lines notice", async () => {
 		const body = Array.from({ length: 10 }, (_, i) => `l${i + 1}`).join("\n");
 		const file = write("ten.txt", body);
