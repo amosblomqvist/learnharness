@@ -94,6 +94,12 @@ const nextConfig: NextConfig = {
 			// Wave E stage 2: resvg rasterizes visual-maker SVGs natively; same
 			// per-platform-binary story as the canvas above (one per build).
 			"node_modules/@resvg/resvg-js-*/**/*",
+			// On-device dictation: the transcriber child (src/server/local-stt/
+			// runtime.ts) loads these by path, outside the module graph. The
+			// glob matches sherpa-onnx-node and this build's one platform
+			// package, which it requires as a sibling (../sherpa-onnx-<os>-<arch>).
+			"src/server/local-stt/*.cjs",
+			"node_modules/sherpa-onnx-*/**/*",
 			"node_modules/@earendil-works/pi-ai/dist/providers/data/**/*",
 			// Public native OAuth factories load these flows through variable imports.
 			// Electron main uses the same standalone SDK; the offline runtime gate

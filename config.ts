@@ -140,6 +140,9 @@ export const PROMPTS_OVERRIDE_DIR = path.join(/* turbopackIgnore: true */ DATA_R
  */
 export const THEMES_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "themes");
 
+/** Downloaded on-device dictation models, one directory per model id. */
+export const DICTATION_MODELS_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "dictation", "models");
+
 /**
  * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a
  * flat {VAR: value} JSON map — the SAME file the Electron app has always

@@ -13,6 +13,7 @@ import { LhMark } from "@/components/lh-mark";
 import { BrailleSpinner } from "@/components/braille-spinner";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { SettingsDialogProvider, useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
+import { LocalModelConsentDialog } from "@/components/local-dictation-dialog";
 import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -1201,6 +1202,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 				<KeyboardShortcuts />
 				<PluginWidgets />
 				<StartupMessage />
+				<LocalModelConsentDialog />
 			</SettingsDialogProvider></InteractionLayersProvider>
 		</HostContentRootContext.Provider>
 		</HostRouteLifetimeProvider>

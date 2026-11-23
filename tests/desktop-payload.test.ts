@@ -11,6 +11,8 @@ import { seedAuthoringReferenceFixture } from "./helpers/plugin-authoring-fixtur
 
 const source = fs.readFileSync(new URL("../scripts/build-server.mjs", import.meta.url), "utf8");
 const STANDALONE = path.join(".next", "standalone");
+/** sherpa-onnx names Windows "win" (scripts/build-server.mjs). */
+const SHERPA_PLATFORM = `sherpa-onnx-${process.platform === "win32" ? "win" : process.platform}-${process.arch}`;
 const PROMPT = path.join("src", "agent", "system-prompt.md");
 const AUTHORING_DOCS = [
 	"plugin-authoring.md", "plugin-architecture.md", "plugin-question-contract.md",
@@ -66,6 +68,10 @@ function withPayload(test: (fixture: {
 		write(path.join(STANDALONE, "src", "agent", "prompts", "teacher", "20-teaching.md"));
 		write(path.join(STANDALONE, "src", "agent", "prompts", "side-chat", "00-base.md"));
 		write(path.join(STANDALONE, "src", "agent", "prompts", "side-chat", "90-style.md"));
+		write(path.join(STANDALONE, "src", "server", "local-stt", "worker.cjs"));
+		write(path.join(STANDALONE, "src", "server", "local-stt", "split.cjs"));
+		write(path.join(STANDALONE, "node_modules", "sherpa-onnx-node", "addon.js"));
+		write(path.join(STANDALONE, "node_modules", SHERPA_PLATFORM, "sherpa-onnx.node"));
 		test({ root, write, run: () => spawnSync(process.execPath, [path.join(root, "scripts", "build-server.mjs")], {
 			cwd: root, encoding: "utf8", timeout: 10_000,
 		}) });
@@ -207,6 +213,21 @@ describe("desktop standalone payload", () => {
 			if (mode === "missing") fs.rmSync(path.join(root, "core-plugins", "flashcards"), { recursive: true });
 			else write("core-plugins/ui-showcase/main.js");
 			assert.equal(run().status, 1);
+		});
+	});
+
+	it("refuses a payload without the on-device dictation worker or this platform's native addon", () => {
+		withPayload(({ root, run }) => {
+			fs.rmSync(path.join(root, STANDALONE, "src", "server", "local-stt", "worker.cjs"));
+			const result = run();
+			assert.equal(result.status, 1);
+			assert.match(String(result.stderr), /local-stt\/worker\.cjs/);
+		});
+		withPayload(({ root, run }) => {
+			fs.rmSync(path.join(root, STANDALONE, "node_modules", SHERPA_PLATFORM), { recursive: true });
+			const result = run();
+			assert.equal(result.status, 1);
+			assert.match(String(result.stderr), /native dictation addon missing/);
 		});
 	});
 

@@ -105,6 +105,9 @@ for (const asset of [
 	path.join("scripts", "plugin-loader.cjs"),
 	path.join("public", "plugin-loader.js"),
 	path.join("src", "agent", "system-prompt.md"),
+	path.join("src", "server", "local-stt", "worker.cjs"),
+	path.join("src", "server", "local-stt", "split.cjs"),
+	path.join("node_modules", "sherpa-onnx-node", "addon.js"),
 	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
 	path.join("src", "agent", "prompts", "side-chat", "00-base.md"),
 	path.join("src", "agent", "prompts", "side-chat", "90-style.md"),
@@ -113,6 +116,14 @@ for (const asset of [
 		console.error(`[build-server] prompt asset missing from the trace: ${asset}`);
 		process.exit(1);
 	}
+}
+
+// On-device dictation's native addon: the trace must carry this build's own
+// platform package (sherpa-onnx names Windows "win").
+const sherpaPlatform = `sherpa-onnx-${process.platform === "win32" ? "win" : process.platform}-${process.arch}`;
+if (!exists(path.join(STANDALONE, "node_modules", sherpaPlatform, "sherpa-onnx.node"))) {
+	console.error(`[build-server] native dictation addon missing from the trace: node_modules/${sherpaPlatform}`);
+	process.exit(1);
 }
 
 console.log("[build-server] server payload ready:", STANDALONE);

@@ -27,9 +27,14 @@ Sessions are saved locally, including earlier messages when context is compacted
 
 ## Dictation
 
+Use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
+
+**Without a Deepgram key**, dictation runs on your computer with NVIDIA's Parakeet v3 model. The first press asks before downloading it (about 670 MB, stored under `dictation/models` in the learning-data folder); recording starts once the download finishes. Audio stays on the machine running LearnHarness. The model recognizes 25 European languages on its own, with no language setting. Text appears when you stop; a minute of speech takes a few seconds to transcribe. Recordings stop themselves at 10 minutes. If a transcription fails, the recording is kept: **Retry** sends it again, Esc discards it. **Settings → Providers → Dictation** shows the model's status and can download or remove it. The model is [Parakeet TDT 0.6B v3](https://huggingface.co/nvidia/parakeet-tdt-0.6b-v3) by NVIDIA (CC-BY-4.0), in the [int8 ONNX export](https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v3-int8) by the [sherpa-onnx](https://github.com/k2-fsa/sherpa-onnx) project, which also provides the runtime.
+
+**With a Deepgram key**, dictation uses Deepgram instead:
+
 1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).
 2. Add it under **Settings → Providers → Dictation** and choose the language below the key. **Multilingual** supports automatic recognition and mixed-language speech.
-3. Use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
 
 Audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
 
@@ -65,7 +70,7 @@ Chats, graph records, settings, and credentials live on your machine. Packaged d
 
 API-key files sit beside `data`, not inside it. They are plaintext with restrictive file permissions, not an encrypted vault. Keep complete profiles private; do not share credential files or raw debug captures in bug reports.
 
-**Local storage does not mean local-only processing.** Configured models, subscription/CLI services, web research, and dictation can receive content. A local custom model is a separate setup choice, not an offline guarantee for other enabled services.
+**Local storage does not mean local-only processing.** Configured models, subscription/CLI services, web research, and Deepgram dictation can receive content. A local custom model is a separate setup choice, not an offline guarantee for other enabled services.
 
 Click the context/cost row beneath the composer for Session stats. Dollar figures estimate known API costs; subscription, CLI, and custom-endpoint usage are not treated as free. See [context, caching, and costs](compaction-accounting.md) for the details.
 
