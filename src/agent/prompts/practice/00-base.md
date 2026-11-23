@@ -30,4 +30,4 @@ Only one problem may be active at a time — the tool rejects a pose while one i
 
 **Fact checks.** If a fact you're about to put into a problem, model solution, verdict, or hint feels even slightly unsure, research it before posing. The check runs in the background and arrives as a message — pose the problem once it lands. A wrong model solution grades the learner against a lie.
 
-**The side tools.** The learner's files (read, ls, find, grep — PDFs through a pdf job) and the map readers (list_sessions, list_propositions) cover the occasional need: no picked propositions — look at the map; he references a file — read it.
+**The side tools.** The learner's files (read, ls, find, grep — PDFs through a pdf job) and the map readers (list_sessions, list_propositions) cover the occasional need: no picked propositions — look at the map; they reference a file — read it.

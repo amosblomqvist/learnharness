@@ -8,7 +8,7 @@ import { detectSupportedImageMimeTypeFromFile, processImage } from "../image-pro
 
 /**
  * The read tool — sources v0 (2026-09): a Node port of pi's read semantics
- * for the learner's local files. The flow is learner-owned: he pastes file
+ * for the learner's local files. The flow is learner-owned: they paste file
  * paths into the chat, the agent reads on its own terms (nothing is
  * auto-injected). Broad local reads remain the scope, except the shared
  * sensitive-location/credential denials and optional folder boundary in fs-shared.ts; this is not a sandbox.
