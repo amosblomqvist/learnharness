@@ -27,7 +27,19 @@ const sendToUserInput = Type.Object({
 		pattern: "\\S",
 		description: "The complete content to display to the learner. Markdown and LaTeX are supported.",
 	}),
+	final: Type.Optional(Type.Boolean({
+		description: "Set true on your last message of the turn: the turn ends immediately after it is delivered, " +
+			"with no further response from you. Omit it when you will call another tool afterwards.",
+	})),
 });
+
+/** The delivery acks. The non-final one is what the model reads right
+ * before deciding whether to close the turn, so it states the ending. */
+export const SEND_TO_USER_ACK = "Delivered. If this was your last message, end the turn with an empty response.";
+export const SEND_TO_USER_FINAL_ACK = "Delivered. The turn has ended.";
+
+const deliver = serverExecute(SEND_TO_USER_TOOL, sendToUserInput, (input) =>
+	input.final === true ? SEND_TO_USER_FINAL_ACK : SEND_TO_USER_ACK);
 
 /** Claude's documented verbatim mid-turn output channel. Availability is
  * model-gated at the shared conversation-agent construction boundary;
@@ -46,9 +58,16 @@ export const sendToUserTool: AgentTool<typeof sendToUserInput> = {
 		"Do not duplicate it in ordinary response text.\n\n" +
 		"Question content still belongs in the appropriate question tool; send any accompanying teaching or " +
 		"commentary through `send_to_user` before calling that tool.\n\n" +
-		"This tool does not pause or end your turn. Continue with other tools when needed. " +
-		"After delivering your final message, end the turn without additional ordinary response text.",
+		"By default this tool does not pause or end your turn. Continue with other tools when needed. " +
+		"For your last message of the turn, set `final: true`: the turn ends as soon as it is delivered. " +
+		"Never restate or summarize the delivered message in ordinary response text.",
 	parameters: sendToUserInput,
 	executionMode: "sequential",
-	execute: serverExecute(SEND_TO_USER_TOOL, sendToUserInput, () => "Message received for display."),
+	// A delivered final message ends the run natively (terminate: true), like
+	// a posed question, so no closing model call follows. pi stops only when
+	// every result in the batch terminates, so other calls still run on.
+	execute: async (toolCallId, input, signal) => {
+		const result = await deliver(toolCallId, input, signal);
+		return (input as { final?: unknown }).final === true && !result.isError ? { ...result, terminate: true } : result;
+	},
 };

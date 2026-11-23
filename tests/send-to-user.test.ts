@@ -35,11 +35,11 @@ after(() => {
 	fs.rmSync(scratch, { recursive: true, force: true });
 });
 
-const { sendToUserTool } = await import("../src/agent/tools/send-to-user.ts");
+const { SEND_TO_USER_ACK, SEND_TO_USER_FINAL_ACK, sendToUserTool } = await import("../src/agent/tools/send-to-user.ts");
 const { practiceTools } = await import("../src/agent/tools/practice.ts");
-const { NARRATION_BLOCK_REASON, NARRATION_GUARD_MAX_BLOCKS, SEND_TO_USER_DELIVERY_RULE } = await import("../src/agent/narration-guard.ts");
+const { NARRATION_BLOCK_REASON, NARRATION_GUARD_MAX_BLOCKS, SEND_TO_USER_DELIVERY_RULE, deliveryRule } = await import("../src/agent/narration-guard.ts");
 const { bareQuestionTools, createProberAgent, createTeacherAgent, createPracticeAgent, composeInstructions } = await import("../src/agent/teacher-agent.ts");
-const { SEND_TO_USER_TOOL, activeProblemOf, asAgentMessages, danglingQuestionOf, newUserMessage, sendToUserText, toLlmMessages, userFacingTextOf } = await import("../src/core/native-messages.ts");
+const { SEND_TO_USER_TOOL, activeProblemOf, asAgentMessages, danglingQuestionOf, isFinalSendToUser, needsContinuation, newUserMessage, sendToUserText, toLlmMessages, userFacingTextOf } = await import("../src/core/native-messages.ts");
 const { coverageOf, messageFingerprint, messageViewLines, teacherProseBlocks } = await import("../src/core/coverage.ts");
 const { projectView } = await import("../src/core/view.ts");
 const { sessionMarkdown } = await import("../src/core/session-markdown.ts");
@@ -74,7 +74,7 @@ function assistant(content: unknown[], id = "a1"): LhMessage {
 function ack(callId = "send-1", isError = false): LhMessage {
 	return {
 		id: `result-${callId}`, role: "toolResult", toolCallId: callId, toolName: SEND_TO_USER_TOOL,
-		content: [{ type: "text", text: isError ? "Invalid tool input" : "Message received for display." }],
+		content: [{ type: "text", text: isError ? "Invalid tool input" : SEND_TO_USER_ACK }],
 		details: null, isError, timestamp: 1,
 	};
 }
@@ -111,7 +111,7 @@ describe("send_to_user model gate", () => {
 					assert.equal(typeof output!.prepareArguments, "function", "standard argument healing is wired");
 				}
 				const composed = composeInstructions(kind as keyof typeof factories);
-				assert.equal(agent.state.systemPrompt, guarded ? `${composed}\n\n---\n\n${SEND_TO_USER_DELIVERY_RULE}` : composed);
+				assert.equal(agent.state.systemPrompt, offered ? `${composed}\n\n---\n\n${deliveryRule(guarded)}` : composed);
 			}
 		});
 	}
@@ -149,7 +149,34 @@ describe("send_to_user mechanics", () => {
 		assert.ok(!result.isError);
 		assert.ok(!result.terminate);
 		assert.ok(!JSON.stringify(result).includes(message));
-		assert.deepEqual(result.content, [{ type: "text", text: "Message received for display." }]);
+		assert.deepEqual(result.content, [{ type: "text", text: SEND_TO_USER_ACK }]);
+	});
+
+	it("final: true ends the turn on successful delivery; other values do not", async () => {
+		const message = "Closing words.";
+		assert.equal(Value.Check(sendToUserTool.parameters, { message, final: true }), true);
+		assert.equal(Value.Check(sendToUserTool.parameters, { message, final: "yes" }), false);
+		const final = await sendToUserTool.execute("send-1", { message, final: true });
+		assert.equal(final.terminate, true);
+		assert.deepEqual(final.content, [{ type: "text", text: SEND_TO_USER_FINAL_ACK }]);
+		const notFinal = await sendToUserTool.execute("send-1", { message, final: false });
+		assert.ok(!notFinal.terminate);
+		assert.deepEqual(notFinal.content, [{ type: "text", text: SEND_TO_USER_ACK }]);
+		assert.ok(!(await sendToUserTool.execute("send-1", { message })).terminate);
+		assert.equal(isFinalSendToUser({ ...outputCall(message), arguments: { message, final: true } }), true);
+		assert.equal(isFinalSendToUser(outputCall(message)), false);
+		assert.equal(isFinalSendToUser({ ...outputCall("  "), arguments: { message: "  ", final: true } }), false);
+	});
+
+	it("a delivered final message owes no continuation; a non-final or failed one still does", () => {
+		const user = newUserMessage("Synthetic question.") as LhMessage;
+		const finalCall = { ...outputCall("Done."), arguments: { message: "Done.", final: true } };
+		assert.equal(needsContinuation([user, assistant([finalCall]), ack()]), false);
+		assert.equal(needsContinuation([user, assistant([outputCall("Not done.")]), ack()]), true);
+		assert.equal(needsContinuation([user, assistant([finalCall]), ack("send-1", true)]), true);
+		const mixed = assistant([finalCall, fauxToolCall("research", { query: "q" }, { id: "r-1" })]);
+		const researchResult = { id: "result-r-1", role: "toolResult", toolCallId: "r-1", toolName: "research", content: [], details: null, isError: false, timestamp: 1 } as LhMessage;
+		assert.equal(needsContinuation([user, mixed, ack(), researchResult]), true, "a batch with other calls is not a final delivery");
 	});
 
 	it("only extracts the output tool's nonblank message, without modifying it", () => {
@@ -204,6 +231,50 @@ describe("send_to_user transcript projection", () => {
 		});
 		assert.deepEqual(prose(live), []);
 		assert.equal(live[0]!.parts[1]!.state, "output-error");
+	});
+
+	it("folds a closing text-only restatement into reasoning, live and after reload", () => {
+		const messages = [
+			assistant([outputCall("The probe is finished.")]), ack(),
+			assistant([fauxText("The probe is finished, and here is a reworded copy.")], "a2"),
+		];
+		const before = structuredClone(messages);
+		const view = projectView(messages);
+		assert.deepEqual(prose(view), ["The probe is finished."]);
+		assert.deepEqual(view[0]!.parts.filter((p) => p.type === "reasoning").map((p) => [p.id, p.text]), [["a2-r0", "The probe is finished, and here is a reworded copy."]]);
+		assert.deepEqual(messages, before, "projection never rewrites native content");
+		assert.deepEqual(projectView(JSON.parse(JSON.stringify(messages))), view);
+		const live = projectView(messages, { inFlight: true, streamingIds: new Set(["a2"]), executions: new Map() });
+		assert.deepEqual(prose(live), ["The probe is finished."]);
+	});
+
+	it("folds after other tools in the same response, but only the closing text-only response", () => {
+		const messages = [
+			assistant([fauxToolCall("plan_init", {}, { id: "plan-1" }), outputCall("The plan.")]),
+			{ id: "result-plan-1", role: "toolResult", toolCallId: "plan-1", toolName: "plan_init", content: [], details: null, isError: false, timestamp: 1 } as LhMessage,
+			ack(),
+			assistant([fauxText("The plan, again.")], "a2"),
+		];
+		assert.deepEqual(prose(projectView(messages)), ["The plan."]);
+		const withTool = [assistant([outputCall("The plan.")]), ack(), assistant([fauxText("Narration."), fauxToolCall("research", {}, { id: "r-1" })], "a2")];
+		assert.deepEqual(prose(projectView(withTool)), ["The plan.", "Narration."], "a response that also calls a tool is not a closing restatement");
+	});
+
+	it("keeps text that is not a restatement of a delivered message", () => {
+		const restated = (messages: LhMessage[]) => prose(projectView(messages));
+		const closing = assistant([fauxText("Closing text.")], "a2");
+		assert.deepEqual(restated([assistant([fauxText("Plain teaching.")]), closing]), ["Plain teaching.", "Closing text."], "no output call");
+		assert.deepEqual(restated([assistant([outputCall("Broken.")]), ack("send-1", true), closing]), ["Closing text."], "failed output");
+		assert.deepEqual(restated([{ ...assistant([outputCall("Cut off.")]), stopReason: "aborted" } as LhMessage, closing]), ["Closing text."], "aborted output");
+		const answered = [
+			assistant([outputCall("A lesson."), fauxToolCall("quiz", { question: "Q?" }, { id: "quiz-1" })]),
+			ack(),
+			{ id: "answer-1", role: "toolResult", toolCallId: "quiz-1", toolName: "quiz", content: [{ type: "text", text: "B" }], details: null, isError: false, timestamp: 2 } as LhMessage,
+			closing,
+		];
+		assert.deepEqual(restated(answered), ["A lesson.", "Closing text."], "feedback after an answered question");
+		const steered = [assistant([outputCall("A lesson.")]), ack(), { id: "u1", role: "user", content: "Why?", timestamp: 3 } as LhMessage, closing];
+		assert.deepEqual(restated(steered), ["A lesson.", "Closing text."], "a reply to new learner input");
 	});
 });
 
@@ -286,6 +357,32 @@ describe("send_to_user native flow (offline)", () => {
 		const agent = createTeacherAgent(undefined, { engine });
 		await agent.prompt("Synthetic request.");
 		assert.equal(faux.state.callCount, 2);
+	});
+
+	it("a final output ends the turn with no closing model call", async () => {
+		const { engine, faux } = scripted("anthropic", "claude-opus-5-5", [
+			fauxAssistantMessage([{ ...outputCall("All done."), arguments: { message: "All done.", final: true } }], { stopReason: "toolUse" }),
+			fauxAssistantMessage("Restatement that must never be generated."),
+		]);
+		const agent = createTeacherAgent(undefined, { engine });
+		await agent.prompt("Synthetic request.");
+		assert.equal(faux.state.callCount, 1);
+		const messages = agent.state.messages.map((m, i) => ({ ...m, id: `final-${i}` })) as LhMessage[];
+		assert.deepEqual(prose(projectView(messages)), ["All done."]);
+		assert.equal(needsContinuation(messages), false);
+	});
+
+	it("a final output batched with a non-final output still continues", async () => {
+		const { engine, faux } = scripted("anthropic", "claude-opus-5-5", [
+			fauxAssistantMessage([
+				outputCall("First part.", "send-a"),
+				{ ...outputCall("Second part.", "send-b"), arguments: { message: "Second part.", final: true } },
+			], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Continued.")]),
+		]);
+		const agent = createTeacherAgent(undefined, { engine });
+		await agent.prompt("Synthetic request.");
+		assert.equal(faux.state.callCount, 2, "pi ends a batch only when every result terminates");
 	});
 
 	for (const outputFirst of [true, false]) {
