@@ -291,6 +291,19 @@ describe("desktop packaging policy", () => {
 		assert.equal(pkg.homepage, "https://github.com/amosblomqvist/learnharness");
 		assert.equal(pkg.desktopName, "learnharness.desktop");
 	});
+
+	it("deb install script is the stock one except that chrome-sandbox is always SUID (#277)", () => {
+		assert.equal(config.deb.afterInstall, "build/deb-after-install.tpl");
+		const custom = readFileSync(new URL("../build/deb-after-install.tpl", import.meta.url), "utf8");
+		const stock = readFileSync(require.resolve("app-builder-lib/templates/linux/after-install.tpl"), "utf8");
+		const probe = /# Check if user namespaces are supported[\s\S]*?\nfi\n/;
+		const always = /# LearnHarness change \(#277\)[\s\S]*?\nchmod 4755 '\/opt\/\$\{sanitizedProductName\}\/chrome-sandbox' \|\| true\n/;
+		assert.match(stock, probe, "the stock script's namespace check moved; re-sync build/deb-after-install.tpl");
+		assert.match(custom, always);
+		assert.doesNotMatch(custom, /unshare|chmod 0755/);
+		assert.equal(custom.replace(always, ""), stock.replace(probe, ""),
+			"the stock script changed; re-sync build/deb-after-install.tpl");
+	});
 });
 
 describe("workflow action versions", () => {

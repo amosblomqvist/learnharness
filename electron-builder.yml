@@ -180,6 +180,14 @@ linux:
   syncDesktopName: true
   # Both targets update via electron-updater 6.8.9. AppImage replaces its
   # own file; deb uses dpkg/apt and may request administrator permission.
+deb:
+  # electron-builder's stock install script with one change (#277): it always
+  # sets chrome-sandbox to 4755. Its user-namespace check runs as root and
+  # passes under Ubuntu's AppArmor restriction, so it chose 0755, and the app
+  # aborted whenever the AppArmor profile was not loaded. The test in
+  # tests/desktop-platform.test.ts fails if an electron-builder update changes
+  # the stock script, so this copy gets re-synced.
+  afterInstall: build/deb-after-install.tpl
 publish:
   # Update feed = GitHub Releases (decided 2026-10-08): latest-mac.yml +
   # zip/blockmap live on releases; electron-updater reads them anonymously.
