@@ -127,3 +127,31 @@ test("recovery converges after one pass, including multiple debris characters", 
 		assert.equal(repairMathForDisplay(once), once);
 	}
 });
+test("physical display layouts with a formula on a fence line are framed (#388)", () => {
+	const framed = "Sum:\n$$\n" + math`\sum\frac{3}{5^n}` + "\n=" + math`\frac35` + "\n$$\nThen $S$.";
+	for (const source of [
+		"Sum:\n$$" + math`\sum\frac{3}{5^n}` + "\n=" + math`\frac35` + "$$\nThen $S$.", // opener line holds the formula, close ends a line
+		"Sum:\n$$\n" + math`\sum\frac{3}{5^n}` + "\n=" + math`\frac35` + "$$\nThen $S$.", // close ends a formula line
+		"Sum:\n$$" + math`\sum\frac{3}{5^n}` + "\n=" + math`\frac35` + "\n$$\nThen $S$.", // opener line holds the formula
+	]) {
+		assert.equal(repairMathForDisplay(source), framed);
+		assert.equal(repairMathForDisplay(framed), framed);
+	}
+	assert.equal(repairMathForDisplay("$$a\n=b$$\ntext\n$$\nc\n=d$$"), "$$\na\n=b\n$$\ntext\n$$\nc\n=d\n$$");
+	assert.equal(repairMathForDisplay("$$$a\n=b$$$"), "$$$\na\n=b\n$$$");
+});
+test("display framing leaves valid, unclosed, nested and literal layouts as written", () => {
+	for (const source of [
+		"$$\na\n=b\n$$",
+		"$$a$$ and text",
+		"$$a\n=b", // unclosed, e.g. still streaming
+		"$$a\n=b$", // partial close while streaming
+		"$$a\n\n=b$$", // a blank line ends the search
+		"$$a\n=b$$ and more", // prose after the close
+		"$$a\n=b\\$$", // escaped dollar
+		"- item\n  $$a\n  =b$$",
+		"> $$a\n> =b$$",
+		"```\n$$a\n=b$$\n```",
+		"`$$a`\n=b$$",
+	]) assert.equal(repairMathForDisplay(source), source);
+});

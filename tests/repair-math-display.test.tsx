@@ -62,8 +62,9 @@ describe("repairMathForDisplay — the existing composition, unchanged", () => {
 		"`" + debris + "`",
 		"```tex\n" + debris + "\n```",
 		String.raw`$\\nabla`,
-		"$$A = \\\\begin{pmatrix}\n1 & 2\n\\\\end{pmatrix}$$", // unsupported midline display close.
+		"$$A = \\\\begin{pmatrix}\n1 & 2\n\\\\end{pmatrix}$$ text", // unsupported: prose after a midline display close.
 	];
+	const midline = "$$A = \\\\begin{pmatrix}\n1 & 2\n\\\\end{pmatrix}$$";
 	for (const [index, value] of [...unchanged, doubled, quadrupled, debris, matrix,
 		String.raw`\(\\nabla\)`, "\\[\n\\\\nabla\n\\]"].entries()) {
 		it(`matches the old composition byte-for-byte (${index})`, () => {
@@ -76,6 +77,9 @@ describe("repairMathForDisplay — the existing composition, unchanged", () => {
 		assert.equal(repairMathForDisplay(quadrupled), clean);
 		assert.equal(repairMathForDisplay(debris), `$${repairedDebris}$`);
 		assert.equal(repairMathForDisplay(matrix), `$$\n${repairedMatrix}\n$$`);
+	});
+	it("frames a midline display close, then recovers its commands", () => {
+		assert.equal(repairMathForDisplay(midline), "$$\n" + String.raw`A = \begin{pmatrix}` + "\n1 & 2\n" + String.raw`\end{pmatrix}` + "\n$$");
 	});
 });
 
@@ -105,6 +109,15 @@ describe("upgraded KaTeX rendering on real question and practice surfaces", () =
 			}
 		});
 	}
+	it("renders the #388 quiz question: formula on the opening line, close at the end of a formula line", () => {
+		const formula = String.raw`\sum_{n=1}^{\infty}\frac{3(-2)^{n-1}}{5^n}` + "\n" + String.raw`=\frac35-\frac6{25}+\frac{12}{125}-\cdots.`;
+		const question = "Найди сумму:\n$$" + formula + "$$\nИспользуй $S=a/(1-q)$, определив $a$ и $q$ по этому ряду.";
+		const html = renderToStaticMarkup(<QuestionDock toolName="quiz" toolCallId="issue_388" input={{ question, options: [{ label: "yes", value: "yes" }, { label: "no", value: "no" }], correctAnswer: "yes", explanation: "yes" }} expanded onExpand={() => {}} onSubmit={() => {}} />);
+		const actual = math(html);
+		assert.equal(actual.errors, 0);
+		assert.deepEqual(actual.annotations.slice(0, 2), [formula, "S=a/(1-q)"]);
+		assert.ok(parseHTML(html).document.firstElementChild?.textContent?.includes("определив"), "prose after the formula is not swallowed");
+	});
 	it("preserves escaped currency and code on both dock surfaces", () => {
 		const raw = "Costs \\$5 and \\$10. `" + clean + "`\n\n```text\n" + doubled + "\n```";
 		for (const element of [dock({ statement: raw }), <QuestionDock toolName="ask_user_question" toolCallId="security_code" input={{ question: raw }} expanded onExpand={() => {}} onSubmit={() => {}} />]) {

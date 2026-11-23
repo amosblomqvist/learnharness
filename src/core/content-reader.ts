@@ -260,6 +260,46 @@ function decodeEscapedCodeFence(raw: string): string | null {
 	return tree.children.length === 1 && tree.children[0]?.type === "code" ? decoded : null;
 }
 
+/** Physical-newline display blocks whose formula shares a line with a fence.
+ * The math flow grammar reads text after an opener as its meta string and
+ * never closes on `formula$$`, so the formula is dropped or swallows the rest
+ * of the document. Only top-level blocks closed before a blank line are
+ * framed; lists, quotes, code and unclosed (streaming) input stay as written. */
+export function frameDisplayMath(text: string): string {
+	if (!text.includes("$$")) return text;
+	// Framing one block can change how later dollars parse: reparse after each.
+	for (let pass = 0; pass < 64; pass++) {
+		const tree: MarkdownNode = fromMarkdown(text, { extensions: [math({ singleDollarTextMath: true })], mdastExtensions: [mathFromMarkdown()] });
+		let framed: string | undefined;
+		for (const node of tree.children ?? []) {
+			const offset = node.position?.start.offset;
+			if (node.type !== "math" || offset === undefined) continue;
+			const start = text.lastIndexOf("\n", offset - 1) + 1;
+			const lines = text.slice(start).split("\n");
+			const open = /^( {0,3})(\${2,})(.*)$/.exec(lines[0]!.replace(/\r$/, ""));
+			if (!open) continue;
+			const size = open[2]!.length, meta = open[3]!.trim() ? open[3]! : "";
+			const body = meta ? [meta] : [];
+			let end = -1, at = start + lines[0]!.length + 1;
+			for (const raw of lines.slice(1)) {
+				const line = raw.replace(/\r$/, "");
+				if (!line.trim()) break;
+				const alone = /^ {0,3}(\$+)[ \t]*$/.exec(line);
+				if (alone && alone[1]!.length >= size) { if (meta) end = at + raw.length; break; }
+				const close = /(\$+)[ \t]*$/.exec(line);
+				if (close && close[1]!.length === size && !escaped(line, close.index)) {
+					body.push(line.slice(0, close.index)); end = at + raw.length; break;
+				}
+				body.push(line); at += raw.length + 1;
+			}
+			if (end >= 0) { framed = text.slice(0, start) + open[1] + open[2] + "\n" + body.join("\n") + "\n" + open[2] + text.slice(end); break; }
+		}
+		if (framed === undefined) return text;
+		text = framed;
+	}
+	return text;
+}
+
 /** Document escapes are not arbitrary string decoding. Complete known TeX
  * words win over the prefix `\\n`; native code is never rewritten. */
 export function recoverDocumentLayout(text: string): string {

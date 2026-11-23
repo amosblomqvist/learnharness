@@ -1,7 +1,7 @@
 /** Shared Markdown/TeX boundaries for legacy delimiter compatibility and
  * display-only tool-content recovery. Source arguments are never rewritten. */
 import {
-	canParseTex, knownTexCommand, mapMathContent, numericPercentEscape, outsideTexComments,
+	canParseTex, frameDisplayMath, knownTexCommand, mapMathContent, numericPercentEscape, outsideTexComments,
 	readContentSpans, recoverDocumentLayout, texRanges,
 } from "./content-reader.ts";
 
@@ -117,5 +117,5 @@ export function healOverescapedCommands(text: string): string {
 /** Presentation-only, language-independent recovery. Shape parsing, saved
  * identities, grading and model history must use the unprojected source. */
 export function repairMathForDisplay(text: string): string {
-	return healOverescapedCommands(restoreMathEscapes(recoverDocumentLayout(text)));
+	return healOverescapedCommands(restoreMathEscapes(frameDisplayMath(recoverDocumentLayout(text))));
 }
