@@ -125,5 +125,22 @@ if (!exists(path.join(STANDALONE, "node_modules", sherpaPlatform, "sherpa-onnx.n
 	console.error(`[build-server] native dictation addon missing from the trace: node_modules/${sherpaPlatform}`);
 	process.exit(1);
 }
+// sherpa-onnx-node finds its platform package as a sibling directory. The
+// Windows installer (NSIS) flattens symlinks, which broke that lookup when
+// the app bundle imported sherpa through Next's hashed .next/node_modules
+// link (reported on #478). Only the dictation worker may load it, from
+// real directories.
+for (const pkg of ["sherpa-onnx-node", sherpaPlatform]) {
+	if (fs.lstatSync(path.join(STANDALONE, "node_modules", pkg)).isSymbolicLink()) {
+		console.error(`[build-server] REFUSING: node_modules/${pkg} is a symlink; the Windows installer would break its sibling lookup.`);
+		process.exit(1);
+	}
+}
+const hashedModules = path.join(STANDALONE, ".next", "node_modules");
+const hashedSherpa = exists(hashedModules) ? fs.readdirSync(hashedModules).filter((name) => name.startsWith("sherpa-onnx")) : [];
+if (hashedSherpa.length > 0) {
+	console.error(`[build-server] REFUSING: the app bundle imports sherpa-onnx (.next/node_modules/${hashedSherpa[0]}); only src/server/local-stt/worker.cjs may load it.`);
+	process.exit(1);
+}
 
 console.log("[build-server] server payload ready:", STANDALONE);

@@ -231,6 +231,25 @@ describe("desktop standalone payload", () => {
 		});
 	});
 
+	it("refuses sherpa-onnx loaded through a symlink or Next's hashed bundle copy (the NSIS flattening on #478)", () => {
+		withPayload(({ write, run }) => {
+			write(path.join(STANDALONE, ".next", "node_modules", "sherpa-onnx-node-0123abcd", "package.json"), "{}");
+			const result = run();
+			assert.equal(result.status, 1);
+			assert.match(String(result.stderr), /app bundle imports sherpa-onnx/);
+		});
+		withPayload(({ root, run }) => {
+			const real = path.join(root, "sherpa-onnx-node-elsewhere");
+			const linked = path.join(root, STANDALONE, "node_modules", "sherpa-onnx-node");
+			fs.renameSync(linked, real);
+			// Windows needs a junction to link a directory without extra privileges.
+			fs.symlinkSync(real, linked, process.platform === "win32" ? "junction" : "dir");
+			const result = run();
+			assert.equal(result.status, 1);
+			assert.match(String(result.stderr), /sherpa-onnx-node is a symlink/);
+		});
+	});
+
 	it("still refuses missing runtime prompt assets, including the side brevity fragment", () => {
 		for (const asset of [PROMPT, path.join("src", "agent", "prompts", "side-chat", "90-style.md")]) withPayload(({ root, run }) => {
 			fs.rmSync(path.join(root, STANDALONE, asset));
