@@ -1,6 +1,7 @@
 import React from "react";
 (globalThis as { React?: typeof React }).React = React;
 import assert from "node:assert/strict";
+import { katexMatrixRows } from "./katex-html-fixture.ts";
 import { readFileSync } from "node:fs";
 import { test } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -23,7 +24,7 @@ const input = { question: a, options: [{ label: a, value: "a" }, { label: b, val
 const dom = (html: string) => parseHTML(`<html><body>${html}</body></html>`).document;
 const render = (text: string, recovered = true) => renderToStaticMarkup(
 	recovered ? <ToolContentResponse mode="static">{text}</ToolContentResponse> : <MessageResponse mode="static">{text}</MessageResponse>);
-const tex = (html: string) => [...dom(html).querySelectorAll('annotation[encoding="application/x-tex"]')].map(n => n.textContent);
+const tex = (html: string) => [...dom(html).querySelectorAll('.katex[data-tex]')].map(n => n.getAttribute('data-tex'));
 
 for (const fixture of fixtures.cases) test(`preserves corpus matrix rows: ${fixture.chatId} ${fixture.source}`, () => {
 	assert.notEqual(fixture.raw, fixture.oldDisplay);
@@ -31,8 +32,8 @@ for (const fixture of fixtures.cases) test(`preserves corpus matrix rows: ${fixt
 	const expected = dom(render(fixture.raw, false));
 	const actual = dom(render(fixture.raw));
 	assert.deepEqual(tex(actual.body.innerHTML), tex(expected.body.innerHTML));
-	assert.equal(actual.querySelectorAll("mtr").length, expected.querySelectorAll("mtr").length);
-	assert.ok(actual.querySelectorAll("mtr").length > dom(render(fixture.oldDisplay, false)).querySelectorAll("mtr").length);
+	assert.equal(katexMatrixRows(actual), katexMatrixRows(expected));
+	assert.ok(katexMatrixRows(actual) > katexMatrixRows(dom(render(fixture.oldDisplay, false))));
 	assert.equal(actual.querySelectorAll(".katex-error").length, 0);
 });
 
@@ -161,4 +162,20 @@ test("historical ambiguous options and absent/invalid original calls retain thei
 	const before = structuredClone(answer);
 	renderToStaticMarkup(<AnsweredCard answer={answer} />);
 	assert.deepEqual(answer, before);
+});
+
+test("escaped fenced code blocks render as syntax-highlighted code blocks with copy affordance", () => {
+	const sqlQuestion =
+		"Consider the following SQL query:\\n\\n```sql\\nSELECT *\\nFROM users u\\nLEFT JOIN orders o ON u.id = o.user_id\\nWHERE o.status = 'PENDING';\\n```\\n\\nWhat is the behavioral impact of the `WHERE o.status = 'PENDING'` clause on this `LEFT JOIN`?";
+	const document = dom(render(sqlQuestion));
+	const codeBlocks = document.querySelectorAll('[data-testid="md-code"]');
+	assert.equal(codeBlocks.length, 1);
+	const block = codeBlocks[0]!;
+	assert.ok(block.querySelector('[data-testid="md-copy"]'));
+	assert.equal(block.querySelector('[data-language="sql"]')?.getAttribute("data-language"), "sql");
+	const text = block.textContent ?? "";
+	assert.ok(text.includes("SELECT *"));
+	assert.ok(text.includes("FROM users u"));
+	assert.ok(text.includes("WHERE o.status = 'PENDING';"));
+	assert.ok(!text.includes("\\n"));
 });

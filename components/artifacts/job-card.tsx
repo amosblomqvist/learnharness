@@ -2,7 +2,7 @@
 
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { MessageResponse } from "@/components/ai-elements/message";
-import type { ArtifactPartProps, PdfResult, ResearchResult } from "@/src/core";
+import { isWebSourceUrl, type ArtifactPartProps, type PdfResult, type ResearchResult } from "@/src/core";
 import { rtlDir } from "@/components/text-direction";
 
 /**
@@ -54,7 +54,7 @@ export function PdfBriefCard({ output }: { output: unknown }) {
 		<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="pdf-brief-card">
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				PDF brief
-				{failed && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">failed</span>}
+				{failed && <span className="rounded bg-error/15 px-1.5 py-0.5 text-error">failed</span>}
 			</div>
 			<div className="text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
 				<MessageResponse>{result.brief}</MessageResponse>
@@ -91,7 +91,7 @@ export function ResearchBriefCard({ output }: { output: unknown }) {
 		<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="research-brief-card">
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				Research brief
-				{failed && <span className="rounded bg-red-500/15 px-1.5 py-0.5 text-red-500">failed</span>}
+				{failed && <span className="rounded bg-error/15 px-1.5 py-0.5 text-error">failed</span>}
 			</div>
 			<div className="text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
 				<MessageResponse>{result.brief}</MessageResponse>
@@ -102,14 +102,19 @@ export function ResearchBriefCard({ output }: { output: unknown }) {
 					<ul className="flex flex-col gap-0.5 text-xs">
 						{result.sources.map((s) => (
 							<li key={s.url} className="truncate">
-								<a
-									href={s.url}
-									target="_blank"
-									rel="noopener noreferrer"
-									className="text-primary underline-offset-2 hover:underline"
-								>
-									<span dir={rtlDir(s.title)}>{s.title}</span>
-								</a>
+								{isWebSourceUrl(s.url) ? (
+									<a
+										href={s.url}
+										target="_blank"
+										rel="noopener noreferrer"
+										className="text-primary underline-offset-2 hover:underline"
+									>
+										<span dir={rtlDir(s.title)}>{s.title}</span>
+									</a>
+								) : (
+									// Saved before sources were limited to http(s): never a link.
+									<span dir={rtlDir(s.title)} className="text-muted-foreground">{s.title}</span>
+								)}
 							</li>
 						))}
 					</ul>

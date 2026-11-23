@@ -16,7 +16,7 @@ const surfaces = {
 };
 const documentFor = (element: React.ReactElement) =>
 	parseHTML(`<html><body>${renderToStaticMarkup(element)}</body></html>`).document;
-const annotations = (root: ParentNode) => [...root.querySelectorAll('annotation[encoding="application/x-tex"]')].map(node => node.textContent);
+const annotations = (root: ParentNode) => [...root.querySelectorAll('.katex[data-tex]')].map(node => node.getAttribute('data-tex'));
 
 // PR266 identified the less-than + letter trigger. Test the actual streaming
 // render seam, not a TeX-space workaround: valid TeX must remain byte-identical.
@@ -33,6 +33,8 @@ for (const [name, surface] of Object.entries(surfaces)) describe(`streaming math
 	]) it(`retains ${JSON.stringify(source)} and subsequent prose`, () => {
 		const document = documentFor(surface(`${source}\n\nTAIL`));
 		assert.deepEqual(annotations(document), [tex]);
+		assert.ok(document.querySelector(".katex-html"));
+		assert.equal(document.querySelector(".katex-mathml, math"), null);
 		assert.ok(document.body.textContent.includes("TAIL"));
 		assert.ok(!document.body.textContent.includes("[blocked]"));
 		assert.equal(document.querySelectorAll(".katex-error").length, 0);

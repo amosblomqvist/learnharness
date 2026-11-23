@@ -1,13 +1,31 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import { Type } from "typebox";
 import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, normalizeContext, type Model, type SimpleStreamOptions } from "@earendil-works/pi-ai";
 import { streamSimple as streamCodex } from "@earendil-works/pi-ai/api/openai-codex-responses";
-import { APP_IDENTITY, piEngineForSpec, type PiEngine } from "../src/agent/models.ts";
+import { APP_IDENTITY, piEngineForSpec, piModels, type PiEngine } from "../src/agent/models.ts";
+import { buildOpenAiCompatibleProvider } from "../src/server/custom-provider.ts";
+import { createPluginWorkerService } from "../src/agent/plugin-workers.ts";
 import { createProberAgent, createTeacherAgent, createPracticeAgent, type AgentBuildOptions } from "../src/agent/teacher-agent.ts";
+import { streamSideAnswer } from "../src/agent/side-chat.ts";
+import { CLAUDE_CODE_PROVIDER } from "../src/agent/claude-code/constants.ts";
 import { runSubagent } from "../src/agent/subagents/pi-run.ts";
 import { healToolRecord } from "../src/agent/tools/heal.ts";
+import type { ModelCatalogResponse } from "../src/core/contracts/models.ts";
+import { createPluginInference } from "../src/server/plugin-inference.ts";
+import { createPluginTaskRecordStore } from "../src/store/plugin-task-records.ts";
 import metadata from "../package.json" with { type: "json" };
+
+// Pin the published routes rather than deriving expectations from the same SDK.
+const openCodeGoRoutes = [
+	["claude-haiku-5-5", "/inference/go/anthropic/v1/messages"],
+	["gemini-4-argon", "/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent"],
+	["glm-5.3", "/inference/go/openai/v1/chat/completions"],
+	["gpt-6-luna", "/inference/go/openai/v1/responses"],
+] as const;
 
 const factories = [
 	(opts: AgentBuildOptions) => createProberAgent({ chatId: opts.chatId, searchAvailable: () => false } as never, opts),
@@ -26,6 +44,16 @@ function recordingEngine() {
 	return { engine, requests };
 }
 const again = { name: "again", label: "again", description: "Continue", parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text" as const, text: "ok" }], details: {} }) };
+
+function nativeCatalogFor(model: { provider: string; id: string }): ModelCatalogResponse {
+	return {
+		models: [{ ...model, name: "Fixture", reasoning: true, input: ["text"], supportedLevels: ["off", "high"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 1024 }],
+		providers: [{ id: model.provider, envVar: "FIXTURE_KEY", keyPresent: true }],
+		defaults: { model },
+		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null },
+		slots: { strong: null, cheap: null, vision: null },
+	};
+}
 
 // Whole-process replacement isolates native auth/profile discovery; fetch never
 // delegates. No real credentials, .env, OAuth accounts, or model inference.
@@ -84,10 +112,7 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 	});
 
 	for (const [provider, id, endpoint] of [
-		["opencode-go", "claude-haiku-5-5", "/inference/go/v1/messages"],
-		["opencode-go", "gemini-4-argon-contributor", "/inference/go/v1/models/gemini-4-argon-contributor:streamGenerateContent"],
-		["opencode-go", "glm-5.3", "/inference/go/v1/chat/completions"],
-		["opencode-go", "gpt-6-luna", "/inference/go/v1/responses"],
+		...openCodeGoRoutes.map(([id, endpoint]) => ["opencode-go", id, endpoint] as const),
 		["openrouter", "openrouter/free", "/api/v1/chat/completions"],
 	] as const) {
 		it(`complete native ${provider}/${id} foreground serialization carries app identity and exact sessions`, async () => closed(async () => {
@@ -114,6 +139,127 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 		}));
 	}
 
+	for (const [id, endpoint] of openCodeGoRoutes) {
+		for (const cacheRetention of [undefined, "none"] as const) it(`side questions carry the chat id so OpenCode Go can route ${id} (cache ${cacheRetention ?? "default"})`, async () => closed(async () => {
+			const engine = piEngineForSpec({ provider: "opencode-go", id, thinkingLevel: "off" }, false, undefined, () => cacheRetention);
+			const requests: Request[] = [];
+			globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return new Response('{"error":{"message":"closed fixture"}}', { status: 400, headers: { "content-type": "application/json" } }); };
+			const result = await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why this step?" }], chatId: "chat_wire_side" });
+			assert.equal(result.outcome, "error");
+			assert.equal(requests.length, 1);
+			assert.equal(new URL(requests[0]!.url).pathname, endpoint);
+			assert.equal(requests[0]!.headers.get("x-opencode-session"), "chat_wire_side");
+			assert.equal(requests[0]!.headers.get("x-opencode-client"), metadata.name);
+		}));
+	}
+
+	it("side questions route custom OpenCode endpoints through the SDK's host detection", async () => closed(async () => {
+		const models = piModels();
+		models.setProvider(buildOpenAiCompatibleProvider({ baseUrl: "https://opencode.ai/inference/go/openai/v1", models: [{ id: "deepseek-v4.1-flash" }] }));
+		try {
+			const engine = piEngineForSpec({ provider: "custom", id: "deepseek-v4.1-flash", thinkingLevel: "off" });
+			const requests: Request[] = [];
+			globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return Response.json({}, { status: 400 }); };
+			for (let question = 0; question < 2; question++) {
+				const result = await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why?" }], chatId: "chat_custom_side" });
+				assert.equal(result.outcome, "error");
+			}
+			assert.equal(requests.length, 2);
+			for (const request of requests) {
+				assert.equal(request.url, "https://opencode.ai/inference/go/openai/v1/chat/completions");
+				assert.equal(request.headers.get("x-opencode-session"), "chat_custom_side");
+				assert.equal(request.headers.get("x-opencode-client"), metadata.name);
+				assert.equal(request.headers.get("authorization"), "Bearer not-needed");
+			}
+		} finally { models.deleteProvider("custom"); }
+	}));
+
+	for (const [provider, id, header] of [["openrouter", "openrouter/free", "x-session-id"], ["openai", "gpt-4o-mini", "session-id"]] as const) {
+		it(`side questions preserve native ${provider} affinity without OpenCode headers`, async () => closed(async () => {
+			const engine = piEngineForSpec({ provider, id, thinkingLevel: "off" });
+			const requests: Request[] = [];
+			globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return Response.json({}, { status: 400 }); };
+			await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why?" }], chatId: "chat_native_side" });
+			assert.equal(requests.length, 1);
+			assert.equal(requests[0]!.headers.get(header), "chat_native_side");
+			assert.equal(requests[0]!.headers.get("x-opencode-session"), null);
+			assert.equal(requests[0]!.headers.get("x-opencode-client"), null);
+		}));
+	}
+
+	for (const [provider, id, endpoint] of [
+		...openCodeGoRoutes.map(([id, endpoint]) => ["opencode-go", id, endpoint] as const),
+		["custom", "deepseek-v4.1-flash", "/inference/go/openai/v1/chat/completions"],
+	] as const) {
+		it(`one-shot ${provider}/${id} calls carry private routing ids with caching off`, async () => closed(async () => {
+			const directory = mkdtempSync(path.join(tmpdir(), "lh-plugin-oneshot-session-"));
+			const controller = new AbortController();
+			if (provider === "custom") piModels().setProvider(buildOpenAiCompatibleProvider({ baseUrl: "https://opencode.ai/inference/go/openai/v1", models: [{ id }] }));
+			try {
+				const pin = { provider, id, thinkingLevel: "off" as const };
+				const adapter = createPluginInference({ signal: controller.signal, dataDirectory: directory }, {
+					catalog: () => nativeCatalogFor(pin), providerKeyPresent: () => true, engineForSpec: spec => piEngineForSpec(spec),
+				});
+				const requests: Request[] = [];
+				globalThis.fetch = async (input, init) => { const request = new Request(input, init); requests.push(request); await request.text(); return Response.json({ error: { message: "closed fixture" } }, { status: 400 }); };
+				const request = { model: pin, context: { messages: [{ role: "user" as const, content: "Offline", timestamp: 1 }] }, options: { cacheRetention: "none" as const, maxRetries: 0 } };
+				const complete = await adapter.inference.complete({ ...request, purpose: "user" });
+				assert.equal(complete.stopReason, "error");
+				const events = [];
+				for await (const event of adapter.inference.stream({ ...request, purpose: "background" })) events.push(event);
+				assert.equal(events.at(-1)?.type, "error");
+				assert.equal(requests.length, 2);
+				const ids = requests.map((request) => request.headers.get("x-opencode-session"));
+				for (const session of ids) assert.match(session ?? "", /^[0-9a-f-]{36}$/);
+				assert.notEqual(ids[0], ids[1]);
+				for (const request of requests) {
+					assert.equal(new URL(request.url).origin, "https://opencode.ai");
+					assert.equal(new URL(request.url).pathname, endpoint);
+					assert.equal(request.headers.get("x-opencode-client"), metadata.name);
+					assert.equal(request.headers.get("user-agent"), `learnharness/${metadata.version}`);
+				}
+			} finally {
+				controller.abort();
+				if (provider === "custom") piModels().deleteProvider("custom");
+				rmSync(directory, { recursive: true, force: true });
+			}
+		}));
+	}
+
+	it("one-shot routing identity stays stable across a native transport retry", async () => closed(async () => {
+		const directory = mkdtempSync(path.join(tmpdir(), "lh-plugin-oneshot-retry-"));
+		const controller = new AbortController();
+		try {
+			const pin = { provider: "opencode-go", id: "glm-5.3", thinkingLevel: "off" as const };
+			const adapter = createPluginInference({ signal: controller.signal, dataDirectory: directory }, {
+				catalog: () => nativeCatalogFor(pin), providerKeyPresent: () => true, engineForSpec: spec => piEngineForSpec(spec),
+			});
+			const ids: (string | null)[] = [];
+			globalThis.fetch = async (input, init) => {
+				const request = new Request(input, init); ids.push(request.headers.get("x-opencode-session")); await request.text();
+				return Response.json({ error: { message: "closed fixture" } }, { status: ids.length === 1 ? 503 : 400, headers: { "retry-after-ms": "0" } });
+			};
+			await adapter.inference.complete({ model: pin, purpose: "user", context: { messages: [{ role: "user", content: "Offline", timestamp: 1 }] }, options: { maxRetries: 1 } });
+			assert.equal(ids.length, 2);
+			assert.match(ids[0] ?? "", /^[0-9a-f-]{36}$/);
+			assert.equal(ids[0], ids[1]);
+		} finally { controller.abort(); rmSync(directory, { recursive: true, force: true }); }
+	}));
+
+	it("side questions never resume a Claude Code live process", async () => {
+		const faux = createFauxCore({});
+		faux.setResponses([fauxAssistantMessage([fauxText("offline answer")])]);
+		const seen: (string | undefined)[] = [];
+		const engine: PiEngine = {
+			model: { ...faux.getModel(), provider: CLAUDE_CODE_PROVIDER },
+			level: "off",
+			streamFn: (model, context, options) => { seen.push(options?.sessionId); return faux.streamSimple(model, context, options); },
+		};
+		const result = await streamSideAnswer({ engine, instructions: "Offline", turns: [{ role: "user", text: "Why?" }], chatId: "chat_side_claude" });
+		assert.equal(result.outcome, "done");
+		assert.deepEqual(seen, [undefined]);
+	});
+
 	it("native OpenAI cache keys clamp to 64 characters while affinity retains exact session", async () => closed(async () => {
 		const engine = piEngineForSpec({ provider: "openai", id: "gpt-4o-mini", thinkingLevel: "off" });
 		const sessionId = "chat_" + "a".repeat(70);
@@ -122,7 +268,7 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 		globalThis.fetch = async (input, init) => { const request = new Request(input, init); headers = request.headers; body = JSON.parse(await request.text()); return new Response("{}", { status: 400, headers: { "content-type": "application/json" } }); };
 		await createTeacherAgent(undefined, { engine, chatId: sessionId, tools: {} }).prompt("offline");
 		assert.equal(body.prompt_cache_key, Array.from(sessionId).slice(0, 64).join(""));
-		assert.equal(headers.get("session_id"), sessionId);
+		assert.equal(headers.get("session-id"), sessionId);
 	}));
 
 	it("native OpenAI cache-key clamp counts Unicode code points, not UTF-16 units", async () => closed(async () => {
@@ -189,4 +335,108 @@ describe("native app and conversation identity", { concurrency: false }, () => {
 		assert.equal(prepared, 1, "SDK prepares arguments but preserves argumentsError for native validation");
 		assert.ok(result.newMessages.some((m) => m.role === "toolResult" && m.isError));
 	}));
+
+	for (const [id, thinkingLevel, cacheRetention] of [
+		["glm-5.3", "off", undefined],
+		["deepseek-v4.1-flash", "high", "none"],
+	] as const) it(`plugin workers keep isolated ${id} sessions across tool rounds (cache ${cacheRetention ?? "default"})`, async () => closed(async () => {
+		const directory = mkdtempSync(path.join(tmpdir(), "lh-plugin-worker-session-"));
+		const signal = new AbortController();
+		const pin = { provider: "opencode-go", id, thinkingLevel };
+		const catalog = nativeCatalogFor(pin);
+		const adapter = createPluginInference({ signal: signal.signal, dataDirectory: directory }, {
+			catalog: () => catalog,
+			providerKeyPresent: () => true,
+			engineForSpec: (spec) => piEngineForSpec(spec),
+		});
+		const service = createPluginWorkerService({
+			store: createPluginTaskRecordStore(path.join(directory, "tasks")),
+			engineFor: adapter.engineFor,
+			signal: signal.signal,
+		});
+		try {
+			service.register({
+				id: "generate-cues-v1",
+				instructions: "offline",
+				resultSchema: Type.Object({ ok: Type.Literal(true) }),
+				tools: () => [{ name: "lookup", label: "lookup", description: "Look up a fact", parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "noted" }], details: {} }) }],
+			});
+			const requests: Request[] = [];
+			globalThis.fetch = async (input, init) => {
+				const request = new Request(input, init);
+				requests.push(request);
+				await request.text();
+				const round = (requests.length - 1) % 2;
+				const call = round === 0 ? { name: "lookup", arguments: {} } : { name: "submit_result", arguments: { result: { ok: true } } };
+				const events = [
+					{ id: `chatcmpl_offline_${round}`, object: "chat.completion.chunk", created: 1, model: pin.id, choices: [{ index: 0, delta: { role: "assistant", tool_calls: [{ index: 0, id: `call_${round}`, type: "function", function: { name: call.name, arguments: JSON.stringify(call.arguments) } }] }, finish_reason: null }] },
+					{ choices: [{ index: 0, delta: {}, finish_reason: "tool_calls" }], usage: { prompt_tokens: 20, completion_tokens: 10, total_tokens: 30 } },
+				];
+				return new Response(`${events.map((event) => `data: ${JSON.stringify(event)}\n\n`).join("")}data: [DONE]\n\n`, { status: 200, headers: { "content-type": "text/event-stream" } });
+			};
+			const sessions = new Set<string>();
+			for (let chunk = 0; chunk < 2; chunk++) {
+				const started = service.start("generate-cues-v1", { requestId: `flashcard-chunk-${chunk}`, input: { nodes: ["n1"] }, prompt: "Generate one cue", model: pin, purpose: "user", maxTurns: 4, options: { cacheRetention } });
+				const outcome = await service.wait(started.id);
+				assert.equal(outcome.status, "succeeded", JSON.stringify(outcome));
+				assert.equal(requests.length, (chunk + 1) * 2);
+				const session = requests[chunk * 2]!.headers.get("x-opencode-session");
+				assert.match(session ?? "", /^[0-9a-f-]{36}$/);
+				assert.equal(requests[chunk * 2 + 1]!.headers.get("x-opencode-session"), session);
+				assert(!sessions.has(session!), "different tasks cannot share a provider session");
+				sessions.add(session!);
+			}
+			for (const request of requests) {
+				assert.equal(new URL(request.url).origin, "https://opencode.ai");
+				assert.equal(new URL(request.url).pathname, "/inference/go/openai/v1/chat/completions");
+				assert.equal(request.headers.get("x-opencode-client"), metadata.name);
+				assert.equal(request.headers.get("user-agent"), `learnharness/${metadata.version}`);
+				assert.ok(!JSON.stringify(Object.fromEntries(request.headers)).includes("dummy-router"));
+			}
+		} finally {
+			await service.dispose().catch(() => {});
+			signal.abort();
+			rmSync(directory, { recursive: true, force: true });
+		}
+	}));
+
+	for (const [provider, id] of [["openrouter", "openrouter/free"], ["openai", "gpt-4o-mini"]] as const) {
+		it(`managed ${provider} requests preserve native session affinity and caching`, async () => closed(async () => {
+			const directory = mkdtempSync(path.join(tmpdir(), "lh-plugin-native-session-"));
+			const controller = new AbortController();
+			try {
+				const pin = { provider, id, thinkingLevel: "off" as const };
+				const adapter = createPluginInference({ signal: controller.signal, dataDirectory: directory }, {
+					catalog: () => nativeCatalogFor(pin), providerKeyPresent: () => true, engineForSpec: spec => piEngineForSpec(spec),
+				});
+				const engine = await adapter.engineFor(pin, "user");
+				let sessionId: string | undefined;
+				const requests: { headers: Headers; body: Record<string, unknown> }[] = [];
+				globalThis.fetch = async (input, init) => {
+					const request = new Request(input, init);
+					requests.push({ headers: request.headers, body: JSON.parse(await request.text()) });
+					return new Response('{"error":{"message":"closed fixture"}}', { status: 400, headers: { "content-type": "application/json" } });
+				};
+				await assert.rejects(runSubagent([], {
+					engine: { ...engine, streamFn: (model, context, options) => { sessionId = options?.sessionId; return engine.streamFn(model, context, options); } },
+					systemPrompt: "Offline", prompt: "Offline", maxTurns: 1,
+				}), /closed fixture/);
+				assert.match(sessionId ?? "", /^[0-9a-f-]{36}$/);
+				assert.equal(requests.length, 1);
+				const { headers, body } = requests[0]!;
+				assert.equal(headers.get("x-opencode-session"), null);
+				assert.equal(headers.get("user-agent"), `learnharness/${metadata.version}`);
+				if (provider === "openrouter") {
+					assert.equal(headers.get("x-session-id"), sessionId);
+					assert.equal(headers.get("x-openrouter-title"), metadata.name);
+				} else {
+					assert.equal(headers.get("session-id"), sessionId);
+					assert.equal(body.prompt_cache_key, sessionId);
+				}
+			} finally {
+				controller.abort();
+				rmSync(directory, { recursive: true, force: true });
+			}
+		}));
+	}
 });

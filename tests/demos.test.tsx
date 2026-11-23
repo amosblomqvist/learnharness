@@ -51,7 +51,7 @@ import { ToolCallCard } from "../components/artifacts/tool-call-card.tsx";
 import { JobsContext } from "../components/jobs-context.ts";
 import { demoInputSchema, jobTools, pdfInputSchema, visualInputSchema } from "../src/agent/tools/jobs.ts";
 import { runDemoBuilder } from "../src/agent/subagents/demo-builder.ts";
-import { headlessOverride, type DemoRunResult, type HeadlessApi } from "../src/agent/subagents/headless.ts";
+import { headlessOverride, realHeadless, type DemoRunResult, type HeadlessApi } from "../src/agent/subagents/headless.ts";
 import { createJobRunner, demoModelOverride, visualModelOverride } from "../src/agent/subagents/runner.ts";
 import { runVisualMaker } from "../src/agent/subagents/visual-maker.ts";
 import { buildAbortSteer, buildSubagentSteer, isSubagentFailure, setSteerUiInverted, type SteerMessage } from "../src/core/contracts.ts";
@@ -604,6 +604,20 @@ const BROKEN_HTML = "<!doctype html><html><body>BROKEN<script>foo();</script></b
 const GOOD_HTML = "<!doctype html><html><body><canvas id=\"c\"></canvas><script>requestAnimationFrame(function step(){});</script></body></html>";
 
 describe("demo builder (fake model + fake headless)", () => {
+	it("continues past twenty-four turns and retains final verification", async () => {
+		const headless = fakeHeadless();
+		const engine = scriptedModel([
+			...Array.from({ length: 25 }, (_, index) => ({ toolCalls: [{ toolCallId: `write_${index}`, toolName: "write_demo", input: { html: GOOD_HTML } }] })),
+			{ text: "Final notes after all edits." },
+		]);
+		let calls = 0;
+		const result = await runDemoBuilder({ title: "T", brief: "b" }, { engine, headless, onUsage: () => calls++ });
+		assert.equal(calls, 26);
+		assert.equal(result.html, GOOD_HTML);
+		assert.equal(result.notes, "Final notes after all edits.");
+		assert.equal(headless.demoRuns.length, 1, "the completion gate still verifies the artifact");
+	});
+
 	it("iterates write → run → fix → run → clean → delivers with notes", async () => {
 		const headless = fakeHeadless({ brokenWhenIncludes: "BROKEN" });
 		const activities: string[] = [];
@@ -674,6 +688,45 @@ describe("demo builder (fake model + fake headless)", () => {
 const SVG_1 = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="100"><line x1="10" y1="50" x2="290" y2="50"/></svg>';
 
 describe("visual maker (fake model + fake headless)", () => {
+	it("continues past eight turns and still makes the model inspect its final SVG", async () => {
+		const headless = fakeHeadless();
+		const engine = scriptedModel([
+			...Array.from({ length: 9 }, (_, index) => ({ toolCalls: [{ toolCallId: `write_${index}`, toolName: "write_svg", input: { svg: SVG_1 } }] })),
+			{ text: "Not inspected yet." },
+			{ text: "Inspected the final SVG." },
+		]);
+		let calls = 0;
+		const result = await runVisualMaker({ brief: "b" }, { engine, headless, onUsage: () => calls++ });
+		assert.equal(calls, 11);
+		assert.equal(result.svg, SVG_1);
+		assert.equal(result.notes, "Inspected the final SVG.");
+		assert.equal(headless.svgRenders.length, 1);
+	});
+
+	it("native rendering repairs do not rewrite the figure delivered by the model loop", async () => {
+		const svg = '<svg width="80" height="40"><rect width="80" height="40" fill="red"/><text x="2" y="20">A&nbsp;B</text></svg>';
+		const model = scriptedModel([
+			{ toolCalls: [{ toolCallId: "w1", toolName: "write_svg", input: { svg } }] },
+			{ toolCalls: [{ toolCallId: "r1", toolName: "render_svg", input: {} }] },
+			{ text: "Looked at the native render." },
+		]);
+		const result = await runVisualMaker({ brief: "b" }, { engine: model, headless: { ...fakeHeadless(), renderSvg: realHeadless.renderSvg } });
+		assert.equal(result.svg, svg, "saved/download source remains the original, not the render-only repaired source");
+		assert.equal(result.notes, "Looked at the native render.");
+	});
+
+	it("refuses an unverified final SVG when its final render throws", async () => {
+		const headless = fakeHeadless({ renderFailures: 1 });
+		const model = scriptedModel([
+			{ toolCalls: [{ toolCallId: "w1", toolName: "write_svg", input: { svg: SVG_1 } }] },
+			{ text: "Done without looking." },
+		]);
+		const result = await runVisualMaker({ brief: "b" }, { engine: model, headless });
+		assert.equal(result.svg, "");
+		assert.match(result.notes ?? "", /^FAILED: rendering the final SVG failed — XML parse error/);
+		assert.equal(headless.svgRenders.length, 1);
+	});
+
 	it("write → render → look → finish delivers the svg with notes", async () => {
 		const headless = fakeHeadless();
 		const model = scriptedModel([
@@ -1102,7 +1155,7 @@ describe("tool + renderer registry wiring", () => {
 		const errHtml = renderToStaticMarkup(<ToolCallCard part={errPart as never} />);
 		assert.match(errHtml, /Error/);
 		assert.match(errHtml, /ENOENT/);
-		assert.match(errHtml, /text-red-500/);
+		assert.match(errHtml, /text-error/);
 	});
 
 	it("the tool-call card: find/grep headline the pattern, ls defaults to ~", () => {

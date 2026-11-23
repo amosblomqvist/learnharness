@@ -8,6 +8,7 @@ import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { clearTurnFailure } from "./turn-runs.ts";
 import { discardChatDeliveries } from "./jobs.ts";
+import { sideChats } from "./side-chat.ts";
 
 /**
  * Server-side chat entries for the transport layer (app/api/chats*,
@@ -125,6 +126,30 @@ export async function deleteChatSession(chatId: string, mode: ChatDeleteMode): P
 	return finishChatDeletion(chatId, mode);
 }
 
+/** Folder deletion's gates and wind-down for several sessions at once —
+ * deleteChatSession's steps 1–2: a running turn or background job refuses
+ * (409, nothing is touched); the sessions' own extraction runs are
+ * true-cancelled and awaited, a timeout is a retryable 503. The caller
+ * re-checks synchronously before its own sync block. */
+export async function settleChatsForDeletion(chatIds: readonly string[]):
+	Promise<{ chatId: string; failure: Exclude<ChatDeleteOutcome, { ok: true } | { status: 404 }> } | null> {
+	for (const chatId of chatIds) {
+		const blocker = runningWorkBlocker(chatId);
+		if (blocker) return { chatId, failure: blocker };
+	}
+	const ids = new Set(chatIds);
+	const winding = () => extractionStatuses().find((run) => ids.has(run.chatId))?.chatId;
+	for (const run of extractionStatuses()) if (ids.has(run.chatId)) abortExtraction(run.chatId);
+	const deadline = Date.now() + WIND_DOWN_TIMEOUT_MS;
+	for (let chatId = winding(); chatId !== undefined; chatId = winding()) {
+		if (Date.now() > deadline) {
+			return { chatId, failure: { ok: false, status: 503, code: "extraction_winding_down", error: "The session's extraction is still winding down — try again in a moment" } };
+		}
+		await new Promise((resolve) => setTimeout(resolve, WIND_DOWN_POLL_MS));
+	}
+	return null;
+}
+
 /** Source deletion has already purged the selected batch's graph traces.
  * Remove the remaining session data with the same gates/cleanup and no await. */
 export function deleteIdleChatRecord(chatId: string): Extract<ChatDeleteOutcome, { ok: false }> | { ok: true } {
@@ -152,6 +177,7 @@ function finishChatRecordDeletion(chatId: string): number {
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
+		sideChats.stopAll(chatId); // a running side answer has nowhere left to land
 	}
 	return jobsRemoved;
 }

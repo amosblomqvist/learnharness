@@ -4,6 +4,8 @@ import { useEffect, useRef, useState } from "react";
 import { ChevronDownIcon } from "lucide-react";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { cn } from "@/lib/utils";
+import type { ImageContent } from "@earendil-works/pi-ai";
+import { SubmittedImages } from "./submitted-images";
 import { PathText } from "@/components/file-path-chip";
 import { rtlDir } from "@/components/text-direction";
 
@@ -70,6 +72,7 @@ function subscribeUserThinking(fn: (open: boolean) => void): () => void {
 export function ThinkingBlock({
 	label = "YOUR THINKING",
 	text,
+	images,
 	testId,
 	dataCommit,
 	defaultOpen = false,
@@ -77,6 +80,7 @@ export function ThinkingBlock({
 }: {
 	label?: string;
 	text: string;
+	images?: readonly Readonly<ImageContent>[];
 	testId?: string;
 	/** The practice marker's register flag (commit vs nudge). */
 	dataCommit?: boolean;
@@ -129,7 +133,7 @@ export function ThinkingBlock({
 				<ChevronDownIcon className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "rotate-0")} />
 			</button>
 			{open && (
-				<span dir={rtlDir(text)} className="lh-prose mt-1.5 block whitespace-pre-wrap text-[15px] italic text-foreground/50"><PathText text={text} /></span>
+				<div>{text && <span dir={rtlDir(text)} className="lh-prose mt-1.5 block whitespace-pre-wrap text-[15px] italic text-foreground/50"><PathText text={text} /></span>}<SubmittedImages images={images} /></div>
 			)}
 		</div>
 	);

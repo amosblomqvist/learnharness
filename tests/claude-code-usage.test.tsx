@@ -2,7 +2,7 @@ import React from "react";
 (globalThis as Record<string, unknown>).React = React;
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { renderToStaticMarkup } from "react-dom/server";
+import { renderWithInteractionLayers as renderToStaticMarkup } from "./interaction-layer-render.tsx";
 import { CLAUDE_CODE_MODELS } from "../src/agent/claude-code/provider.ts";
 import { isSubscriptionModel, sumSteps, type TurnUsage } from "../src/core/index.ts";
 import { graphCostSummary } from "../src/core/cost-summary.ts";
@@ -49,7 +49,7 @@ test("model-catalog API and menus never advertise the CLI adapter's placeholder 
 	const models = CLAUDE_CODE_MODELS.map(toModelDto);
 	assert(models.every((model) => model.cost === null));
 	const html = renderToStaticMarkup(<ModelMenuList models={models} effectiveId={undefined} onPick={() => {}} />);
-	assert.equal((html.match(/>CLI billing<\/span>/g) ?? []).length, 3);
+	assert.equal((html.match(/>CLI billing<\/span>/g) ?? []).length, 4);
 	assert.match(html, /does not estimate it/);
 	assert(!html.includes("$0")); assert(!html.includes("USD per 1M")); assert(!html.includes("(subscription)"));
 });

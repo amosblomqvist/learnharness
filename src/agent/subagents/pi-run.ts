@@ -3,6 +3,7 @@ import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works
 import { randomUUID } from "node:crypto";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "../models.ts";
 import { usageWasAdmitted } from "../subscription-request-cycle.ts";
+import { createWorkerRequestScope } from "../worker-request-admission.ts";
 import { providerEventObserver } from "../provider-events.ts";
 import { backgroundCaptureStream, createBackgroundCapture } from "../background-capture.ts";
 import type { ModelRole } from "../../../config.ts";
@@ -20,23 +21,30 @@ import type { ModelRole } from "../../../config.ts";
  */
 
 export interface SubagentRunOptions {
-	/** The role whose engine (model + thinking level) this run uses. */
-	role: ModelRole;
-	/** Test seam: a scripted engine replaces the role's production one. */
+	/** Named core role for engine resolution and opt-in captures. Optional when
+	 * an explicit engine is supplied; plugin runs do not invent core roles. */
+	role?: ModelRole;
+	/** Explicit engine (also the off-network test seam); required without a role. */
 	engine?: PiEngine;
 	systemPrompt: string;
 	/** Initial transcript (continuation semantics: ends user / toolResult). */
 	messages?: AgentMessage[];
 	/** Fresh-run prompt text (mutually exclusive with a continuation). */
 	prompt?: string;
-	/** Max model calls (the old stepCountIs safety net). */
-	maxTurns: number;
+	/** Optional assistant-turn cap. Omitted = run until natural completion or a stop rule. */
+	maxTurns?: number;
 	/** Abort mid-model-call (the real-kill semantics). */
 	abortSignal?: AbortSignal;
 	/** Money channel: one call per model request. */
 	onUsage?: (usage: Usage) => void;
 	/** Activity line per tool execution (job record progress). */
 	onToolStart?: (toolName: string, args: unknown) => void;
+	/** Awaited native checkpoint barrier, before other observers or tool execution. */
+	onEvent?: (event: AgentEvent) => void | Promise<void>;
+	/** Guard immediately before each native provider request. */
+	beforeRequest?: () => void | Promise<void>;
+	/** Internal runner exception: conversation compaction is not worker work. */
+	bypassWorkerRequestAdmission?: boolean;
 	/** Per completed assistant message (extraction's step log). */
 	onAssistantMessage?: (message: AssistantMessage, step: number) => void;
 	/** Extra stop rule (extractor: stop after a clean submit). */
@@ -55,20 +63,26 @@ export interface SubagentRunResult {
 	text: string;
 }
 
-export function subagentEngine(role: ModelRole, override?: PiEngine): PiEngine {
+export function subagentEngine(role: ModelRole | undefined, override?: PiEngine): PiEngine {
 	// BYOK (owner, 2026-09-22): no factory pins — the override is the only
 	// real path (the runner injects settings-resolved engines); a missed
 	// injection hits the honest thrower in models.ts instead of a guess.
-	return override ?? piEngineFor(role);
+	if (override) return override;
+	if (!role) throw new Error("An explicit engine or configured model role is required");
+	return piEngineFor(role);
 }
 
 export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRunOptions): Promise<SubagentRunResult> {
+	if (opts.abortSignal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
 	const engine = subagentEngine(opts.role, opts.engine);
 	let turns = 0;
 	// Debug recorder (owner, 2026-10-04): raw provider events per job run.
-	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, `job:${opts.role}`) : undefined;
+	const providerEvents = opts.chatId && opts.role ? providerEventObserver(opts.chatId, `job:${opts.role}`) : undefined;
 	const sessionId = randomUUID();
-	const capture = createBackgroundCapture({ role: opts.role, runId: sessionId, sourceId: opts.chatId });
+	// Captures have a core-role identity. Explicit plugin engines have no such
+	// role; do not misattribute them or invent a new capture product surface.
+	const capture = opts.role ? createBackgroundCapture({ role: opts.role, runId: sessionId, sourceId: opts.chatId }) : undefined;
+	const requests = opts.bypassWorkerRequestAdmission ? undefined : createWorkerRequestScope(engine.streamFn, opts.abortSignal);
 	const agent = new Agent({
 		identity: APP_IDENTITY,
 		// One unsaved conversation per invocation, stable through every turn.
@@ -80,13 +94,17 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 			tools,
 			messages: opts.messages ?? [],
 		},
-		streamFn: backgroundCaptureStream(engine.streamFn, capture),
+		streamFn: backgroundCaptureStream(requests?.streamFn ?? engine.streamFn, capture),
+		prepareRequest: async () => {
+			if (opts.abortSignal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
+			await opts.beforeRequest?.();
+		},
 		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
 		// 0.87.1: shouldStopAfterTurn → finishTurn (same call point; "end"
 		// exits before the steering poll, exactly the old boolean-true).
 		finishTurn: (turn) => {
 			turns++;
-			return turns >= opts.maxTurns || opts.shouldStop?.(turn.message, turn.toolResults) === true
+			return (opts.maxTurns !== undefined && turns >= opts.maxTurns) || opts.shouldStop?.(turn.message, turn.toolResults) === true
 				? { action: "end" }
 				: undefined;
 		},
@@ -102,7 +120,8 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 	let runFailure: unknown;
 
 	try {
-		agent.subscribe((event: AgentEvent) => {
+		agent.subscribe(async (event: AgentEvent) => {
+			await opts.onEvent?.(event);
 			switch (event.type) {
 				case "message_end":
 					if ((event.message as { role?: string }).role === "assistant") {
@@ -114,11 +133,11 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 								aborted = true;
 							break;
 						}
-						if (!usageWasAdmitted(m.usage)) { if (m.stopReason === "error") errorMessage = m.errorMessage; break; }
+						if (!usageWasAdmitted(m.usage)) { if (m.stopReason === "error") errorMessage = m.errorMessage ?? "Subagent provider error"; break; }
 						step++;
 						opts.onUsage?.(m.usage);
 						opts.onAssistantMessage?.(m, step);
-						if (m.stopReason === "error") errorMessage = m.errorMessage;
+						if (m.stopReason === "error") errorMessage = m.errorMessage ?? "Subagent provider error";
 					} else if (event.message.role === "toolResult") {
 						capture?.toolResult(event.message);
 					}
@@ -139,6 +158,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 		throw error;
 	} finally {
 		opts.abortSignal?.removeEventListener("abort", onAbort);
+		requests?.close();
 		capture?.finish(runFailure);
 	}
 
