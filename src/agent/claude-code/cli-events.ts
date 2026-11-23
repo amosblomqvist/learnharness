@@ -9,6 +9,7 @@ export type CliEvent =
 	| { type: "blockStart"; index: number; block: CliBlock }
 	| { type: "textDelta"; index: number; text: string }
 	| { type: "thinkingDelta"; index: number; thinking: string }
+	| { type: "signatureDelta"; index: number; signature: string }
 	| { type: "toolInputDelta"; index: number; partialJson: string }
 	| { type: "blockStop"; index: number }
 	| { type: "messageDelta"; stopReason: string | null; usage: CliUsage }
@@ -30,6 +31,7 @@ type RawDelta = {
 	type?: string;
 	text?: string;
 	thinking?: string;
+	signature?: string;
 	partial_json?: string;
 	stop_reason?: string | null;
 };
@@ -91,6 +93,10 @@ function parseDelta(index: number, delta: RawDelta): CliEvent | null {
 		case "thinking_delta":
 			if (typeof delta.thinking !== "string") return null;
 			return { type: "thinkingDelta", index, thinking: delta.thinking };
+
+		case "signature_delta":
+			if (typeof delta.signature !== "string") return null;
+			return { type: "signatureDelta", index, signature: delta.signature };
 
 		case "input_json_delta":
 			if (typeof delta.partial_json !== "string") return null;

@@ -34,6 +34,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
 import { parseCliLine } from "../src/agent/claude-code/cli-events.ts";
+import { isNarrationBlock } from "../src/agent/narration-guard.ts";
 import { ClaudeCodeError } from "../src/agent/claude-code/constants.ts";
 import { LIVE_PROCESS_IDLE_TIMEOUT_MS, liveProcessIdleTimeoutMs } from "../src/agent/claude-code/live-processes.ts";
 import { CLAUDE_CODE_MODELS, createClaudeCodeProvider } from "../src/agent/claude-code/provider.ts";
@@ -373,6 +374,28 @@ test("thinking deltas map to thinking_*", async (t) => {
 		{ type: "thinking", thinking: "Sockets are endpoints." },
 		{ type: "text", text: "An endpoint." },
 	]);
+});
+
+test("a thinking signature is kept, so the narration guard can see summarized reply text", async (t) => {
+	// Newer Claude models may turn reply text into summarized thinking; the API
+	// marks such a block in its signature. Without it the guard never fires.
+	const signature = Buffer.from("\u0008\u0004narration block").toString("base64");
+	const { events } = await runScenario(t, [
+		streamEvent({ type: "message_start", message: { usage: { input_tokens: 3, output_tokens: 1 } } }),
+		streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "", signature: "" } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "The answer is kv-z." } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: signature.slice(0, 8) } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: signature.slice(8) } }),
+		streamEvent({ type: "content_block_stop", index: 0 }),
+		streamEvent({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: { output_tokens: 9 } }),
+		streamEvent({ type: "message_stop" }),
+	]);
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	const [block] = done.message.content;
+	assert.deepEqual(block, { type: "thinking", thinking: "The answer is kv-z.", thinkingSignature: signature });
+	assert.equal(isNarrationBlock(block!), true);
 });
 
 test("tool scenario ends with toolcall_end (Claude's tool_use id, unprefixed name) and done(toolUse)", async (t) => {
