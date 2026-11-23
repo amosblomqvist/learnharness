@@ -10,7 +10,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { after, describe, it, mock } from "node:test";
-import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
+import { createFauxCore, fauxAssistantMessage, fauxText, fauxThinking, fauxToolCall, type FauxResponseStep } from "@earendil-works/pi-ai";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
 import { Type } from "typebox";
 import type { AgentBuildOptions, TeachingAgent } from "../src/agent/teacher-agent.ts";
@@ -57,10 +57,10 @@ const QUIZ_INPUT = {
 const networkFailure: FauxResponseStep = () => { throw new Error("fetch failed"); };
 
 /** Record the actual model context after the app's native conversion. */
-function scripted(steps: FauxResponseStep[]) {
+function scripted(steps: FauxResponseStep[], fauxOptions: Parameters<typeof createFauxCore>[0] = {}) {
 	const contexts: string[][] = [];
 	const histories: string[] = [];
-	const faux = createFauxCore({});
+	const faux = createFauxCore(fauxOptions);
 	faux.setResponses(steps.map((step) => (context, options, state, model) => {
 		contexts.push(context.messages.map((m) => m.role).filter((role) => role !== "system"));
 		histories.push(JSON.stringify(context.messages));
@@ -568,6 +568,214 @@ describe("the Retry button's client path", () => {
 		assert.equal(posted.length, 1, "send() recovers from error without stop()");
 		assert.deepEqual(JSON.parse(posted[0]!).input, { type: "retry" });
 		assert.deepEqual(m.getState().nativeMessages, failedTurn, "there is no optimistic learner message or deletion");
+	});
+});
+
+// Issue #482 (recovery ported from #480): one bounded continuation when an
+// answer reaction shows the learner nothing, or resolves a prediction in
+// prose without posing the step's check.
+describe("automatic continuation after an unresponsive answer reaction", () => {
+	const pose = (type = "check") => () => fauxAssistantMessage([fauxToolCall("quiz", { ...QUIZ_INPUT, type }, { id: "call-1" })], { stopReason: "toolUse" });
+	const nextCheck = () => fauxAssistantMessage([fauxText("So the check:"), fauxToolCall("quiz", QUIZ_INPUT, { id: "call-2" })], { stopReason: "toolUse" });
+	for (const [label, blank] of [
+		["empty text", () => fauxAssistantMessage([fauxText("")])],
+		["no blocks", () => fauxAssistantMessage([])],
+		["reasoning and whitespace", () => fauxAssistantMessage([fauxThinking("Considering the answer."), fauxText(" \n\t")])],
+	] as const) {
+		it(`${label}: one answer advances to the next question without another learner message`, async () => {
+			const { engine, histories } = scripted([
+				pose(), blank,
+				() => fauxAssistantMessage([fauxText("Correct. Predict the next step."), fauxToolCall("quiz", { ...QUIZ_INPUT, type: "predict" }, { id: "call-2" })], { stopReason: "toolUse" }),
+				() => fauxAssistantMessage([fauxText("Here is the step."), fauxToolCall("quiz", QUIZ_INPUT, { id: "call-3" })], { stopReason: "toolUse" }),
+			]);
+			const chat = createConfiguredChat(`Test: recover ${label}`);
+			await turn(engine, chat.id, { type: "text", text: "teach me the planets" });
+			const before = chatStore.getChat(chat.id)!.messages;
+			await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+			const saved = chatStore.getChat(chat.id)!;
+			assertPreserved(before, saved.messages);
+			assert.equal(histories.length, 3, "pose, empty reaction, one recovery request");
+			assert.match(histories[2]!, /learner has answered the question\. Your previous response was empty/);
+			assert.match(histories[2]!, /Mercury is the innermost/);
+			assert.equal(saved.messages.filter((m) => m.role === "user").length, 1);
+			assert.equal(saved.messages.filter((m) => m.role === "toolResult" && m.toolCallId === "call-1").length, 1);
+			assert.equal(saved.messages.at(-1)?.role, "assistant", "the next question stops normally, with no saved placeholder");
+			assert.match(JSON.stringify(saved.messages.at(-1)), /call-2/);
+			assert.doesNotMatch(JSON.stringify(saved.messages), /Your previous response was empty/);
+			assert.equal(saved.turns?.at(-1)?.steps.length, 2, "both provider requests retain their usage in one application turn");
+			assert.equal(endsInFailedTurn(saved.messages), false);
+			await turn(engine, chat.id, { type: "answer", toolCallId: "call-2", answer: gradedAnswer() });
+			assert.equal(histories.length, 4, "a normal reaction to the next answer needs no recovery");
+			assert.doesNotMatch(histories[3]!, /Your previous response was empty|without the step's check/);
+		});
+	}
+
+	it("two empty responses stop with a live and persisted Retry error; Retry keeps the saved answer", async () => {
+		const { engine, contexts, histories } = scripted([
+			pose(), () => fauxAssistantMessage(""), () => fauxAssistantMessage(""),
+			() => fauxAssistantMessage("Continuing from the saved answer."),
+		]);
+		const chat = createConfiguredChat("Test: repeated empty answer reaction");
+		await turn(engine, chat.id, { type: "text", text: "teach me the planets" });
+		const view = new SessionModel({ chatId: chat.id, initialMessages: chatStore.getChat(chat.id)!.messages });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() }, (opts) => {
+			const agent = createTeacherAgent(undefined, { ...opts, engine });
+			agent.subscribe((event) => { view.applyWireEvent(JSON.parse(JSON.stringify(event))); });
+			return agent;
+		});
+		const before = chatStore.getChat(chat.id)!.messages;
+		assert.equal(histories.length, 3, "the second blank cannot start a third automatic request");
+		assert.match(view.getState().error?.message ?? "", /The model returned an empty response twice/);
+		assert.match(new SessionModel({ chatId: chat.id, initialMessages: before }).getState().error?.message ?? "", /empty response twice/);
+		assert.ok(endsInFailedTurn(before));
+		assert.equal(retryDrops(before).size, 2, "Retry omits both blank attempts from temporary history");
+		assert.equal(isTurnRunning(chat.id), false);
+		assert.equal((await turn(engine, chat.id, { type: "retry" })).status, 200);
+		const after = chatStore.getChat(chat.id)!.messages;
+		assertPreserved(before, after);
+		assert.deepEqual(contexts.at(-1), ["user", "assistant", "toolResult"]);
+		assert.equal(after.filter((m) => m.role === "toolResult" && m.toolCallId === "call-1").length, 1);
+		assert.equal(after.filter((m) => m.role === "user").length, 1);
+		assert.equal(new SessionModel({ chatId: chat.id, initialMessages: after }).getState().error, null);
+	});
+
+	it("a failed recovery remains retryable without replaying the answer", async () => {
+		const { engine, contexts, histories } = scripted([pose(), () => fauxAssistantMessage(""), networkFailure, () => fauxAssistantMessage("Recovered.")]);
+		const chat = createConfiguredChat("Test: empty then failed response");
+		await turn(engine, chat.id, { type: "text", text: "teach me" });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+		assert.equal(histories.length, 3);
+		assert.ok(endsInFailedTurn(chatStore.getChat(chat.id)!.messages));
+		await turn(engine, chat.id, { type: "retry" });
+		assert.deepEqual(contexts.at(-1), ["user", "assistant", "toolResult"]);
+		assert.equal(endsInFailedTurn(chatStore.getChat(chat.id)!.messages), false);
+	});
+
+	for (const stopReason of ["error", "aborted", "length"] as const) {
+		it(`${stopReason} is never treated as a recoverable blank completion`, async () => {
+			const { engine, histories } = scripted([pose(), () => fauxAssistantMessage("", { stopReason })]);
+			const chat = createConfiguredChat(`Test: no blank recovery for ${stopReason}`);
+			await turn(engine, chat.id, { type: "text", text: "teach me" });
+			await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+			assert.equal(histories.length, 2);
+			assert.equal(chatStore.getChat(chat.id)!.messages.at(-1)?.role, "assistant");
+		});
+	}
+
+	it("a blank response to typed text does not create an automatic continuation", async () => {
+		const { engine, histories } = scripted([() => fauxAssistantMessage("")]);
+		const chat = createConfiguredChat("Test: blank without an answer");
+		await turn(engine, chat.id, { type: "text", text: "hello" });
+		assert.equal(histories.length, 1);
+	});
+
+	it("prose without a question after a prediction answer gets one continuation that poses the check", async () => {
+		const { engine, histories } = scripted([
+			pose("predict"),
+			() => fauxAssistantMessage("Right: Mercury. Here is why the order works that way."),
+			nextCheck,
+		]);
+		const chat = createConfiguredChat("Test: prediction resolved without a check");
+		await turn(engine, chat.id, { type: "text", text: "teach me the planets" });
+		const before = chatStore.getChat(chat.id)!.messages;
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+		const saved = chatStore.getChat(chat.id)!;
+		assertPreserved(before, saved.messages);
+		assert.equal(histories.length, 3, "pose, prose-only reaction, one recovery request");
+		assert.match(histories[2]!, /answered your prediction and you resolved it, but your turn ended without the step's check/);
+		assert.doesNotMatch(histories[2]!, /Your previous response was empty/);
+		assert.match(JSON.stringify(saved.messages), /Here is why the order works/, "the resolving prose stays in the record");
+		assert.match(JSON.stringify(saved.messages.at(-1)), /call-2/);
+		assert.doesNotMatch(JSON.stringify(saved.messages), /without the step's check/);
+		assert.equal(endsInFailedTurn(saved.messages), false);
+	});
+
+	it("a second prose-only reaction after a prediction stands as teaching, with no error", async () => {
+		const { engine, histories } = scripted([
+			pose("predict"),
+			() => fauxAssistantMessage("Right: Mercury."),
+			() => fauxAssistantMessage("And here is more about the order."),
+		]);
+		const chat = createConfiguredChat("Test: prediction prose twice");
+		await turn(engine, chat.id, { type: "text", text: "teach me the planets" });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+		const saved = chatStore.getChat(chat.id)!.messages;
+		assert.equal(histories.length, 3, "only one automatic continuation per answer");
+		assert.equal(endsInFailedTurn(saved), false);
+		const last = saved.at(-1);
+		assert.equal(last?.role === "assistant" && last.stopReason, "stop");
+		assert.equal(isTurnRunning(chat.id), false);
+	});
+
+	it("an empty continuation after a prediction's prose reaction is not marked failed", async () => {
+		const { engine, histories } = scripted([pose("predict"), () => fauxAssistantMessage("Right: Mercury."), () => fauxAssistantMessage("")]);
+		const chat = createConfiguredChat("Test: prediction prose then empty");
+		await turn(engine, chat.id, { type: "text", text: "teach me" });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+		assert.equal(histories.length, 3);
+		assert.equal(endsInFailedTurn(chatStore.getChat(chat.id)!.messages), false, "the learner already has the teaching");
+	});
+
+	it("prose without a question after a check answer does not continue", async () => {
+		const { engine, histories } = scripted([pose("check"), () => fauxAssistantMessage("Right: Mercury. That completes the lesson.")]);
+		const chat = createConfiguredChat("Test: check reaction may end in prose");
+		await turn(engine, chat.id, { type: "text", text: "teach me" });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+		assert.equal(histories.length, 2);
+	});
+
+	it("send_to_user output counts as a reply, so its empty closing message is not recovered", async () => {
+		const { engine, histories } = scripted([
+			pose(),
+			() => fauxAssistantMessage([fauxToolCall("send_to_user", { message: "Right: Mercury. That completes the lesson." }, { id: "say-1" })], { stopReason: "toolUse" }),
+			() => fauxAssistantMessage(""),
+		], { models: [{ id: "claude-faux" }] });
+		const chat = createConfiguredChat("Test: Claude output channel");
+		await turn(engine, chat.id, { type: "text", text: "teach me" });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+		assert.equal(histories.length, 3, "pose, send_to_user turn, empty closing message; no recovery");
+		assert.equal(endsInFailedTurn(chatStore.getChat(chat.id)!.messages), false);
+	});
+
+	it("the Claude Code engine keeps the normal stop (it cannot receive the reminder)", async () => {
+		const { engine, histories } = scripted([pose(), () => fauxAssistantMessage("")], { provider: "claude-code" });
+		const chat = createConfiguredChat("Test: no recovery on Claude Code");
+		await turn(engine, chat.id, { type: "text", text: "teach me" });
+		await turn(engine, chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer() });
+		assert.equal(histories.length, 2);
+		assert.equal(endsInFailedTurn(chatStore.getChat(chat.id)!.messages), false);
+	});
+
+	describe("the prober (#763)", () => {
+		const ASK = { question: "What do you want to get out of this?", options: [{ label: "Exam prep" }, { label: "Curiosity" }] };
+		const askAnswer = () => ({ kind: "ask", questionText: ASK.question, dontKnow: false, answers: [{ index: 0, label: "Exam prep" }], answeredAt: new Date().toISOString() });
+		const prober = (engine: PiEngine, chatId: string): AgentFactory => (opts) => opts.teaching
+			? createTeacherAgent(undefined, { ...opts, engine })
+			: createProberAgent({ chatId, chatStore, jobStore, deliver: () => {}, spawn: () => {} }, { ...opts, engine });
+
+		it("an empty reaction to a probing answer recovers to the next probe", async () => {
+			const { engine, histories } = scripted([
+				() => fauxAssistantMessage([fauxToolCall("ask_user_question", ASK, { id: "ask-1" })], { stopReason: "toolUse" }),
+				() => fauxAssistantMessage([fauxText("")]),
+				() => fauxAssistantMessage([fauxToolCall("ask_user_question", { ...ASK, question: "Next?" }, { id: "ask-2" })], { stopReason: "toolUse" }),
+			]);
+			const chat = createConfiguredChat("Test: prober empty reaction");
+			await turn(engine, chat.id, { type: "text", text: "teach me planet order" }, prober(engine, chat.id));
+			await turn(engine, chat.id, { type: "answer", toolCallId: "ask-1", answer: askAnswer() }, prober(engine, chat.id));
+			assert.equal(histories.length, 3);
+			assert.match(JSON.stringify(chatStore.getChat(chat.id)!.messages.at(-1)), /ask-2/);
+		});
+
+		it("prose after a probing answer is not a prediction and does not continue", async () => {
+			const { engine, histories } = scripted([
+				() => fauxAssistantMessage([fauxToolCall("ask_user_question", ASK, { id: "ask-1" })], { stopReason: "toolUse" }),
+				() => fauxAssistantMessage("Thanks, that helps."),
+			]);
+			const chat = createConfiguredChat("Test: prober prose reaction");
+			await turn(engine, chat.id, { type: "text", text: "teach me planet order" }, prober(engine, chat.id));
+			await turn(engine, chat.id, { type: "answer", toolCallId: "ask-1", answer: askAnswer() }, prober(engine, chat.id));
+			assert.equal(histories.length, 2);
+		});
 	});
 });
 

@@ -46,7 +46,7 @@ import {
 	NEXT_PROBLEM_TEXT,
 	THINKING_LABEL,
 } from "./contracts/chat.ts";
-import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
+import { compactAnswerForModel, normalizeQuizType, type QuestionAnswerData, type QuizQuestionType } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 import { parseQuestionInput } from "./tool-parts.ts";
 import { expandCitationsForModel } from "./citations.ts";
@@ -1035,6 +1035,35 @@ export function reconstructRequestCause(messages: readonly LhMessage[]): Reconst
 		history.push(message);
 	}
 	return resolve();
+}
+
+/** A completed generation with no prose or tool call has not responded to
+ * the learner. Thinking (including encrypted reasoning) alone is not output. */
+export function isEmptyAssistantCompletion(message: AgentMessage): boolean {
+	return message.role === "assistant" && message.stopReason === "stop" &&
+		message.content.every((block) => block.type === "thinking" || (block.type === "text" && !block.text.trim()));
+}
+
+/** Whether an assistant message shows the learner anything: visible prose,
+ * or a `send_to_user` call (Claude's output channel, after which its final
+ * message is empty by design). */
+export function deliversLearnerOutput(message: AgentMessage): boolean {
+	return message.role === "assistant" && message.content.some((block) =>
+		(block.type === "text" && !!block.text.trim()) || (block.type === "toolCall" && block.name === SEND_TO_USER_TOOL));
+}
+
+/** The teaching-cycle role of the question whose answer ends `messages`,
+ * read from that question's own call (`quiz`/`explain` carry `type`). */
+export function answeredQuestionType(messages: readonly AgentMessage[]): QuizQuestionType | undefined {
+	const last = messages[messages.length - 1];
+	if (!last || last.role !== "toolResult" || last.isError) return undefined;
+	for (let i = messages.length - 2; i >= 0; i--) {
+		const m = messages[i]!;
+		if (m.role !== "assistant") continue;
+		const call = m.content.find((block) => block.type === "toolCall" && block.id === last.toolCallId);
+		if (call?.type === "toolCall") return call.name === last.toolName ? normalizeQuizType((call.arguments as { type?: unknown } | undefined)?.type) : undefined;
+	}
+	return undefined;
 }
 
 export function needsContinuation(record: readonly LhMessage[]): boolean {

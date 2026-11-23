@@ -64,6 +64,9 @@ export class SubscriptionRequestCycle implements SubscriptionDispatchLifecycle {
   this.localRejection = true;
   for (const id of contextIds) this.rejectedContextIds.add(id);
  }
+ /** A completed but unresponsive answer reaction still owes its foreground
+  * continuation if an automatic delivery is denied before dispatch. */
+ oweForegroundContinuation(): void { this.foregroundOwed = true; }
  abort(): void { this.userAborted = true; }
  bindRelease(release: (event: AgentEvent) => void): () => void { this.release = release; return () => { this.release = undefined; }; }
  prepare(request: PrepareRequestContext): void {

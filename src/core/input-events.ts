@@ -37,6 +37,7 @@ import {
 	activeProblemOccurrenceOf,
 	concludedByDismissalPair,
 	isSideQuestionMarker,
+	isEmptyAssistantCompletion,
 	danglingQuestionOf,
 	newAnswerResult,
 	newNextMessage,
@@ -434,15 +435,16 @@ export function retryDrops(messages: readonly LhMessage[]): Set<string> {
 	return ids;
 }
 
-/** Walk back over failed assistants and UI-only plan blocks. A compaction
- * is a boundary, not a marker Retry may cross. A failure AFTER a compaction
+/** Walk back over failed assistants, the empty answer reactions before them,
+ * and UI-only plan blocks. A compaction is a boundary, not a marker Retry
+ * may cross. A failure AFTER a compaction
  * can still retry: that compacted context was already its starting state. */
 function failedTail(messages: readonly LhMessage[]): { ids: Set<string>; before: LhMessage | undefined } {
 	const ids = new Set<string>();
 	let i = messages.length - 1;
 	for (; i >= 0; i--) {
 		const m = messages[i]!;
-		if (m.role === "assistant" && m.stopReason === "error") ids.add(m.id);
+		if (m.role === "assistant" && (m.stopReason === "error" || (ids.size > 0 && isEmptyAssistantCompletion(m)))) ids.add(m.id);
 		else if (!(m.role === "custom" && (m.customType === "plan-block" || isSideQuestionMarker(m)))) break;
 	}
 	return { ids, before: messages[i] };
