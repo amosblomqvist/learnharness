@@ -39,4 +39,4 @@ In labelled answer/Why reveals, only the first direct paragraph is inline with i
 - `tests/tool-content-presentation.test.tsx`: synthetic corpus, historical joins, ambiguity.
 - `tests/tool-content-interaction.test.tsx`: selection/submission/persistence/reveal and paragraphs.
 
-`scripts/replay-tool-rendering-corpus.ts` can replay a separately supplied frozen corpus offline, checking hashes and source/render/answer preservation. Corpus collection and larger diagnostic runs are not prerequisites for unit tests. The Markdown, card, practice, shape, and grading suites remain relevant.
+Corpus collection and larger diagnostic runs are not prerequisites for unit tests. The Markdown, card, practice, shape, and grading suites remain relevant.
