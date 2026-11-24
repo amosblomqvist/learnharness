@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { threadProfileRoot } from "./src/store/thread-profile.ts";
@@ -18,9 +20,22 @@ export const ROOT = path.dirname(fileURLToPath(import.meta.url));
 // Mutable runtime paths are not deployment assets. Turbopack analyzes each
 // path-producing call independently, so derived paths need their own opt-out.
 // Keep ROOT/teacherPrompt traceable: read-only shipped assets still belong.
+/**
+ * Test isolation: under NODE_ENV=test, an unset LH_DATA_DIR / LH_AUTH_FILE
+ * resolves to a fresh per-process temp folder, never the repo data/ or
+ * auth.json. Many test files import config.ts (directly or transitively)
+ * before setting LH_DATA_DIR, or not at all; without this, their fixture
+ * sessions landed in the real sidebar.
+ */
+const TEST_ROOT = process.env.NODE_ENV === "test" && (!process.env.LH_DATA_DIR || !process.env.LH_AUTH_FILE)
+	? fs.mkdtempSync(path.join(/* turbopackIgnore: true */ os.tmpdir(), "lh-test-profile-"))
+	: null;
+
 const DATA_ROOT = process.env.LH_DATA_DIR
 	? path.resolve(/* turbopackIgnore: true */ process.env.LH_DATA_DIR)
-	: path.join(/* turbopackIgnore: true */ ROOT, "data");
+	: TEST_ROOT
+		? path.join(/* turbopackIgnore: true */ TEST_ROOT, "data")
+		: path.join(/* turbopackIgnore: true */ ROOT, "data");
 
 export const PATHS = {
 	root: ROOT,
@@ -158,4 +173,6 @@ export const THEMES_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "them
  */
 export const AUTH_FILE = process.env.LH_AUTH_FILE
 	? path.resolve(/* turbopackIgnore: true */ process.env.LH_AUTH_FILE)
-	: path.join(/* turbopackIgnore: true */ ROOT, "auth.json");
+	: TEST_ROOT
+		? path.join(/* turbopackIgnore: true */ TEST_ROOT, "auth.json")
+		: path.join(/* turbopackIgnore: true */ ROOT, "auth.json");

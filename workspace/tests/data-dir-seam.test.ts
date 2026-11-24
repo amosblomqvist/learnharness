@@ -13,6 +13,7 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFileSync } from "node:child_process";
+import { pathToFileURL } from "node:url";
 import { describe, it } from "node:test";
 
 const REPO_ROOT = path.resolve(import.meta.dirname, "..");
@@ -37,14 +38,33 @@ describe("LH_DATA_DIR seam", () => {
 		}
 	});
 
-	it("unset = the repo data/ exactly as before (fresh child process, no env)", () => {
+	function resolveUnset(nodeEnv: "test" | undefined): { data: string; chats: string; auth: string } {
+		const env: Record<string, string | undefined> = { ...process.env };
+		delete env.LH_DATA_DIR;
+		delete env.LH_AUTH_FILE;
+		if (nodeEnv === undefined) delete env.NODE_ENV; else env.NODE_ENV = nodeEnv;
 		const out = execFileSync(
 			process.execPath,
-			["--import", TSX_LOADER, "--eval", `const m = await import(${JSON.stringify(path.join(REPO_ROOT, "config.ts"))}); console.log(JSON.stringify({ data: m.PATHS.data, chats: m.PATHS.chats }));`],
-			{ cwd: REPO_ROOT, encoding: "utf-8" },
+			["--import", pathToFileURL(TSX_LOADER).href, "--eval", `const m = await import(${JSON.stringify(pathToFileURL(path.join(REPO_ROOT, "config.ts")).href)}); console.log(JSON.stringify({ data: m.PATHS.data, chats: m.PATHS.chats, auth: m.AUTH_FILE }));`],
+			{ cwd: REPO_ROOT, encoding: "utf-8", env },
 		);
-		const parsed = JSON.parse(out) as { data: string; chats: string | null };
+		return JSON.parse(out) as { data: string; chats: string; auth: string };
+	}
+
+	it("unset = the repo data/ exactly as before (fresh child process, no env)", () => {
+		const parsed = resolveUnset(undefined);
 		assert.equal(parsed.data, path.join(REPO_ROOT, "data"));
 		assert.equal(parsed.chats, path.join(REPO_ROOT, "data", "chats"));
+		assert.equal(parsed.auth, path.join(REPO_ROOT, "auth.json"));
+	});
+
+	it("unset under NODE_ENV=test = a temp profile, never the repo data/ or auth.json", () => {
+		const parsed = resolveUnset("test");
+		const tmp = fs.realpathSync(os.tmpdir());
+		for (const value of [parsed.data, parsed.auth]) {
+			assert.ok(!value.startsWith(REPO_ROOT), `${value} must stay outside the repo`);
+			assert.ok(fs.realpathSync(path.dirname(value)).startsWith(tmp), `${value} must live under the OS temp dir`);
+		}
+		assert.equal(path.dirname(parsed.data), path.dirname(parsed.auth), "data and auth share one test profile");
 	});
 });

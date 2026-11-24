@@ -6,17 +6,22 @@ $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
 $workspace = Split-Path -Parent $PSScriptRoot
 
+# Returns the Node.js version when the directory holds a usable Node 26 with npm, otherwise $null.
 function Test-NodeInstallation([string]$Directory) {
     $nodeExecutable = Join-Path $Directory 'node.exe'
     $npmCli = Join-Path $Directory 'node_modules\npm\bin\npm-cli.js'
+    $npmManifest = Join-Path $Directory 'node_modules\npm\package.json'
     if (!(Test-Path -LiteralPath $nodeExecutable -PathType Leaf) -or
-        !(Test-Path -LiteralPath $npmCli -PathType Leaf)) { return $false }
+        !(Test-Path -LiteralPath $npmCli -PathType Leaf) -or
+        !(Test-Path -LiteralPath $npmManifest -PathType Leaf)) { return $null }
     try {
         $nodeVersion = & $nodeExecutable --version 2>$null
-        if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v26\.\d+\.\d+$') { return $false }
-        $npmVersion = & $nodeExecutable $npmCli --version 2>$null
-        return ($LASTEXITCODE -eq 0 -and $npmVersion -match '^\d+\.\d+\.\d+$')
-    } catch { return $false }
+        if ($LASTEXITCODE -ne 0 -or $nodeVersion -notmatch '^v26\.\d+\.\d+$') { return $null }
+        # Reading npm's manifest avoids starting a second Node.js process on every launch.
+        $npmVersion = (Get-Content -LiteralPath $npmManifest -Raw | ConvertFrom-Json).version
+        if ($npmVersion -notmatch '^\d+\.\d+\.\d+$') { return $null }
+        return $nodeVersion
+    } catch { return $null }
 }
 
 function Assert-ManagedPath([string]$Target) {
@@ -116,7 +121,8 @@ try {
     $nodeDirectory = $null
     foreach ($command in @(Get-Command node.exe -CommandType Application -All -ErrorAction SilentlyContinue)) {
         $directory = Split-Path -Parent $command.Source
-        if (Test-NodeInstallation $directory) { $nodeDirectory = $directory; break }
+        $nodeVersion = Test-NodeInstallation $directory
+        if ($nodeVersion) { $nodeDirectory = $directory; break }
     }
 
     if (!$nodeDirectory) {
@@ -140,7 +146,13 @@ try {
             Assert-ManagedPath $nodeDirectory
             Assert-ManagedPath (Join-Path $nodeDirectory 'node.exe')
             Assert-ManagedPath (Join-Path $nodeDirectory 'node_modules\npm\bin\npm-cli.js')
-            if (!(Test-NodeInstallation $nodeDirectory)) { Install-NodeRuntime $architecture $nodeDirectory }
+            Assert-ManagedPath (Join-Path $nodeDirectory 'node_modules\npm\package.json')
+            $nodeVersion = Test-NodeInstallation $nodeDirectory
+            if (!$nodeVersion) {
+                Install-NodeRuntime $architecture $nodeDirectory
+                $nodeVersion = Test-NodeInstallation $nodeDirectory
+                if (!$nodeVersion) { throw 'The installed Node.js/npm runtime could not be verified.' }
+            }
         } finally {
             if ($locked) { $mutex.ReleaseMutex() }
             $mutex.Dispose()
@@ -150,7 +162,7 @@ try {
     $nodeExecutable = Join-Path $nodeDirectory 'node.exe'
     $npmCli = Join-Path $nodeDirectory 'node_modules\npm\bin\npm-cli.js'
     $env:PATH = "$nodeDirectory;$env:PATH"
-    Write-Host "[launcher] Using $(& $nodeExecutable --version) with npm from $nodeDirectory"
+    Write-Host "[launcher] Using $nodeVersion with npm from $nodeDirectory"
     if ($InstallOnly) { exit 0 }
     $env:npm_execpath = $npmCli
     Push-Location -LiteralPath $workspace

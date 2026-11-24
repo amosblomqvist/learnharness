@@ -39,6 +39,8 @@ npm run lint           # ESLint, including the architectural import restrictions
 
 ## Safe local runs
 
+**Never write to the user's real profile** (`workspace/data/`, `workspace/auth.json` and its sibling credential files). Test or demo sessions left there show up as stray threads in the user's sidebar. Every test, smoke script and separate dev server you run must use a scratch `LH_DATA_DIR` and `LH_AUTH_FILE`. Opening the real app to look at how it behaves is allowed; starting a session in it is not, because that changes the user's learning progress. Afterwards, check that `workspace/data/chats` and `workspace/data/jobs` gained no files.
+
 Point the server at a disposable data and auth profile so your personal data stays untouched:
 
 ```sh

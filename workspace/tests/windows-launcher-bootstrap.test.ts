@@ -48,6 +48,7 @@ function global:Expand-Archive {
     New-Item -ItemType Directory -Path $npm -Force | Out-Null
     New-Item -ItemType HardLink -Path (Join-Path $candidate 'node.exe') -Value $RuntimeNode | Out-Null
     Set-Content -LiteralPath (Join-Path $npm 'npm-cli.js') -Value "console.log('11.20.0');" -Encoding Ascii
+    Set-Content -LiteralPath (Join-Path $candidate 'node_modules\npm\package.json') -Value '{"name":"npm","version":"11.20.0"}' -Encoding Ascii
 }
 & $Bootstrap -InstallOnly
 exit $LASTEXITCODE
@@ -61,6 +62,7 @@ function nodeFixture(directory: string, npm = true) {
 		const bin = path.join(directory, "node_modules", "npm", "bin");
 		mkdirSync(bin, { recursive: true });
 		writeFileSync(path.join(bin, "npm-cli.js"), "console.log('11.20.0');\n");
+		writeFileSync(path.join(bin, "..", "package.json"), JSON.stringify({ name: "npm", version: "11.20.0" }));
 	}
 }
 

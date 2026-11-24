@@ -105,15 +105,15 @@ describe("development server readiness", () => {
 	});
 });
 
-function boot(checkout = false) {
+function boot(checkout = false, { appReady = Promise.resolve() }: { appReady?: Promise<void> } = {}) {
 	let ready!: () => void, fail!: (error: Error) => void;
 	const readiness = new Promise<void>((resolve, reject) => { ready = resolve; fail = reject; });
 	const windows: string[] = [], exits: number[] = [], logs: string[] = [], probes: { url: string; signal: AbortSignal }[] = [];
-	const sent: unknown[] = [], signals: string[] = [];
+	const sent: unknown[] = [], signals: string[] = [], spawned: string[] = [];
 	let window: FakeWindow | undefined;
 	const app = Object.assign(new EventEmitter(), {
 		setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => checkout,
-		quit() {}, whenReady: async () => {}, exit: (code: number) => exits.push(code), isPackaged: false,
+		quit() {}, whenReady: () => appReady, exit: (code: number) => exits.push(code), isPackaged: false,
 	});
 	class FakeWindow extends EventEmitter {
 		webContents = Object.assign(new EventEmitter(), { setWindowOpenHandler() {}, send() {}, getZoomFactor: () => 1 });
@@ -132,7 +132,7 @@ function boot(checkout = false) {
 			: id === "./appearance-chrome.cjs" ? { ...mainRequire(id), readAppearance: () => ({ mode: "dark", background: "#141414" }) }
 			: id === "./dev-server-readiness.cjs" ? { waitForDevServer: (url: string, { signal }: { signal: AbortSignal }) => {
 				probes.push({ url, signal }); signal.addEventListener("abort", () => fail(signal.reason), { once: true }); return readiness;
-			} } : id === "./windows-checkout.cjs" ? { startCheckoutServer: () => ({
+			} } : id === "./windows-checkout.cjs" ? { startCheckoutServer: (node: string) => (spawned.push(node), {
 				child: { kill: (signal: string) => signals.push(signal) }, ready: readiness,
 			}) } : mainRequire(id),
 		process: Object.assign(new EventEmitter(), {
@@ -146,7 +146,7 @@ function boot(checkout = false) {
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
 	const done = checkout ? Promise.resolve() : runInNewContext("main()", context) as Promise<void>;
-	return { app, windows, exits, logs, probes, ready, fail, done, signals, sent, launcher: context.process, window: () => window };
+	return { app, windows, exits, logs, probes, ready, fail, done, signals, sent, spawned, launcher: context.process, window: () => window };
 }
 
 describe("real Electron main dev startup wiring", () => {
@@ -179,8 +179,7 @@ describe("real Electron main dev startup wiring", () => {
 
 describe("Windows checkout desktop startup wiring", () => {
 	it("uses only the owned server's readiness signal and detaches once the window loads and shows", async () => {
-		const f = boot(true); await delay(0);
-		assert.deepEqual(f.probes, []);
+		const f = boot(true); await delay(0);		assert.deepEqual(f.probes, []);
 		assert.deepEqual(f.windows, []);
 		f.ready(); await delay(0);
 		assert.deepEqual(f.windows, ["http://localhost:3000"]);
@@ -193,6 +192,30 @@ describe("Windows checkout desktop startup wiring", () => {
 		assert.deepEqual(f.exits, []);
 		f.app.emit("before-quit");
 		assert.deepEqual(f.signals, ["SIGTERM"]);
+	});
+
+	it("starts the owned server before Electron is ready, still after the instance lock", async () => {
+		let appReady!: () => void;
+		const f = boot(true, { appReady: new Promise<void>(resolve => { appReady = resolve; }) }); await delay(0);
+		assert.deepEqual(f.spawned, ["fixture-node"]);
+		f.ready(); await delay(0);
+		assert.deepEqual(f.windows, [], "the window still waits for Electron");
+		appReady();
+		// Startup still awaits Mobile Access initialization before creating the window.
+		for (let i = 0; i < 100 && !f.windows.length; i++) await delay(5);
+		assert.deepEqual(f.windows, ["http://localhost:3000"], JSON.stringify({ sent: f.sent, logs: f.logs }));
+		assert.deepEqual(f.spawned, ["fixture-node"], "the server is started once");
+	});
+
+	it("reports a server failure that happens before Electron is ready", async () => {
+		let appReady!: () => void;
+		const f = boot(true, { appReady: new Promise<void>(resolve => { appReady = resolve; }) }); await delay(0);
+		f.fail(new Error("port already in use")); await delay(0);
+		assert.equal(f.sent.length, 0, "the failure waits for Electron");
+		appReady(); await delay(0);
+		assert.deepEqual(f.windows, []);
+		assert.equal((f.sent[0] as { message: string }).message, "port already in use");
+		assert.deepEqual(f.exits, [1]);
 	});
 
 	it("reports owned server startup failures without navigating", async () => {

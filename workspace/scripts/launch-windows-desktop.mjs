@@ -6,6 +6,7 @@ import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
+import { assertNodeModulesUnlocked } from "./windows-node-modules-locks.mjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const require = createRequire(import.meta.url);
@@ -16,19 +17,22 @@ const sdkName = `${cache}/plugin-sdk`;
 const commonInputs = ["package.json", "package-lock.json", "scripts/launch-windows-desktop.mjs"];
 const projectInputs = ["package.json", "package-lock.json", "manifest.json", "README.md", "LICENSE", "THIRD-PARTY.md", "FSRS-LICENSE.txt", ".gitignore", "tsconfig.json", "src", "scripts", "tests", "licenses"];
 
-function fingerprint(workspace, names) {
+/** Hash file contents, or with `contents: false` only sizes and modification times. */
+export function fingerprint(workspace, names, { contents = true } = {}) {
 	const hash = createHash("sha256");
 	hash.update(`${process.platform}/${process.arch}/${process.versions.node}`);
 	function visit(name) {
 		const filename = path.join(workspace, name);
-		const stat = lstatSync(filename, { throwIfNoEntry: false });
+		const stat = lstatSync(filename, { throwIfNoEntry: false, bigint: !contents });
 		hash.update(`\0${name}\0`);
 		if (!stat) hash.update("missing");
 		else if (stat.isDirectory()) {
 			hash.update("directory");
 			for (const entry of readdirSync(filename).sort()) visit(`${name}/${entry}`);
 		} else if (stat.isFile()) {
-			hash.update(`file:${stat.size}\0`).update(readFileSync(filename));
+			hash.update(`file:${stat.size}\0`);
+			if (contents) hash.update(readFileSync(filename));
+			else hash.update(`mtime:${stat.mtimeNs}`);
 		} else throw new Error(`Refusing linked or special launcher file: ${filename}`);
 	}
 	for (const name of names) visit(name);
@@ -41,7 +45,13 @@ function runNode(args, cwd = root) {
 	if (result.status !== 0) throw new Error(`${path.basename(cwd)}: ${args.slice(1).join(" ") || args[0]} failed (${result.signal ?? result.status}).`);
 }
 
-function runNpm(args, cwd) {
+function runNpm(args, cwd = root) {
+	if (args[0] === "ci") {
+		// npm ci deletes node_modules first; refuse before that if a running process holds a binary in it.
+		assertNodeModulesUnlocked(path.join(cwd, "node_modules"));
+		// Deprecation and install-script notices come from upstream packages and are not actionable here.
+		args = [...args, "--loglevel=error"];
+	}
 	console.log(`[launcher] npm ${args.join(" ")}`);
 	runNode([process.env.npm_execpath, ...args], cwd);
 }
@@ -51,10 +61,19 @@ function readState(filename) {
 	catch { return {}; }
 }
 
-function cached(workspace, previous, input, outputNames, build) {
-	if (previous?.input === input && previous.output === fingerprint(workspace, outputNames)) return previous;
+/**
+ * Reuse generated outputs while their input is unchanged. A size/mtime `stamp` avoids
+ * re-reading the outputs each launch; the content `output` hash is checked only when
+ * the stamp differs (first run, or files touched) and stays the key dependents use.
+ */
+export function cached(workspace, previous, input, outputNames, build) {
+	if (previous?.input === input) {
+		const stamp = fingerprint(workspace, outputNames, { contents: false });
+		if (previous.stamp === stamp) return previous;
+		if (previous.output === fingerprint(workspace, outputNames)) return { ...previous, stamp };
+	}
 	build();
-	return { input, output: fingerprint(workspace, outputNames) };
+	return { input, output: fingerprint(workspace, outputNames), stamp: fingerprint(workspace, outputNames, { contents: false }) };
 }
 
 function prepareDependencies() {
@@ -201,7 +220,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
 	main().catch(error => {
-		console.error(`[launcher] ${error.message}`);
+		for (const line of error.message.split("\n")) console.error(`[launcher] ${line}`);
 		process.exitCode = 1;
 	});
 }

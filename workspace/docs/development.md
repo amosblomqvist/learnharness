@@ -63,8 +63,8 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 
 | Variable | Purpose |
 | --- | --- |
-| `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts, stored in `workspace/data/` by default. |
-| `LH_AUTH_FILE` | Keys and custom-endpoint binding, stored in `workspace/auth.json` by default. |
+| `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts, stored in `workspace/data/` by default. Under `NODE_ENV=test` an unset value resolves to a fresh temp folder, so tests never touch the real profile. |
+| `LH_AUTH_FILE` | Keys and custom-endpoint binding, stored in `workspace/auth.json` by default (temp folder under `NODE_ENV=test` when unset). |
 | `LH_CONVEX_URL` | Optional HTTPS `.convex.cloud` URL that overrides the shared thread sync deployment. See [Google sign-in and thread sync](cloud-sync.md). |
 | `LH_CLOUD_CALLBACK_PORT` | Optional desktop Google sign-in return port; default `3211`, bound only to `127.0.0.1`. |
 | Provider API-key variables | Optional, selected-provider dependent; UI names are in `src/core/auth-keys.ts`. |

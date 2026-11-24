@@ -702,6 +702,29 @@ async function main() {
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
+	// Windows checkout: start the development server while Electron initializes.
+	// The single-instance lock is already held, so this never starts a second server.
+	let checkout;
+	let checkoutReady = false;
+	if (checkoutNode && process.env.LH_DEV_URL) {
+		// main() is called while this module is still evaluating; let it finish so
+		// module-level state declared after the boot block (serverProcess) exists.
+		await null;
+		const { startCheckoutServer } = require("./windows-checkout.cjs");
+		checkout = startCheckoutServer(checkoutNode, {
+			log,
+			onExit: error => {
+				if (!checkoutReady || serverProcess !== checkout.child) return;
+				log(error.message);
+				if (checkoutReported) app.quit();
+				else reportCheckout(error);
+			},
+		});
+		serverProcess = checkout.child;
+		// Awaited after app.whenReady(); keep an early failure from being reported as unhandled meanwhile.
+		checkout.ready.catch(() => {});
+	}
+
 	await app.whenReady();
 
 	// Read the same record/custom theme the server uses before constructing
@@ -747,21 +770,9 @@ async function main() {
 		await startServer(new URL(url).port);
 		await waitUntilUp(url);
 		log(`server up: ${url}`);
-	} else if (checkoutNode) {
-		let ready = false;
-		const { startCheckoutServer } = require("./windows-checkout.cjs");
-		const owned = startCheckoutServer(checkoutNode, {
-			log,
-			onExit: error => {
-				if (!ready || serverProcess !== owned.child) return;
-				log(error.message);
-				if (checkoutReported) app.quit();
-				else reportCheckout(error);
-			},
-		});
-		serverProcess = owned.child;
-		await owned.ready;
-		ready = true;
+	} else if (checkout) {
+		await checkout.ready;
+		checkoutReady = true;
 		log(`checkout server ready: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl} — waiting for server`);

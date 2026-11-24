@@ -1,8 +1,7 @@
 // A source-checkout server owned by Electron. Binding and readiness happen in
 // the same process, so Electron never trusts an unrelated loopback listener.
-const { createServer } = require("node:http");
+const { createServer, get } = require("node:http");
 const path = require("node:path");
-const next = require("next");
 
 const hostname = "localhost";
 const port = 3000;
@@ -16,8 +15,25 @@ function fail(error) {
 	if (!process.connected) process.exit(1);
 }
 
+/**
+ * Request the home page once and discard it. Next compiles routes on first request
+ * in development, so this overlaps the page compile with Electron creating the
+ * window; the window's own request joins the compile already in progress.
+ */
+function warmHomePage(port, host = "127.0.0.1") {
+	return new Promise(resolve => {
+		const request = get({ host, port, path: "/", headers: { host: `${hostname}:${port}` } }, response => {
+			response.resume();
+			response.once("end", () => resolve(response.statusCode));
+			response.once("error", () => resolve(undefined));
+		});
+		request.once("error", () => resolve(undefined));
+	});
+}
+
 async function start() {
 	if (!process.connected) throw new Error("The checkout server requires a connected desktop process.");
+	const next = require("next");
 	process.once("disconnect", () => process.exit(0));
 	const server = createServer();
 	const ipv6 = createServer();
@@ -51,7 +67,10 @@ async function start() {
 			if (error.code !== "EAFNOSUPPORT" && error.code !== "EADDRNOTAVAIL") throw error;
 		}),
 	]);
+	void warmHomePage(port);
 	process.send({ type: "checkout-server-ready" });
 }
 
-start().catch(fail);
+if (require.main === module) start().catch(fail);
+
+module.exports = { warmHomePage };
