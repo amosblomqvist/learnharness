@@ -1,8 +1,10 @@
 // Ported from @earendil-works/pi-coding-agent 1.1.0, dist/utils/exif-orientation.js (MIT).
-function readOrientationFromTiff(bytes, tiffStart) {
-    if (tiffStart + 8 > bytes.length)
+function readOrientationFromTiff(bytes, tiffStart, tiffEnd = bytes.length) {
+    if (tiffStart < 0 || tiffStart + 8 > tiffEnd)
         return 1;
     const byteOrder = (bytes[tiffStart] << 8) | bytes[tiffStart + 1];
+    if (byteOrder !== 0x4949 && byteOrder !== 0x4d4d)
+        return 1;
     const le = byteOrder === 0x4949;
     const read16 = (pos) => {
         if (le)
@@ -11,17 +13,21 @@ function readOrientationFromTiff(bytes, tiffStart) {
     };
     const read32 = (pos) => {
         if (le)
-            return bytes[pos] | (bytes[pos + 1] << 8) | (bytes[pos + 2] << 16) | (bytes[pos + 3] << 24);
+            return (bytes[pos] | (bytes[pos + 1] << 8) | (bytes[pos + 2] << 16) | (bytes[pos + 3] << 24)) >>> 0;
         return ((bytes[pos] << 24) | (bytes[pos + 1] << 16) | (bytes[pos + 2] << 8) | bytes[pos + 3]) >>> 0;
     };
+    if (read16(tiffStart + 2) !== 42)
+        return 1;
     const ifdOffset = read32(tiffStart + 4);
+    if (ifdOffset < 8)
+        return 1;
     const ifdStart = tiffStart + ifdOffset;
-    if (ifdStart + 2 > bytes.length)
+    if (ifdStart + 2 > tiffEnd)
         return 1;
     const entryCount = read16(ifdStart);
     for (let i = 0; i < entryCount; i++) {
         const entryPos = ifdStart + 2 + i * 12;
-        if (entryPos + 12 > bytes.length)
+        if (entryPos + 12 > tiffEnd)
             return 1;
         if (read16(entryPos) === 0x0112) {
             const value = read16(entryPos + 8);
@@ -30,49 +36,55 @@ function readOrientationFromTiff(bytes, tiffStart) {
     }
     return 1;
 }
-function findJpegTiffOffset(bytes) {
+function findJpegTiffSlice(bytes) {
     let offset = 2;
     while (offset < bytes.length - 1) {
         if (bytes[offset] !== 0xff)
-            return -1;
+            return null;
         const marker = bytes[offset + 1];
         if (marker === 0xff) {
             offset++;
             continue;
         }
-        if (marker === 0xe1) {
-            if (offset + 4 >= bytes.length)
-                return -1;
-            const segmentStart = offset + 4;
-            if (segmentStart + 6 > bytes.length)
-                return -1;
-            if (hasExifHeader(bytes, segmentStart))
-                return segmentStart + 6;
+        if (marker === 0x00 || marker === 0xd9 || marker === 0xda)
+            return null;
+        if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd8)) {
+            offset += 2;
+            continue;
         }
         if (offset + 4 > bytes.length)
-            return -1;
+            return null;
         const length = (bytes[offset + 2] << 8) | bytes[offset + 3];
-        offset += 2 + length;
+        if (length < 2)
+            return null;
+        const segmentEnd = offset + 2 + length;
+        if (marker === 0xe1) {
+            const segmentStart = offset + 4;
+            const boundedEnd = Math.min(bytes.length, segmentEnd);
+            if (length >= 8 && segmentStart + 6 <= boundedEnd && hasExifHeader(bytes, segmentStart))
+                return { start: segmentStart + 6, end: boundedEnd };
+        }
+        offset = segmentEnd;
     }
-    return -1;
+    return null;
 }
-function findWebpTiffOffset(bytes) {
+function findWebpTiffSlice(bytes) {
     let offset = 12;
     while (offset + 8 <= bytes.length) {
         const chunkId = String.fromCharCode(bytes[offset], bytes[offset + 1], bytes[offset + 2], bytes[offset + 3]);
-        const chunkSize = bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | (bytes[offset + 7] << 24);
+        const chunkSize = (bytes[offset + 4] | (bytes[offset + 5] << 8) | (bytes[offset + 6] << 16) | (bytes[offset + 7] << 24)) >>> 0;
         const dataStart = offset + 8;
         if (chunkId === "EXIF") {
             if (dataStart + chunkSize > bytes.length)
-                return -1;
+                return null;
             // Some WebP files have "Exif\0\0" prefix before the TIFF header
             const tiffStart = chunkSize >= 6 && hasExifHeader(bytes, dataStart) ? dataStart + 6 : dataStart;
-            return tiffStart;
+            return { start: tiffStart, end: dataStart + chunkSize };
         }
         // RIFF chunks are padded to even size
         offset = dataStart + chunkSize + (chunkSize % 2);
     }
-    return -1;
+    return null;
 }
 function hasExifHeader(bytes, offset) {
     return (bytes[offset] === 0x45 &&
@@ -83,10 +95,10 @@ function hasExifHeader(bytes, offset) {
         bytes[offset + 5] === 0x00);
 }
 export function getExifOrientation(bytes) {
-    let tiffOffset = -1;
+    let tiff = null;
     // JPEG: starts with FF D8
     if (bytes.length >= 2 && bytes[0] === 0xff && bytes[1] === 0xd8) {
-        tiffOffset = findJpegTiffOffset(bytes);
+        tiff = findJpegTiffSlice(bytes);
     }
     // WebP: starts with RIFF....WEBP
     else if (bytes.length >= 12 &&
@@ -98,11 +110,11 @@ export function getExifOrientation(bytes) {
         bytes[9] === 0x45 &&
         bytes[10] === 0x42 &&
         bytes[11] === 0x50) {
-        tiffOffset = findWebpTiffOffset(bytes);
+        tiff = findWebpTiffSlice(bytes);
     }
-    if (tiffOffset === -1)
+    if (!tiff)
         return 1;
-    return readOrientationFromTiff(bytes, tiffOffset);
+    return readOrientationFromTiff(bytes, tiff.start, tiff.end);
 }
 function rotate90(photon, image, dstIndex) {
     const w = image.get_width();
