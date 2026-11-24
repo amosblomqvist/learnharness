@@ -32,8 +32,9 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	visual: VisualCard,
 	// A learner image shown as-is (issue #363): the picture itself, inline.
 	show_image: ImageCard,
-	// Playable audio/video or YouTube clip inline.
+	// Playable audio/video or YouTube clip inline, plus keyless YouTube search.
 	show_media: MediaCard,
+	search_youtube: ToolCallCard,
 	// The probe conclusion: the assessment belongs to the learner as much as
 	// to the transcript (docs/archive/probe-teach-split.md §2). Plain v1 card.
 	probe_done: ProbeDoneCard,

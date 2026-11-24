@@ -23,6 +23,7 @@ import {
 import { mediaStore } from "../src/store/media.ts";
 import { buildMediaFileResponse, parseByteRange, sniffMediaMime } from "../src/server/media.ts";
 import { createShowMediaTool } from "../src/agent/tools/show-media.ts";
+import { parseYouTubeSearchResults, searchYouTubeTool } from "../src/agent/tools/search-youtube.ts";
 import {
 	extractYouTubeCaptionTracks,
 	formatSubtitleCues,
@@ -346,6 +347,37 @@ describe("show_media teacher tool (mandatory subtitles enforcement)", () => {
 		// Rejects invalid source combinations / bad timestamp ranges
 		await assert.rejects(() => tool.execute("call-4", {}));
 		await assert.rejects(() => tool.execute("call-5", { youtubeUrl: "https://youtu.be/dQw4w9WgXcQ", startSec: 50, endSec: 20 }));
+	});
+});
+
+describe("search_youtube keyless tool", () => {
+	it("parses ytInitialData videoRenderer hits and returns verified YouTube URLs", async () => {
+		const fakeHtml = `<html><script>var ytInitialData = {"contents":{"twoColumnSearchResultsRenderer":{"primaryContents":{"sectionListRenderer":{"contents":[{"itemSectionRenderer":{"contents":[{"videoRenderer":{"videoId":"spUNpyF58BY","title":{"runs":[{"text":"But what is the Fourier Transform? A visual introduction."}]},"ownerText":{"runs":[{"text":"3Blue1Brown"}]},"lengthText":{"simpleText":"20:57"},"shortViewCountText":{"simpleText":"18M views"},"badges":[{"metadataBadgeRenderer":{"label":"CC"}}]}}]}}]}}}}};</script></html>`;
+
+		const parsed = parseYouTubeSearchResults(fakeHtml, 5);
+		assert.equal(parsed.length, 1);
+		assert.deepEqual(parsed[0], {
+			videoId: "spUNpyF58BY",
+			url: "https://www.youtube.com/watch?v=spUNpyF58BY",
+			title: "But what is the Fourier Transform? A visual introduction.",
+			channel: "3Blue1Brown",
+			duration: "20:57",
+			views: "18M views",
+			hasCaptionsBadge: true,
+		});
+
+		let requestedUrl = "";
+		safeFetchOverride.current = async (url) => {
+			requestedUrl = url;
+			return new Response(fakeHtml, { status: 200 });
+		};
+
+		const res = await searchYouTubeTool.execute("yt-search-1", { query: "Fourier transform visual" });
+		assert.match(requestedUrl, /youtube\.com\/results\?search_query=Fourier\+transform\+visual&sp=EgIoAQ/);
+		const textBlock = res.content.find((c) => c.type === "text");
+		assert.ok(textBlock && textBlock.type === "text");
+		assert.match(textBlock.text, /3Blue1Brown/);
+		assert.match(textBlock.text, /https:\/\/www\.youtube\.com\/watch\?v=spUNpyF58BY/);
 	});
 });
 

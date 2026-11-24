@@ -25,6 +25,7 @@ import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { createShowImageTool } from "./tools/show-image.ts";
 import { createShowMediaTool, type MediaTranscriber } from "./tools/show-media.ts";
+import { searchYouTubeTool } from "./tools/search-youtube.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import type { GraphStore, MediaStore } from "../core/ports.ts";
 
@@ -464,8 +465,9 @@ export function createTeacherTools(
 			// The learner-image display twin of read (issue #363): teacher
 			// only, always on — it shows the learner their own file.
 			show_image: createShowImageTool(ctx),
-			// Audio/video + YouTube playback twin of show_image.
+			// Audio/video + YouTube playback twin of show_image, plus keyless captioned YouTube search.
 			show_media: createShowMediaTool(ctx),
+			search_youtube: searchYouTubeTool,
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},
