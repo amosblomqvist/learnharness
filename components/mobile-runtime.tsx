@@ -41,6 +41,16 @@ export function mobileShareLink(status: MobileAccessStatus | undefined): string 
 	if (!status?.available || !status.enabled || status.remote) return null;
 	return (status.serving && status.url) || status.directUrl || null;
 }
+/** The links the home QR panel offers, HTTPS first. HTTPS needs Tailscale DNS on
+ * the phone; the direct link uses the Tailscale IP and works without it. */
+export type MobileQrLink = { kind: "https" | "direct"; label: string; hint: string; link: string };
+export function mobileQrLinks(status: MobileAccessStatus | undefined): MobileQrLink[] {
+	if (!mobileShareLink(status) || !status) return [];
+	const links: MobileQrLink[] = [];
+	if (status.serving && status.url) links.push({ kind: "https", label: "HTTPS", hint: "Needs Tailscale DNS on the phone. Dictation works.", link: status.url });
+	if (status.directUrl) links.push({ kind: "direct", label: "Direct", hint: "Works with Tailscale DNS off. No dictation.", link: status.directUrl });
+	return links;
+}
 export async function copyText(value: string): Promise<boolean> {
 	try { await navigator.clipboard.writeText(value); return true; }
 	catch { /* navigator.clipboard is absent on the plain-HTTP direct link. */ }

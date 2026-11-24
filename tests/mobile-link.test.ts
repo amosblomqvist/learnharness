@@ -34,3 +34,12 @@ test("mobile link QR code encodes the exact link as a scannable SVG", async () =
 		.join("");
 	assert.equal(encoded, link);
 });
+
+test("home QR panel offers HTTPS and direct links, HTTPS first", async () => {
+	const { mobileQrLinks } = await import("../components/mobile-runtime");
+	const both = mobileQrLinks({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" });
+	assert.deepEqual(both.map(entry => [entry.kind, entry.link]), [["https", "https://pc.ts.net:9443"], ["direct", "http://100.1.2.3:9081"]]);
+	const directOnly = mobileQrLinks({ ...base, serving: false, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" });
+	assert.deepEqual(directOnly.map(entry => entry.kind), ["direct"]);
+	assert.deepEqual(mobileQrLinks({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081", remote: true }), []);
+});
