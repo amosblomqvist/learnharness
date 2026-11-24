@@ -36,10 +36,7 @@ export function MobileAccessSettings() {
 				{status.url && <Button variant="outline" size="sm" onClick={() => { void copy("link", status.url!); }}>{copied === "link" ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}Copy private link</Button>}
 				{status.directUrl && <Button variant="outline" size="sm" onClick={() => { void copy("direct", status.directUrl!); }}>{copied === "direct" ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}Copy direct link</Button>}
 			</div>
-			{status.url && <div className="flex flex-wrap items-start gap-3">
-				<MobileLinkQr link={status.url} testid="mobile-link-qr" />
-				<a className="min-w-0 flex-1 break-all rounded-lg border bg-background px-3 py-3 text-sm select-all" href={status.url} target="_blank" rel="noreferrer">{status.url}</a>
-			</div>}
+			{status.url && <a className="break-all rounded-lg border bg-background px-3 py-3 text-sm select-all" href={status.url} target="_blank" rel="noreferrer">{status.url}</a>}
 			{status.directUrl && <div className="flex flex-col gap-1">
 				<div className="flex flex-wrap items-start gap-3">
 					<MobileLinkQr link={status.directUrl} testid="mobile-direct-link-qr" />

@@ -35,11 +35,9 @@ test("mobile link QR code encodes the exact link as a scannable SVG", async () =
 	assert.equal(encoded, link);
 });
 
-test("home QR panel offers HTTPS and direct links, HTTPS first", async () => {
-	const { mobileQrLinks } = await import("../components/mobile-runtime");
-	const both = mobileQrLinks({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" });
-	assert.deepEqual(both.map(entry => [entry.kind, entry.link]), [["https", "https://pc.ts.net:9443"], ["direct", "http://100.1.2.3:9081"]]);
-	const directOnly = mobileQrLinks({ ...base, serving: false, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" });
-	assert.deepEqual(directOnly.map(entry => entry.kind), ["direct"]);
-	assert.deepEqual(mobileQrLinks({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081", remote: true }), []);
+test("QR code always uses the direct link and hides without one", async () => {
+	const { mobileQrLink } = await import("../components/mobile-runtime");
+	assert.equal(mobileQrLink({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" }), "http://100.1.2.3:9081");
+	assert.equal(mobileQrLink({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: null }), null);
+	assert.equal(mobileQrLink({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081", remote: true }), null);
 });

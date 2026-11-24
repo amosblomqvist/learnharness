@@ -3,11 +3,11 @@
 import { useEffect, useRef, useState } from "react";
 import { CheckIcon, CopyIcon, QrCodeIcon, SmartphoneIcon } from "lucide-react";
 import type { MobileAccessStatus } from "@/lib/mobile-access";
-import { MOBILE_STATUS_EVENT, copyText, mobileQrLinks, mobileShareLink, mobileStatus } from "@/components/mobile-runtime";
+import { MOBILE_STATUS_EVENT, copyText, mobileQrLink, mobileShareLink, mobileStatus } from "@/components/mobile-runtime";
 import { MobileLinkQr } from "@/components/mobile-link-qr";
 
-/** Home's Mobile Access link: a copy pill plus a QR button whose panel shows
- * a scannable code for each ready link (HTTPS and direct). It renders only on the PC while Mobile
+/** Home's Mobile Access link: a copy pill plus, when a direct link exists, a QR
+ * button whose panel shows the direct link as a scannable code. It renders only on the PC while Mobile
  * Access is on and a link exists: HTTPS when Tailscale Serve is up, otherwise
  * the direct link. Settings and window focus keep it current. */
 export function MobileLinkPill() {
@@ -38,7 +38,7 @@ export function MobileLinkPill() {
 		return () => { document.removeEventListener("pointerdown", outside); document.removeEventListener("keydown", escape); };
 	}, [qrOpen]);
 	const link = mobileShareLink(status);
-	const qrLinks = mobileQrLinks(status);
+	const qrLink = mobileQrLink(status);
 	if (!link) return null;
 	const chip = "lh-no-drag flex h-8 items-center rounded-md border border-border bg-card font-ui text-xs text-muted-foreground shadow-sm transition-colors hover:border-muted-foreground/50 hover:bg-accent hover:text-foreground cursor-pointer";
 	return (
@@ -55,7 +55,7 @@ export function MobileLinkPill() {
 				<span className="truncate">{state === "copied" ? "Copied" : state === "failed" ? "Couldn't copy" : link}</span>
 				{state === "copied" ? <CheckIcon aria-hidden="true" className="size-3.5 shrink-0" /> : <CopyIcon aria-hidden="true" className="size-3.5 shrink-0" />}
 			</button>
-			<button
+			{qrLink && <button
 				type="button"
 				data-testid="home-mobile-qr-toggle"
 				title="Show QR code"
@@ -65,20 +65,13 @@ export function MobileLinkPill() {
 				className={`${chip} w-8 justify-center${qrOpen ? " border-muted-foreground/50 bg-accent text-foreground" : ""}`}
 			>
 				<QrCodeIcon aria-hidden="true" className="size-3.5" />
-			</button>
-			{qrOpen && <div
+			</button>}
+			{qrLink && qrOpen && <div
 				data-testid="home-mobile-qr"
 				className="absolute left-1/2 top-full z-50 mt-2 flex w-max -translate-x-1/2 flex-col items-center gap-2 rounded-lg border border-border bg-card p-3 shadow-lg"
 			>
-				<div className="flex gap-4">
-					{qrLinks.map(entry => <div key={entry.kind} data-testid={`home-mobile-qr-${entry.kind}`} className="flex w-44 flex-col items-center gap-1.5">
-						<p className="font-ui text-xs font-medium text-foreground">{entry.label}</p>
-						<MobileLinkQr link={entry.link} size={176} />
-						<p className="break-all text-center font-ui text-[11px] text-muted-foreground">{entry.link}</p>
-						<p className="text-center font-ui text-[11px] text-muted-foreground">{entry.hint}</p>
-					</div>)}
-				</div>
-				<p className="font-ui text-[11px] text-muted-foreground">Scan with your phone&apos;s camera.</p>
+				<MobileLinkQr link={qrLink} size={176} />
+				<p className="max-w-44 break-all text-center font-ui text-[11px] text-muted-foreground">Scan with your phone&apos;s camera to open {qrLink}</p>
 			</div>}
 		</div>
 	);
