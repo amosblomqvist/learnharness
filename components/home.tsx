@@ -19,6 +19,7 @@ import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton, useAttachmentUploadPending } from "@/components/attach-files-button";
 import { SessionStarter } from "@/components/start-session";
+import { MobileLinkPill } from "@/components/mobile-link-pill";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -344,6 +345,11 @@ export function Home({
 				{/* The graph's folder filter portals here (view only; graph
 				    rendering on). Empty when GraphView renders no control. */}
 				<div ref={setFolderFilterSlot} data-testid="graph-folder-filter-slot" className="pointer-events-auto empty:hidden" />
+				{/* Mobile Access link, centred in the header row; renders nothing
+				    unless Mobile Access is on and has a link. */}
+				<div className="pointer-events-auto absolute left-1/2 top-2.5 -translate-x-1/2 empty:hidden">
+					<MobileLinkPill />
+				</div>
 			</header>
 
 			{/* First-run setup (unconfigured): the CTA's target and the send

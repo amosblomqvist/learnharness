@@ -8,7 +8,7 @@ The knowledge graph, application preferences, provider credentials, and installe
 
 ## Configure Convex and Google
 
-1. Install dependencies with `npm install`. Run `npx convex dev` to select or create your Convex project and development deployment. The first deployment may report that the Google component needs its environment variables; configure those below and run it again.
+1. Install dependencies with `npm install`. Run `npx convex dev` to select or create your Convex project and development deployment. The first deployment may report that the Google component needs its environment variables; configure those below and run it again. The CLI writes `CONVEX_DEPLOYMENT` and `NEXT_PUBLIC_CONVEX_*` to the git-ignored `.env.local`; LearnHarness does not read those (it reads `LH_CONVEX_URL`, step 7). Its `convex/_generated/` output is git-ignored because the functions and the app build without it.
 2. In Google Cloud Console, configure the OAuth consent screen and create a **Web application** OAuth client. During testing, add the Google accounts that will use the experiment as test users.
 3. Add this authorized redirect URI to that Google client, substituting your Convex deployment's site host: `https://YOUR-DEPLOYMENT.convex.site/oauth/google/callback`. The callback is on `.convex.site`, not `.convex.cloud`.
 4. Set `AUTH_GOOGLE_CLIENT_ID` and `AUTH_GOOGLE_CLIENT_SECRET` in the Convex dashboard's environment variables. These credentials belong on Convex, not in frontend code or the settings file.

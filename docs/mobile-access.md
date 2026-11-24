@@ -14,6 +14,8 @@ The phone browser uses the running desktop app's server, models, settings, graph
 
 4. Select **Check connection**, then **Copy private link**. Open the link in Safari on the iPhone. You can also use Safari's **Add to Home Screen**.
 
+While Mobile Access is on, the home page also shows the link at the top middle of the window; select it to copy, or select the QR button beside it and scan the code with the phone's camera to open the link. Settings → Mobile Access shows a QR code beside each link too. The home link shows the HTTPS link once Tailscale Serve is running, otherwise the direct link below, and it's hidden when neither link is ready.
+
 The HTTPS link is `https://<your-PC>.<your-tailnet>.ts.net:9443`. Enable Tailscale DNS on the phone so that name resolves. HTTPS is needed for microphone dictation and browser clipboard access. Your existing dictation provider configuration is still required.
 
 ## Use a direct link without Tailscale DNS

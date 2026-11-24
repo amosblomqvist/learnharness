@@ -3,7 +3,8 @@
 import { useEffect, useState } from "react";
 import { SmartphoneIcon, CopyIcon, CheckIcon, RefreshCwIcon } from "lucide-react";
 import type { MobileAccessStatus } from "@/lib/mobile-access";
-import { mobileStatus, mobileCommand } from "@/components/mobile-runtime";
+import { mobileStatus, mobileCommand, announceMobileStatus, copyText } from "@/components/mobile-runtime";
+import { MobileLinkQr } from "@/components/mobile-link-qr";
 import { Button } from "@/components/ui/button";
 import { SettingsGroup, SettingsRow, Toggle } from "./controls";
 
@@ -13,22 +14,15 @@ export function MobileAccessSettings() {
 	const [busy, setBusy] = useState(false);
 	const [size, setSize] = useState("phone");
 	const [copied, setCopied] = useState<string>();
-	useEffect(() => { let live = true; void mobileStatus().then(value => { if (live) setStatus(value); }).catch(() => { if (live) setError("Mobile Access status could not be loaded."); }); return () => { live = false; }; }, []);
+	useEffect(() => { let live = true; void mobileStatus().then(value => { if (live) { setStatus(value); announceMobileStatus(value); } }).catch(() => { if (live) setError("Mobile Access status could not be loaded."); }); return () => { live = false; }; }, []);
 	const command = async (op: string, fields?: Record<string, unknown>) => {
 		setBusy(true); setError("");
-		try { setStatus(await mobileCommand(op, fields)); }
+		try { const next = await mobileCommand(op, fields); setStatus(next); announceMobileStatus(next); }
 		catch (failure) { setError(failure instanceof Error ? failure.message : "Mobile Access could not be changed."); }
 		finally { setBusy(false); }
 	};
 	const copy = async (label: string, value: string) => {
-		try { await navigator.clipboard.writeText(value); setCopied(label); return; }
-		catch { /* navigator.clipboard is absent on the plain-HTTP direct link. */ }
-		const field = document.createElement("textarea");
-		field.value = value; field.readOnly = true; field.style.position = "fixed"; field.style.opacity = "0";
-		document.body.appendChild(field); field.select();
-		const copiedLegacy = (() => { try { return document.execCommand("copy"); } catch { return false; } })();
-		field.remove();
-		if (copiedLegacy) setCopied(label); else setError("Could not copy. Select and copy the text below.");
+		if (await copyText(value)) setCopied(label); else setError("Could not copy. Select and copy the text below.");
 	};
 	return <SettingsGroup label="Mobile Access" testid="mobile-access-settings">
 		<SettingsRow label="Use LearnHarness on your iPhone" hint="Your PC runs the models and keeps your learning data. Keep the desktop app open and Tailscale connected on both devices.">
@@ -42,9 +36,15 @@ export function MobileAccessSettings() {
 				{status.url && <Button variant="outline" size="sm" onClick={() => { void copy("link", status.url!); }}>{copied === "link" ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}Copy private link</Button>}
 				{status.directUrl && <Button variant="outline" size="sm" onClick={() => { void copy("direct", status.directUrl!); }}>{copied === "direct" ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}Copy direct link</Button>}
 			</div>
-			{status.url && <a className="break-all rounded-lg border bg-background px-3 py-3 text-sm select-all" href={status.url} target="_blank" rel="noreferrer">{status.url}</a>}
+			{status.url && <div className="flex flex-wrap items-start gap-3">
+				<MobileLinkQr link={status.url} testid="mobile-link-qr" />
+				<a className="min-w-0 flex-1 break-all rounded-lg border bg-background px-3 py-3 text-sm select-all" href={status.url} target="_blank" rel="noreferrer">{status.url}</a>
+			</div>}
 			{status.directUrl && <div className="flex flex-col gap-1">
-				<a className="break-all rounded-lg border bg-background px-3 py-3 text-sm select-all" href={status.directUrl} target="_blank" rel="noreferrer" data-testid="mobile-direct-link">{status.directUrl}</a>
+				<div className="flex flex-wrap items-start gap-3">
+					<MobileLinkQr link={status.directUrl} testid="mobile-direct-link-qr" />
+					<a className="min-w-0 flex-1 break-all rounded-lg border bg-background px-3 py-3 text-sm select-all" href={status.directUrl} target="_blank" rel="noreferrer" data-testid="mobile-direct-link">{status.directUrl}</a>
+				</div>
 				<p className="text-xs text-muted-foreground">Direct link: works with Tailscale DNS off on the phone. It uses HTTP inside Tailscale&apos;s encrypted connection, so the browser may call it not secure, and dictation needs the HTTPS link.</p>
 			</div>}
 			{status.enabled && !status.serving && status.setupCommand && <details className="rounded-lg border p-3 text-xs">

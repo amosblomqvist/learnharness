@@ -33,6 +33,24 @@ export async function mobileCommand(op: string, fields: Record<string, unknown> 
 	if (!response.ok) throw new Error(reply.error || "Mobile Access could not be changed.");
 	return reply;
 }
+/** Settings announces each Mobile Access status change so the home link stays current. */
+export const MOBILE_STATUS_EVENT = "lh:mobile-access-status";
+export function announceMobileStatus(status: MobileAccessStatus) { window.dispatchEvent(new CustomEvent<MobileAccessStatus>(MOBILE_STATUS_EVENT, { detail: status })); }
+/** The link the home pill copies: HTTPS when Tailscale Serve is up, else the direct link. */
+export function mobileShareLink(status: MobileAccessStatus | undefined): string | null {
+	if (!status?.available || !status.enabled || status.remote) return null;
+	return (status.serving && status.url) || status.directUrl || null;
+}
+export async function copyText(value: string): Promise<boolean> {
+	try { await navigator.clipboard.writeText(value); return true; }
+	catch { /* navigator.clipboard is absent on the plain-HTTP direct link. */ }
+	const field = document.createElement("textarea");
+	field.value = value; field.readOnly = true; field.style.position = "fixed"; field.style.opacity = "0";
+	document.body.appendChild(field); field.select();
+	const copied = (() => { try { return document.execCommand("copy"); } catch { return false; } })();
+	field.remove();
+	return copied;
+}
 async function hostControl<T>(kind: string, fields: Record<string, unknown>): Promise<T> {
 	const response = await fetch("/api/mobile-host", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ kind, ...fields }) });
 	const reply = await response.json();

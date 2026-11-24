@@ -9,6 +9,9 @@ const nextConfig: NextConfig = {
 	...(process.env.LH_MOBILE_SMOKE === "1" ? { distDir: "node_modules/.cache/learnharness-mobile-smoke" } : {}),
 	// Public build metadata only; no new runtime Electron version API.
 	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
+	// Hide the bottom-left Next.js dev badge (owner, 2026-11-24). The desktop
+	// launcher runs `next dev`, so it showed in everyday use. Errors still surface.
+	devIndicators: false,
 	// Leave multipart headroom above the 25 MiB file allowance. This is a
 	// proxy buffer, not a rejection gate: the import route also bounds reads,
 	// validates actual file bytes and handles incomplete multipart bodies.
