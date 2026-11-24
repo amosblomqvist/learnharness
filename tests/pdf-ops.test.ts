@@ -125,6 +125,10 @@ describe("pdf-ops — the pdfjs text layer", () => {
 		await assert.rejects(() => pdfProbe(garbage));
 	});
 
+	it("pdfProbe returns the document page count", async () => {
+		assert.equal(await pdfProbe(FIXTURE), 3);
+	});
+
 	it("parsePageSpec: all / ranges / lists / clamping", () => {
 		assert.deepEqual(parsePageSpec("all", 3), [1, 2, 3]);
 		assert.deepEqual(parsePageSpec("1-5", 3), [1, 2, 3]);

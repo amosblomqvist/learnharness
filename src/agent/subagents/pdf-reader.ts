@@ -10,7 +10,7 @@ import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCaptur
 import { workerRequestStream } from "../worker-request-admission.ts";
 import type { PdfResult, PdfToolInput } from "../../core/contracts.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
-import { pdfExtract, pdfInfo, pdfProbe, pdfSearch, type PdfSearchHit } from "./pdf-ops.ts";
+import { parsePageSpec, pdfExtract, pdfInfo, pdfProbe, pdfSearch, type PdfSearchHit } from "./pdf-ops.ts";
 
 /**
  * The pdf-reader sub-agent (sources v0, 2026-09): reads a learner-provided
@@ -171,11 +171,14 @@ export async function runPdfReaderAgent(
 	const maxIterations = opts.maxIterations ?? MAX_ITERATIONS;
 	let pdfPath = input.path;
 	let openError: string | null;
+	let pageCount = 0;
 	// Source denial is an ordinary upfront PDF failure, before parsing,
 	// rendering or any model request (including direct reader invocations).
 	try {
 		pdfPath = resolveSourcePath(input.path);
-		openError = await probeReadable(pdfPath);
+		const probe = await probeReadable(pdfPath);
+		pageCount = probe.pageCount;
+		openError = probe.error;
 	} catch (err) {
 		openError = err instanceof Error ? err.message : String(err);
 	}
@@ -272,7 +275,7 @@ export async function runPdfReaderAgent(
 						opts.onActivity?.(`pdf_extract: ${spec}`);
 						const r = await pdfExtractText(pdfPath, spec);
 						toolResults.push(toolText(call.id, call.name, String(r)));
-						for (const p of specNumbers(spec, Infinity)) {
+						for (const p of parsePageSpec(spec, pageCount)) {
 							consulted.add(p);
 							read.add(p);
 						}
@@ -296,9 +299,9 @@ export async function runPdfReaderAgent(
 					} else if (call.name === "pdf_render") {
 						const spec = String(args.pages ?? "1");
 						const dpi = numOr(args.dpi, 150);
-						const wanted = specNumbers(spec, RENDER_BATCH_CAP);
+						const wanted = parsePageSpec(spec, pageCount).slice(0, RENDER_BATCH_CAP);
 						opts.onActivity?.(`pdf_render: ${spec} @${dpi}dpi`);
-						const pages = await headless.renderPdfPages(pdfPath, wanted, { dpi });
+						const pages = wanted.length === 0 ? [] : await headless.renderPdfPages(pdfPath, wanted, { dpi });
 						const processed: { page: number; image: ProcessImageResult }[] = [];
 						for (const p of pages) {
 							const image = await processImage(p.png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
@@ -375,44 +378,21 @@ export async function runPdfReaderAgent(
 
 // ─── small helpers ───────────────────────────────────────────────────────────
 
-/** Parse a page spec into concrete page numbers, capped. */
-function specNumbers(spec: string, cap: number): number[] {
-	// total = Infinity: bounds come from the document at execution time; the
-	// cap alone protects the batch.
-	const parts = spec.trim().toLowerCase() === "all" ? [`${cap}`] : spec.split(",");
-	const out = new Set<number>();
-	for (const part of parts) {
-		const p = part.trim();
-		if (!p) continue;
-		if (p.includes("-")) {
-			const [s, e] = p.split("-", 2) as [string, string];
-			const start = Math.max(1, parseInt(s, 10) || 1);
-			const end = Math.min(parseInt(e, 10) || start, start + cap - 1);
-			for (let pg = start; pg <= end && out.size < cap; pg++) out.add(pg);
-		} else {
-			const pg = parseInt(p, 10);
-			if (Number.isFinite(pg) && pg >= 1 && out.size < cap) out.add(pg);
-		}
-	}
-	return [...out].sort((a, b) => a - b);
-}
-
 function numOr(v: unknown, dflt: number): number {
 	return typeof v === "number" && Number.isFinite(v) ? v : dflt;
 }
 
-/** Cheap upfront readability probe — real parsing happens inside the tools. */
-async function probeReadable(pdfPath: string): Promise<string | null> {
+/** Cheap upfront readability probe; real parsing happens inside the tools. */
+async function probeReadable(pdfPath: string): Promise<{ pageCount: number; error: string | null }> {
 	try {
 		const fs = await import("node:fs/promises");
 		const stat = await fs.stat(pdfPath);
-		if (!stat.isFile()) return "not a regular file";
-		if (stat.size === 0) return "file is empty";
+		if (!stat.isFile()) return { pageCount: 0, error: "not a regular file" };
+		if (stat.size === 0) return { pageCount: 0, error: "file is empty" };
 		// parse probe: pdfProbe throws pdfjs's precise error for garbage files
-		await pdfProbe(pdfPath);
-		return null;
+		return { pageCount: await pdfProbe(pdfPath), error: null };
 	} catch (err) {
-		return err instanceof Error ? err.message : String(err);
+		return { pageCount: 0, error: err instanceof Error ? err.message : String(err) };
 	}
 }
 

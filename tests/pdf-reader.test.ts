@@ -13,6 +13,7 @@ import { createFauxCore, fauxAssistantMessage, fauxText, fauxToolCall, type Faux
 import type { PiEngine } from "../src/agent/models.ts";
 import { runPdfReaderAgent } from "../src/agent/subagents/pdf-reader.ts";
 import type { HeadlessApi } from "../src/agent/subagents/headless.ts";
+import { tinyPdf } from "./helpers/tiny-pdf.ts";
 
 const FIXTURE = path.join(import.meta.dirname, "fixtures", "sample-3page.pdf");
 
@@ -234,5 +235,78 @@ describe("pdf-reader loop (faux engine)", () => {
 		assert.ok(!result.brief.includes("never reached"));
 		assert.deepEqual(result.pagesRead, []);
 		assert.deepEqual(result.pagesConsulted, []);
+	});
+
+	it("pdf_extract with pages 'all' tracks every page and does not trigger the unread-finish gate", async () => {
+		let modelCalls = 0;
+		const engine = fauxEngine([
+			fauxAssistantMessage([fauxToolCall("pdf_extract", { pages: "all" }, { id: "e1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Summarized all three pages (p. 1, p. 2, p. 3). Pages consulted: 1, 2, 3")]),
+		]);
+		const stream = engine.streamFn;
+		engine.streamFn = (...args) => {
+			modelCalls++;
+			return stream(...args);
+		};
+		const result = await runPdfReaderAgent(
+			{ path: FIXTURE, question: "summarize all pages" },
+			{ engine },
+		);
+		assert.equal(modelCalls, 2);
+		assert.match(result.brief, /^Summarized all three pages/);
+		assert.deepEqual(result.pagesRead, [1, 2, 3]);
+		assert.deepEqual(result.pagesConsulted, [1, 2, 3]);
+	});
+
+	it("pdf_render with pages 'all' renders from page 1 up to the document length or batch cap", async () => {
+		const shortHeadless = fakeHeadless();
+		const shortEngine = fauxEngine([
+			fauxAssistantMessage([fauxToolCall("pdf_render", { pages: "all", dpi: 150 }, { id: "r1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Rendered all 3 pages (p. 1, p. 2, p. 3).")]),
+		]);
+		const shortResult = await runPdfReaderAgent(
+			{ path: FIXTURE, question: "render all pages" },
+			{ engine: shortEngine, headless: shortHeadless },
+		);
+		assert.deepEqual(shortHeadless.calls, ["render:1,2,3"]);
+		assert.deepEqual(shortResult.pagesRead, [1, 2, 3]);
+		assert.deepEqual(shortResult.pagesConsulted, [1, 2, 3]);
+
+		const longFile = path.join(os.tmpdir(), `lh-pdf-reader-8page-${process.pid}.pdf`);
+		fs.writeFileSync(longFile, tinyPdf(Array.from({ length: 8 }, (_, i) => ({
+			runs: [{ text: `Page ${i + 1}`, x: 72, y: 700 }],
+		}))));
+		try {
+			const longHeadless = fakeHeadless();
+			const longEngine = fauxEngine([
+				fauxAssistantMessage([fauxToolCall("pdf_render", { pages: "all", dpi: 150 }, { id: "r2" })], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxText("Rendered the first six pages (p. 1-6).")]),
+			]);
+			const longResult = await runPdfReaderAgent(
+				{ path: longFile, question: "render all pages" },
+				{ engine: longEngine, headless: longHeadless },
+			);
+			assert.deepEqual(longHeadless.calls, ["render:1,2,3,4,5,6"]);
+			assert.deepEqual(longResult.pagesRead, [1, 2, 3, 4, 5, 6]);
+			assert.deepEqual(longResult.pagesConsulted, [1, 2, 3, 4, 5, 6]);
+		} finally {
+			fs.rmSync(longFile, { force: true });
+		}
+	});
+
+	it("out-of-range pdf_extract specs do not record nonexistent pages or bypass the unread-finish gate", async () => {
+		const engine = fauxEngine([
+			fauxAssistantMessage([fauxToolCall("pdf_extract", { pages: "99" }, { id: "e1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Fabricated brief from missing page.")]),
+			fauxAssistantMessage([fauxToolCall("pdf_extract", { pages: "2-10" }, { id: "e2" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Real brief from pages 2 and 3 (p. 2, p. 3).")]),
+		]);
+		const result = await runPdfReaderAgent(
+			{ path: FIXTURE, question: "what is on the later pages?" },
+			{ engine },
+		);
+		assert.match(result.brief, /^Real brief from pages 2 and 3/);
+		assert.deepEqual(result.pagesRead, [2, 3]);
+		assert.deepEqual(result.pagesConsulted, [2, 3]);
 	});
 });
