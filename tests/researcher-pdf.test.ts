@@ -198,12 +198,12 @@ describe("web_fetch — PDF pointer + source header", () => {
 	});
 });
 
-describe("research downloads stop at their size cap when no length is declared", () => {
+describe("research downloads stop at their size cap", () => {
 	const CHUNK = 1024 * 1024;
 	const TOTAL_CHUNKS = 64;
 
-	/** A chunked response (no content-length) that counts what was read from it. */
-	function chunkedResponse(contentType: string) {
+	/** A chunked response (no content-length unless given) that counts what was read from it. */
+	function chunkedResponse(contentType: string, headers: Record<string, string> = {}) {
 		const state = { sent: 0, cancelled: false };
 		const body = new ReadableStream<Uint8Array>({
 			pull(controller) {
@@ -215,7 +215,7 @@ describe("research downloads stop at their size cap when no length is declared",
 				state.cancelled = true;
 			},
 		});
-		return { state, response: new Response(body, { headers: { "content-type": contentType } }) };
+		return { state, response: new Response(body, { headers: { "content-type": contentType, ...headers } }) };
 	}
 
 	it("web_fetch gives up just past 5 MB", async () => {
@@ -241,6 +241,19 @@ describe("research downloads stop at their size cap when no length is declared",
 			assert.ok(state.sent <= 28, `read ${state.sent} MB`);
 			assert.ok(state.cancelled, "the connection is released");
 			assert.deepEqual(await fs.readdir(dir), [], "nothing is written");
+		} finally {
+			safeFetchOverride.current = undefined;
+		}
+	});
+
+	it("web_fetch refuses a declared length over the cap without reading the body", async () => {
+		const { state, response } = chunkedResponse("text/plain", { "content-length": String(TOTAL_CHUNKS * CHUNK) });
+		safeFetchOverride.current = async () => response;
+		try {
+			const out = asText(await createWebTools(() => null).web_fetch!.execute!("t16", { url: "https://example.com/big.txt" }));
+			assert.match(out, /web_fetch failed.*Response too large/);
+			assert.ok(state.sent <= 1, `read ${state.sent} MB`);
+			assert.ok(state.cancelled, "the connection is released");
 		} finally {
 			safeFetchOverride.current = undefined;
 		}
