@@ -101,10 +101,11 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
     cliContextWindow?: number;
     lhQuestions?: PluginQuestionOccurrenceMap;
     lhQuestionOccurrence?: PluginQuestionOccurrence;
+    lhMedia?: MediaAttachment[];
 };
 ```
 
-**Related types:** [LhMarkerMessage](native-messages.md#lhmarkermessage), [PluginQuestionOccurrence](plugin-questions.md#pluginquestionoccurrence), [PluginQuestionOccurrenceMap](plugin-questions.md#pluginquestionoccurrencemap).
+**Related types:** [LhMarkerMessage](native-messages.md#lhmarkermessage), [MediaAttachment](contracts-media.md#mediaattachment), [PluginQuestionOccurrence](plugin-questions.md#pluginquestionoccurrence), [PluginQuestionOccurrenceMap](plugin-questions.md#pluginquestionoccurrencemap).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -112,6 +113,7 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 - [cliContextWindow](#lhmessage-clicontextwindow)
 - [lhQuestions](#lhmessage-lhquestions)
 - [lhQuestionOccurrence](#lhmessage-lhquestionoccurrence)
+- [lhMedia](#lhmessage-lhmedia)
 
 ### LhMessage id
 
@@ -142,4 +144,12 @@ Exact binding for genuine plugin-question results (details stays public envelope
 
 ```ts
 lhQuestionOccurrence?: PluginQuestionOccurrence;
+```
+
+### LhMessage lhMedia
+
+Lightweight media attachment metadata (audio/video); binary bytes live in MediaStore.
+
+```ts
+lhMedia?: MediaAttachment[];
 ```
