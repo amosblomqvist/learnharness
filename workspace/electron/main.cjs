@@ -45,6 +45,27 @@ const path = require("node:path");
 const SIDEBAR_AUTOCLOSE = 928;
 
 const PRODUCT_NAME = "LearnHarness";
+const checkoutNode = !app.isPackaged && process.platform === "win32" && process.connected
+	? process.env.LH_WINDOWS_CHECKOUT_NODE : undefined;
+let checkoutReported = false;
+
+function reportCheckout(error) {
+	if (checkoutReported) return;
+	checkoutReported = true;
+	process.off("disconnect", cancelCheckout);
+	if (!error) {
+		process.send({ type: "checkout-window-open" });
+		return;
+	}
+	log(`checkout startup failed: ${error.message}`);
+	if (process.connected) {
+		process.send({ type: "checkout-startup-error", message: error.message }, () => app.exit(1));
+	} else app.exit(1);
+}
+
+function cancelCheckout() {
+	app.exit(1);
+}
 
 // APP NAME → userData (owner, 2026-10-10): the Application Support dir is
 // exactly "LearnHarness" in dev AND packaged. Packaged Electron would
@@ -135,7 +156,8 @@ if (process.argv.includes("--browser-service")) {
 	// a SECOND instance of this very binary on purpose (the running app owns
 	// the lock), so it must never reach this check.
 	if (!app.requestSingleInstanceLock()) {
-		app.quit();
+		if (checkoutNode) reportCheckout(new Error("A LearnHarness development desktop is already open."));
+		else app.quit();
 	} else {
 		app.on("second-instance", () => {
 			const win = BrowserWindow.getAllWindows()[0];
@@ -144,7 +166,10 @@ if (process.argv.includes("--browser-service")) {
 				win.focus();
 			}
 		});
-		main();
+		if (checkoutNode) {
+			process.once("disconnect", cancelCheckout);
+			void main().catch(reportCheckout);
+		} else main();
 	}
 }
 
@@ -318,7 +343,7 @@ function openExternalLink(target) {
  *  - will-navigate pinned to the app origin; window.open always denied —
  *    external links go to the real browser via shell.openExternal, for
  *    http, https and mailto only (openExternalLink). */
-function createWindow(url, beforeLoad) {
+function createWindow(url, beforeLoad, onLoadError) {
 	const win = new BrowserWindow({
 		width: 1440,
 		height: 900,
@@ -405,7 +430,8 @@ function createWindow(url, beforeLoad) {
 	});
 
 	beforeLoad?.(win);
-	void win.loadURL(url);
+	const loading = win.loadURL(url);
+	if (onLoadError) void loading.catch(onLoadError);
 	// Zoom truth reaches the renderer for EVERY load (reload, nav): the
 	// renderer's --lh-zoom must never go stale. The fallback catcher below
 	// covers ⌘= / layout variants the menu's ⌘Plus may not claim — menu-
@@ -723,6 +749,22 @@ async function main() {
 		await startServer(new URL(url).port);
 		await waitUntilUp(url);
 		log(`server up: ${url}`);
+	} else if (checkoutNode) {
+		let ready = false;
+		const { startCheckoutServer } = require("./windows-checkout.cjs");
+		const owned = startCheckoutServer(checkoutNode, {
+			log,
+			onExit: error => {
+				if (!ready || serverProcess !== owned.child) return;
+				log(error.message);
+				if (checkoutReported) app.quit();
+				else reportCheckout(error);
+			},
+		});
+		serverProcess = owned.child;
+		await owned.ready;
+		ready = true;
+		log(`checkout server ready: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl} — waiting for server`);
 		const { waitForDevServer } = require("./dev-server-readiness.cjs");
@@ -852,6 +894,17 @@ async function main() {
 		if (BrowserWindow.getAllWindows().length === 0) reopenWindow();
 	});
 	createWindow(url, firstWindow => {
+		if (checkoutNode) {
+			let loaded = false;
+			const reportFirstWindow = () => {
+				if (loaded && firstWindow.isVisible()) reportCheckout();
+			};
+			firstWindow.once("show", reportFirstWindow);
+			firstWindow.webContents.once("did-finish-load", () => {
+				loaded = true;
+				reportFirstWindow();
+			});
+		}
 		const fromFirstWindow = event => !firstWindow.isDestroyed() && event.sender === firstWindow.webContents &&
 			trustedSender(event, new URL(url).origin, BrowserWindow);
 		let messages;
@@ -861,7 +914,7 @@ async function main() {
 		}
 		ipcMain.handle("lh:startup-message:take", event => messages && fromFirstWindow(event) ? messages.take() : null);
 		ipcMain.handle("lh:startup-message:dismiss", (event, id) => !!messages && fromFirstWindow(event) && messages.dismiss(id));
-	});
+	}, checkoutNode ? reportCheckout : undefined);
 	log(`window open: ${url}`);
 	// Startup + 24h checks stay main-owned and read the current preference.
 	// No renderer subscription is required; late loads retrieve the snapshot.

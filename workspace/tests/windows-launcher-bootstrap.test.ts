@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
-import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, linkSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { describe, it } from "node:test";
@@ -112,6 +112,20 @@ describe("Windows launcher runtime bootstrap", { skip: process.platform !== "win
 		assert.equal(existsSync(test.runtime), false);
 		assert.equal(existsSync(path.join(test.directory, "extracted.txt")), false);
 		assert.deepEqual(readdirSync(path.dirname(test.runtime)), []);
+	});
+
+	it("refuses a redirected managed runtime folder without downloading or modifying it", t => {
+		const test = fixture("junction"); t.after(test.cleanup);
+		const target = path.join(test.directory, "unrelated");
+		mkdirSync(target);
+		writeFileSync(path.join(target, "keep.txt"), "keep");
+		mkdirSync(path.dirname(test.runtime), { recursive: true });
+		symlinkSync(target, test.runtime, "junction");
+		const result = test.run();
+		assert.equal(result.status, 1, result.stdout + result.stderr);
+		assert.match(result.stdout, /Refusing a redirected LearnHarness runtime path/);
+		assert.deepEqual(readdirSync(target), ["keep.txt"]);
+		assert.equal(existsSync(path.join(test.directory, "requests.txt")), false);
 	});
 
 	for (const scenario of ["cached", "path"]) {

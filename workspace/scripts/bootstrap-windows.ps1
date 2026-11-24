@@ -4,7 +4,7 @@ param([switch]$InstallOnly)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
-$repoRoot = Split-Path -Parent $PSScriptRoot
+$workspace = Split-Path -Parent $PSScriptRoot
 
 function Test-NodeInstallation([string]$Directory) {
     $nodeExecutable = Join-Path $Directory 'node.exe'
@@ -21,10 +21,34 @@ function Test-NodeInstallation([string]$Directory) {
 
 function Assert-ManagedPath([string]$Target) {
     $fullTarget = [IO.Path]::GetFullPath($Target)
+    $base = [IO.Path]::GetFullPath($env:LOCALAPPDATA).TrimEnd('\')
     $prefix = [IO.Path]::GetFullPath($runtimeRoot).TrimEnd('\') + '\'
-    if (!$fullTarget.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
+    if (!$fullTarget.StartsWith($base + '\', [StringComparison]::OrdinalIgnoreCase) -or
+        !$fullTarget.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) {
         throw "Refusing to modify a path outside the LearnHarness runtime folder: $fullTarget"
     }
+    for ($current = $fullTarget; $current.Length -ge $base.Length; $current = Split-Path -Parent $current) {
+        $item = Get-Item -LiteralPath $current -Force -ErrorAction SilentlyContinue
+        if ($item -and ($item.Attributes -band [IO.FileAttributes]::ReparsePoint)) {
+            throw "Refusing a redirected LearnHarness runtime path: $current"
+        }
+    }
+}
+
+function Remove-ManagedDirectory([string]$Target) {
+    Assert-ManagedPath $Target
+    # Inspect one directory level at a time so enumeration never follows a junction.
+    $pending = [Collections.Generic.Stack[string]]::new()
+    $pending.Push($Target)
+    while ($pending.Count) {
+        foreach ($item in Get-ChildItem -LiteralPath ($pending.Pop()) -Force) {
+            if ($item.Attributes -band [IO.FileAttributes]::ReparsePoint) {
+                throw "Refusing to remove a runtime directory containing a redirected path: $($item.FullName)"
+            }
+            if ($item.PSIsContainer) { $pending.Push($item.FullName) }
+        }
+    }
+    Remove-Item -LiteralPath $Target -Recurse -Force
 }
 
 function Install-NodeRuntime([string]$Architecture, [string]$Destination) {
@@ -53,7 +77,14 @@ function Install-NodeRuntime([string]$Architecture, [string]$Destination) {
         $archive = Join-Path $stage $archiveName
         Write-Host "[launcher] Downloading Node.js $($release.version) with npm from nodejs.org..."
         Invoke-WebRequest -UseBasicParsing -Uri "$baseUrl/$archiveName" -OutFile $archive -TimeoutSec 180
-        if ((Get-FileHash -LiteralPath $archive -Algorithm SHA256).Hash -ne $checksum.Groups[1].Value) {
+        $hasher = [Security.Cryptography.SHA256]::Create()
+        $archiveStream = [IO.File]::OpenRead($archive)
+        try { $actualChecksum = [BitConverter]::ToString($hasher.ComputeHash($archiveStream)).Replace('-', '') }
+        finally {
+            $archiveStream.Dispose()
+            $hasher.Dispose()
+        }
+        if ($actualChecksum -ne $checksum.Groups[1].Value) {
             throw 'The Node.js download failed its SHA-256 check. Nothing was installed. Try launching again.'
         }
         $unpacked = Join-Path $stage 'unpacked'
@@ -72,11 +103,11 @@ function Install-NodeRuntime([string]$Architecture, [string]$Destination) {
             if ($hadPrevious) { Move-Item -LiteralPath $backup -Destination $Destination }
             throw
         }
-        if ($hadPrevious) { Remove-Item -LiteralPath $backup -Recurse -Force }
+        if ($hadPrevious) { Remove-ManagedDirectory $backup }
         Write-Host "[launcher] Installed Node.js $($release.version) and npm."
     } finally {
         Assert-ManagedPath $stage
-        if (Test-Path -LiteralPath $stage) { Remove-Item -LiteralPath $stage -Recurse -Force }
+        if (Test-Path -LiteralPath $stage) { Remove-ManagedDirectory $stage }
     }
 }
 
@@ -99,7 +130,21 @@ try {
             default { throw "Node.js 26 requires 64-bit Windows (x64 or ARM64); found $processor." }
         }
         $nodeDirectory = Join-Path $runtimeRoot "node26-$architecture"
-        if (!(Test-NodeInstallation $nodeDirectory)) { Install-NodeRuntime $architecture $nodeDirectory }
+        $sid = [Security.Principal.WindowsIdentity]::GetCurrent().User.Value
+        $mutex = [Threading.Mutex]::new($false, "Global\LearnHarness.Node26.$sid.$architecture")
+        $locked = $false
+        try {
+            try { $locked = $mutex.WaitOne([TimeSpan]::FromMinutes(10)) }
+            catch [Threading.AbandonedMutexException] { $locked = $true }
+            if (!$locked) { throw 'Another LearnHarness Node.js setup is still in progress.' }
+            Assert-ManagedPath $nodeDirectory
+            Assert-ManagedPath (Join-Path $nodeDirectory 'node.exe')
+            Assert-ManagedPath (Join-Path $nodeDirectory 'node_modules\npm\bin\npm-cli.js')
+            if (!(Test-NodeInstallation $nodeDirectory)) { Install-NodeRuntime $architecture $nodeDirectory }
+        } finally {
+            if ($locked) { $mutex.ReleaseMutex() }
+            $mutex.Dispose()
+        }
     }
 
     $nodeExecutable = Join-Path $nodeDirectory 'node.exe'
@@ -107,9 +152,10 @@ try {
     $env:PATH = "$nodeDirectory;$env:PATH"
     Write-Host "[launcher] Using $(& $nodeExecutable --version) with npm from $nodeDirectory"
     if ($InstallOnly) { exit 0 }
-    Push-Location -LiteralPath $repoRoot
+    $env:npm_execpath = $npmCli
+    Push-Location -LiteralPath $workspace
     try {
-        & $nodeExecutable $npmCli run desktop:windows
+        & $nodeExecutable (Join-Path $PSScriptRoot 'launch-windows-desktop.mjs')
         $appExit = $LASTEXITCODE
     } finally { Pop-Location }
     exit $appExit

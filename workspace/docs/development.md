@@ -39,11 +39,11 @@ Double-click [`Launch LearnHarness.cmd`](../../Launch%20LearnHarness.cmd) in the
 
 The double-click launcher checks for a working **Node.js 26.x with npm**. If needed, it downloads the latest stable 26.x Windows ZIP for your architecture from `nodejs.org`, verifies its published SHA-256 checksum, and installs it under `%LOCALAPPDATA%\LearnHarness\runtime\node26-<architecture>`. It uses this per-user runtime immediately and reuses it on later launches without a download. Administrator access and a system PATH change are not required. Other Node.js installations remain available to other applications. Windows PowerShell 5.1 or later and 64-bit Windows (x64 or ARM64) are required for automatic installation.
 
-On first launch it runs `npm ci --include=dev` and `npm run plugins:setup`, then downloads the Electron desktop runtime if needed; internet access and any native build prerequisites are required. Successful setup is recorded under ignored `node_modules/`. Later launches skip installation unless package manifests/lockfiles change or required dependency directories are missing. After changing the public plugin API, run `npm run plugins:setup` as usual.
+On first launch it installs locked app and plugin dependencies and downloads the Electron desktop runtime if needed. Internet access and any native build prerequisites are required. The launcher generates one SDK for the plugin installs and the authoring download. Later launches reuse setup and build outputs under `workspace/` when their inputs and generated files still match.
 
-It runs the existing `npm run dev` preparation/build steps, binds to `localhost:3000`, and waits up to three minutes for an HTTP response before opening Electron. An occupied port produces an error rather than connecting the desktop window to another server. This uses the source checkout's development data/auth locations described below.
+Electron starts its own development server on `localhost:3000` and waits for that process to confirm it owns the listener before loading the window. If the port is occupied, startup fails. The checkout's development data and auth locations are described below.
 
-Keep the console open while using LearnHarness. Closing the desktop app stops the server; a failed server or desktop process also stops the other process. Press Ctrl+C to stop both manually. Errors leave the console open so you can read them and retry. If setup fails, fix the reported installation/build error and double-click again. This launcher requires Windows; the other platform commands remain available above.
+The launcher exits when the desktop window opens. Closing the app stops its server, and the app quits if its server stops. The double-click launcher keeps the console open on startup errors. Desktop and server diagnostics are recorded in the development profile's `logs/main.log`.
 
 ### Other devices on your network
 
@@ -65,7 +65,7 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 | --- | --- |
 | `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts, stored in `workspace/data/` by default. |
 | `LH_AUTH_FILE` | Keys and custom-endpoint binding, stored in `workspace/auth.json` by default. |
-| `LH_CONVEX_URL` | Optional Labs thread sync: the Convex deployment's HTTPS `.convex.cloud` URL. See [Google sign-in and thread sync](cloud-sync.md). |
+| `LH_CONVEX_URL` | Optional HTTPS `.convex.cloud` URL that overrides the shared thread sync deployment. See [Google sign-in and thread sync](cloud-sync.md). |
 | `LH_CLOUD_CALLBACK_PORT` | Optional desktop Google sign-in return port; default `3211`, bound only to `127.0.0.1`. |
 | Provider API-key variables | Optional, selected-provider dependent; UI names are in `src/core/auth-keys.ts`. |
 | `TAVILY_API_KEY`, `BRAVE_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `OLLAMA_API_KEY` | Optional search adapters. Without a Settings pin, the first keyed engine wins: Tavily → Brave → Exa → Firecrawl → Ollama. A pinned engine requires its own key; no silent fallback. Ollama search is hosted at ollama.com, not a local model server. Page fetching is independent; research can fetch known URLs without a search key. |

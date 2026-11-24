@@ -43,6 +43,26 @@ test("plugin setup refuses missing lockfiles before starting any installs", () =
 	});
 });
 
+test("the Windows launcher can reuse one SDK while preserving other SDK scripts", () => {
+	fixture((root, plugin) => {
+		plugin("a-first", true); plugin("b-second", true); plugin("z-custom", true);
+		const sdk = path.join(root, "sdk");
+		mkdirSync(sdk);
+		writeFileSync(path.join(sdk, "index.d.ts"), "export type Shared = string;\n");
+		for (const id of ["a-first", "b-second"]) {
+			writeFileSync(path.join(root, "plugins", id, "package.json"), JSON.stringify({
+				scripts: { sdk: "node ../../scripts/build-plugin-types.mjs .sdk" },
+			}));
+		}
+		const calls: string[] = [];
+		setupPlugins(root, { sharedSdk: sdk, run: (args: string[], cwd: string) => calls.push(`${path.basename(cwd)} ${args.join(" ")}`) });
+		assert.deepEqual(calls, ["a-first ci", "b-second ci", "z-custom run sdk", "z-custom ci"]);
+		for (const id of ["a-first", "b-second"]) {
+			assert.equal(readFileSync(path.join(root, "plugins", id, ".sdk", "index.d.ts"), "utf8"), "export type Shared = string;\n");
+		}
+	});
+});
+
 test("plugin setup stops at a failed SDK generation rather than installing that or later packages", () => {
 	fixture((root, plugin) => {
 		plugin("a-types", true); plugin("z-later");

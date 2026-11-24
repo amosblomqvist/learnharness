@@ -25,7 +25,7 @@ globalThis.fetch = async (input, init) => {
 	if (!Object.hasOwn(values, body.path)) throw new Error(`Unexpected Convex operation: ${body.path}`);
 	return Response.json({ status: "success", value: values[body.path] });
 };
-const { cloudControl, cloudSyncStatus, completeCloudSignIn } = await import("../src/server/cloud-sync.ts");
+const { cloudControl, cloudDeployment, cloudSyncStatus, completeCloudSignIn } = await import("../src/server/cloud-sync.ts");
 const { cloudControlsResponse } = await import("../src/server/cloud-http.ts");
 const { chatStore } = await import("../src/store/chats.ts");
 const { isSensitivePath } = await import("../src/agent/tools/fs-shared.ts");
@@ -45,6 +45,20 @@ async function signIn(user: string) {
 	const url = new URL(`http://localhost:3000/labs/google/callback?attempt=${state.pending.id}&convexAuthCode=one-use-code`);
 	await completeCloudSignIn(url); await idle(); return url;
 }
+it("offers the shared deployment on a fresh install while keeping sync off until enabled", () => {
+	const customDeployment = process.env.LH_CONVEX_URL!;
+	delete process.env.LH_CONVEX_URL;
+	try {
+		assert.equal(cloudDeployment(), "https://watchful-jackal-487.ap-southeast-2.convex.cloud");
+		const fresh = cloudSyncStatus();
+		assert.equal(fresh.configured, true);
+		assert.equal(fresh.enabled, false);
+		assert.equal(fresh.user, null);
+	} finally {
+		process.env.LH_CONVEX_URL = customDeployment;
+	}
+	assert.equal(cloudDeployment(), customDeployment);
+});
 it("keeps auth optional, defaults off, validates controls, and isolates sign-out and account switching", async () => {
 	assert.equal(cloudSyncStatus().enabled, false);
 	assert.equal(cloudSyncStatus().user, null);

@@ -19,6 +19,7 @@ import { compactionInFlight } from "./compaction.ts";
 import { extractionStatuses } from "../agent/subagents/extraction.ts";
 import { listenForGoogleCallback } from "./cloud-loopback.ts";
 
+const DEFAULT_CLOUD_DEPLOYMENT = "https://watchful-jackal-487.ap-southeast-2.convex.cloud";
 const credentialsFile = () => path.join(path.dirname(AUTH_FILE), "learnharness-cloud-credentials.json");
 interface CloudSession { deployment: string; user: CloudUser; tokens: CloudTokens }
 interface PendingSignIn { id: string; state: string; expires: number; deployment: string; close?: () => void }
@@ -31,7 +32,7 @@ function state(): CloudState {
 	return global.__lhCloudSync ??= { operation: false, error: null, lastSynced: null, deferred: 0 };
 }
 export function cloudDeployment(): string | null {
-	const value = process.env.LH_CONVEX_URL?.trim();
+	const value = (process.env.LH_CONVEX_URL ?? DEFAULT_CLOUD_DEPLOYMENT).trim();
 	if (!value) return null;
 	const url = new URL(value);
 	if (url.protocol !== "https:" || url.username || url.password || url.pathname !== "/" || url.search || url.hash) throw new Error("LH_CONVEX_URL must be an HTTPS Convex deployment URL.");

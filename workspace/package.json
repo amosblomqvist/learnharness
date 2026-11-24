@@ -99,7 +99,7 @@
 		"@types/react-dom": "^19.2.4",
 		"@types/turndown": "^5.0.6",
 		"@typescript-eslint/parser": "^8.68.0",
-		"concurrently": "^10.0.5",
+		"concurrently": "^10.0.6",
 		"electron": "^44.9.3",
 		"electron-builder": "26.16.1",
 		"eslint": "^9.39.5",

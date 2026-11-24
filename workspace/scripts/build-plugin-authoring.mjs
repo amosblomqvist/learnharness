@@ -99,7 +99,8 @@ function ownedOutput(root, destination) {
 	}
 }
 
-export function buildPluginAuthoring({ root = path.resolve(import.meta.dirname, ".."), standalone = false } = {}) {
+/** @param {{ root?: string, standalone?: boolean, sharedSdk?: string }} [options] */
+export function buildPluginAuthoring({ root = path.resolve(import.meta.dirname, ".."), standalone = false, sharedSdk } = {}) {
 	const base = standalone ? path.join(root, ".next", "standalone") : root;
 	const directory = path.join(base, standalone ? "plugin-authoring" : "dist/plugin-authoring");
 	const publicDirectory = path.join(base, "public", "plugin-authoring");
@@ -130,8 +131,11 @@ export function buildPluginAuthoring({ root = path.resolve(import.meta.dirname, 
 		const skill = fs.readFileSync(sourcePath(root, path.join(root, "skills", "learnharness-plugins", "SKILL.md"), "file"), "utf8").replaceAll("../../docs/", "./docs/").replaceAll("../../examples/", "./examples/");
 		fs.writeFileSync(path.join(stage, "SKILL.md"), skill);
 		copyFile(root, path.join(root, "skills", "learnharness-plugins", "README.md"), path.join(stage, "README.md"));
-		const types = spawnSync(process.execPath, [sourcePath(root, path.join(root, "scripts", "build-plugin-types.mjs"), "file"), path.join(stage, "types")], { cwd: root, stdio: "inherit" });
-		if (types.error || types.status !== 0) throw Error(`Authoring API declaration emission failed: ${types.error ?? types.status}`);
+		if (sharedSdk) copyDirectory(root, sharedSdk, path.join(stage, "types"));
+		else {
+			const types = spawnSync(process.execPath, [sourcePath(root, path.join(root, "scripts", "build-plugin-types.mjs"), "file"), path.join(stage, "types")], { cwd: root, stdio: "inherit" });
+			if (types.error || types.status !== 0) throw Error(`Authoring API declaration emission failed: ${types.error ?? types.status}`);
+		}
 		const reference = spawnSync(process.execPath, [sourcePath(root, path.join(root, "scripts", "build-plugin-api-reference.mjs"), "file"), path.join(stage, "types"), path.join(stage, "docs", "plugin-api")], { cwd: root, stdio: "inherit" });
 		if (reference.error || reference.status !== 0) throw Error(`Authoring API reference generation failed: ${reference.error ?? reference.status}`);
 		const sdk = JSON.parse(fs.readFileSync(sourcePath(stage, path.join(stage, "types", "package.json"), "file"), "utf8"));

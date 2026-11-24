@@ -2,7 +2,7 @@
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { dirname } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { runInNewContext } from "node:vm";
 import { describe, it } from "node:test";
@@ -130,7 +130,7 @@ describe("desktop appearance boot and IPC", () => {
 		};
 		runInNewContext(mainSource, context, { filename: mainFile });
 		await runInNewContext("main()", context);
-		assert.equal(bootDirectory, "/fixture/server-data");
+		assert.equal(bootDirectory, resolve("/fixture/server-data"));
 		assert.equal(nativeTheme.themeSource, "light");
 		const win = windows[0]!;
 		assert.equal(win.options.backgroundColor, "#faf9f5");

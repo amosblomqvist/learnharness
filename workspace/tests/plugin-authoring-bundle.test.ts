@@ -132,7 +132,7 @@ it("produces the complete rooted skill, matching versions, current example layou
 it("regenerates deterministic dev and standalone archives without stale expanded files", () => fixture(root => {
 	const initial = buildPluginAuthoring({ root }), bytes = fs.readFileSync(initial.archive);
 	fs.writeFileSync(path.join(initial.directory, "stale.txt"), "stale");
-	const again = buildPluginAuthoring({ root });
+	const again = buildPluginAuthoring({ root, sharedSdk: path.join(initial.directory, "types") });
 	assert.deepEqual(fs.readFileSync(again.archive), bytes);
 	assert.equal(fs.existsSync(path.join(again.directory, "stale.txt")), false);
 	const packaged = buildPluginAuthoring({ root, standalone: true });

@@ -1,7 +1,7 @@
 /** Prepare source-plugin dependencies for checkout validation, never distribution.
  * Invoke through npm so npm_execpath works identically on Windows and Unix. */
 import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { cpSync, existsSync, lstatSync, readFileSync, readdirSync } from "node:fs";
 import * as path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -13,7 +13,11 @@ function runNpm(args, cwd) {
 	if (result.status !== 0) throw new Error(`${path.basename(cwd)}: npm ${args.join(" ")} failed (${result.signal ?? result.status})`);
 }
 
-export function setupPlugins(root, { run = runNpm } = {}) {
+/**
+ * @param {string} root
+ * @param {{ run?: (args: string[], cwd: string) => void, sharedSdk?: string }} [options]
+ */
+export function setupPlugins(root, { run = runNpm, sharedSdk } = {}) {
 	const source = path.join(root, "plugins");
 	const packages = readdirSync(source, { withFileTypes: true })
 		.filter(entry => entry.isDirectory())
@@ -26,7 +30,13 @@ export function setupPlugins(root, { run = runNpm } = {}) {
 		});
 	for (const { directory, manifest } of packages) {
 		console.log(`[plugin-setup] ${path.basename(directory)}`);
-		if (typeof manifest.scripts?.sdk === "string") run(["run", "sdk"], directory);
+		if (sharedSdk && manifest.scripts?.sdk === "node ../../scripts/build-plugin-types.mjs .sdk") {
+			const destination = path.join(directory, ".sdk");
+			if (lstatSync(destination, { throwIfNoEntry: false })?.isSymbolicLink()) {
+				throw new Error(`Refusing a redirected plugin SDK: ${destination}`);
+			}
+			cpSync(sharedSdk, destination, { recursive: true });
+		} else if (typeof manifest.scripts?.sdk === "string") run(["run", "sdk"], directory);
 		run(["ci"], directory);
 	}
 }
