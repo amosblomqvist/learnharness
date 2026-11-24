@@ -1,7 +1,7 @@
 "use client";
 
 import { useContext, useEffect, useRef, useState } from "react";
-import { DownloadIcon, ExternalLinkIcon, FileTextIcon, MusicIcon, VideoIcon } from "lucide-react";
+import { DownloadIcon, ExternalLinkIcon, FileTextIcon, MaximizeIcon, MusicIcon, VideoIcon } from "lucide-react";
 import { ChatActionsContext } from "@/components/chat";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import {
@@ -80,11 +80,22 @@ export function SessionMediaPlayer({
 }) {
 	useMediaChrome();
 	const mediaRef = useRef<HTMLVideoElement | HTMLAudioElement | null>(null);
+	const controllerRef = useRef<HTMLElement | null>(null);
 	const [transcriptOpen, setTranscriptOpen] = useState(false);
 	const src = buildSessionMediaUrl(chatId, mediaId, startSec, endSec);
 	const downloadHref = `/api/chats/${encodeURIComponent(chatId)}/media/${encodeURIComponent(mediaId)}`;
 	const rangeBadge = formatRangeBadge(startSec, endSec);
 	const label = kind === "audio" ? "Audio" : "Video";
+
+	const toggleFullscreen = () => {
+		const target = controllerRef.current ?? mediaRef.current;
+		if (!target || typeof document === "undefined") return;
+		if (document.fullscreenElement) {
+			void document.exitFullscreen?.().catch(() => {});
+		} else {
+			void target.requestFullscreen?.().catch(() => {});
+		}
+	};
 
 	useEffect(() => {
 		const el = mediaRef.current;
@@ -114,7 +125,10 @@ export function SessionMediaPlayer({
 		>
 			{kind === "video" ? (
 				<div className="overflow-hidden rounded-lg border border-border/70 bg-black">
-					<media-controller className="block w-full" style={{ aspectRatio: "16 / 9", maxHeight: "60vh" }}>
+					<media-controller
+						ref={controllerRef as React.RefObject<HTMLElement | null>}
+						className="block aspect-video max-h-[60vh] w-full [&:fullscreen]:h-full [&:fullscreen]:max-h-none [&:fullscreen]:w-full [&:-webkit-full-screen]:h-full [&:-webkit-full-screen]:max-h-none [&:-webkit-full-screen]:w-full"
+					>
 						<video
 							ref={mediaRef as React.RefObject<HTMLVideoElement | null>}
 							slot="media"
@@ -130,6 +144,7 @@ export function SessionMediaPlayer({
 							<media-time-display show-duration />
 							<media-time-range />
 							<media-mute-button />
+							<media-volume-range className="w-20" />
 							<media-playback-rate-button rates="0.75 1 1.25 1.5 2" />
 							<media-fullscreen-button />
 						</media-control-bar>
@@ -151,6 +166,7 @@ export function SessionMediaPlayer({
 							<media-time-display show-duration />
 							<media-time-range />
 							<media-mute-button />
+							<media-volume-range className="w-20" />
 							<media-playback-rate-button rates="0.75 1 1.25 1.5 2" />
 						</media-control-bar>
 					</media-controller>
@@ -191,6 +207,18 @@ export function SessionMediaPlayer({
 							<span>Transcript</span>
 						</button>
 					)}
+					{kind === "video" && (
+						<button
+							type="button"
+							aria-label="Maximize video"
+							title="Fullscreen"
+							data-testid="media-maximize"
+							onClick={toggleFullscreen}
+							className="rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+						>
+							<MaximizeIcon className="size-3.5" aria-hidden />
+						</button>
+					)}
 					<a
 						href={downloadHref}
 						download={filename}
@@ -217,21 +245,35 @@ export function SessionMediaPlayer({
 
 /** YouTube privacy-enhanced inline embed card. */
 export function YouTubeMediaCard({ details }: { details: Extract<ShowMediaDetails, { source: "youtube" }> }) {
+	const frameBoxRef = useRef<HTMLDivElement | null>(null);
 	const [transcriptOpen, setTranscriptOpen] = useState(false);
 	const embedUrl = buildYouTubeEmbedUrl(details.videoId, details.startSec, details.endSec);
 	const watchUrl = details.startSec ? `${details.url}&t=${Math.floor(details.startSec)}s` : details.url;
 	const rangeBadge = formatRangeBadge(details.startSec, details.endSec);
 
+	const toggleFullscreen = () => {
+		const target = frameBoxRef.current;
+		if (!target || typeof document === "undefined") return;
+		if (document.fullscreenElement) {
+			void document.exitFullscreen?.().catch(() => {});
+		} else {
+			void target.requestFullscreen?.().catch(() => {});
+		}
+	};
+
 	return (
 		<figure className="my-4 w-full max-w-2xl" data-testid="media-card-youtube">
-			<div className="aspect-video w-full overflow-hidden rounded-lg border border-border/70 bg-black">
+			<div
+				ref={frameBoxRef}
+				className="aspect-video w-full overflow-hidden rounded-lg border border-border/70 bg-black [&:fullscreen]:aspect-auto [&:fullscreen]:h-full [&:fullscreen]:w-full [&:fullscreen]:rounded-none [&:fullscreen]:border-0"
+			>
 				<iframe
 					src={embedUrl}
 					title={details.caption ?? "YouTube video"}
 					className="h-full w-full border-0"
 					loading="lazy"
 					referrerPolicy="strict-origin-when-cross-origin"
-					allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+					allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; fullscreen"
 					allowFullScreen
 				/>
 			</div>
@@ -266,6 +308,16 @@ export function YouTubeMediaCard({ details }: { details: Extract<ShowMediaDetail
 							<span>Subtitles</span>
 						</button>
 					)}
+					<button
+						type="button"
+						aria-label="Maximize video"
+						title="Fullscreen"
+						data-testid="media-maximize"
+						onClick={toggleFullscreen}
+						className="shrink-0 rounded-md p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+					>
+						<MaximizeIcon className="size-3.5" aria-hidden />
+					</button>
 					<a
 						href={watchUrl}
 						target="_blank"

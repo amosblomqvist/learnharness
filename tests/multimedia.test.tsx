@@ -413,6 +413,8 @@ describe("MediaCard, SubmittedMedia, and ComposerMediaTray UI", () => {
 			/>,
 		);
 		assert.match(ytHtml, /youtube-nocookie\.com\/embed\/dQw4w9WgXcQ/);
+		assert.match(ytHtml, /allow="[^"]*fullscreen[^"]*"/);
+		assert.match(ytHtml, /data-testid="media-maximize"/);
 		assert.match(ytHtml, /Intro clip/);
 		assert.match(ytHtml, /0:15 – 0:45/);
 		assert.match(ytHtml, /Subtitles/);
@@ -439,6 +441,7 @@ describe("MediaCard, SubmittedMedia, and ComposerMediaTray UI", () => {
 			</ChatActionsContext.Provider>,
 		);
 		assert.match(playerHtml, /media-player-audio/);
+		assert.match(playerHtml, /media-volume-range/);
 		assert.match(playerHtml, /Voice note/);
 		assert.match(playerHtml, /from 0:05/);
 		assert.match(playerHtml, /Transcript/);
@@ -461,6 +464,9 @@ describe("MediaCard, SubmittedMedia, and ComposerMediaTray UI", () => {
 		);
 		assert.match(submittedHtml, /submitted-media/);
 		assert.match(submittedHtml, /media-player-video/);
+		assert.match(submittedHtml, /media-volume-range/);
+		assert.match(submittedHtml, /media-fullscreen-button/);
+		assert.match(submittedHtml, /data-testid="media-maximize"/);
 		assert.match(submittedHtml, /Transcript/);
 
 		const trayHtml = renderToStaticMarkup(
