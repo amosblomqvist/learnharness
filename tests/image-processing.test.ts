@@ -11,7 +11,7 @@ import {
 	detectSupportedImageMimeTypeFromFile,
 	processImage,
 } from "../src/agent/image-processing/index.ts";
-import { applyExifOrientation } from "../src/agent/image-processing/exif-orientation.mjs";
+import { applyExifOrientation, getExifOrientation } from "../src/agent/image-processing/exif-orientation.mjs";
 import { resizeImageInProcess } from "../src/agent/image-processing/resize-core.mjs";
 import { resizeImage } from "../src/agent/image-processing/resize.ts";
 
@@ -278,6 +278,115 @@ test("EXIF mirrors and rotations preserve exact pixel placement for JPEG and bot
 				raw.free();
 			}
 		}
+	}
+});
+
+test("malformed EXIF headers in WebP and JPEG return orientation 1 without looping or reading out of bounds", async () => {
+	// 1. Little-endian TIFF with a high-bit IFD offset (0xFFFFFFE8 = -24 signed)
+	// placed 24 bytes after bytes that look like a 1-entry IFD with orientation 6.
+	const fakeIfd = Buffer.alloc(16);
+	fakeIfd.writeUInt16LE(1, 0);
+	fakeIfd.writeUInt16LE(0x0112, 2);
+	fakeIfd.writeUInt16LE(3, 4);
+	fakeIfd.writeUInt32LE(1, 6);
+	fakeIfd.writeUInt16LE(6, 10);
+	const badOffsetTiff = Buffer.alloc(8);
+	badOffsetTiff.write("II", 0);
+	badOffsetTiff.writeUInt16LE(42, 2);
+	badOffsetTiff.writeUInt32LE(0xffffffe8, 4);
+	const badOffsetWebp = Buffer.alloc(12 + 8 + fakeIfd.length + 8 + badOffsetTiff.length);
+	badOffsetWebp.write("RIFF", 0);
+	badOffsetWebp.writeUInt32LE(badOffsetWebp.length - 8, 4);
+	badOffsetWebp.write("WEBP", 8);
+	badOffsetWebp.write("JUNK", 12);
+	badOffsetWebp.writeUInt32LE(fakeIfd.length, 16);
+	fakeIfd.copy(badOffsetWebp, 20);
+	badOffsetWebp.write("EXIF", 20 + fakeIfd.length);
+	badOffsetWebp.writeUInt32LE(badOffsetTiff.length, 24 + fakeIfd.length);
+	badOffsetTiff.copy(badOffsetWebp, 28 + fakeIfd.length);
+	assert.equal(getExifOrientation(badOffsetWebp), 1);
+
+	// 2. WebP EXIF chunk declaring a high-bit size (0xFFFFFFF8 = -8 signed)
+	// must be rejected by the bounds check instead of wrapping negative.
+	const validTiff = exifJpeg(6).subarray(12, 38);
+	const negExifWebp = Buffer.alloc(12 + 8 + validTiff.length);
+	negExifWebp.write("RIFF", 0);
+	negExifWebp.writeUInt32LE(negExifWebp.length - 8, 4);
+	negExifWebp.write("WEBP", 8);
+	negExifWebp.write("EXIF", 12);
+	negExifWebp.writeUInt32LE(0xfffffff8, 16);
+	validTiff.copy(negExifWebp, 20);
+	assert.equal(getExifOrientation(negExifWebp), 1);
+
+	// 3. JPEG APP1 segment with declared length shorter than the Exif header
+	// must not read into the following segment's bytes.
+	const shortApp1 = Buffer.concat([
+		Buffer.from([0xff, 0xd8, 0xff, 0xe1, 0x00, 0x02]),
+		Buffer.from("Exif\0\0", "binary"),
+		validTiff,
+	]);
+	assert.equal(getExifOrientation(shortApp1), 1);
+
+	// Truncated WebP EXIF chunk must not read past its declared size into a
+	// following chunk's bytes.
+	const truncatedExifWebp = Buffer.alloc(12 + 8 + validTiff.length);
+	truncatedExifWebp.write("RIFF", 0);
+	truncatedExifWebp.writeUInt32LE(truncatedExifWebp.length - 8, 4);
+	truncatedExifWebp.write("WEBP", 8);
+	truncatedExifWebp.write("EXIF", 12);
+	truncatedExifWebp.writeUInt32LE(8, 16);
+	validTiff.copy(truncatedExifWebp, 20);
+	assert.equal(getExifOrientation(truncatedExifWebp), 1);
+
+	// 4. Invalid TIFF byte order (neither "II" nor "MM") must return 1.
+	const badByteOrder = Buffer.alloc(12 + 8 + validTiff.length);
+	badByteOrder.write("RIFF", 0);
+	badByteOrder.writeUInt32LE(badByteOrder.length - 8, 4);
+	badByteOrder.write("WEBP", 8);
+	badByteOrder.write("EXIF", 12);
+	badByteOrder.writeUInt32LE(validTiff.length, 16);
+	const bogusBeTiff = Buffer.alloc(22);
+	bogusBeTiff.write("XX", 0);
+	bogusBeTiff.writeUInt16BE(42, 2);
+	bogusBeTiff.writeUInt32BE(8, 4);
+	bogusBeTiff.writeUInt16BE(1, 8);
+	bogusBeTiff.writeUInt16BE(0x0112, 10);
+	bogusBeTiff.writeUInt16BE(3, 12);
+	bogusBeTiff.writeUInt32BE(1, 14);
+	bogusBeTiff.writeUInt16BE(6, 18);
+	bogusBeTiff.copy(badByteOrder, 20);
+	assert.equal(getExifOrientation(badByteOrder), 1);
+
+	// Valid big-endian ("MM") TIFF still parses orientation accurately.
+	bogusBeTiff.write("MM", 0);
+	bogusBeTiff.copy(badByteOrder, 20);
+	assert.equal(getExifOrientation(badByteOrder), 6);
+
+	// 5. WebP non-EXIF chunk with high-bit size (0xFFFFFFF8 = -8 signed) must
+	// terminate immediately rather than looping forever. Run in a worker with
+	// a short timeout so a regression fails cleanly instead of hanging.
+	const loopWebp = Buffer.alloc(24);
+	loopWebp.write("RIFF", 0);
+	loopWebp.writeUInt32LE(16, 4);
+	loopWebp.write("WEBP", 8);
+	loopWebp.write("JUNK", 12);
+	loopWebp.writeUInt32LE(0xfffffff8, 16);
+	const moduleUrl = new URL("../src/agent/image-processing/exif-orientation.mjs", import.meta.url).href;
+	const worker = new Worker(
+		`import { parentPort, workerData } from "node:worker_threads";
+		import { getExifOrientation } from ${JSON.stringify(moduleUrl)};
+		parentPort.postMessage(getExifOrientation(workerData));`,
+		{ eval: true, workerData: loopWebp },
+	);
+	try {
+		const orientation = await new Promise<number>((resolve, reject) => {
+			const timer = setTimeout(() => reject(new Error("getExifOrientation hung on high-bit WebP chunk size")), 2000);
+			worker.once("message", (value: number) => { clearTimeout(timer); resolve(value); });
+			worker.once("error", (err) => { clearTimeout(timer); reject(err); });
+		});
+		assert.equal(orientation, 1);
+	} finally {
+		await worker.terminate();
 	}
 });
 
