@@ -369,8 +369,6 @@ export function registerQuestionProof(ctx) {
           textarea.setRangeText("\\t", textarea.selectionStart, textarea.selectionEnd, "end");
           textarea.dataset.tabs = String(Number(textarea.dataset.tabs) + 1); publish(); return "handled";
         },
-        // Deliberately no appendTranscript: host thinking owns predict speech;
-        // revealed thinking-off check must retain a visible disabled microphone.
         dispose() { textarea.dataset.disposes = String(Number(textarea.dataset.disposes) + 1); textarea.remove(); }
       };
     },
@@ -524,7 +522,7 @@ export function activate(ctx) {
     } }, { signal });
     let draft = "";
     const composerProps = () => ({ value: draft, onChange(value) { draft = value; widget.update({ composer: composerProps() }); }, onSend() { const sent = document.createElement("p"); sent.dataset.smokeSubmitted = "true"; sent.textContent = draft; container.append(sent); draft = ""; widget.update({ composer: composerProps() }); }, placeholder: "Plugin composer proof" });
-    const widget = ctx.ui.mountStandardComposer(controls, { composer: composerProps(), model: { value: undefined, onChange() {} }, thinking: { model: undefined, value: undefined, onChange() {} }, dictation: { onTranscript(text) { draft = (draft + " " + text).trim(); widget.update({ composer: composerProps() }); } } }, { signal });
+    const widget = ctx.ui.mountStandardComposer(controls, { composer: composerProps(), model: { value: undefined, onChange() {} }, thinking: { model: undefined, value: undefined, onChange() {} } }, { signal });
     const cleanupMarkdown = mountMarkdownProof(ctx, container, signal, "view", ++markdownViewMounts, () => customCodeBlockMounts);
     const result = await ctx.call("proof", "browser-bridge");
     if (ctx.signal.aborted) return;

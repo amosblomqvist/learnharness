@@ -834,7 +834,7 @@ try {
   assert.deepEqual(evidence.pageErrors, []); assert.deepEqual(evidence.blockedRequests, []);
   const expectedResponse = entry => {
     const url = new URL(entry.url);
-    return url.origin === base && entry.method === "GET" && ((url.pathname === "/api/stt/token" && entry.status === 503) || (url.pathname === "/favicon.ico" && entry.status === 404));
+    return url.origin === base && entry.method === "GET" && url.pathname === "/favicon.ico" && entry.status === 404;
   };
   evidence.expectedBaselineResponses = evidence.responses.filter(expectedResponse);
   assert.deepEqual(evidence.responses.filter(entry => entry.status >= 400 && !expectedResponse(entry)), []);

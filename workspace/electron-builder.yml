@@ -122,10 +122,6 @@ mac:
   electronLanguages:
     - en
   category: public.app-category.education
-  # Laid for the STT milestone (researcher-verified): the TCC mic prompt
-  # reads this string; macOS asks regardless of Electron's own handlers.
-  extendInfo:
-    NSMicrophoneUsageDescription: "LearnHarness uses the microphone only for speech-to-text input into your sessions."
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   # Signing + notarization (flipped 2026-10-08): identity auto-detects the

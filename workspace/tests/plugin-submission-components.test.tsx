@@ -39,7 +39,7 @@ test("image-only practice thinking, question thinking, reading and answer contai
 
 test("pending image input makes an empty between-problems composer send rather than Next", () => {
 	assert.equal(enterAction({ busy: false, canSend: true, nextProblem: true }), "send");
-	const html = renderToStaticMarkup(<ChatSessionComposer busy={false} value="" revision={0} pendingInput onChange={() => {}} onSend={() => {}} onStop={() => {}} sendAllowed dictationActive={false} nextProblem />);
+	const html = renderToStaticMarkup(<ChatSessionComposer busy={false} value="" revision={0} pendingInput onChange={() => {}} onSend={() => {}} onStop={() => {}} sendAllowed nextProblem />);
 	assert.match(html, /aria-label="Send"/); assert.doesNotMatch(html, /next-problem-button/);
 });
 

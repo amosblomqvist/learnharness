@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { FileSymlinkIcon, XIcon } from "lucide-react";
 import { directoryReferencePath, quoteFilePath } from "@/src/core";
-import { appendToPrimaryInput } from "@/components/dictation";
+import { appendToFileDropTarget } from "@/components/file-drop-target";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 
 export const BROWSER_NOTICE = "Local file paths can only be attached in the desktop app. You can paste a full path instead.";
@@ -92,7 +92,7 @@ export function FilePathDropZone({ children, className, onContentRoot }: {
 				const focused = document.activeElement?.closest<HTMLElement>("[data-file-path-input]");
 				if (focused && event.currentTarget.contains(focused)) {
 					focused.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
-				} else if (!appendToPrimaryInput(paths.map(quoteFilePath).join(" "))) {
+				} else if (!appendToFileDropTarget(paths.map(quoteFilePath).join(" "))) {
 					setNotice("Open a chat to attach file paths.");
 					return;
 				}

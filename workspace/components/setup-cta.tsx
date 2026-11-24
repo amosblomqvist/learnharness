@@ -9,7 +9,7 @@
  * the first-key screen on its own.
  *
  * Truth: GET /api/keys — a PROVIDER key present (env or file; tool keys
- * like Deepgram do not count — they unlock no models). Live updates ride
+ * for web search do not count — they unlock no models). Live updates ride
  * the lh:settings-saved "keys" signal (keys-section dispatches after
  * save AND delete; the setup dialog's first-key screen dispatches on
  * its own save), the same re-read pattern chat.tsx uses for "models".

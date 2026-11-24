@@ -76,11 +76,7 @@ const SECTIONS = [
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 
-/** `open(section?, row?)` — the optional ROW deep-links into the Keys
- *  section with that row unfolded (zero-keys wave: the dictation error's
- *  click lands on the Deepgram row). `row` is the KEY ID (the env-var
- *  name, e.g. DEEPGRAM_API_KEY — KeysSection's openRow state), not the
- *  row's testid. */
+/** Opens an optional key row by its environment variable name. */
 const DialogContext = createContext<{ open: (section?: string, row?: string) => void }>({ open: () => {} });
 // Authority belongs to the persistent Settings host, not a particular field or
 // open/close lifetime: a delayed response must not roll back a newer ACK.

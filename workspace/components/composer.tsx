@@ -42,7 +42,7 @@ export function enterAction(state: {
 
 /**
  * Session composer with local keystroke state. The owning Chat keeps the
- * current draft in a ref for send/dictation, so typing doesn't rerender the
+ * current draft in a ref for submission, so typing doesn't rerender the
  * transcript; revision signals explicit parent-driven draft resets.
  */
 export function ChatSessionComposer({
@@ -53,10 +53,8 @@ export function ChatSessionComposer({
 	onSend,
 	onStop,
 	sendAllowed,
-	dictationActive,
 	autoFocus,
 	inputRef,
-	onEscape,
 	placeholder,
 	nextProblem,
 	onNext,
@@ -69,10 +67,8 @@ export function ChatSessionComposer({
 	onSend: () => void;
 	onStop: () => void;
 	sendAllowed: boolean;
-	dictationActive: boolean;
 	autoFocus?: boolean;
 	inputRef?: React.RefObject<HTMLDivElement | null>;
-	onEscape?: () => void;
 	placeholder?: string;
 	nextProblem?: boolean;
 	onNext?: () => void;
@@ -80,7 +76,7 @@ export function ChatSessionComposer({
 }) {
 	const [draft, setDraft] = useState(value);
 	useLayoutEffect(() => { setDraft(value); }, [revision, value]);
-	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive || pendingInput);
+	const canSend = sendAllowed && (draft.trim().length > 0 || pendingInput);
 	const applyDraft = useCallback((next: string) => {
 		setDraft(next);
 		onChange(next);
@@ -96,7 +92,6 @@ export function ChatSessionComposer({
 			canSend={canSend}
 			autoFocus={autoFocus}
 			inputRef={inputRef}
-			onEscape={onEscape}
 			placeholder={placeholder}
 			nextProblem={nextProblem}
 			onNext={onNext}
@@ -113,7 +108,6 @@ export function Composer({
 	canSend,
 	autoFocus,
 	inputRef,
-	onEscape,
 	placeholder = "Ask, answer, or steer the lesson…",
 	nextProblem = false,
 	onNext,
@@ -127,12 +121,7 @@ export function Composer({
 	onStop: () => void;
 	canSend: boolean;
 	autoFocus?: boolean;
-	/** The page's handle to the textarea — the dictation-end focus (owner,
-	 *  2026-10-01): a run ending hands the cursor to the bare composer. */
 	inputRef?: React.RefObject<HTMLDivElement | null>;
-	/** Escape while a dictation runs stops it (STT wave, 2026-09-17). No-op
-	 *  when absent — Esc otherwise means nothing in the composer. */
-	onEscape?: () => void;
 	/** The textarea's placeholder (owner refinement round, 2026-09-24):
 	 *  active sessions read "Ask, answer, or steer the lesson…"; the fresh
 	 *  new-session page asks the graph view's opening question instead. */
@@ -177,17 +166,6 @@ export function Composer({
 				fileInsertion={fileInsertion}
 				onKeyDown={(e) => {
 					if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
-					// Esc ends dictation before anything else Esc might someday mean
-					// here (the dictate decisions: click-again or Esc to stop).
-					// stopPropagation claims the Esc (keyboard wave A): the
-					// window-level chain must not also abort a turn under us.
-					if (e.key === "Escape" && onEscape) {
-						controller?.claimEscape(e);
-						e.preventDefault();
-						e.stopPropagation();
-						onEscape();
-						return;
-					}
 					// Chat convention: Enter sends, Shift+Enter is a newline.
 					// ⌘/Ctrl+Enter also sends — the universal submit shortcut
 					// across every input in the app (thinking field, answers).

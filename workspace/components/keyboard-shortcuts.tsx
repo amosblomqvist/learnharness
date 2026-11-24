@@ -7,7 +7,7 @@
  * - Tab is DEAD: browser tab-focus navigation is abandoned by owner decision
  *   (2026-09-17). Provider capture prevents native defaults without stopping
  *   leaf handlers. Explicit field/row and thinking cycles remain scoped.
- * - Escape reaches dictation cancellation / turn abort only if no original
+ * - Escape reaches turn abort only if no original
  *   layer or leaf editor owned it. Closing a layer never exposes this
  *   fallback to the same physical key.
  * - Global actions dispatch lh:kbd-<action> window events; surfaces that are
@@ -36,8 +36,7 @@ import {
 	KEYBOARD_ACTIONS,
 } from "@/src/core";
 import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
-import { isDictationActive } from "@/components/dictation";
-import { dispatchFocusedPluginShortcut, hasLegacyInteractionForeground, isInteractionScopeEligible } from "@/components/plugin-input-focus";
+import { dispatchFocusedPluginShortcut, hasLegacyInteractionForeground } from "@/components/plugin-input-focus";
 import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
 import { usePlugins } from "./plugins";
 import { dispatchPluginActionShortcut, pluginShortcutScopeLabel, usePluginShortcutRows } from "./plugin-shortcuts";
@@ -93,18 +92,8 @@ export function KeyboardShortcuts() {
 				// handlers claim at their element (focus in a field: the
 				// field's action); every SURFACED layer (popovers, plan,
 				// overlays, dialogs) claims at the DOCUMENT level, which
-				// fires before this window listener — so reaching here means
-				// NOTHING is surfaced and no field is focused. This chain is
-				// the fallback, bottom-up: dictation (a live capture, not a
-				// surface — it survives Esc that closes a plan or overlay),
-				// then abort the turn (a server-side turn has no client
-				// request to abort — the abort seam in Chat decides what's
-				// honestly stoppable, layered by escAbortTarget).
-				if (isDictationActive()) {
-					e.preventDefault();
-					window.dispatchEvent(new CustomEvent("lh:kbd-cancel-dictation"));
-					return;
-				}
+				// fires before this window listener.
+				// Turn abort is the fallback; the chat decides what can be stopped.
 				window.dispatchEvent(new CustomEvent("lh:kbd-abort-turn"));
 				return;
 			}
@@ -150,9 +139,6 @@ export function KeyboardShortcuts() {
 					break;
 				default:
 					if (dispatchFocusedPluginShortcut(action, controller)) break;
-					// Core dictation is a background-page service, not a modal
-					// command. A foreground plugin gets its focused claim above.
-					if (action === "toggle-dictation" && !isInteractionScopeEligible(document.body, controller)) break;
 					window.dispatchEvent(new CustomEvent(kbdEventForAction(action)));
 			}
 		};

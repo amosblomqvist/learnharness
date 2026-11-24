@@ -188,14 +188,10 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.screenshot({ path: destination, fullPage: true });
 		evidence.screenshots.push(destination);
 	};
-	// This fixture intentionally has no Deepgram credential; the existing app
-	// probes dictation readiness at startup. Its missing-key 503 and the app's
-	// absent favicon are unrelated baseline responses, not plugin failures.
-	// Keep both in evidence and match only exact paths/statuses/resource errors.
 	const expectedFixtureResponse = entry => {
 		const target = new URL(entry.url);
 		return target.origin === base && entry.method === "GET" &&
-			((target.pathname === "/api/stt/token" && entry.status === 503) || (target.pathname === "/favicon.ico" && entry.status === 404));
+			target.pathname === "/favicon.ico" && entry.status === 404;
 	};
 	const expectedFixtureConsole = entry => {
 		if (entry.type !== "error" || !entry.location?.url) return false;
@@ -232,7 +228,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 			&& stream.url === entry.url && stream.failure === "net::ERR_ABORTED");
 		return entry.method === "GET" && target.origin === base && [`/api/chats/${QUESTION.chatId}/stream`, `/api/chats/${SESSION.chatId}/stream`, `/api/chats/${SESSION.practiceId}/stream`].includes(target.pathname) && !target.search
 			&& entry.failure?.errorText === "net::ERR_ABORTED"
-			&& ["native plugin question: canonical predict authority and public editor", "native plugin question: check reading/reveal and thinking-off microphone", "session extensions: surfaces and image-only message", "session extensions: transformed native answer channels", "session extensions: model retry reuses accepted input", "session extensions: image-only practice thinking"].includes(entry.requestStage ?? entry.stage)
+			&& ["native plugin question: canonical predict authority and public editor", "native plugin question: check reading/reveal with thinking off", "session extensions: surfaces and image-only message", "session extensions: transformed native answer channels", "session extensions: model retry reuses accepted input", "session extensions: image-only practice thinking"].includes(entry.requestStage ?? entry.stage)
 			&& streams.length > 0 && streams.every(stream => stream.status === 200 && stream.text.includes("data: [DONE]"))
 			&& streams.some(stream => stream.failure === "net::ERR_ABORTED");
 	};
@@ -1361,7 +1357,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		const toolbar = await page.$('[data-testid="stats-bar"]');
 		assert.ok(await page.$('[data-testid="stats-model"]'), "Host model control remains present");
 		assert.ok(await page.$('[data-testid="stats-thinking"]'), "Host model-thinking control remains present");
-		assert.ok(await page.$('[data-testid="dictation-toggle"]'), "Host microphone remains present");
+		assert.equal(await page.$('[data-testid="dictation-toggle"]'), null, "Host microphone was removed");
 		const draftText = "  exact offline answer\n\tsecond line  \n";
 		await page.locator(questionEditor).fill(draftText);
 		await page.$eval(questionEditor, node => node.setSelectionRange(3, 8));
@@ -1463,7 +1459,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await screenshot("question-predict-reviewed");
 		evidence.questions.push({ label: "verbatim public-editor answer, separate host thinking, genuine native teacher review; stale terminal submission rejected without another turn", submittedInput, result: answers[0], provider: reviewed, staleSubmission: { status: staleAnswer.status, text: staleAnswerText } });
 
-		evidence.stage = "native plugin question: check reading/reveal and thinking-off microphone";
+		evidence.stage = "native plugin question: check reading/reveal with thinking off";
 		const checkStream = page.waitForResponse(response => new URL(response.url()).pathname === questionRoute + "/stream");
 		await sendQuestionPrompt(QUESTION.checkPrompt);
 		assert.equal((await checkStream).status(), 200);
@@ -1475,8 +1471,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		await page.locator('[data-testid="reading-thinking-field"] [contenteditable="true"]').fill(readingText);
 		await page.locator('[data-testid="teach-check-reveal"]').click();
 		await page.waitForSelector(`${questionEditor}:not(:disabled)`, { visible: true });
-		await page.waitForFunction(() => document.querySelector('[data-testid="dictation-toggle"]')?.disabled === true);
-		assert.equal(await page.$eval('[data-testid="dictation-toggle"]', node => node.getClientRects().length > 0), true, "Thinking-off editor without explicit appendTranscript keeps the host microphone visible but disabled");
+		assert.equal(await page.$('[data-testid="dictation-toggle"]'), null);
 		assert.equal(await page.$$eval(`${questionDock} [aria-label="Your thinking"]`, nodes => nodes.length), 0, "showThinking:false never invents a host thinking field");
 		assert.equal(await page.$eval('[data-testid="reading-thinking-field"] [contenteditable="true"]', node => node.textContent), readingText, "Reveal retains the distinct host reading channel");
 		await page.locator(questionEditor).fill("unsubmitted check draft");
@@ -1508,8 +1503,8 @@ export async function verifyPluginBrowser(url, options = {}) {
 		}
 		const afterQuestionAdmission = await admissionCall("admission-status");
 		assert.deepEqual(afterQuestionAdmission.counts, terminal.counts, "Question-model requests must not alter held-worker admission/completion counters");
-		evidence.questions.push({ label: "check reading/reveal, no implicit answer speech, pending until explicit dismissal", snapshot: check, provider: beforeDisableQuestion, wireEvents: wireEvents.length });
-		evidence.assertions.push("External teach-only plugin question types execute through native validated calls against a live plan: mixed failed/valid predict stops with no temporary ACK on wire/history; canonical reconciliation gates public rich/editor slots; real fold preserves selection/draft/mount; editor Tab edits once and Mod+Enter submits verbatim whitespace with separate host thinking; genuine native teacher continuation reviews without grading; check retains reading/reveal and visible disabled microphone without answer speech opt-in");
+		evidence.questions.push({ label: "check reading/reveal, pending until explicit dismissal", snapshot: check, provider: beforeDisableQuestion, wireEvents: wireEvents.length });
+		evidence.assertions.push("External teach-only plugin question types execute through native validated calls against a live plan: mixed failed/valid predict stops with no temporary ACK on wire/history; canonical reconciliation gates public rich/editor slots; real fold preserves selection/draft/mount; editor Tab edits once and Mod+Enter submits verbatim whitespace with separate host thinking; genuine native teacher continuation reviews without grading; check retains reading/reveal with thinking off");
 		await page.evaluate(() => window.__questionTraceProof.observer.disconnect());
 		await openProof();
 		assert.equal(await disabledQuestionEditor.evaluate(node => !node.isConnected && node.dataset.aborted === "true"), true, "Leaving the chat releases its editor while canonical pending authority survives");

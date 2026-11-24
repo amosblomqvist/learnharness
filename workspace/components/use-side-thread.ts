@@ -77,11 +77,9 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 	const refreshSerial = useRef(0);
 	const uncertain = useRef<{ segmentId: string; text: string; quote?: string; requestId: string } | null>(null);
 	const drafts = useRef(new Map<string, string>());
-	const [, syncExternalDraft] = useState(0);
 	const draftFor = useCallback((threadId: string) => drafts.current.get(threadId) ?? "", []);
-	const saveDraft = useCallback((threadId: string, text: string, notify = false) => {
+	const saveDraft = useCallback((threadId: string, text: string) => {
 		drafts.current.set(threadId, text);
-		if (notify) syncExternalDraft((revision) => revision + 1);
 	}, []);
 	const adopt = useCallback((thread: SideChatThread) => {
 		revision.current++;
@@ -161,8 +159,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 		if (thread) attach(thread);
 		else { connection.current?.controller.abort(); connection.current = null; }
 	}, [attach]);
-	const close = useCallback((expectedThreadId?: string) => {
-		if (expectedThreadId && stateRef.current?.threadId !== expectedThreadId) return;
+	const close = useCallback(() => {
 		connection.current?.controller.abort(); connection.current = null;
 		dispatch({ type: "close" });
 	}, []);

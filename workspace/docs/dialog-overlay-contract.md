@@ -20,7 +20,7 @@ Only the topmost active interaction responds to a physical Escape event. This in
 a focused editor that owns Escape, a menu above a dialog, or a child dialog above its parent.
 
 - Leaf handlers get their normal opportunity before a containing surface dismisses.
-- A handled Escape cannot also dismiss a parent, cancel dictation or abort a turn.
+- A handled Escape cannot also dismiss a parent or abort a turn.
 - Ownership is captured at the start of the event. Closing one surface does not let
   the newly exposed surface handle that same key.
 - A surface that refuses dismissal still consumes Escape.

@@ -69,7 +69,7 @@ for (const overflow of [false, true]) test(`question typing refreshes ${overflow
         <PluginSessionTopBarActions readContext={make} captureContext={() => { const fresh = make(); void fresh.view; return fresh; }} refreshRef={refreshRef} />
       </TopBar>
       <Transcript />
-      <QuestionDock viewReader={reader} toolName="explain" toolCallId="question" input={input} expanded onExpand={() => {}} onSubmit={() => {}} dictationClaim={false} />
+      <QuestionDock viewReader={reader} toolName="explain" toolCallId="question" input={input} expanded onExpand={() => {}} onSubmit={() => {}} primaryDropTarget={false} />
     </>;
   }
   const fixture = await mountPluginChrome({ activate(ctx) {

@@ -60,7 +60,6 @@ export interface PluginProblemEditorHandle {
   update(props: { submission: PluginProblemSubmissionState; active: boolean }): void;
   focus(): void;
   handleKeyDown?(key: PluginQuestionEditorKey): "handled" | "pass";
-  appendTranscript?(text: string): void | Promise<void>;
   dispose(): void;
 }
 export interface PluginProblemRenderer<Q = JsonValue, S = JsonValue> {

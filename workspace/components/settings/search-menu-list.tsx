@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, type ReactNode } from "react";
 import { fuzzyScore } from "@/src/core";
 
 /** The model picker's search, arrow-walk, row styling and scrolling machine.
- * Models and dictation languages supply only their catalog and row content.
+ * Callers supply their catalog and row content.
  * The caller owns the shared MenuShell and dismissal behavior. */
 export function SearchMenuList<T>({
 	items, itemKey, searchTerms, compare, prioritize, isSelected, onPick, renderItem,

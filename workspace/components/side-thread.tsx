@@ -2,9 +2,8 @@
 import { useMobileLayout } from "@/components/mobile-runtime";
 
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
-import { ArrowRight, CornerDownLeft, GripVertical, MessageCircleQuestion, Mic, Pin, PinOff, Square, X } from "lucide-react";
-import { actionForBinding, collectCitations, eventBinding, SIDE_QUOTE_MAX_CHARS, SIDE_QUESTION_MAX_CHARS, type TextSelector, type TutorCitation } from "@/src/core";
-import { rmsToMeter, type DictationPhase } from "./dictation";
+import { ArrowRight, CornerDownLeft, GripVertical, MessageCircleQuestion, Pin, PinOff, Square, X } from "lucide-react";
+import { collectCitations, SIDE_QUOTE_MAX_CHARS, SIDE_QUESTION_MAX_CHARS, type TextSelector, type TutorCitation } from "@/src/core";
 import { CitationActionsContext } from "./citation-chip";
 import { MessageResponse } from "./ai-elements/message";
 import { BrailleSpinner } from "./braille-spinner";
@@ -35,7 +34,6 @@ export function sideThreadPlaceholder(state: SideThreadState): string {
 	return state.pendingPassage ? "Ask about this passage…" : state.messages.length ? "Ask a follow-up…" : "Ask a side question…";
 }
 export interface SideThreadHandlers {
-	dictation?: { phase: DictationPhase; active: boolean; blocked: boolean; error: string | null; levelRef?: { current: number }; toggle: () => void; finish: () => Promise<void> };
 	readDraft?: () => string;
 	draft?: string;
 	onDraftChange?: (text: string) => void;
@@ -56,22 +54,9 @@ function Passage({ text, chatId, sourceMessageId, selector, citation: savedCitat
 		className="cursor-pointer rounded-sm text-left hover:bg-accent/50" onClick={(event) => actions.openSource!(citation, event.currentTarget)}>{quote}</button>;
 }
 
-/** Sample locally: microphone frames must not rerender the chat/composer. */
-function SideInputMeter({ levelRef }: { levelRef?: { current: number } }) {
-	const [level, setLevel] = useState(0);
-	useEffect(() => {
-		const timer = setInterval(() => setLevel(rmsToMeter(levelRef?.current ?? 0)), 60);
-		return () => clearInterval(timer);
-	}, [levelRef]);
-	return <span data-testid="side-input-meter" role="meter" aria-label="Microphone input level" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(level * 100)}
-		className="flex h-4 items-center gap-px text-error">
-		{[0.6, 1, 0.6].map((scale, index) => <span key={index} aria-hidden="true" className="w-0.5 rounded-full bg-current transition-[height] duration-75 motion-reduce:transition-none" style={{ height: 2 + 12 * scale * level }} />)}
-	</span>;
-}
-
 /** #451's companion body, rendering the durable raw messages supplied by
  * #487's service. There is no sharing toggle, generated note, or deletion. */
-export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onDraftChange, onAsk, onStop, onExpand, onFloat, onClose, onCurrentStep, onDragStart }: {
+export function SideThreadBody({ state, chatId, draft, readDraft, onDraftChange, onAsk, onStop, onExpand, onFloat, onClose, onCurrentStep, onDragStart }: {
 	state: SideThreadState; chatId?: string; onDragStart?: (event: React.PointerEvent<HTMLElement>) => void;
 } & SideThreadHandlers) {
 	const controller = useOptionalInteractionLayers();
@@ -96,10 +81,6 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 	}, [state.messages, state.streamText]);
 	const submit = async () => {
 		if (state.answering || !isInteractionScopeEligible(inputRef.current, controller)) return;
-		if (dictation?.active) await dictation.finish();
-		if (!isInteractionScopeEligible(inputRef.current, controller)) return;
-		// A dictation flush updates the saved draft synchronously, before
-		// React commits its new prop. Never submit the pre-flush local text.
 		const sent = readDraft?.() ?? draftRef.current;
 		if (!sent.trim()) return;
 		if (await onAsk(sent) && (readDraft?.() ?? draftRef.current) === sent) changeDraft("");
@@ -108,9 +89,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 	return (
 		<div className="flex min-h-0 flex-1 flex-col gap-3" data-testid="side-thread" onKeyDown={(event) => {
 				if (!isInteractionScopeEligible(event.currentTarget, controller)) return;
-				if (dictation && actionForBinding(eventBinding(event.nativeEvent)) === "toggle-dictation") {
-					event.preventDefault(); event.stopPropagation(); dictation.toggle();
-				} else if (event.key === "Enter") {
+				if (event.key === "Enter") {
 					// This companion owns its controls even when docked. Preserve
 					// native button activation, but never submit the main question.
 					event.stopPropagation();
@@ -149,28 +128,18 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 					Go to current step <ArrowRight aria-hidden="true" className="size-3.5" />
 				</button>}
 				{state.pendingPassage && <Passage text={state.pendingPassage.text} chatId={chatId} sourceMessageId={state.pendingPassage.sourceMessageId} selector={state.pendingPassage.selector} />}
-				{dictation?.error && <p role="alert" className="font-ui text-xs text-destructive">{dictation.error}</p>}
 				<div className="flex items-end gap-1.5">
 					<div data-testid="side-composer-surface" className="relative min-w-0 flex-1 rounded-[10px] border bg-card focus-within:border-primary/50">
-					<Textarea ref={inputRef} aria-label="Side question" data-testid="side-thread-input" className="min-h-9 resize-none border-0 bg-transparent pr-14 font-prose text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
+					<Textarea ref={inputRef} aria-label="Side question" data-testid="side-thread-input" className="min-h-9 resize-none border-0 bg-transparent font-prose text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
 						value={question} maxLength={SIDE_QUESTION_MAX_CHARS} placeholder={sideThreadPlaceholder(state)} onChange={(event) => changeDraft(event.target.value)}
 						onKeyDown={(event) => {
 							if (event.nativeEvent.isComposing || !isInteractionScopeEligible(inputRef.current, controller)) return;
 							if (event.key === "Enter" && (!event.shiftKey || event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); void submit(); }
 							else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); }
 						}} />
-					{dictation && <div className="absolute right-1 bottom-1 flex h-7 items-center gap-1">
-						{dictation.phase === "recording" && <SideInputMeter levelRef={dictation.levelRef} />}
-						<button type="button" data-testid="side-dictation-toggle"
-						aria-label={dictation.active ? "Stop side dictation" : "Start side dictation"} aria-pressed={dictation.active}
-						title={dictation.error ?? (dictation.active ? "Stop side dictation" : "Dictate side question")}
-						disabled={dictation.blocked || dictation.phase === "stopping"} onClick={dictation.toggle}
-						className={`flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${dictation.active ? "bg-error/15 text-error" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>
-						<Mic aria-hidden="true" className="size-3.5" />
-					</button></div>}
 					</div>
 					<button type="button" aria-label={state.answering ? "Stop side answer" : "Send side question"}
-						disabled={!state.answering && !question.trim() && !dictation?.active} onClick={state.answering ? onStop : () => void submit()}
+						disabled={!state.answering && !question.trim()} onClick={state.answering ? onStop : () => void submit()}
 						className={`flex size-9 shrink-0 items-center justify-center rounded-[10px] transition-colors ${state.answering ? "bg-secondary text-foreground hover:bg-accent" : "bg-primary text-primary-foreground hover:opacity-90 disabled:opacity-40"}`}>
 						{state.answering ? <Square aria-hidden="true" className="size-4" /> : <CornerDownLeft aria-hidden="true" className="size-5" />}
 					</button>

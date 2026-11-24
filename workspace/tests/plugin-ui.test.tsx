@@ -9,7 +9,7 @@ import { createPluginUiStore, PluginUiHost as Host, PluginSettingsRows } from ".
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { installModalDom } from "./modal-dom.ts";
 function PluginUiHost(props: React.ComponentProps<typeof Host>) { return <InteractionLayersProvider><Host {...props} /></InteractionLayersProvider>; }
-import { createTranscriptDelivery, PluginComposer, PluginStandardComposer } from "../components/plugin-composer.tsx";
+import { PluginComposer, PluginStandardComposer } from "../components/plugin-composer.tsx";
 import { ModelPickerPill } from "../components/model-picker-pill.tsx";
 import { SettingsSlider } from "../components/settings/controls.tsx";
 import { buttonVariants } from "../components/ui/button.tsx";
@@ -429,7 +429,6 @@ describe("controlled plugin UI", () => {
 			composer={{ value: "", autoFocus: false, onChange() {}, onSend() {} }}
 			model={{ value: undefined, onChange() {} }}
 			thinking={{ model: undefined, value: undefined, onChange() {} }}
-			dictation={{ onTranscript() {} }}
 		/></InteractionLayersProvider>);
 		const { document } = parseHTML(html);
 		const preset = document.querySelector("[data-plugin-standard-composer]")!;
@@ -438,8 +437,8 @@ describe("controlled plugin UI", () => {
 		assert.ok(!preset.classList.contains("border"));
 		for (const token of ["rounded-2xl", "border", "bg-card", "shadow-lg"]) assert.ok(frame.classList.contains(token), token);
 		assert.ok(frame.querySelector('[data-testid="composer"]'));
-		assert.equal(frame.querySelector("[data-testid=plugin-dictation-control], [data-plugin-model-picker], [data-plugin-thinking-picker]"), null);
-		for (const selector of ["[data-testid=plugin-dictation-control]", "[data-plugin-model-picker]", "[data-plugin-thinking-picker]"]) assert.ok(controls.querySelector(selector), selector);
+		assert.equal(frame.querySelector("[data-plugin-model-picker], [data-plugin-thinking-picker]"), null);
+		for (const selector of ["[data-plugin-model-picker]", "[data-plugin-thinking-picker]"]) assert.ok(controls.querySelector(selector), selector);
 		for (const token of ["font-ui", "text-xs", "text-muted-foreground", "pt-2"]) assert.ok(controls.classList.contains(token), token);
 		assert.equal(controls.querySelector('[data-testid="composer"]'), null);
 		assert.ok(document.querySelector('button[aria-label="Send"]')!.hasAttribute("disabled"));
@@ -464,35 +463,4 @@ describe("controlled plugin UI", () => {
 		assert.match(html, />Graph size</); assert.match(html, /type="range" aria-label="Graph size"/);
 	});
 
-	it("flush-before-send waits for asynchronous transcript delivery", async () => {
-		const delivery = createTranscriptDelivery(); let resolve!: () => void; let text = "", sent = "";
-		const ready = new Promise<void>((done) => { resolve = done; });
-		let finished = false;
-		const sending = delivery.finish(async () => {
-			delivery.append(async () => { await ready; text = "spoken text"; }, (error) => { throw error; });
-		}, () => { sent = text; finished = true; });
-		await Promise.resolve(); assert.equal(finished, false); resolve(); await sending;
-		assert.equal(sent, "spoken text");
-	});
-
-	it("failed transcript delivery is reported and does not submit stale text", async () => {
-		const delivery = createTranscriptDelivery(); const errors: unknown[] = []; let sent = false;
-		await assert.rejects(delivery.finish(async () => {
-			await delivery.append(async () => { throw new Error("not stored"); }, (error) => errors.push(error));
-		}, () => { sent = true; }), /not stored/);
-		assert.equal(errors.length, 1); assert.equal(sent, false);
-	});
-
-	it("append returns the delivery promise so the dictation engine observes completion and rejection", async () => {
-		const delivery = createTranscriptDelivery(); const errors: unknown[] = [];
-		let resolve!: () => void;
-		const callbackResult = new Promise<void>((done) => { resolve = done; });
-		const result = delivery.append(() => callbackResult, (error) => errors.push(error));
-		assert.equal(result, callbackResult, "the engine receives the actual callback promise");
-		resolve(); await result;
-		const failed = new Error("transcript failed");
-		await assert.rejects(delivery.append(() => Promise.reject(failed), (error) => errors.push(error)), (error) => error === failed);
-		await assert.rejects(delivery.append(() => { throw failed; }, (error) => errors.push(error)), (error) => error === failed);
-		assert.deepEqual(errors, [failed, failed]);
-	});
 });

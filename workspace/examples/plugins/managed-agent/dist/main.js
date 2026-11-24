@@ -40,7 +40,6 @@ export function activate(ctx) {
 			},
 			model: { value: model, onChange: (value) => { model = value; thinkingLevel = undefined; syncComposer(); } },
 			thinking: { model, value: thinkingLevel, onChange: (value) => { thinkingLevel = value; syncComposer(); } },
-			dictation: { onTranscript: (text) => { draft += (draft ? " " : "") + text; syncComposer(); } },
 		});
 		const syncComposer = () => {
 			if (!alive) return;

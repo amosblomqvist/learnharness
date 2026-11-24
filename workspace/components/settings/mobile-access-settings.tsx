@@ -42,7 +42,7 @@ export function MobileAccessSettings() {
 					<MobileLinkQr link={status.directUrl} testid="mobile-direct-link-qr" />
 					<a className="min-w-0 flex-1 break-all rounded-lg border bg-background px-3 py-3 text-sm select-all" href={status.directUrl} target="_blank" rel="noreferrer" data-testid="mobile-direct-link">{status.directUrl}</a>
 				</div>
-				<p className="text-xs text-muted-foreground">Direct link: works with Tailscale DNS off on the phone. It uses HTTP inside Tailscale&apos;s encrypted connection, so the browser may call it not secure, and dictation needs the HTTPS link.</p>
+				<p className="text-xs text-muted-foreground">Direct link: works with Tailscale DNS off on the phone. It uses HTTP inside Tailscale&apos;s encrypted connection, so the browser may call it not secure.</p>
 			</div>}
 			{status.enabled && !status.serving && status.setupCommand && <details className="rounded-lg border p-3 text-xs">
 				<summary className="cursor-pointer">Set up Tailscale HTTPS</summary>

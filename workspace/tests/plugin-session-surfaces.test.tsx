@@ -298,7 +298,7 @@ it("surfaces share the exact session body/local paint stratum, leaving chrome an
 	assert.equal(f.controller.getTopLayer()?.kind, "view");
 	assert.equal(Number(frame(root).style.zIndex), 100 + f.controller.getTopLayer()!.order);
 	assert.equal(f.controller.isElementEligible(native), false);
-	assert.equal(isInteractionScopeEligible(native, f.controller), false, "covered Enter/Tab/dictation scope is ineligible");
+	assert.equal(isInteractionScopeEligible(native, f.controller), false, "covered Enter/Tab scope is ineligible");
 	assert.equal(f.controller.isElementEligible(document.querySelector("[data-chrome]")), true);
 	assert.equal(document.querySelector("aside")?.closest("[inert]"), null);
 	assert.equal(root.getAttribute("aria-label"), "Drawing");

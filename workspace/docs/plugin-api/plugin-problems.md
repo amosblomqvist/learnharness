@@ -89,7 +89,6 @@ export interface PluginProblemEditorHandle {
     }): void;
     focus(): void;
     handleKeyDown?(key: PluginQuestionEditorKey): "handled" | "pass";
-    appendTranscript?(text: string): void | Promise<void>;
     dispose(): void;
 }
 ```
@@ -101,7 +100,6 @@ export interface PluginProblemEditorHandle {
 - [update](#pluginproblemeditorhandle-update)
 - [focus](#pluginproblemeditorhandle-focus)
 - [handleKeyDown](#pluginproblemeditorhandle-handlekeydown)
-- [appendTranscript](#pluginproblemeditorhandle-appendtranscript)
 - [dispose](#pluginproblemeditorhandle-dispose)
 
 ### PluginProblemEditorHandle update
@@ -138,18 +136,6 @@ handleKeyDown?(key: PluginQuestionEditorKey): "handled" | "pass";
 | `key` | `PluginQuestionEditorKey` |
 
 **Returns:** `"handled" \| "pass"`.
-
-### PluginProblemEditorHandle appendTranscript
-
-```ts
-appendTranscript?(text: string): void | Promise<void>;
-```
-
-| Parameter | Type |
-| --- | --- |
-| `text` | `string` |
-
-**Returns:** `void \| Promise<void>`.
 
 ### PluginProblemEditorHandle dispose
 

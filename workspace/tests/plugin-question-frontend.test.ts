@@ -43,13 +43,6 @@ describe("bounded plugin question frontend", () => {
 		lease.adopt(handle(() => { disposed++; }));
 		assert.equal(disposed, 1); assert.equal(published, 0); assert.equal(lease.ready, false);
 	});
-	it("awaits async transcript publication before the submission snapshot", async () => {
-		const delivery = deferred<void>(); let value = "";
-		const lease = createQuestionEditorLease({ props: props(), publish(answer) { if (answer.status !== "empty") value = String(answer.value); }, changed() {}, failed() {} });
-		lease.adopt({ ...handle(), async appendTranscript(text) { await delivery.promise; lease.props.onChange({ status: "ready", value: text }); } });
-		const pending = lease.append("final chunk"); assert.equal(value, "");
-		delivery.resolve(); await pending; assert.equal(value, "final chunk"); assert.equal(lease.ready, true);
-	});
 	it("privately claims editing keys once without confusing prevented Tab and preserves composing Enter default", () => {
 		let calls = 0, cycles = 0, submits = 0, inside = true, eligible = true;
 		const off = ownPluginQuestionKeys({ eligible: () => eligible, contains: () => inside, key() { calls++; return "handled"; }, cycle() { cycles++; }, submit() { submits++; } });

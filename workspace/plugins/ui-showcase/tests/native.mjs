@@ -10,7 +10,7 @@ import { runPackagedProof } from "./isolated.mjs";
 const gallery = '[data-showcase="gallery"]';
 const example = (id, root = gallery) => `${root} [data-example="${id}"]`;
 const button = (id, root = gallery) => `${example(id, root)} button`;
-const familyIds = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"];
+const familyIds = ["pickers", "composer", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"];
 
 await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }) => {
   const cdp = await page.createCDPSession();
@@ -91,7 +91,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.deepEqual(await page.$$eval(`${gallery} [data-family]`, nodes => nodes.map(node => node.dataset.family)), familyIds);
   for (const id of familyIds) { await page.waitForSelector(button(`reset-${id}`)); assert.ok(await state(id)); }
   assert.equal(await page.$$eval('[data-plugin-session-surface]', nodes => nodes.length), 0);
-  evidence.assertions.push("Built frontend mounts one scroll gallery with all twelve families/fourteen public UI APIs; native target cannot be minted by gallery.");
+  evidence.assertions.push("Built frontend mounts one scroll gallery with all eleven families and fourteen public UI APIs; native target cannot be minted by gallery.");
   const typography = await page.$eval(gallery, root => {
     const note = getComputedStyle(root.querySelector('.ui-showcase-note')), heading = getComputedStyle(root.querySelector('.ui-showcase-heading'));
     const model = getComputedStyle(root.querySelector('[data-example="model-picker"] button'));
@@ -523,10 +523,10 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   evidence.notExercised = ['No visible production control opens a newer surface over an already open main-pane picker. Reverse programmatic ordering belongs to the separately owned host integration test; this browser proof does not invent a hidden-control user path.', 'Window-controls cases simulate published native CSS environment/zoom contracts, not actual Windows/Linux OS chrome.', 'No microphone recording or OS IME testing.'];
   evidence.assertions.push('Contextual picker bounds follow actual open/closed sidebar; simulated macOS zoom gutters and Windows/Linux right window-controls clearance pass. Simulation checks CSS geometry only—not physical Windows/Linux OS buttons. Picker never toggles background sidebar, Done has no icon, and real sidebar session navigation expires the open picker.');
 
-  evidence.stage = "local composers and idle dictation";
+  evidence.stage = "local composers";
   const composition = await page.$eval(example('standard-composer'), root => {
     const preset = root.querySelector('[data-plugin-standard-composer]'), form = preset.querySelector('form'), frame = form.parentElement;
-    const controls = preset.querySelector('[data-testid="plugin-dictation-control"]').parentElement;
+    const controls = preset.querySelector("[data-plugin-model-picker]").parentElement;
     const b = node => { const { y, bottom } = node.getBoundingClientRect(); return { y, bottom }; };
     return { frameContainsControls: frame.contains(controls), frameBorder: getComputedStyle(frame).borderTopWidth, outerBorder: getComputedStyle(preset).borderTopWidth, frame: b(frame), controls: b(controls) };
   });
@@ -547,14 +547,9 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
     await click(`complete-${id}`); await waitState(id, { busy: false });
     await reset(id); await waitState(id, { draft: "", sends: 0 });
   }
-  for (const id of ["dictation", "standard-composer"]) {
-    assert.equal(await page.$$eval(`${example(id)} [data-testid="dictation-meter"]`, nodes => nodes.length), 0);
-    assert.equal(await page.$eval(`${example(id)} [data-testid="dictation-toggle"]`, node => node.getAttribute("aria-label")), "Start dictation");
-  }
-  await waitState("dictation", { deliveries: 0, transcript: "" });
   await page.$eval('[data-family="composer"]', node => node.scrollIntoView({ block: 'start' }));
   await screenshot('gallery-composers', { fullPage: false });
-  evidence.assertions.push("Both actual host composers echo local controlled drafts and simulate Send/Stop/Complete/reset without /api/chat. Native Stop is exposed after clearing a busy retained draft (nonempty draft intentionally remains Send). Dictation remains idle with no recording meter and zero delivery; microphone never clicked. OS IME not tested.");
+  evidence.assertions.push("Both actual host composers echo local controlled drafts and simulate Send/Stop/Complete/reset without /api/chat. Native Stop is exposed after clearing a busy retained draft (nonempty draft intentionally remains Send). OS IME not tested.");
 
   evidence.stage = "Markdown and static workers";
   await page.waitForSelector(`${example("markdown")} table`);

@@ -23,7 +23,6 @@ import { KeyboardSection } from "../components/settings/keyboard-section.tsx";
 import type { GraphSettings } from "../src/core/index.ts";
 import { SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
 import { KEYBOARD_ACTIONS } from "../src/core/index.ts";
-import { DictationLanguageSetting } from "../components/dictation-language.tsx";
 import { SettingsMenuTrigger } from "../components/settings/controls.tsx";
 import { SubscriptionConnections } from "../components/settings/subscription-connections.tsx";
 
@@ -106,11 +105,10 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 });
 
 describe("the shared settings dropdown trigger", () => {
-	it("Agent, Appearance and dictation use the same compact dark mono trigger", () => {
+	it("Agent and Appearance use the same compact dark mono trigger", () => {
 		const surfaces = [
 			[renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />), "slot-model-strong"],
 			[renderToStaticMarkup(<AppearanceSection appearance={undefined} onSectionChange={() => true} />), "font-trigger"],
-			[renderToStaticMarkup(<DictationLanguageSetting />), "dictation-language"],
 		] as const;
 		for (const [html, id] of surfaces) {
 			const tag = tagOf(html, id);
@@ -133,11 +131,6 @@ describe("the shared settings dropdown trigger", () => {
 });
 
 describe("Providers settings-label typography", () => {
-	it("Language uses the standard sans SettingsRow label without changing its mono trigger", () => {
-		const html = renderToStaticMarkup(<DictationLanguageSetting />);
-		assert.ok(html.includes('<span class="block font-prose text-(length:--lh-prose-size)">Language</span>'));
-		assert.ok(tagOf(html, "dictation-language").includes("font-ui text-xs"));
-	});
 
 	it("only Providers subscription labels use sans; setup labels retain their compact mono styling", () => {
 		const settings = renderToStaticMarkup(<SubscriptionConnections />);

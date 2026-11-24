@@ -81,7 +81,7 @@ export function SettingsRow({
 	);
 }
 
-/** The existing Agent/Appearance collapsed-menu look, shared with dictation.
+/** The existing Agent/Appearance collapsed-menu look.
  * `unavailable` preserves callers that gate clicks without native disabling;
  * `disabled` retains native button semantics where the caller requires them. */
 export function SettingsMenuTrigger({

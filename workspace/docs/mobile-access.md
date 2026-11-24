@@ -16,7 +16,7 @@ The phone browser uses the running desktop app's server, models, settings, graph
 
 While Mobile Access is on, the home page also shows the link at the top middle of the window; select it to copy, or, once the direct link is set up, select the QR button beside it and scan the code with the phone's camera. The QR code always opens the direct link, because it works without Tailscale DNS on the phone (the HTTPS name doesn't resolve with it off). Settings → Mobile Access shows the same QR code beside the direct link. The home link shows the HTTPS link once Tailscale Serve is running, otherwise the direct link below, and it's hidden when neither link is ready.
 
-The HTTPS link is `https://<your-PC>.<your-tailnet>.ts.net:9443`. Enable Tailscale DNS on the phone so that name resolves. HTTPS is needed for microphone dictation and browser clipboard access. Your existing dictation provider configuration is still required.
+The HTTPS link is `https://<your-PC>.<your-tailnet>.ts.net:9443`. Enable Tailscale DNS on the phone so that name resolves. HTTPS is needed for browser clipboard access.
 
 ## Use a direct link without Tailscale DNS
 
@@ -28,7 +28,7 @@ tailscale serve --bg --tcp=9081 --proxy-protocol=1 tcp://127.0.0.1:4398
 
 Select **Check connection**, then **Copy direct link**. The link looks like `http://100.x.y.z:9081`. Connect Tailscale on the phone with the same account as the PC and paste the full `http://` link into the browser.
 
-Traffic still travels inside Tailscale's encrypted connection, but the page itself is plain HTTP, so the browser may label it not secure. Tailscale passes each connection's tailnet address to LearnHarness using the PROXY protocol. LearnHarness accepts a connection only from untagged, unexpired devices on the PC's account, and it checks that list on every request. Browsers allow the microphone only on secure pages, so dictation is turned off on the direct link; use the HTTPS link for dictation. Everything else works the same.
+Traffic still travels inside Tailscale's encrypted connection, but the page itself is plain HTTP, so the browser may label it not secure. Tailscale passes each connection's tailnet address to LearnHarness using the PROXY protocol. LearnHarness accepts a connection only from untagged, unexpired devices on the PC's account, and it checks that list on every request.
 
 Remove only this endpoint with `tailscale serve --tcp=9081 off`.
 
@@ -58,7 +58,7 @@ Uploads preserve the configured file-access restrictions. If file access is rest
 
 In **Settings → General → Mobile Access**, choose Compact (320 × 568), Phone (390 × 844), or Large (430 × 932), then select **Open phone viewport**. This opens a separate, resizable window connected to the current workspace. Tailscale and Mobile Access can stay off for this window. Changes in it are real changes to the shared workspace.
 
-This window uses the browser upload path rather than the desktop file-path picker. Resize it to test intermediate widths or landscape. Actual iPhone Safari testing is still needed for iOS microphone permissions, keyboard behavior, safe areas, and Home Screen mode.
+This window uses the browser upload path rather than the desktop file-path picker. Resize it to test intermediate widths or landscape. Actual iPhone Safari testing is still needed for iOS keyboard behavior, safe areas, and Home Screen mode.
 
 ## Verification
 

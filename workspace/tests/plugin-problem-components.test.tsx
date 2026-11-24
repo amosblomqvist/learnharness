@@ -52,7 +52,7 @@ async function fixture(options: { missing?: boolean; available?: boolean; ready?
   return { state, draft, render, submit, get editorProps() { return editorProps; }, replaceRegistration(next?: ProblemRendererRegistration) { registration = next; } };
 }
 
-/** Match Chat's real runner reservation -> asynchronous dictation -> capture seam.
+/** Match Chat's real runner reservation -> asynchronous preparation -> capture seam.
  * A synchronous prepare stub cannot expose the reservation's parent re-render. */
 async function preparingFixture() {
   const renderRoot = await dom();
@@ -78,10 +78,10 @@ async function preparingFixture() {
       const attempt = owned.begin(target, [], isCurrent);
       if (!attempt) return false;
       let release!: () => void, finish!: () => void;
-      const dictation = new Promise<void>(resolve => { release = resolve; });
+      const captureGate = new Promise<void>(resolve => { release = resolve; });
       const done = new Promise<void>(resolve => { finish = resolve; }); gates.push({ release, done });
       try {
-        const input = await attempt.finalize(async () => { await dictation; return capture(); });
+        const input = await attempt.finalize(async () => { await captureGate; return capture(); });
         attempt.deliver(); deliveries.push(input); accepted(); attempt.accepted(); return true;
       } catch (error) { errors.push(error instanceof Error ? error : Error(String(error))); return false; }
       finally { attempt.refused(); finish(); }
@@ -99,17 +99,17 @@ async function preparingFixture() {
   return { state, draft, deliveries, errors, gates, render, submit, shortcut, release, get runner() { return runner; } };
 }
 
-test("practice reservation survives its own preparing re-render, captures after dictation and blocks duplicate submits", async () => {
+test("practice reservation survives its own preparing re-render, captures after the preparation gate and blocks duplicate submits", async () => {
   const f = await preparingFixture();
   await f.submit();
   assert.equal(f.runner.occupied, true);
   assert.ok(document.querySelector('[data-testid="practice-send"]')!.hasAttribute("disabled"));
   await f.shortcut(); await f.submit();
   assert.equal(f.gates.length, 1, "No second preparation while the admitted attempt owns the runner");
-  f.draft.thinking = "final dictation tail"; await f.render();
+  f.draft.thinking = "latest thinking edit"; await f.render();
   await f.release();
   assert.deepEqual(f.errors, []);
-  assert.deepEqual(f.deliveries, [{ type: "plugin-problem-submission", problemId: snapshot.problemId, occurrence, submission: "initial code", thinking: "final dictation tail" }]);
+  assert.deepEqual(f.deliveries, [{ type: "plugin-problem-submission", problemId: snapshot.problemId, occurrence, submission: "initial code", thinking: "latest thinking edit" }]);
   assert.deepEqual(f.draft.submission, { status: "ready", value: "initial code" });
   assert.equal(f.draft.thinking, "");
   assert.equal(f.runner.occupied, false);

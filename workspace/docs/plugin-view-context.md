@@ -127,8 +127,7 @@ and its own product behavior, not pretend that inspectable data is already visib
   runs if its originating view has gone away before capture.
 
 There is no public subscription/global mutable context API, screenshot service, raw keyboard
-shortcut addition, or new session state model. A snapshot read does not finish dictation,
-request microphone access, persist drafts, invoke submission interceptors, process/grade,
+shortcut addition, or new session state model. A snapshot read does not persist drafts, invoke submission interceptors, process/grade,
 submit, acknowledge, or send a model request. It reports current typed/published values,
 not a forced flush of pending speech.
 

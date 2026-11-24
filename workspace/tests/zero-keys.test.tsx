@@ -13,7 +13,6 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { hasProviderKey, strongKeyless, ZeroKeysPill } from "../components/setup-cta.tsx";
 import type { ModelCatalogResponse } from "../src/core/index.ts";
 import { SetupKeysBody } from "../components/setup-dialog.tsx";
-import { DICTATION_KEYLESS, DEEPGRAM_KEY_ID } from "../components/dictation.tsx";
 import type { AuthKeyStatus } from "../src/core/auth-keys.ts";
 import type { ProviderKeyInfo } from "../components/settings/keys-section.tsx";
 
@@ -37,9 +36,8 @@ describe("hasProviderKey — the zero-keys pill's truth", () => {
 		assert.equal(hasProviderKey([status("ANTHROPIC_API_KEY", true, "file")], PROVIDERS), true);
 	});
 
-	it("a TOOL key alone does not count — Deepgram unlocks no models", () => {
-		// Deepgram is not in the providers roster: it must never suppress the pill.
-		assert.equal(hasProviderKey([status("DEEPGRAM_API_KEY", true)], PROVIDERS), false);
+	it("a web search key alone does not unlock models", () => {
+		assert.equal(hasProviderKey([status("TAVILY_API_KEY", true)], PROVIDERS), false);
 	});
 
 	it("absent provider keys = zero keys (the pill shows)", () => {
@@ -111,15 +109,6 @@ describe("SetupKeysBody — stage 1's self-contained first-key screen", () => {
 	});
 });
 
-describe("the dictation keyless seam (owner dictation trio)", () => {
-	it("the client-authored short line — not the route's dev-speak", () => {
-		assert.equal(DICTATION_KEYLESS, "Dictation needs a Deepgram key");
-	});
-
-	it("the Deepgram row id matches the keys store (KeysSection openRow)", () => {
-		assert.equal(DEEPGRAM_KEY_ID, "DEEPGRAM_API_KEY");
-	});
-});
 /** A minimal catalog double — only the two halves the strong-keyless guard
  *  reads: the strong pin and the present-key providers list. */
 const catalog = (strongProvider: string | null, ...keyedProviders: string[]): ModelCatalogResponse => ({

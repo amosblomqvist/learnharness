@@ -15,7 +15,7 @@
  *    a paste box on a key the UI cannot make live would mislead.
  *  - OpenRouter is NOT special: one provider among 33, a row only when
  *    stored, otherwise it lives in the Add dropdown like everyone else.
- *  - Providers groups API keys, subscriptions, dictation and search.
+ *  - Providers groups API keys, subscriptions, and search.
  *    Unknown variables stay masked/read-only at the end of Model API keys.
  *
  * API: GET /api/keys (masked statuses + the providers array), PUT
@@ -42,7 +42,6 @@ import { useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
-import { DictationLanguageSetting } from "@/components/dictation-language";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -363,7 +362,7 @@ function AddProviderRow({
 
 export function KeysSection({
 	/** A deep-linked row to unfold on arrival (zero-keys wave): the
-	 *  dictation error's click lands here on DEEPGRAM_API_KEY. Followed
+	 *  settings signal can focus a particular key row. Followed
 	 *  while mounted too — the settings dialog's while-open retarget
 	 *  pattern. undefined = nothing seeded. */
 	initialRow,
@@ -580,8 +579,8 @@ export function KeysSection({
 				<ClaudeCodeInstallationStatus />
 			</SettingsGroup>
 
-			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
-				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
+			<SettingsGroup label="Search" testid="group-search">
+				{toolRows.map((status) => (
 					<KeyTableRow
 						key={status.id}
 						label={status.info?.label ?? status.id}
@@ -599,18 +598,7 @@ export function KeysSection({
 						testid={`key-${status.id.toLowerCase()}`}
 					/>
 				))}
-				{label === "Dictation" && <>
-					<DictationLanguageSetting />
-					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
-						Create a <a
-							href="https://console.deepgram.com/"
-							target="_blank"
-							rel="noreferrer"
-							className="underline underline-offset-2 hover:text-foreground"
-						>Deepgram API key</a> with the Member role or higher, then add it above.
-					</p>
-				</>}
-			</SettingsGroup>)}
+			</SettingsGroup>
 
 		</div>
 	);

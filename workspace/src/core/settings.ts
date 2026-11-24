@@ -35,7 +35,6 @@ import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
-import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
 
@@ -342,11 +341,6 @@ export interface GeneralSettings {
 	autoUpdate?: boolean;
 }
 
-/** One app-wide dictation preference, shared by every composer. */
-export interface DictationSettings {
-	language?: DictationLanguage;
-}
-
 /** Agent settings — everything about the non-conversation machinery. */
 export interface AgentSettings {
 	/** Maximum simultaneous background-worker model requests (default 8).
@@ -522,7 +516,6 @@ export interface UserSettings {
 	/** Experimental Google account connection and thread sync; absent means off. */
 	labs?: { threadSync?: boolean };
 	general?: GeneralSettings;
-	dictation?: DictationSettings;
 	/** Explicit app-wide opt-in; absent/invalid is off, including older records. */
 	claudeCode?: { enabled?: boolean };
 	agent?: AgentSettings;
@@ -545,7 +538,6 @@ export interface FactorySettings {
 	version: number;
 	agent: Required<Pick<AgentSettings, "workerRequestConcurrency">>;
 	general: Required<GeneralSettings>;
-	dictation: Required<DictationSettings>;
 	appearance: {
 		theme: string;
 		background: string | null;
@@ -572,7 +564,6 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	agent: { workerRequestConcurrency: 8 },
 	general: { autoUpdate: true },
-	dictation: { language: "en" },
 	appearance: {
 		theme: "default",
 		background: null, // null = the active theme's background
@@ -911,13 +902,6 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
 		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
 	}
-	if (r.dictation !== undefined) {
-		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
-			: {};
-	}
 	if (r.claudeCode !== undefined) {
 		const raw = r.claudeCode;
 		out.claudeCode = raw !== null && typeof raw === "object" && !Array.isArray(raw)
@@ -943,13 +927,9 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	if (r.compaction !== undefined && r.compaction !== null && typeof r.compaction === "object") {
 		out.compaction = sanitizeCompaction(r.compaction as Record<string, unknown>);
 	}
-	// Unknown top-level keys ride along untouched (forward-compat). One
-	// known-DEAD key is stripped instead of riding: `chat` (the old
-	// default-settings section) died with per-session models (owner,
-	// 2026-09-28) — a fossil copy on disk must never resurrect through
-	// reads (and any later write flushes it from the file for good).
+	// Preserve future settings while excluding sections the app has retired.
 	for (const [key, value] of Object.entries(r)) {
-		if (key === "chat") continue;
+		if (key === "chat" || key === "dictation") continue;
 		if (!(key in out)) out[key] = value;
 	}
 	return out;

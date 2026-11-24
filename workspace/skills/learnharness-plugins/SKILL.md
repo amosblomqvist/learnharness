@@ -93,12 +93,12 @@ The included no-build examples can be copied directly; they do not need npm setu
 - Use controlled `ctx.ui` helpers, not private imports or DOM-dependent styling. Feed
   accepted values back through shallow handle updates; replace whole nested props.
   Model/thinking controls do not write core settings. Keep host keyboard/IME/focus,
-  dictation ownership and one-Escape rules. Declarative action shortcuts do not expose
+  one-Escape rules. Declarative action shortcuts do not expose
   raw events, bypass foreground dialogs/editors, or register OS-wide hotkeys.
 - Session top-bar `context.view` is a fresh detached/frozen whole-session snapshot,
   including current messages/transcript, presentation and unsent published drafts.
   Use it instead of a second history parser/shuffle or private DOM inspection. Reads
-  never flush dictation, reveal, save, process or submit. Respect reveal/availability
+  never reveal, save, process or submit. Respect reveal/availability
   flags for learner-facing output; inspectable history is not sanitized visible prose.
 - Teaching questions use saved schemas/exact occurrence and validate → optional grade →
   save → continue. Grading returns finite JSON observations; the plugin owns display.

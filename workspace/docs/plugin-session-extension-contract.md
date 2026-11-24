@@ -106,8 +106,7 @@ One runner covers normal/contextual/opening messages, busy steers, builtin/custo
 and native/custom practice submissions:
 
 1. Capture the native view/occurrence and reserve one attempt **before any await**.
-2. Finish original-target dictation/editor publication. Recheck identity; capture final
-   learner input, form draft and readonly history. Never switch targets after an await.
+2. Recheck identity and capture learner input, form draft and readonly history. Never switch targets after an await.
 3. Keep preparation distinct from delivery; preserve visible drafts and prevent duplicates.
 4. Run ordered interceptors serially, validating each output.
 5. Recheck instance/occurrence/readiness/plugin ownership. Rebuild builtin derived answers
@@ -120,7 +119,7 @@ and native/custom practice submissions:
 Preparation is silent: no progress row, label, spinner or preparation Cancel control is
 rendered. Existing submission-disabled states and preparation errors remain. Internal
 pre-POST cancellation (for example view disposal or interceptor unregistration) ignores late
-hook results, retains drafts/final dictated text, and works even if a hook ignores its signal.
+hook results, retains drafts, and works even if a hook ignores its signal.
 When no interceptors were captured, no history snapshot is allocated; payload validation,
 target capture, reservation and eligibility checks still run. With interceptors, the complete
 detached/frozen history snapshot is captured before the first hook, at the same preparation
@@ -141,7 +140,7 @@ newer edits remain. Host never clears plugin-private material: its acceptance ob
 ## 6. Validation and host authority
 
 Capture native `QuestionData` privately with its actual shuffle/resolved grading. Combine
-final dictation/reading fields before hooks; afterward validate types, finite confidence,
+answer, thinking, and reading fields before hooks; afterward validate types, finite confidence,
 known unique values, cardinality/combinations, meaningful content and channel applicability.
 Reject unknown/duplicate selections rather than dropping them. Preserve legitimate existing
 confidence rounding/clamping. Build derived answers through existing `buildAnswer` against
@@ -246,7 +245,7 @@ routing, not another modal/overlay registry or viewport scroll lock.
 Dialogs/Settings always remain in front, even if a surface opens from their content. That
 surface belongs to the page, not the modal opener; it cannot inherit modal focus/Escape
 eligibility. If the dialog closes and the signal remains live, the surface can emerge.
-Do not dispatch submit/Tab/dictation into covered inputs. Closing/unloading a plugin removes
+Do not dispatch submit or Tab into covered inputs. Closing/unloading a plugin removes
 only its surfaces; global Settings is not lifetime-owned merely by being painted above one.
 
 Entry preserves eligible existing/remembered focus, then a synchronously mounted visible

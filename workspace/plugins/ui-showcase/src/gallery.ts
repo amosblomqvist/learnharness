@@ -8,7 +8,7 @@ import { mountOverlayExamples, openPageSurfaceDemo } from "./surfaces.ts";
 import { mountTreeDemo } from "./tree.ts";
 
 type Thinking = PluginThinkingPickerProps["value"];
-export const FAMILY_IDS = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"] as const;
+export const FAMILY_IDS = ["pickers", "composer", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"] as const;
 
 export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext, signal: AbortSignal): () => void {
   const scope = new Scope(signal);
@@ -17,7 +17,7 @@ export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext,
   root.dataset.showcase = "gallery";
   container.append(root);
   scope.own(() => root.remove());
-  note(root, "Host UI examples. Values and callback readouts are local to this view and reset when you leave. Send and Stop only simulate local state; they do not call a model. Dictation is real and uses your configured speech provider only when explicitly started.");
+  note(root, "Host UI examples. Values and callback readouts are local to this view and reset when you leave. Send and Stop only simulate local state; they do not call a model.");
   const ui = ctx.ui;
 
   family(ui, root, scope, "pickers", "Pickers", (body, life) => {
@@ -70,29 +70,10 @@ export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext,
     render();
   });
 
-  family(ui, root, scope, "dictation", "Dictation", (body, life) => {
-    note(body, "Real dictation: explicitly choose Dictate or the microphone to use your configured speech provider. This can send audio to that provider and may incur cost. Nothing starts automatically. Finish awaits final transcript delivery; Cancel affects only this control's recording, not another owner.");
-    let transcript = ""; let deliveries = 0; let lastCallback = "none";
-    const show = readout(body, "dictation");
-    const dictation = ui.mountDictation(example(body, "dictation", "Host dictation control"), {
-      onTranscript(text) { if (!life.signal.aborted) { transcript = join(transcript, text); deliveries++; lastCallback = "onTranscript"; render(); } },
-    }, { signal: life.signal });
-    life.own(() => dictation.dispose());
-    const controls = row(body);
-    button(ui, controls, life, "dictate", { label: "Dictate", onClick() { lastCallback = "toggle requested (not recording status)"; render(); dictation.toggle(); } });
-    button(ui, controls, life, "finish-dictation", { label: "Finish dictation", variant: "outline", async onClick() {
-      await dictation.finish();
-      if (!life.signal.aborted) { lastCallback = "finish resolved after final delivery"; render(); }
-    } });
-    button(ui, controls, life, "cancel-dictation", { label: "Cancel dictation", variant: "outline", onClick() { dictation.cancel(); lastCallback = "cancel requested"; render(); } });
-    function render() { show({ transcript, deliveries, lastCallback }); }
-    render();
-  });
-
   family(ui, root, scope, "standard-composer", "Standard composer", (body, life) => {
-    note(body, "Independent local model, thinking and draft state. Send waits for final dictation delivery through the host API before this local simulation and retains your draft. While busy with a nonempty draft, the host keeps Send available for steering. Clear the draft to expose Stop, or use Complete simulation, which is available throughout the busy state. The microphone explicitly starts real dictation using your configured speech provider; it may send audio and incur cost.");
+    note(body, "Independent local model, thinking and draft state. Send starts the local simulation and retains your draft. While busy with a nonempty draft, the host keeps Send available for steering. Clear the draft to expose Stop, or use Complete simulation, which is available throughout the busy state.");
     let value = ""; let model: PluginModelValue | undefined; let thinking: Thinking;
-    let busy = false; let sends = 0; let deliveries = 0; let lastCallback = "none"; let lastSent = "";
+    let busy = false; let sends = 0; let lastCallback = "none"; let lastSent = "";
     const show = readout(body, "standard-composer");
     let composer: PluginWidgetHandle<PluginStandardComposerProps>;
     let complete: PluginWidgetHandle<PluginButtonProps>;
@@ -100,16 +81,15 @@ export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext,
       composer: {
         value, busy, autoFocus: false, placeholder: "Independent local draft",
         onChange(next) { if (!life.signal.aborted) { value = next; lastCallback = "composer.onChange"; render(); } },
-        onSend() { if (!life.signal.aborted && value.trim()) { lastSent = value; busy = true; sends++; lastCallback = "composer.onSend (after final dictation; local simulation)"; render(); } },
+        onSend() { if (!life.signal.aborted && value.trim()) { lastSent = value; busy = true; sends++; lastCallback = "composer.onSend (local simulation)"; render(); } },
         onStop() { if (!life.signal.aborted) { busy = false; lastCallback = "composer.onStop (local simulation)"; render(); } },
       },
       model: { value: model, onChange(next) { if (!life.signal.aborted) { model = next; thinking = undefined; lastCallback = "model.onChange (thinking cleared)"; render(); } } },
       thinking: { model, value: thinking, onChange(next) { if (!life.signal.aborted) { thinking = next; lastCallback = "thinking.onChange"; render(); } } },
-      dictation: { onTranscript(text) { if (!life.signal.aborted) { value = join(value, text); deliveries++; lastCallback = "dictation.onTranscript (draft updated)"; render(); } } },
     });
     composer = life.widget(ui.mountStandardComposer(example(body, "standard-composer", "Host standard composer"), props(), { signal: life.signal }));
     complete = button(ui, body, life, "complete-standard-composer", { label: "Complete simulation", variant: "outline", disabled: true, onClick() { busy = false; lastCallback = "simulation completed"; render(); } });
-    function render() { composer.update(props()); complete.update({ disabled: !busy }); show({ draft: value, model: model ?? null, thinking: thinking ?? null, busy, sends, deliveries, lastSent, lastCallback }); }
+    function render() { composer.update(props()); complete.update({ disabled: !busy }); show({ draft: value, model: model ?? null, thinking: thinking ?? null, busy, sends, lastSent, lastCallback }); }
     render();
   });
 
@@ -213,7 +193,6 @@ export function mountGallery(container: HTMLElement, ctx: PluginFrontendContext,
   return scope.dispose;
 }
 
-function join(current: string, text: string): string { return current ? `${current}\n${text}` : text; }
 
 const MARKDOWN = `A **host-rendered** paragraph with *emphasis*, inline \`code\`, and a short list:
 

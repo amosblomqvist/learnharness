@@ -3,9 +3,9 @@
  * key manager behind GET/PUT/DELETE /api/keys.
  *
  * THE ENV SEAM (the architecture keystone): every consumer — models.ts's
- * openRouterApiKey(), the sub-agents, web.ts, the STT route — reads
+ * openRouterApiKey(), the sub-agents, and web.ts — reads
  * process.env directly, and the agent layer may not import the store
- * layer. Instead of rewiring five consumers across lanes, the store
+ * layer. Instead of rewiring consumers across lanes, the store
  * REFLECTS itself into the child's env: at boot (idempotent, anchored on
  * globalThis like the extraction registry) every file var UNSET in the
  * real env is fill-gapped into process.env, and each save/delete updates
@@ -92,7 +92,7 @@ export function envKeysIgnored(): boolean {
  */
 export function initAuthEnv(): void {
 	const record = boot();
-	const fileVars = Object.fromEntries(Object.entries(authStore.authVars()).filter(([name]) => name !== CUSTOM_AUTH_BINDING));
+	const fileVars = Object.fromEntries(Object.entries(authStore.authVars()).filter(([name]) => !isHiddenAuthVar(name)));
 	const managed = new Set<string>([
 		...Object.keys(fileVars),
 		...AUTH_KEYS.map((k) => k.id),
@@ -125,10 +125,15 @@ export function initAuthEnv(): void {
 	}
 }
 
+function isHiddenAuthVar(name: string): boolean {
+	// Old profiles may still hold a retired credential in auth.json.
+	return name === CUSTOM_AUTH_BINDING || name === "DEEPGRAM_API_KEY";
+}
+
 /** Is this env-var name one the keys system manages (curated, provider,
  *  or held in the file)? */
 function isManagedName(name: string): boolean {
-	return name !== CUSTOM_AUTH_BINDING && (isWritableAuthKey(name) || name in authStore.authVars());
+	return !isHiddenAuthVar(name) && (isWritableAuthKey(name) || name in authStore.authVars());
 }
 
 /**
@@ -150,7 +155,7 @@ export function resolveKeyStatuses(
 	}
 	const rows: AuthKeyStatus[] = [];
 	for (const id of ids) {
-		if (id === CUSTOM_AUTH_BINDING) continue;
+		if (isHiddenAuthVar(id)) continue;
 		const envValue = env[id];
 		const fileValue = fileVars[id];
 		const isRealEnv = realEnv.has(id);
@@ -177,12 +182,9 @@ export function keyStatuses(): AuthKeyStatus[] {
 	return resolveKeyStatuses(authStore.authVars(), process.env, boot().realEnv, new Set([...AUTH_PROVIDER_ENV_VARS, CUSTOM_PROVIDER.envVar]));
 }
 
-/** The live value for one var, env-first (the env-wins rule) — the canonical
- *  read for consumers that don't live behind the @/src/server barrel (the
- *  STT route was the one cold-boot hole: a first-ever request to it would
- *  otherwise read env before any fill-gap ran). */
+/** The live value for one managed var, with launch environment taking precedence. */
 export function keyValue(id: string): string | undefined {
-	if (id === CUSTOM_AUTH_BINDING) return undefined;
+	if (isHiddenAuthVar(id)) return undefined;
 	// The fresh-user switch: ONLY the file store counts (belt-and-
 	// suspenders — the boot deletion already emptied the env; this guards
 	// any env key reintroduced after boot).

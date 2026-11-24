@@ -168,7 +168,7 @@ host's existing **Dismiss this question?** confirmation. Cancel/Escape keeps the
 confirmation skips only the captured question occurrence, without starting a teacher
 turn. If tests are running, the same server request validates the target, parks its
 dismissal, and stops the run before returning. A stale confirmation cannot stop or
-skip a successor question. Normal overlay/dictation Escape priority remains intact.
+skip a successor question. Normal overlay Escape priority remains intact.
 Process-tree termination is best-effort:
 POSIX process groups are killed, but a process that creates a separate session may
 survive; Windows tree termination uses `taskkill`; platform behavior needs native testing. Escaped
@@ -240,9 +240,8 @@ Escape outside uses the native practice confirmation/layer precedence.
 ## Editor and native question behavior
 
 The host supplies Markdown question presentation, the card, reveal/folding, thinking
-and reading-thinking, microphone, model/thinking controls, Submit answer and
-recovery-only Dismiss, native persistence, and teacher continuation. **Dictation always
-targets host thinking, never code.** Checks retain reading-before-reveal. The host
+and reading-thinking, model/thinking controls, Submit answer and
+recovery-only Dismiss, native persistence, and teacher continuation. Checks retain reading-before-reveal. The host
 places the learner's thinking separately from the plugin's code/result presentation.
 
 The lean CodeMirror 6 editor includes quiet line numbers, undo/redo, bracket matching,
@@ -339,7 +338,7 @@ turns. Its fixture installs a Community `coding-questions` package, an admission
 incompatible with the reserved Core ID on a Core-packaged host. It is not a portable
 Core smoke test or an instruction to install a Community duplicate.
 
-Fixture checks do not establish real-provider correctness, microphone/IME behavior,
+Fixture checks do not establish real-provider correctness, IME behavior,
 physical Electron-window UX, signed-installer behavior or cross-platform execution.
 Use synthetic data and loopback fixtures, never real learner profiles or paid providers.
 

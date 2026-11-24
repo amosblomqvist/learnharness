@@ -87,6 +87,6 @@ describe("AUTH_PROVIDER_KEYS — the no-drift pin against pi-ai", () => {
 	it("isProviderEnvVar: exactly the table's distinct env vars", () => {
 		for (const p of AUTH_PROVIDER_KEYS) assert.ok(isProviderEnvVar(p.envVar), `${p.envVar} is a provider var`);
 		assert.ok(!isProviderEnvVar("OPENROUTER_API_KEYS"), "typo'd name is not one");
-		assert.ok(!isProviderEnvVar("DEEPGRAM_API_KEY"), "curated ≠ provider — separate surfaces");
+		assert.ok(!isProviderEnvVar("BRAVE_API_KEY"), "curated ≠ provider — separate surfaces");
 	});
 });

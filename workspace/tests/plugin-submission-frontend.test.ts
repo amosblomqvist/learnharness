@@ -12,7 +12,7 @@ function owner(intercept: SubmissionInterceptorRegistration["interceptor"]["inte
 	return { pluginId: "fixture", pluginName: "Fixture", interceptor: { id: "capture", intercept }, signal: options.signal ?? new AbortController().signal, isCurrent: options.current ?? (() => true), report: options.report ?? (() => {}) };
 }
 
-test("reserves before dictation finalization, captures final input/history and never duplicates", async () => {
+test("reserves before asynchronous capture, captures final input/history and never duplicates", async () => {
 	const runner = new PluginSubmissionRunner(); const final = deferred<void>(); let text = "before", calls = 0;
 	const registration = owner((value, context) => { calls++; assert.equal(value.type, "text"); if (value.type === "text") assert.equal(value.content.text, "after"); assert.ok(Object.isFrozen(context.messages[0])); assert.equal(context.surfaceTarget, target.surfaceTarget); });
 	const attempt = runner.begin(target, [registration], () => true)!;

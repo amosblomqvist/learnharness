@@ -13,12 +13,12 @@ import { probeArrivalExpanded, revealArrival, shouldStampGeometryMute } from "..
 /**
  * The geometry-mute's growth rule (flicker round, 2026-09-26): reserve
  * GROWTH while a question is pending is the dock stretching itself (the
- * dictation flush landing many dictated lines at once, reproduced d≈152 >
+ * a sudden multiline draft edit, reproduced d≈152 >
  * COLLAPSE_DIST) — the spacer's scroll catch-up must not read as the
  * learner leaving. Shrinks are the fold's own give-back and never stamp.
  */
 describe("shouldStampGeometryMute — when a block resize is our own stretch", () => {
-	it("growth while a question is pending stamps (dictation flush, arrival stretch)", () => {
+	it("growth while a question is pending stamps (multiline draft, arrival stretch)", () => {
 		assert.equal(shouldStampGeometryMute(545, 393, true), true);
 	});
 

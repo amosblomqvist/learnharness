@@ -15,7 +15,7 @@ for (const toolName of ["quiz", "ask_user_question"] as const) test(`view reads 
   let changes = 0; const reader: ViewReaderRef<NativeQuestionViewState> = { current: null, changed() { changes++; } };
   const input = { question: "Question", details: "Visible **context**", options: [{ label: "Alpha", value: "a", description: "**Detail A**" }, { label: "Beta", value: "b", description: "Detail B" }, { label: "Gamma", value: "c" }], correctAnswer: "a", explanation: "PRIVATE" };
   const fail = () => assert.fail("A view read must not save or submit");
-  const render = async (expanded: boolean) => { await act(async () => root.render(<QuestionDock toolName={toolName} toolCallId="display-order" input={input} viewReader={reader} expanded={expanded} onExpand={() => {}} onSubmit={fail} onSaveDraft={fail} dictationClaim={false} />)); };
+  const render = async (expanded: boolean) => { await act(async () => root.render(<QuestionDock toolName={toolName} toolCallId="display-order" input={input} viewReader={reader} expanded={expanded} onExpand={() => {}} onSubmit={fail} onSaveDraft={fail} primaryDropTarget={false} />)); };
   try {
     await render(true); assert.ok(reader.current);
     const first = reader.current!();

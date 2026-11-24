@@ -26,7 +26,6 @@ export interface MountRecord {
   updates: AnyProps[];
   treeContents: TreeContentRecord[];
   target?: unknown;
-  dictation: { toggle: number; finish: number; cancel: number };
   handle: { update(props: AnyProps): void; dispose(): void };
 }
 /** Only plugin-owned primary content lifetimes are simulated. No native tree
@@ -81,7 +80,7 @@ export function createFixture() {
         if (overlay) root.append(container);
         const contentLife = new AbortController();
         let contentCleanup: void | (() => void);
-        const record: MountRecord = { method: key, container, props, signal: options.signal, disposed: 0, updates: [], treeContents: [], dictation: { toggle: 0, finish: 0, cancel: 0 }, handle: null! };
+        const record: MountRecord = { method: key, container, props, signal: options.signal, disposed: 0, updates: [], treeContents: [], handle: null! };
         if (explicitSurface) record.target = args[0];
         const handle = {
           update(next: AnyProps) { record.updates.push(next); record.props = { ...record.props, ...next }; if (key === "mountTree" && !record.disposed) renderTreeContent(record); },
@@ -91,9 +90,6 @@ export function createFixture() {
             for (const content of record.treeContents) content.dispose();
             if (overlay) container.remove();
           },
-          toggle() { record.dictation.toggle++; },
-          async finish() { record.dictation.finish++; },
-          cancel() { record.dictation.cancel++; },
         };
         record.handle = handle; records.push(record);
         options.signal.addEventListener("abort", handle.dispose, { once: true });

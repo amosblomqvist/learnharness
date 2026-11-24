@@ -45,7 +45,7 @@ import { createDockMorph, createDockWidthMorph } from "@/components/dock-morph";
 import { useAppearance } from "@/components/settings/appearance";
 import { dockContainerMax, layoutFontKey, questionCardGeometry, rootRem, type QuestionLayout } from "@/components/question-layout";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
-import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
+import { appendFilePathText, useFileDropTarget } from "@/components/file-drop-target";
 import { useFieldCycle } from "@/components/field-cycle";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
@@ -58,7 +58,6 @@ import {
 	cliContextWindowOf,
 	messageAnchorId,
 	sideEntryPoints,
-	sideSegmentId,
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
 	type ChatInput,
@@ -88,7 +87,7 @@ import { CitationActionsContext, type CitationActions } from "@/components/citat
 import { CitationCommentPopover } from "@/components/citation-comment-popover";
 import { revealCitationSource } from "@/components/citation-source";
 import { createSideQuestionActions, SideThreadBody, SideThreadPanel, SideThreadPopover } from "@/components/side-thread";
-import { useSideThread, type SideThreadOpenArgs } from "@/components/use-side-thread";
+import { useSideThread } from "@/components/use-side-thread";
 import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { PluginProblemDock, type PluginProblemDockProps } from "./plugin-problem-dock";
@@ -341,7 +340,7 @@ export function Chat({
 		if (!attempt) return false;
 		setPreparationError(undefined);
 		try {
-			const input = await attempt.finalize(async () => { await finishDictation(); return capture(); });
+			const input = await attempt.finalize(capture);
 			const prepared = await attempt.prepare(input, submissionLive.current.nativeMessages);
 			if (!prepared) return false;
 			attempt.check();
@@ -522,7 +521,7 @@ export function Chat({
 				const question = (p.input as { question?: string } | null)?.question ?? "";
 				const reading = readingThinkingRef.current.trim() || undefined;
 				clearReadingThinking();
-				void closeSideThreadRef.current(); // its note lands after the skip
+				closeSideThreadRef.current();
 				const answer = dismissedAnswer(toolQuestionKind(p.tool), question);
 				void dismissQuestion(
 					p.toolCallId,
@@ -562,7 +561,6 @@ export function Chat({
 	const pendingPlugin = pendingPluginQuestionOf(canonicalMessages);
 	const unreadablePlugin = pluginQuestionCallsOf(canonicalMessages).find(call => call.status === "unreadable");
 	const pluginOwnsDock = !!pendingPlugin || !!unreadablePlugin;
-	const [pluginMicAvailable, setPluginMicAvailable] = useState(false);
 	const pluginProblemIdentity = activeProblemOf(canonicalMessages)?.pluginProblem?.problemId;
 	const pluginCanonicalIdentity = pendingPlugin?.questionId ?? (unreadablePlugin ? pluginQuestionOccurrenceKey(unreadablePlugin.occurrence) : pluginProblemIdentity ?? null);
 	useEffect(() => {
@@ -684,9 +682,8 @@ export function Chat({
 	const phases = useMemo(() => phaseTimeline(messages), [messages]);
 
 	const [composerDraftRevision, setComposerDraftRevision] = useState(0);
-	/* The composer draft ref is synchronous, so sends and dictation flushes
-	 * read the latest text without a parent render per input event. Explicit
-	 * resets still bump a revision so the local field can sync. */
+	/* The draft ref lets sends read the latest text without a parent render
+	 * on each input event. Explicit resets bump the field revision. */
 	const textRef = useRef("");
 	const composerEditRevision = useRef(0);
 	const applyText = useCallback((v: string) => {
@@ -933,9 +930,6 @@ export function Chat({
 		// (readRecord/clearError are stable per useChat instance — the
 		//  dep pair [error, chatId] is what the flow actually keys on.)
 	}, [error, chatId, readRecord]);
-	// Voice dictation (STT wave, 2026-09-17): finals append at the end of
-	// the current text (the page owns the separator, dictate-flush style);
-	// interims ghost in the stats bar's middle slot next to the meter.
 	// TAB CYCLES THE CHAT'S FIELDS (owner, keyboard round 2026-10-06):
 	// reading-thinking → the active dock's field → the composer, in
 	// visual order, forward-only with wrap; Tab from anywhere else
@@ -952,24 +946,10 @@ export function Chat({
 		];
 	}, []);
 	useFieldCycle(cycleChatFields);
-	const recording = useDictation({
-		// Ref-first (see textRef): the join is computed from the mirror so a
-		// send resuming after `await finish()` reads the dictated tail.
-		append: (t) => { if (!pluginOwnsDock) applyText(joinDictation(textRef.current, t)); },
-		disabled: pluginOwnsDock && !pluginMicAvailable,
+	useFileDropTarget((paths) => applyText(appendFilePathText(textRef.current, paths)), {
+		fallback: true,
+		enabled: !pluginOwnsDock,
 	});
-	const dictation: Dictation = { ...recording,
-		phase: recording.destinationId === "main" ? recording.phase : "idle",
-		active: recording.destinationId === "main" && recording.active,
-		error: recording.destinationId === "main" ? recording.error : null,
-		blocked: recording.destinationId !== "main" && recording.active,
-	};
-	/* When a dictation run ends, the bare composer takes focus (owner
-	 * 2026-10-01) — the hands are already on the keyboard from the stop.
-	 * Falling edge of `active` only (idle→idle never focuses), and ONLY the
-	 * composer: with a question pending the Composer is unmounted, the ref
-	 * is null, and the thinking field is left alone by design. */
-	const dictationWasActiveRef = useRef(false);
 	const composerInputRef = useRef<HTMLDivElement>(null);
 	const uploadingAttachment = useAttachmentUploadPending(composerInputRef);
 
@@ -1005,36 +985,10 @@ export function Chat({
 		if (activeProblem?.pluginProblem) return pluginProblemDraft(activeProblem.pluginProblem).thinking;
 		return workingRef.current;
 	});
-	const sideNavigation = useRef(0);
-	const closeSideThread = useCallback(() => {
-		const id = sideThread.state?.threadId;
-		if (!id) return;
-		const navigation = ++sideNavigation.current;
-		void recording.finishFor(`side:${id}`).then(() => {
-			if (navigation === sideNavigation.current) sideThread.close(id);
-		});
-	}, [recording.finishFor, sideThread.state?.threadId, sideThread.close]);
-	const openSideThread = useCallback((args: SideThreadOpenArgs) => {
-		const navigation = ++sideNavigation.current;
-		const current = sideThread.state;
-		const source = args.sourceMessageId ?? args.passage?.sourceMessageId ?? (args.questionCallId ? nativeMessages.find((message) => message.role === "assistant" &&
-			message.content.some((block) => block.type === "toolCall" && block.id === args.questionCallId))?.id : undefined);
-		if (current && current.segmentId !== sideSegmentId(nativeMessages, source) && recording.active && recording.destinationId === `side:${current.threadId}`) {
-			void recording.finishFor(`side:${current.threadId}`).then(() => {
-				if (navigation === sideNavigation.current) sideThread.open(args);
-			});
-		} else sideThread.open(args);
-	}, [nativeMessages, recording.active, recording.destinationId, recording.finishFor, sideThread.open, sideThread.state]);
+	const closeSideThread = sideThread.close;
+	const openSideThread = sideThread.open;
 	const goToCurrentSideStep = sideThread.state && sideThread.currentSegmentId && sideThread.state.segmentId !== sideThread.currentSegmentId
 		? () => openSideThread({ sourceMessageId: sideThread.currentSegmentId!, anchor: sideThread.state!.anchor }) : undefined;
-	const sideDictationFor = (id: string) => {
-		const destinationId = `side:${id}`;
-		const owns = recording.destinationId === destinationId;
-		return { phase: owns ? recording.phase : "idle" as const, active: owns && recording.active,
-			blocked: !owns && recording.active, error: owns ? recording.error : null, levelRef: recording.levelRef,
-			toggle: () => recording.toggleFor({ id: destinationId, append: (text) => sideThread.saveDraft(id, joinDictation(sideThread.draftFor(id), text), true) }),
-			finish: () => recording.finishFor(destinationId) };
-	};
 	const renderSideEntry = (sourceMessageId?: string) => {
 		if (!sourceMessageId) return null;
 		const hasHistory = sideThread.threads.some((thread) => thread.anchor.messageId === sourceMessageId && thread.messages.length > 0);
@@ -1080,25 +1034,11 @@ export function Chat({
 			});
 		},
 	}), [chatId, router]);
-	useEffect(() => {
-		if (dictation.active) {
-			dictationWasActiveRef.current = true;
-		} else if (dictationWasActiveRef.current) {
-			dictationWasActiveRef.current = false;
-			// Do not steal focus from a helper or a newer interaction owner.
-			if (!document.activeElement?.closest('[data-testid="side-thread"]') && isInteractionScopeEligible(composerInputRef.current, controller)) composerInputRef.current!.focus();
-		}
-	}, [dictation.active, controller]);
-
 	// Jobs never gate the composer (contracts.ts "THE ASYNC PROTOCOL" §4): job
 	// tools resolve with an ack mid-turn, so the learner can interject while
 	// sub-agents run — a feature, not a race: the wake pipeline queues steers
 	// until the current turn ends. Only a QUESTION pending or a turn in
 	// flight (client or server-side wake turn) gates sending.
-	// A LIVE dictation also makes the composer sendable (owner 2026-10-01):
-	// the spoken text is deferred in the run's buffer — Enter must be able
-	// to trigger the finish-first send (see onSend), not be gated out by an
-	// empty textarea. If nothing was said, the send is a harmless no-op.
 	// Steering (2026-10-03): a turn in flight no longer gates the composer —
 	// Enter while a turn runs STEERS it (the quiet queue above the composer);
 	// a pending question still owns the interaction (the dock replaces the
@@ -2068,7 +2008,6 @@ export function Chat({
 					pluginDraft={pendingPlugin ? pluginQuestionDraft(pendingPlugin) : undefined}
 					pluginAvailable={!!pendingPlugin && pluginQuestionAvailability?.questionId === pendingPlugin.questionId && pluginQuestionAvailability.status === "available"}
 					pluginReady={!busy && !compacting && reconciliation === "ready"}
-					onPluginMicAvailable={setPluginMicAvailable}
 					onPluginSend={send}
 					onPluginDismiss={() => pendingPlugin ? dismissPluginQuestion(pendingPlugin.occurrence, pendingPlugin.questionId) : unreadablePlugin ? dismissPluginQuestion(unreadablePlugin.occurrence, unreadablePlugin.annotation.status === "unreadable" ? unreadablePlugin.annotation.identity?.questionId : undefined) : Promise.resolve()}
 					unreadablePlugin={!!unreadablePlugin}
@@ -2083,7 +2022,7 @@ export function Chat({
 						snapshot: activeProblem.pluginProblem, occurrence: activeProblemOccurrence, chatId, draft: pluginProblemDraft(activeProblem.pluginProblem),
 						available: pluginProblemAvailability?.problemId === activeProblem.pluginProblem.problemId && pluginProblemAvailability.status === "available",
 						ready: !busy && !compacting && reconciliation === "ready", reconciliation: activeProblemOf(canonicalMessages)?.pluginProblem?.problemId === activeProblem.pluginProblem.problemId ? reconciliation : "syncing",
-						prepareSubmission: preparePluginProblem, send, preparing: submissionRunner.occupied, compactionRunning: compacting, onEscape: dictation.cancel,
+						prepareSubmission: preparePluginProblem, send, preparing: submissionRunner.occupied, compactionRunning: compacting,
 					} : undefined}
 					compactionRunning={compacting}
 					onSubmitThinking={submitThinking}
@@ -2101,8 +2040,6 @@ export function Chat({
 					cliContextWindow={cliContextWindowOf(nativeMessages)}
 					pricing={pricing}
 					onReserve={setDockReserve}
-					dictationSlot={<DictationBar dictation={dictation} disabled={pluginOwnsDock && !pluginMicAvailable} />}
-					dictationCancel={dictation.cancel}
 					queuedSteers={visibleQueuedSteers(steerQueue, nativeMessages)}
 					setupCta={
 						zeroKeys ? (
@@ -2137,8 +2074,6 @@ export function Chat({
 							onSend={onSend}
 							onStop={abortInFlightTurn}
 							sendAllowed={sendAllowed}
-							dictationActive={dictation.active}
-							onEscape={dictation.active ? dictation.cancel : undefined}
 							// The pause affordance (owner round 16): the placeholder
 							// IS the hint — empty state, exactly where Enter-on-empty
 							// applies.
@@ -2176,7 +2111,6 @@ export function Chat({
 							chatId={chatId}
 							draft={sideThread.draftFor(sideThread.state.threadId)}
 							readDraft={sideThread.draftFor.bind(null, sideThread.state.threadId)}
-							dictation={sideDictationFor(sideThread.state.threadId)}
 							onDraftChange={sideThread.saveDraft.bind(null, sideThread.state.threadId)}
 							onAsk={(text, retry) => sideThread.ask(text, retry, sideThread.state!.threadId)}
 							onStop={sideThread.stop}
@@ -2194,7 +2128,6 @@ export function Chat({
 						chatId={chatId}
 						draft={sideThread.draftFor(sideThread.state.threadId)}
 						readDraft={sideThread.draftFor.bind(null, sideThread.state.threadId)}
-						dictation={sideDictationFor(sideThread.state.threadId)}
 						onDraftChange={sideThread.saveDraft.bind(null, sideThread.state.threadId)}
 						composer={() => composerInputRef.current}
 						onAsk={(text, retry) => sideThread.ask(text, retry, sideThread.state!.threadId)}
@@ -2363,8 +2296,7 @@ export function probeArrivalExpanded(isAtBottom: boolean): boolean {
 
 /**
  * The geometry-mute's growth rule (flicker round, 2026-09-26): a reserve
- * GROWTH while a question is pending is the dock stretching (the dictation
- * flush landing many lines at once) — the spacer lands in that commit, the
+ * GROWTH while a question is pending is the dock stretching — the spacer lands in that commit, the
  * smooth catch-up lags by exactly the growth, and that lag is our own
  * motion, not the learner leaving, so the fold machine ignores scroll
  * events for the mute window after (reproduced d≈152 > COLLAPSE_DIST).
@@ -2397,7 +2329,7 @@ export function DockOverlay({
 	viewReader, viewTargets, unavailableOccurrence,
 	pending,
 	onPrepareBuiltin, onBuiltinPendingInput, onPrepareThinking, pendingThinkingInput, onPreparePluginQuestion, preparing, preparationStatus,
-	pluginQuestion, pluginDraft, pluginAvailable, pluginReady, onPluginMicAvailable, onPluginSend, onPluginDismiss, unreadablePlugin, reconciliation, onRetrySync,
+	pluginQuestion, pluginDraft, pluginAvailable, pluginReady, onPluginSend, onPluginDismiss, unreadablePlugin, reconciliation, onRetrySync,
 	initialQuestionDraft,
 	onSaveQuestionDraft,
 	workingRef,
@@ -2420,8 +2352,6 @@ export function DockOverlay({
 	onReserve,
 	plan,
 	onOpenPlan,
-	dictationSlot,
-	dictationCancel,
 	setupCta,
 	queuedSteers,
 }: {
@@ -2440,7 +2370,6 @@ export function DockOverlay({
 	pluginDraft?: PluginQuestionDraft;
 	pluginAvailable: boolean;
 	pluginReady: boolean;
-	onPluginMicAvailable(available: boolean): void;
 	onPluginSend(input: ChatInput): Promise<boolean>;
 	onPluginDismiss(): Promise<void>;
 	unreadablePlugin: boolean;
@@ -2487,12 +2416,6 @@ export function DockOverlay({
 	plan?: React.ReactNode;
 	/** Opens the full-DAG popup (the marginalia + chip share it). */
 	onOpenPlan: () => void;
-	/** The dictation strip (STT wave): rendered in the stats bar's middle
-	 *  slot — the mic button + live meter (components/dictation.tsx). */
-	dictationSlot?: React.ReactNode;
-	/** Esc in a pending question's field stops dictation (the strip is the
-	 *  stats bar's; the stop belongs to the page-owned hook, threaded down). */
-	dictationCancel?: () => void;
 	/** The queued-steer indicator's lines (composer steering, 2026-10-03):
 	 *  already filtered by visibleQueuedSteers — only undrained steers. */
 	queuedSteers: QueuedSteerLine[];
@@ -2801,11 +2724,9 @@ export function DockOverlay({
 	expandAndRevealRef.current = expandAndReveal;
 	// ENTER OPENS THE WAITING CHECK (owner, keyboard round 2026-10-06):
 	// while a question waits with the dock CLOSED — behind its reveal
-	// invitation or collapsed by scroll — Enter is never dead. Any live
-	// dictation FINISHES FIRST (the flush lands in the reading-thinking
-	// field, its live claim — the nothing-gets-lost law), then the check
-	// opens. A typing surface or a focused button owns its own Enter (the
-	// reading-thinking field opens from INSIDE when the check is closed;
+	// invitation or collapsed by scroll, Enter opens it. A typing surface
+	// or a focused button owns its own Enter (the reading-thinking field
+	// opens the check from inside;
 	// a focused button activates natively) — this listener claims only
 	// the dead case: plain focus with Enter doing nothing.
 	useEffect(() => {
@@ -2823,9 +2744,7 @@ export function DockOverlay({
 			)
 				return;
 			e.preventDefault();
-			void finishDictation().then(() => {
-				expandAndRevealRef.current();
-			});
+			expandAndRevealRef.current();
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
@@ -2924,26 +2843,16 @@ export function DockOverlay({
 					    line dies when its card lands (visibleQueuedSteers). */}
 					<QueuedSteersBody steers={queuedSteers} />
 					{/* The reading-thinking field (owner 2026-10-03): mounted while a
-					    teach-phase check waits — the same cue that collapses it. It
-					    claims dictated speech until the learner reveals the check
-					    (the dock reclaims then). Rides the check answer on submit. */}
+					    teach-phase check waits — the same cue that collapses it. The draft is
+					    sent with the check answer. */}
 					{(pending || pluginQuestion) && requiresReveal && (
 						<ReadingThinkingField
 							inputRef={readingInputRef}
 							value={readingThinking}
 							revision={readingThinkingRevision}
 							onChange={onReadingThinking}
-							onEscape={dictationCancel}
-							onOpen={
-								!expanded
-									? () => {
-											void finishDictation().then(() => {
-												expandAndRevealRef.current();
-											});
-										}
-									: undefined
-							}
-							claim={revealPending}
+							onOpen={!expanded ? () => expandAndRevealRef.current() : undefined}
+							primaryDropTarget={revealPending}
 						/>
 					)}
 					<div ref={shellRef} data-attachment-composer="" className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
@@ -2956,11 +2865,11 @@ export function DockOverlay({
 							className={mode === initialModeRef.current ? "flow-root" : "flow-root dock-variant"}
 						>
 							{pluginQuestion && pluginDraft ? (
-								<PluginQuestionDock viewReader={customViewReader} snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
+								<PluginQuestionDock viewReader={customViewReader} snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
 							) : unreadablePlugin ? (
 								<div className="px-4 py-3">
 									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing question…</p>}
-									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>Dismiss question</Button></>}
+									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void onPluginDismiss(); }}>Dismiss question</Button></>}
 								</div>
 							) : pending ? (
 								<QuestionDock
@@ -2979,8 +2888,7 @@ export function DockOverlay({
 									initialDraft={initialQuestionDraft}
 									onSaveDraft={onSaveQuestionDraft}
 									workingRef={workingRef}
-									onEscape={dictationCancel}
-									dictationClaim={!revealPending}
+									primaryDropTarget={!revealPending}
 									compactionRunning={compactionRunning}
 									layoutRequest={layoutRequest}
 									onLayout={setQuestionLayout}
@@ -3001,7 +2909,6 @@ export function DockOverlay({
 									onPrepareSubmission={onPrepareThinking}
 									hasPendingInput={pendingThinkingInput}
 									preparing={preparing}
-									onEscape={dictationCancel}
 									compactionRunning={compactionRunning}
 								/>
 							) : (
@@ -3019,7 +2926,6 @@ export function DockOverlay({
 						contextTokens={contextTokens}
 						cliContextWindow={cliContextWindow}
 						pricing={pricing}
-						dictationSlot={dictationSlot}
 						chatId={chatId}
 						onModelChange={onModelChange}
 					/>

@@ -1,0 +1,18 @@
+# The application lives in workspace/ (see workspace/.gitignore).
+# These are leftovers and generated output at the repository root.
+node_modules/
+.next/
+/data/
+/dist/
+/core-plugins/
+/plugins/
+/public/
+*.log
+.DS_Store
+
+# Credential stores must never be committed.
+auth.json
+chatgpt-credentials.json*
+github-copilot-credentials.json*
+xai-credentials.json*
+learnharness-cloud-credentials.json*

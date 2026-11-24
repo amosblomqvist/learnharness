@@ -6,7 +6,7 @@ const candidate = (pluginId: string, actionId = "draw", scope: unknown = { sessi
 	id: pluginShortcutId(pluginId, actionId), pluginId, actionId, name: actionId, pluginName: pluginId,
 	shortcut: preparePluginShortcut({ scope, defaultBinding: binding }),
 });
-const core = new Map([["mod+d", "Toggle dictation"]]);
+const core = new Map([["mod+f", "Find"]]);
 
 test("plugin shortcuts accept canonical modified single chords and function keys only", () => {
 	for (const binding of ["mod+d", "alt+shift+x", "mod+alt+shift+arrowdown", "f1", "f24", "shift+f3", "mod++", "mod+,", "mod+ "]) assert.equal(isPluginShortcutBinding(binding), true, binding);
@@ -42,8 +42,8 @@ test("scope overlap is static and plugin view IDs are owner-scoped", () => {
 test("core wins and competing defaults have no load-order winner", () => {
 	const one = candidate("one"), two = candidate("two");
 	for (const entries of [[one, two], [two, one]]) assert.ok(resolvePluginShortcuts(entries, {}, core).every(row => row.status === "conflict"));
-	const blocked = resolvePluginShortcuts([candidate("one", "draw", "app", "mod+d")], {}, core)[0]!;
-	assert.equal(blocked.status, "conflict"); assert.match(blocked.reason!, /Toggle dictation/);
+	const blocked = resolvePluginShortcuts([candidate("one", "draw", "app", "mod+f")], {}, core)[0]!;
+	assert.equal(blocked.status, "conflict"); assert.match(blocked.reason!, /Find/);
 });
 
 test("user assignments beat plugin defaults but conflicting user assignments fail closed", () => {

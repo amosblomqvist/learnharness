@@ -19,7 +19,7 @@ between them. Teaching builds understanding one reasoning step at a time, checki
 and repairing gaps along the way. The aim is for the goal to feel obviously true,
 not merely familiar. Separate practice sessions exercise retrieval and application.
 
-The learner can think out loud—by typing or dictation—while reading and answering.
+The learner can type their thoughts while reading and answering.
 The record therefore contains more than right and wrong answers: explanations of
 reasoning, uncertainty, reactions, questions, confidence, and attempts that changed
 as the lesson progressed. These are often the most informative parts of the data.

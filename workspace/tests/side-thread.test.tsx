@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import { createSideQuestionActions, SideThreadBody, sideThreadPlaceholder, type SideThreadHandlers } from "../components/side-thread.tsx";
+import { createSideQuestionActions, SideThreadBody, sideThreadPlaceholder } from "../components/side-thread.tsx";
 import type { SideThreadState } from "../components/use-side-thread.ts";
 
 const state: SideThreadState = { threadId: "side_lesson", segmentId: "lesson", messages: [
@@ -11,7 +11,7 @@ const state: SideThreadState = { threadId: "side_lesson", segmentId: "lesson", m
 	{ id: "answer", role: "assistant", text: "Because it is continuous.", at: "2026-11-05T00:00:02Z" },
 ], answering: false, streamText: "", mode: "popover", anchor: { kind: "composer" } };
 const handlers = { onAsk: async () => true, onStop() {}, onExpand() {}, onFloat() {}, onClose() {} };
-const render = (s = state, dictation?: SideThreadHandlers["dictation"], onCurrentStep?: () => void) => parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={s} dictation={dictation} onCurrentStep={onCurrentStep} {...handlers} />)}</body></html>`).document;
+const render = (s = state, onCurrentStep?: () => void) => parseHTML(`<html><body>${renderToStaticMarkup(<SideThreadBody state={s} onCurrentStep={onCurrentStep} {...handlers} />)}</body></html>`).document;
 
 describe("floating/docked raw side conversation", () => {
 	it("shows raw questions and replies, with no summary, tutor toggle, or delete action", () => {
@@ -30,7 +30,7 @@ describe("floating/docked raw side conversation", () => {
 		assert.doesNotMatch(doc.body.textContent!, /Tell tutor|Send to tutor|Delete/);
 	});
 	it("keeps an old conversation editable without adding a context-status line", () => {
-		const doc = render(state, undefined, () => {});
+		const doc = render(state, () => {});
 		assert.equal(doc.querySelector('[data-testid="side-context-status"]'), null);
 		assert.equal(doc.querySelector('textarea')!.hasAttribute("disabled"), false);
 		assert.equal(doc.querySelector('[data-testid="side-current-step"]')!.textContent?.trim(), "Go to current step");
@@ -46,14 +46,6 @@ describe("floating/docked raw side conversation", () => {
 		const doc = render({ ...state, mode: "panel" });
 		assert.ok(doc.querySelector('[aria-label="Float side conversation"]'));
 		assert.ok(doc.querySelector('[title="Unpin to float"] svg.lucide-pin-off'));
-	});
-	it("places the side microphone inside the input and uses the error token while recording", () => {
-		const dictation = { phase: "idle" as const, active: false, blocked: false, error: null, toggle() {}, finish: async () => {} };
-		const idle = render(state, dictation);
-		assert.ok(idle.querySelector("textarea")!.parentElement!.querySelector('[aria-label="Start side dictation"]'));
-		const active = render(state, { ...dictation, phase: "recording", active: true });
-		assert.equal(active.querySelector('[data-testid="side-dictation-toggle"]')!.getAttribute("aria-pressed"), "true");
-		assert.ok(active.querySelector('[data-testid="side-dictation-toggle"]')!.classList.contains("text-error"));
 	});
 	it("keeps failed partial replies and offers an explicit retry", () => {
 		const doc = render({ ...state, messages: [...state.messages, { id: "failed", role: "assistant", text: "Partial…", error: "Request failed", at: "" }] });

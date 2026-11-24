@@ -35,9 +35,8 @@ export function isInputShortcutScopeEligible(scope: HTMLElement | null, controll
 
 /** Only the currently focused plugin control can claim these shortcuts.
  * Merely mounting a widget never changes the core fallback. */
-export type PluginInputShortcut = "toggle-dictation" | "open-model-picker" | "cycle-thinking";
+export type PluginInputShortcut = "open-model-picker" | "cycle-thinking";
 export type PluginInputFocusHandlers = {
-	toggleDictation?: () => void;
 	cycleModel?: () => void;
 	cycleThinking?: () => void;
 };
@@ -53,7 +52,6 @@ export function claimPluginInputFocus(root: HTMLElement, handlers: PluginInputFo
 
 export function dispatchFocusedPluginShortcut(action: string, controller?: InteractionLayersController | null): boolean {
 	const keys: Partial<Record<string, keyof PluginInputFocusHandlers>> = {
-		"toggle-dictation": "toggleDictation",
 		"open-model-picker": "cycleModel",
 		"cycle-thinking": "cycleThinking",
 	};
@@ -61,10 +59,7 @@ export function dispatchFocusedPluginShortcut(action: string, controller?: Inter
 	if (!key || typeof document === "undefined") return false;
 	const focused = document.activeElement;
 	if (!focused) return false;
-	const popupOriginAction = action === "open-model-picker" || action === "cycle-thinking";
-	const eligible = (root: HTMLElement) => popupOriginAction
-		? isInputShortcutScopeEligible(root, controller)
-		: isInteractionScopeEligible(root, controller);
+	const eligible = (root: HTMLElement) => isInputShortcutScopeEligible(root, controller);
 	// Walk outward so a standalone control nested in a preset owns its
 	// own matching action, while the preset can supply the other actions.
 	for (let node: Element | null = focused; node; node = node.parentElement) {
@@ -77,7 +72,7 @@ export function dispatchFocusedPluginShortcut(action: string, controller?: Inter
 	}
 	// Portaled popup focus is outside the widget DOM. Resolve only its own
 	// origin profile, never a mounted core/background control.
-	if (popupOriginAction && controller) {
+	if (controller) {
 		const origins = [...claims.keys()].filter(root => controller.isPopupOrigin(root));
 		origins.sort((a, b) => a.contains(b) ? 1 : b.contains(a) ? -1 : 0);
 		for (const root of origins) {

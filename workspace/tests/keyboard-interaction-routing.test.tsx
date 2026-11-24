@@ -146,12 +146,12 @@ it("global Enter submits only its eligible owner and never repeats an already-ha
 	remove();
 });
 
-it("portaled plugin popup retains only its own model/thinking input profile, never background fields or dictation", async () => {
+it("portaled plugin popup retains only its own model/thinking input profile, never background fields", async () => {
 	const f = fixture();
 	await f.render(<><div data-testid="core" tabIndex={-1} /><div data-testid="plugin"><button data-testid="anchor" /></div><div data-testid="popup"><input data-testid="search" /></div></>);
-	let core = 0, plugin = 0, dictation = 0;
+	let core = 0, plugin = 0;
 	const offCore = claimPluginInputFocus(get("core"), { cycleThinking: () => { core++; } });
-	const offPlugin = claimPluginInputFocus(get("plugin"), { cycleThinking: () => { plugin++; }, cycleModel: () => { plugin++; }, toggleDictation: () => { dictation++; } });
+	const offPlugin = claimPluginInputFocus(get("plugin"), { cycleThinking: () => { plugin++; }, cycleModel: () => { plugin++; } });
 	const remove = f.addLayer("popup", "popup", get("popup"), get("anchor"));
 	try {
 		get("search").focus();
@@ -160,8 +160,7 @@ it("portaled plugin popup retains only its own model/thinking input profile, nev
 		assert.equal(isInputShortcutScopeEligible(get("core"), f.controller()), false);
 		assert.equal(dispatchFocusedPluginShortcut("cycle-thinking", f.controller()), true);
 		assert.equal(dispatchFocusedPluginShortcut("open-model-picker", f.controller()), true);
-		assert.equal(dispatchFocusedPluginShortcut("toggle-dictation", f.controller()), false);
-		assert.deepEqual([core, plugin, dictation], [0, 2, 0]);
+		assert.deepEqual([core, plugin], [0, 2]);
 		get("core").focus(); assert.equal(dispatchFocusedPluginShortcut("cycle-thinking", f.controller()), true);
 		assert.deepEqual([core, plugin], [0, 3], "covered DOM focus cannot select a background profile");
 	} finally { offCore(); offPlugin(); remove(); }
@@ -169,7 +168,7 @@ it("portaled plugin popup retains only its own model/thinking input profile, nev
 
 it("question's visible plain-Tab row/thinking cycle survives native Tab prevention, but does nothing behind a modal", async () => {
 	const f = fixture();
-	await f.render(<><QuestionDock toolName="quiz" toolCallId="q" input={{ question: "Pick", options: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], correctAnswer: "yes", explanation: "Yes" }} expanded onExpand={() => {}} onSubmit={() => {}} dictationClaim={false} /><div data-testid="modal" tabIndex={-1} /></>);
+	await f.render(<><QuestionDock toolName="quiz" toolCallId="q" input={{ question: "Pick", options: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], correctAnswer: "yes", explanation: "Yes" }} expanded onExpand={() => {}} onSubmit={() => {}} primaryDropTarget={false} /><div data-testid="modal" tabIndex={-1} /></>);
 	const first = await f.key(document.body, "Tab"); assert.equal(first.defaultPrevented, true);
 	assert.ok(f.focus().closest("[data-kbdrow]"));
 	await f.key(f.focus(), "Tab"); assert.ok(f.focus().closest("[data-testid='thinking-field']"));
@@ -180,7 +179,7 @@ it("question's visible plain-Tab row/thinking cycle survives native Tab preventi
 
 it("ReadingThinking intentionally claims Escape even with no callback, without closing its containing modal", async () => {
 	const f = fixture();
-	await f.render(<div data-testid="modal"><ReadingThinkingField value="" revision={0} onChange={() => {}} claim={false} /></div>);
+	await f.render(<div data-testid="modal"><ReadingThinkingField value="" revision={0} onChange={() => {}} primaryDropTarget={false} /></div>);
 	let closes = 0;
 	f.controller().register({ id: "modal", kind: "modal", rootRef: { current: get("modal") }, onClose: () => { closes++; return "blocked"; } });
 	const field = document.querySelector<HTMLElement>("[data-file-path-input]")!;

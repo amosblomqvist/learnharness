@@ -154,8 +154,7 @@ Both mounts receive the saved `input`, `chatId`, `problemId`, `contractVersion`,
 an `AbortSignal`. `mountSubmissionEditor` also receives `active`, controlled `submission`,
 and `onChange`. State is `{status:"empty"}` or `{status:"unready"|"ready",value:JsonValue}`.
 A ready editor value is mandatory even when an interceptor has pending external input.
-The required handle has `update`, `focus`, `dispose`; optional `handleKeyDown` and
-`appendTranscript` use the same editor-handle vocabulary as teaching questions.
+The required handle has `update`, `focus`, `dispose`; the optional `handleKeyDown` uses the same editor-handle vocabulary as teaching questions.
 
 The native practice dock retains its statement, then inserts the plugin editor above
 **Your thinking**, with one **Submit** button. After acceptance the editor value stays
@@ -167,7 +166,7 @@ Keyboard behavior shares the existing plugin-editor ownership/IME/layer guards: 
 keys stay with the editor; unhandled Enter submits, Shift+Enter is native editing,
 Tab cycles host fields, and unhandled Escape moves directly from editor to thinking.
 The reserved Ctrl/Cmd+Enter chord submits. Escape outside the editor retains native
-practice discard-confirmation precedence. The host still owns thinking dictation.
+practice discard-confirmation precedence.
 
 `mountSubmitted` is optional and receives the exact accepted `submission` plus optional
 `processing`; thinking/images stay host-owned presentation channels. Its optional readonly

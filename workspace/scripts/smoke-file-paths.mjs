@@ -326,7 +326,7 @@ try {
 	await blur(page); await syntheticDrop(page, ["/synthetic/reading.pdf"]);
 	await expectValue(page, "`/synthetic/reading.pdf`", reading);
 	assert.equal(await read(page, question), "");
-	checks.push("Unrevealed teaching check: unfocused drop lands in reading-thinking via dictation registry");
+	checks.push("Unrevealed teaching check: unfocused drop lands in reading-thinking through the default file-drop target");
 	await page.locator('[data-testid="teach-check-reveal"]').click();
 	await page.waitForSelector(question, { visible: true });
 	await fill(page, "AB", reading); await caret(page, 1, reading);

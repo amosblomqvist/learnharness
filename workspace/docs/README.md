@@ -2,7 +2,7 @@
 
 ## User guides
 
-- [Getting started](getting-started.md) — connections, models, sessions, dictation, files, and notes imports.
+- [Getting started](getting-started.md) — connections, models, sessions, files, and notes imports.
 - [Keyboard shortcuts](keyboard.md) — defaults, rebinding, and navigation.
 - [Claude Code](claude-code.md) — use an installed CLI and troubleshoot its connection.
 - [Custom and local models](custom-providers.md) — configure an OpenAI-compatible endpoint.

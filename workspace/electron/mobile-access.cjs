@@ -285,8 +285,8 @@ function createMobileAccess({ app, BrowserWindow, session, origin, directory, de
 			if (target.host === new URL(localOrigin).host && ["http:", "ws:"].includes(target.protocol)) headers["x-learnharness-preview"] = previewToken;
 			callback({ requestHeaders: headers });
 		});
-		isolated.setPermissionRequestHandler((_contents, permission, callback, details) => callback(new URL(details.requestingUrl).origin === localOrigin && ["media", "clipboard-sanitized-write"].includes(permission)));
-		isolated.setPermissionCheckHandler((_contents, permission, requestingOrigin) => requestingOrigin === localOrigin && ["media", "clipboard-sanitized-write"].includes(permission));
+		isolated.setPermissionRequestHandler((_contents, permission, callback, details) => callback(new URL(details.requestingUrl).origin === localOrigin && permission === "clipboard-sanitized-write"));
+		isolated.setPermissionCheckHandler((_contents, permission, requestingOrigin) => requestingOrigin === localOrigin && permission === "clipboard-sanitized-write");
 		previewWindow = new BrowserWindow({ width, height, useContentSize: true, minWidth: 320, minHeight: 320, title: "LearnHarness · Phone viewport", autoHideMenuBar: true, backgroundColor: appearance(), webPreferences: { session: isolated, contextIsolation: true, sandbox: true, nodeIntegration: false } });
 		previewWindow.webContents.setWindowOpenHandler(({ url }) => { openExternal(url); return { action: "deny" }; });
 		previewWindow.webContents.on("will-navigate", (event, target) => { if (new URL(target).origin !== localOrigin) { event.preventDefault(); openExternal(target); } });

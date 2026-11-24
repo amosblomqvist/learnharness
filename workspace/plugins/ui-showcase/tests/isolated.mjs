@@ -162,8 +162,7 @@ export async function runPackagedProof(verify) {
     browser = await puppeteer.launch({ executablePath: chrome, headless: true, userDataDir: path.join(scratch, "chrome-profile"), env: cleanEnv, args: ["--disable-background-networking", "--disable-sync", "--no-first-run", "--no-default-browser-check"] });
     const page = await browser.newPage(); page.setDefaultTimeout(30_000);
     await page.setViewport({ width: 1440, height: 1000, deviceScaleFactor: 1 });
-    // Passive safety tripwire: no test starts dictation. An unexpected request
-    // is counted and rejected before the OS can open a microphone.
+    // Count unexpected media requests and reject them before the OS opens a microphone.
     await page.exposeFunction("__showcaseMicTripwire", () => evidence.microphoneRequests.push({ stage: evidence.stage }));
     await page.evaluateOnNewDocument(() => {
       if (!navigator.mediaDevices) return;
@@ -199,8 +198,8 @@ export async function runPackagedProof(verify) {
     assert.equal(evidence.graphAfter, graphBefore, "Automated selection-only proof must not mutate synthetic knowledge");
     evidence.graphUnchanged = true;
     assert.deepEqual(evidence.forbiddenProviderRequests, []); assert.deepEqual(evidence.blockedRequests, []);
-    assert.deepEqual(evidence.microphoneRequests, [], "Dictation must never auto-start");
-    assert.deepEqual(evidence.webSockets, [], "No dictation/provider websocket may open");
+    assert.deepEqual(evidence.microphoneRequests, [], "No microphone capture may start");
+    assert.deepEqual(evidence.webSockets, [], "No provider websocket may open");
     assert.equal(evidence.requests.filter(request => new URL(request.url).pathname === "/api/chat" && request.method === "POST").length, 0, "No real or fixture generation");
     assert.deepEqual(evidence.pageErrors, []);
     // Closing the real picker aborts its outstanding, read-only source fetch.
@@ -222,7 +221,7 @@ export async function runPackagedProof(verify) {
       matchingResponse: evidence.responses.find(response => response.url === request.url && response.status === 200 && response.stage === request.stage),
     }));
     assert.deepEqual(evidence.failedRequests.filter(request => !evidence.expectedCanceledReads.includes(request) && !expectedCanceledPrefetchRequests.includes(request)), []);
-    evidence.expectedHttpErrors = evidence.responses.filter(response => response.status === 404 && new URL(response.url).pathname === "/favicon.ico" || response.status === 503 && new URL(response.url).pathname === "/api/stt/token");
+    evidence.expectedHttpErrors = evidence.responses.filter(response => response.status === 404 && new URL(response.url).pathname === "/favicon.ico");
     assert.deepEqual(evidence.responses.filter(response => response.status >= 400 && !evidence.expectedHttpErrors.includes(response)), []);
     if (failure) throw failure;
     evidence.passed = true;

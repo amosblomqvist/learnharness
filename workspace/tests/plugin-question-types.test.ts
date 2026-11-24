@@ -71,7 +71,6 @@ const renderer: PluginQuestionRenderer = {
       update({answer, active}) { void [answer, active]; },
       focus() { container.focus(); },
       handleKeyDown(key) { return key === "Tab" ? "handled" : "pass"; },
-      async appendTranscript(text) { props.onChange({status:"unready", value:text}); },
       dispose() { container.replaceChildren(); }
     };
     return handle;

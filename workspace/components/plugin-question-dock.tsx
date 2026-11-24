@@ -8,7 +8,7 @@ import type { QuestionRendererRegistration } from "./plugin-manager";
 import { usePlugins } from "./plugins";
 import { QuestionDockBar } from "./question-dock";
 import { PathInput } from "./path-input";
-import { finishDictation, joinDictation, usePluginQuestionDictationTarget } from "./dictation";
+import { appendFilePathText, useFileDropTarget } from "./file-drop-target";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { useEnterSubmits } from "./enter-submits";
@@ -25,7 +25,7 @@ interface PluginQuestionDockProps {
 	snapshot: PluginQuestionSnapshot; chatId: string; draft: PluginQuestionDraft; expanded: boolean; reveal: boolean; onExpand(): void;
 	prepareSubmission?: PreparePluginQuestionSubmission;
 	ready: boolean; reconciliation: "ready" | "syncing" | "failed"; available: boolean; readingRef: RefObject<HTMLDivElement | null>;
-	onMicAvailable(available: boolean): void; send(input: ChatInput): Promise<boolean>; dismiss(): Promise<void>;
+	send(input: ChatInput): Promise<boolean>; dismiss(): Promise<void>;
 }
 export function PluginQuestionDock(props: PluginQuestionDockProps) {
 	const { snapshot: plugins } = usePlugins();
@@ -34,7 +34,7 @@ export function PluginQuestionDock(props: PluginQuestionDockProps) {
 }
 
 /** Host-only component seam for deterministic DOM/capture fixtures, not SDK. */
-export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft, expanded, reveal, onExpand, ready, reconciliation, available, readingRef, onMicAvailable, send, dismiss, registration, prepareSubmission }: PluginQuestionDockProps & { registration?: QuestionRendererRegistration }) {
+export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft, expanded, reveal, onExpand, ready, reconciliation, available, readingRef, send, dismiss, registration, prepareSubmission }: PluginQuestionDockProps & { registration?: QuestionRendererRegistration }) {
 	const controller = useOptionalInteractionLayers();
 	const root = useRef<HTMLDivElement>(null);
 	const editor = useRef<HTMLDivElement>(null);
@@ -102,8 +102,8 @@ export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft,
 				};
 			};
 			if (prepareSubmission) await prepareSubmission(capture, valid);
-			else { await finishDictation(); if (valid()) await send(capture()); }
-		} catch { /* Failed transcript delivery must never submit a stale answer. */ }
+			else if (valid()) await send(capture());
+		} catch { /* Invalid or cancelled preparation preserves the draft. */ }
 		finally { latch.current = false; setSubmitting(false); }
 	}, [controller, send, prepareSubmission]);
 	const latestSubmit = useRef(submit); latestSubmit.current = submit;
@@ -130,22 +130,14 @@ export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft,
 		},
 	}), [controller, readingRef]);
 
-	const speechLease = snapshot.showThinking ? null : lease.current;
-	const append = useCallback(async (text: string) => {
-		const now = current.current;
-		if (now.reveal || keyOf(now.snapshot) !== key) return; // Reading owns the unrevealed phase.
-		// Host thinking is a draft channel, not plugin execution authority:
-		// an already-captured final must survive reconciliation or compaction.
-		if (snapshot.showThinking) { draft.thinking = joinDictation(draft.thinking, text); render(); }
-		else if (!failed && speechLease === lease.current && now.registration && leaseRegistration.current === now.registration && now.available) await speechLease?.append(text);
-	}, [key, snapshot.showThinking, speechLease, reveal, failed, draft]);
-	usePluginQuestionDictationTarget(append, !reveal);
-	const micAvailable = reveal || snapshot.showThinking || (!!registration && leaseRegistration.current === registration && !!lease.current?.speech && available && !failed);
-	useEffect(() => { onMicAvailable(micAvailable); return () => onMicAvailable(false); }, [micAvailable, onMicAvailable]);
+	useFileDropTarget((paths) => {
+		draft.thinking = appendFilePathText(draft.thinking, paths);
+		render();
+	}, { enabled: snapshot.showThinking && !reveal });
 	const unavailable = canonicalReady && (!available || !registration || failed);
 	const canSubmit = canonicalReady && ready && available && !!registration && leaseRegistration.current === registration && leaseKey.current === key && !failed && !!lease.current?.ready && draft.answer.status === "ready" && !submitting;
 	return <div ref={root} data-testid="plugin-question-dock">
-		{!expanded && <QuestionDockBar toolName="explain" question={snapshot.input.question} toolLabel={snapshot.label} variant={reveal ? "reveal" : "collapsed"} onExpand={() => { void finishDictation().then(onExpand); }} />}
+		{!expanded && <QuestionDockBar toolName="explain" question={snapshot.input.question} toolLabel={snapshot.label} variant={reveal ? "reveal" : "collapsed"} onExpand={onExpand} />}
 		<div className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
 			<div className="space-y-3 px-4 py-3">
 				<div className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{snapshot.input.type === "predict" ? "Prediction" : snapshot.label}</div>
@@ -168,7 +160,7 @@ export function PluginQuestionDockContent({ viewReader, snapshot, chatId, draft,
 					</>}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">↵ submits · ⇧↵ newline</span>
-						{unavailable && <Button type="button" variant="ghost" disabled={!ready || submitting} onClick={() => { if (latch.current) return; latch.current = true; void finishDictation().then(dismiss).catch(() => {}).finally(() => { latch.current = false; }); }}>Dismiss question</Button>}
+						{unavailable && <Button type="button" variant="ghost" disabled={!ready || submitting} onClick={() => { if (latch.current) return; latch.current = true; void dismiss().catch(() => {}).finally(() => { latch.current = false; }); }}>Dismiss question</Button>}
 						<Button type="submit" disabled={!canSubmit} className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium">Submit answer</Button>
 					</div>
 				</div>

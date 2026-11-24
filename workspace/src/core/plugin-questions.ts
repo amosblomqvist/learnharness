@@ -64,7 +64,6 @@ export interface PluginQuestionEditorHandle {
 	 * Unhandled Escape moves to the next host field, or blurs an editor-only chain.
 	 * Meta/Ctrl+Enter remains reserved host submission. */
 	handleKeyDown?(key: PluginQuestionEditorKey): "handled" | "pass";
-	appendTranscript?(text: string): void | Promise<void>;
 	dispose(): void;
 }
 export interface PluginQuestionRenderer<Q = JsonValue, A = JsonValue> {

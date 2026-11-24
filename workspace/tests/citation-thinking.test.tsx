@@ -52,7 +52,7 @@ describe("Cite in learner thinking fields", () => {
 		assert.match(target!.link, /lh-citation:/);
 	});
 	it("hands the raw citation link to the shared chip-input engine in reading thinking", () => {
-		const markup = renderToStaticMarkup(<ReadingThinkingField value={link} revision={0} onChange={() => {}} claim={false} />);
+		const markup = renderToStaticMarkup(<ReadingThinkingField value={link} revision={0} onChange={() => {}} primaryDropTarget={false} />);
 		const doc = parseHTML(`<html><body>${markup}</body></html>`).document;
 		const input = doc.querySelector('[data-file-path-input]')!;
 		assert.match(input.textContent!, /Tutor quote/);

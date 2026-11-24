@@ -286,7 +286,7 @@ Session `context.view` is a fresh detached/frozen snapshot: full browser-native
 `messages`, host-projected `transcript`, metadata/status, queued steers, retained
 composer text and host-selected native/custom input, including displayed option order
 and published unsent drafts. It stays bound to its original session/occurrence across
-awaits. Reads never reveal input, flush dictation, save, process or submit. Disabled
+awaits. Reads never reveal input, save, process or submit. Disabled
 predicates receive the same read-only shape; clicks capture anew. Respect supplied
 reveal/availability flags when choosing learner-facing references: full history is
 inspectable, not sanitized to currently painted prose. See the [view-context contract](plugin-view-context.md).
@@ -359,8 +359,7 @@ plugin owns values and persistence; feed accepted values back through `update`.
 | `mountThinkingPicker` | `model`, `value: ThinkingLevel \| undefined`, `onChange`, optional `disabled` |
 | `mountKnowledgePicker` | `value: readonly string[]`, `onChange`, optional `disabled` |
 | `mountComposer` | `value`, `onChange`, `onSend`; optional `busy`, `onStop`, `canSend`, `placeholder`, `autoFocus` |
-| `mountDictation` | `onTranscript`, optional `disabled`; extra handle methods `toggle`, `finish`, `cancel` |
-| `mountStandardComposer` | `{composer,model,thinking,dictation}` using independent control props |
+| `mountStandardComposer` | `{composer,model,thinking}` using independent control props |
 | `mountButton` | `label`, `onClick`; optional `icon`, `iconOnly`, `disabled`, `variant`, `colors`, `size`, `title` |
 | `mountBadge` | `text`, optional `color` |
 | `mountSettingsRows` | `{rows}` as described below |
@@ -386,13 +385,7 @@ handle disposal and caller/plugin/surface expiry remain disposal, without `onClo
 defaults or choosing fallback models. Their compact typography is self-contained. The
 standalone composer is a bare input; the standard preset frames only text entry, with
 controls below. It excludes usage meters, practice controls, attachments and default
-file/drop behavior. The preset finishes dictation before send; independent controls
-must coordinate it themselves.
-
-Dictation has one recording owner per window. A competing start reports
-`Dictation is active elsewhere`. Speech goes only to the supplied `onTranscript`, not a
-hidden native composer. Focused controls own matching shortcuts; one Escape must not
-also cancel another layer's recording. `finish()` awaits delivery; `cancel()` cancels.
+file/drop behavior.
 
 **Buttons.** `icon` is trusted SVG markup, not a sanitizer/DOM/custom-renderer slot.
 It precedes the required label. `iconOnly: true` hides text and uses `label` as the

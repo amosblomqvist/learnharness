@@ -69,16 +69,25 @@ function settingsAreAbsent(): boolean {
 	}
 }
 
-export function readFileAccessSettings(): FileAccessSettingsResult {
+function readSettingsSnapshot(): { record: unknown; fileAccess: FileAccessSettingsResult } {
 	let raw: string;
 	try { raw = fs.readFileSync(SETTINGS_FILE, "utf-8"); }
 	catch (error) {
-		return (error as NodeJS.ErrnoException).code === "ENOENT" && settingsAreAbsent()
+		const fileAccess: FileAccessSettingsResult = (error as NodeJS.ErrnoException).code === "ENOENT" && settingsAreAbsent()
 			? { ok: true, settings: { restricted: false, folders: [] } }
 			: { ok: false, error: FILE_ACCESS_ERROR };
+		return { record: null, fileAccess };
 	}
-	try { return fileAccessFromRecord(JSON.parse(raw)); }
-	catch { return { ok: false, error: FILE_ACCESS_ERROR }; }
+	try {
+		const record: unknown = JSON.parse(raw);
+		return { record, fileAccess: fileAccessFromRecord(record) };
+	} catch {
+		return { record: null, fileAccess: { ok: false, error: FILE_ACCESS_ERROR } };
+	}
+}
+
+export function readFileAccessSettings(): FileAccessSettingsResult {
+	return readSettingsSnapshot().fileAccess;
 }
 
 /** The persisted record, or null when none exists (first boot). Runs the
@@ -113,14 +122,19 @@ export function readSettings(): UserSettings | null {
 export function writeSettings(raw: unknown): UserSettings {
 	const settings = sanitizeUserSettings(raw);
 	if (!settings) throw new Error("settings record must be a JSON object");
-	if (!readFileAccessSettings().ok && settings.agent?.fileAccess === undefined) {
+	const { record, fileAccess } = readSettingsSnapshot();
+	if (!fileAccess.ok && settings.agent?.fileAccess === undefined) {
 		// A whole-file corruption cannot be carried by readSettings (null).
 		// Saving another preference repairs it into a BLOCKED policy unless
 		// the write explicitly supplies a valid file-access preference.
 		settings.agent = { ...settings.agent, fileAccess: { restricted: true, folders: [] } };
 	}
 	fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
-	writeFileAtomicSync(SETTINGS_FILE, JSON.stringify(settings, null, "\t"), { allowInPlaceFallback: true });
+	// Preserve the retired preference on disk when saving unrelated settings.
+	const persisted = record && typeof record === "object" && "dictation" in record
+		? { ...settings, dictation: record.dictation }
+		: settings;
+	writeFileAtomicSync(SETTINGS_FILE, JSON.stringify(persisted, null, "\t"), { allowInPlaceFallback: true });
 	return settings;
 }
 

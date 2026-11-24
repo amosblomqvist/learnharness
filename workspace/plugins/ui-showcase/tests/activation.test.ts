@@ -123,7 +123,7 @@ test("every required capability fails closed with no partial registrations or fa
 });
 
 test("Tree and Badge are required current-feature capabilities, never optional fallbacks", () => {
-  assert.equal(REQUIRED_UI_METHODS.length, 15);
+  assert.equal(REQUIRED_UI_METHODS.length, 14);
   assert.ok(REQUIRED_UI_METHODS.includes("mountBadge"));
   assert.ok(REQUIRED_UI_METHODS.includes("mountTree"));
   const ui = Object.fromEntries(REQUIRED_UI_METHODS.filter(method => method !== "mountTree").map(method => [method, () => {}])) as unknown as PluginUi;

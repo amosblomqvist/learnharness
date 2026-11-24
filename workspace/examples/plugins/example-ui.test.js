@@ -119,11 +119,10 @@ test("managed composer controls model/thinking/draft, creates explicitly, and cl
 	});
 	assert.equal(calls.some((c) => c.operation === "send"), false);
 	props.composer.onChange("A task");
-	props.dictation.onTranscript("with dictation");
-	assert.equal(props.composer.value, "A task with dictation");
+	assert.equal(props.composer.value, "A task");
 	assert.equal(props.composer.canSend, true);
 	await props.composer.onSend();
-	assert.equal(calls.find((c) => c.operation === "send").input.text, "A task with dictation");
+	assert.equal(calls.find((c) => c.operation === "send").input.text, "A task");
 	assert.equal(calls.find((c) => c.operation === "send").input.purpose, "user");
 	assert.equal(props.composer.value, "");
 	props.model.onChange({ provider: "offline", id: "another" });

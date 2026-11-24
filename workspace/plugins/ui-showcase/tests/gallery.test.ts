@@ -5,21 +5,21 @@ import { openSurfaceDemo } from "../src/surfaces.ts";
 import { Scope } from "../src/dom.ts";
 import { createFixture } from "./fixture.ts";
 
-const families = ["pickers", "composer", "dictation", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"];
+const families = ["pickers", "composer", "standard-composer", "buttons", "settings", "markdown", "tree", "worker-results", "menus", "dialogs", "surfaces"];
 function mounted() {
   const f = createFixture();
   const dispose = mountGallery(f.root, f.context, f.controller.signal);
   return { ...f, dispose };
 }
 
-test("single gallery, twelve families cover fifteen public APIs without backend/app/storage calls", () => {
+test("single gallery, eleven families cover fourteen public APIs without backend/app/storage calls", () => {
   const f = mounted();
   try {
     assert.deepEqual([...FAMILY_IDS], families);
     assert.equal(f.root.querySelectorAll('[data-showcase="gallery"]').length, 1);
     assert.deepEqual([...f.root.querySelectorAll("[data-family]")].map(node => (node as HTMLElement).dataset.family), families);
     for (const family of families) { f.find(`reset-${family}`, "mountButton"); assert.ok(f.root.querySelector(`[data-state="${family}"]`)); }
-    for (const method of ["mountModelPicker", "mountThinkingPicker", "mountKnowledgePicker", "mountComposer", "mountDictation", "mountStandardComposer", "mountButton", "mountBadge", "mountSettingsRows", "mountMarkdown", "mountTree", "mountWorkerResult"]) assert.ok(f.records.some(entry => entry.method === method), method);
+    for (const method of ["mountModelPicker", "mountThinkingPicker", "mountKnowledgePicker", "mountComposer", "mountStandardComposer", "mountButton", "mountBadge", "mountSettingsRows", "mountMarkdown", "mountTree", "mountWorkerResult"]) assert.ok(f.records.some(entry => entry.method === method), method);
     assert.deepEqual(f.calls, []);
     assert.equal(f.records.filter(entry => entry.method === "openSurface").length, 0, "Gallery surfaces open only after an explicit click");
     assert.equal(f.find("open-surface").props.label, "Open surface");
@@ -87,10 +87,9 @@ test("composer and standard composer Send/Stop are local controlled simulations"
     await composer.props.onSend(); await f.find("complete-composer").props.onClick(); assert.equal(composer.props.busy, false);
     const standard = f.find("standard-composer");
     assert.equal(standard.props.composer.canSend, undefined);
-    assert.equal(Object.hasOwn(standard.props.composer, "canSend"), false, "Native preset must retain text-or-active-dictation readiness fallback");
+    assert.equal(Object.hasOwn(standard.props.composer, "canSend"), false, "Native preset must retain native text readiness fallback");
     await standard.props.composer.onChange("standard local draft");
-    await standard.props.dictation.onTranscript("explicit unit transcript");
-    assert.match(standard.props.composer.value, /standard local draft\nexplicit unit transcript/);
+    assert.equal(standard.props.composer.value, "standard local draft");
     await standard.props.model.onChange({ provider: "custom", id: "fixture" });
     await standard.props.thinking.onChange("high");
     await standard.props.model.onChange({ provider: "custom", id: "other-fixture" });
@@ -101,21 +100,6 @@ test("composer and standard composer Send/Stop are local controlled simulations"
     await f.find("reset-composer").props.onClick(); assert.equal(f.find("composer").props.value, "");
     assert.match(standard.props.composer.value, /standard local draft/);
     assert.deepEqual(f.calls, []);
-  } finally { f.restore(); }
-});
-
-test("dictation never starts on mount/reset, transcripts stay local, abort ignores late delivery", async () => {
-  const f = mounted();
-  try {
-    const dictation = f.find("dictation");
-    assert.deepEqual(dictation.dictation, { toggle: 0, finish: 0, cancel: 0 });
-    await dictation.props.onTranscript("first"); await dictation.props.onTranscript("second");
-    assert.equal(f.state("dictation").transcript, "first\nsecond");
-    assert.equal(f.state("dictation").deliveries, 2);
-    await f.find("reset-dictation").props.onClick();
-    assert.deepEqual(f.find("dictation").dictation, { toggle: 0, finish: 0, cancel: 0 });
-    assert.equal(f.state("dictation").transcript, "");
-    await dictation.props.onTranscript("late"); assert.equal(f.state("dictation").transcript, "");
   } finally { f.restore(); }
 });
 

@@ -8,7 +8,6 @@ in-app cheat sheet. See [Getting started](getting-started.md) for setup.
 
 | Action | Binding |
 |---|---|
-| Toggle dictation | Mod+D |
 | Open settings | Mod+, |
 | Model selector | Mod+K |
 | Cycle thinking level | Shift+Tab |
@@ -56,13 +55,9 @@ handling; this is not a guarantee for every OS/IME or layout-specific key.
 - **Esc** acts on the active field or topmost surfaced layer first: for example,
   leave a field, dismiss a menu/dialog, or close Find. Handlers claim the event
   so one Esc does not also act on lower layers. With no layer claiming it, the
-  fallback closes the cheat sheet or cancels dictation (discarding its pending
-  transcript) before reaching the chat's confirmation to dismiss a pending
+  fallback closes the cheat sheet before reaching the chat's confirmation to dismiss a pending
   question/problem or abort a running turn. Confirmed turn abort signals the
   server, including for background turns; it also detaches any local stream.
-
-To keep dictated text, stop dictation with **Mod+D** / Stop rather than the
-fallback Esc cancellation.
 
 ## Enter and submission
 

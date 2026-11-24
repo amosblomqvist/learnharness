@@ -3,8 +3,7 @@
 import { Component, useEffect, useLayoutEffect, useRef, useSyncExternalStore, type ReactNode } from "react";
 import { createPortal } from "react-dom";
 import type { PluginBadgeProps, PluginButtonProps, PluginDialogProps, PluginMenuProps, PluginSurfaceProps, PluginSurfaceTarget, PluginUi, PluginWidgetHandle, PluginWidgetOptions } from "@/src/core";
-import type { Dictation } from "@/components/dictation";
-import { PluginComposer, PluginDictation, PluginStandardComposer } from "@/components/plugin-composer";
+import { PluginComposer, PluginStandardComposer } from "@/components/plugin-composer";
 import { PluginModelPicker, PluginThinkingPicker } from "@/components/plugin-model-picker";
 import { PluginKnowledgePicker } from "@/components/plugin-knowledge-picker";
 import { PluginSettingsRows } from "@/components/plugin-settings-rows";
@@ -186,17 +185,7 @@ export function createPluginUiStore() {
 				mountThinkingPicker: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginThinkingPicker {...props} onError={runtime.report} />),
 				mountKnowledgePicker: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginKnowledgePicker {...props} signal={runtime.signal} onError={runtime.report} />),
 				mountComposer: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginComposer {...props} onError={runtime.report} />),
-				mountStandardComposer: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginStandardComposer {...props} signal={runtime.signal} onError={runtime.report} />),
-				mountDictation: (target, props, options) => {
-					const actions: { current: Dictation | null } = { current: null };
-					const handle = mount(target, props, options, (props, runtime) => <PluginDictation {...props} actionRef={actions} signal={runtime.signal} onError={runtime.report} />);
-					return { ...handle,
-						toggle: () => { if (!lifetime.aborted && !options.signal.aborted) actions.current?.toggle(); },
-						cancel: () => actions.current?.cancel(),
-						finish: () => actions.current?.finish() ?? Promise.resolve(),
-						dispose: () => { actions.current?.cancel(); actions.current = null; handle.dispose(); },
-					};
-				},
+				mountStandardComposer: (target, props, options) => mount(target, props, options, (props, runtime) => <PluginStandardComposer {...props} onError={runtime.report} />),
 				mountButton: (target, props, options) => mount(target, props, options, (props, runtime) => <Button type="button"
 					variant={props.variant} colors={props.colors} size={props.size} disabled={props.disabled} title={props.title}
 					aria-label={props.iconOnly ? props.label : undefined} onClick={() => invoke(props.onClick, runtime.report)}>

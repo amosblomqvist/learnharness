@@ -185,7 +185,7 @@ test("pending → exact copy → submit → saved/answered copy never changes so
 	const root = createRoot(host);
 	try {
 		await act(async () => root.render(<QuestionDock toolName="probe" toolCallId="escaped_code" input={input} expanded
-			dictationClaim={false} onExpand={() => {}} onSubmit={result => { answer = result; }} />));
+			primaryDropTarget={false} onExpand={() => {}} onSubmit={result => { answer = result; }} />));
 		const copy = () => host.querySelector<HTMLButtonElement>('[aria-label="Copy code"]')!;
 		assert.ok(copy());
 		await act(async () => copy().click());

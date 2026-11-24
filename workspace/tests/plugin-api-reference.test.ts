@@ -77,7 +77,7 @@ it("the committed reference covers every real SDK public type/member and exactly
 			for (const name of methodNames) assert.ok(entry.members.some((member: { key: string }) => member.key === name || member.key.endsWith("." + name)), `${exported.name}.${name}`);
 		}
 	}
-	assert.ok(count >= 140, "an accidentally empty/partial SDK must not pass coverage");
+	assert.ok(count >= 138, "an accidentally empty/partial SDK must not pass coverage");
 	assert.equal(reference.inventory.reduce((n: number, entry: { exports: string[] }) => n + entry.exports.length, 0), count);
 	const committed = path.resolve("docs/plugin-api");
 	assert.deepEqual(fs.readdirSync(committed).sort(), [...reference.pages.keys()].sort());

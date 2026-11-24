@@ -9,18 +9,17 @@
  * - Tab is DEAD: browser tab-focus navigation is abandoned entirely. Tab
  *   does nothing; Shift+Tab alone cycles the thinking level.
  * - Esc is a layered dismiss: topmost popover (each popover stopPropagation's
- *   its own Esc) → dictation stop → abort in-flight turn.
+ *   its own Esc) → abort in-flight turn.
  * - The key map persists overrides in localStorage (`lh:keymap`, overrides
  *   only) merged over DEFAULT_BINDINGS — the settings wave adds the editor.
  *
  * Binding strings are normalized, cross-platform:
- *   "mod+d"    — mod = ⌘ on macOS, Ctrl elsewhere (both are accepted live)
+ *   "mod+f"    — mod = ⌘ on macOS, Ctrl elsewhere (both are accepted live)
  *   "shift+tab", "alt+arrowdown", "mod+shift+f", "?", "f2", "escape"
  * Order is fixed: mod, alt, shift, then the key.
  */
 
 export type KeyAction =
-	| "toggle-dictation"
 	| "open-model-picker"
 	| "cycle-thinking"
 	| "toggle-sidebar"
@@ -56,7 +55,6 @@ export interface KeyActionDef {
 }
 
 export const KEYBOARD_ACTIONS: readonly KeyActionDef[] = [
-	{ id: "toggle-dictation", label: "Toggle dictation", scope: "global", binding: "mod+d" },
 	{ id: "open-settings", label: "Open settings", scope: "global", binding: "mod+," },
 	{ id: "open-model-picker", label: "Model selector", scope: "global", binding: "mod+k" },
 	{ id: "cycle-thinking", label: "Cycle thinking level", scope: "global", binding: "shift+tab" },

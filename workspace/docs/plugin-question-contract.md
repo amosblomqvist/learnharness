@@ -9,7 +9,7 @@ separate [problem contract](plugin-problem-contract.md), not teaching enrollment
 ## 1. Scope and ownership
 
 The host owns canonical identity, saved contracts, validation/persistence/continuation,
-question cards/dock, fold/reveal, submission/dismissal, session stats, microphone/model
+question cards/dock, fold/reveal, submission/dismissal, session stats, model
 controls, optional thinking and check reading-thinking, and probe/teach positioning.
 The plugin owns payload/answer schemas, optional presentation, the answer editor,
 instructions for using its format, and optional generic grading/result presentation.
@@ -116,8 +116,7 @@ Submission binds stable question ID **and exact occurrence**, not only call ID. 
 plugin questions cannot be bypassed by ordinary text/Continue/Retry or legacy builtin
 answer/dismiss paths. Session settings/model changes remain possible.
 
-The host latches one attempt, finishes dictation, awaits editor transcript publication,
-rechecks occurrence/mount/readiness, resolves saved canonical schemas, validates/refines,
+The host latches one attempt, captures the current editor value, rechecks occurrence/mount/readiness, resolves saved canonical schemas, validates/refines,
 optionally grades, saves the genuine native result, then follows existing sibling/owed-turn
 continuation rules. Duplicate/stale attempts cannot save another answer or launch extra work.
 New hooks never retroactively change old saved acceptance requirements.
@@ -200,16 +199,16 @@ handle/publication; schema-valid falsy/empty values may qualify. Drafts need not
 the schema. `empty` keeps no value; use `unready` to retain incomplete text.
 
 Required handle: `update({answer,active})`, `focus()`, `dispose()`; optional
-`handleKeyDown(key): "handled" | "pass"`, `appendTranscript(text)` (sync/async).
+`handleKeyDown(key): "handled" | "pass"`.
 Apply controlled updates without echoing publication or resetting identical selection/
 composition. Async mounts/late callbacks are exact-occurrence/generation scoped: obsolete
-handles cannot publish, focus, consume keys or receive speech.
+handles cannot publish, focus, or consume keys.
 
 Keep mounts alive across folding, updating active state. Same-question canonical adoption
 must not remount. In-memory occurrence-keyed drafts survive remounts while the session model
 lives, not necessarily model destruction/reload/restart. No persistent draft format is added.
 
-## 8. Keyboard, dictation and native UI
+## 8. Keyboard and native UI
 
 Host Enter submits; Shift+Enter edits a newline; reserved Cmd/Ctrl+Enter submits subject
 to readiness/IME. Offer plain Tab, Enter, Shift+Enter and Escape to the active eligible
@@ -219,7 +218,7 @@ field (or blurs an editor-only chain), claiming that event without also discardi
 aborting. App shortcuts retain precedence, including Shift+Tab model-thinking cycling.
 No public shortcut registry.
 
-Outside the editor, after focused-field/dictation/layer handling, Escape uses native
+Outside the editor, after focused-field and layer handling, Escape uses native
 question-dismissal confirmation. Cancel/dialog Escape preserves drafts. Confirmation binds
 the exact occurrence/question; stale targets close without action, never retarget. Idle
 confirmation saves cancellation without teacher wake. During grading the silent dismissal
@@ -231,18 +230,12 @@ Composition/229 must not submit/cycle/run editing commands; preserve composing E
 native default while suppressing host routing. Covered/hidden/stale editors cannot claim.
 Keep the editor outside the submit footer's native form; no fabricated keyboard dispatch.
 
-Dictation goes to unrevealed check ReadingThinking; after reveal/open probe/predict it
-goes to host Thinking when enabled, otherwise explicit editor `appendTranscript` if
-provided. Without either, microphone stays visible/disabled, never routes to a hidden
-composer. Folding does not erase/redirect it. Finish before reveal/submit; transcript
-callbacks must publish before resolving. Settle/cancel obsolete capture destinations.
-
 Reuse native dock/card/stats/toolbar/reveal machinery, not a rewrite of builtin forms.
 Thinking uses the native frame with compact 40px minimum and natural growth. Healthy
 questions have no Dismiss; it is recovery-only. Unknown/sync-failed availability is not
 confirmed unavailability: show Preparing or readable content with Retry syncing, gate
 submission, and keep an admitted same-owner editor read-only until canonical readiness.
-Legitimate initial publications/transcript completion still settle under draft-ownership
+Legitimate initial publications still settle under draft-ownership
 checks while interaction is inactive.
 
 Opening height retargets from current geometry over remaining original animation time

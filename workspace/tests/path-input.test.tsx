@@ -387,7 +387,7 @@ test("immutable SSR fallback never stomps native edits, controlled updates, chip
 	assert.equal(f.root.dataset.empty, "true");
 });
 
-test("external dictation append/reset and drop at an unfocused saved selection", async () => {
+test("external append/reset and drop at an unfocused saved selection", async () => {
 	const f = await fixture("one two");
 	f.select(3);
 	f.doc.getElementById("elsewhere")!.focus();

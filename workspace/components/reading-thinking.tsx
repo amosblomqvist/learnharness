@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useLayoutEffect, useRef, useState, type RefObject } from "react";
-import { joinDictation, useDictationTarget } from "@/components/dictation";
+import { appendFilePathText, useFileDropTarget } from "@/components/file-drop-target";
 import { composingQuestionKey, pluginQuestionKeySuppressed } from "./plugin-question-keys";
 import { PathInput } from "@/components/path-input";
 import { useOptionalInteractionLayers } from "./interaction-layers";
@@ -16,33 +16,21 @@ import { isInteractionScopeEligible } from "./plugin-input-focus";
  * the check), rides the check answer as the SEPARATE `readingThinking`
  * channel (never conflated with the quiz thinking), and disappears with
  * the question.
- *
- * Dictation: while the check sits UNREVEALED this field is the primary
- * target (the dock releases its claim — dictated reading-thoughts land
- * here, not in the hidden quiz field); once the learner reveals the
- * check, the dock reclaims and this field is plain typing.
  */
 export function ReadingThinkingField({
 	value,
 	revision,
 	onChange,
-	onEscape,
 	onOpen,
-	claim,
+	primaryDropTarget,
 	inputRef,
 }: {
 	value: string;
 	revision: number;
 	onChange: (v: string) => void;
-	/** Esc in the field stops dictation (threaded from the page's hook). */
-	onEscape?: () => void;
-	/** The check waits CLOSED — Enter opens it (owner, keyboard round
-	 *  2026-10-06). The caller finishes any live dictation FIRST (the
-	 *  flush lands here — the field is the live claim), then reveals.
-	 *  Absent = the check is open: Enter keeps the dumping convention. */
+	/** Enter opens the check while it waits behind its reveal. */
 	onOpen?: () => void;
-	/** Primary dictation claim — true while the check is behind its reveal. */
-	claim: boolean;
+	primaryDropTarget: boolean;
 	inputRef?: RefObject<HTMLDivElement | null>;
 }) {
 	const controller = useOptionalInteractionLayers();
@@ -56,10 +44,7 @@ export function ReadingThinkingField({
 		setDraft(next);
 		onChange(next);
 	}, [onChange]);
-	useDictationTarget(
-		useCallback((text: string) => applyDraft(joinDictation(draftRef.current, text)), [applyDraft]),
-		claim,
-	);
+	useFileDropTarget((paths) => applyDraft(appendFilePathText(draftRef.current, paths)), { enabled: primaryDropTarget });
 	return (
 		<div
 			data-testid="reading-thinking-field"
@@ -86,18 +71,11 @@ export function ReadingThinkingField({
 					if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
 					if (e.key === "Escape") {
 						controller?.claimEscape(e);
-						// Esc stops dictation (the strip's rule) — claimed so the
-						// window chain doesn't also read it as abort-turn.
 						e.preventDefault();
 						e.stopPropagation();
-						onEscape?.();
 						return;
 					}
-					// ENTER OPENS THE WAITING CHECK (owner, keyboard round
-					// 2026-10-06): while the check sits closed, plain Enter
-					// (and the universal ⌘/Ctrl+Enter) opens it — the dictation
-					// flush lands HERE first via the caller's finishDictation,
-					// so spoken thoughts ride along. Shift+Enter stays a newline.
+					// Shift+Enter stays a newline.
 					if (e.key === "Enter" && onOpen !== undefined && (!e.shiftKey || e.metaKey || e.ctrlKey)) {
 						e.preventDefault();
 						e.stopPropagation();

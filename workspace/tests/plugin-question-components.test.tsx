@@ -1,4 +1,4 @@
-import React, { act, useRef, useState } from "react";
+import React, { act, useRef } from "react";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { parseHTML } from "linkedom";
@@ -8,7 +8,6 @@ import { createInteractionLayers } from "../components/interaction-layers.tsx";
 import { PluginQuestionDockContent } from "../components/plugin-question-dock.tsx";
 import type { PreparePluginQuestionSubmission } from "../components/plugin-submission-adapters.ts";
 import { ReadingThinkingField } from "../components/reading-thinking.tsx";
-import { DictationBar, useDictation, type Dictation } from "../components/dictation.tsx";
 import { capturePluginQuestionKey, pluginQuestionKeySuppressed } from "../components/plugin-question-keys.ts";
 import type { PluginQuestionDraft } from "../components/session-core.ts";
 import type { QuestionRendererRegistration } from "../components/plugin-manager.ts";
@@ -17,22 +16,11 @@ import type { PluginQuestionEditorProps, PluginQuestionEditorHandle, PluginQuest
 
 const saved: PluginQuestionSnapshot = { protocolVersion: 1, pluginId: "fixture", typeId: "code", label: "Code", variant: "probe", questionId: "q1", contractVersion: 1, occurrence: { messageId: "a", contentIndex: 0, toolCallId: "call", toolName: "code" }, input: { question: "Public question", payload: { reference: "PRIVATE_REFERENCE" } }, questionSchema: { type: "object" }, answerSchema: { type: "string" }, showThinking: false, requiresAnswerRefinement: false };
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { promise, resolve }; };
-class Socket extends EventTarget {
-	static CONNECTING = 0; static OPEN = 1; static all: Socket[] = [];
-	readyState = Socket.CONNECTING;
-	constructor() { super(); Socket.all.push(this); }
-	send() {} close() { this.readyState = 3; }
-	open() { this.readyState = Socket.OPEN; this.dispatchEvent(new Event("open")); }
-	end() { this.close(); this.dispatchEvent(Object.assign(new Event("close"), { code: 1000 })); }
-	final(text: string) { this.dispatchEvent(Object.assign(new Event("message"), { data: JSON.stringify({ type: "Results", is_final: true, channel: { alternatives: [{ transcript: text }] } }) })); }
-}
-class AudioGraph { state = "running"; destination = {}; audioWorklet = { addModule: async () => {} }; createMediaStreamSource() { return { connect() {}, disconnect() {} }; } }
-class Worklet { port = {}; connect() {} disconnect() {} }
 let cleanup: (() => Promise<void>) | undefined;
 let restore: (() => void) | undefined;
 afterEach(async () => { await cleanup?.(); restore?.(); cleanup = undefined; restore = undefined; });
 
-async function fixture(options: { prepareSubmission?: PreparePluginQuestionSubmission; keyboard?: boolean; thinking?: boolean; check?: boolean; missing?: boolean; available?: boolean; append?: boolean; asyncMount?: boolean; deferPublication?: boolean; ready?: boolean; reconciliation?: "ready" | "syncing" | "failed"; editorFails?: boolean; handleKeyDown?: PluginQuestionEditorHandle["handleKeyDown"]; question?: PluginQuestionRenderer["mountQuestion"] } = {}) {
+async function fixture(options: { prepareSubmission?: PreparePluginQuestionSubmission; keyboard?: boolean; thinking?: boolean; check?: boolean; missing?: boolean; available?: boolean; asyncMount?: boolean; deferPublication?: boolean; ready?: boolean; reconciliation?: "ready" | "syncing" | "failed"; editorFails?: boolean; handleKeyDown?: PluginQuestionEditorHandle["handleKeyDown"]; question?: PluginQuestionRenderer["mountQuestion"] } = {}) {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	let active: Element = dom.document.body;
 	Object.defineProperty(dom.document, "activeElement", { get: () => active });
@@ -40,34 +28,27 @@ async function fixture(options: { prepareSubmission?: PreparePluginQuestionSubmi
 	dom.window.HTMLElement.prototype.blur = function () { if (active === this) active = dom.document.body; };
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [key, value] of Object.entries({ React, window: dom.window, document: dom.document, Node: dom.window.Node, HTMLElement: dom.window.HTMLElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, ResizeObserver: class { observe() {} disconnect() {} },
-		navigator: { userAgent: "", platform: "", mediaDevices: { getUserMedia: async () => ({ getTracks: () => [{ stop() {} }] }) } }, WebSocket: Socket, AudioContext: AudioGraph, AudioWorkletNode: Worklet,
-		fetch: async (url: string) => { if (url === "/api/stt/token") return Response.json({ token: "fake" }); assert.equal(url, "/api/settings"); return Response.json({ settings: { version: 1, dictation: { language: "en" } } }); },
+		navigator: { userAgent: "", platform: "" },
 	})) { previous.set(key, Object.getOwnPropertyDescriptor(globalThis, key)); Object.defineProperty(globalThis, key, { configurable: true, writable: true, value }); }
 	restore = () => { for (const [key, descriptor] of previous) if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete (globalThis as Record<string, unknown>)[key]; };
-	Socket.all = [];
 	const draft: PluginQuestionDraft = { answer: { status: "empty" }, thinking: "", readingThinking: "" };
-	const state = { snapshot: { ...saved, showThinking: options.thinking ?? false, ...(options.check ? { variant: "teach" as const, input: { ...saved.input, type: "check" as const, nodeId: "node" } } : {}) }, expanded: !options.check, reveal: !!options.check, ready: options.ready ?? true, reconciliation: options.reconciliation ?? "ready" as "ready" | "syncing" | "failed", available: options.available ?? true, mic: false, sent: [] as ChatInput[], dismissed: 0, mounts: 0, disposed: 0, updates: [] as boolean[], speech: [] as string[], fallback: [] as string[] };
-	const mount = deferred<PluginQuestionEditorHandle>(); const delivery = deferred<void>();
+	const state = { snapshot: { ...saved, showThinking: options.thinking ?? false, ...(options.check ? { variant: "teach" as const, input: { ...saved.input, type: "check" as const, nodeId: "node" } } : {}) }, expanded: !options.check, reveal: !!options.check, ready: options.ready ?? true, reconciliation: options.reconciliation ?? "ready" as "ready" | "syncing" | "failed", available: options.available ?? true, sent: [] as ChatInput[], dismissed: 0, mounts: 0, disposed: 0, updates: [] as boolean[] };
+	const mount = deferred<PluginQuestionEditorHandle>();
 	let editorProps!: PluginQuestionEditorProps;
 	let registration: QuestionRendererRegistration | undefined = options.missing ? undefined : { pluginId: "fixture", renderer: { id: "code", supportedContractVersions: [1], ...(options.question ? { mountQuestion: options.question } : {}), mountAnswerEditor(container, props) {
 		state.mounts++; editorProps = props;
 		if (options.editorFails) throw new Error("PRIVATE_EDITOR_FAILURE");
 		const textarea = container.ownerDocument.createElement("textarea"); textarea.id = "plugin-editor"; container.append(textarea);
 		if (!options.deferPublication) props.onChange({ status: "ready", value: "  code\n" });
-		const handle: PluginQuestionEditorHandle = { ...(options.handleKeyDown ? { handleKeyDown: options.handleKeyDown } : {}), update(value) { state.updates.push(value.active); }, focus() { textarea.focus(); }, dispose() { state.disposed++; },
-			...(options.append ? { async appendTranscript(text: string) { state.speech.push(text); await delivery.promise; props.onChange({ status: "ready", value: `  code\n${text}` }); } } : {}) };
+		const handle: PluginQuestionEditorHandle = { ...(options.handleKeyDown ? { handleKeyDown: options.handleKeyDown } : {}), update(value) { state.updates.push(value.active); }, focus() { textarea.focus(); }, dispose() { state.disposed++; } };
 		if (options.asyncMount) return mount.promise; return handle;
 	} } };
-	let dictation!: Dictation;
 	function Harness() {
 		const reading = useRef<HTMLDivElement>(null);
-		const [mic, setMic] = useState(false); state.mic = mic;
-		dictation = useDictation({ append: text => { state.fallback.push(text); }, disabled: !mic });
 		return <>
-			{options.check && <ReadingThinkingField inputRef={reading} value={draft.readingThinking} revision={0} onChange={value => { draft.readingThinking = value; }} claim={state.reveal} />}
-			<PluginQuestionDockContent snapshot={state.snapshot} chatId="chat" draft={draft} expanded={state.expanded} reveal={state.reveal} ready={state.ready} reconciliation={state.reconciliation} available={state.available} registration={registration} readingRef={reading} onMicAvailable={setMic}
+			{options.check && <ReadingThinkingField inputRef={reading} value={draft.readingThinking} revision={0} onChange={value => { draft.readingThinking = value; }} primaryDropTarget={state.reveal} />}
+			<PluginQuestionDockContent snapshot={state.snapshot} chatId="chat" draft={draft} expanded={state.expanded} reveal={state.reveal} ready={state.ready} reconciliation={state.reconciliation} available={state.available} registration={registration} readingRef={reading}
 				prepareSubmission={options.prepareSubmission} onExpand={() => { state.reveal = false; state.expanded = true; }} send={async input => { state.sent.push(input); return true; }} dismiss={async () => { state.dismissed++; }} />
-			<DictationBar dictation={dictation} disabled={!mic} />
 			{options.keyboard && <AppRouterContext.Provider value={{ bfcacheId: "plugin-question-fixture", back() {}, forward() {}, refresh() {}, push() {}, replace() {}, prefetch() {} }}><KeyboardShortcuts /></AppRouterContext.Provider>}
 		</>;
 	}
@@ -76,7 +57,7 @@ async function fixture(options: { prepareSubmission?: PreparePluginQuestionSubmi
 	cleanup = async () => { await act(async () => { root.unmount(); }); };
 	await render();
 	const commandSubmit = async () => { await act(async () => { capturePluginQuestionKey({ key: "Enter", ctrlKey: true, target: document.getElementById("plugin-editor"), preventDefault() {} } as unknown as KeyboardEvent); }); };
-	return { state, draft, render, delivery, mount, get registration() { return registration; }, replaceRegistration(next: QuestionRendererRegistration | undefined) { registration = next; }, commandSubmit, get editorProps() { return editorProps; }, get dictation() { return dictation; }, get socket() { return Socket.all.at(-1)!; } };
+	return { state, draft, render, mount, get registration() { return registration; }, replaceRegistration(next: QuestionRendererRegistration | undefined) { registration = next; }, commandSubmit, get editorProps() { return editorProps; } };
 }
 
 test("silent plugin preparation keeps its submit latch and current draft without adding progress controls", async () => {
@@ -99,7 +80,7 @@ test("missing renderer keeps safe public fallback, thinking drafts and dismiss; 
 	const f = await fixture({ missing: true, thinking: true });
 	assert.match(document.body.textContent ?? "", /Public question/); assert.match(document.body.textContent ?? "", /Question unavailable/);
 	assert.doesNotMatch(document.body.textContent ?? "", /PRIVATE_REFERENCE/);
-	assert.ok(document.querySelector('[type="submit"]')!.hasAttribute("disabled")); assert.equal(f.state.mic, true);
+	assert.ok(document.querySelector('[type="submit"]')!.hasAttribute("disabled"));
 	await act(async () => { (Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Dismiss question") as HTMLElement).click(); });
 	assert.equal(f.state.dismissed, 1); assert.equal(f.state.sent.length, 0);
 });
@@ -305,7 +286,7 @@ test("a pending unadopted editor cannot claim Escape or move focus", async () =>
 });
 
 test("folding/canonical replacement preserve editor generation, active updates and ready-state drafts", async () => {
-	const f = await fixture(); assert.equal(f.state.mounts, 1); assert.equal(f.state.mic, false);
+	const f = await fixture(); assert.equal(f.state.mounts, 1);
 	assert.equal(document.querySelector('[data-testid="thinking-field"]'), null);
 	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "Dismiss question"), false, "healthy no-thinking questions have no dismissal action either");
 	f.state.expanded = false; await f.render(); assert.equal(f.state.updates.at(-1), false); await f.commandSubmit(); assert.equal(f.state.sent.length, 0);
@@ -343,78 +324,6 @@ test("asynchronous mount is never answer-ready before adoption and stale callbac
 	await f.commandSubmit(); assert.equal(f.state.sent.length, 0);
 });
 
-test("explicit answer-speech opt-in awaits final STT delivery before reading refs and submitting", async () => {
-	const f = await fixture({ append: true }); assert.equal(f.state.mic, true);
-	await act(async () => { f.dictation.toggle(); });
-	await act(async () => { f.socket.open(); f.socket.final("first"); });
-	await f.commandSubmit(); assert.equal(f.dictation.phase, "stopping"); assert.equal(f.state.sent.length, 0);
-	await act(async () => { f.socket.final("tail"); f.socket.end(); });
-	assert.deepEqual(f.state.speech, ["first tail"]); assert.equal(f.state.sent.length, 0);
-	await act(async () => { f.delivery.resolve(); });
-	assert.equal(f.state.sent.length, 1); const input = f.state.sent[0]!;
-	assert.equal(input.type, "plugin-question-answer"); if (input.type === "plugin-question-answer") { assert.equal(input.answer, "  code\nfirst tail"); assert.equal("thinking" in input, false); }
-	assert.deepEqual(f.state.fallback, []);
-});
-
-test("in-flight editor speech cannot publish or submit while its retained generation is unconfirmed", async () => {
-	const f = await fixture({ append: true });
-	await act(async () => { f.dictation.toggle(); });
-	await act(async () => { f.socket.open(); f.socket.final("in flight"); });
-	await f.commandSubmit();
-	await act(async () => { f.socket.end(); });
-	assert.deepEqual(f.state.speech, ["in flight"]); assert.equal(f.state.sent.length, 0);
-	f.state.reconciliation = "syncing"; f.state.ready = false; f.state.available = false; await f.render();
-	assert.equal(f.state.disposed, 0);
-	await act(async () => { f.delivery.resolve(); });
-	assert.deepEqual(f.draft.answer, { status: "ready", value: "  code\n" });
-	assert.equal(f.state.sent.length, 0); assert.equal(f.state.disposed, 0);
-});
-
-for (const reconciliation of ["syncing", "failed"] as const) test(`current answer capture starts final delivery during ${reconciliation} without losing or replaying its draft`, async () => {
-	const f = await fixture({ append: true });
-	await act(async () => { f.dictation.toggle(); }); const socket = f.socket;
-	await act(async () => { socket.open(); socket.final("first"); });
-	f.state.reconciliation = reconciliation; f.state.ready = false; await f.render();
-	assert.equal(f.state.available, true, "cached authority still belongs to this admitted current owner");
-	assert.equal(f.state.updates.at(-1), false); assert.equal(f.dictation.phase, "recording");
-	await act(async () => { f.dictation.stop(); });
-	await act(async () => { socket.final("tail"); socket.end(); });
-	assert.deepEqual(f.state.speech, ["first tail"], "read-only current owner still receives its already-captured final");
-	assert.equal(f.state.sent.length, 0);
-	await act(async () => { f.delivery.resolve(); });
-	const expected = "  code\nfirst tail";
-	assert.deepEqual(f.draft.answer, { status: "ready", value: expected });
-	await f.commandSubmit(); assert.equal(f.state.sent.length, 0, "canonical submission remains gated");
-	f.state.reconciliation = "ready"; f.state.ready = true; await f.render();
-	await act(async () => { await f.dictation.finish(); socket.end(); });
-	assert.deepEqual(f.state.speech, ["first tail"]); assert.deepEqual(f.draft.answer, { status: "ready", value: expected });
-	await f.commandSubmit(); const input = f.state.sent[0]!;
-	assert.equal(input.type, "plugin-question-answer"); if (input.type === "plugin-question-answer") assert.equal(input.answer, expected);
-	assert.equal(f.state.sent.length, 1); assert.equal(f.state.mounts, 1);
-});
-
-for (const reconciliation of ["syncing", "failed"] as const) test(`in-flight answer publication completes during ${reconciliation} without losing its current-owner final`, async () => {
-	const f = await fixture({ append: true });
-	await act(async () => { f.dictation.toggle(); }); const socket = f.socket;
-	await act(async () => { socket.open(); socket.final("first"); });
-	await f.commandSubmit();
-	await act(async () => { socket.final("tail"); socket.end(); });
-	assert.deepEqual(f.state.speech, ["first tail"]);
-	assert.deepEqual(f.draft.answer, { status: "ready", value: "  code\n" }, "plugin publication is still awaiting its async delivery");
-	f.state.reconciliation = reconciliation; f.state.ready = false; await f.render();
-	assert.equal(f.state.available, true); assert.equal(f.state.disposed, 0); assert.equal(f.state.updates.at(-1), false);
-	await act(async () => { f.delivery.resolve(); });
-	const expected = "  code\nfirst tail";
-	assert.deepEqual(f.draft.answer, { status: "ready", value: expected });
-	assert.equal(f.state.sent.length, 0, "the pending submit must not POST while canonical state is unknown");
-	f.state.reconciliation = "ready"; f.state.ready = true; await f.render();
-	await act(async () => { await f.dictation.finish(); });
-	assert.deepEqual(f.state.speech, ["first tail"]); assert.deepEqual(f.draft.answer, { status: "ready", value: expected });
-	await f.commandSubmit(); const input = f.state.sent[0]!;
-	assert.equal(input.type, "plugin-question-answer"); if (input.type === "plugin-question-answer") assert.equal(input.answer, expected);
-	assert.equal(f.state.sent.length, 1); assert.equal(f.state.mounts, 1);
-});
-
 test("an admitted async editor keeps its first current-owner publication and adoption during reconciliation", async () => {
 	const f = await fixture({ asyncMount: true, deferPublication: true }); const props = f.editorProps;
 	assert.deepEqual(f.draft.answer, { status: "empty" }); assert.equal(f.state.mounts, 1);
@@ -435,74 +344,27 @@ test("an admitted async editor keeps its first current-owner publication and ado
 	assert.equal(f.state.sent.length, 1);
 });
 
-test("thinking-on speech stays host-owned, empty thinking remains an applicable answer channel", async () => {
-	const f = await fixture({ append: true, thinking: true });
-	await f.commandSubmit(); let input = f.state.sent[0]!; if (input.type === "plugin-question-answer") assert.equal(input.thinking, "");
-	f.state.sent.length = 0;
-	await act(async () => { f.dictation.toggle(); }); await act(async () => { f.socket.open(); f.socket.final("thinking"); });
-	await f.commandSubmit(); await act(async () => { f.socket.final("tail"); f.socket.end(); });
-	input = f.state.sent[0]!; assert.equal(input.type, "plugin-question-answer"); if (input.type === "plugin-question-answer") { assert.equal(input.answer, "  code\n"); assert.equal(input.thinking, "thinking tail"); }
-	assert.deepEqual(f.state.speech, []); assert.deepEqual(f.state.fallback, []);
-});
-
-for (const transition of [
-	{ label: "syncing with unknown availability", reconciliation: "syncing", ready: false, available: false },
-	{ label: "failed canonical read with unknown availability", reconciliation: "failed", ready: false, available: false },
-	{ label: "interaction not ready during compaction", reconciliation: "ready", ready: false, available: true },
-	{ label: "plugin unavailable", reconciliation: "ready", ready: true, available: false },
-] as const) test(`active host-thinking capture retains its final exactly once during ${transition.label}`, async () => {
-	const f = await fixture({ thinking: true, append: true });
-	f.draft.thinking = "  existing thought";
-	await act(async () => { f.dictation.toggle(); });
-	const socket = f.socket;
-	await act(async () => { socket.open(); socket.final("first"); });
-	assert.equal(f.dictation.phase, "recording");
-	assert.equal(f.draft.thinking, "  existing thought", "the active capture still buffers its final");
-	Object.assign(f.state, transition); await f.render();
-	assert.equal(f.dictation.phase, "recording", "ordinary readiness changes do not revoke the host destination");
-	await act(async () => { f.dictation.stop(); });
-	assert.equal(f.dictation.phase, "stopping");
-	await act(async () => { socket.final("tail"); socket.end(); });
-	const expected = "  existing thought first tail";
-	assert.equal(f.dictation.phase, "idle");
-	assert.equal(f.draft.thinking, expected, "final delivery updates the same host draft despite readiness gates");
-	assert.deepEqual(f.state.speech, []); assert.deepEqual(f.state.fallback, []); assert.equal(f.state.sent.length, 0);
-	f.state.reconciliation = "ready"; f.state.ready = true; f.state.available = true; await f.render();
-	await act(async () => { await f.dictation.finish(); socket.end(); });
-	assert.equal(f.draft.thinking, expected, "resuming and repeated finish do not replay a delivered final");
-	await f.commandSubmit();
-	const input = f.state.sent[0]!; assert.equal(input.type, "plugin-question-answer");
-	if (input.type === "plugin-question-answer") assert.equal(input.thinking, expected);
-	assert.equal(f.state.sent.length, 1);
-});
-
-for (const change of ["question key", "reveal"] as const) test(`host-thinking capture is still discarded after ${change} changes its destination`, async () => {
-	const f = await fixture({ thinking: true }); f.draft.thinking = "keep this draft";
-	await act(async () => { f.dictation.toggle(); }); const socket = f.socket;
-	await act(async () => { socket.open(); socket.final("obsolete first"); });
-	assert.equal(f.dictation.phase, "recording");
-	if (change === "question key") f.state.snapshot = { ...f.state.snapshot, occurrence: { ...f.state.snapshot.occurrence, messageId: "new question" } };
-	else f.state.reveal = true;
+test("a check retains reading thoughts after reveal and sends them with the typed answer", async () => {
+	const f = await fixture({ check: true });
+	assert.equal(f.state.mounts, 0);
+	const reading = document.querySelector('[data-testid="reading-thinking-field"] [data-file-path-input]')!;
+	await act(async () => {
+		reading.textContent = "reading before reveal";
+		reading.dispatchEvent(new window.Event("input", { bubbles: true }));
+	});
+	const reveal = document.querySelector<HTMLButtonElement>('[data-testid="teach-check-reveal"]')!;
+	await act(async () => reveal.click());
 	await f.render();
-	assert.equal(f.dictation.phase, "idle"); assert.equal(f.dictation.active, false);
-	await act(async () => { socket.final("obsolete tail"); socket.end(); });
-	assert.equal(f.draft.thinking, "keep this draft");
-	assert.deepEqual(f.state.fallback, []); assert.equal(f.state.sent.length, 0);
+	assert.equal(f.state.expanded, true);
+	assert.equal(f.state.mounts, 1);
+	await f.commandSubmit();
+	const input = f.state.sent[0]!;
+	assert.equal(input.type, "plugin-question-answer");
+	if (input.type === "plugin-question-answer") {
+		assert.equal(input.readingThinking, "reading before reveal");
+		assert.equal("thinking" in input, false);
+	}
 });
-
-test("unrevealed check finishes reading speech before reveal, then shows disabled mic without opt-in", async () => {
-	const f = await fixture({ check: true }); assert.equal(f.state.mic, true); assert.equal(f.state.mounts, 0, "no plugin slot runs before check reveal");
-	await act(async () => { f.dictation.toggle(); }); await act(async () => { f.socket.open(); f.socket.final("reading"); });
-	await act(async () => { (document.querySelector('[data-testid="teach-check-reveal"]') as HTMLElement).click(); });
-	assert.equal(f.state.reveal, true); assert.equal(f.dictation.phase, "stopping");
-	await act(async () => { f.socket.final("tail"); f.socket.end(); });
-	assert.equal(f.draft.readingThinking, "reading tail"); assert.equal(f.state.reveal, false);
-	await f.render(); assert.equal(f.state.mic, false); assert.ok(document.querySelector('[data-testid="reading-thinking-field"]'));
-	const mic = Array.from(document.querySelectorAll("button")).find(button => button.textContent?.includes("Dictate")); assert.ok(mic); assert.equal(mic.hasAttribute("disabled"), true);
-	await f.commandSubmit(); const input = f.state.sent[0]!; if (input.type === "plugin-question-answer") { assert.equal(input.readingThinking, "reading tail"); assert.equal("thinking" in input, false); }
-	assert.deepEqual(f.state.fallback, []);
-});
-
 
 for (const check of [false, true]) test(`healthy ${check ? "teach" : "probe"} thinking uses the native framed field without Dismiss`, async () => {
 	const f = await fixture({ thinking: true, check });
@@ -593,13 +455,4 @@ test("late custom-presentation cleanup cannot erase a replacement slot", async (
 	await f.render(); assert.match(document.body.textContent ?? "", /new presentation/);
 	await act(async () => { oldCleanup.resolve(() => { oldContainer.replaceChildren(); }); });
 	assert.match(document.body.textContent ?? "", /new presentation/);
-});
-
-test("renderer replacement cancels an old capture rather than delivering it to the new editor", async () => {
-	const f = await fixture({ append: true });
-	await act(async () => { f.dictation.toggle(); }); await act(async () => { f.socket.open(); f.socket.final("old editor speech"); });
-	const replacementSpeech: string[] = [];
-	f.replaceRegistration({ ...f.registration!, renderer: { ...f.registration!.renderer, mountAnswerEditor(_container, props) { props.onChange({ status: "ready", value: "new" }); return { update() {}, focus() {}, dispose() {}, appendTranscript(text) { replacementSpeech.push(text); } }; } } });
-	await f.render();
-	assert.equal(f.dictation.active, false); assert.deepEqual(replacementSpeech, []); assert.deepEqual(f.state.speech, []); assert.deepEqual(f.state.fallback, []);
 });

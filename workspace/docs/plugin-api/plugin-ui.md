@@ -10,8 +10,6 @@
 - [PluginButtonProps](#pluginbuttonprops)
 - [PluginComposerProps](#plugincomposerprops)
 - [PluginDialogProps](#plugindialogprops)
-- [PluginDictationHandle](#plugindictationhandle)
-- [PluginDictationProps](#plugindictationprops)
 - [PluginKnowledgePickerProps](#pluginknowledgepickerprops)
 - [PluginMarkdownProps](#pluginmarkdownprops)
 - [PluginMenuItem](#pluginmenuitem)
@@ -382,90 +380,6 @@ onClose?: () => void | Promise<void>;
 ```
 
 **Returns:** `void \| Promise<void>`.
-
-## PluginDictationHandle
-
-Public SDK type, exported as `PluginDictationHandle`. Import with `import type`; the SDK has no runtime exports.
-
-```ts
-export interface PluginDictationHandle extends PluginWidgetHandle<PluginDictationProps> {
-    toggle(): void;
-    finish(): Promise<void>;
-    cancel(): void;
-}
-```
-
-**Related types:** [PluginDictationProps](plugin-ui.md#plugindictationprops), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle).
-
-**Member index** (including nested object members; inherited members are defined in the linked base types):
-
-- [toggle](#plugindictationhandle-toggle)
-- [finish](#plugindictationhandle-finish)
-- [cancel](#plugindictationhandle-cancel)
-
-### PluginDictationHandle toggle
-
-Start recording when idle, or stop and keep speech when active. One recording
-owner is allowed per window; a competing start reports an error.
-
-```ts
-toggle(): void;
-```
-
-**Returns:** `void`.
-
-### PluginDictationHandle finish
-
-Stop this recording and await transcript delivery before sending. Does not
-start capture when idle; delivery failures can reject. This does not send a
-message or update a hidden native composer.
-
-```ts
-finish(): Promise<void>;
-```
-
-**Returns:** `Promise<void>`.
-
-### PluginDictationHandle cancel
-
-Cancel capture and discard buffered speech rather than flushing it. Does not
-undo text already delivered through onTranscript. Disposal/abort also cancels.
-
-```ts
-cancel(): void;
-```
-
-**Returns:** `void`.
-
-## PluginDictationProps
-
-Public SDK type, exported as `PluginDictationProps`. Import with `import type`; the SDK has no runtime exports.
-
-```ts
-export interface PluginDictationProps {
-    disabled?: boolean;
-    onTranscript: PluginUiCallback<string>;
-}
-```
-
-**Related types:** [PluginUiCallback](plugin-ui.md#pluginuicallback).
-
-**Member index** (including nested object members; inherited members are defined in the linked base types):
-
-- [disabled](#plugindictationprops-disabled)
-- [onTranscript](#plugindictationprops-ontranscript)
-
-### PluginDictationProps disabled
-
-```ts
-disabled?: boolean;
-```
-
-### PluginDictationProps onTranscript
-
-```ts
-onTranscript: PluginUiCallback<string>;
-```
 
 ## PluginKnowledgePickerProps
 
@@ -872,18 +786,16 @@ export interface PluginStandardComposerProps {
     composer: PluginComposerProps;
     model: PluginModelPickerProps;
     thinking: PluginThinkingPickerProps;
-    dictation: PluginDictationProps;
 }
 ```
 
-**Related types:** [PluginComposerProps](plugin-ui.md#plugincomposerprops), [PluginDictationProps](plugin-ui.md#plugindictationprops), [PluginModelPickerProps](plugin-ui.md#pluginmodelpickerprops), [PluginThinkingPickerProps](plugin-ui.md#pluginthinkingpickerprops).
+**Related types:** [PluginComposerProps](plugin-ui.md#plugincomposerprops), [PluginModelPickerProps](plugin-ui.md#pluginmodelpickerprops), [PluginThinkingPickerProps](plugin-ui.md#pluginthinkingpickerprops).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [composer](#pluginstandardcomposerprops-composer)
 - [model](#pluginstandardcomposerprops-model)
 - [thinking](#pluginstandardcomposerprops-thinking)
-- [dictation](#pluginstandardcomposerprops-dictation)
 
 ### PluginStandardComposerProps composer
 
@@ -901,12 +813,6 @@ model: PluginModelPickerProps;
 
 ```ts
 thinking: PluginThinkingPickerProps;
-```
-
-### PluginStandardComposerProps dictation
-
-```ts
-dictation: PluginDictationProps;
 ```
 
 ## PluginSurfaceProps
@@ -1058,7 +964,6 @@ export interface PluginUi {
     mountThinkingPicker(container: HTMLElement, props: PluginThinkingPickerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginThinkingPickerProps>;
     mountKnowledgePicker(container: HTMLElement, props: PluginKnowledgePickerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginKnowledgePickerProps>;
     mountComposer(container: HTMLElement, props: PluginComposerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginComposerProps>;
-    mountDictation(container: HTMLElement, props: PluginDictationProps, options: PluginWidgetOptions): PluginDictationHandle;
     mountStandardComposer(container: HTMLElement, props: PluginStandardComposerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginStandardComposerProps>;
     mountButton(container: HTMLElement, props: PluginButtonProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginButtonProps>;
     mountBadge(container: HTMLElement, props: PluginBadgeProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginBadgeProps>;
@@ -1073,7 +978,7 @@ export interface PluginUi {
 }
 ```
 
-**Related types:** [PluginBadgeProps](plugin-ui.md#pluginbadgeprops), [PluginButtonProps](plugin-ui.md#pluginbuttonprops), [PluginComposerProps](plugin-ui.md#plugincomposerprops), [PluginDialogProps](plugin-ui.md#plugindialogprops), [PluginDictationHandle](plugin-ui.md#plugindictationhandle), [PluginDictationProps](plugin-ui.md#plugindictationprops), [PluginKnowledgePickerProps](plugin-ui.md#pluginknowledgepickerprops), [PluginMarkdownProps](plugin-ui.md#pluginmarkdownprops), [PluginMenuProps](plugin-ui.md#pluginmenuprops), [PluginModelPickerProps](plugin-ui.md#pluginmodelpickerprops), [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginStandardComposerProps](plugin-ui.md#pluginstandardcomposerprops), [PluginSurfaceProps](plugin-ui.md#pluginsurfaceprops), [PluginSurfaceTarget](plugin-ui.md#pluginsurfacetarget), [PluginThinkingPickerProps](plugin-ui.md#pluginthinkingpickerprops), [PluginTreeProps](plugin-tree.md#plugintreeprops), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle), [PluginWidgetOptions](plugin-ui.md#pluginwidgetoptions), [PluginWorkerResultProps](plugin-ui.md#pluginworkerresultprops).
+**Related types:** [PluginBadgeProps](plugin-ui.md#pluginbadgeprops), [PluginButtonProps](plugin-ui.md#pluginbuttonprops), [PluginComposerProps](plugin-ui.md#plugincomposerprops), [PluginDialogProps](plugin-ui.md#plugindialogprops), [PluginKnowledgePickerProps](plugin-ui.md#pluginknowledgepickerprops), [PluginMarkdownProps](plugin-ui.md#pluginmarkdownprops), [PluginMenuProps](plugin-ui.md#pluginmenuprops), [PluginModelPickerProps](plugin-ui.md#pluginmodelpickerprops), [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginStandardComposerProps](plugin-ui.md#pluginstandardcomposerprops), [PluginSurfaceProps](plugin-ui.md#pluginsurfaceprops), [PluginSurfaceTarget](plugin-ui.md#pluginsurfacetarget), [PluginThinkingPickerProps](plugin-ui.md#pluginthinkingpickerprops), [PluginTreeProps](plugin-tree.md#plugintreeprops), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle), [PluginWidgetOptions](plugin-ui.md#pluginwidgetoptions), [PluginWorkerResultProps](plugin-ui.md#pluginworkerresultprops).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -1081,7 +986,6 @@ export interface PluginUi {
 - [mountThinkingPicker](#pluginui-mountthinkingpicker)
 - [mountKnowledgePicker](#pluginui-mountknowledgepicker)
 - [mountComposer](#pluginui-mountcomposer)
-- [mountDictation](#pluginui-mountdictation)
 - [mountStandardComposer](#pluginui-mountstandardcomposer)
 - [mountButton](#pluginui-mountbutton)
 - [mountBadge](#pluginui-mountbadge)
@@ -1148,8 +1052,7 @@ mountKnowledgePicker(container: HTMLElement, props: PluginKnowledgePickerProps, 
 ### PluginUi mountComposer
 
 Mount a controlled text composer with send/stop callbacks and return its
-handle. No default attachment/drop handling or model dispatch is added;
-standalone users coordinate dictation completion themselves.
+handle. Attachment/drop handling and model dispatch are owned by the caller.
 
 ```ts
 mountComposer(container: HTMLElement, props: PluginComposerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginComposerProps>;
@@ -1163,29 +1066,10 @@ mountComposer(container: HTMLElement, props: PluginComposerProps, options: Plugi
 
 **Returns:** `PluginWidgetHandle<PluginComposerProps>`.
 
-### PluginUi mountDictation
-
-Mount native dictation into onTranscript only; returns update/dispose plus
-toggle/finish/cancel controls. Abort/dispose cancels capture. Speech never
-targets a hidden native composer; recording ownership is per window.
-
-```ts
-mountDictation(container: HTMLElement, props: PluginDictationProps, options: PluginWidgetOptions): PluginDictationHandle;
-```
-
-| Parameter | Type |
-| --- | --- |
-| `container` | `HTMLElement` |
-| `props` | `PluginDictationProps` |
-| `options` | `PluginWidgetOptions` |
-
-**Returns:** `PluginDictationHandle`.
-
 ### PluginUi mountStandardComposer
 
-Mount text entry with model/thinking/dictation controls. Finishes dictation
-before onSend; no attachment, usage or practice controls are included. Returns
-a controlled handle; replace whole nested control props on update.
+Mount text entry with model and thinking controls. Returns a controlled
+handle. Replace whole nested control props on update.
 
 ```ts
 mountStandardComposer(container: HTMLElement, props: PluginStandardComposerProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginStandardComposerProps>;

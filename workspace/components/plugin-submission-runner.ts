@@ -36,7 +36,7 @@ export class SubmissionModelEpoch {
 	isCurrent(revision: number) { return revision === this.revision; }
 }
 
-/** One native-view lease. Reservation precedes STT/editor awaits; release is
+/** One native-view lease. Reservation precedes input preparation; release is
  * HTTP acknowledgment/refusal, deliberately NOT model stream completion. */
 export class PluginSubmissionRunner {
 	private active: SubmissionAttempt | null = null;

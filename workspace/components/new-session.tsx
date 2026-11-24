@@ -1,15 +1,13 @@
 "use client";
 import { useAttachmentUploadPending } from "@/components/attach-files-button";
 
-import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
+import { useCallback, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
 import { SurfaceRegion, usePageSurfaceBoundary, useSurfaceChromeStyle } from "./plugin-surfaces";
 import { Conversation, ConversationContent, ConversationEmptyState } from "@/components/ai-elements/conversation";
 import { Composer } from "@/components/composer";
-import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
+import { appendFilePathText, useFileDropTarget } from "@/components/file-drop-target";
 import { useFieldCycle } from "@/components/field-cycle";
-import { useOptionalInteractionLayers } from "./interaction-layers";
-import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { SidebarToggle } from "@/components/sidebar";
 import { SetupDialog } from "@/components/setup-dialog";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
@@ -69,9 +67,6 @@ export async function startDraftSession(
 
 /** The pure shell (no router) — the render-test seam: the draft view's
  *  visible surface, assembled from the same pieces a fresh chat shows. */
-/* FINISH-FIRST SEND + RUN-END FOCUS live in the shell (it owns the
- * dictation instance); the truth of the text stays in the parent, whose
- * send reads a REF mirror — see NewSession below. */
 export function DraftShell({
 	busy,
 	text,
@@ -112,53 +107,21 @@ export function DraftShell({
 	 *  Passed as a node so the pick state stays in NewSession. */
 	overlay?: ReactNode;
 }) {
-	const controller = useOptionalInteractionLayers();
 	const pathname = usePathname();
 	const bodyRef = useRef<HTMLDivElement>(null);
 	const surfaceTarget = usePageSurfaceBoundary({ active: pathname === "/chat/new", viewKey: "/chat/new", bodyRef });
 	const chromeStyle = useSurfaceChromeStyle(surfaceTarget);
-	// Voice dictation (STT wave, 2026-09-17): finals append at the end of the
-	// draft text (via the parent's onChange — the truth lives there); the
-	// strip lives in the stats bar's middle slot.
 	// Tab navigates INTO the composer (owner, keyboard round 2026-10-06):
 	// the only text field on this surface — the cycle's whole chain.
 	const cycleComposer = useCallback((): readonly HTMLElement[] =>
 		Array.from(document.querySelectorAll<HTMLElement>('[data-testid="composer"] [data-file-path-input]')),
 		[]);
 	useFieldCycle(cycleComposer);
-	const dictation = useDictation({
-		append: (t) => onChange(joinDictation(text, t)),
-	});
-	// A LIVE dictation keeps the composer sendable ("nothing gets lost"
-	// round, owner 2026-10-01): the spoken text is deferred in the run's
-	// buffer — Enter must reach the finish-first send, not be gated out by
-	// an empty textarea. Nothing said → the send no-ops.
-	const canSend = text.trim().length > 0 || dictation.active;
-	/* FINISH DICTATION FIRST (owner, 2026-10-01): stop the run, let the
-	 * last finals land through onChange, THEN call the parent's send —
-	 * which reads its REF mirror, so the post-await timing of React's
-	 * re-render cannot eat the dictated tail. */
-	const handleSend = () => {
-		if (uploadingAttachment) return;
-		if (dictation.active) {
-			void dictation.finish().then(onSend);
-			return;
-		}
-		onSend();
-	};
-	/* Run end focuses the composer (owner, 2026-10-01): the hands are on
-	 * the keyboard from the stop — falling edge of `active` only. */
+	useFileDropTarget((paths) => onChange(appendFilePathText(text, paths)), { fallback: true });
+	const canSend = text.trim().length > 0;
+	const handleSend = () => { if (!uploadingAttachment) onSend(); };
 	const composerInputRef = useRef<HTMLDivElement>(null);
 	const uploadingAttachment = useAttachmentUploadPending(composerInputRef);
-	const dictationWasActiveRef = useRef(false);
-	useEffect(() => {
-		if (dictation.active) {
-			dictationWasActiveRef.current = true;
-		} else if (dictationWasActiveRef.current) {
-			dictationWasActiveRef.current = false;
-			if (isInteractionScopeEligible(composerInputRef.current, controller)) composerInputRef.current!.focus();
-		}
-	}, [dictation.active, controller]);
 	return (
 		/* CHROME-LESS CREATION SURFACE (owner round 11, 2026-10-05): the
 		 * drafts join home's register — no TopBar, no title (the serif title
@@ -210,7 +173,6 @@ export function DraftShell({
 										canSend={canSend}
 										inputRef={composerInputRef}
 										autoFocus
-										onEscape={dictation.active ? dictation.cancel : undefined}
 										// The opening question, same as the graph view's new-session
 										// input (owner refinement round, 2026-09-24) — no lesson has
 										// started yet, so the composer must not read like one is in
@@ -219,7 +181,6 @@ export function DraftShell({
 									/>
 								</div>
 								<StatsBar
-									dictationSlot={<DictationBar dictation={dictation} />}
 									turns={[]}
 								/>
 							</div>
@@ -245,10 +206,6 @@ export function DraftShell({
 export function NewSession({ initialConfigured, mode = "teach" }: { initialConfigured: boolean; mode?: "teach" | "practice" }) {
 	const router = useRouter();
 	const [text, setText] = useState("");
-	/* The draft MIRROR ("nothing gets lost" round, 2026-10-01): the shell's
-	 * finish-first send calls THIS send after the dictation flush — which
-	 * landed via setState and may not have re-rendered yet. The send reads
-	 * the mirror; every write keeps it current. */
 	const textRef = useRef("");
 	const applyText = (v: string) => {
 		textRef.current = v;

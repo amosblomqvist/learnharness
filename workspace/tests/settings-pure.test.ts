@@ -298,9 +298,8 @@ describe("classifyKeys — the Keys section's two-group projection", () => {
 	});
 
 	it("curated tool ids always render (synthesized when absent)", () => {
-		const out = classifyKeys([synth("DEEPGRAM_API_KEY", true)], undefined);
+		const out = classifyKeys([synth("TAVILY_API_KEY", true)], undefined);
 		assert.deepEqual(out.toolRows.map((r) => r.id), [
-			"DEEPGRAM_API_KEY",
 			"TAVILY_API_KEY",
 			"BRAVE_API_KEY",
 			"EXA_API_KEY",

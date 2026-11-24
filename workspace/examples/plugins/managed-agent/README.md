@@ -9,12 +9,11 @@ Open it using its explicit sidebar or graph action. Registration of the view its
 not place it anywhere.
 
 This is a small developer example, not a separate showcase application. The host's
-`mountStandardComposer` supplies controlled model/thinking selection, text input,
-and dictation. Select a configured model (and thinking level if supported), then
+`mountStandardComposer` supplies controlled model/thinking selection and text input. Select a configured model (and thinking level if supported), then
 click **New conversation**. Those choices apply to the new conversation, not an
 existing one. Creating or opening a conversation never runs the agent. Only **Send**,
 **Run as background task**, or answering a pending question starts explicit work.
-Model requests and dictation may incur configured-provider costs; background work
+Model requests may incur configured-provider costs; background work
 also needs the configured connection's permission. Stop uses the host composer.
 
 Try asking the agent to ask a question or save a note. Pending questions and the

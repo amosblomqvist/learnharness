@@ -118,7 +118,7 @@ controller; callers own hierarchy/selection, sufficient width and scrolling.
 
 Dialogs, menus, pickers and page-body surfaces use the shared interaction controller;
 see [dialog/overlay rules](dialog-overlay-contract.md). One Escape has one owner,
-covered content cannot receive native submit/dictation actions, and eligible focus is
+covered content cannot receive native submit actions, and eligible focus is
 restored without focusing detached/covered controls. Browser Tab navigation remains
 unchanged. Declarative action shortcuts use `src/core/plugin-shortcuts.ts` for validation,
 static scope-overlap/conflict resolution, and `components/plugin-shortcuts.tsx` for
@@ -175,8 +175,7 @@ projection/retry/remount never recomputes saved grading/processing.
 
 ## Submission preparation, images and view snapshots
 
-One frontend preparation runner captures target occurrence, ordered interceptors and
-original dictation destination before awaits. It freezes detached context/input,
+One frontend preparation runner captures the target occurrence and ordered interceptors before awaits. It freezes detached context/input,
 serially transforms learner values, rechecks ownership, then uses native POST/steer
 admission. Preparation cancellation/failure preserves drafts; accepted delivery clears
 only captured revisions. The lease ends at acknowledgment/refusal, not model-stream end,
@@ -248,7 +247,7 @@ Maintain tests at each actual boundary:
 - Inline grading/processing ownership, Stop/revocation, write-before-continuation,
   compaction joins and no recomputation on replay.
 - Editor lease generations, async cleanup/StrictMode, draft retention, keyboard/IME,
-  dictation destination, missing-renderer fallback and image placement.
+  missing-renderer fallback and image placement.
 - Submission interception/acknowledgment races and snapshot freshness/immutability,
   including real input owners and inline/overflow top-bar actions.
 - Durable agent/task state, accepted-result preservation and fallback delivery recovery.

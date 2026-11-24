@@ -11,7 +11,7 @@ import { useInteractionLayers } from "@/components/interaction-layers";
 import { isInputShortcutScopeEligible } from "@/components/plugin-input-focus";
 import { prettyModel } from "@/components/usage-format";
 import { THINKING_LABEL } from "@/components/thinking-default";
-import { claimPluginInputFocus } from "@/components/plugin-dictation";
+import { claimPluginInputFocus } from "@/components/plugin-input-focus";
 
 export type PickerCommand = { invoke(): void };
 type Extra = { onError?: (error: unknown) => void; commandRef?: RefObject<PickerCommand | null> };

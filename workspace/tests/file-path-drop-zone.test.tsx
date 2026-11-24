@@ -4,7 +4,7 @@ import { readFileSync } from "node:fs";
 import { afterEach, test } from "node:test";
 import { parseHTML } from "linkedom";
 import { FilePathDropZone } from "../components/file-path-drop-zone.tsx";
-import { useDictationTarget } from "../components/dictation.tsx";
+import { useFileDropTarget } from "../components/file-drop-target.ts";
 import { PathInput } from "../components/path-input.tsx";
 import { readPathInput, restorePathSelection } from "../components/path-input-dom.ts";
 import { quoteFilePath } from "../src/core/file-paths.ts";
@@ -58,7 +58,7 @@ async function fixture({ desktop = true, claimed = true, onContentRoot }: {
 	const { createRoot } = await import("react-dom/client");
 	const root = createRoot(doc.getElementById("root")!);
 	function Harness() {
-		useDictationTarget((text) => appends.push(text), claimed);
+		useFileDropTarget((text) => { appends.push(text); }, { enabled: claimed });
 		return <>
 			<aside data-testid="sidebar">Sidebar</aside>
 			<FilePathDropZone onContentRoot={onContentRoot}>
@@ -116,7 +116,7 @@ async function fixture({ desktop = true, claimed = true, onContentRoot }: {
 	};
 }
 
-test("desktop drop inserts quoted paths at the focused editor caret instead of the dictation claimant", async () => {
+test("desktop drop inserts quoted paths at the focused editor caret instead of the default drop target", async () => {
 	const f = await fixture();
 	f.focusEditor(4);
 	const paths = ["/actual/course notes.pdf", "C:\\course\\chapter`one.pdf", "\\\\host\\share\\図.png"];
@@ -142,7 +142,7 @@ test("a successful drop clears an earlier failure without replacing it with a co
 	f.assertPathOnly();
 });
 
-test("unfocused drop uses the dictation target registry, not the last focused editor", async () => {
+test("unfocused drop uses the file-drop target registry, not the last focused editor", async () => {
 	const f = await fixture();
 	f.focusEditor(4);
 	f.doc.querySelector<HTMLElement>('[data-testid="elsewhere"]')!.focus();

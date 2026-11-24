@@ -329,11 +329,11 @@ test("Keys custom and ordinary row drafts survive editor-first Escape even with 
 		assert.equal((byTest("custom-baseurl-input") as HTMLInputElement).value, "http://fixture.invalid/v1");
 		assert.equal((byTest("custom-models-input") as HTMLInputElement).value, "");
 		await key(controller(), byTest("custom-baseurl-input"), "Escape");
-		await click('[data-testid="key-deepgram_api_key-row"]');
-		await type("key-deepgram_api_key-input", "ordinary-row-draft");
-		await click('[data-testid="key-deepgram_api_key-cancel"]');
-		await click('[data-testid="key-deepgram_api_key-row"]');
-		assert.equal((byTest("key-deepgram_api_key-input") as HTMLInputElement).value, "ordinary-row-draft", "ordinary row Cancel still folds without clearing its existing local state");
+		await click('[data-testid="key-tavily_api_key-row"]');
+		await type("key-tavily_api_key-input", "ordinary-row-draft");
+		await click('[data-testid="key-tavily_api_key-cancel"]');
+		await click('[data-testid="key-tavily_api_key-row"]');
+		assert.equal((byTest("key-tavily_api_key-input") as HTMLInputElement).value, "ordinary-row-draft", "ordinary row Cancel still folds without clearing its existing local state");
 		assert.equal(mock.writes.length, 0);
 	} finally { mock.restore(); }
 }));

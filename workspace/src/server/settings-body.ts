@@ -22,7 +22,6 @@ import type {
 	CompactionSettings,
 	CustomModelOverride,
 	GeneralSettings,
-	DictationSettings,
 	GraphSettings,
 	ModelsSettings,
 	ModelSlot,
@@ -31,7 +30,6 @@ import type {
 import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, isTranscriptMaxWidth, MODEL_SLOTS, TRANSCRIPT_WIDTH_MAX_REM, TRANSCRIPT_WIDTH_MIN_REM } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
-import { isDictationLanguage } from "../core/dictation.ts";
 import { parseFileAccessSettings } from "../core/file-access.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -460,15 +458,6 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
-/** dictation: { language?: one of Nova-3's supported language codes } */
-export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
-	const raw = asRecord(body);
-	if (!raw) return { ok: false, error: "Invalid JSON body" };
-	if (raw.language === undefined) return { ok: true, settings: {} };
-	if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
-	return { ok: true, settings: { language: raw.language } };
-}
-
 /** The custom endpoint's per-model pins (PATCH /api/custom-provider): the
  *  whole desired map, replace-whole like every section. Strict write side — a
  *  token count must be a whole number at or above the floor (the read side
@@ -518,7 +507,6 @@ export const SETTINGS_SECTIONS = {
 	graph: parseGraphSettingsBody,
 	compaction: parseCompactionSettingsBody,
 	models: parseModelsSettingsBody,
-	dictation: parseDictationSettingsBody,
 	claudeCode: parseClaudeCodeSettingsBody,
 } as const;
 

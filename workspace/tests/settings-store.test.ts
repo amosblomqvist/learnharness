@@ -34,6 +34,17 @@ afterEach(() => {
 });
 
 describe("the settings store", () => {
+	it("keeps an old dictation preference on disk while excluding it from app settings", () => {
+		const legacy = { version: 1, dictation: { language: "en" } };
+		fs.writeFileSync(SETTINGS_FILE, JSON.stringify(legacy));
+		assert.deepEqual(readSettings(), { version: 1 });
+
+		const settings = { version: 1, general: { autoUpdate: false } };
+		assert.deepEqual(writeSettings(settings), settings);
+		assert.deepEqual(readSettings(), settings);
+		assert.deepEqual(JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")), { ...settings, dictation: legacy.dictation });
+	});
+
 	it("persists worker concurrency, drops invalid disk values, and resets to 8 when unset", () => {
 		writeSettings({ version: 1, agent: { workerRequestConcurrency: 29, tools: { research: false } } });
 		assert.deepEqual(readSettings()?.agent, { workerRequestConcurrency: 29, tools: { research: false } });

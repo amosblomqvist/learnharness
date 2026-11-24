@@ -59,7 +59,7 @@ async function mount(
 	const root = createRoot(host);
 	const render = (req: QuestionLayoutRequest | null) => act(async () => root.render(
 		<QuestionDock toolName={kind.toolName} toolCallId={toolCallId} input={kind.input} expanded onExpand={() => {}} onSubmit={() => {}}
-			dictationClaim={false} layoutRequest={req} onLayout={(l) => layouts.push(l)} />,
+			primaryDropTarget={false} layoutRequest={req} onLayout={(l) => layouts.push(l)} />,
 	));
 	await render(layoutRequest);
 	return { host, root, render };
