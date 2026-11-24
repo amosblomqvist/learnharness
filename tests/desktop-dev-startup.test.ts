@@ -143,7 +143,7 @@ describe("real Electron main dev startup wiring", () => {
 		assert.equal(f.probes.length, 1); assert.equal(f.probes[0]!.url, "http://localhost:3000"); assert.deepEqual(f.windows, []);
 		f.ready(); await f.done;
 		assert.deepEqual(f.windows, ["http://localhost:3000"]); assert.deepEqual(f.exits, []);
-		assert.equal(f.app.listenerCount("before-quit"), 1, "only the existing server cleanup listener should remain");
+		assert.equal(f.app.listenerCount("before-quit"), 2, "server and Mobile Access cleanup remain; the temporary startup listener is detached");
 	});
 	it("logs and exits unsuccessfully on readiness failure instead of creating an empty window", async () => {
 		const f = boot(); await delay(0); assert.equal(f.probes.length, 1);

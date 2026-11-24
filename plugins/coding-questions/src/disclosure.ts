@@ -9,7 +9,8 @@ export function mountDisclosure(container: HTMLElement, kind: "test-output" | "m
   button.setAttribute("aria-expanded", "false");
   const body = document.createElement("div");
   body.className = "lh-coding-disclosure__body";
-  body.id = `lh-coding-${crypto.randomUUID()}`;
+  // getRandomValues, not randomUUID: the phone's direct link is plain HTTP.
+  body.id = `lh-coding-${Array.from(crypto.getRandomValues(new Uint8Array(16)), byte => byte.toString(16).padStart(2, "0")).join("")}`;
   button.setAttribute("aria-controls", body.id);
   root.append(button);
   container.append(root);

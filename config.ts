@@ -1,5 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { threadProfileRoot } from "./src/store/thread-profile.ts";
 
 /** Repository root (this file is at <root>/config.ts). */
 export const ROOT = path.dirname(fileURLToPath(import.meta.url));
@@ -27,7 +28,8 @@ export const PATHS = {
 	teacherPrompt: path.join(ROOT, "src", "agent", "system-prompt.md"),
 	data: DATA_ROOT,
 	/** Chat sessions (AI SDK UIMessage transcripts, one JSON file per chat). */
-	chats: path.join(/* turbopackIgnore: true */ DATA_ROOT, "chats"),
+	get threadData() { return threadProfileRoot(DATA_ROOT); },
+	get chats() { return path.join(/* turbopackIgnore: true */ threadProfileRoot(DATA_ROOT), "chats"); },
 	graph: path.join(/* turbopackIgnore: true */ DATA_ROOT, "graph"),
 	/** Debug artifacts (env-gated): data/debug/provider-events/<chatId>.jsonl
 	 * raw provider stream recordings (src/agent/provider-events.ts). */

@@ -1,4 +1,5 @@
 "use client";
+import { MobileAccessSettings } from "./mobile-access-settings";
 /**
  * THE SETTINGS DIALOG (settings-app wave, 2026-09-20): the thin settings
  * page graduated into the designed surface — a centered modal over
@@ -46,6 +47,7 @@ import {
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
+import { LabsSection } from "./labs-section.tsx";
 import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -70,6 +72,7 @@ const SECTIONS = [
 	{ id: "graph", label: "Graph", icon: WaypointsIcon },
 	{ id: "keyboard", label: "Keyboard", icon: KeyboardIcon, hint: "Stored on this device" },
 	{ id: "general", label: "General", icon: SettingsIcon },
+	{ id: "labs", label: "Labs", icon: SettingsIcon },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 
@@ -484,6 +487,7 @@ export function SettingsDialogBody({
 						</p>
 					) : (
 						<div>
+							{active === "labs" && <LabsSection />}
 							{active === "general" && (
 								<SettingsSection
 									title="General"
@@ -495,6 +499,7 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+									<MobileAccessSettings />
 								</SettingsSection>
 							)}
 							{active === "keys" && (

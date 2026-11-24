@@ -32,7 +32,21 @@ npm start              # serve the production build with Next
 
 `npm run desktop:dist` is the local **signed macOS** packaging path, not a portable unsigned shortcut. Prerequisites and Windows/Linux instructions are in [Desktop builds and releases](desktop-release.md).
 
+### Windows double-click launcher
+
+Double-click [`Launch LearnHarness.cmd`](../Launch%20LearnHarness.cmd) in the repository root. The launcher uses its own folder as the working directory, including paths containing spaces. From a terminal with Node.js 26.x and npm already available, you can also run `npm run desktop:windows`.
+
+The double-click launcher checks for a working **Node.js 26.x with npm**. If needed, it downloads the latest stable 26.x Windows ZIP for your architecture from `nodejs.org`, verifies its published SHA-256 checksum, and installs it under `%LOCALAPPDATA%\LearnHarness\runtime\node26-<architecture>`. It uses this per-user runtime immediately and reuses it on later launches without a download. Administrator access and a system PATH change are not required. Other Node.js installations remain available to other applications. Windows PowerShell 5.1 or later and 64-bit Windows (x64 or ARM64) are required for automatic installation.
+
+On first launch it runs `npm ci --include=dev` and `npm run plugins:setup`, then downloads the Electron desktop runtime if needed; internet access and any native build prerequisites are required. Successful setup is recorded under ignored `node_modules/`. Later launches skip installation unless package manifests/lockfiles change or required dependency directories are missing. After changing the public plugin API, run `npm run plugins:setup` as usual.
+
+It runs the existing `npm run dev` preparation/build steps, binds to `localhost:3000`, and waits up to three minutes for an HTTP response before opening Electron. An occupied port produces an error rather than connecting the desktop window to another server. This uses the source checkout's development data/auth locations described below.
+
+Keep the console open while using LearnHarness. Closing the desktop app stops the server; a failed server or desktop process also stops the other process. Press Ctrl+C to stop both manually. Errors leave the console open so you can read them and retry. If setup fails, fix the reported installation/build error and double-click again. This launcher requires Windows; the other platform commands remain available above.
+
 ### Other devices on your network
+
+For private iPhone access and a connected local phone viewport, use [Mobile Access](mobile-access.md) in the desktop app. It shares the existing loopback server through a separate same-account Tailscale gateway; no LAN binding is needed.
 
 `npm run dev`, `npm start`, and `desktop:dev` listen on `localhost` only. Browser-only mode has **no login**: anyone who can reach the port can read every chat and setting, change saved keys, and start agent turns. To open it from another device on a network you trust, pass a later host flag:
 
@@ -50,6 +64,8 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 | --- | --- |
 | `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts; default repo `data/`. |
 | `LH_AUTH_FILE` | Keys/custom-endpoint binding; default repo-root `auth.json`, outside `data/`. |
+| `LH_CONVEX_URL` | Optional Labs thread sync: the Convex deployment's HTTPS `.convex.cloud` URL. See [Google sign-in and thread sync](cloud-sync.md). |
+| `LH_CLOUD_CALLBACK_PORT` | Optional desktop Google sign-in return port; default `3211`, bound only to `127.0.0.1`. |
 | Provider API-key variables | Optional, selected-provider dependent; UI names are in `src/core/auth-keys.ts`. |
 | `TAVILY_API_KEY`, `BRAVE_API_KEY`, `EXA_API_KEY`, `FIRECRAWL_API_KEY`, `OLLAMA_API_KEY` | Optional search adapters. Without a Settings pin, the first keyed engine wins: Tavily → Brave → Exa → Firecrawl → Ollama. A pinned engine requires its own key; no silent fallback. Ollama search is hosted at ollama.com, not a local model server. Page fetching is independent; research can fetch known URLs without a search key. |
 | `DEEPGRAM_API_KEY` | Optional dictation token minting. |

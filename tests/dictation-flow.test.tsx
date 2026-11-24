@@ -2,7 +2,7 @@ import React, { act } from "react";
 import assert from "node:assert/strict";
 import { afterEach, test } from "node:test";
 import { parseHTML } from "linkedom";
-import { finishDictation, useDictation, useDictationTarget, type Dictation } from "../components/dictation.tsx";
+import { DICTATION_NEEDS_HTTPS, finishDictation, useDictation, useDictationTarget, type Dictation } from "../components/dictation.tsx";
 import { notifySettingsSaved } from "../components/settings-signal.ts";
 import { useDictationLanguage } from "../components/dictation-preference.ts";
 import { isDictationActive, useDictationActive } from "../components/dictation-state.ts";
@@ -372,5 +372,14 @@ test("microphone permission resolving after unmount immediately stops the late s
 	await act(async () => { mic.resolve({ getTracks: () => [{ stop() { f.state.stops++; } }] }); });
 	assert.equal(f.state.stops, 1);
 	assert.equal(Socket.all.length, 0);
+	assert.equal(isDictationActive(), false);
+});
+test("an insecure page (the phone's plain-HTTP direct link) never requests the microphone and says why", async () => {
+	const f = await fixture(); await f.mount();
+	(window as unknown as { isSecureContext: boolean }).isSecureContext = false;
+	await act(async () => { f.dictation.toggle(); });
+	assert.equal(f.state.captures, 0);
+	assert.equal(Socket.all.length, 0);
+	assert.equal(f.dictation.error, DICTATION_NEEDS_HTTPS);
 	assert.equal(isDictationActive(), false);
 });

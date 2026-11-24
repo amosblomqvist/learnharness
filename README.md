@@ -75,7 +75,11 @@ npm test           # fixtures and fake providers
 
 See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), [themes](docs/themes.md) for the theme file format, and [desktop builds and releases](docs/desktop-release.md).
 
+**Windows double-click launcher (source checkout):** Double-click [`Launch LearnHarness.cmd`](Launch%20LearnHarness.cmd) in this folder. If Node.js **26.x** with npm is missing, it installs a verified copy for your Windows account automatically, without administrator access. It then installs app and plugin dependencies on first launch (internet required), builds the local plugins, and opens the desktop app after the local server responds. Keep the console open while using the app; closing the desktop window or pressing Ctrl+C stops the server. Startup errors remain visible in the console. See [Windows launcher details](docs/development.md#windows-double-click-launcher).
+
 For trusted local plugins, start with the [authoring guide and capability map](docs/plugin-authoring.md). It links the question, practice-problem, submission, view-context and UI contracts. Use [`examples/plugins/`](examples/plugins/) for small runnable templates, [`plugins/`](plugins/) for feature source projects, and the [host architecture](docs/plugin-architecture.md) for internals.
+
+Settings → Labs offers optional [Google sign-in and cross-computer thread sync](docs/cloud-sync.md) through Convex. It is off by default; the app remains usable without signing in.
 
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 

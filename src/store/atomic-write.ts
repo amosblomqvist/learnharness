@@ -38,7 +38,7 @@ const RENAME_RETRY_MS = 100;
 /** Replace `file` with `text` (UTF-8). Throws on failure, with the old file
  *  untouched, except when the in-place fallback fails midway: then the temp
  *  file beside it keeps the complete new bytes. */
-export function writeFileAtomicSync(file: string, text: string, options?: { mode?: number; allowInPlaceFallback?: boolean }): void {
+export function writeFileAtomicSync(file: string, text: string | Uint8Array, options?: { mode?: number; allowInPlaceFallback?: boolean }): void {
 	const tmp = `${file}${TEMP_MARKER}${randomUUID()}`;
 	let target: number;
 	try {

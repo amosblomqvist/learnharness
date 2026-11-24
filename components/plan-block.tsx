@@ -671,9 +671,22 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 	// per-frame — the transition is off while dragging or it rubber-bands.
 	const [panning, setPanning] = useState(false);
 	const dragRef = useRef<{ px: number; py: number; x: number; y: number; moved: boolean } | null>(null);
+	const touches = useRef(new Map<number, { x: number; y: number }>());
+	const pinch = useRef<{ distance: number; x: number; y: number } | null>(null);
+	const touchGeometry = () => {
+		const [a, b] = [...touches.current.values()];
+		if (!a || !b) return null;
+		return { distance: Math.hypot(b.x - a.x, b.y - a.y), x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 };
+	};
 	const startDrag = (e: React.PointerEvent<HTMLDivElement>) => {
 		if (e.button !== 0) return;
 		if ((e.target as HTMLElement).closest("button")) return;
+		if (e.pointerType === "touch") {
+			touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+			e.currentTarget.setPointerCapture(e.pointerId);
+			pinch.current = touchGeometry();
+			if (pinch.current) { dragRef.current = null; setPanning(true); return; }
+		}
 		if (atFloor) return;
 		dragRef.current = { px: e.clientX, py: e.clientY, x: view.x, y: view.y, moved: false };
 		setPanning(true);
@@ -681,6 +694,19 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 		e.currentTarget.setPointerCapture(e.pointerId);
 	};
 	const moveDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		if (touches.current.has(e.pointerId)) {
+			touches.current.set(e.pointerId, { x: e.clientX, y: e.clientY });
+			const next = touchGeometry();
+			const previous = pinch.current;
+			if (next && previous && previous.distance > 0) {
+				const rect = e.currentTarget.getBoundingClientRect();
+				setView(value => {
+					const zoomed = zoomedGraphView(value, next.distance / previous.distance, fitZoom, { x: previous.x - rect.left, y: previous.y - rect.top }, box, size);
+					return { ...zoomed, x: zoomed.x + next.x - previous.x, y: zoomed.y + next.y - previous.y };
+				});
+				pinch.current = next; userAdjustedRef.current = true; return;
+			}
+		}
 		const d = dragRef.current;
 		if (!d) return;
 		d.moved = true;
@@ -689,6 +715,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 		);
 	};
 	const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+		touches.current.delete(e.pointerId); pinch.current = null;
 		const d = dragRef.current;
 		if (d) {
 			dragRef.current = null;
@@ -783,7 +810,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 						</div>
 						<PlanLayoutProbe probe={plan.probe} />
 						<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-2">
-							<span className="text-xs text-muted-foreground/60">Drag to pan · scroll to zoom</span>
+							<span className="text-xs text-muted-foreground/60">Drag to pan · pinch or scroll to zoom</span>
 							<div className="flex gap-1">
 								<Hint label="Zoom out" side="bottom">
 <button

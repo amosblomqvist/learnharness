@@ -17,7 +17,7 @@ import { SidebarToggle } from "@/components/sidebar";
 import { StatsBar } from "@/components/stats-bar";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
-import { AttachFilesButton } from "@/components/attach-files-button";
+import { AttachFilesButton, useAttachmentUploadPending } from "@/components/attach-files-button";
 import { SessionStarter } from "@/components/start-session";
 import type { TurnUsage } from "@/src/core";
 
@@ -76,6 +76,7 @@ export function Home({
 	 * the keyboard from the stop. Falling edge only; this surface's only
 	 * dictation target IS this textarea, so no case-split is needed. */
 	const topicInputRef = useRef<HTMLDivElement>(null);
+	const uploading = useAttachmentUploadPending(topicInputRef);
 	// Tab navigates INTO the topic composer (owner, keyboard round
 	// 2026-10-06): the only text field on this surface — and home's
 	// composer is its OWN textarea, not the shared Composer component,
@@ -113,6 +114,7 @@ export function Home({
 	 * state closure) and run. Applies before the setup/key guards too, so
 	 * an intercepted draft is the complete one. */
 	const start = () => {
+		if (uploading) return;
 		if (!dictation.active) {
 			void begin();
 			return;
@@ -120,6 +122,7 @@ export function Home({
 		void dictation.finish().then(() => begin());
 	};
 	const begin = async () => {
+		if (uploading) return;
 		const t = topicRef.current.trim();
 		if (!t || startingRef.current) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
@@ -211,7 +214,7 @@ export function Home({
 			    OVER the graph (no gradient: the graph runs clean under it to the
 			    bottom edge). Matches chat.tsx's DOCK geometry (max-w-[46rem]
 			    px-4) so nothing shifts when a session starts (owner). */}
-			<div className="pointer-events-none absolute inset-x-0 bottom-0 pb-5">
+			<div data-lh-home-dock="" className="pointer-events-none absolute inset-x-0 bottom-0 pb-5">
 				<div className="pointer-events-auto mx-auto w-full max-w-[46rem] px-4">
 					{/* The pick bar (owner vision, 2026-10-04): the chain
 					    table's selection is PERSISTENT — picked
@@ -246,6 +249,7 @@ export function Home({
 					{startError && <p role="alert" className="mb-2 text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
 					<form
 						data-attachment-composer=""
+						suppressHydrationWarning // Chrome for iOS adds autofill ids before hydration.
 						className="flex items-end gap-1.5 rounded-2xl border bg-card p-1.5 shadow-lg"
 					onSubmit={(e) => {
 						e.preventDefault();
@@ -287,7 +291,7 @@ export function Home({
 					<button
 						type="submit"
 						aria-label="Start session"
-						disabled={(!topic.trim() && !dictation.active) || busy}
+								disabled={(!topic.trim() && !dictation.active) || busy || uploading}
 						className="flex size-10 shrink-0 items-center justify-center rounded-[10px] bg-primary text-primary-foreground transition-colors hover:opacity-90 disabled:opacity-40"
 					>
 						<CornerDownLeftIcon className="size-5" />

@@ -134,6 +134,7 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 					<span className={cn("min-w-0 flex-1 truncate", sidebarNameFont(compact))}>{folder.name}</span>
 				</button>
 			)}
+			{!renaming && <button type="button" className="lh-mobile-row-action" aria-label={`Actions for folder ${folder.name}`} onClick={onContextMenu}>•••</button>}
 		</SourceDragRow>
 	);
 }

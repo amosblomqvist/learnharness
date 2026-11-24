@@ -1615,7 +1615,7 @@ export function GraphView({
 			    the settings/coverage dropdowns (owner report), still hoverable
 			    and clickable on top of them. The row is a stacking context, so
 			    its open dropdowns cover the number; clicks land on the panel. */}
-			<div className="relative z-20 flex min-w-0 items-start gap-2">
+			<div data-testid="graph-actions" className="relative z-20 flex min-w-0 items-start gap-2">
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
 				    settings only when nodes exist, fading in on their mount. */}
@@ -1663,6 +1663,7 @@ export function GraphView({
 			{selected && !isEmpty && (
 				<div
 					ref={cardRef}
+					data-testid="graph-node-card"
 					// Positioned imperatively in the layout effect above; hidden
 					// until placed so the flip never flashes in the wrong spot.
 					style={{ visibility: "hidden", left: 0, top: 0 }}
@@ -1672,6 +1673,10 @@ export function GraphView({
 					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 				>
 					<NodeCardText name={selected.node.name} statement={selected.node.statement} />
+					<div className="lh-mobile-node-actions">
+						<button type="button" className="rounded-lg border px-3 text-xs" onClick={() => setSelected(null)}>Close</button>
+						<button type="button" className="rounded-lg border px-3 text-xs text-destructive" onClick={() => setDeletingNode({ id: selected.node.id, name: selected.node.name })}>Delete node</button>
+					</div>
 					{selected.sourceIds.length > 0 ? (
 						<div className="mt-3 flex flex-col gap-1">
 							<div className="text-xs text-muted-foreground">Sessions</div>

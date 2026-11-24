@@ -1,7 +1,7 @@
 /**
  * The composer's attach button (issue #285): the picker's twin of a file
  * drop. Picked files become quoted path chips at the caret through the
- * desktop bridge; the browser build explains instead. Same linkedom
+ * desktop bridge; browsers upload phone files. Same linkedom
  * shims as file-path-drop-zone.test.tsx (no native Selection there).
  */
 import React, { act } from "react";
@@ -20,7 +20,7 @@ import { InteractionLayersProvider, useInteractionLayers, type InteractionLayers
 let cleanup: (() => Promise<void>) | undefined;
 afterEach(async () => { await cleanup?.(); cleanup = undefined; });
 
-async function fixture({ desktop = true } = {}) {
+async function fixture({ desktop = true, request }: { desktop?: boolean; request?: typeof fetch } = {}) {
 	const { window: win, document: doc } = parseHTML("<html><body><div id='root'></div></body></html>");
 	let active: Element = doc.body;
 	Object.defineProperty(doc, "activeElement", { get: () => active });
@@ -42,7 +42,7 @@ async function fixture({ desktop = true } = {}) {
 	let value = "readthis";
 	const previous = new Map<string, PropertyDescriptor | undefined>();
 	for (const [name, next] of Object.entries({
-		React, window: win, document: doc, Node: win.Node, HTMLElement: win.HTMLElement, Element: win.Element,
+		React, window: win, document: doc, Node: win.Node, HTMLElement: win.HTMLElement, Element: win.Element, ...(request ? { fetch: request } : {}),
 		Event: win.Event, CustomEvent: win.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true, innerWidth: 1000, innerHeight: 800,
 	})) {
 		previous.set(name, Object.getOwnPropertyDescriptor(globalThis, name));
@@ -174,9 +174,9 @@ describe("composer attach button", () => {
 		assert.deepEqual(result, { paths: ["/notes/a.pdf"], skipped: 2 });
 	});
 
-	it("server render is the browser case: a disabled-looking paperclip between the input and Send", () => {
+	it("server render offers browser uploads with the paperclip between the input and Send", () => {
 		const html = renderToStaticMarkup(<Composer busy={false} value="" onChange={() => {}} onSend={() => {}} onStop={() => {}} canSend={false} />);
-		assert.match(html, /aria-label="Attach files"[^>]*aria-disabled="true"|aria-disabled="true"[^>]*aria-label="Attach files"/);
+		assert.match(html, /aria-label="Attach files"[^>]*aria-disabled="false"|aria-disabled="false"[^>]*aria-label="Attach files"/);
 		const editor = html.indexOf("data-file-path-input");
 		const attach = html.indexOf('data-testid="attach-files"');
 		const send = html.indexOf('aria-label="Send"');
@@ -287,12 +287,23 @@ describe("composer attach button", () => {
 		assert.equal(f.sends, 0);
 	});
 
-	it("browser: the button stays inert and the picker never opens", async () => {
-		const f = await fixture({ desktop: false });
-		assert.equal(f.button.getAttribute("aria-disabled"), "true");
+	it("browser: phone file choices upload bytes and insert the returned server reference", async () => {
+		let sent = false;
+		const f = await fixture({ desktop: false, request: async (url, options) => {
+			assert.equal(url, "/api/attachments");
+			assert.equal(options?.method, "POST");
+			const file = (options?.body as FormData).get("files") as File;
+			assert.equal(file.name, "phone.txt"); assert.equal(await file.text(), "from phone"); sent = true;
+			return Response.json({ paths: ["/learning/attachments/phone.txt"] });
+		} });
+		assert.equal(f.button.getAttribute("aria-disabled"), "false");
 		await act(async () => { f.button.click(); });
+		assert.deepEqual(Array.from(f.doc.querySelectorAll('[role="menuitem"]')).map(item => item.textContent), ["Photos or camera", "Files"]);
 		assert.equal(f.pickerClicks, 0);
-		await f.pick([f.file("a.pdf", "/a.pdf")]);
-		assert.equal(f.value, "readthis");
+		await f.choice("Files"); assert.equal(f.pickerClicks, 1);
+		await f.pick([new File(["from phone"], "phone.txt")]);
+		await act(async () => { await new Promise(resolve => setTimeout(resolve, 0)); });
+		assert.equal(sent, true); assert.match(f.value, /\/learning\/attachments\/phone.txt/);
+		assert.equal(f.folderCalls, 0); assert.equal(f.sends, 0);
 	});
 });

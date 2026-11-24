@@ -5,6 +5,8 @@ import { MAX_IMPORT_BODY_BYTES } from "./lib/notes-import-limits.ts";
 const pkg = JSON.parse(readFileSync(new URL("./package.json", import.meta.url), "utf8")) as { version: string; homepage: string };
 
 const nextConfig: NextConfig = {
+	// Isolated smoke tests must not take the running desktop's dev-server lock.
+	...(process.env.LH_MOBILE_SMOKE === "1" ? { distDir: "node_modules/.cache/learnharness-mobile-smoke" } : {}),
 	// Public build metadata only; no new runtime Electron version API.
 	env: { LH_VERSION: pkg.version, LH_HOMEPAGE: pkg.homepage },
 	// Leave multipart headroom above the 25 MiB file allowance. This is a
@@ -56,6 +58,7 @@ const nextConfig: NextConfig = {
 			"chatgpt-credentials.json*",
 			"github-copilot-credentials.json*",
 			"xai-credentials.json*",
+			"learnharness-cloud-credentials.json*",
 			".env*",
 		],
 	},

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
@@ -111,6 +111,18 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * it and deep-links Settings → Keys → the Deepgram row. */
 export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
 export const DICTATION_ACTIVE_ELSEWHERE = "Dictation is active elsewhere";
+/** Browsers expose the microphone only to secure pages; the phone's
+ *  DNS-free direct link is plain HTTP inside Tailscale. */
+export const DICTATION_NEEDS_HTTPS = "Dictation needs the HTTPS link";
+function microphoneAvailable(): boolean {
+	// Insecure pages have no navigator.mediaDevices; isSecureContext is the explicit belt.
+	return window.isSecureContext !== false && typeof navigator.mediaDevices?.getUserMedia === "function";
+}
+const noSubscription = () => () => {};
+/** Server render assumes a microphone, so the secure-page markup never changes on hydration. */
+function useMicrophoneAvailable(): boolean {
+	return useSyncExternalStore(noSubscription, microphoneAvailable, () => true);
+}
 
 // Mounted controllers do not claim capture. Only start() acquires the single
 // window-wide owner, synchronously, before settings/mic/token awaits.
@@ -532,6 +544,10 @@ export function useDictation({ append, destination = "primary", disabled = false
 
 	const start = useCallback(async (destination?: DictationDestination) => {
 		if (disabledRef.current || phaseRef.current !== "idle") return;
+		if (!microphoneAvailable()) {
+			setError(DICTATION_NEEDS_HTTPS);
+			return;
+		}
 		if (recordingOwner !== null && recordingOwner !== owner) {
 			setError(DICTATION_ACTIVE_ELSEWHERE);
 			return;
@@ -757,8 +773,10 @@ export function useDictation({ append, destination = "primary", disabled = false
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation, disabled = false }: { dictation: Dictation; disabled?: boolean }) {
-	const { phase, error, levelRef, toggle, active, clearError, blocked } = dictation;
+	const { phase, error: runError, levelRef, toggle, active, clearError, blocked } = dictation;
 	const { open: openSettings } = useSettingsDialog();
+	const microphone = useMicrophoneAvailable();
+	const error = microphone ? runError : DICTATION_NEEDS_HTTPS;
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
 	 *  the error — the surface is clean when the user returns. Any other
@@ -823,8 +841,8 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 							toggle();
 						}
 					}}
-					disabled={disabled || blocked}
-					aria-label={error ? `Dictation failed: ${error}` : "Start dictation"}
+					disabled={disabled || blocked || !microphone}
+					aria-label={!microphone ? DICTATION_NEEDS_HTTPS : error ? `Dictation failed: ${error}` : "Start dictation"}
 					data-testid="dictation-toggle"
 					className="flex h-7 w-full items-center justify-center gap-1.5 rounded-md border border-border/50 bg-card/50 text-xs text-muted-foreground/70 shadow-lg backdrop-blur transition-colors hover:border-border hover:text-muted-foreground"
 				>

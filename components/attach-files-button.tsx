@@ -9,6 +9,7 @@ import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
 import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers } from "./interaction-layers";
 import { INTERACTION_LAYER_Z_BASE } from "./host-dialog";
+import { MAX_ATTACHMENT_BYTES, MAX_ATTACHMENT_FILES } from "@/lib/attachment-limits";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 
 /** Picked files → the rooted paths an editor chips (issue #285), via the
@@ -43,6 +44,17 @@ export function attachmentPopupPlacement(button: { left: number; right: number }
 }
 
 const noSubscribe = () => () => {};
+const pendingUploads = new WeakSet<HTMLElement>();
+const uploadListeners = new Set<() => void>();
+const subscribeUploads = (listener: () => void) => { uploadListeners.add(listener); return () => { uploadListeners.delete(listener); }; };
+export function useAttachmentUploadPending(editorRef: RefObject<HTMLDivElement | null>) {
+	return useSyncExternalStore(subscribeUploads, () => !!editorRef.current && pendingUploads.has(editorRef.current), () => false);
+}
+function markUpload(editor: HTMLElement | null, pending: boolean) {
+	if (!editor) return;
+	if (pending) pendingUploads.add(editor); else pendingUploads.delete(editor);
+	for (const notify of uploadListeners) notify();
+}
 /** The bridge is fixed for the window's life; the server render is always
  *  the browser case, so hydration never mismatches. */
 function useDesktopPaths(): boolean {
@@ -90,6 +102,26 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 	const choosingFolder = useRef(false);
 	const [open, setOpen] = useState(false);
 	const [notice, setNotice] = useState("");
+	const [uploading, setUploading] = useState(false);
+	const uploadPending = useRef(false);
+	const upload = async (files: File[]) => {
+		if (!files.length || uploadPending.current) return;
+		if (files.length > MAX_ATTACHMENT_FILES || files.reduce((sum, file) => sum + file.size, 0) > MAX_ATTACHMENT_BYTES) {
+			setNotice("Choose up to 32 files totaling 25 MiB or less."); return;
+		}
+		const editor = editorRef.current;
+		markUpload(editor, true);
+		uploadPending.current = true; setUploading(true); setNotice("");
+		try {
+			const form = new FormData();
+			for (const file of files) form.append("files", file);
+			const response = await fetch("/api/attachments", { method: "POST", body: form });
+			const result = await response.json();
+			if (!response.ok || !Array.isArray(result.paths) || !result.paths.every((entry: unknown) => typeof entry === "string")) throw new Error(result.error || "Upload failed. Try again.");
+			if (editor?.isConnected && editor === editorRef.current) editor.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: result.paths }));
+		} catch (error) { setNotice(error instanceof Error ? error.message : "Upload failed. Try again."); }
+		finally { markUpload(editor, false); uploadPending.current = false; setUploading(false); }
+	};
 	const [placement, setPlacement] = useState<ReturnType<typeof attachmentPopupPlacement> | null>(null);
 	const positioned = placement !== null;
 	// Like MenuShell, portal to body with viewport-capped, reanchored placement.
@@ -148,31 +180,37 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 				type="file"
 				multiple
 				hidden
+				suppressHydrationWarning // Chrome for iOS adds autofill ids before hydration.
 				data-testid="attach-files-input"
 				onChange={(e) => {
 					const resolve = window.lh?.getPathForFile;
-					const { paths } = resolve ? pathsForFiles(Array.from(e.currentTarget.files ?? []), resolve) : { paths: [] };
+					const files = Array.from(e.currentTarget.files ?? []);
+					const { paths } = resolve ? pathsForFiles(files, resolve) : { paths: [] };
 					if (paths.length > 0) editorRef.current?.dispatchEvent(new CustomEvent(INSERT_FILE_PATHS_EVENT, { detail: paths }));
+					if (!resolve) void upload(files);
 					e.currentTarget.value = ""; // allow re-picking the same file
 				}}
 			/>
-			<Hint label={desktop ? "Attach files or a folder" : BROWSER_NOTICE}>
+			<Hint label={uploading ? "Uploading files…" : desktop ? "Attach files or a folder" : "Upload photos or files (25 MiB total)"}>
 				<button
 					ref={buttonRef}
 					type="button"
 					aria-label="Attach files"
-					aria-disabled={!desktop}
+					disabled={uploading}
+					aria-disabled={uploading}
+					aria-busy={uploading}
 					aria-haspopup="menu"
 					aria-expanded={open}
 					data-testid="attach-files"
-					onClick={() => { if (desktop) { setNotice(""); setOpen(!open); } }}
+					onClick={() => { setNotice(""); setOpen(!open); }}
 					className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
 				>
 					<PaperclipIcon className="size-4" />
 				</button>
 			</Hint>
+			{uploading && <span role="status" className="absolute bottom-full left-0 mb-2 w-max rounded-lg border bg-card px-3 py-2 text-xs">Uploading files…</span>}
 			{(open || notice) && <AttachmentPopup anchorRef={buttonRef} rootRef={popupRef} open={open} close={() => setOpen(false)}><div ref={popupRef} role={open ? "menu" : "status"}
-				aria-label={open ? "Attach files or a folder" : undefined}
+				aria-label={open ? desktop ? "Attach files or a folder" : "Upload photos or files" : undefined}
 				data-testid="attachment-popup"
 				style={{ position: "fixed", zIndex: 60, ...(placement ?? { left: 0, top: 0, visibility: "hidden" }), overflowY: "auto" }}
 				className={open ? "w-max rounded-lg border bg-card p-1 shadow-lg" : "w-64 rounded-lg border bg-card p-2 text-xs text-muted-foreground shadow-lg"}
@@ -183,10 +221,12 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 					if (next >= 0) { event.preventDefault(); buttons[next]?.focus(); }
 				}}>
 				{open ? <>
-					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
-					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
-						onClick={() => { void chooseFolder(); }}>Folder</button>
+					{!desktop && <button type="button" role="menuitem" className="block w-full rounded px-3 py-2 text-left text-sm hover:bg-accent"
+						onClick={() => { setOpen(false); if (pickerRef.current) { pickerRef.current.accept = "image/*"; pickerRef.current.click(); } }}>Photos or camera</button>}
+					<button type="button" role="menuitem" className={desktop ? "block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent" : "block w-full rounded px-3 py-2 text-left text-sm hover:bg-accent"}
+						onClick={() => { setOpen(false); if (pickerRef.current) { pickerRef.current.accept = ""; pickerRef.current.click(); } }}>Files</button>
+					{desktop && <button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+						onClick={() => { void chooseFolder(); }}>Folder</button>}
 				</> : notice}
 			</div></AttachmentPopup>}
 		</div>

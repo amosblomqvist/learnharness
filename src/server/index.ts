@@ -7,6 +7,8 @@
 export * from "./chat-handler.ts";
 export * from "./events-stream.ts";
 export * from "./chats.ts";
+export { cloudControlsResponse, cloudCallbackResponse } from "./cloud-http.ts";
+export { cloudSyncProfile } from "./cloud-sync.ts";
 export * from "./graph.ts";
 export * from "./source-organization.ts";
 export * from "./source-deletion.ts";
@@ -45,6 +47,7 @@ export * from "./search.ts";
 export { authStore } from "../store/auth.ts";
 export * from "./settings-body.ts";
 export { fileAccessConfigurationError } from "./file-access.ts";
+export { saveAttachments } from "./attachments.ts";
 export * from "./turn-liveness.ts";
 export * from "./turn-runs.ts";
 export * from "./dismissal-park.ts";

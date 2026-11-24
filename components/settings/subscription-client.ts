@@ -22,7 +22,10 @@ async function control<T>(providerId: string, op: string, fields: Record<string,
 function onChange(hub: Hub, listener: () => void): () => void {
 	const offEvent = hub?.subscribe("subscriptions-changed", listener);
 	const offResync = hub?.onResync(listener);
-	return () => { offEvent?.(); offResync?.(); };
+	// Packaged native owners publish IPC to the desktop. Remote browsers also
+	// refresh their public status while a provider's PC-side sign-in completes.
+	const timer = typeof window !== "undefined" && window.lh?.mobileRemote ? window.setInterval(listener, 5000) : undefined;
+	return () => { offEvent?.(); offResync?.(); if (timer !== undefined) window.clearInterval(timer); };
 }
 /** Reserve the new tab synchronously in the click gesture. Only a one-use
  * same-origin action URL enters app JS; provider URLs remain in the owner.

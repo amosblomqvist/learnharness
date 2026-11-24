@@ -44,6 +44,12 @@ ipcRenderer.on("lh:open-settings", (_event, section) => {
 
 contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
+	mobile: {
+		status: () => ipcRenderer.invoke("lh:mobile:control", { op: "status" }),
+		refresh: () => ipcRenderer.invoke("lh:mobile:control", { op: "refresh" }),
+		enable: enabled => ipcRenderer.invoke("lh:mobile:control", { op: "enable", enabled }),
+		preview: size => ipcRenderer.invoke("lh:mobile:control", { op: "preview", size }),
+	},
 	takeStartupMessage: () => ipcRenderer.invoke("lh:startup-message:take"),
 	dismissStartupMessage: (id) => ipcRenderer.invoke("lh:startup-message:dismiss", id),
 	// Resolve only a renderer-supplied, OS-backed File. No filesystem API,

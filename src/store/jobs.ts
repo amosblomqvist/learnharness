@@ -17,13 +17,14 @@ import type { JobStore } from "../core/ports.ts";
 import type { CreateJobInit, JobPatch } from "../core/ports.ts";
 import type { JobRecord } from "../core/contracts.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { markThreadModified } from "./thread-times.ts";
 
 /** Background jobs (data/jobs). Not in config.ts PATHS (orchestrator-owned). */
-const JOBS_DIR = path.join(/* turbopackIgnore: true */ PATHS.data, "jobs");
+const jobsDir = () => path.join(/* turbopackIgnore: true */ PATHS.threadData, "jobs");
 
 function jobFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid job id: ${id}`);
-	return path.join(/* turbopackIgnore: true */ JOBS_DIR, `${id}.json`);
+	return path.join(/* turbopackIgnore: true */ jobsDir(), `${id}.json`);
 }
 
 /** Use the shared retry/cleanup law, but never truncate a plugin-linked job.
@@ -32,12 +33,13 @@ function jobFile(id: string): string {
  * cannot grant plugin-kind jobs permission to fall back in place. */
 function writeJob(record: JobRecord): void {
 	const strict = record.kind === "plugin" || record.plugin !== undefined;
+	if (PATHS.threadData !== PATHS.data) markThreadModified(PATHS.threadData, record.chatId);
 	writeFileAtomicSync(jobFile(record.id), JSON.stringify(record, null, "\t"), {
 		allowInPlaceFallback: !strict,
 		...(strict ? { mode: 0o600 } : {}),
 	});
 	if (strict && process.platform !== "win32") {
-		const directory = fs.openSync(JOBS_DIR, "r");
+		const directory = fs.openSync(jobsDir(), "r");
 		try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
 	}
 }
@@ -60,7 +62,7 @@ function createJob(init: CreateJobInit): JobRecord {
 		updatedAt: now,
 		...(init.plugin ? { plugin: init.plugin } : {}),
 	};
-	fs.mkdirSync(JOBS_DIR, { recursive: true });
+	fs.mkdirSync(jobsDir(), { recursive: true });
 	writeJob(record);
 	emit("jobs-changed", { chatId: init.chatId });
 	return record;
@@ -92,9 +94,9 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 /** All jobs for a chat, newest activity first. */
 function listJobs(chatId: string): JobRecord[] {
 	try {
-		fs.mkdirSync(JOBS_DIR, { recursive: true });
+		fs.mkdirSync(jobsDir(), { recursive: true });
 		return fs
-			.readdirSync(/* turbopackIgnore: true */ JOBS_DIR)
+			.readdirSync(/* turbopackIgnore: true */ jobsDir())
 			.filter((f) => f.endsWith(".json"))
 			.map((f) => getJob(f.slice(0, -5)))
 			.filter((j): j is JobRecord => j !== null && j.chatId === chatId)

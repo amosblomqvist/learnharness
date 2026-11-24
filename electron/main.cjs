@@ -32,6 +32,7 @@ const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cj
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
+const { createMobileAccess } = require("./mobile-access.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
@@ -64,7 +65,7 @@ function applyChrome(win) {
 	if (win.isDestroyed()) return;
 	const colors = chromeColors(appearance);
 	win.setBackgroundColor(colors.color);
-	if (process.platform !== "darwin") win.setTitleBarOverlay(colors);
+	if (process.platform !== "darwin" && trustedAppWindows.has(win)) win.setTitleBarOverlay(colors);
 }
 
 /** The packaged standalone server (extraResources → Resources/server).
@@ -778,6 +779,33 @@ async function main() {
 	// interval fire after it below. setupAutoUpdater's contract: failures
 	// are log lines — this can never block boot.
 	setupAutoUpdater();
+	const mobile = createMobileAccess({
+		app, BrowserWindow, session, origin: url, desktopSecret: desktopAPISecret,
+		openExternal: openExternalLink,
+		directory: serverDataDir({ devUrl, env: process.env, packagedDataDir: DATA_DIR(), repoRoot: path.join(__dirname, "..") }),
+		appearance: () => chromeColors(appearance).color,
+		openWebBrowser: action => openWebSubscriptionBrowser(action, new URL(url).origin, { openExternal: target => shell.openExternal(target) }),
+		nativeControl: async command => {
+			if (!chatgpt || !subscriptions || !serverProcess?.connected) throw new Error("The desktop connection is unavailable.");
+			if (command.op === "status" && !command.providerId) return { chatgpt: await chatGPTControl(command, chatgpt), native: await subscriptionControl(command, subscriptions) };
+			return command.providerId === "chatgpt" ? chatGPTControl(command, chatgpt) : subscriptionControl(command, subscriptions);
+		},
+		updateControl: op => {
+			if (op === "status") return updateState;
+			if (op === "check") { checkForUpdates({ manual: true }); return null; }
+			if (op === "install") { setTimeout(() => installUpdateNow(), 250); return null; }
+			throw new Error("Unsupported update control.");
+		},
+	});
+	await mobile.initialize();
+	ipcMain.handle("lh:mobile:control", async (event, command) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		if (command?.op === "status") return mobile.status();
+		if (command?.op === "refresh") return mobile.refresh();
+		if (command?.op === "enable" && typeof command.enabled === "boolean") return mobile.setEnabled(command.enabled);
+		if (command?.op === "preview") { await mobile.openPreview(command.size); return mobile.status(); }
+		throw new Error("Unsupported Mobile Access control.");
+	});
 	// Same sender rule as lh:update:get/check. ipcMain.on has no reply channel,
 	// so an untrusted request is dropped and logged.
 	ipcMain.on("lh:update-install", (event) => {

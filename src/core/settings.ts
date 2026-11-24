@@ -519,6 +519,8 @@ export interface CompactionSettings {
  *  preserved verbatim by the sanitizer (forward-compat with newer records). */
 export interface UserSettings {
 	version: number;
+	/** Experimental Google account connection and thread sync; absent means off. */
+	labs?: { threadSync?: boolean };
 	general?: GeneralSettings;
 	dictation?: DictationSettings;
 	/** Explicit app-wide opt-in; absent/invalid is off, including older records. */
@@ -902,6 +904,10 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	const out: UserSettings = {
 		version: typeof r.version === "number" && Number.isInteger(r.version) && r.version >= 1 ? r.version : CURRENT_SETTINGS_VERSION,
 	};
+	if (r.labs !== undefined) {
+		const labs = r.labs as Record<string, unknown> | null;
+		out.labs = labs && typeof labs === "object" && !Array.isArray(labs) && typeof labs.threadSync === "boolean" ? { threadSync: labs.threadSync } : {};
+	}
 	if (r.general !== null && typeof r.general === "object" && !Array.isArray(r.general)) {
 		out.general = sanitizeGeneral(r.general as Record<string, unknown>);
 	}

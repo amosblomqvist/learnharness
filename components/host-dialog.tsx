@@ -16,7 +16,7 @@ import {
 
 /** Shared declarative paint ranks, never per-dialog foreground constants. */
 export const INTERACTION_LAYER_Z_BASE = 100;
-type FrameProps = HTMLAttributes<HTMLElement> & { ref?: Ref<HTMLElement> };
+type FrameProps = HTMLAttributes<HTMLElement> & { ref?: Ref<HTMLElement>; "data-lh-dialog-frame"?: string };
 export interface HostDialogProps {
 	open: boolean;
 	onClose: (reason: CloseReason) => CloseOutcome | void;
@@ -129,6 +129,7 @@ function OpenHostDialog({
 	if (!portalTarget || (openingLease && !openingLease.owns())) return null;
 	const visual = cloneElement(frame, {
 		ref: frameRef,
+		"data-lh-dialog-frame": "",
 		// The semantic boundary includes popup portals; the visual frame may
 		// transform/clip freely without changing fixed viewport menu geometry.
 		role: undefined,

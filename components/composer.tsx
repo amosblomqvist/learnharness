@@ -4,7 +4,7 @@ import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PathInput } from "@/components/path-input";
-import { AttachFilesButton } from "@/components/attach-files-button";
+import { AttachFilesButton, useAttachmentUploadPending } from "@/components/attach-files-button";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 
@@ -150,6 +150,7 @@ export function Composer({
 }) {
 	const controller = useOptionalInteractionLayers();
 	const act = () => {
+		if (uploading && !busy) return;
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
 		else if (action === "send") onSend();
@@ -157,9 +158,11 @@ export function Composer({
 	};
 	const ownInputRef = useRef<HTMLDivElement>(null);
 	const editorRef = inputRef ?? ownInputRef;
+	const uploading = useAttachmentUploadPending(editorRef);
 	return (
 		<form
 			data-testid="composer"
+			suppressHydrationWarning // Chrome for iOS adds autofill ids before hydration.
 			className="flex items-end gap-1.5 p-1.5"
 			onSubmit={(e) => {
 				e.preventDefault();
@@ -226,7 +229,7 @@ export function Composer({
 					<button
 						type="submit"
 						aria-label={busy && !canSend ? "Stop" : "Send"}
-						disabled={!busy && !canSend}
+						disabled={!busy && (!canSend || uploading)}
 						className={cn(
 							"flex size-10 shrink-0 items-center justify-center rounded-[10px] transition-colors",
 							busy && !canSend

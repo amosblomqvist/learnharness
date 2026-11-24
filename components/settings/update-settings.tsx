@@ -25,21 +25,25 @@ export function useUpdateState() {
 	const [state, setState] = useState<UpdateState | null>(null);
 	const [failed, setFailed] = useState(false);
 	useEffect(() => {
-		const lh = window.lh;
-		if (!lh) return;
 		let live = true;
 		let revision = -1;
+		let off: (() => void) | undefined;
 		const accept = (next: UpdateState) => {
 			if (!live || next.revision < revision) return;
 			revision = next.revision;
 			setState(next);
 			setFailed(false);
 		};
-		const off = lh.onUpdateStatus?.(accept);
-		void lh.getUpdateState?.().then(accept).catch(() => {
-			if (live && revision === -1) setFailed(true);
-		});
-		return () => { live = false; off?.(); };
+		const connect = () => {
+			const lh = window.lh;
+			if (!lh) return;
+			off?.(); off = lh.onUpdateStatus?.(accept);
+			void lh.getUpdateState?.().then(accept).catch(() => {
+				if (live && revision === -1) setFailed(true);
+			});
+		};
+		connect(); window.addEventListener("lh:mobile-ready", connect);
+		return () => { live = false; off?.(); window.removeEventListener("lh:mobile-ready", connect); };
 	}, []);
 	return { state, failed };
 }

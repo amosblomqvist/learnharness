@@ -1,4 +1,5 @@
 "use client";
+import { useAttachmentUploadPending } from "@/components/attach-files-button";
 
 import { useCallback, useEffect, useRef, useState, type ReactNode } from "react";
 import { usePathname, useRouter } from "next/navigation";
@@ -138,6 +139,7 @@ export function DraftShell({
 	 * which reads its REF mirror, so the post-await timing of React's
 	 * re-render cannot eat the dictated tail. */
 	const handleSend = () => {
+		if (uploadingAttachment) return;
 		if (dictation.active) {
 			void dictation.finish().then(onSend);
 			return;
@@ -147,6 +149,7 @@ export function DraftShell({
 	/* Run end focuses the composer (owner, 2026-10-01): the hands are on
 	 * the keyboard from the stop — falling edge of `active` only. */
 	const composerInputRef = useRef<HTMLDivElement>(null);
+	const uploadingAttachment = useAttachmentUploadPending(composerInputRef);
 	const dictationWasActiveRef = useRef(false);
 	useEffect(() => {
 		if (dictation.active) {

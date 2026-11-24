@@ -35,6 +35,7 @@ import { AnsweredCard } from "@/components/answered-card";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
 import { ChatSessionComposer } from "@/components/composer";
+import { useAttachmentUploadPending } from "@/components/attach-files-button";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
@@ -970,6 +971,7 @@ export function Chat({
 	 * is null, and the thinking field is left alone by design. */
 	const dictationWasActiveRef = useRef(false);
 	const composerInputRef = useRef<HTMLDivElement>(null);
+	const uploadingAttachment = useAttachmentUploadPending(composerInputRef);
 
 	// CITE (2026-10-31): selected tutor text → a citation chip in the
 	// composer, then its comment popover. The transcript's scroll element
@@ -1563,6 +1565,7 @@ export function Chat({
 	});
 
 	const onSend = () => {
+		if (uploadingAttachment) return;
 		if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller) || submissionRunner.occupied) return;
 		if (openingDraftRef.current !== null) { deliverOpeningPrompt(textRef.current.trim(), true); return; }
 		void prepareText();

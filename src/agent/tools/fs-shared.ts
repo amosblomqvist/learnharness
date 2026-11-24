@@ -85,7 +85,7 @@ const SENSITIVE_HOME_PATHS = [
 
 /** Templates are deliberately included: their names do not guarantee safe contents. */
 const ENV_FILE = /^\.env(\..*)?$/i;
-const SUBSCRIPTION_FILES = ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json"];
+const SUBSCRIPTION_FILES = ["chatgpt-credentials.json", "github-copilot-credentials.json", "xai-credentials.json", "learnharness-cloud-credentials.json"];
 // Match the actual writers in store/auth.ts and electron/{chatgpt,subscription-store}.cjs.
 const CREDENTIAL_TEMP = /^(?:\.auth\.json\.tmp-\d+|(?:chatgpt|github-copilot|xai)-credentials\.json\.[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.tmp)$/i;
 const ATOMIC_TEMP_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -111,7 +111,7 @@ export function isSensitivePath(absolute: string, home: string = os.homedir(), a
 	return ENV_FILE.test(path.basename(file)) ||
 		SENSITIVE_HOME_PATHS.some((p) => isWithin(file, path.join(home, p), true)) ||
 		credentialFiles(authFile).some((p) => isWithin(file, p)) ||
-		isCredentialTemp(file, path.dirname(authFile), path.basename(comparisonPath(authFile)));
+		credentialFiles(authFile).some(p => isCredentialTemp(file, path.dirname(p), path.basename(comparisonPath(p))));
 }
 
 /** An unrelated inaccessible/broken protected root must not break ordinary
@@ -160,7 +160,7 @@ function sourcePathCheck(home = os.homedir()): (absolute: string) => boolean {
 	const credentialDir = protectedRealPath(path.dirname(AUTH_FILE));
 	return (absolute) => isSensitivePath(absolute, home) ||
 		homeRoots.some((p) => isWithin(absolute, p, true)) ||
-		files.some((p) => isWithin(absolute, p)) || isCredentialTemp(absolute, credentialDir, path.basename(comparisonPath(AUTH_FILE)));
+		files.some((p) => isWithin(absolute, p)) || credentialFiles(AUTH_FILE).some(p => isCredentialTemp(absolute, credentialDir, path.basename(comparisonPath(p))));
 }
 
 function checkedSourcePath(absolute: string, denied: (absolute: string) => boolean): string {

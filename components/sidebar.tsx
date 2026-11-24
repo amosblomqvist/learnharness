@@ -33,6 +33,10 @@ import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
 import { StartupMessage, type StartupMessageOffer } from "@/components/startup-message";
+import { MobileRuntime, useMobileLayout } from "@/components/mobile-runtime";
+import type { MobileAccessBridge } from "@/lib/mobile-access";
+import { HostDialog } from "@/components/host-dialog";
+import { canMoveFolder } from "@/src/core";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -65,12 +69,14 @@ import { FilePathDropZone } from "@/components/file-path-drop-zone";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
-const IS_ELECTRON = typeof navigator !== "undefined" && navigator.userAgent.includes("Electron");
+const IS_ELECTRON = typeof window !== "undefined" && !!window.lh?.platform;
 
 declare global {
 	interface Window {
 		/** Preload bridge (electron/preload.cjs) — Electron only, absent in the browser. */
 		lh?: {
+			mobileRemote?: boolean;
+			mobile?: MobileAccessBridge;
 			/** Read-only host OS; determines the native-control gutter. */
 			platform?: string;
 			/** Resolve an OS-backed File without copying/uploading its contents. */
@@ -102,9 +108,10 @@ declare global {
 	}
 }
 
-const SidebarContext = createContext<{ open: boolean; toggle: () => void }>({
+const SidebarContext = createContext<{ open: boolean; toggle: () => void; close: () => void }>({
 	open: false,
 	toggle: () => {},
+	close: () => {},
 });
 
 export function useSidebar() {
@@ -112,6 +119,10 @@ export function useSidebar() {
 }
 
 export function SidebarProvider({ children }: { children: React.ReactNode }) {
+	const mobile = useMobileLayout();
+	const pathname = usePathname();
+	const [mobileOpen, setMobileOpen] = useState(false);
+	useEffect(() => { setMobileOpen(false); }, [pathname, mobile]);
 	useEffect(() => {
 		const bridge = window.lh?.chatgpt;
 		if (!bridge) return;
@@ -166,6 +177,7 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, []);
 
 	const toggle = useCallback(() => {
+		if (mobile) { setMobileOpen(value => !value); return; }
 		// Opening while narrow (auto-closed, or the user's own closed-at-
 		// narrow): ask the shell to widen to the threshold — the resize
 		// listener flips `narrow` and the sidebar appears. The preference
@@ -181,7 +193,8 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 			localStorage.setItem(STORAGE_KEY, v ? "0" : "1");
 			return !v;
 		});
-	}, [narrow, open]);
+	}, [narrow, open, mobile]);
+	const close = useCallback(() => { if (mobile) setMobileOpen(false); else { setOpen(false); localStorage.setItem(STORAGE_KEY, "0"); } }, [mobile]);
 
 	// ⌘B: the global shortcut dispatches kbdEventForAction("toggle-sidebar")
 	// and the context answers on exactly that name — the shared spelling
@@ -197,9 +210,9 @@ export function SidebarProvider({ children }: { children: React.ReactNode }) {
 	}, [toggle]);
 
 	return (
-		<SidebarContext.Provider value={{ open: open && !narrow, toggle }}>
+		<SidebarContext.Provider value={{ open: mobile ? mobileOpen : open && !narrow, toggle, close }}>
 			{/* transitions gated on mount: no slide-in flash on page load */}
-			<div className={cn("flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
+			<div className={cn("lh-app-shell flex h-dvh", mounted && "[&_.sidebar-motion]:transition-[width,margin,opacity]")}>{children}</div>
 		</SidebarContext.Provider>
 	);
 }
@@ -324,7 +337,7 @@ export function SessionRow({
 	/** Right-click opens the context menu (wave 6: Rename / Delete). */
 	onContextMenu?: (e: React.MouseEvent<HTMLButtonElement>) => void;
 }) {
-	return (
+	return (<div className="relative">
 		<button
 			type="button"
 			onClick={onOpen}
@@ -351,7 +364,8 @@ export function SessionRow({
 				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
 			)}
 		</button>
-	);
+		{onContextMenu && <button type="button" aria-label={`Actions for ${chat.title}`} className="lh-mobile-row-action" onClick={onContextMenu}>•••</button>}
+	</div>);
 }
 
 /** The inline-rename row (wave 6): same geometry as SessionRow, but the
@@ -417,7 +431,8 @@ const KIND_FILTER_KEY = "lh:session-kind-filter";
 function SessionsSidebar() {
 	const { appearance: { compactSessionList } } = useAppearance();
 	const interactions = useInteractionLayers();
-	const { open, toggle } = useSidebar();
+	const { open, toggle, close } = useSidebar();
+	const mobile = useMobileLayout();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [kindFilter, setKindFilter] = useState<SessionKindFilter>("all");
@@ -775,6 +790,7 @@ function SessionsSidebar() {
 							onOpen={() => {
 								setKbdIndex(null);
 								router.push(`/chat/${c.id}`);
+								if (mobile) close();
 							}}
 							onContextMenu={(e) => openContext(e, c)}
 						/>
@@ -819,11 +835,7 @@ function SessionsSidebar() {
 		);
 	});
 
-	return (
-		<aside
-			className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")}
-			aria-hidden={!open}
-		>
+	const contents = <>
 			<div className="flex h-full w-72 flex-col border-r bg-background">
 				{/* LH wordmark — the owner's header; close toggle sits at the edge.
 				    Merged chrome (2026-09-17): in Electron this band is the
@@ -1005,7 +1017,7 @@ function SessionsSidebar() {
 
 				{/* The bar overlays the rows (owner polish round): rules and
 				    highlights run to the edge; it shows while scrolling/hovering. */}
-				<OverlayScrollArea scrollRef={listRef} data-testid="session-list" className="flex flex-col" {...folderDrop.containerProps}>
+				<OverlayScrollArea scrollRef={listRef} areaClassName="lh-sidebar-session-list" data-testid="session-list" className="flex flex-col" {...folderDrop.containerProps}>
 					{(creatingFolder?.parentId === null || (rows !== null && rows.length > 0)) && (
 						<div data-testid="session-rows">
 							{creatingFolder?.parentId === null && (
@@ -1044,7 +1056,7 @@ function SessionsSidebar() {
 						<Hint label="Settings" action="open-settings" side="right">
 							<button
 								type="button"
-								onClick={() => openSettings()}
+								onClick={() => { openSettings(); if (mobile) close(); }}
 								data-testid="settings-entry"
 								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
@@ -1119,6 +1131,11 @@ function SessionsSidebar() {
 						</button>
 						<div className="my-0.5 border-t border-border/60" aria-hidden="true" />
 						<CoverageMenuBlock chatId={ctxChatId} />
+						{mobile && organization && <label className="mt-1 flex flex-col gap-1 border-t pt-2 text-muted-foreground">Move to folder
+							<select aria-label="Move session to folder" className="rounded-lg border bg-background p-2 text-foreground" value={placementOf(organization, ctxChatId)?.folderId ?? ""} onChange={event => {
+								void changeFolders({ action: "move", kind: "source", id: ctxChatId, parentId: event.target.value || null }); setCtxChatId(null);
+							}}><option value="">No folder</option>{organization.folders.map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select>
+						</label>}
 					</MenuShell>
 				)}
 
@@ -1154,6 +1171,11 @@ function SessionsSidebar() {
 						>
 							New subfolder
 						</button>
+						{mobile && organization && <label className="flex flex-col gap-1 border-t py-2 text-muted-foreground">Move to folder
+							<select aria-label="Move folder" className="rounded-lg border bg-background p-2 text-foreground" value={organization.folders.find(folder => folder.id === ctxFolderId)?.parentId ?? ""} onChange={event => {
+								void changeFolders({ action: "move", kind: "folder", id: ctxFolderId, parentId: event.target.value || null }); setCtxFolderId(null);
+							}}><option value="">No folder</option>{organization.folders.filter(folder => canMoveFolder(organization, ctxFolderId, folder.id)).map(folder => <option key={folder.id} value={folder.id}>{folder.name}</option>)}</select>
+						</label>}
 						<button
 							type="button"
 							data-testid="folder-ctx-delete"
@@ -1181,8 +1203,10 @@ function SessionsSidebar() {
 					}}
 					onDeleted={onFolderDeleted}
 				/>
-			</aside>
-	);
+	</>;
+	return mobile ? <HostDialog open={open} ownerId={null} onClose={() => { close(); return "closed"; }} aria-label="Sessions and navigation"
+		frame={<aside className="lh-mobile-drawer" />} backdropProps={{ className: "lh-mobile-drawer-backdrop" }}>{contents}</HostDialog>
+		: <aside className={cn("sidebar-motion shrink-0 overflow-hidden duration-200", open ? "w-72" : "w-0")} aria-hidden={!open} inert={!open}>{contents}</aside>;
 }
 
 /** The app frame: sidebar inline + content. Rendered once in the root layout. */
@@ -1199,6 +1223,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 				    after the content in the tree, but it's window-level so order only
 				    matters for the events it dispatches, never for DOM priority. */}
 				<KeyboardShortcuts />
+				<MobileRuntime />
 				<PluginWidgets />
 				<StartupMessage />
 			</SettingsDialogProvider></InteractionLayersProvider>

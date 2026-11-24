@@ -39,7 +39,11 @@
     "**/*.ts",
     "**/*.tsx",
     ".next/types/**/*.ts",
-    ".next/dev/types/**/*.ts"
+    ".next/dev/types/**/*.ts",
+    ".next/mobile-smoke/types/**/*.ts",
+    ".next/mobile-smoke/dev/types/**/*.ts",
+    "node_modules/.cache/learnharness-mobile-smoke/types/**/*.ts",
+    "node_modules/.cache/learnharness-mobile-smoke/dev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

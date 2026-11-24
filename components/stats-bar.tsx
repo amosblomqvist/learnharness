@@ -99,6 +99,7 @@ export function StatsBar({
 	return (
 		<div
 			data-testid="stats-bar"
+			data-lh-stats-bar=""
 			// pointer-events-auto: the sticky composer wrapper is pointer-events-none
 			// (so its transparent gradient area never blocks scrolling) — this row
 			// must re-enable events or every control on it is dead (the model-

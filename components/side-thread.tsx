@@ -1,4 +1,5 @@
 "use client";
+import { useMobileLayout } from "@/components/mobile-runtime";
 
 import { useContext, useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "react";
 import { ArrowRight, CornerDownLeft, GripVertical, MessageCircleQuestion, Mic, Pin, PinOff, Square, X } from "lucide-react";
@@ -217,6 +218,7 @@ const RESIZE_HANDLES: { edge: SideThreadResizeEdge; className: string }[] = [
  * Render as native session content, not a body portal: whole-session surfaces
  * must cover/inactivate this companion without closing it or losing its draft. */
 export function SideThreadPopover({ state, chatId, composer, ...handlers }: { state: SideThreadState; chatId: string; composer: () => HTMLElement | null } & SideThreadHandlers) {
+	const mobile = useMobileLayout();
 	const controller = useOptionalInteractionLayers();
 	const boxRef = useRef<HTMLDivElement>(null);
 	const [placement, setPlacement] = useState<SideThreadPlacement | null>(null);
@@ -263,6 +265,7 @@ export function SideThreadPopover({ state, chatId, composer, ...handlers }: { st
 	};
 	const currentFrame = (): SideThreadFrame => { const rect = boxRef.current!.getBoundingClientRect(); return frameRef.current ?? { x: rect.left, y: rect.top, width: rect.width, height: rect.height }; };
 	const startDrag = (event: React.PointerEvent<HTMLElement>) => {
+		if (mobile) return;
 		if (event.button !== 0 || (event.target as Element).closest("button") || !boxRef.current) return;
 		event.preventDefault(); const start = currentFrame();
 		const dx = event.clientX - start.x; const dy = event.clientY - start.y; setFrame(start);
