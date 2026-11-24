@@ -31,8 +31,8 @@ export interface PluginWorkerStartOptions {
 	prompt: string;
 	model: PluginModelSpec;
 	purpose: PluginCallPurpose;
-	/** Maximum model turns, including correction turns. No implicit default. */
-	maxTurns: number;
+	/** Optional maximum assistant turns, including corrections. Omitted = unbounded. */
+	maxTurns?: number;
 	options?: PluginInferenceOptions;
 	/** Wall-clock lifetime from acceptance, including admission waits. */
 	timeoutMs?: number;
@@ -95,7 +95,7 @@ export interface PluginBackgroundMeta {
 	taskId: string;
 	status: PluginTaskOutcome["status"];
 }
-/** Plugin-owned bounded tasks; model execution can incur cost. Task lifetime is
+/** Plugin-owned result tasks; model execution can incur cost. Task lifetime is
  * independent of views/subscriptions. Disable/restart interrupts unfinished tasks;
  * reactivation does not replay them. */
 export interface PluginWorkerService {

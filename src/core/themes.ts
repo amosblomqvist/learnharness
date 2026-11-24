@@ -223,7 +223,10 @@ export function resolveTheme(id: string | null | undefined, customs: readonly Th
 /** The single place the two override homes merge onto the theme: the
  *  legacy keys (`background`, `mdRendering.boldColor/italicColor`) and
  *  `colors`. A null/absent override = the theme's color. */
-export function effectiveColors(theme: ThemeFile, appearance: AppearanceSettings | undefined): ThemeColors {
+export function effectiveColors(
+	theme: ThemeFile,
+	appearance: Pick<AppearanceSettings, "background" | "colors" | "mdRendering"> | undefined,
+): ThemeColors {
 	const out: ThemeColors = { ...theme.colors };
 	if (!appearance) return out;
 	if (isHex(appearance.background)) out.background = appearance.background;

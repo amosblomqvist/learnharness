@@ -9,10 +9,8 @@
  * queues the handoff steer through the wake pipeline so the teacher starts
  * immediately after the prober's turn ends (auto-wake, user-decided).
  *
- * Assessment shape (v1 — refine later): the probe was a binary search per
- * dependency strand; the assessment formalizes exactly that. A list of the
- * strands the lesson will depend on, each with a free-form read of where
- * the learner's edge sits.
+ * The assessment groups the evidence by dependency strand, with a
+ * free-form account of the learner's understanding for each.
  */
 
 import { Type, type Static } from "typebox";
@@ -21,8 +19,7 @@ import { Type, type Static } from "typebox";
 export interface ProbeStrand {
 	/** Name/description of the strand (e.g. "the derivative as a limit"). */
 	strand: string;
-	/** Free-form: where the learner's edge sits on this strand — floor,
-	 *  ceiling, misconceptions found, what to build from. */
+	/** Free-form: what the learner can build on and what remains uncertain. */
 	assessment: string;
 }
 
@@ -55,15 +52,15 @@ export const probeDoneInputSchema = Type.Object({
 					}),
 					assessment: Type.String({
 						description:
-							"Where his edge sits on this strand: the floor (what he reliably gets right), the ceiling (where it runs out), " +
-							"misconceptions found, and what the lesson should build from.",
+							"Describe what the learner reliably reasons from (the floor) and where their reasoning runs out (the ceiling), " +
+							"as supported by the evidence. Include relevant misconceptions and distinguish untested bounds from observed gaps.",
 					}),
 				}),
-				{ minItems: 1, description: "Every strand the planned lesson will depend on, each with your read of his edge on it." },
+				{ minItems: 1, description: "The strands the lesson depends on, with what the evidence shows and what still needs checking." },
 			),
 			summary: Type.Optional(
 				Type.String({
-					description: "Optional overall synthesis: his apparent goal and where the teaching should enter.",
+					description: "Optional overall synthesis: the learner's goal and where teaching should start.",
 				}),
 			),
 		},

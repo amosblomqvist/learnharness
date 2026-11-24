@@ -36,7 +36,7 @@ abort(id){const mount=mounts.get(id);mount?.controller.abort();mount?.dispose?.(
 async render(id,language,source,incomplete=false){this.abort(id);document.getElementById(id)?.remove();const card=document.createElement('article');card.id=id;const title=document.createElement('h2');title.textContent=id;const body=document.createElement('div');card.append(title,body);document.querySelector('#cards').append(card);
  const renderer=renders.get(language);if(!renderer){body.textContent=source;return {raw:true}};
  const controller=new AbortController(), mount={controller,language};mounts.set(id,mount);const started=performance.now();
- try{const dispose=await renderer.mount(body,{language,source,meta:'',incomplete,signal:controller.signal});mount.dispose=dispose;if(controller.signal.aborted){dispose?.();return {aborted:true,ms:performance.now()-started}};
+ try{const dispose=await renderer.mount(body,Object.freeze({language,source,meta:'',incomplete,signal:controller.signal}));mount.dispose=dispose;if(controller.signal.aborted){dispose?.();return {aborted:true,ms:performance.now()-started}};
  const svg=body.querySelector('svg');return {ms:performance.now()-started,source:body.querySelector('pre')?.textContent,svg:!!svg,paths:svg?.querySelectorAll('path,line,rect,circle').length,text:svg?.textContent,viewBox:svg?.getAttribute('viewBox'),width:svg?.getBoundingClientRect().width,height:svg?.getBoundingClientRect().height};
  }catch(error){if(controller.signal.aborted)return {aborted:true};const message=document.createElement('p');message.setAttribute('role','alert');message.textContent=error.message;const raw=document.createElement('pre');raw.textContent=source;body.replaceChildren(message,raw);return {error:error.message,source:raw.textContent,ms:performance.now()-started}}},
 disable(){ownedCleanup?.();for(const id of mounts.keys())this.abort(id)}
@@ -268,8 +268,8 @@ try {
   assert.equal(await page.evaluate(() => getComputedStyle(document.getElementById('cached').querySelector('.rich-code-blocks--rendered')).color), 'rgb(18, 52, 86)', 'New cache mounts use the current theme Text color.');
   assert.equal(await page.evaluate(() => window.texPosts), postsBeforeColors, 'Ink-only changes retain the compiled SVG cache.');
   assert.equal(await page.evaluate(() => new Set([...document.querySelectorAll('svg [id]')].map(node => node.id)).size === document.querySelectorAll('svg [id]').length), true, "Repeated cached SVG must have mount-unique IDs.");
-  // Observed authoring failure patterns: each corrected block must pass the
-  // real worker and SVG sanitizer; its unsupported variant stays readable.
+  // Genuine authoring errors still fail through the real worker/sanitizer,
+  // with useful diagnostics and the original source kept readable.
   const authoringCases = [
     { id: 'commutative-authoring', source: String.raw`\usepackage{tikz-cd}
 \begin{document}
@@ -290,7 +290,7 @@ C \arrow[r,"k"'] & D
 \draw[->] (-0.6,0)--(-1.6,0) node[left] {$f_k$};
 \draw (-1.8,-0.55)--(1.8,-0.55);
 \end{tikzpicture}
-\end{document}`, invalid: source => source.replace('\\usepackage{amsmath}', '') },
+\end{document}`, invalid: source => source.replace('\\text{app}', '\\unknownForceLabel{app}') },
     { id: 'plot-authoring', source: String.raw`\usepackage{pgfplots}
 \pgfplotsset{compat=1.16}
 \begin{document}
@@ -305,13 +305,56 @@ C \arrow[r,"k"'] & D
   for (const { id, source, invalid } of authoringCases) {
     const unsupported = invalid(source);
     const failure = await render(id + '-unsupported', 'tikz', unsupported);
-    assert.match(failure.error, /TeX engine render failed/, id);
-    assert.equal(failure.source, unsupported, 'Failed source stays intact; no automatic repairs.');
+    assert.match(failure.error, /TeX compilation failed:/, id);
+    assert.doesNotMatch(failure.error, /showConsole|Emergency stop/);
+    assert.equal(failure.source, unsupported, 'Failed source stays intact; genuine errors are not rewritten.');
     const corrected = await render(id, 'tikz', source);
     assert.ok(corrected.svg && corrected.paths > 0 && corrected.width > 0 && corrected.height > 0, `${id}: ${JSON.stringify(corrected)}`);
     authoringProof.push({ id, failure, corrected });
   }
   await page.screenshot({ path: path.join(evidence, 'tikz-authoring-regressions.png'), fullPage: true });
+  // Exact human-supplied failure: missing amsmath in an otherwise valid diagram.
+  const freeBody = String.raw`\usepackage{tikz}
+\usetikzlibrary{arrows.meta}
+
+\begin{document}
+\begin{tikzpicture}[>=Stealth,thick]
+  % Surface and block
+  \draw (-2,0) -- (3,0);
+  \draw[fill=gray!15] (-0.5,0) rectangle (1,1);
+
+  % Forces
+  \draw[->] (0.25,1) -- (0.25,2.2) node[above] {$N$};
+  \draw[->] (0.25,0) -- (0.25,-1.2) node[below] {$mg$};
+  \draw[->] (1,0.5) -- (2.3,0.5) node[right] {$F_{\text{applied}}$};
+  \draw[->] (-0.5,0.5) -- (-1.6,0.5) node[left] {$f$};
+\end{tikzpicture}
+\end{document}`;
+  const healingProof = [];
+  for (const [id, source] of [
+    ['free-body-missing-amsmath', freeBody],
+    ['free-body-explicit-amsmath', '\\usepackage{amsmath}\n' + freeBody],
+    ['free-body-package-options', '\\usepackage[fleqn]{amsmath}\n' + freeBody],
+    ['free-body-package-list', freeBody.replace('\\usepackage{tikz}', '\\usepackage{tikz,amsmath}')],
+    ['free-body-class', '\\documentclass[12pt]{standalone}\n' + freeBody],
+    ['free-body-style', '\\documentstyle[12pt]{article}\n' + freeBody],
+  ]) {
+    const result = await render(id, 'tikz', source);
+    assert.ok(result.svg && result.paths > 0, `${id}: ${JSON.stringify(result)}`);
+    assert.match(result.text, /applied/);
+    healingProof.push({ id, result });
+  }
+  const badSource = '\\documentclass[12pt]{article}\n' + freeBody.replace('\\draw (-2,0)', '\\unknownForceCommand % <script>window.pwned=100</script>\n  \\draw (-2,0)');
+  const diagnostic = await render('free-body-genuine-error', 'tikz', badSource);
+  assert.match(diagnostic.error, /Undefined control sequence/);
+  const line = badSource.split('\n').findIndex(line => line.includes('\\unknownForceCommand')) + 1;
+  assert.ok(diagnostic.error.includes(`Line ${line}: \\unknownForceCommand`), diagnostic.error);
+  assert.equal(diagnostic.source, badSource, 'Class removal and package healing never change the raw-source fallback.');
+  assert.ok(new TextEncoder().encode(diagnostic.error).length <= 2048);
+  assert.equal(await page.$eval('#free-body-genuine-error', node => node.querySelector('script')), null);
+  assert.equal(await page.evaluate(() => window.pwned), undefined);
+  assert.ok((await render('after-genuine-error', 'tikz', freeBody + '\n% fresh worker')).svg);
+  await page.screenshot({ path: path.join(evidence, 'tikz-healing-and-diagnostics.png'), fullPage: true });
   const dirty = `<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" viewBox="0 0 100 100" onload="window.pwned=1"><script>window.pwned=2</script><style>@import url(https://example.invalid/a.css);</style><foreignObject><div xmlns="http://www.w3.org/1999/xhtml">bad</div></foreignObject><image href="https://example.invalid/x.png"/><a href="javascript:alert(1)"><text>link</text></a><animate attributeName="x"/><defs><path id="shape" d="M0 0L10 10"/></defs><use xlink:href="#shape"/><use href="https://example.invalid/a.svg#x"/><path d="M0 0L2 2" onclick="window.pwned=3" style="fill:url(https://example.invalid/f);stroke:red;filter:url(https://example.invalid/filter)"/><text font-family="cmr10" style="font-size:12px;position:fixed">safe &lt;script&gt;</text></svg>`;
   const sanitized = await page.evaluate(dirty => {
     const svg=sanitizeSvg(dirty,'Safety fixture');document.body.append(svg);
@@ -366,7 +409,7 @@ C \arrow[r,"k"'] & D
   assert.equal(await page.evaluate(() => host.mounts.size), 0);
   assert.deepEqual(errors, []); assert.deepEqual(consoleErrors, []);
   assert.ok(network.every(url => url.startsWith(base + '/') || url.startsWith('data:')), `Unexpected network: ${network.filter(url => !url.startsWith(base + '/'))}`);
-  const report = { timings, authoringProof, chemicalLabels, sizingProof, wideProof, inkProof, switchedInk, overrideInk, paletteProof, initialColors, textColors, referenceProof, cachedMs: cached.ms, timeout, heartbeatTicks: ticks, recoveredMs: recovered.ms, fontProof, requests, network, errors, consoleErrors };
+  const report = { timings, authoringProof, healingProof, diagnostic, chemicalLabels, sizingProof, wideProof, inkProof, switchedInk, overrideInk, paletteProof, initialColors, textColors, referenceProof, cachedMs: cached.ms, timeout, heartbeatTicks: ticks, recoveredMs: recovered.ms, fontProof, requests, network, errors, consoleErrors };
   fs.writeFileSync(path.join(evidence, "report.json"), JSON.stringify(report, null, 2));
   console.log(JSON.stringify({ evidence, timings: Object.fromEntries(Object.entries(timings).map(([name,result])=>[name,Math.round(result.ms)])), cachedMs: Math.round(cached.ms), timeoutMs: Math.round(timeout.ms), heartbeatTicks: ticks, recoveredMs: Math.round(recovered.ms), bundledFontRequests: fontProof.requests.length, requests: requests.length, pageErrors: errors.length }, null, 2));
 } finally { await browser?.close(); await new Promise(resolve => server.close(resolve)); }

@@ -79,6 +79,13 @@ describe("boot fill-gap + precedence", () => {
 		assert.equal(externalCliEnv().OPENROUTER_API_KEY, ENV_OWNED, "external CLIs retain launch-env ownership");
 	});
 
+	it("external CLIs never receive the desktop API capability", () => {
+		const env = externalCliEnv({ ...process.env, PATH: "/usr/bin", LH_DESKTOP_SERVER: "1", LH_DESKTOP_API_SECRET: "d".repeat(64) });
+		assert.equal(env.LH_DESKTOP_API_SECRET, undefined);
+		assert.equal(env.LH_DESKTOP_SERVER, undefined);
+		assert.equal(env.PATH, "/usr/bin", "ordinary launch env is kept");
+	});
+
 	it("unknown file var: fill-gapped into env, surfaced as a generic row", () => {
 		assert.equal(process.env.FUTURE_PLANS_TOKEN, "opaque-plans-token", "reflected at boot");
 		assert.equal(externalCliEnv().FUTURE_PLANS_TOKEN, undefined, "external CLIs exclude unknown file-only injections too");

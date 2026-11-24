@@ -15,6 +15,7 @@ import type { ModelCatalogResponse } from "../src/core/contracts/models.ts";
 import type { PluginModelSpec } from "../src/core/plugin-agents.ts";
 import type { PluginInferenceOptions, PluginInferenceRequest } from "../src/core/plugins.ts";
 import { usageWasAdmitted, type SubscriptionDispatchLifecycle } from "../src/agent/subscription-request-cycle.ts";
+import { CLAUDE_CODE_PROVIDER } from "../src/agent/claude-code/constants.ts";
 
 const spec = { provider: "fixture", id: "explicit-model", thinkingLevel: "medium" } as const;
 const usage = () => ({ input: 3, output: 4, cacheRead: 1, cacheWrite: 0, totalTokens: 8, cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0, total: 0.31 } });
@@ -108,6 +109,32 @@ test("complete preserves native tool calls/signatures and appends per-model plug
 	assert.equal(ledger(f.directory).length, 2);
 });
 
+test("one-shot calls own distinct unsaved routing ids across stream/complete and user/background purposes", async (t) => {
+	const f = fixture(t);
+	await Promise.all([
+		f.adapter.inference.complete({ ...request(), purpose: "user" }),
+		f.adapter.inference.complete(request()),
+		collect(f.adapter.inference.stream({ ...request(), purpose: "user" })),
+		collect(f.adapter.inference.stream(request())),
+	]);
+	assert.equal(f.calls.length, 4);
+	const ids = f.calls.map((call) => call.options.sessionId);
+	for (const id of ids) assert.match(id ?? "", /^[0-9a-f-]{36}$/);
+	assert.equal(new Set(ids).size, 4);
+	assert.deepEqual(f.calls.map((call) => call.background).sort(), [false, false, true, true]);
+	assert.deepEqual(readdirSync(f.directory), ["usage.jsonl"], "routing ids create no persisted conversations");
+	for (const id of ids) assert(!readFileSync(join(f.directory, "usage.jsonl"), "utf8").includes(id!));
+});
+
+test("one-shot Claude Code calls never receive a reusable session id", async (t) => {
+	const pin = { ...spec, provider: CLAUDE_CODE_PROVIDER };
+	const f = fixture(t, { model: pin });
+	await f.adapter.inference.complete({ ...request(pin), purpose: "user" });
+	await collect(f.adapter.inference.stream(request(pin)));
+	assert.equal(f.calls.length, 2);
+	for (const call of f.calls) assert.equal(call.options.sessionId, undefined);
+});
+
 test("stream forwards native events without text-only conversion; native error states are returned by complete", async (t) => {
 	const events: AssistantMessageEvent[] = [];
 	const expected = { ...output(), stopReason: "error" as const, errorMessage: "Native provider quota error" };
@@ -154,7 +181,9 @@ test("allowed generation settings are forwarded without host sampling defaults; 
 	const f = fixture(t);
 	const options: PluginInferenceOptions = { temperature: 0.7, maxTokens: 128, cacheRetention: "none", reasoning: "medium", thinkingBudgets: { medium: 64 }, toolChoice: "none", timeoutMs: 1000, maxRetries: 0, maxRetryDelayMs: 0, metadata: { request: "plugin-task" } };
 	await f.adapter.inference.complete({ ...request(), options });
-	assert.deepEqual({ ...f.calls[0]?.options, signal: undefined }, { ...options, signal: undefined });
+	const { sessionId, ...forwarded } = f.calls[0]!.options;
+	assert.match(sessionId ?? "", /^[0-9a-f-]{36}$/);
+	assert.deepEqual({ ...forwarded, signal: undefined }, { ...options, signal: undefined });
 	await f.adapter.inference.complete(request());
 	assert.equal(f.calls[1]?.options.temperature, undefined);
 	assert.equal(f.calls[1]?.options.maxTokens, undefined);

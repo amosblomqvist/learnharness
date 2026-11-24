@@ -317,7 +317,7 @@ function openExternalLink(target) {
  *  - will-navigate pinned to the app origin; window.open always denied —
  *    external links go to the real browser via shell.openExternal, for
  *    http, https and mailto only (openExternalLink). */
-function createWindow(url) {
+function createWindow(url, beforeLoad) {
 	const win = new BrowserWindow({
 		width: 1440,
 		height: 900,
@@ -403,6 +403,7 @@ function createWindow(url) {
 		return { action: "deny" };
 	});
 
+	beforeLoad?.(win);
 	void win.loadURL(url);
 	// Zoom truth reaches the renderer for EVERY load (reload, nav): the
 	// renderer's --lh-zoom must never go stale. The fallback catcher below
@@ -777,7 +778,15 @@ async function main() {
 	// interval fire after it below. setupAutoUpdater's contract: failures
 	// are log lines — this can never block boot.
 	setupAutoUpdater();
-	ipcMain.on("lh:update-install", () => installUpdateNow());
+	// Same sender rule as lh:update:get/check. ipcMain.on has no reply channel,
+	// so an untrusted request is dropped and logged.
+	ipcMain.on("lh:update-install", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) {
+			log("auto-update: ignored install request from an untrusted sender");
+			return;
+		}
+		installUpdateNow();
+	});
 	ipcMain.handle("lh:update:get", (event) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
 		return updateState;
@@ -814,7 +823,17 @@ async function main() {
 	app.on("activate", () => {
 		if (BrowserWindow.getAllWindows().length === 0) reopenWindow();
 	});
-	createWindow(url);
+	createWindow(url, firstWindow => {
+		const fromFirstWindow = event => !firstWindow.isDestroyed() && event.sender === firstWindow.webContents &&
+			trustedSender(event, new URL(url).origin, BrowserWindow);
+		let messages;
+		if (app.isPackaged && !devUrl) {
+			const { dismissalStore, startMessages } = require("./startup-messages.cjs");
+			messages = startMessages(firstWindow, dismissalStore(app.getPath("userData")));
+		}
+		ipcMain.handle("lh:startup-message:take", event => messages && fromFirstWindow(event) ? messages.take() : null);
+		ipcMain.handle("lh:startup-message:dismiss", (event, id) => !!messages && fromFirstWindow(event) && messages.dismiss(id));
+	});
 	log(`window open: ${url}`);
 	// Startup + 24h checks stay main-owned and read the current preference.
 	// No renderer subscription is required; late loads retrieve the snapshot.

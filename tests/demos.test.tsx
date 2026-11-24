@@ -604,6 +604,20 @@ const BROKEN_HTML = "<!doctype html><html><body>BROKEN<script>foo();</script></b
 const GOOD_HTML = "<!doctype html><html><body><canvas id=\"c\"></canvas><script>requestAnimationFrame(function step(){});</script></body></html>";
 
 describe("demo builder (fake model + fake headless)", () => {
+	it("continues past twenty-four turns and retains final verification", async () => {
+		const headless = fakeHeadless();
+		const engine = scriptedModel([
+			...Array.from({ length: 25 }, (_, index) => ({ toolCalls: [{ toolCallId: `write_${index}`, toolName: "write_demo", input: { html: GOOD_HTML } }] })),
+			{ text: "Final notes after all edits." },
+		]);
+		let calls = 0;
+		const result = await runDemoBuilder({ title: "T", brief: "b" }, { engine, headless, onUsage: () => calls++ });
+		assert.equal(calls, 26);
+		assert.equal(result.html, GOOD_HTML);
+		assert.equal(result.notes, "Final notes after all edits.");
+		assert.equal(headless.demoRuns.length, 1, "the completion gate still verifies the artifact");
+	});
+
 	it("iterates write → run → fix → run → clean → delivers with notes", async () => {
 		const headless = fakeHeadless({ brokenWhenIncludes: "BROKEN" });
 		const activities: string[] = [];
@@ -674,6 +688,21 @@ describe("demo builder (fake model + fake headless)", () => {
 const SVG_1 = '<svg xmlns="http://www.w3.org/2000/svg" width="300" height="100"><line x1="10" y1="50" x2="290" y2="50"/></svg>';
 
 describe("visual maker (fake model + fake headless)", () => {
+	it("continues past eight turns and still makes the model inspect its final SVG", async () => {
+		const headless = fakeHeadless();
+		const engine = scriptedModel([
+			...Array.from({ length: 9 }, (_, index) => ({ toolCalls: [{ toolCallId: `write_${index}`, toolName: "write_svg", input: { svg: SVG_1 } }] })),
+			{ text: "Not inspected yet." },
+			{ text: "Inspected the final SVG." },
+		]);
+		let calls = 0;
+		const result = await runVisualMaker({ brief: "b" }, { engine, headless, onUsage: () => calls++ });
+		assert.equal(calls, 11);
+		assert.equal(result.svg, SVG_1);
+		assert.equal(result.notes, "Inspected the final SVG.");
+		assert.equal(headless.svgRenders.length, 1);
+	});
+
 	it("native rendering repairs do not rewrite the figure delivered by the model loop", async () => {
 		const svg = '<svg width="80" height="40"><rect width="80" height="40" fill="red"/><text x="2" y="20">A&nbsp;B</text></svg>';
 		const model = scriptedModel([
