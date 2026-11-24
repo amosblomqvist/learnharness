@@ -129,7 +129,7 @@ export function createPdfReadTools(dir: string): Record<string, AgentTool<any>> 
 					const bytes = new Uint8Array(await resp.arrayBuffer());
 					if (bytes.length === 0) throw new Error("Empty response");
 					if (bytes.length > MAX_PDF_BYTES) throw new Error("PDF too large (over 25 MB)");
-					const filePath = path.join(dir, pdfFileName(url));
+				const filePath = path.join(/* turbopackIgnore: true */ dir, pdfFileName(url));
 					await fs.writeFile(filePath, bytes);
 					try {
 						await pdfProbe(filePath);

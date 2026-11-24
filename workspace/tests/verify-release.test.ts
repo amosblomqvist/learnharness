@@ -22,8 +22,8 @@ import {
 } from "../scripts/verify-release.ts";
 
 const require = createRequire(import.meta.url);
-const repoRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
-const script = path.join(repoRoot, "scripts", "verify-release.ts");
+const appRoot = path.resolve(fileURLToPath(new URL("..", import.meta.url)));
+const script = path.join(appRoot, "scripts", "verify-release.ts");
 const VERSION = "0.2.0";
 const TAG = `v${VERSION}`;
 
@@ -149,8 +149,8 @@ describe("release gate — draft selection (fail-closed, existing tag matching)"
 
 describe("release gate — packaging-config drift guard", () => {
 	const yaml = require("js-yaml") as { load(source: string): unknown };
-	const realConfig = yaml.load(fs.readFileSync(path.join(repoRoot, "electron-builder.yml"), "utf8"));
-	const realPkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+	const realConfig = yaml.load(fs.readFileSync(path.join(appRoot, "electron-builder.yml"), "utf8"));
+	const realPkg = JSON.parse(fs.readFileSync(path.join(appRoot, "package.json"), "utf8"));
 
 	it("accepts the repository's real configuration", () => {
 		const verdict = verifyConfigAssumptions(realConfig, realPkg);
@@ -309,7 +309,7 @@ describe("release gate — update feeds", () => {
 
 describe("release gate — workflow wiring", () => {
 	const yaml = require("js-yaml") as { load(source: string): any };
-	const workflow = yaml.load(fs.readFileSync(path.join(repoRoot, ".github", "workflows", "release.yml"), "utf8"));
+	const workflow = yaml.load(fs.readFileSync(path.join(appRoot, "..", ".github", "workflows", "release.yml"), "utf8"));
 	const verify = workflow.jobs.verify;
 
 	it("can see drafts after ALL packaging jobs, only on real tag pushes", () => {
@@ -365,10 +365,10 @@ describe("release gate — workflow wiring", () => {
 describe("release gate — CLI (offline, repo config)", () => {
 	// CLI fixtures follow the real package version; pure-core fixtures above
 	// intentionally stay at 0.2.0. A release version bump must not break tests.
-	const VERSION = (JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8")) as { version: string }).version;
+	const VERSION = (JSON.parse(fs.readFileSync(path.join(appRoot, "package.json"), "utf8")) as { version: string }).version;
 	const TAG = `v${VERSION}`;
-	const tsxImport = fileURLToPath(import.meta.resolve("tsx"));
-	function run(args: string[], cwd = repoRoot) {
+	const tsxImport = import.meta.resolve("tsx");
+	function run(args: string[], cwd = appRoot) {
 		return spawnSync(process.execPath, ["--import", tsxImport, script, ...args], {
 			cwd, encoding: "utf8", timeout: 60_000,
 		});
@@ -448,9 +448,9 @@ describe("release gate — CLI (offline, repo config)", () => {
 		const futureVersion = "12.3.4";
 		const { root } = workspace("v", futureVersion);
 		try {
-			const pkg = JSON.parse(fs.readFileSync(path.join(repoRoot, "package.json"), "utf8"));
+			const pkg = JSON.parse(fs.readFileSync(path.join(appRoot, "package.json"), "utf8"));
 			fs.writeFileSync(path.join(root, "package.json"), JSON.stringify({ ...pkg, version: futureVersion }));
-			fs.copyFileSync(path.join(repoRoot, "electron-builder.yml"), path.join(root, "electron-builder.yml"));
+			fs.copyFileSync(path.join(appRoot, "electron-builder.yml"), path.join(root, "electron-builder.yml"));
 			const result = run(["verify", path.join(root, "releases.json"), path.join(root, "metadata"), "--tag", `v${futureVersion}`], root);
 			assert.equal(result.status, 0, String(result.stderr));
 			assert.ok(result.stdout.includes(`OK: draft for v${futureVersion} is complete`));

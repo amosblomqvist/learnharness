@@ -8,10 +8,11 @@ export function accountKey(deployment: string, userId: string): string {
 }
 export function threadProfileRoot(dataRoot: string): string {
 	try {
-		const key: unknown = JSON.parse(fs.readFileSync(path.join(dataRoot, "cloud-profile.json"), "utf8"));
+		const profile = path.join(/* turbopackIgnore: true */ dataRoot, "cloud-profile.json");
+		const key: unknown = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ profile, "utf8"));
 		if (key === null) return dataRoot;
 		if (typeof key !== "string" || !/^[a-f0-9]{64}$/.test(key)) throw new Error("Invalid account cache.");
-		return path.join(dataRoot, "cloud-accounts", key);
+		return path.join(/* turbopackIgnore: true */ dataRoot, "cloud-accounts", key);
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code === "ENOENT") return dataRoot;
 		throw error; // Never expose another profile on malformed metadata.
@@ -20,5 +21,5 @@ export function threadProfileRoot(dataRoot: string): string {
 export function selectThreadProfile(dataRoot: string, key: string | null): void {
 	if (key !== null && !/^[a-f0-9]{64}$/.test(key)) throw new Error("Invalid account cache.");
 	fs.mkdirSync(dataRoot, { recursive: true });
-	writeFileAtomicSync(path.join(dataRoot, "cloud-profile.json"), JSON.stringify(key), { mode: 0o600 });
+	writeFileAtomicSync(path.join(/* turbopackIgnore: true */ dataRoot, "cloud-profile.json"), JSON.stringify(key), { mode: 0o600 });
 }

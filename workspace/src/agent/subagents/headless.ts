@@ -203,7 +203,7 @@ async function connectBrowserService(): Promise<ConnectedBrowserService | null> 
 			path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "..", ".."),
 			"--browser-service",
 		];
-		proc = spawn(binary, appArgs, {
+	proc = spawn(/* turbopackIgnore: true */ binary, appArgs, {
 			// Cast: the sanitizer is pure over a loose record; NODE_ENV is
 			// always present in a real process.env.
 			env: browserServiceSpawnEnv(process.env) as NodeJS.ProcessEnv,

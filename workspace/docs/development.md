@@ -4,9 +4,10 @@ For product setup, see [Getting started](getting-started.md). For runtime flows,
 
 ## Setup
 
-CI and release builds use **Node 26**. Use the lockfile and a compatible native build environment:
+Run the commands in this guide from `workspace/` with **Node 26**, the lockfile, and a compatible native build environment.
 
 ```sh
+cd workspace
 npm ci
 npm run plugins:setup  # generate local SDKs and install locked source-plugin dependencies
 npm run dev            # normally http://localhost:3000
@@ -34,7 +35,7 @@ npm start              # serve the production build with Next
 
 ### Windows double-click launcher
 
-Double-click [`Launch LearnHarness.cmd`](../Launch%20LearnHarness.cmd) in the repository root. The launcher uses its own folder as the working directory, including paths containing spaces. From a terminal with Node.js 26.x and npm already available, you can also run `npm run desktop:windows`.
+Double-click [`Launch LearnHarness.cmd`](../../Launch%20LearnHarness.cmd) in the repository root. It finds `workspace/` relative to the launcher, including in paths containing spaces. From a terminal in `workspace/` with Node.js 26.x and npm already available, you can also run `npm run desktop:windows`.
 
 The double-click launcher checks for a working **Node.js 26.x with npm**. If needed, it downloads the latest stable 26.x Windows ZIP for your architecture from `nodejs.org`, verifies its published SHA-256 checksum, and installs it under `%LOCALAPPDATA%\LearnHarness\runtime\node26-<architecture>`. It uses this per-user runtime immediately and reuses it on later launches without a download. Administrator access and a system PATH change are not required. Other Node.js installations remain available to other applications. Windows PowerShell 5.1 or later and 64-bit Windows (x64 or ARM64) are required for automatic installation.
 
@@ -62,8 +63,8 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 
 | Variable | Purpose |
 | --- | --- |
-| `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts; default repo `data/`. |
-| `LH_AUTH_FILE` | Keys/custom-endpoint binding; default repo-root `auth.json`, outside `data/`. |
+| `LH_DATA_DIR` | Mutable chats/jobs/graph/settings/prompts, stored in `workspace/data/` by default. |
+| `LH_AUTH_FILE` | Keys and custom-endpoint binding, stored in `workspace/auth.json` by default. |
 | `LH_CONVEX_URL` | Optional Labs thread sync: the Convex deployment's HTTPS `.convex.cloud` URL. See [Google sign-in and thread sync](cloud-sync.md). |
 | `LH_CLOUD_CALLBACK_PORT` | Optional desktop Google sign-in return port; default `3211`, bound only to `127.0.0.1`. |
 | Provider API-key variables | Optional, selected-provider dependent; UI names are in `src/core/auth-keys.ts`. |
@@ -72,7 +73,9 @@ Nonsecret settings are deltas in `<data root>/settings.json`; absent values reso
 | `CHROME_PATH` | Chrome/Chromium executable fallback for demo verification; Electron's browser helper is primary. No extra Chromium is downloaded. |
 | `LH_ALLOWED_HOSTS` | Browser-only mode: extra host names the API accepts besides `localhost` and IP addresses. Comma-separated, case-insensitive, port ignored, no wildcards. |
 
-Ordinary Next development can read `.env.local`. Real environment keys take precedence over saved keys. Saved auth is restrictive-permission plaintext, not an encrypted vault. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.
+Ordinary Next development can read `workspace/.env.local`. Real environment keys take precedence over saved keys. Saved auth is restrictive-permission plaintext, not an encrypted vault. Packaged Electron sets separate data/auth locations under `userData`; it does not use the repo development profile.
+
+If you update a checkout from before the workspace move, move its local `.env.local`, `data/`, `auth.json`, and `*-credentials.json` files into `workspace/` before starting the app. The ignore rules for those files now apply within `workspace/`.
 
 Provider-specific setup and limitations: [Claude Code](claude-code.md), [custom endpoints](custom-providers.md), [context/cost accounting](compaction-accounting.md).
 
@@ -80,7 +83,7 @@ Provider-specific setup and limitations: [Claude Code](claude-code.md), [custom 
 
 `npm run dev` and `npm start` support ChatGPT, GitHub Copilot, and Grok sign-in. `desktop:dev` uses those same dev-server connections; packaged desktop has a separate main-process credential owner/private transport. Subscription routes do not fall back to API-key billing.
 
-Web/dev writes `chatgpt-credentials.json`, `github-copilot-credentials.json`, and `xai-credentials.json` **beside `LH_AUTH_FILE`**, in the repo by default—not under `data/` or a global Pi profile. Git/build exclusions cover these files and their write temporaries. Refresh serialization is process-local: use one server per credential directory.
+Web/dev writes `chatgpt-credentials.json`, `github-copilot-credentials.json`, and `xai-credentials.json` **beside `LH_AUTH_FILE`**, in `workspace/` by default. Git/build exclusions cover these files and their write temporaries. Refresh serialization is process-local: use one server per credential directory.
 
 ChatGPT's callback listener is `127.0.0.1` on the **server's machine**; complete sign-in in a browser there. Copilot/Grok use device codes. Allow the initiating browser's sign-in tab if blocked; Electron dev opens provider pages in the system browser. Connected browsers share server credentials, background-use consent, keys, and learning data.
 

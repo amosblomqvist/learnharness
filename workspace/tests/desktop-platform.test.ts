@@ -300,7 +300,7 @@ describe("workflow action versions", () => {
 
 	for (const filename of ["ci.yml", "release.yml"]) {
 		it(`${filename} uses supported Action runtimes without changing the app's Node 26`, () => {
-			const workflow = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
+			const workflow = yaml.load(readFileSync(new URL(`../../.github/workflows/${filename}`, import.meta.url), "utf8"));
 			const expected = ["actions/checkout@v7", "actions/setup-node@v7"];
 			if (filename === "release.yml") {
 				expected.push("actions/github-script@v9", "actions/upload-artifact@v7", "maxim-lobanov/setup-xcode@v1");
@@ -338,7 +338,7 @@ describe("desktop release workflow", () => {
 		}>;
 	};
 	const yaml = require("js-yaml") as { load(source: string): Workflow };
-	const workflow = yaml.load(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
+	const workflow = yaml.load(readFileSync(new URL("../../.github/workflows/release.yml", import.meta.url), "utf8"));
 	const draft = workflow.jobs.draft;
 	const packaging = workflow.jobs.package;
 	assert.ok(draft && packaging);
@@ -382,7 +382,7 @@ describe("desktop release workflow", () => {
 		assert.equal(workflow.concurrency.group, "release-${{ github.ref }}");
 		assert.equal(workflow.concurrency["cancel-in-progress"], false);
 		for (const filename of ["ci.yml", "release.yml"]) {
-			const config = yaml.load(readFileSync(new URL(`../.github/workflows/${filename}`, import.meta.url), "utf8"));
+			const config = yaml.load(readFileSync(new URL(`../../.github/workflows/${filename}`, import.meta.url), "utf8"));
 			const job = config.jobs[filename === "ci.yml" ? "standalone" : "package"];
 			assert.ok(job);
 			const steps = job.steps;
@@ -407,7 +407,7 @@ describe("desktop release workflow", () => {
 		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
 		assert.ok(buildIndex > xcodeIndex, "select Xcode before packaging compiles the icon");
 
-		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
+		const ci = yaml.load(readFileSync(new URL("../../.github/workflows/ci.yml", import.meta.url), "utf8"));
 		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
 		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
 	});

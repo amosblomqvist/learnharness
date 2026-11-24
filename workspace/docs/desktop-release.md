@@ -18,7 +18,7 @@ The custom app bar remains on all platforms. macOS has left traffic lights/syste
 
 ## Build pipeline
 
-Build **on each target OS**. Next traces native binaries for its build machine; a macOS standalone tree is not a Windows/Linux payload.
+Run the build commands from `workspace/` **on each target OS**. Next traces native binaries for its build machine; a macOS standalone tree is not a Windows/Linux payload.
 
 1. `npm ci`
 2. Run native renderer/browser-service tests in Electron's Node:
@@ -51,9 +51,9 @@ npx electron-builder --linux --x64 --publish never # Linux
 
 ## CI and release modes
 
-[CI](../.github/workflows/ci.yml) runs typecheck/tests/lint on Ubuntu, plus standalone/native checks on macOS, Windows, and Linux. Its `macos-15` job does not compile the release icon.
+[CI](../../.github/workflows/ci.yml) runs typecheck/tests/lint on Ubuntu, plus standalone/native checks on macOS, Windows, and Linux. Its `macos-15` job does not compile the release icon.
 
-[Desktop release](../.github/workflows/release.yml) has two modes:
+[Desktop release](../../.github/workflows/release.yml) has two modes:
 
 - **Manual dispatch:** unsigned rehearsal installers retained as workflow artifacts for seven days. No signing secrets, release creation, or publication. macOS notarization is skipped; these are not production installers.
 - **Matching `v<package.json version>` tag:** gates, one shared draft-preparation job, three OS packaging/upload jobs, then read-only draft verification. Published/ambiguous existing releases fail preparation; same-ref runs serialize rather than cancelling uploads. macOS must sign/notarize. **The workflow never publishes the draft.**
@@ -107,4 +107,4 @@ Packaged apps check at startup and every 24 hours by default, download automatic
 
 Sources: [`electron/main.cjs`](../electron/main.cjs), [`preload.cjs`](../electron/preload.cjs), [`update-settings.tsx`](../components/settings/update-settings.tsx).
 
-After stable publication, [`notify-website.yml`](../.github/workflows/notify-website.yml) dispatches the tag to the website using `WEBSITE_DISPATCH_TOKEN`. Drafts/prereleases do not trigger it. HTTP 204 means the website update was queued, not deployed or publicly verified.
+After stable publication, [`notify-website.yml`](../../.github/workflows/notify-website.yml) dispatches the tag to the website using `WEBSITE_DISPATCH_TOKEN`. Drafts/prereleases do not trigger it. HTTP 204 means the website update was queued, not deployed or publicly verified.

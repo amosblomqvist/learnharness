@@ -154,7 +154,7 @@ it("waits for paint and first focus within the startup window without focusing t
 
 it("has exactly one publication-only, tag-only website notifier", () => {
 	const { load } = require("js-yaml");
-	const file = (name: string) => readFileSync(new URL(`../.github/workflows/${name}.yml`, import.meta.url), "utf8");
+	const file = (name: string) => readFileSync(new URL(`../../.github/workflows/${name}.yml`, import.meta.url), "utf8");
 	const { on, permissions, jobs } = load(file("notify-website"));
 	assert.deepEqual(on, { release: { types: ["published"] } });
 	assert.deepEqual(permissions, {});

@@ -4,7 +4,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 @AGENTS.md
 
-The rules in AGENTS.md are binding. Read the installed Next guide in `node_modules/next/dist/docs/` before changing anything framework-facing, because this Next version differs from what you were trained on. Never guess a design or implementation decision: ask, get the plan approved, then implement.
+The rules in AGENTS.md are binding. Read the installed Next guide in `workspace/node_modules/next/dist/docs/` before changing anything framework-facing, because this Next version differs from what you were trained on. Never guess a design or implementation decision: ask, get the plan approved, then implement.
+
+Run the commands below from `workspace/`. Application paths in this guide are relative to that directory.
 
 ## What this is
 
@@ -43,7 +45,7 @@ Point the server at a disposable data and auth profile so your personal data sta
 LH_DATA_DIR=/abs/scratch/data LH_AUTH_FILE=/abs/scratch/auth.json npm run dev -- --port 3001
 ```
 
-By default, mutable state lives in the repo's `data/` and keys in the repo-root `auth.json`. Subscription credential files (`chatgpt-credentials.json` and others) sit next to `LH_AUTH_FILE`. Environment API keys override saved keys. Run **one server per data/auth profile**: storage is synchronous file IO with no cross-process locking. Debug flags: `LH_PROVIDER_EVENTS=1` and `LH_BACKGROUND_CAPTURE=<role>|all` (details in `docs/development.md#debugging`).
+By default, mutable state lives in `workspace/data/` and keys in `workspace/auth.json`. Subscription credential files (`chatgpt-credentials.json` and others) sit next to `LH_AUTH_FILE`. Environment API keys override saved keys. Run **one server per data/auth profile**: storage is synchronous file IO with no cross-process locking. Debug flags: `LH_PROVIDER_EVENTS=1` and `LH_BACKGROUND_CAPTURE=<role>|all` (details in `docs/development.md#debugging`).
 
 ## Architecture
 
@@ -60,7 +62,7 @@ By default, mutable state lives in the repo's `data/` and keys in the repo-root 
 | `electron/` | Desktop shell, navigation and permission guards, credential transport, updater |
 | `convex/` | Optional Labs cloud thread sync (off by default) |
 
-Shell code imports `src/` only through the core and server barrels. Core must not import IO layers, and agents must not import server or store adapters. Dependencies come in through injected contexts and ports. `config.ts` anchors read-only assets to the repo root and mutable paths to `LH_DATA_DIR`.
+Shell code imports `src/` only through the core and server barrels. Core must not import IO layers, and agents must not import server or store adapters. Dependencies come in through injected contexts and ports. `config.ts` anchors read-only assets to the workspace and mutable paths to `LH_DATA_DIR`.
 
 ### Turns
 

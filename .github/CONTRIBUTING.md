@@ -36,7 +36,7 @@ We judge contributions by their results, not the tools used to produce them. AI-
 
 Run relevant checks and add regression coverage where useful. Briefly describe what you actually tested and any important limitations—for example, whether you used a real provider or mocked responses.
 
-See the [development guide](docs/development.md) for setup and check commands, and the [architecture reference](docs/architecture.md) for runtime boundaries.
+See the [development guide](../workspace/docs/development.md) for setup and check commands, and the [architecture reference](../workspace/docs/architecture.md) for runtime boundaries.
 
 ## Bug reports
 
@@ -54,4 +54,4 @@ A PR does not guarantee acceptance or inclusion in a particular release. Integra
 
 **Interested in contributing regularly?** If you’d like to help maintain LearnHarness, review and finish fixes, or support other contributors, email me at [contribute@learnharness.ai](mailto:contribute@learnharness.ai). Tell me a little about your interests and how you’d like to help.
 
-LearnHarness is licensed under [AGPL-3.0](LICENSE).
+LearnHarness is licensed under [AGPL-3.0](../workspace/LICENSE).

@@ -1,8 +1,8 @@
 <p align="center">
   <picture>
-    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/lh_banner_dark.png">
-    <source media="(prefers-color-scheme: light)" srcset="docs/assets/lh_banner_light.png">
-    <img src="docs/assets/lh_banner_light.png" alt="LearnHarness" width="640">
+    <source media="(prefers-color-scheme: dark)" srcset="../workspace/docs/assets/lh_banner_dark.png">
+    <source media="(prefers-color-scheme: light)" srcset="../workspace/docs/assets/lh_banner_light.png">
+    <img src="../workspace/docs/assets/lh_banner_light.png" alt="LearnHarness" width="640">
   </picture>
 </p>
 
@@ -11,7 +11,7 @@
 <p align="center">
   <a href="https://learnharness.ai">Download</a> ·
   <a href="#how-it-works">How it works</a> ·
-  <a href="docs/README.md">Documentation</a> ·
+  <a href="../workspace/docs/README.md">Documentation</a> ·
   <a href="https://github.com/amosblomqvist/learnharness/issues">Issues</a> ·
   <a href="https://discord.gg/5tCHHQEB2e">Discord</a>
 </p>
@@ -20,7 +20,7 @@ LearnHarness uses AI agents to plan and teach lessons from your current understa
 
 Instead of just giving you an explanation, it uses your answers and thinking to decide what you need next. Teaching builds understanding one reasoning step at a time. Practice makes it usable. A persistent knowledge graph carries it across sessions.
 
-![LearnHarness teaching session](docs/assets/teaching-session.png)
+![LearnHarness teaching session](../workspace/docs/assets/teaching-session.png)
 
 ## How it works
 
@@ -41,7 +41,7 @@ What you are taught accumulates as propositions and reasoning chains: individual
 
 Future teaching sessions can read the graph instead of starting from scratch. Practice sessions can draw their material from it. It stores the ideas and their connections, not ratings of your ability.
 
-![LearnHarness knowledge graph](docs/assets/knowledge-graph.png)
+![LearnHarness knowledge graph](../workspace/docs/assets/knowledge-graph.png)
 
 ## Download and get started
 
@@ -51,9 +51,9 @@ Future teaching sessions can read the graph instead of starting from scratch. Pr
 - **Windows (x64):** run the installer. It is currently unsigned; Windows may show an “unknown publisher” or SmartScreen warning.
 - **Linux (x64):** make the AppImage executable and open it, or install the Debian/Ubuntu `.deb`.
 
-Choose your models, then start a session with what you want to understand. You can use provider API keys, supported subscription connections in the desktop app, an installed [Claude Code CLI](docs/claude-code.md), or a [custom OpenAI-compatible endpoint](docs/custom-providers.md), including a local model server. Optional dictation and web search use separate service keys. Web research can use a Tavily, Brave, Exa, Firecrawl, or Ollama key in Settings → Providers → Search. Ollama search uses its hosted service, not a local model server.
+Choose your models, then start a session with what you want to understand. You can use provider API keys, supported subscription connections in the desktop app, an installed [Claude Code CLI](../workspace/docs/claude-code.md), or a [custom OpenAI-compatible endpoint](../workspace/docs/custom-providers.md), including a local model server. Optional dictation and web search use separate service keys. Web research can use a Tavily, Brave, Exa, Firecrawl, or Ollama key in Settings → Providers → Search. Ollama search uses its hosted service, not a local model server.
 
-See [Getting started](docs/getting-started.md) for model setup, dictation, files, and notes imports, and [context, caching, and costs](docs/compaction-accounting.md) for advanced cache preferences.
+See [Getting started](../workspace/docs/getting-started.md) for model setup, dictation, files, and notes imports, and [context, caching, and costs](../workspace/docs/compaction-accounting.md) for advanced cache preferences.
 
 All three platforms support in-app updates.
 
@@ -73,13 +73,13 @@ npm run dev        # http://localhost:3000
 npm test           # fixtures and fake providers
 ```
 
-See the [documentation index](docs/README.md) for all guides, [development](docs/development.md) for setup and checks, [architecture](docs/architecture.md) for the runtime, [keyboard shortcuts](docs/keyboard.md), [themes](docs/themes.md) for the theme file format, and [desktop builds and releases](docs/desktop-release.md).
+See the [documentation index](../workspace/docs/README.md) for all guides, [development](../workspace/docs/development.md) for setup and checks, [architecture](../workspace/docs/architecture.md) for the runtime, [keyboard shortcuts](../workspace/docs/keyboard.md), [themes](../workspace/docs/themes.md) for the theme file format, and [desktop builds and releases](../workspace/docs/desktop-release.md).
 
-**Windows double-click launcher (source checkout):** Double-click [`Launch LearnHarness.cmd`](Launch%20LearnHarness.cmd) in this folder. If Node.js **26.x** with npm is missing, it installs a verified copy for your Windows account automatically, without administrator access. It then installs app and plugin dependencies on first launch (internet required), builds the local plugins, and opens the desktop app after the local server responds. Keep the console open while using the app; closing the desktop window or pressing Ctrl+C stops the server. Startup errors remain visible in the console. See [Windows launcher details](docs/development.md#windows-double-click-launcher).
+**Windows double-click launcher (source checkout):** Double-click [`Launch LearnHarness.cmd`](../Launch%20LearnHarness.cmd) in the repository root. If Node.js **26.x** with npm is missing, it installs a verified copy for your Windows account automatically, without administrator access. It then installs app and plugin dependencies on first launch (internet required), builds the local plugins, and opens the desktop app after the local server responds. Keep the console open while using the app; closing the desktop window or pressing Ctrl+C stops the server. Startup errors remain visible in the console. See [Windows launcher details](../workspace/docs/development.md#windows-double-click-launcher).
 
-For trusted local plugins, start with the [authoring guide and capability map](docs/plugin-authoring.md). It links the question, practice-problem, submission, view-context and UI contracts. Use [`examples/plugins/`](examples/plugins/) for small runnable templates, [`plugins/`](plugins/) for feature source projects, and the [host architecture](docs/plugin-architecture.md) for internals.
+For trusted local plugins, start with the [authoring guide and capability map](../workspace/docs/plugin-authoring.md). It links the question, practice-problem, submission, view-context and UI contracts. Use [`examples/plugins/`](../workspace/examples/plugins/) for small runnable templates, [`plugins/`](../workspace/plugins/) for feature source projects, and the [host architecture](../workspace/docs/plugin-architecture.md) for internals.
 
-Settings → Labs offers optional [Google sign-in and cross-computer thread sync](docs/cloud-sync.md) through Convex. It is off by default; the app remains usable without signing in.
+Settings → Labs offers optional [Google sign-in and cross-computer thread sync](../workspace/docs/cloud-sync.md) through Convex. It is off by default; the app remains usable without signing in.
 
 Questions, bug reports, and feature requests: [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues).
 
@@ -87,6 +87,6 @@ Security vulnerabilities: report privately as described in [SECURITY.md](SECURIT
 
 ## License
 
-[AGPL-3.0](LICENSE)
+[AGPL-3.0](../workspace/LICENSE)
 
 The app is free and open forever. If we ever charge for anything, it will be for convenience — managed keys, hosting — never for features you can run locally.

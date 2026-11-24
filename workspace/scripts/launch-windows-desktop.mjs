@@ -45,8 +45,11 @@ function prepareDependencies() {
 	const pluginHash = fingerprint(projects.flatMap(directory => [`${directory}/package.json`, `${directory}/package-lock.json`]));
 	const missingPlugin = projects.some(directory => {
 		const manifest = JSON.parse(readFileSync(path.join(root, directory, "package.json"), "utf8"));
-		return !existsSync(path.join(root, directory, "node_modules", ".package-lock.json")) ||
-			(typeof manifest.scripts?.sdk === "string" && !existsSync(path.join(root, directory, ".sdk", "package.json")));
+		const modules = path.join(root, directory, "node_modules");
+		return !existsSync(path.join(modules, ".package-lock.json")) ||
+			(typeof manifest.scripts?.sdk === "string" &&
+				(!existsSync(path.join(root, directory, ".sdk", "package.json")) ||
+					!existsSync(path.join(modules, "learnharness-plugin-api", "package.json"))));
 	});
 	if (previous.plugins !== pluginHash || missingPlugin) {
 		runNpm(["run", "plugins:setup"]);

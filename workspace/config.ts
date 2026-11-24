@@ -2,7 +2,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { threadProfileRoot } from "./src/store/thread-profile.ts";
 
-/** Repository root (this file is at <root>/config.ts). */
+/** Application root (this file is at workspace/config.ts in a checkout). */
 export const ROOT = path.dirname(fileURLToPath(import.meta.url));
 
 /**
@@ -147,7 +147,7 @@ export const THEMES_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "them
  * flat {VAR: value} JSON map — the SAME file the Electron app has always
  * hand-edited (owner decision: option A, zero migration). Desktop main.cjs
  * passes LH_AUTH_FILE pointing at userData/auth.json (mode 0600); in dev
- * (no Electron) the default is the repo-root auth.json (gitignored, same
+ * (no Electron) the default is the workspace auth.json (gitignored, same
  * pattern as .env.local — a worktree may symlink it to the master copy).
  * The SERVER reads/writes this file directly at call time (no restart to
  * change a key); it reflects the values into process.env at boot with

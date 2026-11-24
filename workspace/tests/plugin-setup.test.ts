@@ -66,7 +66,7 @@ test("contributor and CI entry points prepare plugins before typechecking or bui
 	const pkg = JSON.parse(readFileSync(path.join(root, "package.json"), "utf8"));
 	assert.equal(pkg.scripts["plugins:setup"], "node scripts/setup-plugins.mjs");
 	for (const workflow of ["ci.yml", "release.yml"]) {
-		const source = readFileSync(path.join(root, ".github", "workflows", workflow), "utf8");
+		const source = readFileSync(path.join(root, "..", ".github", "workflows", workflow), "utf8");
 		for (const section of source.split("- run: npm ci").slice(1)) {
 			const gate = /- run: npm run (typecheck|build)/.exec(section);
 			if (!gate) continue;

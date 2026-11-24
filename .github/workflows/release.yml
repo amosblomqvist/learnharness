@@ -18,6 +18,10 @@ concurrency:
 env:
   NEXT_TELEMETRY_DISABLED: "1"
 
+defaults:
+  run:
+    working-directory: workspace
+
 jobs:
   quality:
     name: Release gates
@@ -29,6 +33,7 @@ jobs:
         with:
           node-version: "26"
           cache: npm
+          cache-dependency-path: workspace/package-lock.json
       - run: npm ci
       - run: npm run plugins:setup
       - name: Tag must match package.json
@@ -114,6 +119,7 @@ jobs:
         with:
           node-version: "26"
           cache: npm
+          cache-dependency-path: workspace/package-lock.json
       # The mac icon is the Icon Composer document (build/icon.icon);
       # compiling it needs both macOS 26+ and actool ≥ 26 (Xcode 26+).
       # Xcode 26's asset compiler crashes on macOS 15's older frameworks.
@@ -213,13 +219,13 @@ jobs:
           retention-days: 7
           if-no-files-found: error
           path: |
-            dist/*.dmg
-            dist/*.zip
-            dist/*.exe
-            dist/*.AppImage
-            dist/*.deb
-            dist/*.blockmap
-            dist/latest*.yml
+            workspace/dist/*.dmg
+            workspace/dist/*.zip
+            workspace/dist/*.exe
+            workspace/dist/*.AppImage
+            workspace/dist/*.deb
+            workspace/dist/*.blockmap
+            workspace/dist/latest*.yml
 
   # The last gate before a human publishes: after ALL three packaging jobs
   # have uploaded, fail the run unless the tag's single draft release holds
@@ -248,6 +254,7 @@ jobs:
         with:
           node-version: "26"
           cache: npm
+          cache-dependency-path: workspace/package-lock.json
       - run: npm ci
       - name: List every release, drafts included
         env:
