@@ -309,4 +309,22 @@ describe("pdf-reader loop (faux engine)", () => {
 		assert.deepEqual(result.pagesRead, [2, 3]);
 		assert.deepEqual(result.pagesConsulted, [2, 3]);
 	});
+
+	it("out-of-range pdf_render specs skip empty renders and clamp ranges to the document length", async () => {
+		const headless = fakeHeadless();
+		const engine = fauxEngine([
+			fauxAssistantMessage([fauxToolCall("pdf_render", { pages: "99", dpi: 150 }, { id: "r1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Fabricated brief from missing render.")]),
+			fauxAssistantMessage([fauxToolCall("pdf_render", { pages: "2-10", dpi: 150 }, { id: "r2" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Rendered pages 2 and 3 (p. 2, p. 3).")]),
+		]);
+		const result = await runPdfReaderAgent(
+			{ path: FIXTURE, question: "render the later pages" },
+			{ engine, headless },
+		);
+		assert.deepEqual(headless.calls, ["render:2,3"]);
+		assert.match(result.brief, /^Rendered pages 2 and 3/);
+		assert.deepEqual(result.pagesRead, [2, 3]);
+		assert.deepEqual(result.pagesConsulted, [2, 3]);
+	});
 });
