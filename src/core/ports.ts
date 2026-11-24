@@ -30,6 +30,8 @@ import type {
 	SideChatThread,
 	TurnUsage,
 	NotesSource,
+	MediaKind,
+	StoredMediaEntry,
 } from "./contracts.ts";
 import type { UserSettings } from "./settings.ts";
 import type { Theme, ThemeFile } from "./themes.ts";
@@ -95,6 +97,25 @@ export interface ChatStore {
 	 *  side-chat service announces its own changes. Not conversation
 	 *  activity — updatedAt stays put. */
 	updateSideChats(id: string, update: (threads: SideChatThread[]) => SideChatThread[]): SideChatThread[] | null;
+}
+
+// ─── MediaStore — session-scoped binary media assets (data/media/<chatId>/) ──
+
+export interface MediaStore {
+	/** Store binary bytes deduplicated by SHA-256 under the chat's media directory. */
+	saveMedia(
+		chatId: string,
+		bytes: Uint8Array,
+		meta: { kind: MediaKind; mimeType: string; filename: string },
+	): StoredMediaEntry;
+	/** Read metadata sidecar for a stored asset, or null if absent/invalid. */
+	getMediaMeta(chatId: string, mediaId: string): StoredMediaEntry | null;
+	/** Persist or update the cached subtitle/STT transcript on an existing asset. */
+	updateMediaTranscript(chatId: string, mediaId: string, transcript: string): StoredMediaEntry | null;
+	/** Absolute filesystem path to the stored binary asset, or null if absent. */
+	getMediaFilePath(chatId: string, mediaId: string): string | null;
+	/** Remove all media files stored for a chat. Returns number of assets removed. */
+	deleteMediaForChat(chatId: string): number;
 }
 
 // ─── GraphStore — the append-only evidence ledgers (data/graph) ──────────────

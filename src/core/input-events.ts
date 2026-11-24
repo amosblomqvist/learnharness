@@ -30,6 +30,7 @@
 
 import type { QuestionAnswerData } from "./question-core.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
+import { validateMediaAttachmentArray, type MediaAttachment } from "./contracts/media.ts";
 import { validatePluginSubmissionImageArray, validatePluginSubmissionImages, type PluginSubmissionImages, type PluginSubmissionOccurrence } from "./plugin-submissions.ts";
 import type { LhMessage } from "./native-messages.ts";
 import {
@@ -60,7 +61,7 @@ export type DismissPluginQuestionInput = { type: "dismiss-plugin-question"; ques
 export type ChatInput =
 	| PluginQuestionAnswerInput
 	| PluginProblemSubmissionInput
-	| { type: "text"; text: string; images?: ImageContent[] }
+	| { type: "text"; text: string; images?: ImageContent[]; media?: MediaAttachment[] }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData; occurrence?: PluginSubmissionOccurrence }
 	| { type: "continue" }
 	/** The failed-turn retry (issue #110): the banner's Retry button. */
@@ -137,7 +138,7 @@ export function parseDismissInput(input: unknown): DismissInput {
  *  (a send with no live turn is a plain text send, which already exists).
  *  The id is client-minted (steer_<localid>): the queued indicator keys on
  *  it, and the drain's message events upsert the real card by the same id. */
-export type UserSteerInput = { type: "steer"; id: string; text: string; images?: ImageContent[] };
+export type UserSteerInput = { type: "steer"; id: string; text: string; images?: ImageContent[]; media?: MediaAttachment[] };
 
 /** Parse and validate a steer event off a request body. */
 export function parseUserSteerInput(input: unknown): UserSteerInput {
@@ -148,10 +149,11 @@ export function parseUserSteerInput(input: unknown): UserSteerInput {
 		throw new ChatInputError("steer input requires a client-minted id");
 	}
 	const images = parseImages(i.images);
-	if (typeof i.text !== "string" || (!i.text.trim() && !images)) {
-		throw new ChatInputError("steer input requires non-empty text or images");
+	const media = parseMedia(i.media);
+	if (typeof i.text !== "string" || (!i.text.trim() && !images && !media)) {
+		throw new ChatInputError("steer input requires non-empty text, images, or media");
 	}
-	return { type: "steer", id: i.id, text: i.text, ...(images ? { images } : {}) };
+	return { type: "steer", id: i.id, text: i.text, ...(images ? { images } : {}), ...(media ? { media } : {}) };
 }
 
 /** The native appends a dismissal makes (pure — same orphan discipline
@@ -205,6 +207,13 @@ function parseImages(value: unknown): ImageContent[] | undefined {
 		return images.length ? images : undefined;
 	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid submission images"); }
 }
+function parseMedia(value: unknown): MediaAttachment[] | undefined {
+	if (value === undefined) return undefined;
+	try {
+		const media = validateMediaAttachmentArray(value);
+		return media.length ? media : undefined;
+	} catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid media attachments"); }
+}
 function parseImageChannels(value: unknown): PluginSubmissionImages | undefined {
 	if (value === undefined) return undefined;
 	try {
@@ -241,10 +250,11 @@ export function parseChatInput(input: unknown): ChatInput {
 		}
 		case "text": {
 			const images = parseImages(i.images);
-			if (typeof i.text !== "string" || (!i.text.trim() && !images)) {
-				throw new ChatInputError("text input requires non-empty text or images");
+			const media = parseMedia(i.media);
+			if (typeof i.text !== "string" || (!i.text.trim() && !images && !media)) {
+				throw new ChatInputError("text input requires non-empty text, images, or media");
 			}
-			return { type: "text", text: i.text, ...(images ? { images } : {}) };
+			return { type: "text", text: i.text, ...(images ? { images } : {}), ...(media ? { media } : {}) };
 		}
 		case "answer": {
 			if (typeof i.toolCallId !== "string" || i.toolCallId.length === 0) {
@@ -308,7 +318,7 @@ export function inputAppends(
 		case "plugin-question-answer":
 			throw new ChatInputError("Plugin question answers require canonical server validation");
 		case "text":
-			return [...dismissalConclusion(record), newUserMessage(input.text, input.images)];
+			return [...dismissalConclusion(record), newUserMessage(input.text, input.images, input.media)];
 		case "answer": {
 			const pending = danglingQuestionOf(record.messages);
 			if (!pending || pending.toolCallId !== input.toolCallId) {

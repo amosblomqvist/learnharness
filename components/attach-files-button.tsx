@@ -3,7 +3,7 @@
 import { cloneElement, useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type CSSProperties, type ReactElement, type RefObject } from "react";
 import { createPortal } from "react-dom";
 import { PaperclipIcon } from "lucide-react";
-import { directoryReferencePath, quoteFilePath } from "@/src/core";
+import { ACCEPT_MEDIA_EXTENSIONS, directoryReferencePath, quoteFilePath } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 import { BROWSER_NOTICE } from "@/components/file-path-drop-zone";
@@ -81,10 +81,18 @@ function AttachmentPopup({ anchorRef, rootRef, open, close, children }: {
  * folder choice returns the directory itself, including an empty directory.
  * aria-disabled, not disabled, so the tooltip still shows.
  */
-export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HTMLDivElement | null> }) {
+export function AttachFilesButton({
+	editorRef,
+	onAttachMedia,
+}: {
+	editorRef: React.RefObject<HTMLDivElement | null>;
+	onAttachMedia?: (files: File[]) => void;
+}) {
 	const controller = useOptionalInteractionLayers();
 	const pickerRef = useRef<HTMLInputElement>(null);
+	const mediaPickerRef = useRef<HTMLInputElement>(null);
 	const desktop = useDesktopPaths();
+	const canAttach = desktop || Boolean(onAttachMedia);
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const popupRef = useRef<HTMLDivElement>(null);
 	const choosingFolder = useRef(false);
@@ -156,16 +164,39 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 					e.currentTarget.value = ""; // allow re-picking the same file
 				}}
 			/>
-			<Hint label={desktop ? "Attach files or a folder" : BROWSER_NOTICE}>
+			{onAttachMedia && (
+				<input
+					ref={mediaPickerRef}
+					type="file"
+					accept={ACCEPT_MEDIA_EXTENSIONS}
+					multiple
+					hidden
+					data-testid="attach-media-input"
+					onChange={(e) => {
+						const files = Array.from(e.currentTarget.files ?? []);
+						if (files.length > 0) onAttachMedia(files);
+						e.currentTarget.value = "";
+					}}
+				/>
+			)}
+			<Hint label={desktop ? "Attach files, folder, or media" : onAttachMedia ? "Attach image, audio, or video" : BROWSER_NOTICE}>
 				<button
 					ref={buttonRef}
 					type="button"
 					aria-label="Attach files"
-					aria-disabled={!desktop}
-					aria-haspopup="menu"
-					aria-expanded={open}
+					aria-disabled={!canAttach}
+					aria-haspopup={desktop ? "menu" : undefined}
+					aria-expanded={desktop ? open : undefined}
 					data-testid="attach-files"
-					onClick={() => { if (desktop) { setNotice(""); setOpen(!open); } }}
+					onClick={() => {
+						if (desktop) {
+							setNotice("");
+							setOpen(!open);
+						} else if (onAttachMedia) {
+							setNotice("");
+							mediaPickerRef.current?.click();
+						}
+					}}
 					className="flex size-10 shrink-0 items-center justify-center rounded-[10px] text-muted-foreground transition-colors hover:bg-accent hover:text-foreground aria-disabled:cursor-default aria-disabled:opacity-40 aria-disabled:hover:bg-transparent aria-disabled:hover:text-muted-foreground"
 				>
 					<PaperclipIcon className="size-4" />
@@ -187,6 +218,10 @@ export function AttachFilesButton({ editorRef }: { editorRef: React.RefObject<HT
 						onClick={() => { setOpen(false); pickerRef.current?.click(); }}>Files</button>
 					<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
 						onClick={() => { void chooseFolder(); }}>Folder</button>
+					{onAttachMedia && (
+						<button type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
+							onClick={() => { setOpen(false); mediaPickerRef.current?.click(); }}>Media (image, audio, video)</button>
+					)}
 				</> : notice}
 			</div></AttachmentPopup>}
 		</div>

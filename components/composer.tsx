@@ -1,10 +1,13 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
 import { ArrowRightIcon, CornerDownLeftIcon, SquareIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { detectClientMediaType, type PendingMediaItem } from "@/lib/client-media";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
+import { ComposerMediaTray } from "@/components/composer-media-tray";
+import { INSERT_MEDIA_FILES_EVENT } from "@/components/file-path-drop-zone";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
 
@@ -61,6 +64,9 @@ export function ChatSessionComposer({
 	nextProblem,
 	onNext,
 	pendingInput = false,
+	attachments,
+	onAttachMedia,
+	onRemoveAttachment,
 }: {
 	busy: boolean;
 	value: string;
@@ -77,10 +83,15 @@ export function ChatSessionComposer({
 	nextProblem?: boolean;
 	onNext?: () => void;
 	pendingInput?: boolean;
+	attachments?: readonly PendingMediaItem[];
+	onAttachMedia?: (files: File[]) => void;
+	onRemoveAttachment?: (localId: string) => void;
 }) {
 	const [draft, setDraft] = useState(value);
 	useLayoutEffect(() => { setDraft(value); }, [revision, value]);
-	const canSend = sendAllowed && (draft.trim().length > 0 || dictationActive || pendingInput);
+	const preparingAttachments = Boolean(attachments?.some((item) => item.status === "preparing"));
+	const readyAttachments = Boolean(attachments?.some((item) => item.status === "ready"));
+	const canSend = sendAllowed && !preparingAttachments && (draft.trim().length > 0 || dictationActive || pendingInput || readyAttachments);
 	const applyDraft = useCallback((next: string) => {
 		setDraft(next);
 		onChange(next);
@@ -100,6 +111,9 @@ export function ChatSessionComposer({
 			placeholder={placeholder}
 			nextProblem={nextProblem}
 			onNext={onNext}
+			attachments={attachments}
+			onAttachMedia={onAttachMedia}
+			onRemoveAttachment={onRemoveAttachment}
 		/>
 	);
 }
@@ -119,6 +133,9 @@ export function Composer({
 	onNext,
 	defaultDropTarget = true,
 	fileInsertion = true,
+	attachments,
+	onAttachMedia,
+	onRemoveAttachment,
 }: {
 	busy: boolean;
 	value: string;
@@ -147,8 +164,24 @@ export function Composer({
 	/** Neutral plugin composers opt out without changing core defaults. */
 	defaultDropTarget?: boolean;
 	fileInsertion?: boolean;
+	attachments?: readonly PendingMediaItem[];
+	onAttachMedia?: (files: File[]) => void;
+	onRemoveAttachment?: (localId: string) => void;
 }) {
 	const controller = useOptionalInteractionLayers();
+	const formRef = useRef<HTMLFormElement>(null);
+	const onAttachMediaRef = useRef(onAttachMedia);
+	onAttachMediaRef.current = onAttachMedia;
+	useEffect(() => {
+		const el = formRef.current;
+		if (!el || !onAttachMedia) return;
+		const handler = (event: Event) => {
+			const files = (event as CustomEvent<File[]>).detail;
+			if (Array.isArray(files) && files.length > 0) onAttachMediaRef.current?.(files);
+		};
+		el.addEventListener(INSERT_MEDIA_FILES_EVENT, handler);
+		return () => el.removeEventListener(INSERT_MEDIA_FILES_EVENT, handler);
+	}, [onAttachMedia]);
 	const act = () => {
 		const action = enterAction({ busy, canSend, nextProblem });
 		if (action === "stop") onStop();
@@ -159,13 +192,26 @@ export function Composer({
 	const editorRef = inputRef ?? ownInputRef;
 	return (
 		<form
+			ref={formRef}
 			data-testid="composer"
-			className="flex items-end gap-1.5 p-1.5"
+			data-media-drop-target={onAttachMedia ? "" : undefined}
+			className="flex flex-col"
+			onPaste={(event) => {
+				if (!onAttachMedia) return;
+				const files = Array.from(event.clipboardData?.files ?? []).filter((file) => Boolean(detectClientMediaType(file)));
+				if (files.length === 0) return;
+				event.preventDefault();
+				onAttachMedia(files);
+			}}
 			onSubmit={(e) => {
 				e.preventDefault();
 				act();
 			}}
 		>
+			{attachments && attachments.length > 0 && onRemoveAttachment && (
+				<ComposerMediaTray items={attachments} onRemove={onRemoveAttachment} />
+			)}
+			<div className="flex items-end gap-1.5 p-1.5">
 			<PathInput
 				ref={editorRef}
 				value={value}
@@ -197,7 +243,7 @@ export function Composer({
 				autoFocus={autoFocus}
 				className="field-sizing-content lh-input max-h-48 min-h-10 flex-1 resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 			/>
-			<AttachFilesButton editorRef={editorRef} />
+			<AttachFilesButton editorRef={editorRef} onAttachMedia={onAttachMedia} />
 			{/* The button follows the text (owner report 2026-10-03): while
 				 a turn runs WITH text typed it stays the SEND affordance
 				 (click = steer — steering must be clickable, not Enter-only);
@@ -237,6 +283,7 @@ export function Composer({
 						{busy && !canSend ? <SquareIcon className="size-4" /> : <CornerDownLeftIcon className="size-5" />}
 					</button>
 				)}
+			</div>
 		</form>
 	);
 }

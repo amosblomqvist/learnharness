@@ -2,10 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { FileSymlinkIcon, XIcon } from "lucide-react";
-import { directoryReferencePath, quoteFilePath } from "@/src/core";
+import { directoryReferencePath, mediaMimeFromFilename, normalizeMediaMimeType, quoteFilePath } from "@/src/core";
 import { appendToPrimaryInput } from "@/components/dictation";
 import { INSERT_FILE_PATHS_EVENT } from "@/components/path-input";
 
+export const INSERT_MEDIA_FILES_EVENT = "lh:insert-media-files";
 export const BROWSER_NOTICE = "Local file paths can only be attached in the desktop app. You can paste a full path instead.";
 
 /** The content area only: the sidebar is deliberately outside this zone.
@@ -68,7 +69,18 @@ export function FilePathDropZone({ children, className, onContentRoot }: {
 				event.stopPropagation();
 				clearDrag();
 				const resolve = window.lh?.getPathForFile;
-				if (!resolve) { setNotice(BROWSER_NOTICE); return; }
+				if (!resolve) {
+					const dropped = Array.from(event.dataTransfer.files);
+					const mediaFiles = dropped.filter((file) => Boolean(normalizeMediaMimeType(file.type) ?? mediaMimeFromFilename(file.name)));
+					const target = event.currentTarget.querySelector<HTMLElement>("[data-media-drop-target]");
+					if (mediaFiles.length > 0 && target) {
+						target.dispatchEvent(new CustomEvent(INSERT_MEDIA_FILES_EVENT, { detail: mediaFiles }));
+						setNotice(mediaFiles.length < dropped.length ? "Some non-media files could not be attached in the browser." : "");
+						return;
+					}
+					setNotice(BROWSER_NOTICE);
+					return;
+				}
 				// Inspect only the dropped item's type, never traverse its entries.
 				// Positively known directories get a durable trailing separator.
 				const entries = Array.from(event.dataTransfer.items).filter((item) => item.kind === "file");

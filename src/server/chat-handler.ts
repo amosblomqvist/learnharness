@@ -37,6 +37,7 @@ import { getPluginAgentContributions, getPluginHost } from "./plugins.ts";
 import { preparePluginQuestionSubmission, reconcilePluginQuestionCompatibility, type QuestionTypeResolver } from "./plugin-questions.ts";
 import { searchAvailable, searchProvider } from "./search.ts";
 import { prepareSubmissionImages, prepareSubmissionImageChannels, prepareProblemSubmissionImageChannels, submissionImagePolicyKey } from "./submission-images.ts";
+import { MediaUploadError, transcribeMediaBytes, verifyChatMediaAttachments } from "./media.ts";
 import { preparePluginProblemSubmission, requirePluginProblemTarget, type ProblemTypeResolver } from "./plugin-problems.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { CLAUDE_CODE_PROVIDER } from "../core/contracts/claude-code.ts";
@@ -344,7 +345,20 @@ export async function handleChatInput(
 	const capturedConversation = JSON.stringify(conversation);
 	try {
 		switch (input.type) {
-			case "text": case "thinking":
+			case "text": {
+				let media = verifyChatMediaAttachments(chatId, input.media);
+				// Video keyframes ride alongside `media`: if the selected model is text-only,
+				// gracefully drop video keyframes while keeping media metadata & transcript.
+				const hasKeyframeMedia = Boolean(media?.some((item) => item.keyframeCount && item.keyframeCount > 0));
+				if (hasKeyframeMedia && !conversationEngine.model.input.includes("image")) {
+					media = media?.map((item) => (item.keyframeCount ? { ...item, keyframeCount: undefined } : item));
+					input = { ...input, images: undefined, media };
+				} else {
+					input = { ...input, images: await prepareSubmissionImages(input.images, conversationEngine), media };
+				}
+				break;
+			}
+			case "thinking":
 				input = { ...input, images: await prepareSubmissionImages(input.images, conversationEngine) };
 				break;
 			case "answer":
@@ -358,7 +372,7 @@ export async function handleChatInput(
 				break;
 		}
 	} catch (err) {
-		if (err instanceof ChatInputError) return Response.json({ error: err.message }, { status: 400 });
+		if (err instanceof ChatInputError || err instanceof MediaUploadError) return Response.json({ error: err.message }, { status: 400 });
 		throw err;
 	}
 	const modelIdForCompaction = `${conversationEngine.model.provider}:${conversationEngine.model.id}`;
@@ -762,6 +776,9 @@ export async function handleChatInput(
 					{
 						chatId,
 						chatStore: stores.chatStore,
+						mediaStore: stores.mediaStore,
+						transcribeMedia: async (bytes, mimeType, filename, signal) =>
+							(await transcribeMediaBytes(bytes, mimeType, filename, signal)).transcript,
 						jobStore: stores.jobStore,
 						spawn: (job, input) => void jobRunner.runJob(job.id, input),
 						// The registry drop's signal (2026-09-20): no live engine

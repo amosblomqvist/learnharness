@@ -16,6 +16,15 @@ export { joinPages } from "../agent/subagents/pdf-markdown.ts";
 export * from "./commit-positions.ts";
 export * from "./jobs.ts";
 export { prepareSubmissionImages, prepareSubmissionImageChannels } from "./submission-images.ts";
+export {
+	MediaUploadError,
+	saveUploadedMedia,
+	verifyChatMediaAttachments,
+	buildMediaFileResponse,
+	transcribeMediaBytes,
+	parseByteRange,
+	sniffMediaMime,
+} from "./media.ts";
 export * from "./stores.ts";
 export { refreshWorkerRequestAdmission } from "../agent/worker-request-admission.ts";
 export { readRenderSettings, writeRenderSettings } from "../store/render-settings.ts";

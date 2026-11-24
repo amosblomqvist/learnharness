@@ -69,6 +69,8 @@ import {
 import type { TurnInput, UserSteerInput } from "../core/input-events.ts";
 import { hasUnresolvedQuestion, endsInDismissal, endsInQuestionRecovery, newUserSteer, type LhMessage } from "../core/native-messages.ts";
 import { prepareSubmissionImages, submissionImagePolicyKey } from "./submission-images.ts";
+import { MediaUploadError, verifyChatMediaAttachments } from "./media.ts";
+import { ChatInputError } from "../core/input-events.ts";
 import { fireJobAbort, isJobLive } from "../agent/subagents/aborts.ts";
 import { stores, effectiveSettings } from "./stores.ts";
 import { resolveConversationSpec } from "../core/settings-resolution.ts";
@@ -325,14 +327,28 @@ export async function prepareAndSteerChat(chatId: string, input: UserSteerInput)
 	if (!model || !session) return "stale";
 	const policy = submissionImagePolicyKey({ model });
 	const { text, id } = input;
-	const images = await prepareSubmissionImages(input.images, { model });
+	let media: UserSteerInput["media"];
+	try {
+		media = verifyChatMediaAttachments(chatId, input.media);
+	} catch (err) {
+		if (err instanceof MediaUploadError) throw new ChatInputError(err.message);
+		throw err;
+	}
+	const hasKeyframeMedia = Boolean(media?.some((item) => item.keyframeCount && item.keyframeCount > 0));
+	let images: UserSteerInput["images"];
+	if (hasKeyframeMedia && !model.input.includes("image")) {
+		media = media?.map((item) => (item.keyframeCount ? { ...item, keyframeCount: undefined } : item));
+		images = undefined;
+	} else {
+		images = await prepareSubmissionImages(input.images, { model });
+	}
 	const currentSession = stores.chatStore.getChat(chatId);
 	if (!currentSession || currentSession.createdAt !== session.createdAt || currentSession.kind !== session.kind) return "stale";
 	const current = state().liveAgents.get(chatId);
 	if (!current) return "settled";
 	if (current !== agent || current.state.model !== model || submissionImagePolicyKey({ model }) !== policy) return "stale";
 	// No await may separate the identity/policy check from this registry handoff.
-	return steerLiveChat(chatId, newUserSteer(text, id, images)) ? "accepted" : "settled";
+	return steerLiveChat(chatId, newUserSteer(text, id, images, media)) ? "accepted" : "settled";
 }
 
 /** Synchronous live handoff. The registry copy preserves the existing
