@@ -24,9 +24,9 @@ export async function inspectClaudeInstallation(
 	try {
 		const output = await readVersion(binary);
 		// Expose only a version, never arbitrary CLI stdout/stderr or an absolute path.
-		const match = /^(\d+)\.(\d+)\.(\d+)(?: \(Claude Code\))?$/.exec(output.trim());
+		const match = /^(?:claude\s+)?(\d+)\.(\d+)\.(\d+)(?:\.\d+)?(?: \([^()\r\n]*\))?$/.exec(output.trim());
 		if (!match) return { ...base, state: "version-unchecked" };
-		const parts = match.slice(1).map(Number);
+		const parts = match.slice(1, 4).map(Number);
 		if (!parts.every(Number.isSafeInteger)) return { ...base, state: "version-unchecked" };
 		const minimum = CLAUDE_CODE_MINIMUM_VERSION.split(".").map(Number);
 		const differing = parts.findIndex((part, index) => part !== minimum[index]);

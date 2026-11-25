@@ -17,6 +17,7 @@ for (const [output, state, version] of [
 	["2.1.258 (Claude Code)\n", "update-required", "2.1.258"],
 	["2.1.259 (Claude Code)", "meets-minimum", "2.1.259"],
 	["2.1.310 (Claude Code)", "meets-minimum", "2.1.310"],
+	["claude 2.1.330.1791 ", "meets-minimum", "2.1.330"],
 	["2.2.0", "meets-minimum", "2.2.0"],
 	["2.0.999", "update-required", "2.0.999"],
 	["3.0.0", "meets-minimum", "3.0.0"],
