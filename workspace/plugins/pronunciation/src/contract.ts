@@ -9,6 +9,10 @@ export const VOICES = [
 export type VoiceId = (typeof VOICES)[number]["id"];
 export const DEFAULT_VOICE: VoiceId = "zf_001";
 
+/** Notices shown next to the clicked or tapped text. */
+export const PREPARING_TEXT = "Preparing audio…";
+export const BLOCKED_TEXT = "The browser blocked audio. Tap the text again.";
+
 /** Longest phrase (in characters) sent for one click. */
 export const MAX_PHRASE_CHARS = 100;
 

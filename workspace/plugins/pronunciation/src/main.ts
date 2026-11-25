@@ -1,10 +1,12 @@
 import type { PluginButtonProps, PluginFrontendContext, PluginSettingsSchema, PluginWidgetHandle } from "learnharness-plugin-api";
-import { VOICES, describeInstall, megabytes, parseSpeakResult, parseState, type PluginState } from "./contract.ts";
-import { INTERACTIVE_SELECTOR, isCleanClick, pointInRects, type Press } from "./gesture.ts";
+import { BLOCKED_TEXT, PREPARING_TEXT, VOICES, describeInstall, megabytes, parseSpeakResult, parseState, type PluginState } from "./contract.ts";
+import { INTERACTIVE_SELECTOR, MAX_MOVE_PX, TOUCH_CLICK_MS, isCleanClick, isCleanTap, isRepeatTap, pointInRects, type Press, type Tap } from "./gesture.ts";
 import { hanAt, hanRunAt } from "./han.ts";
+import { encodeWav } from "./wav.ts";
 
 const HIGHLIGHT = "lh-pronounce";
 const NOTICE_MS = 5000;
+const PREPARING_MS = 600;
 
 interface Hit { node: Text; start: number; end: number }
 
@@ -45,12 +47,21 @@ function hanHitAt(x: number, y: number): Hit | undefined {
   return undefined;
 }
 
-function base64Bytes(value: string): ArrayBuffer {
+function base64Bytes(value: string): Uint8Array<ArrayBuffer> {
   const binary = atob(value);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
-  return bytes.buffer;
+  return bytes;
 }
+
+function bytesBase64(bytes: Uint8Array): string {
+  let binary = "";
+  for (const byte of bytes) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+/** 10 ms of silence, played inside the tap to unlock the audio element. */
+const SILENCE = `data:audio/wav;base64,${bytesBase64(encodeWav(new Float32Array(240), 24_000))}`;
 
 export async function activate(ctx: PluginFrontendContext): Promise<() => void> {
   let state: PluginState | undefined;
@@ -76,7 +87,8 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   let notice: HTMLElement | undefined;
   let noticeTimer: ReturnType<typeof setTimeout> | undefined;
   const hideNotice = () => { clearTimeout(noticeTimer); notice?.remove(); notice = undefined; };
-  function showNotice(message: string, x: number, y: number): void {
+  /** `lasting` keeps the notice until it is replaced or hidden. */
+  function showNotice(message: string, x: number, y: number, lasting = false): void {
     hideNotice();
     const element = document.createElement("div");
     element.className = "lh-pronounce-notice";
@@ -87,34 +99,94 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     element.style.left = `${Math.max(16, Math.min(x - width / 2, window.innerWidth - width - 16))}px`;
     element.style.top = `${y + 18 + height <= window.innerHeight - 8 ? y + 18 : Math.max(8, y - 18 - height)}px`;
     notice = element;
-    noticeTimer = setTimeout(hideNotice, NOTICE_MS);
+    if (!lasting) noticeTimer = setTimeout(hideNotice, NOTICE_MS);
   }
 
   // ---- Playback ----------------------------------------------------------
-  let audio: AudioContext | undefined;
-  let playing: AudioBufferSourceNode | undefined;
+  // One media element, not Web Audio: iPhone plays media even on silent, and a
+  // media element unlocked by a play() inside the tap may play again later,
+  // when the clip arrives, without another gesture.
+  let player: HTMLAudioElement | undefined;
+  let clip: string | undefined;
   let generation = 0;
-  const stop = () => { try { playing?.stop(); } catch { /* already ended */ } playing = undefined; };
+  let preparing: ReturnType<typeof setTimeout> | undefined;
+  const releaseClip = () => { if (clip) URL.revokeObjectURL(clip); clip = undefined; };
+  const stop = () => {
+    clearTimeout(preparing);
+    player?.pause();
+    releaseClip();
+  };
   function speak(text: string, x: number, y: number): void {
     const request = ++generation;
     stop(); hideNotice();
-    // Create/resume inside the click so phones allow the later playback.
-    audio ??= new AudioContext();
-    void audio.resume().catch(() => {});
-    const context = audio;
+    const element = player ??= new Audio();
+    element.preload = "auto";
+    element.src = SILENCE;
+    // Superseded by the real clip (AbortError) or refused; either way the real play() reports.
+    void element.play().catch(() => {});
+    preparing = setTimeout(() => { if (request === generation && !disposed) showNotice(PREPARING_TEXT, x, y, true); }, PREPARING_MS);
     ctx.call("speak", { text }).then(parseSpeakResult).then(async ({ wav }) => {
-      const buffer = await context.decodeAudioData(base64Bytes(wav));
       if (request !== generation || disposed) return;
-      const source = context.createBufferSource();
-      source.buffer = buffer;
-      source.connect(context.destination);
-      source.onended = () => { if (playing === source) playing = undefined; };
-      playing = source;
-      source.start();
+      const url = URL.createObjectURL(new Blob([base64Bytes(wav)], { type: "audio/wav" }));
+      releaseClip();
+      clip = url;
+      element.src = url;
+      element.onended = () => { if (clip === url) releaseClip(); };
+      try { await element.play(); }
+      catch (error) {
+        if ((error as { name?: string }).name === "NotAllowedError") throw new Error(BLOCKED_TEXT);
+        throw error;
+      }
+      if (request !== generation || disposed) return;
+      clearTimeout(preparing);
+      hideNotice();
     }).catch((error: unknown) => {
-      if (request === generation && !disposed) showNotice(error instanceof Error ? error.message : String(error), x, y);
+      if (request !== generation || disposed) return;
+      clearTimeout(preparing);
+      // A newer clip replacing this one aborts its play(); that is not an error.
+      if ((error as { name?: string }).name === "AbortError") return;
+      showNotice(error instanceof Error ? error.message : String(error), x, y);
     });
   }
+
+  /** Common checks for a click or tap at a point; plays when it hits Chinese. */
+  function activateAt(target: EventTarget | null, x: number, y: number): void {
+    if (!state) return;
+    if (target instanceof Element && target.closest(INTERACTIVE_SELECTOR)) return;
+    const hit = hanHitAt(x, y);
+    if (hit) speak(hit.node.data.slice(hit.start, hit.end), x, y);
+  }
+  const selectionCollapsed = () => { const selection = document.getSelection(); return !selection || selection.isCollapsed; };
+
+  // ---- Touch taps --------------------------------------------------------
+  // iPhone Safari often sends no click for a tap on plain text, so taps are
+  // read from touch events. Listeners are passive: scrolling, selection and
+  // links behave exactly as before.
+  let touch: (Press & { moved: boolean }) | undefined;
+  let lastTap: Tap | undefined;
+  let lastTouchEnd = -Infinity;
+  const onTouchStart = (event: TouchEvent) => {
+    const point = event.touches.length === 1 ? event.touches[0] : undefined;
+    touch = point && { x: point.clientX, y: point.clientY, time: event.timeStamp, moved: false };
+  };
+  const onTouchMove = (event: TouchEvent) => {
+    const point = event.touches.length === 1 ? event.touches[0] : undefined;
+    if (!touch || !point) { touch = undefined; return; }
+    if (Math.hypot(point.clientX - touch.x, point.clientY - touch.y) > MAX_MOVE_PX) touch.moved = true;
+  };
+  const onTouchCancel = () => { touch = undefined; };
+  const onTouchEnd = (event: TouchEvent) => {
+    const start = touch;
+    touch = undefined;
+    lastTouchEnd = event.timeStamp;
+    const point = event.changedTouches[0];
+    if (!start || !point || event.touches.length) return;
+    const tap = { x: point.clientX, y: point.clientY, time: event.timeStamp };
+    if (!isCleanTap(start, tap, start.moved, selectionCollapsed())) return;
+    const repeat = isRepeatTap(lastTap, tap);
+    lastTap = tap;
+    if (!repeat) activateAt(event.target, tap.x, tap.y);
+  };
 
   // ---- Clicks and hover --------------------------------------------------
   let press: Press | undefined;
@@ -124,16 +196,14 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   const onClick = (event: MouseEvent) => {
     const down = press;
     press = undefined;
+    // A tap was already handled from its touch events.
+    if (event.timeStamp - lastTouchEnd < TOUCH_CLICK_MS) return;
     if (!state) return;
-    const selection = document.getSelection();
     const clean = isCleanClick(down, {
       x: event.clientX, y: event.clientY, time: event.timeStamp, button: event.button, detail: event.detail,
       modified: event.altKey || event.ctrlKey || event.metaKey || event.shiftKey,
-    }, !selection || selection.isCollapsed);
-    if (!clean) return;
-    if (event.target instanceof Element && event.target.closest(INTERACTIVE_SELECTOR)) return;
-    const hit = hanHitAt(event.clientX, event.clientY);
-    if (hit) speak(hit.node.data.slice(hit.start, hit.end), event.clientX, event.clientY);
+    }, selectionCollapsed());
+    if (clean) activateAt(event.target, event.clientX, event.clientY);
   };
 
   const highlights = (globalThis as { CSS?: { highlights?: HighlightRegistry } }).CSS?.highlights;
@@ -158,6 +228,10 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   };
   const onLeave = () => { hoverPoint = undefined; clearHover(); };
 
+  document.addEventListener("touchstart", onTouchStart, { capture: true, passive: true });
+  document.addEventListener("touchmove", onTouchMove, { capture: true, passive: true });
+  document.addEventListener("touchend", onTouchEnd, { capture: true, passive: true });
+  document.addEventListener("touchcancel", onTouchCancel, { capture: true, passive: true });
   document.addEventListener("pointerdown", onPointerDown, { capture: true, passive: true });
   document.addEventListener("click", onClick);
   document.addEventListener("pointermove", onPointerMove, { passive: true });
@@ -220,6 +294,10 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     disposed = true;
     subscriptions.splice(0).forEach(unsubscribe => unsubscribe());
     unregisterSettings();
+    document.removeEventListener("touchstart", onTouchStart, { capture: true });
+    document.removeEventListener("touchmove", onTouchMove, { capture: true });
+    document.removeEventListener("touchend", onTouchEnd, { capture: true });
+    document.removeEventListener("touchcancel", onTouchCancel, { capture: true });
     document.removeEventListener("pointerdown", onPointerDown, { capture: true });
     document.removeEventListener("click", onClick);
     document.removeEventListener("pointermove", onPointerMove);
@@ -227,8 +305,9 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     window.removeEventListener("blur", onLeave);
     if (hoverFrame) cancelAnimationFrame(hoverFrame);
     clearHover(); hideNotice(); stop();
-    void audio?.close().catch(() => {});
-    audio = undefined;
+    player?.removeAttribute("src");
+    player?.load();
+    player = undefined;
   };
   ctx.cleanup(dispose);
   subscriptions.push(ctx.onNotification(event => { if (event.topic === "state-changed") apply(event.data); }));

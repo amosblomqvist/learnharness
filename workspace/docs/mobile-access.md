@@ -38,6 +38,8 @@ Settings fill the screen with a horizontally scrollable section selector. Side c
 
 Model calls and native operations run on the PC. Existing provider connections work from the phone. Sign-in flows that require a PC browser open there; finish those flows on the PC. Update controls, when available, apply to the PC app.
 
+With the **Chinese pronunciation** core plugin enabled and its voice downloaded on the PC, tap Chinese text to hear it. The PC's GPU generates the audio and the phone plays it, even with the ring/silent switch on silent. The first tap after the app starts can take a few seconds while the voice loads; "Preparing audio…" appears meanwhile. See the [plugin README](../plugins/pronunciation/README.md#on-a-phone).
+
 ## Upload photos and files
 
 Use the paperclip to choose **Photos or camera** or **Files**. Upload up to 32 files totaling **25 MiB per request**. The composer waits for an upload to finish before sending. Uploaded files are retained under `<learning data>/attachments/`, and the message uses their server-side paths so the existing file-reading tools can use them later.

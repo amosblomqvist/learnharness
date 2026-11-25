@@ -45,12 +45,25 @@ next start instead.
 - A new click stops the clip that is playing. Nothing is cached: each click
   generates the audio again (about 0.1–0.7 s on a mid-range GPU).
 - The model loads on the first click (a few seconds, including GPU warm-up) and
-  stays loaded, using about 0.5 GB of VRAM, while the plugin is enabled.
-- On a phone opened through the mobile link, the PC's GPU generates the audio
-  and the phone plays it.
+  stays loaded, using about 0.5 GB of VRAM, while the plugin is enabled. If a
+  clip hasn't started within 0.6 s, "Preparing audio…" appears next to the text
+  until it plays.
+- Audio plays through an HTML audio element, so the browser treats it as media.
+
+### On a phone
+
+On a phone opened through the mobile link, the PC's GPU generates the audio and
+the phone plays it. Taps are read from touch events, because iPhone Safari often
+sends no click for a tap on plain text. The rules match clicks: one finger, at
+most 5 px of movement (scrolling cancels the tap), under 500 ms, nothing left
+selected and not on a control. A second tap within 350 ms and 20 px is ignored,
+like the second click of a double-click. On an iPhone, pronunciation plays even
+with the ring/silent switch on silent, at the media volume. If the browser
+still refuses to play, a notice asks you to tap the text again.
 
 Errors, such as the model not being downloaded or DirectML being unavailable,
-appear as a small notice next to the clicked text. There is no CPU fallback.
+appear as a small notice next to the clicked or tapped text. There is no CPU
+fallback.
 
 ## How text becomes speech
 
@@ -73,5 +86,9 @@ npm run build
 ```
 
 `npm test` uses small fixture lexicons, a local HTTP server and fake runtimes. It
-needs no download or GPU. `scripts/smoke-gpu.mjs` runs the real model on the GPU
+needs no download or GPU. `npm run test:browser` runs the real frontend in
+headless Chrome (set `CHROME_PATH` if it isn't in the default place) with a
+mocked backend, in phone emulation and on a desktop viewport. It covers taps,
+swipes, long presses, double taps, taps without a click event, playback and
+notices. `scripts/smoke-gpu.mjs` runs the real model on the GPU
 against a scratch data directory; read it before running it.
