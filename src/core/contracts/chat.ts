@@ -234,6 +234,17 @@ export const HANDOFF_TEXT =
 	"Take your time here and really think this through. " +
 	"When it's genuinely reasoned out, call plan_init and present the plan; I'll accept it or ask for changes.";
 
+export const SKIP_PROBING_START_TEXT =
+	"[Probing skipped] — the learner chose to skip diagnostic probing and start directly in planning. " +
+	"Treat their prior understanding as unmeasured unless stated in their message or attached session context. " +
+	"Apply the teaching methodology in your system prompt, plan the full teaching arc from foundations to their goal (carrying any uncertain premises into the plan to verify during teaching), " +
+	"call plan_init, and present the plan; the learner will accept it or ask for changes.";
+
+export const SKIP_PROBING_MID_TEXT =
+	"[Probing skipped] — the learner chose to end diagnostic probing now and move straight to planning. " +
+	"Use their stated goal and any answers they gave so far; treat untested areas as unmeasured and do not restart probing. " +
+	"Apply the teaching methodology in your system prompt, plan the full teaching arc, call plan_init, and present the plan; the learner will accept it or ask for changes.";
+
 // ─── Practice sessions (owner, 2026-10-04) — marker + ack texts ──────────────
 // Single-sourced here per the marker law: the model-facing text of every
 // custom marker lives in core/contracts, never in the flattening seam.
@@ -301,8 +312,9 @@ export interface ChatSummary {
 	/** Normalized kind (absent record field reads as teach). */
 	kind: ChatKind;
 	messageCount: number;
-	/** Transcript-derived phase: probe ends at successful probe_done completion;
-	 * plan ends at the first node-tagged teaching question call, not its answer. */
+	/** Transcript-derived phase: probe ends at successful probe_done completion
+	 * or a probe-skipped marker; plan ends at the first node-tagged teaching
+	 * question call, not its answer. */
 	phase: Phase3;
 	/** An unanswered quiz/ask question is waiting for the learner. */
 	pendingQuestion: boolean;

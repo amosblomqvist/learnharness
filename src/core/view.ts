@@ -428,6 +428,14 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 			});
 			return;
 		}
+		case "probe-skipped": {
+			out.push({
+				id: marker.id,
+				role: "user",
+				parts: [{ type: "data-probe-skipped", id: `ps_${marker.id}`, data: marker.details }],
+			});
+			return;
+		}
 		case "subagent-steer": {
 			const meta = marker.details as SubagentResultMeta;
 			const artifact = marker.details as {

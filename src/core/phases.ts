@@ -2,7 +2,7 @@
  * Teaching-session phases derived sequentially from transcript events,
  * not from plan-tree occupancy or an explicit plan-acceptance flag:
  *
- * - probe: until probe_done has a successful tool result.
+ * - probe: until a learner probe-skip marker or a successful probe_done tool result.
  * - plan: after probe completion, until a node-tagged teaching question call.
  * - teach: from that first call onward, without waiting for its answer.
  *
@@ -63,10 +63,13 @@ function advance(
 ): Phase3 {
 	if (!parts) return phase;
 	for (const part of parts) {
-		// STRICTLY SEQUENTIAL: probe → plan only via a concluded probe_done,
-		// plan → teach only via the first nodeId-tagged quiz CALL (the call,
-		// not its answer — an errored-and-retried call still proves teaching
-		// began, and the retry lands in the same group anyway).
+		// STRICTLY SEQUENTIAL: probe → plan via a learner probe-skip marker or a
+		// concluded probe_done, plan → teach only via the first nodeId-tagged quiz
+		// CALL (the call, not its answer — an errored-and-retried call still proves
+		// teaching began, and the retry lands in the same group anyway).
+		if (phase === "probe" && part.type === "data-probe-skipped") {
+			phase = "plan";
+		}
 		if (
 			phase === "probe" && part.type === "tool-probe_done" && part.state === "output-available" &&
 			(part.output as { ok?: unknown } | null | undefined)?.ok !== false
@@ -142,9 +145,9 @@ import { probeDoneResultIds, type LhMessage } from "./native-messages.ts";
 
 /** The phase at `upToIndex` (inclusive; default: the last message) of a
  *  NATIVE record. probe→plan advances at the probe_done call's clean
- *  toolResult; plan→teach at the assistant message carrying the first
- *  nodeId-tagged quiz CALL (mirrors the view fold — same seam, native
- *  shape). */
+ *  toolResult or a probe-skipped marker; plan→teach at the assistant message
+ *  carrying the first nodeId-tagged quiz CALL (mirrors the view fold — same
+ *  seam, native shape). */
 export function phaseAt3Lh(messages: readonly LhMessage[], upToIndex?: number): Phase3 {
 	let phase: Phase3 = "probe";
 	const last = Math.min(upToIndex ?? messages.length - 1, messages.length - 1);
@@ -152,6 +155,9 @@ export function phaseAt3Lh(messages: readonly LhMessage[], upToIndex?: number): 
 	for (let i = 0; i <= last; i++) {
 		const m = messages[i]!;
 		const role = (m as { role?: string }).role;
+		if (phase === "probe" && m.role === "custom" && m.customType === "probe-skipped") {
+			phase = "plan";
+		}
 		if (role === "toolResult") {
 			if (phase === "probe" && concluded.has(m.id)) phase = "plan";
 		} else if (role === "assistant") {
