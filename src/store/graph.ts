@@ -54,15 +54,31 @@ import type { GraphStore } from "../core/ports.ts";
 function appendLine<T>(file: string, record: T): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
-	fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf-8");
+	// A torn earlier append leaves no newline; start this record on its own line.
+	fs.appendFileSync(file, `${endsMidLine(file) ? "\n" : ""}${JSON.stringify(record)}\n`, "utf-8");
+}
+
+function endsMidLine(file: string): boolean {
+	let fd: number;
+	try { fd = fs.openSync(file, "r"); } catch { return false; }
+	try {
+		const { size } = fs.fstatSync(fd);
+		if (size === 0) return false;
+		const last = Buffer.alloc(1);
+		fs.readSync(fd, last, 0, 1, size - 1);
+		return last[0] !== 0x0a;
+	} finally {
+		fs.closeSync(fd);
+	}
 }
 
 function readRawLines(file: string): unknown[] {
 	let raw: string;
 	try {
 		raw = fs.readFileSync(file, "utf-8");
-	} catch {
-		return []; // no ledger yet — nothing has ever been emitted
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return []; // no ledger yet — nothing has ever been emitted
+		throw error; // unreadable is not empty: a rewrite from [] would erase it
 	}
 	const out: unknown[] = [];
 	for (const line of raw.split("\n")) {

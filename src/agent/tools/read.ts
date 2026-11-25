@@ -4,6 +4,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute, type ImageFileResult } from "../tool-execute.ts";
 import { resolveSourcePath } from "./fs-shared.ts";
+import { MAX_LEARNER_IMAGE_BYTES } from "./learner-image-dimensions.ts";
 import { detectSupportedImageMimeTypeFromFile, processImage } from "../image-processing/index.ts";
 
 /**
@@ -99,6 +100,10 @@ export function createReadTool(model?: ReadModel): AgentTool<typeof readInput> {
 		parameters: readInput,
 		execute: serverExecute("read", readInput, async ({ path: rawPath, offset, limit }, { signal }): Promise<string | ImageFileResult> => {
 			const absolute = resolveSourcePath(rawPath);
+			// stat first: a pipe or device would hang the open, a huge file would fill memory.
+			const info = await fs.stat(absolute);
+			if (!info.isFile()) throw new Error(`Not a regular file: ${rawPath}`);
+			if (info.size > MAX_LEARNER_IMAGE_BYTES) throw new Error(`File is too large to read (${info.size} bytes, limit ${MAX_LEARNER_IMAGE_BYTES}): ${rawPath}`);
 			const mime = await detectSupportedImageMimeTypeFromFile(absolute);
 			const buffer = await fs.readFile(absolute, { signal });
 			if (mime) {

@@ -67,6 +67,24 @@ describe("POST /api/chats/:id/artifact-ui", () => {
 		assert.equal((await post(chat.id, { input: { messageId: "m1", inverted: "yes" } })).status, 400);
 	});
 
+	it("keeps a message saved while the request body is still being read", async () => {
+		const chat = createChat("Artifact UI stale write");
+		const steer = buildSubagentSteerFn(
+			{ id: "js", kind: "visual", toolCallId: "cs" },
+			{ svg: '<svg xmlns="http://www.w3.org/2000/svg" width="10" height="10"></svg>' },
+		);
+		saveMessages(chat.id, [steer as never]);
+		const req = {
+			json: async () => {
+				saveMessages(chat.id, [steer as never, { id: "reply", role: "assistant", content: "late reply" }]);
+				return { input: { messageId: steer.id, inverted: true } };
+			},
+		} as unknown as Request;
+		assert.equal((await POST(req, { params: Promise.resolve({ id: chat.id }) })).status, 200);
+		const saved = getChat(chat.id)!.messages as Array<{ id: string }>;
+		assert.deepEqual(saved.map((m) => m.id), [steer.id, "reply"]);
+	});
+
 	it("persists ui.inverted onto the demo steer and toggles it back", async () => {
 		const chat = createChat("Artifact UI round trip");
 		const steer = buildSubagentSteerFn(

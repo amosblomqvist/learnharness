@@ -32,6 +32,16 @@ const run = (args: { path: string; offset?: number; limit?: number }) =>
 		return { text: (first as { type: "text"; text: string }).text, details: r.details };
 	});
 
+describe("read tool — file kind and size", () => {
+	it("refuses a directory and a file over the size cap without loading it", async () => {
+		await assert.rejects(readTool.execute!("test", { path: tmp }), /Not a regular file/);
+		const big = path.join(tmp, "sparse.bin");
+		fs.closeSync(fs.openSync(big, "w"));
+		fs.truncateSync(big, 26 * 1024 * 1024);
+		await assert.rejects(readTool.execute!("test", { path: big }), /too large/);
+	});
+});
+
 describe("read tool — text semantics", () => {
 	it("reads a small file verbatim", async () => {
 		const file = write("small.txt", "hello\nworld");

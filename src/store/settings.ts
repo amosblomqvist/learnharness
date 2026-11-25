@@ -109,6 +109,20 @@ export function readSettings(): UserSettings | null {
 	return record;
 }
 
+/** Before a write replaces the file: a file that cannot be read stops the
+ *  write, and one that does not parse is copied aside first, so a hand-edit
+ *  typo never costs the user their other settings. */
+function keepDamagedSettings(): void {
+	let raw: string;
+	try { raw = fs.readFileSync(SETTINGS_FILE, "utf-8"); }
+	catch (error) {
+		if ((error as NodeJS.ErrnoException).code === "ENOENT") return;
+		throw new Error("Settings file cannot be read");
+	}
+	try { JSON.parse(raw); return; } catch { /* damaged */ }
+	fs.copyFileSync(SETTINGS_FILE, `${SETTINGS_FILE}.damaged-${new Date().toISOString().replace(/[:.]/g, "-")}`);
+}
+
 /** Persist the record (sanitized). Returns what was written. */
 export function writeSettings(raw: unknown): UserSettings {
 	const settings = sanitizeUserSettings(raw);
@@ -120,6 +134,7 @@ export function writeSettings(raw: unknown): UserSettings {
 		settings.agent = { ...settings.agent, fileAccess: { restricted: true, folders: [] } };
 	}
 	fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+	keepDamagedSettings();
 	writeFileAtomicSync(SETTINGS_FILE, JSON.stringify(settings, null, "\t"), { allowInPlaceFallback: true });
 	return settings;
 }

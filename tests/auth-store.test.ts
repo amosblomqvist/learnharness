@@ -64,6 +64,18 @@ describe("AuthStore adapter", () => {
 		assert.deepEqual(authStore.authVars(), { OK: "fine" }, "non-string values drop");
 	});
 
+	it("set and delete refuse a damaged file and leave it unchanged", () => {
+		for (const damaged of ["{not json", JSON.stringify(["an", "array"])]) {
+			fs.writeFileSync(AUTH_FILE, damaged);
+			assert.throws(() => authStore.setAuthVar("OPENROUTER_API_KEY", "sk-or-v1-new"));
+			assert.throws(() => authStore.deleteAuthVar("OPENROUTER_API_KEY"));
+			assert.equal(fs.readFileSync(AUTH_FILE, "utf-8"), damaged);
+		}
+		fs.writeFileSync(AUTH_FILE, JSON.stringify({ KEEP: "me", FUTURE: { a: 1 } }));
+		authStore.setAuthVar("OPENROUTER_API_KEY", "sk-or-v1-new");
+		assert.deepEqual(JSON.parse(fs.readFileSync(AUTH_FILE, "utf-8")), { KEEP: "me", FUTURE: { a: 1 }, OPENROUTER_API_KEY: "sk-or-v1-new" });
+	});
+
 	it("delete removes just that var; absent delete = silent no-op", () => {
 		fs.writeFileSync(AUTH_FILE, JSON.stringify({ A: "1", B: "2" }));
 		authStore.deleteAuthVar("A");

@@ -34,6 +34,22 @@ afterEach(() => {
 });
 
 describe("the settings store", () => {
+	it("keeps a copy of a damaged file before a save replaces it", () => {
+		const damaged = '{"version": 1, "models": {"strong": ';
+		fs.writeFileSync(SETTINGS_FILE, damaged);
+		writeSettings({ version: 1, appearance: { theme: "dark" } });
+		const copies = fs.readdirSync(path.dirname(SETTINGS_FILE)).filter((name) => name.startsWith("settings.json.damaged-"));
+		assert.equal(copies.length, 1);
+		assert.equal(fs.readFileSync(path.join(path.dirname(SETTINGS_FILE), copies[0]!), "utf-8"), damaged);
+		fs.rmSync(path.join(path.dirname(SETTINGS_FILE), copies[0]!));
+	});
+
+	it("refuses to save over a settings file that cannot be read", () => {
+		fs.mkdirSync(SETTINGS_FILE);
+		try { assert.throws(() => writeSettings({ version: 1 }), /cannot be read/); }
+		finally { fs.rmSync(SETTINGS_FILE, { recursive: true }); }
+	});
+
 	it("persists worker concurrency, drops invalid disk values, and resets to 8 when unset", () => {
 		writeSettings({ version: 1, agent: { workerRequestConcurrency: 29, tools: { research: false } } });
 		assert.deepEqual(readSettings()?.agent, { workerRequestConcurrency: 29, tools: { research: false } });

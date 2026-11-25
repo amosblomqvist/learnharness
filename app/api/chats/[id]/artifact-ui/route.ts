@@ -14,10 +14,12 @@ import { getChat, stores } from "@/src/server";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
+	// Read the body first: the chat is saved back whole, so it must be read
+	// after the last await or a turn that settles meanwhile would be undone.
+	const body = (await req.json().catch(() => null)) as { input?: unknown } | null;
 	const chat = getChat(id);
 	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
 
-	const body = (await req.json().catch(() => null)) as { input?: unknown } | null;
 	const input = body?.input as { messageId?: unknown; inverted?: unknown } | null | undefined;
 	if (
 		!input ||

@@ -45,19 +45,32 @@ function writeMap(map: Record<string, unknown>): void {
 	writeFileAtomicSync(AUTH_FILE, `${JSON.stringify(map, null, "\t")}\n`, { mode: 0o600 });
 }
 
+/** For writes: only a missing file means {}. An unreadable or damaged file
+ *  throws, so a save never replaces the other keys with just one. Values that
+ *  are not strings are kept as they are. */
+function readMapStrict(): Record<string, unknown> {
+	let text: string;
+	try { text = fs.readFileSync(AUTH_FILE, "utf-8"); }
+	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw new Error("Key storage unavailable"); }
+	let raw: unknown;
+	try { raw = JSON.parse(text); } catch { throw new Error("Key storage unavailable"); }
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Key storage unavailable");
+	return raw as Record<string, unknown>;
+}
+
 export const authStore: AuthStore = {
 	authVars() {
 		return readMap();
 	},
 	setAuthVar(name, value) {
 		assertOrdinaryVar(name);
-		const map = readMap();
+		const map = readMapStrict();
 		map[name] = value;
 		writeMap(map);
 	},
 	deleteAuthVar(name) {
 		assertOrdinaryVar(name);
-		const map = readMap();
+		const map = readMapStrict();
 		if (!(name in map)) return; // absent = silent success, idempotent
 		delete map[name];
 		writeMap(map);
