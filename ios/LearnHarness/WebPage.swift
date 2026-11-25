@@ -259,6 +259,12 @@ private final class WeakMessageHandler: NSObject, WKScriptMessageHandler {
 // MARK: - Navigation: stay on the server, everything else opens in Safari
 
 extension WebPage: WKNavigationDelegate {
+	/// A paired computer's self-signed certificate is accepted only if it is
+	/// exactly the pinned one (Pairing.swift); other hosts get normal TLS.
+	func webView(_ webView: WKWebView, respondTo challenge: URLAuthenticationChallenge) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+		PinnedTrust.shared.evaluate(challenge)
+	}
+
 	func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction) async -> WKNavigationActionPolicy {
 		if action.shouldPerformDownload { return .download }
 		guard action.targetFrame?.isMainFrame ?? true, let url = action.request.url else { return .allow }

@@ -9,6 +9,9 @@
 /* Begin PBXBuildFile section */
 		1B922C8DE97DC53CD7FB1177 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 586D663B6ACD022C06488358 /* Assets.xcassets */; };
 		2EFF25BA3B2EA477704E0C20 /* ConnectView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4062BB2D19EC5ABD42E0D1EB /* ConnectView.swift */; };
+		A98D3B0ABF6117CB9D1A5AC5 /* PairView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 14B7D78B6711AB4773D887EF /* PairView.swift */; };
+		BCDA5C0A518BC88936C0F375 /* Pairing.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2A3364DFE4ABF14014C5007 /* Pairing.swift */; };
+		FAA1AC5CBBE591C7610E042E /* NearbyBrowser.swift in Sources */ = {isa = PBXBuildFile; fileRef = 78335F3527698D22963CDAF2 /* NearbyBrowser.swift */; };
 		3FD2C3ED3B6D6D91E938D3BE /* ChatScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8D0C1F7C05F3DEE198D80BF5 /* ChatScreen.swift */; };
 		4F375F1E34AB2EECFF3643A5 /* SignInView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 011C175FE4227D8200BAEA61 /* SignInView.swift */; };
 		607ABF789087EE3617D18F4A /* GraphScreen.swift in Sources */ = {isa = PBXBuildFile; fileRef = 3C6F45F229534711F0A46DB8 /* GraphScreen.swift */; };
@@ -20,6 +23,7 @@
 		B906308D47FA8658F48CF688 /* cmunbx.ttf in Resources */ = {isa = PBXBuildFile; fileRef = 7E395DCB0FEBEE3A73F7475C /* cmunbx.ttf */; };
 		C9E1C7066E1A4AA084179459 /* ConnectionTest.swift in Sources */ = {isa = PBXBuildFile; fileRef = A727B4C9CA9E8FCDACF16F16 /* ConnectionTest.swift */; };
 		DCDCD6ABEB482F0D25F09D1E /* ServerAddressTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = ADD9B5ED780E8FCE79640456 /* ServerAddressTests.swift */; };
+		21C35913040F4DB736C60632 /* PairingTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 08BFF075E1CAB5C5585034B0 /* PairingTests.swift */; };
 		DD3BFEE3A36B7A68841C70F2 /* LearnHarnessApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = DF66A05E71DF8368D500E8F4 /* LearnHarnessApp.swift */; };
 		E26A23F5BC3673E0C861ACE7 /* Dictation.swift in Sources */ = {isa = PBXBuildFile; fileRef = AAD74CA005D1771B87179307 /* Dictation.swift */; };
 		E42627E0977EE8FC0E7F103C /* ServerAPI.swift in Sources */ = {isa = PBXBuildFile; fileRef = E917504BF2022A02C512E6CC /* ServerAPI.swift */; };
@@ -45,6 +49,9 @@
 		3C49CA56635182103D15C6AE /* SettingsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SettingsView.swift; sourceTree = "<group>"; };
 		3C6F45F229534711F0A46DB8 /* GraphScreen.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = GraphScreen.swift; sourceTree = "<group>"; };
 		4062BB2D19EC5ABD42E0D1EB /* ConnectView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectView.swift; sourceTree = "<group>"; };
+		14B7D78B6711AB4773D887EF /* PairView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairView.swift; sourceTree = "<group>"; };
+		B2A3364DFE4ABF14014C5007 /* Pairing.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Pairing.swift; sourceTree = "<group>"; };
+		78335F3527698D22963CDAF2 /* NearbyBrowser.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NearbyBrowser.swift; sourceTree = "<group>"; };
 		41A10E03F471CEBD2559DFDF /* ServerAddress.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerAddress.swift; sourceTree = "<group>"; };
 		54D04EB3C03E96D19EC28C8A /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		586D663B6ACD022C06488358 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
@@ -56,6 +63,7 @@
 		A727B4C9CA9E8FCDACF16F16 /* ConnectionTest.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ConnectionTest.swift; sourceTree = "<group>"; };
 		AAD74CA005D1771B87179307 /* Dictation.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Dictation.swift; sourceTree = "<group>"; };
 		ADD9B5ED780E8FCE79640456 /* ServerAddressTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ServerAddressTests.swift; sourceTree = "<group>"; };
+		08BFF075E1CAB5C5585034B0 /* PairingTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PairingTests.swift; sourceTree = "<group>"; };
 		BE87A15DE6632DBA8D5EF9E1 /* LearnHarness.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = LearnHarness.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		CF0F281510444C456C2CD42A /* SessionsView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SessionsView.swift; sourceTree = "<group>"; };
 		DF66A05E71DF8368D500E8F4 /* LearnHarnessApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LearnHarnessApp.swift; sourceTree = "<group>"; };
@@ -72,6 +80,9 @@
 				8D0C1F7C05F3DEE198D80BF5 /* ChatScreen.swift */,
 				A727B4C9CA9E8FCDACF16F16 /* ConnectionTest.swift */,
 				4062BB2D19EC5ABD42E0D1EB /* ConnectView.swift */,
+				14B7D78B6711AB4773D887EF /* PairView.swift */,
+				B2A3364DFE4ABF14014C5007 /* Pairing.swift */,
+				78335F3527698D22963CDAF2 /* NearbyBrowser.swift */,
 				AAD74CA005D1771B87179307 /* Dictation.swift */,
 				3C6F45F229534711F0A46DB8 /* GraphScreen.swift */,
 				54D04EB3C03E96D19EC28C8A /* Info.plist */,
@@ -103,6 +114,7 @@
 			isa = PBXGroup;
 			children = (
 				ADD9B5ED780E8FCE79640456 /* ServerAddressTests.swift */,
+				08BFF075E1CAB5C5585034B0 /* PairingTests.swift */,
 			);
 			path = LearnHarnessTests;
 			sourceTree = "<group>";
@@ -219,6 +231,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				DCDCD6ABEB482F0D25F09D1E /* ServerAddressTests.swift in Sources */,
+				21C35913040F4DB736C60632 /* PairingTests.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -229,6 +242,9 @@
 				F9D2A5921B3FD9481043D7BF /* AppModel.swift in Sources */,
 				3FD2C3ED3B6D6D91E938D3BE /* ChatScreen.swift in Sources */,
 				2EFF25BA3B2EA477704E0C20 /* ConnectView.swift in Sources */,
+				A98D3B0ABF6117CB9D1A5AC5 /* PairView.swift in Sources */,
+				BCDA5C0A518BC88936C0F375 /* Pairing.swift in Sources */,
+				FAA1AC5CBBE591C7610E042E /* NearbyBrowser.swift in Sources */,
 				C9E1C7066E1A4AA084179459 /* ConnectionTest.swift in Sources */,
 				E26A23F5BC3673E0C861ACE7 /* Dictation.swift in Sources */,
 				607ABF789087EE3617D18F4A /* GraphScreen.swift in Sources */,

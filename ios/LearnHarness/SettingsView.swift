@@ -27,8 +27,8 @@ struct SettingsView: View {
 							.frame(width: 30, height: 30)
 							.background(Theme.raised, in: RoundedRectangle(cornerRadius: 7))
 						VStack(alignment: .leading) {
-							Text(model.server.host() ?? model.server.absoluteString).font(.body.weight(.medium))
-							Text(model.server.absoluteString).font(.caption.monospaced()).foregroundStyle(.secondary)
+							Text(store.pairing?.name ?? model.server.host() ?? model.server.absoluteString).font(.body.weight(.medium))
+							Text(store.pairing.map { "Paired · key \($0.key)" } ?? model.server.absoluteString).font(.caption.monospaced()).foregroundStyle(.secondary)
 						}
 						Spacer()
 						Label(model.live ? "Live" : "Reconnecting", systemImage: "circle.fill")
@@ -61,9 +61,11 @@ struct SettingsView: View {
 
 				Section {
 					Button("Change Server…") { showingConnect = true }
-					Button("Sign Out", role: .destructive) { confirmingSignOut = true }
+					Button(store.pairing == nil ? "Sign Out" : "Unpair This iPhone", role: .destructive) { confirmingSignOut = true }
 				} footer: {
-					Text("LearnHarness \(Bundle.main.appVersion). Signing out affects this phone only.")
+					Text(store.pairing == nil
+						? "LearnHarness \(Bundle.main.appVersion). Signing out affects this phone only."
+						: "LearnHarness \(Bundle.main.appVersion). Unpairing removes this iPhone from the computer's list of paired phones.")
 				}
 			}
 			.lhList()
@@ -72,8 +74,12 @@ struct SettingsView: View {
 			.navigationBarTitleDisplayMode(.inline)
 		}
 		.sheet(isPresented: $showingConnect) { ConnectView(isSheet: true) }
-		.confirmationDialog("Sign out of \(model.server.host() ?? "the server")?", isPresented: $confirmingSignOut, titleVisibility: .visible) {
-			Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
+		.confirmationDialog(store.pairing.map { "Unpair from \($0.name)?" } ?? "Sign out of \(model.server.host() ?? "the server")?", isPresented: $confirmingSignOut, titleVisibility: .visible) {
+			if store.pairing != nil {
+				Button("Unpair", role: .destructive) { Task { await store.forgetPairing() } }
+			} else {
+				Button("Sign Out", role: .destructive) { Task { await model.signOut() } }
+			}
 		}
 	}
 

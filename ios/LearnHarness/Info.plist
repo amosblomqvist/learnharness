@@ -51,7 +51,24 @@
 	<key>NSSpeechRecognitionUsageDescription</key>
 	<string>LearnHarness turns your dictation into text, on this iPhone when it can, so you can speak your answers.</string>
 	<key>NSLocalNetworkUsageDescription</key>
-	<string>LearnHarness connects to your self-hosted LearnHarness server on your local network.</string>
+	<string>LearnHarness finds and connects to your computer (Phone access) or your self-hosted LearnHarness server on your local network.</string>
+	<key>NSBonjourServices</key>
+	<array>
+		<string>_learnharness._tcp</string>
+	</array>
+	<key>NSCameraUsageDescription</key>
+	<string>LearnHarness uses the camera only to scan the pairing QR code shown on your computer.</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>LearnHarness pairing</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>learnharness</string>
+			</array>
+		</dict>
+	</array>
 	<!-- Self-hosted servers on a home network or Tailscale are often plain
 	     http (e.g. http://my-server.lan:3000). The app warns before using
 	     plain http anywhere outside a private network. Don't add

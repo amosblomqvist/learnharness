@@ -1,11 +1,101 @@
 import SwiftUI
+import VisionKit
 
-/// First screen (and "Change Server…"): enter the address of a self-hosted
-/// LearnHarness server. The address is checked before it is saved.
+/// First screen (and "Change Server…"): pair with a computer running the
+/// LearnHarness desktop app (QR code or nearby), or use a self-hosted server.
 struct ConnectView: View {
 	@Environment(ServerStore.self) private var store
 	@Environment(\.dismiss) private var dismiss
 	/// Shown as a sheet from the server screen (with Cancel) or as the root.
+	var isSheet = false
+
+	@State private var nearby = NearbyBrowser()
+	@State private var scanning = false
+	@State private var link: PairingLink?
+	@State private var chosen: NearbyBrowser.Computer?
+
+	private var canScan: Bool { DataScannerViewController.isSupported && DataScannerViewController.isAvailable }
+
+	var body: some View {
+		NavigationStack {
+			List {
+				Section {
+					if canScan {
+						Button { scanning = true } label: {
+							Label("Scan QR Code", systemImage: "qrcode.viewfinder").fontWeight(.semibold)
+						}
+					} else {
+						Label("Scan the QR code with the Camera app", systemImage: "camera")
+							.foregroundStyle(.secondary)
+					}
+				} header: {
+					Text("Pair with your computer")
+				} footer: {
+					Text("On your computer, open LearnHarness → Settings → Phone access and turn it on. A QR code appears there.")
+				}
+
+				Section {
+					if nearby.computers.isEmpty {
+						HStack(spacing: 10) {
+							ProgressView()
+							Text(nearby.problem ?? "Looking for computers on this Wi-Fi…").foregroundStyle(.secondary)
+						}
+					}
+					ForEach(nearby.computers) { computer in
+						Button { chosen = computer } label: {
+							Label(computer.name, systemImage: "desktopcomputer")
+						}
+					}
+				} header: {
+					Text("Nearby")
+				} footer: {
+					Text("Without the QR code: pick your computer, then allow this iPhone on the computer after checking the pairing key matches.")
+				}
+
+				Section {
+					NavigationLink("Server Address and Password") { SelfHostedConnectView(isSheet: isSheet) }
+				} header: {
+					Text("Self-hosted server")
+				} footer: {
+					Text("For a LearnHarness server you run yourself (see docs/self-hosting.md).")
+				}
+			}
+			.lhList()
+			.background(Color.appBackground)
+			.navigationTitle("Connect")
+			.toolbar {
+				if isSheet {
+					ToolbarItem(placement: .cancellationAction) {
+						Button("Cancel") { dismiss() }
+					}
+				}
+			}
+		}
+		.onAppear { nearby.start() }
+		.onDisappear { nearby.stop() }
+		.sheet(isPresented: $scanning) {
+			QRScannerSheet { scanned in
+				scanning = false
+				link = scanned
+			}
+		}
+		.sheet(item: $link) { link in
+			LinkPairingView(link: link) { if isSheet { dismiss() } }
+		}
+		.sheet(item: $chosen) { computer in
+			NearbyPairingView(computer: computer) { if isSheet { dismiss() } }
+		}
+	}
+}
+
+extension PairingLink: Identifiable {
+	var id: String { code }
+}
+
+/// Address + password for a self-hosted server. The address is checked before it is saved.
+struct SelfHostedConnectView: View {
+	@Environment(ServerStore.self) private var store
+	@Environment(\.dismiss) private var dismiss
 	var isSheet = false
 
 	@State private var address = ""
@@ -19,63 +109,54 @@ struct ConnectView: View {
 	}
 
 	var body: some View {
-		NavigationStack {
-			ScrollView {
-				VStack(alignment: .leading, spacing: 16) {
-					Text("Use your self-hosted LearnHarness server. Your sessions, knowledge graph and settings stay on the server and sync with your other devices.")
-						.foregroundStyle(.secondary)
+		ScrollView {
+			VStack(alignment: .leading, spacing: 16) {
+				Text("Use your self-hosted LearnHarness server. Your sessions, knowledge graph and settings stay on the server and sync with your other devices.")
+					.foregroundStyle(.secondary)
 
-					TextField("my-server.lan:3000", text: $address)
-						.textContentType(.URL)
-						.keyboardType(.URL)
-						.textInputAutocapitalization(.never)
-						.autocorrectionDisabled()
-						.submitLabel(.go)
-						.onSubmit(connect)
-						.padding(12)
-						.background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
-						.overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12)))
+				TextField("my-server.lan:3000", text: $address)
+					.textContentType(.URL)
+					.keyboardType(.URL)
+					.textInputAutocapitalization(.never)
+					.autocorrectionDisabled()
+					.submitLabel(.go)
+					.onSubmit(connect)
+					.padding(12)
+					.background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 10))
+					.overlay(RoundedRectangle(cornerRadius: 10).stroke(Color.white.opacity(0.12)))
 
-					switch status {
-					case .error(let message):
-						Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
-					case .warning(let message):
-						Label(message, systemImage: "lock.open").foregroundStyle(.orange)
-					case nil:
-						EmptyView()
-					}
-
-					Button(action: connect) {
-						HStack {
-							if checking { ProgressView().tint(.black) }
-							Text(checking ? "Checking…" : "Connect").fontWeight(.semibold)
-						}
-						.frame(maxWidth: .infinity)
-						.padding(.vertical, 12)
-					}
-					.buttonStyle(.borderedProminent)
-					.tint(.white)
-					.foregroundStyle(.black)
-					.disabled(checking || address.trimmingCharacters(in: .whitespaces).isEmpty)
-
-					Text("Tip: on the go, install Tailscale on this phone and the server, then use the server's Tailscale name.")
-						.font(.footnote)
-						.foregroundStyle(.secondary)
+				switch status {
+				case .error(let message):
+					Label(message, systemImage: "exclamationmark.triangle").foregroundStyle(.red)
+				case .warning(let message):
+					Label(message, systemImage: "lock.open").foregroundStyle(.orange)
+				case nil:
+					EmptyView()
 				}
-				.padding(20)
-			}
-			.background(Color.appBackground)
-			.navigationTitle("Connect to Server")
-			.toolbar {
-				if isSheet {
-					ToolbarItem(placement: .cancellationAction) {
-						Button("Cancel") { dismiss() }
+
+				Button(action: connect) {
+					HStack {
+						if checking { ProgressView().tint(.black) }
+						Text(checking ? "Checking…" : "Connect").fontWeight(.semibold)
 					}
+					.frame(maxWidth: .infinity)
+					.padding(.vertical, 12)
 				}
+				.buttonStyle(.borderedProminent)
+				.tint(.white)
+				.foregroundStyle(.black)
+				.disabled(checking || address.trimmingCharacters(in: .whitespaces).isEmpty)
+
+				Text("Tip: on the go, install Tailscale on this phone and the server, then use the server's Tailscale name.")
+					.font(.footnote)
+					.foregroundStyle(.secondary)
 			}
+			.padding(20)
 		}
+		.background(Color.appBackground)
+		.navigationTitle("Self-hosted Server")
 		.onAppear {
-			if address.isEmpty, let server = store.server { address = server.absoluteString }
+			if address.isEmpty, store.pairing == nil, let server = store.server { address = server.absoluteString }
 		}
 	}
 

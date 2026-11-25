@@ -84,7 +84,8 @@ struct ServerEvent: Equatable {
 }
 
 enum APIError: LocalizedError, Equatable {
-	/// 401: the session cookie is missing or expired.
+	/// 401: the session cookie is missing or expired (or, for a paired
+	/// computer, this phone's pairing was revoked).
 	case signedOut
 	/// 403 from an apps-only server that didn't recognise this app.
 	case refused(String)
@@ -115,7 +116,8 @@ struct ServerAPI: Sendable {
 		config.httpCookieAcceptPolicy = .always
 		config.requestCachePolicy = .reloadIgnoringLocalCacheData
 		config.timeoutIntervalForRequest = 20
-		return URLSession(configuration: config)
+		// Paired computers' certificates are pinned (Pairing.swift); other hosts get normal TLS.
+		return URLSession(configuration: config, delegate: PinningDelegate.shared, delegateQueue: nil)
 	}()
 
 	/// The notification channel never ends on its own, so it gets no timeout.
@@ -125,7 +127,7 @@ struct ServerAPI: Sendable {
 		config.requestCachePolicy = .reloadIgnoringLocalCacheData
 		config.timeoutIntervalForRequest = 60 * 60 * 24
 		config.timeoutIntervalForResource = 60 * 60 * 24 * 7
-		return URLSession(configuration: config)
+		return URLSession(configuration: config, delegate: PinningDelegate.shared, delegateQueue: nil)
 	}()
 
 	private static let decoder: JSONDecoder = {
@@ -318,6 +320,10 @@ struct ServerAPI: Sendable {
 
 		func urlSession(_ session: URLSession, task: URLSessionTask, willPerformHTTPRedirection response: HTTPURLResponse, newRequest request: URLRequest) async -> URLRequest? {
 			nil
+		}
+
+		func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
+			PinnedTrust.shared.evaluate(challenge)
 		}
 	}
 
