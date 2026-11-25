@@ -77,7 +77,7 @@ The included no-build examples can be copied directly; they do not need npm setu
   never infer sibling paths. Core updates with the app; both origins start disabled and
   retain explicit choices. Core IDs are reserved; community copies are skipped with a
   diagnostic, not replacements. Use Settings → Community plugins for installations and
-  Settings → Core plugins for shipped features. `plugins:build-core` stages the four
+  Settings → Core plugins for shipped features. `plugins:build-core` stages the five
   catalog-selected packages; it never installs into learner data.
 - Refresh discovers packages/first builds; admitted code changes need server restart.
   No hot reload, separate development registration or root-manifest fallback exists.

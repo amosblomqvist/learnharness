@@ -147,14 +147,14 @@ paths into source or data. Malformed/incompatible packages are reported without 
   development registration, legacy-layout fallback, or hot code replacement.
 
 Core and community plugins use the same APIs, but have separate code/data locations.
-The app ships Flashcards, Coding Questions, Drawing Pad and Rich Code Blocks as flat
+The app ships Flashcards, Coding Questions, Drawing Pad, Rich Code Blocks and Chinese Pronunciation as flat
 built packages in app `core-plugins/<id>/`, loaded directly without a user-data code
 copy. Their writable settings/records live in `<learning data>/core-plugin-data/<id>/`.
 Always use `ctx.directory` for code and `ctx.dataDirectory` for writable records; do not
 infer one from the other. Core plugins update with the app and are managed in
-**Settings → Core plugins**; all four start disabled, existing explicit choices survive
+**Settings → Core plugins**; all five start disabled, existing explicit choices survive
 updates, and disabling never deletes data. Their IDs (`flashcards`, `coding-questions`,
-`drawing-pad`, `rich-code-blocks`) are reserved even if a core package is broken/missing.
+`drawing-pad`, `rich-code-blocks`, `pronunciation`) are reserved even if a core package is broken/missing.
 Conflicting community folders are skipped with a diagnostic and are not modified.
 
 Repository source stays in `plugins/`. `npm run plugins:build-core` builds the selected

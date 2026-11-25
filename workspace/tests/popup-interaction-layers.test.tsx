@@ -83,6 +83,14 @@ test("popup is portaled into its modal host; focused leaf Escape precedes menu t
 	assert.equal(document.querySelector('[data-testid="parent"]'), null);
 }));
 
+test("a searchable popup focuses its body on mobile", async () => withDom(async (_controller, render) => {
+	document.documentElement.setAttribute("data-lh-mobile", "");
+	await render(<ModalMenu searchable />);
+	await click('[data-testid="trigger"]');
+	assert(document.querySelector('[data-testid="search"]'));
+	assert.equal(document.activeElement, document.querySelector('[data-testid="test-menu"]'));
+}));
+
 test("popup keeps arrow wrapping and consumes blocked Escape without native Tab loops", async () => withDom(async (controller, render) => {
 	await render(<ModalMenu blocked />);
 	await click('[data-testid="trigger"]');

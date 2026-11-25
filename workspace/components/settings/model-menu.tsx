@@ -163,7 +163,7 @@ export function ProviderMenuList({
 	const listRef = useRef<HTMLUListElement>(null);
 
 	useEffect(() => {
-		searchRef.current?.focus();
+		if (!document.documentElement.hasAttribute("data-lh-mobile")) searchRef.current?.focus();
 	}, []);
 
 	useEffect(() => {
@@ -293,7 +293,7 @@ export function FontMenuList({
 	const listRef = useRef<HTMLUListElement>(null);
 
 	useEffect(() => {
-		searchRef.current?.focus();
+		if (!document.documentElement.hasAttribute("data-lh-mobile")) searchRef.current?.focus();
 	}, []);
 
 	useEffect(() => {

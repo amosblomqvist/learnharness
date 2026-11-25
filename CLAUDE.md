@@ -88,7 +88,7 @@ Research, PDF, demo and visual tools save a job (`jobs/*.json`), acknowledge the
 
 ### Plugins
 
-Trusted local plugins have no sandbox. The four core plugins are listed in `core-plugins.json`. Their source is in `plugins/<id>/` and the staged builds go to the generated, git-ignored `core-plugins/<id>/`. Community plugins live in `<data>/plugins/<id>/dist`. `instrumentation.ts` starts the plugin host (`src/server/plugins.ts`), and `scripts/plugin-loader.cjs` loads backends outside the Next bundle. Contracts are in `docs/plugin-*.md`, and templates are in `examples/plugins/`.
+Trusted local plugins have no sandbox. The five core plugins are listed in `core-plugins.json`. Their source is in `plugins/<id>/` and the staged builds go to the generated, git-ignored `core-plugins/<id>/`. Community plugins live in `<data>/plugins/<id>/dist`. `instrumentation.ts` starts the plugin host (`src/server/plugins.ts`), and `scripts/plugin-loader.cjs` loads backends outside the Next bundle. Contracts are in `docs/plugin-*.md`, and templates are in `examples/plugins/`.
 
 ## Conventions worth knowing
 

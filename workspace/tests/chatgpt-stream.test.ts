@@ -7,8 +7,9 @@ import os from "node:os";
 import path from "node:path";
 import { backgroundCaptureDir, backgroundCaptureStream, createBackgroundCapture } from "../src/agent/background-capture.ts";
 import { piModels, piEngineForSpec } from "../src/agent/models.ts";
-import { chatGPTAbortController, chatGPTModels, refreshChatGPTModels } from "../src/agent/chatgpt-bridge.ts";
+import { chatGPTAbortController, chatGPTModels } from "../src/agent/chatgpt-bridge.ts";
 import { chatGPTHistory, chatGPTPayload } from "../src/agent/chatgpt-stream.ts";
+import { refreshConnectionCatalog } from "../src/server/model-catalog.ts";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
 const originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
@@ -20,6 +21,10 @@ let requests: { authorization: string | null; body: Record<string, any>; url: st
 let responseEvents: unknown[] = [];
 const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", value);
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
+const gpt62Models = [
+	{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol" },
+	{ id: "gpt-6.2-astra", name: "GPT-6.2 Astra" },
+];
 const status = { available: true, pending: false, allowBackgroundUse: false, activeId: "scratch-account", accounts: [{ id: "scratch-account", email: "dummy@example.invalid", registration: "oaiapp_scratch", connected: true, planEnabled: true, background: false }], error: null };
 before(async () => {
 	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
@@ -29,12 +34,12 @@ before(async () => {
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
 		queueMicrotask(() => {
 			ipc({ channel: "lh:chatgpt", id: message.id, op: message.op,
-				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: [{ id: model.id, name: "Scratch account model" }, { id: "unknown-capabilities", name: "Do not invent capabilities" }] } }),
+				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: [{ id: model.id, name: "Scratch account model" }, ...gpt62Models, { id: "unknown-capabilities", name: "Do not invent capabilities" }] } }),
 			});
 		});
 		callback?.(); return true;
 	} });
-	await refreshChatGPTModels([model]);
+	await refreshConnectionCatalog("chatgpt");
 	globalThis.fetch = async (input, init) => {
 		const req = new Request(input, init);
 		requests.push({ authorization: req.headers.get("authorization"), body: JSON.parse(await req.text()), url: req.url });
@@ -54,10 +59,27 @@ const complete = (output: unknown[] = []) => ({ type: "response.completed", resp
 const context = () => normalizeContext({ systemPrompt: "Scratch teacher instructions", messages: [{ role: "user", content: [{ type: "text", text: "Scratch learning material" }, { type: "image", data: "c2NyYXRjaA==", mimeType: "image/png" }], timestamp: 1 }], tools: [{ name: "scratch_tool", description: "Scratch local tool", parameters: Type.Object({ value: Type.String() }) }] });
 
 test("catalog intersects supported capabilities, without inventing model limits", () => {
-	assert.equal(chatGPTModels().length, 1);
+	assert.deepEqual(chatGPTModels().map(({ id }) => id), [model.id, ...gpt62Models.map(({ id }) => id)]);
 	assert.equal(chatGPTModels()[0]!.provider, "chatgpt");
 	assert.equal(chatGPTModels()[0]!.contextWindow, model.contextWindow);
 	assert.deepEqual(chatGPTModels()[0]!.input, model.input);
+});
+
+test("GPT-6.2 Sol and Astra send the selected ID and reasoning effort with ChatGPT OAuth", async () => {
+	requests = [];
+	responseEvents = [complete()];
+	for (const { id } of gpt62Models) {
+		const engine = piEngineForSpec({ provider: "chatgpt", id, thinkingLevel: "high" }, false);
+		const result = await engine.streamFn(engine.model, context()).result();
+		assert.equal(result.stopReason, "stop");
+		assert.equal(result.model, id);
+		assert.equal(result.provider, "chatgpt");
+	}
+	assert.deepEqual(requests.map(({ authorization, body, url }) => ({
+		authorization, model: body.model, effort: body.reasoning?.effort, url,
+	})), gpt62Models.map(({ id }) => ({
+		authorization: "Bearer scratch-oauth-only", model: id, effort: "high", url: "https://api.openai.com/v1/responses",
+	})));
 });
 
 test("alias resolves only OAuth; native Responses body is stateless/namespaced, image/history preserved and logical output retained", async () => {

@@ -6,7 +6,7 @@
  * /api/settings/* — the per-chat settings PUT is retired from the UI;
  * legacy records' per-chat overrides still resolve server-side).
  *
- * pi-ai owns ALL the data: the catalog (id/name/cost/context/modality/
+ * pi-ai supplies the catalog data (id/name/cost/context/modality/
  * thinkingLevelMap) and the per-model thinking truth
  * (getSupportedThinkingLevels / clampThinkingLevel). This module only
  * projects and validates — no second registry to drift out of sync.
@@ -26,10 +26,24 @@ import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } f
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
+const bundledChatGPTModels = getBuiltinModels("openai").filter((model): model is Model<"openai-responses"> => model.api === "openai-responses");
+
+// Pi 1.6.0's OpenAI Responses entries match these bundled predecessors
+// apart from identity and API pricing. ChatGPT plan models zero that pricing.
+// The signed-in account's catalog still determines which IDs are available.
+const chatGPTModelBackfills = [
+	{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol", metadataFrom: "gpt-6.1-sol" },
+	{ id: "gpt-6.2-astra", name: "GPT-6.2 Astra", metadataFrom: "gpt-6-astra" },
+];
+const supportedChatGPTModels = bundledChatGPTModels.concat(chatGPTModelBackfills.flatMap(({ id, name, metadataFrom }) => {
+	if (bundledChatGPTModels.some((model) => model.id === id)) return [];
+	const source = bundledChatGPTModels.find((model) => model.id === metadataFrom);
+	return source ? [{ ...source, id, name }] : [];
+}));
+
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
-		// The subscription bridge still trusts only the bundled OpenAI catalog.
-		!provider || provider === "chatgpt" ? refreshChatGPTModels(getBuiltinModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+		!provider || provider === "chatgpt" ? refreshChatGPTModels(supportedChatGPTModels) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
 	]);
 }

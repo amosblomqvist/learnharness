@@ -80,6 +80,33 @@ describe("computeMenuPlacement — cap + position", () => {
 		assert.ok(!("right" in p.style));
 	});
 });
+describe("computeMenuPlacement — horizontal bounds", () => {
+	const phone = { width: 390, height: 800 };
+	const leftAnchor = { ...rect(100, 140), left: 40, right: 260 };
+	const rightAnchor = { ...rect(100, 140), left: 260, right: 370 };
+
+	it("shifts a right-aligned 352px menu away from the left edge", () => {
+		const { style } = computeMenuPlacement(leftAnchor, phone, 300, "down", "right", 352);
+		assert.equal(style.right, 30);
+	});
+
+	it("shifts a left-aligned 352px menu away from the right edge", () => {
+		const { style } = computeMenuPlacement(rightAnchor, phone, 300, "down", "left", 352);
+		assert.equal(style.left, 30);
+	});
+
+	it("caps and clamps a menu wider than the viewport", () => {
+		const { style } = computeMenuPlacement(rightAnchor, phone, 300, "down", "left", 500);
+		assert.equal(style.maxWidth, "max(0px, calc(100vw - 16px))");
+		assert.equal(style.left, 8);
+	});
+
+	it("keeps legacy placement when the width is omitted or zero", () => {
+		const legacy = { side: "down", style: { right: 130, top: 144 }, maxHeight: 480 };
+		assert.deepEqual(computeMenuPlacement(leftAnchor, phone, 300, "down", "right"), legacy);
+		assert.deepEqual(computeMenuPlacement(leftAnchor, phone, 300, "down", "right", 0), legacy);
+	});
+});
 describe("menuAnchorRect — the anchor seam", () => {
 	const doc = { querySelector: () => ({ getBoundingClientRect: () => ({ top: 1, bottom: 2, left: 3, right: 4 }) }) } as unknown as Pick<Document, "querySelector">;
 	it("prefers a virtual anchor rect when it yields one", () => {

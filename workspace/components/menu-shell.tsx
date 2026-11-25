@@ -20,6 +20,10 @@ import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, type 
  *  - Cap: max-height = min(60vh, the chosen side's available room); the
  *    menu scrolls internally instead of stretching the page or escaping
  *    the viewport (graph-view's max-h-[60vh] pattern).
+ *  - Width: cap to the viewport minus two edge gutters, then clamp the
+ *    aligned position to keep both gutters clear.
+ *  - Focus: on mobile, focus the menu body so opening a searchable menu
+ *    leaves the keyboard closed. Elsewhere, focus the search when present.
  *  - Re-placement: capture-phase scroll + window resize — the settings
  *    menus' discipline (the settings dialog's inner content scroll
  *    included).
@@ -39,6 +43,7 @@ import { InteractionLayerOwner, useInteractionLayer, useInteractionLayers, type 
 
 const GAP = 4; // anchor edge → menu (the bespoke shells' settled 4px)
 const EDGE = 8; // viewport floor the menu never enters
+const MENU_MAX_WIDTH = `max(0px, calc(100vw - ${2 * EDGE}px))`;
 const CAP_VH = 0.6; // 60vh — the graph pattern's cap
 const MIN_USABLE = 96; // floor: a shorter cap is an unusable sliver; the
 // cap then overflows the edge instead of crushing the menu
@@ -76,6 +81,7 @@ export function computeMenuPlacement(
 	contentHeight: number,
 	preferredSide: MenuSide,
 	align: MenuAlign,
+	menuWidth = 0,
 ): MenuPlacement {
 	const availDown = viewport.height - EDGE - (rect.bottom + GAP);
 	const availUp = rect.top - GAP - EDGE;
@@ -91,11 +97,14 @@ export function computeMenuPlacement(
 	}
 	const avail = side === "down" ? availDown : availUp;
 	const maxHeight = Math.max(MIN_USABLE, Math.min(CAP_VH * viewport.height, avail));
-	const horizontal: Record<string, number> =
-		align === "right" ? { right: viewport.width - rect.right } : { left: rect.left };
+	let offset = align === "right" ? viewport.width - rect.right : rect.left;
+	if (menuWidth > 0) {
+		const width = Math.min(menuWidth, Math.max(0, viewport.width - 2 * EDGE));
+		offset = Math.max(EDGE, Math.min(offset, viewport.width - EDGE - width));
+	}
 	const vertical: Record<string, number> =
 		side === "down" ? { top: rect.bottom + GAP } : { bottom: viewport.height - rect.top + GAP };
-	return { side, style: { ...horizontal, ...vertical }, maxHeight };
+	return { side, style: { [align]: offset, ...vertical, ...(menuWidth > 0 ? { maxWidth: MENU_MAX_WIDTH } : {}) }, maxHeight };
 }
 
 type AnchorRect = { top: number; bottom: number; left: number; right: number };
@@ -169,7 +178,9 @@ export function MenuShell({
 
 	// Focus on open (owner, fix wave): the search menus land focus IN the
 	// search; menus without one land it on the body (tabIndex -1 below) so
-	// the arrow machine has a home. Once only — re-placements (scroll/
+	// the arrow machine has a home. On the mobile layout the body takes
+	// focus even when a search exists, so opening a menu never raises the
+	// on-screen keyboard over the list. Once only — re-placements (scroll/
 	// resize) must never steal focus back mid-walk. The lists' own mount
 	// focus runs during the hidden measuring pass, where focus() silently
 	// fails (visibility: hidden subtrees are not focusable) — this seam is
@@ -179,7 +190,9 @@ export function MenuShell({
 		focusedOnceRef.current = true;
 		const el = menuRef.current;
 		if (!el) return;
-		const input = el.querySelector<HTMLElement>("input, textarea");
+		const input = document.documentElement.hasAttribute("data-lh-mobile")
+			? null
+			: el.querySelector<HTMLElement>("input, textarea");
 		(input ?? el).focus();
 	}, [placed, layer.isTop]);
 
@@ -235,6 +248,7 @@ export function MenuShell({
 				menuRef.current.scrollHeight,
 				preferredSide,
 				align,
+				menuRef.current.getBoundingClientRect().width,
 			);
 			setPlaced(p);
 		};
@@ -262,7 +276,7 @@ export function MenuShell({
 				ref={menuRef}
 				data-testid={testid}
 				data-lh-menu=""
-				style={{ position: "fixed", left: 0, top: 0, visibility: "hidden" }}
+				style={{ position: "fixed", left: 0, top: 0, maxWidth: MENU_MAX_WIDTH, visibility: "hidden" }}
 				className={menuClass}
 			>
 				{children}
@@ -277,7 +291,7 @@ export function MenuShell({
 			data-lh-menu=""
 			tabIndex={-1}
 			onKeyDown={onBodyKeyDown}
-			style={{ position: "fixed", zIndex: INTERACTION_LAYER_Z_BASE + layer.order, ...placed.style, maxHeight: placed.maxHeight, overflowY: "auto" }}
+			style={{ position: "fixed", zIndex: INTERACTION_LAYER_Z_BASE + layer.order, maxWidth: MENU_MAX_WIDTH, ...placed.style, maxHeight: placed.maxHeight, overflowY: "auto" }}
 			// The body is the arrow machine's focus home (input-less menus
 			// land focus here on open) — the focus STAYS, but the browser's
 			// default blue ring around it must not draw (owner, polish

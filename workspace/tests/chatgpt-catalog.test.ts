@@ -1,7 +1,7 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
 import { piModels } from "../src/agent/models.ts";
-import { refreshConnectionCatalog } from "../src/server/model-catalog.ts";
+import { modelCatalog, refreshConnectionCatalog, validateModelsSettings } from "../src/server/model-catalog.ts";
 import { refreshChatGPTModels, chatGPTModels, chatGPTStatus, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTAbortController } from "../src/agent/chatgpt-bridge.ts";
 const send = Object.getOwnPropertyDescriptor(process, "send"), connected = Object.getOwnPropertyDescriptor(process, "connected");
 const desktopMarker = process.env.LH_DESKTOP_SERVER, desktopSecret = process.env.LH_DESKTOP_API_SECRET;
@@ -62,4 +62,29 @@ test("account-offered GPT-6.1 Terra resolves from the bundled Responses catalog"
   provider: "chatgpt", id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)", api: "openai-responses",
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
  }]);
+});
+
+test("the picker and slot validation follow account access to GPT-6.2 Sol and Astra", async () => {
+ const sol = { id: "gpt-6.2-sol", name: "GPT-6.2 Sol (account)" };
+ const astra = { id: "gpt-6.2-astra", name: "GPT-6.2 Astra (account)" };
+ const validate = (id: string) => validateModelsSettings({ strong: { model: { provider: "chatgpt", id } } });
+ const pickerModels = () => modelCatalog().models.filter((entry) => entry.provider === "chatgpt");
+
+ let refresh = refreshConnectionCatalog("chatgpt");
+ reply(pending.at(-1), { ...value("B", 10, "B", 4), models: [sol] });
+ await refresh;
+ assert.deepEqual(pickerModels().map((entry) => entry.id), [sol.id]);
+ assert.deepEqual(validate(sol.id), { ok: true });
+ assert.equal(validate(astra.id).ok, false);
+
+ refresh = refreshConnectionCatalog("chatgpt");
+ reply(pending.at(-1), { ...value("B", 11, "B", 5), models: [astra, sol] });
+ await refresh;
+ assert.deepEqual(pickerModels(), [astra, sol].map((entry) => ({
+  ...entry, provider: "chatgpt", reasoning: true, input: ["text", "image"],
+  supportedLevels: ["low", "medium", "high", "xhigh", "max"],
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+  contextWindow: 272_000, maxTokens: 128_000,
+ })));
+ assert.deepEqual(validate(astra.id), { ok: true });
 });

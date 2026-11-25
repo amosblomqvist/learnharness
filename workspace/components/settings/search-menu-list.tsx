@@ -36,7 +36,9 @@ export function SearchMenuList<T>({
 	const searchRef = useRef<HTMLInputElement>(null);
 	const listRef = useRef<HTMLUListElement>(null);
 
-	useEffect(() => { searchRef.current?.focus(); }, []);
+	useEffect(() => {
+		if (!document.documentElement.hasAttribute("data-lh-mobile")) searchRef.current?.focus();
+	}, []);
 	useEffect(() => {
 		if (menuIdx === null) return;
 		listRef.current?.querySelector(`[data-idx="${menuIdx}"]`)?.scrollIntoView({ block: "nearest" });

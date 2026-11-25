@@ -24,8 +24,8 @@ of replacing these primary examples.
 
 ## Core references are not Community packages
 
-The four IDs **`flashcards`**, **`coding-questions`**, **`drawing-pad`** and
-**`rich-code-blocks`** are reserved for app-shipped Core plugins, even when a Core
+The five IDs **`flashcards`**, **`coding-questions`**, **`drawing-pad`**,
+**`rich-code-blocks`** and **`pronunciation`** are reserved for app-shipped Core plugins, even when a Core
 package is disabled, broken or missing. Their sources are included for study and
 adaptation, not installation as Community duplicates. Enable the app-supplied features
 in **Settings → Core plugins**. App updates supply Core code; writable records live
