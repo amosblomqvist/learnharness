@@ -10,8 +10,7 @@ import type { AddressInfo } from "node:net";
 import type { TLSSocket } from "node:tls";
 const require = createRequire(import.meta.url);
 const { createPhoneAccess, cleanDeviceName, lanAddresses } = require("../electron/phone-access.cjs");
-const { pairingKey } = require("../electron/phone-access-cert.cjs");
-const { bonjourAdvertiser } = require("../electron/phone-access-bonjour.cjs");
+const { bonjourAdvertiser, dnsSdAdvertiser, phoneAccessAdvertiser } = require("../electron/phone-access-bonjour.cjs");
 
 type Reply = { status: number; headers: http.IncomingHttpHeaders; body: string; fingerprint: string };
 
@@ -33,17 +32,15 @@ async function fakeUpstream() {
 	return { server, seen, origin: `http://127.0.0.1:${(server.address() as AddressInfo).port}` };
 }
 
-async function harness(t: import("node:test").TestContext, { approve = async () => true, secret = "s".repeat(64) as string | null } = {}) {
+async function harness(t: import("node:test").TestContext, { secret = "s".repeat(64) as string | null } = {}) {
 	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-phone-"));
 	const upstream = await fakeUpstream();
 	const adverts: unknown[] = [];
 	let stopped = 0;
-	const prompts: { deviceName: string; key: string }[] = [];
 	const make = () => createPhoneAccess({
 		directory, port: 0, host: "127.0.0.1", computerName: "Test Mac", appVersion: "0.7.0",
 		addresses: () => ["192.168.1.88"],
 		upstream: () => ({ origin: upstream.origin, secret }),
-		approve: async (request: { deviceName: string; key: string }) => { prompts.push(request); return approve(); },
 		advertise: (service: unknown) => { adverts.push(service); return { stop: () => { stopped++; } }; },
 	});
 	const phone = make();
@@ -58,7 +55,7 @@ async function harness(t: import("node:test").TestContext, { approve = async () 
 		req.on("error", reject); req.end(payload);
 	});
 	const json = (reply: Reply) => JSON.parse(reply.body);
-	return { directory, upstream, adverts, prompts, phone, make, request, json, stoppedAdverts: () => stopped };
+	return { directory, upstream, adverts, phone, make, request, json, stoppedAdverts: () => stopped };
 }
 
 /** Pair through the QR link and return the device token. */
@@ -75,12 +72,10 @@ test("off by default; enabling starts HTTPS, advertises without secrets, and is 
 	assert.equal(h.phone.status().running, false);
 	const status = await h.phone.setEnabled(true);
 	assert.equal(status.running, true);
-	assert.match(status.key, /^[0-9A-Z]{4}-[0-9A-Z]{4}-[0-9A-Z]{4}$/);
 	const link = new URL(status.pairingLink);
 	assert.equal(link.protocol, "learnharness:");
 	assert.equal(link.searchParams.get("h"), "192.168.1.88");
 	assert.equal(link.searchParams.get("f")?.length, 64);
-	assert.equal(pairingKey(link.searchParams.get("f")), status.key);
 	const advert = h.adverts[0] as { port: number; txt: Record<string, string> };
 	assert.equal(advert.txt.fp, link.searchParams.get("f")!.slice(0, 16));
 	assert.ok(!JSON.stringify(advert).includes(link.searchParams.get("c")!), "no pairing code in the advert");
@@ -140,30 +135,12 @@ test("expired QR codes are refused", async (t) => {
 	assert.equal((await h.request("POST", "/.well-known/learnharness/pair/qr", { body: { code: "guess", deviceName: "x" } })).status, 403);
 });
 
-test("nearby pairing: the desktop is asked with the pairing key; the token is handed out once", async (t) => {
+test("there is no pairing without the QR code", async (t) => {
 	const h = await harness(t);
 	await h.phone.setEnabled(true);
-	const created = await h.request("POST", "/.well-known/learnharness/pair/request", { body: { deviceName: "iPhone\u0000 de Ana" } });
-	assert.equal(created.status, 202);
-	const { requestId, secret } = h.json(created);
-	await new Promise((resolve) => setImmediate(resolve));
-	assert.deepEqual(h.prompts.map((p) => [p.deviceName, p.key]), [["iPhone de Ana", h.phone.status().key]]);
-	const poll = (s = secret) => h.request("GET", `/.well-known/learnharness/pair/request/${requestId}`, { headers: { "x-lh-pair-secret": s } });
-	assert.equal((await poll("wrong")).status, 404, "only the asking phone can collect it");
-	const approved = h.json(await poll());
-	assert.equal(approved.status, "approved");
-	assert.equal((await h.request("GET", "/api/x", { headers: { authorization: `Bearer ${approved.token}` } })).status, 200);
-	assert.equal((await poll()).status, 404, "token handed out once");
-});
-
-test("nearby pairing denied by the user yields no token", async (t) => {
-	const h = await harness(t, { approve: async () => false });
-	await h.phone.setEnabled(true);
-	const { requestId, secret } = h.json(await h.request("POST", "/.well-known/learnharness/pair/request", { body: { deviceName: "x" } }));
-	await new Promise((resolve) => setImmediate(resolve));
-	const reply = h.json(await h.request("GET", `/.well-known/learnharness/pair/request/${requestId}`, { headers: { "x-lh-pair-secret": secret } }));
-	assert.deepEqual(reply, { status: "denied" });
+	assert.equal((await h.request("POST", "/.well-known/learnharness/pair/request", { body: { deviceName: "x" } })).status, 404);
 	assert.equal(h.phone.status().devices.length, 0);
+	assert.equal("key" in h.phone.status(), false);
 });
 
 test("pairing attempts are rate limited per address", async (t) => {
@@ -227,7 +204,7 @@ test("a busy port is reported instead of silently moving", async (t) => {
 	t.after(() => blocker.close());
 	const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-phone-"));
 	t.after(() => fs.rmSync(directory, { recursive: true, force: true }));
-	const phone = createPhoneAccess({ directory, port: (blocker.address() as AddressInfo).port, host: "127.0.0.1", upstream: () => null, approve: async () => false });
+	const phone = createPhoneAccess({ directory, port: (blocker.address() as AddressInfo).port, host: "127.0.0.1", upstream: () => null });
 	const status = await phone.setEnabled(true);
 	assert.equal(status.running, false);
 	assert.match(status.error, /already in use/);
@@ -260,4 +237,45 @@ test("Bonjour failures are reported, never thrown (they would crash the desktop 
 	assert.doesNotThrow(() => handler!(Object.assign(new Error("send EHOSTUNREACH 224.0.0.251:5353"), { code: "EHOSTUNREACH" })));
 	assert.doesNotThrow(() => advert.stop());
 	assert.deepEqual(errors.map((e) => (e as Error).message), ["send EHOSTUNREACH 224.0.0.251:5353", "stop failed"]);
+});
+
+test("macOS advertises through the system dns-sd, withdrawn on stop or exit", () => {
+	const { EventEmitter } = require("node:events");
+	const errors: unknown[] = [];
+	const spawned: { command: string; args: string[]; child: InstanceType<typeof EventEmitter> & { killed: number } }[] = [];
+	const spawn = (command: string, args: string[]) => {
+		const child = Object.assign(new EventEmitter(), { killed: 0, stderr: new EventEmitter(), kill() { this.killed++; } });
+		spawned.push({ command, args, child });
+		return child;
+	};
+	const processRef = new EventEmitter();
+	const advertise = dnsSdAdvertiser({ spawn, onError: (error: unknown) => errors.push(error), processRef });
+	const advert = advertise({ name: "LearnHarness on Mac", port: 4399, txt: { v: "1", fp: "abc", ver: "0.7.0" } });
+	assert.equal(spawned[0]!.command, "/usr/bin/dns-sd");
+	assert.deepEqual(spawned[0]!.args, ["-R", "LearnHarness on Mac", "_learnharness._tcp", "local", "4399", "v=1", "fp=abc", "ver=0.7.0"]);
+	spawned[0]!.child.emit("exit", 1, null);
+	assert.match((errors[0] as Error).message, /dns-sd exited \(1\)/);
+	advert.stop();
+	advert.stop();
+	assert.equal(spawned[0]!.child.killed, 1);
+	spawned[0]!.child.emit("exit", null, "SIGTERM");
+	assert.equal(errors.length, 1, "a requested stop is not an error");
+	assert.equal(processRef.listenerCount("exit"), 0);
+
+	advertise({ name: "x", port: 1, txt: {} });
+	processRef.emit("exit");
+	assert.equal(spawned[1]!.child.killed, 1, "the advert dies with the app");
+	spawned[1]!.child.emit("error", new Error("ENOENT"));
+	assert.equal((errors[1] as Error).message, "ENOENT");
+});
+
+test("the advertiser is native on macOS and bonjour-service elsewhere", () => {
+	const spawned: string[] = [];
+	const spawn = (command: string) => { spawned.push(command); const { EventEmitter } = require("node:events"); return Object.assign(new EventEmitter(), { kill() {} }); };
+	phoneAccessAdvertiser({ platform: "darwin", spawn, processRef: { once() {}, removeListener() {} } })({ name: "a", port: 1, txt: {} });
+	assert.deepEqual(spawned, ["/usr/bin/dns-sd"]);
+	let loaded = false;
+	class FakeBonjour { publish() { return { on() {}, stop() {} }; } destroy() {} }
+	phoneAccessAdvertiser({ platform: "win32", load: () => { loaded = true; return { Bonjour: FakeBonjour }; } })({ name: "a", port: 1, txt: {} });
+	assert.equal(loaded, true);
 });

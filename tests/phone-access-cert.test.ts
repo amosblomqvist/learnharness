@@ -8,7 +8,7 @@ import os from "node:os";
 import path from "node:path";
 import type { AddressInfo } from "node:net";
 const require = createRequire(import.meta.url);
-const { createIdentity, loadIdentity, fingerprint, pairingKey } = require("../electron/phone-access-cert.cjs");
+const { createIdentity, loadIdentity, fingerprint } = require("../electron/phone-access-cert.cjs");
 
 test("self-signed certificate parses, verifies with its own key, and is valid now", () => {
 	const now = new Date("2026-11-25T12:00:00Z");
@@ -48,14 +48,6 @@ test("a TLS client pinning the fingerprint completes a handshake", async () => {
 	} finally {
 		server.close();
 	}
-});
-
-test("pairing key: 12 Crockford characters from the fingerprint's first 60 bits", () => {
-	assert.equal(pairingKey("0".repeat(64)), "0000-0000-0000");
-	assert.equal(pairingKey("f".repeat(64)), "ZZZZ-ZZZZ-ZZZZ");
-	assert.equal(pairingKey("000000000000001" + "0".repeat(49)), "0000-0000-0001");
-	const key = pairingKey(fingerprint(createIdentity().cert));
-	assert.match(key, /^[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}-[0-9A-HJKMNP-TV-Z]{4}$/);
 });
 
 test("identity is created once, reused, and its key file is private", () => {

@@ -16,9 +16,8 @@ with its question and practice cards, the knowledge graph, and one
 settings section at a time.
 
 - **Pair with your computer**: scan the QR code from the desktop app's
-  Settings → Phone access (in the app or with the Camera app), or pick the
-  computer under **Nearby** and allow it on the computer after comparing
-  the pairing key. Pairing lasts until revoked; the computer's certificate
+  Settings → Phone access (in the app or with the Camera app). Pairing
+  lasts until revoked; the computer's certificate
   is pinned and the device token is kept in the Keychain.
 - **Self-hosted server**: type the address (e.g. `my-server.lan:3000`). The
   app checks it is a LearnHarness server before saving it, and warns

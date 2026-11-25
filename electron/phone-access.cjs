@@ -7,15 +7,12 @@
 //
 //   phone ──TLS (pinned self-signed cert)──▶ gateway :4399 ──▶ 127.0.0.1:<app>
 //
-// Pairing (docs/phone-access.md):
-//   QR      learnharness://pair?… carries the address, the certificate
-//           fingerprint and a one-time code (128 bits, 5 minutes).
-//   Nearby  the phone finds the gateway over Bonjour and asks; the desktop
-//           shows the device name and the pairing key (first 60 bits of the
-//           fingerprint) and the user approves. The phone shows the key it
-//           sees, so an impostor on the network is caught by comparison.
-// Either way the phone receives a device token (stored here only as a hash)
-// that works until revoked.
+// Pairing (docs/phone-access.md) is by QR code only: learnharness://pair?…
+// carries the address, the certificate fingerprint and a one-time code
+// (128 bits, 5 minutes), so the fingerprint reaches the phone through the
+// camera. The phone receives a device token (stored here only as a hash)
+// that works until revoked. Bonjour only lets a paired phone find this
+// computer again after its address changes; it never pairs.
 
 const crypto = require("node:crypto");
 const fs = require("node:fs");
@@ -23,13 +20,12 @@ const http = require("node:http");
 const https = require("node:https");
 const os = require("node:os");
 const path = require("node:path");
-const { loadIdentity, pairingKey } = require("./phone-access-cert.cjs");
+const { loadIdentity } = require("./phone-access-cert.cjs");
 
 const DEFAULT_PORT = 4399;
 const WELL_KNOWN = "/.well-known/learnharness/";
 const DEVICE_COOKIE = "lh_device";
 const CODE_TTL_MS = 5 * 60 * 1000;
-const REQUEST_TTL_MS = 2 * 60 * 1000;
 const SEEN_WRITE_MS = 5 * 60 * 1000;
 const PAIR_LIMIT = 10; // attempts per address per minute
 const MAX_BODY = 4096;
@@ -103,21 +99,18 @@ function readBody(request) {
  * @param {object} options
  * @param {string} options.directory  private state directory (identity, devices, settings)
  * @param {() => ({ origin: string, secret: string | null } | null)} options.upstream  the app's loopback server
- * @param {(request: { deviceName: string, key: string, address: string }) => Promise<boolean>} options.approve  ask the user
  * @param {(service: { name: string, port: number, txt: Record<string, string> }) => { stop(): void }} [options.advertise]  Bonjour
  * @param {() => void} [options.onChange]
  */
-function createPhoneAccess({ directory, upstream, approve, advertise = () => ({ stop() {} }), onChange = () => {}, port = DEFAULT_PORT, host = "0.0.0.0", computerName = os.hostname().replace(/\.local$/i, ""), appVersion = "0", now = Date.now, addresses = lanAddresses }) {
+function createPhoneAccess({ directory, upstream, advertise = () => ({ stop() {} }), onChange = () => {}, port = DEFAULT_PORT, host = "0.0.0.0", computerName = os.hostname().replace(/\.local$/i, ""), appVersion = "0", now = Date.now, addresses = lanAddresses }) {
 	const settingsFile = path.join(directory, "state.json"), devicesFile = path.join(directory, "devices.json");
 	let identity = null, server = null, advert = null, error = null, enabled = readJSON(settingsFile, {}).enabled === true;
 	/** @type {{ id: string, name: string, tokenHash: string, createdAt: number, lastSeenAt: number }[]} */
 	let devices = (readJSON(devicesFile, {}).devices ?? []).filter((d) => d && typeof d.id === "string" && typeof d.tokenHash === "string");
 	let code = null; // { value, expiresAt }
-	const requests = new Map(); // id → { secretHash, status, deviceName, token?, expiresAt }
 	const attempts = new Map(); // address → { count, since }
 	const sockets = new Map(); // deviceId → Set<socket>
 	const seenWritten = new Map();
-	let prompting = false;
 
 	const saveDevices = () => writeJSON(devicesFile, { version: 1, devices });
 	const changed = () => { try { onChange(); } catch { /* listener errors never break the gateway */ } };
@@ -175,35 +168,6 @@ function createPhoneAccess({ directory, upstream, approve, advertise = () => ({ 
 			if (!active || typeof body.code !== "string" || !sameSecret(body.code, active.value)) return sendJSON(response, 403, { error: "This pairing code is invalid or expired. Show a new QR code on the computer." });
 			freshCode(); // one use
 			return sendJSON(response, 200, addDevice(body.deviceName));
-		}
-		if (route === "pair/request" && request.method === "POST") {
-			const body = await readBody(request);
-			if (prompting) return sendJSON(response, 429, { error: "Another phone is waiting for approval on the computer." });
-			const id = crypto.randomBytes(12).toString("base64url"), secret = token();
-			const entry = { secretHash: sha256(secret), status: "pending", deviceName: cleanDeviceName(body.deviceName), expiresAt: now() + REQUEST_TTL_MS };
-			requests.set(id, entry);
-			prompting = true;
-			Promise.resolve()
-				.then(() => approve({ deviceName: entry.deviceName, key: pairingKey(identity.fingerprint), address }))
-				.then((allowed) => {
-					if (entry.status !== "pending") return;
-					if (allowed && entry.expiresAt > now()) { Object.assign(entry, { status: "approved" }, addDevice(entry.deviceName)); } else entry.status = "denied";
-				}, () => { entry.status = "denied"; })
-				.finally(() => { prompting = false; });
-			return sendJSON(response, 202, { requestId: id, secret });
-		}
-		const poll = /^pair\/request\/([A-Za-z0-9_-]{16})$/.exec(route);
-		if (poll && request.method === "GET") {
-			const entry = requests.get(poll[1]);
-			const secret = request.headers["x-lh-pair-secret"];
-			if (!entry || typeof secret !== "string" || !sameSecret(sha256(secret), entry.secretHash)) return sendJSON(response, 404, { error: "Unknown pairing request." });
-			if (entry.status === "pending" && entry.expiresAt <= now()) entry.status = "expired";
-			if (entry.status === "approved") {
-				requests.delete(poll[1]); // the token is handed out once
-				return sendJSON(response, 200, { status: "approved", token: entry.token, deviceId: entry.deviceId });
-			}
-			if (entry.status !== "pending") requests.delete(poll[1]);
-			return sendJSON(response, 200, { status: entry.status });
 		}
 		return sendJSON(response, 404, { error: "Not found." });
 	}
@@ -343,7 +307,6 @@ function createPhoneAccess({ directory, upstream, approve, advertise = () => ({ 
 		const link = running && hosts.length ? `learnharness://pair?v=1&h=${hosts.map(encodeURIComponent).join(",")}&p=${listening}&f=${identity.fingerprint}&c=${active.value}&n=${encodeURIComponent(computerName)}` : null;
 		return {
 			enabled, running, error, port: listening, addresses: hosts,
-			key: identity ? pairingKey(identity.fingerprint) : null,
 			pairingLink: link, codeExpiresAt: active?.expiresAt ?? null,
 			devices: devices.map(({ id, name, createdAt, lastSeenAt }) => ({ id, name, createdAt, lastSeenAt, connected: (sockets.get(id)?.size ?? 0) > 0 })),
 		};

@@ -28,7 +28,7 @@ struct SettingsView: View {
 							.background(Theme.raised, in: RoundedRectangle(cornerRadius: 7))
 						VStack(alignment: .leading) {
 							Text(store.pairing?.name ?? model.server.host() ?? model.server.absoluteString).font(.body.weight(.medium))
-							Text(store.pairing.map { "Paired · key \($0.key)" } ?? model.server.absoluteString).font(.caption.monospaced()).foregroundStyle(.secondary)
+							Text(store.pairing.map { "Paired · \($0.hosts.first ?? "")" } ?? model.server.absoluteString).font(.caption.monospaced()).foregroundStyle(.secondary)
 						}
 						Spacer()
 						Label(model.live ? "Live" : "Reconnecting", systemImage: "circle.fill")

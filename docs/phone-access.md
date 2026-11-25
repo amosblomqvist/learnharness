@@ -11,15 +11,10 @@ For a server that runs without the desktop app (Docker, a home server), see
 
 ## Pair a phone
 
-1. On the computer: **Settings → Phone access**, turn it on. A QR code, a
-   pairing key (like `7KQ2-M9XD-4F8T`) and the computer's addresses appear.
-2. On the iPhone, either:
-   - **scan the QR code** with the Camera app or with **Scan QR Code** in the
-     LearnHarness app; or
-   - in the app, pick the computer under **Nearby**. The computer asks
-     *Allow "iPhone" to use LearnHarness on this computer?* and shows a
-     pairing key; the phone shows the key it sees. **Allow only if both keys
-     match exactly.**
+1. On the computer: **Settings → Phone access**, turn it on. A QR code and
+   the computer's addresses appear.
+2. On the iPhone, **scan the QR code** with the Camera app or with **Scan QR
+   Code** in the LearnHarness app.
 
 The phone and the computer must be on the same network. The phone stays
 paired until you revoke it: **Settings → Phone access → Paired phones →
@@ -45,13 +40,16 @@ sees that capability.
   computer's addresses, the full fingerprint and a one-time 128-bit code
   that expires after 5 minutes. The fingerprint reaches the phone through
   the camera, which an attacker on the network cannot alter.
-- **Nearby pairing.** Bonjour (`_learnharness._tcp`) only finds the
-  computer. The phone connects, records the certificate it was shown, and
-  asks to pair. The pairing key is the first 60 bits of the fingerprint:
-  an impostor would need about 2^60 attempts to forge a certificate with
-  the same key, so comparing the keys catches it. Nothing is trusted until
-  you press **Allow** on the computer, and only the phone that asked can
-  collect the result.
+- **QR only.** There is no pairing over the network without the code: the
+  QR code is the one channel an attacker on the network can't touch, and
+  pairing needs someone at the computer anyway.
+- **Finding the computer again.** The computer advertises itself over
+  Bonjour (`_learnharness._tcp`) with a 16-hex-digit prefix of its
+  fingerprint and no secrets. A paired phone uses it only to find its own
+  computer after an address change, and still checks the full pinned
+  fingerprint before sending anything. On macOS the app registers through
+  the system's Bonjour service (`/usr/bin/dns-sd`); elsewhere it uses
+  `bonjour-service`.
 - **Device tokens.** Each phone gets a random 256-bit token, kept in the
   iPhone's Keychain (this device only). The computer stores only its
   SHA-256 hash, with the phone's name and last use, in
@@ -61,8 +59,8 @@ sees that capability.
 - **Forwarding rules.** The gateway refuses unpaired requests before they
   reach the app, refuses cross-site requests, and strips anything a phone
   could use to impersonate the desktop (`Authorization`, the device cookie,
-  `X-Forwarded-*`, `X-LearnHarness-*`, hop-by-hop headers). Pairing
-  endpoints are rate limited per network address.
+  `X-Forwarded-*`, `X-LearnHarness-*`, hop-by-hop headers). The pairing
+  endpoint is rate limited per network address.
 - **Off by default.** Nothing listens on the network until Phone access is
   turned on. The choice is remembered, and the gateway then starts with the
   app. If port 4399 is taken, Settings says so; the port is not changed

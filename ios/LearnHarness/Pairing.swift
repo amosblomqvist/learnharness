@@ -28,24 +28,6 @@ struct Pairing: Codable, Equatable {
 		return parts.url!
 	}
 
-	var key: String { PairingKey.from(fingerprint: fingerprint) }
-}
-
-/// The human pairing key: the fingerprint's first 60 bits in Crockford
-/// base32, XXXX-XXXX-XXXX. Must match electron/phone-access-cert.cjs.
-enum PairingKey {
-	private static let alphabet = Array("0123456789ABCDEFGHJKMNPQRSTVWXYZ")
-
-	static func from(fingerprint: String) -> String {
-		guard fingerprint.count >= 15, var bits = UInt64(fingerprint.prefix(15), radix: 16) else { return "" }
-		var characters: [Character] = []
-		for _ in 0..<12 {
-			characters.insert(alphabet[Int(bits & 31)], at: 0)
-			bits >>= 5
-		}
-		let text = String(characters)
-		return "\(text.prefix(4))-\(text.dropFirst(4).prefix(4))-\(text.suffix(4))"
-	}
 }
 
 /// learnharness://pair?v=1&h=<hosts>&p=<port>&f=<fingerprint>&c=<code>&n=<name>,
@@ -180,34 +162,6 @@ final class PinningDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegat
 	}
 }
 
-/// Nearby pairing has no fingerprint yet: accept the certificate of exactly
-/// one host:port and record it, so the user can compare its key with the one
-/// the computer shows before anything is trusted.
-private final class CapturingDelegate: NSObject, URLSessionDelegate, URLSessionTaskDelegate, @unchecked Sendable {
-	let host: String
-	let port: Int
-	private let lock = NSLock()
-	private var captured: String?
-
-	init(host: String, port: Int) { self.host = host.lowercased(); self.port = port }
-
-	var fingerprint: String? { lock.withLock { captured } }
-
-	func urlSession(_ session: URLSession, task: URLSessionTask, didReceive challenge: URLAuthenticationChallenge) async -> (URLSession.AuthChallengeDisposition, URLCredential?) {
-		let space = challenge.protectionSpace
-		guard space.authenticationMethod == NSURLAuthenticationMethodServerTrust, let trust = space.serverTrust,
-		      space.host.lowercased() == host, space.port == port, let seen = PinnedTrust.leafFingerprint(trust) else {
-			return (.cancelAuthenticationChallenge, nil)
-		}
-		let accepted: Bool = lock.withLock {
-			if let captured, captured != seen { return false } // changed mid-flow
-			captured = seen
-			return true
-		}
-		return accepted ? (.useCredential, URLCredential(trust: trust)) : (.cancelAuthenticationChallenge, nil)
-	}
-}
-
 // MARK: - Device cookie
 
 enum DeviceCookie {
@@ -242,39 +196,21 @@ enum DeviceCookie {
 enum PairingError: LocalizedError, Equatable {
 	case rejected(String)
 	case unreachable(String)
-	case denied
-	case expired
 	case busy(String)
 	case badResponse
 
 	var errorDescription: String? {
 		switch self {
 		case .rejected(let message), .busy(let message), .unreachable(let message): message
-		case .denied: "The computer didn't allow this iPhone."
-		case .expired: "The request expired before it was allowed on the computer. Try again."
 		case .badResponse: "The computer answered with something this app didn't understand."
 		}
 	}
-}
-
-/// A nearby pairing request waiting for approval on the computer.
-struct NearbyRequest: Equatable {
-	let host: String
-	let port: Int
-	let name: String
-	let fingerprint: String
-	let requestId: String
-	let secret: String
-	var key: String { PairingKey.from(fingerprint: fingerprint) }
 }
 
 enum PairingClient {
 	private static let wellKnown = "/.well-known/learnharness/"
 
 	private struct Paired: Decodable { let token: String; let deviceId: String }
-	private struct Info: Decodable { let app: String; let name: String }
-	private struct Created: Decodable { let requestId: String; let secret: String }
-	private struct Poll: Decodable { let status: String; let token: String?; let deviceId: String? }
 	private struct Failure: Decodable { let error: String }
 
 	private static func endpoint(_ host: String, _ port: Int, _ path: String) -> URL {
@@ -331,49 +267,6 @@ enum PairingClient {
 			}
 		}
 		throw PairingError.unreachable(lastProblem)
-	}
-
-	/// Nearby pairing, step 1: learn the certificate and ask the computer.
-	static func request(host: String, port: Int, deviceName: String) async throws -> NearbyRequest {
-		let capture = CapturingDelegate(host: host, port: port)
-		let session = ephemeral(capture)
-		defer { session.finishTasksAndInvalidate() }
-		do {
-			let (infoData, _) = try await session.data(for: httpRequest(endpoint(host, port, "info")))
-			guard let info = try? JSONDecoder().decode(Info.self, from: infoData), info.app == "LearnHarness" else { throw PairingError.badResponse }
-			let (data, response) = try await session.data(for: httpRequest(endpoint(host, port, "pair/request"), method: "POST", json: ["deviceName": deviceName]))
-			let status = (response as? HTTPURLResponse)?.statusCode ?? 0
-			if status == 429 { throw PairingError.busy(message(data) ?? "Another phone is waiting for approval.") }
-			guard status == 202, let created = try? JSONDecoder().decode(Created.self, from: data), let fingerprint = capture.fingerprint else { throw PairingError.badResponse }
-			return NearbyRequest(host: host, port: port, name: info.name, fingerprint: fingerprint, requestId: created.requestId, secret: created.secret)
-		} catch let error as URLError {
-			throw PairingError.unreachable("Couldn't reach the computer at \(host) (\(error.localizedDescription)).")
-		}
-	}
-
-	enum PollResult: Equatable { case pending, approved(Pairing, String) }
-
-	/// Nearby pairing, step 2: ask whether the computer allowed it. The
-	/// certificate is pinned from step 1, so a different machine can't answer.
-	static func poll(_ pending: NearbyRequest) async throws -> PollResult {
-		PinnedTrust.shared.pin(hosts: [pending.host], port: pending.port, fingerprint: pending.fingerprint)
-		let session = ephemeral(PinningDelegate.shared)
-		defer { session.finishTasksAndInvalidate() }
-		var call = httpRequest(endpoint(pending.host, pending.port, "pair/request/\(pending.requestId)"))
-		call.setValue(pending.secret, forHTTPHeaderField: "x-lh-pair-secret")
-		let data: Data, response: URLResponse
-		do { (data, response) = try await session.data(for: call) } catch let error as URLError {
-			throw PairingError.unreachable("Lost the connection to \(pending.name) (\(error.localizedDescription)).")
-		}
-		guard (response as? HTTPURLResponse)?.statusCode == 200, let poll = try? JSONDecoder().decode(Poll.self, from: data) else { throw PairingError.expired }
-		switch poll.status {
-		case "pending": return .pending
-		case "approved":
-			guard let token = poll.token, let deviceId = poll.deviceId else { throw PairingError.badResponse }
-			return .approved(Pairing(name: pending.name, fingerprint: pending.fingerprint, hosts: [pending.host], port: pending.port, deviceId: deviceId), token)
-		case "denied": throw PairingError.denied
-		default: throw PairingError.expired
-		}
 	}
 
 	/// Tells the computer to forget this phone (best effort; it may be off).

@@ -1,20 +1,9 @@
 import XCTest
 @testable import LearnHarness
 
-/// Phone access pairing. Keys must match electron/phone-access-cert.cjs
-/// (vectors computed there) so the phone and the computer show the same key.
+/// Phone access pairing: the QR link, pins and stored pairing.
 final class PairingTests: XCTestCase {
 	private let fingerprint = "a1b2c3d4e5f60718293a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7e8f90"
-
-	func testPairingKeyMatchesTheDesktop() {
-		XCTAssertEqual(PairingKey.from(fingerprint: String(repeating: "0", count: 64)), "0000-0000-0000")
-		XCTAssertEqual(PairingKey.from(fingerprint: String(repeating: "f", count: 64)), "ZZZZ-ZZZZ-ZZZZ")
-		XCTAssertEqual(PairingKey.from(fingerprint: "000000000000001" + String(repeating: "0", count: 49)), "0000-0000-0001")
-		XCTAssertEqual(PairingKey.from(fingerprint: fingerprint), "M6SC-7N75-YR3H")
-		XCTAssertEqual(PairingKey.from(fingerprint: "7f00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00ff00"), "FW0F-Y07Z-03ZG")
-		XCTAssertEqual(PairingKey.from(fingerprint: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"), "04HM-ASW9-NF6Y")
-		XCTAssertEqual(PairingKey.from(fingerprint: "xyz"), "")
-	}
 
 	func testPairingLinkParsesTheDesktopQRCode() throws {
 		let text = "learnharness://pair?v=1&h=192.168.1.88,100.101.1.2&p=4399&f=\(fingerprint)&c=Ab-_0123456789xyzABC&n=Ana%E2%80%99s%20Mac"
@@ -49,7 +38,6 @@ final class PairingTests: XCTestCase {
 	func testPairingURLAndPins() {
 		let pairing = Pairing(name: "Mac", fingerprint: fingerprint, hosts: ["192.168.1.88", "10.0.0.2"], port: 4399, deviceId: "d1")
 		XCTAssertEqual(pairing.url.absoluteString, "https://192.168.1.88:4399")
-		XCTAssertEqual(pairing.key, "M6SC-7N75-YR3H")
 		let trust = PinnedTrust()
 		trust.pin(hosts: pairing.hosts, port: pairing.port, fingerprint: fingerprint.uppercased())
 		XCTAssertEqual(trust.pinned(host: "192.168.1.88", port: 4399), fingerprint)

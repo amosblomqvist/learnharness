@@ -2,17 +2,15 @@ import SwiftUI
 import VisionKit
 
 /// First screen (and "Change Server…"): pair with a computer running the
-/// LearnHarness desktop app (QR code or nearby), or use a self-hosted server.
+/// LearnHarness desktop app (QR code), or use a self-hosted server.
 struct ConnectView: View {
 	@Environment(ServerStore.self) private var store
 	@Environment(\.dismiss) private var dismiss
 	/// Shown as a sheet from the server screen (with Cancel) or as the root.
 	var isSheet = false
 
-	@State private var nearby = NearbyBrowser()
 	@State private var scanning = false
 	@State private var link: PairingLink?
-	@State private var chosen: NearbyBrowser.Computer?
 
 	private var canScan: Bool { DataScannerViewController.isSupported && DataScannerViewController.isAvailable }
 
@@ -35,24 +33,6 @@ struct ConnectView: View {
 				}
 
 				Section {
-					if nearby.computers.isEmpty {
-						HStack(spacing: 10) {
-							ProgressView()
-							Text(nearby.problem ?? "Looking for computers on this Wi-Fi…").foregroundStyle(.secondary)
-						}
-					}
-					ForEach(nearby.computers) { computer in
-						Button { chosen = computer } label: {
-							Label(computer.name, systemImage: "desktopcomputer")
-						}
-					}
-				} header: {
-					Text("Nearby")
-				} footer: {
-					Text("Without the QR code: pick your computer, then allow this iPhone on the computer after checking the pairing key matches.")
-				}
-
-				Section {
 					NavigationLink("Server Address and Password") { SelfHostedConnectView(isSheet: isSheet) }
 				} header: {
 					Text("Self-hosted server")
@@ -71,8 +51,6 @@ struct ConnectView: View {
 				}
 			}
 		}
-		.onAppear { nearby.start() }
-		.onDisappear { nearby.stop() }
 		.sheet(isPresented: $scanning) {
 			QRScannerSheet { scanned in
 				scanning = false
@@ -81,9 +59,6 @@ struct ConnectView: View {
 		}
 		.sheet(item: $link) { link in
 			LinkPairingView(link: link) { if isSheet { dismiss() } }
-		}
-		.sheet(item: $chosen) { computer in
-			NearbyPairingView(computer: computer) { if isSheet { dismiss() } }
 		}
 	}
 }

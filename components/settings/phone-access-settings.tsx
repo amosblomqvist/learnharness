@@ -13,8 +13,6 @@ export type PhoneAccessStatus = {
 	error?: string | null;
 	port?: number;
 	addresses?: string[];
-	/** Human pairing key: the certificate fingerprint's first 60 bits. */
-	key?: string | null;
 	/** learnharness://pair?… with a one-time code; null while not running. */
 	pairingLink?: string | null;
 	codeExpiresAt?: number | null;
@@ -117,10 +115,6 @@ export function PhoneAccessSettings({ bridge }: { bridge: PhoneAccessBridge }) {
 						<div className="flex min-w-48 flex-1 flex-col gap-2 text-xs text-muted-foreground">
 							<p className="text-sm text-foreground">Pair a phone</p>
 							<p>Scan this code with the iPhone camera or in the LearnHarness app. It works once and expires in 5 minutes.</p>
-							<p>
-								Or pick this computer under <span className="text-foreground">Nearby</span> in the app and allow it here. Check that the phone shows this key:
-							</p>
-							<p className="font-mono text-base tracking-wider text-foreground" data-testid="phone-access-key">{status.key}</p>
 							<p className="font-mono">{status.addresses.map((address) => `${address}:${status.port}`).join(" · ")}</p>
 							<div>
 								<Button variant="outline" size="sm" onClick={() => void run(bridge.newCode)}>New code</Button>

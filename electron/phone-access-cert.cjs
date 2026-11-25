@@ -1,8 +1,7 @@
 "use strict";
 
 // Self-signed TLS identity for Phone access. Phones never validate it against
-// a CA: they pin its SHA-256 fingerprint, learned from the pairing QR code (or
-// confirmed by comparing the pairing key). So the certificate only needs to be
+// a CA: they pin its SHA-256 fingerprint, learned from the pairing QR code. So the certificate only needs to be
 // well-formed, stable, and private-key protected.
 //
 // Node can make keys and signatures but not X.509 certificates, so this writes
@@ -87,16 +86,6 @@ function fingerprint(certPem) {
 	return new crypto.X509Certificate(certPem).fingerprint256.replace(/:/g, "").toLowerCase();
 }
 
-// Crockford base32 (no I, L, O, U): easy to read aloud and compare.
-const ALPHABET = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
-/** The human pairing key: the fingerprint's first 60 bits as XXXX-XXXX-XXXX.
- * Forging a different certificate with the same key takes ~2^60 work. */
-function pairingKey(fingerprintHex) {
-	let bits = BigInt("0x" + fingerprintHex.slice(0, 15)); // 60 bits
-	let out = "";
-	for (let i = 0; i < 12; i++) { out = ALPHABET[Number(bits & 31n)] + out; bits >>= 5n; }
-	return `${out.slice(0, 4)}-${out.slice(4, 8)}-${out.slice(8)}`;
-}
 
 /** Load the identity from `directory`, creating it once. The key file is 0600. */
 function loadIdentity(directory, options) {
@@ -117,4 +106,4 @@ function loadIdentity(directory, options) {
 	return { ...identity, fingerprint: fingerprint(identity.cert) };
 }
 
-module.exports = { createIdentity, loadIdentity, fingerprint, pairingKey };
+module.exports = { createIdentity, loadIdentity, fingerprint };

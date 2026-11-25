@@ -32,7 +32,7 @@ const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cj
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
 const { createPhoneAccess } = require("./phone-access.cjs");
-const { bonjourAdvertiser } = require("./phone-access-bonjour.cjs");
+const { phoneAccessAdvertiser } = require("./phone-access-bonjour.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
 const { APP_USER_AGENT_TOKEN, normalizeServerUrl, insecureRemote, readServerChoice, writeServerChoice, probeServer } = require("./remote-server.cjs");
 const { randomBytes } = require("node:crypto");
@@ -163,27 +163,6 @@ let reopenWindow = null;
 const trustedAppWindows = new Set();
 let phoneAccess = null;
 
-/** A phone asked to pair without the QR code: the user decides here, after
- * comparing the pairing key the phone shows. No answer within two minutes
- * (the request's lifetime) counts as Don't Allow. */
-async function approvePhone({ deviceName, key }) {
-	const win = [...trustedAppWindows].find((candidate) => !candidate.isDestroyed()) ?? null;
-	if (win) { if (win.isMinimized()) win.restore(); win.show(); }
-	if (process.platform === "darwin") app.focus({ steal: true });
-	const options = {
-		type: "question",
-		buttons: ["Allow", "Don't Allow"],
-		defaultId: 1,
-		cancelId: 1,
-		noLink: true,
-		message: `Allow "${deviceName}" to use LearnHarness on this computer?`,
-		detail: `The phone should show this pairing key:\n\n${key}\n\nAllow only if it matches exactly. The phone can then use your sessions, knowledge graph and settings until you revoke it in Settings → Phone access.`,
-	};
-	const answer = win ? dialog.showMessageBox(win, options) : dialog.showMessageBox(options);
-	const timeout = new Promise((resolve) => setTimeout(() => resolve({ response: 1 }), 2 * 60 * 1000).unref());
-	const { response } = await Promise.race([answer, timeout]);
-	return response === 0;
-}
 // The self-hosted server this launch opened, or null when running locally.
 let remoteServerUrl = null;
 let connectWindow = null;
@@ -983,8 +962,7 @@ async function main() {
 		phoneAccess = createPhoneAccess({
 			directory: path.join(app.getPath("userData"), "phone-access"),
 			upstream: () => ({ origin: new URL(url).origin, secret: desktopAPISecret }),
-			approve: approvePhone,
-			advertise: bonjourAdvertiser({ onError: (error) => log(`phone access: Bonjour: ${error?.message ?? error}`) }),
+			advertise: phoneAccessAdvertiser({ onError: (error) => log(`phone access: Bonjour: ${error?.message ?? error}`) }),
 			appVersion: app.getVersion(),
 			onChange: notifyPhoneAccess,
 		});
