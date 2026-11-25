@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, useTransition } from "react";
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, useTransition } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
@@ -332,6 +332,7 @@ export function SessionRow({
 			onContextMenu={onContextMenu}
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
 			data-session-id={chat.id}
+			aria-current={active ? "page" : undefined}
 			className={cn(
 				"relative flex w-full items-center gap-2 pr-3 text-left hover:bg-accent",
 				compact ? SIDEBAR_COMPACT_ROW : "py-2",
@@ -424,7 +425,7 @@ function OpeningChatStatus() {
 	}, []);
 	if (!contentRoot || !visible) return null;
 	return createPortal(
-		<div role="status" className="lh-card-enter pointer-events-none absolute right-4 top-16 z-20 flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 font-ui text-xs text-foreground">
+		<div role="status" className="chat-opening-status pointer-events-none absolute right-4 top-16 z-20 flex items-center gap-2 rounded-md border bg-card px-2.5 py-1.5 font-ui text-xs text-foreground">
 			<span aria-hidden="true"><BrailleSpinner /></span>
 			Opening chat…
 		</div>,
@@ -450,9 +451,6 @@ function SessionsSidebar() {
 	const pathname = usePathname();
 	const router = useRouter();
 	const [openingChat, startOpeningChat] = useTransition();
-	const openChat = (chatId: string) => {
-		startOpeningChat(() => router.push(`/chat/${chatId}`));
-	};
 	const { open: openSettings } = useSettingsDialog();
 
 	/* New session (owner, 2026-09-13): NO POST — the button opens the
@@ -498,6 +496,14 @@ function SessionsSidebar() {
 	const rows = useMemo(() => tree && flattenSessionTree(tree, isFolderOpen), [tree, isFolderOpen]);
 	// The keyboard walk follows the visible session rows in tree order.
 	const shown = useMemo(() => rows?.flatMap((r) => r.type === "session" ? [r.session] : []) ?? null, [rows]);
+	const openChat = (chatId: string) => {
+		const target = `/chat/${chatId}`;
+		const from = shown?.findIndex(chat => pathname === `/chat/${chat.id}`) ?? -1;
+		const to = shown?.findIndex(chat => chat.id === chatId) ?? -1;
+		const type = from < 0 || to < 0 ? "chat-switch-enter" : from < to ? "chat-switch-next" : "chat-switch-previous";
+		const motion = target !== pathname && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		startOpeningChat(() => router.push(target, motion ? { transitionTypes: [type] } : undefined));
+	};
 
 	const refreshInFlightRef = useRef(false);
 	const refresh = useCallback(async () => {
@@ -604,6 +610,27 @@ function SessionsSidebar() {
 	const [kbdIndex, setKbdIndex] = useState<number | null>(null);
 	const searchRef = useRef<HTMLInputElement>(null);
 	const listRef = useRef<HTMLDivElement>(null);
+	const sessionRowsRef = useRef<HTMLDivElement>(null);
+	const previousHighlight = useRef<{ root: HTMLDivElement; pathname: string } | null>(null);
+	useLayoutEffect(() => {
+		const root = sessionRowsRef.current;
+		const row = root?.querySelector<HTMLElement>('button[data-session-id][aria-current="page"]');
+		if (!root || !row) {
+			root?.removeAttribute("data-chat-highlight");
+			previousHighlight.current = null;
+			return;
+		}
+		const bounds = root.getBoundingClientRect();
+		const target = row.getBoundingClientRect();
+		const previous = previousHighlight.current;
+		const transform = `translate(${target.left - bounds.left}px, ${target.top - bounds.top}px) scale(${target.width}, ${target.height})`;
+		if (root.style.getPropertyValue("--chat-highlight-transform") !== transform) {
+			root.toggleAttribute("data-chat-highlight-move", previous?.root === root && previous.pathname !== pathname);
+			root.style.setProperty("--chat-highlight-transform", transform);
+		}
+		root.setAttribute("data-chat-highlight", "");
+		previousHighlight.current = { root, pathname };
+	});
 
 	/* ── Wave 6 chunk A: context menu + inline rename + deletion ──
 	   Right-click a session row → MenuShell: the two management actions
@@ -1029,7 +1056,7 @@ function SessionsSidebar() {
 				    highlights run to the edge; it shows while scrolling/hovering. */}
 				<OverlayScrollArea scrollRef={listRef} data-testid="session-list" className="flex flex-col" {...folderDrop.containerProps}>
 					{(creatingFolder?.parentId === null || (rows !== null && rows.length > 0)) && (
-						<div data-testid="session-rows">
+						<div ref={sessionRowsRef} data-testid="session-rows" className="relative isolate">
 							{creatingFolder?.parentId === null && (
 								<NewFolderRow depth={0} compact={compactSessionList} onDone={() => setCreatingFolder(null)}
 									onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: null })} />

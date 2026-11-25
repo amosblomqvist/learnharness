@@ -709,16 +709,84 @@ body {
 	animation: lh-card-enter 120ms ease-out;
 }
 
-/* A chat arrival uses the card timing with opacity only, keeping the
-   transcript and its scrollbar at their measured positions. */
-@keyframes chat-open-in {
-	from { opacity: 0.82; }
-	to { opacity: 1; }
+:root {
+	--chat-switch-duration: 260ms;
+	--chat-switch-easing: cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+/* Leave the sidebar and header live while the two captured viewports pass
+   through the same clipped space. */
+:root:is(:active-view-transition-type(chat-switch-next), :active-view-transition-type(chat-switch-previous), :active-view-transition-type(chat-switch-enter)) {
+	view-transition-name: none;
+}
+
+::view-transition {
+	pointer-events: none;
+}
+
+::view-transition-group(.chat-switch-next),
+::view-transition-group(.chat-switch-previous),
+::view-transition-group(.chat-switch-enter) {
+	overflow: clip;
+	animation-duration: var(--chat-switch-duration);
+	animation-timing-function: var(--chat-switch-easing);
+}
+
+::view-transition-old(.chat-switch-next),
+::view-transition-new(.chat-switch-previous) { --chat-switch-offset: -100%; }
+::view-transition-old(.chat-switch-previous),
+::view-transition-new(.chat-switch-next) { --chat-switch-offset: 100%; }
+::view-transition-new(.chat-switch-enter) { --chat-switch-offset: 32px; }
+
+::view-transition-old(.chat-switch-next),
+::view-transition-old(.chat-switch-previous) {
+	animation: chat-switch-out var(--chat-switch-duration) var(--chat-switch-easing) both;
+	mix-blend-mode: normal;
+}
+
+::view-transition-new(.chat-switch-next),
+::view-transition-new(.chat-switch-previous),
+::view-transition-new(.chat-switch-enter) {
+	animation: chat-switch-in var(--chat-switch-duration) var(--chat-switch-easing) both;
+	mix-blend-mode: normal;
+}
+
+@keyframes chat-switch-out {
+	to { transform: translateY(var(--chat-switch-offset)); }
+}
+
+@keyframes chat-switch-in {
+	from { transform: translateY(var(--chat-switch-offset)); }
+}
+
+/* The composer paints above the transcript during the handoff. */
+::view-transition-group(.chat-switch-dock) { animation: none; z-index: 1; }
+::view-transition-old(.chat-switch-dock) { display: none; }
+::view-transition-new(.chat-switch-dock) { animation: none; mix-blend-mode: normal; }
+
+[data-chat-highlight]::before {
+	content: "";
+	position: absolute;
+	inset: 0 auto auto 0;
+	z-index: -1;
+	width: 1px;
+	height: 1px;
+	background-color: var(--color-accent);
+	transform: var(--chat-highlight-transform);
+	transform-origin: top left;
+	pointer-events: none;
+}
+
+[data-chat-highlight] button[data-session-id][aria-current="page"] {
+	background-color: transparent;
 }
 
 @media (prefers-reduced-motion: no-preference) {
-	[data-session-surface] {
-		animation: chat-open-in 120ms ease-out;
+	[data-chat-highlight-move]::before {
+		transition: transform var(--chat-switch-duration) var(--chat-switch-easing);
+	}
+	.chat-opening-status {
+		animation: lh-card-enter var(--chat-switch-duration) var(--chat-switch-easing);
 	}
 }
 

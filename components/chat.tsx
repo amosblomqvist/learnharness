@@ -35,6 +35,7 @@ import { AnsweredCard } from "@/components/answered-card";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
 import { ChatSessionComposer } from "@/components/composer";
+import { ChatSwitchTransition } from "@/components/chat-switch-transition";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
@@ -1762,6 +1763,7 @@ export function Chat({
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
 					<TranscriptElementReporter onElement={setTranscriptElement} />
+					<ChatSwitchTransition part="transcript">
 					<ConversationContent className="min-h-full gap-0 p-0">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
@@ -2042,13 +2044,14 @@ export function Chat({
 						    effect reports before paint). */}
 						<div aria-hidden data-testid="dock-spacer" style={{ height: dockReserve }} />
 				</ConversationContent>
+				</ChatSwitchTransition>
 				{/* The dock: an overlay sibling of the scroller (the
 				    use-stick-to-bottom pattern). The scroll-down button lives
 				    INSIDE the overlay now (owner refinement round, 2026-09-24):
 				    anchored to the dock block's top edge, so it rides every
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
-				<DockOverlay
+				<ChatSwitchTransition part="dock"><DockOverlay
 					viewReader={inputViewReader}
 					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}
 					pending={pending}
@@ -2163,7 +2166,7 @@ export function Chat({
 						// raw side updates with this main answer.
 						send();
 					}}
-				/>
+				/></ChatSwitchTransition>
 				</Conversation>
 				{sideThread.state?.mode === "panel" && (
 					<SideThreadPanel>
