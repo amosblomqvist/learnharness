@@ -77,6 +77,10 @@ install [Tailscale](https://tailscale.com) on the server and the iPhone,
 then use **Settings → Change Server…** with the server's Tailscale name
 (e.g. `my-server.your-tailnet.ts.net:3000`).
 
+Every host name you use (`my-server.lan`, the Tailscale name) must be listed
+in the server's `LH_ALLOWED_HOSTS`; IP addresses work without it. See
+[self-hosting.md](self-hosting.md#server-mode).
+
 ## Development
 
 ```bash

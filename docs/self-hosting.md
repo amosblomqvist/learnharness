@@ -59,6 +59,13 @@ A native iPhone app lives in `ios/`. Build and install it with Xcode:
 - 10 wrong passwords from one address lock that address out for 15 minutes;
 - `Authorization: Bearer <LH_API_TOKEN>` works for non-browser clients.
 
+**Host names.** The API accepts `localhost` and IP addresses as the host
+name; any other name your devices use (`my-server.lan`, a Tailscale name, a
+reverse-proxy domain) must be listed in `LH_ALLOWED_HOSTS`, comma-separated.
+Otherwise API calls through that name answer `403` ("This host name is not
+allowed") even after sign-in. This guards against DNS rebinding and applies
+with or without server mode.
+
 Sign a device out with `POST /api/auth/logout`. Sign **every** device out by
 rotating `LH_SESSION_SECRET` (or the password, if no secret is set).
 

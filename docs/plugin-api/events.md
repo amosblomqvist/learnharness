@@ -52,6 +52,10 @@ export interface ServerEvents {
     "chats-changed": Record<string, never>;
     "sources-changed": Record<string, never>;
     "subscriptions-changed": Record<string, never>;
+    "settings-changed": {
+        section: string;
+        chatId?: never;
+    };
     "record-changed": {
         chatId: string;
     };
@@ -83,6 +87,9 @@ export interface ServerEvents {
 - ["chats-changed"](#serverevents-chats-changed)
 - ["sources-changed"](#serverevents-sources-changed)
 - ["subscriptions-changed"](#serverevents-subscriptions-changed)
+- ["settings-changed"](#serverevents-settings-changed)
+- ["settings-changed".section](#serverevents-settings-changedsection)
+- ["settings-changed".chatId](#serverevents-settings-changedchatid)
 - ["record-changed"](#serverevents-record-changed)
 - ["record-changed".chatId](#serverevents-record-changedchatid)
 - ["compaction-changed"](#serverevents-compaction-changed)
@@ -177,6 +184,32 @@ Web subscription state changed. No account or credential data on the bus.
 
 ```ts
 "subscriptions-changed": Record<string, never>;
+```
+
+### ServerEvents "settings-changed"
+
+Server-wide settings changed: a provider key, a custom provider, or a
+settings section (models, agent, appearance…). Every connected device
+re-reads, so a key added on one shows on all of them. `section` uses
+the client's settings-signal names ("keys", "models", …).
+
+```ts
+"settings-changed": {
+    section: string;
+    chatId?: never;
+};
+```
+
+### ServerEvents "settings-changed".section
+
+```ts
+section: string;
+```
+
+### ServerEvents "settings-changed".chatId
+
+```ts
+chatId?: never;
 ```
 
 ### ServerEvents "record-changed"

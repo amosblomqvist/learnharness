@@ -26,7 +26,7 @@ function windowOptions(platform: string, env: Record<string, string> = {}, repor
 		app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
 		BrowserWindow: FakeWindow,
 		nativeTheme: { shouldUseDarkColors: true, themeSource: "system", on() {} },
-		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, getUserAgent: () => "Electron", setUserAgent() {} } },
 	};
 	const context = {
 		require: (id: string) => id === "electron" ? electron : mainRequire(id),
@@ -61,7 +61,7 @@ describe("desktop development startup", () => {
 			nativeTheme: { themeSource: "system" },
 			Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
 			ipcMain: { handle() {}, on() {} },
-			session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+			session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, getUserAgent: () => "Electron", setUserAgent() {} } },
 		};
 		const context = {
 			require: (id: string) => {
@@ -116,7 +116,7 @@ describe("desktop appearance boot and IPC", () => {
 					BrowserWindow: FakeWindow, nativeTheme,
 					Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
 					ipcMain: { handle() {}, on: (name: string, fn: (event: unknown, value: unknown) => void) => handlers.set(name, fn) },
-					session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+					session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, getUserAgent: () => "Electron", setUserAgent() {} } },
 				};
 				if (id === "node:fs") return { mkdirSync() {}, appendFileSync() {} };
 				if (id === "./appearance-chrome.cjs") return { ...chrome, readAppearance: (directory: string) => {

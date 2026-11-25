@@ -120,7 +120,7 @@ function boot() {
 	const electron = {
 		app, BrowserWindow: FakeWindow, nativeTheme: { themeSource: "system" }, ipcMain: Object.assign(new EventEmitter(), { handle() {} }),
 		Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
-		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, getUserAgent: () => "Electron", setUserAgent() {} } },
 	};
 	const context = {
 		require: (id: string) => id === "electron" ? electron : id === "node:fs" ? { mkdirSync() {}, appendFileSync() {} }

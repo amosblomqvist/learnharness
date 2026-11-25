@@ -17,7 +17,8 @@ import {
 } from "../src/server/remote-access.ts";
 import { proxy } from "../proxy.ts";
 
-const env = { LH_SERVER_PASSWORD: "correct horse battery staple", LH_SESSION_SECRET: "s".repeat(48) };
+// lh.example.test is a host name, so the API's DNS-rebinding check needs it allowed.
+const env = { LH_SERVER_PASSWORD: "correct horse battery staple", LH_SESSION_SECRET: "s".repeat(48), LH_ALLOWED_HOSTS: "lh.example.test" };
 const origin = "https://lh.example.test";
 
 async function withEnv(vars: Record<string, string>, fn: () => void | Promise<void>): Promise<void> {
@@ -82,6 +83,32 @@ test("proxy in server mode: pages redirect to login, APIs 401, login flow stays 
 		const cookie = `${SESSION_COOKIE}=${mintSessionToken()}`;
 		assert.equal(proxy(new NextRequest(origin + "/api/events", { headers: { cookie } })).headers.get("x-middleware-next"), "1");
 		assert.equal(proxy(new NextRequest(origin + "/", { headers: { cookie } })).headers.get("x-middleware-next"), "1");
+	});
+});
+
+test("proxy in server mode keeps the API host check: a signed-in request to an unlisted host name is refused", async () => {
+	await withEnv({ ...env, LH_ALLOWED_HOSTS: "" }, () => {
+		const cookie = `${SESSION_COOKIE}=${mintSessionToken()}`;
+		assert.equal(proxy(new NextRequest(origin + "/api/events", { headers: { cookie } })).status, 403);
+		assert.equal(proxy(new NextRequest("http://192.168.1.20:3000/api/events", { headers: { cookie } })).headers.get("x-middleware-next"), "1");
+	});
+});
+
+test("streamed document route applies server-mode sign-in before the API policy", async () => {
+	const { createPluginDocumentRoute } = await import("../src/server/plugin-transport.ts");
+	const route = createPluginDocumentRoute({ convertDocument: async () => new Response("converted") });
+	const params = { params: Promise.resolve({ id: "p" }) };
+	await withEnv(env, async () => {
+		const url = origin + "/api/plugins/p/documents/markdown";
+		assert.equal((await route.POST(new Request(url, { method: "POST" }), params)).status, 401);
+		assert.equal(route.OPTIONS(new Request(url, { method: "OPTIONS" })).status, 401);
+		const cookie = `${SESSION_COOKIE}=${mintSessionToken()}`;
+		assert.equal(await (await route.POST(new Request(url, { method: "POST", headers: { cookie } }), params)).text(), "converted");
+	});
+	await withEnv({ ...env, LH_APPS_ONLY: "1" }, async () => {
+		const url = origin + "/api/plugins/p/documents/markdown";
+		const cookie = `${SESSION_COOKIE}=${mintSessionToken()}`;
+		assert.equal((await route.POST(new Request(url, { method: "POST", headers: { cookie } }), params)).status, 403);
 	});
 });
 
