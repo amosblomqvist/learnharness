@@ -27,6 +27,8 @@ export const stores = {
 
 export type Stores = typeof stores;
 
+export { getChatOpening } from "../store/chats.ts";
+
 /**
  * The resolved view of the settings record (core/settings-resolution.ts):
  * every knob concrete over its factory default — EXCEPT MODELS (BYOK all

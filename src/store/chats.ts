@@ -19,6 +19,11 @@ import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
 import { phaseAt3Lh } from "../core/phases.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { deleteChatHistoryIndex, readChatHistoryIndex, rebuildChatHistoryIndex } from "./chat-history-index.ts";
+
+const MIN_INDEXED_MESSAGES = 80;
+const OPENING_MESSAGES = 40;
+const OPENING_BYTES = 128 * 1024;
 
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
@@ -57,7 +62,9 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
  *  lazy migration means existing files only get stamped on their next write.
  *  A future-version guard lives on the read side (getChat). */
 function writeChat(record: ChatRecord): void {
-	writeFileAtomicSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
+	const file = chatFile(record.id);
+	writeFileAtomicSync(file, JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
+	if (record.messages.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, true);
 }
 
 function getChat(id: string): ChatRecord | null {
@@ -76,6 +83,21 @@ function getChat(id: string): ChatRecord | null {
 		return null;
 	}
 	return parsed as ChatRecord;
+}
+
+/** Indexed startup is optional. Older profiles take the canonical path once
+ * and leave an index for their next open without rewriting the chat. */
+export function getChatOpening(id: string): (Pick<ChatRecord, "id" | "title" | "kind" | "messages"> & { partial: boolean }) | null {
+	let file: string;
+	try { file = chatFile(id); } catch { return null; }
+	const indexed = readChatHistoryIndex(file, { limit: OPENING_MESSAGES, maxBytes: OPENING_BYTES });
+	if (indexed && indexed.chat.id === id && indexed.total >= MIN_INDEXED_MESSAGES && indexed.messages.length) {
+		return { ...indexed.chat, messages: indexed.messages, partial: true };
+	}
+	const chat = getChat(id);
+	if (!chat) return null;
+	if (!indexed && chat.messages?.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file);
+	return { id: chat.id, title: chat.title, kind: chat.kind, messages: chat.messages, partial: false };
 }
 
 function listChats(): ChatSummary[] {
@@ -209,8 +231,10 @@ function renameChat(id: string, title: string): ChatRecord {
  *  choreography (core/graph-deletion.ts), not the store's. */
 function deleteChat(id: string): boolean {
 	try {
-		fs.unlinkSync(chatFile(id));
-		removeLeftoverTemps(chatFile(id));
+		const file = chatFile(id);
+		fs.unlinkSync(file);
+		removeLeftoverTemps(file);
+		deleteChatHistoryIndex(file);
 		emit("chats-changed", {}); // only a real removal — the present-entry law
 		return true;
 	} catch {
