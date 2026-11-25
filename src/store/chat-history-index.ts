@@ -1,8 +1,9 @@
 import fs from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { Tokenizer, TokenType } from "@streamparser/json";
-import { CURRENT_CHAT_VERSION, type ChatRecord } from "../core/contracts/chat.ts";
-import type { LhMessage } from "../core/native-messages.ts";
+import { CURRENT_CHAT_VERSION, type ChatDockUsage, type ChatRecord } from "../core/contracts/chat.ts";
+import { cliContextWindowOf, type LhMessage } from "../core/native-messages.ts";
+import { measuredContextTokens } from "../core/context-usage.ts";
 import { transcriptOpeningLayout, type TranscriptRowSize } from "../core/transcript-layout.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
@@ -18,6 +19,8 @@ interface HistoryIndex {
 	offsets: number[];
 	fields: Record<string, unknown>;
 	opening?: TranscriptRowSize[] | null;
+	dock?: ChatDockUsage & { settings?: ChatRecord["settings"] };
+	turnsRange?: [start: number, end: number];
 }
 
 function revisionOf({ dev, ino, size, mtimeNs, ctimeNs }: fs.BigIntStats): string {
@@ -34,6 +37,8 @@ async function locate(source: FileHandle) {
 	let depth = 0;
 	let key: string | undefined;
 	let expectValue = false;
+	let turnsStart: number | undefined;
+	let turnsRange: HistoryIndex["turnsRange"];
 
 	tokenizer.onToken = ({ token, value, offset }) => {
 		if (depth === 1) {
@@ -43,9 +48,14 @@ async function locate(source: FileHandle) {
 					if (token !== TokenType.LEFT_BRACKET) throw new Error("Invalid message array");
 					offsets = [];
 					inMessages = true;
-				} else if (key !== undefined && OPENING_FIELDS.has(key)) fields[key] = value;
+				} else if (key === "turns" && token === TokenType.LEFT_BRACKET) turnsStart = offset;
+				else if (key !== undefined && OPENING_FIELDS.has(key)) fields[key] = value;
 			} else if (token === TokenType.COLON) expectValue = true;
 			else if (token === TokenType.STRING) key = value as string;
+		}
+		if (depth === 2 && token === TokenType.RIGHT_BRACKET && turnsStart !== undefined) {
+			turnsRange = [turnsStart, offset + 1];
+			turnsStart = undefined;
 		}
 		if (inMessages && depth === 2) {
 			if (token === TokenType.LEFT_BRACE) offsets!.push(offset);
@@ -60,10 +70,11 @@ async function locate(source: FileHandle) {
 	for await (const chunk of source.createReadStream({ highWaterMark: CHUNK_BYTES, autoClose: false })) tokenizer.write(chunk);
 	tokenizer.end();
 	if (depth !== 0 || !offsets?.length) throw new Error("Invalid chat history index source");
-	return { offsets, fields };
+	return { offsets, fields, turnsRange };
 }
 
-type OpeningSnapshot = { revision: string; messages: readonly LhMessage[] };
+type OpeningRecord = Pick<ChatRecord, "messages" | "settings">;
+type OpeningSnapshot = { revision: string; record: OpeningRecord };
 
 async function buildIndex(file: string, snapshot: OpeningSnapshot | undefined): Promise<void> {
 	try {
@@ -71,9 +82,10 @@ async function buildIndex(file: string, snapshot: OpeningSnapshot | undefined): 
 		try {
 			const revision = revisionOf(await source.stat({ bigint: true }));
 			const layout = await locate(source);
-			const opening = snapshot?.revision === revision && snapshot.messages.length === layout.offsets.length - 1
-				? transcriptOpeningLayout(snapshot.messages) : undefined;
-			const text = JSON.stringify({ format: FORMAT, revision, ...layout, opening } satisfies HistoryIndex);
+			const record = snapshot?.revision === revision && snapshot.record.messages.length === layout.offsets.length - 1 ? snapshot.record : undefined;
+			const opening = record && transcriptOpeningLayout(record.messages);
+			const dock = record && { settings: record.settings, contextTokens: measuredContextTokens(record.messages), cliContextWindow: cliContextWindowOf(record.messages) };
+			const text = JSON.stringify({ format: FORMAT, revision, ...layout, opening, dock } satisfies HistoryIndex);
 			if (Buffer.byteLength(text) > MAX_INDEX_BYTES) return;
 			if (revision === revisionOf(fs.statSync(/* turbopackIgnore: true */ file, { bigint: true }))) writeFileAtomicSync(indexFile(file), text);
 		} finally { await source.close(); }
@@ -86,10 +98,10 @@ const pendingBuilds = new Map<string, { dirty: boolean; done: Promise<void>; sna
 
 /** Refresh after the canonical save returns. A burst of saves shares one
  * scan, with one more pass if the file changed while it was being read. */
-export function rebuildChatHistoryIndex(file: string, changed = false, messages?: readonly LhMessage[]): Promise<void> {
+export function rebuildChatHistoryIndex(file: string, changed = false, record?: OpeningRecord): Promise<void> {
 	let snapshot: OpeningSnapshot | undefined;
-	if (messages) {
-		try { snapshot = { revision: revisionOf(fs.statSync(/* turbopackIgnore: true */ file, { bigint: true })), messages }; }
+	if (record) {
+		try { snapshot = { revision: revisionOf(fs.statSync(/* turbopackIgnore: true */ file, { bigint: true })), record }; }
 		catch { return Promise.resolve(); }
 	}
 	const pending = pendingBuilds.get(file);
@@ -139,13 +151,15 @@ export interface IndexedChatHistory {
 	total: number;
 	revision: string;
 	opening?: TranscriptRowSize[] | null;
+	dock?: HistoryIndex["dock"];
+	turns?: ChatRecord["turns"];
 }
 
 /** before is an exclusive native message ordinal, defaulting to the tail.
  * Only the size-limited sidecar and the requested message range are read. */
 export function readChatHistoryIndex(
 	file: string,
-	{ limit, maxBytes, before }: { limit: number; maxBytes: number; before?: number },
+	{ limit, maxBytes, before, includeDock = false }: { limit: number; maxBytes: number; before?: number; includeDock?: boolean },
 ): IndexedChatHistory | null {
 	if (!Number.isSafeInteger(maxBytes) || maxBytes < 1 || !Number.isSafeInteger(limit) || limit < 1) return null;
 	try {
@@ -171,10 +185,19 @@ export function readChatHistoryIndex(
 			if (!Number.isSafeInteger(from) || from < 0 || from > stop || (start < end && from === stop)) return null;
 			const slice = start === end ? "" : readRange(source, from, stop - from).toString("utf8").trimEnd().replace(/,$/, "");
 			const messages = JSON.parse(`[${slice}]`) as LhMessage[];
-			if (messages.length !== end - start || revision !== revisionOf(fs.fstatSync(source, { bigint: true }))) return null;
+			if (messages.length !== end - start) return null;
 			const opening = index.opening;
 			if (opening && (!Array.isArray(opening) || opening.some(row => !Array.isArray(row) || typeof row[0] !== "string" || !Number.isFinite(row[1]) || row[1] <= 0))) return null;
-			return { chat: { id, title, kind }, messages, start, total, revision, opening };
+			let turns: ChatRecord["turns"];
+			if (includeDock && index.turnsRange) {
+				const [start, end] = index.turnsRange;
+				if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || end <= start ||
+					end > Number(info.size) || end - start > MAX_INDEX_BYTES) return null;
+				turns = JSON.parse(readRange(source, start, end - start).toString("utf8")) as ChatRecord["turns"];
+				if (!Array.isArray(turns)) return null;
+			}
+			if (revision !== revisionOf(fs.fstatSync(source, { bigint: true }))) return null;
+			return { chat: { id, title, kind }, messages, start, total, revision, opening, dock: index.dock, turns };
 		} finally { fs.closeSync(source); }
 	} catch { return null; }
 }

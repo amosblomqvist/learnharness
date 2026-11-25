@@ -23,7 +23,7 @@ test("meter keeps its measured numerator across selected-model/catalog changes, 
 	globalThis.fetch = async (input) => {
 		if (input === "/api/models") return Response.json(catalog);
 		if (input === "/api/settings") return Response.json({ settings: { models: {} } });
-		if (input === "/api/chats/fixture") return Response.json({ settings: { model: { provider: "fixture", id: selected }, thinkingLevel: "off" } });
+		if (input === "/api/chats/fixture/settings") return Response.json({ settings: { model: { provider: "fixture", id: selected }, thinkingLevel: "off" } });
 		throw new Error(`unexpected fixture request ${String(input)}`);
 	};
 	const host = document.createElement("div"); document.body.append(host);

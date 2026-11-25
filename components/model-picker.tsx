@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { ChatSettings, ModelCatalogEntry, ModelCatalogResponse, ModelsSettings, UserSettings } from "@/src/core";
+import type { ChatDockSeed, ChatSettings, ModelCatalogEntry, ModelCatalogResponse, ModelsSettings, UserSettings } from "@/src/core";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
 import { ModelMenuList, ThinkingMenuList } from "@/components/settings/model-menu";
@@ -40,12 +40,14 @@ export function catalogLimits(catalog: Pick<ModelCatalogResponse, "models">): Ma
  * changing the new-session default. Unpicked reads "—" (the
  * no-factory-fallback language: the UI never presents a default model).
  */
-export function ModelControl({ chatId, onModelChange }: { chatId?: string; onModelChange?: (model: string | undefined) => void }) {
+export function ModelControl({ chatId, onModelChange, initialModel }: {
+	chatId?: string; onModelChange?: (model: string | undefined) => void; initialModel?: ChatDockSeed["model"];
+}) {
 	const { catalog, refresh } = useModelCatalog();
-	const [models, setModels] = useState<ModelsSettings | undefined>();
+	const [models, setModels] = useState<ModelsSettings | undefined>(initialModel?.strong ? { strong: initialModel.strong } : undefined);
 	// A successful read with no settings is a legacy session; undefined
 	// means no session record is known yet, not permission to inherit Strong.
-	const [session, setSession] = useState<{ settings?: ChatSettings }>();
+	const [session, setSession] = useState<{ settings?: ChatSettings } | undefined>(initialModel && { settings: initialModel.settings });
 	const [open, setOpen] = useState<"model" | "thinking" | null>(null);
 	const [error, setError] = useState<string | null>(null);
 	const containerRef = useRef<HTMLDivElement>(null);
@@ -60,7 +62,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	// reads the models section alone.
 	const readRecord = useCallback(() => {
 		if (chatId) {
-			fetch(`/api/chats/${chatId}`)
+			fetch(`/api/chats/${encodeURIComponent(chatId)}/settings`)
 				.then((r) => { if (!r.ok) throw new Error(`session read failed: ${r.status}`); return r.json() as Promise<{ settings?: ChatSettings }>; })
 				.then((body) => setSession({ settings: body.settings }))
 				.catch(() => {
@@ -78,8 +80,8 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 	}, [chatId]);
 
 	useEffect(() => {
-		readRecord();
-	}, [readRecord]);
+		if (!initialModel) readRecord();
+	}, [initialModel, readRecord]);
 
 	useSettingsSaved((section) => {
 		if (section === "models") readRecord();
@@ -104,7 +106,9 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 		onModelChange?.(effectiveProvider && effectiveId ? `${effectiveProvider}:${effectiveId}` : undefined);
 	}, [effectiveProvider, effectiveId, onModelChange]);
 	const storedLevel = override?.thinkingLevel;
-	const entry = catalog?.models.find(
+	const initialEntry = initialModel?.entry;
+	const entries = catalog?.models ?? (initialEntry ? [initialEntry] : []);
+	const entry = entries.find(
 		(m) => m.id === effectiveId && m.provider === effectiveProvider,
 	);
 	const levels = entry?.supportedLevels ?? [];

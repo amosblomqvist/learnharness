@@ -105,7 +105,7 @@ import { PluginSessionTopBarActions } from "@/components/plugin-chrome";
 import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
 import type { SessionInputViewReader, SessionViewTargets, NativeQuestionViewState, ViewReaderRef } from "./session-view-readers";
-import type { JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
+import type { ChatDockSeed, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
 	CompactionCutDivider,
@@ -277,6 +277,7 @@ export function Chat({
 	initiallyInFlight,
 	initiallyCompacting = false,
 	initialConfigured = false,
+	initialDock,
 	kind = "teach",
 }: {
 	chatId: string;
@@ -302,6 +303,7 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
+	initialDock?: ChatDockSeed;
 }) {
 	const [historyLoading, setHistoryLoading] = useState(!!openingLayout);
 	// Reattach plumbing (background-turn runner wave): the hook holds the
@@ -712,7 +714,8 @@ export function Chat({
 	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
 	const catalogRef = useRef(catalog);
 	catalogRef.current = catalog;
-	const [selectedModel, setSelectedModel] = useState<string | undefined>();
+	const initialSelection = initialDock?.model.settings?.model ?? initialDock?.model.strong?.model;
+	const [selectedModel, setSelectedModel] = useState(initialSelection ? `${initialSelection.provider}:${initialSelection.id}` : undefined);
 	const recordSelectedModel = useCallback((model: string | undefined) => { submissionModel.observe(model); setSelectedModel(model); }, [submissionModel]);
 	const [setupOpen, setSetupOpen] = useState(false);
 	/** The last explicitly-sent draft (composer send): the
@@ -1308,11 +1311,9 @@ export function Chat({
 	const planTree = useMemo(() => latestTree(messages), [messages]);
 
 	// ── Session usage (wave-4 stats bar) ──
-	// The money channel: the record's turns log and read-time server Pi
-	// pricing projection. Seeded once on mount (the page doesn't carry turns),
-	// refreshed when the local stream settles (each turn appends to the log
-	// server-side), and kept fresh by syncFromServer whenever it already
-	// fetches the record. No turns yet → the bar renders "—" everywhere.
+	// The page carries the initial summary. Load turn details once history
+	// is ready, then refresh when a turn settles or syncFromServer fetches
+	// the record.
 	const [turns, setTurns] = useState<TurnUsage[]>([]);
 	const [pricing, setPricing] = useState<SessionPricing | undefined>();
 	// The per-chat model control state (model-picker writes via PUT; the
@@ -2132,9 +2133,10 @@ export function Chat({
 					onReadingThinking={(value) => { applyReadingThinking(value); if (pendingPlugin) pluginQuestionDraft(pendingPlugin).readingThinking = value; }}
 					phase={phases.at(-1) ?? "probe"}
 					turns={turns}
-					contextTokens={contextTokens}
-					cliContextWindow={cliContextWindowOf(nativeMessages)}
+					contextTokens={historyLoading ? initialDock?.contextTokens ?? null : contextTokens}
+					cliContextWindow={historyLoading ? initialDock?.cliContextWindow ?? null : cliContextWindowOf(nativeMessages)}
 					pricing={pricing}
+					initialDock={initialDock}
 					onReserve={setDockReserve}
 					dictationSlot={<DictationBar dictation={dictation} disabled={pluginOwnsDock && !pluginMicAvailable} />}
 					dictationCancel={dictation.cancel}
@@ -2449,6 +2451,7 @@ export function DockOverlay({
 	contextTokens,
 	cliContextWindow,
 	pricing,
+	initialDock,
 	composer,
 	onSubmitAnswer,
 	chatId,
@@ -2511,6 +2514,7 @@ export function DockOverlay({
 	contextTokens: number | null;
 	cliContextWindow: ReturnType<typeof cliContextWindowOf>;
 	pricing?: SessionPricing;
+	initialDock?: ChatDockSeed;
 	composer: React.ReactNode;
 	onSubmitAnswer: (output: QuestionAnswerData) => void;
 	/** The model control's pass-through (the stats bar hosts it). */
@@ -3056,6 +3060,7 @@ export function DockOverlay({
 						contextTokens={contextTokens}
 						cliContextWindow={cliContextWindow}
 						pricing={pricing}
+						initialDock={initialDock}
 						dictationSlot={dictationSlot}
 						chatId={chatId}
 						onModelChange={onModelChange}

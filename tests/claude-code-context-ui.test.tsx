@@ -25,7 +25,7 @@ test("compact CLI context is numeric only; effective-window explanation appears 
 	globalThis.fetch = (async (url) => {
 		if (url === "/api/models") return Response.json(catalog);
 		if (url === "/api/settings") return Response.json({ settings: { models: {} } });
-		if (url === "/api/chats/cli-session") return Response.json({ settings: { model: { provider: "claude-code", id: "opus" } } });
+		if (url === "/api/chats/cli-session/settings") return Response.json({ settings: { model: { provider: "claude-code", id: "opus" } } });
 		throw new Error(`unexpected request ${url}`);
 	}) as typeof fetch;
 	host = document.createElement("div"); document.body.append(host); root = createRoot(host);

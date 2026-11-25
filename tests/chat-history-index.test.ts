@@ -6,6 +6,7 @@ import { after, test } from "node:test";
 import { readChatHistoryIndex, rebuildChatHistoryIndex } from "../src/store/chat-history-index.ts";
 import { newUserMessage } from "../src/core/native-messages.ts";
 import { transcriptOpeningLayout } from "../src/core/transcript-layout.ts";
+import type { TurnUsage } from "../src/core/contracts.ts";
 
 const data = fs.mkdtempSync(path.join(os.tmpdir(), "lh-history-index-"));
 process.env.LH_DATA_DIR = data;
@@ -20,12 +21,17 @@ const messages = Array.from({ length: 90 }, (_, index) =>
 test("warm open reads a bounded byte range from the original, with one offset per message", async t => {
 	const chat = chatStore.createChat("Назва́ние 🙂", "practice");
 	chatStore.saveMessages(chat.id, messages);
+	const settings = { model: { provider: "openai", id: "gpt-5" }, thinkingLevel: "medium" } as const;
+	const turn: TurnUsage = { id: "turn-seed", messageId: messages[0]!.id, at: "2026-11-25T00:00:00Z", model: "openai:gpt-5", steps: [] };
+	chatStore.saveSettings(chat.id, settings);
+	chatStore.appendTurnUsage(chat.id, turn);
 	const file = fileFor(chat.id);
 	await rebuildChatHistoryIndex(file);
 	const fileSize = fs.statSync(file).size;
 	const sourceInode = fs.statSync(file).ino;
 	const index = JSON.parse(fs.readFileSync(indexFor(chat.id), "utf8"));
 	assert.equal(index.offsets.length, messages.length + 1);
+	assert.equal(JSON.stringify(index).includes(turn.id), false, "the index stores a range, not a copy of the usage log");
 	assert.ok(fs.statSync(indexFor(chat.id)).size < fileSize / 100);
 	const readSync = fs.readSync.bind(fs);
 	let sourceBytes = 0;
@@ -38,6 +44,7 @@ test("warm open reads a bounded byte range from the original, with one offset pe
 	assert.deepEqual(getChatOpening(chat.id), {
 		id: chat.id, title: chat.title, kind: "practice", messages: messages.slice(-40), partial: true,
 		openingLayout: transcriptOpeningLayout(messages),
+		settings, turns: [turn], dockUsage: { contextTokens: null, cliContextWindow: null },
 	});
 	assert.ok(sourceBytes > 0 && sourceBytes < fileSize / 10, `read ${sourceBytes} of ${fileSize} bytes`);
 	const tail = readChatHistoryIndex(file, { limit: 4, maxBytes: 128 * 1024 })!;
@@ -45,6 +52,7 @@ test("warm open reads a bounded byte range from the original, with one offset pe
 	assert.deepEqual([...previous.messages, ...tail.messages], messages.slice(-8));
 	assert.equal(tail.revision, previous.revision);
 	assert.equal(previous.total, messages.length);
+	assert.equal(tail.turns, undefined, "ordinary page reads leave the usage log on disk");
 	const bounded = readChatHistoryIndex(file, { limit: 4, before: 40, maxBytes: 20000 })!;
 	assert.deepEqual(bounded.messages, messages.slice(39, 40));
 });

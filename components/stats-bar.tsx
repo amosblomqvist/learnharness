@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useMemo, useRef, useState, type ReactNode } from "react";
-import { CLAUDE_CODE_PROVIDER, sessionCacheHitRate, subscriptionLabels, subscriptionLabel, type cliContextWindowOf, type SessionPricing, type TurnUsage } from "@/src/core";
+import { CLAUDE_CODE_PROVIDER, sessionCacheHitRate, subscriptionLabels, subscriptionLabel, type ChatDockSeed, type cliContextWindowOf, type SessionPricing, type TurnUsage } from "@/src/core";
 import { formatTokens, formatUsd, planCostLabel, prettyModel } from "@/components/usage-format";
 import { ModelControl, catalogLimits, useModelCatalog } from "@/components/model-picker";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
@@ -48,6 +48,7 @@ export function StatsBar({
 	chatId,
 	leadingSlot,
 	onModelChange,
+	initialDock,
 }: {
 	turns: TurnUsage[];
 	contextTokens?: number | null;
@@ -60,6 +61,7 @@ export function StatsBar({
 	chatId?: string;
 	/** The same effective identity the visible model control owns. */
 	onModelChange?: (model: string | undefined) => void;
+	initialDock?: ChatDockSeed;
 	/** The dictation strip (STT wave, 2026-09-17): the row's middle is dead
 	 *  space between the session data and the model control — the mic
 	 *  button lives there, and while recording the meter unfurls to fill
@@ -71,7 +73,8 @@ export function StatsBar({
 	leadingSlot?: ReactNode;
 }) {
 	const [open, setOpen] = useState(false);
-	const [selectedModel, setSelectedModel] = useState<string | undefined>();
+	const selection = initialDock?.model.settings?.model ?? initialDock?.model.strong?.model;
+	const [selectedModel, setSelectedModel] = useState(selection ? `${selection.provider}:${selection.id}` : undefined);
 	const modelChanged = useCallback((model: string | undefined) => {
 		setSelectedModel(model);
 		onModelChange?.(model);
@@ -84,16 +87,19 @@ export function StatsBar({
 	// The picker reports its effective selection. CLI windows are session-
 	// scoped; unknown metadata always means usage-only, never a guessed maximum.
 	const { catalog } = useModelCatalog();
-	const limits = useMemo(() => (catalog ? catalogLimits(catalog) : undefined), [catalog]);
+	const initialEntry = initialDock?.model.entry;
+	const limits = useMemo(() => catalog ? catalogLimits(catalog) : initialEntry ? catalogLimits({ models: [initialEntry] }) : undefined, [catalog, initialEntry]);
 	const limit = contextLimitForModel(selectedModel, limits, cliContextWindow);
 	const contextLabel = formatContextMeasurement(contextTokens, limit);
 	const cacheHitRate = useMemo(() => sessionCacheHitRate({ turns }), [turns]);
-	const { cost = 0, unpriced = turns.length, subscription = 0 } = pricing ?? {};
+	const shownPricing = pricing ?? initialDock?.pricing;
+	const turnCount = pricing ? turns.length : initialDock?.turnCount ?? turns.length;
+	const { cost = 0, unpriced = turnCount, subscription = 0 } = shownPricing ?? {};
 	// Honest cost: show dollars only when at least one turn priced;
 	// otherwise "—" (never a fake $0.0000).
-	const pricedCount = turns.length - unpriced - subscription;
-	const providers = pricing?.subscriptionProviders ?? subscriptionLabels(turns.map((turn) => turn.model));
-	const cliBilled = turns.some((turn) => turn.model.startsWith(`${CLAUDE_CODE_PROVIDER}:`));
+	const pricedCount = turnCount - unpriced - subscription;
+	const providers = shownPricing?.subscriptionProviders ?? subscriptionLabels(turns.map((turn) => turn.model));
+	const cliBilled = !pricing && initialDock ? initialDock.cliBilled : turns.some((turn) => turn.model.startsWith(`${CLAUDE_CODE_PROVIDER}:`));
 	const costLabel = planCostLabel(pricedCount > 0 ? cost : null, cliBilled ? [...providers, "CLI"] : providers);
 
 	return (
@@ -207,7 +213,7 @@ export function StatsBar({
 			{/* The model + thinking control — one controller for the conversation
 			    agents (prober/teacher); the record's `turns` above still folds
 			    the ACTUAL models billed, regardless of what the picker says. */}
-			<ModelControl chatId={chatId} onModelChange={modelChanged} />
+			<ModelControl chatId={chatId} onModelChange={modelChanged} initialModel={initialDock?.model} />
 		</div>
 	);
 }

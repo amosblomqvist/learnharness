@@ -13,6 +13,7 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
+import type { ChatDockUsage } from "../core/contracts/chat.ts";
 import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
@@ -66,7 +67,7 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
 function writeChat(record: ChatRecord): void {
 	const file = chatFile(record.id);
 	writeFileAtomicSync(file, JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
-	if (record.messages.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, true, record.messages);
+	if (record.messages.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, true, record);
 }
 
 function getChat(id: string): ChatRecord | null {
@@ -89,11 +90,13 @@ function getChat(id: string): ChatRecord | null {
 
 /** Indexed startup is optional. Older profiles take the canonical path once
  * and leave an index for their next open without rewriting the chat. */
-export function getChatOpening(id: string): (Pick<ChatRecord, "id" | "title" | "kind" | "messages"> & { partial: boolean; openingLayout?: TranscriptRowSize[] }) | null {
+export function getChatOpening(id: string): (Pick<ChatRecord, "id" | "title" | "kind" | "messages" | "settings" | "turns"> & {
+	partial: boolean; openingLayout?: TranscriptRowSize[]; dockUsage?: ChatDockUsage;
+}) | null {
 	let file: string;
 	try { file = chatFile(id); } catch { return null; }
-	const indexed = readChatHistoryIndex(file, { limit: OPENING_MESSAGES, maxBytes: OPENING_BYTES });
-	if (indexed?.opening?.length && indexed.chat.id === id && indexed.total >= MIN_INDEXED_MESSAGES && indexed.messages.length) {
+	const indexed = readChatHistoryIndex(file, { limit: OPENING_MESSAGES, maxBytes: OPENING_BYTES, includeDock: true });
+	if (indexed?.opening?.length && indexed.dock && indexed.chat.id === id && indexed.total >= MIN_INDEXED_MESSAGES && indexed.messages.length) {
 		// A learner message starts a complete presentation group and resets
 		// side conversation segments. Avoid a partial rendering of an older group.
 		const start = indexed.messages.findIndex(message => message.role === "user");
@@ -102,14 +105,15 @@ export function getChatOpening(id: string): (Pick<ChatRecord, "id" | "title" | "
 			const tail = transcriptRows(projectView(messages));
 			const first = indexed.opening.length - tail.length;
 			if (tail.length && first >= 0 && tail.every((row, i) => row.key === indexed.opening?.[first + i]?.[0])) {
-				return { ...indexed.chat, messages, partial: true, openingLayout: indexed.opening };
+				const { settings, ...dockUsage } = indexed.dock;
+				return { ...indexed.chat, messages, settings, turns: indexed.turns, dockUsage, partial: true, openingLayout: indexed.opening };
 			}
 		}
 	}
 	const chat = getChat(id);
 	if (!chat) return null;
-	if (indexed?.opening === undefined && chat.messages?.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, false, chat.messages);
-	return { id: chat.id, title: chat.title, kind: chat.kind, messages: chat.messages, partial: false };
+	if ((!indexed?.dock || indexed.opening === undefined) && chat.messages?.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, false, chat);
+	return { id: chat.id, title: chat.title, kind: chat.kind, messages: chat.messages, settings: chat.settings, turns: chat.turns, partial: false };
 }
 
 function listChats(): ChatSummary[] {
