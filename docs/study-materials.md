@@ -55,3 +55,22 @@ an explicit material-request intent header. Remote API error bodies are not echo
 This PR is independent of the Perrin layout and answer-review PRs; it uses the
 existing palette and components. No user notes, tokens or library records are
 included in the repository.
+
+### Study a whole Obsidian course folder
+
+Connect the vault (rather than just one class folder if you want references to shared
+attachments). Browse to the course and choose **Study this folder**. Nested Markdown
+notes, PDFs, PPTs and PPTXs start checked. Referenced slides and PDFs elsewhere in
+the vault are offered unchecked. Review the list, open an original Markdown note
+with **Open in Obsidian**, then choose **Start course lesson**. This opens a teaching
+session, not a graph import. The teacher gets the selected paths and reads relevant
+files with the existing learner-file tools; contents are not all pasted into the
+first message. The eight-document snapshot limit applies to the separate document
+review flow.
+
+Slide conversion requires LibreOffice. LearnHarness uses a private temporary
+profile and a copy of the deck, then keeps its PDF under the application's
+`course-pdfs` data folder so a resumed lesson can still read it. File-access
+restrictions must allow that folder as well as the chosen source. Originals are
+not written. Hidden paths, symbolic links and remote links are not followed;
+unresolved or ambiguous attachment names are reported for review.

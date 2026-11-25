@@ -7,6 +7,7 @@ import { CustomBodyLimitError, readBoundedJson } from "./custom-provider-body.ts
 import { resolveSourcePath } from "../agent/tools/fs-shared.ts";
 import { resolvePolicy } from "../agent/tools/file-access.ts";
 import { fileAccessPolicy } from "./file-access.ts";
+import { scanCourse, courseLesson, openCourseNote } from "./course-folder.ts";
 import { StudyMaterials, type MaterialConfig } from "./study-materials.ts";
 import type { MaterialReference, MaterialSource } from "../core/study-materials.ts";
 
@@ -66,6 +67,9 @@ export async function studyMaterialsResponse(request: Request): Promise<Response
 			return response(new StudyMaterials(await operation).status());
 		}
 		const service = new StudyMaterials(await readConfig());
+		if (body.op === "scanCourse" && typeof body.folder === "string") return response(await scanCourse(service.config.obsidianRoot ?? "",body.folder));
+		if (body.op === "courseLesson" && Array.isArray(body.ids) && body.ids.length && body.ids.every(id=>typeof id==="string") && typeof body.goal==="string") return response({prompt:await courseLesson(service.config.obsidianRoot ?? "",body.ids,body.goal)});
+		if (body.op === "openCourseNote" && typeof body.id==="string") {await openCourseNote(service.config.obsidianRoot ?? "",body.id);return response({ok:true});}
 		if (body.op === "status") return response(service.status());
 		if (body.op === "list") {
 			if (!sources.has(String(body.source))) throw new Error("Choose a supported material source.");
