@@ -6,6 +6,7 @@ import * as React from "react";
 const transcript = {
 	"chat-switch-next": "chat-switch-next",
 	"chat-switch-previous": "chat-switch-previous",
+	"chat-switch-enter": "chat-switch-enter",
 	default: "none",
 };
 const dock = {

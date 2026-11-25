@@ -1,4 +1,5 @@
 import { Home } from "@/components/home";
+import { ChatSwitchTransition } from "@/components/chat-switch-transition";
 import { readSettingsRecord } from "@/src/server";
 import { resolveSettings, slotsConfigured } from "@/src/core";
 
@@ -17,6 +18,8 @@ export default function HomePage() {
 	// section / absent key → factory default on); re-read per navigation.
 	const rendering = resolveSettings(record ?? null).graph.rendering;
 	return (
-		<Home initialConfigured={slotsConfigured(record?.models)} rendering={rendering} />
+		<ChatSwitchTransition part="transcript">
+			<Home initialConfigured={slotsConfigured(record?.models)} rendering={rendering} />
+		</ChatSwitchTransition>
 	);
 }

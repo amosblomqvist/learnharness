@@ -736,7 +736,9 @@ body {
 ::view-transition-new(.chat-switch-previous) { --chat-switch-offset: -100%; }
 ::view-transition-old(.chat-switch-previous),
 ::view-transition-new(.chat-switch-next) { --chat-switch-offset: 100%; }
-::view-transition-new(.chat-switch-enter) { --chat-switch-offset: 32px; }
+::view-transition-new(.chat-switch-enter) { --chat-switch-offset: 96px; }
+::view-transition-group(.chat-switch-enter) { animation: none; }
+::view-transition-old(.chat-switch-enter) { display: none; }
 
 ::view-transition-old(.chat-switch-next),
 ::view-transition-old(.chat-switch-previous) {
@@ -791,15 +793,33 @@ body {
 	transform: var(--chat-highlight-transform);
 	transform-origin: top left;
 	pointer-events: none;
+	visibility: hidden;
 }
 
+/* Overlap the row edge so adjacent accent fills stay solid at fractional scale. */
 [data-chat-highlight] button[data-session-id][aria-current="page"] {
-	background-color: transparent;
+	isolation: isolate;
+}
+
+[data-chat-highlight] button[data-session-id][aria-current="page"]::before {
+	content: "";
+	position: absolute;
+	inset: -1px 0;
+	z-index: -1;
+	background-color: var(--color-accent);
+	pointer-events: none;
 }
 
 @media (prefers-reduced-motion: no-preference) {
 	[data-chat-highlight-move]::before {
+		visibility: visible;
 		transition: transform var(--chat-switch-duration) var(--chat-switch-easing);
+	}
+	[data-chat-highlight-move] button[data-session-id][aria-current="page"] {
+		background-color: transparent;
+	}
+	[data-chat-highlight-move] button[data-session-id][aria-current="page"]::before {
+		display: none;
 	}
 }
 
