@@ -24,6 +24,7 @@ interface TranscriptJump extends TranscriptJumpWindow {
 }
 
 export interface VirtualTranscriptHandle {
+	positionInitialViewport(): void;
 	revealRow(index: number): Promise<HTMLElement | null>;
 	revealMessage(id: string): Promise<HTMLElement | null>;
 	scrollToBottom(): Promise<void>;
@@ -40,6 +41,8 @@ export function VirtualTranscript({ rows, handleRef, children, openingLayout, hi
 	const contextRef = useRef(context);
 	contextRef.current = context;
 	const root = useRef<HTMLDivElement>(null);
+	const positioning = useRef(false);
+	const firstFrame = useRef<number | null>(null);
 	const rowStates = useRef(new Map<string, Map<string, unknown>>());
 	const stateForRow = (key: string) => {
 		let state = rowStates.current.get(key);
@@ -186,6 +189,35 @@ export function VirtualTranscript({ rows, handleRef, children, openingLayout, hi
 		}
 	}, [width, virtualizer, context.scrollRef]);
 
+	const alignInitialViewport = useCallback(() => {
+		const scroll = contextRef.current;
+		if (!scroll.scrollRef.current || !root.current) return;
+		// Measure the small mounted window before the first paint. At startup
+		// the observer batch would otherwise correct estimates after a frame
+		// of the new chat has already been shown at the wrong offset.
+		const sizes = [...root.current.children].flatMap(element => {
+			if (element.hasAttribute("data-history-placeholder")) return [];
+			return [[Number((element as HTMLElement).dataset.index), Math.round(element.getBoundingClientRect().height)] as const];
+		});
+		for (const [index, size] of sizes) if (size > 0) virtualizer.resizeItem(index, size);
+		scroll.state.scrollTop = Math.max(0, scroll.state.targetScrollTop);
+	}, [virtualizer]);
+	const positionInitialViewport = useCallback(() => {
+		positioning.current = true;
+		alignInitialViewport();
+		firstFrame.current = requestAnimationFrame(() => {
+			positioning.current = false;
+			firstFrame.current = null;
+		});
+	}, [alignInitialViewport]);
+	useLayoutEffect(() => {
+		// Width and dock layout can require another commit in the same frame.
+		if (positioning.current) alignInitialViewport();
+	});
+	useLayoutEffect(() => () => {
+		if (firstFrame.current !== null) cancelAnimationFrame(firstFrame.current);
+	}, []);
+
 	const mounted = useRef(true);
 	useEffect(() => {
 		mounted.current = true;
@@ -259,9 +291,9 @@ export function VirtualTranscript({ rows, handleRef, children, openingLayout, hi
 		}
 		return null;
 	}, [slots.length, virtualizer]);
-	useImperativeHandle(handleRef, () => ({ revealRow, scrollToBottom,
+	useImperativeHandle(handleRef, () => ({ positionInitialViewport, revealRow, scrollToBottom,
 		revealMessage: id => revealRow(slots.findIndex(row => "sourceIds" in row && row.sourceIds.includes(id))),
-	}), [revealRow, slots, scrollToBottom]);
+	}), [positionInitialViewport, revealRow, slots, scrollToBottom]);
 
 	// An explicitly revealed row is retained only until the next user scroll.
 	// Focused controls and text selections must not disappear mid-interaction.

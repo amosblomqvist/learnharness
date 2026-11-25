@@ -363,6 +363,7 @@ export function Chat({
 	const textTarget = (): Extract<PluginSubmissionTarget, { type: "text" }> | undefined => surfaceTarget ? { type: "text", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget, channels: ["content"] } : undefined;
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
 	const virtualTranscriptRef = useRef<VirtualTranscriptHandle | null>(null);
+	useLayoutEffect(() => { virtualTranscriptRef.current?.positionInitialViewport(); }, []);
 	const rows = useMemo(() => transcriptRows(messages), [messages]);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
 	const newestTurnFrom = newestLearnerTurnFrom(messages);
@@ -1797,7 +1798,7 @@ export function Chat({
 					contextRef={scrollContextRef} aria-busy={historyLoading || undefined}>
 					{!historyLoading && <SessionMessageNavigation virtualTranscriptRef={virtualTranscriptRef} />}
 					<TranscriptElementReporter onElement={setTranscriptElement} />
-					<ConversationContent className="min-h-full gap-0 p-0">
+					<ConversationContent className="min-h-full gap-0 p-0" scrollClassName="overflow-auto">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
