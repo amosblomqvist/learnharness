@@ -2,6 +2,7 @@ import { mountLibraryTree } from './library-tree.js';
 import { createReviewController } from './review.js';
 import { mountDashboard } from './dashboard.js';
 import { buildPracticeCards } from './practice-queue.js';
+import { uuid } from './uuid.js';
 
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
@@ -11,7 +12,6 @@ const el = (tag, className, text) => {
 };
 const message = error => error instanceof Error ? error.message : String(error);
 const generationSummary = (source, tokens) => `${source} (approximately ${tokens.toLocaleString()} input tokens)`;
-const uuid = () => crypto.randomUUID();
 const flashcardsIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><path d="M7 4h12a1 1 0 0 1 1 1v12"/><rect x="3" y="8" width="14" height="13" rx="2"/><path d="M6 12h8M6 16h5"/></svg>';
 const trashIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/></svg>';
 const deletionBlocked = 'Wait for generation to finish or cancel it before deleting content.';

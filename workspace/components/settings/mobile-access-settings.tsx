@@ -33,10 +33,8 @@ export function MobileAccessSettings() {
 		{status?.available && <div className="mt-2 flex flex-col gap-3">
 			<div className="flex flex-wrap gap-2">
 				<Button variant="outline" size="sm" disabled={busy} onClick={() => { void command("refresh"); }}><RefreshCwIcon className="size-4" />Check connection</Button>
-				{status.url && <Button variant="outline" size="sm" onClick={() => { void copy("link", status.url!); }}>{copied === "link" ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}Copy private link</Button>}
 				{status.directUrl && <Button variant="outline" size="sm" onClick={() => { void copy("direct", status.directUrl!); }}>{copied === "direct" ? <CheckIcon className="size-4" /> : <CopyIcon className="size-4" />}Copy direct link</Button>}
 			</div>
-			{status.url && <a className="break-all rounded-lg border bg-background px-3 py-3 text-sm select-all" href={status.url} target="_blank" rel="noreferrer">{status.url}</a>}
 			{status.directUrl && <div className="flex flex-col gap-1">
 				<div className="flex flex-wrap items-start gap-3">
 					<MobileLinkQr link={status.directUrl} testid="mobile-direct-link-qr" />
@@ -44,12 +42,6 @@ export function MobileAccessSettings() {
 				</div>
 				<p className="text-xs text-muted-foreground">Direct link: works with Tailscale DNS off on the phone. It uses HTTP inside Tailscale&apos;s encrypted connection, so the browser may call it not secure.</p>
 			</div>}
-			{status.enabled && !status.serving && status.setupCommand && <details className="rounded-lg border p-3 text-xs">
-				<summary className="cursor-pointer">Set up Tailscale HTTPS</summary>
-				<p className="mt-3 text-muted-foreground">Run this command on the PC. It uses its own port and keeps other Tailscale sites running.</p>
-				<code className="my-3 block break-all select-all">{status.setupCommand}</code>
-				<Button variant="outline" size="sm" onClick={() => { void copy("setup", status.setupCommand!); }}>{copied === "setup" ? "Copied" : "Copy setup command"}</Button>
-			</details>}
 			{status.enabled && !status.directUrl && status.directSetupCommand && <details className="rounded-lg border p-3 text-xs">
 				<summary className="cursor-pointer">Set up a direct link without Tailscale DNS</summary>
 				<p className="mt-3 text-muted-foreground">Run this command on the PC, then check the connection. The link uses the PC&apos;s Tailscale IP address, so the phone doesn&apos;t need Tailscale DNS.</p>

@@ -1,4 +1,5 @@
 // Page-bound review, using only the public plugin UI and RPC contracts.
+import { uuid } from './uuid.js';
 const ratings = ["Again", "Hard", "Good", "Easy"];
 const ratingOptions = label => {
   const color = `var(--fc-rating-${label.toLowerCase()})`;
@@ -183,7 +184,7 @@ export function createReviewController({ ctx, signal, button, markdown, onRated 
                 focusOwned();
                 ratingBusy = true;
                 ratingButtons.forEach(handle => handle.update({ disabled: true }));
-                if (!requests.has(rating)) requests.set(rating, crypto.randomUUID());
+                if (!requests.has(rating)) requests.set(rating, uuid());
                 let accepted = false;
                 try {
                   // Do not cancel accepted work when the view closes. A transport

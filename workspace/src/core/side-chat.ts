@@ -38,6 +38,7 @@ import {
 	userFacingTextOf,
 } from "./native-messages.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
+import { randomHex } from "./random-id.ts";
 import { citationsToReadableText, collectCitations } from "./citations.ts";
 import { messageMarkdown } from "./session-markdown.ts";
 import { answeredOptionLetters } from "./answer-presentation.ts";
@@ -303,7 +304,7 @@ export function parseSideOpenInput(raw: unknown): boolean {
 // ─── threads ─────────────────────────────────────────────────────────────────
 
 export function newSideThreadId(): string {
-	return `side_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`;
+	return `side_${Date.now().toString(36)}_${randomHex(4)}`;
 }
 
 export function newSideThread(anchor: SideChatAnchor, at = new Date().toISOString()): SideChatThread {

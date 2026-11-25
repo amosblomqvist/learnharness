@@ -6,10 +6,10 @@ import type { MobileAccessStatus } from "@/lib/mobile-access";
 import { MOBILE_STATUS_EVENT, copyText, mobileQrLink, mobileShareLink, mobileStatus } from "@/components/mobile-runtime";
 import { MobileLinkQr } from "@/components/mobile-link-qr";
 
-/** Home's Mobile Access link: a copy pill plus, when a direct link exists, a QR
- * button whose panel shows the direct link as a scannable code. It renders only on the PC while Mobile
- * Access is on and a link exists: HTTPS when Tailscale Serve is up, otherwise
- * the direct link. Settings and window focus keep it current. */
+/** Home's Mobile Access link: a copy pill for the direct link plus a QR button
+ * whose panel shows it as a scannable code. It renders only on the PC while
+ * Mobile Access is on and the direct link is ready. Settings and window focus
+ * keep it current. */
 export function MobileLinkPill() {
 	const [status, setStatus] = useState<MobileAccessStatus | undefined>();
 	const [state, setState] = useState<"idle" | "copied" | "failed">("idle");

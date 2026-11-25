@@ -4,17 +4,18 @@ import { mobileShareLink } from "../components/mobile-runtime";
 
 const base = { available: true, enabled: true, remote: false, message: "" };
 
-test("home mobile link prefers HTTPS once Tailscale Serve is up", () => {
-	assert.equal(mobileShareLink({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" }), "https://pc.ts.net:9443");
+test("home mobile link shows the direct link even when Tailscale Serve HTTPS is up", () => {
+	assert.equal(mobileShareLink({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" }), "http://100.1.2.3:9081");
+	assert.equal(mobileShareLink({ ...base, serving: false, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" }), "http://100.1.2.3:9081");
 });
 
-test("home mobile link falls back to the direct link when HTTPS is not serving", () => {
-	assert.equal(mobileShareLink({ ...base, serving: false, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" }), "http://100.1.2.3:9081");
+test("home mobile link never falls back to the HTTPS link", () => {
+	assert.equal(mobileShareLink({ ...base, serving: true, url: "https://pc.ts.net:9443", directUrl: null }), null);
 	assert.equal(mobileShareLink({ ...base, serving: false, url: "https://pc.ts.net:9443", directUrl: null }), null);
 });
 
 test("home mobile link is hidden when off, unavailable, or on the phone", () => {
-	const ready = { serving: true, url: "https://pc.ts.net:9443" };
+	const ready = { serving: true, url: "https://pc.ts.net:9443", directUrl: "http://100.1.2.3:9081" };
 	assert.equal(mobileShareLink(undefined), null);
 	assert.equal(mobileShareLink({ ...base, ...ready, enabled: false }), null);
 	assert.equal(mobileShareLink({ ...base, ...ready, available: false }), null);

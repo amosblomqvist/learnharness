@@ -36,15 +36,16 @@ export async function mobileCommand(op: string, fields: Record<string, unknown> 
 /** Settings announces each Mobile Access status change so the home link stays current. */
 export const MOBILE_STATUS_EVENT = "lh:mobile-access-status";
 export function announceMobileStatus(status: MobileAccessStatus) { window.dispatchEvent(new CustomEvent<MobileAccessStatus>(MOBILE_STATUS_EVENT, { detail: status })); }
-/** The link the home pill copies: HTTPS when Tailscale Serve is up, else the direct link. */
+/** The link the home pill copies: only the direct link, since it needs no
+ * Tailscale DNS on the phone. The HTTPS (ts.net) link is never shown, even
+ * when Tailscale Serve still forwards it. Null hides the pill. */
 export function mobileShareLink(status: MobileAccessStatus | undefined): string | null {
 	if (!status?.available || !status.enabled || status.remote) return null;
-	return (status.serving && status.url) || status.directUrl || null;
+	return status.directUrl || null;
 }
-/** The link the QR codes encode: only the direct link, since it needs no
- * Tailscale DNS on the phone. Null hides the home QR button. */
+/** The link the QR codes encode: the same direct link. Null hides the home QR button. */
 export function mobileQrLink(status: MobileAccessStatus | undefined): string | null {
-	return mobileShareLink(status) ? status?.directUrl || null : null;
+	return mobileShareLink(status);
 }
 export async function copyText(value: string): Promise<boolean> {
 	try { await navigator.clipboard.writeText(value); return true; }

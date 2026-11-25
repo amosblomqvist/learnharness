@@ -71,4 +71,23 @@ export default defineConfig([
 			],
 		},
 	},
+	{
+		// Browser-facing code: crypto.randomUUID exists only in secure contexts,
+		// and the phone's direct link is plain HTTP, so it is undefined there.
+		// Use randomHex (src/core/random-id.ts) or getRandomValues instead.
+		// Node-side code (src/server, src/store, src/agent, plugin backends)
+		// may keep using randomUUID.
+		files: ["components/**/*.{ts,tsx}", "src/core/**/*.ts", "plugins/*/src/**/*.{js,mjs,ts,tsx}"],
+		ignores: ["plugins/*/src/backend.*"],
+		rules: {
+			"no-restricted-properties": [
+				"error",
+				{
+					object: "crypto",
+					property: "randomUUID",
+					message: "crypto.randomUUID is undefined over the phone's plain-HTTP link (not a secure context). Use randomHex from src/core/random-id.ts, or crypto.getRandomValues.",
+				},
+			],
+		},
+	},
 ]);

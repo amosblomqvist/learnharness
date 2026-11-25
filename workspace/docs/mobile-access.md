@@ -4,41 +4,31 @@ The phone browser uses the running desktop app's server, models, settings, graph
 
 ## Connect through Tailscale
 
+The phone opens LearnHarness through a direct link that uses the PC's Tailscale IPv4 address, so it works with **Use Tailscale DNS** off on the phone.
+
 1. Connect the PC and iPhone to Tailscale using the same personal account.
 2. In LearnHarness on the PC, open **Settings → General → Mobile Access** and enable it.
 3. Run the setup command shown there on the PC:
 
    ```sh
-   tailscale serve --bg --https=9443 http://127.0.0.1:4397
+   tailscale serve --bg --tcp=9081 --proxy-protocol=1 tcp://127.0.0.1:4398
    ```
 
-4. Select **Check connection**, then **Copy private link**. Open the link in Safari on the iPhone. You can also use Safari's **Add to Home Screen**.
+4. Select **Check connection**, then **Copy direct link**. The link looks like `http://100.x.y.z:9081`. Paste the full `http://` link into Safari on the iPhone. You can also use Safari's **Add to Home Screen**.
 
-While Mobile Access is on, the home page also shows the link at the top middle of the window; select it to copy, or, once the direct link is set up, select the QR button beside it and scan the code with the phone's camera. The QR code always opens the direct link, because it works without Tailscale DNS on the phone (the HTTPS name doesn't resolve with it off). Settings → Mobile Access shows the same QR code beside the direct link. The home link shows the HTTPS link once Tailscale Serve is running, otherwise the direct link below, and it's hidden when neither link is ready.
+While Mobile Access is on and the direct link is ready, the home page also shows the link at the top middle of the window. Select it to copy, or select the QR button beside it and scan the code with the phone's camera. Settings → Mobile Access shows the same QR code beside the link. The home link is hidden until the direct link is ready.
 
-The HTTPS link is `https://<your-PC>.<your-tailnet>.ts.net:9443`. Enable Tailscale DNS on the phone so that name resolves. HTTPS is needed for browser clipboard access.
-
-## Use a direct link without Tailscale DNS
-
-The direct link uses the PC's Tailscale IPv4 address, so it works with **Use Tailscale DNS** off on the phone. Set it up alongside the HTTPS link by running this on the PC:
-
-```sh
-tailscale serve --bg --tcp=9081 --proxy-protocol=1 tcp://127.0.0.1:4398
-```
-
-Select **Check connection**, then **Copy direct link**. The link looks like `http://100.x.y.z:9081`. Connect Tailscale on the phone with the same account as the PC and paste the full `http://` link into the browser.
-
-Traffic still travels inside Tailscale's encrypted connection, but the page itself is plain HTTP, so the browser may label it not secure. Tailscale passes each connection's tailnet address to LearnHarness using the PROXY protocol. LearnHarness accepts a connection only from untagged, unexpired devices on the PC's account, and it checks that list on every request.
-
-Remove only this endpoint with `tailscale serve --tcp=9081 off`.
-
-Port 9443 is separate from other Tailscale sites on 443 or 8443. If 9443 already serves something else, resolve that conflict before running the command. The setup command configures a private Tailscale Serve endpoint. The gateway requires the same Tailscale user as the PC; Funnel and tagged-device identity are not supported.
+Traffic still travels inside Tailscale's encrypted connection, but the page itself is plain HTTP, so the browser may label it not secure, and browser features that need a secure context (such as the browser clipboard API) are unavailable on the phone. Tailscale passes each connection's tailnet address to LearnHarness using the PROXY protocol. LearnHarness accepts a connection only from untagged, unexpired devices on the PC's account, and it checks that list on every request. The gateway requires the same Tailscale user as the PC; Funnel and tagged-device identity are not supported.
 
 Turn **Mobile Access** off to stop phone connections and close active streams. The preference is remembered on this PC, and an enabled gateway starts when the desktop app starts. Remove only this Tailscale endpoint with:
 
 ```sh
-tailscale serve --https=9443 off
+tailscale serve --tcp=9081 off
 ```
+
+### Earlier HTTPS link
+
+Earlier versions also showed an HTTPS link (`https://<your-PC>.<your-tailnet>.ts.net:9443`, which needs Tailscale DNS on the phone). The app no longer shows or sets it up. If you configured it before, the gateway still serves it while Mobile Access is on. Remove it with `tailscale serve --https=9443 off`.
 
 ## Use the phone interface
 
