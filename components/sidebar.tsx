@@ -11,6 +11,7 @@ import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
 import { BrailleSpinner } from "@/components/braille-spinner";
+import { finishChatSwitchAnimation } from "@/components/chat-switch-transition";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { SettingsDialogProvider, useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
 import { Hint } from "@/components/ui/hint";
@@ -479,10 +480,17 @@ function SessionsSidebar() {
 	const shown = useMemo(() => rows?.flatMap((r) => r.type === "session" ? [r.session] : []) ?? null, [rows]);
 	const openChat = (chatId: string) => {
 		const target = `/chat/${chatId}`;
-		const from = shown?.findIndex(chat => pathname === `/chat/${chat.id}`) ?? -1;
-		const to = shown?.findIndex(chat => chat.id === chatId) ?? -1;
+		let from = shown?.findIndex(chat => pathname === `/chat/${chat.id}`) ?? -1;
+		let to = shown?.findIndex(chat => chat.id === chatId) ?? -1;
+		// Search and closed folders can hide the currently open chat.
+		if (from < 0 && chats && pathname.startsWith("/chat/")) {
+			const all = flattenSessionTree(buildSessionTree(chats, organization, { query: "" }), () => true);
+			from = all.findIndex(row => row.type === "session" && pathname === `/chat/${row.session.id}`);
+			to = all.findIndex(row => row.type === "session" && row.session.id === chatId);
+		}
 		const type = from < 0 || to < 0 ? "chat-switch-enter" : from < to ? "chat-switch-next" : "chat-switch-previous";
 		const motion = target !== pathname && !window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+		if (target !== pathname) finishChatSwitchAnimation();
 		router.push(target, motion ? { transitionTypes: [type] } : undefined);
 	};
 
@@ -607,7 +615,20 @@ function SessionsSidebar() {
 		const previous = previousHighlight.current;
 		const transform = `translate(${target.left - bounds.left}px, ${target.top - bounds.top}px) scale(${target.width}, ${target.height})`;
 		if (root.style.getPropertyValue("--chat-highlight-transform") !== transform) {
-			root.toggleAttribute("data-chat-highlight-move", previous?.root === root && previous.pathname !== pathname);
+			const switching = previous?.root === root && previous.pathname !== pathname;
+			const moving = previous?.root === root && root.hasAttribute("data-chat-highlight-move");
+			root.style.removeProperty("--chat-highlight-duration");
+			if (moving && !switching) {
+				// The list can refresh during a switch. Retarget from the painted
+				// position using the remaining time instead of snapping to the row.
+				const animation = root.getAnimations({ subtree: true }).find(({ effect }) =>
+					effect instanceof KeyframeEffect && effect.target === root && effect.pseudoElement === "::before");
+				const end = animation?.effect?.getComputedTiming().endTime;
+				if (typeof end === "number" && typeof animation?.currentTime === "number") {
+					root.style.setProperty("--chat-highlight-duration", `${Math.max(16, end - animation.currentTime)}ms`);
+				}
+			}
+			root.toggleAttribute("data-chat-highlight-move", switching || moving);
 			root.style.setProperty("--chat-highlight-transform", transform);
 		}
 		root.setAttribute("data-chat-highlight", "");

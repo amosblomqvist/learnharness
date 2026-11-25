@@ -10,11 +10,22 @@ const transcript = {
 	default: "none",
 };
 const dock = {
-	"chat-switch-next": "chat-switch-dock",
-	"chat-switch-previous": "chat-switch-dock",
-	"chat-switch-enter": "chat-switch-dock",
+	"chat-switch-next": "chat-switch-dock-down",
+	"chat-switch-previous": "chat-switch-dock-up",
+	"chat-switch-enter": "chat-switch-dock-down",
 	default: "none",
 };
+
+/** React waits for a running view transition before committing another one. */
+export function finishChatSwitchAnimation() {
+	if (!document.startViewTransition) return;
+	for (const animation of document.getAnimations()) {
+		const effect = animation.effect;
+		if (effect instanceof KeyframeEffect && /^::view-transition-[\w-]+\(chat-switch-(transcript|dock)\)$/.test(effect.pseudoElement ?? "")) {
+			animation.finish();
+		}
+	}
+}
 
 /** Animate the captured viewport while its real scroll layout stays put. */
 export function ChatSwitchTransition({ part, children }: { part: "transcript" | "dock"; children: React.ReactNode }) {

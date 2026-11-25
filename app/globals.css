@@ -762,24 +762,45 @@ body {
 }
 
 /* The dock keeps its bottom edge while its captured height changes. */
-::view-transition-group(.chat-switch-dock) {
+::view-transition-group(.chat-switch-dock-down),
+::view-transition-group(.chat-switch-dock-up) {
+	--chat-switch-dock-folded: inset(calc(100% - 3.5rem) 0 0);
 	z-index: 1;
 	overflow: clip;
 	animation-duration: var(--chat-switch-duration);
 	animation-timing-function: var(--chat-switch-easing);
 }
 
-::view-transition-old(.chat-switch-dock) { display: none; }
+::view-transition-old(.chat-switch-dock-down) { display: none; }
 
-::view-transition-new(.chat-switch-dock) {
+::view-transition-new(.chat-switch-dock-down),
+::view-transition-new(.chat-switch-dock-up),
+::view-transition-old(.chat-switch-dock-up) {
 	inset-block: auto 0;
 	height: auto;
-	animation: chat-switch-dock-in var(--chat-switch-duration) var(--chat-switch-easing) both;
 	mix-blend-mode: normal;
 }
 
-@keyframes chat-switch-dock-in {
-	from { opacity: 0.6; transform: translateY(12px); }
+::view-transition-new(.chat-switch-dock-down) {
+	animation: chat-switch-dock-unfold var(--chat-switch-duration) var(--chat-switch-easing) both;
+}
+
+::view-transition-new(.chat-switch-dock-up) { animation: none; }
+
+::view-transition-old(.chat-switch-dock-up) {
+	z-index: 1;
+	animation: chat-switch-dock-fold var(--chat-switch-duration) var(--chat-switch-easing) both;
+}
+
+@keyframes chat-switch-dock-unfold {
+	from { clip-path: var(--chat-switch-dock-folded); }
+	to { clip-path: inset(0); }
+}
+
+@keyframes chat-switch-dock-fold {
+	from { clip-path: inset(0); }
+	70% { clip-path: var(--chat-switch-dock-folded); opacity: 1; }
+	to { clip-path: var(--chat-switch-dock-folded); opacity: 0; }
 }
 
 [data-chat-highlight]::before {
@@ -813,7 +834,7 @@ body {
 @media (prefers-reduced-motion: no-preference) {
 	[data-chat-highlight-move]::before {
 		visibility: visible;
-		transition: transform var(--chat-switch-duration) var(--chat-switch-easing);
+		transition: transform var(--chat-highlight-duration, var(--chat-switch-duration)) var(--chat-switch-easing);
 	}
 	[data-chat-highlight-move] button[data-session-id][aria-current="page"] {
 		background-color: transparent;
