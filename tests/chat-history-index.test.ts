@@ -5,6 +5,7 @@ import path from "node:path";
 import { after, test } from "node:test";
 import { readChatHistoryIndex, rebuildChatHistoryIndex } from "../src/store/chat-history-index.ts";
 import { newUserMessage } from "../src/core/native-messages.ts";
+import { transcriptOpeningLayout } from "../src/core/transcript-layout.ts";
 
 const data = fs.mkdtempSync(path.join(os.tmpdir(), "lh-history-index-"));
 process.env.LH_DATA_DIR = data;
@@ -36,6 +37,7 @@ test("warm open reads a bounded byte range from the original, with one offset pe
 	t.mock.method(fs, "readFileSync", () => { throw new Error("Indexed opening must not call readFileSync"); });
 	assert.deepEqual(getChatOpening(chat.id), {
 		id: chat.id, title: chat.title, kind: "practice", messages: messages.slice(-40), partial: true,
+		openingLayout: transcriptOpeningLayout(messages),
 	});
 	assert.ok(sourceBytes > 0 && sourceBytes < fileSize / 10, `read ${sourceBytes} of ${fileSize} bytes`);
 	const tail = readChatHistoryIndex(file, { limit: 4, maxBytes: 128 * 1024 })!;

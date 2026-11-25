@@ -3,6 +3,7 @@ import type { FileHandle } from "node:fs/promises";
 import { Tokenizer, TokenType } from "@streamparser/json";
 import { CURRENT_CHAT_VERSION, type ChatRecord } from "../core/contracts/chat.ts";
 import type { LhMessage } from "../core/native-messages.ts";
+import { transcriptOpeningLayout, type TranscriptRowSize } from "../core/transcript-layout.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 const FORMAT = 1;
@@ -16,6 +17,7 @@ interface HistoryIndex {
 	revision: string;
 	offsets: number[];
 	fields: Record<string, unknown>;
+	opening?: TranscriptRowSize[] | null;
 }
 
 function revisionOf({ dev, ino, size, mtimeNs, ctimeNs }: fs.BigIntStats): string {
@@ -61,36 +63,48 @@ async function locate(source: FileHandle) {
 	return { offsets, fields };
 }
 
-async function buildIndex(file: string): Promise<void> {
+type OpeningSnapshot = { revision: string; messages: readonly LhMessage[] };
+
+async function buildIndex(file: string, snapshot: OpeningSnapshot | undefined): Promise<void> {
 	try {
-		const source = await fs.promises.open(file, "r");
+		const source = await fs.promises.open(/* turbopackIgnore: true */ file, "r");
 		try {
 			const revision = revisionOf(await source.stat({ bigint: true }));
 			const layout = await locate(source);
-			const text = JSON.stringify({ format: FORMAT, revision, ...layout } satisfies HistoryIndex);
+			const opening = snapshot?.revision === revision && snapshot.messages.length === layout.offsets.length - 1
+				? transcriptOpeningLayout(snapshot.messages) : undefined;
+			const text = JSON.stringify({ format: FORMAT, revision, ...layout, opening } satisfies HistoryIndex);
 			if (Buffer.byteLength(text) > MAX_INDEX_BYTES) return;
-			if (revision === revisionOf(fs.statSync(file, { bigint: true }))) writeFileAtomicSync(indexFile(file), text);
+			if (revision === revisionOf(fs.statSync(/* turbopackIgnore: true */ file, { bigint: true }))) writeFileAtomicSync(indexFile(file), text);
 		} finally { await source.close(); }
 	} catch {
 		// The canonical record remains available without the index.
 	}
 }
 
-const pendingBuilds = new Map<string, { dirty: boolean; done: Promise<void> }>();
+const pendingBuilds = new Map<string, { dirty: boolean; done: Promise<void>; snapshot?: OpeningSnapshot }>();
 
 /** Refresh after the canonical save returns. A burst of saves shares one
  * scan, with one more pass if the file changed while it was being read. */
-export function rebuildChatHistoryIndex(file: string, changed = false): Promise<void> {
+export function rebuildChatHistoryIndex(file: string, changed = false, messages?: readonly LhMessage[]): Promise<void> {
+	let snapshot: OpeningSnapshot | undefined;
+	if (messages) {
+		try { snapshot = { revision: revisionOf(fs.statSync(/* turbopackIgnore: true */ file, { bigint: true })), messages }; }
+		catch { return Promise.resolve(); }
+	}
 	const pending = pendingBuilds.get(file);
 	if (pending) {
-		pending.dirty ||= changed;
+		if (changed || (snapshot && !pending.snapshot)) {
+			pending.dirty = true;
+			pending.snapshot = snapshot;
+		}
 		return pending.done;
 	}
-	const job = { dirty: false, done: Promise.resolve() };
+	const job = { dirty: false, done: Promise.resolve(), snapshot };
 	job.done = (async () => {
 		do {
 			job.dirty = false;
-			await buildIndex(file);
+			await buildIndex(file, job.snapshot);
 		} while (job.dirty);
 	})().finally(() => pendingBuilds.delete(file));
 	pendingBuilds.set(file, job);
@@ -109,7 +123,7 @@ function readRange(fd: number, start: number, length: number): Buffer {
 }
 
 function readIndex(file: string): HistoryIndex | null {
-	const fd = fs.openSync(indexFile(file), "r");
+	const fd = fs.openSync(/* turbopackIgnore: true */ indexFile(file), "r");
 	try {
 		const { size } = fs.fstatSync(fd);
 		if (size <= 0 || size > MAX_INDEX_BYTES) return null;
@@ -124,6 +138,7 @@ export interface IndexedChatHistory {
 	start: number;
 	total: number;
 	revision: string;
+	opening?: TranscriptRowSize[] | null;
 }
 
 /** before is an exclusive native message ordinal, defaulting to the tail.
@@ -136,7 +151,7 @@ export function readChatHistoryIndex(
 	try {
 		const index = readIndex(file);
 		if (!index) return null;
-		const source = fs.openSync(file, "r");
+		const source = fs.openSync(/* turbopackIgnore: true */ file, "r");
 		try {
 			const info = fs.fstatSync(source, { bigint: true });
 			const revision = revisionOf(info);
@@ -157,14 +172,16 @@ export function readChatHistoryIndex(
 			const slice = start === end ? "" : readRange(source, from, stop - from).toString("utf8").trimEnd().replace(/,$/, "");
 			const messages = JSON.parse(`[${slice}]`) as LhMessage[];
 			if (messages.length !== end - start || revision !== revisionOf(fs.fstatSync(source, { bigint: true }))) return null;
-			return { chat: { id, title, kind }, messages, start, total, revision };
+			const opening = index.opening;
+			if (opening && (!Array.isArray(opening) || opening.some(row => !Array.isArray(row) || typeof row[0] !== "string" || !Number.isFinite(row[1]) || row[1] <= 0))) return null;
+			return { chat: { id, title, kind }, messages, start, total, revision, opening };
 		} finally { fs.closeSync(source); }
 	} catch { return null; }
 }
 
 export function deleteChatHistoryIndex(file: string): void {
 	try {
-		fs.unlinkSync(indexFile(file));
+		fs.unlinkSync(/* turbopackIgnore: true */ indexFile(file));
 	} catch (error) {
 		if ((error as NodeJS.ErrnoException).code !== "ENOENT") console.warn("[store] could not remove chat history index:", error);
 	}

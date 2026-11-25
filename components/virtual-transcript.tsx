@@ -4,6 +4,7 @@ import { memo, useCallback, useEffect, useImperativeHandle, useLayoutEffect, use
 import { flushSync } from "react-dom";
 import { measureElement, useVirtualizer, type Range, type Virtualizer } from "@tanstack/react-virtual";
 import { useStickToBottomContext } from "use-stick-to-bottom";
+import type { TranscriptRowSize } from "@/src/core";
 import { estimateTranscriptRow, type TranscriptRow } from "./transcript-rows";
 import { TranscriptRowState } from "./transcript-row-state";
 import { TRANSCRIPT_OVERSCAN, transcriptJumpWindow, transcriptJumpRestoreOffset, transcriptJumpTravel, type TranscriptJumpWindow } from "./transcript-jump";
@@ -28,10 +29,12 @@ export interface VirtualTranscriptHandle {
 	scrollToBottom(): Promise<void>;
 }
 
-export function VirtualTranscript({ rows, handleRef, children }: {
+export function VirtualTranscript({ rows, handleRef, children, openingLayout, historyLoading }: {
 	rows: readonly TranscriptRow[];
 	handleRef: RefObject<VirtualTranscriptHandle | null>;
 	children: (row: TranscriptRow) => ReactNode;
+	openingLayout?: readonly TranscriptRowSize[];
+	historyLoading?: boolean;
 }) {
 	const context = useStickToBottomContext();
 	const contextRef = useRef(context);
@@ -63,10 +66,19 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 			if (!scrollbar.dragRef.current && !jumpRef.current) readingAnchor.current = transcriptReadingAnchor(root.current, contextRef.current.scrollRef.current);
 			callback(offset, scrolling);
 		}), [scrollbar.observeOffset, scrollbar.dragRef]);
-	const estimates = useMemo(() => rows.map(row => estimateTranscriptRow(row, width)), [rows, width]);
+	const slots = useMemo(() => {
+		if (!historyLoading || !openingLayout) return rows;
+		const available = new Map(rows.map(row => [row.key, row]));
+		return openingLayout.map(([key, height]) => available.get(key) ?? { key, height });
+	}, [rows, openingLayout, historyLoading]);
+	const openingSizes = useMemo(() => new Map(openingLayout), [openingLayout]);
+	// Use one set of coordinates through adoption. Replacing a placeholder
+	// with an actual row changes only that row's measured size.
+	const estimates = useMemo(() => slots.map(row => "height" in row ? row.height :
+		openingSizes.get(row.key) ?? estimateTranscriptRow(row, width)), [slots, openingSizes, width]);
 	const estimatedTotal = useMemo(() => estimates.reduce((total, height) => total + height, 0), [estimates]);
 	const getScrollElement = useCallback(() => context.scrollRef.current, [context.scrollRef]);
-	const getItemKey = useCallback((index: number) => rows[index]!.key, [rows]);
+	const getItemKey = useCallback((index: number) => slots[index]!.key, [slots]);
 	const estimateSize = useCallback((index: number) => estimates[index]!, [estimates]);
 	const measureRow = useCallback((element: Element, entry: ResizeObserverEntry | undefined, instance: Virtualizer<HTMLElement, Element>) => {
 		// React mounts every row before the observer's batched border-box
@@ -82,14 +94,14 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		const instance = virtualizerRef.current;
 		const indexes = new Set(jump ? [] : transcriptWindow(range, instance?.measurementsCache ?? [], instance?.scrollRect?.height ?? 900));
 		if (jump) {
-			for (let index = jump.sourceStart; index <= jump.sourceEnd && index < rows.length; index++) indexes.add(index);
-			for (let index = jump.tailStart; index < rows.length; index++) indexes.add(index);
+			for (let index = jump.sourceStart; index <= jump.sourceEnd && index < slots.length; index++) indexes.add(index);
+			for (let index = jump.tailStart; index < slots.length; index++) indexes.add(index);
 		}
-		for (const index of [...interactionRows, ...(pinned === null ? [] : [pinned])]) if (index < rows.length) indexes.add(index);
+		for (const index of [...interactionRows, ...(pinned === null ? [] : [pinned])]) if (index < slots.length) indexes.add(index);
 		return [...indexes].sort((a, b) => a - b);
-	}, [jump, interactionRows, pinned, rows.length]);
+	}, [jump, interactionRows, pinned, slots.length]);
 	const virtualizer = useVirtualizer({
-		count: rows.length,
+		count: slots.length,
 		getScrollElement, getItemKey, estimateSize,
 		observeElementOffset: observeOffset,
 		measureElement: measureRow,
@@ -209,7 +221,7 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		const element = scroll.scrollRef.current;
 		if (!element) return;
 		const window = transcriptJumpWindow(virtualizer.getVirtualItems(), element.scrollTop, element.clientHeight,
-			scroll.state.targetScrollTop, rows.length, index => virtualizer.getOffsetForIndex(index, "start")?.[0] ?? 0);
+			scroll.state.targetScrollTop, slots.length, index => virtualizer.getOffsetForIndex(index, "start")?.[0] ?? 0);
 		if (!window) { await scroll.scrollToBottom(); return; }
 		scroll.stopScroll();
 		const preparing: TranscriptJump = { ...window, id: ++jumpSequence.current, phase: "prepare", from: element.scrollTop };
@@ -232,9 +244,9 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 		jumpFrame.current = requestAnimationFrame(frame);
 		const completed = await completion;
 		if (mounted.current && jumpRef.current?.id === preparing.id) finishJump(completed);
-	}, [virtualizer, rows.length, finishJump, updateJumpPositions]);
+	}, [virtualizer, slots.length, finishJump, updateJumpPositions]);
 	const revealRow = useCallback(async (index: number): Promise<HTMLElement | null> => {
-		if (index < 0 || index >= rows.length) return null;
+		if (index < 0 || index >= slots.length) return null;
 		cancelJumpRef.current();
 		contextRef.current.stopScroll();
 		setPinned(index);
@@ -246,10 +258,10 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 			if (element) return element;
 		}
 		return null;
-	}, [rows, virtualizer]);
+	}, [slots.length, virtualizer]);
 	useImperativeHandle(handleRef, () => ({ revealRow, scrollToBottom,
-		revealMessage: id => revealRow(rows.findIndex(row => row.sourceIds.includes(id))),
-	}), [revealRow, rows, scrollToBottom]);
+		revealMessage: id => revealRow(slots.findIndex(row => "sourceIds" in row && row.sourceIds.includes(id))),
+	}), [revealRow, slots, scrollToBottom]);
 
 	// An explicitly revealed row is retained only until the next user scroll.
 	// Focused controls and text selections must not disappear mid-interaction.
@@ -287,12 +299,20 @@ export function VirtualTranscript({ rows, handleRef, children }: {
 	}, [context.scrollRef]);
 
 	const scrollbarOffset = scrollbar.contentOffset();
-	return <div ref={root} data-virtual-transcript="" data-row-count={rows.length} data-transcript-jump={shift ? "" : undefined} data-transcript-drag={scrollbar.drag ? "" : undefined}
+	return <div ref={root} data-virtual-transcript="" data-row-count={slots.length} data-transcript-jump={shift ? "" : undefined} data-transcript-drag={scrollbar.drag ? "" : undefined}
 		style={{ height: scrollbar.drag?.height ?? virtualizer.getTotalSize(), overflow: scrollbar.drag ? "clip" : undefined, position: "relative", width: "100%", overflowAnchor: "none" }}>
-		{items.map(item => <div key={item.key} ref={virtualizer.measureElement} data-index={item.index} data-transcript-row={item.index} data-session-find-root=""
-			className="flex min-w-0 flex-col gap-4"
-			style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start - scrollMargin + scrollbarOffset}px)`, paddingBottom: rows[item.index]!.gapAfter }}>
-			<TranscriptRowBody row={rows[item.index]!} state={stateForRow(rows[item.index]!.key)} render={children} />
-		</div>)}
+		{items.map(item => {
+			const row = slots[item.index]!;
+			const placeholder = "height" in row;
+			return <div key={item.key} ref={placeholder ? undefined : virtualizer.measureElement} data-index={item.index}
+				data-transcript-row={item.index} data-session-find-root="" data-history-placeholder={placeholder ? "" : undefined}
+				inert={historyLoading && !placeholder ? true : undefined} aria-hidden={placeholder || undefined}
+				className="flex min-w-0 flex-col gap-4"
+				style={{ position: "absolute", top: 0, left: 0, width: "100%", transform: `translateY(${item.start - scrollMargin + scrollbarOffset}px)`,
+					height: placeholder ? item.size : undefined, paddingBottom: placeholder ? undefined : row.gapAfter }}>
+				{placeholder ? <div className="mt-4 h-3 w-1/2 rounded bg-muted" />
+					: <TranscriptRowBody row={row} state={stateForRow(row.key)} render={children} />}
+			</div>;
+		})}
 	</div>;
 }

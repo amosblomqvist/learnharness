@@ -83,6 +83,8 @@ import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
 import { isSubagentSteer, newestLearnerTurnFrom, transcriptRows } from "./transcript-rows";
 import { VirtualTranscript, type VirtualTranscriptHandle } from "./virtual-transcript";
+import { useChatOpening, type ChatSeed } from "./chat-opening";
+import { projectView, type TranscriptRowSize } from "@/src/core";
 import { SelectionToolbar } from "@/components/selection-toolbar";
 import { createCiteAction, type CitationEditTarget } from "@/components/citation-actions";
 import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
@@ -269,6 +271,7 @@ export function Chat({
 	chatId,
 	title,
 	initialMessages,
+	openingLayout,
 	initialError,
 	initialPrompt,
 	initiallyInFlight,
@@ -279,6 +282,7 @@ export function Chat({
 	chatId: string;
 	title: string;
 	initialMessages: LhMessage[];
+	openingLayout?: readonly TranscriptRowSize[];
 	/** Memory-only settlement notice supplied on reopening. */
 	initialError?: string;
 	/** The session kind (practice sessions, owner 2026-10-04): practice
@@ -299,6 +303,7 @@ export function Chat({
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
 }) {
+	const [historyLoading, setHistoryLoading] = useState(!!openingLayout);
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
@@ -310,13 +315,15 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, readStats, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
-		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
+	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, readStats, messages: sessionMessages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled, setMessages } =
+		useChatSession({ chatId, initialMessages: openingLayout ? [] : initialMessages, initialError: openingLayout ? undefined : initialError, initiallyInFlight });
+	const openingMessages = useMemo(() => openingLayout ? projectView(initialMessages) : [], [initialMessages, openingLayout]);
+	const messages = historyLoading ? openingMessages : sessionMessages;
 
 	const controller = useOptionalInteractionLayers();
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const pathname = usePathname();
-	const surfaceTarget = usePageSurfaceBoundary({ active: pathname === `/chat/${encodeURIComponent(chatId)}`, viewKey: chatId, bodyRef: sessionFindScopeRef });
+	const surfaceTarget = usePageSurfaceBoundary({ active: !historyLoading && pathname === `/chat/${encodeURIComponent(chatId)}`, viewKey: chatId, bodyRef: sessionFindScopeRef });
 	const { manager: pluginManager } = usePlugins();
 	const [, submissionChanged] = useState(0);
 	const [preparationError, setPreparationError] = useState<string>();
@@ -336,6 +343,7 @@ export function Chat({
 	const submissionLive = useRef({ nativeMessages, surfaceTarget, ready: true });
 	submissionLive.current = { nativeMessages, surfaceTarget, ready: true };
 	const runSubmission = async (target: PluginSubmissionTarget, capture: () => PluginSubmission | Promise<PluginSubmission>, current: () => boolean, deliver: (prepared: PluginSubmission, attempt: SubmissionAttempt) => Promise<boolean>): Promise<boolean> => {
+		if (historyLoading) return false;
 		const modelRevision = submissionModel.capture();
 		const attempt = submissionRunner.begin(target, pluginManager?.captureSubmissionInterceptors() ?? [], () => submissionMounted.current && submissionModel.isCurrent(modelRevision) && submissionLive.current.surfaceTarget === target.surfaceTarget && !!findSurfaceBoundary(target.surfaceTarget) && current());
 		if (!attempt) return false;
@@ -358,7 +366,8 @@ export function Chat({
 	const rows = useMemo(() => transcriptRows(messages), [messages]);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
 	const newestTurnFrom = newestLearnerTurnFrom(messages);
-	const sideEntries = useMemo(() => sideEntryPoints(nativeMessages, messages), [nativeMessages, messages]);
+	const displayedNativeMessages = historyLoading ? initialMessages : nativeMessages;
+	const sideEntries = useMemo(() => sideEntryPoints(displayedNativeMessages, messages), [displayedNativeMessages, messages]);
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
 	setReattachSettled(() => reattachSettledRef.current());
@@ -555,11 +564,10 @@ export function Chat({
 	// it; the poll below resumes instead).
 	const mountContinuation = useRef(false);
 	useEffect(() => {
-		if (mountContinuation.current) return;
+		if (historyLoading || mountContinuation.current) return;
 		mountContinuation.current = true;
-		if (!turnInFlight) continueIfOwed(initialMessages);
-		// mount-only by design (turnInFlight read at initial value)
-	}, []);
+		if (!turnInFlight) continueIfOwed(nativeMessages);
+	}, [historyLoading, turnInFlight, continueIfOwed, nativeMessages]);
 
 	const pendingPlugin = pendingPluginQuestionOf(canonicalMessages);
 	const unreadablePlugin = pluginQuestionCallsOf(canonicalMessages).find(call => call.status === "unreadable");
@@ -1114,14 +1122,28 @@ export function Chat({
 	// server's registry mutex is the structural gate; this is the
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
-	submissionLive.current.ready = !compacting && reconciliation === "ready";
+	const finishHistoryOpening = useCallback((seed: ChatSeed) => {
+		const conversation = scrollContextRef.current;
+		const scroll = conversation?.scrollRef.current;
+		// Close-to-bottom is not the same as following the tail. Leave a
+		// reader's offset alone when the canonical record comes in.
+		if (scroll && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 2) conversation.stopScroll();
+		setMessages(seed.initialMessages, seed.initialError);
+		setTitleText(seed.title);
+		setTurnInFlight(!!seed.initiallyInFlight);
+		setCompacting(!!seed.initiallyCompacting);
+		setHistoryLoading(false);
+		if (seed.initiallyInFlight) resumeStream();
+	}, [setMessages, resumeStream]);
+	const historyOpening = useChatOpening(chatId, historyLoading, finishHistoryOpening);
+	submissionLive.current.ready = !historyLoading && !compacting && reconciliation === "ready";
 	// A failed model response (issue #110): Retry keeps the saved input
 	// and completed work, without another learner message. Offered from
 	// "error" too: a dropped stream leaves the model there, and send()
 	// recovers from it. Later compaction requires new input instead.
 	const retryable = !pluginOwnsDock && (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
 	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
-	const sendAllowed = !pluginOwnsDock && reconciliation === "ready" && !pending && !activeProblem && !compacting && !submissionRunner.occupied;
+	const sendAllowed = !historyLoading && !pluginOwnsDock && reconciliation === "ready" && !pending && !activeProblem && !compacting && !submissionRunner.occupied;
 	const pendingTextTarget = textTarget();
 	const pendingTextInput = !!pendingTextTarget && !!pluginManager?.hasPendingSubmissionInput(pendingTextTarget);
 	const pendingThinkingTarget = thinkingTarget();
@@ -1195,12 +1217,13 @@ export function Chat({
 	// order, never rewrite a local one, keep the in-flight tail last. The
 	// full syncFromServer stays the net at idle (reorder, plan blocks, turns).
 	const adoptAppendOnly = useCallback(async () => {
+		if (historyLoading) return;
 		try {
 			await readRecord({ adoption: "append" });
 		} catch {
 			/* transient — the idle full sync is the net */
 		}
-	}, [readRecord]);
+	}, [historyLoading, readRecord]);
 
 	// Turn-start window: the server inserts claimed steers right after our
 	// outgoing message, BEFORE the stream produces anything — so a bounded,
@@ -1317,9 +1340,10 @@ export function Chat({
 		}
 	}, [readStats]);
 	useEffect(() => {
+		if (historyLoading) return;
 		void syncTurns();
 		return () => statsRequest.current?.abort();
-	}, [syncTurns]);
+	}, [historyLoading, syncTurns]);
 	// After the learner's own turn ends the log has a fresh entry — and the
 	// Post-turn settle (the SLIMMED watch — push-architecture S3,
 	// 2026-10-02): our own stream just ended. Two instant LOCAL actions
@@ -1515,7 +1539,7 @@ export function Chat({
 		// synchronous request flow; a GET /stream inside that sub-ms window
 		// gets a settled response — unwinnable by a network round-trip,
 		// self-healing via the eventual turn-settled. Do not engineer around.
-		if (p.chatId !== chatId) return;
+		if (historyLoading || p.chatId !== chatId) return;
 		if (localStreamRef.current) return; // our OWN turn — the 409-race guard
 		if (turnInFlightRef.current) return; // already attached
 		attachToRunningTurn();
@@ -1639,7 +1663,7 @@ export function Chat({
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. data-session-surface scopes the
 		    session's reading rules (no-wrap inline code/math, globals.css). */}
-		<div data-session-surface="" className="flex h-dvh">
+		<div data-session-surface="" data-chat-opening={historyLoading ? "" : undefined} className="flex h-dvh">
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1764,10 +1788,14 @@ export function Chat({
 					<PluginSessionTopBarActions readContext={actionContext} captureContext={captureActionContext} refreshRef={refreshPluginActions} />
 				</TopBar>
 
-				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} rows={rows} virtualTranscriptRef={virtualTranscriptRef} />
+				{!historyLoading && <SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} rows={rows} virtualTranscriptRef={virtualTranscriptRef} />}
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
-				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
-					<SessionMessageNavigation virtualTranscriptRef={virtualTranscriptRef} />
+				{historyOpening.failed && historyLoading && <div role="alert" className="absolute top-3 left-1/2 z-10 -translate-x-1/2 rounded-lg border bg-card px-3 py-2 text-sm">
+					Could not load chat history. <Button type="button" variant="ghost" onClick={historyOpening.retry}>Retry</Button>
+				</div>}
+				<Conversation className="h-full min-w-0 flex-1" initial="instant" resize={historyLoading ? "instant" : "smooth"}
+					contextRef={scrollContextRef} aria-busy={historyLoading || undefined}>
+					{!historyLoading && <SessionMessageNavigation virtualTranscriptRef={virtualTranscriptRef} />}
 					<TranscriptElementReporter onElement={setTranscriptElement} />
 					<ConversationContent className="min-h-full gap-0 p-0">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
@@ -1778,7 +1806,7 @@ export function Chat({
 								/>
 							)}
 
-							<VirtualTranscript rows={rows} handleRef={virtualTranscriptRef}>{({ message: m, messageIndex: mi, start, end }) =>
+							<VirtualTranscript rows={rows} handleRef={virtualTranscriptRef} openingLayout={openingLayout} historyLoading={historyLoading}>{({ message: m, messageIndex: mi, start, end }) =>
 								m.role === "user" && isSubagentSteer(m) ? (
 									// Sub-agent delivery (wake-pipeline steer): NO message bubble — the
 									// artifact card sits in the transcript column directly, full width

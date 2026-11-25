@@ -110,6 +110,26 @@ test("server rendering emits a bounded tail window rather than the full history"
 	assert.ok(!html.includes("Passage 0."));
 });
 
+test("indexed opening renders the same full height and recent row as the canonical transcript", () => {
+	const rows = transcriptRows(Array.from({ length: 80 }, (_, index): LhViewMessage => ({
+		id: `storage-${index}`, role: "user", parts: [{ type: "text", text: `Passage ${index}.` }],
+	})));
+	const openingLayout = rows.map(row => [row.key, estimateTranscriptRow(row)] as const);
+	const render = (historyLoading: boolean) => renderToStaticMarkup(React.createElement(StickToBottom, {
+		children: React.createElement(VirtualTranscript, {
+			rows: historyLoading ? rows.slice(-4) : rows, openingLayout, historyLoading, handleRef: { current: null },
+			children: row => React.createElement("p", {}, row.message.parts[0]?.text),
+		}),
+	}));
+	const opening = render(true), full = render(false);
+	const height = (html: string) => html.match(/data-virtual-transcript="" data-row-count="80" style="height:([\d.]+)px/)?.[1];
+	assert.equal(height(opening), String(openingLayout.reduce((total, [, size]) => total + size, 0)));
+	assert.equal(height(opening), height(full));
+	assert.match(opening, /data-history-placeholder/);
+	assert.match(opening, /Passage 79\./);
+	assert.doesNotMatch(opening, /Passage 75\./);
+});
+
 test("data Find reaches unmounted rows and preserves literal matching and global occurrence order", () => {
 	const rows = transcriptRows(Array.from({ length: 1000 }, (_, index): LhViewMessage => ({ id: `message-${index}`, role: "assistant",
 		parts: [{ type: "text", text: index === 725 ? "Needle and **NEEDLE** [a.b](https://excluded.invalid)" : "other text" }] })));

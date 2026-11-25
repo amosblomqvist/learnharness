@@ -1,6 +1,5 @@
 import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
-import { ChatOpening } from "@/components/chat-opening";
 import { slotsConfigured } from "@/src/core";
 import { compactionInFlight, getChat, getChatOpening, isTurnRunning, readSettingsRecord, turnFailure } from "@/src/server";
 
@@ -23,9 +22,6 @@ export default async function ChatPage({
 	// server's 503 stays the truth; this only decides whether the pill rides.
 	const record = readSettingsRecord();
 	const initialConfigured = slotsConfigured(record?.models);
-	if ("partial" in chat && chat.partial) {
-		return <ChatOpening key={id} chatId={id} title={chat.title} recent={chat.messages} initialConfigured={initialConfigured} />;
-	}
 	return (
 		<Chat
 			key={chat.id}
@@ -34,6 +30,7 @@ export default async function ChatPage({
 			kind={chat.kind ?? "teach"}
 			// The record is native agent history; the client derives its view.
 			initialMessages={chat.messages}
+			openingLayout={"openingLayout" in chat ? chat.openingLayout : undefined}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={initialConfigured}
 			initialPrompt={prompt}
