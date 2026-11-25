@@ -24,8 +24,13 @@ function setAll(kind: DisclosureKind, open: boolean) {
 	for (const listener of listeners[kind]) listener(open);
 }
 
+/** Where every block of the kind stands: the last keyboard set, else the setting. */
+export function kindOpen(kind: DisclosureKind, expandByDefault: boolean): boolean {
+	return keyboardSets[kind] ?? expandByDefault;
+}
+
 export function toggleAllDisclosures(kind: DisclosureKind, expandByDefault: boolean): void {
-	const open = !(keyboardSets[kind] ?? expandByDefault);
+	const open = !kindOpen(kind, expandByDefault);
 	keyboardSets[kind] = open;
 	setAll(kind, open);
 }
@@ -37,7 +42,7 @@ export function applyExpandByDefault(kind: DisclosureKind, open: boolean): void 
 
 export function useDisclosure(kind: DisclosureKind) {
 	const expandByDefault = useAppearance().appearance.expandByDefault[kind];
-	const [open, setOpen] = useState(() => keyboardSets[kind] ?? expandByDefault);
+	const [open, setOpen] = useState(() => kindOpen(kind, expandByDefault));
 	useEffect(() => {
 		const subscribed = listeners[kind];
 		subscribed.add(setOpen);

@@ -1,7 +1,7 @@
 "use client";
 
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
-import { useDisclosure } from "@/components/disclosure-store";
+import { kindOpen, useDisclosure } from "@/components/disclosure-store";
 import { useAppearance } from "@/components/settings/appearance";
 import {
   Collapsible,
@@ -80,17 +80,19 @@ export const Reasoning = memo(
     const [hasAutoClosed, setHasAutoClosed] = useState(false);
 
     // Auto-close when streaming ends (once only, and only if it ever
-    // streamed) tidies a row the learner opened. With the setting on it
-    // would undo the setting, so it stays open.
+    // streamed) tidies a row the learner opened by itself. When every row
+    // of the kind is open, by the setting or a shortcut, closing this one
+    // would leave the chat in mixed states, so it stays open.
     useEffect(() => {
       if (
-        !expandByDefault &&
+        !kindOpen("agentThinking", expandByDefault) &&
         hasEverStreamedRef.current &&
         !isStreaming &&
         isOpen &&
         !hasAutoClosed
       ) {
         const timer = setTimeout(() => {
+          if (kindOpen("agentThinking", expandByDefault)) return;
           setIsOpen(false);
           setHasAutoClosed(true);
         }, AUTO_CLOSE_DELAY);

@@ -5,7 +5,7 @@ import { parseHTML } from "linkedom";
 import { renderToStaticMarkup } from "react-dom/server";
 import { DEFAULT_THEME, type AppearanceSettings, type DisclosureKind, type QuestionAnswerData } from "../src/core/index.ts";
 import { AppearanceProvider, useAppearance } from "../components/settings/appearance.tsx";
-import { toggleAllDisclosures } from "../components/disclosure-store.ts";
+import { applyExpandByDefault, toggleAllDisclosures } from "../components/disclosure-store.ts";
 import { ThinkingBlock } from "../components/thinking-block.tsx";
 import { AnsweredCard } from "../components/answered-card.tsx";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "../components/ai-elements/reasoning.tsx";
@@ -41,6 +41,7 @@ function Probe() {
 }
 
 async function mount(expandByDefault: ExpandByDefault, node: React.ReactNode) {
+	for (const kind of ["userThinking", "why", "agentThinking"] as const) applyExpandByDefault(kind, false);
 	const { createRoot } = await import("react-dom/client");
 	const host = document.createElement("div");
 	document.body.append(host);
@@ -170,13 +171,15 @@ describe("keyboard toggles and setting changes", () => {
 
 describe("agent thinking after its stream ends", () => {
 	const settled = () => act(() => new Promise((resolve) => setTimeout(resolve, 1300)));
-	const streamed = async (agentThinking: boolean) => {
+	const streamed = async (agentThinking: boolean, open: "click" | "shortcut" = "click") => {
 		const block = (isStreaming: boolean) => (
 			<Reasoning isStreaming={isStreaming}><ReasoningTrigger data-testid="streamed" /><ReasoningContent>streamed</ReasoningContent></Reasoning>
 		);
 		const view = await mount({ agentThinking }, block(true));
 		const trigger = () => view.host.querySelector<HTMLButtonElement>('[data-testid="streamed"]')!;
-		if (trigger().getAttribute("aria-expanded") !== "true") await act(async () => trigger().click());
+		if (trigger().getAttribute("aria-expanded") !== "true") {
+			await (open === "click" ? act(async () => trigger().click()) : keyboardToggle("agentThinking"));
+		}
 		assert.equal(trigger().getAttribute("aria-expanded"), "true", "open while streaming");
 		await view.render(block(false));
 		await settled();
@@ -191,5 +194,9 @@ describe("agent thinking after its stream ends", () => {
 
 	it("setting off: a block the learner opened still collapses", async () => {
 		assert.equal(await streamed(false), false);
+	});
+
+	it("setting off: a block opened by Toggle all agent thinking stays open", async () => {
+		assert.equal(await streamed(false, "shortcut"), true);
 	});
 });
