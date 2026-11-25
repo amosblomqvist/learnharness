@@ -665,7 +665,12 @@ function installMenu() {
 }
 
 async function main() {
+	const { createDraftStore } = require("./drafts.cjs");
+	const drafts = createDraftStore(path.join(app.getPath("userData"), "drafts"), error => log(`draft storage: ${error.code ?? "write failed"}`));
+	app.on("before-quit", drafts.flush);
+	app.on("will-quit", drafts.flush);
 	app.on("window-all-closed", () => {
+		drafts.flush();
 		chatgpt?.pause();
 		subscriptions?.pause();
 		// macOS convention: the app stays resident, reactivated from the Dock.
@@ -770,6 +775,14 @@ async function main() {
 	ipcMain.handle("lh:attachment:pick", (event, mode) => pickAttachmentPath(event, mode, {
 		BrowserWindow, dialog, trustedAppWindows, origin: new URL(url).origin,
 	}));
+	ipcMain.handle("lh:drafts:read", (event, key) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return "";
+		return drafts.read(key);
+	});
+	ipcMain.on("lh:drafts:write", (event, key, text) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return;
+		drafts.write(key, text);
+	});
 
 	installMenu();
 

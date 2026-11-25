@@ -16,6 +16,27 @@ Object.assign(globalThis, {
 	IS_REACT_ACT_ENVIRONMENT: true,
 });
 
+test("a draft restores typed thinking and the answer on remount", async () => {
+	const host = document.createElement("div"); document.body.append(host);
+	const root = createRoot(host);
+	const input: QuizToolInput = { type: "predict", nodeId: "draft-node", question: "Draft question", options: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], correctAnswer: "yes", explanation: "Yes is correct." };
+	const render = () => root.render(<QuestionDock draftKey="test:question" toolName="quiz" toolCallId="q"
+		input={input} expanded onExpand={() => {}} onSubmit={() => {}} dictationClaim={false} />);
+	const thinking = () => host.querySelector<HTMLElement>('[data-testid="thinking-field"] [data-file-path-input]')!;
+	try {
+		await act(async () => render());
+		await act(async () => {
+			host.querySelector<HTMLButtonElement>('[role="radio"]')!.click();
+			thinking().textContent = "Continue this derivation";
+			thinking().dispatchEvent(new window.Event("input", { bubbles: true }));
+		});
+		await act(async () => root.render(null));
+		await act(async () => render());
+		assert.equal(thinking().textContent, "Continue this derivation");
+		assert.ok(host.querySelector('[role="radio"][aria-checked="true"]'));
+	} finally { await act(async () => root.unmount()); host.remove(); }
+});
+
 function question(id: string, callId: string, text: string): LhMessage {
 	return { id, role: "assistant", content: [{ type: "toolCall", id: callId, name: "quiz", arguments: {
 		question: text, options: [{ label: "Yes", value: "yes" }, { label: "No", value: "no" }], correctAnswer: "yes", explanation: "Yes is correct.",

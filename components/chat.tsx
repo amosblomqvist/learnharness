@@ -35,6 +35,7 @@ import { AnsweredCard } from "@/components/answered-card";
 import { MalformedQuestion } from "@/components/malformed-question";
 import { SubagentSteerCard } from "@/components/artifacts/steer-card";
 import { ChatSessionComposer } from "@/components/composer";
+import { rememberDraft, useSavedDraft } from "@/components/saved-draft";
 import { useEnterSubmits } from "@/components/enter-submits";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
@@ -657,14 +658,13 @@ export function Chat({
 		window.addEventListener(kbdEventForChat("toggle-user-thinking"), onToggle);
 		return () => window.removeEventListener(kbdEventForChat("toggle-user-thinking"), onToggle);
 	}, [controller]);
-	const applyReadingThinking = useCallback((v: string) => {
-		readingThinkingRef.current = v;
-	}, []);
 	const clearReadingThinking = useCallback(() => {
 		readingThinkingRef.current = "";
 		setReadingThinkingSeed((previous) => ({ ...previous, value: "", revision: previous.revision + 1 }));
 	}, []);
 	const pendingQuestionId = pendingPlugin ? pluginQuestionOccurrenceKey(pendingPlugin.occurrence) : pending?.key ?? null;
+	const questionDraftKey = pendingQuestionId ? `chat:${chatId}:question:${pendingQuestionId}` : undefined;
+	const readingDraftKey = questionDraftKey && `${questionDraftKey}:reading`;
 	useLayoutEffect(() => {
 		// Different calls never share a draft; a failed submission of THIS
 		// call restores the reading channel alongside the form's snapshot.
@@ -676,6 +676,15 @@ export function Chat({
 				: { questionId: pendingQuestionId, value, revision: previous.revision + 1 },
 		);
 	}, [pendingQuestionId, questionDraft, pluginQuestionDraft]);
+	const saveReadingDraft = useSavedDraft(readingDraftKey, value => {
+		readingThinkingRef.current = value;
+		if (pendingPlugin) pluginQuestionDraft(pendingPlugin).readingThinking = value;
+		setReadingThinkingSeed(previous => ({ questionId: pendingQuestionId, value, revision: previous.revision + 1 }));
+	});
+	const applyReadingThinking = useCallback((v: string) => {
+		readingThinkingRef.current = v;
+		saveReadingDraft(v);
+	}, [saveReadingDraft]);
 
 	// The phase at every message (one linear fold): the transcript draws a
 	// color-coded dotted divider at each boundary; the header chip reads the
@@ -688,13 +697,19 @@ export function Chat({
 	 * resets still bump a revision so the local field can sync. */
 	const textRef = useRef("");
 	const composerEditRevision = useRef(0);
-	const applyText = useCallback((v: string) => {
+	const restoreText = useCallback((v: string) => {
 		textRef.current = v; composerEditRevision.current++;
 		setComposerDraftRevision((revision) => revision + 1);
 	}, []);
+	const saveComposerDraft = useSavedDraft(`chat:${chatId}:composer`, restoreText);
+	const applyText = useCallback((v: string) => {
+		restoreText(v);
+		saveComposerDraft(v);
+	}, [restoreText, saveComposerDraft]);
 	const recordComposerText = useCallback((v: string) => {
 		textRef.current = v; composerEditRevision.current++;
-	}, []);
+		saveComposerDraft(v);
+	}, [saveComposerDraft]);
 	// Saved slot completeness is live, but the session's selected route
 	// comes from its own ordinary model control, never today's Strong pin.
 	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
@@ -746,7 +761,11 @@ export function Chat({
 			// Save newer native edits without changing the prepared payload.
 			capture(); saveQuestionDraft(original.key, { readingThinking: readingThinkingRef.current });
 			attempt.deliver();
-			return send({ type: "answer", toolCallId: original.toolCallId, occurrence: target.question.occurrence, answer: { ...answer, ...(images ? { images } : {}) } }, attempt.accepted, original.key, attempt.refused);
+			return send({ type: "answer", toolCallId: original.toolCallId, occurrence: target.question.occurrence, answer: { ...answer, ...(images ? { images } : {}) } }, () => {
+				rememberDraft(questionDraftKey, "");
+				rememberDraft(readingDraftKey, "");
+				attempt.accepted();
+			}, original.key, attempt.refused);
 		});
 	};
 	const thinkingTarget = (): Extract<PluginSubmissionTarget, { type: "thinking" }> | undefined => {
@@ -815,13 +834,20 @@ export function Chat({
 		if (!target || pendingRef.current || pluginOwnsDock || activeProblemRef.current || compacting) return Promise.resolve(false);
 		if (!busyRef.current && zeroKeys) { setSetupOpen(true); return Promise.resolve(false); }
 		if (!busyRef.current && selectedModelUnavailable(catalog, selectedModel)) { openModelPicker(); return Promise.resolve(false); }
-		let captured = "", capturedRevision = 0;
-		return runSubmission(target, () => { capturedRevision = composerEditRevision.current; return { type: "text", content: { text: captured = supplied ?? textRef.current.trim(), images: [] } }; }, () => submissionLive.current.ready && !pendingQuestionOf(submissionLive.current.nativeMessages) && !pendingPluginQuestionOf(submissionLive.current.nativeMessages) && !activeProblemOf(submissionLive.current.nativeMessages), async (prepared, attempt) => {
+		let captured = "", capturedDraft = "", capturedRevision = 0;
+		return runSubmission(target, () => { capturedRevision = composerEditRevision.current; capturedDraft = textRef.current; return { type: "text", content: { text: captured = supplied ?? capturedDraft.trim(), images: [] } }; }, () => submissionLive.current.ready && !pendingQuestionOf(submissionLive.current.nativeMessages) && !pendingPluginQuestionOf(submissionLive.current.nativeMessages) && !activeProblemOf(submissionLive.current.nativeMessages), async (prepared, attempt) => {
 			if (prepared.type !== "text") return false;
 			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error("Message text or images are required. Your input has been kept.");
 			if (beforePost && !beforePost(captured)) { attempt.cancel(); return false; }
 			draftRef.current = captured;
-			const accepted = () => { if (composerEditRevision.current === capturedRevision && textRef.current.trim() === captured) applyText(""); openingAccepted?.(); attempt.accepted(); };
+			const accepted = () => {
+				if (composerEditRevision.current === capturedRevision && textRef.current.trim() === captured) {
+					restoreText("");
+					saveComposerDraft("", capturedDraft);
+				}
+				openingAccepted?.();
+				attempt.accepted();
+			};
 			attempt.deliver();
 			if (busyRef.current) return steer(prepared.content.text, prepared.content.images, accepted, attempt.refused);
 			return send({ type: "text", text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}) }, accepted, undefined, attempt.refused);
@@ -2962,6 +2988,7 @@ export function DockOverlay({
 							) : pending ? (
 								<QuestionDock
 									viewReader={nativeViewReader}
+									draftKey={chatId ? `chat:${chatId}:question:${pending.key}` : undefined}
 									toolName={pending.tool as "quiz" | "probe" | "ask_user_question" | "explain" | "recall"}
 									toolCallId={pending.toolCallId}
 									input={pending.input as never}
@@ -2986,7 +3013,9 @@ export function DockOverlay({
 								<PluginProblemDock {...pluginPractice} viewReader={customViewReader} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
 							) : practice ? (
 								<PracticeDock
+									key={practice.toolCallId}
 									viewReader={practiceViewReader}
+									draftKey={chatId ? `chat:${chatId}:practice:${practice.toolCallId}` : undefined}
 									problemCallId={practice.toolCallId}
 									input={practice.input as { statement: string }}
 									expanded={expanded}

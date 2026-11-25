@@ -12,6 +12,7 @@ import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
 import type { PrepareThinkingSubmission } from "./plugin-submission-adapters";
 import { cn } from "@/lib/utils";
+import { useSavedDraft } from "./saved-draft";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -34,6 +35,7 @@ import { cn } from "@/lib/utils";
  */
 
 export interface PracticeDockProps {
+	draftKey?: string;
 	viewReader?: ViewReaderRef<string>;
 	/** The active problem's tool-call id (submissions target it). */
 	problemCallId: string;
@@ -65,13 +67,20 @@ export interface PracticeDockProps {
 	compactionRunning?: boolean;
 }
 
-export function PracticeDock({ viewReader, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
+export function PracticeDock({ viewReader, draftKey, problemCallId, input, expanded, onExpand, onSubmit, onPrepareSubmission, customInput, hasPendingInput = false, preparing = false, onEscape, compactionRunning = false }: PracticeDockProps) {
 	const controller = useOptionalInteractionLayers();
 	const rootRef = useRef<HTMLElement>(null);
 	const [nativeThinking, setNativeThinking] = useState("");
 	const custom = useRef(customInput); custom.current = customInput;
 	const thinking = customInput ? customInput.thinking : nativeThinking;
-	const setThinking = (value: string) => { if (custom.current) custom.current.onThinkingChange(value); else setNativeThinking(value); };
+	const saveThinking = useSavedDraft(draftKey, setNativeThinking);
+	const setThinking = useCallback((value: string) => {
+		if (custom.current) custom.current.onThinkingChange(value);
+		else {
+			setNativeThinking(value);
+			saveThinking(value);
+		}
+	}, [saveThinking]);
 	// Ref MIRRORS the field ("nothing gets lost", the question-dock
 	// discipline): a submit resuming after `await finishDictation()` reads
 	// the tail, never a stale closure.
@@ -91,7 +100,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 				thinkingRef.current = v; editRevision.current++;
 				setThinking(v);
 			},
-			[],
+			[setThinking],
 		),
 		true,
 	);
