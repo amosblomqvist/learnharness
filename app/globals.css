@@ -83,6 +83,19 @@
 	--lh-prose-leading: 1.5;
 	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
 	--lh-heading-weight: 900;
+	/* Chat diagrams (Pele): bind to house tokens so dark, light, and custom
+	   themes cascade into SVGs without re-rendering. */
+	--pele-bg: var(--background);
+	--pele-fg: var(--foreground);
+	--pele-muted: var(--muted-foreground);
+	--pele-line: var(--lh-line-strong);
+	--pele-surface: var(--card);
+	--pele-surface-alt: var(--accent);
+	--pele-border: var(--border);
+	--pele-accent: var(--lh-accent);
+	--pele-font: var(--font-prose);
+	--pele-font-mono: var(--font-mono);
+	--pele-radius: var(--radius);
 }
 
 /* The light variant: the colors come from the active light theme (inline
@@ -305,8 +318,8 @@ body {
 	--color-sidebar: var(--card);
 }
 
-/* Mermaid diagrams: keep wide charts inside the content column. Mermaid
- * inlines a px max-width on the svg, so !important is required to win. */
+/* Chat diagrams (Pele): keep wide charts inside the content column. Pele
+ * inlines max-width/height on the svg, so !important wins against it. */
 [data-streamdown="mermaid"] svg {
 	max-width: 100% !important;
 	height: auto !important;
