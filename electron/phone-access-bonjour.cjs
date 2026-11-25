@@ -7,18 +7,22 @@
 
 const SERVICE_TYPE = "learnharness";
 
-/** Returns an `advertise` function for createPhoneAccess. */
-function bonjourAdvertiser(load = () => require("bonjour-service")) {
+/** Returns an `advertise` function for createPhoneAccess. Advertising is a
+ * convenience: its failures (no multicast route, VPN interfaces, sleep/wake)
+ * are reported to `onError` and never thrown — bonjour-service's default
+ * error handler throws, which would take down the Electron main process. */
+function bonjourAdvertiser({ load = () => require("bonjour-service"), onError = () => {} } = {}) {
 	let instance = null;
+	const report = (error) => { try { onError(error); } catch { /* never rethrow */ } };
 	return function advertise({ name, port, txt }) {
 		const { Bonjour } = load();
-		instance ??= new Bonjour();
-		const service = instance.publish({ name, type: SERVICE_TYPE, protocol: "tcp", port, txt, disableIPv6: false });
-		service.on?.("error", () => { /* name conflicts and network changes are retried by mDNS */ });
+		instance ??= new Bonjour({}, report);
+		const service = instance.publish({ name, type: SERVICE_TYPE, protocol: "tcp", port, txt });
+		service.on?.("error", report);
 		return {
 			stop() {
-				try { service.stop?.(); } catch { /* best effort */ }
-				try { instance?.destroy(); } catch { /* best effort */ }
+				try { service.stop?.(); } catch (error) { report(error); }
+				try { instance?.destroy(); } catch (error) { report(error); }
 				instance = null;
 			},
 		};

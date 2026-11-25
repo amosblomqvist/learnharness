@@ -11,6 +11,7 @@ import type { TLSSocket } from "node:tls";
 const require = createRequire(import.meta.url);
 const { createPhoneAccess, cleanDeviceName, lanAddresses } = require("../electron/phone-access.cjs");
 const { pairingKey } = require("../electron/phone-access-cert.cjs");
+const { bonjourAdvertiser } = require("../electron/phone-access-bonjour.cjs");
 
 type Reply = { status: number; headers: http.IncomingHttpHeaders; body: string; fingerprint: string };
 
@@ -242,4 +243,21 @@ test("helpers: device names and LAN addresses", () => {
 		en0: [{ family: "IPv4", address: "100.101.1.2", internal: false }, { family: "IPv6", address: "fe80::1", internal: false }],
 		en1: [{ family: "IPv4", address: "192.168.1.88", internal: false }, { family: "IPv4", address: "169.254.3.4", internal: false }],
 	}), ["192.168.1.88", "100.101.1.2"]);
+});
+
+test("Bonjour failures are reported, never thrown (they would crash the desktop app)", () => {
+	const errors: unknown[] = [];
+	let handler: ((error: Error) => void) | undefined;
+	let published: { name: string; type: string; port: number; txt: Record<string, string> } | undefined;
+	class FakeBonjour {
+		constructor(_options: unknown, errorCallback: (error: Error) => void) { handler = errorCallback; }
+		publish(service: typeof published) { published = service; return { on() {}, stop() { throw new Error("stop failed"); } }; }
+		destroy() {}
+	}
+	const advertise = bonjourAdvertiser({ load: () => ({ Bonjour: FakeBonjour }), onError: (error: unknown) => errors.push(error) });
+	const advert = advertise({ name: "LearnHarness on Mac", port: 4399, txt: { v: "1", fp: "abc" } });
+	assert.deepEqual(published, { name: "LearnHarness on Mac", type: "learnharness", protocol: "tcp", port: 4399, txt: { v: "1", fp: "abc" } });
+	assert.doesNotThrow(() => handler!(Object.assign(new Error("send EHOSTUNREACH 224.0.0.251:5353"), { code: "EHOSTUNREACH" })));
+	assert.doesNotThrow(() => advert.stop());
+	assert.deepEqual(errors.map((e) => (e as Error).message), ["send EHOSTUNREACH 224.0.0.251:5353", "stop failed"]);
 });

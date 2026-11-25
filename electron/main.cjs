@@ -984,7 +984,7 @@ async function main() {
 			directory: path.join(app.getPath("userData"), "phone-access"),
 			upstream: () => ({ origin: new URL(url).origin, secret: desktopAPISecret }),
 			approve: approvePhone,
-			advertise: bonjourAdvertiser(),
+			advertise: bonjourAdvertiser({ onError: (error) => log(`phone access: Bonjour: ${error?.message ?? error}`) }),
 			appVersion: app.getVersion(),
 			onChange: notifyPhoneAccess,
 		});
