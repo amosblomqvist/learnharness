@@ -709,6 +709,19 @@ body {
 	animation: lh-card-enter 120ms ease-out;
 }
 
+/* A chat arrival uses the card timing with opacity only, keeping the
+   transcript and its scrollbar at their measured positions. */
+@keyframes chat-open-in {
+	from { opacity: 0.82; }
+	to { opacity: 1; }
+}
+
+@media (prefers-reduced-motion: no-preference) {
+	[data-session-surface] {
+		animation: chat-open-in 120ms ease-out;
+	}
+}
+
 @media (prefers-reduced-motion: reduce) {
 	.lh-card-enter {
 		animation: none;
