@@ -1,30 +1,36 @@
 # Chinese pronunciation
 
 Click Chinese text anywhere in LearnHarness to hear it spoken. Speech is generated
-locally by the [Kokoro v1.1-zh](https://huggingface.co/hexgrad/Kokoro-82M-v1.1-zh)
-voice model, running on the GPU through ONNX Runtime's DirectML provider.
+locally by the [Matcha-Baker Mandarin voice](https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/matcha-icefall-zh-baker.html)
+and Vocos vocoder, running on the GPU through ONNX Runtime's DirectML provider.
 
 ## Requirements
 
 - Windows on x64 with a DirectML-capable (DirectX 12) GPU. Other systems show
   "unsupported" in settings.
-- About 480 MB of downloads, fetched once from Settings.
+- About 245 MB for a fresh install, or 130 MB when reusing the runtime from
+  Kokoro. The Baker recordings are licensed for non-commercial use only.
 
 ## Setup
 
 1. Enable **Chinese pronunciation** in Settings → Core plugins.
-2. Open the plugin's settings and press **Download**. Two kinds of file are
-   fetched and checked before use:
-   - `kokoro-multi-lang-v1_1.tar.bz2` (365 MB) from the
+2. Open the plugin's settings and press **Download**. LearnHarness verifies each
+   download before use.
+   - `matcha-icefall-zh-baker.tar.bz2` (75 MB) from the
      [k2-fsa/sherpa-onnx `tts-models` release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/tts-models),
      checked against a pinned SHA-256.
+   - `vocos-22khz-univ.onnx` (54 MB) from the
+     [sherpa-onnx vocoder release](https://github.com/k2-fsa/sherpa-onnx/releases/tag/vocoder-models),
+     also checked against a pinned SHA-256.
    - `onnxruntime-node` and `onnxruntime-common` 1.31.1 (115 MB) from the npm
      registry, checked against npm's published SHA-512 integrity values.
 
    Windows' built-in `tar.exe` unpacks only the needed files into the plugin's
    data folder (`core-plugin-data/pronunciation/voice/`). An interrupted or failed
    download leaves nothing installed.
-3. Pick a voice: `zf_001` (default), `zf_002`, `zm_009` or `zm_010`.
+
+When the updated plugin starts, it removes the old Kokoro voice and its saved
+voice choice. The compatible ONNX runtime is reused when you download Matcha-Baker.
 
 **Remove downloaded files** deletes the install. Windows keeps a loaded GPU
 runtime DLL locked until the app exits, so a few files may be deleted on the
@@ -42,10 +48,9 @@ next start instead.
   sentence) plays only the part in the clicked text node.
 - Hovering with a mouse shows a faint dotted underline under the phrase a click
   would play.
-- A new click stops the clip that is playing. Nothing is cached: each click
-  generates the audio again (about 0.1–0.7 s on a mid-range GPU).
-- The model loads on the first click (a few seconds, including GPU warm-up) and
-  stays loaded, using about 0.5 GB of VRAM, while the plugin is enabled. If a
+- A new click stops the clip that is playing. Each click generates new audio.
+- The model and vocoder load and warm up on the first click, then stay loaded
+  while the plugin is enabled. If a
   clip hasn't started within 0.6 s, "Preparing audio…" appears next to the text
   until it plays.
 - Audio plays through an HTML audio element, so the browser treats it as media.
@@ -67,13 +72,13 @@ fallback.
 
 ## How text becomes speech
 
-The phrase is segmented the way jieba does (the most probable path through the
-words, weighted by frequencies from the model's `jieba.dict.utf8` and
-`user.dict.utf8`), restricted to words in the model's `lexicon-zh.txt`. Each word's
-phonemes, with tone changes already applied inside the word, come from that
-lexicon; a word not in the lexicon is read character by character, and a
-character not in it is skipped. The token sequence, padded with 0 at both ends,
-runs through `model.onnx` with the voice's style vector for that token count.
+The phrase is split using word frequencies from `jieba.dict.utf8` and
+`user.dict.utf8`. Readings come from the Baker `lexicon.txt`. Words missing
+from the lexicon are read character by character, and characters missing from
+it are skipped. Matcha receives the token sequence with a blank before, after,
+and between tokens. It produces a mel spectrogram that Vocos converts to a
+spectrum. An inverse STFT reconstructs mono audio at 22,050 Hz, and long pauses
+are shortened to 20% of their original length.
 
 ## Development
 

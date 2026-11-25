@@ -1,9 +1,9 @@
-/** Tiny stand-ins for the model's tokens.txt, lexicon-zh.txt and jieba dictionaries. */
-export const TOKENS = ["$ 0", "  16", "1 1", "2 2", "3 3", "4 4", "5 5", "a 43", "b 44", "c 45", "d 46", "e 47", "f 48", "g 49", "h 50"].join("\n");
+/** Tiny stand-ins for the model's tokens.txt, lexicon.txt and jieba dictionaries (Baker format). */
+export const TOKENS = ["  0", "_ 1", ", 2", "yin2 10", "xing2 11", "hang2 12", "ni3 13", "ni2 14", "hao3 15", "yan2 16", "jiu1 17", "sheng1 18", "ming4 19"].join("\n");
 export const LEXICON = [
-  "银 a 2", "行 b 2", "银行 a 2 c 2", "你 d 3", "好 e 3", "你好 d 2 e 3",
-  "研 f 2", "究 g 1", "生 h 1", "命 a 4", "研究 f 2 g 1", "研究生 f 2 g 1 h 1",
-  "怪 a b ? c",
+  "银 yin2", "行 xing2", "银行 yin2 hang2", "你 ni3", "好 hao3", "你好 ni2 hao3",
+  "研 yan2", "究 jiu1", "生 sheng1", "命 ming4", "研究 yan2 jiu1", "研究生 yan2 jiu1 sheng1",
+  "怪 yin2 ? xing2",
 ].join("\r\n");
 // 生命 is only in the jieba dictionary, as in the real model files.
 // 研究/生命 is more probable than 研究生/命 even though 研究生 is the longer match.

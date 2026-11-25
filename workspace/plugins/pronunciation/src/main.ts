@@ -1,5 +1,5 @@
-import type { PluginButtonProps, PluginFrontendContext, PluginSettingsSchema, PluginWidgetHandle } from "learnharness-plugin-api";
-import { BLOCKED_TEXT, PREPARING_TEXT, VOICES, describeInstall, megabytes, parseSpeakResult, parseState, type PluginState } from "./contract.ts";
+import type { PluginButtonProps, PluginFrontendContext, PluginWidgetHandle } from "learnharness-plugin-api";
+import { BLOCKED_TEXT, LICENSE_TEXT, PREPARING_TEXT, describeInstall, megabytes, parseSpeakResult, parseState, type PluginState } from "./contract.ts";
 import { INTERACTIVE_SELECTOR, MAX_MOVE_PX, TOUCH_CLICK_MS, isCleanClick, isCleanTap, isRepeatTap, pointInRects, type Press, type Tap } from "./gesture.ts";
 import { hanAt, hanRunAt } from "./han.ts";
 import { encodeWav } from "./wav.ts";
@@ -249,8 +249,10 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     progress.className = "lh-pronounce-progress";
     const actions = document.createElement("div");
     actions.className = "lh-pronounce-actions";
-    const rows = document.createElement("div");
-    root.append(status, progress, actions, rows);
+    const license = document.createElement("p");
+    license.className = "lh-pronounce-license";
+    license.textContent = LICENSE_TEXT;
+    root.append(status, progress, actions, license);
     container.append(root);
 
     const run = (operation: "download" | "remove") => async () => {
@@ -265,28 +267,18 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
         default: return { label: `Download (~${megabytes(current.downloadBytes)})`, variant: "default", size: "sm", onClick: run("download") };
       }
     };
-    const rowsFor = (current: PluginState): PluginSettingsSchema => ({
-      rows: [{
-        key: "voice", type: "dropdown", label: "Voice", value: current.settings.voice,
-        description: "The Kokoro voice used for every phrase.",
-        options: VOICES.map(voice => ({ value: voice.id, label: voice.label })),
-        async onChange(voice: string) { apply(await ctx.call("set-voice", { voice })); },
-      }],
-    });
     let button: PluginWidgetHandle<PluginButtonProps> | undefined;
-    let voice: PluginWidgetHandle<PluginSettingsSchema> | undefined;
     const render = (current: PluginState) => {
       status.textContent = describeInstall(current.install, current.downloadBytes);
       const download = current.install.kind === "downloading" ? current.install : undefined;
       progress.hidden = !download;
       if (download) { progress.max = download.total; progress.value = download.received; }
       if (button) button.update(buttonProps(current)); else button = ctx.ui.mountButton(actions, buttonProps(current), { signal });
-      if (voice) voice.update(rowsFor(current)); else voice = ctx.ui.mountSettingsRows(rows, rowsFor(current), { signal });
     };
     views.add(render);
     if (state) render(state);
     else status.textContent = "Loading…";
-    return () => { views.delete(render); button?.dispose(); voice?.dispose(); root.remove(); };
+    return () => { views.delete(render); button?.dispose(); root.remove(); };
   });
 
   const dispose = () => {

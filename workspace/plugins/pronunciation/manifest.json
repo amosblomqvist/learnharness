@@ -4,7 +4,7 @@
   "name": "Chinese pronunciation",
   "version": "0.1.0",
   "minAppVersion": "0.7.0",
-  "description": "Click Chinese text to hear it spoken by a local Kokoro voice model on the GPU (Windows, DirectML).",
+  "description": "Click or tap Chinese text to hear Mandarin spoken by the local Matcha-Baker voice (Windows, DirectML).",
   "main": "main.js",
   "backend": "backend.cjs",
   "styles": "styles.css"

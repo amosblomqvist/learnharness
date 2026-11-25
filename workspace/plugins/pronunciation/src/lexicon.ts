@@ -1,12 +1,11 @@
 /**
- * Chinese text → Kokoro token ids, using the files shipped with the model:
- * tokens.txt (symbol → id), lexicon-zh.txt (word → phoneme symbols, with tone
- * changes already applied inside each word) and the jieba dictionaries (word
- * frequencies, used only to choose between competing segmentations).
+ * Chinese text → voice-model token ids, using the files shipped with the model:
+ * tokens.txt (symbol → id), lexicon.txt (word → tone-numbered pinyin syllables,
+ * with tone changes already applied inside each word) and the jieba
+ * dictionaries (word frequencies, used only to choose between competing
+ * segmentations; the model was trained on jieba-segmented text).
  */
 
-/** Content tokens must stay below the model's 510-row style table. */
-export const MAX_TOKENS = 509;
 const MAX_WORD_CHARS = 16;
 
 const lines = (text: string): string[] => text.split(/\r?\n/).filter(line => line.length > 0);
@@ -26,13 +25,14 @@ export function parseTokens(text: string): Map<string, number> {
 export interface LexiconFiles { tokens: string; lexicon: string; dictionaries: string[] }
 
 export class Lexicon {
+  private readonly tokens: Map<string, number>;
   private readonly words = new Map<string, number[]>();
   private readonly logFrequency = new Map<string, number>();
   private readonly fallbackLog: number;
   private readonly maxWordChars: number;
 
   constructor(files: LexiconFiles) {
-    const tokens = parseTokens(files.tokens);
+    const tokens = this.tokens = parseTokens(files.tokens);
     let longest = 1;
     for (const line of lines(files.lexicon)) {
       const [word, ...symbols] = line.split(" ");
@@ -71,6 +71,10 @@ export class Lexicon {
     this.maxWordChars = Math.min(longest, MAX_WORD_CHARS);
   }
 
+  tokenId(symbol: string): number | undefined {
+    return this.tokens.get(symbol);
+  }
+
   /** Jieba-style segmentation: the most probable path through known words (no HMM). */
   segment(phrase: string): string[] {
     const characters = [...phrase];
@@ -99,7 +103,6 @@ export class Lexicon {
     for (const word of this.segment(phrase)) {
       const known = this.words.get(word);
       const piece = known ? [...known] : [...word].flatMap(character => this.words.get(character) ?? []);
-      if (ids.length + piece.length > MAX_TOKENS) break;
       ids.push(...piece);
     }
     return ids;

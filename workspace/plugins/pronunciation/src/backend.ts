@@ -2,9 +2,9 @@ import fs from "node:fs";
 import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { PluginBackendContext } from "learnharness-plugin-api";
-import { DEFAULT_SETTINGS, VOICES, isVoice, parseSettings, type InstallState, type PluginState, type Settings, type SpeakResult } from "./contract.ts";
+import type { InstallState, PluginState, SpeakResult } from "./contract.ts";
 import { isHanPhrase } from "./han.ts";
-import { TOTAL_BYTES, cleanLeftovers, installVoice, isInstalled, removeVoice, type InstallOptions } from "./install.ts";
+import { cleanLeftovers, installVoice, isInstalled, pendingBytes, removeVoice, retireOutdated, type InstallOptions } from "./install.ts";
 import { Engine, SAMPLE_RATE, type OrtModule } from "./engine.ts";
 import { encodeWav } from "./wav.ts";
 
@@ -24,15 +24,11 @@ export function activate(ctx: PluginBackendContext): () => void {
 
 export function activateWith(ctx: PluginBackendContext, options: BackendOptions): () => void {
   const directory = ctx.dataDirectory;
-  const settingsFile = path.join(directory, "settings.json");
-  let settings: Settings;
-  try { settings = parseSettings(JSON.parse(fs.readFileSync(settingsFile, "utf8"))); }
-  catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
-    settings = { ...DEFAULT_SETTINGS };
-  }
   const supported = (options.platform ?? process.platform) === "win32" && (options.arch ?? process.arch) === "x64";
   cleanLeftovers(directory);
+  // The earlier Kokoro voice kept a voice choice here; there is only one voice now.
+  fs.rmSync(path.join(directory, "settings.json"), { force: true });
+  if (retireOutdated(directory, options.install?.marker)) console.info("[pronunciation] Removed the files of an earlier voice; download the new voice in settings.");
   let install: InstallState = !supported
     ? { kind: "unsupported", reason: "Chinese pronunciation needs Windows (x64) with a DirectML-capable GPU." }
     : isInstalled(directory, options.install?.marker) ? { kind: "installed" } : { kind: "missing" };
@@ -42,7 +38,8 @@ export function activateWith(ctx: PluginBackendContext, options: BackendOptions)
   let downloading = false;
   let disposed = false;
 
-  const snapshot = (): PluginState => ({ epoch, sequence, settings: { ...settings }, install: { ...install }, downloadBytes: TOTAL_BYTES });
+  const downloadBytes = () => pendingBytes(directory, options.install?.assets);
+  const snapshot = (): PluginState => ({ epoch, sequence, install: { ...install }, downloadBytes: downloadBytes() });
   const publish = (): PluginState => {
     sequence++;
     const state = snapshot();
@@ -64,7 +61,7 @@ export function activateWith(ctx: PluginBackendContext, options: BackendOptions)
 
   const startDownload = () => {
     downloading = true;
-    install = { kind: "downloading", step: "voice model", received: 0, total: TOTAL_BYTES };
+    install = { kind: "downloading", step: "voice model", received: 0, total: downloadBytes() };
     let last = 0;
     void installVoice({
       ...options.install, dataDirectory: directory, signal: ctx.signal,
@@ -84,22 +81,6 @@ export function activateWith(ctx: PluginBackendContext, options: BackendOptions)
 
   const handlers = [
     ctx.handle("get-state", () => { assertActive(); return snapshot(); }),
-    ctx.handle("set-voice", value => {
-      assertActive();
-      const voice = input(value).voice;
-      if (!isVoice(voice)) throw new Error("Unknown voice.");
-      if (voice === settings.voice) return snapshot();
-      if (settings.revision === Number.MAX_SAFE_INTEGER) throw new Error("Settings revision limit reached.");
-      const next: Settings = { revision: settings.revision + 1, voice };
-      fs.mkdirSync(directory, { recursive: true });
-      const temporary = path.join(directory, `.settings-${randomUUID()}.tmp`);
-      try {
-        fs.writeFileSync(temporary, JSON.stringify(next) + "\n", { flag: "wx", mode: 0o600 });
-        fs.renameSync(temporary, settingsFile);
-      } finally { fs.rmSync(temporary, { force: true }); }
-      settings = next;
-      return publish();
-    }),
     ctx.handle("download", () => {
       assertActive();
       if (install.kind === "missing" || install.kind === "failed") { startDownload(); return publish(); }
@@ -123,7 +104,6 @@ export function activateWith(ctx: PluginBackendContext, options: BackendOptions)
       if (typeof text !== "string" || !isHanPhrase(text)) throw new Error("Only Chinese characters can be pronounced.");
       if (install.kind === "unsupported") throw new Error(install.reason);
       if (install.kind !== "installed") throw new Error(NOT_INSTALLED);
-      const speaker = VOICES.find(voice => voice.id === settings.voice)!.speaker;
       const loading = engine ??= Engine.load(directory, options.runtime);
       let loaded: Engine;
       try { loaded = await loading; }
@@ -132,7 +112,7 @@ export function activateWith(ctx: PluginBackendContext, options: BackendOptions)
         throw error;
       }
       assertActive();
-      const samples = await loaded.synthesize(text, speaker);
+      const samples = await loaded.synthesize(text);
       return { wav: Buffer.from(encodeWav(samples, SAMPLE_RATE)).toString("base64") };
     }),
   ];

@@ -1,9 +1,10 @@
 /**
- * Manual GPU check: downloads (~480 MB, once per scratch directory) and runs the
+ * Manual GPU check: downloads (~245 MB, once per scratch directory) and runs the
  * real model on DirectML through the built backend, then writes WAV files.
  *
- *   npm run build
- *   node scripts/smoke-gpu.mjs <scratch-data-directory>
+ * From workspace/ with scratch LH_DATA_DIR and LH_AUTH_FILE:
+ *   npm --prefix plugins/pronunciation run build
+ *   node plugins/pronunciation/scripts/smoke-gpu.mjs <scratch-model-directory>
  *
  * The directory stands in for core-plugin-data/pronunciation. It must not be
  * inside a LearnHarness profile; nothing here touches app data or settings.
@@ -53,7 +54,10 @@ for (const [index, text] of phrases.entries()) {
   const { wav } = await call("speak", { text });
   const bytes = Buffer.from(wav, "base64");
   fs.writeFileSync(path.join(out, `${index}.wav`), bytes);
-  console.log(`${text}: ${Math.round(performance.now() - started)} ms, ${((bytes.length - 44) / 48000).toFixed(2)} s audio`);
+  const rate = bytes.readUInt32LE(24);
+  const sampleBytes = bytes.readUInt32LE(40);
+  if (rate !== 22_050 || sampleBytes !== bytes.length - 44 || sampleBytes === 0) throw new Error("Expected a nonempty 22.05 kHz WAV.");
+  console.log(`${text}: ${Math.round(performance.now() - started)} ms, ${(sampleBytes / (rate * 2)).toFixed(2)} s audio`);
 }
 console.log(`WAV files: ${out}`);
 controller.abort();

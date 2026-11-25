@@ -29,25 +29,20 @@ export async function serve(files: Record<string, Buffer>): Promise<{ url: strin
 
 export function assetFor(url: string, bytes: Buffer, overrides: Partial<Asset> = {}): Asset {
   return {
-    id: "fixture", step: "fixture", url, size: bytes.length,
+    id: "fixture", step: "fixture", part: "voice", url, size: bytes.length,
     digest: { algorithm: "sha256", encoding: "hex", value: createHash("sha256").update(bytes).digest("hex") },
     archive: "gzip", into: "model", strip: 0, members: [], required: [],
     ...overrides,
   };
 }
 
-/** The model files a real archive would unpack, built from the fixtures. */
-export const SPEAKERS = 4, STYLE_ROWS = 510, STYLE_WIDTH = 256;
+/** The model files a real install holds, built from the fixtures. */
 export function modelFiles(): Record<string, Buffer> {
-  const styles = new Float32Array(SPEAKERS * STYLE_ROWS * STYLE_WIDTH);
-  // Every value in a row is speaker * 1000 + row, so tests can see which row was used.
-  for (let speaker = 0; speaker < SPEAKERS; speaker++) for (let row = 0; row < STYLE_ROWS; row++) {
-    styles.fill(speaker * 1000 + row, (speaker * STYLE_ROWS + row) * STYLE_WIDTH, (speaker * STYLE_ROWS + row + 1) * STYLE_WIDTH);
-  }
   return {
-    "model.onnx": Buffer.from("fake model"), "voices.bin": Buffer.from(styles.buffer), "tokens.txt": Buffer.from(TOKENS),
-    "lexicon-zh.txt": Buffer.from(LEXICON), "dict/jieba.dict.utf8": Buffer.from(DICTIONARY), "dict/user.dict.utf8": Buffer.from(USER_DICTIONARY),
-    LICENSE: Buffer.from("Apache-2.0"),
+    "model-steps-3.onnx": Buffer.from("fake acoustic model"), "vocos-22khz-univ.onnx": Buffer.from("fake vocoder"),
+    "tokens.txt": Buffer.from(TOKENS), "lexicon.txt": Buffer.from(LEXICON),
+    "dict/jieba.dict.utf8": Buffer.from(DICTIONARY), "dict/user.dict.utf8": Buffer.from(USER_DICTIONARY),
+    "README.md": Buffer.from("non-commercial use only"),
   };
 }
 
@@ -68,18 +63,41 @@ export function fakeExtract(files?: Record<string, Buffer>): Extract & { calls: 
 export class FakeTensor implements OrtTensor {
   constructor(readonly type: string, readonly data: BigInt64Array | Float32Array, readonly dims: readonly number[]) {}
 }
+/** Mel frames the fake acoustic model returns per input token. */
+export const FRAMES_PER_TOKEN = 2;
+export const SPECTRUM_BINS = 513;
+/**
+ * A fake runtime with the acoustic model and vocoder interfaces. The vocoder
+ * returns a DC-only spectrum (magnitude 512 in bin 0), so the audio is a
+ * steady non-silent level and no pause is shortened.
+ */
 export function fakeRuntime(options: { failCreate?: string } = {}) {
   const created: { model: string; options: Record<string, unknown> }[] = [];
-  const runs: Record<string, FakeTensor>[] = [];
+  const runs: { model: string; feeds: Record<string, FakeTensor> }[] = [];
   let released = 0, loads = 0;
   const ort: OrtModule = {
     InferenceSession: {
       async create(model, sessionOptions) {
         created.push({ model, options: sessionOptions });
         if (options.failCreate) throw new Error(options.failCreate);
+        const name = path.basename(model);
+        const vocoder = name.startsWith("vocos");
         return {
-          inputNames: ["tokens", "style", "speed"], outputNames: ["audio", "durations"],
-          async run(feeds) { runs.push(feeds as Record<string, FakeTensor>); return { audio: new FakeTensor("float32", Float32Array.of(0, 0.5, -0.5, 1), [4]) }; },
+          inputNames: vocoder ? ["mels"] : ["x", "x_length", "noise_scale", "length_scale"],
+          outputNames: vocoder ? ["mag", "x", "y"] : ["mel"],
+          async run(feeds): Promise<Record<string, OrtTensor>> {
+            const typed = feeds as Record<string, FakeTensor>;
+            runs.push({ model: name, feeds: typed });
+            if (!vocoder) {
+              const frames = typed.x!.dims[1]! * FRAMES_PER_TOKEN;
+              return { mel: new FakeTensor("float32", new Float32Array(80 * frames).fill(0.25), [1, 80, frames]) };
+            }
+            const frames = typed.mels!.dims[2]!;
+            const mag = new Float32Array(SPECTRUM_BINS * frames), x = new Float32Array(SPECTRUM_BINS * frames), y = new Float32Array(SPECTRUM_BINS * frames);
+            mag.fill(512, 0, frames); x.fill(1, 0, frames);
+            const dims = [1, SPECTRUM_BINS, frames];
+            return { mag: new FakeTensor("float32", mag, dims), x: new FakeTensor("float32", x, dims), y: new FakeTensor("float32", y, dims) };
+          },
           async release() { released++; },
         };
       },

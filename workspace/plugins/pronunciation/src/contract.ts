@@ -1,23 +1,11 @@
 /** Browser-safe values shared by the frontend and backend. */
 
-export const VOICES = [
-  { id: "zf_001", speaker: 3, label: "zf_001 (female)" },
-  { id: "zf_002", speaker: 4, label: "zf_002 (female)" },
-  { id: "zm_009", speaker: 58, label: "zm_009 (male)" },
-  { id: "zm_010", speaker: 59, label: "zm_010 (male)" },
-] as const;
-export type VoiceId = (typeof VOICES)[number]["id"];
-export const DEFAULT_VOICE: VoiceId = "zf_001";
-
 /** Notices shown next to the clicked or tapped text. */
 export const PREPARING_TEXT = "Preparing audio…";
 export const BLOCKED_TEXT = "The browser blocked audio. Tap the text again.";
 
 /** Longest phrase (in characters) sent for one click. */
 export const MAX_PHRASE_CHARS = 100;
-
-export interface Settings { revision: number; voice: VoiceId }
-export const DEFAULT_SETTINGS: Settings = { revision: 0, voice: DEFAULT_VOICE };
 
 export type InstallState =
   | { kind: "unsupported"; reason: string }
@@ -26,8 +14,11 @@ export type InstallState =
   | { kind: "failed"; message: string }
   | { kind: "installed" };
 
-/** `epoch` identifies one backend activation; `sequence` orders its snapshots. */
-export interface PluginState { epoch: string; sequence: number; settings: Settings; install: InstallState; downloadBytes: number }
+/**
+ * `epoch` identifies one backend activation; `sequence` orders its snapshots.
+ * `downloadBytes` is what pressing Download fetches now (less when the runtime is kept).
+ */
+export interface PluginState { epoch: string; sequence: number; install: InstallState; downloadBytes: number }
 
 export interface SpeakResult { wav: string }
 
@@ -43,16 +34,6 @@ const text = (value: unknown, what: string): string => {
   if (typeof value !== "string") throw new Error(`Invalid ${what}.`);
   return value;
 };
-
-export function isVoice(value: unknown): value is VoiceId {
-  return VOICES.some(voice => voice.id === value);
-}
-
-export function parseSettings(value: unknown): Settings {
-  const input = object(value, "settings");
-  if (!isVoice(input.voice)) throw new Error("Invalid voice.");
-  return { revision: count(input.revision, "settings revision"), voice: input.voice };
-}
 
 export function parseInstall(value: unknown): InstallState {
   const input = object(value, "install state");
@@ -70,7 +51,7 @@ export function parseState(value: unknown): PluginState {
   const input = object(value, "plugin state");
   return {
     epoch: text(input.epoch, "epoch"), sequence: count(input.sequence, "sequence"),
-    settings: parseSettings(input.settings), install: parseInstall(input.install),
+    install: parseInstall(input.install),
     downloadBytes: count(input.downloadBytes, "download size"),
   };
 }
@@ -85,11 +66,14 @@ export function parseSpeakResult(value: unknown): SpeakResult {
 const MB = 1024 * 1024;
 export const megabytes = (bytes: number): string => `${Math.round(bytes / MB)} MB`;
 
+/** Shown under the download controls. */
+export const LICENSE_TEXT = "The voice was trained on the Databaker Chinese Standard Mandarin Speech Corpus, which is licensed for non-commercial use only.";
+
 /** One line describing the install state for the settings page. */
 export function describeInstall(install: InstallState, downloadBytes: number): string {
   switch (install.kind) {
     case "unsupported": return install.reason;
-    case "missing": return `Not downloaded. The voice model and GPU runtime are about ${megabytes(downloadBytes)}.`;
+    case "missing": return `Not downloaded. The download is about ${megabytes(downloadBytes)}.`;
     case "downloading": return `Downloading ${install.step}… ${megabytes(install.received)} of ${megabytes(install.total)}`;
     case "failed": return `Download failed: ${install.message}`;
     case "installed": return "Ready. Click Chinese text anywhere in the app to hear it.";

@@ -2,8 +2,8 @@
 import { activate } from "../src/main.ts";
 import { encodeWav } from "../src/wav.ts";
 
-const state = { epoch: "fixture", sequence: 1, settings: { revision: 0, voice: "zf_001" }, install: { kind: "installed" }, downloadBytes: 1 };
-const wav = encodeWav(Float32Array.from({ length: 4800 }, (_, i) => Math.sin(i / 8) * 0.2), 24_000);
+const state = { epoch: "fixture", sequence: 1, install: { kind: "installed" }, downloadBytes: 1 };
+const wav = encodeWav(Float32Array.from({ length: 4410 }, (_, i) => Math.sin(i / 8) * 0.2), 22_050);
 let binary = "";
 for (const byte of wav) binary += String.fromCharCode(byte);
 const clip = btoa(binary);

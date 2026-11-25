@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import { spawnSync } from "node:child_process";
-import { ASSETS, MARKER, TOTAL_BYTES, cleanLeftovers, installVoice, isInstalled, removeVoice, voiceLayout, windowsTar, type Progress } from "../src/install.ts";
+import { ASSETS, MARKER, RUNTIME_MARKER, TOTAL_BYTES, cleanLeftovers, installVoice, isInstalled, pendingBytes, removeVoice, voiceLayout, windowsTar, type Progress } from "../src/install.ts";
 import { assetFor, fakeExtract, serve, temporaryDirectory } from "./helpers.ts";
 
 const never = new AbortController().signal;
@@ -11,7 +11,7 @@ const never = new AbortController().signal;
 test("the pinned downloads add up to the advertised size", () => {
   assert.equal(TOTAL_BYTES, ASSETS.reduce((sum, asset) => sum + asset.size, 0));
   assert.ok(ASSETS.every(asset => asset.url.startsWith("https://")));
-  assert.equal(Math.round(TOTAL_BYTES / 2 ** 20), 458);
+  assert.equal(TOTAL_BYTES, 244_802_924);
 });
 
 test("a verified download is unpacked, marked and moved into place", async () => {
@@ -21,7 +21,7 @@ test("a verified download is unpacked, marked and moved into place", async () =>
   try {
     const assets = [
       assetFor(`${server.url}/model`, model, { id: "model", step: "voice model", required: ["model.onnx"] }),
-      assetFor(`${server.url}/runtime`, runtime, { id: "runtime", step: "GPU runtime", into: "runtime/node_modules/x", required: ["package.json"] }),
+      assetFor(`${server.url}/runtime`, runtime, { id: "runtime", step: "GPU runtime", part: "runtime", into: "runtime/node_modules/x", required: ["package.json"] }),
     ];
     const progress: Progress[] = [];
     const extract = fakeExtract();
@@ -36,6 +36,45 @@ test("a verified download is unpacked, marked and moved into place", async () =>
     assert.ok(progress.every((value, index) => index === 0 || value.received >= progress[index - 1]!.received));
     assert.deepEqual(progress.at(-1), { step: "GPU runtime", received: model.length + runtime.length, total: model.length + runtime.length });
     await assert.rejects(installVoice({ dataDirectory: scratch.directory, signal: never, assets, extract, onProgress() {} }), /already installed/);
+  } finally { await server.close(); }
+});
+
+test("a retry keeps the compatible runtime and installs the verified raw vocoder", async () => {
+  using scratch = temporaryDirectory("lh-pron-reuse-");
+  const model = Buffer.from("acoustic model"), vocoder = Buffer.from("vocoder"), runtime = Buffer.from("runtime");
+  const server = await serve({ "/model": model, "/vocoder": vocoder });
+  try {
+    const layout = voiceLayout(scratch.directory);
+    fs.mkdirSync(layout.runtime, { recursive: true });
+    fs.writeFileSync(layout.runtimeMarker, JSON.stringify(RUNTIME_MARKER));
+    const runtimeFile = path.join(layout.runtime, "fixture.dll");
+    fs.writeFileSync(runtimeFile, runtime);
+    const assets = [
+      assetFor(`${server.url}/model`, model, { id: "model", required: ["model-steps-3.onnx"] }),
+      assetFor(`${server.url}/vocoder`, vocoder, { id: "vocoder", archive: "file", required: ["vocos-22khz-univ.onnx"] }),
+      assetFor(`${server.url}/runtime`, runtime, { id: "runtime", part: "runtime", into: "runtime", required: ["fixture.dll"] }),
+    ];
+    const voiceBytes = model.length + vocoder.length;
+    assert.equal(pendingBytes(scratch.directory, assets), voiceBytes);
+    const options = { dataDirectory: scratch.directory, signal: never, assets, onProgress() {} };
+    await assert.rejects(installVoice({ ...options, extract: async () => {
+      assert.deepEqual(fs.readFileSync(runtimeFile), runtime);
+      throw new Error("interrupted");
+    } }), /interrupted/);
+    assert.equal(isInstalled(scratch.directory), false);
+    assert.equal(pendingBytes(scratch.directory, assets), voiceBytes);
+    assert.deepEqual(fs.readdirSync(scratch.directory), ["voice"]);
+
+    const extract = fakeExtract();
+    const progress: Progress[] = [];
+    await installVoice({ ...options, extract, onProgress: value => progress.push(value) });
+    assert.deepEqual(server.requests, ["/model", "/model", "/vocoder"]);
+    assert.deepEqual(extract.calls, ["model"]);
+    assert.deepEqual(fs.readFileSync(path.join(layout.model, "vocos-22khz-univ.onnx")), vocoder);
+    assert.deepEqual(fs.readFileSync(runtimeFile), runtime);
+    assert.equal(isInstalled(scratch.directory), true);
+    assert.ok(progress.every(value => value.total === voiceBytes));
+    assert.equal(progress.at(-1)!.received, voiceBytes);
   } finally { await server.close(); }
 });
 
