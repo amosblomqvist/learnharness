@@ -7,6 +7,7 @@ import {
 	SESSION_TTL_MS,
 	isPublicPath,
 	loginResponse,
+	clientAddress,
 	loginThrottled,
 	mintSessionToken,
 	passwordMatches,
@@ -134,9 +135,24 @@ test("login route: sets a secure session cookie on success, throttles repeated f
 		assert.match(bad.headers.get("location") ?? "", /error=invalid/);
 		assert.equal(bad.headers.get("set-cookie"), null);
 
+	});
+	// Behind a trusted proxy the limit is per client address.
+	await withEnv({ ...env, LH_TRUST_PROXY: "1" }, async () => {
 		for (let i = 0; i < 10; i++) recordLoginFailure("10.0.0.3");
 		assert(loginThrottled("10.0.0.3"));
-		const throttled = await post(env.LH_SERVER_PASSWORD, "10.0.0.3");
+		const throttled = await loginResponse(new Request(origin + "/api/auth/login", { method: "POST", body: Object.assign(new FormData(), {}), headers: { "x-forwarded-for": "10.0.0.3" } }));
+		assert.match(throttled.headers.get("location") ?? "", /error=throttled/);
+		assert(!loginThrottled("10.0.0.4"), "other addresses are unaffected");
+	});
+	// Without one, forged addresses all land in the server-wide bucket.
+	await withEnv(env, async () => {
+		const post = (password: string, ip: string) => {
+			const body = new FormData();
+			body.set("password", password);
+			return loginResponse(new Request(origin + "/api/auth/login", { method: "POST", body, headers: { "x-forwarded-for": ip } }));
+		};
+		for (let i = 0; i < 10; i++) await post("wrong", `203.0.113.${i}`);
+		const throttled = await post(env.LH_SERVER_PASSWORD, "198.51.100.9");
 		assert.match(throttled.headers.get("location") ?? "", /error=throttled/, "even the right password is refused while throttled");
 	});
 });
@@ -162,4 +178,13 @@ test("apps only: browsers are refused before sign-in, the two apps and API token
 		assert.equal(proxy(new NextRequest(origin + "/login", { headers: { "user-agent": iosUA } })).headers.get("x-middleware-next"), "1");
 		assert.equal(proxy(new NextRequest(origin + "/api/chats", { headers: { "user-agent": desktopUA } })).status, 401, "apps still sign in");
 	});
+});
+
+test("sign-in throttling shares one bucket unless a trusted proxy supplies addresses", () => {
+	const spoofed = new Headers({ "x-forwarded-for": "203.0.113.7", "x-real-ip": "203.0.113.8" });
+	assert.equal(clientAddress(spoofed, {}), "server", "client-supplied addresses are ignored by default");
+	assert.equal(clientAddress(new Headers({ "x-forwarded-for": "198.51.100.1" }), {}), "server");
+	assert.equal(clientAddress(spoofed, { LH_TRUST_PROXY: "1" }), "203.0.113.7");
+	assert.equal(clientAddress(new Headers({ "x-real-ip": "198.51.100.2" }), { LH_TRUST_PROXY: "1" }), "198.51.100.2");
+	assert.equal(clientAddress(new Headers(), { LH_TRUST_PROXY: "1" }), "proxy-unknown");
 });

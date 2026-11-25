@@ -142,15 +142,22 @@ export function clearedSessionCookieHeader(): string {
 }
 
 // ─── Login throttling ─────────────────────────────────────────────────────
-// In-memory, per client address: 10 failures per 15 minutes, then refuse
-// until the window passes. Single-process server, so a Map is the truth.
+// In-memory, per bucket (see clientAddress): 10 failures per 15 minutes,
+// then refuse until the window passes. Single-process server, so a Map is the truth.
 
 const FAIL_WINDOW_MS = 15 * 60 * 1000;
 const MAX_FAILS = 10;
 const failures = new Map<string, { count: number; since: number }>();
 
-export function clientAddress(headers: Headers): string {
-	return headers.get("x-forwarded-for")?.split(",")[0]?.trim() || headers.get("x-real-ip") || "local";
+/** The throttling bucket for a sign-in attempt. Next route handlers do not
+ * see the TCP peer, and X-Forwarded-For / X-Real-IP are client-controlled
+ * unless a reverse proxy overwrites them. So by default every attempt shares
+ * ONE server-wide bucket (a guesser cannot dodge the limit by inventing
+ * addresses; the cost is that it can lock sign-in for 15 minutes). Behind a
+ * proxy that sets these headers, LH_TRUST_PROXY=1 restores per-address limits. */
+export function clientAddress(headers: Headers, env: Env = process.env): string {
+	if (env.LH_TRUST_PROXY !== "1") return "server";
+	return headers.get("x-forwarded-for")?.split(",")[0]?.trim() || headers.get("x-real-ip") || "proxy-unknown";
 }
 
 export function loginThrottled(address: string, now = Date.now()): boolean {

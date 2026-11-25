@@ -56,7 +56,10 @@ A native iPhone app lives in `ios/`. Build and install it with Xcode:
 - every page redirects to `/login` until you sign in;
 - every `/api/*` route answers `401` without a valid session;
 - a sign-in lasts 30 days per device (HttpOnly, SameSite=Lax cookie);
-- 10 wrong passwords from one address lock that address out for 15 minutes;
+- 10 wrong passwords lock sign-in for 15 minutes. By default the limit is
+  server-wide, because a client can forge `X-Forwarded-For`; behind a
+  reverse proxy that sets that header, `LH_TRUST_PROXY=1` makes it per
+  client address;
 - `Authorization: Bearer <LH_API_TOKEN>` works for non-browser clients.
 
 **Host names.** The API accepts `localhost` and IP addresses as the host

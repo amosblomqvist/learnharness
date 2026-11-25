@@ -80,6 +80,7 @@ ssh user@server "grep LH_SERVER_PASSWORD ~/learnharness/.env.server"
 - Use letters, numbers, `-` and `_`. Quotes, spaces or `$` can be
   misinterpreted in the `.env` file.
 - Make it long: a passphrase of four or more random words works well.
-- Ten wrong passwords from one address lock that address out for 15
-  minutes. Restarting the container clears the lockout.
+- Ten wrong passwords lock sign-in for 15 minutes, for everyone unless
+  `LH_TRUST_PROXY=1` is set behind a reverse proxy (then per address).
+  Restarting the container clears the lockout.
 - `.env.server` is in `.gitignore`. Never commit it.
