@@ -4,8 +4,7 @@ import { createContext, useContext, useEffect, useMemo, useRef, useState } from 
 import { MaximizeIcon, MinusIcon, PlusIcon, XIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { fitGraphView, fitZoomFor, zoomedGraphView, type Viewport } from "@/components/pan-zoom";
-import { renderMermaid } from "@/components/mermaid-render";
-import { useAppearance } from "@/components/settings/appearance";
+import { renderMermaid, resolvedChartFont } from "@/components/mermaid-render";
 import { MermaidError } from "@/components/mermaid-error";
 import { Hint } from "@/components/ui/hint";
 import { SvgImage } from "@/components/artifacts/svg-image";
@@ -74,11 +73,28 @@ export function chartSize(svg: string): { w: number; h: number } {
 	return { w: 600, h: 400 };
 }
 
+/** Resolved reading font stack after mount and font/theme changes, so Pele
+ *  measures the same font CSS draws (zero SSR hydration mismatch). */
+export function useChartFont(): string | undefined {
+	const [font, setFont] = useState<string | undefined>(undefined);
+	useEffect(() => {
+		const refresh = () => setFont(resolvedChartFont());
+		refresh();
+		let cancelled = false;
+		void document.fonts?.ready.then(() => { if (!cancelled) refresh(); });
+		if (typeof MutationObserver === "undefined") return () => { cancelled = true; };
+		const observer = new MutationObserver(refresh);
+		observer.observe(document.documentElement, { attributes: true, attributeFilter: ["style", "class"] });
+		return () => { cancelled = true; observer.disconnect(); };
+	}, []);
+	return font;
+}
+
 /** The diagram focus: the chart at natural size inside a pan/zoom viewport
  *  (the plan popup's fit-floor semantics — fitGraphView/zoomedGraphView in
- *  pan-zoom.ts), Esc/X close. Renders its own copy of the chart (mermaid
- *  ids are per-render), not the injected inline svg. FIGURE MODE
- *  (2026-10-07): pass a raw `svg` instead of a mermaid `chart` — the same
+ *  pan-zoom.ts), Esc/X close. Renders its own copy of the chart synchronously
+ *  via pele (stateless, no ID collisions), not the injected inline svg. FIGURE
+ *  MODE (2026-10-07): pass a raw `svg` instead of a mermaid `chart` — the same
  *  shell then focuses a figure card's svg on a white stage, with the
  *  caller's invert state carried over (the filter rides the white stage,
  *  exactly like the in-card holder). */
@@ -95,37 +111,16 @@ export function MermaidOverlay({
 	inverted?: boolean;
 	onClose: () => void;
 }) {
-	// ── chart render (own instance, own ids); figure mode uses the raw svg ──
-	const [svg, setSvg] = useState<string | null>(rawSvg ?? null);
-	const [error, setError] = useState<string | null>(null);
+	// ── chart render (synchronous via pele); figure mode uses the raw svg ──
 	const [attempt, setAttempt] = useState(0);
-	const { resolvedMode } = useAppearance();
-	useEffect(() => {
-		if (image) {
-			setSvg(null);
-			setError(null);
-			return;
-		}
-		if (rawSvg !== undefined) {
-			setSvg(rawSvg);
-			setError(null);
-			return;
-		}
-		if (chart === undefined) return;
-		let cancelled = false;
-		setSvg(null);
-		setError(null);
-		renderMermaid(chart, resolvedMode)
-			.then((s) => {
-				if (!cancelled) setSvg(s);
-			})
-			.catch((e) => {
-				if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [rawSvg, chart, image, attempt, resolvedMode]);
+	const chartFont = useChartFont();
+	const diagram = useMemo(() => {
+		if (image || rawSvg !== undefined || chart === undefined) return null;
+		void attempt;
+		return renderMermaid(chart, chartFont);
+	}, [image, rawSvg, chart, chartFont, attempt]);
+	const svg = image ? null : rawSvg !== undefined ? rawSvg : (diagram?.svg ?? null);
+	const error = image || rawSvg !== undefined ? null : (diagram?.error ?? null);
 
 	const rootRef = useRef<HTMLDivElement>(null);
 	const layer = useInteractionLayer({
