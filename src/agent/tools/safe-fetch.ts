@@ -110,7 +110,7 @@ export async function safeFetch(url: string, init: RequestInit = {}, dispatcher:
  *  have none, and for compressed ones it is the size before decompression. */
 export async function readBoundedBytes(resp: Response, limit: number, tooLarge: string): Promise<Uint8Array> {
 	if (Number(resp.headers.get("content-length")) > limit) {
-		await resp.body?.cancel();
+		await resp.body?.cancel().catch(() => undefined);
 		throw new Error(tooLarge);
 	}
 	const reader = resp.body?.getReader();
