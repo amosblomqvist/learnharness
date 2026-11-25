@@ -253,4 +253,53 @@ describe("the practice draft (?mode=practice, 2026-10-04)", () => {
 		await startDraftSession("orbital mechanics", f);
 		assert.deepEqual(body, { title: "orbital mechanics" });
 	});
+
+	it("startDraftSession sends skipProbing:true only when requested in teach mode", async () => {
+		let body: Record<string, unknown> | null = null;
+		const f = (async (_url: string, init?: RequestInit) => {
+			body = JSON.parse(String(init?.body));
+			return new Response(JSON.stringify({ id: "c_skip" }), { status: 201 });
+		}) as unknown as typeof fetch;
+		await startDraftSession("TCP congestion control", f, undefined, undefined, undefined, undefined, true);
+		assert.deepEqual(body, { title: "TCP congestion control", skipProbing: true });
+
+		await startDraftSession("TCP practice", f, "practice", [], undefined, undefined, true);
+		assert.deepEqual(body, { title: "TCP practice", kind: "practice" });
+	});
+
+	it("DraftShell renders SkipProbingToggle in teach mode and updates empty-state copy when enabled", () => {
+		const offHtml = renderToStaticMarkup(
+			<DraftShell busy={false} text="" onChange={() => {}} onSend={() => {}} skipProbing={false} onSkipProbingChange={() => {}} />,
+		);
+		assert.ok(offHtml.includes('data-testid="skip-probing-toggle"'));
+		assert.ok(offHtml.includes('aria-pressed="false"'));
+		assert.ok(offHtml.includes("The teacher will open by probing what you already know."));
+
+		const onHtml = renderToStaticMarkup(
+			<DraftShell busy={false} text="" onChange={() => {}} onSend={() => {}} skipProbing={true} onSkipProbingChange={() => {}} />,
+		);
+		assert.ok(onHtml.includes('data-testid="skip-probing-toggle"'));
+		assert.ok(onHtml.includes('aria-pressed="true"'));
+		assert.ok(onHtml.includes("The teacher will start by building your learning plan."));
+
+		const practiceHtml = renderToStaticMarkup(
+			<DraftShell busy={false} text="" onChange={() => {}} onSend={() => {}} mode="practice" skipProbing={true} onSkipProbingChange={() => {}} />,
+		);
+		assert.ok(!practiceHtml.includes('data-testid="skip-probing-toggle"'));
+	});
+
+	it("SessionStarter mints a distinct session when skipProbing flips after an earlier start", async () => {
+		const { SessionStarter } = await import("../components/start-session.ts");
+		let nextId = 1;
+		const calls: Array<Record<string, unknown>> = [];
+		const f = (async (_url: string, init?: RequestInit) => {
+			calls.push(JSON.parse(String(init?.body)));
+			return new Response(JSON.stringify({ id: `c_${nextId++}` }), { status: 200 });
+		}) as typeof fetch;
+		const starter = new SessionStarter();
+		assert.equal(await starter.start({ title: "TCP" }, f, "m1"), "/chat/c_1");
+		assert.equal(await starter.start({ title: "TCP" }, f, "m1"), "/chat/c_1", "unchanged retry reuses session");
+		assert.equal(await starter.start({ title: "TCP", skipProbing: true }, f, "m1"), "/chat/c_2", "toggling skipProbing mints fresh session");
+		assert.equal(calls.length, 2);
+	});
 });

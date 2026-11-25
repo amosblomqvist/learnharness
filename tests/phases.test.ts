@@ -229,3 +229,63 @@ test("phaseAt3 + phaseAt3Lh: a tagged explain CALL is the plan→teach seam too"
 		"the two folds agree on the explain mechanic",
 	);
 });
+
+import {
+	hasProbeDone,
+	newProbeSkippedMessage,
+	newUserMessage,
+	reconstructRequestCause,
+	skipProbingAnchorId,
+	toLlmMessages,
+} from "../src/core/native-messages.ts";
+import { projectView } from "../src/core/view.ts";
+
+test("probe-skipped marker: pre-start and mid-probe parity across native fold, view fold, timeline, agent seam, and request cause", () => {
+	const startMarker = newProbeSkippedMessage(true);
+	const opening = newUserMessage("Teach me TCP congestion control");
+	const startRecord: LhMessage[] = [startMarker, opening];
+	const startView = projectView(startRecord);
+
+	assert.equal(hasProbeDone(startRecord), true);
+	assert.equal(phaseAt3Lh(startRecord), "plan");
+	assert.equal(phaseAt3(startView), "plan");
+	assert.deepEqual(phaseTimeline(startView), ["plan", "plan"]);
+	assert.equal(reconstructRequestCause(startRecord), "foreground");
+	assert.equal(toLlmMessages(startRecord).length, 2, "pre-start marker flattens ahead of the opening user message");
+
+	const midMarker = newProbeSkippedMessage(false);
+	const midRecord: LhMessage[] = [opening, midMarker];
+	const midView = projectView(midRecord);
+
+	assert.equal(hasProbeDone(midRecord), true);
+	assert.equal(phaseAt3Lh(midRecord), "plan");
+	assert.equal(phaseAt3(midView), "plan");
+	assert.deepEqual(phaseTimeline(midView), ["probe", "plan"]);
+	assert.equal(reconstructRequestCause(midRecord), "foreground");
+
+	const tagged = assistantQuizCall({ question: "q", nodeId: "n1", correctAnswer: "a" });
+	const compacted: LhMessage = {
+		id: "cmp_1",
+		role: "custom",
+		customType: "compaction",
+		content: "summary",
+		display: true,
+		details: { firstKeptMessageId: tagged.id, tokensBefore: 1000 },
+		timestamp: Date.now(),
+	};
+	assert.equal(skipProbingAnchorId([opening, compacted]), opening.id, "anchor ignores trailing compaction markers");
+	assert.equal(hasProbeDone([startMarker, opening, tagged, compacted]), true, "probe-skipped survives compaction");
+	assert.equal(phaseAt3Lh([startMarker, opening, tagged, compacted]), "teach");
+
+	const sideMarker: LhMessage = {
+		id: "sq_1",
+		role: "custom",
+		customType: "side-question",
+		content: "side note",
+		display: false,
+		details: {},
+		timestamp: Date.now(),
+	};
+	assert.equal(skipProbingAnchorId([opening, sideMarker, compacted]), opening.id, "anchor ignores trailing side-question and compaction markers");
+	assert.equal(skipProbingAnchorId([]), null);
+});
