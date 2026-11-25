@@ -1702,7 +1702,13 @@ export function Chat({
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
-				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
+				{/* overflow-x-hidden: the root's overflow-y-hidden would otherwise
+				    compute overflow-x to auto, and any stray box past the edge
+				    (the faded plan marginalia on phones) let a sideways swipe —
+				    e.g. across the confidence slider — pan the whole session.
+				    Only the root: the library's wheel handler reads the inner
+				    scroller's overflow shorthand, which must stay "auto". */}
+				<Conversation className="h-full min-w-0 flex-1 overflow-x-hidden" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
 					<TranscriptElementReporter onElement={setTranscriptElement} />
 					<ConversationContent className="min-h-full gap-0 p-0">
@@ -2958,7 +2964,10 @@ export function DockOverlay({
 						type="button"
 						data-testid="plan-marginalia"
 						onClick={onOpenPlan}
-						style={{ left: `calc(50% + ${dockW / 2 + MARGIN_GAP}px)` }}
+						// Clamped to the right inset (right-4): in a flank too narrow
+						// for the diagram the faded box collapses at that edge instead
+						// of sitting past it, where it added sideways scroll.
+						style={{ left: `min(50% + ${dockW / 2 + MARGIN_GAP}px, 100% - 1rem)` }}
 						className={`absolute bottom-5 right-4 top-0 cursor-pointer transition-[filter,opacity] duration-300 ease-out ${
 							expanded && flankW >= MARGIN_MIN_W
 								? "pointer-events-auto opacity-100 blur-0"
