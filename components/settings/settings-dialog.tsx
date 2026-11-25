@@ -34,7 +34,7 @@ import {
 	type ReactNode,
 	type RefObject,
 } from "react";
-import { BotIcon, KeyIcon, KeyboardIcon, PaletteIcon, PlugIcon, PuzzleIcon, SettingsIcon, WaypointsIcon, type LucideIcon } from "lucide-react";
+import { BotIcon, KeyIcon, KeyboardIcon, PaletteIcon, PlugIcon, PuzzleIcon, SettingsIcon, SmartphoneIcon, WaypointsIcon, type LucideIcon } from "lucide-react";
 import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
@@ -47,6 +47,7 @@ import {
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
+import { PhoneAccessSettings, phoneAccessBridge, type PhoneAccessBridge } from "./phone-access-settings.tsx";
 import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -72,7 +73,7 @@ const SECTIONS = [
 	{ id: "keyboard", label: "Keyboard", icon: KeyboardIcon, hint: "Stored on this device" },
 	{ id: "general", label: "General", icon: SettingsIcon },
 ] as const;
-type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
+type SectionId = (typeof SECTIONS)[number]["id"] | "phone" | "plugins" | "core-plugins" | `plugin:${string}`;
 
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
@@ -273,8 +274,13 @@ export function SettingsDialogBody({
 		if (missingPlugin) setActive(management);
 	}, [missingPlugin, management]);
 	const selected = missingPlugin ? management : active;
+	// Desktop app only (preload bridge); read after mount so SSR and the first
+	// client render agree.
+	const [phoneBridge, setPhoneBridge] = useState<PhoneAccessBridge | undefined>(undefined);
+	useEffect(() => setPhoneBridge(phoneAccessBridge()), []);
 	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = [
 		...SECTIONS,
+		...(phoneBridge ? [{ id: "phone" as const, label: "Phone access", icon: SmartphoneIcon }] : []),
 		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
 		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },
 		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
@@ -448,7 +454,7 @@ export function SettingsDialogBody({
 				>
 					{navSections.map((s, index) => (
 						<div key={s.id} className="shrink-0">
-							{index === SECTIONS.length && <hr className="my-2 border-border" />}
+							{s.id === "core-plugins" && <hr className="my-2 border-border" />}
 							<button
 								type="button"
 								data-testid={`settings-nav-${s.id}`}
@@ -512,6 +518,11 @@ export function SettingsDialogBody({
 											void write("general", { ...record.general, autoUpdate: on })
 										}
 									/>
+								</SettingsSection>
+							)}
+							{active === "phone" && phoneBridge && (
+								<SettingsSection title="Phone access" testid="section-phone">
+									<PhoneAccessSettings bridge={phoneBridge} />
 								</SettingsSection>
 							)}
 							{active === "keys" && (

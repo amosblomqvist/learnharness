@@ -83,6 +83,17 @@ contextBridge.exposeInMainWorld("lh", {
 			return () => ipcRenderer.removeListener("lh:subscriptions:changed", listener);
 		},
 	},
+	phoneAccess: {
+		status: () => ipcRenderer.invoke("lh:phone-access:control", { op: "status" }),
+		setEnabled: (enabled) => ipcRenderer.invoke("lh:phone-access:control", { op: "setEnabled", enabled }),
+		newCode: () => ipcRenderer.invoke("lh:phone-access:control", { op: "newCode" }),
+		revoke: (id) => ipcRenderer.invoke("lh:phone-access:control", { op: "revoke", id }),
+		onChange: (cb) => {
+			const listener = () => cb();
+			ipcRenderer.on("lh:phone-access:changed", listener);
+			return () => ipcRenderer.removeListener("lh:phone-access:changed", listener);
+		},
+	},
 	expandWindow: () => ipcRenderer.send("lh:expand-window"),
 	setAppearance: (a) => ipcRenderer.send("lh:appearance", a),
 	onZoom: (cb) => {

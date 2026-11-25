@@ -23,7 +23,7 @@ function windowOptions(platform: string, env: Record<string, string> = {}, repor
 		once() {}
 	}
 	const electron = {
-		app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
+		app: { setName() {}, getVersion: () => "0.0.0-test", getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
 		BrowserWindow: FakeWindow,
 		nativeTheme: { shouldUseDarkColors: true, themeSource: "system", on() {} },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {}, getUserAgent: () => "Electron", setUserAgent() {} } },
@@ -54,7 +54,7 @@ describe("desktop development startup", () => {
 		}
 		const electron = {
 			app: {
-				setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {},
+				setName() {}, getVersion: () => "0.0.0-test", getPath: () => "/fixture/LearnHarness", setPath() {},
 				requestSingleInstanceLock: () => false, quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {},
 			},
 			BrowserWindow: FakeWindow,
@@ -111,7 +111,7 @@ describe("desktop appearance boot and IPC", () => {
 		const context = {
 			require: (id: string) => {
 				if (id === "electron") return {
-					app: { setName() {}, getPath: () => "/fixture/shell", setPath() {}, requestSingleInstanceLock: () => false,
+					app: { setName() {}, getVersion: () => "0.0.0-test", getPath: () => "/fixture/shell", setPath() {}, requestSingleInstanceLock: () => false,
 						quit() {}, on() {}, once() {}, removeListener() {}, whenReady: async () => {} },
 					BrowserWindow: FakeWindow, nativeTheme,
 					Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
@@ -218,7 +218,7 @@ describe("desktop window chrome", () => {
 		runInNewContext(readFileSync(new URL("../electron/preload.cjs", import.meta.url), "utf8"), context);
 		assert.equal(bridge.platform, "win32");
 		assert.deepEqual(Object.keys(bridge).sort(), [
-			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "dismissStartupMessage", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "platform", "setAppearance", "subscriptions", "takeStartupMessage",
+			"chatgpt", "checkForUpdates", "chooseAttachmentFolder", "dismissStartupMessage", "expandWindow", "getPathForFile", "getUpdateState", "getZoom", "installUpdate", "onOpenSettings", "onUpdateStatus", "onZoom", "phoneAccess", "platform", "setAppearance", "subscriptions", "takeStartupMessage",
 		]);
 		const appearance = { mode: "light", background: "#eeeeee" };
 		(bridge.setAppearance as (a: unknown) => void)(appearance);

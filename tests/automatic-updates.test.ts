@@ -74,6 +74,7 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		name: "LearnHarness",
 		setName() {},
 		getPath: () => userData,
+		getVersion: () => "0.0.0-test",
 		setPath: (_: string, value: string) => { userData = value; },
 		requestSingleInstanceLock: () => false,
 		quit() {},

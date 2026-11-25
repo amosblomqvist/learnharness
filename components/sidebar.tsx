@@ -62,6 +62,7 @@ const STORAGE_KEY = "lh:sidebar-open";
  */
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
+import type { PhoneAccessBridge } from "@/components/settings/phone-access-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
 const SIDEBAR_AUTOCLOSE = 928;
 
@@ -86,6 +87,8 @@ declare global {
 			subscriptionTransport?: "desktop" | "web";
 			openSubscriptionBrowser?: (action: string) => Promise<void>;
 			chatgpt?: ChatGPTControlBridge;
+			/** Phone access gateway controls (electron/phone-access.cjs). */
+			phoneAccess?: PhoneAccessBridge;
 			subscriptions?: NativeSubscriptionControlBridge;
 			expandWindow: () => void;
 			/** Native chrome follows the active theme (theme wave): main sets

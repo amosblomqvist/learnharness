@@ -83,6 +83,16 @@ files:
   - node_modules/argparse/**/*
   # Main-process ID-token signature verification (no bundled OAuth implementation).
   - node_modules/jose/**/*
+  # Phone access Bonjour advertisement (electron/phone-access-bonjour.cjs).
+  # bonjour-service → fast-deep-equal, multicast-dns; multicast-dns →
+  # dns-packet, thunky; dns-packet → @leichtgewicht/ip-codec. All MIT,
+  # pure JavaScript. Keep in sync when bonjour-service bumps (npm ls --all).
+  - node_modules/bonjour-service/**/*
+  - node_modules/fast-deep-equal/**/*
+  - node_modules/multicast-dns/**/*
+  - node_modules/dns-packet/**/*
+  - node_modules/thunky/**/*
+  - node_modules/@leichtgewicht/ip-codec/**/*
 extraResources:
   # Attribution/license for the bounded local Pi cutoff-selector port.
   - from: docs/compaction-accounting.md
