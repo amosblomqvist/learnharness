@@ -1,0 +1,144 @@
+/**
+ * Tests for the settings STORE (settings-storage wave, 2026-09-19):
+ * src/store/settings.ts — the record's fs adapter. Uses a fresh isolated
+ * HOME/data/auth before importing any store or config; never touches the
+ * repo's data or shares a recovery/store directory with another process.
+ *
+ * (The legacy default-settings.json fold and the chat-section facade died
+ * with per-session models, owner 2026-09-28 — sessions own their model
+ * from birth, stamped from the strong slot server-side.)
+ */
+
+import assert from "node:assert/strict";
+import fs from "node:fs";
+import path from "node:path";
+import os from "node:os";
+import { after, afterEach, describe, it } from "node:test";
+
+const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-settings-store-"));
+process.env.HOME = path.join(directory, "home");
+process.env.LH_DATA_DIR = path.join(directory, "data");
+process.env.LH_AUTH_FILE = path.join(directory, "auth.json");
+fs.mkdirSync(process.env.HOME, { recursive: true });
+fs.mkdirSync(process.env.LH_DATA_DIR, { recursive: true });
+fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
+const { SETTINGS_FILE } = await import("../config.ts");
+const { readSettings, writeSettings } = await import("../src/store/settings.ts");
+const { resolveSettings } = await import("../src/core/settings-resolution.ts");
+const { parseCompactionSettingsBody, parseAppearanceSettingsBody } = await import("../src/server/settings-body.ts");
+
+after(() => fs.rmSync(directory, { recursive: true, force: true }));
+
+afterEach(() => {
+	fs.rmSync(SETTINGS_FILE, { force: true });
+});
+
+describe("the settings store", () => {
+	it("keeps an old dictation preference on disk while excluding it from app settings", () => {
+		const legacy = { version: 1, dictation: { language: "en" } };
+		fs.writeFileSync(SETTINGS_FILE, JSON.stringify(legacy));
+		assert.deepEqual(readSettings(), { version: 1 });
+
+		const settings = { version: 1, general: { autoUpdate: false } };
+		assert.deepEqual(writeSettings(settings), settings);
+		assert.deepEqual(readSettings(), settings);
+		assert.deepEqual(JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")), { ...settings, dictation: legacy.dictation });
+	});
+
+	it("persists worker concurrency, drops invalid disk values, and resets to 8 when unset", () => {
+		writeSettings({ version: 1, agent: { workerRequestConcurrency: 29, tools: { research: false } } });
+		assert.deepEqual(readSettings()?.agent, { workerRequestConcurrency: 29, tools: { research: false } });
+		assert.equal(JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")).agent.workerRequestConcurrency, 29);
+		fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: 1, agent: { workerRequestConcurrency: 1.5, tools: { research: false } } }));
+		assert.deepEqual(readSettings()?.agent, { tools: { research: false } });
+		assert.equal(resolveSettings(readSettings()).agent.workerRequestConcurrency, 8);
+		writeSettings({ version: 1, agent: { tools: { research: false } } });
+		assert.equal("workerRequestConcurrency" in JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf-8")).agent, false);
+		assert.equal(resolveSettings(readSettings()).agent.workerRequestConcurrency, 8);
+	});
+
+	it("code ligatures persist in either state; omitted and invalid existing settings resolve OFF", () => {
+		assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, false);
+		for (const codeLigatures of [true, false]) {
+			const parsed = parseAppearanceSettingsBody({ codeLigatures, proseFontSize: 20 });
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, appearance: parsed.settings });
+			assert.deepEqual(readSettings()?.appearance, { codeLigatures, proseFontSize: 20 });
+			assert.equal(JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")).appearance.codeLigatures, codeLigatures);
+			assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, codeLigatures);
+		}
+		for (const appearance of [{ proseFontSize: 20 }, { proseFontSize: 20, codeLigatures: "true" }]) {
+			fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: 1, appearance }));
+			assert.deepEqual(readSettings()?.appearance, { proseFontSize: 20 });
+			assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, false);
+		}
+	});
+
+	it("compact session list is off by default and persists either checkbox state", () => {
+		assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, false);
+		for (const compactSessionList of [true, false]) {
+			const appearance = { compactSessionList, fontFamily: "Georgia" };
+			const parsed = parseAppearanceSettingsBody(appearance);
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, appearance: parsed.settings });
+			assert.deepEqual(readSettings()?.appearance, appearance);
+			assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, compactSessionList);
+		}
+		assert.equal(parseAppearanceSettingsBody({ compactSessionList: "true" }).ok, false);
+		fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: 1, appearance: { compactSessionList: "true" } }));
+		assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, false);
+	});
+
+	it("reads null on first boot (no record)", () => {
+		fs.rmSync(SETTINGS_FILE, { force: true });
+		assert.equal(readSettings(), null);
+	});
+
+	it("write→read round-trips through the sanitizer", () => {
+		writeSettings({ version: 1, graph: { enabled: false } });
+		const out = readSettings();
+		assert.ok(out);
+		assert.deepEqual(out.graph, { enabled: false });
+	});
+
+	it("reasoning estimation defaults off and explicit choices survive parsing, storage, and resolution", () => {
+		assert.equal(resolveSettings(null).compaction.includeReasoning, false);
+		writeSettings({ version: 1, compaction: { thresholdTokens: 120_000 } });
+		assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, false, "older records stay on the original estimator");
+		for (const includeReasoning of [true, false]) {
+			const parsed = parseCompactionSettingsBody({ thresholdTokens: 120_000, includeReasoning });
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, compaction: parsed.settings });
+			assert.deepEqual(readSettings()?.compaction, { thresholdTokens: 120_000, includeReasoning });
+			assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, includeReasoning);
+		}
+		writeSettings({ version: 1, compaction: { thresholdTokens: 120_000, includeReasoning: "true" } });
+		assert.deepEqual(readSettings()?.compaction, { thresholdTokens: 120_000 }, "invalid disk values are dropped");
+		assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, false);
+	});
+
+	it("a chat section on disk is IGNORED — the field died with per-session models (owner, 2026-09-28)", () => {
+		fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+		// A fossil `chat` section (the old default-settings record) must not
+		// resurrect through the sanitizer — the key is simply gone.
+		fs.writeFileSync(
+			SETTINGS_FILE,
+			JSON.stringify({
+				version: 1,
+				chat: { model: { provider: "openrouter", id: "z-ai/glm-5.3-flash" }, thinkingLevel: "low" },
+				graph: { enabled: true },
+			}),
+			"utf-8",
+		);
+		const out = readSettings();
+		assert.ok(out);
+		assert.equal("chat" in out, false, "the chat section never surfaces");
+		assert.deepEqual(out.graph, { enabled: true }); // siblings survive
+	});
+
+	it("corrupt settings.json → null (first-boot semantics), never throws", () => {
+		fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
+		fs.writeFileSync(SETTINGS_FILE, "{not json", "utf-8");
+		assert.equal(readSettings(), null);
+	});
+});

@@ -16,6 +16,10 @@ concurrency:
 env:
   NEXT_TELEMETRY_DISABLED: "1"
 
+defaults:
+  run:
+    working-directory: workspace
+
 jobs:
   quality:
     name: Typecheck, tests, lint
@@ -27,6 +31,7 @@ jobs:
         with:
           node-version: "26"
           cache: npm
+          cache-dependency-path: workspace/package-lock.json
       - run: npm ci
       - run: npm run plugins:setup
       - run: npm run typecheck
@@ -57,6 +62,7 @@ jobs:
         with:
           node-version: "26"
           cache: npm
+          cache-dependency-path: workspace/package-lock.json
       - run: npm ci
       - run: npm run plugins:setup
       - name: Native renderer tests on this OS

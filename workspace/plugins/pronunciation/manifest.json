@@ -1,0 +1,11 @@
+{
+  "apiVersion": 1,
+  "id": "pronunciation",
+  "name": "Chinese pronunciation",
+  "version": "0.1.0",
+  "minAppVersion": "0.7.0",
+  "description": "Click or tap Chinese text to hear Mandarin spoken by the local Matcha-Baker voice (Windows, DirectML).",
+  "main": "main.js",
+  "backend": "backend.cjs",
+  "styles": "styles.css"
+}

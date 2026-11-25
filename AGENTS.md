@@ -1,12 +1,10 @@
-<!-- BEGIN:nextjs-agent-rules -->
+# Workspace
 
-## This is NOT the Next.js you know
+Run application, build, and test commands from `workspace/`. Before writing code, follow `workspace/AGENTS.md` and read the relevant installed Next.js guide under `workspace/node_modules/next/dist/docs/`.
 
-This version has breaking changes — APIs, conventions, and file structure may all differ from your training data. Read the relevant guide in `node_modules/next/dist/docs/` (resolved from this file's directory; in monorepos the `next` package may not be visible from the repo root) before writing any code. Heed deprecation notices.
+# Never touch the user's real data
 
-This block is written and re-added by `next dev` — verify at `node_modules/next/dist/server/lib/generate-agent-files.js`. Removing it from a diff only re-creates the uncommitted change; committing it with your work keeps the tree clean.
-
-<!-- END:nextjs-agent-rules -->
+Never create, leave behind or delete sessions (threads), jobs, graph entries, settings or credentials in the user's real profile (`workspace/data/`, `workspace/auth.json` and the credential files next to it). Every test, smoke script or separate dev server you start must run against a scratch `LH_DATA_DIR` and `LH_AUTH_FILE`. You may open the real app (for example with `Launch LearnHarness.cmd`) to check how it behaves, but only to look: never start a session in it, because that changes the user's learning progress. After any run, check that `workspace/data/chats` and `workspace/data/jobs` gained no files. If they did, report it instead of leaving stray threads in the user's sidebar.
 
 # No guessing
 

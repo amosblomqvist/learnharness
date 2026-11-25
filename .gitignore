@@ -1,31 +1,18 @@
+# The application lives in workspace/ (see workspace/.gitignore).
+# These are leftovers and generated output at the repository root.
 node_modules/
-data/
 .next/
+/data/
+/dist/
+/core-plugins/
+/plugins/
+/public/
 *.log
 .DS_Store
-*.tsbuildinfo
-# Local environment secrets; example templates may be committed.
-.env
-.env.*
-!.env.example
-!.env.*.example
-.memory/
-SCOPE.md
-# raw real-data import sources (user directive 2026-09-13: never commit)
-real-data-extraction/
-dist/
-# Generated offline authoring-skill download (dev/build preparation).
-/public/plugin-authoring/
 
-# Generated app-owned plugin packages and transactional staging.
-/core-plugins/
-/.core-plugins-*/
-
-# dev auth/keys store (auth-keys wave): repo-root auth.json — secrets never committed
+# Credential stores must never be committed.
 auth.json
 chatgpt-credentials.json*
 github-copilot-credentials.json*
 xai-credentials.json*
-
-# dev-fresh launcher scratch (fresh-user sim): disposable per launch
-.fresh-data/
+learnharness-cloud-credentials.json*
