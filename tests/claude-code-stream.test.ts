@@ -34,6 +34,7 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import { Type } from "typebox";
 
 import { parseCliLine } from "../src/agent/claude-code/cli-events.ts";
+import { isNarrationBlock } from "../src/agent/narration-guard.ts";
 import { ClaudeCodeError } from "../src/agent/claude-code/constants.ts";
 import { LIVE_PROCESS_IDLE_TIMEOUT_MS, liveProcessIdleTimeoutMs } from "../src/agent/claude-code/live-processes.ts";
 import { CLAUDE_CODE_MODELS, createClaudeCodeProvider } from "../src/agent/claude-code/provider.ts";
@@ -70,8 +71,13 @@ type RunCall = {
 
 type ScenarioRun = { events: AssistantMessageEvent[]; calls: RunCall[] };
 
-function readFixtureLines(name: string): string[] {
+function readRawFixtureLines(name: string): string[] {
 	return readFileSync(join(FIXTURES, name), "utf8").split("\n").filter(Boolean);
+}
+
+/** Recorded lines without the CLI's init line, so scenarios behave as if none arrived. */
+function readFixtureLines(name: string): string[] {
+	return readRawFixtureLines(name).filter((line) => !line.startsWith('{"type":"system","subtype":"init"'));
 }
 
 function getFlagValue(args: string[], flag: string): string {
@@ -373,6 +379,30 @@ test("thinking deltas map to thinking_*", async (t) => {
 		{ type: "thinking", thinking: "Sockets are endpoints." },
 		{ type: "text", text: "An endpoint." },
 	]);
+});
+
+test("signature deltas land on the thinking block so the narration guard recognizes it", async (t) => {
+	const signature = Buffer.from("\u0008\u0001narration-summary").toString("base64");
+	const split = Math.floor(signature.length / 8) * 4;
+	const { events } = await runScenario(t, [
+		streamEvent({ type: "message_start", message: { usage: {} } }),
+		streamEvent({ type: "content_block_start", index: 0, content_block: { type: "thinking", thinking: "", signature: "" } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "thinking_delta", thinking: "Feedback for the learner." } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: signature.slice(0, split) } }),
+		streamEvent({ type: "content_block_delta", index: 0, delta: { type: "signature_delta", signature: signature.slice(split) } }),
+		streamEvent({ type: "content_block_stop", index: 0 }),
+		streamEvent({ type: "message_delta", delta: { stop_reason: "end_turn" }, usage: {} }),
+		streamEvent({ type: "message_stop" }),
+	]);
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.deepEqual(done.message.content, [
+		{ type: "thinking", thinking: "Feedback for the learner.", thinkingSignature: signature },
+	]);
+	const [block] = done.message.content;
+	assert.ok(block);
+	assert.equal(isNarrationBlock(block), true);
 });
 
 test("tool scenario ends with toolcall_end (Claude's tool_use id, unprefixed name) and done(toolUse)", async (t) => {
@@ -905,6 +935,80 @@ test("writes one user prompt after local-only control initialization and summary
 	assert.deepEqual(JSON.parse(lines[1]!).request, { subtype: "get_context_usage", detail: "summary" });
 	assert.equal(lines[2], toStreamJsonLine([{ type: "text", text: "hi" }]));
 	assert(lines.slice(3).every((line) => JSON.parse(line).request.detail === "summary"));
+});
+
+test("parseCliLine maps a signature_delta to a signatureDelta event", () => {
+	const line = streamEvent({ type: "content_block_delta", index: 2, delta: { type: "signature_delta", signature: "c2ln" } });
+
+	assert.deepEqual(parseCliLine(line), { type: "signatureDelta", index: 2, signature: "c2ln" });
+});
+
+const BRIDGE_UNREACHABLE = /could not reach the LearnHarness tool bridge/;
+
+/** CLI init lines as the real CLI 2.1.322 prints them (issue #571). */
+function initLine(tools: string[], bridgeStatus?: string): string {
+	return JSON.stringify({
+		type: "system",
+		subtype: "init",
+		tools,
+		mcp_servers: bridgeStatus ? [{ name: "learnharness", status: bridgeStatus }] : [],
+	});
+}
+
+test("an init line with no tools and a failed bridge fails the turn before any model text", async (t) => {
+	const { events } = await runScenario(t, [initLine([], "failed"), ...readFixtureLines("text.jsonl"), HOLD]);
+
+	assert.match(getErrorMessage(events) ?? "", BRIDGE_UNREACHABLE);
+	assert.equal(events.some((event) => event.type === "text_delta"), false);
+});
+
+test("a connected bridge that lacks a declared tool fails the turn before any model text", async (t) => {
+	const { events } = await runScenario(t, [initLine(["mcp__learnharness__read"], "connected"), ...readFixtureLines("text.jsonl"), HOLD]);
+
+	assert.match(getErrorMessage(events) ?? "", BRIDGE_UNREACHABLE);
+	assert.equal(events.some((event) => event.type === "text_delta"), false);
+});
+
+test("a healthy init line from the recorded tool turn lets the turn proceed", async (t) => {
+	const recordedInit = readRawFixtureLines("tool.jsonl")[0];
+	assert.ok(recordedInit);
+	assert.ok(recordedInit.includes('"mcp__learnharness__get_weather"'));
+	const weather: ToolUse = { id: "toolu_01JBB4cJsPa585FWb1XrfbNX", name: "get_weather", arguments: { city: "Paris" } };
+	const { runClaude } = createFakeRun(t, [recordedInit, ...toToolUseMessage([weather]), callTool(weather), HOLD]);
+	const tool: Tool = { name: "get_weather", description: "Weather", parameters: { type: "object", properties: {} } };
+	const context = normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI], tools: [tool] });
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), context, { sessionId: SESSION_ID }));
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.equal(done.reason, "toolUse");
+	assert.deepEqual(done.message.content, [{ type: "toolCall", ...weather }]);
+});
+
+test("extra tools beyond the declared ones do not fail the turn", async (t) => {
+	const { events } = await runScenario(t, [
+		initLine(["mcp__learnharness__read", "mcp__learnharness__get_weather", "mcp__other__extra"], "connected"),
+		...readFixtureLines("text.jsonl"),
+	]);
+
+	assert.equal(getLastEvent(events).type, "done");
+});
+
+test("a turn that declares no tools proceeds on the recorded empty init line", async (t) => {
+	const { runClaude, calls } = createFakeRun(t, readRawFixtureLines("text.jsonl"));
+	const events = await collectEvents(createClaudeCodeStreamFunction(runClaude)(getModel(), normalizeContext({ messages: [HI], tools: [] })));
+
+	const done = getLastEvent(events);
+	assert.ok(done.type === "done");
+	assert.equal(getText(done.message), "hello there");
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
+test("a bridge failure kills the CLI process and removes the temporary turn files", async (t) => {
+	const { events, calls } = await runScenario(t, [initLine([], "failed"), ...readFixtureLines("text.jsonl"), HOLD]);
+
+	assert.match(getErrorMessage(events) ?? "", BRIDGE_UNREACHABLE);
+	await assertCleanedUp(getOnlyCall(calls));
 });
 
 test("parseCliLine ignores non-JSON, system, rate-limit and successful result lines", () => {

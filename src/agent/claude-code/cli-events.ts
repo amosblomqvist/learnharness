@@ -9,13 +9,15 @@ export type CliEvent =
 	| { type: "blockStart"; index: number; block: CliBlock }
 	| { type: "textDelta"; index: number; text: string }
 	| { type: "thinkingDelta"; index: number; thinking: string }
+	| { type: "signatureDelta"; index: number; signature: string }
 	| { type: "toolInputDelta"; index: number; partialJson: string }
 	| { type: "blockStop"; index: number }
 	| { type: "messageDelta"; stopReason: string | null; usage: CliUsage }
 	| { type: "messageStop" }
 	| { type: "assistantError"; error: string; text: string }
 	| { type: "resultError"; text: string }
-	| { type: "toolResults"; ids: string[] };
+	| { type: "toolResults"; ids: string[] }
+	| { type: "init"; tools: string[]; mcpServers: { name: string; status: string }[] };
 
 type RawUsage = {
 	input_tokens?: number | null;
@@ -30,6 +32,7 @@ type RawDelta = {
 	type?: string;
 	text?: string;
 	thinking?: string;
+	signature?: string;
 	partial_json?: string;
 	stop_reason?: string | null;
 };
@@ -52,6 +55,8 @@ type RawCliLine = {
 	result?: string;
 	subtype?: string;
 	errors?: string[];
+	tools?: unknown;
+	mcp_servers?: unknown;
 };
 
 function toUsage(raw: RawUsage): CliUsage {
@@ -91,6 +96,10 @@ function parseDelta(index: number, delta: RawDelta): CliEvent | null {
 		case "thinking_delta":
 			if (typeof delta.thinking !== "string") return null;
 			return { type: "thinkingDelta", index, thinking: delta.thinking };
+
+		case "signature_delta":
+			if (typeof delta.signature !== "string") return null;
+			return { type: "signatureDelta", index, signature: delta.signature };
 
 		case "input_json_delta":
 			if (typeof delta.partial_json !== "string") return null;
@@ -152,6 +161,19 @@ function getResultErrorText(line: RawCliLine): string {
 	return `claude CLI failed: ${line.subtype ?? "unknown error"}`;
 }
 
+function parseInit(line: RawCliLine): CliEvent | null {
+	if (!Array.isArray(line.tools)) return null;
+
+	const tools = line.tools.filter((tool): tool is string => typeof tool === "string");
+	const servers: unknown[] = Array.isArray(line.mcp_servers) ? line.mcp_servers : [];
+	const mcpServers = servers.flatMap((server) => {
+		const { name, status } = (server ?? {}) as { name?: unknown; status?: unknown };
+		return typeof name === "string" && typeof status === "string" ? [{ name, status }] : [];
+	});
+
+	return { type: "init", tools, mcpServers };
+}
+
 export function parseCliLine(text: string): CliEvent | null {
 	let parsed: unknown;
 	try {
@@ -177,6 +199,9 @@ export function parseCliLine(text: string): CliEvent | null {
 			const ids = blocks.flatMap((block) => block.type === "tool_result" && typeof block.tool_use_id === "string" ? [block.tool_use_id] : []);
 			return ids.length ? { type: "toolResults", ids } : null;
 		}
+
+		case "system":
+			return line.subtype === "init" ? parseInit(line) : null;
 
 		case "result":
 			if (line.is_error !== true) return null;
