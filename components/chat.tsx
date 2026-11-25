@@ -97,6 +97,7 @@ import { readPluginProblemSubmission, pluginProblemById } from "@/src/core";
 import { ThinkingCard, ProblemCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
+import { HostDialog } from "@/components/host-dialog";
 import { PluginSessionTopBarActions } from "@/components/plugin-chrome";
 import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
@@ -120,6 +121,7 @@ import {
 	findPendingToolCall,
 	phaseAt3,
 	phaseTimeline,
+	skipProbingAnchorId,
 	teachStepIndex,
 	toolQuestionKind,
 	questionNeedsReveal,
@@ -469,6 +471,9 @@ export function Chat({
 	const [abortAsk, setAbortAsk] = useState<AbortMode | null>(null);
 	const abortAskRef = useRef<AbortMode | null>(null);
 	abortAskRef.current = abortAsk;
+	const [skipProbeConfirm, setSkipProbeConfirm] = useState(false);
+	const skipProbeConfirmRef = useRef(false);
+	skipProbeConfirmRef.current = skipProbeConfirm;
 	const pluginAbortTarget = useRef<PluginQuestionDismissalTarget | null>(null);
 	const pluginDismissal = useRef({ canonicalMessages, reconciliation, stop, dismissPluginQuestion });
 	pluginDismissal.current = { canonicalMessages, reconciliation, stop, dismissPluginQuestion };
@@ -478,7 +483,7 @@ export function Chat({
 			if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller)) return;
 			const pluginQuestion = capturePluginQuestionDismissal(pluginDismissal.current.canonicalMessages);
 			const target = escAbortTarget({
-				abortAsk: abortAskRef.current !== null,
+				abortAsk: abortAskRef.current !== null || skipProbeConfirmRef.current,
 				sideThread: sideThreadOpenRef.current,
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
@@ -1115,6 +1120,15 @@ export function Chat({
 	const retryable = !pluginOwnsDock && (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
 	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
 	const sendAllowed = !pluginOwnsDock && reconciliation === "ready" && !pending && !activeProblem && !compacting && !submissionRunner.occupied;
+	const skipAnchorId = skipProbingAnchorId(canonicalMessages);
+	const skipProbingDisabled = busy || compacting || pluginOwnsDock || reconciliation !== "ready" || !skipAnchorId;
+	const triggerSkipProbing = () => {
+		const latestAnchor = skipProbingAnchorId(canonicalMessages);
+		if (!latestAnchor || busy || compacting || pluginOwnsDock || reconciliation !== "ready") return;
+		clearReadingThinking();
+		void closeSideThreadRef.current();
+		void send({ type: "skip-probing", lastMessageId: latestAnchor });
+	};
 	const pendingTextTarget = textTarget();
 	const pendingTextInput = !!pendingTextTarget && !!pluginManager?.hasPendingSubmissionInput(pendingTextTarget);
 	const pendingThinkingTarget = thinkingTarget();
@@ -1739,6 +1753,31 @@ export function Chat({
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
 					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
+					{kind !== "practice" && (phases.at(-1) ?? "probe") === "probe" && (
+						<Hint
+							label={
+								pluginOwnsDock
+									? "Finish or dismiss the active plugin question first"
+									: "End probing and build the learning plan now"
+							}
+							side="bottom"
+						>
+							<button
+								type="button"
+								data-testid="skip-probing"
+								disabled={skipProbingDisabled}
+								onClick={(e) => {
+									blurAfterPointerClick(e);
+									if (skipProbingDisabled) return;
+									if (pending || malformedQuestions.length > 0) setSkipProbeConfirm(true);
+									else triggerSkipProbing();
+								}}
+								className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground disabled:cursor-not-allowed disabled:opacity-40"
+							>
+								Skip probing
+							</button>
+						</Hint>
+					)}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
 					{kind === "practice" ? (
@@ -1789,6 +1828,10 @@ export function Chat({
 								// assistant group — is gone). Never a user bubble: the wake is
 								// scaffolding; the model-facing instruction lives in the adapter.
 								<PhaseDivider key={m.id || `m-${mi}`} phase="plan" />
+							) : m.role === "user" && m.parts.some((p) => p.type === "data-probe-skipped") ? (
+								(m.parts.find((p) => p.type === "data-probe-skipped")?.data as { atStart?: boolean } | undefined)?.atStart === true
+									? null
+									: <PhaseDivider key={m.id || `m-${mi}`} phase="plan" />
 							) : m.role === "user" && m.parts.length > 0 && m.parts.every((p) => p.type.startsWith("data-")) ? (
 								// Marker cards (custom messages, 2026-10-04): user-side
 								// scaffolding — the graph-context pick, the practice
@@ -2235,6 +2278,51 @@ export function Chat({
 				)}
 				</SurfaceRegion>
 				<AbortTurnDialog mode={abortAsk} onClose={closeAbortAsk} onConfirm={confirmAbort} busy={busy} />
+				{skipProbeConfirm && (
+					<HostDialog
+						open
+						aria-label="Skip the rest of probing?"
+						onClose={() => { setSkipProbeConfirm(false); return "closed"; }}
+						backdropProps={{
+							className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm",
+							"data-testid": "skip-probing-dialog",
+						}}
+						frame={
+							<div
+								className="mx-4 w-full max-w-sm rounded-xl border bg-card p-5 shadow-lg"
+								onClick={(e) => e.stopPropagation()}
+							/>
+						}
+					>
+						<h2 className="text-sm font-semibold text-card-foreground" data-testid="skip-probing-title">
+							Skip the rest of probing?
+						</h2>
+						<p className="mt-1.5 text-xs text-muted-foreground" data-testid="skip-probing-line">
+							The open question will be skipped without grading. Answers you already gave stay in context for your learning plan.
+						</p>
+						<div className="mt-4 flex justify-end gap-2">
+							<button
+								type="button"
+								data-testid="skip-probing-cancel"
+								onClick={() => setSkipProbeConfirm(false)}
+								className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
+							>
+								Cancel
+							</button>
+							<button
+								type="button"
+								data-testid="skip-probing-confirm"
+								onClick={() => {
+									setSkipProbeConfirm(false);
+									triggerSkipProbing();
+								}}
+								className="rounded-sm border border-border bg-accent px-3 py-1.5 text-xs text-foreground transition-colors hover:bg-accent/80"
+							>
+								Skip probing
+							</button>
+						</div>
+					</HostDialog>
+				)}
 				</div>
 			</div>
 		</div>
