@@ -47,6 +47,8 @@ The launcher exits when the desktop window opens. Closing the app stops its serv
 
 After a successful double-click launch, open a new PowerShell or Command Prompt and run `learn` from any folder. The launcher adds it to your Windows user PATH and creates a LearnHarness shortcut that opens the app when you sign in. You can disable or re-enable it in **Task Manager → Startup apps**. If you move the checkout, double-click `Launch LearnHarness.cmd` in its new location to update both launchers.
 
+Use `learn restart` to close and reopen the Windows checkout desktop. The command waits up to 30 seconds for the previous instance and its server to stop. If the desktop is closed, it opens normally. To upgrade an existing `learn` command, close LearnHarness and double-click `Launch LearnHarness.cmd` once.
+
 ### Other devices on your network
 
 For private iPhone access and a connected local phone viewport, use [Mobile Access](mobile-access.md) in the desktop app. It shares the existing loopback server through a separate same-account Tailscale gateway; no LAN binding is needed.

@@ -1,6 +1,10 @@
 # Bootstrap the Windows checkout without requiring Node, npm, or administrator access.
 [CmdletBinding()]
-param([switch]$InstallOnly, [switch]$RegisterWindowsLaunchers)
+param(
+    [Parameter(Position = 0)][ValidateSet('restart')][string]$LauncherCommand,
+    [switch]$InstallOnly,
+    [switch]$RegisterWindowsLaunchers
+)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -165,9 +169,11 @@ try {
     Write-Host "[launcher] Using $nodeVersion with npm from $nodeDirectory"
     if ($InstallOnly) { exit 0 }
     $env:npm_execpath = $npmCli
+    $launchArguments = @((Join-Path $PSScriptRoot 'launch-windows-desktop.mjs'))
+    if ($LauncherCommand) { $launchArguments += $LauncherCommand.ToLowerInvariant() }
     Push-Location -LiteralPath $workspace
     try {
-        & $nodeExecutable (Join-Path $PSScriptRoot 'launch-windows-desktop.mjs')
+        & $nodeExecutable @launchArguments
         $appExit = $LASTEXITCODE
     } finally { Pop-Location }
     if ($appExit -eq 0 -and $RegisterWindowsLaunchers) {

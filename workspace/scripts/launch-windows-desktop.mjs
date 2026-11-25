@@ -7,6 +7,7 @@ import { createServer } from "node:net";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertNodeModulesUnlocked } from "./windows-node-modules-locks.mjs";
+import checkoutRestart from "../electron/windows-checkout-restart.cjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const require = createRequire(import.meta.url);
@@ -191,6 +192,9 @@ async function startDesktop() {
 async function main() {
 	if (process.platform !== "win32") throw new Error("This launcher is for Windows only.");
 	if (!process.versions.node.startsWith("26.")) throw new Error(`Node.js 26.x is required; found ${process.version}.`);
+	const args = process.argv.slice(2);
+	const restart = args.length === 1 && args[0] === "restart";
+	if (args.length && !restart) throw new Error("Usage: learn [restart]");
 	const npm = process.env.npm_execpath;
 	if (!npm || !path.isAbsolute(npm) || path.basename(npm).toLowerCase() !== "npm-cli.js") {
 		throw new Error("Run Launch LearnHarness.cmd or npm run desktop:windows.");
@@ -208,6 +212,12 @@ async function main() {
 	});
 	try {
 		const started = performance.now();
+		if (restart) {
+			console.log("[launcher] Checking for a running LearnHarness desktop...");
+			if (await checkoutRestart.requestStop(checkoutRestart.pipeName(root))) {
+				console.log("[launcher] Previous LearnHarness desktop stopped.");
+			}
+		}
 		const dependencies = prepareDependencies();
 		console.log(`[launcher] Dependencies ready in ${((performance.now() - started) / 1000).toFixed(1)}s.`);
 		const pluginsStarted = performance.now();

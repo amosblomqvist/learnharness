@@ -1,5 +1,7 @@
 /** Launcher startup shortcuts: the output stamp cache and the checkout server's home-page warm-up. */
 import assert from "node:assert/strict";
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import { createServer, type IncomingHttpHeaders } from "node:http";
 import { createRequire } from "node:module";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, utimesSync, writeFileSync } from "node:fs";
@@ -7,10 +9,16 @@ import type { AddressInfo } from "node:net";
 import { tmpdir } from "node:os";
 import * as path from "node:path";
 import { describe, it, type TestContext } from "node:test";
+import { fileURLToPath } from "node:url";
 import { cached, fingerprint } from "../scripts/launch-windows-desktop.mjs";
 
 const { warmHomePage } = createRequire(import.meta.url)("../scripts/windows-checkout-server.cjs") as {
 	warmHomePage: (port: number, host?: string) => Promise<number | undefined>;
+};
+const restartModule = fileURLToPath(new URL("../electron/windows-checkout-restart.cjs", import.meta.url));
+const { pipeName, requestStop } = createRequire(import.meta.url)(restartModule) as {
+	pipeName: (workspace: string) => string;
+	requestStop: (address: string, timeoutMs?: number) => Promise<boolean>;
 };
 
 function workspace(t: TestContext) {
@@ -102,5 +110,32 @@ describe("checkout server home-page warm-up", () => {
 		const { port } = probe.address() as AddressInfo;
 		await new Promise(resolve => probe.close(resolve));
 		assert.equal(await warmHomePage(port), undefined);
+	});
+});
+
+describe("checkout restart on Windows", { skip: process.platform !== "win32" }, () => {
+	it("distinguishes a closed checkout and waits for a running checkout to exit", { timeout: 10_000 }, async t => {
+		const w = workspace(t);
+		const address = pipeName(w.directory);
+		assert.equal(await requestStop(address), false);
+		const desktop = spawn(process.execPath, ["-e", `
+			const { listenForStop } = require(process.argv[1]);
+			listenForStop(process.argv[2], () => process.send('stopping'), console.error)
+				.then(() => process.send('ready'));
+			process.on('message', () => process.exit(0));
+		`, restartModule, address], { stdio: ["ignore", "ignore", "inherit", "ipc"], windowsHide: true });
+		t.after(() => { if (desktop.exitCode === null && desktop.signalCode === null) desktop.kill(); });
+		const [ready] = await once(desktop, "message");
+		assert.equal(ready, "ready");
+		const stopping = once(desktop, "message");
+		const stopped = requestStop(address);
+		const [message] = await stopping;
+		assert.equal(message, "stopping");
+		await assert.rejects(requestStop(address, 200), /did not shut down within 30 seconds/);
+		const exit = once(desktop, "exit");
+		desktop.send("exit");
+		assert.equal(await stopped, true);
+		assert.deepEqual(await exit, [0, null]);
+		assert.equal(await requestStop(address), false);
 	});
 });

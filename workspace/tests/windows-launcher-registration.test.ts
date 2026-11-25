@@ -30,6 +30,10 @@ try {
     $terminalExit = $LASTEXITCODE
     $cmdOutput = & $env:ComSpec /d /c learn
     $cmdExit = $LASTEXITCODE
+    $restartOutput = & learn restart
+    $restartExit = $LASTEXITCODE
+    $cmdRestartOutput = & $env:ComSpec /d /c learn restart
+    $cmdRestartExit = $LASTEXITCODE
     $env:LH_TEST_SIGN_IN_OUTPUT = Join-Path $LocalAppData 'sign-in.txt'
     $process = Start-Process -FilePath $shortcutPath -WindowStyle Hidden -PassThru -Wait
     try {
@@ -43,6 +47,8 @@ try {
         SameShortcut = $firstModified -eq $lastModified
         TerminalOutput = $terminalOutput; TerminalExit = $terminalExit
         CmdOutput = $cmdOutput; CmdExit = $cmdExit
+        RestartOutput = $restartOutput; RestartExit = $restartExit
+        CmdRestartOutput = $cmdRestartOutput; CmdRestartExit = $cmdRestartExit
         SignInOutput = $signInOutput; SignInExit = $signInExit
     } | ConvertTo-Json -Compress
 } finally {
@@ -63,10 +69,11 @@ test("registers the Windows CLI and sign-in shortcut once and updates both after
 		mkdirSync(path.dirname(bootstrap), { recursive: true });
 		const output = bootstrap === moved ? "moved checkout" : "original checkout";
 		writeFileSync(bootstrap, `
+param([string]$Command)
 if ($env:LH_TEST_SIGN_IN_OUTPUT) {
     [IO.File]::WriteAllText($env:LH_TEST_SIGN_IN_OUTPUT, '${output}')
 }
-Write-Output '${output}'
+if ($Command) { Write-Output "${output} $Command" } else { Write-Output '${output}' }
 exit 0
 `);
 	}
@@ -90,6 +97,8 @@ exit 0
 		SameShortcut: true,
 		TerminalOutput: "moved checkout", TerminalExit: 0,
 		CmdOutput: "moved checkout", CmdExit: 0,
+		RestartOutput: "moved checkout restart", RestartExit: 0,
+		CmdRestartOutput: "moved checkout restart", CmdRestartExit: 0,
 		SignInOutput: "moved checkout", SignInExit: 0,
 	});
 });

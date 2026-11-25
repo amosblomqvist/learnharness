@@ -110,17 +110,30 @@ function boot(checkout = false, { appReady = Promise.resolve() }: { appReady?: P
 	const readiness = new Promise<void>((resolve, reject) => { ready = resolve; fail = reject; });
 	const windows: string[] = [], exits: number[] = [], logs: string[] = [], probes: { url: string; signal: AbortSignal }[] = [];
 	const sent: unknown[] = [], signals: string[] = [], spawned: string[] = [];
+	const checkoutChild = Object.assign(new EventEmitter(), {
+		exitCode: null as number | null, signalCode: null, kill: (signal: string) => signals.push(signal),
+	});
+	let requestStop: (() => void) | undefined;
+	let quitCount = 0;
 	let window: FakeWindow | undefined;
+	let markNavigated!: () => void;
+	const navigated = new Promise<void>(resolve => { markNavigated = resolve; });
 	const app = Object.assign(new EventEmitter(), {
 		setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => checkout,
-		quit() {}, whenReady: () => appReady, exit: (code: number) => exits.push(code), isPackaged: false,
+		quit() {
+			this.emit("before-quit");
+			let deferred = false;
+			this.emit("will-quit", { preventDefault: () => { deferred = true; } });
+			if (!deferred) quitCount++;
+		},
+		whenReady: () => appReady, exit: (code: number) => exits.push(code), isPackaged: false,
 	});
 	class FakeWindow extends EventEmitter {
 		webContents = Object.assign(new EventEmitter(), { setWindowOpenHandler() {}, send() {}, getZoomFactor: () => 1 });
 		visible = false;
 		isVisible() { return this.visible; }
 		show() { this.visible = true; this.emit("show"); }
-		async loadURL(url: string) { window = this; windows.push(url); }
+		async loadURL(url: string) { window = this; windows.push(url); markNavigated(); }
 	}
 	const electron = {
 		app, BrowserWindow: FakeWindow, nativeTheme: { themeSource: "system" }, ipcMain: Object.assign(new EventEmitter(), { handle() {} }),
@@ -133,8 +146,10 @@ function boot(checkout = false, { appReady = Promise.resolve() }: { appReady?: P
 			: id === "./dev-server-readiness.cjs" ? { waitForDevServer: (url: string, { signal }: { signal: AbortSignal }) => {
 				probes.push({ url, signal }); signal.addEventListener("abort", () => fail(signal.reason), { once: true }); return readiness;
 			} } : id === "./windows-checkout.cjs" ? { startCheckoutServer: (node: string) => (spawned.push(node), {
-				child: { kill: (signal: string) => signals.push(signal) }, ready: readiness,
-			}) } : mainRequire(id),
+				child: checkoutChild, ready: readiness,
+			}) } : id === "./windows-checkout-restart.cjs" ? {
+				pipeName: () => "fixture-pipe", listenForStop: async (_address: string, quit: () => void) => { requestStop = quit; },
+			} : mainRequire(id),
 		process: Object.assign(new EventEmitter(), {
 			platform: checkout ? "win32" : "darwin", argv: [], connected: checkout,
 			env: { LH_DEV_URL: "http://localhost:3000", ...(checkout ? { LH_WINDOWS_CHECKOUT_NODE: "fixture-node" } : {}) },
@@ -146,7 +161,10 @@ function boot(checkout = false, { appReady = Promise.resolve() }: { appReady?: P
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
 	const done = checkout ? Promise.resolve() : runInNewContext("main()", context) as Promise<void>;
-	return { app, windows, exits, logs, probes, ready, fail, done, signals, sent, spawned, launcher: context.process, window: () => window };
+	return {
+		app, windows, exits, logs, probes, ready, fail, done, signals, sent, spawned, checkoutChild, navigated,
+		launcher: context.process, window: () => window, requestStop: () => requestStop!(), quitCount: () => quitCount,
+	};
 }
 
 describe("real Electron main dev startup wiring", () => {
@@ -178,10 +196,22 @@ describe("real Electron main dev startup wiring", () => {
 });
 
 describe("Windows checkout desktop startup wiring", () => {
+	it("uses normal Electron shutdown and waits for the owned server before quitting for restart", async () => {
+		const f = boot(true);
+		f.ready(); await f.navigated;
+		f.requestStop();
+		assert.deepEqual(f.signals, ["SIGTERM"]);
+		assert.equal(f.quitCount(), 0);
+		f.checkoutChild.exitCode = 0;
+		f.checkoutChild.emit("exit", 0);
+		assert.equal(f.quitCount(), 1);
+		assert.deepEqual(f.signals, ["SIGTERM"]);
+	});
+
 	it("uses only the owned server's readiness signal and detaches once the window loads and shows", async () => {
 		const f = boot(true); await delay(0);		assert.deepEqual(f.probes, []);
 		assert.deepEqual(f.windows, []);
-		f.ready(); await delay(0);
+		f.ready(); await f.navigated;
 		assert.deepEqual(f.windows, ["http://localhost:3000"]);
 		const win = f.window()!;
 		win.emit("ready-to-show");
@@ -201,8 +231,7 @@ describe("Windows checkout desktop startup wiring", () => {
 		f.ready(); await delay(0);
 		assert.deepEqual(f.windows, [], "the window still waits for Electron");
 		appReady();
-		// Startup still awaits Mobile Access initialization before creating the window.
-		for (let i = 0; i < 100 && !f.windows.length; i++) await delay(5);
+		await f.navigated;
 		assert.deepEqual(f.windows, ["http://localhost:3000"], JSON.stringify({ sent: f.sent, logs: f.logs }));
 		assert.deepEqual(f.spawned, ["fixture-node"], "the server is started once");
 	});

@@ -27,7 +27,7 @@ function Register-LearnHarnessWindowsLaunchers(
     $escapedBootstrap = $Bootstrap.Replace("'", "''")
     $shimScriptContents = @"
 # $marker
-& '$escapedBootstrap'
+& '$escapedBootstrap' @args
 exit `$LASTEXITCODE
 "@
     if (!(Test-Path -LiteralPath $shimScript) -or [IO.File]::ReadAllText($shimScript) -cne $shimScriptContents) {
@@ -37,7 +37,7 @@ exit `$LASTEXITCODE
 @echo off
 rem LearnHarness source checkout launcher
 setlocal EnableExtensions DisableDelayedExpansion
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch-checkout.ps1"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "%~dp0launch-checkout.ps1" %*
 exit /b %errorlevel%
 '@
     if (!(Test-Path -LiteralPath $shim) -or [IO.File]::ReadAllText($shim) -cne $shimContents) {

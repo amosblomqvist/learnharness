@@ -773,6 +773,18 @@ async function main() {
 	} else if (checkout) {
 		await checkout.ready;
 		checkoutReady = true;
+		const restart = require("./windows-checkout-restart.cjs");
+		await restart.listenForStop(restart.pipeName(path.join(__dirname, "..")), () => {
+			app.once("will-quit", event => {
+				// before-quit has signalled the owned server. Keep the desktop alive
+				// until the child exits and releases the port used by the next launch.
+				const { child } = checkout;
+				if (child.exitCode !== null || child.signalCode !== null) return;
+				event.preventDefault();
+				child.once("exit", () => app.quit());
+			});
+			app.quit();
+		}, log);
 		log(`checkout server ready: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl} — waiting for server`);
