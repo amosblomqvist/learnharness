@@ -64,9 +64,10 @@ describe("md-blocks — code", () => {
 });
 
 describe("md-blocks — mermaid", () => {
-	it("renders as the bare app-owned block (skeleton in static render), never a code block, source never leaks", () => {
+	it("renders synchronously as an app-owned SVG block, never a code block, source never leaks", () => {
 		const html = render("```mermaid\ngraph TD\nA --> B\n```");
 		assert.ok(html.includes('data-testid="md-mermaid"'), "the app-owned mermaid block mounts");
+		assert.ok(html.includes("pele-flowchart"), "renders SVG synchronously via Pele");
 		assert.ok(
 			!html.includes('data-streamdown="code-block"'),
 			"mermaid fences must not render as code blocks",
@@ -184,16 +185,10 @@ describe("session-scoped overlays (chrome-melt wave, 2026-09-19)", () => {
 	});
 
 	it("the diagram wrapper is hidden until the first fit applies (no top-left flash — owner report, 2026-09-19)", () => {
-		// Covered in render-plan-block.test.tsx, which has a real tree
-		// fixture (an empty-messages popup renders no diagram to gate) — and
-		// the same gate is asserted on the mermaid overlay's wrapper here:
-		// settled=false at static render → opacity 0.
-		const html = renderToStaticMarkup(<MermaidOverlay chart="graph TD\nA --> B" onClose={() => {}} />);
-		// The chart itself hasn't rendered at static render (async effect) —
-		// the opacity gate is pinned on the plan popup's diagram wrapper in
-		// render-plan-block.test.tsx, which has a real tree fixture (the two
-		// overlays share the settled-gating pattern).
+		const html = renderToStaticMarkup(<MermaidOverlay chart={"graph TD\nA --> B"} onClose={() => {}} />);
 		assert.ok(html.includes('data-testid="mermaid-overlay-close"'), "overlay shell renders");
+		assert.ok(html.includes("pele-flowchart"), "overlay renders Pele SVG synchronously");
+		assert.ok(html.includes("opacity:0"), "diagram wrapper stays hidden until fit applies");
 	});
 
 	it("chartSize reads the viewBox from a rendered svg (fallback for degenerate ones)", () => {
