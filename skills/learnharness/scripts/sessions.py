@@ -34,6 +34,7 @@ ACCOUNTING = {
     "extractionCursor", "extractedAt", "settings",
 }
 PAYLOAD_KEYS = {"html", "svg", "base64", "imageBase64", "dataUrl", "dataURL"}
+PAYLOAD_REASON = "embedded HTML/SVG/base64/image payload not rendered; references only, no files opened"
 # Exact current acknowledgments only. A historical result containing actual
 # teaching/assessment text must not be classified as noise by its tool name.
 ACK_TEXT = {
@@ -67,7 +68,7 @@ def _safe_payload(value: Any, source: str, omissions: list[dict[str, str]]) -> A
     for key, item in value.items():
         path = f"{source}.{key}"
         if key in PAYLOAD_KEYS or (image and key == "data"):
-            _omit(omissions, path, "embedded HTML/SVG/base64/image payload not rendered; references only, no files opened")
+            _omit(omissions, path, PAYLOAD_REASON)
         else:
             result[key] = _safe_payload(item, path, omissions)
     return result
@@ -133,6 +134,23 @@ def selected_record(record: dict[str, Any], *, include_agent_thinking: bool = Fa
             continue
         if key in ACCOUNTING and not include_operations:
             _omit(omissions, key, "operational metadata/accounting (use --include-operations)")
+        elif key == "imageSnapshots" and isinstance(value, dict):
+            # ImageSnapshot {mimeType, data, width, height} has no type key; keep
+            # the ID (show_image details.snapshotId) and metadata, never base64.
+            snapshots = {}
+            for snapshot_id, snapshot in value.items():
+                path = f"{key}.{snapshot_id}"
+                if isinstance(snapshot, dict):
+                    kept = {}
+                    for field, item in snapshot.items():
+                        if field == "data":
+                            _omit(omissions, f"{path}.data", PAYLOAD_REASON)
+                        else:
+                            kept[field] = _safe_payload(item, f"{path}.{field}", omissions)
+                    snapshots[snapshot_id] = kept
+                else:
+                    snapshots[snapshot_id] = _safe_payload(snapshot, path, omissions)
+            selected[key] = snapshots
         else:
             selected[key] = _safe_payload(value, key, omissions)
     messages = []
