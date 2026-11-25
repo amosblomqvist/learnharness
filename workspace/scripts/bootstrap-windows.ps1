@@ -1,6 +1,6 @@
 # Bootstrap the Windows checkout without requiring Node, npm, or administrator access.
 [CmdletBinding()]
-param([switch]$InstallOnly)
+param([switch]$InstallOnly, [switch]$RegisterWindowsLaunchers)
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
@@ -170,6 +170,23 @@ try {
         & $nodeExecutable (Join-Path $PSScriptRoot 'launch-windows-desktop.mjs')
         $appExit = $LASTEXITCODE
     } finally { Pop-Location }
+    if ($appExit -eq 0 -and $RegisterWindowsLaunchers) {
+        try {
+            . (Join-Path $PSScriptRoot 'register-windows-launchers.ps1')
+            $startup = [Environment]::GetFolderPath('Startup', 'Create')
+            $environmentKey = [Microsoft.Win32.Registry]::CurrentUser.CreateSubKey('Environment')
+            try {
+                $pathChanged = Register-LearnHarnessWindowsLaunchers $PSCommandPath $startup $environmentKey
+            } finally { $environmentKey.Dispose() }
+            if ($pathChanged) {
+                [LearnHarness.WindowsLaunchers]::NotifyEnvironmentChanged()
+                Write-Host '[launcher] Open a new terminal to launch LearnHarness with learn.'
+            }
+        } catch {
+            Write-Host "[launcher] Could not set up the learn command and Windows startup shortcut: $($_.Exception.Message)" -ForegroundColor Red
+            exit 1
+        }
+    }
     exit $appExit
 } catch {
     Write-Host "[launcher] $($_.Exception.Message)" -ForegroundColor Red

@@ -4,7 +4,7 @@ title LearnHarness
 pushd "%~dp0"
 if errorlevel 1 goto directory_error
 
-"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "workspace\scripts\bootstrap-windows.ps1"
+"%SystemRoot%\System32\WindowsPowerShell\v1.0\powershell.exe" -NoProfile -ExecutionPolicy Bypass -File "workspace\scripts\bootstrap-windows.ps1" -RegisterWindowsLaunchers
 set "launcher_exit=%errorlevel%"
 if not "%launcher_exit%"=="0" (
     echo.

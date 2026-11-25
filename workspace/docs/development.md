@@ -45,6 +45,8 @@ Electron starts its own development server on `localhost:3000` and waits for tha
 
 The launcher exits when the desktop window opens. Closing the app stops its server, and the app quits if its server stops. The double-click launcher keeps the console open on startup errors. Desktop and server diagnostics are recorded in the development profile's `logs/main.log`.
 
+After a successful double-click launch, open a new PowerShell or Command Prompt and run `learn` from any folder. The launcher adds it to your Windows user PATH and creates a LearnHarness shortcut that opens the app when you sign in. You can disable or re-enable it in **Task Manager → Startup apps**. If you move the checkout, double-click `Launch LearnHarness.cmd` in its new location to update both launchers.
+
 ### Other devices on your network
 
 For private iPhone access and a connected local phone viewport, use [Mobile Access](mobile-access.md) in the desktop app. It shares the existing loopback server through a separate same-account Tailscale gateway; no LAN binding is needed.
