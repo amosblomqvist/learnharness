@@ -1,9 +1,11 @@
 # iPhone app
 
-`ios/` is a SwiftUI app that connects to your self-hosted LearnHarness
-server (see [self-hosting.md](self-hosting.md)). Sessions, the knowledge
-graph, settings and provider keys all live on the server, so the phone,
-the desktop app and any other device stay in sync.
+`ios/` is a SwiftUI app that uses LearnHarness on another machine: usually
+your computer's desktop app, paired through **Phone access**
+([phone-access.md](phone-access.md)), or a self-hosted server
+([self-hosting.md](self-hosting.md)). Sessions, the knowledge graph,
+settings and provider keys all stay on that machine, so the phone and the
+computer always show the same thing.
 
 ## What it does
 
@@ -13,11 +15,16 @@ server's pages only for what the server renders: a session's transcript
 with its question and practice cards, the knowledge graph, and one
 settings section at a time.
 
-- **Connect to Server**: type the address (e.g. `my-server.lan:3000`). The
+- **Pair with your computer**: scan the QR code from the desktop app's
+  Settings → Phone access (in the app or with the Camera app), or pick the
+  computer under **Nearby** and allow it on the computer after comparing
+  the pairing key. Pairing lasts until revoked; the computer's certificate
+  is pinned and the device token is kept in the Keychain.
+- **Self-hosted server**: type the address (e.g. `my-server.lan:3000`). The
   app checks it is a LearnHarness server before saving it, and warns
-  before plain `http://` outside a home network or Tailscale.
-- **Sign in** with the server password. The session lasts 30 days and
-  covers the embedded pages too.
+  before plain `http://` outside a home network or Tailscale. Then **sign
+  in** with the server password; the session lasts 30 days and covers the
+  embedded pages too.
 - **Sessions**: every session, newest first, with the All / Teaching /
   Practice filter, search, swipe to rename or delete (with or without the
   session's graph traces), live status (thinking, question or problem
@@ -61,10 +68,11 @@ You need a Mac with Xcode and an Apple ID. No App Store or TestFlight needed.
 4. First time only, on the iPhone:
    - **Settings → Privacy & Security → Developer Mode** → on (restarts the phone).
    - **Settings → General → VPN & Device Management** → trust your developer certificate.
-5. Open LearnHarness, enter your server's address (e.g. `my-server.lan:3000`),
-   tap **Connect**, then sign in with the server password
+5. Open LearnHarness and pair with your computer (turn on **Settings →
+   Phone access** in the desktop app, then scan its QR code), or open
+   **Server Address and Password** for a self-hosted server
    ([server-password.md](server-password.md)). Allow **Local Network**
-   access when iOS asks.
+   access (and the camera, to scan) when iOS asks.
 
 With a free Apple ID the app stops opening after 7 days; press Run in
 Xcode again to renew it. A paid Apple Developer account ($99/year) makes it
