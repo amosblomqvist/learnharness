@@ -7,7 +7,7 @@ import { CornerDownLeftIcon, DumbbellIcon } from "lucide-react";
 import { GraphView } from "@/components/graph-view";
 import { MinimalHome } from "@/components/minimal-home";
 import { SetupDialog } from "@/components/setup-dialog";
-import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { ComposerActions, NodePickerControl, SkipProbingToggle } from "@/components/composer-actions";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { DictationBar, joinDictation, useDictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
@@ -102,6 +102,7 @@ export function Home({
 	 *  the composer opens the picker; the picks seed the opening prompt).
 	 *  Not enforcing any input format — the picks are a convenience. */
 	const [mode, setMode] = useState<"teach" | "practice">("teach");
+	const [skipProbing, setSkipProbing] = useState(false);
 	const [practiceProps, setPracticeProps] = useState<{ id: string; name: string; statement: string }[]>([]);
 	const [chainSelectOpen, setChainSelectOpen] = useState(false);
 	// The chain table is CONTROLLED off this id set (the lifted pick).
@@ -155,7 +156,7 @@ export function Home({
 			// chains among them); the prompt stays the learner's own words.
 			const target = await starterRef.current.start({
 				title: t,
-				...(mode === "practice" ? { kind: "practice" } : {}),
+				...(mode === "practice" ? { kind: "practice" } : skipProbing ? { skipProbing: true } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
 			router.push(target);
@@ -301,24 +302,29 @@ export function Home({
 						dictationSlot={<DictationBar dictation={dictation} />}
 						turns={[] as TurnUsage[]}
 						leadingSlot={
-							<div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="home-mode-switch">
-								{(["teach", "practice"] as const).map((m) => (
-									<button
-										key={m}
-										type="button"
-										data-testid={`home-mode-${m}`}
-										onClick={() => setMode(m)}
-										className={
-											"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
-											(mode === m
-												? "bg-accent text-foreground"
-												: "text-muted-foreground hover:text-foreground")
-										}
-									>
-										{m === "practice" ? <DumbbellIcon aria-hidden="true" className="size-3" /> : null}
-										{m === "teach" ? "Teach" : "Practice"}
-									</button>
-								))}
+							<div className="flex items-center gap-1.5">
+								<div className="flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="home-mode-switch">
+									{(["teach", "practice"] as const).map((m) => (
+										<button
+											key={m}
+											type="button"
+											data-testid={`home-mode-${m}`}
+											onClick={() => setMode(m)}
+											className={
+												"flex items-center gap-1 rounded-sm px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors " +
+												(mode === m
+													? "bg-accent text-foreground"
+													: "text-muted-foreground hover:text-foreground")
+											}
+										>
+											{m === "practice" ? <DumbbellIcon aria-hidden="true" className="size-3" /> : null}
+											{m === "teach" ? "Teach" : "Practice"}
+										</button>
+									))}
+								</div>
+								{mode === "teach" && (
+									<SkipProbingToggle checked={skipProbing} onChange={setSkipProbing} disabled={busy} />
+								)}
 							</div>
 						}
 					/>

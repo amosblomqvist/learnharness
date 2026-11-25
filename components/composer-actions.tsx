@@ -59,3 +59,33 @@ export function NodePickerControl({ count, onOpen, onClear, disabled, triggerRef
 		</div>
 	);
 }
+
+/** Per-session pre-start toggle: skips the prober and opens teaching in plan.
+ *  Resets on mount; callers only render it for teaching sessions. */
+export function SkipProbingToggle({
+	checked,
+	onChange,
+	disabled,
+}: {
+	checked: boolean;
+	onChange: (next: boolean) => void;
+	disabled?: boolean;
+}) {
+	return (
+		<button
+			type="button"
+			data-testid="skip-probing-toggle"
+			aria-pressed={checked}
+			disabled={disabled}
+			onClick={() => onChange(!checked)}
+			className={
+				"flex cursor-pointer items-center rounded-md border px-2 py-0.5 text-[11px] uppercase tracking-wider transition-colors disabled:cursor-not-allowed disabled:opacity-40 " +
+				(checked
+					? "border-border bg-accent text-foreground"
+					: "border-border/60 bg-background text-muted-foreground hover:text-foreground")
+			}
+		>
+			Skip probing
+		</button>
+	);
+}
