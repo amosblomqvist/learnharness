@@ -2,7 +2,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import test from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { PendingTurnIndicator } from "../components/chat.tsx";
+import { PendingTurnIndicator, QuestionGenerationIndicator } from "../components/chat.tsx";
 import { SessionModel, type SessionState } from "../components/session-core.ts";
 import type { ChatInput, LhMessage, PluginProblemSnapshot, PluginQuestionSnapshot } from "../src/core/index.ts";
 
@@ -129,4 +129,13 @@ for (const evaluating of [true, false]) test(`pending indicator renders one unch
 	assert.match(html, new RegExp(`aria-label="${evaluating ? "Evaluating" : "Thinking"}"`));
 	assert.ok(html.includes(evaluating ? "EVALUATING…" : "THINKING…"));
 	assert.ok(!html.includes(evaluating ? "THINKING…" : "EVALUATING…"));
+});
+
+test("question generation feedback appears only while the tool input is streaming", () => {
+	const html = renderToStaticMarkup(<QuestionGenerationIndicator state="input-streaming" />);
+	assert.match(html, /aria-label="Generating question"/);
+	assert.match(html, /GENERATING QUESTION…/);
+	for (const state of ["input-available", "output-available", "output-error", undefined]) {
+		assert.equal(renderToStaticMarkup(<QuestionGenerationIndicator state={state} />), "");
+	}
 });
