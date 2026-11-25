@@ -759,10 +759,26 @@ body {
 	from { transform: translateY(var(--chat-switch-offset)); }
 }
 
-/* The composer paints above the transcript during the handoff. */
-::view-transition-group(.chat-switch-dock) { animation: none; z-index: 1; }
+/* The dock keeps its bottom edge while its captured height changes. */
+::view-transition-group(.chat-switch-dock) {
+	z-index: 1;
+	overflow: clip;
+	animation-duration: var(--chat-switch-duration);
+	animation-timing-function: var(--chat-switch-easing);
+}
+
 ::view-transition-old(.chat-switch-dock) { display: none; }
-::view-transition-new(.chat-switch-dock) { animation: none; mix-blend-mode: normal; }
+
+::view-transition-new(.chat-switch-dock) {
+	inset-block: auto 0;
+	height: auto;
+	animation: chat-switch-dock-in var(--chat-switch-duration) var(--chat-switch-easing) both;
+	mix-blend-mode: normal;
+}
+
+@keyframes chat-switch-dock-in {
+	from { opacity: 0.6; transform: translateY(12px); }
+}
 
 [data-chat-highlight]::before {
 	content: "";
@@ -784,9 +800,6 @@ body {
 @media (prefers-reduced-motion: no-preference) {
 	[data-chat-highlight-move]::before {
 		transition: transform var(--chat-switch-duration) var(--chat-switch-easing);
-	}
-	.chat-opening-status {
-		animation: lh-card-enter var(--chat-switch-duration) var(--chat-switch-easing);
 	}
 }
 
