@@ -2,14 +2,18 @@
 
 Click Chinese text anywhere in LearnHarness to hear it spoken. Speech is generated
 locally by the [Matcha-Baker Mandarin voice](https://k2-fsa.github.io/sherpa/onnx/tts/all/Chinese/matcha-icefall-zh-baker.html)
-and Vocos vocoder, running on the GPU through ONNX Runtime's DirectML provider.
+and Vocos vocoder, running on the GPU through ONNX Runtime: the DirectML provider
+on Windows and the CUDA provider on Linux.
 
 ## Requirements
 
-- Windows on x64 with a DirectML-capable (DirectX 12) GPU. Other systems show
-  "unsupported" in settings.
-- About 245 MB for a fresh install, or 130 MB when reusing the runtime from
-  Kokoro. The Baker recordings are licensed for non-commercial use only.
+- Windows on x64 with a DirectML-capable (DirectX 12) GPU, or Linux on x64 with
+  an NVIDIA GPU and a driver that supports CUDA 13 (version 580 or newer). Other
+  systems show "unsupported" in settings.
+- On Windows, about 245 MB for a fresh install, or 130 MB when reusing the
+  runtime from Kokoro. On Linux, about 1.5 GB to download and 2.1 GB on disk,
+  because the CUDA libraries are included. The Baker recordings are licensed for
+  non-commercial use only.
 
 ## Setup
 
@@ -24,9 +28,20 @@ and Vocos vocoder, running on the GPU through ONNX Runtime's DirectML provider.
      also checked against a pinned SHA-256.
    - `onnxruntime-node` and `onnxruntime-common` 1.31.1 (115 MB) from the npm
      registry, checked against npm's published SHA-512 integrity values.
+   - On Linux only:
+     - `Microsoft.ML.OnnxRuntime.Gpu.Linux` 1.31.1 (245 MB) from
+       [NuGet](https://www.nuget.org/packages/Microsoft.ML.OnnxRuntime.Gpu.Linux),
+       checked against NuGet's published SHA-512. Only the CUDA provider
+       libraries are kept.
+     - NVIDIA's CUDA 13 libraries from PyPI, each checked against a pinned
+       SHA-256: `nvidia-cuda-runtime` 13.5.37 (2 MB), `nvidia-cublas` 13.10.1.6
+       (424 MB), `nvidia-curand` 10.4.5.25 (74 MB) and `nvidia-cudnn-cu13`
+       9.28.1.4 (493 MB). Nothing is installed system-wide.
 
-   Windows' built-in `tar.exe` unpacks only the needed files into the plugin's
-   data folder (`core-plugin-data/pronunciation/voice/`). An interrupted or failed
+   Windows' built-in `tar.exe`, or `tar` on Linux, unpacks only the needed files
+   into the plugin's data folder (`core-plugin-data/pronunciation/voice/`).
+   Linux also needs `bzip2` for the model archive. NuGet packages and wheels are
+   zip files, and the plugin unpacks those itself. An interrupted or failed
    download leaves nothing installed.
 
 When the updated plugin starts, it removes the old Kokoro voice and its saved
@@ -34,7 +49,7 @@ voice choice. The compatible ONNX runtime is reused when you download Matcha-Bak
 
 **Remove downloaded files** deletes the install. Windows keeps a loaded GPU
 runtime DLL locked until the app exits, so a few files may be deleted on the
-next start instead.
+next start instead. Linux deletes everything right away.
 
 ## Using it
 
@@ -66,9 +81,14 @@ like the second click of a double-click. On an iPhone, pronunciation plays even
 with the ring/silent switch on silent, at the media volume. If the browser
 still refuses to play, a notice asks you to tap the text again.
 
-Errors, such as the model not being downloaded or DirectML being unavailable,
-appear as a small notice next to the clicked or tapped text. There is no CPU
-fallback.
+Errors, such as the model not being downloaded or DirectML or CUDA being
+unavailable, appear as a small notice next to the clicked or tapped text. There
+is no CPU fallback.
+
+On Linux, the CUDA provider library names its CUDA dependencies without a search
+path, and a running process can't change `LD_LIBRARY_PATH`. So the plugin loads
+the downloaded CUDA libraries first and keeps them loaded (`RTLD_NODELETE`). The
+provider then links to those copies.
 
 ## How text becomes speech
 
@@ -95,5 +115,5 @@ needs no download or GPU. `npm run test:browser` runs the real frontend in
 headless Chrome (set `CHROME_PATH` if it isn't in the default place) with a
 mocked backend, in phone emulation and on a desktop viewport. It covers taps,
 swipes, long presses, double taps, taps without a click event, playback and
-notices. `scripts/smoke-gpu.mjs` runs the real model on the GPU
-against a scratch data directory; read it before running it.
+notices. `scripts/smoke-gpu.mjs` runs the real model on the GPU (DirectML or
+CUDA) against a scratch data directory; read it before running it.

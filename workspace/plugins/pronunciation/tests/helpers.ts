@@ -2,10 +2,11 @@ import fs from "node:fs";
 import http from "node:http";
 import os from "node:os";
 import path from "node:path";
+import zlib from "node:zlib";
 import { createHash } from "node:crypto";
 import type { AddressInfo } from "node:net";
 import type { Asset, Extract } from "../src/install.ts";
-import type { OrtModule, OrtTensor } from "../src/engine.ts";
+import type { Accelerator, OrtModule, OrtTensor } from "../src/engine.ts";
 import { DICTIONARY, LEXICON, TOKENS, USER_DICTIONARY } from "./fixtures.ts";
 
 export function temporaryDirectory(prefix: string): { directory: string; [Symbol.dispose](): void } {
@@ -74,6 +75,7 @@ export const SPECTRUM_BINS = 513;
 export function fakeRuntime(options: { failCreate?: string } = {}) {
   const created: { model: string; options: Record<string, unknown> }[] = [];
   const runs: { model: string; feeds: Record<string, FakeTensor> }[] = [];
+  const accelerators: string[] = [];
   let released = 0, loads = 0;
   const ort: OrtModule = {
     InferenceSession: {
@@ -104,5 +106,30 @@ export function fakeRuntime(options: { failCreate?: string } = {}) {
     },
     Tensor: FakeTensor,
   };
-  return { load: (directory: string) => { loads++; void directory; return ort; }, created, runs, get released() { return released; }, get loads() { return loads; } };
+  return { load: (directory: string, accelerator: Accelerator) => { loads++; void directory; accelerators.push(accelerator.name); return ort; }, created, runs, accelerators, get released() { return released; }, get loads() { return loads; } };
+}
+
+/** Builds a .zip in memory: each entry is deflated unless `stored` lists it. */
+export function makeZip(files: Record<string, Buffer | string>, options: { stored?: string[]; corrupt?: string } = {}): Buffer {
+  const locals: Buffer[] = [], entries: Buffer[] = [];
+  let offset = 0;
+  for (const [name, content] of Object.entries(files)) {
+    const data = Buffer.from(content), nameBytes = Buffer.from(name);
+    const method = options.stored?.includes(name) ? 0 : 8;
+    const packed = method === 8 ? zlib.deflateRawSync(data) : data;
+    const crc = zlib.crc32(data) ^ (options.corrupt === name ? 1 : 0);
+    const local = Buffer.alloc(30);
+    local.writeUInt32LE(0x04034b50, 0); local.writeUInt16LE(20, 4); local.writeUInt16LE(method, 8);
+    local.writeUInt32LE(crc >>> 0, 14); local.writeUInt32LE(packed.length, 18); local.writeUInt32LE(data.length, 22); local.writeUInt16LE(nameBytes.length, 26);
+    const entry = Buffer.alloc(46);
+    entry.writeUInt32LE(0x02014b50, 0); entry.writeUInt16LE(20, 4); entry.writeUInt16LE(20, 6); entry.writeUInt16LE(method, 10);
+    entry.writeUInt32LE(crc >>> 0, 16); entry.writeUInt32LE(packed.length, 20); entry.writeUInt32LE(data.length, 24); entry.writeUInt16LE(nameBytes.length, 28); entry.writeUInt32LE(offset, 42);
+    locals.push(local, nameBytes, packed);
+    entries.push(entry, nameBytes);
+    offset += local.length + nameBytes.length + packed.length;
+  }
+  const directory = Buffer.concat(entries), end = Buffer.alloc(22);
+  end.writeUInt32LE(0x06054b50, 0); end.writeUInt16LE(Object.keys(files).length, 8); end.writeUInt16LE(Object.keys(files).length, 10);
+  end.writeUInt32LE(directory.length, 12); end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...locals, directory, end]);
 }

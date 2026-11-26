@@ -1,6 +1,8 @@
 /**
- * Manual GPU check: downloads (~245 MB, once per scratch directory) and runs the
- * real model on DirectML through the built backend, then writes WAV files.
+ * Manual GPU check: downloads the model and runtime (~245 MB on Windows, ~1.5 GB
+ * on Linux, once per scratch directory) and runs the real model on the GPU
+ * (DirectML on Windows, CUDA on Linux) through the built backend, then writes
+ * WAV files.
  *
  * From workspace/ with scratch LH_DATA_DIR and LH_AUTH_FILE:
  *   npm --prefix plugins/pronunciation run build

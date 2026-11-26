@@ -3,11 +3,11 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import type { PluginBackendContext } from "learnharness-plugin-api";
-import { NOT_INSTALLED, activateWith, type BackendOptions } from "../src/backend.ts";
+import { NOT_INSTALLED, UNSUPPORTED, activateWith, type BackendOptions } from "../src/backend.ts";
 import { parseSpeakResult, parseState, type PluginState } from "../src/contract.ts";
 import { VOCOS_STFT } from "../src/dsp.ts";
 import { SAMPLE_RATE } from "../src/engine.ts";
-import { ASSETS, MARKER, ONNXRUNTIME_VERSION, voiceLayout } from "../src/install.ts";
+import { LINUX, ONNXRUNTIME_VERSION, WINDOWS, voiceLayout } from "../src/install.ts";
 import { assetFor, fakeExtract, fakeRuntime, modelFiles, serve, temporaryDirectory } from "./helpers.ts";
 
 function host(directory: string, options: BackendOptions) {
@@ -28,13 +28,13 @@ function host(directory: string, options: BackendOptions) {
   return { controller, handlers, events, dispose, call, state: async () => parseState(await call("get-state")) };
 }
 
-function writeInstall(directory: string) {
+function writeInstall(directory: string, marker: object = WINDOWS.marker) {
   const layout = voiceLayout(directory);
   for (const [name, bytes] of Object.entries(modelFiles())) {
     fs.mkdirSync(path.dirname(path.join(layout.model, name)), { recursive: true });
     fs.writeFileSync(path.join(layout.model, name), bytes);
   }
-  fs.writeFileSync(layout.marker, JSON.stringify(MARKER));
+  fs.writeFileSync(layout.marker, JSON.stringify(marker));
 }
 
 const wavHeader = (base64: string) => {
@@ -47,7 +47,8 @@ test("other platforms are unsupported and say why", async () => {
   const app = host(scratch.directory, { platform: "darwin", arch: "arm64" });
   const state = await app.state();
   assert.equal(state.install.kind, "unsupported");
-  await assert.rejects(app.call("speak", { text: "你好" }), /needs Windows \(x64\)/);
+  assert.equal(state.install.kind === "unsupported" && state.install.reason, UNSUPPORTED);
+  await assert.rejects(app.call("speak", { text: "你好" }), { message: UNSUPPORTED });
   assert.deepEqual(await app.call("download"), state, "download does nothing");
   app.dispose();
 });
@@ -73,7 +74,7 @@ test("activation retires Kokoro and its settings while keeping its compatible ru
   fs.writeFileSync(path.join(layout.model, "voices.bin"), "old");
   fs.writeFileSync(layout.marker, JSON.stringify({ format: 1, model: "kokoro-multi-lang-v1_1", onnxruntime: ONNXRUNTIME_VERSION }));
   fs.writeFileSync(settings, JSON.stringify({ revision: 1, voice: "zm_009" }));
-  for (const asset of ASSETS.filter(asset => asset.part === "runtime")) for (const file of asset.required) {
+  for (const asset of WINDOWS.assets.filter(asset => asset.part === "runtime")) for (const file of asset.required) {
     const target = path.join(layout.root, asset.into, file);
     fs.mkdirSync(path.dirname(target), { recursive: true });
     fs.writeFileSync(target, "kept");
@@ -82,7 +83,7 @@ test("activation retires Kokoro and its settings while keeping its compatible ru
   const app = host(scratch.directory, {});
   const state = await app.state();
   assert.equal(state.install.kind, "missing");
-  assert.equal(state.downloadBytes, ASSETS.filter(asset => asset.part === "voice").reduce((sum, asset) => sum + asset.size, 0));
+  assert.equal(state.downloadBytes, WINDOWS.assets.filter(asset => asset.part === "voice").reduce((sum, asset) => sum + asset.size, 0));
   assert.equal(fs.existsSync(settings), false);
   assert.equal(fs.existsSync(layout.model), false);
   assert.equal(fs.existsSync(layout.marker), false);
@@ -133,6 +134,34 @@ test("a DirectML failure is reported and retried on the next click", async () =>
   await assert.rejects(app.call("speak", { text: "你好" }), /GPU \(DirectML\) unavailable/);
   assert.equal(runtime.loads, 2);
   app.dispose();
+});
+
+test("Linux runs on CUDA, reports CUDA failures and downloads the Linux runtime", async () => {
+  using scratch = temporaryDirectory("lh-pron-backend-");
+  const linux = { platform: "linux", arch: "x64" };
+  const fresh = host(scratch.directory, linux);
+  const missing = await fresh.state();
+  assert.equal(missing.install.kind, "missing");
+  assert.equal(missing.downloadBytes, LINUX.assets.reduce((sum, asset) => sum + asset.size, 0));
+  fresh.dispose();
+
+  writeInstall(scratch.directory, LINUX.marker);
+  const windows = host(scratch.directory, { platform: "win32", arch: "x64" });
+  assert.equal((await windows.state()).install.kind, "missing", "a Linux install is not a Windows one");
+  windows.dispose();
+  writeInstall(scratch.directory, LINUX.marker);
+  const runtime = fakeRuntime();
+  const app = host(scratch.directory, { ...linux, runtime: runtime.load });
+  assert.equal((await app.state()).install.kind, "installed");
+  await app.call("speak", { text: "你好" });
+  assert.deepEqual(runtime.created.map(entry => entry.options.executionProviders), [["cuda"], ["cuda"]]);
+  assert.deepEqual(runtime.accelerators, ["CUDA"]);
+  app.dispose();
+
+  const failing = fakeRuntime({ failCreate: "libcublasLt.so.13: cannot open shared object file" });
+  const broken = host(scratch.directory, { ...linux, runtime: failing.load });
+  await assert.rejects(broken.call("speak", { text: "你好" }), /GPU \(CUDA\) unavailable: libcublasLt/);
+  broken.dispose();
 });
 
 test("download publishes progress, installs, and removal returns to missing", async () => {

@@ -23,6 +23,15 @@ publishers and stores them in the plugin's data folder:
   `onnxruntime.dll`, `DirectML.dll` and `dxcompiler.dll`). MIT, Microsoft
   Corporation. DirectML and the DirectX Shader Compiler are redistributed by
   Microsoft inside that package under its terms. https://github.com/microsoft/onnxruntime
+- **ONNX Runtime GPU 1.31.1 for Linux** (`libonnxruntime_providers_cuda.so`,
+  `libonnxruntime_providers_shared.so`) from the NuGet package
+  `Microsoft.ML.OnnxRuntime.Gpu.Linux`. MIT, Microsoft Corporation. Linux only.
+- **NVIDIA CUDA runtime, cuBLAS, cuRAND and cuDNN** (`libcudart.so.13`,
+  `libcublas.so.13`, `libcublasLt.so.13`, `libcurand.so.10`, `libcudnn*.so.9`)
+  from NVIDIA's PyPI wheels `nvidia-cuda-runtime`, `nvidia-cublas`,
+  `nvidia-curand` and `nvidia-cudnn-cu13`. NVIDIA redistributes them under the
+  NVIDIA Software License Agreement and the CUDA Toolkit supplement. Each wheel's
+  `License.txt` is kept beside the libraries in `voice/runtime/cuda/`. Linux only.
 
 The plugin's pause shortening follows
 [sherpa-onnx's Apache-2.0 implementation](https://github.com/k2-fsa/sherpa-onnx/blob/v2.0.3/sherpa-onnx/csrc/offline-tts.cc).
