@@ -19,6 +19,7 @@ import { isSubscriptionProvider } from "../agent/subscription-connections.ts";
 import { usageWasAdmitted } from "../agent/subscription-request-cycle.ts";
 import { composeSideChatInstructions, streamSideAnswer } from "../agent/side-chat.ts";
 import { effectiveSettings, stores } from "./stores.ts";
+import { AGY_PROVIDER } from "../core/contracts/agy.ts";
 import { providerKeyPresent } from "./keys.ts";
 import { refreshConnectionCatalog } from "./model-catalog.ts";
 import { awaitCompaction } from "./compaction.ts";
@@ -267,7 +268,7 @@ export function createSideChatService(deps: SideChatDeps): SideChatService {
 async function productionEngineFor(record: ChatRecord): Promise<SideEngine | Response> {
 	const spec = resolveSideQuestionSpec(record.settings, stores.settingsStore.readSettings());
 	if (!spec) return Response.json(modelsNotConfigured(["strong"]), { status: 503 });
-	if (isSubscriptionProvider(spec.provider)) await refreshConnectionCatalog(spec.provider);
+	if (isSubscriptionProvider(spec.provider) || spec.provider === AGY_PROVIDER) await refreshConnectionCatalog(spec.provider);
 	if (!providerKeyPresent(spec.provider)) return Response.json(providerKeyMissingEnvelope(spec.provider, ["strong"]), { status: 503 });
 	try {
 		let denied = false;

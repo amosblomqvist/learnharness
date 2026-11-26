@@ -30,7 +30,7 @@
  * lands here.
  */
 
-import { isBuiltinThemeId, type AgentSettings, type AppearanceSettings, type ChatSettings, type ModelsSettings } from "@/src/core";
+import { AGY_PROVIDER, isBuiltinThemeId, type AgentSettings, type AppearanceSettings, type ChatSettings, type ModelsSettings } from "@/src/core";
 import {
 	SETTINGS_SECTIONS,
 	allSegmentPaths,
@@ -40,6 +40,7 @@ import {
 	fileAccessConfigurationError,
 	promptOverrides,
 	readSettingsRecord,
+	refreshConnectionCatalog,
 	refreshWorkerRequestAdmission,
 	themeStore,
 	validateChatSettings,
@@ -74,7 +75,9 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// Section-specific cross-validation (against the catalog / the prompt
 	// store) — the parsers only see shapes.
 	if (section === "chat") {
-		const verdict = validateChatSettings(parsed.settings as ChatSettings);
+		const chatSettings = parsed.settings as ChatSettings;
+		if (chatSettings.model?.provider === AGY_PROVIDER) await refreshConnectionCatalog(AGY_PROVIDER);
+		const verdict = validateChatSettings(chatSettings);
 		if (!verdict.ok) {
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
 		}
@@ -83,7 +86,11 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 	// references may survive disconnect, including thinking-preference edits,
 	// so each unavailable slot can be repaired independently of the others.
 	if (section === "models") {
-		const verdict = validateModelsSettings(parsed.settings as ModelsSettings, record.models);
+		const modelsSettings = parsed.settings as ModelsSettings;
+		if (Object.values(modelsSettings).some((slot) => slot?.model?.provider === AGY_PROVIDER)) {
+			await refreshConnectionCatalog(AGY_PROVIDER);
+		}
+		const verdict = validateModelsSettings(modelsSettings, record.models);
 		if (!verdict.ok) {
 			return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
 		}

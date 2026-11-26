@@ -15,6 +15,7 @@ import { themeStore } from "../store/themes.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
 import { configureWorkerRequestAdmission } from "../agent/worker-request-admission.ts";
+import { AGY_PROVIDER } from "../core/contracts/agy.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
 	chatStore,
@@ -45,3 +46,8 @@ configureWorkerRequestAdmission(() => effectiveSettings().agent.workerRequestCon
 // Boot: register the custom endpoint (when configured) into piModels(); the
 // POST /api/custom-provider route re-syncs after every connect.
 syncCustomProvider();
+if (process.env.NODE_ENV !== "test") {
+	queueMicrotask(() => {
+		void import("./model-catalog.ts").then(({ refreshConnectionCatalog }) => refreshConnectionCatalog(AGY_PROVIDER));
+	});
+}

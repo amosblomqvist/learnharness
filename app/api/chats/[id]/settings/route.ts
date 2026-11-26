@@ -3,10 +3,11 @@ import {
 	effectiveSettings,
 	getChat,
 	parseSettingsBody,
+	refreshConnectionCatalog,
 	stores,
 	validateChatSettings,
 } from "@/src/server";
-import type { ChatSettings } from "@/src/core";
+import { AGY_PROVIDER, type ChatSettings } from "@/src/core";
 
 /**
  * The per-chat model control (model-control wave): replace-whole settings —
@@ -32,6 +33,7 @@ export async function PUT(req: Request, { params }: { params: Promise<{ id: stri
 	const parsed = parseSettingsBody(body);
 	if (!parsed.ok) return Response.json({ error: parsed.error }, { status: 400 });
 
+	if (parsed.settings.model?.provider === AGY_PROVIDER) await refreshConnectionCatalog(AGY_PROVIDER);
 	const verdict = validateChatSettings(parsed.settings);
 	if (!verdict.ok) {
 		return Response.json({ error: verdict.error, supported: verdict.supported }, { status: 400 });
