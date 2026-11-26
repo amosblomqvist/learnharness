@@ -13,7 +13,7 @@ import React from "react";
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { renderToStaticMarkup } from "react-dom/server";
-import { MessageResponse } from "../components/ai-elements/message.tsx";
+import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
 import { MermaidError } from "../components/mermaid-error.tsx";
 import { transformMathDelimiters, healOverescapedCommands } from "../src/core/math-delims.ts";
 
@@ -21,6 +21,17 @@ import { transformMathDelimiters, healOverescapedCommands } from "../src/core/ma
 function render(md: string): string {
 	return renderToStaticMarkup(<MessageResponse mode="static">{md}</MessageResponse>);
 }
+
+it("renders half-open intervals in complete question text without inventing a link", () => {
+	const question = "See [schedule](https://example.org/schedule). A waits during $[2,10)$ and B during $[6,14)$. Calculate the busy time.";
+	const html = renderToStaticMarkup(<ToolContentResponse>{question}</ToolContentResponse>);
+	assert.doesNotMatch(html, /streamdown:incomplete-link|katex-error/);
+	for (const interval of ["[2,10)", "[6,14)"]) {
+		assert.ok(html.includes(`<annotation encoding="application/x-tex">${interval}</annotation>`));
+	}
+	assert.match(html, /data-incomplete="false"[^>]*data-streamdown="link"[^>]*>schedule</);
+	assert.match(html, /Calculate the busy time\./);
+});
 
 describe("math delimiter transform (pure unit)", () => {
 	it("converts inline \\(...\\) to the two-dollar inline form", () => {
