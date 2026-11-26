@@ -189,6 +189,27 @@ function freePort() {
  *  effect on the next model call — no restart. Real environment variables
  *  still win over the file inside the child (its documented rule). */
 
+let logStream = null;
+let logFilePath = null;
+
+function getLogStream() {
+	try {
+		const file = path.join(app.getPath("userData"), "logs", "main.log");
+		if (logStream && logFilePath === file && !logStream.destroyed) return logStream;
+		logStream?.end();
+		fs.mkdirSync(path.dirname(file), { recursive: true });
+		logFilePath = file;
+		const stream = fs.createWriteStream(file, { flags: "a" });
+		stream.on("error", () => {
+			if (logStream === stream) logStream = null;
+		});
+		logStream = stream;
+		return stream;
+	} catch {
+		return null;
+	}
+}
+
 function log(line) {
 	const stamp = new Date().toISOString();
 	// The stdout write is guarded (EPIPE hardening, 2026-10-10): a packaged
@@ -203,9 +224,7 @@ function log(line) {
 	// Belt and braces: also append to userData/logs so a misbehaving child
 	// can be diagnosed after the window is gone. Best effort only.
 	try {
-		const dir = path.join(app.getPath("userData"), "logs");
-		fs.mkdirSync(dir, { recursive: true });
-		fs.appendFileSync(path.join(dir, "main.log"), `[${stamp}] ${line}\n`);
+		getLogStream()?.write(`[${stamp}] ${line}\n`);
 	} catch {
 		/* best effort */
 	}
@@ -260,19 +279,27 @@ function startServer(port) {
 }
 
 /** No "ready" event exists — poll until the server answers (docs-confirmed). */
-function waitUntilUp(url, tries = 150) {
+function waitUntilUp(url, timeoutMs = 30_000) {
+	const deadline = Date.now() + timeoutMs;
+	let delay = 25;
 	return new Promise((resolve, reject) => {
-		const attempt = (n) => {
+		const attempt = () => {
 			const req = http.get(url, (res) => {
 				res.resume();
 				resolve(res.statusCode !== undefined);
 			});
 			req.on("error", () => {
-				if (n <= 0) reject(new Error(`server never answered on ${url}`));
-				else setTimeout(() => attempt(n - 1), 200);
+				const remaining = deadline - Date.now();
+				if (remaining <= 0) {
+					reject(new Error(`server never answered on ${url}`));
+					return;
+				}
+				const wait = Math.min(delay, remaining);
+				delay = Math.min(delay * 2, 100);
+				setTimeout(attempt, wait);
 			});
 		};
-		attempt(tries);
+		attempt();
 	});
 }
 
@@ -716,11 +743,10 @@ async function main() {
 				for (const win of BrowserWindow.getAllWindows()) win.webContents.send("lh:subscriptions:changed");
 			},
 		});
-		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
 		await startServer(new URL(url).port);
-		await waitUntilUp(url);
+		await Promise.all([waitUntilUp(url), subscriptions.ready]);
 		log(`server up: ${url}`);
 	} else {
 		log(`dev mode: ${devUrl} — waiting for server`);
