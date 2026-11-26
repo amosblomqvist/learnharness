@@ -208,6 +208,19 @@ class ClaudeTurn {
 				return;
 			}
 
+			// The signature tells a reasoning block from reply text the API
+			// summarized into thinking ("narration"); the narration guard reads it.
+			case "signatureDelta": {
+				const found = this.getBlock(event.index);
+				if (!found) return;
+
+				const { block } = found;
+				if (block.type !== "thinking") return;
+
+				block.thinkingSignature = (block.thinkingSignature ?? "") + event.signature;
+				return;
+			}
+
 			case "toolInputDelta": {
 				const found = this.getBlock(event.index);
 				if (!found) return;
