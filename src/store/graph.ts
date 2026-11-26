@@ -51,10 +51,21 @@ import type { GraphStore } from "../core/ports.ts";
 
 // ─── JSONL primitives ────────────────────────────────────────────────────────
 
+interface CachedFile<T> {
+	mtimeMs: number;
+	size: number;
+	value: T;
+}
+
+const ledgerCache = new Map<string, CachedFile<unknown[]>>();
+let positionsCache: CachedFile<Record<string, Position>> | null = null;
+let sourcesCache: CachedFile<Record<string, NotesSource>> | null = null;
+
 function appendLine<T>(file: string, record: T): void {
 	fs.mkdirSync(path.dirname(file), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
 	fs.appendFileSync(file, `${JSON.stringify(record)}\n`, "utf-8");
+	ledgerCache.delete(file);
 }
 
 function readRawLines(file: string): unknown[] {
@@ -87,7 +98,20 @@ const isString = (v: unknown): v is string => typeof v === "string";
 /** Strict shape guards — anything not matching a W4 ledger shape is skipped. */
 function readValid<T>(file: string, isValid: (v: unknown) => v is T): T[] {
 	assertGraphFormat(); // honest refusal on a newer-stamped data dir
-	return readRawLines(file).filter(isValid);
+	let stat: fs.Stats;
+	try {
+		stat = fs.statSync(file);
+	} catch {
+		ledgerCache.delete(file);
+		return [];
+	}
+	const cached = ledgerCache.get(file);
+	if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+		return [...(cached.value as T[])];
+	}
+	const rows = readRawLines(file).filter(isValid);
+	ledgerCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, value: rows });
+	return [...rows];
 }
 
 /** Provenance points are (chatId, messageId) pairs — message-granular. */
@@ -182,6 +206,7 @@ export const graphStore: GraphStore = {
 		for (const id of ids) if (Object.hasOwn(all, id)) { delete all[id]; removed++; }
 		if (removed === 0) return 0;
 		writeFileAtomicSync(SOURCES_FILE, JSON.stringify(all, null, "\t"));
+		sourcesCache = null;
 		removeLeftoverTemps(SOURCES_FILE); // crash leftovers would still hold the deleted sources
 		return removed;
 	},
@@ -228,6 +253,7 @@ export const graphStore: GraphStore = {
 			// must see exactly what appendLine would have written.
 			const body = records.map((record) => JSON.stringify(record)).join("\n") + (records.length > 0 ? "\n" : "");
 			writeFileAtomicSync(file, body);
+			ledgerCache.delete(file);
 			removeLeftoverTemps(file); // crash leftovers would still hold the purged records
 		}
 	},
@@ -238,11 +264,28 @@ export const graphStore: GraphStore = {
  *  whole map. The updatedAt stamp exists for future live-physics conflict
  *  handling (a browser commit must be able to detect "the graph changed
  *  underneath me"); reads just return the map. */
+function clonePositionMap(map: Record<string, Position>): Record<string, Position> {
+	const copy: Record<string, Position> = {};
+	for (const [id, pos] of Object.entries(map)) copy[id] = { x: pos.x, y: pos.y };
+	return copy;
+}
+
 function readPositionMap(): Record<string, Position> {
+	let stat: fs.Stats;
+	try {
+		stat = fs.statSync(POSITIONS_FILE);
+	} catch {
+		positionsCache = null;
+		return {}; // no ledger yet — nothing has ever settled
+	}
+	if (positionsCache && positionsCache.mtimeMs === stat.mtimeMs && positionsCache.size === stat.size) {
+		return clonePositionMap(positionsCache.value);
+	}
 	let raw: string;
 	try {
 		raw = fs.readFileSync(POSITIONS_FILE, "utf-8");
 	} catch {
+		positionsCache = null;
 		return {}; // no ledger yet — nothing has ever settled
 	}
 	try {
@@ -252,8 +295,10 @@ function readPositionMap(): Record<string, Position> {
 		for (const [id, value] of Object.entries(parsed.positions)) {
 			if (isPosition(value)) out[id] = { x: value.x, y: value.y };
 		}
-		return out;
+		positionsCache = { mtimeMs: stat.mtimeMs, size: stat.size, value: out };
+		return clonePositionMap(out);
 	} catch {
+		positionsCache = null;
 		return {};
 	}
 }
@@ -261,6 +306,7 @@ function readPositionMap(): Record<string, Position> {
 function writePositionMap(positions: Record<string, Position>): void {
 	fs.mkdirSync(path.dirname(POSITIONS_FILE), { recursive: true });
 	writeFileAtomicSync(POSITIONS_FILE, JSON.stringify({ positions, updatedAt: new Date().toISOString() }, null, "\t"));
+	positionsCache = null;
 }
 
 const isPosition = (v: unknown): v is Position =>
@@ -268,12 +314,29 @@ const isPosition = (v: unknown): v is Position =>
 
 /** sources.json — { id: NotesSource }. Read-modify-write, NOT append-only:
  *  the usage log lives inside the record (like a chat's JSON file). */
+function cloneSourceMap(map: Record<string, NotesSource>): Record<string, NotesSource> {
+	const copy: Record<string, NotesSource> = {};
+	for (const [id, src] of Object.entries(map)) copy[id] = { ...src };
+	return copy;
+}
+
 function readSourceMap(): Record<string, NotesSource> {
 	assertGraphFormat(); // honest refusal on a newer-stamped data dir
+	let stat: fs.Stats;
+	try {
+		stat = fs.statSync(SOURCES_FILE);
+	} catch {
+		sourcesCache = null;
+		return {};
+	}
+	if (sourcesCache && sourcesCache.mtimeMs === stat.mtimeMs && sourcesCache.size === stat.size) {
+		return cloneSourceMap(sourcesCache.value);
+	}
 	let raw: string;
 	try {
 		raw = fs.readFileSync(SOURCES_FILE, "utf-8");
 	} catch {
+		sourcesCache = null;
 		return {};
 	}
 	try {
@@ -283,8 +346,10 @@ function readSourceMap(): Record<string, NotesSource> {
 		for (const [id, value] of Object.entries(parsed)) {
 			if (isNotesSource(value)) out[id] = value;
 		}
-		return out;
+		sourcesCache = { mtimeMs: stat.mtimeMs, size: stat.size, value: out };
+		return cloneSourceMap(out);
 	} catch {
+		sourcesCache = null;
 		return {};
 	}
 }
@@ -293,6 +358,7 @@ function writeSourceMap(map: Record<string, NotesSource>): void {
 	fs.mkdirSync(path.dirname(SOURCES_FILE), { recursive: true });
 	ensureGraphFormat(); // the lazy format stamp (graph-format.ts)
 	writeFileAtomicSync(SOURCES_FILE, JSON.stringify(map, null, "\t"), { allowInPlaceFallback: true });
+	sourcesCache = null;
 }
 
 // ─── one-way purges at adapter load: dead ledgers are exactly the confusion
