@@ -268,54 +268,131 @@ test("discoverClaudeCodeProfiles prefers <defaultDir>/.claude.json over <homeDir
 	assert.equal("email" in (partialResult.profiles[0] ?? {}), false);
 });
 
-test("discoverClaudeCodeProfiles (.claude.json-only variant) never reads .credentials.json and never leaks secrets", (t) => {
-	const homeDir = makeTempDir(t, "lh-profiles-nocreds-");
-	const defaultDir = join(homeDir, ".claude");
-	const workDir = join(homeDir, ".claude-work");
-	mkdirSync(defaultDir);
-	mkdirSync(workDir);
-
-	writeFileSync(
-		join(workDir, ".credentials.json"),
-		JSON.stringify({
-			claudeAiOauth: {
-				accessToken: "SECRET_OAUTH_ACCESS",
-				refreshToken: "SECRET_OAUTH_REFRESH",
-				subscriptionType: "max",
-				rateLimitTier: "default_claude_max_20x",
+test("discoverClaudeCodeProfiles extracts formatted plan labels from .credentials.json with safe fallback and zero secret leakage", (t) => {
+	const homeDir = makeTempDir(t, "lh-profiles-creds-");
+	const cases: Array<{
+		dirName: string;
+		creds?: Record<string, unknown> | string;
+		claudeJson?: Record<string, unknown>;
+		expectedPlan: string | undefined;
+	}> = [
+		{
+			dirName: ".claude-pro",
+			creds: {
+				apiKey: "SECRET_PRO_API_KEY",
+				claudeAiOauth: {
+					accessToken: "SECRET_PRO_ACCESS",
+					refreshToken: "SECRET_PRO_REFRESH",
+					expiresAt: 1735689600123,
+					scopes: ["user:inference"],
+					subscriptionType: "pro",
+					rateLimitTier: "default_claude_pro",
+				},
 			},
-			apiKey: "SECRET_API_KEY",
-		}),
-	);
-	writeFileSync(
-		join(workDir, ".claude.json"),
-		JSON.stringify({
-			oauthAccount: { emailAddress: "work@example.com" },
-			primaryApiKey: "SECRET_PRIMARY_API_KEY",
-		}),
-	);
+			expectedPlan: "Pro",
+		},
+		{
+			dirName: ".claude-max5",
+			creds: {
+				claudeAiOauth: {
+					accessToken: "SECRET_MAX5_ACCESS",
+					subscriptionType: "max",
+					rateLimitTier: "default_claude_max_5x",
+				},
+			},
+			expectedPlan: "Max (5x)",
+		},
+		{
+			dirName: ".claude-max20",
+			creds: {
+				claudeAiOauth: {
+					accessToken: "SECRET_MAX20_ACCESS",
+					subscriptionType: "max",
+					rateLimitTier: "default_claude_max_20x",
+				},
+			},
+			expectedPlan: "Max (20x)",
+		},
+		{
+			dirName: ".claude-max-plain",
+			creds: { claudeAiOauth: { subscriptionType: "max" } },
+			expectedPlan: "Max",
+		},
+		{
+			dirName: ".claude-team",
+			creds: { claudeAiOauth: { subscriptionType: "team" } },
+			expectedPlan: "Team",
+		},
+		{
+			dirName: ".claude-enterprise",
+			creds: { claudeAiOauth: { subscriptionType: "enterprise" } },
+			expectedPlan: "Enterprise",
+		},
+		{
+			dirName: ".claude-free",
+			creds: { claudeAiOauth: { subscriptionType: "free" } },
+			expectedPlan: "Free",
+		},
+		{
+			dirName: ".claude-custom-label",
+			creds: { claudeAiOauth: { subscriptionType: "plus" } },
+			expectedPlan: "Plus",
+		},
+		{
+			dirName: ".claude-unsafe-plan",
+			creds: { claudeAiOauth: { subscriptionType: "sk-ant-should-reject" } },
+			expectedPlan: undefined,
+		},
+		{
+			dirName: ".claude-fallback",
+			creds: "{corrupt-credentials",
+			claudeJson: { oauthAccount: { emailAddress: "fb@example.com", billingType: "stripe_subscription" } },
+			expectedPlan: "Subscription",
+		},
+		{
+			dirName: ".claude-oversized-creds",
+			creds: JSON.stringify({
+				claudeAiOauth: { subscriptionType: "pro" },
+				padding: "y".repeat(1024 * 1024 + 64),
+			}),
+			claudeJson: { oauthAccount: { billingType: "stripe_subscription" } },
+			expectedPlan: "Subscription",
+		},
+	];
 
-	const readPaths: string[] = [];
-	const spyFs: ClaudeCodeProfileFs = {
-		readdirSync: nodeFs.readdirSync,
-		statSync: nodeFs.statSync,
-		realpathSync: nodeFs.realpathSync,
-		readFileSync: ((filePath: nodeFs.PathOrFileDescriptor, options?: unknown) => {
-			readPaths.push(String(filePath));
-			return nodeFs.readFileSync(filePath, options as BufferEncoding);
-		}) as typeof nodeFs.readFileSync,
-	};
+	mkdirSync(join(homeDir, ".claude"));
+	for (const entry of cases) {
+		const dir = join(homeDir, entry.dirName);
+		mkdirSync(dir);
+		if (entry.creds !== undefined) {
+			writeFileSync(
+				join(dir, ".credentials.json"),
+				typeof entry.creds === "string" ? entry.creds : JSON.stringify(entry.creds),
+			);
+		}
+		if (entry.claudeJson) {
+			writeFileSync(join(dir, ".claude.json"), JSON.stringify(entry.claudeJson));
+		}
+	}
 
-	const result = discoverClaudeCodeProfiles({ homeDir, env: {}, fs: spyFs });
-	assert.equal(readPaths.some((p) => p.endsWith(".credentials.json")), false);
-	const workProfile = result.profiles.find((p) => p.label === ".claude-work");
-	assert.equal(workProfile?.hasCredentials, true);
-	assert.equal(workProfile?.email, "work@example.com");
-	assert.equal("subscriptionPlan" in (workProfile ?? {}), false);
+	const result = discoverClaudeCodeProfiles({ homeDir, env: {} });
+	for (const entry of cases) {
+		const profile = result.profiles.find((p) => p.label === entry.dirName);
+		assert.ok(profile, `expected profile ${entry.dirName}`);
+		assert.equal(profile.subscriptionPlan, entry.expectedPlan, `plan mismatch for ${entry.dirName}`);
+	}
 
 	const serialized = JSON.stringify(result);
-	assert.equal(serialized.includes("SECRET_OAUTH_ACCESS"), false);
-	assert.equal(serialized.includes("SECRET_OAUTH_REFRESH"), false);
-	assert.equal(serialized.includes("SECRET_API_KEY"), false);
-	assert.equal(serialized.includes("SECRET_PRIMARY_API_KEY"), false);
+	for (const forbidden of [
+		"SECRET_PRO_API_KEY",
+		"SECRET_PRO_ACCESS",
+		"SECRET_PRO_REFRESH",
+		"SECRET_MAX5_ACCESS",
+		"SECRET_MAX20_ACCESS",
+		"1735689600123",
+		"user:inference",
+		"sk-ant-should-reject",
+	]) {
+		assert.equal(serialized.includes(forbidden), false, `must not expose ${forbidden}`);
+	}
 });

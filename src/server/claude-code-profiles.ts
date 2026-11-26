@@ -14,6 +14,8 @@ export type ClaudeCodeProfileFs = Pick<typeof nodeFs, "readdirSync" | "statSync"
 
 const MAX_METADATA_FILE_BYTES = 1024 * 1024;
 const MAX_METADATA_VALUE_LENGTH = 256;
+const SAFE_SUBSCRIPTION_TYPE_RE = /^[A-Za-z][A-Za-z0-9 _-]{1,23}$/;
+const TOKEN_LIKE_RE = /(?:^sk-|token|secret|key|bearer|oauth|jwt|eyj)/i;
 
 export interface DiscoverClaudeCodeProfilesOptions {
 	homeDir?: string;
@@ -124,9 +126,66 @@ function extractClaudeJsonAccountMeta(
 	};
 }
 
+function titleCaseWords(raw: string): string {
+	return raw
+		.split(/[_\s-]+/)
+		.filter(Boolean)
+		.map((part) => part.charAt(0).toUpperCase() + part.slice(1).toLowerCase())
+		.join(" ");
+}
+
+function extractRateLimitMultiplier(rateLimitTier: string | undefined): "5x" | "20x" | null {
+	if (!rateLimitTier) return null;
+	const lower = rateLimitTier.toLowerCase();
+	if (/(?:^|[_-])20x(?:$|[_-])/.test(lower)) return "20x";
+	if (/(?:^|[_-])5x(?:$|[_-])/.test(lower)) return "5x";
+	return null;
+}
+
+function formatCredentialsSubscriptionPlan(
+	subscriptionTypeRaw: unknown,
+	rateLimitTierRaw: unknown,
+): string | undefined {
+	const subscriptionType = sanitizeMetadataString(subscriptionTypeRaw, 64);
+	const rateLimitTier = sanitizeMetadataString(rateLimitTierRaw, 64);
+	if (!subscriptionType) return undefined;
+	if (!SAFE_SUBSCRIPTION_TYPE_RE.test(subscriptionType) || TOKEN_LIKE_RE.test(subscriptionType)) {
+		return undefined;
+	}
+
+	const normalized = subscriptionType.toLowerCase();
+	switch (normalized) {
+		case "pro":
+			return "Pro";
+		case "max": {
+			const multiplier = extractRateLimitMultiplier(rateLimitTier);
+			return multiplier ? `Max (${multiplier})` : "Max";
+		}
+		case "team":
+			return "Team";
+		case "enterprise":
+			return "Enterprise";
+		case "free":
+			return "Free";
+		default: {
+			const formatted = titleCaseWords(subscriptionType);
+			return formatted || undefined;
+		}
+	}
+}
+
+function extractCredentialsPlan(credentialsPath: string, fsOps: ClaudeCodeProfileFs): string | undefined {
+	const parsed = readSafeJsonObject(credentialsPath, fsOps);
+	if (!parsed) return undefined;
+	const oauth = isPlainObject(parsed.claudeAiOauth) ? parsed.claudeAiOauth : null;
+	if (!oauth) return undefined;
+	return formatCredentialsSubscriptionPlan(oauth.subscriptionType, oauth.rateLimitTier);
+}
+
 /** Non-secret discovery of Claude Code config directories; inspects filesystem
- *  stat metadata and allowlisted non-secret account display metadata from
- *  `.claude.json` only. Never reads `.credentials.json` or exposes tokens/secrets. */
+ *  stat metadata, allowlisted account display metadata from `.claude.json`, and
+ *  non-secret subscription plan labels from `.credentials.json`. Never returns,
+ *  retains, or logs OAuth tokens, refresh tokens, API keys, or secrets. */
 export function discoverClaudeCodeProfiles(
 	options: DiscoverClaudeCodeProfilesOptions = {},
 ): ClaudeCodeProfilesResponse {
@@ -158,7 +217,8 @@ export function discoverClaudeCodeProfiles(
 
 		const exists = isDirectoryTarget(resolved, fsOps);
 		const hasSettings = exists && isRegularFile(path.join(/* turbopackIgnore: true */ resolved, "settings.json"), fsOps);
-		const hasCredentials = exists && isRegularFile(path.join(/* turbopackIgnore: true */ resolved, ".credentials.json"), fsOps);
+		const credentialsPath = path.join(/* turbopackIgnore: true */ resolved, ".credentials.json");
+		const hasCredentials = exists && isRegularFile(credentialsPath, fsOps);
 		const claudeJsonPaths = resolved === resolvedDefault
 			? [
 					path.join(/* turbopackIgnore: true */ resolved, ".claude.json"),
@@ -166,6 +226,8 @@ export function discoverClaudeCodeProfiles(
 				]
 			: [path.join(/* turbopackIgnore: true */ resolved, ".claude.json")];
 		const accountMeta = extractClaudeJsonAccountMeta(claudeJsonPaths, fsOps);
+		const credentialsPlan = hasCredentials ? extractCredentialsPlan(credentialsPath, fsOps) : undefined;
+		const subscriptionPlan = credentialsPlan ?? accountMeta.subscriptionPlan;
 		const label = source === "default" || resolved === resolvedDefault
 			? "Default (.claude)"
 			: path.basename(resolved) || resolved;
@@ -178,7 +240,8 @@ export function discoverClaudeCodeProfiles(
 			exists,
 			hasSettings,
 			hasCredentials,
-			...accountMeta,
+			...(accountMeta.email ? { email: accountMeta.email } : {}),
+			...(subscriptionPlan ? { subscriptionPlan } : {}),
 		});
 	};
 

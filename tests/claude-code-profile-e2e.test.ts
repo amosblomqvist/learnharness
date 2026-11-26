@@ -130,6 +130,10 @@ test("end-to-end isolated profile discovery, settings persistence, real child CL
 			claudeAiOauth: {
 				accessToken: SECRET_SENTINEL,
 				refreshToken: `${SECRET_SENTINEL}_REFRESH`,
+				expiresAt: 9999999999999,
+				scopes: ["user:inference"],
+				subscriptionType: "max",
+				rateLimitTier: "default_claude_max_20x",
 			},
 			apiKey: `${SECRET_SENTINEL}_API`,
 		}),
@@ -188,6 +192,8 @@ test("end-to-end isolated profile discovery, settings persistence, real child CL
 	assert.equal(res.headers.get("cache-control"), "no-store");
 	const rawJson = await res.text();
 	assert(!rawJson.includes(SECRET_SENTINEL), "Discovery payload must never leak secrets from .credentials.json or .claude.json");
+	assert(!rawJson.includes("user:inference"), "Discovery payload must never leak OAuth scopes");
+	assert(!rawJson.includes("9999999999999"), "Discovery payload must never leak OAuth expiry");
 	const discovery = JSON.parse(rawJson);
 	const labels = discovery.profiles.map((p: { label: string }) => p.label);
 	assert(labels.includes("Default (.claude)"));
@@ -200,6 +206,7 @@ test("end-to-end isolated profile discovery, settings persistence, real child CL
 	assert.equal(defaultProfile?.email, "default@example.com");
 	assert.equal(defaultProfile?.subscriptionPlan, "Subscription");
 	assert.equal(secondProfile?.email, "second@example.com");
+	assert.equal(secondProfile?.subscriptionPlan, "Max (20x)");
 
 	// 2. Select ~/.claude-second via settings body parser + store; verify real child receives expanded path
 	//    even when an inherited CLAUDE_CONFIG_DIR points elsewhere.
