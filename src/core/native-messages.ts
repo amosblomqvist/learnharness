@@ -75,6 +75,7 @@ export interface LhMarkerMessage {
 	customType:
 		| "graph-context"
 		| "probe-handoff"
+		| "learner-handoff"
 		| "subagent-steer"
 		| "subagent-abort"
 		| "plan-block"
@@ -917,9 +918,9 @@ export function probeDoneResultIds(messages: readonly LhMessage[]): Set<string> 
 }
 
 /** The probe→teach construction seam (chat-handler and the tool guard):
- *  only a concluded call plus a matching successful result means teach. */
+ *  the learner may end probing explicitly; otherwise require a matched successful assessment. */
 export function hasProbeDone(messages: readonly LhMessage[]): boolean {
-	return probeDoneResultIds(messages).size > 0;
+	return messages.some(m => m.role === "custom" && m.customType === "learner-handoff") || probeDoneResultIds(messages).size > 0;
 }
 
 /** Every toolResult id in the record — answer-event validation (the call
@@ -987,7 +988,7 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 	if (message.role === "system" || message.role === "assistant") return "neutral";
 	if (message.role === "custom") {
 		if (["probe-handoff", "subagent-steer", "subagent-abort"].includes(message.customType)) return "automatic";
-		if (["practice-thinking", "plugin-problem-submission", "practice-next"].includes(message.customType)) return "learner";
+		if (["learner-handoff", "practice-thinking", "plugin-problem-submission", "practice-next"].includes(message.customType)) return "learner";
 		return ["graph-context", "plan-block", "problem-dismissed", "compaction", "side-question", "side-question-told"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}
 	if (message.role === "toolResult") {

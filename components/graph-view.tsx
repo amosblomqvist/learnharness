@@ -63,6 +63,7 @@
  * camera never moves.
  */
 
+import { GraphSessionCoverage } from "@/components/graph-session-coverage";
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { GraphFolderFilterControl, useGraphFolderSelection } from "@/components/graph-folder-filter";
@@ -1638,6 +1639,7 @@ export function GraphView({
 				/>
 			</div>
 
+			<GraphSessionCoverage />
 			<NotesImportErrors errors={notesImport.errors} />
 			<NotesImportNotices notices={notesImport.notices} />
 			{/* Top-right tail (owner, 2026-09-20): the pipeline cost number —

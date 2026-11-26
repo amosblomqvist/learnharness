@@ -241,7 +241,7 @@ export function ringFill(uncoveredTokens: number, chunkTokens: number): number {
  * (resets as the fold drains coverage) + the settings signal (the
  * threshold/kill-switch re-read live).
  */
-export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refreshKey?: number }) {
+export function CoverageRing({ chatId, refreshKey = 0, sessionPicker }: { chatId: string; refreshKey?: number; sessionPicker?: React.ReactNode }) {
 	const [graph, setGraph] = useState<GraphRead | null>(null);
 	const [coverage, setCoverage] = useState<SessionCoverage | null>(null);
 	const [open, setOpen] = useState(false);
@@ -300,7 +300,8 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 
 	const fill = ringFill(coverage.uncoveredTokens, graph.chunkTokens);
 	return (
-		<div ref={rootRef} className="lh-no-drag relative shrink-0">
+		<div ref={rootRef} className="lh-no-drag relative flex max-w-full items-center gap-2 rounded-xl border bg-card px-2 py-1">
+			{sessionPicker}
 			<Hint
 				// Trimmed (owner, subtlety round 2026-09-25).
 				label="How much of this session isn't mapped yet"
