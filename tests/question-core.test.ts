@@ -225,6 +225,16 @@ it("quiz options carry NO description field; ask keeps it (owner nuke, 2026-09-2
 	assert.ok("description" in askOption, "ask option schema keeps description");
 	});
 
+it("quiz and ask option labels tell the model not to add its own letter or number prefix", () => {
+	// The app shuffles quiz options and letters single-select options itself;
+	// a model-written "B …" prefix then disagreed with the displayed badge.
+	for (const schema of [quizInputBase, askInputSchema]) {
+		const option = (schema.properties.options as { items?: { properties?: Record<string, { description?: string }> } })
+			.items!.properties!;
+		assert.match(option.label!.description!, /no letter or number prefix/);
+	}
+	});
+
 	it("handles undefined input", () => {
 		assert.deepEqual(normalizeOptions(undefined), []);
 	});

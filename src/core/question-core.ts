@@ -39,7 +39,7 @@ export interface QuizOption {
  *  Neutral elaboration belongs in the question text or the post-answer
  *  explanation; the option is a bare claim. */
 const quizOptionProps = {
-	label: Type.String({ description: "Display label for the answer option — a bare claim, no reasoning" }),
+	label: Type.String({ description: "Display label for the answer option — a bare claim, no reasoning, with no letter or number prefix (the app letters the options)" }),
 	value: Type.Optional(
 		Type.String({
 			description: "Optional machine-readable value returned for the option. Defaults to the label.",
