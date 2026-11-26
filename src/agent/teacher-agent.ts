@@ -402,7 +402,7 @@ export function createPracticeAgent(ctx: PracticeToolContext, opts: AgentBuildOp
 	// Explicit test registries bypass all builtin construction and contributions.
 	if (opts.tools !== undefined) return baseAgentOptions("practice", opts, Object.values(opts.tools));
 	const gate = createPracticeGate(ctx);
-	return baseAgentOptions("practice", opts, Object.values(practiceTools(ctx, gate)), undefined, { gate, graphNodes: ctx.graphNodes });
+	return baseAgentOptions("practice", opts, Object.values(practiceTools({ ...ctx, visualEnabled: opts.toolToggles?.visual !== false }, gate)), undefined, { gate, graphNodes: ctx.graphNodes });
 }
 
 export type ProberAgent = ReturnType<typeof createProberAgent>;

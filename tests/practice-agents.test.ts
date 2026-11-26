@@ -213,10 +213,11 @@ describe("the practice agent", () => {
 		// not apply the teacher/prober user tool-toggle filter.
 		assert.deepEqual(
 			Object.keys(tools).sort(),
-			["conclude", "find", "grep", "list_propositions", "list_sessions", "ls", "pdf", "problem", "read", "research"],
+			["conclude", "find", "grep", "list_propositions", "list_sessions", "ls", "pdf", "problem", "read", "research", "visual"],
 		);
 		const withSearch = practiceTools({ ...ctxOf([]), jobs: { ...jobs, searchAvailable: () => true }, graph });
 		assert.ok(withSearch.research, "a live engine also keeps research");
+		assert.ok(!practiceTools({ ...ctxOf([]), jobs, visualEnabled: false }).visual, "drawing toggle still applies");
 	});
 
 	it("constructs with exactly the two practice tools", () => {
