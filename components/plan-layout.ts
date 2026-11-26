@@ -180,6 +180,16 @@ export function blockLayout(
 	const ids = new Set(nodes.map((n) => n.id));
 	const routed: Array<{ from: string; to: string }> = [];
 	const g = new graphlib.Graph({ compound: false, multigraph: true });
+	// dagre keys plain objects by node id in several places. graphlib's own
+	// node table guards its writes, but dagre's crossing minimisation keeps
+	// `subgraphs = {}` keyed by id (order/sort-subgraph.js), so a plan id
+	// such as "constructor" resolves to Object.prototype.constructor —
+	// truthy, with no `.vs` — and the resulting `undefined` node crashes
+	// layout while it assigns `order`. "__proto__" is worse: assigning it
+	// replaces the prototype instead of adding a key, so the node silently
+	// disappears. Namespace the ids dagre sees; every map and edge key
+	// above/below still uses the record's own ids.
+	const graphId = (id: string) => `node:${id}`;
 	g.setGraph({ rankdir: "TB", nodesep: GAP_X, ranksep: GAP_Y, marginx: 0, marginy: 0 });
 	const minH = 2 * lineH + 2 * PAD_Y;
 	for (const n of nodes) {
@@ -190,25 +200,25 @@ export function blockLayout(
 		lines.set(n.id, wrapped);
 		nodeW.set(n.id, w);
 		nodeH.set(n.id, h);
-		g.setNode(n.id, { width: w, height: h });
+		g.setNode(graphId(n.id), { width: w, height: h });
 	}
 	for (const e of edges) {
 		if (ids.has(e.from) && ids.has(e.to)) {
-			g.setEdge(e.from, e.to, { label: "", width: 0, height: 0 });
+			g.setEdge(graphId(e.from), graphId(e.to), { label: "", width: 0, height: 0 });
 			routed.push(e);
 		}
 	}
 	// (the d.ts marks opts required; the runtime ignores it)
 	dagreLayout(g, undefined);
 	for (const n of nodes) {
-		const pos = g.node(n.id);
+		const pos = g.node(graphId(n.id));
 		if (pos) {
 			x.set(n.id, pos.x - nodeW.get(n.id)! / 2);
 			y.set(n.id, pos.y - nodeH.get(n.id)! / 2);
 		}
 	}
 	for (const e of routed) {
-		const pts: Array<{ x: number; y: number }> | undefined = g.edge(e.from, e.to)?.points;
+		const pts: Array<{ x: number; y: number }> | undefined = g.edge(graphId(e.from), graphId(e.to))?.points;
 		if (pts) edgePts.set(`${e.from}->${e.to}`, pts.map((pt) => ({ x: pt.x, y: pt.y })));
 	}
 	// THE CANVAS MUST COVER THE ARROWS (owner, 2026-10-10): dagre's
