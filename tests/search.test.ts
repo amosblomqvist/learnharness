@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider, specstreamProvider } from "../src/server/search.ts";
 import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
@@ -285,9 +285,71 @@ describe("ollamaProvider (hosted search only)", () => {
 	});
 });
 
-describe("five-engine catalog and resolution", () => {
+describe("specstreamProvider (wire shape per specstream.ai/docs/search-api)", () => {
+	it("GETs api.specstream.ai/v1/web-search with Bearer auth, num, speed=fast, and bounded snippets", async () => {
+		const provider = specstreamProvider("specstream-fake-key-1234", stubFetch({
+			data: {
+				sources: [
+					{ title: "SpecStream", url: "https://specstream.ai", snippet: "first\nline" },
+					{ url: "https://example.org", snippet: "x".repeat(600) },
+					{ snippet: "no URL" }, { url: "javascript:alert(1)" }, { url: "file:///tmp/private" }, null,
+				],
+			},
+		}, (url, init) => {
+			const parsed = new URL(url);
+			assert.equal(`${parsed.origin}${parsed.pathname}`, "https://api.specstream.ai/v1/web-search");
+			assert.equal(parsed.searchParams.get("q"), "test query");
+			assert.equal(parsed.searchParams.get("num"), "5");
+			assert.equal(parsed.searchParams.get("speed"), "fast");
+			const headers = init.headers as Record<string, string>;
+			assert.equal(headers.accept, "application/json");
+			assert.equal(headers.authorization, "Bearer specstream-fake-key-1234");
+			assert.ok(init.signal);
+		}));
+		assert.deepEqual(await provider.search("test query", 5), [
+			{ title: "SpecStream", url: "https://specstream.ai", snippet: "first line" },
+			{ title: "https://example.org", url: "https://example.org", snippet: "x".repeat(500) },
+		]);
+	});
+
+	it("returns an empty result array for a successful empty search", async () => {
+		assert.deepEqual(await specstreamProvider("fake-key", stubFetch({ data: { sources: [] } }, () => {})).search("q", 5), []);
+	});
+
+	it("sends integer counts within SpecStream's range", async () => {
+		const counts: string[] = [];
+		const provider = specstreamProvider("fake-key", stubFetch({ data: { sources: [] } }, (url) => {
+			counts.push(new URL(url).searchParams.get("num") ?? "");
+		}));
+		for (const count of [1, 5, 10, 200, 0, 2.8]) await provider.search("q", count);
+		assert.deepEqual(counts, ["1", "5", "10", "100", "1", "2"]);
+	});
+
+	it("rejects malformed envelopes and invalid JSON without echoing bodies", async () => {
+		for (const invalid of [null, {}, [], { data: null }, { data: { sources: null } }, { error: { message: "fake-secret-123456" } }]) {
+			const provider = specstreamProvider("fake-secret-123456", async () => new Response(JSON.stringify(invalid)));
+			await assert.rejects(provider.search("q", 5), { message: "SpecStream search API returned an invalid response" });
+		}
+		const provider = specstreamProvider("fake-secret-123456", async () => new Response("invalid fake-secret-123456"));
+		await assert.rejects(provider.search("q", 5), { message: "SpecStream search API returned an invalid response" });
+	});
+
+	it("reports auth, quota, rate-limit and server failures without response bodies or retries", async () => {
+		for (const status of [401, 402, 429, 500, 503]) {
+			let calls = 0;
+			const provider = specstreamProvider("fake-secret-123456", async () => {
+				calls++;
+				return new Response("fake-secret-123456", { status });
+			});
+			await assert.rejects(provider.search("q", 5), { message: `SpecStream search API ${status}` });
+			assert.equal(calls, 1);
+		}
+	});
+});
+
+describe("six-engine catalog and resolution", () => {
 	it("pins the approved Automatic order independently of table-driven tests", () => {
-		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama"]);
+		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama", "specstream"]);
 		assert.equal(isSearchEngineId("chatgpt"), false);
 		assert.equal(isSearchEngineId("deepseek"), false);
 		for (const value of [null, {}, 1, "", "toString"]) assert.equal(isSearchEngineId(value), false);
