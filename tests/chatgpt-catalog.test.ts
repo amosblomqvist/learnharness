@@ -51,15 +51,25 @@ test("account/full and catalog authority changes reject outstanding old leases w
  ipc({ channel: "lh:chatgpt", kind: "state", stamp: { epoch: 2, authorityRevision: 3, revision: 8 }, status: status("B"), invalidate: "none" });
  assert.equal(chatGPTModels().length, 0); await assert.rejects(chatGPTLease(newScope, false));
 });
-test("account-offered GPT-6.1 Terra resolves from the bundled Responses catalog", async () => {
+test("account-offered GPT-6.2 Sol and GPT-6.1 Terra resolve from the bundled Responses catalog", async () => {
  const refresh = refreshConnectionCatalog("chatgpt");
  reply(pending.at(-1), { ...value("B", 9, "B", 3), models: [
+  { id: "gpt-6.2-sol", name: "GPT-6.2 Sol (account)" },
   { id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)" },
   { id: "not-in-the-bundled-catalog", name: "Unsupported" },
  ] });
  await refresh;
  assert.deepEqual(chatGPTModels().map(({ provider, id, name, api, cost }) => ({ provider, id, name, api, cost })), [{
+  provider: "chatgpt", id: "gpt-6.2-sol", name: "GPT-6.2 Sol (account)", api: "openai-responses",
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+ }, {
   provider: "chatgpt", id: "gpt-6.1-terra", name: "GPT-6.1 Terra (account)", api: "openai-responses",
   cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
  }]);
+});
+test("GPT-6.2 Sol stays unavailable when the account does not offer it", async () => {
+ const refresh = refreshConnectionCatalog("chatgpt");
+ reply(pending.at(-1), value("B", 10, "B", 3));
+ await refresh;
+ assert.deepEqual(chatGPTModels().map(({ id }) => id), [model.id]);
 });

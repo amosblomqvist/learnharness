@@ -9,6 +9,7 @@ import { backgroundCaptureDir, backgroundCaptureStream, createBackgroundCapture 
 import { piModels, piEngineForSpec } from "../src/agent/models.ts";
 import { chatGPTAbortController, chatGPTModels, refreshChatGPTModels } from "../src/agent/chatgpt-bridge.ts";
 import { chatGPTHistory, chatGPTPayload } from "../src/agent/chatgpt-stream.ts";
+import { refreshConnectionCatalog } from "../src/server/model-catalog.ts";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
 const originalConnected = Object.getOwnPropertyDescriptor(process, "connected");
@@ -20,6 +21,11 @@ let requests: { authorization: string | null; body: Record<string, any>; url: st
 let responseEvents: unknown[] = [];
 const ipc = (value: unknown) => (process.emit as (name: string, value: unknown) => boolean)("message", value);
 const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses">;
+const accountModels = [
+	{ id: model.id, name: "Scratch account model" },
+	{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol" },
+	{ id: "unknown-capabilities", name: "Do not invent capabilities" },
+];
 const status = { available: true, pending: false, allowBackgroundUse: false, activeId: "scratch-account", accounts: [{ id: "scratch-account", email: "dummy@example.invalid", registration: "oaiapp_scratch", connected: true, planEnabled: true, background: false }], error: null };
 before(async () => {
 	process.env.LH_DESKTOP_SERVER = "1"; process.env.LH_DESKTOP_API_SECRET = "d".repeat(64);
@@ -29,7 +35,7 @@ before(async () => {
 	Object.defineProperty(process, "send", { configurable: true, value: (message: any, callback?: () => void) => {
 		queueMicrotask(() => {
 			ipc({ channel: "lh:chatgpt", id: message.id, op: message.op,
-				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: [{ id: model.id, name: "Scratch account model" }, { id: "unknown-capabilities", name: "Do not invent capabilities" }] } }),
+				...(message.op === "lease" && leaseError ? { ok: false, error: leaseError, stamp: { epoch: 1, authorityRevision: 1, revision: 1 } } : { ok: true, value: message.op === "lease" ? { accessToken: "scratch-oauth-only", accountId: "scratch-account", epoch: 1, authorityRevision: 1, revision: 1 } : { epoch: 1, authorityRevision: 1, revision: 1, status, accountId: "scratch-account", models: accountModels } }),
 			});
 		});
 		callback?.(); return true;
@@ -90,6 +96,23 @@ test("alias resolves only OAuth; native Responses body is stateless/namespaced, 
 	assert(replay.some((item: any) => item.encrypted_content === "scratch-encrypted-reasoning"));
 	assert(replay.some((item: any) => item.type === "function_call" && item.id === "fc_scratch" && item.namespace === "learnharness"));
 	assert(replay.some((item: any) => item.type === "function_call_output" && item.call_id === "call_scratch"));
+});
+
+test("account-offered GPT-6.2 Sol dispatches through the subscription Responses route", async () => {
+	await refreshConnectionCatalog("chatgpt");
+	try {
+		requests = [];
+		responseEvents = [complete()];
+		const engine = piEngineForSpec({ provider: "chatgpt", id: "gpt-6.2-sol", thinkingLevel: "medium" }, false);
+		const result = await engine.streamFn(engine.model, context()).result();
+		assert.equal(result.stopReason, "stop");
+		assert.equal(requests.length, 1);
+		assert.equal(requests[0]!.authorization, "Bearer scratch-oauth-only");
+		assert.equal(requests[0]!.body.model, "gpt-6.2-sol");
+		assert.equal(requests[0]!.body.reasoning.effort, "medium");
+	} finally {
+		await refreshChatGPTModels([model]);
+	}
 });
 
 test("mixed history never blanket-relabels API providers or reuses foreign reasoning signatures", () => {

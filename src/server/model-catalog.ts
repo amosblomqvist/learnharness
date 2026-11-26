@@ -26,10 +26,19 @@ import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } f
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
+function chatGPTSupportedModels(): Model<"openai-responses">[] {
+	const models = getBuiltinModels("openai").filter((model): model is Model<"openai-responses"> => model.api === "openai-responses");
+	if (models.some((model) => model.id === "gpt-6.2-sol")) return models;
+
+	// Pi 1.6.1 gives Sol 6.2 the same Responses capabilities and limits as
+	// Sol 6.1. Backport it for subscription lookup until Pi ships it here.
+	const sol = models.find((model) => model.id === "gpt-6.1-sol");
+	return sol ? [...models, { ...sol, id: "gpt-6.2-sol", name: "GPT-6.2 Sol" }] : models;
+}
+
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
-		// The subscription bridge still trusts only the bundled OpenAI catalog.
-		!provider || provider === "chatgpt" ? refreshChatGPTModels(getBuiltinModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+		!provider || provider === "chatgpt" ? refreshChatGPTModels(chatGPTSupportedModels()) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
 	]);
 }
