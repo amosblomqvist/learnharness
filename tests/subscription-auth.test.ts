@@ -13,6 +13,22 @@ const { createSubscriptions, loadSubscriptionSDK, validEndpoint, publicError } =
 const { fileStore, validateState } = require("../electron/subscription-store.cjs");
 const { subscriptionControl } = require("../electron/subscription-ipc.cjs");
 const ids = ["github-copilot", "xai"] as const;
+
+test("GitHub Copilot exposes auto as a virtual model and never sends auto upstream", async () => {
+	const f = await fixture();
+	await f.controller.login("github-copilot", false);
+	const model = (await f.controller.snapshot()).models["github-copilot"];
+	assert(model.some((entry: any) => entry.id === "auto"));
+	const scope = await f.scope("github-copilot");
+	const backendScope = { ...scope, selectedModelId: "auto" };
+	const lease = await f.controller.lease(backendScope, false);
+	assert.equal(lease.scope.selectedModelId, "auto");
+	assert.equal(typeof lease.auth.apiKey, "string");
+	assert.equal(typeof (lease.auth as any).modelId, "string");
+	assert.notEqual((lease.auth as any).modelId, "auto");
+	assert(model.some((entry: any) => entry.id === "auto"));
+	f.controller.close();
+});
 const credential = (id: string, expires = Date.now() + 3600000): OAuthCredential => ({ type: "oauth", access: id === "xai" ? "fixture-xai-access" : "tid=fixture;proxy-ep=proxy.individual.githubcopilot.com;", refresh: "fixture-refresh", expires, ...(id === "github-copilot" ? { availableModelIds: [githubCopilotProvider().getModels()[0]!.id] } : {}) });
 function deferred<T>() { let resolve!: (value: T) => void; const promise = new Promise<T>((done) => { resolve = done; }); return { resolve, promise }; }
 async function fixture(options: { login?: (id: string, interaction: ProviderAuthInteraction) => Promise<OAuthCredential>; refresh?: (id: string, value: OAuthCredential, signal: AbortSignal) => Promise<OAuthCredential>; stores?: Record<string, unknown> } = {}) {
