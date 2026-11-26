@@ -335,6 +335,13 @@ function openExternalLink(target) {
 	log(`external link blocked (scheme ${scheme.slice(0, 40)})`);
 }
 
+/** The 512px logo for the Linux window icon, in a checkout or a packaged build. */
+function linuxWindowIcon() {
+	return app.isPackaged
+		? path.join(process.resourcesPath, "icon.png")
+		: path.join(__dirname, "..", "build", "icon.png");
+}
+
 /** Security posture (all defaults asserted explicitly; the guards are the
  *  checklist's own recommendations for localhost-app shells):
  *  - deny-by-default permission handler allowing only our loopback origin
@@ -347,6 +354,10 @@ function createWindow(url, beforeLoad, onLoadError) {
 		width: 1440,
 		height: 900,
 		title: PRODUCT_NAME,
+		// X11 taskbars (XFCE and others) draw the window's own icon, and
+		// Electron sets none, so Linux showed a blank entry. Packaged builds
+		// ship build/icon.png as a resource (electron-builder.yml linux).
+		...(process.platform === "linux" ? { icon: linuxWindowIcon() } : {}),
 		// Merged chrome (owner, 2026-09-17): the system title bar is gone;
 		// the app's own 60px header bands ARE the title bar. The traffic
 		// lights float over the sidebar's LH wordmark band, vertically

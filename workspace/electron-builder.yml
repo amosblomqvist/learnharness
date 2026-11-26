@@ -163,6 +163,11 @@ nsis:
   perMachine: false
 linux:
   icon: build/icon.png
+  # The window icon: X11 taskbars draw it instead of the desktop entry's
+  # (electron/main.cjs linuxWindowIcon).
+  extraResources:
+    - from: build/icon.png
+      to: icon.png
   target:
     - target: AppImage
       arch:

@@ -15,7 +15,7 @@ const mainRequire = createRequire(mainFile);
 /** Decline the single-instance lock so normal boot never spawns a server.
  * Then call the REAL createWindow with a stub Electron API and inspect its
  * constructor options. No rewritten copy of the production logic. */
-function windowOptions(platform: string, env: Record<string, string> = {}, reported?: { mode: string; background?: string }) {
+function windowOptions(platform: string, env: Record<string, string> = {}, reported?: { mode: string; background?: string }, isPackaged = false) {
 	class FakeWindow {
 		constructor(readonly options: unknown) {}
 		webContents = { on() {}, setWindowOpenHandler() {} };
@@ -23,14 +23,14 @@ function windowOptions(platform: string, env: Record<string, string> = {}, repor
 		once() {}
 	}
 	const electron = {
-		app: { setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
+		app: { isPackaged, setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => false, quit() {} },
 		BrowserWindow: FakeWindow,
 		nativeTheme: { shouldUseDarkColors: true, themeSource: "system", on() {} },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
 		require: (id: string) => id === "electron" ? electron : mainRequire(id),
-		process: { platform, argv: [], env, on() {} },
+		process: { platform, argv: [], env, on() {}, resourcesPath: "/fixture/resources" },
 		__dirname: dirname(mainFile),
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
@@ -173,6 +173,15 @@ describe("desktop window chrome", () => {
 		});
 	}
 
+	it("Linux windows carry the logo so X11 taskbars do not show a blank icon", () => {
+		const checkoutIcon = resolve(dirname(mainFile), "..", "build", "icon.png");
+		assert.equal(windowOptions("linux").icon, checkoutIcon);
+		assert.ok(readFileSync(checkoutIcon).length > 0);
+		assert.equal(windowOptions("linux", {}, undefined, true).icon, "/fixture/resources/icon.png");
+		assert.equal(windowOptions("win32").icon, undefined);
+		assert.equal(windowOptions("darwin").icon, undefined);
+	});
+
 	it("the native chrome paints the active theme: Default dark until the renderer reports, then its mode and background", () => {
 		const dark = windowOptions("win32");
 		assert.equal(dark.backgroundColor, "#141414");
@@ -282,6 +291,10 @@ describe("desktop packaging policy", () => {
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
 		assert.equal(config.publish[0].releaseType, "draft");
+	});
+
+	it("Linux packages ship the window icon where the main process reads it", () => {
+		assert.deepEqual(config.linux.extraResources, [{ from: "build/icon.png", to: "icon.png" }]);
 	});
 
 	it("deb has public maintainer metadata and a matching desktop identity", () => {
