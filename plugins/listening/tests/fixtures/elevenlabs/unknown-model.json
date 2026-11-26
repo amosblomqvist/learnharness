@@ -1,0 +1,12 @@
+{
+  "recorded": "2026-11-15",
+  "request": "POST /v1/text-to-speech/{voice_id}",
+  "status": 400,
+  "contentType": "application/json",
+  "body": {
+    "detail": {
+      "status": "model_not_found",
+      "message": "A model with model ID no_such_model does not exist ..."
+    }
+  }
+}

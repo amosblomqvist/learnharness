@@ -124,7 +124,7 @@ describe("desktop standalone payload", () => {
 			assert.equal(fs.existsSync(path.join(root, STANDALONE, "dist")), false);
 			assert.equal(fs.existsSync(path.join(root, STANDALONE, "plugins")), false);
 			assert.ok(fs.existsSync(path.join(root, "plugins", "rich-code-blocks", "tests", "browser.mjs")));
-			assert.deepEqual(fs.readdirSync(path.join(root, STANDALONE, "core-plugins")).sort(), ["coding-questions", "drawing-pad", "flashcards", "rich-code-blocks"]);
+			assert.deepEqual(fs.readdirSync(path.join(root, STANDALONE, "core-plugins")).sort(), ["coding-questions", "drawing-pad", "flashcards", "listening", "rich-code-blocks"]);
 			assert.equal(fs.readFileSync(path.join(root, STANDALONE, "core-plugins", "flashcards", "assets", "font.woff"), "utf8"), "bundled-font");
 			assert.equal(fs.existsSync(path.join(root, STANDALONE, "node_modules", "electron")), false);
 			assert.ok(fs.existsSync(path.join(root, "dist", "old.app", "nested.dmg")));

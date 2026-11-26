@@ -1,0 +1,16 @@
+{
+  "recorded": "2026-11-15",
+  "request": "GET /v1/models",
+  "status": 400,
+  "contentType": "application/json",
+  "body": {
+    "detail": {
+      "type": "authentication_error",
+      "code": "invalid_api_key",
+      "message": "API key is invalid.",
+      "status": "invalid_api_key",
+      "request_id": "00000000000000000000000000000000",
+      "param": "api_key"
+    }
+  }
+}
