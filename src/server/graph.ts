@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
-import { LEDGER_FILES, POSITIONS_FILE } from "../../config.ts";
-import type { GraphSnapshot } from "../core/contracts.ts";
+import * as path from "node:path";
+import { LEDGER_FILES, PATHS, POSITIONS_FILE } from "../../config.ts";
+import type { ExtractionRunUsage, GraphSnapshot } from "../core/contracts.ts";
 import type { GraphCostSummary } from "../core/cost-summary.ts";
 import { graphCostSummary } from "../core/cost-summary.ts";
 import { graphSnapshot } from "../core/graph.ts";
@@ -31,15 +32,46 @@ export function graphView(): GraphSnapshot {
  *  (notes-front-door runs), and the naming ledger (graph-global runs);
  *  dollars are inferred by the pure core fold (core/cost-summary.ts +
  *  prices.ts) — nothing here stores or caches money. */
+interface CachedChatExtraction {
+	mtimeMs: number;
+	size: number;
+	entry: { title: string; extractions: ExtractionRunUsage[] } | null;
+}
+
+const chatExtractionCache = new Map<string, CachedChatExtraction>();
+
 export function graphCosts(): GraphCostSummary {
-	const chats = stores.chatStore
-		.listChats()
-		.flatMap((summary) => {
-			const record = stores.chatStore.getChat(summary.id);
-			return record?.extractions?.length
-				? [{ title: record.title ?? summary.id, extractions: record.extractions }]
-				: [];
-		});
+	const summaries = stores.chatStore.listChats();
+	const seen = new Set<string>();
+	const chats: { title: string; extractions: ExtractionRunUsage[] }[] = [];
+	for (const summary of summaries) {
+		const file = path.join(/* turbopackIgnore: true */ PATHS.chats, `${summary.id}.json`);
+		seen.add(file);
+		let stat: fs.Stats | null = null;
+		try {
+			stat = fs.statSync(/* turbopackIgnore: true */ file);
+		} catch {
+			chatExtractionCache.delete(file);
+		}
+		if (stat) {
+			const cached = chatExtractionCache.get(file);
+			if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+				if (cached.entry) chats.push(cached.entry);
+				continue;
+			}
+		}
+		const record = stores.chatStore.getChat(summary.id);
+		const entry = record?.extractions?.length
+			? { title: record.title ?? summary.id, extractions: record.extractions }
+			: null;
+		if (stat) {
+			chatExtractionCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, entry });
+		}
+		if (entry) chats.push(entry);
+	}
+	for (const key of chatExtractionCache.keys()) {
+		if (!seen.has(key)) chatExtractionCache.delete(key);
+	}
 	const sources = stores.graphStore
 		.readSources()
 		.filter((s) => s.extractions?.length)
