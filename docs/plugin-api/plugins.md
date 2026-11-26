@@ -693,6 +693,9 @@ export interface PluginFrontendContext {
     onResync(listener: () => void): () => void;
     app: {
         pathname(): string;
+        currentSession(): Extract<PluginPageActionContext, {
+            surface: "session";
+        }> | undefined;
         openSession(id: string): void;
         openHome(): void;
         openView(id: string): void;
@@ -701,7 +704,7 @@ export interface PluginFrontendContext {
 }
 ```
 
-**Related types:** [PluginAction](plugins.md#pluginaction), [PluginActionPlacement](plugins.md#pluginactionplacement), [PluginCleanup](plugins.md#plugincleanup), [PluginCodeBlockRenderer](plugins.md#plugincodeblockrenderer), [PluginManifest](plugins.md#pluginmanifest), [PluginNotification](plugins.md#pluginnotification), [PluginProblemRenderer](plugin-problems.md#pluginproblemrenderer), [PluginQuestionRenderer](plugin-questions.md#pluginquestionrenderer), [PluginSettingsRegistration](plugins.md#pluginsettingsregistration), [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginSubmissionInterceptor](plugin-submissions.md#pluginsubmissioninterceptor), [PluginToolRenderer](plugins.md#plugintoolrenderer), [PluginUi](plugin-ui.md#pluginui), [PluginView](plugins.md#pluginview), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle), [ServerEvent](events.md#serverevent).
+**Related types:** [PluginAction](plugins.md#pluginaction), [PluginActionPlacement](plugins.md#pluginactionplacement), [PluginCleanup](plugins.md#plugincleanup), [PluginCodeBlockRenderer](plugins.md#plugincodeblockrenderer), [PluginManifest](plugins.md#pluginmanifest), [PluginNotification](plugins.md#pluginnotification), [PluginPageActionContext](plugins.md#pluginpageactioncontext), [PluginProblemRenderer](plugin-problems.md#pluginproblemrenderer), [PluginQuestionRenderer](plugin-questions.md#pluginquestionrenderer), [PluginSettingsRegistration](plugins.md#pluginsettingsregistration), [PluginSettingsSchema](plugin-ui.md#pluginsettingsschema), [PluginSubmissionInterceptor](plugin-submissions.md#pluginsubmissioninterceptor), [PluginToolRenderer](plugins.md#plugintoolrenderer), [PluginUi](plugin-ui.md#pluginui), [PluginView](plugins.md#pluginview), [PluginWidgetHandle](plugin-ui.md#pluginwidgethandle), [ServerEvent](events.md#serverevent).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
@@ -728,6 +731,7 @@ export interface PluginFrontendContext {
 - [onResync](#pluginfrontendcontext-onresync)
 - [app](#pluginfrontendcontext-app)
 - [app.pathname](#pluginfrontendcontext-apppathname)
+- [app.currentSession](#pluginfrontendcontext-appcurrentsession)
 - [app.openSession](#pluginfrontendcontext-appopensession)
 - [app.openHome](#pluginfrontendcontext-appopenhome)
 - [app.openView](#pluginfrontendcontext-appopenview)
@@ -1071,6 +1075,9 @@ Navigation methods are inert after activation expiry and do not await mounts.
 ```ts
 app: {
     pathname(): string;
+    currentSession(): Extract<PluginPageActionContext, {
+        surface: "session";
+    }> | undefined;
     openSession(id: string): void;
     openHome(): void;
     openView(id: string): void;
@@ -1087,6 +1094,21 @@ pathname(): string;
 ```
 
 **Returns:** `string`.
+
+### PluginFrontendContext app.currentSession
+
+Read the teaching/practice session page in front right now: the same
+detached context a session action receives, captured at this call. Returns
+undefined on every other page, or while that page cannot supply its context;
+never a guessed, retained or hidden session. Call it again for newer state.
+
+```ts
+currentSession(): Extract<PluginPageActionContext, {
+    surface: "session";
+}> | undefined;
+```
+
+**Returns:** `Extract<PluginPageActionContext, {             surface: "session";         }> \| undefined`.
 
 ### PluginFrontendContext app.openSession
 

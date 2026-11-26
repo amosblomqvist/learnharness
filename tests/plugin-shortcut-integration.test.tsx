@@ -131,6 +131,19 @@ test("manager captures shortcut metadata, validates defaults, preserves action b
 		assert.deepEqual(manager.shortcutPageContext(), { surface: "app", pathname: "/" });
 		pathname = "/plugins/fixture/overview"; assert.equal((manager.shortcutPageContext() as { viewId: string }).viewId, "new");
 		pathname = "/chat/missing"; assert.equal(manager.shortcutPageContext(), undefined);
+		// The current session is the page in front, read fresh, and never another route's.
+		assert.equal(ctx.app.currentSession(), undefined);
+		const sessionTarget = Object.freeze({}) as Extract<PluginActionContext, { surface: "session" }>["surfaceTarget"]; let composer = "first";
+		const offSession = manager.registerShortcutPage("/chat/one", () => createPluginSessionActionContext({ placement: "top-bar", surface: "session", sessionId: "one", kind: "practice", surfaceTarget: sessionTarget }, () => ({ sessionId: "one", kind: "practice", title: "One", messages: [], transcript: [], status: "ready", reconciliation: "ready", busy: false, compacting: false, phase: "practice", contextTokens: null, queuedSteers: [], composer: { text: composer }, input: { type: "unavailable", expanded: false, revealed: false } })));
+		assert.equal(ctx.app.currentSession(), undefined);
+		pathname = "/chat/one"; const current = ctx.app.currentSession()!;
+		assert.deepEqual([current.surface, current.sessionId, current.kind, current.view.composer.text], ["session", "one", "practice", "first"]);
+		assert.equal(current.surfaceTarget, sessionTarget); assert.ok(Object.isFrozen(current.view.composer));
+		composer = "second"; assert.equal(ctx.app.currentSession()!.view.composer.text, "second");
+		pathname = "/plugins/fixture/overview"; assert.equal(ctx.app.currentSession(), undefined);
+		pathname = "/chat/one"; offSession(); assert.equal(ctx.app.currentSession(), undefined);
+		const offBroken = manager.registerShortcutPage("/chat/one", () => { throw new Error("This session view is no longer active."); });
+		assert.equal(ctx.app.currentSession(), undefined); offBroken();
 		ctx.registerAction({ id: "fail", name: "Fail", run() { throw new Error("action failed"); } });
 		await manager.runAction("fixture", manager.getSnapshot().plugins[0]!.actions[1]!, { placement: "keyboard", surface: "app", pathname });
 		assert.match(manager.getSnapshot().plugins[0]!.error!, /action failed/);

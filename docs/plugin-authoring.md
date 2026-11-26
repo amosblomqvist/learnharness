@@ -256,9 +256,12 @@ the document, top bar or sidebar. Plugins may still provide their own bounded
 scrollers; content that fits does not create a second host scrollbar. Page-body
 surfaces are separate overlay siblings, not children of the background scroll viewport.
 
-`ctx.app` exposes `pathname()`, `openSession(id)`, `openHome()`, `openView(id)` and
-`openSettings()`; the latter two target this plugin. It exposes no private React context
-or graph-selection internals.
+`ctx.app` exposes `pathname()`, `currentSession()`, `openSession(id)`, `openHome()`,
+`openView(id)` and `openSettings()`; the latter two target this plugin. It exposes no
+private React context or graph-selection internals. `currentSession()` returns the
+teaching/practice session page in front right now, with the same detached
+[whole-session view](plugin-view-context.md#reading-the-current-session-without-an-action)
+a session action receives, or `undefined` on any other page.
 
 ### Actions
 

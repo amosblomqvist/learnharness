@@ -126,7 +126,30 @@ and its own product behavior, not pretend that inspectable data is already visib
 - Capture failures are contained by existing plugin action error handling. No action
   runs if its originating view has gone away before capture.
 
-There is no public subscription/global mutable context API, screenshot service, raw keyboard
+## Reading the current session without an action
+
+`ctx.app.currentSession()` returns the session page in front right now as
+`{surface: "session", sessionId, kind, surfaceTarget, view}`: the same identity, opaque
+surface target and detached snapshot an action invoked there at that moment would
+receive. It returns `undefined` on every other page (home, settings, plugin views, a new
+unsaved chat) and while the page cannot supply its context, for example during a route
+change. It never returns a guessed, retained or hidden session.
+
+```ts
+const session = ctx.app.currentSession();
+if (session) console.log(session.sessionId, session.kind, session.view.input.type);
+```
+
+- Each call captures anew and detaches the whole history, so do not call it per frame.
+  There is no change event: call it again after `ctx.app.pathname()` changes or a
+  `turn-settled`/`record-changed` app event for that session, and when your own state
+  needs it.
+- Every snapshot, identity and lifetime rule below applies unchanged. The result does
+  not follow later navigation or edits, and a read never reveals, submits or changes anything.
+- This capability was added after 0.7.0. A plugin that also runs on older builds checks
+  `typeof ctx.app.currentSession === "function"` first.
+
+There is no public subscription/live mutable context API, screenshot service, raw keyboard
 shortcut addition, or new session state model. A snapshot read does not finish dictation,
 request microphone access, persist drafts, invoke submission interceptors, process/grade,
 submit, acknowledge, or send a model request. It reports current typed/published values,
