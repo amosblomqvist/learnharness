@@ -43,7 +43,8 @@ import { MermaidError } from "@/components/mermaid-error";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
-import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
+import { BUILTIN_MERMAID_LANGUAGE, BUILTIN_PIXEL_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
+import { PixelArtInline } from "@/components/pixel-art";
 
 /** Local rendering profile for host-mounted, display-only Markdown. Ordinary
  * transcript rendering (including SSR/static Streamdown) stays interactive. */
@@ -260,6 +261,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const source = codeSource(children);
 
 	if (language === BUILTIN_MERMAID_LANGUAGE) return <MermaidInline chart={source} />;
+	if (language === BUILTIN_PIXEL_LANGUAGE) return <PixelArtInline source={source} />;
 
 	const startMatch = /startLine=(\d+)/.exec(meta);
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
