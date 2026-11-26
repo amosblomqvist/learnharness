@@ -1312,8 +1312,24 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// (same doctrine as chat batches).
 			const chunkTokens = deps.getChunkTokens?.() ?? FACTORY_SETTINGS.graph.extractionChunkTokens;
 			const chunks = chunkNotes(input.text, chunkTokens);
+			// RESUMABLE (owner, 2026-11-13): a stopped import of the same text at
+			// the same chunk budget resumes at the first chunk that never merged.
+			// The fingerprint covers every chunking input, so changed content
+			// (fresh OCR, edited text) starts from the top rather than splicing
+			// two different documents together.
+			const fp = crypto.createHash("sha256").update(`${chunkTokens}\n${input.text}`).digest("hex").slice(0, 32);
+			const prevResume = graphStore.readSources().find((source) => source.id === id)?.resume;
+			const resumeFrom = prevResume && prevResume.fp === fp && prevResume.chunks === chunks.length
+				&& Number.isSafeInteger(prevResume.chunks) && prevResume.chunks > 0
+				&& Number.isSafeInteger(prevResume.done) && prevResume.done > 0 && prevResume.done <= chunks.length
+				? prevResume.done
+				: 0;
+			if (prevResume && resumeFrom === 0) {
+				graphStore.upsertSource({ id, filePath: input.filePath, importedAt: input.importedAt });
+			}
 			console.info(
-				`[extraction ${id}] notes pipeline start (${input.filePath}) — ${chunks.length} chunk(s) of ≤${chunkTokens} tok`,
+				`[extraction ${id}] notes pipeline start (${input.filePath}) — ${chunks.length} chunk(s) of ≤${chunkTokens} tok` +
+					(resumeFrom > 0 ? `, resuming after ${resumeFrom} merged chunk(s)` : ""),
 			);
 			// PER-CHUNK JOBS (owner, 2026-09-28), SERIALIZED PER SOURCE (owner,
 			// 2026-09-30 evening): same law as the chat door — chunks run
@@ -1324,7 +1340,10 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// part rides the registry entry (feed suffix "· i/N") only when
 			// the file actually chunked.
 			const settled: PromiseSettledResult<EmissionStats>[] = [];
+			// Only a successfully persisted leading merge advances the resume point.
+			let completedPrefix = resumeFrom;
 			for (const [chunkIndex, chunk] of chunks.entries()) {
+				if (chunkIndex < resumeFrom) continue;
 				const part = chunks.length > 1 ? { i: chunkIndex + 1, n: chunks.length } : undefined;
 				// Keep the actual signal after runJob tears down its registry row:
 				// usage persistence can throw and mask the body's AbortError.
@@ -1356,6 +1375,16 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 								mergedStats.chains! += merged.chains ?? 0;
 								if (merged.droppedChains)
 									mergedStats.droppedChains = (mergedStats.droppedChains ?? 0) + merged.droppedChains;
+								// Persist the committed prefix before layout or usage can fail.
+								if (chunkIndex === completedPrefix) {
+									graphStore.upsertSource({
+										id,
+										filePath: input.filePath,
+										importedAt: input.importedAt,
+										resume: { fp, chunks: chunks.length, done: chunkIndex + 1 },
+									});
+									completedPrefix = chunkIndex + 1;
+								}
 								// The layout ledger evolves with each merge — the next
 								// snapshot fetch reflects every finished chunk.
 								settleGraphLayout(graphStore);
@@ -1384,12 +1413,16 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// Completion is a chunk-status contract, never a node-count test.
 			// Zero findings (and an empty file after the readiness gate) are valid.
 			const rejected = settled.filter((r) => r.status === "rejected");
-			if (rejected.length > 0 || settled.length !== chunks.length) {
+			if (rejected.length > 0 || settled.length + resumeFrom !== chunks.length) {
 				const aborted = rejected.some((r) => r.reason instanceof Error && r.reason.name === "AbortError");
 				const outcome = aborted ? "aborted" : settled.some((r) => r.status === "fulfilled") ? "partial" : "failed";
 				const details = rejected.map((r) => r.reason instanceof Error ? r.reason.message : String(r.reason)).join("; ");
 				throw new NotesImportError(outcome, mergedStats, details || "Notes import did not complete");
 			}
+			if (resumeFrom > 0 && resumeFrom === chunks.length) settleGraphLayout(graphStore);
+			// Completed: the checkpoint has no further use. Another explicit
+			// import of this file processes it whole, as before.
+			graphStore.upsertSource({ id, filePath: input.filePath, importedAt: input.importedAt });
 			console.info(
 				`[extraction ${id}] merged: ${stats.nodes} nodes, ${stats.chains ?? 0} chains ` +
 					`(${Math.round(performance.now() - t0)}ms total, ${chunks.length} chunk job(s))`,
@@ -1405,8 +1438,8 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		}
 	}
 
-	/** Every explicit import processes the whole file. Identity, source digest,
-	 * auditor and usage history remain source-scoped; this is not exactly-once. */
+	/** Resume an incomplete import of matching text and chunk budget. After a
+	 * completed run, the next explicit import processes the whole file. */
 	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
@@ -1414,7 +1447,10 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		inFlight.add(id);
 		try {
 			const importedAt = new Date().toISOString();
-			graphStore.upsertSource({ id, filePath: input.filePath, importedAt });
+			// Carry any incomplete-run checkpoint through the metadata upsert —
+			// otherwise re-uploading the stopped file would silently restart it.
+			const resume = graphStore.readSources().find((source) => source.id === id)?.resume;
+			graphStore.upsertSource({ id, filePath: input.filePath, importedAt, ...(resume ? { resume } : {}) });
 			return await runNotesExtraction({ id, ...input, importedAt });
 		} catch (err) {
 			if (err instanceof NotesImportError || err instanceof ModelsNotConfiguredError || err instanceof ProviderKeyMissingError) throw err;

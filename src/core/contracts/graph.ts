@@ -82,10 +82,17 @@ export interface NotesSource {
 	filePath: string;
 	/** ISO — when this file was imported (the checkpoint's foldedAt). */
 	importedAt: string;
-	/** Legacy content fingerprint. Accepted when reading old records, but
-	 * ignored: every explicit notes import processes the whole file. New
-	 * imports do not compute or write this field. No migration is needed. */
+	/** Legacy content fingerprint, ignored by extraction. New imports use
+	 * resume.fp for incomplete runs and do not write this field. */
 	contentFp?: string;
+	/** Incomplete-run checkpoint: fp is 32 lowercase hex characters; chunks
+	 * and done are positive safe integers with done <= chunks. Persisted
+	 * after each leading merge, before layout and usage. A full prefix can
+	 * remain if cleanup fails; a matching retry skips all model calls and
+	 * clears it. Completion clears it so the next explicit import runs whole.
+	 * Changed text or chunk budget clears an incompatible checkpoint before
+	 * extraction. Disk reads discard invalid resume data, not its source. */
+	resume?: { fp: string; chunks: number; done: number };
 	/** The run's usage log — same append-only discipline as
 	 *  ChatRecord.extractions, idempotent per startedAt. */
 	extractions?: ExtractionRunUsage[];
