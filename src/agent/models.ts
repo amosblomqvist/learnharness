@@ -15,6 +15,7 @@ import { lazyApi, lazyStream } from "@earendil-works/pi-ai/api/lazy";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
+import { ANTHROPIC_WORKSPACE_KEY } from "../core/auth-keys.ts";
 import packageMetadata from "../../package.json" with { type: "json" };
 import { chatGPTModel } from "./chatgpt-bridge.ts";
 import { chatGPTStream } from "./chatgpt-stream.ts";
@@ -207,10 +208,17 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
 			// Direct Anthropic auth is resolved per request. Keep full replay: Pi's
 			// message-thread fingerprint does not include that rotating credential.
-			const wireModel = requestModel.provider === "anthropic" && requestModel.api === "anthropic-messages"
+			const directAnthropic = requestModel.provider === "anthropic" && requestModel.api === "anthropic-messages";
+			const wireModel = directAnthropic
 				? { ...requestModel, compat: { ...requestModel.compat, supportsMessageThreads: false } }
 				: requestModel;
-			return stream(wireModel, context, requestOptions);
+			// Keys not scoped to a workspace are rejected unless every request
+			// names one. Read per request, like the key itself (keys seam).
+			const workspaceId = directAnthropic ? process.env[ANTHROPIC_WORKSPACE_KEY]?.trim() : undefined;
+			const wireOptions = workspaceId
+				? { ...requestOptions, headers: { "anthropic-workspace-id": workspaceId, ...requestOptions.headers } }
+				: requestOptions;
+			return stream(wireModel, context, wireOptions);
 		},
 	};
 }

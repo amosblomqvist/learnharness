@@ -25,6 +25,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+	ANTHROPIC_WORKSPACE_KEY,
 	AUTH_KEYS,
 	CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
@@ -82,7 +83,7 @@ async function readCustomStatus(inspectKey = false): Promise<CustomStatus> {
  *  these ids are the contract). Derived from the catalog (search wave,
  *  2026-09-20: the Google CSE pair retired, Tavily + Brave joined) — the
  *  section can never drift from core/auth-keys.ts again. */
-const TOOL_IDS = AUTH_KEYS.map((k) => k.id) as readonly string[];
+const TOOL_IDS = AUTH_KEYS.map((k) => k.id).filter((id) => id !== ANTHROPIC_WORKSPACE_KEY) as readonly string[];
 
 /** The custom endpoint's synthetic Add-provider entry (offered only while unconfigured). */
 export const CUSTOM_PROVIDER_INFO: ProviderKeyInfo = {
@@ -123,6 +124,9 @@ export function classifyKeys(
 	const unknownRows: AuthKeyStatus[] = [];
 	for (const s of statuses) {
 		if (isTool(s.id)) continue;
+		// The workspace ID qualifies the Anthropic key: placed after that row
+		// below, and only offered once there is an Anthropic key to qualify.
+		if (s.id === ANTHROPIC_WORKSPACE_KEY) continue;
 		// The custom endpoint's key has its OWN home (the Custom endpoint
 		// section), so it never shows here — not as a provider row, not as an
 		// "other stored variable".
@@ -132,6 +136,11 @@ export function classifyKeys(
 		// (pre-interlude catalogs: a curated-but-unclassified status still
 		// renders as a provider row so nothing disappears)
 		else providerRows.push(s);
+	}
+	const workspace = byId.get(ANTHROPIC_WORKSPACE_KEY);
+	const anthropicAt = providerRows.findIndex((s) => s.id === "ANTHROPIC_API_KEY" && s.present);
+	if (workspace && (workspace.present || anthropicAt >= 0)) {
+		providerRows.splice(anthropicAt >= 0 ? anthropicAt + 1 : providerRows.length, 0, workspace);
 	}
 	return {
 		providerRows,
