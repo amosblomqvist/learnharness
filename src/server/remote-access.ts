@@ -64,7 +64,7 @@ function cookieValue(headers: Headers, name: string): string | undefined {
 }
 
 /** True when the request carries the configured API token (scripts, non-browser clients). */
-export function bearerAuthorized(headers: Headers, env: Env = process.env): boolean {
+function bearerAuthorized(headers: Headers, env: Env = process.env): boolean {
 	const bearer = headers.get("authorization")?.match(/^Bearer\s+(.+)$/i)?.[1];
 	return !!bearer && !!env.LH_API_TOKEN && env.LH_API_TOKEN.length >= 32 && sameSecret(bearer, env.LH_API_TOKEN);
 }
@@ -85,11 +85,11 @@ export function remoteRequestAuthorized(headers: Headers, env: Env = process.env
 
 const APP_USER_AGENT = /\bLearnHarness(Desktop|iOS)\/\d/;
 
-export function appsOnlyEnabled(env: Env = process.env): boolean {
+function appsOnlyEnabled(env: Env = process.env): boolean {
 	return serverModeEnabled(env) && env.LH_APPS_ONLY === "1";
 }
 
-export function fromLearnHarnessApp(headers: Headers): boolean {
+function fromLearnHarnessApp(headers: Headers): boolean {
 	return APP_USER_AGENT.test(headers.get("user-agent") ?? "");
 }
 
@@ -131,13 +131,13 @@ function secureCookies(headers: Headers, env: Env): boolean {
 	return headers.get("x-forwarded-proto") === "https" || (headers.get("origin") ?? "").startsWith("https://");
 }
 
-export function sessionCookieHeader(token: string, headers: Headers, env: Env = process.env): string {
+function sessionCookieHeader(token: string, headers: Headers, env: Env = process.env): string {
 	const attrs = [`${SESSION_COOKIE}=${token}`, "Path=/", "HttpOnly", "SameSite=Lax", `Max-Age=${Math.floor(SESSION_TTL_MS / 1000)}`];
 	if (secureCookies(headers, env)) attrs.push("Secure");
 	return attrs.join("; ");
 }
 
-export function clearedSessionCookieHeader(): string {
+function clearedSessionCookieHeader(): string {
 	return `${SESSION_COOKIE}=; Path=/; HttpOnly; SameSite=Lax; Max-Age=0`;
 }
 
@@ -172,7 +172,7 @@ export function recordLoginFailure(address: string, now = Date.now()): void {
 	else entry.count++;
 }
 
-export function clearLoginFailures(address: string): void {
+function clearLoginFailures(address: string): void {
 	failures.delete(address);
 }
 

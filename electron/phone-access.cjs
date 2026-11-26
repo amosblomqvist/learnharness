@@ -319,4 +319,4 @@ function createPhoneAccess({ directory, upstream, advertise = () => ({ stop() {}
 	};
 }
 
-module.exports = { createPhoneAccess, lanAddresses, cleanDeviceName, DEFAULT_PORT, DEVICE_COOKIE };
+module.exports = { createPhoneAccess, lanAddresses, cleanDeviceName };

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { SettingsRow, Toggle } from "./controls.tsx";
 
 /** Snapshot from electron/phone-access.cjs (via preload). */
-export type PhoneAccessStatus = {
+type PhoneAccessStatus = {
 	available: boolean;
 	enabled?: boolean;
 	running?: boolean;

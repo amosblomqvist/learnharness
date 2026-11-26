@@ -67,4 +67,4 @@ function phoneAccessAdvertiser({ platform = process.platform, ...options } = {})
 	return platform === "darwin" ? dnsSdAdvertiser(options) : bonjourAdvertiser(options);
 }
 
-module.exports = { bonjourAdvertiser, dnsSdAdvertiser, phoneAccessAdvertiser, SERVICE_TYPE };
+module.exports = { bonjourAdvertiser, dnsSdAdvertiser, phoneAccessAdvertiser };

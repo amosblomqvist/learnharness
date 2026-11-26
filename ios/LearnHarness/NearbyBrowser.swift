@@ -1,51 +1,32 @@
 import Foundation
 import Network
-import Observation
 
-/// Computers with Phone access on, found over Bonjour (`_learnharness._tcp`,
-/// advertised by electron/phone-access-bonjour.cjs). The TXT record's `fp`
-/// (a public fingerprint prefix) lets a paired phone find its computer again
-/// after its address changes.
+/// Finds the paired computer again over Bonjour (`_learnharness._tcp`,
+/// advertised by electron/phone-access-bonjour.cjs) after its address
+/// changes. The TXT record's `fp` is a public fingerprint prefix; the full
+/// pinned fingerprint is still checked on connect.
 @MainActor
-@Observable
 final class NearbyBrowser {
-	struct Computer: Identifiable, Hashable {
-		let name: String
+	struct Computer {
 		let fingerprintPrefix: String?
 		let endpoint: NWEndpoint
-		var id: String { name }
 	}
 
 	static let serviceType = "_learnharness._tcp"
 
-	private(set) var computers: [Computer] = []
-	/// Set when browsing can't work (Local Network access denied, no Wi-Fi).
-	private(set) var problem: String?
-	@ObservationIgnored private var browser: NWBrowser?
+	private var computers: [Computer] = []
+	private var browser: NWBrowser?
 
-	func start() {
+	private func start() {
 		guard browser == nil else { return }
 		let browser = NWBrowser(for: .bonjourWithTXTRecord(type: Self.serviceType, domain: nil), using: NWParameters())
 		browser.browseResultsChangedHandler = { [weak self] results, _ in
-			let found = results.compactMap { result -> Computer? in
-				guard case let .service(name, _, _, _) = result.endpoint else { return nil }
+			let found = results.map { result -> Computer in
 				var prefix: String?
 				if case let .bonjour(record) = result.metadata { prefix = record["fp"] }
-				return Computer(name: name, fingerprintPrefix: prefix, endpoint: result.endpoint)
-			}.sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-			Task { @MainActor in self?.computers = found }
-		}
-		browser.stateUpdateHandler = { [weak self] state in
-			let message: String? = switch state {
-			case .failed(let error), .waiting(let error):
-				if case .dns(let code) = error, code == -65570 /* kDNSServiceErr_PolicyDenied */ {
-					"Allow Local Network access for LearnHarness in the Settings app to find computers nearby."
-				} else {
-					"Can't look for computers nearby (\(error.localizedDescription))."
-				}
-			default: nil
+				return Computer(fingerprintPrefix: prefix, endpoint: result.endpoint)
 			}
-			Task { @MainActor in self?.problem = message }
+			Task { @MainActor in self?.computers = found }
 		}
 		self.browser = browser
 		browser.start(queue: .main)
