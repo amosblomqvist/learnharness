@@ -15,7 +15,15 @@ const unsupportedSummary = (extensions: readonly string[]): string =>
 	`Skipped ${extensions.length} ${extensions.length === 1 ? "file that isn't" : "files that aren't"} text, Markdown, or PDF (${[...new Set(extensions)].join(", ")}).`;
 const unsafeSummary = (count: number): string =>
 	`Skipped ${count} ${count === 1 ? "file with a name" : "files with names"} the import can't use (e.g. a ':' in the name).`;
+type MoveChoice = "move" | "copy" | "skip";
+export interface PendingNoteMove {
+	index: number;
+	from: string;
+	to: string;
+	choose: (choice: MoveChoice) => void;
+}
 export interface ImportQueueSnapshot {
+	moves?: PendingNoteMove[];
 	importing: boolean;
 	errors: string[];
 	notices: string[];
@@ -26,27 +34,48 @@ export const EMPTY_IMPORT_QUEUE: ImportQueueSnapshot = { importing: false, error
 /** PR198's refill-on-completion, one-request-per-file transport, extended to
  * accept later selections. One instance per page, NOT three workers per click.
  * Only pending/in-flight Files are retained; no retry or persisted upload queue. */
-export function createNotesImportQueue(post: (files: readonly File[]) => Promise<NotesImportResult[]>) {
+export function createNotesImportQueue(
+	post: (files: readonly File[], decision?: { moveFrom: string } | { keepCopy: true }) => Promise<NotesImportResult[]>,
+) {
 	const listeners = new Set<() => void>();
-	const pending: { file: File; index: number }[] = [];
+	const pending: { file: File; index: number; selectedPaths: ReadonlySet<string> }[] = [];
+	const moves = new Map<number, PendingNoteMove>();
 	const failures = new Map<number, string>();
 	const notices = new Map<number, string>();
 	let active = 0, sequence = 0;
 	let snapshot = EMPTY_IMPORT_QUEUE;
-	const ordered = (map: Map<number, string>) => [...map].sort(([a], [b]) => a - b).map(([, text]) => text);
+	const ordered = <T>(map: Map<number, T>) => [...map].sort(([a], [b]) => a - b).map(([, text]) => text);
 	const publish = (completed = false) => {
-		snapshot = { importing: active > 0 || pending.length > 0, errors: ordered(failures), notices: ordered(notices), completion: snapshot.completion + Number(completed) };
+		snapshot = { ...(moves.size && { moves: ordered(moves) }), importing: active > 0 || pending.length > 0, errors: ordered(failures), notices: ordered(notices), completion: snapshot.completion + Number(completed) };
 		for (const listener of [...listeners]) listener();
 	};
 	// Normalize a synchronously throwing transport to the same async settlement.
-	const send = async (file: File) => post([file]);
+	const send = async (file: File, index: number, selectedPaths: ReadonlySet<string>) => {
+		const [result] = await post([file]);
+		if (result?.outcome !== "confirm-move") return result;
+		const from = result.previousPath!;
+		const to = notesPath(file);
+		let choice: MoveChoice = "copy";
+		if (!selectedPaths.has(from)) {
+			choice = await new Promise<MoveChoice>((choose) => {
+				moves.set(index, { index, from, to, choose });
+				publish();
+			});
+			moves.delete(index);
+			publish();
+		}
+		if (choice === "skip") return { ...result, ok: true, outcome: "skipped" as const, notice: "Skipped by request." };
+		const [resolved] = await post([file], choice === "move" ? { moveFrom: from } : { keepCopy: true });
+		if (resolved?.outcome === "confirm-move") throw new Error("Could not resolve the file move. Select the folder again.");
+		return resolved;
+	};
 	function pump(): void {
 		while (active < 3 && pending.length > 0) {
-			const { file, index } = pending.shift()!;
+			const { file, index, selectedPaths } = pending.shift()!;
 			active++;
 			void (async () => {
 				try {
-					const [r] = await send(file);
+					const r = await send(file, index, selectedPaths);
 					if (!r) throw new Error("Invalid import response. Check the graph before retrying.");
 					if (!r.ok) {
 						const details = [r.provider, r.missing?.join(", "), r.slots?.join(", ")].filter(Boolean);
@@ -71,6 +100,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 			if (!snapshot.importing) { failures.clear(); notices.clear(); sequence = 0; }
 			// Unsafe names and unsupported types are summed up per pick; each summary sits where its first file was.
 			const unsafe: number[] = [], unsupported: { index: number; extension: string }[] = [];
+			const selectedPaths = new Set(files.map(notesPath));
 			for (const file of files) {
 				const index = sequence++;
 				const path = notesPath(file);
@@ -78,7 +108,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 				if (!validNotesPath(path, file.name)) unsafe.push(index);
 				else if (!IMPORT_EXTENSIONS.test(file.name)) unsupported.push({ index, extension: extensionLabel(file.name) });
 				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, `${path}: Too big. Max 25 MB.`);
-				else pending.push({ file, index });
+				else pending.push({ file, index, selectedPaths });
 			}
 			if (unsafe.length > 0) failures.set(unsafe[0]!, unsafeSummary(unsafe.length));
 			if (unsupported.length > 0) failures.set(unsupported[0]!.index, unsupportedSummary(unsupported.map(({ extension }) => extension)));

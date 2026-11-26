@@ -51,10 +51,8 @@ export function createSourceDirectory(deps: { chatStore: ChatStore; graphStore: 
 		}
 		return { ...read(), ...(createdFolderId ? { createdFolderId } : {}) };
 	}
-	/** Before starting the file's existing extraction pipeline. The source key
-	 * is the pipeline's unchanged path hash; no source text is stored here. */
-	function registerImport(filePath: string): void {
-		const id = `src_${createHash("sha256").update(filePath).digest("hex").slice(0, 12)}`;
+	/** Preserve the resolved source ID and any placement the user chose. */
+	function registerImport(filePath: string, id = `src_${createHash("sha256").update(filePath).digest("hex").slice(0, 12)}`): void {
 		const state = deps.sourceOrganizationStore.read();
 		// Legacy imports with no organization record already live at root.
 		// Explicitly preserve that placement on re-import too.

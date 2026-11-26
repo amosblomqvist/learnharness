@@ -75,17 +75,19 @@ export interface ProvenancePoint {
 
 /** Imported notes source processed by the extractor → auditor → merger pipeline.
  * Provenance identifies the file rather than a chat message, and the source
- * owns its extraction usage log. IDs are src_ plus a deterministic file-path
- * hash, so re-importing the same path uses the same source identity. */
+ * owns its extraction usage log. The ID stays with the source across confirmed file moves. */
 export interface NotesSource {
 	id: string;
 	filePath: string;
 	/** ISO — when this file was imported (the checkpoint's foldedAt). */
 	importedAt: string;
-	/** Legacy content fingerprint. Accepted when reading old records, but
-	 * ignored: every explicit notes import processes the whole file. New
-	 * imports do not compute or write this field. No migration is needed. */
+	/** Legacy text fingerprint. Only completedFileHash can establish that
+	 * the same uploaded bytes were successfully extracted. */
 	contentFp?: string;
+	/** SHA-256 of the uploaded bytes for a fully completed extraction. */
+	completedFileHash?: string;
+	/** Earlier propositions from this file unobserved in its latest completed refresh. */
+	unobservedNodeIds?: string[];
 	/** The run's usage log — same append-only discipline as
 	 *  ChatRecord.extractions, idempotent per startedAt. */
 	extractions?: ExtractionRunUsage[];
@@ -310,6 +312,8 @@ export interface GraphSnapshot {
 	 *  graph (the format-agnostic front door): a static provenance entry —
 	 *  the detail card shows the path as plain text, not a link. */
 	fileSources: Record<string, string>;
+	/** Earlier propositions to label on their individual file provenance entries. */
+	unobservedBySource?: Record<string, string[]>;
 	/** nodeId → chatIds that touched the node (click-through provenance). */
 	nodeSessions: Record<string, string[]>;
 	/** Birth-session communities (core/session-clusters.ts: each

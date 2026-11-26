@@ -220,3 +220,26 @@ it("synchronous transport failures settle one wave once without reentrant pump r
 	assert.equal(calls, 4); assert.equal(queue.getSnapshot().completion, 1); assert.equal(queue.getSnapshot().importing, false);
 	assert.equal(queue.getSnapshot().errors.length, 4);
 });
+
+it("only offers a move when the earlier path is absent from this selection", async () => {
+	const from = "Vault/old.md", to = "Vault/other.md";
+	const decisions: unknown[] = [];
+	const queue = createNotesImportQueue(async ([f], decision) => {
+		const path = f!.webkitRelativePath;
+		if (path === from) return [success(path)];
+		if (!decision) return [{ requestIndex: 0, filePath: to, ok: false, outcome: "confirm-move", previousPath: from }];
+		decisions.push(decision);
+		return [{ ...success(path), outcome: "skipped", notice: "Skipped unchanged file." }];
+	});
+	queue.append([file("other.md", to), file("old.md", from)]);
+	await tick();
+	assert.equal(queue.getSnapshot().moves, undefined);
+	queue.append([file("other.md", to)]);
+	await tick();
+	const [move] = queue.getSnapshot().moves!;
+	assert.deepEqual([move!.from, move!.to], [from, to]);
+	move!.choose("move");
+	await tick();
+	assert.deepEqual(decisions, [{ keepCopy: true }, { moveFrom: from }]);
+	assert.deepEqual(queue.getSnapshot().notices, [`${to}: Skipped unchanged file.`]);
+});

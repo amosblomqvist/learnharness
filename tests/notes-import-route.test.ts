@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { after, it } from "node:test";
 import { POST } from "../app/api/graph/import/route.ts";
 import { extraction, sourceDirectory } from "../src/server/index.ts";
@@ -299,4 +300,28 @@ it("malformed or proxy-truncated multipart is refused before any file enters the
 		assert.deepEqual(await response.json(), { results: [], error: "Could not read the upload. It may be incomplete; please select the files again." });
 	}
 	assert.equal(calls, 0);
+});
+
+it("folder uploads hash original bytes even when decoding gives identical text", async () => {
+	const saved = extraction.importFolderNotes;
+	const hashes: string[] = [];
+	const decoded: string[] = [];
+	extraction.importFolderNotes = async (input) => {
+		hashes.push(input.fileHash);
+		decoded.push(await input.readText());
+		return { outcome: "skipped", notice: "Skipped unchanged file." };
+	};
+	try {
+		for (const bytes of [new Uint8Array([65]), new Uint8Array([0xef, 0xbb, 0xbf, 65])]) {
+			const form = new FormData();
+			form.set("mode", "folder"); form.set("paths", "Vault/a.md"); form.set("files", new File([bytes], "a.md"));
+			const response = await POST(new Request("http://localhost/api/graph/import", { method: "POST", body: form }));
+			const { results } = await response.json();
+			assert.equal(results[0].outcome, "skipped");
+			assert.equal(results[0].ok, true);
+			assert.equal(hashes.at(-1), createHash("sha256").update(bytes).digest("hex"));
+		}
+		assert.deepEqual(decoded, ["A", "A"]);
+		assert.notEqual(hashes[0], hashes[1]);
+	} finally { extraction.importFolderNotes = saved; }
 });

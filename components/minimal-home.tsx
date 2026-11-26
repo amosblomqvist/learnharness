@@ -172,7 +172,7 @@ export function MinimalHome({
 					<NotesImportControl importing={importing} onImportFiles={onImportFiles} />
 				</div>
 				<NotesImportErrors errors={notesImport.errors} />
-				<NotesImportNotices notices={notesImport.notices} />
+				<NotesImportNotices notices={notesImport.notices} moves={notesImport.moves} />
 				{costs && costs.runs.length > 0 && <GraphCostControl costs={costs} />}
 			</div>
 

@@ -1,5 +1,5 @@
 import * as fs from "node:fs";
-import { LEDGER_FILES, POSITIONS_FILE } from "../../config.ts";
+import { LEDGER_FILES, POSITIONS_FILE, SOURCES_FILE } from "../../config.ts";
 import type { GraphSnapshot } from "../core/contracts.ts";
 import type { GraphCostSummary } from "../core/cost-summary.ts";
 import { graphCostSummary } from "../core/cost-summary.ts";
@@ -62,6 +62,7 @@ export function graphRevision(): number {
 		LEDGER_FILES.sessions,
 		LEDGER_FILES.coverage,
 		POSITIONS_FILE,
+		SOURCES_FILE,
 	]) {
 		try {
 			revision = Math.max(revision, fs.statSync(file).mtimeMs);

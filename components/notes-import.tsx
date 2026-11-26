@@ -6,7 +6,7 @@ import { Hint } from "@/components/ui/hint";
 import { IMPORT_ACCEPT } from "@/lib/notes-import-limits.ts";
 import { useInteractionLayer, useInteractionLayers } from "@/components/interaction-layers";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
-import { createNotesImportQueue, EMPTY_IMPORT_QUEUE, notesPath } from "./notes-import-queue";
+import { createNotesImportQueue, EMPTY_IMPORT_QUEUE, notesPath, type PendingNoteMove } from "./notes-import-queue";
 
 export { MAX_IMPORT_BYTES } from "@/lib/notes-import-limits.ts";
 export { notesPath } from "./notes-import-queue";
@@ -16,7 +16,8 @@ export interface NotesImportResult {
 	requestIndex: number;
 	filePath: string;
 	ok: boolean;
-	outcome: "completed" | "failed" | "partial" | "aborted" | "busy";
+	previousPath?: string;
+	outcome: "completed" | "skipped" | "confirm-move" | "failed" | "partial" | "aborted" | "busy";
 	stats?: { nodes: number; chains?: number; droppedChains?: number };
 	error?: string;
 	code?: string;
@@ -37,18 +38,25 @@ export function parseNotesImportResults(body: unknown, files: readonly File[]): 
 		const r = raw as NotesImportResult;
 		if (!Number.isInteger(r.requestIndex) || r.requestIndex < 0 || r.requestIndex >= files.length || seen.has(r.requestIndex) || r.filePath !== notesPath(files[r.requestIndex]!)) throw invalid();
 		seen.add(r.requestIndex);
-		if (!["completed", "failed", "partial", "aborted", "busy"].includes(r.outcome) || typeof r.ok !== "boolean" || r.ok !== (r.outcome === "completed")) throw invalid();
+		if (!["completed", "skipped", "confirm-move", "failed", "partial", "aborted", "busy"].includes(r.outcome) || typeof r.ok !== "boolean" || r.ok !== (r.outcome === "completed" || r.outcome === "skipped")) throw invalid();
 		if (r.stats !== undefined && (!r.stats || typeof r.stats !== "object" || !Number.isFinite(r.stats.nodes) || r.stats.nodes < 0 || (r.stats.chains !== undefined && (!Number.isFinite(r.stats.chains) || r.stats.chains < 0)))) throw invalid();
-		if (r.ok && !r.stats) throw invalid();
-		if (!r.ok && typeof r.error !== "string") throw invalid();
+		if (r.outcome === "skipped" && typeof r.notice !== "string") throw invalid();
+		if (r.outcome === "confirm-move" && (typeof r.previousPath !== "string" || !r.previousPath)) throw invalid();
+		if (r.outcome === "completed" && !r.stats) throw invalid();
+		if (!r.ok && r.outcome !== "confirm-move" && typeof r.error !== "string") throw invalid();
 		for (const field of ["error", "code", "provider", "notice"] as const) if (r[field] !== undefined && typeof r[field] !== "string") throw invalid();
 		for (const field of ["missing", "slots"] as const) if (r[field] !== undefined && (!Array.isArray(r[field]) || !r[field]!.every((v) => typeof v === "string"))) throw invalid();
 	}
 	return body.results as NotesImportResult[];
 }
 
-export async function postNotesImport(files: readonly File[]): Promise<NotesImportResult[]> {
+export async function postNotesImport(files: readonly File[], decision?: { moveFrom: string } | { keepCopy: true }): Promise<NotesImportResult[]> {
 	const form = new FormData();
+	if (files.length && files.every((file) => file.webkitRelativePath)) form.set("mode", "folder");
+	if (decision) {
+		if ("moveFrom" in decision) form.set("moveFrom", decision.moveFrom);
+		else form.set("keepCopy", "true");
+	}
 	for (const file of files) {
 		form.append("files", file);
 		form.append("paths", notesPath(file));
@@ -79,7 +87,7 @@ export function useNotesImport(callbacks: { onStart?: () => void; onFinish?: () 
 		}
 	}, [snapshot.completion]);
 	return {
-		errors: snapshot.errors, notices: snapshot.notices, importing: snapshot.importing,
+		errors: snapshot.errors, notices: snapshot.notices, moves: snapshot.moves, importing: snapshot.importing,
 		onImportFiles: (files: FileList | null) => {
 			if (!files || files.length === 0) return;
 			latest.current.onStart?.();
@@ -130,6 +138,15 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 export function NotesImportErrors({ errors }: { errors: readonly string[] }) {
 	return <>{errors.map((error, i) => <p key={i} role="alert" className="max-w-full whitespace-pre-wrap break-words text-xs text-error">{error}</p>)}</>;
 }
-export function NotesImportNotices({ notices }: { notices: readonly string[] }) {
-	return <>{notices.map((notice, i) => <p key={i} role="status" className="max-w-full whitespace-pre-wrap break-words text-xs text-muted-foreground">{notice}</p>)}</>;
+export function NotesImportNotices({ notices, moves }: { notices: readonly string[]; moves?: readonly PendingNoteMove[] }) {
+	return <>
+		{moves?.map((move) => <div key={move.index} role="group" aria-label={`Resolve import of ${move.to}`} className="max-w-sm rounded-lg border bg-card p-2 text-xs">
+			<p className="break-words">“{move.to}” has the same contents as “{move.from}”. Did this file move?</p>
+			<div className="mt-2 flex flex-wrap gap-1">
+				{([["move", "Keep source history"], ["copy", "Extract as copy"], ["skip", "Skip file"]] as const).map(([choice, label]) =>
+					<button key={choice} type="button" className="rounded border px-2 py-1 hover:bg-accent" onClick={() => move.choose(choice)}>{label}</button>)}
+			</div>
+		</div>)}
+		{notices.map((notice, i) => <p key={i} role="status" className="max-w-full whitespace-pre-wrap break-words text-xs text-muted-foreground">{notice}</p>)}
+	</>;
 }
