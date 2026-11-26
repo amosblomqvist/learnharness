@@ -1,10 +1,10 @@
 import assert from "node:assert/strict";
-import { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import nodeFs, { mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test, { type TestContext } from "node:test";
 import { isValidClaudeConfigDir } from "../src/core/contracts/claude-code.ts";
-import { discoverClaudeCodeProfiles } from "../src/server/claude-code-profiles.ts";
+import { discoverClaudeCodeProfiles, type ClaudeCodeProfileFs } from "../src/server/claude-code-profiles.ts";
 
 function makeTempDir(t: TestContext, prefix: string): string {
 	const dir = mkdtempSync(join(tmpdir(), prefix));
@@ -170,4 +170,152 @@ test("discoverClaudeCodeProfiles avoids homeDir prefix collisions in displayPath
 	assert.ok(siblingProfile);
 	assert.equal(siblingProfile.displayPath, siblingDir);
 	assert.equal(siblingProfile.displayPath.startsWith("~2"), false);
+});
+
+test("discoverClaudeCodeProfiles reads .claude.json metadata for default and custom profiles without cross-fallback", (t) => {
+	const homeDir = makeTempDir(t, "lh-profiles-meta-");
+	const defaultDir = join(homeDir, ".claude");
+	const workDir = join(homeDir, ".claude-work");
+	const bareDir = join(homeDir, ".claude-bare");
+	mkdirSync(defaultDir);
+	mkdirSync(workDir);
+	mkdirSync(bareDir);
+
+	writeFileSync(
+		join(homeDir, ".claude.json"),
+		JSON.stringify({
+			oauthAccount: {
+				emailAddress: "  default@example.com\n",
+				billingType: "stripe_subscription",
+				accountUuid: "SECRET_UUID_SHOULD_NOT_SURFACE",
+			},
+			primaryApiKey: "SECRET_PRIMARY_KEY",
+			mcpServers: { local: { env: { API_TOKEN: "SECRET_MCP_ENV" } } },
+		}),
+	);
+	writeFileSync(
+		join(workDir, ".claude.json"),
+		JSON.stringify({
+			oauthAccount: {
+				emailAddress: "work@example.com",
+				billingType: "unknown_internal_billing",
+			},
+		}),
+	);
+
+	const result = discoverClaudeCodeProfiles({ homeDir, env: {} });
+	const defaultProfile = result.profiles.find((p) => p.label === "Default (.claude)");
+	const workProfile = result.profiles.find((p) => p.label === ".claude-work");
+	const bareProfile = result.profiles.find((p) => p.label === ".claude-bare");
+
+	assert.equal(defaultProfile?.email, "default@example.com");
+	assert.equal(defaultProfile?.subscriptionPlan, "Subscription");
+	assert.equal(workProfile?.email, "work@example.com");
+	assert.equal("subscriptionPlan" in (workProfile ?? {}), false);
+	assert.equal("email" in (bareProfile ?? {}), false);
+	assert.equal("subscriptionPlan" in (bareProfile ?? {}), false);
+
+	const serialized = JSON.stringify(result);
+	assert.equal(serialized.includes("SECRET_UUID_SHOULD_NOT_SURFACE"), false);
+	assert.equal(serialized.includes("SECRET_PRIMARY_KEY"), false);
+	assert.equal(serialized.includes("SECRET_MCP_ENV"), false);
+	assert.equal(serialized.includes("unknown_internal_billing"), false);
+});
+
+test("discoverClaudeCodeProfiles prefers <defaultDir>/.claude.json over <homeDir>/.claude.json and handles corrupt/oversized/partial fs", (t) => {
+	const homeDir = makeTempDir(t, "lh-profiles-edge-");
+	const defaultDir = join(homeDir, ".claude");
+	const corruptDir = join(homeDir, ".claude-corrupt");
+	const hugeDir = join(homeDir, ".claude-huge");
+	mkdirSync(defaultDir);
+	mkdirSync(corruptDir);
+	mkdirSync(hugeDir);
+
+	writeFileSync(
+		join(homeDir, ".claude.json"),
+		JSON.stringify({ oauthAccount: { emailAddress: "home@example.com", billingType: "stripe_subscription" } }),
+	);
+	writeFileSync(
+		join(defaultDir, ".claude.json"),
+		JSON.stringify({ oauthAccount: { emailAddress: "default-dir@example.com" } }),
+	);
+	writeFileSync(join(corruptDir, ".claude.json"), "{not-valid-json");
+	writeFileSync(
+		join(hugeDir, ".claude.json"),
+		JSON.stringify({
+			oauthAccount: { emailAddress: "huge@example.com" },
+			padding: "x".repeat(1024 * 1024 + 64),
+		}),
+	);
+
+	const result = discoverClaudeCodeProfiles({ homeDir, env: {} });
+	const defaultProfile = result.profiles.find((p) => p.label === "Default (.claude)");
+	const corruptProfile = result.profiles.find((p) => p.label === ".claude-corrupt");
+	const hugeProfile = result.profiles.find((p) => p.label === ".claude-huge");
+
+	assert.equal(defaultProfile?.email, "default-dir@example.com");
+	assert.equal(defaultProfile?.subscriptionPlan, "Subscription");
+	assert.equal("email" in (corruptProfile ?? {}), false);
+	assert.equal("email" in (hugeProfile ?? {}), false);
+
+	// Partial fs mock omitting readFileSync works without throwing
+	const partialFs: ClaudeCodeProfileFs = {
+		readdirSync: nodeFs.readdirSync,
+		statSync: nodeFs.statSync,
+		realpathSync: nodeFs.realpathSync,
+	};
+	const partialResult = discoverClaudeCodeProfiles({ homeDir, env: {}, fs: partialFs });
+	assert.equal("email" in (partialResult.profiles[0] ?? {}), false);
+});
+
+test("discoverClaudeCodeProfiles (.claude.json-only variant) never reads .credentials.json and never leaks secrets", (t) => {
+	const homeDir = makeTempDir(t, "lh-profiles-nocreds-");
+	const defaultDir = join(homeDir, ".claude");
+	const workDir = join(homeDir, ".claude-work");
+	mkdirSync(defaultDir);
+	mkdirSync(workDir);
+
+	writeFileSync(
+		join(workDir, ".credentials.json"),
+		JSON.stringify({
+			claudeAiOauth: {
+				accessToken: "SECRET_OAUTH_ACCESS",
+				refreshToken: "SECRET_OAUTH_REFRESH",
+				subscriptionType: "max",
+				rateLimitTier: "default_claude_max_20x",
+			},
+			apiKey: "SECRET_API_KEY",
+		}),
+	);
+	writeFileSync(
+		join(workDir, ".claude.json"),
+		JSON.stringify({
+			oauthAccount: { emailAddress: "work@example.com" },
+			primaryApiKey: "SECRET_PRIMARY_API_KEY",
+		}),
+	);
+
+	const readPaths: string[] = [];
+	const spyFs: ClaudeCodeProfileFs = {
+		readdirSync: nodeFs.readdirSync,
+		statSync: nodeFs.statSync,
+		realpathSync: nodeFs.realpathSync,
+		readFileSync: ((filePath: nodeFs.PathOrFileDescriptor, options?: unknown) => {
+			readPaths.push(String(filePath));
+			return nodeFs.readFileSync(filePath, options as BufferEncoding);
+		}) as typeof nodeFs.readFileSync,
+	};
+
+	const result = discoverClaudeCodeProfiles({ homeDir, env: {}, fs: spyFs });
+	assert.equal(readPaths.some((p) => p.endsWith(".credentials.json")), false);
+	const workProfile = result.profiles.find((p) => p.label === ".claude-work");
+	assert.equal(workProfile?.hasCredentials, true);
+	assert.equal(workProfile?.email, "work@example.com");
+	assert.equal("subscriptionPlan" in (workProfile ?? {}), false);
+
+	const serialized = JSON.stringify(result);
+	assert.equal(serialized.includes("SECRET_OAUTH_ACCESS"), false);
+	assert.equal(serialized.includes("SECRET_OAUTH_REFRESH"), false);
+	assert.equal(serialized.includes("SECRET_API_KEY"), false);
+	assert.equal(serialized.includes("SECRET_PRIMARY_API_KEY"), false);
 });

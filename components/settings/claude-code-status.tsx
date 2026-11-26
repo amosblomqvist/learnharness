@@ -2,6 +2,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
 	CLAUDE_CODE_MINIMUM_VERSION,
+	type ClaudeCodeProfile,
 	type ClaudeCodeProfilesResponse,
 	type ClaudeCodeStatus,
 	type UserSettings,
@@ -15,6 +16,10 @@ import {
 	ClaudeProfileMenuList,
 	claudeProfileHint,
 	claudeProfileTriggerLabel,
+	findActiveClaudeProfile,
+	formatClaudeProfileAccountMeta,
+	formatClaudeSubscriptionPlan,
+	normalizeNonEmptyMeta,
 } from "./claude-profile-menu";
 
 export function claudeCodeStatusLabel(status: ClaudeCodeStatus | null): string {
@@ -31,11 +36,50 @@ function isValidProfilesPayload(value: unknown): value is ClaudeCodeProfilesResp
 	const v = value as Record<string, unknown>;
 	return (
 		Array.isArray(v.profiles) &&
+		v.profiles.every((item) => {
+			if (!item || typeof item !== "object") return false;
+			const p = item as Record<string, unknown>;
+			return (
+				typeof p.path === "string" &&
+				typeof p.displayPath === "string" &&
+				typeof p.label === "string" &&
+				typeof p.source === "string" &&
+				typeof p.exists === "boolean" &&
+				typeof p.hasSettings === "boolean" &&
+				typeof p.hasCredentials === "boolean" &&
+				(p.email === undefined || typeof p.email === "string") &&
+				(p.subscriptionPlan === undefined || typeof p.subscriptionPlan === "string")
+			);
+		}) &&
 		typeof v.defaultDir === "string" &&
 		(v.configuredDir === null || typeof v.configuredDir === "string") &&
 		(v.inheritedEnvDir === null || typeof v.inheritedEnvDir === "string") &&
 		(v.effectiveDir === null || typeof v.effectiveDir === "string")
 	);
+}
+
+function sanitizeProfilesPayload(payload: ClaudeCodeProfilesResponse): ClaudeCodeProfilesResponse {
+	return {
+		configuredDir: payload.configuredDir,
+		inheritedEnvDir: payload.inheritedEnvDir,
+		effectiveDir: payload.effectiveDir,
+		defaultDir: payload.defaultDir,
+		profiles: payload.profiles.map((profile): ClaudeCodeProfile => {
+			const email = normalizeNonEmptyMeta(profile.email);
+			const subscriptionPlan = formatClaudeSubscriptionPlan(profile.subscriptionPlan);
+			return {
+				path: profile.path,
+				displayPath: profile.displayPath,
+				label: profile.label,
+				source: profile.source,
+				exists: profile.exists,
+				hasSettings: profile.hasSettings,
+				hasCredentials: profile.hasCredentials,
+				...(email ? { email } : {}),
+				...(subscriptionPlan ? { subscriptionPlan } : {}),
+			};
+		}),
+	};
 }
 
 export function ClaudeCodeInstallationStatus() {
@@ -129,7 +173,7 @@ export function ClaudeCodeInstallationStatus() {
 			const value: unknown = await response.json();
 			if (!isValidProfilesPayload(value)) throw new Error("invalid profiles response");
 			if (!controller.signal.aborted) {
-				setProfilesData(value);
+				setProfilesData(sanitizeProfilesPayload(value));
 				setProfilesError(null);
 			}
 		} catch {
@@ -246,6 +290,8 @@ export function ClaudeCodeInstallationStatus() {
 
 	const triggerLabel = claudeProfileTriggerLabel(configDir, profilesData);
 	const hint = claudeProfileHint(configDir, profilesData);
+	const activeProfile = findActiveClaudeProfile(configDir, profilesData);
+	const activeAccountMeta = formatClaudeProfileAccountMeta(activeProfile);
 
 	return <div className="space-y-2" data-testid="claude-code-installation">
 		<div className="flex items-center gap-3">
@@ -278,14 +324,23 @@ export function ClaudeCodeInstallationStatus() {
 			</div>
 			<SettingsRow
 				label="Profile"
-				hint={<span className={hint.warning ? "text-error" : undefined}>{hint.text}</span>}
+				hint={
+					<>
+						<span className={hint.warning ? "text-error" : undefined}>{hint.text}</span>
+						{activeAccountMeta && (
+							<span data-testid="claude-code-profile-summary" className="block truncate text-muted-foreground">
+								{activeAccountMeta}
+							</span>
+						)}
+					</>
+				}
 				testid="row-claude-code-profile"
 			>
 				<SettingsMenuTrigger
 					ref={triggerRef}
 					value={triggerLabel}
 					data-testid="claude-code-profile-trigger"
-					aria-label={`Claude Code profile: ${triggerLabel}`}
+					aria-label={activeAccountMeta ? `Claude Code profile: ${triggerLabel} (${activeAccountMeta})` : `Claude Code profile: ${triggerLabel}`}
 					aria-expanded={menuOpen}
 					disabled={!loaded || saving}
 					onClick={() => {

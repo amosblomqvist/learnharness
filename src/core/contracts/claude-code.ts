@@ -18,7 +18,8 @@ export interface ClaudeCodeSettings {
 
 export type ClaudeCodeProfileSource = "default" | "env" | "discovered" | "configured";
 
-/** Non-secret metadata only; never carries credentials, tokens, or file contents. */
+/** Non-secret metadata only; never carries credentials, tokens, API keys, or raw file contents.
+ *  Optional display fields (`email`, `subscriptionPlan`) are omitted when absent. */
 export interface ClaudeCodeProfile {
 	path: string;
 	displayPath: string;
@@ -27,6 +28,10 @@ export interface ClaudeCodeProfile {
 	exists: boolean;
 	hasSettings: boolean;
 	hasCredentials: boolean;
+	/** Non-secret account email address for display only; omitted when absent. */
+	email?: string;
+	/** Non-secret subscription plan label for display only; omitted when absent. */
+	subscriptionPlan?: string;
 }
 
 export interface ClaudeCodeProfilesResponse {

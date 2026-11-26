@@ -18,6 +18,8 @@ export type ClaudeProfileMenuEntry =
 			exists: boolean;
 			hasSettings: boolean;
 			hasCredentials: boolean;
+			email?: string;
+			subscriptionPlan?: string;
 	  }
 	| {
 			kind: "profile";
@@ -47,18 +49,93 @@ function pathBasename(value: string): string {
 	return parts[parts.length - 1] ?? normalized;
 }
 
+const KNOWN_PLAN_LABELS = new Map<string, string>([
+	["pro", "Pro"],
+	["max", "Max"],
+	["team", "Team"],
+	["enterprise", "Enterprise"],
+	["free", "Free"],
+	["subscription", "Subscription"],
+	["stripe_subscription", "Subscription"],
+]);
+
+export function normalizeNonEmptyMeta(value: unknown): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+	return cleaned.length > 0 ? cleaned : undefined;
+}
+
+export function formatClaudeSubscriptionPlan(plan: unknown): string | undefined {
+	const normalized = normalizeNonEmptyMeta(plan);
+	if (!normalized) return undefined;
+	const known = KNOWN_PLAN_LABELS.get(normalized.toLowerCase());
+	return known ?? normalized;
+}
+
+export function formatClaudeProfileAccountMeta(
+	profile: { email?: unknown; subscriptionPlan?: unknown } | null | undefined,
+): string | null {
+	if (!profile) return null;
+	const email = normalizeNonEmptyMeta(profile.email);
+	const plan = formatClaudeSubscriptionPlan(profile.subscriptionPlan);
+	const parts = [email, plan].filter((part): part is string => Boolean(part));
+	return parts.length > 0 ? parts.join(" · ") : null;
+}
+
+function expandTildeFromDefaultDir(target: string, defaultDir: string | undefined): string | null {
+	if (target !== "~" && !target.startsWith("~/") && !target.startsWith("~\\")) {
+		return null;
+	}
+	if (!defaultDir) return null;
+	const normalizedDefault = normalizeMatchPath(defaultDir);
+	const match = /^(.*?)([\\/])\.claude$/.exec(normalizedDefault);
+	if (!match) return null;
+	const [, homePrefix, sep] = match;
+	if (homePrefix === undefined || sep === undefined) return null;
+	const home = homePrefix === "" ? sep : homePrefix;
+	if (target === "~") return home;
+	const rest = target.slice(2).replace(/^[\\/]+/, "");
+	if (!rest) return home;
+	const normalizedRest = sep === "\\" ? rest.replace(/\//g, "\\") : rest.replace(/\\/g, "/");
+	return home === sep ? `${sep}${normalizedRest}` : `${home}${sep}${normalizedRest}`;
+}
+
 export function findMatchingClaudeProfile(
 	configDir: string | undefined,
 	data: ClaudeCodeProfilesResponse | null,
 ): ClaudeCodeProfile | undefined {
 	if (!configDir || !data) return undefined;
 	const target = normalizeMatchPath(configDir);
-	const expanded = data.configuredDir ? normalizeMatchPath(data.configuredDir) : null;
+	if (!target) return undefined;
+	const expandedTarget = expandTildeFromDefaultDir(target, data.defaultDir);
 	return data.profiles.find((profile) => {
 		const pPath = normalizeMatchPath(profile.path);
 		const pDisplay = normalizeMatchPath(profile.displayPath);
-		return pPath === target || pDisplay === target || (expanded !== null && pPath === expanded);
+		return (
+			pPath === target ||
+			pDisplay === target ||
+			(expandedTarget !== null && (pPath === expandedTarget || pDisplay === expandedTarget))
+		);
 	});
+}
+
+export function findActiveClaudeProfile(
+	configDir: string | undefined,
+	data: ClaudeCodeProfilesResponse | null,
+): ClaudeCodeProfile | undefined {
+	if (!data) return undefined;
+	if (configDir) {
+		return findMatchingClaudeProfile(configDir, data);
+	}
+	if (data.inheritedEnvDir) {
+		const target = normalizeMatchPath(data.inheritedEnvDir);
+		return data.profiles.find((profile) => normalizeMatchPath(profile.path) === target);
+	}
+	const defaultTarget = normalizeMatchPath(data.defaultDir);
+	return (
+		data.profiles.find((profile) => profile.source === "default") ??
+		data.profiles.find((profile) => normalizeMatchPath(profile.path) === defaultTarget)
+	);
 }
 
 export function claudeProfileTriggerLabel(
@@ -131,6 +208,11 @@ export function claudeProfileMenuEntries(
 			)
 		: undefined;
 
+	const defaultEmail = normalizeNonEmptyMeta(inherited ? inheritedProfile?.email : defaultProfile?.email);
+	const defaultPlan = formatClaudeSubscriptionPlan(
+		inherited ? inheritedProfile?.subscriptionPlan : defaultProfile?.subscriptionPlan,
+	);
+
 	const defaultEntry: Extract<ClaudeProfileMenuEntry, { kind: "default" }> = inherited
 		? {
 				kind: "default",
@@ -140,6 +222,8 @@ export function claudeProfileMenuEntries(
 				exists: inheritedProfile?.exists ?? true,
 				hasSettings: inheritedProfile?.hasSettings ?? false,
 				hasCredentials: inheritedProfile?.hasCredentials ?? false,
+				...(defaultEmail ? { email: defaultEmail } : {}),
+				...(defaultPlan ? { subscriptionPlan: defaultPlan } : {}),
 			}
 		: {
 				kind: "default",
@@ -149,6 +233,8 @@ export function claudeProfileMenuEntries(
 				exists: defaultProfile?.exists ?? false,
 				hasSettings: defaultProfile?.hasSettings ?? false,
 				hasCredentials: defaultProfile?.hasCredentials ?? false,
+				...(defaultEmail ? { email: defaultEmail } : {}),
+				...(defaultPlan ? { subscriptionPlan: defaultPlan } : {}),
 			};
 
 	const candidates = (data?.profiles ?? []).filter((profile) =>
@@ -156,16 +242,22 @@ export function claudeProfileMenuEntries(
 	);
 
 	const scored = candidates
-		.map((profile) => ({
-			profile,
-			score: fuzzyScore(
-				query,
-				profile.label,
-				profile.displayPath,
-				profile.path,
-				profile.source,
-			),
-		}))
+		.map((profile) => {
+			const searchEmail = normalizeNonEmptyMeta(profile.email);
+			const searchPlan = formatClaudeSubscriptionPlan(profile.subscriptionPlan);
+			return {
+				profile,
+				score: fuzzyScore(
+					query,
+					profile.label,
+					profile.displayPath,
+					profile.path,
+					profile.source,
+					...(searchEmail ? [searchEmail] : []),
+					...(searchPlan ? [searchPlan] : []),
+				),
+			};
+		})
 		.filter((item): item is { profile: ClaudeCodeProfile; score: number } => item.score !== null)
 		.sort(
 			(a, b) =>
@@ -176,8 +268,25 @@ export function claudeProfileMenuEntries(
 		.map(({ profile }): ClaudeProfileMenuEntry => ({ kind: "profile", profile }));
 
 	const defaultTerms = inherited
-		? [defaultEntry.label, defaultEntry.displayPath, "default", "inherited", "env", "reset"]
-		: [defaultEntry.label, defaultEntry.displayPath, data?.defaultDir ?? "~/.claude", "default", "reset"];
+		? [
+				defaultEntry.label,
+				defaultEntry.displayPath,
+				"default",
+				"inherited",
+				"env",
+				"reset",
+				...(defaultEmail ? [defaultEmail] : []),
+				...(defaultPlan ? [defaultPlan] : []),
+			]
+		: [
+				defaultEntry.label,
+				defaultEntry.displayPath,
+				data?.defaultDir ?? "~/.claude",
+				"default",
+				"reset",
+				...(defaultEmail ? [defaultEmail] : []),
+				...(defaultPlan ? [defaultPlan] : []),
+			];
 
 	const entries: ClaudeProfileMenuEntry[] = [];
 	if (query.trim() === "" || fuzzyScore(query, ...defaultTerms) !== null) {
@@ -323,6 +432,11 @@ export function ClaudeProfileMenuList({
 			<ul ref={listRef} data-testid="claude-profile-list" className="flex max-h-72 flex-col overflow-y-auto px-1">
 				{entries.map((entry, i) => {
 					const selected = isEntrySelected(entry);
+					const accountMeta = entry.kind === "default"
+						? formatClaudeProfileAccountMeta(entry)
+						: entry.kind === "profile"
+							? formatClaudeProfileAccountMeta(entry.profile)
+							: null;
 					return (
 						<li key={entryKey(entry)}>
 							<button
@@ -347,6 +461,11 @@ export function ClaudeProfileMenuList({
 										<span className="truncate font-mono text-[11px] text-muted-foreground">
 											{entry.displayPath}
 										</span>
+										{accountMeta && (
+											<span data-testid="claude-profile-account-meta" className="truncate text-[11px] text-muted-foreground">
+												{accountMeta}
+											</span>
+										)}
 									</>
 								)}
 								{entry.kind === "profile" && (
@@ -361,6 +480,11 @@ export function ClaudeProfileMenuList({
 										<span className="truncate font-mono text-[11px] text-muted-foreground">
 											{entry.profile.displayPath}
 										</span>
+										{accountMeta && (
+											<span data-testid="claude-profile-account-meta" className="truncate text-[11px] text-muted-foreground">
+												{accountMeta}
+											</span>
+										)}
 									</>
 								)}
 								{entry.kind === "custom" && (

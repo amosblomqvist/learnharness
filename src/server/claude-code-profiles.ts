@@ -9,7 +9,11 @@ import type {
 } from "../core/contracts/claude-code.ts";
 import { expandClaudeConfigDir } from "./claude-code-config.ts";
 
-export type ClaudeCodeProfileFs = Pick<typeof nodeFs, "readdirSync" | "statSync" | "realpathSync">;
+export type ClaudeCodeProfileFs = Pick<typeof nodeFs, "readdirSync" | "statSync" | "realpathSync"> &
+	Partial<Pick<typeof nodeFs, "readFileSync">>;
+
+const MAX_METADATA_FILE_BYTES = 1024 * 1024;
+const MAX_METADATA_VALUE_LENGTH = 256;
 
 export interface DiscoverClaudeCodeProfilesOptions {
 	homeDir?: string;
@@ -62,12 +66,71 @@ function resolveInheritedEnvDir(env: Record<string, string | undefined>, resolve
 	return null;
 }
 
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function sanitizeMetadataString(value: unknown, maxLength = MAX_METADATA_VALUE_LENGTH): string | undefined {
+	if (typeof value !== "string") return undefined;
+	const cleaned = value.replace(/[\u0000-\u001f\u007f]/g, "").trim();
+	if (!cleaned) return undefined;
+	const bounded = cleaned.slice(0, maxLength).trim();
+	return bounded || undefined;
+}
+
+function readSafeJsonObject(filePath: string, fsOps: ClaudeCodeProfileFs): Record<string, unknown> | null {
+	if (typeof fsOps.readFileSync !== "function") return null;
+	try {
+		const stat = fsOps.statSync(/* turbopackIgnore: true */ filePath);
+		if (!stat.isFile()) return null;
+		if (typeof stat.size === "number" && (stat.size <= 0 || stat.size > MAX_METADATA_FILE_BYTES)) {
+			return null;
+		}
+		const raw = fsOps.readFileSync(/* turbopackIgnore: true */ filePath, "utf8");
+		if (typeof raw !== "string") return null;
+		if (Buffer.byteLength(raw, "utf8") > MAX_METADATA_FILE_BYTES) return null;
+		const parsed: unknown = JSON.parse(raw);
+		return isPlainObject(parsed) ? parsed : null;
+	} catch {
+		return null;
+	}
+}
+
+function extractClaudeJsonAccountMeta(
+	candidatePaths: readonly string[],
+	fsOps: ClaudeCodeProfileFs,
+): { email?: string; subscriptionPlan?: string } {
+	let email: string | undefined;
+	let subscriptionPlan: string | undefined;
+
+	for (const candidatePath of candidatePaths) {
+		const parsed = readSafeJsonObject(candidatePath, fsOps);
+		if (!parsed) continue;
+		const oauthAccount = isPlainObject(parsed.oauthAccount) ? parsed.oauthAccount : null;
+		if (oauthAccount) {
+			if (!email) {
+				email = sanitizeMetadataString(oauthAccount.emailAddress);
+			}
+			if (!subscriptionPlan && oauthAccount.billingType === "stripe_subscription") {
+				subscriptionPlan = "Subscription";
+			}
+		}
+		if (email && subscriptionPlan) break;
+	}
+
+	return {
+		...(email ? { email } : {}),
+		...(subscriptionPlan ? { subscriptionPlan } : {}),
+	};
+}
+
 /** Non-secret discovery of Claude Code config directories; inspects filesystem
- *  stat metadata only and never reads `.credentials.json` or `.claude.json`. */
+ *  stat metadata and allowlisted non-secret account display metadata from
+ *  `.claude.json` only. Never reads `.credentials.json` or exposes tokens/secrets. */
 export function discoverClaudeCodeProfiles(
 	options: DiscoverClaudeCodeProfilesOptions = {},
 ): ClaudeCodeProfilesResponse {
-	const fsOps = options.fs ?? nodeFs;
+	const fsOps: ClaudeCodeProfileFs = options.fs ?? nodeFs;
 	const resolvedHome = path.resolve(/* turbopackIgnore: true */ options.homeDir ?? os.homedir());
 	const defaultDir = path.join(/* turbopackIgnore: true */ resolvedHome, ".claude");
 	const resolvedDefault = path.resolve(/* turbopackIgnore: true */ defaultDir);
@@ -96,6 +159,13 @@ export function discoverClaudeCodeProfiles(
 		const exists = isDirectoryTarget(resolved, fsOps);
 		const hasSettings = exists && isRegularFile(path.join(/* turbopackIgnore: true */ resolved, "settings.json"), fsOps);
 		const hasCredentials = exists && isRegularFile(path.join(/* turbopackIgnore: true */ resolved, ".credentials.json"), fsOps);
+		const claudeJsonPaths = resolved === resolvedDefault
+			? [
+					path.join(/* turbopackIgnore: true */ resolved, ".claude.json"),
+					path.join(/* turbopackIgnore: true */ resolvedHome, ".claude.json"),
+				]
+			: [path.join(/* turbopackIgnore: true */ resolved, ".claude.json")];
+		const accountMeta = extractClaudeJsonAccountMeta(claudeJsonPaths, fsOps);
 		const label = source === "default" || resolved === resolvedDefault
 			? "Default (.claude)"
 			: path.basename(resolved) || resolved;
@@ -108,6 +178,7 @@ export function discoverClaudeCodeProfiles(
 			exists,
 			hasSettings,
 			hasCredentials,
+			...accountMeta,
 		});
 	};
 

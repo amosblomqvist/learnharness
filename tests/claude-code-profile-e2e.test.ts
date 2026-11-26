@@ -124,8 +124,35 @@ test("end-to-end isolated profile discovery, settings persistence, real child CL
 	fs.mkdirSync(symlinkTarget);
 	fs.writeFileSync(path.join(defaultDir, "settings.json"), '{"theme":"dark"}');
 	fs.writeFileSync(path.join(secondDir, "settings.json"), '{"model":"opus"}');
-	fs.writeFileSync(path.join(secondDir, ".credentials.json"), JSON.stringify({ accessToken: SECRET_SENTINEL }));
-	fs.writeFileSync(path.join(mockHome, ".claude.json"), JSON.stringify({ oauthAccount: { emailAddress: SECRET_SENTINEL } }));
+	fs.writeFileSync(
+		path.join(secondDir, ".credentials.json"),
+		JSON.stringify({
+			claudeAiOauth: {
+				accessToken: SECRET_SENTINEL,
+				refreshToken: `${SECRET_SENTINEL}_REFRESH`,
+			},
+			apiKey: `${SECRET_SENTINEL}_API`,
+		}),
+	);
+	fs.writeFileSync(
+		path.join(mockHome, ".claude.json"),
+		JSON.stringify({
+			primaryApiKey: `${SECRET_SENTINEL}_PRIMARY`,
+			mcpServers: { secret: { env: { TOKEN: SECRET_SENTINEL } } },
+			oauthAccount: {
+				emailAddress: "default@example.com",
+				billingType: "stripe_subscription",
+				accountUuid: `${SECRET_SENTINEL}_UUID`,
+			},
+		}),
+	);
+	fs.writeFileSync(
+		path.join(secondDir, ".claude.json"),
+		JSON.stringify({
+			primaryApiKey: `${SECRET_SENTINEL}_SECOND`,
+			oauthAccount: { emailAddress: "second@example.com" },
+		}),
+	);
 	fs.symlinkSync(symlinkTarget, path.join(mockHome, ".claude-linked"));
 
 	const mockClaudeBinary = writeSyntheticClaudeCli(mockBinDir);
@@ -160,7 +187,7 @@ test("end-to-end isolated profile discovery, settings persistence, real child CL
 	assert.equal(res.status, 200);
 	assert.equal(res.headers.get("cache-control"), "no-store");
 	const rawJson = await res.text();
-	assert(!rawJson.includes(SECRET_SENTINEL), "Discovery payload must never leak credential or .claude.json contents");
+	assert(!rawJson.includes(SECRET_SENTINEL), "Discovery payload must never leak secrets from .credentials.json or .claude.json");
 	const discovery = JSON.parse(rawJson);
 	const labels = discovery.profiles.map((p: { label: string }) => p.label);
 	assert(labels.includes("Default (.claude)"));
@@ -168,6 +195,11 @@ test("end-to-end isolated profile discovery, settings persistence, real child CL
 	assert(labels.includes(".claude-3"));
 	assert(labels.includes(".claude-linked"));
 	assert(!labels.includes(".claude.json"));
+	const defaultProfile = discovery.profiles.find((p: { label: string }) => p.label === "Default (.claude)");
+	const secondProfile = discovery.profiles.find((p: { label: string }) => p.label === ".claude-second");
+	assert.equal(defaultProfile?.email, "default@example.com");
+	assert.equal(defaultProfile?.subscriptionPlan, "Subscription");
+	assert.equal(secondProfile?.email, "second@example.com");
 
 	// 2. Select ~/.claude-second via settings body parser + store; verify real child receives expanded path
 	//    even when an inherited CLAUDE_CONFIG_DIR points elsewhere.
