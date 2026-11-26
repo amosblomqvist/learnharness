@@ -1195,7 +1195,10 @@ function QuestionDockForm({
 					)}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning ? "compacting session…" : (
+									// Touch: no keyboard to describe (narrow-viewport pass).
+									<span className="coarse:hidden">↵ submits · ⇧↵ newline</span>
+								)}
 						</span>
 						<Button
 							type="submit"
