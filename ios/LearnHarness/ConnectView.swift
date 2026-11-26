@@ -43,6 +43,7 @@ struct ConnectView: View {
 			.lhList()
 			.background(Color.appBackground)
 			.navigationTitle("Connect")
+			.navigationBarTitleDisplayMode(.inline)
 			.toolbar {
 				if isSheet {
 					ToolbarItem(placement: .cancellationAction) {
@@ -130,6 +131,7 @@ struct SelfHostedConnectView: View {
 		}
 		.background(Color.appBackground)
 		.navigationTitle("Self-hosted Server")
+		.navigationBarTitleDisplayMode(.inline)
 		.onAppear {
 			if address.isEmpty, store.pairing == nil, let server = store.server { address = server.absoluteString }
 		}
