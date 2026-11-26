@@ -200,6 +200,19 @@ describe("render — mermaid", () => {
 		assert.ok(!html.includes("graph TD"), "chart source is not leaked as text");
 	});
 
+	it("renders $$...$$ TeX labels synchronously via Temml MathML Core and falls back cleanly on invalid TeX", () => {
+		const valid = render('```mermaid\nflowchart TD\nA["$$\\frac{a}{b} + \\mathbb{R}^n$$"] -->|"$$x^2$$"| B["Done"]\n```');
+		assert.ok(valid.includes('class="pele-math"'), "diagram embeds Pele math foreignObject");
+		assert.ok(valid.includes('xmlns="http://www.w3.org/1998/Math/MathML"'), "emits XML-namespaced MathML Core");
+		assert.match(valid, /<mfrac[\s>]/, "renders fraction as MathML <mfrac>");
+		assert.ok(valid.includes("ℝ"), "renders \\mathbb{R} as MathML Core Unicode ℝ");
+		assert.ok(!valid.includes("$$"), "no raw $$ delimiters leak when TeX compiles");
+
+		const invalid = render('```mermaid\nflowchart TD\nA["$$\\unknowncmd{x}$$"] --> B["OK"]\n```');
+		assert.ok(invalid.includes("pele-flowchart"), "invalid TeX does not break diagram rendering");
+		assert.ok(invalid.includes("$$\\unknowncmd{x}$$"), "invalid TeX falls back to literal source");
+	});
+
 	it("still renders ordinary code fences as code blocks (contrast)", () => {
 		const html = render("```js\nconst x = 1;\n```");
 		assert.ok(html.includes('data-streamdown="code-block"'), "js fences keep the code-block path");

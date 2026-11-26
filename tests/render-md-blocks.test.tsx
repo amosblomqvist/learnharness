@@ -20,6 +20,7 @@ import { parseHTML } from "linkedom";
 import { MessageResponse, ToolContentResponse } from "../components/ai-elements/message.tsx";
 import { ThinkingBlock, setAllUserThinkingOpen } from "@/components/thinking-block";
 import { MermaidOverlay, SessionMermaidContext, chartSize } from "../components/session-overlay.tsx";
+import { renderMermaid, resolvedChartFont } from "../components/mermaid-render.ts";
 import { PlanPopup } from "../components/plan-block.tsx";
 import { MarkdownCode, codeSource } from "../components/md-blocks.tsx";
 
@@ -75,6 +76,82 @@ describe("md-blocks — mermaid", () => {
 		assert.ok(!html.includes("graph TD"), "chart source is not leaked as text");
 		// No chat page mounted → no overlay context → no expand button.
 		assert.ok(!html.includes('data-testid="md-mermaid-expand"'), "expand hidden without a session context");
+	});
+
+	it("typesets $$...$$ TeX labels, enforces trust:false/maxSize/idPrefix, caps holder in em, and cleans up DOM probe", () => {
+		const mathBox = (chart: string, font?: string, idPrefix?: string) => {
+			const result = renderMermaid(chart, font, idPrefix);
+			assert.equal(result.error, null);
+			const match = /<foreignObject class="pele-math"[^>]*\bwidth="([\d.]+)"[^>]*\bheight="([\d.]+)"/.exec(result.svg ?? "");
+			assert.ok(match, "expected pele-math foreignObject with width & height");
+			return { w: Number(match[1]), h: Number(match[2]), svg: result.svg! };
+		};
+
+		const ok = renderMermaid('flowchart LR\nA["$$\\frac{1}{2}$$"] --> B["$$\\vec{v}$$"]');
+		assert.equal(ok.error, null);
+		assert.ok(ok.svg?.includes('class="pele-math"'));
+		assert.match(ok.svg ?? "", /<mfrac[\s>]/);
+
+		// Inline block emits an `em` max-width cap in SSR so Reading sizes > 16px scale cleanly.
+		const blockHtml = render("```mermaid\ngraph TD\nA --> B\n```");
+		assert.match(blockHtml, /max-width:[\d.]+em/, "holder uses em max-width cap");
+
+		// Real Temml trust: false gates reject \includegraphics and \style (both pass under trust: true).
+		const blockedImg = renderMermaid('flowchart LR\nA["$$\\includegraphics{https://example.invalid/x.png}$$"]');
+		assert.equal(blockedImg.error, null);
+		assert.ok(!blockedImg.svg?.includes('class="pele-math"'));
+		assert.ok(!blockedImg.svg?.includes("<img"));
+		const blockedStyle = renderMermaid('flowchart LR\nA["$$\\style{color:red}{x}$$"]');
+		assert.equal(blockedStyle.error, null);
+		assert.ok(!blockedStyle.svg?.includes('class="pele-math"'));
+
+		// maxSize caps giant \rule dimensions so a single expression cannot shrink the whole diagram.
+		const cappedRule = mathBox('flowchart LR\nA["$$\\rule{9999em}{9999em}$$"]');
+		assert.ok(cappedRule.svg.includes("25em"), "Temml maxSize clamps huge \\rule width");
+
+		// Distinct idPrefix prevents accTitle ID collisions across charts.
+		const titled1 = renderMermaid("flowchart LR\naccTitle: One\nA --> B", undefined, "c1");
+		const titled2 = renderMermaid("flowchart LR\naccTitle: Two\nA --> B", undefined, "c2");
+		assert.ok(titled1.svg?.includes("c1-title") && titled2.svg?.includes("c2-title"));
+
+		const simpleH = mathBox('flowchart LR\nA["$$x$$"]').h;
+		const fracH = mathBox('flowchart LR\nA["$$\\frac{a}{b}$$"]').h;
+		const matrixH = mathBox('flowchart LR\nA["$$\\begin{pmatrix} a & b \\\\ c & d \\end{pmatrix}$$"]').h;
+		assert.ok(fracH > simpleH, `fraction (${fracH}) should be taller than variable (${simpleH})`);
+		assert.ok(matrixH > fracH, `matrix (${matrixH}) should be taller than fraction (${fracH})`);
+
+		// Exercise the real post-mount DOM probe path (getComputedStyle + getBoundingClientRect)
+		// plus probe cleanup and throw-safe fallback to estimateMathSize.
+		const prevDoc = globalThis.document;
+		const prevGetCS = globalThis.getComputedStyle;
+		const { document: domDoc } = parseHTML('<!doctype html><html><body><div class="lh-prose" id="holder"></div></body></html>');
+		const holder = domDoc.getElementById("holder")!;
+		let shouldThrow = false;
+		const elemProto = Object.getPrototypeOf(Object.getPrototypeOf(holder)) as { getBoundingClientRect?: () => DOMRect };
+		const prevRect = elemProto.getBoundingClientRect;
+		elemProto.getBoundingClientRect = () => {
+			if (shouldThrow) throw new Error("layout unavailable");
+			return { width: 73.2, height: 29.4, top: 0, left: 0, bottom: 29.4, right: 73.2, x: 0, y: 0, toJSON: () => ({}) } as DOMRect;
+		};
+		try {
+			globalThis.document = domDoc as unknown as Document;
+			globalThis.getComputedStyle = ((el: Element) => ({ fontFamily: el === holder ? "Georgia, serif" : "monospace" })) as typeof getComputedStyle;
+			const font = resolvedChartFont(holder);
+			assert.equal(font, "Georgia, serif", "resolvedChartFont reads the passed holder, not another element");
+			const measured = mathBox('flowchart LR\nA["$$x^2$$"]', font);
+			assert.equal(measured.w, 76, "measured width (ceil 73.2 + 2px pad) reaches foreignObject");
+			assert.equal(measured.h, 32, "measured height (ceil 29.4 + 2px pad) reaches foreignObject");
+			assert.equal(domDoc.body.querySelector(".pele-math"), null, "DOM probe is removed after render");
+
+			shouldThrow = true;
+			const fallback = mathBox('flowchart LR\nA["$$x^2$$"]', font);
+			assert.ok(fallback.w > 0 && fallback.h > 0, "probe error falls back to estimateMathSize instead of failing chart");
+			assert.equal(domDoc.body.querySelector(".pele-math"), null, "DOM probe is removed even when measurement throws");
+		} finally {
+			elemProto.getBoundingClientRect = prevRect;
+			globalThis.document = prevDoc;
+			globalThis.getComputedStyle = prevGetCS;
+		}
 	});
 });
 
