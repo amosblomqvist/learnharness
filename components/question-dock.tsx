@@ -43,6 +43,7 @@ import {
 } from "@/src/core";
 import type { PrepareBuiltinSubmission } from "./plugin-submission-adapters";
 import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-rail";
+import { rtlDir } from "@/components/text-direction";
 import {
 	ANSWER_COLUMN_FRAME,
 	ANSWER_OPTIONS_PAD,
@@ -66,7 +67,7 @@ const QC_LABEL = "mb-1 text-xs font-medium uppercase tracking-wide text-muted-fo
 const QC_QUESTION = "mb-3 font-medium";
 const QC_CONTEXT = "mb-3 text-sm text-muted-foreground";
 const QC_OPTION_LIST = "flex flex-col gap-2 pb-2";
-const QC_OPTION_ROW = "flex items-center gap-3 rounded-lg border px-3 py-2 text-left text-sm outline-none transition-colors";
+const QC_OPTION_ROW = "flex items-center gap-3 rounded-lg border px-3 py-2 text-start text-sm outline-none transition-colors";
 const QC_OPTION_MARK = "flex size-4 shrink-0 items-center justify-center border";
 const QC_OPTION_LETTER = "text-[0.625rem] font-medium leading-none";
 const QC_OTHER_INPUT = "lh-input w-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground";
@@ -909,7 +910,13 @@ function QuestionDockForm({
 	);
 	const optionList = qd.mode === "text" ? null : (
 		<div ref={optionsRef} data-question-options="">
-			<div className={QC_OPTION_LIST} role={qd.mode === "multi-select" ? "group" : "radiogroup"}>
+			<div
+				// One direction for the whole list, from the question and its
+				// options: a Persian question's rows all read right-to-left.
+				dir={rtlDir([qd.question, ...qd.options.map((o) => `${o.label} ${o.description ?? ""}`)].join(" "))}
+				className={QC_OPTION_LIST}
+				role={qd.mode === "multi-select" ? "group" : "radiogroup"}
+			>
 				{qd.options.map((opt, i) => {
 					const isSel = sel.selected.has(i);
 					const letter = displayedOptionLetter(qd.optionOrder, i + 1);
@@ -989,7 +996,7 @@ function QuestionDockForm({
 						>
 							{sel.dontKnow && <span className="size-1.5 rounded-full bg-current" />}
 						</span>
-						<span>I don't know</span>
+						<span className="font-ui">I don't know</span>
 					</button>
 				)}
 

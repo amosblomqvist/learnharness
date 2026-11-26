@@ -28,7 +28,8 @@ export const MERMAID_FONT_SIZE = 16;
 // `mermaid` prop wiring is retired.)
 export function mermaidConfig(mode: RenderedMode): MermaidConfig {
 	return {
-		fontFamily: "ui-sans-serif, system-ui, sans-serif",
+		// Vazirmatn draws Persian/Arabic labels (see app/layout.tsx).
+		fontFamily: "ui-sans-serif, system-ui, var(--font-vazirmatn), sans-serif",
 		fontSize: MERMAID_FONT_SIZE,
 		securityLevel: "strict",
 		theme: mode === "dark" ? "dark" : "default",

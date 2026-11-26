@@ -64,7 +64,7 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		const vars = appearanceVars(resolveAppearance({ fontFamily: "JetBrains Mono" }), mocha);
 		assert.equal(
 			vars["--font-prose"],
-			`"JetBrains Mono", var(--font-jetbrains), var(--font-sans3), ui-sans-serif, system-ui, sans-serif`,
+			`"JetBrains Mono", var(--font-jetbrains), var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif`,
 		);
 	});
 
@@ -83,7 +83,7 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--background"], "#101820");
 		assert.equal(vars["--card"], mocha.colors.surface, "un-overridden colors stay the theme's");
 		assert.equal(vars["--lh-warning"], "#fab387");
-		assert.equal(vars["--font-prose"], `"Georgia", var(--font-sans3), ui-sans-serif, system-ui, sans-serif`);
+		assert.equal(vars["--font-prose"], `"Georgia", var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif`);
 		assert.equal(vars["--lh-prose-size"], "18px");
 		assert.equal(vars["--font-title"], "var(--font-prose)", "serif off → titles follow the prose font");
 		assert.equal(vars["--lh-heading-weight"], "700");

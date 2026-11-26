@@ -11,6 +11,8 @@
  * against the message ids. A steer parked server-side (stranded behind a
  * question) keeps its line — an honest "waiting for the next run".
  */
+import { rtlDir } from "@/components/text-direction";
+
 export interface QueuedSteerLine {
 	id: string;
 	text: string;
@@ -26,6 +28,7 @@ export function QueuedSteersBody({ steers }: { steers: QueuedSteerLine[] }) {
 				<span
 					key={s.id}
 					title={s.text}
+					dir={rtlDir(s.text)}
 					className="block max-w-[240px] truncate font-ui text-[11px] text-muted-foreground/60"
 				>
 					{s.text}

@@ -62,6 +62,7 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
+import { rtlDir } from "@/components/text-direction";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -341,7 +342,7 @@ export function SessionRow({
 		>
 			<SessionStatus busy={chat.busy || chat.compacting} />
 			<span className="min-w-0 flex-1">
-				<span className={cn("block truncate", sidebarNameFont(compact))}>{chat.title}</span>
+				<span dir={rtlDir(chat.title)} className={cn("block truncate", sidebarNameFont(compact))}>{chat.title}</span>
 				{!compact && <span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>}
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
@@ -386,6 +387,7 @@ export function RenameRow({ chat, onCommit, onCancel, depth = 0, compact = false
 				<input
 					ref={inputRef}
 					value={draft}
+					dir={rtlDir(draft)}
 					spellCheck={false}
 					onChange={(e) => setDraft(e.target.value)}
 					onBlur={() => onCommit(draft)}
@@ -900,6 +902,7 @@ function SessionsSidebar() {
 							ref={searchRef}
 							data-testid="session-search"
 							value={query}
+							dir={rtlDir(query)}
 							onChange={(e) => {
 								setQuery(e.target.value);
 								// The list reorders under the query every keystroke —

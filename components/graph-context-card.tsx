@@ -3,6 +3,7 @@
 import { useState } from "react";
 import { ChevronRightIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * The graph-context card (owner, 2026-10-04): the session's map pick —
@@ -42,7 +43,7 @@ export function GraphContextCard({ data }: { data: GraphContextData }) {
 			{open && (
 				<div data-testid="graph-context-body" className="mt-1 space-y-1 rounded-lg border border-dashed border-border/70 px-4 py-3 text-xs">
 					{propositions.map((p) => (
-						<div key={p.id} data-testid={`graph-context-prop-${p.id}`} className="leading-relaxed">
+						<div key={p.id} data-testid={`graph-context-prop-${p.id}`} dir={rtlDir(`${p.name} ${p.statement}`)} className="leading-relaxed">
 							<span className="font-medium text-foreground/80">{p.name}</span>
 							<span className="text-muted-foreground"> — {p.statement}</span>
 						</div>

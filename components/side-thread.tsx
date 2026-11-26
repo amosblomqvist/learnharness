@@ -14,6 +14,7 @@ import type { SelectionAction } from "./selection-toolbar";
 import type { SideThreadAnchor, SideThreadOpenArgs, SideThreadState } from "./use-side-thread";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { rtlDir } from "@/components/text-direction";
 
 /** Ask always opens the selected teaching segment's ONE conversation. Cite
  * is an independent action that inserts a chip into the main/thinking field. */
@@ -47,7 +48,7 @@ export interface SideThreadHandlers {
 }
 function Passage({ text, chatId, sourceMessageId, selector, citation: savedCitation }: { text: string; chatId?: string; sourceMessageId?: string; selector?: Omit<TextSelector, "text">; citation?: TutorCitation }) {
 	const actions = useContext(CitationActionsContext);
-	const quote = <blockquote className="line-clamp-3 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">{text}</blockquote>;
+	const quote = <blockquote dir={rtlDir(text)} className="line-clamp-3 border-s-2 border-border ps-2 text-xs italic text-muted-foreground">{text}</blockquote>;
 	if (!actions?.openSource || (!savedCitation && (!chatId || !sourceMessageId))) return quote;
 	const citation: TutorCitation = savedCitation ?? { version: 1, chatId: chatId!, messageId: sourceMessageId!, text,
 		...(selector ?? { start: 0, end: text.length, prefix: "", suffix: "" }) };
@@ -130,7 +131,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				{state.messages.map((message) => (
 					<div key={message.id} data-testid={message.role === "user" ? "side-learner-message" : "side-helper-message"} className={message.role === "user" ? "ml-auto flex w-fit max-w-[70%] flex-col gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm [overflow-wrap:anywhere]" : "flex flex-col gap-1.5 text-sm"}>
 						{message.quotes?.map((quote, index) => <Passage key={index} text={quote} citation={collectCitations(message.quoteCitations?.[index] ?? "")[0]?.citation} />)}
-						{message.role === "user" ? <p className="whitespace-pre-wrap font-medium">{message.text}</p> : <MessageResponse>{message.text}</MessageResponse>}
+						{message.role === "user" ? <p dir={rtlDir(message.text)} className="whitespace-pre-wrap font-medium">{message.text}</p> : <MessageResponse>{message.text}</MessageResponse>}
 						{message.stopped && <span className="font-ui text-xs text-muted-foreground">Stopped</span>}
 						{message.error && <span role="alert" className="text-xs text-destructive">{message.error}</span>}
 					</div>

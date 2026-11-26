@@ -3,6 +3,7 @@
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { isWebSourceUrl, type ArtifactPartProps, type PdfResult, type ResearchResult } from "@/src/core";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * The research tool-call box (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -108,11 +109,11 @@ export function ResearchBriefCard({ output }: { output: unknown }) {
 										rel="noopener noreferrer"
 										className="text-primary underline-offset-2 hover:underline"
 									>
-										{s.title}
+										<span dir={rtlDir(s.title)}>{s.title}</span>
 									</a>
 								) : (
 									// Saved before sources were limited to http(s): never a link.
-									<span className="text-muted-foreground">{s.title}</span>
+									<span dir={rtlDir(s.title)} className="text-muted-foreground">{s.title}</span>
 								)}
 							</li>
 						))}

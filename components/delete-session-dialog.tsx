@@ -3,6 +3,7 @@
 import { useEffect, useState, type ReactElement, type ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
 import type { ChatDeleteMode, ChatListItem, FolderDeletionScope } from "@/src/core";
+import { rtlDir } from "@/components/text-direction";
 
 /** The graph-traces checkbox copy (owner, 2026-09-24 flow rework — was
  *  the delete-nodes option's body in the two-button design): the
@@ -188,7 +189,7 @@ export function DeleteSessionBody({
 			    sized-up text-lg), still white. Same shape as the node
 			    dialog. */}
 			<div className="mt-1.5">
-				<code data-testid="session-name-code" className="font-mono text-sm text-foreground">
+				<code data-testid="session-name-code" dir={rtlDir(chat.title)} className="font-mono text-sm text-foreground">
 					{chat.title}
 				</code>
 			</div>

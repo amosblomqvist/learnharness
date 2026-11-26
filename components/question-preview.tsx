@@ -5,6 +5,7 @@ import { Streamdown, type ExtraProps, type PluginConfig } from "streamdown";
 import { streamdownPlugins } from "@/components/ai-elements/message";
 import { MarkdownStrong } from "@/components/md-blocks";
 import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
+import { rtlDir } from "@/components/text-direction";
 
 // Transform the renderer's parsed Markdown, not a whitespace-flattened source:
 // flattening first destroys code fences and significant spaces in inline code.
@@ -170,7 +171,7 @@ function MeasuredQuestionPreview({ source }: { source: string }) {
 			className="relative block h-[1.6em] min-w-0 overflow-hidden"
 			style={{ visibility: fit.ready ? "visible" : "hidden" }}
 		>
-			<span data-preview-line className="absolute inset-x-0 top-1/2 flex min-w-0 -translate-y-1/2 items-center overflow-hidden">
+			<span data-preview-line dir={rtlDir(source)} className="absolute inset-x-0 top-1/2 flex min-w-0 -translate-y-1/2 items-center overflow-hidden">
 				<Streamdown
 					mode="static"
 					plugins={previewPlugins}

@@ -12,6 +12,7 @@ import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { PathInput } from "@/components/path-input";
 import type { PrepareThinkingSubmission } from "./plugin-submission-adapters";
 import { cn } from "@/lib/utils";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * The practice dock (practice sessions, owner design 2026-10-04): an
@@ -132,7 +133,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 			>
 				<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
 				<span className="font-medium">Problem</span>
-				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
+				<span dir={rtlDir(input.statement)} className="min-w-0 flex-1 truncate">{input.statement}</span>
 			</button>
 		);
 	if (!expanded && !customInput) return bar;

@@ -1,6 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { fuzzyScore } from "../src/core/fuzzy.ts";
+import { foldSearchText, fuzzyScore } from "../src/core/fuzzy.ts";
 
 // The picker's search ranking (pi's /model pattern): tokens must each match
 // some field; exact beats prefix beats buried substring; whole-query
@@ -38,5 +38,19 @@ describe("fuzzyScore", () => {
 	it("empty query matches everything at score 0", () => {
 		assert.equal(fuzzyScore("", "anything"), 0);
 		assert.equal(fuzzyScore("   ", "anything"), 0);
+	});
+});
+
+describe("Persian search folding", () => {
+	it("folds Arabic letter and digit spellings, half-spaces and vowel marks", () => {
+		assert.equal(foldSearchText("كِتابي ۱۲ ٣"), "کتابی 12 3");
+		assert.equal(foldSearchText("می‌خواهم"), "میخواهم");
+	});
+
+	it("finds Persian titles however the query was typed", () => {
+		assert.notEqual(fuzzyScore("کتاب", "كتاب فيزيك"), null);
+		assert.notEqual(fuzzyScore("میخواهم", "می‌خواهم یاد بگیرم"), null);
+		assert.notEqual(fuzzyScore("درس ۱۲", "درس 12"), null);
+		assert.equal(fuzzyScore("کتاب", "دفتر"), null);
 	});
 });

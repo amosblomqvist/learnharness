@@ -6,6 +6,7 @@ import { MenuShell } from "./menu-shell";
 import { citationLabel, type TutorCitation } from "@/src/core";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { rtlDir } from "@/components/text-direction";
 
 /** Where a composer chip's link sits in the draft (for comment edits). */
 export type ComposerCitationSource = { start: number; end: number; link: string; host: HTMLElement };
@@ -31,7 +32,7 @@ export interface CitationChipProps {
 export function CitationQuoteCard({ citation, onOpenSource }: { citation: TutorCitation; onOpenSource: () => void }) {
 	return (
 		<div className="flex flex-col gap-2">
-			<blockquote className="max-h-64 overflow-y-auto whitespace-pre-wrap border-l-2 border-muted-foreground/30 pl-2 text-sm">{citation.text}</blockquote>
+			<blockquote dir={rtlDir(citation.text)} className="max-h-64 overflow-y-auto whitespace-pre-wrap border-s-2 border-muted-foreground/30 ps-2 text-sm">{citation.text}</blockquote>
 			{citation.comment ? <p className="whitespace-pre-wrap text-sm">{citation.comment}</p> : null}
 			<button type="button" className="inline-flex items-center gap-1 self-start text-xs font-medium text-muted-foreground hover:text-foreground" onClick={onOpenSource}>
 				<ArrowUpRight aria-hidden="true" className="size-3.5" />Go to source
@@ -76,7 +77,7 @@ export function CitationChip({ citation, variant, contentEditable, source }: Cit
 				onClick={(event) => { if (variant === "composer") openSource(event.currentTarget); else setCardOpen((open) => !open); }}
 			>
 				<Quote aria-hidden="true" className="size-3.5 shrink-0" />
-				<span className="min-w-0 truncate">{label}</span>
+				<span dir={rtlDir(label)} className="min-w-0 truncate">{label}</span>
 			</button>
 			{variant === "composer" ? (
 				<button

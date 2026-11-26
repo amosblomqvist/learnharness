@@ -26,6 +26,7 @@ import {
 } from "@/components/ai-elements/conversation";
 import { Message, MessageContent, MessageResponse } from "@/components/ai-elements/message";
 import { PathText } from "@/components/file-path-chip";
+import { rtlDir } from "@/components/text-direction";
 import { Reasoning, ReasoningContent, ReasoningTrigger } from "@/components/ai-elements/reasoning";
 import { Shimmer } from "@/components/ai-elements/shimmer";
 import { BrailleSpinner } from "@/components/braille-spinner";
@@ -70,7 +71,7 @@ import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
 import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
-import type { PlanBlockData } from "@/src/core";
+import type { LhViewMessage, PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { PluginQuestionDock } from "./plugin-question-dock";
 import { PluginQuestionPart } from "./plugin-question-part";
@@ -253,6 +254,10 @@ export function PendingTurnIndicator({ evaluating }: { evaluating: boolean }) {
 			<Shimmer duration={1}>{evaluating ? "EVALUATING…" : "THINKING…"}</Shimmer>
 		</span>
 	);
+}
+
+function userText(m: LhViewMessage): string {
+	return m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n");
 }
 
 /**
@@ -1663,6 +1668,7 @@ export function Chat({
 							<input
 								ref={titleInputRef}
 								value={titleDraft}
+								dir={rtlDir(titleDraft)}
 								onChange={(e) => setTitleDraft(e.target.value)}
 								onKeyDown={(e) => {
 									if (!isInteractionScopeEligible(e.currentTarget, controller)) return;
@@ -1701,6 +1707,7 @@ export function Chat({
 								setTitleDraft(titleText);
 								setRenaming(true);
 							}}
+							dir={rtlDir(titleText)}
 							data-plugin-chrome-title
 							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
 						>
@@ -1883,8 +1890,8 @@ export function Chat({
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
 												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
-												<div className="lh-prose whitespace-pre-wrap text-foreground">
-													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
+												<div dir={rtlDir(userText(m))} className="lh-prose whitespace-pre-wrap text-foreground">
+													<PathText text={userText(m)} />
 												</div>
 												<SubmittedImages images={m.parts.filter((part) => part.type === "image").map(part => ({ type: "image" as const, data: part.data as string, mimeType: part.mimeType as string }))} />
 											</div>

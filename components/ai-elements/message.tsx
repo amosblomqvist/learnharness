@@ -36,6 +36,7 @@ import {
   type StreamdownProps,
 } from "streamdown";
 import { mdComponents } from "@/components/md-blocks";
+import { rehypeTextDirection } from "@/components/text-direction";
 import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
 import { rehypeGluePunctuation } from "@/components/md-nobreak";
 
@@ -374,7 +375,10 @@ export const streamdownRemend = { htmlTags: false };
 //
 // Punctuation glue (components/md-nobreak.ts) runs last in this list:
 // after sanitize/harden (its class survives) and before rehype-katex, which
-// Streamdown appends after the list.
+// Streamdown appends after the list. Per-block text direction
+// (components/text-direction.ts) goes after it: Streamdown's own dir="auto"
+// follows the first strong character, which turns Persian sentences that
+// open with an English term left-to-right.
 const [hardenPlugin, hardenOptions] = defaultRehypePlugins.harden as [unknown, Record<string, unknown>];
 export const streamdownRehypePlugins = [
   ...Object.values({
@@ -382,6 +386,7 @@ export const streamdownRehypePlugins = [
     harden: [hardenPlugin, { ...hardenOptions, allowedImagePrefixes: [] }],
   }),
   rehypeGluePunctuation,
+  rehypeTextDirection,
 ] as NonNullable<StreamdownProps["rehypePlugins"]>;
 
 export const MessageResponse = memo(

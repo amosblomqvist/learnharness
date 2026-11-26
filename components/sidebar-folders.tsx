@@ -5,6 +5,7 @@ import { ChevronRightIcon, FolderIcon, FolderOpenIcon } from "lucide-react";
 import { canMoveFolder, type OrganizationAction, type SourceFolder, type SourceOrganization } from "@/src/core";
 import { EditableSourceName, SOURCE_DRAG_TYPE, SourceDragRow } from "@/components/source-folder-tree";
 import { cn } from "@/lib/utils";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * Session-sidebar folders (approved plan): the shared source organization
@@ -131,7 +132,7 @@ export function SidebarFolderRow({ folder, depth, open, dropActive, renaming, on
 					style={{ paddingLeft: sidebarFolderBox(depth).paddingLeft }}>
 					<ChevronRightIcon aria-hidden="true" className={cn("size-3.5 shrink-0 text-muted-foreground/70", open && "rotate-90")} />
 					<Icon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-					<span className={cn("min-w-0 flex-1 truncate", sidebarNameFont(compact))}>{folder.name}</span>
+					<span dir={rtlDir(folder.name)} className={cn("min-w-0 flex-1 truncate", sidebarNameFont(compact))}>{folder.name}</span>
 				</button>
 			)}
 		</SourceDragRow>

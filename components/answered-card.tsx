@@ -7,6 +7,7 @@ import { StatusBadge } from "@/components/ui/status-badge";
 import { SubmittedImages } from "./submitted-images";
 import { ThinkingBlock } from "@/components/thinking-block";
 import { PathText } from "@/components/file-path-chip";
+import { rtlDir } from "@/components/text-direction";
 import { cn } from "@/lib/utils";
 import { ToolContentResponse } from "@/components/ai-elements/message";
 import type { QuestionAnswerData } from "@/src/core";
@@ -199,7 +200,12 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 			<div className={columns ? "flex min-w-0 flex-col justify-center" : "contents"}>
 
 			{((answer.options?.length ?? 0) > 0 || answer.other) && (
-				<div ref={optionsRef} className="flex flex-col gap-1.5 text-sm">
+				<div
+					ref={optionsRef}
+					// One direction for the whole list, as in the pending dock.
+					dir={rtlDir([answer.questionText, ...(answer.options ?? []).map((o) => o.label), ...descByIndex.values()].join(" "))}
+					className="flex flex-col gap-1.5 text-sm"
+				>
 					{answer.options?.map((opt) => {
 						const sel = selectedIdx.has(opt.index);
 						const key = isQuiz && correctIdx.has(opt.index);
@@ -256,13 +262,13 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 							data-testid="answered-other"
 							className="flex items-center gap-2 rounded-lg border border-primary bg-accent px-3 py-1.5"
 						>
-							<span>“<PathText text={answer.other} />”</span>
+							<span dir={rtlDir(answer.other)}>“<PathText text={answer.other} />”</span>
 						</div>
 					)}
 				</div>
 			)}
 
-			{answer.text && <div className="lh-prose mt-2 whitespace-pre-wrap">“<PathText text={answer.text} />”</div>}
+			{answer.text && <div dir={rtlDir(answer.text)} className="lh-prose mt-2 whitespace-pre-wrap">“<PathText text={answer.text} />”</div>}
 			<SubmittedImages images={answer.images?.answer} />
 
 			{/* The confidence record (owner round 6): the slider's rail, disc

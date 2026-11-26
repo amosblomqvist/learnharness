@@ -9,6 +9,7 @@ import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { Hint } from "@/components/ui/hint";
 import { TreeCheckbox } from "@/components/tree-presentation";
 import { cn } from "@/lib/utils";
+import { rtlDir } from "@/components/text-direction";
 
 /**
  * The graph's folder filter (approved plan): VIEW ONLY. Ticked folders of the
@@ -105,7 +106,7 @@ export function GraphFolderFilterControl({ organization, listed, selected, onCha
 						aria-label={`Show folder ${folder.name}`}
 						onChange={(e) => onChange(toggleGraphFolder(organization, selected, folder.id, e.target.checked, listed))} />
 					<FolderIcon aria-hidden="true" className="size-3.5 shrink-0 text-muted-foreground" />
-					<span className="min-w-0 flex-1 truncate text-xs">{folder.name}</span>
+					<span dir={rtlDir(folder.name)} className="min-w-0 flex-1 truncate text-xs">{folder.name}</span>
 				</label>
 				{renderLevel(folder.id, depth + 1)}
 			</div>

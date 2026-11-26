@@ -23,6 +23,14 @@ const dom = parseHTML("<html><head><style></style></head><body></body></html>");
 (globalThis as Record<string, unknown>).CSS = dom.window.CSS ?? { highlights: new Map() };
 
 describe("findSessionTextMatches — literal, case-insensitive, regex-inert", () => {
+	it("matches Persian across Arabic spellings, digits and half-spaces, at the text's own offsets", () => {
+		assert.deepEqual(findSessionTextMatches("یک كتاب", "کتاب"), [{ start: 3, end: 7 }]);
+		assert.deepEqual(findSessionTextMatches("درس ۱۲", "12"), [{ start: 4, end: 6 }]);
+		// The match spans the half-space in the text, so the highlight covers the whole word.
+		assert.deepEqual(findSessionTextMatches("من می‌خواهم", "میخواهم"), [{ start: 3, end: 11 }]);
+		assert.deepEqual(findSessionTextMatches("abc", "\u200c"), []);
+	});
+
 	it("finds every literal occurrence, any case — substrings included", () => {
 		assert.deepEqual(findSessionTextMatches("Cat and CAT", "cat"), [
 			{ start: 0, end: 3 }, { start: 8, end: 11 },

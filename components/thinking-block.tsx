@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { SubmittedImages } from "./submitted-images";
 import { PathText } from "@/components/file-path-chip";
+import { rtlDir } from "@/components/text-direction";
 
 /** The unified user-thinking row (owner round, 2026-10-05): ONE visual
  *  language for every surface where the learner's own thinking renders —
@@ -132,7 +133,7 @@ export function ThinkingBlock({
 				<ChevronDownIcon className={cn("size-4 shrink-0 transition-transform", open ? "rotate-180" : "rotate-0")} />
 			</button>
 			{open && (
-				<div>{text && <span className="lh-prose mt-1.5 block whitespace-pre-wrap text-[15px] italic text-foreground/50"><PathText text={text} /></span>}<SubmittedImages images={images} /></div>
+				<div>{text && <span dir={rtlDir(text)} className="lh-prose mt-1.5 block whitespace-pre-wrap text-[15px] italic text-foreground/50"><PathText text={text} /></span>}<SubmittedImages images={images} /></div>
 			)}
 		</div>
 	);

@@ -84,7 +84,7 @@ export function appearanceVars(
 	const vars: Record<string, string> = themeVars(effectiveColors(theme, a), theme.mode);
 	if (a.fontFamily !== null) {
 		const bundled = BUNDLED_READING_FONTS[a.fontFamily];
-		vars["--font-prose"] = `"${a.fontFamily}", ${bundled ? `${bundled}, ` : ""}var(--font-sans3), ui-sans-serif, system-ui, sans-serif`;
+		vars["--font-prose"] = `"${a.fontFamily}", ${bundled ? `${bundled}, ` : ""}var(--font-sans3), var(--font-vazirmatn), ui-sans-serif, system-ui, sans-serif`;
 	}
 	// The ONE documented reading-size variable (typography round 4): prose,
 	// inputs, and session titles all read it, so one setProperty moves them.

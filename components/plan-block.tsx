@@ -20,6 +20,7 @@ import {
 import type { PlanBlockData, PlanNodeStatus, PlanTree } from "@/src/core";
 import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
+import { rtlDir } from "@/components/text-direction";
 import { useAppearance } from "@/components/settings/appearance";
 import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
 
@@ -490,6 +491,7 @@ export function PlanDiagram({
 								x={w / 2}
 								y={y0 + i * layout.lineH}
 								textAnchor="middle"
+								direction={rtlDir(line)}
 								dominantBaseline="central"
 								className={monochrome ? MONO_TEXT : TEXT[status]}
 							>
