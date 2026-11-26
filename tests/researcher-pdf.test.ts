@@ -197,3 +197,82 @@ describe("web_fetch — PDF pointer + source header", () => {
 		}
 	});
 });
+
+describe("research downloads stop at their size cap", () => {
+	const CHUNK = 1024 * 1024;
+	const TOTAL_CHUNKS = 64;
+
+	/** A chunked response (no content-length unless given) that counts what was read from it. */
+	function chunkedResponse(contentType: string, headers: Record<string, string> = {}) {
+		const state = { sent: 0, cancelled: false };
+		const body = new ReadableStream<Uint8Array>({
+			pull(controller) {
+				if (state.sent === TOTAL_CHUNKS) return controller.close();
+				state.sent++;
+				controller.enqueue(new Uint8Array(CHUNK).fill(0x61));
+			},
+			cancel() {
+				state.cancelled = true;
+			},
+		});
+		return { state, response: new Response(body, { headers: { "content-type": contentType, ...headers } }) };
+	}
+
+	it("web_fetch gives up just past 5 MB", async () => {
+		const { state, response } = chunkedResponse("text/plain");
+		safeFetchOverride.current = async () => response;
+		try {
+			const out = asText(await createWebTools(() => null).web_fetch!.execute!("t13", { url: "https://example.com/endless.txt" }));
+			assert.match(out, /web_fetch failed.*Response too large/);
+			assert.ok(state.sent <= 8, `read ${state.sent} MB`);
+			assert.ok(state.cancelled, "the connection is released");
+		} finally {
+			safeFetchOverride.current = undefined;
+		}
+	});
+
+	it("web_fetch_pdf gives up just past 25 MB", async () => {
+		const { state, response } = chunkedResponse("application/pdf");
+		const dir = await newDir();
+		safeFetchOverride.current = async () => response;
+		try {
+			const out = asText(await createPdfReadTools(dir).web_fetch_pdf!.execute!("t14", { url: "https://example.com/endless.pdf" }));
+			assert.match(out, /web_fetch_pdf failed.*PDF too large \(over 25 MB\)/);
+			assert.ok(state.sent <= 28, `read ${state.sent} MB`);
+			assert.ok(state.cancelled, "the connection is released");
+			assert.deepEqual(await fs.readdir(dir), [], "nothing is written");
+		} finally {
+			safeFetchOverride.current = undefined;
+		}
+	});
+
+	it("web_fetch refuses a declared length over the cap without reading the body", async () => {
+		const { state, response } = chunkedResponse("text/plain", { "content-length": String(TOTAL_CHUNKS * CHUNK) });
+		safeFetchOverride.current = async () => response;
+		try {
+			const out = asText(await createWebTools(() => null).web_fetch!.execute!("t16", { url: "https://example.com/big.txt" }));
+			assert.match(out, /web_fetch failed.*Response too large/);
+			assert.ok(state.sent <= 1, `read ${state.sent} MB`);
+			assert.ok(state.cancelled, "the connection is released");
+		} finally {
+			safeFetchOverride.current = undefined;
+		}
+	});
+
+	it("web_fetch keeps characters split across chunks", async () => {
+		const bytes = new TextEncoder().encode("naïve café ∑ 𝔼");
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) {
+				for (const byte of bytes) controller.enqueue(new Uint8Array([byte]));
+				controller.close();
+			},
+		});
+		safeFetchOverride.current = async () => new Response(body, { headers: { "content-type": "text/plain" } });
+		try {
+			const out = asText(await createWebTools(() => null).web_fetch!.execute!("t15", { url: "https://example.com/unicode.txt" }));
+			assert.match(out, /naïve café ∑ 𝔼/);
+		} finally {
+			safeFetchOverride.current = undefined;
+		}
+	});
+});

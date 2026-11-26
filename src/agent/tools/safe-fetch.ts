@@ -104,3 +104,36 @@ export async function safeFetch(url: string, init: RequestInit = {}, dispatcher:
 		throw err;
 	}
 }
+
+/** Read a response body of at most `limit` bytes, or throw `tooLarge` and drop
+ *  the connection. The declared length is only an early exit: chunked responses
+ *  have none, and for compressed ones it is the size before decompression. */
+export async function readBoundedBytes(resp: Response, limit: number, tooLarge: string): Promise<Uint8Array> {
+	if (Number(resp.headers.get("content-length")) > limit) {
+		await resp.body?.cancel().catch(() => undefined);
+		throw new Error(tooLarge);
+	}
+	const reader = resp.body?.getReader();
+	if (!reader) return new Uint8Array();
+	const chunks: Uint8Array[] = [];
+	let length = 0;
+	try {
+		for (;;) {
+			const { done, value } = await reader.read();
+			if (done) break;
+			length += value.byteLength;
+			if (length > limit) throw new Error(tooLarge);
+			chunks.push(value);
+		}
+	} finally {
+		await reader.cancel().catch(() => undefined);
+		reader.releaseLock();
+	}
+	const bytes = new Uint8Array(length);
+	let offset = 0;
+	for (const chunk of chunks) {
+		bytes.set(chunk, offset);
+		offset += chunk.byteLength;
+	}
+	return bytes;
+}

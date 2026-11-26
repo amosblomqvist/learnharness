@@ -1,7 +1,7 @@
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
-import { safeFetch } from "./safe-fetch.ts";
+import { readBoundedBytes, safeFetch } from "./safe-fetch.ts";
 // The search-hit shape lives in the core port since the search wave
 // (2026-09-20); this alias keeps callers churn-free.
 import type { SearchHit as WebSearchResult, SearchProvider } from "../../core/search.ts";
@@ -105,10 +105,7 @@ async function fetchAndExtract(url: string): Promise<string> {
 	if (/image\/|audio\/|video\/|zip|octet-stream/.test(contentType)) {
 		throw new Error(`Unsupported content type: ${contentType.split(";")[0]}`);
 	}
-	const length = Number(resp.headers.get("content-length") ?? 0);
-	if (length > MAX_RESPONSE_BYTES) throw new Error("Response too large");
-
-	const text = await resp.text();
+	const text = new TextDecoder().decode(await readBoundedBytes(resp, MAX_RESPONSE_BYTES, "Response too large"));
 	if (!contentType.includes("html")) return `${sourceLine}\n\n${truncate(text)}`; // plain text / markdown / code
 
 	const extracted = htmlToMarkdown(text);
