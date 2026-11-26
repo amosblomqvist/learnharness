@@ -24,6 +24,7 @@ export * from "./source-selection.ts";
 export * from "./session-folders.ts";
 export * from "./source-label.ts";
 export * from "./render-settings.ts";
+export { comparePluginVersions, type CatalogPlugin, type PluginCatalog } from "./plugin-catalog.ts";
 
 export * from "./question-core.ts";
 // The event bus (push architecture, 2026-10-02): vocabulary + emit/subscribe
