@@ -801,7 +801,9 @@ export class GraphCanvasRenderer {
 		this.dragId = null;
 		this.simMoved = false;
 		this.simCenter = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
-		this.buildSim();
+		// Defer d3-force construction until first node drag or physics tuning.
+		this.sim = null;
+		this.simById.clear();
 		this.geoVersion++; // new data → rebuild world geometry
 		this.markDirty();
 	}
@@ -987,6 +989,7 @@ export class GraphCanvasRenderer {
 		if (e.button !== 0) return;
 		const pos = this.eventPos(e);
 		const node = this.pickAt(pos.x, pos.y);
+		if (node && !this.sim) this.buildSim();
 		if (node && this.sim) {
 			// Node press: pin the node (at ITS OWN position — the cursor
 			// may be inside the pick pad, off-center). preventDefault kills
@@ -1085,15 +1088,20 @@ export class GraphCanvasRenderer {
 		// is the disc's world radius × the camera zoom, plus the constant
 		// screen pad — the whole halo stays hit-testable.
 		const maxDist = this.settings.nodeSize * k + PICKING_PAD;
-		const projected: { id: string; x: number; y: number }[] = [];
+		let best: CanvasNode | null = null;
+		let bestD2 = maxDist * maxDist;
 		for (const n of this.data.nodes) {
 			if (this.visible && !this.visible.has(n.id)) continue;
 			if (isImpNodeId(n.id)) continue; // pure geometry — never picked
-			projected.push({ id: n.id, x: n.x * k + tx, y: n.y * k + ty });
+			const dx = n.x * k + tx - px;
+			const dy = n.y * k + ty - py;
+			const d2 = dx * dx + dy * dy;
+			if (d2 < bestD2) {
+				bestD2 = d2;
+				best = n;
+			}
 		}
-		const hit = pickNearest(projected, px, py, maxDist);
-		if (!hit) return null;
-		return this.nodeById.get(hit.id) ?? null;
+		return best;
 	}
 
 	private setHover(nodeId: string | null): void {
