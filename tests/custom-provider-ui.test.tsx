@@ -9,13 +9,19 @@ import { InteractionLayersProvider } from "../components/interaction-layers.tsx"
 
 const dom = parseHTML("<html><body></body></html>");
 Object.assign(globalThis, { window: dom.window, document: dom.document, Element: dom.window.Element, HTMLElement: dom.window.HTMLElement, HTMLInputElement: dom.window.HTMLInputElement, CustomEvent: dom.window.CustomEvent, IS_REACT_ACT_ENVIRONMENT: true });
+const etag = { etag: '"fixture"' };
+const revision = '"fixture"';
+const ENDPOINTS = () => [
+	{ id: "custom", name: "Fixture endpoint", baseUrl: "http://fixture.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] },
+	{ id: "custom-1234abcd", name: "Work gateway", baseUrl: "http://work.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "work-model" }], overrides: {}, manualModels: [] },
+];
 const originalFetch = globalThis.fetch;
 let root: Root | undefined;
 let host: HTMLElement | undefined;
 async function mount(setup = false) {
 	globalThis.fetch = async (input, init) => {
 		assert.equal(init?.method ?? "GET", "GET", "polish interactions must not save credentials/settings");
-		if (String(input).startsWith("/api/custom-provider")) return Response.json({ baseUrl: "http://fixture.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"fixture"' } });
+		if (String(input).startsWith("/api/custom-provider")) return Response.json({ revision, limit: 20, endpoints: ENDPOINTS() }, { headers: etag });
 		return Response.json({ keys: [], providers: [] });
 	};
 	host = document.createElement("div"); document.body.appendChild(host); root = createRoot(host);
@@ -49,4 +55,20 @@ test("model controls use approved effort labels, right-align Save limits, and gr
 	const help = element("custom-help"); assert.equal(element("custom-budget-help").parentElement, help); assert.equal(element("custom-reasoning-help").parentElement, help);
 	const children = Array.from(element("custom-endpoint-editor").children); assert.ok(children.indexOf(help) > children.indexOf(element("custom-pins")));
 	assert.match(help.textContent ?? "", /do not resize backend context/); assert.match(help.textContent ?? "", /Off may not disable/);
+});
+
+test("every endpoint is its own named row, and the editor edits the one you opened", async () => {
+	await mount();
+	const rows = document.querySelectorAll('[data-testid="custom-endpoint-row"]');
+	assert.equal(rows.length, 2, "one row per stored endpoint");
+	assert.deepEqual(
+		Array.from(document.querySelectorAll('[data-testid="custom-endpoint-name"]')).map((node) => node.textContent),
+		["Fixture endpoint", "Work gateway"],
+		"the name is what tells them apart",
+	);
+	const name = element("custom-name-input") as HTMLInputElement;
+	assert.equal(name.value, "Fixture endpoint", "the open editor is seeded from the row you clicked");
+	const url = element("custom-baseurl-input") as HTMLInputElement;
+	assert.equal(url.value, "http://fixture.invalid/v1");
+	assert.ok(element("custom-endpoint-editor"));
 });

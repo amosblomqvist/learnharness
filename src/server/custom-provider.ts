@@ -11,15 +11,19 @@ import { configureProviderSource, piModels } from "../agent/models.ts";
 import { readSettings } from "../store/settings.ts";
 import { CustomBodyLimitError, readBoundedJson } from "./custom-provider-body.ts";
 import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
+import { CUSTOM_PROVIDER_ID } from "../core/settings.ts";
 import { customBindingMatches } from "../core/custom-provider-auth.ts";
 import { customAuthState, customKeyAuthorized } from "./custom-provider-auth.ts";
 import {
 	CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
+	customProviderName,
 	customProviderUsable,
+	isCustomProviderId,
 	normalizeBaseUrl,
 	type CustomModel,
 	type CustomModelOverride,
+	type CustomProviderSettings,
 } from "../core/settings.ts";
 
 
@@ -30,31 +34,55 @@ const KEYLESS_PLACEHOLDER = "not-needed";
 const isRecord = (value: unknown): value is Record<string, unknown> =>
 	typeof value === "object" && value !== null && !Array.isArray(value);
 
-/** Install the sole custom source: donor settings + explicit authentication.
- * Publication captures a consistent snapshot; an already-started operation
- * cannot acquire a later endpoint's key. No file configuration source exists. */
+/** Install the custom source: every stored endpoint, each with its own
+ * authorization. Publication captures a consistent snapshot; an
+ * already-started operation cannot acquire a later endpoint's key. No file
+ * configuration source exists. An endpoint that stops being usable (deleted,
+ * key revoked, URL cleared) is removed from the collection in the same pass,
+ * so no stale route survives to answer a request. */
 export function installCustomProviderSource(readAuth = customAuthState): void {
 	let fingerprint: string | undefined;
 	configureProviderSource({
-		isCustom: (id) => id === CUSTOM_PROVIDER.id,
+		isCustom: isCustomProviderId,
 		sync(models) {
-			const cp = readSettings()?.customProvider;
-			// Validate the durable nonce/URL/mode before resolving ANY credential.
-			// Keyless reads only the nonsecret marker, never a file/env key.
-			const auth = readAuth(cp?.authMode === "apiKey", cp);
-			const key = auth.key;
-			const ready = customProviderUsable(cp) && auth.readable && customBindingMatches(cp, auth.binding) && (cp.authMode === "keyless" || customKeyAuthorized(cp, auth));
-			const next = JSON.stringify([cp, auth]); // Private in-memory fingerprint, never a public revision.
+			const stored = readSettings()?.customProviders ?? [];
+			const ready: { cp: CustomProviderSettings & { baseUrl: string }; key: string | undefined }[] = [];
+			const snapshot: unknown[] = [];
+			for (const cp of stored) {
+				// Validate the durable nonce/URL/mode before resolving ANY
+				// credential. Keyless reads only the nonsecret marker, never a
+				// file/env key.
+				const auth = readAuth(cp.id, cp.authMode === "apiKey", cp);
+				snapshot.push([cp, auth]);
+				const usable = customProviderUsable(cp) && auth.readable && customBindingMatches(cp, auth.binding) && (cp.authMode === "keyless" || customKeyAuthorized(cp, auth));
+				if (usable) ready.push({ cp, key: auth.key });
+			}
+			const next = JSON.stringify(snapshot); // Private in-memory fingerprint, never a public revision.
 			if (next === fingerprint) return;
-			if (ready) models.setProvider(buildOpenAiCompatibleProvider({ ...cp, baseUrl: cp.baseUrl, models: cp.models ?? [], apiKey: key }));
-			else models.deleteProvider(CUSTOM_PROVIDER.id);
 			fingerprint = next;
+			const live = new Set(ready.map((r) => r.cp.id));
+			for (const provider of models.getProviders()) {
+				if (isCustomProviderId(provider.id) && !live.has(provider.id)) models.deleteProvider(provider.id);
+			}
+			for (const { cp, key } of ready) {
+				models.setProvider(buildOpenAiCompatibleProvider({
+					id: cp.id,
+					name: customProviderName(cp),
+					baseUrl: cp.baseUrl,
+					models: cp.models ?? [],
+					overrides: cp.overrides,
+					apiKey: key,
+				}));
+			}
 		},
 	});
 }
 
-export function customProviderAvailable(): boolean {
-	return piModels().getProvider(CUSTOM_PROVIDER.id) !== undefined;
+/** Is any custom endpoint registered in the collection — or, with an id,
+ *  exactly that one? */
+export function customProviderAvailable(id?: string): boolean {
+	if (id !== undefined) return piModels().getProvider(id) !== undefined;
+	return piModels().getProviders().some((p) => isCustomProviderId(p.id));
 }
 
 /** Map a discovered model to a pi-ai entry: image→input, reasoning→thinking
@@ -66,13 +94,14 @@ function toPiModel(
 	model: CustomModel,
 	baseUrl: string,
 	overrides: Record<string, CustomModelOverride>,
+	providerId: string,
 ): Model<Api> {
 	const pin = overrides[model.id];
 	return {
 		id: model.id,
 		name: model.id,
 		api: "openai-completions",
-		provider: CUSTOM_PROVIDER.id,
+		provider: providerId,
 		baseUrl,
 		// Pin wins; else detected from the endpoint's metadata (see
 		// detectReasoning). true makes pi-ai offer the standard levels and send
@@ -89,6 +118,11 @@ function toPiModel(
 
 /** Build an OpenAI-compatible provider from parts. baseUrl must be normalized. */
 export function buildOpenAiCompatibleProvider(input: {
+	/** The endpoint's id — its models carry it as their provider.
+	 *  Defaults to the legacy `custom` id for pre-multi-provider callers. */
+	id?: string;
+	/** The learner's name for it (the picker's group label). */
+	name?: string;
 	baseUrl: string;
 	models: readonly CustomModel[];
 	/** User pins by model id (see CustomModelOverride) — absent = none. */
@@ -97,15 +131,17 @@ export function buildOpenAiCompatibleProvider(input: {
 	apiKey?: string;
 }): Provider<Api> {
 	const overrides = input.overrides ?? {};
+	const id = input.id ?? CUSTOM_PROVIDER_ID;
+	const name = input.name ?? CUSTOM_PROVIDER.label;
 	return createProvider<Api>({
-		id: CUSTOM_PROVIDER.id,
-		name: CUSTOM_PROVIDER.label,
+		id,
+		name,
 		baseUrl: input.baseUrl,
 		auth: { apiKey: {
-			name: `${CUSTOM_PROVIDER.label} API key`,
-			resolve: async () => ({ auth: { apiKey: input.apiKey ?? KEYLESS_PLACEHOLDER }, source: input.apiKey ? CUSTOM_PROVIDER.envVar : "keyless" }),
+			name: `${name} API key`,
+			resolve: async () => ({ auth: { apiKey: input.apiKey ?? KEYLESS_PLACEHOLDER }, source: input.apiKey ? `${name} key` : "keyless" }),
 		} },
-		models: input.models.map((m) => toPiModel(m, input.baseUrl, overrides)),
+		models: input.models.map((m) => toPiModel(m, input.baseUrl, overrides, id)),
 		api: openAICompletionsApi(),
 	});
 }

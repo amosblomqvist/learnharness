@@ -241,7 +241,7 @@ function mockKeys() {
 			writes.push({ path, body: JSON.parse(String(init.body)) });
 			return Response.json({ ok: true });
 		}
-		if (path.startsWith("/api/custom-provider")) return Response.json({ baseUrl: "http://fixture.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }, { headers: { etag: '"fixture"' } });
+		if (path.startsWith("/api/custom-provider")) return Response.json({ revision: '"fixture"', limit: 20, endpoints: [{ id: "custom", name: "Custom endpoint", baseUrl: "http://fixture.invalid/v1", authMode: "keyless", keySource: "none", keyPresent: false, keyReuseRequired: false, models: [{ id: "fixture-model" }], overrides: {}, manualModels: [] }] }, { headers: { etag: '"fixture"' } });
 		return Response.json({ keys: [], providers: [
 			{ id: "alpha", envVar: "ALPHA_API_KEY", label: "Alpha" }, { id: "beta", envVar: "BETA_API_KEY", label: "Beta" },
 		] });

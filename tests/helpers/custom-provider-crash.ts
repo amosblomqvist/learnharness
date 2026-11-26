@@ -42,10 +42,14 @@ if (mode === "inspect") {
 } else {
 	const route = await import("../../app/api/custom-provider/route.ts");
 	const get = route.GET(new Request("http://localhost/api/custom-provider"));
-	const payload = action === "keyless" ? { baseUrl: "http://second.invalid/v1", authMode: "keyless" }
-		: action === "envMove" ? { baseUrl: "http://second.invalid/v1", authMode: "apiKey", reuseKey: true }
-		: action === "reuse" ? { baseUrl: "http://first.invalid/v1", authMode: "apiKey", reuseKey: true }
-		: { baseUrl: "http://second.invalid/v1", authMode: "apiKey", key: "fixture-new-key" };
+	// Reconnect the endpoint the record already holds — every case below moves
+	// THAT endpoint's URL, never adds a second one.
+	const current = (await get.json()) as { endpoints?: { id: string }[] };
+	const id = current.endpoints?.[0]?.id ?? "";
+	const payload = action === "keyless" ? { id, baseUrl: "http://second.invalid/v1", authMode: "keyless" }
+		: action === "envMove" ? { id, baseUrl: "http://second.invalid/v1", authMode: "apiKey", reuseKey: true }
+		: action === "reuse" ? { id, baseUrl: "http://first.invalid/v1", authMode: "apiKey", reuseKey: true }
+		: { id, baseUrl: "http://second.invalid/v1", authMode: "apiKey", key: "fixture-new-key" };
 	const request = new Request("http://localhost/api/custom-provider", { method: action === "disconnect" ? "DELETE" : "POST", headers: { origin: "http://localhost", "content-type": "application/json", "if-match": get.headers.get("etag")! }, body: JSON.stringify(payload) });
 	const result = await route.POST(request);
 	console.log(JSON.stringify({ status: result.status, body: await result.json(), requests }));

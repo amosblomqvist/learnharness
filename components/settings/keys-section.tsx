@@ -57,25 +57,51 @@ interface KeysResponse {
 	providers?: ProviderKeyInfo[];
 }
 
-/** The custom endpoint's non-secret status (GET /api/custom-provider). */
-interface CustomStatus {
-	keyReuseRequired: boolean;
-	revision: string;
+/** One custom endpoint's non-secret status (GET /api/custom-provider). */
+interface CustomEndpointStatus {
+	id: string;
+	/** What the learner calls it. */
+	name: string;
+	baseUrl: string;
 	authMode: "keyless" | "apiKey";
 	keySource: "env" | "file" | "none";
-	baseUrl: string;
+	keyPresent: boolean;
+	keyReuseRequired: boolean;
 	models: CustomModel[];
 	/** User pins by model id (context / max output / thinking). */
 	overrides: Record<string, CustomModelOverride>;
 	manualModels: string[];
-	keyPresent: boolean;
 }
+
+/** Every stored endpoint, plus the record's revision and its cap. */
+interface CustomStatus {
+	endpoints: CustomEndpointStatus[];
+	revision: string;
+	limit: number;
+}
+
+const CUSTOM_ENDPOINT_FALLBACK_LIMIT = 20;
 
 async function readCustomStatus(inspectKey = false): Promise<CustomStatus> {
 	const response = await fetch(`/api/custom-provider${inspectKey ? "?authMode=apiKey" : ""}`);
 	if (!response.ok) throw new Error("Unable to load custom configuration.");
-	const cp = await response.json() as Partial<CustomStatus>;
-	return { keyReuseRequired: Boolean(cp.keyReuseRequired), revision: response.headers.get("etag") ?? "", authMode: cp.authMode ?? "keyless", keySource: cp.keySource ?? "none", baseUrl: cp.baseUrl ?? "", models: cp.models ?? [], overrides: cp.overrides ?? {}, manualModels: cp.manualModels ?? [], keyPresent: Boolean(cp.keyPresent) };
+	const body = (await response.json()) as Partial<CustomStatus>;
+	return {
+		endpoints: (body.endpoints ?? []).map((e) => ({
+			id: e.id ?? "",
+			name: e.name ?? "Custom endpoint",
+			baseUrl: e.baseUrl ?? "",
+			authMode: e.authMode === "apiKey" ? "apiKey" : "keyless",
+			keySource: e.keySource ?? "none",
+			keyPresent: Boolean(e.keyPresent),
+			keyReuseRequired: Boolean(e.keyReuseRequired),
+			models: e.models ?? [],
+			overrides: e.overrides ?? {},
+			manualModels: e.manualModels ?? [],
+		})),
+		revision: body.revision ?? response.headers.get("etag") ?? "",
+		limit: body.limit ?? CUSTOM_ENDPOINT_FALLBACK_LIMIT,
+	};
 }
 
 /** The curated tools group, pinned by id (the catalog owns the copy;
@@ -84,7 +110,8 @@ async function readCustomStatus(inspectKey = false): Promise<CustomStatus> {
  *  section can never drift from core/auth-keys.ts again. */
 const TOOL_IDS = AUTH_KEYS.map((k) => k.id) as readonly string[];
 
-/** The custom endpoint's synthetic Add-provider entry (offered only while unconfigured). */
+/** The custom endpoint's synthetic Add-provider entry (offered as often as the
+ *  record's cap allows — one row per endpoint). */
 export const CUSTOM_PROVIDER_INFO: ProviderKeyInfo = {
 	id: CUSTOM_PROVIDER.id,
 	envVar: CUSTOM_PROVIDER.envVar,
@@ -382,22 +409,26 @@ export function KeysSection({
 	// without destroying drafts; explicit Save/Cancel still discard them.
 	const [addingEditors, setAddingEditors] = useState<ProviderKeyInfo[]>([]);
 	const [addError, setAddError] = useState<string | null>(null);
-	/** The custom endpoint's status + whether its connect editor is open. */
+	/** Every custom endpoint's status, plus which one is being edited. */
 	const [custom, setCustom] = useState<CustomStatus | null>(null);
-	const [addingCustom, setAddingCustom] = useState(false);
+	/** The endpoint whose connect editor is open ("" while adding a new one). */
+	const [customTarget, setCustomTarget] = useState<string | null>(null);
+	/** What the MOUNTED editor edits ("__new__" = an endpoint being added).
+	 *  Separate from customTarget so folding with Escape keeps its drafts. */
+	const [customEditorId, setCustomEditorId] = useState("__new__");
 	const [customEditorMounted, setCustomEditorMounted] = useState(false);
 	const editorScopeRef = useRef<HTMLDivElement>(null);
 	useInteractionLayer({
 		kind: "view", rootRef: editorScopeRef,
-		enabled: openRow !== null || adding !== null || addingCustom,
+		enabled: openRow !== null || adding !== null || customTarget !== null,
 		onClose: () => {
 			setOpenRow(null);
 			setAdding(null);
-			setAddingCustom(false);
+			setCustomTarget(null);
 			return "closed";
 		},
 	});
-	const discardCustomEditor = () => { setAddingCustom(false); setCustomEditorMounted(false); };
+	const discardCustomEditor = () => { setCustomTarget(null); setCustomEditorMounted(false); };
 	const discardProviderEditor = (id: string) => {
 		setAdding(null);
 		setAddingEditors(editors => editors.filter(provider => provider.id !== id));
@@ -457,10 +488,10 @@ export function KeysSection({
 		notifySettingsSaved("keys");
 	}
 
-	/** Forget the custom endpoint (config + key server-side), same rhythm as
+	/** Forget ONE custom endpoint (config + key server-side), same rhythm as
 	 *  deleteKey: fire, re-read, broadcast so the catalog narrows everywhere. */
-	async function disconnectCustom(revision: string): Promise<string | null> {
-		const res = await fetch("/api/custom-provider", { method: "DELETE", headers: { "content-type": "application/json", "if-match": revision }, body: JSON.stringify({}) }).catch(() => null);
+	async function disconnectCustom(id: string, revision: string): Promise<string | null> {
+		const res = await fetch("/api/custom-provider", { method: "DELETE", headers: { "content-type": "application/json", "if-match": revision }, body: JSON.stringify({ id }) }).catch(() => null);
 		if (!res?.ok) return res ? ((await res.json().catch(() => ({}))).error ?? "Disconnect failed.") : "Disconnect failed. Check your connection.";
 		discardCustomEditor();
 		await reload();
@@ -504,52 +535,64 @@ export function KeysSection({
 						testid={`key-${status.id.toLowerCase()}`}
 					/>
 				))}
-				{custom?.baseUrl && (
+				{custom?.endpoints.map((endpoint) => (
 					<CustomEndpointRow
-						status={custom}
-						expanded={addingCustom}
-						onToggle={() => { setCustomEditorMounted(true); setAddingCustom((v) => !v); }}
-					/>
-				)}
-				{customEditorMounted && (
-					<div hidden={!addingCustom} inert={!addingCustom} style={{ display: addingCustom ? undefined : "none" }}>
-					<CustomEndpointEditor
-						active={addingCustom}
-						revision0={custom?.revision ?? ""}
-						authMode0={custom?.authMode ?? "keyless"}
-						keySource0={custom?.keySource ?? "none"}
-						keyReuseRequired0={custom?.keyReuseRequired ?? false}
-						onReload={async () => { await reload(); discardCustomEditor(); }}
-						baseUrl0={custom?.baseUrl ?? ""}
-						keyPresent={custom?.keyPresent ?? false}
-						models={custom?.models ?? []}
-						overrides={custom?.overrides ?? {}}
-						manualModels0={custom?.manualModels ?? []}
-						onSaved={async () => {
-							discardCustomEditor();
-							await reload();
-							notifySettingsSaved("keys");
+						key={endpoint.id}
+						status={endpoint}
+						expanded={customTarget === endpoint.id}
+						onToggle={() => {
+							setCustomEditorMounted(true);
+							if (customTarget !== endpoint.id) setCustomEditorId(endpoint.id);
+							setCustomTarget(customTarget === endpoint.id ? null : endpoint.id);
 						}}
-						onPinsSaved={async () => {
-							await reload();
-							notifySettingsSaved("keys");
-						}}
-						onDelete={disconnectCustom}
-						onCancel={discardCustomEditor}
 					/>
-					</div>
-				)}
+				))}
+				{customEditorMounted && (() => {
+					const editing = custom?.endpoints.find((e) => e.id === customEditorId);
+					return (
+						<div hidden={customTarget === null} inert={customTarget === null} style={{ display: customTarget === null ? "none" : undefined }}>
+							<CustomEndpointEditor
+								key={customEditorId}
+								id0={editing?.id ?? ""}
+								name0={editing?.name ?? ""}
+								active={customTarget !== null}
+								revision0={custom?.revision ?? ""}
+								authMode0={editing?.authMode ?? "keyless"}
+								keySource0={editing?.keySource ?? "none"}
+								keyReuseRequired0={editing?.keyReuseRequired ?? false}
+								onReload={async () => { await reload(); discardCustomEditor(); }}
+								baseUrl0={editing?.baseUrl ?? ""}
+								keyPresent={editing?.keyPresent ?? false}
+								models={editing?.models ?? []}
+								overrides={editing?.overrides ?? {}}
+								manualModels0={editing?.manualModels ?? []}
+								onSaved={async () => {
+									discardCustomEditor();
+									await reload();
+									notifySettingsSaved("keys");
+								}}
+								onPinsSaved={async () => {
+									await reload();
+									notifySettingsSaved("keys");
+								}}
+								onDelete={editing ? (rev) => disconnectCustom(editing.id, rev) : undefined}
+								onCancel={discardCustomEditor}
+							/>
+						</div>
+					);
+				})()}
 				{providers !== undefined && (
 					<AddProviderRow
-						addable={custom?.baseUrl ? addable : [...addable, CUSTOM_PROVIDER_INFO]}
+						addable={[...addable, ...(custom && custom.endpoints.length >= custom.limit ? [] : [CUSTOM_PROVIDER_INFO])]}
 						onPick={(p) => {
 							setAddError(null);
 							if (p.id === CUSTOM_PROVIDER.id) {
 								setAdding(null);
 								setCustomEditorMounted(true);
-								setAddingCustom(true);
+								setCustomEditorId("__new__");
+								setCustomTarget("");
 							} else {
-								setAddingCustom(false);
+								setCustomTarget(null);
 								setAddingEditors(editors => editors.some(provider => provider.id === p.id) ? editors : [...editors, p]);
 								setAdding(p);
 							}
@@ -680,7 +723,8 @@ function AddProviderEditor({
 }
 
 /** One donor editor for first setup and Settings; setup omits offline pin and
- * disconnect controls, while authentication/revisions/manual IDs stay identical. */
+ *  disconnect controls, while authentication/revisions/manual IDs stay identical.
+ *  Setup edits the endpoint the learner already has, or adds the first one. */
 export function CustomEndpointSetup({ onSaved }: { onSaved: () => void | Promise<void> }) {
 	const [status, setStatus] = useState<CustomStatus | null>(null);
 	const [error, setError] = useState(false);
@@ -690,23 +734,25 @@ export function CustomEndpointSetup({ onSaved }: { onSaved: () => void | Promise
 	}
 	useEffect(() => { void reload(); }, []);
 	if (!status || error) return <div className="text-xs">{error ? "Unable to load custom configuration." : "Loading custom configuration…"}{error && <button onClick={() => void reload()}>Retry</button>}</div>;
-	return <CustomEndpointEditor key={status.revision} setup revision0={status.revision} authMode0={status.authMode} keySource0={status.keySource} keyReuseRequired0={status.keyReuseRequired} baseUrl0={status.baseUrl} keyPresent={status.keyPresent} models={status.models} overrides={status.overrides} manualModels0={status.manualModels} onSaved={onSaved} onPinsSaved={reload} onReload={reload} onCancel={reload} />;
+	const existing = status.endpoints[0];
+	return <CustomEndpointEditor key={`${existing?.id ?? "__new__"}:${status.revision}`} setup id0={existing?.id ?? ""} name0={existing?.name ?? ""} active revision0={status.revision} authMode0={existing?.authMode ?? "keyless"} keySource0={existing?.keySource ?? "none"} keyReuseRequired0={existing?.keyReuseRequired ?? false} baseUrl0={existing?.baseUrl ?? ""} keyPresent={existing?.keyPresent ?? false} models={existing?.models ?? []} overrides={existing?.overrides ?? {}} manualModels0={existing?.manualModels ?? []} onSaved={onSaved} onPinsSaved={reload} onReload={reload} onCancel={reload} />;
 }
 
-/** The custom endpoint's status row (shown once configured); clicking re-opens the editor. */
+/** One custom endpoint's status row (shown once configured); clicking re-opens
+ *  the editor. The name is what tells two of them apart. */
 function CustomEndpointRow({
 	status,
 	expanded,
 	onToggle,
 }: {
-	status: CustomStatus;
+	status: CustomEndpointStatus;
 	expanded: boolean;
 	onToggle: () => void;
 }) {
 	const count = status.models.length;
 	const line = `${status.baseUrl} · ${count} model${count === 1 ? "" : "s"} · ${status.authMode === "keyless" ? "keyless" : status.keyPresent ? "API key" : "API key missing"}`;
 	return (
-		<div data-testid="custom-endpoint-row">
+		<div data-testid="custom-endpoint-row" data-endpoint-id={status.id}>
 			<button
 				type="button"
 				data-testid="custom-endpoint-row-btn"
@@ -714,7 +760,7 @@ function CustomEndpointRow({
 				onClick={onToggle}
 				className="flex w-full items-center justify-between gap-3 rounded-sm px-1 py-1.5 text-left cursor-pointer transition-colors hover:bg-accent/50"
 			>
-				<span className="font-ui text-xs text-foreground">Custom endpoint</span>
+				<span data-testid="custom-endpoint-name" className="font-ui text-xs text-foreground">{status.name}</span>
 				<span data-testid="custom-endpoint-status" className="max-w-[60%] truncate font-mono text-[11px] text-muted-foreground">
 					{line}
 				</span>
@@ -769,6 +815,8 @@ const pinTestid = (prefix: string, id: string) => `${prefix}-${id.replace(/[^a-z
 function CustomEndpointEditor({
 	setup = false,
 	active = true,
+	id0,
+	name0,
 	revision0, authMode0, keySource0, keyReuseRequired0, onReload,
 	baseUrl0,
 	keyPresent: initialKeyPresent,
@@ -782,6 +830,10 @@ function CustomEndpointEditor({
 }: {
 	setup?: boolean;
 	active?: boolean;
+	/** The endpoint being edited; "" adds a new one. */
+	id0: string;
+	/** Its stored name — the learner's own word for it. */
+	name0: string;
 	revision0: string;
 	authMode0: "keyless" | "apiKey";
 	keySource0: "env" | "file" | "none";
@@ -816,16 +868,20 @@ function CustomEndpointEditor({
 		if (authMode !== "apiKey") return;
 		let cancelled = false;
 		setAuthLoading(true);
+		// A new endpoint has no key to inspect yet; only a stored one does.
+		if (!id0) { setAuthLoading(false); return; }
 		readCustomStatus(true).then((status) => {
 			if (cancelled) return;
-			setKeySource(status.keySource);
-			setKeyPresent(status.keyPresent);
-			setKeyReuseRequired(status.keyReuseRequired);
-			if (status.keySource === "env") setKey("");
+			const mine = status.endpoints.find((e) => e.id === id0);
+			setKeySource(mine?.keySource ?? "none");
+			setKeyPresent(Boolean(mine?.keyPresent));
+			setKeyReuseRequired(Boolean(mine?.keyReuseRequired));
+			if (mine?.keySource === "env") setKey("");
 		}).catch(() => { if (!cancelled) setError("Unable to inspect effective key. Reload configuration and retry."); })
 			.finally(() => { if (!cancelled) setAuthLoading(false); });
 		return () => { cancelled = true; };
-	}, [authMode]);
+	}, [authMode, id0]);
+	const [name, setName] = useState(name0);
 	const [baseUrl, setBaseUrl] = useState(baseUrl0);
 	const [key, setKey] = useState("");
 	const [keyTouched, setKeyTouched] = useState(false);
@@ -840,6 +896,13 @@ function CustomEndpointEditor({
 	const [pinsError, setPinsError] = useState<string | null>(null);
 	const changedTarget = normalizeBaseUrl(baseUrl) !== normalizeBaseUrl(baseUrl0);
 	const canConnect = Boolean(baseUrl.trim()) && (authMode === "keyless" || (!authLoading && ((Boolean(key.trim()) && keySource !== "env") || (keyPresent && (!(changedTarget || keyReuseRequired) || reuseKey)))));
+	// Only the name changed: nothing to re-probe, nothing to re-authorize.
+	const renameOnly = Boolean(id0)
+		&& name.trim() !== name0.trim()
+		&& normalizeBaseUrl(baseUrl) === normalizeBaseUrl(baseUrl0)
+		&& authMode === authMode0
+		&& !(keyTouched && key.trim())
+		&& manualModels.trim() === manualModels0.join(", ").trim();
 
 	const draftOf = (m: CustomModel): PinDraft => drafts[m.id] ?? pinDraft(overrides[m.id]);
 	const setDraft = (m: CustomModel, patch: Partial<PinDraft>) =>
@@ -854,7 +917,7 @@ function CustomEndpointEditor({
 		const res = await fetch("/api/custom-provider", {
 			method: "PATCH",
 			headers: { "content-type": "application/json", "if-match": revision },
-			body: JSON.stringify({ overrides: pinsPayload(current) }),
+			body: JSON.stringify({ id: id0, overrides: pinsPayload(current) }),
 		}).catch(() => null);
 		if (!res || !res.ok) {
 			const b = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
@@ -873,13 +936,15 @@ function CustomEndpointEditor({
 	}
 
 	async function save() {
-		if (busy || pinsBusy || !canConnect) return;
+		if (busy || pinsBusy || (!renameOnly && !canConnect)) return;
 		setBusy(true);
 		setError(null);
 		const res = await fetch("/api/custom-provider", {
 			method: "POST",
 			headers: { "content-type": "application/json", "if-match": revision },
-			body: JSON.stringify({ baseUrl, authMode, reuseKey, manualModels, ...(authMode === "apiKey" && keyTouched && key.trim() && keySource !== "env" ? { key } : {}) }),
+			body: JSON.stringify(renameOnly
+				? { id: id0, name }
+				: { id: id0, name, baseUrl, authMode, reuseKey, manualModels, ...(authMode === "apiKey" && keyTouched && key.trim() && keySource !== "env" ? { key } : {}) }),
 		}).catch(() => null);
 		if (!res || !res.ok) {
 			const b = (await res?.json().catch(() => ({}))) as { error?: string } | undefined;
@@ -894,7 +959,16 @@ function CustomEndpointEditor({
 	return (
 		<div data-testid="custom-endpoint-editor" className="flex flex-col gap-2 rounded-sm px-1 py-1.5">
 			<div className="flex items-center gap-2">
-				<span className="shrink-0 font-ui text-xs text-foreground">Custom endpoint</span>
+				<input
+					type="text"
+					value={name}
+					onChange={(e) => setName(e.target.value)}
+					placeholder="Name"
+					aria-label="Custom endpoint name"
+					data-testid="custom-name-input"
+					disabled={busy}
+					className="h-7 w-28 shrink-0 rounded-sm border border-border bg-background px-1.5 font-ui text-xs text-foreground outline-none placeholder:text-muted-foreground/60 focus:border-muted-foreground/50"
+				/>
 				<input
 					ref={baseUrlRef}
 					type="text"
@@ -943,11 +1017,11 @@ function CustomEndpointEditor({
 				<button
 					type="button"
 					onClick={() => void save()}
-					disabled={busy || pinsBusy || !canConnect}
+					disabled={busy || pinsBusy || (!renameOnly && !canConnect)}
 					data-testid="custom-save"
 					className="shrink-0 text-xs text-foreground underline-offset-2 hover:underline disabled:text-muted-foreground/40 disabled:no-underline"
 				>
-					{busy ? "Connecting…" : "Connect"}
+					{busy ? (renameOnly ? "Saving…" : "Connecting…") : renameOnly ? "Save name" : "Connect"}
 				</button>
 				<button
 					type="button"

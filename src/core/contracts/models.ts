@@ -15,6 +15,9 @@ export interface ModelCatalogEntry {
 	id: string;
 	name: string;
 	provider: string;
+	/** What the learner calls this provider. Present only where they named it
+	 *  (custom endpoints); absent means `provider` is already readable. */
+	providerName?: string;
 	reasoning: boolean;
 	input: ("text" | "image")[];
 	/** Thinking levels accepted by this model, as reported by the host catalog. */

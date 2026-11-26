@@ -56,8 +56,10 @@ import { claudeCodeAvailable } from "./claude-code-config.ts";
 import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
+	CUSTOM_PROVIDER_ID,
 	MODEL_SLOTS,
-	customProviderUsable,
+	isCustomProviderId,
+	usableCustomProviders,
 	type BackgroundModelRole,
 	type ModelSlotName,
 	type ModelsSettings,
@@ -158,11 +160,14 @@ export function catalogProviders(): CatalogProvider[] {
 		{ id: "chatgpt", envVar: "", keyPresent: chatGPTConnected() },
 		{ id: CLAUDE_CODE_PROVIDER, envVar: "", keyPresent: claudeCodeAvailable() },
 		...NATIVE_SUBSCRIPTIONS.map((p) => ({ id: p.logicalId, envVar: "", keyPresent: nativeSubscriptionConnected(p.providerId) })),
-		// The custom endpoint: a row only when usable (base URL set). keyPresent
+		// Each custom endpoint: a row only when usable (base URL set). keyPresent
 		// reflects usability, not key presence (keyless local servers are allowed).
-		...(customProviderUsable(effectiveSettings().customProvider)
-			? [{ id: CUSTOM_PROVIDER.id, envVar: CUSTOM_PROVIDER.envVar, keyPresent: customProviderAvailable() }]
-			: []),
+		...usableCustomProviders(effectiveSettings().customProviders).map((cp) => ({
+			id: cp.id,
+			// Only the endpoint the single-endpoint era wrote has an env var.
+			envVar: cp.id === CUSTOM_PROVIDER_ID ? CUSTOM_PROVIDER.envVar : "",
+			keyPresent: customProviderAvailable(cp.id),
+		})),
 	]).sort((a, b) => a.id.localeCompare(b.id));
 }
 
@@ -173,16 +178,22 @@ function keyedProviderIds(): Set<string> {
 	return new Set(catalogProviders().filter((p) => p.keyPresent).map((p) => p.id));
 }
 
-/** Project one catalog model to the client DTO. */
-export function toModelDto(model: Model<Api>): ModelDto {
+/** Project one catalog model to the client DTO. `providerNames` carries the
+ *  learner's own name for providers they configured (custom endpoints), so
+ *  the picker never shows a generated id. */
+export function toModelDto(model: Model<Api>, providerNamesOrIndex?: ReadonlyMap<string, string> | number): ModelDto {
+	// A bare `.map(toModelDto)` passes the numeric index here; ignore it.
+	const providerNames = typeof providerNamesOrIndex === "number" ? undefined : providerNamesOrIndex;
+	const providerName = providerNames?.get(model.provider);
 	return {
 		id: model.id,
 		name: model.name,
 		provider: model.provider,
+		...(providerName ? { providerName } : {}),
 		reasoning: model.reasoning,
 		input: [...model.input],
 		supportedLevels: getSupportedThinkingLevels(model),
-		cost: model.provider === CLAUDE_CODE_PROVIDER || model.provider === CUSTOM_PROVIDER.id ? null : {
+		cost: model.provider === CLAUDE_CODE_PROVIDER || isCustomProviderId(model.provider) ? null : {
 			input: model.cost.input,
 			output: model.cost.output,
 			cacheRead: model.cost.cacheRead,
@@ -220,13 +231,14 @@ export function catalogContextLimits(): Map<string, number> {
  *  pins (the settings UI's per-role default captions). */
 export function modelCatalog(): ModelCatalogResponse {
 	const keyed = keyedProviderIds();
+	const names: ReadonlyMap<string, string> = new Map(usableCustomProviders(effectiveSettings().customProviders).map((cp): [string, string] => [cp.id, cp.name ?? cp.id]));
 	const models = piModels()
 		.getProviders()
 		.filter((p) => keyed.has(p.id))
 		.flatMap((p) => piModels().getModels(p.id))
-		.map(toModelDto)
+		.map((m) => toModelDto(m, names))
 		.sort((a, b) => (a.provider === b.provider ? a.id.localeCompare(b.id) : a.provider.localeCompare(b.provider)))
-		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map(toModelDto));
+		.concat([...chatGPTModels(), ...nativeSubscriptionModels()].map((m) => toModelDto(m)));
 	return {
 		models,
 		defaults: catalogDefaults(),
