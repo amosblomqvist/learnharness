@@ -35,28 +35,47 @@ import type { ChatStore } from "../core/ports.ts";
  *  {type:"dismiss-problem", problemCallId}). */
 export type ParkedDismissal = unknown;
 
-interface LhGlobal {
-	__lhParkedDismissals?: Map<string, ParkedDismissal>;
+interface StoredPark {
+	input: ParkedDismissal;
+	/** Identifies this park. A composer steer accepted while it is waiting
+	 *  records the same number, so settlement can tell that message from a
+	 *  steer that was already queued. */
+	generation: number;
 }
 
-function registry(): Map<string, ParkedDismissal> {
+interface ParkState {
+	entries: Map<string, StoredPark>;
+	nextGeneration: number;
+}
+
+interface LhGlobal {
+	__lhParkedDismissalState?: ParkState;
+}
+
+function state(): ParkState {
 	const g = globalThis as typeof globalThis & LhGlobal;
-	return (g.__lhParkedDismissals ??= new Map<string, ParkedDismissal>());
+	return (g.__lhParkedDismissalState ??= { entries: new Map(), nextGeneration: 1 });
 }
 
 /** Park (or overwrite) the chat's dismissal intent. Called by the dismiss
  *  route when a turn owns the chat. */
 export function parkDismissal(chatId: string, input: ParkedDismissal): void {
-	registry().set(chatId, input);
+	const parks = state();
+	parks.entries.set(chatId, { input, generation: parks.nextGeneration++ });
+}
+
+/** The generation of the chat's current park, or null when nothing is parked. */
+export function parkedDismissalGeneration(chatId: string): number | null {
+	return state().entries.get(chatId)?.generation ?? null;
 }
 
 /** Take the chat's parked dismissal (removes it). Returns null when
  *  nothing is parked. */
 export function takeParkedDismissal(chatId: string): ParkedDismissal | null {
-	const parked = registry().get(chatId);
+	const parked = state().entries.get(chatId);
 	if (parked === undefined) return null;
-	registry().delete(chatId);
-	return parked;
+	state().entries.delete(chatId);
+	return parked.input;
 }
 
 /** Apply the chat's parked dismissal, if any, against the current record.
@@ -65,14 +84,21 @@ export function takeParkedDismissal(chatId: string): ParkedDismissal | null {
  *  record. The append path is the route's own (dismissAppends); a
  *  ChatInputError means the dismissed thing never materialized — the park
  *  is dropped, silence is the correct outcome. Emits "record-changed"
- *  exactly when something was written. */
-export function applyParkedDismissal(chatStore: ChatStore, chatId: string): void {
-	const input = takeParkedDismissal(chatId);
-	if (input === null) return;
+ *  exactly when something was written.
+ *
+ *  Returns which park landed. "question" is a skipped check (builtin or
+ *  plugin). "problem" is a practice discard — its conclude pair still
+ *  waits for the next explicit input. Null means nothing was written. */
+export function applyParkedDismissal(chatStore: ChatStore, chatId: string): AppliedDismissal | null {
+	const parked = state().entries.get(chatId);
+	if (parked === undefined) return null;
+	state().entries.delete(chatId);
+	const input = parked.input;
 	const record = chatStore.getChat(chatId);
-	if (!record) return;
+	if (!record) return null;
 	try {
 		assertPluginQuestionInputAllowed(record.messages, input as { type: string });
+		const problem = (input as { type?: string }).type === "dismiss-problem";
 		const appends = (input as { type?: string }).type === "dismiss-plugin-question"
 			? preparePluginQuestionDismissal(record, input as PluginQuestionDismissInput)
 			: dismissAppends(record, input as Parameters<typeof dismissAppends>[1]);
@@ -80,8 +106,14 @@ export function applyParkedDismissal(chatStore: ChatStore, chatId: string): void
 		// side exchanges pending until that call's context-budget gate.
 		chatStore.saveMessages(chatId, [...record.messages, ...appends]);
 		emit("record-changed", { chatId });
+		return { kind: problem ? "problem" : "question", generation: parked.generation };
 	} catch (err) {
-		if (err instanceof ChatInputError) return; // never materialized — drop
+		if (err instanceof ChatInputError) return null; // never materialized — drop
 		throw err;
 	}
+}
+
+export interface AppliedDismissal {
+	kind: "question" | "problem";
+	generation: number;
 }

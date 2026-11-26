@@ -18,6 +18,7 @@ import type { ModelRole } from "../../config.ts";
 import {
 	deliverJobResult,
 	noteSteersDurable,
+	hasPostSkipUserSteer,
 	reconcileUserSteers,
 	registerLiveAgent,
 	restoreUncommittedAutomatic,
@@ -896,7 +897,7 @@ export async function handleChatInput(
 				// real truth — BEFORE endTurn, so "turn-settled" guarantees a
 				// subsequent fetch reads the dismissal already in the record
 				// (the same ordering law as persistTurn itself).
-				applyParkedDismissal(stores.chatStore, chatId);
+				const appliedDismissal = applyParkedDismissal(stores.chatStore, chatId);
 				// Any helper activity after the last model call stays pending;
 				// settlement never injects it behind the agent's context.
 				// LAST: a poller that sees not-in-flight must read an already-persisted
@@ -908,11 +909,32 @@ export async function handleChatInput(
 				// resolve; stranded markers return to pending), then let
 				// the pump take any stragglers down the idle wake.
 				unregisterLiveAgent(chatId);
-				settleSteers(chatId, stamped, false, constructed);
 				// Composer steers (2026-10-03): delivered ids dropped, stranded
 				// ones stay parked for the chat's next run (the registry is the
 				// stranding safety net — the agent's undrained copy died above).
+				// The question stopper returns before that poll, so a message
+				// typed after Skip — while this turn was still the live agent —
+				// is parked here even though the learner already sent it.
 				reconcileUserSteers(chatId, stamped);
+				// A skip still waits when the learner has not spoken. A message
+				// accepted during THIS park is that next message: continue once,
+				// and the parked copy rides the new run's start poll. A steer
+				// from before the skip stays parked until an explicit send.
+				// Practice discards are not included; their conclude pair is
+				// still attached by the next explicit input.
+				if (appliedDismissal?.kind === "question" && hasPostSkipUserSteer(chatId, appliedDismissal.generation)) {
+					void handleChatInput(chatId, { type: "continue" }, buildAgent, sideContext)
+						.then(async (res) => {
+							if (!res.ok) console.error(`[chat ${chatId}] post-skip message was not delivered (${res.status})`);
+							await res.arrayBuffer().catch(() => undefined);
+						})
+						.catch((err: unknown) => {
+							console.error(`[chat ${chatId}] post-skip message was not delivered:`, err);
+						})
+						.finally(() => { settleSteers(chatId, stamped, false, constructed); });
+				} else {
+					settleSteers(chatId, stamped, false, constructed);
+				}
 				// THE SETTLE KICK (owner round 14): the turn settled — if the
 				// projection is now over threshold, the summary starts in the
 				// background, INSIDE the learner's reading/answering pause
