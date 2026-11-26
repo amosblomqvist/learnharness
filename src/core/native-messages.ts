@@ -163,6 +163,11 @@ export function sendToUserText(block: unknown): string | undefined {
 	return typeof message === "string" && message.trim() ? message : undefined;
 }
 
+/** A send_to_user call that asked to end the turn after delivery. */
+export function isFinalSendToUser(block: unknown): boolean {
+	return sendToUserText(block) !== undefined && (block as { arguments: { final?: unknown } }).arguments.final === true;
+}
+
 /** Learner-facing prose, in content order. Only the explicit output tool
  * joins ordinary text here — thinking and all other tool inputs stay out.
  * Shared by coverage/extraction and Markdown; native history stays intact. */
@@ -1079,6 +1084,11 @@ export function needsContinuation(record: readonly LhMessage[]): boolean {
 				!!pluginProblemForCall(messages, { messageId: owner.id, contentIndex, toolCallId: call.id, toolName: call.name }))),
 	);
 	if (posedProblem) return false;
+	// A delivered final send_to_user ended the turn deliberately (its result
+	// terminates the run): nothing is owed, so a reload must not wake a turn.
+	const finalCalls = (content as AssistantMessage["content"]).filter((b) => b.type === "toolCall");
+	if (finalCalls.length > 0 && finalCalls.every((call) => isFinalSendToUser(call) &&
+		results.some((m) => m.toolCallId === (call as { id: string }).id && !m.isError))) return false;
 	const answered = new Set(results.map((m) => m.toolCallId));
 	const calls = (content as Array<{ type?: string; id?: string; name?: string }>).filter(
 		(b) => b.type === "toolCall" && typeof b.id === "string",

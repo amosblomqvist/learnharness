@@ -9,12 +9,23 @@ export const NARRATION_GUARD_MAX_BLOCKS = 2;
 export const NARRATION_BLOCK_REASON =
 	"This response contains narration but no delivered learner-facing prose. Write the explanation or commentary the learner needs through `send_to_user`, then retry this question. Deliver learner-facing content, not internal reasoning.";
 
+/** Every agent offered `send_to_user` (sendToUserApplies). */
 export const SEND_TO_USER_DELIVERY_RULE =
 	"## Delivering your prose\n\n" +
 	"Deliver learner-facing prose through `send_to_user`; ordinary response text may be converted into summarized thinking instead of reaching the learner. " +
 	"Send the complete explanation, example, or commentary before calling the accompanying question tool. " +
 	"Question-only turns do not require an extra message. " +
+	"When a `send_to_user` message is the last thing you do in a turn, set `final: true` on it. " +
+	"Leave it off if any tool call follows, including a question tool.";
+
+/** Appended to the delivery rule only where the narration guard runs. */
+export const NARRATION_RETRY_RULE =
 	"A question whose response contains narration but no delivered prose may be rejected so you can deliver the missing explanation and retry.";
+
+/** The prompt section for an agent offered `send_to_user`. */
+export function deliveryRule(guarded: boolean): string {
+	return guarded ? `${SEND_TO_USER_DELIVERY_RULE} ${NARRATION_RETRY_RULE}` : SEND_TO_USER_DELIVERY_RULE;
+}
 
 export function narrationGuardApplies(
 	kind: string,
