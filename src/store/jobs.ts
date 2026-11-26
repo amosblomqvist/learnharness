@@ -30,12 +30,26 @@ function jobFile(id: string): string {
  * Metadata also makes a builtin job strict: accepted plugin linkage must stay
  * readable even when its worker is native. A malformed/missing plugin identity
  * cannot grant plugin-kind jobs permission to fall back in place. */
+interface CachedJob {
+	mtimeMs: number;
+	size: number;
+	record: JobRecord;
+}
+
+const jobCache = new Map<string, CachedJob>();
+
+function cloneJob(record: JobRecord): JobRecord {
+	return { ...record };
+}
+
 function writeJob(record: JobRecord): void {
+	const file = jobFile(record.id);
 	const strict = record.kind === "plugin" || record.plugin !== undefined;
-	writeFileAtomicSync(jobFile(record.id), JSON.stringify(record, null, "\t"), {
+	writeFileAtomicSync(file, JSON.stringify(record, null, "\t"), {
 		allowInPlaceFallback: !strict,
 		...(strict ? { mode: 0o600 } : {}),
 	});
+	jobCache.delete(file);
 	if (strict && process.platform !== "win32") {
 		const directory = fs.openSync(JOBS_DIR, "r");
 		try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
@@ -66,12 +80,37 @@ function createJob(init: CreateJobInit): JobRecord {
 	return record;
 }
 
-function getJob(id: string): JobRecord | null {
+function readJobCached(id: string): JobRecord | null {
+	let file: string;
 	try {
-		return JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ jobFile(id), "utf-8")) as JobRecord;
+		file = jobFile(id);
 	} catch {
 		return null;
 	}
+	let stat: fs.Stats;
+	try {
+		stat = fs.statSync(/* turbopackIgnore: true */ file);
+	} catch {
+		jobCache.delete(file);
+		return null;
+	}
+	const cached = jobCache.get(file);
+	if (cached && cached.mtimeMs === stat.mtimeMs && cached.size === stat.size) {
+		return cached.record;
+	}
+	try {
+		const record = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ file, "utf-8")) as JobRecord;
+		jobCache.set(file, { mtimeMs: stat.mtimeMs, size: stat.size, record });
+		return record;
+	} catch {
+		jobCache.delete(file);
+		return null;
+	}
+}
+
+function getJob(id: string): JobRecord | null {
+	const record = readJobCached(id);
+	return record ? cloneJob(record) : null;
 }
 
 /** Merge a partial patch into the record (identity fields are immutable).
@@ -93,12 +132,25 @@ function updateJob(id: string, patch: JobPatch): JobRecord | null {
 function listJobs(chatId: string): JobRecord[] {
 	try {
 		fs.mkdirSync(JOBS_DIR, { recursive: true });
-		return fs
-			.readdirSync(/* turbopackIgnore: true */ JOBS_DIR)
-			.filter((f) => f.endsWith(".json"))
-			.map((f) => getJob(f.slice(0, -5)))
-			.filter((j): j is JobRecord => j !== null && j.chatId === chatId)
-			.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+		const entries = fs.readdirSync(/* turbopackIgnore: true */ JOBS_DIR).filter((f) => f.endsWith(".json"));
+		const seen = new Set<string>();
+		const matches: JobRecord[] = [];
+		for (const f of entries) {
+			const id = f.slice(0, -5);
+			let file: string;
+			try {
+				file = jobFile(id);
+			} catch {
+				continue;
+			}
+			seen.add(file);
+			const record = readJobCached(id);
+			if (record && record.chatId === chatId) matches.push(cloneJob(record));
+		}
+		for (const key of jobCache.keys()) {
+			if (!seen.has(key)) jobCache.delete(key);
+		}
+		return matches.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 	} catch {
 		return [];
 	}
@@ -117,8 +169,10 @@ function deleteJobsForChat(chatId: string): number {
 	let removed = 0;
 	for (const job of listJobs(chatId)) {
 		try {
-			fs.unlinkSync(jobFile(job.id));
-			removeLeftoverTemps(jobFile(job.id));
+			const file = jobFile(job.id);
+			fs.unlinkSync(file);
+			jobCache.delete(file);
+			removeLeftoverTemps(file);
 			removed++;
 		} catch {
 			/* already gone — the count is best-effort truth */
