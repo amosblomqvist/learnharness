@@ -944,7 +944,7 @@ function QuestionDockForm({
 									</span>
 								)}
 							</span>
-							<span>
+							<span className="min-w-0">
 								<ToolContentResponse>{opt.label}</ToolContentResponse>
 								{kind !== "quiz" && opt.description && (
 									// Option subtext renders in Source Sans 3 (owner's mockup);
