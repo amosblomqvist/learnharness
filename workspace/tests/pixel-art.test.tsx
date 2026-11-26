@@ -12,6 +12,7 @@ import { renderToStaticMarkup as renderMarkup } from "react-dom/server";
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { MessageResponse } from "../components/ai-elements/message.tsx";
 import { parsePixelArt, pixelRuns, pixelSvgDocument, PIXEL_MAX_SIDE } from "../components/pixel-art.tsx";
+import { composeInstructions } from "../src/agent/teacher-agent.ts";
 
 const render = (md: string) => renderMarkup(<InteractionLayersProvider><MessageResponse mode="static">{md}</MessageResponse></InteractionLayersProvider>);
 
@@ -123,3 +124,30 @@ describe("pixel art — markdown render", () => {
 	});
 });
 
+describe("pixel art — prompts", () => {
+	it("the teacher and practitioner learn the format and the picture ladder; the prober does not", () => {
+		const teacher = composeInstructions("teacher");
+		const practice = composeInstructions("practice");
+		const prober = composeInstructions("prober");
+		for (const prompt of [teacher, practice]) {
+			assert.match(prompt, /```pixel/);
+			assert.match(prompt, /find_image/);
+			assert.match(prompt, /show_image` with `commons`/);
+		}
+		assert.match(teacher, /\*\*`visual`:\*\* only for precise geometry/);
+		assert.ok(!/`visual`/.test(practice.split("## Pictures as nudges")[1] ?? ""), "practice has no visual tool");
+		assert.ok(!prober.includes("```pixel"), "the prober stays text-only");
+	});
+
+	it("every pixel example in the prompts parses", () => {
+		const prompts = `${composeInstructions("teacher")}\n${composeInstructions("practice")}`;
+		// Checkouts may carry CRLF (core.autocrlf); the parser accepts both.
+		const examples = [...prompts.matchAll(/```pixel\r?\n([\s\S]*?)```/g)].map((m) => m[1]!);
+		assert.equal(examples.length, 2, "one example each in the teacher and practice prompts");
+		for (const source of examples) {
+			const parsed = parsePixelArt(source);
+			assert.ok(parsed.ok, parsed.ok ? "" : parsed.error);
+			assert.ok(parsed.art.palette.every((c) => c.label), "examples label every colour");
+		}
+	});
+});

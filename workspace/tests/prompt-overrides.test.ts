@@ -420,7 +420,7 @@ describe("Practice settings API and effective prompt loading", () => {
 			assert.deepEqual(view[kind], effectivePromptSegments(kind, readSettingsRecord()?.agent?.prompts ?? {}));
 		}
 		assert.deepEqual(view.practice.map((s: { path: string }) => s.path), [
-			"practice/00-base.md", "practice/10-doctrine.md",
+			"practice/00-base.md", "practice/10-doctrine.md", "practice/20-pictures.md",
 			"shared/10-voice.md", "shared/15-accuracy.md", "shared/16-mental-model.md", "shared/35-side-conversations.md", "shared/40-formatting.md",
 		]);
 		assert.ok(!view.practice.some((s: { path: string }) => s.path === "system-prompt.md"));
