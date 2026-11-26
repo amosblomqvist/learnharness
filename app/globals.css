@@ -378,6 +378,17 @@ body {
 	padding: 0;
 	margin: 0;
 }
+/* WebKit (Safari, the iPhone app) lacks baseline-source: an inline-block
+ * scroller there sits on its bottom edge, lifting inline math and code
+ * off the line. An inline flex container takes its first item's baseline
+ * even while it scrolls, so the spans stay on the baseline. */
+@supports not (baseline-source: first) {
+	[data-session-surface] [data-streamdown="inline-code"],
+	[data-session-surface] :not(.katex-display) > .katex,
+	[data-session-surface] .lh-nobreak {
+		display: inline-flex;
+	}
+}
 
 /* ============================================================
  * Chrome melt (owner wave, 2026-09-19) — tables and code blocks stop
