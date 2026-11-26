@@ -69,7 +69,75 @@ function settingsAreAbsent(): boolean {
 	}
 }
 
+interface CachedSettingsEntry {
+	mtimeMs: number;
+	size: number;
+	record: UserSettings | null;
+	fileAccess: FileAccessSettingsResult;
+}
+
+let settingsCache: CachedSettingsEntry | null = null;
+
+function readCachedSettingsEntry(): CachedSettingsEntry | null {
+	let stat: fs.Stats;
+	try {
+		stat = fs.statSync(/* turbopackIgnore: true */ SETTINGS_FILE);
+	} catch {
+		settingsCache = null;
+		return null;
+	}
+	if (settingsCache && settingsCache.mtimeMs === stat.mtimeMs && settingsCache.size === stat.size) {
+		return settingsCache;
+	}
+	let raw: string;
+	try {
+		raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
+	} catch {
+		settingsCache = null;
+		return null;
+	}
+	let parsed: unknown;
+	try {
+		parsed = JSON.parse(raw);
+	} catch {
+		const entry: CachedSettingsEntry = {
+			mtimeMs: stat.mtimeMs,
+			size: stat.size,
+			record: null,
+			fileAccess: { ok: false, error: FILE_ACCESS_ERROR },
+		};
+		settingsCache = entry;
+		return entry;
+	}
+	const fileAccess = fileAccessFromRecord(parsed);
+	const record = sanitizeUserSettings(parsed);
+	if (record && !fileAccess.ok) {
+		// Unrelated section writes carry this safe placeholder, not a dropped
+		// malformed policy that would silently restore unrestricted reads.
+		record.agent = { ...record.agent, fileAccess: { restricted: true, folders: [] } };
+	}
+	const entry: CachedSettingsEntry = { mtimeMs: stat.mtimeMs, size: stat.size, record, fileAccess };
+	settingsCache = entry;
+	return entry;
+}
+
+function cloneFileAccess(res: FileAccessSettingsResult): FileAccessSettingsResult {
+	return res.ok
+		? { ok: true, settings: { restricted: res.settings.restricted, folders: [...res.settings.folders] } }
+		: { ok: false, error: res.error };
+}
+
+function clonePlain<T>(value: T): T {
+	if (value === null || typeof value !== "object") return value;
+	if (Array.isArray(value)) return value.map((item) => clonePlain(item)) as T;
+	const out: Record<string, unknown> = {};
+	for (const [k, v] of Object.entries(value)) out[k] = clonePlain(v);
+	return out as T;
+}
+
 export function readFileAccessSettings(): FileAccessSettingsResult {
+	const cached = readCachedSettingsEntry();
+	if (cached) return cloneFileAccess(cached.fileAccess);
 	let raw: string;
 	try { raw = fs.readFileSync(SETTINGS_FILE, "utf-8"); }
 	catch (error) {
@@ -84,29 +152,12 @@ export function readFileAccessSettings(): FileAccessSettingsResult {
 /** The persisted record, or null when none exists (first boot). Runs the
  *  migration chain on every read — cheap: a no-op file check when current. */
 export function readSettings(): UserSettings | null {
-	let raw: string;
-	try {
-		raw = fs.readFileSync(SETTINGS_FILE, "utf-8");
-	} catch {
-		return null; // no settings.json yet — first boot, all factory defaults
-	}
-	let parsed: unknown;
-	try {
-		parsed = JSON.parse(raw);
-	} catch {
-		return null; // corrupt → first-boot semantics (all factory defaults)
-	}
-	const record = sanitizeUserSettings(parsed);
-	if (!record) return null;
-	if (!fileAccessFromRecord(parsed).ok) {
-		// Unrelated section writes carry this safe placeholder, not a dropped
-		// malformed policy that would silently restore unrestricted reads.
-		record.agent = { ...record.agent, fileAccess: { restricted: true, folders: [] } };
-	}
+	const cached = readCachedSettingsEntry();
+	if (!cached || !cached.record) return null;
 	// Version chain (empty today): a future v2 migration slots in here —
 	// `if (record.version > CURRENT_SETTINGS_VERSION) …`. Unknown NEWER
 	// versions pass through untouched (the sanitizer preserved unknowns).
-	return record;
+	return clonePlain(cached.record);
 }
 
 /** Persist the record (sanitized). Returns what was written. */
@@ -121,6 +172,7 @@ export function writeSettings(raw: unknown): UserSettings {
 	}
 	fs.mkdirSync(path.dirname(SETTINGS_FILE), { recursive: true });
 	writeFileAtomicSync(SETTINGS_FILE, JSON.stringify(settings, null, "\t"), { allowInPlaceFallback: true });
+	settingsCache = null;
 	return settings;
 }
 
