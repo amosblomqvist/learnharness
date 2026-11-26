@@ -1,5 +1,5 @@
 import { Agent } from "@earendil-works/pi-agent-core";
-import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
+import type { AgentEvent, AgentMessage, AgentTool, AgentTurnContext, AgentTurnDecision } from "@earendil-works/pi-agent-core";
 import { invalidInputResult, questionResult } from "./tool-execute.ts";
 import { providerEventObserver } from "./provider-events.ts";
 import type { Usage } from "@earendil-works/pi-ai";
@@ -23,7 +23,8 @@ import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, TOGGLEABLE_TOOLS, type EnabledTools } from "../core/pending.ts";
 import type { PluginToolContext } from "../core/plugins.ts";
-import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
+import { toLlmMessages, nativeInputCause, needsContinuation, deliversLearnerOutput, answeredQuestionType, PRACTICE_PROBLEM_TOOL, type LhMessage } from "../core/native-messages.ts";
+import { CLAUDE_CODE_PROVIDER } from "./claude-code/constants.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 import { PluginQuestionLedger, type NativePluginQuestionContribution } from "./plugin-question-tools.ts";
@@ -201,6 +202,61 @@ function makeQuestionStopper(kind: AgentKind) {
 	};
 }
 
+const EMPTY_REACTION_REMINDER =
+	"The learner has answered the question. Your previous response was empty. Start the next turn now: respond to that answer and continue the lesson without waiting for another learner message.";
+const PREDICTION_CHECK_REMINDER =
+	"The learner answered your prediction and you resolved it, but your turn ended without the step's check. Continue now: finish teaching the step if anything is missing, then pose its check, without waiting for another learner message.";
+const EMPTY_TWICE_ERROR = "The model returned an empty response twice. Retry to continue from your saved answer.";
+
+/**
+ * One bounded continuation after a learner's question answer (#482, ported
+ * from #480). Some models complete the answer reaction with nothing for the
+ * learner, or (teacher, after a prediction) resolve it in prose and stop
+ * without the step's check; either way the lesson idles until "go on".
+ *
+ * Owed only when the run starts from a successful built-in question answer
+ * in the prober or teacher. Practice, plugin questions and the Claude Code
+ * engine (which drops system messages, so the reminder could not reach it)
+ * keep the normal stop. At most one continuation per answer: a second empty
+ * reaction becomes a failed turn with Retry; a second prose-only reaction
+ * stands as teaching.
+ */
+function answerReactionRecovery(kind: AgentKind, messages: readonly AgentMessage[], provider: string) {
+	const last = messages.at(-1);
+	if (kind === "practice" || provider === CLAUDE_CODE_PROVIDER || last?.role !== "toolResult" || last.isError ||
+		!(QUESTION_TOOLS as readonly string[]).includes(last.toolName) || !needsContinuation(messages as LhMessage[])) return undefined;
+	const afterPrediction = kind === "teacher" && answeredQuestionType(messages) === "predict";
+	let delivered = false;
+	let used: "empty" | "prediction" | undefined;
+	let reminder: string | undefined;
+	const terminal = (message: AgentMessage) => message.role === "assistant" && message.stopReason === "stop" && !message.content.some((block) => block.type === "toolCall");
+	return {
+		/** message_end: track learner-facing output; classify a second empty reaction
+		 * before the loop and downstream listeners consume it (existing Retry path). */
+		observe(message: AgentMessage): void {
+			if (deliversLearnerOutput(message)) delivered = true;
+			else if (used === "empty" && !delivered && terminal(message)) {
+				Object.assign(message, { stopReason: "error", errorMessage: EMPTY_TWICE_ERROR });
+			}
+		},
+		finish(turn: AgentTurnContext, signal: AbortSignal | undefined, requestCycle: AgentBuildOptions["requestCycle"]): AgentTurnDecision | undefined {
+			if (used || signal?.aborted || !terminal(turn.message)) return undefined;
+			if (!delivered) { used = "empty"; reminder = EMPTY_REACTION_REMINDER; }
+			else if (afterPrediction) { used = "prediction"; reminder = PREDICTION_CHECK_REMINDER; }
+			else return undefined;
+			// Normal admission, usage and steering still apply; no learner input or tool replay.
+			requestCycle?.oweForegroundContinuation();
+			return { action: "continue" };
+		},
+		/** The hidden reminder rides the continuation request only; settlement filters system messages. */
+		takeReminder(): AgentMessage | undefined {
+			const text = reminder;
+			reminder = undefined;
+			return text ? { role: "system", content: text, timestamp: Date.now() } : undefined;
+		},
+	};
+}
+
 function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[], nodeExists?: (nodeId: string) => boolean,
 	practice?: { gate: PracticeGate; graphNodes: PracticeToolContext["graphNodes"] }) {
 	// Practice never reaches the role fallback (the handler ALWAYS injects
@@ -241,6 +297,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	// the normal no-observer path (tests, env-off).
 	const providerEvents = opts.chatId ? providerEventObserver(opts.chatId, kind) : undefined;
 	const seenInputs = new Set((opts.messages ?? []).map((m) => (m as { id?: string }).id).filter(Boolean));
+	const recovery = answerReactionRecovery(kind, opts.messages ?? [], engine.model.provider);
 	const agent = new Agent({
 		identity: APP_IDENTITY,
 		sessionId: opts.chatId,
@@ -269,7 +326,12 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// exits BEFORE the steering poll — the parked-marker stranding our
 		// Wave C registerLiveAgent-before-runPiTurn design depends on.
 		// undefined preserves normal scheduling (the old boolean false).
-		finishTurn: (turn) => (turn.toolResults.some(result => questionLedger?.isAcknowledgment(result) || (kind === "practice" && isPluginProblemPoseAcknowledgment(result))) || stopper(turn) ? { action: "end" } : undefined),
+		// An answer reaction that ends with nothing for the learner (or, after a
+		// prediction, without its check) gets one continuation; see
+		// answerReactionRecovery.
+		finishTurn: (turn, signal) => (turn.toolResults.some(result => questionLedger?.isAcknowledgment(result) || (kind === "practice" && isPluginProblemPoseAcknowledgment(result))) || stopper(turn)
+			? { action: "end" }
+			: recovery?.finish(turn, signal, opts.requestCycle)),
 		// Wave C (2026-09-26, owner correction same day): markers handed to a
 		// live run drain from pi's STEERING queue — the lesson loop is one
 		// continuous teach→quiz→teach run, so delivery must inject at turn
@@ -285,8 +347,9 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		// an abort's dangling question call gets its INTERRUPTED result. It
 		// must never throw (pi's convertToLlm contract).
 		convertToLlm: toLlmMessages,
-		...(opts.contextUpdates ? { prepareNextTurnWithContext: ({ context }: { context: { messages: AgentMessage[] } }) => {
-			const messages = opts.contextUpdates!(context.messages);
+		...(opts.contextUpdates || recovery ? { prepareNextTurnWithContext: ({ context }: { context: { messages: AgentMessage[] } }) => {
+			const reminder = recovery?.takeReminder();
+			const messages = [...(opts.contextUpdates?.(context.messages) ?? []), ...(reminder ? [reminder] : [])];
 			return messages.length ? { messages } : undefined;
 		} } : {}),
 		prepareRequest: (request) => {
@@ -314,6 +377,9 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 		},
 	});
 	questionLedger?.bind(agent);
+	if (recovery) {
+		agent.subscribe((event) => { if (event.type === "message_end") recovery.observe(event.message); });
+	}
 	if (opts.onUsage) {
 		agent.subscribe((event: AgentEvent) => {
 			if (event.type === "message_end" && event.message.role === "assistant" && "usage" in event.message) {

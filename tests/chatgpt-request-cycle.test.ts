@@ -1,6 +1,6 @@
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
-import { type Model } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxToolCall, type Model } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import type { AgentEvent, AgentMessage } from "@earendil-works/pi-agent-core";
 import { piModels, piEngineForSpec, APP_IDENTITY } from "../src/agent/models.ts";
@@ -26,6 +26,8 @@ const model = piModels().getModel("openai", "gpt-5") as Model<"openai-responses"
 let epoch = 1, revision = 1, background = true;
 let cut: "lease" | "payload" | "full" | "afterFetch" | "none" = "none";
 let leases: boolean[] = [], fetches = 0, toolFirst = false;
+let emptyResponses = 0;
+let requestBodies: Record<string, any>[] = [];
 const status = () => ({ available: true, pending: false, allowBackgroundUse: background, activeId: "scratch", accounts: [{ id: "scratch", registration: "oaiapp_scratch", email: "dummy@example.invalid", connected: true, planEnabled: true, background: !background }], error: null });
 const ipc = (m: unknown) => (process.emit as (name: string, m: unknown) => boolean)("message", m);
 function revoke(full = false) {
@@ -50,11 +52,19 @@ before(() => {
   assert.equal(request.headers.get("authorization"), "Bearer dummy-oauth-native");
   assert.equal(request.headers.get("user-agent"), APP_IDENTITY.userAgent.custom);
   const body = JSON.parse(await request.text()); assert.equal(body.model, model.id); assert.equal(body.store, false);
+  requestBodies.push(body);
   fetches++;
   if (cut === "afterFetch") { cut = "none"; revoke(); throw new Error("admitted local abort"); }
   if (toolFirst && fetches === 1) {
    const call = { type: "function_call", id: "fc_again", call_id: "call_again", name: "again", namespace: "learnharness", arguments: "{}", status: "completed" };
    return new Response([{ type: "response.output_item.added", output_index: 0, item: call }, { type: "response.output_item.done", output_index: 0, item: call }, { type: "response.completed", response: { status: "completed", output: [call], usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 } } }].map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
+  }
+  if (emptyResponses > 0) {
+   // The shape seen live (#482): a completed final_answer message with empty text.
+   emptyResponses--;
+   const item = { id: `msg_empty_${fetches}`, type: "message", phase: "final_answer", role: "assistant", content: [{ type: "output_text", text: "", annotations: [] }] };
+   const events = [{ type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } }, { type: "response.content_part.added", output_index: 0, content_index: 0, part: item.content[0] }, { type: "response.output_item.done", output_index: 0, item }, { type: "response.completed", response: { status: "completed", output: [item], usage: { input_tokens: 4, output_tokens: 4, total_tokens: 8 } } }];
+   return new Response(events.map((e) => `data: ${JSON.stringify(e)}\n\n`).join(""), { headers: { "content-type": "text/event-stream" } });
   }
   const item = { id: "msg_native", type: "message", role: "assistant", content: [{ type: "output_text", text: "Accepted learner", annotations: [] }] };
   const events = [{ type: "response.created", response: { id: "resp_native" } }, { type: "response.output_item.added", output_index: 0, item: { ...item, content: [] } }, { type: "response.content_part.added", output_index: 0, content_index: 0, part: { type: "output_text", text: "", annotations: [] } }, { type: "response.output_text.delta", output_index: 0, content_index: 0, delta: "Accepted learner" }, { type: "response.output_item.done", output_index: 0, item }, { type: "response.completed", response: { status: "completed", output: [item], usage: { input_tokens: 4, output_tokens: 2, total_tokens: 6 } } }];
@@ -161,6 +171,51 @@ test("unfinished foreground ordinary-tool chain recovers without rerunning the c
  assert.equal(r.final.filter((m) => m.role === "toolResult").length, 1);
  assert(!r.wire.includes('"id":"auto"'));
 });
+
+for (const blanks of [1, 2]) for (const lateAutomatic of [false, true]) {
+ test(`empty ChatGPT answer reaction uses one separately admitted foreground continuation, blanks=${blanks}, lateAutomatic=${lateAutomatic}`, async (t) => {
+  epoch++; revision++; background = false; cut = "none"; leases = []; fetches = 0; toolFirst = false; emptyResponses = blanks; requestBodies = [];
+  t.after(() => { emptyResponses = 0; });
+  await refreshChatGPTModels([model]);
+  const question = { ...fauxAssistantMessage([fauxToolCall("quiz", { question: "Which is first?" }, { id: "call_question|fc_question" })], { stopReason: "toolUse" }), provider: "chatgpt", api: model.api, model: model.id };
+  const answer = newAnswerResult("call_question|fc_question", "quiz", { kind: "quiz", questionText: "Which is first?", dontKnow: false, answers: [{ index: 1, label: "A" }], correct: true, answeredAt: new Date().toISOString() });
+  const messages = [newUserMessage("Teach me"), question, answer];
+  const purpose = { background: false };
+  let settled = 0, usage = 0, restored = 0, handedLate = false;
+  let final: AgentMessage[] = [];
+  const marker = automatic();
+  const cycle = new ChatGPTRequestCycle({ initialMessages: messages, foregroundOwed: true, purpose, scopeCurrent: chatGPTScopeCurrent, restoreAutomatic: (ids) => { restored++; assert(ids.has(marker.id)); agent.clearSteeringQueue(); } });
+  const engine = piEngineForSpec({ provider: "chatgpt", id: model.id }, () => purpose.background, cycle);
+  const agent = createTeacherAgent(undefined, { engine, messages, tools: {}, callPurpose: purpose, requestCycle: cycle, onUsage: () => { usage++; } });
+  agent.subscribe((event) => {
+   if (lateAutomatic && !handedLate && event.type === "message_end" && event.message.role === "assistant") {
+    handedLate = true; cut = "lease"; agent.steer(marker);
+   }
+  });
+  const handle = runPiTurn({ agent, requestCycle: cycle, onFinish: (m) => { settled++; final = m; } });
+  const wire = await new Response(handle.subscribe()).text();
+  assert.equal(fetches, 2, "one empty response and exactly one recovery request");
+  assert.deepEqual(leases, lateAutomatic ? [false, true, false] : [false, false], "background denial cannot consume the owed foreground continuation");
+  assert.equal(restored, lateAutomatic ? 1 : 0);
+  assert(!wire.includes('"id":"auto"'));
+  assert.equal(usage, 2); assert.equal(settled, 1);
+  assert.equal(await cycle.admission, true);
+  assert.equal(wire.split('"type":"agent_end"').length, 2);
+  assert.equal(final.filter((m) => m.role === "user").length, 1);
+  assert.equal(final.filter((m) => m.role === "toolResult").length, 1);
+  assert.equal(final.filter((m) => m.role === ("system" as string)).length, 0, "the reminder is never settled into the record");
+  const recovery = requestBodies[1]!;
+  assert(recovery.input.some((item: any) => item.type === "function_call_output" && item.call_id === "call_question"));
+  assert.match(JSON.stringify(recovery), /Your previous response was empty/);
+  const last = final.at(-1)!;
+  assert.equal(last.role, "assistant");
+  if (last.role === "assistant") {
+   assert.equal(last.stopReason, blanks === 1 ? "stop" : "error");
+   if (blanks === 1) assert.match(JSON.stringify(last.content), /Accepted learner/);
+   else { assert.match(last.errorMessage ?? "", /empty response twice/); assert.match(wire, /empty response twice/); }
+  }
+ });
+}
 
 test("local first-call context refusal restores unadmitted automatic input and retains an actionable SDK error without a lease or retry", async () => {
  const r = await nativeRun("none", true, true, false, false, false, "first");
