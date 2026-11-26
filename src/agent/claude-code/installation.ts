@@ -3,13 +3,23 @@ import { tmpdir } from "node:os";
 import { externalCliEnv } from "../../core/auth-env.ts";
 import { CLAUDE_CODE_MINIMUM_VERSION, type ClaudeCodeStatus } from "../../core/contracts/claude-code.ts";
 import { getClaudeBinary } from "./binary.ts";
+import { getConfiguredClaudeConfigDir } from "./config-dir.ts";
 
 export type ReadClaudeVersion = (binary: string) => Promise<string>;
+
+function versionProbeEnv(): NodeJS.ProcessEnv {
+	const configuredDir = getConfiguredClaudeConfigDir();
+	const env = externalCliEnv();
+	if (configuredDir !== undefined && configuredDir.length > 0) {
+		env.CLAUDE_CONFIG_DIR = configuredDir;
+	}
+	return env;
+}
 
 /** No shell, auth-status command, model call, or credential-file inspection. */
 export const readClaudeVersion: ReadClaudeVersion = (binary) => new Promise((resolve, reject) => {
 	execFile(binary, ["--version"], {
-		cwd: tmpdir(), env: externalCliEnv(), windowsHide: true,
+		cwd: tmpdir(), env: versionProbeEnv(), windowsHide: true,
 		timeout: 5_000, killSignal: "SIGKILL", maxBuffer: 4_096,
 	}, (error, stdout) => error ? reject(error) : resolve(stdout));
 });

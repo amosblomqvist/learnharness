@@ -1,12 +1,21 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { claudeCodeInstallationResponse as respond } from "../src/server/claude-code.ts";
+import { claudeCodeInstallationResponse as respond, claudeCodeProfilesResponse as respondProfiles } from "../src/server/claude-code.ts";
+import type { ClaudeCodeProfilesResponse } from "../src/core/contracts/claude-code.ts";
 const claudeCodeInstallationResponse: typeof respond = (request, inspect) => respond(request, inspect, () => true);
+const claudeCodeProfilesResponse: typeof respondProfiles = (request, discover) => respondProfiles(request, discover, () => true);
 
-function request(headers: Record<string, string> = {}) {
-	return new Request("http://localhost:3000/api/claude-code", { headers: { "x-learnharness-claude-code": "1", ...headers } });
+function request(headers: Record<string, string> = {}, path = "/api/claude-code", method = "GET") {
+	return new Request(`http://localhost:3000${path}`, { method, headers: { "x-learnharness-claude-code": "1", ...headers } });
 }
 const status = { state: "not-found" as const, version: null, minimumVersion: "2.1.259" };
+const profilesPayload: ClaudeCodeProfilesResponse = {
+	profiles: [],
+	configuredDir: null,
+	inheritedEnvDir: null,
+	effectiveDir: null,
+	defaultDir: "/tmp/home/.claude",
+};
 
 for (const headers of [
 	{ origin: "https://attacker.invalid" },
@@ -43,4 +52,42 @@ for (const headers of [{}, { origin: "http://localhost:3000", "sec-fetch-site": 
 test("a forged forwarded origin cannot authorize a foreign Origin header", async () => {
 	const response = await claudeCodeInstallationResponse(request({ origin: "https://attacker.invalid", "x-forwarded-host": "attacker.invalid", "x-forwarded-proto": "https" }), async () => assert.fail("must not probe"));
 	assert.equal(response.status, 403);
+});
+
+for (const headers of [
+	{ origin: "https://attacker.invalid" },
+	{ "sec-fetch-site": "cross-site" },
+	{ origin: "http://localhost:3000", "sec-fetch-site": "cross-site" },
+	{ origin: "null" },
+	{ "x-learnharness-claude-code": "" },
+	{ origin: "https://attacker.invalid", "x-forwarded-host": "attacker.invalid", "x-forwarded-proto": "https" },
+] as Record<string, string>[]) test(`unsafe profiles request ${JSON.stringify(headers)} never runs discovery`, async () => {
+	let calls = 0;
+	const response = await claudeCodeProfilesResponse(request(headers, "/api/claude-code/profiles"), () => { calls++; return profilesPayload; });
+	assert.equal(response.status, 403);
+	assert.equal(calls, 0);
+	assert.equal(response.headers.get("access-control-allow-origin"), null);
+});
+
+test("profiles endpoint rejects missing intent header, non-GET method, and disabled opt-in", async () => {
+	let calls = 0;
+	const noHeader = await claudeCodeProfilesResponse(new Request("http://localhost:3000/api/claude-code/profiles"), () => { calls++; return profilesPayload; });
+	assert.equal(noHeader.status, 403);
+
+	const postReq = await claudeCodeProfilesResponse(request({}, "/api/claude-code/profiles", "POST"), () => { calls++; return profilesPayload; });
+	assert.equal(postReq.status, 403);
+
+	const disabled = await respondProfiles(request({}, "/api/claude-code/profiles"), () => { calls++; return profilesPayload; }, () => false);
+	assert.equal(disabled.status, 403);
+	assert.equal(calls, 0);
+});
+
+for (const headers of [{}, { origin: "http://localhost:3000", "sec-fetch-site": "same-origin" }] as Record<string, string>[]) test(`legitimate profiles GET ${JSON.stringify(headers)} returns no-store JSON`, async () => {
+	let calls = 0;
+	const response = await claudeCodeProfilesResponse(request(headers, "/api/claude-code/profiles"), () => { calls++; return profilesPayload; });
+	assert.equal(response.status, 200);
+	assert.equal(calls, 1);
+	assert.equal(response.headers.get("cache-control"), "no-store");
+	assert.equal(response.headers.get("x-content-type-options"), "nosniff");
+	assert.deepEqual(await response.json(), profilesPayload);
 });

@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test, type TestContext } from "node:test";
 import { resolveClaudeBinary } from "../src/agent/claude-code/binary.ts";
+import { configureClaudeConfigDir } from "../src/agent/claude-code/config-dir.ts";
 import { readClaudeVersion } from "../src/agent/claude-code/installation.ts";
 import { createClaudeLauncher } from "../src/agent/claude-code/launch.ts";
 
@@ -81,4 +82,25 @@ test("relative PATH is resolved at server cwd and stays the same for probe and m
 	});
 	await launch(["-p"], { cwd: tmpdir(), env: { NODE_ENV: "test" } });
 	assert(spawned, "same verified absolute identity passed to the model launcher");
+});
+
+test("version probe applies configured CLAUDE_CONFIG_DIR via Symbol.for seam", { skip: unsupportedShebang }, async (t) => {
+	const dir = mkdtempSync(join(tmpdir(), "lh-version-cfg-"));
+	t.after(() => {
+		configureClaudeConfigDir(() => undefined);
+		rmSync(dir, { recursive: true, force: true });
+	});
+	const profileDir = join(dir, "profile");
+	mkdirSync(profileDir);
+	const bin = join(dir, "bin");
+	mkdirSync(bin);
+	const binary = join(bin, "claude");
+	writeFileSync(
+		binary,
+		`#!${process.execPath}\nif (process.env.CLAUDE_CONFIG_DIR !== ${JSON.stringify(profileDir)}) process.exit(5);\nprocess.stdout.write("2.1.310 (Claude Code)\\n");\n`,
+		{ mode: 0o755 },
+	);
+
+	configureClaudeConfigDir(() => profileDir);
+	assert.equal(await readClaudeVersion(binary), "2.1.310 (Claude Code)\n");
 });

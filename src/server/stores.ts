@@ -14,7 +14,9 @@ import { settingsStore } from "../store/settings.ts";
 import { themeStore } from "../store/themes.ts";
 import { resolveSettings, type EffectiveSettings } from "../core/settings-resolution.ts";
 import { syncCustomProvider } from "./custom-provider.ts";
+import { effectiveClaudeConfigDir } from "./claude-code-config.ts";
 import { configureWorkerRequestAdmission } from "../agent/worker-request-admission.ts";
+import { configureClaudeConfigDir } from "../agent/claude-code/config-dir.ts";
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
 	chatStore,
@@ -41,6 +43,7 @@ export function effectiveSettings(): EffectiveSettings {
 
 // Runtime policy is supplied at the composition root, never imported by agents.
 configureWorkerRequestAdmission(() => effectiveSettings().agent.workerRequestConcurrency);
+configureClaudeConfigDir(() => effectiveClaudeConfigDir());
 
 // Boot: register the custom endpoint (when configured) into piModels(); the
 // POST /api/custom-provider route re-syncs after every connect.

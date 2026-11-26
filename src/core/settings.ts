@@ -31,7 +31,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { CacheRetention } from "@earendil-works/pi-ai";
 import { AUTH_PROVIDER_KEYS } from "./auth-keys.ts";
-import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
+import { CLAUDE_CODE_PROVIDER, isValidClaudeConfigDir, type ClaudeCodeSettings } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
@@ -522,7 +522,7 @@ export interface UserSettings {
 	general?: GeneralSettings;
 	dictation?: DictationSettings;
 	/** Explicit app-wide opt-in; absent/invalid is off, including older records. */
-	claudeCode?: { enabled?: boolean };
+	claudeCode?: ClaudeCodeSettings;
 	agent?: AgentSettings;
 	/** The strong/cheap/vision model slots (model slots wave, 2026-09-20). */
 	models?: ModelsSettings;
@@ -890,6 +890,19 @@ function sanitizeCompaction(raw: Record<string, unknown>): CompactionSettings {
 	return out;
 }
 
+function sanitizeClaudeCode(raw: unknown): ClaudeCodeSettings {
+	const out: ClaudeCodeSettings = {};
+	if (raw === null || typeof raw !== "object" || Array.isArray(raw)) return out;
+	const r = raw as Record<string, unknown>;
+	const enabled = boolOrDrop(r.enabled);
+	if (enabled !== undefined) out.enabled = enabled;
+	if (typeof r.configDir === "string") {
+		const trimmed = r.configDir.trim();
+		if (isValidClaudeConfigDir(trimmed)) out.configDir = trimmed;
+	}
+	return out;
+}
+
 /**
  * Coerce arbitrary JSON (disk file, network body) into a valid delta record:
  * known fields validated strictly (invalid ones drop/clamp per module doc),
@@ -913,10 +926,7 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 			: {};
 	}
 	if (r.claudeCode !== undefined) {
-		const raw = r.claudeCode;
-		out.claudeCode = raw !== null && typeof raw === "object" && !Array.isArray(raw)
-			&& typeof (raw as Record<string, unknown>).enabled === "boolean"
-			? { enabled: (raw as { enabled: boolean }).enabled } : {};
+		out.claudeCode = sanitizeClaudeCode(r.claudeCode);
 	}
 	if (r.agent !== null && typeof r.agent === "object" && !Array.isArray(r.agent)) {
 		out.agent = sanitizeAgent(r.agent as Record<string, unknown>);
