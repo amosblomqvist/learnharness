@@ -105,7 +105,7 @@ describe("development server readiness", () => {
 	});
 });
 
-function boot(checkout = false, { appReady = Promise.resolve() }: { appReady?: Promise<void> } = {}) {
+function boot(checkout = false, { appReady = Promise.resolve(), platform = checkout ? "win32" : "darwin", connected = checkout }: { appReady?: Promise<void>; platform?: string; connected?: boolean } = {}) {
 	let ready!: () => void, fail!: (error: Error) => void;
 	const readiness = new Promise<void>((resolve, reject) => { ready = resolve; fail = reject; });
 	const windows: string[] = [], exits: number[] = [], logs: string[] = [], probes: { url: string; signal: AbortSignal }[] = [];
@@ -119,7 +119,7 @@ function boot(checkout = false, { appReady = Promise.resolve() }: { appReady?: P
 	let markNavigated!: () => void;
 	const navigated = new Promise<void>(resolve => { markNavigated = resolve; });
 	const app = Object.assign(new EventEmitter(), {
-		setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => checkout,
+		setName() {}, getPath: () => "/fixture/LearnHarness", setPath() {}, requestSingleInstanceLock: () => connected,
 		quit() {
 			this.emit("before-quit");
 			let deferred = false;
@@ -145,14 +145,14 @@ function boot(checkout = false, { appReady = Promise.resolve() }: { appReady?: P
 			: id === "./appearance-chrome.cjs" ? { ...mainRequire(id), readAppearance: () => ({ mode: "dark", background: "#141414" }) }
 			: id === "./dev-server-readiness.cjs" ? { waitForDevServer: (url: string, { signal }: { signal: AbortSignal }) => {
 				probes.push({ url, signal }); signal.addEventListener("abort", () => fail(signal.reason), { once: true }); return readiness;
-			} } : id === "./windows-checkout.cjs" ? { startCheckoutServer: (node: string) => (spawned.push(node), {
+			} } : id === "./checkout-server.cjs" ? { startCheckoutServer: (node: string) => (spawned.push(node), {
 				child: checkoutChild, ready: readiness,
-			}) } : id === "./windows-checkout-restart.cjs" ? {
+			}) } : id === "./checkout-restart.cjs" ? {
 				pipeName: () => "fixture-pipe", listenForStop: async (_address: string, quit: () => void) => { requestStop = quit; },
 			} : mainRequire(id),
 		process: Object.assign(new EventEmitter(), {
-			platform: checkout ? "win32" : "darwin", argv: [], connected: checkout,
-			env: { LH_DEV_URL: "http://localhost:3000", ...(checkout ? { LH_WINDOWS_CHECKOUT_NODE: "fixture-node" } : {}) },
+			platform, argv: [], connected,
+			env: { LH_DEV_URL: "http://localhost:3000", ...(checkout ? { LH_CHECKOUT_NODE: "fixture-node" } : {}) },
 			send(message: unknown, callback?: () => void) { sent.push(message); callback?.(); },
 		}),
 		__dirname: dirname(mainFile), AbortController,
@@ -160,7 +160,7 @@ function boot(checkout = false, { appReady = Promise.resolve() }: { appReady?: P
 		console: { log: (line: string) => logs.push(line) },
 	};
 	runInNewContext(mainSource, context, { filename: mainFile });
-	const done = checkout ? Promise.resolve() : runInNewContext("main()", context) as Promise<void>;
+	const done = connected ? Promise.resolve() : runInNewContext("main()", context) as Promise<void>;
 	return {
 		app, windows, exits, logs, probes, ready, fail, done, signals, sent, spawned, checkoutChild, navigated,
 		launcher: context.process, window: () => window, requestStop: () => requestStop!(), quitCount: () => quitCount,
@@ -195,9 +195,9 @@ describe("real Electron main dev startup wiring", () => {
 	});
 });
 
-describe("Windows checkout desktop startup wiring", () => {
+for (const platform of ["win32", "linux"]) describe(`${platform} checkout desktop startup wiring`, () => {
 	it("uses normal Electron shutdown and waits for the owned server before quitting for restart", async () => {
-		const f = boot(true);
+		const f = boot(true, { platform });
 		f.ready(); await f.navigated;
 		f.requestStop();
 		assert.deepEqual(f.signals, ["SIGTERM"]);
@@ -209,7 +209,7 @@ describe("Windows checkout desktop startup wiring", () => {
 	});
 
 	it("uses only the owned server's readiness signal and detaches once the window loads and shows", async () => {
-		const f = boot(true); await delay(0);		assert.deepEqual(f.probes, []);
+		const f = boot(true, { platform }); await delay(0);		assert.deepEqual(f.probes, []);
 		assert.deepEqual(f.windows, []);
 		f.ready(); await f.navigated;
 		assert.deepEqual(f.windows, ["http://localhost:3000"]);
@@ -226,7 +226,7 @@ describe("Windows checkout desktop startup wiring", () => {
 
 	it("starts the owned server before Electron is ready, still after the instance lock", async () => {
 		let appReady!: () => void;
-		const f = boot(true, { appReady: new Promise<void>(resolve => { appReady = resolve; }) }); await delay(0);
+		const f = boot(true, { platform, appReady: new Promise<void>(resolve => { appReady = resolve; }) }); await delay(0);
 		assert.deepEqual(f.spawned, ["fixture-node"]);
 		f.ready(); await delay(0);
 		assert.deepEqual(f.windows, [], "the window still waits for Electron");
@@ -238,7 +238,7 @@ describe("Windows checkout desktop startup wiring", () => {
 
 	it("reports a server failure that happens before Electron is ready", async () => {
 		let appReady!: () => void;
-		const f = boot(true, { appReady: new Promise<void>(resolve => { appReady = resolve; }) }); await delay(0);
+		const f = boot(true, { platform, appReady: new Promise<void>(resolve => { appReady = resolve; }) }); await delay(0);
 		f.fail(new Error("port already in use")); await delay(0);
 		assert.equal(f.sent.length, 0, "the failure waits for Electron");
 		appReady(); await delay(0);
@@ -248,10 +248,18 @@ describe("Windows checkout desktop startup wiring", () => {
 	});
 
 	it("reports owned server startup failures without navigating", async () => {
-		const f = boot(true); await delay(0);
+		const f = boot(true, { platform }); await delay(0);
 		f.fail(new Error("port already in use")); await delay(0);
 		assert.deepEqual(f.windows, []);
 		assert.equal((f.sent[0] as { message: string }).message, "port already in use");
 		assert.deepEqual(f.exits, [1]);
+	});
+});
+
+describe("checkout mode platforms", () => {
+	it("keeps macOS out of checkout mode even with a connected launcher", async () => {
+		const f = boot(true, { platform: "darwin" }); await delay(0);
+		assert.deepEqual(f.spawned, []);
+		assert.equal(f.probes.length, 1, "macOS waits for an external dev server");
 	});
 });

@@ -169,7 +169,7 @@ try {
     Write-Host "[launcher] Using $nodeVersion with npm from $nodeDirectory"
     if ($InstallOnly) { exit 0 }
     $env:npm_execpath = $npmCli
-    $launchArguments = @((Join-Path $PSScriptRoot 'launch-windows-desktop.mjs'))
+    $launchArguments = @((Join-Path $PSScriptRoot 'launch-checkout-desktop.mjs'))
     if ($LauncherCommand) { $launchArguments += $LauncherCommand.ToLowerInvariant() }
     Push-Location -LiteralPath $workspace
     try {

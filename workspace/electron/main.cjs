@@ -45,8 +45,8 @@ const path = require("node:path");
 const SIDEBAR_AUTOCLOSE = 928;
 
 const PRODUCT_NAME = "LearnHarness";
-const checkoutNode = !app.isPackaged && process.platform === "win32" && process.connected
-	? process.env.LH_WINDOWS_CHECKOUT_NODE : undefined;
+const checkoutNode = !app.isPackaged && (process.platform === "win32" || process.platform === "linux") && process.connected
+	? process.env.LH_CHECKOUT_NODE : undefined;
 let checkoutReported = false;
 
 function reportCheckout(error) {
@@ -702,7 +702,7 @@ async function main() {
 	process.on("exit", killServer);
 	process.on("SIGHUP", killServer);
 
-	// Windows checkout: start the development server while Electron initializes.
+	// Source checkout (Windows/Linux launcher): start the development server while Electron initializes.
 	// The single-instance lock is already held, so this never starts a second server.
 	let checkout;
 	let checkoutReady = false;
@@ -710,7 +710,7 @@ async function main() {
 		// main() is called while this module is still evaluating; let it finish so
 		// module-level state declared after the boot block (serverProcess) exists.
 		await null;
-		const { startCheckoutServer } = require("./windows-checkout.cjs");
+		const { startCheckoutServer } = require("./checkout-server.cjs");
 		checkout = startCheckoutServer(checkoutNode, {
 			log,
 			onExit: error => {
@@ -773,7 +773,7 @@ async function main() {
 	} else if (checkout) {
 		await checkout.ready;
 		checkoutReady = true;
-		const restart = require("./windows-checkout-restart.cjs");
+		const restart = require("./checkout-restart.cjs");
 		await restart.listenForStop(restart.pipeName(path.join(__dirname, "..")), () => {
 			app.once("will-quit", event => {
 				// before-quit has signalled the owned server. Keep the desktop alive

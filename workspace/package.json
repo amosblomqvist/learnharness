@@ -23,7 +23,8 @@
 		"plugins:build-authoring": "node scripts/build-plugin-authoring.mjs",
 		"plugins:build-core": "node scripts/build-core-plugins.mjs",
 		"desktop:dev": "concurrently -k \"npm run dev\" \"LH_DEV_URL=http://localhost:3000 electron .\"",
-		"desktop:windows": "node scripts/launch-windows-desktop.mjs",
+		"desktop:windows": "node scripts/launch-checkout-desktop.mjs",
+		"desktop:linux": "node scripts/launch-checkout-desktop.mjs",
 		"dev:fresh": "bash scripts/dev-fresh.sh",
 		"desktop:dist": "rm -rf dist .next/standalone && npm run build && node scripts/smoke-provider-runtime.mjs && node scripts/build-server.mjs && node scripts/smoke-server.mjs && DEVELOPER_DIR=${DEVELOPER_DIR:-/Applications/Xcode.app/Contents/Developer} APPLE_KEYCHAIN_PROFILE=LH_NOTARY APPLE_TEAM_ID=JS6XN22HY6 electron-builder --mac --arm64"
 	},

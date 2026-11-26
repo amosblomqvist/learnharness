@@ -4,7 +4,7 @@ const readline = require("node:readline");
 
 function startCheckoutServer(node, { log, onExit }) {
 	const root = path.resolve(__dirname, "..");
-	const child = spawn(node, [path.join(root, "scripts", "windows-checkout-server.cjs")], {
+	const child = spawn(node, [path.join(root, "scripts", "checkout-server.cjs")], {
 		cwd: root,
 		env: { ...process.env, NODE_ENV: "development" },
 		stdio: ["ignore", "pipe", "pipe", "ipc"],

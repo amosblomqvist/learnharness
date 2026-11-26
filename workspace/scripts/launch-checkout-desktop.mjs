@@ -1,21 +1,21 @@
-/** Prepare the Windows checkout and hand its lifetime over to Electron. */
+/** Prepare the Windows or Linux checkout and hand its lifetime over to Electron. */
 import { spawn, spawnSync } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { createServer } from "node:net";
 import * as path from "node:path";
 import { pathToFileURL } from "node:url";
 import { assertNodeModulesUnlocked } from "./windows-node-modules-locks.mjs";
-import checkoutRestart from "../electron/windows-checkout-restart.cjs";
+import checkoutRestart from "../electron/checkout-restart.cjs";
 
 const root = path.resolve(import.meta.dirname, "..");
 const require = createRequire(import.meta.url);
 const origin = "http://localhost:3000";
 const archive = "public/plugin-authoring/learnharness-plugins.zip";
-const cache = "node_modules/.cache/learnharness-windows";
+const cache = `node_modules/.cache/learnharness-${process.platform === "win32" ? "windows" : "linux"}`;
 const sdkName = `${cache}/plugin-sdk`;
-const commonInputs = ["package.json", "package-lock.json", "scripts/launch-windows-desktop.mjs"];
+const commonInputs = ["package.json", "package-lock.json", "scripts/launch-checkout-desktop.mjs"];
 const projectInputs = ["package.json", "package-lock.json", "manifest.json", "README.md", "LICENSE", "THIRD-PARTY.md", "FSRS-LICENSE.txt", ".gitignore", "tsconfig.json", "src", "scripts", "tests", "licenses"];
 
 /** Hash file contents, or with `contents: false` only sizes and modification times. */
@@ -48,8 +48,9 @@ function runNode(args, cwd = root) {
 
 function runNpm(args, cwd = root) {
 	if (args[0] === "ci") {
-		// npm ci deletes node_modules first; refuse before that if a running process holds a binary in it.
-		assertNodeModulesUnlocked(path.join(cwd, "node_modules"));
+		// npm ci deletes node_modules first. Windows cannot delete a loaded binary, so refuse
+		// before that if a running process holds one. Linux deletes files that are in use.
+		if (process.platform === "win32") assertNodeModulesUnlocked(path.join(cwd, "node_modules"));
 		// Deprecation and install-script notices come from upstream packages and are not actionable here.
 		args = [...args, "--loglevel=error"];
 	}
@@ -156,7 +157,7 @@ async function startDesktop() {
 	console.log("[launcher] Checking the desktop runtime (downloads Electron if needed)...");
 	const executable = require("electron");
 	if (!existsSync(executable)) throw new Error("Electron's executable is missing. Run npx install-electron --no, then try again.");
-	const env = { ...process.env, LH_DEV_URL: origin, LH_WINDOWS_CHECKOUT_NODE: process.execPath };
+	const env = { ...process.env, LH_DEV_URL: origin, LH_CHECKOUT_NODE: process.execPath };
 	delete env.ELECTRON_RUN_AS_NODE;
 	console.log("[launcher] Starting LearnHarness. The console closes when its window opens.");
 	const desktop = spawn(executable, [root], { cwd: root, env, detached: true, stdio: ["ignore", "ignore", "ignore", "ipc"] });
@@ -190,25 +191,30 @@ async function startDesktop() {
 }
 
 async function main() {
-	if (process.platform !== "win32") throw new Error("This launcher is for Windows only.");
+	if (process.platform !== "win32" && process.platform !== "linux") throw new Error("This launcher is for Windows and Linux only.");
+	const script = process.env.npm_lifecycle_event;
+	const ownScript = process.platform === "win32" ? "desktop:windows" : "desktop:linux";
+	if ((script === "desktop:windows" || script === "desktop:linux") && script !== ownScript) {
+		throw new Error(`npm run ${script} is not for this platform. Use npm run ${ownScript}.`);
+	}
 	if (!process.versions.node.startsWith("26.")) throw new Error(`Node.js 26.x is required; found ${process.version}.`);
 	const args = process.argv.slice(2);
 	const restart = args.length === 1 && args[0] === "restart";
 	if (args.length && !restart) throw new Error("Usage: learn [restart]");
 	const npm = process.env.npm_execpath;
 	if (!npm || !path.isAbsolute(npm) || path.basename(npm).toLowerCase() !== "npm-cli.js") {
-		throw new Error("Run Launch LearnHarness.cmd or npm run desktop:windows.");
+		throw new Error(process.platform === "win32"
+			? "Run Launch LearnHarness.cmd or npm run desktop:windows."
+			: "Run Launch LearnHarness.desktop or npm run desktop:linux.");
 	}
 	process.env.NODE_ENV = "development";
 	process.env.PATH = `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ""}`;
 
 	// The OS releases the checkout lock even when the launcher is terminated.
-	const key = createHash("sha256").update(realpathSync(root).toLowerCase()).digest("hex");
 	const lock = createServer(socket => socket.destroy());
-	await new Promise((resolve, reject) => {
-		lock.once("error", error => reject(error.code === "EADDRINUSE" || error.code === "EACCES"
-			? new Error("Another launcher is already preparing this checkout.") : error));
-		lock.listen(`\\\\.\\pipe\\learnharness-checkout-${key}`, resolve);
+	await checkoutRestart.listenLocal(lock, checkoutRestart.checkoutAddress("checkout", root)).catch(error => {
+		throw error.code === "EADDRINUSE" || error.code === "EACCES"
+			? new Error("Another launcher is already preparing this checkout.") : error;
 	});
 	try {
 		const started = performance.now();

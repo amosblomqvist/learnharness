@@ -49,6 +49,16 @@ After a successful double-click launch, open a new PowerShell or Command Prompt 
 
 Use `learn restart` to close and reopen the Windows checkout desktop. The command waits up to 30 seconds for the previous instance and its server to stop. If the desktop is closed, it opens normally. To upgrade an existing `learn` command, close LearnHarness and double-click `Launch LearnHarness.cmd` once.
 
+### Linux double-click launcher
+
+Double-click [`Launch LearnHarness.desktop`](../../Launch%20LearnHarness.desktop) in the repository root. The first time, the file manager asks whether to trust the launcher (Thunar: **Mark as trusted and launch**). It opens a terminal and finds `workspace/` next to the launcher file, including in paths containing spaces. From a terminal in `workspace/` with Node.js 26.x and npm already available, you can also run `npm run desktop:linux`. `desktop:windows` and `desktop:linux` run the same launcher and each refuses on the other platform.
+
+The double-click launcher (`scripts/bootstrap-linux.sh`) uses the first Node.js 26.x with npm on `PATH`. If there is none, it downloads the latest stable 26.x `linux-x64` or `linux-arm64` archive from `nodejs.org`, verifies its published SHA-256 checksum, and installs it under `${XDG_DATA_HOME:-~/.local/share}/LearnHarness/runtime/node26-<architecture>`. Administrator access is not required, and the runtime is used only by the launcher. Automatic installation needs `curl`, `tar`, `xz`, `sha256sum` and `flock`. Setup caching, the owned server on `localhost:3000`, closing the terminal when the window opens, and `logs/main.log` work as on Windows; on a startup error the terminal waits for Enter.
+
+The single-launcher lock and the restart channel are Unix sockets in `$XDG_RUNTIME_DIR/learnharness/`, a folder only your user can open. A socket left by a crash is replaced on the next launch.
+
+After a successful double-click launch, run `learn` from any terminal. The launcher writes `~/.local/bin/learn` and prints a hint if that folder is not on your `PATH`. It never replaces a `learn` command it did not write. Use `learn restart` to close and reopen the Linux checkout desktop. If you move the checkout, double-click `Launch LearnHarness.desktop` in its new location to update the command. The Linux launcher does not open the app at sign-in.
+
 ### Other devices on your network
 
 For private iPhone access and a connected local phone viewport, use [Mobile Access](mobile-access.md) in the desktop app. It shares the existing loopback server through a separate same-account Tailscale gateway; no LAN binding is needed.

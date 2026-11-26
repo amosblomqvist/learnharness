@@ -25,6 +25,7 @@ npm run plugins:setup   # generates plugins/*/.sdk and runs npm ci in each sourc
 npm run dev            # stages core plugins, then next dev on localhost:3000
 npm run desktop:dev    # dev server + Electron
 npm run desktop:windows  # Windows launcher (same as "Launch LearnHarness.cmd")
+npm run desktop:linux    # Linux launcher (same as "Launch LearnHarness.desktop")
 npm run build          # stages core plugins, then next build
 npm test               # node:test via tsx over tests/*.test.ts(x)
 npm run typecheck      # tsc --noEmit (includes plugin sources)

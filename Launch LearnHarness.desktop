@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Version=1.5
+Name=Launch LearnHarness
+Comment=Prepare this LearnHarness checkout and open the desktop app
+Icon=applications-education
+Terminal=true
+Exec=sh -c "exec bash \\"\\$(dirname \\"\\$0\\")/workspace/scripts/bootstrap-linux.sh\\" --register --pause-on-error" %k
+Categories=Education;
