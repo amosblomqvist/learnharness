@@ -23,11 +23,14 @@ interface ToolCallPart {
 	errorText?: string;
 }
 
-/** The collapsed headline argument per tool: path for read/ls/show_image, pattern for
+/** The collapsed headline argument per tool: path for read/ls/show_image
+ *  (its Commons title when it shows one), the query for find_image, pattern for
  *  find/grep — shown as given, never resolved (the absolute path lands in
  *  the expanded view when present in the output). */
 function headlineArg(tool: string, input: unknown): string {
 	const inp = (input ?? {}) as Record<string, unknown>;
+	if (tool === "show_image" && typeof inp.commons === "string" && inp.commons.length > 0) return inp.commons;
+	if (tool === "find_image" && typeof inp.query === "string") return inp.query;
 	if (tool === "read" || tool === "ls" || tool === "show_image") {
 		const p = typeof inp.path === "string" && inp.path.length > 0 ? inp.path : "~";
 		return p;

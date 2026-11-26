@@ -70,10 +70,10 @@ A side answer is **not an application turn**. [`server/side-chat.ts`](../src/ser
 | Agent | Interaction | Other tools |
 | --- | --- | --- |
 | Prober | `probe` or `recall`, `ask_user_question`, `probe_done` | Read-only files, research/PDF dispatch; gated graph readers |
-| Teacher | `quiz` or `explain`, `ask_user_question`, `plan_init` | Read-only files, research/PDF/demo/visual dispatch; `show_image` |
-| Practitioner | `problem`, `conclude` | Read-only files, research/PDF dispatch; gated graph readers |
+| Teacher | `quiz` or `explain`, `ask_user_question`, `plan_init` | Read-only files, research/PDF/demo/visual dispatch; `show_image`, `find_image` |
+| Practitioner | `problem`, `conclude` | Read-only files, research/PDF dispatch; `show_image`, `find_image`; gated graph readers |
 
-Mechanic choices, settings toggles, and readiness affect availability. Practice side tools are composed separately from teaching toggles. Claude-family agents can receive `send_to_user`. Argument healing precedes semantic validation; invalid calls return errors the model can correct.
+Mechanic choices, settings toggles, and readiness affect availability. Practice side tools are composed separately from teaching toggles, except `find_image`, whose toggle applies to both. Claude-family agents can receive `send_to_user`. Argument healing precedes semantic validation; invalid calls return errors the model can correct.
 
 Question tools validate and execute server-side, returning a synthetic terminating placeholder. It stops a clean question pose, including mixed tool batches, but is not saved. The actual learner answer becomes the call's result later. The browser shuffles options and grades select questions; free recall exposes the committed answer for model judgment. Sibling pending questions are answered without inference until the last is resolved.
 
@@ -102,6 +102,10 @@ Core extractor/auditor/research/demo/visual/PDF requests and all detached `ctx.w
 ### Learner-image snapshots
 
 `show_image` displays a local raster picture; `visual` with an image path annotates it. Both use the file-access policy and shared processing: input bounds of 25 MiB, 16 megapixels, and 8192px per side; off-thread orientation/metadata cleanup; stored PNG/JPEG bounded to 1600px per side and below 1 MiB of base64.
+
+`show_image` with `commons` shows a Wikimedia Commons file that `find_image` listed. [`commons.ts`](../src/agent/tools/commons.ts) queries only the Commons API and downloads only a roughly 1024px thumbnail from `upload.wikimedia.org`, both through `safeFetch`. The thumbnail goes through the same snapshot processing. Its record details (`WebImageDetails`) add the title, author, license and file-page link, which the image card shows as an attribution line. `find_image` returns text candidates only. Neither tool sends image bytes to the model. Switching the `find_image` tool off removes both `find_image` and the `commons` input.
+
+Teacher and practitioner replies can also contain ```` ```pixel ```` fences: pixel art of at most 32×32 with a 16-colour palette, parsed and drawn as inline SVG by [`pixel-art.tsx`](../components/pixel-art.tsx). There is no tool call and no server involvement. `pixel` and `mermaid` are reserved fence languages that plugins cannot claim.
 
 `visual` with `pdf: { path, page }` annotates a figure on one page of a learner's PDF. Dispatch checks file access, the 64 MiB local PDF limit for this visual tool, and that pdfjs can open the file and the page exists. At job start [`pdf-figure.ts`](../src/agent/tools/pdf-figure.ts) checks again and opens one bounded copy of the PDF for the job. It renders the page natively (pdfjs + Skia, about 1600px on the long side). The maker finds the figure and calls `crop_page` with a box in page-image pixels. The crop is re-rendered from the same opened PDF (at most 300 dpi), not from the page bitmap or a fresh file read. The job releases the PDF before delivering the result. Recropping replaces the picture and discards the SVG. Both renders go through the same snapshot processing; only the picture finally annotated is stored, and the result records its page and crop.
 
@@ -179,7 +183,7 @@ Read-only file tools default to the server user's home, not a selected project o
 
 The **sensitive-path guard** refuses known private home locations, `.env` files, configured auth/subscription files, and recognized credential temporary files. It checks named/canonical paths and aliases; walks skip protected locations. It is path-based defense in depth, not a content scanner, sandbox, or allowed-folders setting. Other sensitive files and learning records can remain readable. See [`fs-shared.ts`](../src/agent/tools/fs-shared.ts).
 
-File/PDF/visual images share image postprocessing. Search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama adapters; page fetching is independent and does not need a search key. These external effects are not isolated by a scratch data directory alone.
+File/PDF/visual images share image postprocessing. `find_image` and `show_image` with `commons` send the model's short search words or a file title to Wikimedia Commons, with a generic app User-Agent. The `find_image` tool toggle (on by default) switches both off. Search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama adapters; page fetching is independent and does not need a search key. These external effects are not isolated by a scratch data directory alone.
 
 ## Trusted local plugins (API v1)
 

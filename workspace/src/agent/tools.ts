@@ -24,6 +24,7 @@ import { lsTool } from "./tools/ls.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { createShowImageTool } from "./tools/show-image.ts";
+import { findImageTool } from "./tools/find-image.ts";
 import { healToolRecord } from "./tools/heal.ts";
 import type { GraphStore } from "../core/ports.ts";
 
@@ -456,9 +457,11 @@ export function createTeacherTools(
 			ls: lsTool,
 			find: findTool,
 			grep: grepTool,
-			// The learner-image display twin of read (issue #363): teacher
-			// only, always on — it shows the learner their own file.
-			show_image: createShowImageTool(ctx),
+			// The picture display twin of read (issue #363): always on — it
+			// shows a learner file, or (with the find_image toggle on) a
+			// Wikimedia Commons file that find_image listed.
+			show_image: createShowImageTool({ ...ctx, commons: enabled?.find_image !== false }),
+			find_image: findImageTool,
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},

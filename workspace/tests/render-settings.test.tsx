@@ -261,7 +261,7 @@ describe("AgentSection (thin SSR)", () => {
 	});
 
 	it("renders the owner's FINAL tool list — research, demo, visual, pdf", () => {
-		assert.deepEqual([...TOGGLE_TOOLS], ["research", "demo", "visual", "pdf"]);
+		assert.deepEqual([...TOGGLE_TOOLS], ["research", "demo", "visual", "pdf", "find_image"]);
 		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
 		for (const id of TOGGLE_TOOLS) assert.ok(html.includes(`data-testid="tool-row-${id}"`), id);
 	});
@@ -269,7 +269,8 @@ describe("AgentSection (thin SSR)", () => {
 	it("tools default ON (absent key = enabled)", () => {
 		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
 		for (const id of TOGGLE_TOOLS) {
-			assert.ok(tagOf(html, `toggle-tool-${id}`).includes('aria-checked="true"'), `${id} defaults on`);
+			// The toggle testid slugs its label ("tool find_image" → toggle-tool-find-image).
+			assert.ok(tagOf(html, `toggle-tool-${id.replace(/_/g, "-")}`).includes('aria-checked="true"'), `${id} defaults on`);
 		}
 	});
 

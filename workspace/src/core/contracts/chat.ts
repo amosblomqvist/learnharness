@@ -344,6 +344,26 @@ export interface ShowImageDetails {
 	height: number;
 }
 
+/** The show_image({ commons }) record payload: a Wikimedia Commons picture,
+ *  stored as a session snapshot like a local one, plus the attribution its
+ *  free license asks for. Never model-facing. */
+export interface WebImageDetails {
+	source: "commons";
+	/** The "File:…" title on Wikimedia Commons. */
+	title: string;
+	/** The file's description page (the attribution link). */
+	pageUrl: string;
+	author?: string;
+	license?: string;
+	licenseUrl?: string;
+	caption?: string;
+	mimeType: "image/png" | "image/jpeg";
+	/** SHA-256 identity in ChatRecord.imageSnapshots. */
+	snapshotId: string;
+	width: number;
+	height: number;
+}
+
 // ─── Artifact renderer registry (client extension point) ────────────────────
 
 /**

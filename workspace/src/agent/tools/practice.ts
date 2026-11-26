@@ -22,6 +22,10 @@ import { readTool } from "./read.ts";
 import { lsTool } from "./ls.ts";
 import { findTool } from "./find.ts";
 import { grepTool } from "./grep.ts";
+import { createShowImageTool } from "./show-image.ts";
+import { findImageTool } from "./find-image.ts";
+import type { EnabledTools } from "../../core/pending.ts";
+import type { ChatStore } from "../../core/ports.ts";
 import { jobTools, type JobToolContext } from "./jobs.ts";
 import { proberGraphTools, type GraphToolContext } from "./graph.ts";
 import { activeProblemOf } from "../../core/native-messages.ts";
@@ -33,7 +37,8 @@ import { healEncodedArguments, healToolRecord } from "./heal.ts";
 /** The record-reading context the gates need (the plan-tools idiom). */
 export interface PracticeToolContext {
 	chatId: string;
-	chatStore: { getChat(id: string): { messages: LhMessage[]; kind?: string } | null };
+	/** saveImageSnapshot arms show_image (and find_image); absent (tests) = no picture tools. */
+	chatStore: { getChat(id: string): { messages: LhMessage[]; kind?: string } | null } & Partial<Pick<ChatStore, "saveImageSnapshot">>;
 	/** The WHOLE-graph node list, read fresh per pose (owner round 9 — the
 	 *  mastery-trace contract): targets validate against every proposition,
 	 *  not just the session's picks, so pickless sessions and future
@@ -191,15 +196,20 @@ export function concludeTool(gate: PracticeGate): AgentTool<typeof concludeInput
 }
 
 /** The practice toolset (the practice agent's whole registry). */
-export function practiceTools(ctx: PracticeToolContext, gate: PracticeGate = createPracticeGate(ctx)): Record<string, AgentTool<any>> {
+export function practiceTools(ctx: PracticeToolContext, gate: PracticeGate = createPracticeGate(ctx), enabled?: EnabledTools): Record<string, AgentTool<any>> {
 	// ONE gate per turn, shared by native/plugin poses and conclude.
 	// THE RARELY-NEEDED SET (owner round 10): read/ls/find/grep over the
 	// learner's files (always — the same read-only set the teacher and
 	// prober carry), the research + pdf jobs (available without search
 	// keys; demo/visual stay teach-only), and
-	// the prober's map readers when the settings gate opened. None are
-	// toggle-filtered: problem/conclude are the session; these are
-	// exceptions the doctrine says to reach for rarely.
+	// the prober's map readers when the settings gate opened. Only
+	// find_image is toggle-filtered (it reaches the internet; it also
+	// gates show_image's commons input): problem/conclude are the session;
+	// the rest are exceptions the doctrine says to reach for rarely.
+	// show_image + find_image put a picture in front of a struggling
+	// learner (pictures wave, 2026-11-26).
+	const saveImageSnapshot = ctx.chatStore.saveImageSnapshot?.bind(ctx.chatStore);
+	const commons = enabled?.find_image !== false;
 	const jobs = ctx.jobs ? jobTools(ctx.jobs) : null;
 	// healToolRecord (owner, 2026-10-09 — the whitehead generalization):
 	// the standard argument heal over the WHOLE registry. problem/conclude
@@ -212,6 +222,8 @@ export function practiceTools(ctx: PracticeToolContext, gate: PracticeGate = cre
 		ls: lsTool,
 		find: findTool,
 		grep: grepTool,
+		...(saveImageSnapshot ? { show_image: createShowImageTool({ chatId: ctx.chatId, chatStore: { saveImageSnapshot }, commons }) } : {}),
+		...(saveImageSnapshot && commons ? { find_image: findImageTool } : {}),
 		...(jobs?.research ? { research: jobs.research } : {}),
 		...(jobs ? { pdf: jobs.pdf! } : {}),
 		...(ctx.graph ? proberGraphTools(ctx.graph) : {}),

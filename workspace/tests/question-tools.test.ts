@@ -267,7 +267,7 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 		// are built on graded questions — the wedge danger), as are the
 		// learner-fs set, plan tools, and probe_done. The settings WRITE side
 		// validates against this list (settings-body).
-		assert.deepEqual(TOGGLEABLE_TOOLS, ["research", "demo", "visual", "pdf"]);
+		assert.deepEqual(TOGGLEABLE_TOOLS, ["research", "demo", "visual", "pdf", "find_image"]);
 	});
 
 	it("createProberTools: absent record = full set; explicit false drops exactly that tool; probe_done survives everything", () => {
@@ -302,10 +302,10 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 			spawn: () => {},
 		};
 		const full = Object.keys(createTeacherTools(ctx)).sort();
-		assert.deepEqual(full, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "research", "show_image", "visual"]);
+		assert.deepEqual(full, ["ask_user_question", "demo", "find", "find_image", "grep", "ls", "pdf", "plan_init", "quiz", "read", "research", "show_image", "visual"]);
 
 		const noResearch = Object.keys(createTeacherTools(ctx, { research: false })).sort();
-		assert.deepEqual(noResearch, ["ask_user_question", "demo", "find", "grep", "ls", "pdf", "plan_init", "quiz", "read", "show_image", "visual"]);
+		assert.deepEqual(noResearch, ["ask_user_question", "demo", "find", "find_image", "grep", "ls", "pdf", "plan_init", "quiz", "read", "show_image", "visual"]);
 
 		// absent = enabled: an empty record and undefined behave identically
 		assert.deepEqual(
@@ -316,7 +316,7 @@ describe("tool toggles (core/pending.ts + factories)", () => {
 
 		// The mechanic switch (owner 2026-09-27): free-recall swaps the teach
 		// quiz for the teach explain — one quizzing tool, whichever is armed.
-		const freeFull = ["ask_user_question", "demo", "explain", "find", "grep", "ls", "pdf", "plan_init", "read", "research", "show_image", "visual"];
+		const freeFull = ["ask_user_question", "demo", "explain", "find", "find_image", "grep", "ls", "pdf", "plan_init", "read", "research", "show_image", "visual"];
 		assert.deepEqual(Object.keys(createTeacherTools(ctx, { explain: true })).sort(), freeFull);
 		assert.deepEqual(
 			Object.keys(createTeacherTools(ctx, { explain: true, research: false })).sort(),
