@@ -38,7 +38,7 @@ import {
 import { pluginQuestionKeySuppressed, composingQuestionKey } from "./plugin-question-keys";
 import { isDictationActive } from "@/components/dictation";
 import { dispatchFocusedPluginShortcut, hasLegacyInteractionForeground, isInteractionScopeEligible } from "@/components/plugin-input-focus";
-import { useSettingsDialog } from "@/components/settings/settings-dialog.tsx";
+import { useSettingsDialog } from "@/components/settings/settings-dialog-provider.tsx";
 import { usePlugins } from "./plugins";
 import { dispatchPluginActionShortcut, pluginShortcutScopeLabel, usePluginShortcutRows } from "./plugin-shortcuts";
 
