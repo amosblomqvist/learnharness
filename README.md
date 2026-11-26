@@ -57,6 +57,21 @@ See [Getting started](docs/getting-started.md) for model setup, dictation, files
 
 All three platforms support in-app updates.
 
+## On your iPhone
+
+The iPhone app uses LearnHarness on your computer: the same sessions, knowledge graph, and settings, served by the desktop app over your local network. Nothing is copied or synced.
+
+<p align="center">
+  <img src="docs/assets/ios-session.png" alt="A teaching session on the iPhone" width="250">
+  <img src="docs/assets/ios-sessions.png" alt="The session list on the iPhone" width="250">
+  <img src="docs/assets/ios-pair.png" alt="Pairing the iPhone with a QR code" width="250">
+</p>
+
+1. On the computer, turn on **Settings → Phone access**. A QR code appears.
+2. Scan it with the iPhone. The phone stays paired until you revoke it.
+
+Keep LearnHarness open and the computer awake while you use the phone; a reply keeps generating on the computer if you leave the app. Both devices need the same network, or Tailscale away from home. For now the iPhone app is built from source with Xcode: see [the iPhone app](docs/ios.md) for setup and [Phone access](docs/phone-access.md) for how pairing is secured.
+
 ## Your keys, your data
 
 - **Your keys and models.** No LearnHarness subscription or markup. Billing depends on your provider, CLI configuration, subscription, or local setup. The live cost meter estimates known API costs, not subscription, CLI, or custom-endpoint charges.

@@ -7,6 +7,9 @@
 - [Claude Code](claude-code.md) — use an installed CLI and troubleshoot its connection.
 - [Custom and local models](custom-providers.md) — configure an OpenAI-compatible endpoint.
 - [Context, caching, and costs](compaction-accounting.md) — understand the session meters and advanced cache preferences.
+- [The iPhone app](ios.md) — build it with Xcode and connect it to your computer or server.
+- [Phone access](phone-access.md) — pair a phone with the desktop app and how the connection is secured.
+- [Self-hosting](self-hosting.md) — run LearnHarness as a server without the desktop app.
 - [Learning-data skill](../skills/learnharness/SKILL.md) — a read-only guide and standalone readers for local learning records.
 
 ## Development and maintenance
