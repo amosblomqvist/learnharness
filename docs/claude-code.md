@@ -7,11 +7,20 @@ LearnHarness can use an externally installed **Claude Code CLI** as a model prov
 1. [Install and authenticate Claude Code](https://code.claude.com/docs/en/setup) outside LearnHarness, on **the machine running the LearnHarness server**, under its OS user. No always-running CLI process is needed.
 2. Make the executable discoverable in that server's `PATH` or a common user/native installation location. On Windows, a directly runnable `claude.exe` is required; `claude.cmd` alone does not qualify. Desktop launch environments may differ from terminals.
 3. Enable **Settings → Providers → External CLI → Claude Code**. This app-wide opt-in is **off by default**. Use **Check again** to refresh installation status.
-4. Select a Claude Code model: `opus`, `sonnet`, `haiku`, or `fable`. These are CLI aliases, not pinned underlying versions.
+4. *(Optional)* Choose a **Profile** (`CLAUDE_CONFIG_DIR`) if you maintain multiple Claude Code profiles (for example `~/.claude-second`). You can search discovered `~/.claude*` directories, enter a custom absolute or `~/…` directory path, or reset to **Default**.
+5. Select a Claude Code model: `opus`, `sonnet`, `haiku`, or `fable`. These are CLI aliases, not pinned underlying versions.
 
 The minimum version is **2.1.259** ([contract](../src/core/contracts/claude-code.ts)). The check runs only `--version`, not authentication or inference. Fresh model processes check again and refuse old/unverifiable versions. Passing proves neither account access, quota, billing method, nor complete protocol compatibility.
 
 Install, update, sign in, and change CLI accounts externally. LearnHarness has no CLI account-status or reauthentication control. Disabling the opt-in blocks future requests without rewriting model selections or signing out the CLI; it does not interrupt an already admitted turn. Use normal cancellation for running work.
+
+### Profiles (`CLAUDE_CONFIG_DIR`)
+
+When Claude Code is enabled, **Settings → Providers → External CLI → Claude Code → Profile** lists candidate configuration directories on the server machine:
+
+- **Discovery is metadata-only**: `GET /api/claude-code/profiles` checks `~/.claude`, `~/.claude*` directories (and directory symlinks) under the server user's home directory, any inherited `CLAUDE_CONFIG_DIR`, and any saved `claudeCode.configDir` in `settings.json`. It checks only whether directories and `settings.json`/`.credentials.json` files exist—it never reads credential files, tokens, or account data.
+- **Precedence**: an explicitly configured `claudeCode.configDir` overrides any launch-environment `CLAUDE_CONFIG_DIR`. Resetting the selector to **Default** clears `claudeCode.configDir`, falling back to an inherited `CLAUDE_CONFIG_DIR` if present or the CLI's default (`~/.claude`) otherwise.
+- **Fail-closed launch & reuse**: if a configured directory is missing, unreadable, or not a directory, LearnHarness refuses to start the CLI rather than silently falling back to `~/.claude`. Changing the profile changes the child environment and automatically replaces any held idle CLI process on the next turn.
 
 ## What goes through the CLI
 
@@ -56,6 +65,6 @@ Dollar costs remain **unpriced** and menus say **CLI billing**. LearnHarness doe
 
 ## Maintainer entry points
 
-[`src/agent/claude-code/`](../src/agent/claude-code/) contains discovery/launch, stream adaptation, MCP admission, reuse, replay, and context-window probing. The engine is registered in [`models.ts`](../src/agent/models.ts); credential provenance is in [`auth-env.ts`](../src/core/auth-env.ts). Settings status is exposed by [`server/claude-code.ts`](../src/server/claude-code.ts).
+[`src/agent/claude-code/`](../src/agent/claude-code/) contains discovery/launch (`binary.ts`, `config-dir.ts`, `launch.ts`), stream adaptation, MCP admission, reuse, replay, and context-window probing. The engine is registered in [`models.ts`](../src/agent/models.ts); credential provenance is in [`auth-env.ts`](../src/core/auth-env.ts). Settings status and non-secret profile discovery are exposed by [`server/claude-code.ts`](../src/server/claude-code.ts), [`server/claude-code-config.ts`](../src/server/claude-code-config.ts), and [`server/claude-code-profiles.ts`](../src/server/claude-code-profiles.ts); the searchable settings UI lives in [`components/settings/claude-code-status.tsx`](../components/settings/claude-code-status.tsx) and [`components/settings/claude-profile-menu.tsx`](../components/settings/claude-profile-menu.tsx).
 
 The `tests/claude-code-*.test.*` suites use synthetic CLI processes and MCP requests. They cover adapter contracts, not live account eligibility, provider approval, billing, or lesson quality.
