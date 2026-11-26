@@ -1,4 +1,4 @@
-import { IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits";
+import { IMAGE_IMPORT_EXTENSIONS, IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits";
 import type { NotesImportResult } from "./notes-import";
 
 export const notesPath = (file: File): string => file.webkitRelativePath || file.name;
@@ -10,9 +10,10 @@ const extensionLabel = (name: string): string => {
 	const dot = name.lastIndexOf(".");
 	return dot > 0 && dot < name.length - 1 ? name.slice(dot).toLowerCase() : "no extension";
 };
-/** One line per reason for a whole pick, so a big folder cannot flood the error list. */
-const unsupportedSummary = (extensions: readonly string[]): string =>
-	`Skipped ${extensions.length} ${extensions.length === 1 ? "file that isn't" : "files that aren't"} text, Markdown, or PDF (${[...new Set(extensions)].join(", ")}).`;
+/** One line per reason for a whole pick, so a big folder cannot flood the error
+ * list. Folder picks never take images (issue #285), so only file picks name them. */
+const unsupportedSummary = (extensions: readonly string[], folder: boolean): string =>
+	`Skipped ${extensions.length} ${extensions.length === 1 ? "file that isn't" : "files that aren't"} ${folder ? "text, Markdown, or PDF" : "text, Markdown, PDF, or an image"} (${[...new Set(extensions)].join(", ")}).`;
 const unsafeSummary = (count: number): string =>
 	`Skipped ${count} ${count === 1 ? "file with a name" : "files with names"} the import can't use (e.g. a ':' in the name).`;
 export interface ImportQueueSnapshot {
@@ -70,18 +71,20 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 			if (files.length === 0) return;
 			if (!snapshot.importing) { failures.clear(); notices.clear(); sequence = 0; }
 			// Unsafe names and unsupported types are summed up per pick; each summary sits where its first file was.
-			const unsafe: number[] = [], unsupported: { index: number; extension: string }[] = [];
+			const unsafe: number[] = [], unsupported: { index: number; extension: string; folder: boolean }[] = [];
 			for (const file of files) {
 				const index = sequence++;
 				const path = notesPath(file);
 				if (file.webkitRelativePath && hiddenInFolder(file)) continue;
+				// Images only from the Files picker; a folder's images stay unsupported.
+				const supported = IMPORT_EXTENSIONS.test(file.name) || (!file.webkitRelativePath && IMAGE_IMPORT_EXTENSIONS.test(file.name));
 				if (!validNotesPath(path, file.name)) unsafe.push(index);
-				else if (!IMPORT_EXTENSIONS.test(file.name)) unsupported.push({ index, extension: extensionLabel(file.name) });
+				else if (!supported) unsupported.push({ index, extension: extensionLabel(file.name), folder: Boolean(file.webkitRelativePath) });
 				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, `${path}: Too big. Max 25 MB.`);
 				else pending.push({ file, index });
 			}
 			if (unsafe.length > 0) failures.set(unsafe[0]!, unsafeSummary(unsafe.length));
-			if (unsupported.length > 0) failures.set(unsupported[0]!.index, unsupportedSummary(unsupported.map(({ extension }) => extension)));
+			if (unsupported.length > 0) failures.set(unsupported[0]!.index, unsupportedSummary(unsupported.map(({ extension }) => extension), unsupported.some(({ folder }) => folder)));
 			const hadWork = active > 0 || pending.length > 0;
 			pump();
 			publish(!hadWork);

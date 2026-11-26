@@ -472,8 +472,9 @@ export interface ExtractionRunUsage {
     durationMs: number;
     stats?: EmissionStats;
     stages: {
-        extractor: ExtractionStageUsage;
-        auditor: ExtractionStageUsage;
+        transcription?: ExtractionStageUsage;
+        extractor?: ExtractionStageUsage;
+        auditor?: ExtractionStageUsage;
     };
 }
 ```
@@ -487,6 +488,7 @@ export interface ExtractionRunUsage {
 - [durationMs](#extractionrunusage-durationms)
 - [stats](#extractionrunusage-stats)
 - [stages](#extractionrunusage-stages)
+- [stages.transcription](#extractionrunusage-stagestranscription)
 - [stages.extractor](#extractionrunusage-stagesextractor)
 - [stages.auditor](#extractionrunusage-stagesauditor)
 
@@ -521,25 +523,34 @@ stats?: EmissionStats;
 ### ExtractionRunUsage stages
 
 Model usage per stage, in pipeline order (merger is deterministic —
-no model call, no entry).
+no model call, no entry). Chunk/batch runs carry extractor + auditor;
+a PDF/image import's transcription run (issue #285) carries only
+transcription.
 
 ```ts
 stages: {
-    extractor: ExtractionStageUsage;
-    auditor: ExtractionStageUsage;
+    transcription?: ExtractionStageUsage;
+    extractor?: ExtractionStageUsage;
+    auditor?: ExtractionStageUsage;
 };
+```
+
+### ExtractionRunUsage stages.transcription
+
+```ts
+transcription?: ExtractionStageUsage;
 ```
 
 ### ExtractionRunUsage stages.extractor
 
 ```ts
-extractor: ExtractionStageUsage;
+extractor?: ExtractionStageUsage;
 ```
 
 ### ExtractionRunUsage stages.auditor
 
 ```ts
-auditor: ExtractionStageUsage;
+auditor?: ExtractionStageUsage;
 ```
 
 ## ExtractionStageUsage

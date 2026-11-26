@@ -4,9 +4,14 @@ export const MAX_IMPORT_BODY_BYTES = 26 * 1024 * 1024;
 
 /** The file types "Extract files" takes; the client check, server check and picker `accept` all derive from this list. */
 const IMPORT_EXTENSION_NAMES = ["txt", "md", "markdown", "rst", "org", "adoc", "tex", "pdf"];
+/** Images the vision pass reads (issue #285) — taken only when picked one by
+ * one: a folder's attachments would each cost a vision call. The server
+ * still sniffs their content, never trusting the name. */
+const IMAGE_EXTENSION_NAMES = ["png", "jpg", "jpeg", "gif", "webp", "bmp"];
 export const IMPORT_EXTENSIONS = new RegExp(`\\.(?:${IMPORT_EXTENSION_NAMES.join("|")})$`, "i");
-export const IMPORT_ACCEPT = IMPORT_EXTENSION_NAMES.map((name) => `.${name}`).join(",");
-export const UNSUPPORTED_TYPE_MESSAGE = "This file type isn't supported. Use text, Markdown, or PDF.";
+export const IMAGE_IMPORT_EXTENSIONS = new RegExp(`\\.(?:${IMAGE_EXTENSION_NAMES.join("|")})$`, "i");
+export const IMPORT_ACCEPT = [...IMPORT_EXTENSION_NAMES, ...IMAGE_EXTENSION_NAMES].map((name) => `.${name}`).join(",");
+export const UNSUPPORTED_TYPE_MESSAGE = "This file type isn't supported. Use text, Markdown, PDF, or an image.";
 
 /** Contributor's relative-path contract: identity only, never a disk path.
  * Chromium may serialize the basename or the full webkitRelativePath. */

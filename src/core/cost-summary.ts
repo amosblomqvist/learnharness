@@ -2,7 +2,8 @@
  * Graph-pipeline cost summary (2026-09 graph cost metrics wave) — the pure
  * fold behind the graph view's cost pill. Two usage channels in: chat
  * extraction runs (ChatRecord.extractions) and notes-source runs
- * (NotesSource.extractions). Out: per-stage totals (extraction / audit)
+ * (NotesSource.extractions). Out: per-stage totals (transcription /
+ * extraction / audit)
  * + a capped recent-runs list. (The cluster-naming channel died with the
  * extraction-UX close-out, 2026-09-24 — UI's displayCostTotals had already
  * dropped it; historical naming-runs.jsonl spend is simply not displayed,
@@ -17,7 +18,7 @@
  * barrel so the pill/panel components carry no cost math.
  */
 
-import type { CallUsage, EmissionStats, ExtractionRunUsage } from "./contracts.ts";
+import type { CallUsage, EmissionStats, ExtractionRunUsage, ExtractionStageUsage } from "./contracts.ts";
 import { sumSteps, isSubscriptionModel, subscriptionLabels, type CallPricer } from "./prices.ts";
 
 /** One pipeline stage's cumulative cost across every run. */
@@ -52,6 +53,9 @@ export interface RecentRun {
 	tokens: CallUsage;
 	/** What the run merged into the graph; absent on failed runs. */
 	merged?: EmissionStats;
+	/** Stages whose model is neither priced nor a subscription — set only
+	 *  when the run has no dollars and some stage is genuinely unpriced. */
+	unpricedStages?: number;
 }
 
 /** The cost pill's whole payload: stage totals + recent runs. */
@@ -67,6 +71,9 @@ export interface GraphCostSummary {
 	 *  2026-09-24 close-out culled cluster naming the same way —
 	 *  historical spend on either is simply not displayed.) */
 	stages: {
+		/** PDF/image imports' vision pass (issue #285) — zero runs when
+		 *  nothing was ever transcribed. */
+		transcription: StageCost;
 		extraction: StageCost;
 		audit: StageCost;
 	};
@@ -122,49 +129,56 @@ function mergeTokens(into: CallUsage, steps: readonly CallUsage[]): void {
 /** Fold every usage channel into the pill's payload. Pure: same input,
  *  same output — no clock, no fs, no store reads. */
 export function graphCostSummary(input: CostSummaryInput, price: CallPricer): GraphCostSummary {
+	const transcription = emptyStage();
 	const extraction = emptyStage();
 	const audit = emptyStage();
 	const runs: RecentRun[] = [];
+	// A run is "unpriced" when it billed nothing countable at all.
+	let unpricedRuns = 0;
+
+	/** Per-stage: tokens always count; dollars only when priced. */
+	const foldStage = (cost: StageCost, stage: ExtractionStageUsage): number | null => {
+		cost.runs++;
+		mergeTokens(cost.tokens, stage.steps);
+		const dollars = stageDollars(stage.model, stage.steps, price);
+		if (isSubscriptionModel(stage.model)) {
+			cost.subscriptionRuns = (cost.subscriptionRuns ?? 0) + 1;
+			cost.subscriptionProviders = [...new Set([...(cost.subscriptionProviders ?? []), ...subscriptionLabels([stage.model])])];
+		}
+		else if (dollars === null) cost.unpricedRuns++;
+		else cost.dollars += dollars;
+		return dollars;
+	};
 
 	const foldExtractionRun = (run: ExtractionRunUsage, title: string) => {
 		const stages = run.stages ?? { extractor: { model: "unknown", steps: [] }, auditor: { model: "unknown", steps: [] } };
-		// Per-stage: tokens always count; dollars only when priced.
-		extraction.runs++;
-		mergeTokens(extraction.tokens, stages.extractor.steps);
-		const extDollars = stageDollars(stages.extractor.model, stages.extractor.steps, price);
-		if (isSubscriptionModel(stages.extractor.model)) {
-			extraction.subscriptionRuns = (extraction.subscriptionRuns ?? 0) + 1;
-			extraction.subscriptionProviders = [...new Set([...(extraction.subscriptionProviders ?? []), ...subscriptionLabels([stages.extractor.model])])];
-		}
-		else if (extDollars === null) extraction.unpricedRuns++;
-		else extraction.dollars += extDollars;
-
-		audit.runs++;
-		mergeTokens(audit.tokens, stages.auditor.steps);
-		const audDollars = stageDollars(stages.auditor.model, stages.auditor.steps, price);
-		if (isSubscriptionModel(stages.auditor.model)) {
-			audit.subscriptionRuns = (audit.subscriptionRuns ?? 0) + 1;
-			audit.subscriptionProviders = [...new Set([...(audit.subscriptionProviders ?? []), ...subscriptionLabels([stages.auditor.model])])];
-		}
-		else if (audDollars === null) audit.unpricedRuns++;
-		else audit.dollars += audDollars;
+		// Chunk runs carry extractor + auditor; a transcription run only its
+		// own stage (issue #285). Absent stages never count.
+		const billed = ([
+			[transcription, stages.transcription],
+			[extraction, stages.extractor],
+			[audit, stages.auditor],
+		] as const).filter((entry): entry is readonly [StageCost, ExtractionStageUsage] => entry[1] !== undefined);
+		const used = billed.map(([, stage]) => stage);
 
 		// Run-level: null only when EVERY stage is unpriced.
-		const allStages: Array<number | null> = [extDollars, audDollars];
+		const allStages = billed.map(([cost, stage]) => foldStage(cost, stage));
 		const runDollars = allStages.every((d) => d === null)
 			? null
 			: allStages.reduce<number>((a, d) => a + (d ?? 0), 0);
-		const subscriptionRuns = [stages.extractor, stages.auditor].filter((stage) => isSubscriptionModel(stage.model)).length;
-		const allSteps = [...stages.extractor.steps, ...stages.auditor.steps];
+		const subscriptionRuns = used.filter((stage) => isSubscriptionModel(stage.model)).length;
+		const unpricedStages = runDollars === null ? used.length - subscriptionRuns : 0;
+		if (unpricedStages > 0) unpricedRuns++;
 		runs.push({
-			...(subscriptionRuns ? { subscriptionRuns, subscriptionProviders: subscriptionLabels([stages.extractor.model, stages.auditor.model]) } : {}),
+			...(subscriptionRuns ? { subscriptionRuns, subscriptionProviders: subscriptionLabels(used.map((stage) => stage.model)) } : {}),
+			...(unpricedStages > 0 ? { unpricedStages } : {}),
 			startedAt: run.startedAt,
 			at: run.at,
 			durationMs: run.durationMs,
 			kind: "extraction",
 			title,
 			dollars: runDollars,
-			tokens: sumSteps(allSteps),
+			tokens: sumSteps(used.flatMap((stage) => stage.steps)),
 			...(run.stats ? { merged: run.stats } : {}),
 		});
 	};
@@ -179,14 +193,13 @@ export function graphCostSummary(input: CostSummaryInput, price: CallPricer): Gr
 	runs.sort((a, b) => b.startedAt - a.startedAt);
 	const capped = runs.slice(0, input.recentCap ?? 10);
 
-	// A run is "unpriced" when it billed nothing countable at all.
-	const unpricedRuns = runs.filter((r) => r.dollars === null && (r.subscriptionRuns ?? 0) < 2).length;
-	const subscriptionRuns = (extraction.subscriptionRuns ?? 0) + (audit.subscriptionRuns ?? 0);
+	const all = [transcription, extraction, audit];
+	const subscriptionRuns = all.reduce((n, stage) => n + (stage.subscriptionRuns ?? 0), 0);
 	return {
-		...(subscriptionRuns ? { subscriptionRuns, subscriptionProviders: [...new Set([...(extraction.subscriptionProviders ?? []), ...(audit.subscriptionProviders ?? [])])] } : {}),
-		totalDollars: extraction.dollars + audit.dollars,
+		...(subscriptionRuns ? { subscriptionRuns, subscriptionProviders: [...new Set(all.flatMap((stage) => stage.subscriptionProviders ?? []))] } : {}),
+		totalDollars: transcription.dollars + extraction.dollars + audit.dollars,
 		unpricedRuns,
-		stages: { extraction, audit },
+		stages: { transcription, extraction, audit },
 		runs: capped,
 	};
 }
