@@ -4,40 +4,25 @@ import * as fs from "node:fs";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { test, type TestContext } from "node:test";
-import { crc32, deflateRawSync } from "node:zlib";
-import { COMMUNITY_FEED_URL, communityListingReport, compatibleCommunityRelease, parseCommunityFeed } from "../src/core/community-catalog.ts";
+import {
+	checkCommunityFeatured, COMMUNITY_FEED_URL, communityDetailUrl, communityFeatured, communityListingReport, communityOffersFor, compatibleCommunityRelease,
+	parseCommunityDetail, parseCommunityFeatured, parseCommunityFeed, reviewedCommunityRelease, type CommunityListing, type CommunityOffer,
+} from "../src/core/community-catalog.ts";
 import { createCommunityPluginCatalog } from "../src/server/community-plugin-catalog.ts";
 import { createPluginHost, type PluginHostDependencies } from "../src/server/plugin-host.ts";
 import { createPluginTransport } from "../src/server/plugin-transport.ts";
 import { readCommunityPluginZip } from "../src/server/community-plugin-zip.ts";
 import { publishCatalogFiles } from "../src/server/community-plugin-files.ts";
 import seed from "../plugin-catalog/community-plugins.json";
+import featuredList from "../plugin-catalog/featured.json";
 import coreIds from "../core-plugins.json";
+import { zip } from "./community-zip.ts";
 
 const id = "fixture-plugin", repo = "example/fixture-plugin";
 const manifest = (version: string, extra = {}) => JSON.stringify({ id, version, name: "Fixture plugin", minAppVersion: "0.7.0", apiVersion: 1, backend: "backend.cjs", main: "main.js", ...extra });
 const backend = (value: string) => `exports.activate = ctx => { ctx.handle('proof', () => ${JSON.stringify(value)}); ctx.cleanup(() => ctx.learning.history.push('cleanup')); };`;
 const frontend = "export function activate() {}";
 
-function zip(entries: [string, string, number?][], descriptors = false) {
-	const [locals, records] = [[], []] as Buffer[][];
-	let offset = 0;
-	for (const [name, value, mode = 0x81a4] of entries) {
-		const filename = Buffer.from(name), payload = Buffer.from(value), checksum = crc32(payload);
-		const compressed = deflateRawSync(payload), flags = descriptors ? 8 : 0;
-		const local = Buffer.alloc(30), central = Buffer.alloc(46), descriptor = Buffer.alloc(descriptors ? 16 : 0);
-		local.writeUInt32LE(0x04034b50); local.writeUInt16LE(20, 4); local.writeUInt16LE(flags, 6); local.writeUInt16LE(8, 8); local.writeUInt16LE(filename.length, 26);
-		if (descriptors) { descriptor.writeUInt32LE(0x08074b50); descriptor.writeUInt32LE(checksum, 4); descriptor.writeUInt32LE(compressed.length, 8); descriptor.writeUInt32LE(payload.length, 12); }
-		else { local.writeUInt32LE(checksum, 14); local.writeUInt32LE(compressed.length, 18); local.writeUInt32LE(payload.length, 22); }
-		central.writeUInt32LE(0x02014b50); central.writeUInt16LE(0x314, 4); central.writeUInt16LE(20, 6); central.writeUInt16LE(flags, 8); central.writeUInt16LE(8, 10);
-		central.writeUInt32LE(checksum, 16); central.writeUInt32LE(compressed.length, 20); central.writeUInt32LE(payload.length, 24);
-		central.writeUInt16LE(filename.length, 28); central.writeUInt32LE(mode * 65536, 38); central.writeUInt32LE(offset, 42);
-		locals!.push(local, filename, compressed, descriptor); records!.push(central, filename); offset += local.length + filename.length + compressed.length + descriptor.length;
-	}
-	const central = Buffer.concat(records!), end = Buffer.alloc(22);
-	end.writeUInt32LE(0x06054b50); end.writeUInt16LE(entries.length, 8); end.writeUInt16LE(entries.length, 10); end.writeUInt32LE(central.length, 12); end.writeUInt32LE(offset, 16);
-	return Buffer.concat([...locals!, central, end]);
-}
 function build(version = "1.0.0", prefix = "", extra: [string, string, number?][] = [], manifestText = manifest(version)) {
 	return zip([[`${prefix}manifest.json`, manifestText], [`${prefix}main.js`, frontend], [`${prefix}backend.cjs`, backend(version)], ...extra], true);
 }
@@ -58,12 +43,14 @@ function fixture(t: TestContext) {
 	let bytes: Buffer = build();
 	let current = release(bytes), delisted = false;
 	let assetResponse: Response | undefined;
+	let detailResponse: () => Response = () => Response.json({ schemaVersion: 1, id, readme: { tag: current.tag, markdown: "# Fixture" }, releases: [{ version: current.version, notes: "First." }] });
 	const fetched: string[] = [];
 	const catalog = createCommunityPluginCatalog({ appVersion: deps.appVersion, coreIds: ["official"], getHost: async () => { await host.initialize(); return host; }, fetch: async (input, options) => {
 		const url = String(input); fetched.push(url);
 		assert.equal(options?.credentials, "omit");
 		assert.equal(options?.redirect, "manual");
-		if (url === COMMUNITY_FEED_URL) return Response.json({ schemaVersion: 1, plugins: delisted ? [] : [{ id, name: "Fixture plugin", author: "Example", description: "A test fixture", repository: repo, releases: [current] }] });
+		if (url === COMMUNITY_FEED_URL) return Response.json({ schemaVersion: 1, plugins: delisted ? [] : [{ id, name: "Fixture plugin", author: "Example", description: "A test fixture", repository: repo, downloads: 7, listedAt: "2026-11-20T00:00:00Z", releases: [current] }] });
+		if (url === communityDetailUrl(id)) return detailResponse();
 		assert.equal(url, `https://github.com/${repo}/releases/download/${current.tag}/${current.asset}`);
 		return assetResponse ?? new Response(Uint8Array.from(bytes));
 	} });
@@ -71,6 +58,8 @@ function fixture(t: TestContext) {
 	return { directory, core, state, history, hooks, fetched, get host() { return host; },
 		async restart() { await host.dispose(); host = newHost(); await host.initialize(); },
 		async browse() { const response = await catalog.list(request()); return { status: response.status, body: await response.json() }; },
+		async detail(pluginId = id) { const response = await catalog.detail(pluginId, request()); return { status: response.status, body: await response.json() }; },
+		setDetail(response: () => Response) { detailResponse = response; },
 		install(action = "Install", sha256 = current.sha256) { return catalog.install(id, new Request(request(), { method: "POST", body: JSON.stringify({ action, sha256 }) })); },
 		setBuild(zipBytes: Buffer, version?: string) { bytes = zipBytes; current = release(bytes, version); },
 		setResponse(response?: Response) { assetResponse = response; }, delist() { delisted = true; },
@@ -239,4 +228,94 @@ test("staged publication rolls back the old build if state commit fails", t => {
 	assert.throws(() => publishCatalogFiles(f.directory, id, new Map([["new.txt", Buffer.from("new")]]), true, () => { throw new Error("state failure"); }), /state failure/);
 	assert.deepEqual(fs.readdirSync(path.join(dir, "dist")), ["old.txt"]);
 	assert.deepEqual(fs.readdirSync(f.directory), [id]);
+});
+
+const sha = (char: string) => char.repeat(64);
+function catalogListing(extra: Partial<CommunityListing> = {}): CommunityListing {
+	return { id: "sample", name: "Sample", author: "Example", description: "A sample listing", repository: "example/sample", downloads: 0, listedAt: "2026-11-01T00:00:00Z", releases: [
+		{ version: "1.0.0", apiVersion: 1, minAppVersion: "0.7.0", publishedAt: "2026-11-01T00:00:00Z", tag: "v1.0.0", asset: "sample.zip", sha256: sha("a") },
+	], ...extra };
+}
+
+test("the feed requires download counts and listing dates, and featured is only a literal true on a release", () => {
+	const valid = catalogListing();
+	assert.deepEqual(parseCommunityFeed({ schemaVersion: 1, plugins: [valid] }).plugins[0], valid);
+	for (const broken of [{ downloads: undefined }, { downloads: -1 }, { downloads: 1.5 }, { downloads: "3" }, { listedAt: undefined }, { listedAt: "2026-11-01" }, { listedAt: "2026-11-01T00:00:00.000Z" }])
+		assert.throws(() => parseCommunityFeed({ schemaVersion: 1, plugins: [{ ...valid, ...broken }] }), /listing/, JSON.stringify(broken));
+	const release = valid.releases[0]!;
+	assert.equal(parseCommunityFeed({ schemaVersion: 1, plugins: [{ ...valid, releases: [{ ...release, featured: true }] }] }).plugins[0]!.releases[0]!.featured, true);
+	for (const featured of [false, "true", 1]) assert.throws(() => parseCommunityFeed({ schemaVersion: 1, plugins: [{ ...valid, releases: [{ ...release, featured }] }] }), /release/);
+	assert.equal("featured" in parseCommunityFeed({ schemaVersion: 1, plugins: [valid] }).plugins[0]!.releases[0]!, false);
+});
+
+test("Browse views drop listings without a release, sort by downloads or listing date, and mark only a reviewed offered release", () => {
+	const release = (version: string, featured = false) => ({ version, apiVersion: 1, minAppVersion: "0.7.0", publishedAt: "2026-11-01T00:00:00Z", tag: `v${version}`, asset: "a.zip", sha256: sha(version[0]!), ...(featured ? { featured: true as const } : {}) });
+	const offer = (id: string, downloads: number, listedAt: string, offered: ReturnType<typeof release> | null, releases = offered ? [offered] : []): CommunityOffer =>
+		({ listing: catalogListing({ id, name: id, downloads, listedAt, releases }), release: offered, action: offered ? "Install" : null });
+	const reviewedOld = release("1.0.0", true), unreviewedNew = release("2.0.0");
+	const offers = [
+		offer("alpha", 10, "2026-11-01T00:00:00Z", release("1.0.0", true)),
+		offer("bravo", 50, "2026-11-10T00:00:00Z", unreviewedNew, [reviewedOld, unreviewedNew]),
+		offer("charlie", 99, "2026-11-30T00:00:00Z", null),
+		offer("delta", 10, "2026-11-20T00:00:00Z", release("3.0.0")),
+	];
+	const ids = (view: Parameters<typeof communityOffersFor>[1]) => communityOffersFor(offers, view).map(entry => entry.listing.id);
+	assert.deepEqual(ids("featured"), ["alpha"]);
+	assert.deepEqual(ids("downloads"), ["bravo", "alpha", "delta"], "ties fall back to name");
+	assert.deepEqual(ids("newest"), ["delta", "bravo", "alpha"]);
+	assert.equal(communityFeatured(offers[1]!), false, "a newer unreviewed release carries no mark");
+	assert.equal(reviewedCommunityRelease(offers[1]!.listing)?.version, "1.0.0");
+	assert.equal(reviewedCommunityRelease(offers[3]!.listing), null);
+});
+
+test("featured.json is the only source of featured flags, and the shipped feed matches it", () => {
+	const listing = catalogListing();
+	const feed = (featured: boolean) => ({ schemaVersion: 1 as const, plugins: [{ ...listing, releases: [{ ...listing.releases[0]!, ...(featured ? { featured: true as const } : {}) }] }] });
+	const list = parseCommunityFeatured({ schemaVersion: 1, featured: [{ id: "sample", sha256: sha("a") }] });
+	checkCommunityFeatured(feed(true), list);
+	assert.throws(() => checkCommunityFeatured(feed(false), list), /out of sync/);
+	assert.throws(() => checkCommunityFeatured(feed(true), parseCommunityFeatured({ schemaVersion: 1, featured: [] })), /out of sync/);
+	assert.throws(() => checkCommunityFeatured(feed(false), parseCommunityFeatured({ schemaVersion: 1, featured: [{ id: "gone", sha256: sha("b") }] })), /not in the feed/);
+	for (const broken of [{ schemaVersion: 2, featured: [] }, { schemaVersion: 1, featured: [{ id: "sample" }] }, { schemaVersion: 1, featured: [{ id: "sample", sha256: sha("a"), by: "me" }] }, { schemaVersion: 1, featured: [{ id: "sample", sha256: sha("a") }, { id: "sample", sha256: sha("a") }] }])
+		assert.throws(() => parseCommunityFeatured(broken), JSON.stringify(broken));
+	checkCommunityFeatured(parseCommunityFeed(seed, coreIds), parseCommunityFeatured(featuredList));
+});
+
+test("plugin details are cross-checked against their listing, size-capped, and every seed has one", () => {
+	const listing = catalogListing();
+	const valid = { schemaVersion: 1, id: "sample", readme: { tag: "v1.0.0", markdown: "# Sample" }, releases: [{ version: "1.0.0", notes: "" }] };
+	assert.deepEqual(parseCommunityDetail(valid, listing), valid);
+	assert.equal(parseCommunityDetail({ ...valid, readme: null }, listing).readme, null);
+	for (const broken of [{ id: "other" }, { schemaVersion: 2 }, { readme: { tag: "v9.9.9", markdown: "" } }, { readme: { tag: "v1.0.0", markdown: "x".repeat(128 * 1024 + 1) } },
+		{ releases: [{ version: "9.9.9", notes: "" }] }, { releases: [{ version: "1.0.0", notes: "x".repeat(16 * 1024 + 1) }] }, { releases: [{ version: "1.0.0", notes: "" }, { version: "1.0.0", notes: "" }] }])
+		assert.throws(() => parseCommunityDetail({ ...valid, ...broken }, listing), JSON.stringify(broken).slice(0, 80));
+	const { plugins } = parseCommunityFeed(seed, coreIds);
+	assert.deepEqual(fs.readdirSync(new URL("../plugin-catalog/details/", import.meta.url)).sort(), plugins.map(plugin => `${plugin.id}.json`).sort());
+	for (const plugin of plugins) {
+		const bytes = fs.readFileSync(new URL(`../plugin-catalog/details/${plugin.id}.json`, import.meta.url));
+		assert.ok(bytes.length <= 256 * 1024, plugin.id);
+		const detail = parseCommunityDetail(JSON.parse(bytes.toString("utf8")), plugin);
+		assert.equal(detail.readme === null, plugin.releases.length === 0, `${plugin.id}: a README snapshot exactly when there is a release`);
+	}
+});
+
+test("the detail route needs community plugins on and a listed ID, and reports a bad or missing snapshot as unavailable", async t => {
+	const f = fixture(t);
+	await f.host.initialize();
+	assert.equal((await f.detail()).status, 409);
+	assert.deepEqual(f.fetched, [], "nothing is fetched while community plugins are off");
+	await f.host.setCommunityEnabled(true);
+	const ok = await f.detail();
+	assert.equal(ok.status, 200);
+	assert.equal(ok.body.detail.readme.markdown, "# Fixture");
+	assert.deepEqual(f.fetched.slice(-2), [COMMUNITY_FEED_URL, communityDetailUrl(id)]);
+	assert.equal((await f.detail("Bad/ID")).status, 400);
+	assert.equal((await f.detail("not-listed")).status, 404);
+	for (const response of [() => new Response("nope", { status: 404 }), () => Response.json({ schemaVersion: 1, id: "other", readme: null, releases: [] }),
+		() => new Response("x".repeat(256 * 1024 + 1)), () => new Response(null, { status: 302, headers: { Location: "https://evil.example/x.json" } })]) {
+		f.setDetail(response);
+		const failed = await f.detail();
+		assert.equal(failed.status, 503);
+		assert.match(failed.body.error, /details are unavailable/);
+	}
 });

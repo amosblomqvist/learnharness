@@ -1,0 +1,104 @@
+name: Community catalog discovery
+
+# Finds plugin repositories (GitHub topic learnharness-plugin plus existing
+# listings), runs the catalog static checks on each one's newest stable release,
+# and proposes the releases that pass in one rolling pull request. A maintainer
+# merges it; merging is not a code review. Nothing is removed automatically.
+#
+# The job that downloads and parses untrusted plugin archives has a read-only
+# token. Only the second job can push, and it handles nothing but the catalog
+# file, details files and report produced by the first.
+on:
+  schedule:
+    - cron: "23 5 * * *"
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: plugin-catalog-discovery
+  cancel-in-progress: false
+
+env:
+  BRANCH: bot/community-catalog-discovery
+  TITLE: "Community catalog: discovered releases"
+
+jobs:
+  discover:
+    name: Discover and check releases
+    if: github.repository == 'amosblomqvist/learnharness'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+      - run: npm ci
+      - name: Discover releases
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/discovery"
+          npm run catalog:discover -- --report "$RUNNER_TEMP/discovery/report.md"
+          cp plugin-catalog/community-plugins.json "$RUNNER_TEMP/discovery/community-plugins.json"
+          cp -R plugin-catalog/details "$RUNNER_TEMP/discovery/details"
+          cat "$RUNNER_TEMP/discovery/report.md" >> "$GITHUB_STEP_SUMMARY"
+      - uses: actions/upload-artifact@v7
+        with:
+          name: catalog-discovery
+          retention-days: 7
+          if-no-files-found: error
+          path: |
+            ${{ runner.temp }}/discovery/community-plugins.json
+            ${{ runner.temp }}/discovery/report.md
+            ${{ runner.temp }}/discovery/details/
+
+  propose:
+    name: Open or update the discovery pull request
+    needs: discover
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+      - uses: actions/download-artifact@v8
+        with:
+          name: catalog-discovery
+          path: ${{ runner.temp }}/discovery
+      - name: Open, update or close the pull request
+        env:
+          GH_TOKEN: ${{ github.token }}
+          BASE: ${{ github.event.repository.default_branch }}
+        run: |
+          cp "$RUNNER_TEMP/discovery/community-plugins.json" plugin-catalog/community-plugins.json
+          cp "$RUNNER_TEMP"/discovery/details/*.json plugin-catalog/details/
+          git add -- plugin-catalog/community-plugins.json plugin-catalog/details
+          open=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+          if git diff --cached --quiet; then
+            if [ -n "$open" ]; then
+              gh pr close "$open" --repo "$GITHUB_REPOSITORY" --comment "Nothing new to list against $BASE; closing. A later run opens a new pull request when it finds a release."
+            fi
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898804+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$BRANCH"
+          git commit -m "$TITLE"
+          git push --force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" "HEAD:refs/heads/$BRANCH"
+          if [ -n "$open" ]; then
+            gh pr edit "$open" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/discovery/report.md"
+          else
+            gh pr create --repo "$GITHUB_REPOSITORY" --base "$BASE" --head "$BRANCH" --title "$TITLE" --body-file "$RUNNER_TEMP/discovery/report.md"
+          fi

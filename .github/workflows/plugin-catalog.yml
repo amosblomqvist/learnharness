@@ -1,0 +1,45 @@
+name: Community catalog checks
+
+# Static checks on every release listed in plugin-catalog/community-plugins.json:
+# the pinned ZIP must verify, and must contain no native code, obfuscation or
+# leaked secrets; its source lockfile must have no known-malicious packages.
+on:
+  push:
+    branches: [main]
+    paths:
+      - plugin-catalog/**
+      - scripts/check-community-catalog.ts
+      - src/server/community-plugin-*.ts
+      - src/core/community-catalog.ts
+      - .github/workflows/plugin-catalog.yml
+  pull_request:
+    paths:
+      - plugin-catalog/**
+      - scripts/check-community-catalog.ts
+      - src/server/community-plugin-*.ts
+      - src/core/community-catalog.ts
+      - .github/workflows/plugin-catalog.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: plugin-catalog-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Check listed plugin releases
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: "26"
+          cache: npm
+      - run: npm ci
+      - run: npm run catalog:check
