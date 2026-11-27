@@ -592,6 +592,7 @@ export async function verifyPluginBrowser(url, options = {}) {
 		const warning = await page.$eval('[data-testid="section-plugins"]', element => element.textContent);
 		for (const copy of ["unreviewed third-party code", "not sandboxed", "chats and credentials", "network requests", "previously enabled"]) assert.ok(warning.includes(copy), `Missing trust/default-state warning: ${copy}`);
 		await page.locator(communityMode).click();
+		await page.locator('[data-testid="community-opt-in-confirm"]').click();
 		await page.waitForSelector(TOGGLE);
 		assert.equal(await page.$eval(TOGGLE, element => element.getAttribute("aria-checked")), "false", "verifyPluginServer must leave the runtime fixture disabled");
 		assert.ok((await page.$eval(ROW, element => element.textContent)).includes("Disabled"), "Package row must show the disabled status");
