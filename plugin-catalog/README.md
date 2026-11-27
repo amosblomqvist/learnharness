@@ -17,6 +17,19 @@ For each verified package, record `version`, `apiVersion`, `minAppVersion`, UTC 
 
 The supported archive has built files at ZIP root or inside the exact `<id>/dist/` prefix. `manifest.json` identifies the plugin, version, minimum app and plugin API. Only built root files and the `assets/` tree are installed, not package wrappers, plugin data, or nested documentation. Use portable slash-separated paths and ordinary stored/deflated ZIP files (no links, encryption, ZIP64, or conflicting names). Compressed downloads are capped at 16 MiB; expanded entries are capped at 48 MiB total and 16 MiB per file. Use the application’s existing `dist/` build convention; there is no npm install or source build on the user's machine.
 
+## Checks
+
+`npm run catalog:check` runs on every pull request that touches this folder (`.github/workflows/plugin-catalog.yml`) and can be run locally. For every listed release it downloads the pinned asset, verifies it exactly as Install does (sha256, archive, manifest, entry files), and scans the files Install would write. It fails on:
+
+- `release-invalid`: the download, checksum, archive or manifest does not verify;
+- `native-binary`: native or executable files, by signature (ELF, PE, Mach-O, WebAssembly) or type (`.node .exe .dll .so .dylib .wasm .jar .msi .sh .bash .bat .cmd .ps1`);
+- `obfuscation`: in scripts, `eval(…)`, `new Function(…)`, `Function("…")` or string timers, 20+ javascript-obfuscator `_0x…` names, or a 4096+ character base64/hex blob that is not an image or font `data:` URI (ordinary minified bundles pass);
+- `secret`: provider keys and tokens (Anthropic, OpenAI, OpenRouter, Groq, xAI, Google, Hugging Face, Tavily, Firecrawl, Deepgram, GitHub, AWS, Slack), private-key blocks, or a hard-coded `*_API_KEY`/`*_TOKEN` value; reports show only the first 4 characters;
+- `malicious-dependency`: a package in the repository's `package-lock.json` at the release tag (dev dependencies included) has an OSV malware advisory (`MAL-…`); ordinary CVEs do not fail;
+- `missing-lockfile`: the repository has a `package.json` but no `package-lock.json` at the tag. A repository with no `package.json` has no npm dependencies to check.
+
+These checks gate a listing; they are not a review and do not make plugin code safe. A maintainer can approve a specific hit in `check-exceptions.json` with `id`, `version`, `rule`, optional `file`, and a written `reason`. An exception excuses only that release, so a new version is checked afresh, and an exception that no longer matches anything fails the run until it is removed.
+
 ## Install, update, and removal
 
 The desktop picks the highest compatible version, fetches the current catalog again when the user initiates installation, and downloads the pinned asset directly from GitHub. Install leaves the plugin off. Updates require a disabled, unchanged catalog installation from the same repo, replace only `dist/`, and require restart and explicit Enable. The host preserves its existing plugin-code lifetime model: turning community plugins off disables host registrations and invokes cleanup. It is not a sandbox and cannot undo side effects or stop arbitrary third-party code that ignores cleanup. If in doubt, turn community plugins off and restart.

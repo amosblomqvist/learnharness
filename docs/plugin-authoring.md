@@ -165,6 +165,7 @@ or enables a package in a learning-data directory.
 ### Install a prebuilt package
 
 For catalog distribution, see the [community catalog package convention](https://github.com/amosblomqvist/learnharness/blob/main/plugin-catalog/README.md). A listing does not enable a plugin or endorse its code.
+Before a release is listed, automated [catalog checks](https://github.com/amosblomqvist/learnharness/blob/main/plugin-catalog/README.md#checks) reject native or WebAssembly files, `eval`/`new Function` and obfuscated code, and committed API keys. If your repository has a `package.json`, commit its `package-lock.json` so dependencies can be checked for known malware.
 
 For manual installation, copy/extract the plugin so its built files occupy
 `<plugins-directory>/<plugin-id>/dist/manifest.json` and sibling bundles/assets. The
