@@ -35,6 +35,10 @@ export const SEARCH_ENGINES = [
 	{ id: "exa", label: "Exa", envVar: "EXA_API_KEY" },
 	{ id: "firecrawl", label: "Firecrawl", envVar: "FIRECRAWL_API_KEY" },
 	{ id: "ollama", label: "Ollama", envVar: "OLLAMA_API_KEY" },
+	// Appended, never inserted: this order is ALSO the auto-detect preference,
+	// so adding an engine in the middle would silently steal the pick from
+	// anyone whose first keyed engine used to win.
+	{ id: "parallel", label: "Parallel", envVar: "PARALLEL_API_KEY" },
 ] as const;
 
 export type SearchEngineId = (typeof SEARCH_ENGINES)[number]["id"];
