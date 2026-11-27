@@ -15,6 +15,8 @@ import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
 import type { ServerEvent } from "../core/events.ts";
 import { safePluginDataDirectory } from "../store/plugin-data-paths.ts";
+import { compareCommunityVersions, REPOSITORY_PATTERN, SHA256_PATTERN, type CommunityListing, type CommunityRelease } from "../core/community-catalog.ts";
+import { catalogTreeDigest, COMMUNITY_STAGE_PREFIX, publishCatalogFiles } from "./community-plugin-files.ts";
 
 /** Expected host/transport failure. Exceptions thrown by plugin handlers stay ordinary 500 errors. */
 export class PluginHostError extends Error {
@@ -91,7 +93,8 @@ interface Package {
 	blocked?: boolean;
 	contributionWarning?: string;
 }
-interface State { version: 1; enabled: Record<string, boolean> }
+interface CatalogInstall { repository: string; revision: string; tree: string }
+interface State { version: 1; enabled: Record<string, boolean>; communityEnabled: boolean; catalog: Record<string, CatalogInstall> }
 const errorText = (e: unknown) => e instanceof Error ? e.message : String(e);
 const exists = (p: string) => { try { fs.lstatSync(p); return true; } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return false; throw e; } };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -106,7 +109,7 @@ function targets(agents: PluginAgentKind[]): Set<PluginAgentKind> {
 const safeSegment = (p: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(p);
 
 function readState(filename: string): State {
-	if (!exists(filename)) return { version: 1, enabled: Object.create(null) };
+	if (!exists(filename)) return { version: 1, enabled: Object.create(null), communityEnabled: false, catalog: Object.create(null) };
 	if (!fs.lstatSync(filename).isFile() || fs.lstatSync(filename).isSymbolicLink()) throw new Error("Unsafe plugins-state.json");
 	const value: unknown = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ filename, "utf8"));
 	if (!object(value) || value.version !== 1 || !object(value.enabled)) throw new Error("Invalid or unsupported plugins-state.json");
@@ -115,7 +118,16 @@ function readState(filename: string): State {
 		if (!PLUGIN_ID_PATTERN.test(id) || typeof flag !== "boolean") throw new Error("Invalid plugins-state.json enabled entry");
 		enabled[id] = flag;
 	}
-	return { version: 1, enabled };
+	if (value.communityEnabled !== undefined && typeof value.communityEnabled !== "boolean") throw new Error("Invalid community plugin mode");
+	const catalog: State["catalog"] = Object.create(null);
+	if (value.catalog !== undefined) {
+		if (!object(value.catalog)) throw new Error("Invalid catalog plugin state");
+		for (const [id, install] of Object.entries(value.catalog)) {
+			if (!PLUGIN_ID_PATTERN.test(id) || !object(install) || typeof install.repository !== "string" || !REPOSITORY_PATTERN.test(install.repository) || typeof install.revision !== "string" || !SHA256_PATTERN.test(install.revision) || typeof install.tree !== "string" || !SHA256_PATTERN.test(install.tree)) throw new Error("Invalid catalog plugin state entry");
+			catalog[id] = { repository: install.repository, revision: install.revision, tree: install.tree };
+		}
+	}
+	return { version: 1, enabled, communityEnabled: value.communityEnabled === true, catalog };
 }
 function writeState(filename: string, state: State): void {
 	const temp = `${filename}.${randomUUID()}.tmp`;
@@ -195,7 +207,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	const packages = new Map<string, Package>();
 	const questionControllers = new WeakMap<QuestionDefinition, AbortController>();
 	const problemControllers = new WeakMap<NativePluginProblemDefinition, AbortController>();
-	let initialized = false, disposed = false;
+	let initialized = false, disposed = false, communityEnabled = false;
 	let serial: Promise<unknown> = Promise.resolve();
 	let disposing: Promise<void> | undefined;
 	const assertOpen = () => { if (disposed) throw new PluginHostError(503, "Plugin host is disposed"); };
@@ -225,6 +237,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	}
 	async function activate(pkg: Package): Promise<void> {
 		assertOpen();
+		if (pkg.info.origin === "community" && !communityEnabled) return;
 		if (!pkg.info.manifest || pkg.blocked || pkg.restart) {
 			pkg.info.status = "error";
 			return;
@@ -347,10 +360,11 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		}
 	}
 
-	async function discover(state: State): Promise<void> {
+	async function discover(state: State, resumeCommunity = true): Promise<void> {
 		const installationErrors = deps.installationErrors ?? {};
 		const failed = (id: string) => Object.hasOwn(installationErrors, id);
 		const communityIds = fs.readdirSync(/* turbopackIgnore: true */ directory).filter(id => {
+			if (id.startsWith(COMMUNITY_STAGE_PREFIX)) return false;
 			const stat = fs.lstatSync(path.join(/* turbopackIgnore: true */ directory, id));
 			return stat.isDirectory() || stat.isSymbolicLink();
 		});
@@ -380,9 +394,11 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				}
 				continue;
 			}
-			candidate.info.enabled = state.enabled[id] === true;
+			const install = state.catalog[id];
+			if (origin === "community" && candidate.info.revision && install?.revision === candidate.info.revision) candidate.info.repository = install.repository;
+			candidate.info.enabled = state.enabled[id] === true && (origin === "core" || communityEnabled);
 			packages.set(id, candidate);
-			if (candidate.info.enabled && !candidate.blocked) await activate(candidate);
+			if (candidate.info.enabled && !candidate.blocked && (origin === "core" || resumeCommunity)) await activate(candidate);
 		}
 		for (const [id, pkg] of packages) if (!ids.has(id)) {
 			pkg.restart = "Restart required: plugin package removed";
@@ -395,8 +411,20 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		const state = readState(stateFile); // Never hide corrupt/future state or execute code first.
 		fs.mkdirSync(directory, { recursive: true });
 		if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new Error("Unsafe plugins directory");
+		communityEnabled = state.communityEnabled;
 		await discover(state);
 		initialized = true; change();
+	}
+
+	function catalogAction(listing: CommunityListing, release: CommunityRelease): "Install" | "Update" | null {
+		if (!communityEnabled || coreIds.has(listing.id) || !PLUGIN_ID_PATTERN.test(listing.id) || Object.hasOwn(deps.installationErrors ?? {}, listing.id)) return null;
+		pluginRoot(directory);
+		const root = path.join(directory, listing.id);
+		const pkg = packages.get(listing.id);
+		if (!exists(root)) return pkg && (!pkg.blocked || pkg.info.manifest) ? null : "Install";
+		if (!pkg?.info.manifest || pkg.info.enabled || pkg.activation || pkg.restart || pkg.blocked) return null;
+		const state = readState(stateFile), previous = state.catalog[listing.id];
+		return previous?.repository === listing.repository && previous.revision === pkg.info.revision && state.enabled[listing.id] !== true && compareCommunityVersions(release.version, pkg.info.manifest.version) > 0 ? "Update" : null;
 	}
 
 	/** One synchronous per-turn snapshot. Failed packages contribute nothing, not even instructions. */
@@ -543,6 +571,70 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			assertOpen();
 			return [...packages.values()].map(({ info }) => ({ ...info, ...(info.manifest ? { manifest: { ...info.manifest } } : {}) })).sort((a, b) => a.id.localeCompare(b.id));
 		},
+		communityEnabled: () => communityEnabled,
+		catalogAction,
+		installFromCatalog(listing: CommunityListing, release: CommunityRelease, action: "Install" | "Update", files: ReadonlyMap<string, Buffer>, signal: AbortSignal): Promise<void> {
+			return enqueue(async () => {
+				assertOpen(); await initializeInternal();
+				if (signal.aborted || catalogAction(listing, release) !== action) throw new PluginHostError(409, "Plugin availability changed. Refresh Browse.");
+				const state = readState(stateFile), root = path.join(directory, listing.id), update = action === "Update";
+				if (!state.communityEnabled) throw new PluginHostError(409, "Community plugins are off.");
+				if (update) {
+					pluginRoot(root);
+					if (catalogTreeDigest(path.join(root, "dist")) !== state.catalog[listing.id]?.tree) throw new PluginHostError(409, "Local plugin files changed. The catalog did not overwrite them.");
+				}
+				// Clear any orphaned prior enable bit BEFORE the new code can appear on disk.
+				if (state.enabled[listing.id] !== false) { state.enabled[listing.id] = false; writeState(stateFile, state); }
+				let candidate: Package | undefined;
+				try {
+					publishCatalogFiles(directory, listing.id, files, update, tree => {
+						candidate = snapshot(root, listing.id, deps.appVersion, "community");
+						state.catalog[listing.id] = { repository: listing.repository, revision: candidate.info.revision, tree };
+						writeState(stateFile, state);
+					});
+				} catch (error) { throw new PluginHostError(500, `Could not publish the plugin build: ${errorText(error)}`); }
+				candidate!.info.repository = listing.repository;
+				if (update) {
+					candidate!.restart = "Restart required before enabling this updated version";
+					candidate!.info.error = candidate!.restart;
+					candidate!.info.restartRequired = true;
+				}
+				packages.set(listing.id, candidate!);
+				change(); // Deliberately no discovery or activation here.
+			});
+		},
+		setCommunityEnabled(enabled: boolean): Promise<void> {
+			if (!enabled) for (const pkg of packages.values()) {
+				if (pkg.info.origin === "community" && pkg.activation && !pkg.activation.ready) pkg.activation.controller.abort();
+			}
+			return enqueue(async () => {
+				assertOpen(); await initializeInternal();
+				if (enabled === communityEnabled) return;
+				const state = readState(stateFile);
+				state.communityEnabled = enabled;
+				writeState(stateFile, state);
+				communityEnabled = enabled;
+				if (!enabled) {
+					const community = [...packages.values()].filter(pkg => pkg.info.origin === "community");
+					for (const pkg of community) pkg.info.enabled = false;
+					const stopping = community.map(async pkg => {
+						delete pkg.contributionWarning;
+						const failures = await deactivate(pkg);
+						pkg.info.status = failures.length || pkg.blocked ? "error" : "disabled";
+						pkg.info.error = failures.length ? `Cleanup: ${failures.join("; ")}` : pkg.restart ?? (pkg.blocked ? pkg.info.error : undefined);
+					});
+					change(); await Promise.all(stopping);
+				} else {
+					await discover(state, false);
+					for (const pkg of packages.values()) {
+						if (pkg.info.origin !== "community" || state.enabled[pkg.info.id] !== true || pkg.activation) continue;
+						pkg.info.enabled = true;
+						await activate(pkg);
+					}
+				}
+				change();
+			});
+		},
 		setEnabled(id: string, enabled: boolean): Promise<void> {
 			// Let a cooperative in-flight activation finish so queued teardown cannot deadlock.
 			if (!enabled) {
@@ -553,6 +645,8 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				assertOpen(); await initializeInternal();
 				if (!PLUGIN_ID_PATTERN.test(id) || typeof enabled !== "boolean") throw new PluginHostError(400, "Invalid plugin enable request");
 				const pkg = get(id);
+				if (enabled && pkg.info.origin === "community" && !communityEnabled) throw new PluginHostError(409, "Community plugins are off.");
+				if (enabled && pkg.info.restartRequired) throw new PluginHostError(409, pkg.restart ?? "Restart required before enabling this build");
 				const state = readState(stateFile); // Recheck before overwriting externally changed state.
 				state.enabled[id] = enabled; writeState(stateFile, state);
 				if (enabled && pkg.activation?.ready) return;

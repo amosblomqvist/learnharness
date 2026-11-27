@@ -256,11 +256,11 @@ export async function verifyPluginBrowser(url, options = {}) {
 		assert.deepEqual(evidence.blockedRequests, [], "The app attempted an off-origin request; provider/account access is forbidden in this smoke");
 		assert.deepEqual(evidence.responses.filter(entry => entry.status >= 400 && !expectedFixtureResponse(entry)), [], "The live app received unexpected unsuccessful HTTP responses");
 	};
-	const openPlugins = async () => {
+	const openPlugins = async (waitForPlugin = true) => {
 		await page.waitForSelector('aside[aria-hidden="false"]', { visible: true });
 		await page.locator('[data-testid="settings-entry"]').click();
 		await page.locator('[data-testid="settings-nav-plugins"]').click();
-		await page.waitForSelector(`${TOGGLE}:not(:disabled)`, { visible: true });
+		if (waitForPlugin) await page.waitForSelector(`${TOGGLE}:not(:disabled)`, { visible: true });
 	};
 	const closeSettings = async () => {
 		await page.locator('[data-testid="settings-close"]').click();
@@ -586,9 +586,13 @@ export async function verifyPluginBrowser(url, options = {}) {
 		evidence.stage = "disabled discovery in Settings";
 		const documentResponse = await page.goto(base, { waitUntil: "domcontentloaded" });
 		assert.equal(documentResponse?.status(), 200, "The caller's live app must serve its home screen");
-		await openPlugins();
+		await openPlugins(false);
+		const communityMode = '[role="switch"][aria-label="Allow community plugins"]';
+		await page.waitForSelector(`${communityMode}[aria-checked="false"]`);
 		const warning = await page.$eval('[data-testid="section-plugins"]', element => element.textContent);
-		for (const copy of ["trusted local code", "broad file and network access", "not sandboxed", "restarting LearnHarness", "disabled by default"]) assert.ok(warning.includes(copy), `Missing trust/default-state warning: ${copy}`);
+		for (const copy of ["unreviewed third-party code", "not sandboxed", "chats and credentials", "network requests", "previously enabled"]) assert.ok(warning.includes(copy), `Missing trust/default-state warning: ${copy}`);
+		await page.locator(communityMode).click();
+		await page.waitForSelector(TOGGLE);
 		assert.equal(await page.$eval(TOGGLE, element => element.getAttribute("aria-checked")), "false", "verifyPluginServer must leave the runtime fixture disabled");
 		assert.ok((await page.$eval(ROW, element => element.textContent)).includes("Disabled"), "Package row must show the disabled status");
 		assert.equal(await page.$$eval(SIDEBAR_LINK, elements => elements.length), 0, "A disabled package must not expose a sidebar view");

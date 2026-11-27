@@ -17,7 +17,7 @@ async function fixture(t: TestContext) {
   fs.writeFileSync(path.join(dist, "backend.cjs"), "exports.activate = ctx => { ctx.handle('context', () => ctx); };");
   const host = createPluginHost({ directory, appVersion: "0.4.1", createServices: () => ({ learning: {}, inference: {}, agents: { dispose: async () => {} }, workers: { dispose: async () => {} }, createBackgroundTool() { throw Error("Unexpected background tool"); } }) as never });
   t.after(async () => { await host.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
-  await host.initialize(); await host.setEnabled("example", true);
+  await host.setCommunityEnabled(true); await host.setEnabled("example", true);
   return { host, ctx: await host.call("example", "context") as PluginBackendContext };
 }
 const definition = () => ({ id: "code", label: "Coding problem", contractVersion: 1, tool: { toolName: "code_problem", description: "Pose code" }, problemSchema: Type.Object({ starter: Type.String() }), submissionSchema: Type.String() });

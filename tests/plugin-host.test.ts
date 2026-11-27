@@ -17,6 +17,7 @@ function fixture(t: TestContext) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-host-"));
 	const directory = path.join(root, "plugins");
 	fs.mkdirSync(directory);
+	fs.writeFileSync(path.join(root, "plugins-state.json"), JSON.stringify({ version: 1, enabled: {}, communityEnabled: true }));
 	t.after(() => fs.rmSync(root, { recursive: true, force: true }));
 	const listeners = new Set<(event: ServerEvent) => void>();
 	const history: string[] = [];
@@ -218,7 +219,7 @@ test("state persistence, corrupt/future state refusal, atomic writes, and refres
 	await Promise.all([f.host.initialize(), f.host.setEnabled("example", true), f.host.setEnabled("example", false), f.host.setEnabled("example", true)]);
 	assert.equal(f.servicesCreated(), 2);
 	const statePath = path.join(f.root, "plugins-state.json");
-	assert.deepEqual(JSON.parse(fs.readFileSync(statePath, "utf8")), { version: 1, enabled: { example: true } });
+	assert.deepEqual(JSON.parse(fs.readFileSync(statePath, "utf8")), { version: 1, enabled: { example: true }, communityEnabled: true, catalog: {} });
 	assert.equal(fs.readdirSync(f.root).some(p => p.endsWith(".tmp")), false);
 	const restarted = createPluginHost(f.deps); t.after(() => restarted.dispose());
 	await restarted.initialize(); assert.equal(restarted.list()[0]!.status, "active");

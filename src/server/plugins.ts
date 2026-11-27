@@ -16,6 +16,7 @@ import { createPluginBackgroundTool, recoverPluginBackgroundJob } from "./plugin
 import { registerPluginWorkerActivity } from "./plugin-worker-activity.ts";
 import { deliverJobResult, setPluginJobRecovery } from "./jobs.ts";
 import { createPluginHost } from "./plugin-host.ts";
+import { createCommunityPluginCatalog } from "./community-plugin-catalog.ts";
 import { createPluginTransport } from "./plugin-transport.ts";
 import { createPluginDocumentConverter } from "./plugin-documents.ts";
 import type { AgentBuildOptions } from "../agent/teacher-agent.ts";
@@ -118,3 +119,5 @@ export async function getPluginQuestionTypeResolver(): Promise<Host["resolveQues
 	return (await getPluginHost()).resolveQuestionType;
 }
 export const pluginTransport = createPluginTransport({ getHost: getPluginHost, directory: pluginDirectory });
+
+export const communityPluginCatalog = createCommunityPluginCatalog({ getHost: getPluginHost, appVersion: packageJson.version, coreIds: core.ids });

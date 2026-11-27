@@ -14,6 +14,7 @@ function fixture(t: TestContext) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-question-registration-"));
 	const directory = path.join(root, "plugins");
 	fs.mkdirSync(directory);
+	fs.writeFileSync(path.join(root, "plugins-state.json"), JSON.stringify({ version: 1, enabled: {}, communityEnabled: true }));
 	const host = createPluginHost({ directory, appVersion: "0.4.1", createServices: () => ({
 		learning: {} as PluginLearningData, inference: {} as PluginInference,
 		agents: { dispose: async () => {} } as PluginAgentService,

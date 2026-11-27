@@ -103,6 +103,7 @@ export * from "./session-markdown.ts";
 // thread lookup and the side model's lesson document. Pure, browser-safe.
 export * from "./side-chat.ts";
 export * from "./plugins.ts";
+export { COMMUNITY_CREDIT_URL, COMMUNITY_SECURITY_URL, communityListingReport, communitySource, type CommunityOffer } from "./community-catalog.ts";
 export * from "./plugin-questions.ts";
 export * from "./plugin-problems.ts";
 export * from "./plugin-view-context.ts";

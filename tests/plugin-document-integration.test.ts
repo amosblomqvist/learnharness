@@ -29,7 +29,7 @@ async function fixture(t: TestContext, pdfConverter = convertPdf) {
 	const host = createPluginHost({ directory, appVersion: "0.4.1", convertDocument: converter.convert,
 		createServices() { throw new Error("Pure document conversion must not construct backend/model/learning services"); },
 	});
-	await host.initialize();
+	await host.setCommunityEnabled(true);
 	await host.setEnabled("document-one", true); await host.setEnabled("document-two", true);
 	const transport = createPluginTransport({ getHost: async () => host, directory });
 	const route = createPluginDocumentRoute(transport);

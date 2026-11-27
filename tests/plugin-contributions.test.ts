@@ -35,6 +35,7 @@ function engine(): PiEngine {
 function fixture(t: TestContext) {
 	const root = fs.mkdtempSync(path.join(os.tmpdir(), "plugin-contributions-"));
 	const directory = path.join(root, "plugins"); fs.mkdirSync(directory);
+	fs.writeFileSync(path.join(root, "plugins-state.json"), JSON.stringify({ version: 1, enabled: {}, communityEnabled: true }));
 	let changes = 0, disposedServices = 0;
 	const host = createPluginHost({ directory, appVersion: "0.3.7", onChange: () => { changes++; }, createServices: () => ({
 		learning: {} as PluginLearningData, inference: {} as PluginInference,

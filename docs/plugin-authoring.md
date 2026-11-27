@@ -36,7 +36,7 @@ explain the exact shapes. Neither requires importing private app runtime modules
 The primary source-development workflow is to **clone into the app's plugins directory
 and build there**. No LearnHarness repository clone is required.
 
-1. Open **Settings → Community plugins** and copy the plugins directory path.
+1. Open **Settings → Community plugins**, opt in to community code, and copy the plugins directory path under **Manual installation and authoring**.
 2. Clone the plugin's repository into `<plugins-directory>/<plugin-id>`. The folder
    name must match `id` in its manifest, which may differ from the repository name.
 3. Follow the project's dependency setup, then run `npm run build` in that folder.
@@ -164,7 +164,9 @@ or enables a package in a learning-data directory.
 
 ### Install a prebuilt package
 
-Copy/extract the plugin so its built files occupy
+For catalog distribution, see the [community catalog package convention](https://github.com/amosblomqvist/learnharness/blob/main/plugin-catalog/README.md). A listing does not enable a plugin or endorse its code.
+
+For manual installation, copy/extract the plugin so its built files occupy
 `<plugins-directory>/<plugin-id>/dist/manifest.json` and sibling bundles/assets. The
 included no-build examples already have the `<plugin-id>/dist/` layout: copy an example's
 whole folder, refresh the list and enable it. No Node/npm setup is required for those
@@ -696,7 +698,7 @@ See [host architecture and testing seams](plugin-architecture.md#testing).
 
 ## Deliberate limits
 
-No marketplace/community updater, sandbox/per-plugin process, hot replacement,
+No automatic community updates, sandbox/per-plugin process, hot replacement,
 programmable core-data writes, general UI/forms or raw keyboard-event framework, or automatic replay
 of interrupted arbitrary tools. The platform supplies mechanisms, not feature prompts,
 algorithms, defaults or deletion policy; product decisions belong to the human.

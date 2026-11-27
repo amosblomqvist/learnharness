@@ -29,7 +29,7 @@ const { chatStore } = await import("../src/store/chats.ts");
 const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { activeProblemOf, modelSolutionForConclude, newUserMessage } = await import("../src/core/native-messages.ts");
 const { readPluginProblemSnapshot, readPluginProblemSubmission } = await import("../src/core/plugin-problems.ts");
-const host = await getPluginHost();
+const host = await getPluginHost(); await host.setCommunityEnabled(true);
 await host.setEnabled(pluginId, true);
 // This test crosses the real dynamic plugin boundary. Use the consumer's SDK
 // context type rather than equating two installations of TypeBox's generic types.

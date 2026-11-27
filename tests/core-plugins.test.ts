@@ -39,7 +39,7 @@ test("core packages load directly, default disabled, and never create data or ev
 test("core activation uses separate writable data, pinned assets, and persisted explicit choices", async t => {
 	const f = fixture(t); const code = f.pkg("official", "core"); f.pkg("community", "community");
 	const before = fs.readdirSync(code).map(name => [name, fs.readFileSync(path.join(code, name), "utf8")]);
-	await f.host.initialize(); await f.host.setEnabled("official", true); await f.host.setEnabled("community", true);
+	await f.host.initialize(); await f.host.setEnabled("official", true); await f.host.setCommunityEnabled(true); await f.host.setEnabled("community", true);
 	const ctx = await f.host.call("official", "context") as PluginBackendContext;
 	assert.equal(ctx.directory, code); assert.equal(ctx.dataDirectory, path.join(f.core.dataDirectory, "official"));
 	const community = await f.host.call("community", "context") as PluginBackendContext;

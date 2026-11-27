@@ -40,7 +40,7 @@ test("actual Rich code blocks backend appends enabled-family instructions to eve
     createBackgroundTool() { throw new Error("Unexpected background tool"); },
   }) });
   t.after(() => host.dispose());
-  await host.initialize();
+  await host.setCommunityEnabled(true);
   await host.setEnabled("rich-code-blocks", true);
   assert.equal(host.list()[0]?.status, "active", JSON.stringify(host.list()));
   const faux = createFauxCore({});

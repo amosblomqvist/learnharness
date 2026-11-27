@@ -49,8 +49,10 @@ not supported runtime imports for plugin code.
 
 Manifest API version is 1; app/package versions are numeric `x.y.z`. Validate identity,
 paths, compatibility and built entries before executing code. Disabled packages are
-inspected without evaluation. New core and community plugins default to disabled;
-explicit enable/disable choices share `plugins-state.json` and survive app updates.
+inspected without evaluation. New Core and community plugins default to disabled.
+Community execution also requires a persisted global opt-in; existing community
+choices are suspended until it is on. Per-plugin choices share `plugins-state.json`
+and survive app updates.
 
 Code/data locations are explicit:
 
@@ -287,7 +289,7 @@ project README instructions consistent when adding a capability or source exampl
 
 ## Non-goals
 
-No sandbox/per-plugin process, marketplace/community updater, hot replacement,
+No sandbox/per-plugin process, automatic community updates, hot replacement,
 programmable core-data writes, generic forms/UI or raw keyboard-event framework, persistent arbitrary
 editor drafts, or automatic replay/exactly-once external effects. Host infrastructure
 must not choose plugin product prompts, algorithms, defaults or deletion policy.

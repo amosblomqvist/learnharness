@@ -44,10 +44,13 @@ export interface PluginInfo {
 	/** Host-owned package provenance; never read from a plugin manifest. */
 	origin: "core" | "community";
 	manifest?: PluginManifest;
+	/** Verified catalog source for the installed build, not a manifest claim. */
+	repository?: string;
+	restartRequired?: boolean;
 	enabled: boolean;
 	status: "disabled" | "active" | "error";
 	error?: string;
-	/** Changes only after server restart, not merely after enable/disable. */
+	/** Identifies the loaded build, not merely its enable/disable state. */
 	revision: string;
 }
 export interface PluginNotification {

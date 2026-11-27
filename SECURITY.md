@@ -9,6 +9,8 @@ LearnHarness stores API keys, sign-in tokens, chats, and learning records on you
 Report it through GitHub's private vulnerability reporting:
 [Security → Report a vulnerability](https://github.com/amosblomqvist/learnharness/security/advisories/new).
 
+Use the same private route for suspected malicious community plugins or security problems in the community catalog or installer. Include the plugin ID, author repository, and version if known. For ordinary plugin bugs, contact the author; for ordinary listing problems, use the catalog’s listing report link.
+
 If that page is unavailable, message a maintainer on [Discord](https://discord.gg/5tCHHQEB2e) and ask for a private channel. Do not include any details in that first message.
 
 A useful report includes:
@@ -49,7 +51,8 @@ In scope:
 - the local API server, whether started by the desktop app or run from source;
 - the agent and its tools, including prompt injection from web pages, PDFs, or other content that leads to reading, changing, or sending your data;
 - rendered content such as demos, figures, and markdown;
-- the update and release pipeline.
+- the update and release pipeline;
+- the community catalog and installer, including suspicious or malicious catalog entries.
 
 Out of scope:
 

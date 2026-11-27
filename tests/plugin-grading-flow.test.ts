@@ -27,7 +27,7 @@ const { isTurnRunning } = await import("../src/server/turn-liveness.ts");
 const { abortTurn, runningTurn, turnFailure } = await import("../src/server/turn-runs.ts");
 const { pendingPluginQuestionOf, newUserMessage } = await import("../src/core/native-messages.ts");
 const { parkDismissal } = await import("../src/server/dismissal-park.ts");
-const host = await getPluginHost();
+const host = await getPluginHost(); await host.setCommunityEnabled(true);
 await host.setEnabled("grading-fixture", true);
 let ctx = await host.call("grading-fixture", "context") as PluginBackendContext;
 after(async () => { await host.dispose(); globalThis.fetch = realFetch; fs.rmSync(root, { recursive: true, force: true }); });

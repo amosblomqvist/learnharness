@@ -1391,6 +1391,8 @@ export interface PluginInfo {
     id: string;
     origin: "core" | "community";
     manifest?: PluginManifest;
+    repository?: string;
+    restartRequired?: boolean;
     enabled: boolean;
     status: "disabled" | "active" | "error";
     error?: string;
@@ -1405,6 +1407,8 @@ export interface PluginInfo {
 - [id](#plugininfo-id)
 - [origin](#plugininfo-origin)
 - [manifest](#plugininfo-manifest)
+- [repository](#plugininfo-repository)
+- [restartRequired](#plugininfo-restartrequired)
 - [enabled](#plugininfo-enabled)
 - [status](#plugininfo-status)
 - [error](#plugininfo-error)
@@ -1430,6 +1434,20 @@ origin: "core" | "community";
 manifest?: PluginManifest;
 ```
 
+### PluginInfo repository
+
+Verified catalog source for the installed build, not a manifest claim.
+
+```ts
+repository?: string;
+```
+
+### PluginInfo restartRequired
+
+```ts
+restartRequired?: boolean;
+```
+
 ### PluginInfo enabled
 
 ```ts
@@ -1450,7 +1468,7 @@ error?: string;
 
 ### PluginInfo revision
 
-Changes only after server restart, not merely after enable/disable.
+Identifies the loaded build, not merely its enable/disable state.
 
 ```ts
 revision: string;

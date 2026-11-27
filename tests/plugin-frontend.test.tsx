@@ -606,7 +606,7 @@ describe("plugin frontend surface and native importer", () => {
 		} }, { fetch: async (_url, init) => {
 			if (init?.method === "POST") { refreshPosts++; if (pendingRefresh) return pendingRefresh.promise; }
 			if (init?.method === "PUT") enabled = JSON.parse(String(init.body)).enabled;
-			return Response.json({ plugins: [info("fixture", { enabled, status: enabled ? "active" : "disabled" })], directory: "/fixture/writable/plugins" });
+			return Response.json({ plugins: [info("fixture", { enabled, status: enabled ? "active" : "disabled" })], directory: "/fixture/writable/plugins", communityEnabled: true });
 		} });
 		window.__lhPluginWindow = createPluginWindowOwner(f.host);
 		const frames = new Map<string, (raw: string) => void>();
@@ -630,6 +630,13 @@ describe("plugin frontend surface and native importer", () => {
 			assert.ok(ids.indexOf("plugin-authoring-help") < ids.indexOf("plugin-directory"));
 			assert.ok(ids.indexOf("plugin-directory") < ids.indexOf("plugin-fixture"));
 			const refresh = document.querySelector<HTMLButtonElement>('[aria-label="Refresh plugins"]')!;
+			const help = document.querySelector('[data-testid="plugin-install-help"]')!;
+			assert.equal(help.hasAttribute("open"), false);
+			assert.equal(help.querySelector("summary")?.textContent, "Manual installation and authoring");
+			assert.ok(help.contains(document.querySelector('[data-testid="plugin-authoring-help"]')));
+			const download = help.querySelector('[data-testid="download-plugin-authoring"]')!;
+			assert.equal(download.getAttribute("href"), "/plugin-authoring/learnharness-plugins.zip");
+			assert.equal(download.hasAttribute("download"), true);
 			assert.ok(document.querySelector('[data-testid="plugin-directory"]')?.contains(refresh));
 			assert.equal(refresh.textContent, "");
 			assert.equal(refresh.disabled, false);
@@ -659,8 +666,9 @@ describe("plugin frontend surface and native importer", () => {
 			await click(button("Community plugins")); assert.equal(settingsCleanups, 1);
 			await act(async () => { frames.get("record-changed")!(JSON.stringify({ chatId: "external" })); });
 			assert.deepEqual(events, [{ type: "record-changed", chatId: "external" }]);
-			await click(document.querySelector<HTMLButtonElement>('[role="switch"]')!);
-			assert.equal(document.querySelector('[role="switch"]')?.getAttribute("aria-checked"), "false");
+			const toggle = document.querySelector<HTMLButtonElement>('[aria-label="Enable Plugin fixture"]')!;
+			await click(toggle);
+			assert.equal(toggle.getAttribute("aria-checked"), "false");
 			assert.equal(document.querySelector('nav[aria-label="Plugin views"]'), null);
 			assert.equal(activated, 1);
 			assert.equal(document.querySelector('[aria-label="Settings for Plugin fixture"]'), null, "disabled plugins have no settings gear");
@@ -705,29 +713,14 @@ describe("plugin frontend surface and native importer", () => {
 	it("widgets safely render empty without a provider", () => {
 		assert.equal(renderToStaticMarkup(<PluginWidgets />), "");
 	});
-	it("Settings explains trusted local code, broad access, restart recovery and directory install/refresh", () => {
+	it("Community settings are off before opt-in and explain the access and preserved choices; Core has no gate", () => {
 		const html = renderToStaticMarkup(<PluginsSection />);
-		for (const copy of ["trusted local code", "broad file and network access", "not sandboxed", "restarting LearnHarness", "disabled by default", "Refresh plugins", "How to install a plugin", "Build a plugin", "Download authoring skill", "npm run build", "Prebuilt packages", "Preserve", "data/"]) assert.ok(html.includes(copy), copy);
+		for (const copy of ["unreviewed third-party code", "not sandboxed", "read or change local files", "chats and credentials", "network requests", "resumes any plugins you previously enabled"]) assert.ok(html.includes(copy), copy);
 		const document = parseHTML(html).document;
-		const help = document.querySelector('[data-testid="plugin-install-help"]')!;
-		assert.equal(help.hasAttribute("open"), false);
-		const trigger = help.querySelector("summary")!;
-		assert.equal(trigger.textContent, "How to install a plugin");
-		for (const style of ["list-none", "text-muted-foreground", "underline", "underline-offset-2", "hover:text-foreground", "[&::-webkit-details-marker]:hidden"]) assert.ok(trigger.classList.contains(style), style);
-		assert.equal(help.contains(document.querySelector('[data-testid="plugin-authoring-help"]')), false);
-		const download = document.querySelector('[data-testid="download-plugin-authoring"]')!;
-		assert.equal(download.tagName, "A");
-		assert.equal(download.getAttribute("href"), "/plugin-authoring/learnharness-plugins.zip");
-		assert.equal(download.hasAttribute("download"), true);
-		assert.equal(document.querySelector('[data-testid="plugin-authoring-help"]')?.querySelectorAll("p").length, 1);
-		assert.equal(document.querySelector('[data-testid="plugin-authoring-help"] p')?.textContent, "Download the authoring skill for your coding agent.");
-		const refresh = document.querySelector('[aria-label="Refresh plugins"]')!;
-		assert.equal(refresh.textContent, "");
-		assert.equal(refresh.hasAttribute("disabled"), true, "no provider means disabled");
-		assert.ok(refresh.querySelector('svg[aria-hidden="true"]'));
-		assert.ok(document.querySelector('[data-testid="plugin-directory"]')?.contains(refresh));
+		assert.equal(document.querySelector('[aria-label="Allow community plugins"]')?.getAttribute("aria-checked"), "false");
+		for (const text of ["Browse", "Installed", "Manual installation and authoring", "Refresh plugins"]) assert.equal(html.includes(text), false, text);
 		const core = renderToStaticMarkup(<PluginsSection origin="core" />);
-		for (const text of ["How to install a plugin", "Build a plugin", "Download authoring skill", "Refresh plugins"]) assert.equal(core.includes(text), false, text);
+		assert.doesNotMatch(core, /Allow community plugins|Browse|Manual installation and authoring|Refresh plugins/);
 	});
 	it("native ESM wrapper is a public module, with no dynamic evaluation or bundled import escape hatch", async () => {
 		const script = await readFile(new URL("../public/plugin-loader.js", import.meta.url), "utf8");

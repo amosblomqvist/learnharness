@@ -38,6 +38,8 @@ export interface PluginSnapshot {
 	conflicts: readonly { id: string; error: string }[];
 	loading: boolean;
 	refreshing: boolean;
+	communityEnabled?: boolean;
+	communityChanging?: boolean;
 	error?: string;
 }
 interface Lifecycle {
@@ -231,10 +233,10 @@ export class PluginFrontendManager {
 		if (this.disposed || this.mutations) return;
 		const generation = ++this.requestGeneration;
 		try {
-			const body = await this.json("/api/plugins") as { plugins: PluginInfo[]; directory: string; conflicts?: { id: string; error: string }[] };
+			const body = await this.json("/api/plugins") as { plugins: PluginInfo[]; directory: string; conflicts?: { id: string; error: string }[]; communityEnabled?: boolean };
 			if (this.disposed || generation !== this.requestGeneration) return;
 			this.reconcile(body.plugins);
-			this.publish({ directory: body.directory, conflicts: body.conflicts ?? [], loading: false, ...(clearError ? { error: undefined } : {}) });
+			this.publish({ directory: body.directory, conflicts: body.conflicts ?? [], communityEnabled: body.communityEnabled === true, loading: false, ...(clearError ? { error: undefined } : {}) });
 		} catch (error) {
 			if (generation === this.requestGeneration) this.publish({ loading: false, error: message(error) });
 		}
@@ -503,6 +505,22 @@ export class PluginFrontendManager {
 		finally {
 			this.requestGeneration++; this.pending.delete(id); this.mutations--;
 			this.publish(); await this.reload(false);
+		}
+	}
+	async setCommunityEnabled(enabled: boolean) {
+		if (this.disposed || this.mutations) return;
+		this.mutations++; this.requestGeneration++;
+		if (!enabled) this.reconcile(this.infos.map(info => info.origin === "community" ? { ...info, enabled: false, status: "disabled" } : info));
+		this.publish({ communityChanging: true, error: undefined });
+		try {
+			await this.json("/api/plugins", {
+				method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }),
+			});
+		} catch (error) { this.publish({ error: message(error) }); }
+		finally {
+			this.requestGeneration++; this.mutations--;
+			await this.reload(false);
+			this.publish({ communityChanging: false });
 		}
 	}
 	async refresh() {

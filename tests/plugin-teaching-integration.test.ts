@@ -73,7 +73,7 @@ test("external teaching example composes native tools, validated workers, separa
 		};
 	} });
 	t.after(() => host.dispose());
-	await host.initialize();
+	await host.setCommunityEnabled(true);
 	assert.equal(foreground.state.callCount + worker.state.callCount, 0, "discovery makes no model calls");
 	await host.setEnabled("teaching-extension", true);
 	assert.equal(worker.state.callCount, 0, "activation registers definitions but does not start work");

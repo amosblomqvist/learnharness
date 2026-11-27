@@ -5,6 +5,8 @@ import type { PluginFrontendContext, PluginInfo } from "../core/plugins.ts";
 /** Thin HTTP adapter, separately injectable so its tests never boot plugins. */
 export interface PluginTransportHost {
 	list(): PluginInfo[];
+	communityEnabled?(): boolean;
+	setCommunityEnabled?(enabled: boolean): Promise<void>;
 	conflicts(): { id: string; error: string }[];
 	refresh(): Promise<void>;
 	setEnabled(id: string, enabled: boolean): Promise<void>;
@@ -28,7 +30,7 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
 			return json({ error: error instanceof Error || isPluginHostError(error) ? error.message : "Plugin request failed" }, status);
 		}
 	};
-	const catalog = (host: PluginTransportHost) => ({ plugins: host.list(), directory: deps.directory, conflicts: host.conflicts() });
+	const catalog = (host: PluginTransportHost) => ({ plugins: host.list(), directory: deps.directory, conflicts: host.conflicts(), ...(host.communityEnabled ? { communityEnabled: host.communityEnabled() } : {}) });
 	return {
 		list: () => guarded(async () => json(catalog(await deps.getHost()))),
 		refresh: (request: Request) => guarded(async () => {
@@ -36,6 +38,14 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
 			if (body.action !== "refresh") throw new InputError("Expected action: refresh");
 			const host = await deps.getHost();
 			await host.refresh();
+			return json(catalog(host));
+		}),
+		setCommunityEnabled: (request: Request) => guarded(async () => {
+			const body = await objectBody(request);
+			if (typeof body.enabled !== "boolean") throw new InputError("enabled must be a boolean");
+			const host = await deps.getHost();
+			if (!host.setCommunityEnabled) return json({ error: "Community plugin mode unavailable" }, 503);
+			await host.setCommunityEnabled(body.enabled);
 			return json(catalog(host));
 		}),
 		setEnabled: (id: string, request: Request) => guarded(async () => {

@@ -172,7 +172,7 @@ test("external native backend composes host, inference, persistent managed input
 	t.after(async () => { releaseQuestion(); await host.dispose(); fs.rmSync(root, { recursive: true, force: true }); });
 	const call = (operation: string, input?: unknown) => host.call("integration-fixture", operation, input);
 
-	await host.initialize();
+	await host.setCommunityEnabled(true);
 	assert.equal(host.list()[0]?.status, "disabled");
 	assert.equal(activationSignals.length, 0);
 	await assert.rejects(call("create"), disabled);

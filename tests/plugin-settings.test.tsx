@@ -43,7 +43,7 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		broken: { activate() { throw new Error("Fixture activation failed"); } },
 	};
 	const owner = createPluginWindowOwner({
-		fetch: async () => Response.json({ plugins: [info("schema"), info("custom"), info("backend"), info("loading"), info("broken"), info("disabled", false)], directory: "/fixtures/plugins", conflicts: [{ id: "schema", error: "Community schema skipped: reserved Core plugin ID" }] }),
+		fetch: async () => Response.json({ plugins: [info("schema"), info("custom"), info("backend"), info("loading"), info("broken"), info("disabled", false)], directory: "/fixtures/plugins", communityEnabled: true, conflicts: [{ id: "schema", error: "Community schema skipped: reserved Core plugin ID" }] }),
 		importModule: async url => modules[decodeURIComponent(url.split("/")[3]!)]!,
 		pathname: () => "/", navigate() {},
 	});

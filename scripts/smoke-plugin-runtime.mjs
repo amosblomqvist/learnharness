@@ -645,8 +645,9 @@ export async function verifyPluginServer(url, home, headers = {}) {
 	};
 	const listing = await (await fetch(url + "/api/plugins", { headers })).json();
 	const plugin = listing.plugins?.find((item) => item.id === "native-smoke");
-	if (!plugin || plugin.enabled || plugin.status !== "disabled") throw new Error("External plugins must be discovered disabled without executing code");
+	if (listing.communityEnabled !== false || !plugin || plugin.enabled || plugin.status !== "disabled") throw new Error("External plugins must be discovered disabled without executing code");
 	if (fs.existsSync(activated)) throw new Error("Disabled plugin backend was evaluated");
+	await jsonRequest("/api/plugins", "PUT", { enabled: true });
 	await jsonRequest("/api/plugins/native-smoke", "PUT", { enabled: true });
 	const proof = await jsonRequest("/api/plugins/native-smoke/call", "POST", { operation: "proof", input: "packaged-runtime" });
 	if (proof.result?.answer !== "packaged-runtime" || !proof.result.node || proof.result.data !== path.join(directory, "data") || proof.result.learning !== path.join(home, "data")) throw new Error("Native backend/context/bridge proof failed");
@@ -680,5 +681,6 @@ export async function verifyPluginServer(url, home, headers = {}) {
 	if (mockStillListening) throw new Error("Disabled plugin leaked its loopback mock listener");
 	const stopped = await fetch(url + "/api/plugins/native-smoke/call", { method: "POST", headers: { ...headers, "content-type": "application/json" }, body: JSON.stringify({ operation: "proof" }) });
 	if (stopped.ok) throw new Error("Disabled plugin accepted operations");
+	await jsonRequest("/api/plugins", "PUT", { enabled: false });
 	console.log("[smoke-server] external plugin: disabled discovery → native backend/bridge/assets + idle loopback fixture → cooperative disable closes mock; data preserved");
 }

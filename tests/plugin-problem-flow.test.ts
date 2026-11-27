@@ -20,7 +20,7 @@ const { getPluginHost } = await import("../src/server/plugins.ts"), { handleChat
 const { createPracticeAgent } = await import("../src/agent/teacher-agent.ts"), { chatStore } = await import("../src/store/chats.ts");
 const { isTurnRunning } = await import("../src/server/turn-liveness.ts"), { runningTurn, abortTurn } = await import("../src/server/turn-runs.ts");
 const { activeProblemOf, modelSolutionForConclude, newUserMessage } = await import("../src/core/native-messages.ts");
-const host = await getPluginHost(); await host.setEnabled("problem-fixture", true);
+const host = await getPluginHost(); await host.setCommunityEnabled(true); await host.setEnabled("problem-fixture", true);
 const ctx = await host.call("problem-fixture", "context") as PluginBackendContext;
 after(async () => { await host.dispose(); globalThis.fetch = realFetch; fs.rmSync(root, { recursive: true, force: true }); });
 const deferred = <T,>() => { let resolve!: (value: T) => void; const promise = new Promise<T>(yes => { resolve = yes; }); return { resolve, promise }; };
