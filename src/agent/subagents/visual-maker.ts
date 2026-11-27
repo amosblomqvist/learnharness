@@ -8,6 +8,7 @@ import { providerEventObserver, type ProviderEventObserver } from "../provider-e
 import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import { createWorkerRequestScope } from "../worker-request-admission.ts";
 import type { VisualResult } from "../../core/contracts.ts";
+import { appendLanguageDirective } from "../../core/language.ts";
 import type { LearnerImage } from "../tools/learner-image.ts";
 import type { PdfFigureImage, PdfFigureSource } from "../tools/pdf-figure.ts";
 import { embedLearnerImage, LEARNER_IMAGE_HREF } from "../../core/learner-image-svg.ts";
@@ -73,6 +74,8 @@ export interface VisualMakerOptions {
 	onUsage?: (usage: Usage) => void;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;
+	/** Optional explicit response language (absent/undefined = Auto). */
+	language?: string;
 }
 
 const INSTRUCTIONS = `You are a visual maker — a diagram author + renderer for precise, spatial figures. You
@@ -109,6 +112,7 @@ until correct and clean. Never finish without having looked at a render of your 
 SVG requirements:
 - A complete <svg> with explicit width/height AND a matching viewBox.
 - White background (<rect> or style), dark strokes, sans-serif labels at generous sizes.
+- Write all learner-visible labels, readouts, and diagram text in the language requested by the brief (keeping standard scientific terms and formulas intact).
 - One idea, fewest elements — sparse and large beats busy and tiny.
 - Draw only what the brief specifies; never invent data, values, or shapes to fill space.
 - Plain, clean styling: at most one accent color. An explanatory diagram, not art.
@@ -223,11 +227,12 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	const capture = createBackgroundCapture({ role: "visualMaker", runId: sessionId, sourceId: opts.chatId });
 	/** The picture being annotated; in PDF mode crop_page replaces it. */
 	let learnerImage: LearnerImage | PdfFigureImage | undefined = input.image ?? pdf?.pageImage;
-	const systemPrompt = pdf
+	const baseSystemPrompt = pdf
 		? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}\n\n${PDF_INSTRUCTIONS}`
 		: learnerImage
 			? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}`
 			: INSTRUCTIONS;
+	const systemPrompt = appendLanguageDirective(baseSystemPrompt, opts.language, "subagent");
 	const prompt = [
 		pdf
 			? "Brief for ONE annotated figure from the learner's PDF (from the teacher, verbatim — it is everything you know):"

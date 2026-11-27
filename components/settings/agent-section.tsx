@@ -63,6 +63,7 @@ import { PromptSegmentDialog, type PromptDeleteOutcome, type PromptSaveOutcome }
 import { PromptSegmentRow, promptSegmentName } from "./prompt-segment-row";
 import type React from "react";
 import {
+	AGENT_LANGUAGES,
 	COMPACTION_THRESHOLD_FLOOR,
 	MODEL_SLOTS,
 	SEARCH_ENGINES,
@@ -78,7 +79,7 @@ import {
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { prettyModel } from "@/components/usage-format";
 import { cn } from "@/lib/utils";
-import { SettingsGroup, SettingsRow, SettingsMenuTrigger, SettingsSegmentedControl, Toggle, CommitInput } from "./controls.tsx";
+import { SettingsGroup, SettingsRow, SettingsMenuTrigger, SettingsSegmentedControl, ThinSelect, Toggle, CommitInput } from "./controls.tsx";
 import { ModelMenuList, ThinkingMenuList } from "./model-menu";
 import { ChatGPTBackgroundAccess } from "./chatgpt-connection";
 import { NativeSubscriptionBackgroundAccess } from "./subscription-connections";
@@ -213,6 +214,15 @@ export function composeQuizMechanics(agent: AgentSettings | undefined, mechanics
  *  explicit-off record stays visible as stored. Pure — exported for tests. */
 export function composeGraphTools(agent: AgentSettings | undefined, on: boolean): AgentSettings {
 	return { ...agent, graphTools: { enabled: on } };
+}
+
+/** Compose: the response-language preference. "auto" / "" clears the
+ *  override (absent = Auto, match learner). Pure — exported for tests. */
+export function composeAgentLanguage(agent: AgentSettings | undefined, language: string): AgentSettings {
+	const next = { ...agent };
+	if (!language || language === "auto") delete next.language;
+	else next.language = language;
+	return next;
 }
 
 /** Compose: one slot's model/thinking override. Empty model = absent
@@ -777,13 +787,29 @@ export function AgentSection({
 			</SettingsGroup>
 
 			<SettingsGroup label="Tools" testid="group-tools">
+				<SettingsRow
+					label="Response language"
+					hint="Language for tutor replies, quizzes, knowledge graph, and plugins"
+					testid="agent-language-row"
+				>
+					<ThinSelect
+						value={agent?.language ?? "auto"}
+						ariaLabel="Response language"
+						testid="select-agent-language"
+						onChange={(value) => onSectionChange(composeAgentLanguage(agent, value))}
+					>
+						{AGENT_LANGUAGES.map(({ code, label }) => (
+							<option key={code} value={code}>{label}</option>
+						))}
+					</ThinSelect>
+				</SettingsRow>
 				{/* The prober's graph tools (wave 7, owner ruling 2026-09-23):
-				    FIRST row of the group — its subject is the map, its
-				    mechanism is agent capability, so it lives in Tools but
-				    NOT in the tool-toggles list. Its own agent-section key
-				    (agent.graphTools), the search-row hint discipline: a
-				    smaller line under it explaining what it is — this
-				    connects prior sessions' knowledge into new ones. */}
+				    sits at the top of the tool rows (below Response language) —
+				    its subject is the map, its mechanism is agent capability,
+				    so it lives in Tools but NOT in the tool-toggles list. Its
+				    own agent-section key (agent.graphTools), the search-row hint
+				    discipline: a smaller line under it explaining what it is —
+				    this connects prior sessions' knowledge into new ones. */}
 				{(() => {
 					const graphOn = graph?.enabled ?? true;
 					return (

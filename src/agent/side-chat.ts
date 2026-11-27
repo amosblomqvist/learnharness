@@ -27,6 +27,7 @@ import { CLAUDE_CODE_PROVIDER } from "./claude-code/constants.ts";
 import { providerEventObserver } from "./provider-events.ts";
 import { PATHS } from "../../config.ts";
 import type { SideModelTurn } from "../core/side-chat.ts";
+import { appendLanguageDirective } from "../core/language.ts";
 import type { PiEngine } from "./models.ts";
 import { readPromptOverride } from "./prompt-segments.ts";
 
@@ -46,17 +47,18 @@ function readSource(file: string): string {
 
 /** The side model's system prompt, composed fresh per call (an override
  *  switched on between questions lands on the next one). */
-export function composeSideChatInstructions(switches: Record<string, boolean> = {}): string {
+export function composeSideChatInstructions(switches: Record<string, boolean> = {}, language?: string): string {
 	const segments = [readSource(SIDE_BASE)];
 	for (const key of SIDE_SHARED_FRAGMENTS) {
 		const override = switches[key] === true ? readPromptOverride(key) : null;
 		segments.push(override ?? readSource(path.join(PROMPTS_DIR, ...key.split("/"))));
 	}
 	segments.push(readSource(SIDE_STYLE));
-	return segments
+	const base = segments
 		.map((s) => s.trim())
 		.filter(Boolean)
 		.join("\n\n---\n\n");
+	return appendLanguageDirective(base, language, "conversation");
 }
 
 export interface SideAnswerResult {

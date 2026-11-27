@@ -96,6 +96,8 @@ export interface JobRunnerDeps {
 	 *  Injected because the agent layer may not read the key store; absent
 	 *  in tests that inject engines directly (test engines never owe a key). */
 	providerKeyMissing?: (provider: string, tier: ModelSlotName) => ProviderKeyMissing | null;
+	/** Optional live response language getter (absent/undefined = Auto). */
+	getLanguage?: () => string | undefined;
 }
 
 export interface JobRunner {
@@ -380,6 +382,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 				pdfDir,
 				abortSignal: loop.abortSignal,
 				chatId: loop.chatId,
+				language: deps.getLanguage?.(),
 				// Money channel: each agent step is one model call — fold its
 				// usage into the record as it completes (progress write).
 				onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
@@ -431,6 +434,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 					engine: model,
 					abortSignal: loop.abortSignal,
 					chatId: loop.chatId,
+					language: deps.getLanguage?.(),
 					onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
 					onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
 				},
@@ -486,6 +490,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 						engine: model,
 						abortSignal: loop.abortSignal,
 						chatId: loop.chatId,
+						language: deps.getLanguage?.(),
 						onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
 						onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
 					},
@@ -532,6 +537,7 @@ export function createJobRunner(deps: JobRunnerDeps): JobRunner {
 				engine: model,
 				abortSignal: loop.abortSignal,
 				chatId: loop.chatId,
+				language: deps.getLanguage?.(),
 				onUsage: (usage) => loop.onUsage(piUsageToStep(usage)),
 				onActivity: (line) => jobStore.updateJob(jobId, { activity: line }),
 			},

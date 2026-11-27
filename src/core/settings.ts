@@ -36,6 +36,7 @@ import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
 import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import { normalizeAgentLanguage } from "./language.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
 
@@ -383,6 +384,8 @@ export interface AgentSettings {
 	 *  the current policy is read per new tool call/job start. Existing
 	 *  sensitive-location/credential denials always win, not a whole-data ban. */
 	fileAccess?: FileAccessSettings;
+	/** Optional explicit response language (e.g. "hu", "en"). Absent = Auto (match learner). */
+	language?: string;
 }
 
 /** Markdown-rendering knobs — the bare-bones set (owner decision). */
@@ -797,6 +800,8 @@ function sanitizeAgent(raw: Record<string, unknown>): AgentSettings {
 		const parsed = parseFileAccessSettings(raw.fileAccess);
 		out.fileAccess = parsed.ok ? parsed.settings : { restricted: true, folders: [] };
 	}
+	const language = normalizeAgentLanguage(raw.language);
+	if (language !== undefined) out.language = language;
 	return out;
 }
 

@@ -7,6 +7,7 @@ import type {
 	PluginAgentSnapshot, PluginCallPurpose, PluginModelSpec,
 } from "../core/plugin-agents.ts";
 import type { PiEngine } from "./models.ts";
+import { appendLanguageDirective } from "../core/language.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 
 import type { PluginAgentRecordStore } from "../core/ports.ts";
@@ -17,6 +18,7 @@ export interface PluginAgentServiceDeps {
 	onUsage?: (model: PluginModelSpec, usage: Usage) => void;
 	signal?: AbortSignal;
 	onChange?: () => void;
+	getLanguage?: () => string | undefined;
 }
 
 const clone = <T>(value: T): T => structuredClone(value);
@@ -169,7 +171,7 @@ export function createPluginAgentService(deps: PluginAgentServiceDeps): PluginAg
 				const agent = new Agent({
 					sessionId: s.record.id,
 					initialState: {
-						systemPrompt: d.instructions, model: engine.model,
+						systemPrompt: appendLanguageDirective(d.instructions, deps.getLanguage?.(), "plugin"), model: engine.model,
 						thinkingLevel: engine.level ?? d.model.thinkingLevel,
 						messages: clone(modelHistory(s.record.messages)), tools,
 					},

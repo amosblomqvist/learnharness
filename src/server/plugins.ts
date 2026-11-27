@@ -19,7 +19,7 @@ import { createPluginHost } from "./plugin-host.ts";
 import { createPluginTransport } from "./plugin-transport.ts";
 import { createPluginDocumentConverter } from "./plugin-documents.ts";
 import type { AgentBuildOptions } from "../agent/teacher-agent.ts";
-import { stores } from "./stores.ts";
+import { effectiveSettings, stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { compactionInFlight } from "./compaction.ts";
 
@@ -60,6 +60,7 @@ function runtime(): Runtime {
 			const agents = createPluginAgentService({
 				store: createPluginAgentRecordStore(path.join(/* turbopackIgnore: true */ dataDirectory, "agents")),
 				engineFor: inference.engineFor, onUsage: inference.onUsage, signal,
+				getLanguage: () => effectiveSettings().agent.language,
 				onChange: () => { if (!signal.aborted) emit("plugin-message", { pluginId: manifest.id, topic: "agents-changed" }); },
 			});
 			const workerActivity = registerPluginWorkerActivity({
@@ -69,6 +70,7 @@ function runtime(): Runtime {
 			const workers = createPluginWorkerService({
 				store: createPluginTaskRecordStore(path.join(/* turbopackIgnore: true */ dataDirectory, "tasks")),
 				engineFor: inference.engineFor, onUsage: inference.onUsage, signal,
+				getLanguage: () => effectiveSettings().agent.language,
 				onChange: workerActivity,
 			});
 			return { learning, inference: inference.inference, agents, workers,

@@ -9,6 +9,7 @@ import { providerEventObserver, type ProviderEventObserver } from "../provider-e
 import { backgroundCaptureStream, createBackgroundCapture, type BackgroundCapture } from "../background-capture.ts";
 import { createWorkerRequestScope } from "../worker-request-admission.ts";
 import type { PdfResult, PdfToolInput } from "../../core/contracts.ts";
+import { appendLanguageDirective } from "../../core/language.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 import { pdfExtract, pdfInfo, pdfProbe, pdfSearch, type PdfSearchHit } from "./pdf-ops.ts";
 
@@ -74,6 +75,8 @@ export interface PdfReaderOptions {
 	maxIterations?: number;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;
+	/** Optional explicit response language (absent/undefined = Auto). */
+	language?: string;
 }
 
 export interface PdfReaderInput extends PdfToolInput {}
@@ -215,11 +218,13 @@ export async function runPdfReaderAgent(
 	let nudged = false;
 	let captureError: unknown;
 
+	const systemPrompt = appendLanguageDirective(INSTRUCTIONS, opts.language, "subagent");
+
 	try {
 		for (let iteration = 0; maxIterations === undefined || iteration < maxIterations; iteration++) {
 			const result = await streamOnce(
 				streamEngine,
-				INSTRUCTIONS,
+				systemPrompt,
 				messages,
 				toolDeclarations,
 				sessionId,
