@@ -92,7 +92,7 @@ a plugin.
 | Display a controlled hierarchy | `ctx.ui.mountTree`; [tree contract](plugin-tree-contract.md) |
 | Convert an uploaded PDF/text file | Frontend `ctx.documents.toMarkdown` below |
 | Read saved learning records | Backend `ctx.learning` below |
-| Call models, run conversations or bounded tasks | Backend `ctx.inference`, `ctx.agents`, `ctx.workers` below |
+| Call models, run conversations or result tasks | Backend `ctx.inference`, `ctx.agents`, `ctx.workers` below |
 
 Feature contracts define lifecycle and acceptance rules; this guide is the entry point.
 Browse the [complete API reference](plugin-api/README.md) for exact signatures and
@@ -625,14 +625,16 @@ exactly-once promise for external tool effects. See `examples/plugins/managed-ag
 
 ### Result-oriented workers and background tools
 
-`ctx.workers` runs bounded tasks with one validated result, not human-input conversations.
+`ctx.workers` runs tasks with one validated result, not human-input conversations.
 Register instructions, `resultSchema`, optional side-effect-free `validateResult` and
-native tools. `start(workerId, {requestId,input,prompt,model,purpose,maxTurns,...})`
+native tools. `start(workerId, {requestId,input,prompt,model,purpose,...})`
 persists acceptance synchronously and returns a snapshot, **not completion**.
 `options` use the inference allowlist; `timeoutMs` is wall-clock lifetime including
-admission waits, distinct from per-request `options.timeoutMs`. Model/purpose and
-`maxTurns` are explicit; an identical request ID/request returns the original task,
-while conflicting reuse errors. Retry with a new ID for a new attempt.
+admission waits, distinct from per-request `options.timeoutMs`. Model/purpose are
+explicit. Optional `maxTurns` limits assistant turns, including correction turns;
+omitting it means no turn-count limit. An explicit limit must be a positive safe
+integer and remains enforced. An identical request ID/request returns the original
+task, while conflicting reuse errors. Retry with a new ID for a new attempt.
 
 The host's `submit_result({result})` validates schema/refinements and supplies correction
 feedback in the same native context. First durably accepted valid JSON wins, including

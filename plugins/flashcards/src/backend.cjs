@@ -81,7 +81,7 @@ function pack(graph, ids, state) {
   }
   // Like core extraction, the chunk budget covers source material only.
   // Instructions, schema, chains and existing cards still count in estimate()
-  // for full-request cost and model-context checks, but not for chunk grouping.
+  // for the full-request preview, but not for chunk grouping.
   const chunks = []; let current = [], currentTokens = 0;
   for (const id of targets) {
     const node = nodes.get(id), tokens = Math.ceil(`${node.name}\n${node.statement}`.length / 4);
@@ -368,19 +368,14 @@ function activate(ctx) {
     if (activeBatch(store.get())) fail('A generation batch is already active.');
     const resolved = await resolveModel(store.get().settings);
     const state = store.get(), chunks = pack(graphNow(), propositionIds, state);
-    const plans = chunks.map(input => {
-      const tokens = estimate(input);
-      const maxTokens = Math.min(8192, resolved.entry.maxTokens ?? 8192, (resolved.entry.contextWindow ?? Infinity) - tokens - 256);
-      if (maxTokens < 1024) fail('The selected model cannot fit this context and an output allowance. Reduce the chunk budget or choose another model.');
-      return { input, prompt: promptFor(input), maxTokens, tokens };
-    });
+    const plans = chunks.map(input => ({ input, prompt: promptFor(input), tokens: estimate(input) }));
     const id = randomUUID();
     preflights.set(id, { kind: 'graph', revision: state.revision, settingsHash: fingerprint(state.settings), model: resolved.spec, plans, createdAt: Date.now() });
     for (const [key, value] of preflights) if (Date.now() - value.createdAt > 600000) preflights.delete(key);
     return { id, chunkCount: plans.length, propositionCount: new Set(propositionIds).size, estimatedTokens: plans.reduce((n, p) => n + p.tokens, 0), modelLabel: resolved.entry.name };
   });
   function rememberFilePlan(file, resolved, state, source, ranges, retryOf) {
-    const plans = fileGeneration.prepareFileChunks({ name: file.name, markdown: file.markdown, chunkBudget: state.settings.chunkBudget, entry: resolved.entry, ...(ranges ? { ranges } : {}) });
+    const plans = fileGeneration.prepareFileChunks({ name: file.name, markdown: file.markdown, chunkBudget: state.settings.chunkBudget, ...(ranges ? { ranges } : {}) });
     const id = randomUUID(), sourceId = source?.id ?? randomUUID(), deckId = source?.deckId ?? randomUUID();
     preflights.set(id, { kind: 'file', file, sourceId, deckId, retryOf, revision: state.revision, settingsHash: fingerprint(state.settings), model: resolved.spec, plans, createdAt: Date.now() });
     for (const [key, value] of preflights) if (Date.now() - value.createdAt > 600000) preflights.delete(key);
@@ -461,7 +456,8 @@ function activate(ctx) {
         try {
           if (store.get().batches.find(b => b.id === batchId).cancelRequested) return;
           const p = plan.plans[index];
-          const task = ctx.workers.start(plan.kind === 'file' ? 'generate-file-facts-v1' : 'generate-cues-v1', { requestId: chunk.requestId, input: plan.kind === 'file' ? { ...p.input, sourceId: plan.sourceId } : p.input, prompt: p.prompt, model: plan.model, purpose: 'user', maxTurns: 4, options: { maxTokens: p.maxTokens, timeoutMs: 120000, maxRetries: 0 } });
+          // Leave output sizing and context fit to native Pi/provider handling.
+          const task = ctx.workers.start(plan.kind === 'file' ? 'generate-file-facts-v1' : 'generate-cues-v1', { requestId: chunk.requestId, input: plan.kind === 'file' ? { ...p.input, sourceId: plan.sourceId } : p.input, prompt: p.prompt, model: plan.model, purpose: 'user', options: { timeoutMs: 120000, maxRetries: 0 } });
           change(s => { const c = s.batches.find(b => b.id === batchId).chunks.find(c => c.id === chunk.id); c.taskId = task.id; c.status = 'queued'; }, 'batch-changed');
           watch(batchId, chunk.id, task.id);
         } catch (error) {

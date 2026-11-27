@@ -35,10 +35,10 @@ interface Transport {
 	origin: string; path: string; authHeader: string;
 }
 const TRANSPORTS: Transport[] = [
-	{ provider: "opencode-go", id: "claude-haiku-5-5", envVar: "OPENCODE_API_KEY", api: "anthropic-messages", origin: "https://opencode.ai", path: "/inference/go/v1/messages", authHeader: "x-api-key" },
-	{ provider: "opencode-go", id: "gemini-4-argon-contributor", envVar: "OPENCODE_API_KEY", api: "google-generative-ai", origin: "https://opencode.ai", path: "/inference/go/v1/models/gemini-4-argon-contributor:streamGenerateContent", authHeader: "x-goog-api-key" },
-	{ provider: "opencode-go", id: "glm-5.3", envVar: "OPENCODE_API_KEY", api: "openai-completions", origin: "https://opencode.ai", path: "/inference/go/v1/chat/completions", authHeader: "authorization" },
-	{ provider: "opencode-go", id: "gpt-6-luna", envVar: "OPENCODE_API_KEY", api: "openai-responses", origin: "https://opencode.ai", path: "/inference/go/v1/responses", authHeader: "authorization" },
+	{ provider: "opencode-go", id: "claude-haiku-5-5", envVar: "OPENCODE_API_KEY", api: "anthropic-messages", origin: "https://opencode.ai", path: "/inference/go/anthropic/v1/messages", authHeader: "x-api-key" },
+	{ provider: "opencode-go", id: "gemini-4-argon", envVar: "OPENCODE_API_KEY", api: "google-generative-ai", origin: "https://opencode.ai", path: "/inference/go/google/v1beta/models/gemini-4-argon:streamGenerateContent", authHeader: "x-goog-api-key" },
+	{ provider: "opencode-go", id: "glm-5.3", envVar: "OPENCODE_API_KEY", api: "openai-completions", origin: "https://opencode.ai", path: "/inference/go/openai/v1/chat/completions", authHeader: "authorization" },
+	{ provider: "opencode-go", id: "gpt-6-luna", envVar: "OPENCODE_API_KEY", api: "openai-responses", origin: "https://opencode.ai", path: "/inference/go/openai/v1/responses", authHeader: "authorization" },
 	{ provider: "openrouter", id: "openai/gpt-4o-mini", envVar: "OPENROUTER_API_KEY", api: "openai-completions", origin: "https://openrouter.ai", path: "/api/v1/chat/completions", authHeader: "authorization" },
 	{ provider: "openai", id: "gpt-4o-mini", envVar: "OPENAI_API_KEY", api: "openai-responses", origin: "https://api.openai.com", path: "/v1/responses", authHeader: "authorization" },
 	{ provider: "anthropic", id: "claude-haiku-4-5", envVar: "ANTHROPIC_API_KEY", api: "anthropic-messages", origin: "https://api.anthropic.com", path: "/v1/messages", authHeader: "x-api-key" },
@@ -217,6 +217,11 @@ describe("provider-neutral raw agent loops", { concurrency: false }, () => {
 						const expected = transport.provider === "openrouter" ? OR_KEY : round === 0 ? "dummy-selected-key-first" : "dummy-selected-key-rotated";
 						assert.equal(request.headers.get(transport.authHeader), transport.authHeader === "authorization" ? `Bearer ${expected}` : expected);
 						if (transport.provider !== "openrouter") assert.ok(!JSON.stringify({ ...request, headers: Object.fromEntries(request.headers) }).includes(OR_KEY));
+						if (transport.provider === "anthropic") {
+							assert.ok(!Object.hasOwn(request.body, "thread"), "key rotation must not reuse a server-side thread");
+							assert.doesNotMatch(request.headers.get("anthropic-beta") ?? "", /message-threads/);
+							assert.match(JSON.stringify(request.body), /cache_control/, "native prompt caching is independent of threads");
+						}
 						assertPayload(transport, loop, round, request.body);
 					}
 				});

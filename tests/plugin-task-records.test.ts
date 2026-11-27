@@ -28,6 +28,24 @@ test("store is lazy on missing reads and atomically round-trips independent nati
 	assert(!existsSync(join(root, "chats")));
 });
 
+test("unbounded tasks round-trip while legacy caps and max_turns outcomes remain unchanged", t => {
+	const directory = fixture(t); const store = createPluginTaskRecordStore(directory);
+	const unbounded = record(); delete unbounded.maxTurns;
+	store.save(unbounded);
+	assert.deepEqual(store.get(unbounded.id), unbounded);
+	assert.equal(Object.hasOwn(store.get(unbounded.id)!, "maxTurns"), false);
+	const legacy = record({ id: "legacy", status: "failed", completedAt: "2026-10-31T00:01:00.000Z", turns: 3,
+		error: { code: "max_turns", message: "Worker exhausted maxTurns without an accepted result" } });
+	store.save(legacy);
+	const file = join(directory, "legacy.json"), before = readFileSync(file, "utf8");
+	assert.deepEqual(store.get(legacy.id), legacy);
+	assert.equal(store.list().length, 2);
+	assert.equal(readFileSync(file, "utf8"), before);
+	for (const maxTurns of [0, -1, 1.5, null, "3", Number.MAX_SAFE_INTEGER + 1]) {
+		assert.throws(() => store.save({ ...unbounded, maxTurns } as never), /Corrupt|unsupported/);
+	}
+});
+
 test("all falsy JSON results persist, while absent success and non-JSON data cannot be coerced", t => {
 	const store = createPluginTaskRecordStore(fixture(t));
 	for (const value of [false, 0, "", null]) { store.save(success(value)); assert.equal(store.get("task_one")?.result, value); }

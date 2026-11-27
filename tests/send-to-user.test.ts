@@ -93,6 +93,7 @@ describe("send_to_user model gate", () => {
 		["claude-code", "opus", true],
 		["claude-code", "sonnet", true],
 		["claude-code", "haiku", true],
+		["claude-code", "fable", true],
 		["openrouter", "z-ai/glm-5.3-flash", false],
 		["openai", "gpt-4o-mini", false],
 		["anthropic", "opaque-alias", false],

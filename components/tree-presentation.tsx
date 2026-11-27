@@ -74,10 +74,13 @@ export function TreeHeader({ sticky = false, className, ...props }: HTMLAttribut
 	return <div {...props} className={classes(sticky && "sticky top-0 z-10", "flex shrink-0 items-center gap-1 border-b border-border/60 bg-background/80 px-3 py-1.5 text-[11px] uppercase tracking-widest text-muted-foreground/70 backdrop-blur", className)} />;
 }
 
-export function TreeGuide({ depth = 0, selectionColumn, variant = "branch", className, style, ...props }: HTMLAttributes<HTMLDivElement> & {
-	depth?: number; selectionColumn: boolean; variant?: "branch" | "compact";
+/** `through`: the rail runs to the branch's bottom rule instead of stopping at
+ * the last row's checkbox — for contents separated by horizontal rules
+ * (folders), so the last item's rule still meets the rail. */
+export function TreeGuide({ depth = 0, selectionColumn, variant = "branch", through = false, className, style, ...props }: HTMLAttributes<HTMLDivElement> & {
+	depth?: number; selectionColumn: boolean; variant?: "branch" | "compact"; through?: boolean;
 }) {
-	return <div {...props} className={classes("pointer-events-none absolute bottom-[8px]", variant === "compact" ? "top-[22px]" : "top-[23px]", "w-px bg-border/50", className)}
+	return <div {...props} className={classes("pointer-events-none absolute", through ? "bottom-0" : "bottom-[8px]", variant === "compact" ? "top-[22px]" : "top-[23px]", "w-px bg-border/50", className)}
 		style={{ left: (selectionColumn ? 37 : 19) + depth * 36, ...style }} />;
 }
 

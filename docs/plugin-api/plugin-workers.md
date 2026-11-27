@@ -558,7 +558,7 @@ validateResult?: (result: unknown, context: PluginWorkerContext) => void | Promi
 
 Public SDK type, exported as `PluginWorkerService`. Import with `import type`; the SDK has no runtime exports.
 
-Plugin-owned bounded tasks; model execution can incur cost. Task lifetime is
+Plugin-owned result tasks; model execution can incur cost. Task lifetime is
 independent of views/subscriptions. Disable/restart interrupts unfinished tasks;
 reactivation does not replay them.
 
@@ -723,7 +723,7 @@ export interface PluginWorkerStartOptions {
     prompt: string;
     model: PluginModelSpec;
     purpose: PluginCallPurpose;
-    maxTurns: number;
+    maxTurns?: number;
     options?: PluginInferenceOptions;
     timeoutMs?: number;
 }
@@ -776,10 +776,10 @@ purpose: PluginCallPurpose;
 
 ### PluginWorkerStartOptions maxTurns
 
-Maximum model turns, including correction turns. No implicit default.
+Optional maximum assistant turns, including corrections. Omitted = unbounded.
 
 ```ts
-maxTurns: number;
+maxTurns?: number;
 ```
 
 ### PluginWorkerStartOptions options

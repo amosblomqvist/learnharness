@@ -81,8 +81,8 @@ it("the Appearance switch preserves siblings, applies immediately through the pr
   const root = createRoot(document.getElementById("root")!);
   const writes: AppearanceSettings[] = [];
   function Panel() {
-    const { appearance, onAppearanceChange } = useAppearance();
-    return <AppearanceSection appearance={appearance} onSectionChange={next => { writes.push(next); onAppearanceChange(next); return true; }} />;
+    const { delta, onAppearanceChange } = useAppearance();
+    return <AppearanceSection appearance={delta} onSectionChange={next => { writes.push(next); onAppearanceChange(next); return true; }} />;
   }
   const toggle = () => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Code ligatures"]')!;
   const token = () => document.documentElement.style.getPropertyValue("--lh-code-ligatures");
