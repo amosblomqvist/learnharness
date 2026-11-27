@@ -2,8 +2,8 @@
 
 The files are the user's record, not an import format to rewrite. Work read-only.
 The bundled readers make common views convenient; they are not required for custom
-analysis. This reference describes native session/graph format **1**. An absent
-version stamp means v1. Older fields within that format are described below;
+analysis. This reference describes native session formats **1–2** and graph format **1**.
+An absent version stamp means v1. Older fields within those formats are described below;
 pre-native `parts`/UIMessage transcripts are a different, unsupported dialect.
 
 ## File map
@@ -37,8 +37,10 @@ Each `chats/*.json` file is an object with:
 | `id`, `title` | Stable session identity and user-visible name |
 | `createdAt`, `updatedAt` | ISO date strings for the session, not a date for every idea |
 | `kind` | `teach` or `practice`; absent means `teach` |
-| `version` | Format stamp; absent means v1 |
+| `version` | Format stamp (`1` or `2`); absent means v1 |
 | `messages` | Complete stored chronological history, including custom app markers |
+| `sideChats` | Optional v2 inline clarification threads anchored to teacher prose blocks |
+| `imageSnapshots` | Optional v2 session-owned image store (`{mimeType, data, width, height}`); readers omit base64 `data` and keep dimensions/MIME metadata |
 | `tree` | Optional session plan: nodes, prerequisite edges, revision number |
 | `turns`, `extractions` | Parallel usage/cost-observation logs, not learner answers |
 | `settings` | Per-session model/thinking overrides, not an understanding assessment |
@@ -136,6 +138,7 @@ recall/explain response: the teacher's subsequent prose is its interpretation.
 | `customType` | Interpretation |
 | --- | --- |
 | `practice-thinking` | **Learner-authored work**, including intermediate attempts and claimed answers; raw text is `details.text`, associated through `details.problemCallId` |
+| `plugin-problem-submission` | **Learner-authored submission** for a plugin problem; structured payload lives in `details` |
 | `graph-context` | Picked propositions/chains supplied as session context; app-injected, not learner speech |
 | `plan-block` | Historical plan presentation snapshot in `details.block` |
 | `subagent-steer` | Delivered teaching artifact; `details.kind` and `details.result` identify the payload |
@@ -144,6 +147,8 @@ recall/explain response: the teacher's subsequent prose is its interpretation.
 | `practice-next` | Learner moved on to another problem |
 | `problem-dismissed` | Learner skipped a practice problem; points to its problem call |
 | `compaction` | Context-management bookkeeping, not a learner statement or replacement for history |
+| `side-question` | Clarification exchange from a v2 side-chat thread recorded in main history |
+| `side-question-told` | Record marker noting a v2 side-chat thread was shared with the main teacher |
 
 The practice `problem` tool holds the statement, target proposition IDs, and
 precommitted `modelSolution`. There may be many `practice-thinking` submissions for

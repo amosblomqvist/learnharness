@@ -123,17 +123,33 @@ class DataHelpersTest(unittest.TestCase):
         self.save_chat()
         target = self.root / "chats" / "chat_one.json"
         before = target.read_bytes()
+        before_mtime = target.stat().st_mtime_ns
         self.assertEqual(_data.read_chat(self.root, "chat_one"), self.record())
         self.assertEqual(target.read_bytes(), before)
+        self.assertEqual(target.stat().st_mtime_ns, before_mtime)
         self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), ["chats", "chats/chat_one.json"])
 
-    def test_future_chat_version_is_refused(self):
-        self.save_chat(version=2)
+    def test_supported_v1_and_v2_chats_are_read_without_writes(self):
+        for version in (None, 1, 2):
+            with self.subTest(version=version):
+                self.save_chat(version=version)
+                target = self.root / "chats" / "chat_one.json"
+                before = target.read_bytes()
+                before_mtime = target.stat().st_mtime_ns
+                self.assertEqual(_data.read_chat(self.root, "chat_one"), self.record(version=version))
+                self.assertEqual(target.read_bytes(), before)
+                self.assertEqual(target.stat().st_mtime_ns, before_mtime)
+                self.assertEqual(sorted(p.relative_to(self.root).as_posix() for p in self.root.rglob("*")), ["chats", "chats/chat_one.json"])
+
+    def test_future_and_invalid_chat_versions_are_refused(self):
+        self.save_chat(version=3)
         with self.assertRaisesRegex(_data.DataError, "Update the skill"):
             _data.read_chat(self.root, "chat_one")
-        self.save_chat(version=True)
-        with self.assertRaisesRegex(_data.DataError, "invalid version"):
-            _data.read_chat(self.root, "chat_one")
+        for invalid in (0, -1, True, False, 1.5, 2.0, "2"):
+            with self.subTest(version=invalid):
+                self.save_chat(version=invalid)
+                with self.assertRaisesRegex(_data.DataError, "invalid version"):
+                    _data.read_chat(self.root, "chat_one")
 
     def test_pre_native_parts_dialect_is_not_silently_empty(self):
         self.save_chat(messages=[{"role": "user", "parts": [{"type": "text", "text": "old shape"}]}])

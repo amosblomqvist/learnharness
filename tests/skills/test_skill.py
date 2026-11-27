@@ -3,9 +3,11 @@
 from __future__ import annotations
 
 import ast
+import importlib.util
 import json
 import os
 from pathlib import Path
+import re
 import shutil
 import subprocess
 import sys
@@ -49,6 +51,28 @@ class SkillFolderTest(unittest.TestCase):
         for script in (SKILL / "scripts").glob("*.py"):
             with self.subTest(script=script.name):
                 ast.parse(script.read_text(encoding="utf-8"), filename=str(script), feature_version=(3, 10))
+
+    def test_supported_format_versions_match_app_contracts(self):
+        chat_contract = (REPO / "src" / "core" / "contracts" / "chat.ts").read_text(encoding="utf-8")
+        graph_contract = (REPO / "src" / "core" / "contracts" / "graph.ts").read_text(encoding="utf-8")
+        chat_match = re.search(r"export\s+const\s+CURRENT_CHAT_VERSION\s*=\s*(\d+)\s*;", chat_contract)
+        graph_match = re.search(r"export\s+const\s+CURRENT_GRAPH_FORMAT_VERSION\s*=\s*(\d+)\s*;", graph_contract)
+        self.assertIsNotNone(chat_match, "CURRENT_CHAT_VERSION not found in src/core/contracts/chat.ts")
+        self.assertIsNotNone(graph_match, "CURRENT_GRAPH_FORMAT_VERSION not found in src/core/contracts/graph.ts")
+        scripts_dir = SKILL / "scripts"
+        sys.path.insert(0, str(scripts_dir))
+        try:
+            data_spec = importlib.util.spec_from_file_location("lh_drift_data", scripts_dir / "_data.py")
+            data_mod = importlib.util.module_from_spec(data_spec)
+            data_spec.loader.exec_module(data_mod)
+            graph_spec = importlib.util.spec_from_file_location("lh_drift_graph", scripts_dir / "graph.py")
+            graph_mod = importlib.util.module_from_spec(graph_spec)
+            graph_spec.loader.exec_module(graph_mod)
+        finally:
+            sys.path.remove(str(scripts_dir))
+        self.assertEqual(data_mod.SUPPORTED_CHAT_VERSION, int(chat_match.group(1)))
+        self.assertEqual(data_mod.SUPPORTED_GRAPH_VERSION, int(graph_match.group(1)))
+        self.assertEqual(graph_mod.SUPPORTED_GRAPH_VERSION, int(graph_match.group(1)))
 
     def test_copied_skill_runs_outside_repository_and_creates_no_cache_or_data(self):
         with tempfile.TemporaryDirectory() as temporary:
