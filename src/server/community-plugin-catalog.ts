@@ -82,7 +82,8 @@ export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHo
 			const { plugins } = await feed(request.signal);
 			const offers: CommunityOffer[] = plugins.map(listing => {
 				const release = releaseFor(listing);
-				return { listing, release, action: release ? host.catalogAction(listing, release) : null };
+				const action = release ? host.catalogAction(listing, release) : null;
+				return { listing, release, action, ...(action === "Update" && host.catalogUpdateTurnsOff(listing.id) ? { turnsOff: true } : {}) };
 			});
 			return json({ offers });
 		}),
@@ -91,7 +92,8 @@ export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHo
 			try { selection = await request.json(); } catch { throw new PluginHostError(400, "Invalid install request"); }
 			const sha256 = selection && typeof selection === "object" ? Reflect.get(selection, "sha256") : undefined;
 			const action = selection && typeof selection === "object" ? Reflect.get(selection, "action") : undefined;
-			if (id.length > 80 || !PLUGIN_ID_PATTERN.test(id) || typeof sha256 !== "string" || !SHA256_PATTERN.test(sha256) || (action !== "Install" && action !== "Update")) throw new PluginHostError(400, "Invalid install request");
+			const turnOff = selection && typeof selection === "object" ? Reflect.get(selection, "turnOff") ?? false : false;
+			if (id.length > 80 || !PLUGIN_ID_PATTERN.test(id) || typeof sha256 !== "string" || !SHA256_PATTERN.test(sha256) || (action !== "Install" && action !== "Update") || typeof turnOff !== "boolean") throw new PluginHostError(400, "Invalid install request");
 			const host = await deps.getHost();
 			if (!host.communityEnabled()) throw new PluginHostError(409, "Community plugins are off.");
 			const listing = (await feed(request.signal)).plugins.find(plugin => plugin.id === id);
@@ -100,7 +102,7 @@ export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHo
 			if (host.catalogAction(listing, release) !== action) throw new PluginHostError(409, "This plugin cannot be installed or updated in its current state. Refresh Browse.");
 			const files = await build(listing, release, request.signal);
 			if (request.signal.aborted) throw new PluginHostError(409, "Installation was cancelled.");
-			await host.installFromCatalog(listing, release, action, files, request.signal);
+			await host.installFromCatalog(listing, release, action, files, request.signal, turnOff);
 			return json({ restartRequired: action === "Update" });
 		}),
 	};
