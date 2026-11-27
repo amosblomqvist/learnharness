@@ -21,6 +21,8 @@ import { AUTH_FILE } from "../../config.ts";
 import type { AuthStore } from "../core/ports.ts";
 import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
 import { CUSTOM_AUTH_BINDING, parseCustomAuthBinding, type CustomAuthBinding } from "../core/custom-provider-auth.ts";
+import { LOCAL_STT_KEY_ID } from "../core/dictation.ts";
+import { LOCAL_STT_AUTH_BINDING, parseLocalSttAuthBinding, type LocalSttAuthBinding } from "../core/local-stt-auth.ts";
 import { writeFileAtomicSync } from "./atomic-write.ts";
 
 /** The flat string→string map, or {} for absent/corrupt/non-object. */
@@ -67,20 +69,24 @@ export const authStore: AuthStore = {
 /** Custom writes must never turn an unreadable/corrupt private file into {}.
  * Other providers retain their existing adapter semantics. Unknown JSON values
  * survive custom-only updates, not just the ordinary string projection. */
-function readCustomMap(): Record<string, unknown> {
+function readStrictMap(): Record<string, unknown> {
 	let text: string;
 	try { text = fs.readFileSync(AUTH_FILE, "utf8"); }
 	catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return {}; throw new Error("Custom authorization storage unavailable"); }
 	let raw: unknown;
 	try { raw = JSON.parse(text); } catch { throw new Error("Custom authorization storage unavailable"); }
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new Error("Custom authorization storage unavailable");
-	const map = raw as Record<string, unknown>;
+	return raw as Record<string, unknown>;
+}
+function readCustomMap(): Record<string, unknown> {
+	const map = readStrictMap();
 	if (Object.hasOwn(map, CUSTOM_AUTH_BINDING) && !parseCustomAuthBinding(map[CUSTOM_AUTH_BINDING])) throw new Error("Invalid custom authorization record");
 	if (Object.hasOwn(map, CUSTOM_PROVIDER.envVar) && typeof map[CUSTOM_PROVIDER.envVar] !== "string") throw new Error("Invalid custom credential record");
 	return map;
 }
 function assertOrdinaryVar(name: string): void {
 	if (name === CUSTOM_AUTH_BINDING || name === CUSTOM_PROVIDER.envVar) throw new Error("Use the custom endpoint editor");
+	if (name === LOCAL_STT_AUTH_BINDING || name === LOCAL_STT_KEY_ID) throw new Error("Use the local dictation key writer");
 }
 /** One immutable file snapshot. Keyless callers never invoke fileKey(). */
 export function readCustomAuth() {
@@ -95,5 +101,23 @@ export function writeCustomAuth(binding: CustomAuthBinding | undefined, fileKey:
 	else Object.defineProperty(map, CUSTOM_PROVIDER.envVar, { value: fileKey, enumerable: true, configurable: true, writable: true });
 	if (binding === undefined) delete map[CUSTOM_AUTH_BINDING];
 	else Object.defineProperty(map, CUSTOM_AUTH_BINDING, { value: JSON.stringify(binding), enumerable: true, configurable: true, writable: true });
+	writeMap(map);
+}
+
+/** One immutable snapshot of the local transcription key and its URL binding.
+ * A malformed binding reads as absent, so the key is never sent; the next
+ * pair write replaces it. */
+export function readLocalSttAuth() {
+	const map = readStrictMap();
+	return { binding: parseLocalSttAuthBinding(map[LOCAL_STT_AUTH_BINDING]), fileKey: () => typeof map[LOCAL_STT_KEY_ID] === "string" ? map[LOCAL_STT_KEY_ID] as string : undefined };
+}
+/** Replace the local key and its binding together in ONE atomic record write. */
+export function writeLocalSttAuth(binding: LocalSttAuthBinding | undefined, fileKey: string | undefined): void {
+	const map = readStrictMap();
+	if (binding && !parseLocalSttAuthBinding(JSON.stringify(binding))) throw new Error("Invalid local transcription authorization record");
+	if (fileKey === undefined) delete map[LOCAL_STT_KEY_ID];
+	else Object.defineProperty(map, LOCAL_STT_KEY_ID, { value: fileKey, enumerable: true, configurable: true, writable: true });
+	if (binding === undefined) delete map[LOCAL_STT_AUTH_BINDING];
+	else Object.defineProperty(map, LOCAL_STT_AUTH_BINDING, { value: JSON.stringify(binding), enumerable: true, configurable: true, writable: true });
 	writeMap(map);
 }
