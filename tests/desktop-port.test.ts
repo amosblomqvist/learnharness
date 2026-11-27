@@ -26,11 +26,16 @@ type DesktopPortModule = {
 
 const loadDesktopPort = (): DesktopPortModule => mainRequire("./desktop-port.cjs");
 
-async function holdPort(port = 0): Promise<{ port: number; close: () => Promise<void> }> {
+async function holdPort(port = 0, host = "127.0.0.1"): Promise<{ port: number; close: () => Promise<void> }> {
 	const server = net.createServer();
+	const sockets = new Set<net.Socket>();
+	server.on("connection", socket => {
+		sockets.add(socket);
+		socket.once("close", () => sockets.delete(socket));
+	});
 	await new Promise<void>((resolve, reject) => {
 		server.once("error", reject);
-		server.listen(port, "127.0.0.1", () => {
+		server.listen(port, host, () => {
 			server.off("error", reject);
 			resolve();
 		});
@@ -38,7 +43,10 @@ async function holdPort(port = 0): Promise<{ port: number; close: () => Promise<
 	const boundPort = (server.address() as AddressInfo).port;
 	return {
 		port: boundPort,
-		close: () => new Promise<void>((resolve, reject) => server.close(err => (err ? reject(err) : resolve()))),
+		close: () => {
+			for (const socket of sockets) socket.destroy();
+			return new Promise<void>((resolve, reject) => server.close(err => (err ? reject(err) : resolve())));
+		},
 	};
 }
 
@@ -105,6 +113,21 @@ describe("desktop localhost port selection", () => {
 			assert.ok(Number.isInteger(fallback) && fallback > 0 && fallback <= 65535);
 		} finally {
 			await occupied.close();
+		}
+	});
+
+	it("falls back to an ephemeral free port when another process listens on 0.0.0.0:<preferredPort>", async () => {
+		const { pickDesktopPort } = loadDesktopPort();
+		const wildcard = await holdPort(0, "0.0.0.0");
+		try {
+			const picked = await pickDesktopPort({ preferredPort: wildcard.port });
+			assert.notEqual(picked, wildcard.port);
+			assert.ok(Number.isInteger(picked) && picked > 0 && picked <= 65535);
+
+			const probe = await holdPort(picked);
+			await probe.close();
+		} finally {
+			await wildcard.close();
 		}
 	});
 });
@@ -221,5 +244,80 @@ describe("Electron main packaged server port wiring", () => {
 
 		assert.deepEqual(spawnedPorts, [String(preferred)]);
 		assert.deepEqual(loadedUrls, [`http://127.0.0.1:${preferred}`]);
+	});
+
+	it("does not probe or pick a desktop port when LH_DEV_URL is set", async () => {
+		let pickCalls = 0;
+		const loadedUrls: string[] = [];
+		const app = Object.assign(new EventEmitter(), {
+			setName() {},
+			getPath: () => "/fixture/LearnHarness",
+			setPath() {},
+			requestSingleInstanceLock: () => false,
+			quit() {},
+			whenReady: async () => {},
+			isPackaged: false,
+		});
+		class FakeWindow extends EventEmitter {
+			static getAllWindows() { return []; }
+			webContents = Object.assign(new EventEmitter(), {
+				id: 1,
+				mainFrame: { url: "" },
+				setWindowOpenHandler() {},
+				send() {},
+				getZoomFactor: () => 1,
+				isDestroyed: () => false,
+			});
+			isDestroyed() { return false; }
+			loadURL(url: string) { loadedUrls.push(url); }
+			setBackgroundColor() {}
+			setTitleBarOverlay() {}
+		}
+		const electron = {
+			app,
+			BrowserWindow: FakeWindow,
+			nativeTheme: { themeSource: "system", shouldUseDarkColors: true, on() {} },
+			ipcMain: Object.assign(new EventEmitter(), { handle() {} }),
+			Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
+			session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
+			shell: { openExternal() {} },
+			dialog: {},
+		};
+		const context = {
+			require: (id: string) => {
+				if (id === "electron") return electron;
+				if (id === "node:fs") return { existsSync: () => false, mkdirSync() {}, appendFileSync() {} };
+				if (id === "./desktop-port.cjs") {
+					return { pickDesktopPort: async () => { pickCalls++; return 43127; } };
+				}
+				if (id === "./appearance-chrome.cjs") {
+					return { ...mainRequire(id), readAppearance: () => ({ mode: "dark", background: "#141414" }) };
+				}
+				if (id === "./dev-server-readiness.cjs") {
+					return { waitForDevServer: async () => {} };
+				}
+				return mainRequire(id);
+			},
+			process: Object.assign(new EventEmitter(), {
+				platform: "linux",
+				argv: [],
+				execPath: "/fixture/electron",
+				resourcesPath: "/fixture/resources",
+				env: { LH_DEV_URL: "http://localhost:3000" },
+			}),
+			__dirname: dirname(mainFile),
+			AbortController,
+			URL,
+			console: { log() {} },
+			setTimeout,
+			clearTimeout,
+			setInterval: () => 0,
+		};
+
+		runInNewContext(mainSource, context, { filename: mainFile });
+		await (runInNewContext("main()", context) as Promise<void>);
+
+		assert.equal(pickCalls, 0);
+		assert.deepEqual(loadedUrls, ["http://localhost:3000"]);
 	});
 });

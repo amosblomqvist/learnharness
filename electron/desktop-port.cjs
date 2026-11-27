@@ -6,6 +6,7 @@ const net = require("node:net");
  *  Chromium origin (and renderer localStorage) persists across launches. */
 const DEFAULT_DESKTOP_PORT = 43127;
 const FALLBACK_CODES = new Set(["EADDRINUSE", "EACCES"]);
+const PROBE_CONNECT_TIMEOUT_MS = 200;
 
 /** Parse an optional LH_PORT override (integer 1..65535), falling back to
  *  DEFAULT_DESKTOP_PORT when unset or invalid. */
@@ -19,14 +20,44 @@ function parsePreferredPort(env = process.env) {
 /** Bind and immediately release a loopback TCP socket to confirm availability. */
 function probePort(port, host = "127.0.0.1") {
 	return new Promise((resolve, reject) => {
+		let settled = false;
 		const srv = net.createServer();
-		srv.once("error", reject);
+		const fail = (err) => {
+			if (settled) return;
+			settled = true;
+			try { srv.close(); } catch { /* not listening */ }
+			reject(err);
+		};
+		srv.on("error", fail);
 		srv.listen(port, host, () => {
-			srv.off("error", reject);
 			const addr = srv.address();
 			const bound = typeof addr === "object" && addr ? addr.port : port;
-			srv.close((err) => (err ? reject(err) : resolve(bound)));
+			srv.close((err) => {
+				if (settled) return;
+				settled = true;
+				if (err) reject(err);
+				else resolve(bound);
+			});
 		});
+	});
+}
+
+/** On Windows, Winsock allows binding 127.0.0.1:<port> even when another
+ *  process already listens on 0.0.0.0:<port>. A short loopback connect check
+ *  detects any active listener so we never attach to a foreign server. */
+function hasActiveListener(port, host = "127.0.0.1", timeoutMs = PROBE_CONNECT_TIMEOUT_MS) {
+	return new Promise((resolve) => {
+		let settled = false;
+		const sock = net.connect({ host, port });
+		const done = (active) => {
+			if (settled) return;
+			settled = true;
+			sock.destroy();
+			resolve(active);
+		};
+		sock.setTimeout(timeoutMs, () => done(true));
+		sock.once("connect", () => done(true));
+		sock.once("error", (err) => done(err?.code !== "ECONNREFUSED" && err?.code !== "EHOSTUNREACH" && err?.code !== "ENETUNREACH"));
 	});
 }
 
@@ -36,7 +67,8 @@ async function pickDesktopPort({ preferredPort, env = process.env, host = "127.0
 	const target = preferredPort === undefined ? parsePreferredPort(env) : preferredPort;
 	if (Number.isInteger(target) && target >= 1 && target <= 65535) {
 		try {
-			return await probePort(target, host);
+			const bound = await probePort(target, host);
+			if (!(await hasActiveListener(bound, host))) return bound;
 		} catch (err) {
 			if (!FALLBACK_CODES.has(err?.code)) throw err;
 		}
