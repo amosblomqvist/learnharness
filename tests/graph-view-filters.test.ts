@@ -5,7 +5,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { displayCostTotals, graphVisibleIds, isNodeVisible } from "../components/graph-view.tsx";
+import { displayCostTotals, graphVisibleIds, isNodeVisible, nextGraphStatusState } from "../components/graph-view.tsx";
 import { graphFolderVisibleIds, type GraphNode, type SourceOrganization } from "../src/core/index.ts";
 import { deriveView } from "../src/core/graph.ts";
 
@@ -89,5 +89,60 @@ describe("displayCostTotals (naming-free cost fold)", () => {
 
 	it("unpriced counts fold the same two stages", () => {
 		assert.equal(displayCostTotals(costs).unpricedRuns, 1);
+	});
+});
+
+describe("nextGraphStatusState (status + graphRevision refresh transitions)", () => {
+	const row = (id: string) => ({ id, chatId: id.split("#")[0]!, title: id, phase: "extracting", startedAt: 1 });
+
+	it("initial mount seeds lastRevision without triggering an extra refresh", () => {
+		const next = nextGraphStatusState(
+			{ rowIds: new Set(), lastRevision: null },
+			{ runs: [], graphRevision: 1000 },
+		);
+		assert.equal(next.shouldRefresh, false);
+		assert.equal(next.lastRevision, 1000);
+		assert.equal(next.rowIds.size, 0);
+	});
+
+	it("steady state with unchanged revision does not loop", () => {
+		const next = nextGraphStatusState(
+			{ rowIds: new Set(), lastRevision: 1000 },
+			{ runs: [], graphRevision: 1000 },
+		);
+		assert.equal(next.shouldRefresh, false);
+		assert.equal(next.lastRevision, 1000);
+	});
+
+	it("refreshes when graphRevision moves even if runs stayed empty (fast unseen extraction)", () => {
+		const next = nextGraphStatusState(
+			{ rowIds: new Set(), lastRevision: 1000 },
+			{ runs: [], graphRevision: 2000 },
+		);
+		assert.equal(next.shouldRefresh, true);
+		assert.equal(next.lastRevision, 2000);
+	});
+
+	it("refreshes when a run row disappears even if graphRevision stayed unchanged", () => {
+		const next = nextGraphStatusState(
+			{ rowIds: new Set(["chat_1#1"]), lastRevision: 1000 },
+			{ runs: [], graphRevision: 1000 },
+		);
+		assert.equal(next.shouldRefresh, true);
+		assert.equal(next.rowIds.size, 0);
+	});
+
+	it("preserves lastRevision when payload omits graphRevision and still tracks row disappearance", () => {
+		const active = nextGraphStatusState(
+			{ rowIds: new Set(), lastRevision: 1500 },
+			{ runs: [row("chat_1")] },
+		);
+		assert.equal(active.shouldRefresh, false);
+		assert.equal(active.lastRevision, 1500);
+		assert.deepEqual([...active.rowIds], ["chat_1"]);
+
+		const done = nextGraphStatusState(active, { runs: [] });
+		assert.equal(done.shouldRefresh, true);
+		assert.equal(done.lastRevision, 1500);
 	});
 });

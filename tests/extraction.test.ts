@@ -44,7 +44,13 @@ import type {
 import type { GraphStore } from "../src/core/ports.ts";
 import {
 	abortExtraction,
+	clearExtractionError,
 	createExtractionPipeline,
+	extractionError,
+	ExtractionStageUnavailableError,
+	formatExtractionError,
+	isChatExtractionRunning,
+	normalizeSessionAnchor,
 	NotesImportError,
 	extractionStatuses,
 	transcriptView,
@@ -2702,5 +2708,276 @@ describe("notes import completion and retry reliability", () => {
 		assert.equal(ledgers.readSources().length, 1);
 		assert.equal(ledgers.readSources()[0]!.extractions?.length, 2);
 		assert.equal(ledgers.readNodes().length, 2);
+	});
+});
+
+// ─── #934 & #568: anchor normalization, readiness order, error lifecycle, startExtraction ──
+
+describe("normalizeSessionAnchor & session anchor normalization (#934)", () => {
+	it("unwraps TEACHER [id] and [id] wrappers while rejecting adversarial inputs", () => {
+		assert.equal(normalizeSessionAnchor("msg_1"), "msg_1");
+		assert.equal(normalizeSessionAnchor("  msg_1  "), "msg_1");
+		assert.equal(normalizeSessionAnchor("[msg_1]"), "msg_1");
+		assert.equal(normalizeSessionAnchor("[ msg_1 ]"), "msg_1");
+		assert.equal(normalizeSessionAnchor("TEACHER [msg_1]"), "msg_1");
+		assert.equal(normalizeSessionAnchor("teacher [ msg_1 ]"), "msg_1");
+		// Adversarial strings do NOT unwrap into valid bare ids:
+		assert.equal(normalizeSessionAnchor(""), "");
+		assert.equal(normalizeSessionAnchor("   "), "");
+		assert.equal(normalizeSessionAnchor("[]"), "[]");
+		assert.equal(normalizeSessionAnchor("[a b]"), "[a b]");
+		assert.equal(normalizeSessionAnchor("TEACHER [msg_1] trailing"), "TEACHER [msg_1] trailing");
+		assert.equal(normalizeSessionAnchor("[[msg_1]]"), "[[msg_1]]");
+		assert.equal(normalizeSessionAnchor("LEARNER [msg_1]"), "LEARNER [msg_1]");
+	});
+
+	it("accepts wrapped TEACHER [a2] in session submit while still refusing adversarial anchors", async () => {
+		const { chatId } = fixtureChat();
+		const ledgers = memoryLedgers();
+		const submit = (messageId: string): FauxResponseStep => () =>
+			fauxAssistantMessage(
+				[
+					fauxToolCall(
+						"submit_findings",
+						{
+							propositions: [{ id: "p1", name: "Normalized", statement: "Normalized anchor claim.", aliases: [], messageId }],
+							chains: [],
+						} as ToolCall["arguments"],
+						{ id: "norm-call" },
+					),
+				],
+				{ stopReason: "toolUse" },
+			);
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: fauxEngine([
+				submit("LEARNER [a2]"),
+				submit("TEACHER [a2] extra"),
+				submit("TEACHER [u1]"),
+				submit("  TEACHER [ a2 ]  "),
+			]),
+			auditor: submitModel("submit_review", { links: [] }),
+		});
+		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 1, chains: 0 });
+		assert.deepEqual(ledgers.readNodes()[0]!.provenance, [{ chatId, messageId: "a2" }]);
+	});
+});
+
+describe("prepareStages, stageProvider readiness order, and sanitized errors (#934)", () => {
+	it("runs prepareStages BEFORE re-reading the chat and BEFORE readiness checks; concurrent delete → not_found without setting lastError", async () => {
+		const { chatId } = fixtureChat();
+		const ledgers = memoryLedgers();
+		const order: string[] = [];
+		let releasePrepare!: () => void;
+		const prepareGate = new Promise<void>((r) => { releasePrepare = r; });
+
+		const pipeline = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			prepareStages: async () => {
+				order.push("prepare");
+				await prepareGate;
+			},
+			stageProvider: (role) => {
+				order.push(`provider:${role}`);
+				return "openai";
+			},
+			engineFor: () => {
+				order.push("engineFor");
+				return submitModel("submit_findings", { propositions: [], chains: [] });
+			},
+		});
+
+		const pending = pipeline.startExtraction(chatId);
+		assert.equal(isChatExtractionRunning(chatId), true, "in-flight during prepareStages");
+		assert.deepEqual(await pipeline.startExtraction(chatId), { status: "already_running" }, "single-flight blocks during prepareStages");
+		// Delete chat while prepareStages is awaiting
+		chatStore.deleteChat(chatId);
+		releasePrepare();
+		const res = await pending;
+		assert.deepEqual(res, { status: "not_found" });
+		assert.deepEqual(order, ["prepare"], "readiness gates never ran for a deleted chat");
+		assert.equal(isChatExtractionRunning(chatId), false, "inFlight released after not_found");
+		assert.equal(extractionError(chatId), null, "not_found must not write lastError");
+	});
+
+	it("checks config -> providerKeyMissing -> engineFor strictly, and sanitizes ExtractionStageUnavailableError secrets", async () => {
+		const { chatId } = fixtureChat();
+		const ledgers = memoryLedgers();
+
+		// 1. Missing key surfaces ProviderKeyMissingError BEFORE engineFor is even called
+		let engineForCalled = false;
+		const keyless = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			stageProvider: () => "openai",
+			providerKeyMissing: (provider, tier) => providerKeyMissing(provider, [tier]),
+			engineFor: () => {
+				engineForCalled = true;
+				throw new Error("should not be reached");
+			},
+		});
+		await assert.rejects(keyless.startExtraction(chatId), (err: unknown) => {
+			assert.ok(err instanceof ProviderKeyMissingError);
+			assert.equal(err.envelope.provider, "openai");
+			return true;
+		});
+		assert.equal(engineForCalled, false, "providerKeyMissing runs BEFORE engine/catalog resolution");
+		assert.equal(extractionError(chatId), null, "key refusal stays quiet (no lastError)");
+
+		// 2. Engine resolution throwing raw secret -> sanitized ExtractionStageUnavailableError + lastError
+		const broken = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			stageProvider: () => "openai",
+			providerKeyMissing: () => null,
+			engineFor: () => {
+				throw new Error("Catalog lookup failed with sk-live-SUPERSECRET999 and Bearer tok_secret_xyz");
+			},
+		});
+		await assert.rejects(broken.startExtraction(chatId), (err: unknown) => {
+			assert.ok(err instanceof ExtractionStageUnavailableError);
+			assert.ok(!err.message.includes("sk-live-SUPERSECRET999"), "no API key leak");
+			assert.ok(!err.message.includes("Bearer tok_secret_xyz"), "no bearer leak");
+			return true;
+		});
+		const savedErr = extractionError(chatId);
+		assert.ok(savedErr && !savedErr.includes("sk-live") && !savedErr.includes("Bearer"), "lastError is sanitized");
+		clearExtractionError(chatId);
+
+		// 3. Direct override still takes precedence over stageProvider
+		const withOverride = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			extractor: submitModel("submit_findings", { propositions: [], chains: [] }),
+			auditor: submitModel("submit_review", { links: [] }),
+			stageProvider: () => undefined,
+		});
+		const started = await withOverride.startExtraction(chatId);
+		assert.equal(started.status, "started");
+		if (started.status === "started") await started.done;
+	});
+});
+
+describe("formatExtractionError, lastError lifecycle, and 200-entry LRU (#934)", () => {
+	it("never leaks raw error messages, secrets, or stack traces; allows curated subscription errors <= 240 chars", () => {
+		const secretErr = new Error("Upstream exploded: Authorization: Bearer eyJhbGciOi.secret key=sk-proj-abc123456789\n  at foo (bar.ts:1:1)");
+		const formatted = formatExtractionError(secretErr);
+		assert.ok(!formatted.includes("Bearer"));
+		assert.ok(!formatted.includes("sk-proj"));
+		assert.ok(!formatted.includes("bar.ts"));
+		assert.equal(formatted, "Extraction failed. Check the server logs for details.");
+
+		const curated = "ChatGPT plan usage limit reached. Manage usage at https://chatgpt.com/settings/usage. No API-key fallback was used.";
+		assert.equal(formatExtractionError(new Error(curated)), curated);
+
+		const poisonedCurated = "Leaked sk-proj-abc123456789 No API-key fallback was used.";
+		assert.equal(formatExtractionError(new Error(poisonedCurated)), "Extraction failed. Check the server logs for details.");
+
+		const tooLongCurated = `${"x".repeat(230)} No API-key fallback was used.`;
+		assert.equal(formatExtractionError(new Error(tooLongCurated)), "Extraction failed. Check the server logs for details.");
+
+		assert.equal(
+			formatExtractionError(new ModelsNotConfiguredError(["cheap"])),
+			"No model configured — set up your models first",
+		);
+		assert.equal(
+			formatExtractionError(new ProviderKeyMissingError("openai", ["cheap"])),
+			providerKeyMissing("openai", ["cheap"]).error,
+		);
+	});
+
+	it("records full failure, partial multi-batch failure, clears on success/nothing_uncovered, leaves null on AbortError, and enforces 200 LRU cap", async () => {
+		// Partial multi-batch failure
+		const { chatId } = chunkyChat();
+		const ledgers = memoryLedgers();
+		let calls = 0;
+		const partialPipe = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			getChunkTokens: () => 4096,
+			engineFor: (role) => {
+				if (role === "auditor") return submitModel("submit_review", { links: [] });
+				return fauxEngine([
+					() => {
+						calls++;
+						if (calls === 1) {
+							return fauxAssistantMessage(
+								[fauxToolCall("submit_findings", { propositions: [{ id: "p1", name: "B1", statement: "B1.", aliases: [], messageId: "a1" }], chains: [] })],
+								{ stopReason: "toolUse" },
+							);
+						}
+						throw new Error("429 rate limit exceeded Bearer secret_tok");
+					},
+				]);
+			},
+		});
+		const stats = await partialPipe.runExtraction(chatId);
+		assert.equal(stats.nodes, 1);
+		const partialErr = extractionError(chatId);
+		assert.ok(partialErr, "partial batch failure sets lastError");
+		assert.match(partialErr, /^Partial extraction: 1 of 2 batches failed\./);
+		assert.ok(!partialErr.includes("secret_tok"), "no secret in partial error");
+
+		// Clean recovery run for remaining batch clears lastError
+		const recoverPipe = createExtractionPipeline({
+			chatStore,
+			graphStore: ledgers,
+			getChunkTokens: () => 4096,
+			extractor: submitModel("submit_findings", { propositions: [{ id: "p2", name: "B2", statement: "B2.", aliases: [], messageId: "a4" }], chains: [] }),
+			auditor: submitModel("submit_review", { links: [] }),
+		});
+		await recoverPipe.runExtraction(chatId);
+		assert.equal(extractionError(chatId), null, "successful run clears lastError");
+
+		// Multi-batch startExtraction registers chatId#1 immediately and AbortError leaves lastError null
+		const { chatId: abortChatId } = chunkyChat();
+		const abortLedgers = memoryLedgers();
+		let releaseGate!: () => void;
+		const gate = new Promise<void>((r) => { releaseGate = r; });
+		const abortPipe = createExtractionPipeline({
+			chatStore,
+			graphStore: abortLedgers,
+			getChunkTokens: () => 4096,
+			extractor: gatedSubmitModel("submit_findings", { propositions: [], chains: [] }, gate),
+			auditor: submitModel("submit_review", { links: [] }),
+		});
+		const started = await abortPipe.startExtraction(abortChatId);
+		assert.equal(started.status, "started");
+		assert.equal(isChatExtractionRunning(abortChatId), true);
+		const g = globalThis as { __lhExtractionRuns?: { running: Map<string, { chatId: string }> } };
+		assert.ok(g.__lhExtractionRuns?.running.has(`${abortChatId}#1`), "multi-batch registers chatId#1 job key");
+		assert.equal(abortExtraction(abortChatId), true, "abort reaches registered controller");
+		releaseGate();
+		if (started.status === "started") await started.done;
+		assert.equal(isChatExtractionRunning(abortChatId), false);
+		assert.equal(extractionError(abortChatId), null, "AbortError never sets lastError");
+
+		// 200-entry LRU eviction check via failing runs on synthetic chats
+		const lruLedgers = memoryLedgers();
+		const failPipe = createExtractionPipeline({
+			chatStore,
+			graphStore: lruLedgers,
+			stageProvider: () => "openai",
+			providerKeyMissing: () => null,
+			engineFor: () => { throw new Error("catalog error"); },
+		});
+		const firstChat = fixtureChat().chatId;
+		await assert.rejects(failPipe.startExtraction(firstChat), ExtractionStageUnavailableError);
+		assert.ok(extractionError(firstChat) !== null);
+		// Fill 200 more entries in the error map to push firstChat past cap=200
+		const errMap = (globalThis as { __lhExtractionErrors?: Map<string, string> }).__lhExtractionErrors!;
+		for (let i = 0; i < 200; i++) {
+			errMap.set(`lru_dummy_${i}`, "err");
+		}
+		// Trigger one real setExtractionError to enforce cap eviction
+		const lastChat = fixtureChat().chatId;
+		await assert.rejects(failPipe.startExtraction(lastChat), ExtractionStageUnavailableError);
+		assert.equal(extractionError(firstChat), null, "oldest entry evicted past 200 LRU cap");
+		assert.ok(extractionError(lastChat) !== null, "newest entry retained");
+		assert.ok(errMap.size <= 200, `error map capped at 200 (got ${errMap.size})`);
+		for (let i = 0; i < 200; i++) clearExtractionError(`lru_dummy_${i}`);
+		clearExtractionError(lastChat);
 	});
 });

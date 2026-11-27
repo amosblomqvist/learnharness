@@ -7,7 +7,7 @@
  * per-chunk jobs, owner 2026-09-28). Titles joined from the chat store;
  * a missing chat record still reports the run.
  */
-import { chatStore, extractionStatuses } from "@/src/server";
+import { chatStore, extractionStatuses, graphRevision } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -32,5 +32,5 @@ export async function GET() {
 		// consumer's (core/prices.ts helpers — nothing stores dollars).
 		usage: run.usage,
 	}));
-	return Response.json({ runs });
+	return Response.json({ runs, graphRevision: graphRevision() });
 }

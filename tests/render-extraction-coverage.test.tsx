@@ -1,14 +1,17 @@
-import React from "react";
+import React, { act } from "react";
 (globalThis as Record<string, unknown>).React = React;
 
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { parseHTML } from "linkedom";
 import {
+	CoverageMenuBlock,
 	CoverageMenuBody,
 	CoverageRingDetail,
 	CoverageRingGlyph,
 	fetchGraphRead,
+	requestExtract,
 	ringFill,
 	type SessionCoverage,
 } from "../components/extraction-coverage.tsx";
@@ -194,5 +197,185 @@ describe("CoverageRingDetail — the popover's exact numbers", () => {
 		);
 		assert.ok(html.includes('data-testid="coverage-ring-running"'));
 		assert.match(html, /extracting…/);
+		assert.ok(!html.includes('data-testid="coverage-ring-error"'), "running hides stale errors");
+	});
+
+	it("surfaces lastError when idle and hides it while running", () => {
+		const idleHtml = renderToStaticMarkup(
+			<CoverageRingDetail
+				coverage={coverage({ running: false, lastError: "Extraction failed. Check the server logs for details." })}
+				chunkTokens={4096}
+			/>,
+		);
+		assert.ok(idleHtml.includes('data-testid="coverage-ring-error"'));
+		assert.match(idleHtml, /Extraction failed\. Check the server logs for details\./);
+
+		const busyHtml = renderToStaticMarkup(
+			<CoverageRingDetail
+				coverage={coverage({ running: true, lastError: "Extraction failed. Check the server logs for details." })}
+				chunkTokens={4096}
+			/>,
+		);
+		assert.ok(!busyHtml.includes('data-testid="coverage-ring-error"'));
+	});
+});
+
+describe("CoverageMenuBody — error visibility", () => {
+	it("shows server lastError when idle and keeps Extract enabled for retry", () => {
+		const html = renderToStaticMarkup(
+			<CoverageMenuBody
+				coverage={coverage({ running: false, lastError: "Extraction was rate-limited by the provider. Try again later." })}
+				extracting={false}
+				onExtract={() => {}}
+			/>,
+		);
+		assert.ok(html.includes('data-testid="ctx-coverage-error"'));
+		assert.match(html, /rate-limited/);
+		assert.ok(!html.includes('disabled=""'), "user can retry extraction after failure");
+	});
+
+	it("prefers action error over server lastError and hides both while busy", () => {
+		const errHtml = renderToStaticMarkup(
+			<CoverageMenuBody
+				coverage={coverage({ lastError: "Older server error" })}
+				extracting={false}
+				error="No model configured — set up your models first"
+				onExtract={() => {}}
+			/>,
+		);
+		assert.match(errHtml, /No model configured/);
+		assert.ok(!errHtml.includes("Older server error"));
+
+		const busyHtml = renderToStaticMarkup(
+			<CoverageMenuBody
+				coverage={coverage({ running: false, lastError: "Older server error" })}
+				extracting
+				error="Action error"
+				onExtract={() => {}}
+			/>,
+		);
+		assert.ok(!busyHtml.includes('data-testid="ctx-coverage-error"'));
+	});
+});
+
+describe("requestExtract (manual extract HTTP contract)", () => {
+	const stubFetch = (fn: typeof fetch) => {
+		const real = globalThis.fetch;
+		globalThis.fetch = fn;
+		return () => {
+			globalThis.fetch = real;
+		};
+	};
+
+	it("maps 202, 200 started:false, 409, 503, and transport errors accurately", async () => {
+		let restore = stubFetch(async () => Response.json({ started: true }, { status: 202 }));
+		try {
+			assert.deepEqual(await requestExtract("c1"), { ok: true, started: true, running: true });
+		} finally {
+			restore();
+		}
+
+		restore = stubFetch(async () => Response.json({ started: false }, { status: 200 }));
+		try {
+			assert.deepEqual(await requestExtract("c1"), { ok: true, started: false, running: false });
+		} finally {
+			restore();
+		}
+
+		restore = stubFetch(async () => Response.json({ error: "Already running" }, { status: 409 }));
+		try {
+			assert.deepEqual(await requestExtract("c1"), { ok: true, started: false, running: true });
+		} finally {
+			restore();
+		}
+
+		restore = stubFetch(async () =>
+			Response.json({ error: "No model configured — set up your models first", code: "models_not_configured" }, { status: 503 }),
+		);
+		try {
+			assert.deepEqual(await requestExtract("c1"), {
+				ok: false,
+				error: "No model configured — set up your models first",
+			});
+		} finally {
+			restore();
+		}
+
+		restore = stubFetch(async () => {
+			throw new Error("network down");
+		});
+		try {
+			const res = await requestExtract("c1");
+			assert.equal(res.ok, false);
+			if (!res.ok) assert.ok(res.error.length > 0);
+		} finally {
+			restore();
+		}
+	});
+});
+
+describe("CoverageMenuBlock — fast failure leaves Running state cleanly", () => {
+	it("exits optimistic Running state and renders error when extraction fails before coverage poll sees running:true", async () => {
+		const dom = parseHTML("<html><body><div id='root'></div></body></html>");
+		let coverageReads = 0;
+		const globals = {
+			window: dom.window,
+			document: dom.document,
+			HTMLElement: dom.window.HTMLElement,
+			Element: dom.window.Element,
+			Node: dom.window.Node,
+			SVGElement: dom.window.SVGElement,
+			IS_REACT_ACT_ENVIRONMENT: true,
+			fetch: async (input: unknown, init?: RequestInit) => {
+				const url = String(input);
+				if (url === "/api/chats/chat_fast_fail" && (!init?.method || init.method === "GET")) {
+					coverageReads++;
+					return Response.json({
+						coverage: coverage({
+							running: false,
+							uncoveredTokens: 2048,
+							lastError: coverageReads >= 2 ? "Extraction failed. Check the server logs for details." : null,
+						}),
+					});
+				}
+				if (url === "/api/graph/coverage/extract" && init?.method === "POST") {
+					return Response.json({ started: true }, { status: 202 });
+				}
+				throw new Error(`Unexpected fetch: ${url}`);
+			},
+		};
+		const saved = new Map(Object.keys(globals).map((k) => [k, Object.getOwnPropertyDescriptor(globalThis, k)]));
+		for (const [k, v] of Object.entries(globals)) {
+			Object.defineProperty(globalThis, k, { configurable: true, writable: true, value: v });
+		}
+		const { createRoot } = await import("react-dom/client");
+		const root = createRoot(dom.document.getElementById("root")!);
+		try {
+			await act(async () => {
+				root.render(<CoverageMenuBlock chatId="chat_fast_fail" />);
+			});
+			const button = dom.document.querySelector('[data-testid="ctx-extract"]') as HTMLButtonElement;
+			assert.ok(button, "Extract button rendered");
+			assert.equal(button.textContent, "Extract");
+			assert.equal(button.disabled, false);
+
+			await act(async () => {
+				button.click();
+			});
+			const btnAfter = dom.document.querySelector('[data-testid="ctx-extract"]') as HTMLButtonElement;
+			assert.equal(btnAfter.textContent, "Extract", "fast failure must NOT remain stuck in Running");
+			assert.equal(btnAfter.disabled, false, "Extract button is re-enabled for retry");
+			const errEl = dom.document.querySelector('[data-testid="ctx-coverage-error"]');
+			assert.ok(errEl, "error message surfaces after fast failure");
+			assert.match(errEl.textContent ?? "", /Extraction failed/);
+		} finally {
+			await act(async () => {
+				root.unmount();
+			});
+			for (const [k, desc] of saved.entries()) {
+				if (desc) Object.defineProperty(globalThis, k, desc);
+				else delete (globalThis as Record<string, unknown>)[k];
+			}
+		}
 	});
 });

@@ -13,6 +13,9 @@ import {
 	type ProviderKeyMissing,
 } from "../../core/settings.ts";
 import type { PiEngine } from "../models.ts";
+import { isSubscriptionProvider } from "../subscription-connections.ts";
+import { chatGPTStreamError } from "../chatgpt-stream.ts";
+import { nativeSubscriptionError } from "../subscription-stream.ts";
 import { runSubagent } from "./pi-run.ts";
 import type {
 	AuditVerdicts,
@@ -276,6 +279,17 @@ type NotesAuditResult = AuditVerdicts;
 // a pile of nodes with no structure). Only the per-item aliases stay
 // optional with a ??-fill.
 
+const SESSION_ANCHOR_WRAPPER = /^(?:TEACHER\s*)?\[\s*([^\[\]\s]+)\s*\]$/i;
+
+/** Normalize a session proposition's messageId anchor at the submit seam:
+ *  trim whitespace and unwrap an accidental `TEACHER [id]` or `[id]` label
+ *  wrapper without salvaging malformed or adversarial inputs. */
+export function normalizeSessionAnchor(raw: string): string {
+	const trimmed = raw.trim();
+	const match = SESSION_ANCHOR_WRAPPER.exec(trimmed);
+	return match ? match[1]! : trimmed;
+}
+
 function fillFindings<T extends { propositions: Array<{ aliases?: string[] }>; chains: unknown }>(
 	raw: T,
 ): T {
@@ -283,6 +297,17 @@ function fillFindings<T extends { propositions: Array<{ aliases?: string[] }>; c
 		...raw,
 		propositions: raw.propositions.map((p) => ({ ...p, aliases: p.aliases ?? [] })),
 	};
+}
+
+/** The session fill: shared alias ??-fill plus anchor wrapper normalization. */
+function fillSessionFindings(raw: SessionFindingsSubmit): SessionFindingsSubmit {
+	return fillFindings({
+		...raw,
+		propositions: raw.propositions.map((p) => ({
+			...p,
+			messageId: normalizeSessionAnchor(p.messageId),
+		})),
+	});
 }
 
 /** The notes fill: the shared alias ??-fill PLUS the door's boundary — a
@@ -510,7 +535,7 @@ function runExtractor(
 		toolName: "submit_findings",
 		toolDescription: "Submit the session findings.",
 		parameters: sessionFindingsSchema,
-		fill: fillFindings,
+		fill: fillSessionFindings,
 		validate: (value) => validateSessionAnchors(value, batchIds) ?? validateFindingsChains(value, existingIds),
 		systemPrompt: EXTRACTOR_INSTRUCTIONS,
 		prompt,
@@ -673,6 +698,110 @@ interface LhExtractionGlobal {
 	 *  process-wide. globalThis for the same module-instance reason as
 	 *  the run registries. */
 	__lhAuditLock?: { tail: Promise<void> };
+	/** Last sanitized chat extraction error per chatId (LRU-capped at 200).
+	 *  Kept separate from __lhExtractionRuns so registry test fixtures stay intact. */
+	__lhExtractionErrors?: Map<string, string>;
+}
+
+const MAX_EXTRACTION_ERRORS = 200;
+
+function extractionErrors(): Map<string, string> {
+	const g = globalThis as typeof globalThis & LhExtractionGlobal;
+	return (g.__lhExtractionErrors ??= new Map());
+}
+
+function setExtractionError(chatId: string, message: string): void {
+	const map = extractionErrors();
+	if (map.has(chatId)) map.delete(chatId);
+	map.set(chatId, message);
+	while (map.size > MAX_EXTRACTION_ERRORS) {
+		const oldest = map.keys().next().value;
+		if (oldest === undefined) break;
+		map.delete(oldest);
+	}
+}
+
+/** Last sanitized extraction failure recorded for a chat, or null when clear. */
+export function extractionError(chatId: string): string | null {
+	return extractionErrors().get(chatId) ?? null;
+}
+
+/** Clear any recorded extraction failure for a chat. */
+export function clearExtractionError(chatId: string): void {
+	extractionErrors().delete(chatId);
+}
+
+/** True while a chat extraction is starting (inFlight) or registered in the run table. */
+export function isChatExtractionRunning(chatId: string): boolean {
+	const r = runs();
+	if (r.inFlight.has(chatId)) return true;
+	for (const run of r.running.values()) {
+		if (run.kind === "chat" && run.chatId === chatId) return true;
+	}
+	return false;
+}
+
+/** A configured extraction stage could not resolve an executable engine
+ *  (e.g., catalog/provider unavailable). Always carries a sanitized message. */
+export class ExtractionStageUnavailableError extends Error {
+	constructor(
+		public readonly role: ModelRole,
+		public readonly provider: string | undefined,
+		message: string,
+		options?: ErrorOptions,
+	) {
+		super(message, options);
+		this.name = "ExtractionStageUnavailableError";
+	}
+}
+
+function unavailableStageMessage(provider: string | undefined): string {
+	if (provider === "chatgpt") return chatGPTStreamError("model catalog");
+	if (isSubscriptionProvider(provider)) return nativeSubscriptionError(provider!, "model catalog");
+	return "The selected extraction model is unavailable. Check your model settings.";
+}
+
+const EXTRACTION_ERROR_FALLBACK = "Extraction failed. Check the server logs for details.";
+const SECRET_PATTERN = /[\r\n]|sk-[a-zA-Z0-9_-]{6,}|Bearer\s+\S+/i;
+
+/** Sanitize any extraction failure for user-facing status/API surfaces.
+ *  Never leaks raw provider error text, secrets, or stack traces. */
+export function formatExtractionError(err: unknown): string {
+	if (err instanceof ModelsNotConfiguredError) return err.envelope.error;
+	if (err instanceof ProviderKeyMissingError) return err.envelope.error;
+	if (err instanceof ExtractionStageUnavailableError) return err.message;
+	const raw = err instanceof Error ? err.message : typeof err === "string" ? err : "";
+	const trimmed = raw.trim();
+	if (
+		trimmed.length > 0 &&
+		trimmed.length <= 240 &&
+		trimmed.endsWith("No API-key fallback was used.") &&
+		!SECRET_PATTERN.test(trimmed)
+	) {
+		return trimmed;
+	}
+	if (/never submitted findings/i.test(raw)) {
+		return "The extractor did not submit findings. Try running extraction again.";
+	}
+	if (/never submitted a review/i.test(raw)) {
+		return "The auditor did not submit a review. Try running extraction again.";
+	}
+	if (/(?:429|rate.?limit|quota)/i.test(raw)) {
+		return "Extraction was rate-limited by the provider. Try again later.";
+	}
+	if (/(?:401|403|unauthorized|forbidden|authentication|invalid.?api.?key|expired)/i.test(raw)) {
+		return "Extraction authentication failed. Check your provider credentials in Settings.";
+	}
+	if (/(?:timeout|timed out|ETIMEDOUT|ECONNRESET|ECONNREFUSED|ENOTFOUND|network|fetch failed)/i.test(raw)) {
+		return "Extraction failed due to a network or provider timeout. Try again.";
+	}
+	if (/(?:context.?length|maximum context|too many tokens)/i.test(raw)) {
+		return "Extraction exceeded the model's context limit. Try lowering the extraction chunk size.";
+	}
+	if (/(?:model.*not found|unknown model|catalog|unavailable)/i.test(raw)) {
+		return "The selected extraction model is unavailable. Check your model settings.";
+	}
+	return EXTRACTION_ERROR_FALLBACK;
 }
 
 /** THE RUN REGISTRIES live on globalThis, not module level — the
@@ -741,7 +870,20 @@ export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
 	 *  callers wire the live effective settings (extraction-UX redesign,
 	 *  2026-09-24). */
 	getChunkTokens?: () => number;
+	/** Configured provider id for a role (read without triggering catalog/engine
+	 *  resolution) so readiness checks validate configuration and provider keys
+	 *  BEFORE attempting engine construction. */
+	stageProvider?: (role: ModelRole) => string | undefined;
+	/** Optional async preflight hook (e.g., refreshing subscription model
+	 *  catalogs) run before readiness validation. */
+	prepareStages?: () => Promise<void>;
 }
+
+export type StartChatExtractionResult =
+	| { status: "started"; done: Promise<EmissionStats> }
+	| { status: "already_running" }
+	| { status: "nothing_uncovered" }
+	| { status: "not_found" };
 
 export interface NotesImportInput {
 	/** The source's file path — its identity (deterministic src id) AND its
@@ -766,6 +908,9 @@ export class NotesImportError extends Error {
 }
 
 export interface ExtractionPipeline {
+	/** Prepare, validate readiness, and register ONE chat extraction run
+	 *  before handing off batch execution asynchronously. */
+	startExtraction(chatId: string): Promise<StartChatExtractionResult>;
 	/** Extract + audit + merge ONE chat. Single-flight per chat; resolves to
 	 *  the merger's append stats (or throws — no checkpoint on failure). */
 	runExtraction(chatId: string): Promise<EmissionStats>;
@@ -807,10 +952,55 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	 *  and whether a configured stage's provider key is gone (provider-key
 	 *  interlude, 2026-09-25) — both refuse BEFORE any batch runs. */
 	function refuseIfStagesUnready(): void {
-		const stages: readonly [ModelRole, PiEngine | undefined][] = [
-			["extractor", stageEngine("extractor", deps.extractor)],
-			["auditor", stageEngine("auditor", deps.auditor)],
+		const roles: readonly [ModelRole, PiEngine | undefined][] = [
+			["extractor", deps.extractor],
+			["auditor", deps.auditor],
 		];
+		if (deps.stageProvider) {
+			// 1. Configuration check (direct test override wins over stageProvider).
+			const configured: [ModelRole, PiEngine | undefined, string | undefined][] = roles.map(
+				([role, override]) => [role, override, override ? override.model.provider : deps.stageProvider!(role)],
+			);
+			const missing = new Set<ModelSlotName>();
+			for (const [role, , provider] of configured) {
+				if (!provider) missing.add(ROLE_SLOT[role]);
+			}
+			if (missing.size > 0) {
+				console.info(`[extraction] refused — no model configured for: ${[...missing].join(", ")}`);
+				throw new ModelsNotConfiguredError([...missing]);
+			}
+			// 2. Key-presence check BEFORE engine/catalog resolution.
+			for (const [role, , provider] of configured) {
+				const refusal = deps.providerKeyMissing?.(provider!, ROLE_SLOT[role]);
+				if (refusal) {
+					console.info(`[extraction] refused — ${JSON.stringify(refusal)}`);
+					throw new ProviderKeyMissingError(refusal.provider, refusal.slots);
+				}
+			}
+			// 3. Engine/catalog resolution AFTER key presence, with sanitized failure.
+			for (const [role, override, provider] of configured) {
+				if (override) continue;
+				let resolved: PiEngine | undefined;
+				try {
+					resolved = stageEngine(role, undefined);
+				} catch (err) {
+					console.error(`[extraction] stage ${role} engine unavailable:`, err);
+					throw new ExtractionStageUnavailableError(role, provider, unavailableStageMessage(provider), { cause: err });
+				}
+				if (!resolved) {
+					throw new ExtractionStageUnavailableError(role, provider, unavailableStageMessage(provider));
+				}
+			}
+			return;
+		}
+		const stages: [ModelRole, PiEngine | undefined][] = roles.map(([role, override]) => {
+			try {
+				return [role, stageEngine(role, override)];
+			} catch (err) {
+				console.error(`[extraction] stage ${role} engine unavailable:`, err);
+				throw new ExtractionStageUnavailableError(role, undefined, unavailableStageMessage(undefined), { cause: err });
+			}
+		});
 		const missing = new Set<ModelSlotName>();
 		for (const [role, engine] of stages) if (!engine) missing.add(ROLE_SLOT[role]);
 		if (missing.size > 0) {
@@ -865,6 +1055,16 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	function finishExtraction(jobKey: string): void {
 		runningExtractions.delete(jobKey);
 		emit("activity-changed", {});
+	}
+
+	/** Remove every chat-kind registry row owned by chatId (both single-batch
+	 *  `chatId` and multi-batch `chatId#i` keys). */
+	function clearChatRunningEntries(chatId: string): void {
+		for (const [key, run] of runningExtractions.entries()) {
+			if (run.kind === "chat" && run.chatId === chatId) {
+				runningExtractions.delete(key);
+			}
+		}
 	}
 
 	/** Accumulate one billed step into the run's registry entry (live). */
@@ -1093,49 +1293,21 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		return stats;
 	}
 
-	async function runExtraction(chatId: string): Promise<EmissionStats> {
-		if (inFlight.has(chatId)) return { nodes: 0, chains: 0 };
-		inFlight.add(chatId);
-		const t0 = performance.now();
-		// COVERAGE (vision-extraction-coverage.md, 2026-09-15): extract ONLY
-		// what the per-chat coverage ledger doesn't already hold — never the
-		// whole session. Batches are token-budgeted runs of the oldest
-		// uncovered messages; each merged batch checkpoints its messages'
-		// coverage ATOMICALLY (inside the merger's step 4), so an abort or
-		// error below loses at most the in-flight batch — every earlier
-		// batch stays covered, the rest stays visibly uncovered.
+	async function executeChatBatches(params: {
+		chatId: string;
+		title: string | undefined;
+		covered: ReturnType<typeof coverageOf>;
+		failedOutputCalls: ReadonlySet<string>;
+		chunkTokens: number;
+		batches: ReturnType<typeof batchRuns>;
+		t0: number;
+	}): Promise<EmissionStats> {
+		const { chatId, title, covered, failedOutputCalls, chunkTokens, batches, t0 } = params;
 		try {
-			const record = chatStore.getChat(chatId);
-			if (!record) throw new Error(`Chat not found: ${chatId}`);
-			// BYOK per-need gate (owner, 2026-09-22) + key presence
-			// (2026-09-25): the write channel needs extractor + auditor
-			// engines AND their providers' keys; a refusal lands BEFORE any
-			// stage runs (typed — the trigger skips, routes surface 503).
-			refuseIfStagesUnready();
-			const covered = coverageOf(record.messages, graphStore.readCoverage(), chatId);
-			const failedOutputCalls = failedOutputCallIds(record.messages);
-			if (covered.uncovered.length === 0) {
-				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
-				return { nodes: 0, chains: 0 };
-			}
-			const chunkTokens = deps.getChunkTokens?.() ?? FACTORY_SETTINGS.graph.extractionChunkTokens;
-			// The batcher's one rule (owner, Wave D): a tool-call message and
-			// its result message(s) are INSEPARABLE — one chunk, covered
-			// together, read together (core/coverage.ts batchRuns).
-			const batches = batchRuns(covered.slots, covered.uncovered, chunkTokens);
 			console.info(
 				`[extraction ${chatId}] pipeline start — ${covered.uncoveredTokens} uncovered tok, ` +
 					`${covered.uncoveredCount} messages, ${batches.length} batch(es) of ≤${chunkTokens} tok`,
 			);
-			// PER-CHUNK JOBS (owner, 2026-09-28), SERIALIZED PER SOURCE (owner,
-			// 2026-09-30 evening): every batch is its own job — registry row,
-			// because each batch's extractor continues the source's digest
-			// (everything the earlier batches merged). Cross-source runs stay
-			// parallel; individual worker requests share process-wide admission.
-			// Audits serialize through the separate consistency gate ("waiting").
-			// A batch that fails is ISOLATED
-			// (its messages stay uncovered — honestly re-runnable); its
-			// siblings keep merging.
 			const settled: PromiseSettledResult<EmissionStats>[] = [];
 			for (const [batchIndex, batch] of batches.entries()) {
 				const part = batches.length > 1 ? { i: batchIndex + 1, n: batches.length } : undefined;
@@ -1143,45 +1315,22 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 					settled.push({
 						status: "fulfilled",
 						value: await runJob({ id: chatId, kind: "chat", part }, async (jobKey) => {
-							// The batch's source view: TEACHER PROSE ONLY (owner,
-							// 2026-09-28), each passage labeled with its ACTUAL message
-							// id (2026-10-13) — the view lines ARE the coverage
-							// fingerprints' messageViewLines ("TEACHER [id] text"), one
-							// shared seam.
 							const messages = batch.map((slot) => slot.message);
-							const view = proseView(messages, record.title, failedOutputCalls);
-							// The batch's teacher-prose ids — the ONLY anchors this
-							// job's submit may name (validateSessionAnchors at the
-							// submit seam refuses anything else: ids from other
-							// batches — even real ones of this chat — other chats,
-							// and non-prose messages).
+							const view = proseView(messages, title, failedOutputCalls);
 							const batchIds = new Set(
 								messages.filter((m) => messageViewLines(m, m.id, failedOutputCalls).length > 0).map((m) => m.id),
 							);
 							setPhase(jobKey, "extracting", "chat", undefined, part);
 							const findings = await extract(jobKey, chatId, view, batchIds);
-							// SERIALIZED AUDIT (owner, 2026-09-28): audit + merge are the
-							// graph-mutating critical section — one job at a time,
-							// process-wide, so the auditor explores the graph as it
-							// stands AFTER every earlier job's merge.
 							return withAuditLock(jobKey, "chat", undefined, async () => {
 								setPhase(jobKey, "auditing", "chat", undefined, part);
 								const auditResult = await audit(jobKey, chatId, findings);
 								setPhase(jobKey, "merging", "chat", undefined, part);
-								// SESSION-DELETION GUARD (wave 6): a chat deleted mid-run must never
-								// merge. The deletion route aborts this run first and runs its purge
-								// as one sync block; this closes the last window — a run that slipped
-								// past the wind-down finds the chat gone HERE and rides the existing
-								// abort path (info, not error): nothing merged, nothing checkpointed.
 								if (!chatStore.getChat(chatId)) {
 									const gone = new Error(`chat deleted mid-run: ${chatId}`);
 									gone.name = "AbortError";
 									throw gone;
 								}
-								// The batch's messages, snapshotted when the run computed
-								// coverage — if a message mutates mid-run (a quiz answer
-								// merges in), the stored fingerprint won't match its new
-								// one and it re-opens: honest by construction.
 								const foldedAt = new Date().toISOString();
 								const batchStats = mergeFindings(chatId, findings, auditResult, { chatStore, graphStore }, {
 									foldedAt,
@@ -1189,8 +1338,6 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 										.filter((slot) => slot.tokens > 0)
 										.map((slot) => ({ chatId, fp: slot.fp, tokens: slot.tokens, foldedAt })),
 								});
-								// The layout ledger evolves with the merge (sync — the
-								// next snapshot fetch must already reflect the new nodes).
 								settleGraphLayout(graphStore);
 								console.info(
 									`[extraction ${jobKey}] merged: ${batchStats.nodes} nodes, ${batchStats.chains ?? 0} chains`,
@@ -1201,30 +1348,114 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 					});
 				} catch (err) {
 					settled.push({ status: "rejected", reason: err });
-					// A source-wide abort (user abort / session deletion)
-					// ends the WHOLE run: later batches would mint fresh,
-					// un-aborted jobs and hang — stop here. Isolated
-					// FAILURES keep going (siblings still merge).
 					if (err instanceof Error && err.name === "AbortError") break;
 				}
 			}
 			const stats = aggregateJobs(chatId, settled);
+			const nonAbortFailures = settled.filter(
+				(r): r is PromiseRejectedResult =>
+					r.status === "rejected" && !(r.reason instanceof Error && r.reason.name === "AbortError"),
+			);
+			if (nonAbortFailures.length > 0 && chatStore.getChat(chatId)) {
+				const reasonText = formatExtractionError(nonAbortFailures[0]!.reason);
+				const summary =
+					nonAbortFailures.length < batches.length
+						? `Partial extraction: ${nonAbortFailures.length} of ${batches.length} batches failed. ${reasonText}`
+						: reasonText;
+				setExtractionError(chatId, summary);
+			}
 			console.info(
 				`[extraction ${chatId}] merged: ${stats.nodes} nodes, ${stats.chains ?? 0} chains ` +
 					`(${Math.round(performance.now() - t0)}ms total, ${batches.length} batch job(s))`,
 			);
 			return stats;
 		} catch (err) {
-			// Pre-fan-out failures only (stage gate, coverage read): aborts
-			// and job-level failures are absorbed at the fan-out site, per
-			// job — merged batches stay covered, partial usage persists per
-			// job, the aggregate returns what actually merged.
+			if (!(err instanceof Error && err.name === "AbortError") && chatStore.getChat(chatId)) {
+				setExtractionError(chatId, formatExtractionError(err));
+			}
 			console.error(`[extraction ${chatId}] pipeline failed (${Math.round(performance.now() - t0)}ms):`, err);
 			throw err;
 		} finally {
 			inFlight.delete(chatId);
-			finishExtraction(chatId); // done or failed — no longer running
+			clearChatRunningEntries(chatId);
+			emit("activity-changed", {});
 		}
+	}
+
+	async function startExtraction(chatId: string): Promise<StartChatExtractionResult> {
+		// 1. Synchronous single-flight acquisition
+		if (inFlight.has(chatId)) return { status: "already_running" };
+		inFlight.add(chatId);
+		const t0 = performance.now();
+		let handedOff = false;
+		try {
+			// 2. Optional async preflight (skip await when absent so sync callers observe immediate registration)
+			if (deps.prepareStages) await deps.prepareStages();
+			// 3. Re-read AFTER await — a deleted chat returns not_found without setting lastError
+			const record = chatStore.getChat(chatId);
+			if (!record) return { status: "not_found" };
+			// 4. Readiness gate: config -> key -> engine/catalog
+			refuseIfStagesUnready();
+			// 5. Coverage + batches
+			const covered = coverageOf(record.messages, graphStore.readCoverage(), chatId);
+			const failedOutputCalls = failedOutputCallIds(record.messages);
+			if (covered.uncovered.length === 0) {
+				clearExtractionError(chatId);
+				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
+				return { status: "nothing_uncovered" };
+			}
+			const chunkTokens = deps.getChunkTokens?.() ?? FACTORY_SETTINGS.graph.extractionChunkTokens;
+			const batches = batchRuns(covered.slots, covered.uncovered, chunkTokens);
+			if (batches.length === 0) {
+				clearExtractionError(chatId);
+				console.info(`[extraction ${chatId}] nothing uncovered — no-op`);
+				return { status: "nothing_uncovered" };
+			}
+			// 6. Clear prior failure before starting
+			clearExtractionError(chatId);
+			// 7. Register the first batch's job key BEFORE returning 202
+			const firstPart = batches.length > 1 ? { i: 1, n: batches.length } : undefined;
+			const firstJobKey = firstPart ? `${chatId}#1` : chatId;
+			// 8. Register queued phase immediately so running===true before HTTP 202
+			setPhase(firstJobKey, "queued", "chat", undefined, firstPart);
+			// 9. Handoff to batch execution
+			handedOff = true;
+			const done = executeChatBatches({
+				chatId,
+				title: record.title,
+				covered,
+				failedOutputCalls,
+				chunkTokens,
+				batches,
+				t0,
+			});
+			return { status: "started", done };
+		} catch (err) {
+			if (!(err instanceof ModelsNotConfiguredError) && !(err instanceof ProviderKeyMissingError)) {
+				if (chatStore.getChat(chatId)) {
+					setExtractionError(chatId, formatExtractionError(err));
+				}
+				console.error(`[extraction ${chatId}] pipeline failed (${Math.round(performance.now() - t0)}ms):`, err);
+			}
+			throw err;
+		} finally {
+			if (!handedOff) {
+				inFlight.delete(chatId);
+				clearChatRunningEntries(chatId);
+				emit("activity-changed", {});
+			}
+		}
+	}
+
+	async function runExtraction(chatId: string): Promise<EmissionStats> {
+		const started = await startExtraction(chatId);
+		if (started.status === "not_found") {
+			const err = new Error(`Chat not found: ${chatId}`);
+			console.error(`[extraction ${chatId}] pipeline failed:`, err);
+			throw err;
+		}
+		if (started.status !== "started") return { nodes: 0, chains: 0 };
+		return await started.done;
 	}
 
 	// ── the notes front door (format-agnostic: raw text in, same graph out) ──
@@ -1305,6 +1536,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 			// BYOK per-need gate (owner, 2026-09-22) + key presence
 			// (2026-09-25): same refusal as the chat front door — no
 			// extractor/auditor engines, or a stage key gone, no run.
+			if (deps.prepareStages) await deps.prepareStages();
 			refuseIfStagesUnready();
 			// CHUNKED like the chat path (owner, 2026-09-28): each chunk is a
 			// standalone extract → audit → merge, so no single call carries a
@@ -1424,6 +1656,6 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 		}
 	}
 
-	return { runExtraction, importNotes };
+	return { startExtraction, runExtraction, importNotes };
 }
 

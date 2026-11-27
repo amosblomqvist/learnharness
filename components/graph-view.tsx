@@ -175,6 +175,44 @@ export function renameSessionsPatch(snapshot: Pick<GraphSnapshot, "sessions">, i
 	snapshot.sessions[id] = title;
 }
 
+export interface GraphStatusRow {
+	id: string;
+	chatId: string;
+	title: string;
+	phase: string;
+	startedAt: number;
+}
+
+export interface GraphStatusState {
+	rowIds: ReadonlySet<string>;
+	lastRevision: number | null;
+}
+
+export interface GraphStatusPayload {
+	runs: readonly GraphStatusRow[];
+	graphRevision?: number;
+}
+
+/** Pure transition for /api/graph/status polling/resync: refreshes whenever a
+ *  run row disappears OR graphRevision moves after initial seeding (catching
+ *  fast extractions that started and finished between status reads without
+ *  causing an extra fetch on mount). */
+export function nextGraphStatusState(
+	prev: GraphStatusState,
+	payload: GraphStatusPayload,
+): { rowIds: Set<string>; lastRevision: number | null; shouldRefresh: boolean } {
+	const nextRowIds = new Set(payload.runs.map((r) => r.id));
+	const rowDisappeared = [...prev.rowIds].some((id) => !nextRowIds.has(id));
+	const hasRevision = typeof payload.graphRevision === "number" && Number.isFinite(payload.graphRevision);
+	const nextRevision = hasRevision ? payload.graphRevision! : prev.lastRevision;
+	const revisionMoved = hasRevision && prev.lastRevision !== null && payload.graphRevision !== prev.lastRevision;
+	return {
+		rowIds: nextRowIds,
+		lastRevision: nextRevision,
+		shouldRefresh: rowDisappeared || revisionMoved,
+	};
+}
+
 /** Seed positions for nodes the ledger doesn't know yet (hygiene,
  *  2026-09-23 fix wave): they used to fall through to a ?? 0 and dump
  *  at the origin. Place them on a deterministic ring around the known
@@ -1153,16 +1191,22 @@ export function GraphView({
 	// chunk jobs), NOT chatId: chatId-scoping re-batched per-chunk jobs
 	// into one end-of-import reveal (the exact bug this rule exists to
 	// prevent — a chunk's row leaving IS its merge landing).
-	const [pipelineRuns, setPipelineRuns] = useState<{ id: string; chatId: string; title: string; phase: string; startedAt: number }[]>([]);
+	const [pipelineRuns, setPipelineRuns] = useState<GraphStatusRow[]>([]);
 	const rowIdsRef = useRef<Set<string>>(new Set());
+	const lastRevisionRef = useRef<number | null>(null);
 	const readPipelineStatus = useCallback(() => {
 		fetch("/api/graph/status")
-			.then((res) => res.json() as Promise<{ runs: typeof pipelineRuns }>)
-			.then(({ runs }) => {
+			.then((res) => res.json() as Promise<GraphStatusPayload>)
+			.then((payload) => {
+				const runs = Array.isArray(payload.runs) ? [...payload.runs] : [];
 				setPipelineRuns(runs);
-				const ids = new Set(runs.map((r) => r.id));
-				if ([...rowIdsRef.current].some((id) => !ids.has(id))) setRefreshTick((t) => t + 1);
-				rowIdsRef.current = ids;
+				const next = nextGraphStatusState(
+					{ rowIds: rowIdsRef.current, lastRevision: lastRevisionRef.current },
+					{ runs, graphRevision: payload.graphRevision },
+				);
+				rowIdsRef.current = next.rowIds;
+				lastRevisionRef.current = next.lastRevision;
+				if (next.shouldRefresh) setRefreshTick((t) => t + 1);
 			})
 			.catch(() => {}); // status is cosmetic — never surface read errors
 	}, []);
@@ -1189,13 +1233,9 @@ export function GraphView({
 		};
 	}, [readPipelineStatus]);
 
-	// Graph pipeline costs (2026-09 cost metrics wave): the cumulative fold
-	// of the usage channels (chat + notes extraction runs; the dead namer's
-	// channel is not displayed anymore, owner 2026-09-24)
-	// behind the bottom-left cost pill. Fetched once on mount and refetched
-	// when a pipeline run finishes (running -> none) so fresh spend lands
-	// without a manual reload. Best-effort: a fetch failure never blocks
-	// the view — the pill just stays on its last numbers.
+	// Graph pipeline costs (2026-09 cost metrics wave): fetched once on mount
+	// and refetched alongside snapshot refreshes (refreshTick) so fresh spend
+	// lands once per graph change without duplicate requests.
 	const [costs, setCosts] = useState<GraphCostSummary | null>(null);
 	const refreshCosts = useCallback(() => {
 		fetch("/api/graph/costs")
@@ -1205,32 +1245,19 @@ export function GraphView({
 	}, []);
 	useEffect(() => {
 		refreshCosts();
-	}, [refreshCosts]);
-	// The same disappearance rule as the snapshot refresh (owner
-	// 2026-09-28): usage persists per JOB (per-chunk jobs), so costs refresh
-	// per job row — not only when the whole feed drains.
-	const prevRunIds = useRef(new Set<string>());
-	useEffect(() => {
-		const gone = [...prevRunIds.current].some((id) => !pipelineRuns.some((r) => r.id === id));
-		if (gone && prevRunIds.current.size > 0) refreshCosts();
-		prevRunIds.current = new Set(pipelineRuns.map((r) => r.id));
-	}, [pipelineRuns, refreshCosts]);
+	}, [refreshCosts, refreshTick]);
 
 	/* Deletion refresh (wave 6 chunk A): the DELETE /api/chats/:id response
 	   carries the new graphRevision, and the sidebar (which owns the delete
-	   flow) announces it as lh:graph-revision. The status poll above can't
-	   see a deletion — no pipeline run ever disappears from the feed for
-	   it — so this event is the one seam. Refetch the snapshot and the
-	   costs on every announcement: deletions are rare, a redundant fetch
-	   is free. */
+	   flow) announces it as lh:graph-revision. Bumping refreshTick refetches
+	   both snapshot and costs once. */
 	useEffect(() => {
 		const onRevision = () => {
 			setRefreshTick((t) => t + 1);
-			refreshCosts();
 		};
 		window.addEventListener("lh:graph-revision", onRevision);
 		return () => window.removeEventListener("lh:graph-revision", onRevision);
-	}, [refreshCosts]);
+	}, []);
 
 	/* Live rename labels (rename-shuffle fix, 2026-09-23): a session
 	   rename anywhere (sidebar inline row, chat header) announces itself

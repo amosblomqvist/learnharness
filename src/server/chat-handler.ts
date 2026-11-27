@@ -134,6 +134,18 @@ const jobRunner = createJobRunner({
  *  (/api/graph/import) hit the same single-flight registry. */
 export const extraction = createExtractionPipeline({
 	...stores,
+	getChunkTokens: () => effectiveSettings().graph.extractionChunkTokens,
+	stageProvider: (role) => resolveStageProvider(role),
+	prepareStages: async () => {
+		const providers = new Set<string>();
+		for (const role of ["extractor", "auditor"] as const) {
+			const provider = resolveStageProvider(role);
+			if (provider && isSubscriptionProvider(provider)) providers.add(provider);
+		}
+		for (const provider of providers) {
+			await refreshConnectionCatalog(provider);
+		}
+	},
 	// BYOK (owner, 2026-09-22): the extraction stages resolve the chain —
 	// role override → slot → NOTHING — read FRESH per stage call; an empty
 	// chain flows through as undefined and the pipeline refuses the run
@@ -163,6 +175,10 @@ setTurnRunner(async (chatId, input) => {
  *  the chain (role override → slot → NOTHING) may end empty, and undefined
  *  flows through to the per-need refusal gates (runner/extraction), read
  *  FRESH so a settings PUT between dispatch and spawn lands. */
+function resolveStageProvider(role: ModelRole): string | undefined {
+	return resolveRoleSpec(role, stores.settingsStore.readSettings())?.provider;
+}
+
 function resolveEngine(role: ModelRole): PiEngine | undefined {
 	const spec = resolveRoleSpec(role, stores.settingsStore.readSettings());
 	return spec ? piEngineForSpec(spec, true, undefined, retentionForSlot(ROLE_SLOT[role])) : undefined;
@@ -888,7 +904,11 @@ export async function handleChatInput(
 					// Fresh per-turn read of the graph section's chunk budget
 					// (extraction-UX redesign, 2026-09-24): the trigger compares
 					// against it and the pipeline's batches share it.
-					triggerExtraction(stores, extraction, chatId, effective.graph.extractionChunkTokens);
+					triggerExtraction(stores, extraction, chatId, effective.graph.extractionChunkTokens, {
+						previousMessages: record.messages,
+						previousTree: record.tree,
+						isAborted,
+					});
 				}
 				// PARKED DISMISSAL (owner, 2026-10-04): a dismissal that arrived
 				// mid-turn was parked by the dismiss route (202); now that

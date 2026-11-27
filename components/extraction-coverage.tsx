@@ -40,6 +40,7 @@ export interface SessionCoverage {
 	uncoveredTokens: number;
 	running: boolean;
 	lastFoldedAt: string | null;
+	lastError?: string | null;
 }
 
 /** One session's coverage read — null on transport/404 (callers render
@@ -80,21 +81,42 @@ export async function fetchGraphRead(): Promise<GraphRead | null> {
 	}
 }
 
-/** The manual-extract seam, shared by both surfaces. 409 is BENIGN (the
- *  run is already in flight) — returns "running" so the caller flips to the
- *  optimistic/running state instead of an error. Returns false only on a
- *  real failure, where the caller reverts. */
-async function requestExtract(chatId: string): Promise<boolean> {
+export type RequestExtractResult =
+	| { ok: true; started: boolean; running: boolean }
+	| { ok: false; error: string };
+
+/** The manual-extract seam, shared by surfaces and unit tests.
+ *  202 started → { ok: true, started: true, running: true }
+ *  200 nothing uncovered → { ok: true, started: false, running: false }
+ *  409 already running (benign) → { ok: true, started: false, running: true }
+ *  4xx/5xx/network → { ok: false, error } */
+export async function requestExtract(chatId: string): Promise<RequestExtractResult> {
 	try {
 		const res = await fetch("/api/graph/coverage/extract", {
 			method: "POST",
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify({ chatId }),
 		});
-		if (!res.ok && res.status !== 409) return false;
-		return true; // 202 started, or 409 already-running — both "running"
+		if (res.status === 409) {
+			return { ok: true, started: false, running: true };
+		}
+		let body: { started?: unknown; error?: unknown } | null = null;
+		try {
+			body = (await res.json()) as { started?: unknown; error?: unknown };
+		} catch {
+			body = null;
+		}
+		if (res.ok) {
+			const started = body?.started === true || res.status === 202;
+			return { ok: true, started, running: started };
+		}
+		const message =
+			typeof body?.error === "string" && body.error.trim().length > 0
+				? body.error
+				: "Could not start extraction.";
+		return { ok: false, error: message };
 	} catch {
-		return false;
+		return { ok: false, error: "Could not reach the server to start extraction." };
 	}
 }
 
@@ -112,29 +134,42 @@ async function requestExtract(chatId: string): Promise<boolean> {
 export function CoverageMenuBlock({ chatId }: { chatId: string }) {
 	const refreshActivity = useActivity().refresh;
 	const [coverage, setCoverage] = useState<SessionCoverage | null>(null);
-	const [extracting, setExtracting] = useState(false); // optimistic until the server says running
-	const lastUncoveredRef = useRef<number | null>(null);
+	const [extracting, setExtracting] = useState(false); // optimistic until the server responds
+	const [actionError, setActionError] = useState<string | null>(null);
+	const submittingRef = useRef(false);
+	const loadSeqRef = useRef(0);
+	const mountedRef = useRef(true);
+
+	useEffect(() => {
+		mountedRef.current = true;
+		return () => {
+			mountedRef.current = false;
+		};
+	}, []);
 
 	const load = useCallback(async () => {
+		const seq = ++loadSeqRef.current;
 		const next = await fetchCoverage(chatId);
+		if (!mountedRef.current || seq !== loadSeqRef.current) return;
 		if (next === null) return;
-		// The optimistic state stands down once the server says running, or
-		// once the fold moved coverage (the run finished).
-		if (
-			next.running ||
-			(lastUncoveredRef.current !== null && next.uncoveredTokens !== lastUncoveredRef.current)
-		) {
+		// Always stand down optimistic extracting once no POST is in flight;
+		// if the server is running, coverage.running === true takes over cleanly,
+		// and a fast failure/abort exits "Running" and stops the 2s poll immediately.
+		if (!submittingRef.current) {
 			setExtracting(false);
 		}
-		lastUncoveredRef.current = next.uncoveredTokens;
+		if (next.running || next.lastError) {
+			setActionError(null);
+		}
 		setCoverage(next);
 	}, [chatId]);
 
 	// On MENU OPEN (the block mounts with the menu — on-demand, never
 	// eagerly): one read, then the 2s poll below takes over while running.
 	useEffect(() => {
-		lastUncoveredRef.current = null;
+		submittingRef.current = false;
 		setExtracting(false);
+		setActionError(null);
 		void load();
 	}, [load]);
 
@@ -153,19 +188,32 @@ export function CoverageMenuBlock({ chatId }: { chatId: string }) {
 	if (coverage === null) return null;
 
 	const onExtract = async () => {
+		if (submittingRef.current) return;
+		submittingRef.current = true;
+		setActionError(null);
 		setExtracting(true);
-		// The dock's start-site nudge (the 202 registers the run before the
-		// response; a 409 means one is already in flight) — refresh so the
-		// run surfaces at once either way.
-		refreshActivity();
-		const started = await requestExtract(chatId);
-		if (!started) setExtracting(false);
-		void load();
+		let result: RequestExtractResult;
+		try {
+			result = await requestExtract(chatId);
+		} finally {
+			submittingRef.current = false;
+		}
+		if (!mountedRef.current) return;
+		if (!result.ok) {
+			setActionError(result.error);
+		} else if (result.started) {
+			refreshActivity();
+		}
+		await load();
+		if (mountedRef.current) {
+			setExtracting(false);
+		}
 	};
 	return (
 		<CoverageMenuBody
 			coverage={coverage}
 			extracting={extracting}
+			error={actionError}
 			onExtract={() => void onExtract()}
 		/>
 	);
@@ -177,15 +225,18 @@ export function CoverageMenuBlock({ chatId }: { chatId: string }) {
 export function CoverageMenuBody({
 	coverage,
 	extracting,
+	error,
 	onExtract,
 }: {
 	coverage: SessionCoverage;
 	/** Click-pending (optimistic) until the server says running. */
 	extracting: boolean;
+	error?: string | null;
 	onExtract: () => void;
 }) {
 	const busy = coverage.running || extracting;
 	const complete = coverage.uncoveredTokens === 0 && coverage.uncoveredCount === 0;
+	const visibleError = !busy ? (error ?? coverage.lastError ?? null) : null;
 	return (
 		<div data-testid="ctx-coverage" className="flex flex-col gap-1 px-2.5 pt-1 pb-2">
 			{busy ? (
@@ -203,6 +254,14 @@ export function CoverageMenuBody({
 					<span className="tabular-nums text-muted-foreground">
 						{coverage.uncoveredCount} message{coverage.uncoveredCount === 1 ? "" : "s"} unextracted
 					</span>
+				</span>
+			)}
+			{visibleError && (
+				<span
+					data-testid="ctx-coverage-error"
+					className="text-[11px] leading-snug text-destructive break-words"
+				>
+					{visibleError}
 				</span>
 			)}
 			<button
@@ -403,6 +462,14 @@ export function CoverageRingDetail({ coverage, chunkTokens }: { coverage: Sessio
 					<div className="flex justify-between gap-2" data-testid="coverage-ring-running">
 						<span>Status</span>
 						<span className="text-card-foreground">extracting…</span>
+					</div>
+				)}
+				{!coverage.running && coverage.lastError && (
+					<div
+						data-testid="coverage-ring-error"
+						className="mt-1 border-t pt-1.5 text-[11px] leading-snug text-destructive break-words"
+					>
+						{coverage.lastError}
 					</div>
 				)}
 			</div>
