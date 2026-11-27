@@ -7,6 +7,8 @@
       "author": "Huskhd",
       "description": "A year-at-a-glance heat map of study days, activity, and streaks.",
       "repository": "Huskhd/learnharness-activity-heatmap",
+      "downloads": 0,
+      "listedAt": "2026-11-13T14:23:37Z",
       "releases": []
     },
     {
@@ -15,6 +17,8 @@
       "author": "Singh-Mehtab",
       "description": "Draft cards from graph nodes, edit and approve, then send one way to Anki.",
       "repository": "Singh-Mehtab/learnharness-anki-bridge",
+      "downloads": 21,
+      "listedAt": "2026-11-20T11:15:12Z",
       "releases": [
         {
           "version": "0.9.0",
@@ -33,6 +37,8 @@
       "author": "prinxipia",
       "description": "Your own image behind the whole app, with a frosted reading area and optional chrome-style controls. Works with any color theme.",
       "repository": "prinxipia/learnharness-backdrop",
+      "downloads": 5,
+      "listedAt": "2026-11-14T21:02:53Z",
       "releases": [
         {
           "version": "0.1.0",
@@ -51,6 +57,8 @@
       "author": "Giuliano Testa",
       "description": "Version your learning data with Git: automatic commit, pull and push, a Source Control view and commit history.",
       "repository": "heohlee/learnharness-git",
+      "downloads": 35,
+      "listedAt": "2026-11-13T18:01:49Z",
       "releases": [
         {
           "version": "0.1.2",
@@ -69,6 +77,8 @@
       "author": "kerr-mwv",
       "description": "Design and follow a pedagogical learning path built on canonical sources, with child teaching and practice sessions for every node.",
       "repository": "kerr-mwv/learning-path-plugin",
+      "downloads": 93,
+      "listedAt": "2026-11-12T17:44:42Z",
       "releases": [
         {
           "version": "0.1.0",
@@ -87,6 +97,8 @@
       "author": "808arc",
       "description": "Bring memes into LearnHarness.",
       "repository": "808arc/meme-plugin",
+      "downloads": 0,
+      "listedAt": "2026-11-12T03:36:31Z",
       "releases": []
     },
     {
@@ -95,6 +107,8 @@
       "author": "sevenRevy",
       "description": "Reusable, versioned question patterns with per-session teaching and practice switches.",
       "repository": "sevenRevy/question-patterns",
+      "downloads": 20,
+      "listedAt": "2026-11-14T00:51:16Z",
       "releases": [
         {
           "version": "0.1.1",
@@ -113,6 +127,8 @@
       "author": "jayden-husein",
       "description": "Learn a codebase by re-deriving its design decisions, with normal teaching when a concept is missing.",
       "repository": "jayden-husein/rederive-lh",
+      "downloads": 10,
+      "listedAt": "2026-11-15T21:53:30Z",
       "releases": [
         {
           "version": "0.3.2",
@@ -131,6 +147,8 @@
       "author": "wangdepin",
       "description": "把自己想说的中文变成英语，每天跟读、试背、按遗忘进度复习。翻译用你配置的模型，合成用 ElevenLabs，评分用 Azure 语音，三者都可能产生费用。",
       "repository": "wangdepin/speak-english-plugin",
+      "downloads": 5,
+      "listedAt": "2026-11-14T16:49:20Z",
       "releases": [
         {
           "version": "0.2.0",

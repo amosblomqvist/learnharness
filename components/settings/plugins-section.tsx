@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { RefreshCw, Settings } from "lucide-react";
 import { usePlugins } from "@/components/plugins";
 import type { FrontendPlugin } from "@/components/plugin-manager";
@@ -18,6 +18,13 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 	const allowed = snapshot.communityEnabled === true;
 	const modeBusy = snapshot.loading || snapshot.communityChanging || (!allowed && (snapshot.refreshing || snapshot.plugins.some(plugin => plugin.busy)));
 	const plugins = snapshot.plugins.filter(plugin => plugin.info.origin === origin);
+	// Off (here or in another window) drops the Browse page and its open intent.
+	const browsable = !core && allowed && !snapshot.communityChanging;
+	const [browsing, setBrowsing] = useState(false);
+	const refocusBrowse = useRef(false);
+	useEffect(() => { if (!browsable) setBrowsing(false); }, [browsable]);
+	if (browsable && browsing) return <CommunityPluginBrowser operation={snapshot.catalogOperation} onInstall={offer => void manager?.installFromCatalog(offer)}
+		onClose={() => { refocusBrowse.current = true; setBrowsing(false); }} />;
 	const installed = snapshot.loading ? <p role="status" className="text-xs text-muted-foreground">Loading plugins…</p>
 		: plugins.length === 0 ? <p className="text-xs text-muted-foreground">{core ? "No Core plugins available." : "No community plugins installed."}</p>
 			: plugins.map(plugin => <PluginRow key={plugin.info.id} plugin={plugin} onSettings={() => onOpenSettings?.(plugin.info.id)} />);
@@ -28,8 +35,9 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 		</SettingsRow>}
 		{!core && !allowed && <p className="font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING}</p>}
 		{!core && (!allowed || snapshot.communityChanging) && <CatalogOperationStatus operation={snapshot.catalogOperation} />}
-		{!core && allowed && !snapshot.communityChanging && <>
-		<BrowseControl />
+		{browsable && <>
+		<div><Button variant="outline" size="sm" data-testid="browse-community-plugins" ref={element => { if (element && refocusBrowse.current) { refocusBrowse.current = false; element.focus(); } }} onClick={() => setBrowsing(true)}>Browse</Button></div>
+		<CatalogOperationStatus operation={snapshot.catalogOperation} />
 		<details data-testid="plugin-install-help" className="text-xs text-muted-foreground">
 			<summary className="w-fit cursor-pointer list-none text-muted-foreground underline underline-offset-2 hover:text-foreground [&::-webkit-details-marker]:hidden">Manual installation</summary>
 			<ol className="mt-2 list-decimal space-y-2 pl-5">
@@ -60,18 +68,6 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 			<div><Button variant="outline" size="sm" asChild><a href="/plugin-authoring/learnharness-plugins.zip" download={`learnharness-plugins-${process.env.LH_VERSION ?? "authoring"}.zip`} data-testid="download-plugin-authoring">Download authoring skill</a></Button></div>
 		</SettingsGroup>}
 	</SettingsSection>;
-}
-
-// Off removes this subtree, including the open intent, even when the change
-// originated in another window. Operation status lives in the window manager.
-function BrowseControl() {
-	const { manager, snapshot } = usePlugins();
-	const [open, setOpen] = useState(false);
-	return <>
-		<div><Button variant="outline" size="sm" aria-haspopup="dialog" onClick={() => setOpen(true)}>Browse</Button></div>
-		{open ? <CommunityPluginBrowser onClose={() => setOpen(false)} operation={snapshot.catalogOperation} onInstall={offer => void manager?.installFromCatalog(offer)} />
-			: <CatalogOperationStatus operation={snapshot.catalogOperation} />}
-	</>;
 }
 
 function PluginRow({ plugin, onSettings }: { plugin: FrontendPlugin; onSettings: () => void }) {
