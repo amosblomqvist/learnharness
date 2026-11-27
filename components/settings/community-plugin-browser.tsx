@@ -18,6 +18,7 @@ export function CommunityPluginBrowser({ onClose, onInstall, operation }: { onCl
 	const [query, setQuery] = useState("");
 	const [problem, setProblem] = useState<string | null>(null);
 	const [attempt, retry] = useState(0);
+	const [confirming, setConfirming] = useState<string | null>(null);
 	const title = useId();
 	const interactions = useInteractionLayers();
 	const busy = operation?.phase === "pending";
@@ -60,13 +61,21 @@ export function CommunityPluginBrowser({ onClose, onInstall, operation }: { onCl
 		{visible?.length === 0 && <p role="status" className="text-sm text-muted-foreground">No plugins match.</p>}
 		<div className="grid gap-3 sm:grid-cols-2">
 			{visible?.map(offer => {
-				const { listing, release, action } = offer;
+				const { listing, release, action, turnsOff } = offer;
 				const source = communitySource(listing.repository);
 				return <article key={listing.id} className="flex min-w-0 flex-col gap-2 rounded-md border border-border p-3 text-sm">
 					<div className="flex gap-2"><Puzzle aria-hidden="true" className="mt-0.5 size-4 shrink-0 text-muted-foreground" /><div className="min-w-0"><h3 className="break-words font-semibold">{listing.name}</h3><p className="break-words text-xs text-muted-foreground">{listing.author}</p></div></div>
 					<p className="flex-1 break-words font-prose text-muted-foreground">{listing.description}</p>
 					<p className="text-xs text-muted-foreground">{release ? <>v{release.version} · <time dateTime={release.publishedAt}>{date(release.publishedAt)}</time></> : "No compatible packaged release"}</p>
-					{action && (catalog?.completed === completed || completed?.id !== listing.id) && <Button type="button" variant="outline" size="sm" className="self-start" aria-label={`${action} ${listing.name}`} disabled={busy} onClick={() => onInstall(offer)}>{busy && operation.id === listing.id ? `${action === "Update" ? "Updating" : "Installing"}…` : action}</Button>}
+					{action && (catalog?.completed === completed || completed?.id !== listing.id) && (confirming === listing.id && release && !busy
+						? <div data-testid={`confirm-update-${listing.id}`} className="space-y-2">
+							<p className="text-xs">This turns off {listing.name}, installs v{release.version}, then needs a restart and Enable.</p>
+							<div className="flex gap-2">
+								<Button type="button" variant="outline" size="sm" onClick={() => { setConfirming(null); onInstall(offer); }}>Turn off and update</Button>
+								<Button type="button" variant="ghost" size="sm" onClick={() => setConfirming(null)}>Cancel</Button>
+							</div>
+						</div>
+						: <Button type="button" variant="outline" size="sm" className="self-start" aria-label={`${action} ${listing.name}`} disabled={busy} onClick={() => turnsOff ? setConfirming(listing.id) : onInstall(offer)}>{busy && operation.id === listing.id ? `${action === "Update" ? "Updating" : "Installing"}…` : action}</Button>)}
 					<div className="flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground">
 						<a className={pluginLinkClass} href={source} target="_blank" rel="noreferrer">Source</a>
 						<a className={pluginLinkClass} href={`${source}/issues`} target="_blank" rel="noreferrer">Plugin bugs</a>

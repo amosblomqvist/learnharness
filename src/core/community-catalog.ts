@@ -23,7 +23,8 @@ export interface CommunityListing {
 	releases: CommunityRelease[];
 }
 export interface CommunityFeed { schemaVersion: 1; plugins: CommunityListing[] }
-export type CommunityOffer = { listing: CommunityListing; release: CommunityRelease | null; action: "Install" | "Update" | null };
+/** turnsOff: the installed copy is enabled, so Update turns it off first. */
+export type CommunityOffer = { listing: CommunityListing; release: CommunityRelease | null; action: "Install" | "Update" | null; turnsOff?: boolean };
 
 const versionPattern = /^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$/;
 const text = (value: unknown, limit: number): value is string => typeof value === "string" && !!value.trim() && value.length <= limit;

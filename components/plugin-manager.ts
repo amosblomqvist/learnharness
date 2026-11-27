@@ -528,7 +528,8 @@ export class PluginFrontendManager {
 			await this.reload(false);
 		}
 	}
-	async installFromCatalog({ listing, release, action }: CommunityOffer) {
+	/** An offer with turnsOff is sent only after the user confirmed turning it off. */
+	async installFromCatalog({ listing, release, action, turnsOff }: CommunityOffer) {
 		if (this.disposed || !this.snapshot.communityEnabled || this.snapshot.communityChanging || !release || !action || this.snapshot.catalogOperation?.phase === "pending") return;
 		const { id, name } = listing;
 		// Owned by this window, not by Browse. Dismissing the dialog neither
@@ -536,10 +537,10 @@ export class PluginFrontendManager {
 		this.publish({ catalogOperation: { id, phase: "pending", message: `${action === "Update" ? "Updating" : "Installing"} ${name}…` } });
 		try {
 			const { restartRequired } = await this.json(`/api/plugin-catalog/${encodeURIComponent(id)}`, {
-				method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, sha256: release.sha256 }),
+				method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, sha256: release.sha256, ...(turnsOff ? { turnOff: true } : {}) }),
 			}) as { restartRequired: boolean };
 			this.publish({ catalogOperation: { id, phase: "success", message: restartRequired
-				? `${name} was updated and is off. Restart LearnHarness before enabling it.`
+				? `${name} was ${turnsOff ? "turned off and updated" : "updated and is off"}. Restart LearnHarness before enabling it.`
 				: `${name} was installed and is off. Enable it from Installed if you trust it.` } });
 			await this.reload(false);
 		} catch (error) {

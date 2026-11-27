@@ -11,6 +11,7 @@ import { SettingsDialogBody, SettingsDialogProvider } from "../components/settin
 import type { CommunityOffer, PluginFrontendModule, PluginInfo } from "../src/core/index.ts";
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { installModalDom } from "./modal-dom.ts";
+import { CommunityPluginBrowser } from "../components/settings/community-plugin-browser.tsx";
 
 function info(id: string, enabled = true): PluginInfo {
 	return { id, origin: id === "schema" ? "core" : "community", enabled, status: enabled ? "active" : "disabled", revision: "one", manifest: {
@@ -182,6 +183,45 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		await new Promise(resolve => setTimeout(resolve, 5));
 		restoreModalDom();
 		if (getSelection) Object.defineProperty(dom.window, "getSelection", getSelection); else Reflect.deleteProperty(dom.window, "getSelection");
+		for (const key of keys) {
+			const descriptor = saved.get(key);
+			if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);
+		}
+	}
+});
+
+it("Browse confirms inline before an Update turns off an enabled plugin", async () => {
+	const dom = parseHTML("<html><head></head><body><div id='root'></div></body></html>");
+	const keys = ["window", "self", "document", "HTMLElement", "Element", "fetch", "IS_REACT_ACT_ENVIRONMENT"] as const;
+	const saved = new Map(keys.map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
+	const listing = { id: "running", name: "Running", author: "Fixture", description: "Enabled listing", repository: "fixture/running", releases: [] };
+	const offer: CommunityOffer = { listing, action: "Update", turnsOff: true, release: { version: "1.2.0", apiVersion: 1, minAppVersion: "0.7.0", publishedAt: "2026-10-01T00:00:00Z", tag: "v1.2.0", asset: "fixture.zip", sha256: "b".repeat(64) } };
+	Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element,
+		fetch: async () => Response.json({ offers: [offer] }), IS_REACT_ACT_ENVIRONMENT: true });
+	const restoreModalDom = installModalDom(dom);
+	const root = createRoot(document.querySelector("#root")!);
+	const installs: CommunityOffer[] = [];
+	const click = async (element: Element | null | undefined) => {
+		assert.ok(element);
+		await act(async () => { element.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+	};
+	const button = (text: string) => [...document.querySelectorAll("button")].find(element => element.textContent === text);
+	try {
+		await act(async () => { root.render(<InteractionLayersProvider><CommunityPluginBrowser onClose={() => {}} onInstall={selected => installs.push(selected)} /></InteractionLayersProvider>); });
+		await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); });
+		const confirm = '[data-testid="confirm-update-running"]';
+		await click(document.querySelector('[aria-label="Update Running"]'));
+		assert.deepEqual(installs, [], "Update on an enabled plugin waits for confirmation");
+		assert.match(document.querySelector(confirm)!.textContent!, /This turns off Running, installs v1\.2\.0, then needs a restart and Enable\./);
+		await click(button("Cancel"));
+		assert.equal(document.querySelector(confirm), null); assert.deepEqual(installs, []);
+		await click(document.querySelector('[aria-label="Update Running"]'));
+		await click(button("Turn off and update"));
+		assert.deepEqual(installs, [offer]); assert.equal(document.querySelector(confirm), null);
+	} finally {
+		await act(async () => { root.unmount(); });
+		await new Promise(resolve => setTimeout(resolve, 5));
+		restoreModalDom();
 		for (const key of keys) {
 			const descriptor = saved.get(key);
 			if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);

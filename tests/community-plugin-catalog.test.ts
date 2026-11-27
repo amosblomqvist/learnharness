@@ -71,7 +71,7 @@ function fixture(t: TestContext) {
 	return { directory, core, state, history, hooks, fetched, get host() { return host; },
 		async restart() { await host.dispose(); host = newHost(); await host.initialize(); },
 		async browse() { const response = await catalog.list(request()); return { status: response.status, body: await response.json() }; },
-		install(action = "Install", sha256 = current.sha256) { return catalog.install(id, new Request(request(), { method: "POST", body: JSON.stringify({ action, sha256 }) })); },
+		install(action = "Install", sha256 = current.sha256, turnOff?: boolean) { return catalog.install(id, new Request(request(), { method: "POST", body: JSON.stringify({ action, sha256, ...(turnOff === undefined ? {} : { turnOff }) }) })); },
 		setBuild(zipBytes: Buffer, version?: string) { bytes = zipBytes; current = release(bytes, version); },
 		setResponse(response?: Response) { assetResponse = response; }, delist() { delisted = true; },
 	};
@@ -179,9 +179,13 @@ test("browse, install, update and restart do not execute a downloaded build befo
 	await f.host.setEnabled(id, true); assert.equal(await f.host.call(id, "proof"), "1.0.0");
 	const data = path.join(f.directory, id, "data", "fixture.txt"); fs.writeFileSync(data, "preserved");
 	f.setBuild(build("1.1.0", `${id}/dist/`, [[`${id}/README.md`, "ignore outside dist"]]), "1.1.0");
-	assert.equal((await f.browse()).body.offers[0].action, null);
+	const enabledOffer = (await f.browse()).body.offers[0];
+	assert.equal(enabledOffer.action, "Update"); assert.equal(enabledOffer.turnsOff, true);
+	assert.equal((await f.install("Update")).status, 409, "an enabled plugin updates only after confirming it turns off");
+	assert.equal(await f.host.call(id, "proof"), "1.0.0");
 	await f.host.setEnabled(id, false);
-	assert.equal((await f.browse()).body.offers[0].action, "Update");
+	const offer = (await f.browse()).body.offers[0];
+	assert.equal(offer.action, "Update"); assert.equal(offer.turnsOff, undefined);
 	const result = await f.install("Update"); assert.equal(result.status, 200); assert.deepEqual(await result.json(), { restartRequired: true });
 	assert.equal(fs.readFileSync(data, "utf8"), "preserved");
 	assert.equal(f.host.list().find(p => p.id === id)?.enabled, false);
@@ -193,6 +197,27 @@ test("browse, install, update and restart do not execute a downloaded build befo
 	await f.host.setEnabled(id, true);
 	// The test restarts the host but not Node's CJS module cache; a real process restart clears it.
 	assert.equal(f.host.list().find(p => p.id === id)?.manifest?.version, "1.1.0");
+});
+
+test("a confirmed Update turns off an enabled catalog plugin with cleanup, then requires restart and Enable", async t => {
+	const f = fixture(t); await f.host.setCommunityEnabled(true);
+	assert.equal((await f.install()).status, 200);
+	await f.host.setEnabled(id, true); assert.equal(await f.host.call(id, "proof"), "1.0.0");
+	f.setBuild(build("1.1.0"), "1.1.0");
+	const result = await f.install("Update", undefined, true);
+	assert.equal(result.status, 200); assert.deepEqual(await result.json(), { restartRequired: true });
+	assert.deepEqual(f.history, ["activate", "cleanup"]);
+	const info = f.host.list().find(p => p.id === id)!;
+	assert.equal(info.enabled, false); assert.equal(info.manifest?.version, "1.1.0"); assert.equal(info.restartRequired, true);
+	assert.equal(JSON.parse(fs.readFileSync(f.state, "utf8")).enabled[id], false);
+	await assert.rejects(f.host.call(id, "proof"), /disabled/);
+	await assert.rejects(f.host.setEnabled(id, true), /Restart required/);
+	// A locally edited enabled build is still never offered an Update.
+	await f.restart(); await f.host.setEnabled(id, true);
+	f.setBuild(build("1.2.0"), "1.2.0");
+	fs.writeFileSync(path.join(f.directory, id, "dist", "local.txt"), "local change");
+	assert.equal((await f.browse()).body.offers[0].action, null);
+	assert.equal((await f.install("Update", undefined, true)).status, 409);
 });
 
 test("bad feed selection, partial data, unexpected redirects and invalid packages leave no new files; locally edited builds are not overwritten", async t => {

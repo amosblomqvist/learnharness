@@ -506,11 +506,16 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		const root = path.join(directory, listing.id);
 		const pkg = packages.get(listing.id);
 		if (!exists(root)) return pkg && (!pkg.blocked || pkg.info.manifest) ? null : "Install";
-		if (!pkg?.info.manifest || pkg.info.enabled || pkg.activation || pkg.restart || pkg.blocked) return null;
+		// An enabled install is eligible too: installFromCatalog turns it off first.
+		if (!pkg?.info.manifest || pkg.restart || pkg.blocked || pkg.retiring) return null;
 		const state = readState(stateFile), previous = state.catalog[listing.id];
-		if (previous?.repository !== listing.repository || previous.revision !== pkg.info.revision || state.enabled[listing.id] === true || compareCommunityVersions(release.version, pkg.info.manifest.version) <= 0 || pkg.retiring) return null;
+		if (previous?.repository !== listing.repository || previous.revision !== pkg.info.revision || compareCommunityVersions(release.version, pkg.info.manifest.version) <= 0) return null;
 		try { pluginRoot(root); } catch { return null; }
 		return catalogTreeDigest(path.join(root, "dist")) === previous.tree ? "Update" : null;
+	}
+	function catalogUpdateTurnsOff(id: string): boolean {
+		const pkg = packages.get(id);
+		return !!pkg && (pkg.info.enabled || !!pkg.activation || readState(stateFile).enabled[id] === true);
 	}
 
 	/** One synchronous per-turn snapshot. Failed packages contribute nothing, not even instructions. */
@@ -659,15 +664,28 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		},
 		communityEnabled: () => communityEnabled,
 		catalogAction,
-		installFromCatalog(listing: CommunityListing, release: CommunityRelease, action: "Install" | "Update", files: ReadonlyMap<string, Buffer>, signal: AbortSignal): Promise<void> {
+		catalogUpdateTurnsOff,
+		/** turnOff confirms that an Update may first turn off an enabled copy. */
+		installFromCatalog(listing: CommunityListing, release: CommunityRelease, action: "Install" | "Update", files: ReadonlyMap<string, Buffer>, signal: AbortSignal, turnOff = false): Promise<void> {
 			return enqueue(async () => {
 				assertOpen(); await initializeInternal();
 				if (signal.aborted || catalogAction(listing, release) !== action) throw new PluginHostError(409, "Plugin availability changed. Refresh Browse.");
 				const state = readState(stateFile), root = path.join(directory, listing.id), update = action === "Update";
 				if (!state.communityEnabled) throw new PluginHostError(409, "Community plugins are off.");
+				const running = update && catalogUpdateTurnsOff(listing.id);
+				if (running && !turnOff) throw new PluginHostError(409, "This plugin is on. Refresh Browse and confirm turning it off to update.");
 				// catalogAction above rechecks the on-disk build under the host queue.
 				// Clear any orphaned prior enable bit BEFORE the new code can appear on disk.
 				if (state.enabled[listing.id] !== false) { state.enabled[listing.id] = false; writeState(stateFile, state); }
+				let cleanup: string[] = [];
+				if (running) {
+					const current = get(listing.id);
+					current.info.enabled = false;
+					delete current.contributionWarning;
+					cleanup = await deactivate(current);
+					current.info.status = cleanup.length || current.blocked ? "error" : "disabled";
+					current.info.error = cleanup.length ? `Cleanup: ${cleanup.join("; ")}` : undefined;
+				}
 				let candidate: Package | undefined;
 				try {
 					publishCatalogFiles(directory, listing.id, files, update, tree => {
@@ -675,11 +693,14 @@ export function createPluginHost(deps: PluginHostDependencies) {
 						state.catalog[listing.id] = { repository: listing.repository, revision: candidate.info.revision, tree };
 						writeState(stateFile, state);
 					});
-				} catch (error) { throw new PluginHostError(500, `Could not publish the plugin build: ${errorText(error)}`); }
+				} catch (error) {
+					if (running) change();
+					throw new PluginHostError(500, `Could not publish the plugin build${running ? " (the plugin was turned off)" : ""}: ${errorText(error)}`);
+				}
 				candidate!.info.repository = listing.repository;
 				if (update) {
 					candidate!.restart = "Restart required before enabling this updated version";
-					candidate!.info.error = candidate!.restart;
+					candidate!.info.error = [candidate!.restart, ...(cleanup.length ? [`Cleanup: ${cleanup.join("; ")}`] : [])].join("; ");
 					candidate!.info.restartRequired = true;
 				}
 				packages.set(listing.id, candidate!);
