@@ -31,6 +31,11 @@ export { promptOverrides } from "../store/prompt-overrides.ts";
 export { themeStore } from "../store/themes.ts";
 export { readThemeBoot, type ThemeBoot } from "./theme-boot.ts";
 export { isValidSegmentPath } from "../core/prompt-segments.ts";
+// The Anki .apkg builder (issue #11): node-bound core (node:sqlite has no
+// browser polyfill), so it stays OUT of the core barrel and reaches the
+// export route through this barrel — the same precedent as the segment
+// discovery re-export above.
+export { ankiCardsOf, buildAnkiApkg, AnkiExportUnavailableError, type AnkiApkgInput } from "../core/anki.ts";
 // The canonical segment discovery/resolution lives in the agent layer
 // (composition is an agent concern); the barrel re-exports it for the
 // routes — server→agent is the lawful direction (chat-handler precedent).

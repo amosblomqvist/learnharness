@@ -25,6 +25,8 @@ Choose **Practice** for problems rather than a lesson. Start from selected graph
 
 Sessions are saved locally, including earlier messages when context is compacted. The [keyboard guide](keyboard.md) covers submission, focus, question controls, and cancellation.
 
+A session's questions can leave the app: right-click a session in the sidebar and choose **Export Anki deck (.apkg)…** to download its quizzes and concluded practice problems as an Anki deck (see [Anki export](anki-export.md)). **Export as Markdown…** on the same menu saves the full transcript.
+
 ## Dictation
 
 1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).
