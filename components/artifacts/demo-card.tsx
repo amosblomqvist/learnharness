@@ -7,7 +7,14 @@ import { InvertDiscIcon } from "@/components/artifacts/invert-disc";
 import { ChatActionsContext } from "@/components/chat";
 import { downloadFile, slugFilename } from "@/components/artifacts/download";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
-import type { ArtifactPartProps, DemoResult } from "@/src/core";
+import { useAppearance } from "@/components/settings/appearance";
+import {
+	artifactThemeCss,
+	injectArtifactTheme,
+	isThemedDemo,
+	type ArtifactPartProps,
+	type DemoResult,
+} from "@/src/core";
 
 /**
  * Demo artifact card (W6): while the part is input-available, a job activity
@@ -24,6 +31,13 @@ import type { ArtifactPartProps, DemoResult } from "@/src/core";
  *
  * Bridge message handling is a pure function (reduceDemoBridgeState) so
  * tests cover it without a DOM.
+ *
+ * Themed demos (core/artifact-theme.ts): a demo carrying
+ * <meta name="lh-theme" content="app"> gets the learner's theme as --lh-*
+ * variables and a transparent page, so it sits on the card like the rest
+ * of the transcript. On a theme switch the parent posts
+ * {type:"lh-theme",css}; the bridge rewrites the injected sheet and fires
+ * "lh-theme-change" on window (canvas demos redraw), with no reload.
  */
 
 // ─── bridge injection + message handling (pure, testable) ───────────────────
@@ -44,12 +58,17 @@ window.addEventListener("load",post);
 window.addEventListener("error",function(e){send({type:"demo-error",message:e.message||String(e)})});
 setTimeout(post,50);
 setTimeout(post,400);
+window.addEventListener("message",function(e){var d=e.data;if(e.source!==parent||!d||d.type!=="lh-theme"||typeof d.css!=="string")return;
+var s=document.querySelector("style[data-lh-theme]");if(!s||s.textContent===d.css)return;s.textContent=d.css;
+try{window.dispatchEvent(new Event("lh-theme-change"))}catch(x){}});
 })();</script>`;
 
-/** Inject the bridge before </body> (or at the end of a body-less document). */
-export function buildDemoSrcDoc(html: string): string {
-	if (/<\/body>/i.test(html)) return html.replace(/<\/body>/i, `${DEMO_BRIDGE_SCRIPT}</body>`);
-	return `${html}${DEMO_BRIDGE_SCRIPT}`;
+/** Inject the bridge before </body> (or at the end of a body-less
+ *  document), and the theme sheet when one is given (themed demos only). */
+export function buildDemoSrcDoc(html: string, themeCss?: string): string {
+	const doc = themeCss === undefined ? html : injectArtifactTheme(html, themeCss);
+	if (/<\/body>/i.test(doc)) return doc.replace(/<\/body>/i, `${DEMO_BRIDGE_SCRIPT}</body>`);
+	return `${doc}${DEMO_BRIDGE_SCRIPT}`;
 }
 
 export interface DemoBridgeState {
@@ -156,7 +175,23 @@ function DemoFrame({
 			body: JSON.stringify({ input: { messageId, inverted: next } }),
 		}).catch(() => {});
 	};
-	const srcDoc = useMemo(() => buildDemoSrcDoc(html), [html]);
+	// Themed demos: the sheet is baked into srcDoc once (a srcDoc change
+	// reloads the frame and loses the learner's state); later switches go
+	// over postMessage. onLoad re-posts the latest sheet in case the theme
+	// moved while the frame was loading.
+	const { colors, resolvedMode } = useAppearance();
+	const themed = useMemo(() => isThemedDemo(html), [html]);
+	const themeCss = artifactThemeCss(colors, resolvedMode);
+	const themeCssRef = useRef(themeCss);
+	themeCssRef.current = themeCss;
+	const srcDoc = useMemo(
+		() => buildDemoSrcDoc(html, themed ? themeCssRef.current : undefined),
+		[html, themed],
+	);
+	const postTheme = () => {
+		if (themed) iframeRef.current?.contentWindow?.postMessage({ type: "lh-theme", css: themeCssRef.current }, "*");
+	};
+	useEffect(postTheme, [themed, themeCss]);
 
 	useEffect(() => {
 		const onMessage = (event: MessageEvent) => {
@@ -182,13 +217,17 @@ function DemoFrame({
 					<span className="truncate text-xs font-medium tracking-wide text-foreground">{title}</span>
 				</div>
 				<div className="flex shrink-0 items-center gap-1.5">
-					<Toggle
-						checked={inverted}
-						onChange={toggleInverted}
-						label="Invert demo brightness"
-						title="Invert colors"
-						discIcon={<InvertDiscIcon className="size-3" />}
-					/>
+					{/* A themed demo already matches the app; inverting it would
+					   only undo that. */}
+					{!themed && (
+						<Toggle
+							checked={inverted}
+							onChange={toggleInverted}
+							label="Invert demo brightness"
+							title="Invert colors"
+							discIcon={<InvertDiscIcon className="size-3" />}
+						/>
+					)}
 					<button
 						type="button"
 						aria-label="Download demo as HTML"
@@ -221,15 +260,21 @@ function DemoFrame({
 				// the wheel (session scrolling stalls over the demo). With
 				// scrolling disabled the wheel chains straight to the session.
 				scrolling="no"
-				className="mt-2 w-full rounded-lg border bg-white"
+				onLoad={postTheme}
+				// Themed: no white backing or inner border, so the transparent
+				// page shows the card. The frame's color-scheme matches the
+				// document's, or Chromium paints an opaque backdrop behind it.
+				className={themed ? "mt-2 w-full" : "mt-2 w-full rounded-lg border bg-white"}
 				// content-box: the bridge reports the CONTENT height — with the
 				// preflight's border-box the 2px border would eat into it and clip
 				// the bottom of the demo (smoke finding, 2026-10-07).
 				style={{
 					height: state.height ?? 360,
 					boxSizing: "content-box",
-					filter: inverted ? "invert(1) hue-rotate(180deg)" : undefined,
+					filter: inverted && !themed ? "invert(1) hue-rotate(180deg)" : undefined,
+					colorScheme: themed ? resolvedMode : undefined,
 				}}
+				data-themed={themed ? "true" : undefined}
 				data-testid="demo-iframe"
 			/>
 		</div>
