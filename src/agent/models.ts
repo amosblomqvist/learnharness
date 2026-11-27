@@ -7,11 +7,13 @@ import {
 	type Model,
 	type Models,
 	type MutableModels,
+	type Provider,
 	type StreamFunction,
 } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
-import { supportsOpenAIFastMode } from "../core/native-chat-speed.ts";
+import { fastModeCompletionResult, mergeFastModeResults, supportsOpenAIFastMode, type FastModeResult } from "../core/native-chat-speed.ts";
 import { lazyApi, lazyStream } from "@earendil-works/pi-ai/api/lazy";
+import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import { type ModelRole } from "../../config.ts";
 import { DEFAULT_THINKING_ORDER } from "../core/settings.ts";
@@ -54,6 +56,30 @@ export interface PiEngine {
 
 export type { ThinkingLevel };
 
+// Route handlers can have separate module instances in Next.js. All of
+// their collections see the same validated overlay without changing auth.
+const CATALOG_KEY = Symbol.for("lh.model-catalog-overlay");
+const catalogGlobal = globalThis as typeof globalThis & { [CATALOG_KEY]?: ReadonlyMap<string, readonly Model<Api>[]> };
+
+export function setModelCatalogOverlay(models: ReadonlyMap<string, readonly Model<Api>[]>): void {
+	catalogGlobal[CATALOG_KEY] = models;
+}
+
+function withCatalogOverlay(provider: Provider): Provider {
+	return {
+		...provider,
+		getModels: () => {
+			const extra = catalogGlobal[CATALOG_KEY]?.get(provider.id);
+			return extra?.length ? [...provider.getModels(), ...extra] : provider.getModels();
+		},
+		getAllModels: () => {
+			const base = provider.getAllModels?.() ?? provider.getModels();
+			const extra = catalogGlobal[CATALOG_KEY]?.get(provider.id);
+			return extra?.length ? [...base, ...extra] : base;
+		},
+	};
+}
+
 let collection: ReturnType<typeof createModels> | undefined;
 interface ProviderSource {
 	sync(models: MutableModels): void;
@@ -88,9 +114,9 @@ export function piModels() {
 			// Keep the native Bedrock implementation reachable by standalone tracing.
 			// Pi's default Node-only loader hides this import from bundlers. Only
 			// replace its lazy forwarding; preserve the native factory's auth/catalog.
-			collection.setProvider(provider.id === "amazon-bedrock"
+			collection.setProvider(withCatalogOverlay(provider.id === "amazon-bedrock"
 				? { ...provider, ...lazyApi(() => import("@earendil-works/pi-ai/api/bedrock-converse-stream")) }
-				: provider);
+				: provider));
 		}
 		collection.setProvider(createClaudeCodeProvider(streamClaudeCode));
 	}
@@ -130,7 +156,7 @@ function defaultThinkingLevel(model: Model<Api>): ThinkingLevel {
  *  key is resolved by pi-ai itself from the environment per request (the
  *  keys seam reflects file-saved keys into env), so the engine never
  *  hardcodes OpenRouter's. */
-export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle, cacheRetention?: () => CacheRetention | undefined, lessonFastMode = false): PiEngine {
+export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (() => boolean) = true, lifecycle?: ChatGPTDispatchLifecycle, cacheRetention?: () => CacheRetention | undefined, lessonFastMode = false, fastModeObserver?: (result: FastModeResult) => void): PiEngine {
 	const models: Models = piModels();
 	const nativeId = nativeSubscriptionId(spec.provider);
 	const registeredModel = spec.provider === "chatgpt" ? chatGPTModel(spec.id) : nativeId ? nativeSubscriptionModel(spec.provider, spec.id) : models.getModel(spec.provider, spec.id);
@@ -183,7 +209,8 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 			// Pi's simple Responses adapter forwards onPayload and drops provider-only options.
 			if (lessonFastMode && spec.provider === "openai" && requestModel.provider === "openai" &&
 				requestModel.api === "openai-responses" && supportsOpenAIFastMode(requestModel.id) && !purpose()) {
-				return models.streamSimple(requestModel, context, {
+				let completedResult: FastModeResult | undefined;
+				const source = models.streamSimple(requestModel, context, {
 					...requestOptions,
 					onPayload: async (raw, nativeModel) => {
 						const replacement = await options?.onPayload?.(raw, nativeModel);
@@ -191,10 +218,36 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 						if (!body || typeof body !== "object" || Array.isArray(body)) throw new Error("Invalid OpenAI Responses request");
 						return { ...body, service_tier: "priority" };
 					},
+					onProviderStreamEvent: async (raw, nativeModel) => {
+						const result = fastModeCompletionResult(raw);
+						await options?.onProviderStreamEvent?.(raw, nativeModel);
+						if (result) completedResult = mergeFastModeResults(completedResult, result);
+					},
 				});
+				if (!fastModeObserver) return source;
+				const observed = new AssistantMessageEventStream();
+				// A caller hook or later provider error can reject a raw completed
+				// event. Report only after SDK success and before forwarding done, so
+				// this turn cannot settle before its speed notification is emitted.
+				void (async () => {
+					for await (const event of source) {
+						if (event.type === "done" && completedResult) {
+							try { void Promise.resolve(fastModeObserver(completedResult)).catch(() => {}); }
+							catch { /* A live UI observer cannot fail the model response. */ }
+						}
+						observed.push(event);
+					}
+					observed.end();
+				})();
+				return observed;
 			}
-			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle, lessonFastMode) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
-			return stream(requestModel, context, requestOptions);
+			const stream = spec.provider === "chatgpt" ? chatGPTStream(purpose, lifecycle, lessonFastMode, fastModeObserver) : nativeId ? nativeSubscriptionStream(models.getProvider(nativeId)!, purpose, lifecycle) : models.streamSimple.bind(models);
+			// Direct Anthropic auth is resolved per request. Keep full replay: Pi's
+			// message-thread fingerprint does not include that rotating credential.
+			const wireModel = requestModel.provider === "anthropic" && requestModel.api === "anthropic-messages"
+				? { ...requestModel, compat: { ...requestModel.compat, supportsMessageThreads: false } }
+				: requestModel;
+			return stream(wireModel, context, requestOptions);
 		},
 	};
 }

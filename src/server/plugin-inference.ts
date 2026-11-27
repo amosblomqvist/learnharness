@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { normalizeContext, type AssistantMessage, type AssistantMessageEvent, type SimpleStreamOptions, type Usage } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import type { PiEngine } from "../agent/models.ts";
+import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
 import { markUnadmittedUsage, usageWasAdmitted, type SubscriptionDispatchLifecycle } from "../agent/subscription-request-cycle.ts";
 import type { PluginCallPurpose, PluginModelSpec } from "../core/plugin-agents.ts";
 import type { PluginInference, PluginInferenceOptions, PluginInferenceRequest } from "../core/plugins.ts";
@@ -197,7 +199,11 @@ export function createPluginInference(
 		const options = optionsFor(request.options), model = modelSpec(request.model), purpose = purposeOf(request.purpose);
 		const engine = await bounded(engineFor(model, purpose), combined);
 		if (options.reasoning !== undefined && options.reasoning !== engine.level) throw new Error("Set model.thinkingLevel instead of overriding engine reasoning");
-		const source = engine.streamFn(engine.model, normalizeContext(request.context), { ...options, signal: combined });
+		// One-shot calls have no saved conversation. Own one routing identity per
+		// invocation (also stable across transport retries), never a plugin option.
+		// Claude Code must not retain/reuse a live process for a one-shot request.
+		const sessionId = model.provider === CLAUDE_CODE_PROVIDER ? undefined : randomUUID();
+		const source = engine.streamFn(engine.model, normalizeContext(request.context), { ...options, signal: combined, ...(sessionId ? { sessionId } : {}) });
 		for await (const event of source) {
 			if (event.type === "done" || event.type === "error") {
 				const message = event.type === "done" ? event.message : event.error;

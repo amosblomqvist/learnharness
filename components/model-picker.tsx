@@ -302,7 +302,7 @@ export function ModelControl({ chatId, onModelChange }: { chatId?: string; onMod
 				>{effectiveLevel === undefined ? "—" : (THINKING_LABEL[effectiveLevel] ?? effectiveLevel)}</ModelPickerPill>
 			</Hint>
 
-			{entry?.supportsFastMode === true && <ChatSpeedSwitch />}
+			{entry?.supportsFastMode === true && <ChatSpeedSwitch key={`${chatId ?? "draft"}:${effectiveProvider}:${effectiveId}`} chatId={chatId} model={{ provider: entry.provider, id: entry.id }} />}
 
 			{/* The shared dropdown body (extracted 2026-09-20): the agent
 			    settings' slot selects and the setup dialog use the exact same

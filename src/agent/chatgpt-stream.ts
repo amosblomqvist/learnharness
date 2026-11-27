@@ -5,6 +5,7 @@ import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages"
 import { chatGPTAbortController, chatGPTModel, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTDenial } from "./chatgpt-bridge.ts";
 import type { AdmissionScope, ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 import { capturePreparedBackgroundPayload } from "./background-capture.ts";
+import { fastModeCompletionResult, mergeFastModeResults, type FastModeResult } from "../core/native-chat-speed.ts";
 
 const USAGE = "https://chatgpt.com/settings/usage";
 export function chatGPTStreamError(message: string): string {
@@ -47,7 +48,7 @@ export function chatGPTHistory(context: TranscriptContext, logicalModel: Model<A
 function empty(model: Model<Api>): AssistantMessage {
 	return { role: "assistant", api: model.api, provider: "chatgpt", model: model.id, content: [], stopReason: "error", timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
-export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDispatchLifecycle, lessonFastMode = false): StreamFunction<Api, SimpleStreamOptions> {
+export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDispatchLifecycle, lessonFastMode = false, fastModeObserver?: (result: FastModeResult) => void): StreamFunction<Api, SimpleStreamOptions> {
 	return (logicalModel, context, options) => {
 		const output = new AssistantMessageEventStream();
 		const purpose = background();
@@ -60,6 +61,8 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 			let scope: AdmissionScope | undefined;
 			let committed = false;
 			let terminal = false;
+			let fastRequested = false;
+			let completedResult: FastModeResult | undefined;
 			const check = () => { if (signal.aborted || !scope || !chatGPTScopeCurrent(scope)) throw new Error("cancelled or catalog authority changed"); };
 			try {
 				if (logicalModel.provider !== "chatgpt") throw new Error("ChatGPT account catalog has no selected model");
@@ -87,15 +90,18 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 					onPayload: async (raw, model) => {
 						const replacement = await options?.onPayload?.(raw, model);
 						const payload = chatGPTPayload(replacement === undefined ? raw : replacement, logicalModel.id, lessonFastMode && !purpose);
+						fastRequested = payload.service_tier === "priority";
 						check();
 						capturePreparedBackgroundPayload(payload, logicalModel);
 						return payload;
 					},
 					onProviderStreamEvent: async (raw, model) => {
+						const result = fastRequested ? fastModeCompletionResult(raw) : undefined;
 						const event = raw as { type?: string; code?: string; error?: { code?: string }; response?: { error?: { code?: string }; status?: string } };
 						if (event.type === "response.completed" && event.response?.status === "completed" && !event.response?.error) completed = true;
 						if (["response.incomplete", "response.failed", "error"].includes(event.type ?? "") || event.response?.error) failure = event.code || event.error?.code || event.response?.error?.code || "incomplete terminal response";
 						await options?.onProviderStreamEvent?.(raw, model);
+						if (result) completedResult = mergeFastModeResults(completedResult, result);
 					},
 				});
 				for await (const event of source) {
@@ -105,6 +111,10 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 					if (event.type === "done") {
 						if (!completed || failure) throw new Error(failure || "missing terminal response.completed");
 						terminal = true;
+						if (completedResult) {
+							try { void Promise.resolve(fastModeObserver?.(completedResult)).catch(() => {}); }
+							catch { /* Live UI observers do not affect completed answers. */ }
+						}
 						output.push({ ...event, message: partial });
 					} else if (event.type === "error") {
 						throw new Error(failure || event.error.errorMessage || "ChatGPT stream error");

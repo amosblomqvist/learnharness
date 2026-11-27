@@ -40,8 +40,10 @@ import {
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
 import { citationsToReadableText, collectCitations } from "./citations.ts";
 import { messageMarkdown } from "./session-markdown.ts";
-import { normalizeOptions, seededRandom, shuffleOptions, type QuestionAnswerData } from "./question-core.ts";
+import { answeredOptionLetters } from "./answer-presentation.ts";
+import { displayedOptionLetter, questionDisplayOptions, type QuestionAnswerData } from "./question-core.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
+import { parseQuestionInput } from "./tool-parts.ts";
 import { readPluginQuestionMessageAnnotation, readPluginQuestionAnswer, readPluginQuestionCancellation } from "./plugin-questions.ts";
 import { pluginProblemForCall, readPluginProblemSubmission } from "./plugin-problems.ts";
 
@@ -370,11 +372,13 @@ function answeredQuestionMarkdown(result: ToolResultMessage, input: Record<strin
 	const correct = new Set(answer.correctIndices ?? []);
 	const isQuiz = answer.kind === "quiz";
 	if (answer.options && answer.options.length > 0) {
+		const letters = answeredOptionLetters(answer, input);
 		lines.push(
 			answer.options
 				.map((o) => {
 					const marks = [isQuiz && correct.has(o.index) ? "correct" : "", chosen.has(o.index) ? "chosen by the learner" : ""].filter(Boolean);
-					return `- ${o.label}${marks.length > 0 ? ` *(${marks.join(", ")})*` : ""}`;
+					const letter = letters.get(o.index);
+					return `- ${letter ? `${letter}. ` : ""}${o.label}${marks.length > 0 ? ` *(${marks.join(", ")})*` : ""}`;
 				})
 				.join("\n"),
 		);
@@ -403,9 +407,16 @@ function openQuestionMarkdown(tool: string, input: unknown, toolCallId: string):
 	const details = typeof args.details === "string" ? args.details.trim() : "";
 	if (details) lines.push(details);
 	if (tool !== "explain" && tool !== "recall") {
-		const rawOptions = normalizeOptions(args.options as Parameters<typeof normalizeOptions>[0]);
-		const options = toolQuestionKind(tool) === "quiz" ? shuffleOptions(rawOptions, seededRandom(toolCallId)) : rawOptions;
-		if (options.length > 0) lines.push(options.map((o, index) => `${index + 1}. ${o.label}`).join("\n"));
+		// Saved calls can contain encoded fields (e.g. multiSelect: "true").
+		// Interpret the options and selection mode exactly as the dock does.
+		const parsed = parseQuestionInput(tool, input);
+		if (parsed && "options" in parsed) {
+			const { options, optionOrder } = questionDisplayOptions(parsed.options, toolQuestionKind(tool), parsed.multiSelect === true, toolCallId);
+			if (options.length > 0) lines.push(options.map((o, index) => {
+				const letter = displayedOptionLetter(optionOrder, index + 1);
+				return letter ? `- ${letter}. ${o.label}` : `${index + 1}. ${o.label}`;
+			}).join("\n"));
+		}
 	}
 	return lines.join("\n\n");
 }
@@ -456,10 +467,18 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 		}
 	}
 	const calls = new Map<string, { name: string; args: Record<string, unknown> | undefined }>();
+	const answeredInputs = new Map<ToolResultMessage, Record<string, unknown>>();
 	for (const m of messages) {
-		if (m.role !== "assistant") continue;
-		for (const block of (m as AssistantMessage).content) {
-			if (block.type === "toolCall") calls.set(block.id, { name: block.name, args: block.arguments as Record<string, unknown> | undefined });
+		if (m.role === "assistant") {
+			for (const block of (m as AssistantMessage).content) {
+				if (block.type === "toolCall") calls.set(block.id, { name: block.name, args: block.arguments as Record<string, unknown> | undefined });
+			}
+		} else if (m.role === "toolResult" && !m.isError && (QUESTION_TOOLS as readonly string[]).includes(m.toolName)) {
+			// Like the transcript, pair the answer with the preceding call,
+			// not the last reuse of its ID in the whole session. The call can
+			// predate the compaction cut even when the answer is retained.
+			const call = calls.get(m.toolCallId);
+			if (call?.name === m.toolName && call.args) answeredInputs.set(m, call.args);
 		}
 	}
 	const pluginQuestions = sidePluginQuestions(messages);
@@ -525,7 +544,7 @@ export function sideChatLessonDocument(messages: readonly LhMessage[]): string {
 				const md = problemMarkdown(pluginProblem.input, result.toolCallId === activeProblem);
 				if (md) blocks.push(md);
 			} else if ((QUESTION_TOOLS as readonly string[]).includes(result.toolName)) {
-				const md = answeredQuestionMarkdown(result, calls.get(result.toolCallId)?.args);
+				const md = answeredQuestionMarkdown(result, answeredInputs.get(result));
 				if (md) blocks.push(md);
 			} else if (result.toolName === PRACTICE_PROBLEM_TOOL) {
 				const md = problemMarkdown(calls.get(result.toolCallId)?.args, result.toolCallId === activeProblem);

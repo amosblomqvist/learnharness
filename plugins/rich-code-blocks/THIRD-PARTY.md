@@ -61,7 +61,13 @@ before strict XML sanitization; it never parses generated HTML. A separate
 asserted-source DVI adaptation escapes ordinary text characters `&`, `<` and `>`
 when they are emitted, preserving intentional numeric entities. Thus valid TeX
 labels such as `A\\&B` and `$x<y$` remain valid XML rather than being mistaken for
-markup. Browser-produced
+markup. A further asserted-source bootstrap adaptation captures at most 4 KiB
+around the first TeX error from the in-memory `input.log` before upstream cleanup
+would discard it. It replaces the generic inaccessible `showConsole` instruction;
+console logging remains disabled. The Worker formats a plain-text diagnostic capped
+at 2 KiB, with original-source line context, rather than exposing the full log.
+These adaptations modify only the built Worker, not installed dependency files.
+Browser-produced
 SMILES/ABC SVG is serialized with XMLSerializer to retain its SVG namespace.
 SMILES label CSS translate transforms become validated finite 2D SVG matrices;
 only approved static declarations survive. Vendor license texts are not modified. Narrow TypeScript declarations cover only the vendor calls used here:

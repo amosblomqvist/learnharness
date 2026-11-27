@@ -127,14 +127,17 @@ describe("side lesson document", () => {
 	it("renders prose, learner text and answered checks in full", () => {
 		const doc = sideChatLessonDocument([
 			newUserMessage("I want to learn arithmetic"),
-			assistant([text("Addition combines counts."), call("q1", "quiz", { ...QUIZ_ARGS, question: "What is 2+2?" })]),
+			assistant([text("Addition combines counts."), call("q1", "quiz", {
+				...QUIZ_ARGS, question: "What is 2+2?", correctAnswer: "4",
+				options: [{ label: "4", value: "4" }, { label: "3", value: "3" }],
+			})]),
 			result("q1", "quiz", answeredQuiz()),
 		]);
 		assert.match(doc, /### Learner\n\nI want to learn arithmetic/);
 		assert.match(doc, /### Teacher\n\nAddition combines counts\./);
 		assert.match(doc, /Check question \(answered\)/);
-		assert.match(doc, /- 3 \*\(chosen by the learner\)\*/);
-		assert.match(doc, /- 4 \*\(correct\)\*/);
+		assert.match(doc, /- A\. 3 \*\(chosen by the learner\)\*/);
+		assert.match(doc, /- B\. 4 \*\(correct\)\*/);
 		assert.match(doc, /Verdict: incorrect/);
 		assert.match(doc, /Two pairs make four/);
 		assert.match(doc, /confidence: 70%/);
@@ -147,11 +150,86 @@ describe("side lesson document", () => {
 		]);
 		assert.match(doc, /OPEN question/);
 		assert.match(doc, /Which limit defines the derivative\?/);
-		assert.match(doc, /\d\. Difference quotient as h→0/);
+		assert.match(doc, /- [AB]\. Difference quotient as h→0/);
 		assert.match(doc, /Explain the slope\./);
 		assert.doesNotMatch(doc, /SECRET-EXPLANATION/);
 		assert.doesNotMatch(doc, /SECRET-COMMITTED/);
 		assert.doesNotMatch(doc, /correctAnswer|"dq"/);
+	});
+
+	it("uses the same letters before and after answering a probe, without spoiling the open answer", () => {
+		const id = "lettered-probe";
+		const posed = assistant([call(id, "probe", QUIZ_ARGS)]);
+		const displayed = core.questionDisplayOptions(QUIZ_ARGS.options, "quiz", false, id);
+		const open = sideChatLessonDocument([posed]);
+		assert.doesNotMatch(open, /SECRET-EXPLANATION|chosen by the learner|\*\(correct\)\*/);
+		const qd = {
+			id, kind: "quiz", question: QUIZ_ARGS.question, mode: "single-select", ...displayed,
+			correctIndices: core.resolveCorrect(QUIZ_ARGS.correctAnswer, displayed.options).indices,
+			createdAt: new Date().toISOString(),
+		} as const;
+		const answer = core.buildAnswer(qd, { values: [displayed.options[1]!.value] }, "probe");
+		const answered = sideChatLessonDocument([posed, core.newAnswerResult(id, "probe", answer)]);
+		for (const [i, o] of displayed.options.entries()) {
+			const line = `- ${String.fromCharCode(65 + i)}. ${o.label}`;
+			assert.ok(open.includes(line));
+			assert.ok(answered.includes(line));
+		}
+		assert.match(answered, /- B\..*chosen by the learner/);
+	});
+
+	for (const tool of ["quiz", "probe", "ask_user_question"]) {
+		it(`keeps ${tool} options unlettered when the saved multiSelect flag is encoded`, () => {
+			const id = `encoded-multi-${tool}`;
+			const raw = { ...QUIZ_ARGS, multiSelect: "true" };
+			const posed = assistant([call(id, tool, raw)]);
+			const parsed = core.parseQuestionInput(tool, raw);
+			assert.ok(parsed && "options" in parsed);
+			assert.equal(parsed.multiSelect, true, "the dock sees a multi-select question");
+			const kind = tool === "ask_user_question" ? "ask" : "quiz";
+			const displayed = core.questionDisplayOptions(parsed.options, kind, parsed.multiSelect, id);
+			const open = sideChatLessonDocument([posed]);
+			assert.doesNotMatch(open, /^- [A-Z]\. |SECRET-EXPLANATION|\*\(correct\)\*/m);
+			for (const [i, option] of displayed.options.entries()) assert.ok(open.includes(`${i + 1}. ${option.label}`));
+
+			const answer = core.buildAnswer({
+				id, kind, question: parsed.question, mode: "multi-select", ...displayed,
+				createdAt: "2026-01-01",
+			}, { values: [displayed.options[0]!.value] }, tool);
+			const answered = sideChatLessonDocument([posed, core.newAnswerResult(id, tool, answer)]);
+			assert.doesNotMatch(answered, /^- [A-Z]\. /m);
+			assert.ok(answered.includes(`- ${displayed.options[0]!.label} *(chosen by the learner)*`));
+		});
+	}
+
+	for (const olderMulti of [true, false]) {
+		it(`uses each reused call ID's preceding occurrence (older ${olderMulti ? "multi" : "single"}-select)`, () => {
+			const id = "call_0";
+			const posed = (when: string, multi: boolean) => assistant([call(id, "ask_user_question", {
+				question: `${when} question`,
+				options: ["one", "two", "three"].map((option) => ({ label: `${when} ${option}` })),
+				...(multi ? { multiSelect: "true" } : {}),
+			})]);
+			const answered = (when: string) => result(id, "ask_user_question", {
+				kind: "ask", questionText: `${when} question`, dontKnow: false, answers: [],
+				options: ["one", "two", "three"].map((option, i) => ({ index: i + 1, label: `${when} ${option}` })),
+			});
+			const older = answered("Older");
+			const history = [posed("Older", olderMulti), older, posed("Later", !olderMulti), answered("Later")];
+			const cut = newCompactionMarker("PRIVATE SUMMARY", { firstKeptMessageId: older.id, tokensBefore: 1, at: "2026-01-01" });
+			for (const record of [history, [...history, cut]]) {
+				const doc = sideChatLessonDocument(record);
+				assert.match(doc, olderMulti ? /^- Older one$/m : /^- A\. Older one$/m);
+				assert.match(doc, olderMulti ? /^- A\. Later one$/m : /^- Later one$/m);
+			}
+		});
+	}
+
+	it("does not infer letters from a call that only appears after the answer", () => {
+		const answer = result("call_0", "quiz", answeredQuiz());
+		const doc = sideChatLessonDocument([answer, assistant([call("call_0", "quiz", QUIZ_ARGS)])]);
+		assert.match(doc, /^- 3 \*\(chosen by the learner\)\*$/m);
+		assert.doesNotMatch(doc, /^- A\. 3/m);
 	});
 
 	it("hides the ACTIVE problem's solution, reveals concluded ones", () => {
@@ -470,5 +548,25 @@ describe("side chat service", () => {
 		const lines = await readAll(res2);
 		assert.equal(lines.at(-1)!.type, "error");
 		assert.equal(chatStore.getChat(other.chatId), null);
+	});
+});
+
+describe("side chat provider routing", () => {
+	it("carries the chat id as the provider session so OpenCode Go can route the answer", async () => {
+		const faux = createFauxCore({});
+		faux.appendResponses([() => fauxAssistantMessage("Short answer.")]);
+		let seen: string | undefined;
+		const engine: PiEngine = {
+			model: { ...faux.getModel(), provider: "opencode-go", id: "claude-haiku-5-5" },
+			streamFn: (model, context, options) => { seen = options?.sessionId; return faux.streamSimple(model, context, options); },
+		};
+		const service = createSideChatService({ chatStore, engineFor: async () => engine, instructions: () => "SIDE-INSTRUCTIONS" });
+		const chat = chatStore.createChat("side routing");
+		const prose = assistant([text("A paragraph the learner selects."), call("q-routing", "quiz", QUIZ_ARGS)]);
+		chatStore.saveMessages(chat.id, [newUserMessage("teach me"), prose]);
+		const anchor: SideChatAnchor = { messageId: prose.id, partId: `${prose.id}-t0`, blockIndex: 0, blockText: "A paragraph the learner selects." };
+		const lines = await readAll(await service.ask(chat.id, { anchor, text: "why?", quotes: [] }));
+		assert.equal(lines.at(-1)!.type, "done");
+		assert.equal(seen, chat.id);
 	});
 });

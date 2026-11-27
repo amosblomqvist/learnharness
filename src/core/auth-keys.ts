@@ -99,7 +99,7 @@ export interface AuthProviderInfo {
  * account-scoped pair. Anthropic keeps ANTHROPIC_API_KEY only — its
  * AUTH_TOKEN/OAUTH_TOKEN alternates stay env-only. openai-codex exposes
  * no env-key (naturally absent). Providers sharing one env var (moonshotai
- * / moonshotai-cn, opencode / opencode-go, the qwen-token-plan pair,
+ * / moonshotai-cn, opencode / opencode-go, Qwen Token Plan variants,
  * xiaomi variants) each keep their own row — the UI groups as it wishes.
  */
 export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
@@ -127,6 +127,7 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "qwen-token-plan", envVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan" },
 	{ id: "qwen-token-plan-cn", envVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan CN" },
 	{ id: "qwen-token-plan-individual", envVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan Individual" },
+	{ id: "qwen-token-plan-individual-cn", envVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan Individual CN" },
 	{ id: "radius", envVar: "RADIUS_API_KEY", label: "Radius" },
 	{ id: "together", envVar: "TOGETHER_API_KEY", label: "Together" },
 	{ id: "typesafe", envVar: "TYPESAFE_API_KEY", label: "TypeSafe" },

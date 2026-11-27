@@ -8,6 +8,7 @@ import path from "node:path";
 import { backgroundCaptureDir, backgroundCaptureStream, createBackgroundCapture } from "../src/agent/background-capture.ts";
 import { piModels, piEngineForSpec } from "../src/agent/models.ts";
 import { chatGPTAbortController, chatGPTModels, refreshChatGPTModels } from "../src/agent/chatgpt-bridge.ts";
+import type { FastModeResult } from "../src/core/native-chat-speed.ts";
 import { chatGPTHistory, chatGPTPayload } from "../src/agent/chatgpt-stream.ts";
 
 const originalSend = Object.getOwnPropertyDescriptor(process, "send");
@@ -122,6 +123,69 @@ test("Fast mode requests priority for foreground lesson operations on the select
 	}
 });
 
+test("Fast reports actual completed processing on both connections and preserves caller hooks", async () => {
+	for (const provider of ["chatgpt", "openai"]) {
+		for (const tier of ["priority", "fast", "default", undefined, "invalid-private-tier", 123]) {
+			const reported: FastModeResult[] = [];
+			const hooks: string[] = [];
+			const engine = piEngineForSpec({ provider, id: fastModel.id }, false, undefined, undefined, true, result => { hooks.push("observed"); reported.push(result); });
+			const terminal = complete();
+			responseEvents = [{ type: "response.created", response: { id: "resp_scratch", service_tier: "priority" } }, { ...terminal, response: { ...terminal.response, service_tier: tier } }];
+			requests = [];
+			const stream = engine.streamFn(engine.model, context(), {
+				onPayload: async raw => { await Promise.resolve(); hooks.push("payload"); return { ...raw as object, service_tier: "ultrafast" }; },
+				onResponse: async () => { await Promise.resolve(); hooks.push("response"); },
+				onProviderStreamEvent: async raw => { await Promise.resolve(); hooks.push((raw as { type: string }).type); },
+			});
+			for await (const event of stream) if (event.type === "done") { assert.equal(reported.length, 1, "speed is emitted before the answer can settle"); hooks.push("done"); }
+			assert.equal((await stream.result()).stopReason, "stop");
+			assert.equal(requests.length, 1);
+			assert.equal(requests[0]!.body.service_tier, "priority", "caller overrides cannot change the requested mode");
+			assert.deepEqual(reported, [tier === "priority" || tier === "fast" ? { outcome: "applied", servedTier: tier } : tier === "default" ? { outcome: "not-applied", servedTier: tier } : { outcome: "unconfirmed" }], provider);
+			assert.deepEqual(hooks, ["payload", "response", "response.created", "response.completed", "observed", "done"]);
+		}
+	}
+});
+
+test("Fast observations ignore nonterminal tiers, failed responses, unsupported models and background work", async () => {
+	for (const provider of ["chatgpt", "openai"]) {
+		const reported: FastModeResult[] = [];
+		const observer = (result: FastModeResult) => reported.push(result);
+		const spec = { provider, id: fastModel.id };
+		const fast = piEngineForSpec(spec, false, undefined, undefined, true, observer);
+		responseEvents = [{ type: "response.created", response: { id: "resp_scratch", service_tier: "priority" } }];
+		assert.equal((await fast.streamFn(fast.model, context()).result()).stopReason, "error");
+		assert.deepEqual(reported, []);
+		const terminal = complete();
+		responseEvents = [{ ...terminal, response: { ...terminal.response, service_tier: "priority" } }, { type: "error", code: "fixture_failure", message: "offline fixture error" }];
+		assert.equal((await fast.streamFn(fast.model, context()).result()).stopReason, "error");
+		assert.deepEqual(reported, [], "a raw completed event followed by failure does not confirm success");
+		responseEvents = [{ ...terminal, response: { ...terminal.response, service_tier: "priority" } }];
+		assert.equal((await fast.streamFn(fast.model, context(), { onProviderStreamEvent: () => { throw new Error("caller observer failed"); } }).result()).stopReason, "error");
+		assert.deepEqual(reported, [], "caller observer semantics are preserved");
+		for (const [background, enabled] of [[true, true], [false, false]] as const) {
+			const engine = piEngineForSpec(spec, background, undefined, undefined, enabled, observer);
+			await engine.streamFn(engine.model, context()).result();
+			assert.deepEqual(reported, []);
+		}
+		const unsupported = piEngineForSpec({ provider, id: model.id }, false, undefined, undefined, true, observer);
+		await unsupported.streamFn(unsupported.model, context()).result();
+		assert.deepEqual(reported, []);
+	}
+});
+
+test("duplicate completion tiers aggregate conservatively and notification failures cannot fail answers", async () => {
+	for (const provider of ["chatgpt", "openai"]) {
+		const reported: FastModeResult[] = [];
+		const engine = piEngineForSpec({ provider, id: fastModel.id }, false, undefined, undefined, true, result => { reported.push(result); throw new Error("UI listener failed"); });
+		const terminal = complete();
+		responseEvents = ["default", "priority"].map(service_tier => ({ ...terminal, response: { ...terminal.response, service_tier } }));
+		const result = await engine.streamFn(engine.model, context()).result();
+		assert.equal(result.stopReason, "stop", result.errorMessage);
+		assert.deepEqual(reported, [{ outcome: "not-applied", servedTier: "default" }]);
+	}
+});
+
 test("ChatGPT strips caller-supplied tiers and limits Fast to supported models", () => {
 	const raw = { input: [], service_tier: "ultrafast" };
 	assert.equal(chatGPTPayload(raw, fastModel.id).service_tier, undefined);
@@ -192,7 +256,7 @@ test("native identity/session/cache/fetch and awaited caller observers survive e
 	const events = []; for await (const event of stream) events.push(event);
 	assert.equal(delegated, 1); assert.equal(observed, 1); assert.equal(responses, 1);
 	assert.equal(headers.get("user-agent"), APP_IDENTITY.userAgent.custom);
-	assert.equal(headers.get("session_id"), "exact-native-chat-session");
+	assert.equal(headers.get("session-id"), "exact-native-chat-session");
 	assert.equal(headers.get("x-client-request-id"), "exact-native-chat-session");
 	assert.equal(headers.get("x-native-observer"), "retained"); assert.equal(headers.get("x-suppressed"), null);
 	assert.equal(payload.prompt_cache_key, "exact-native-chat-session"); assert.equal(payload.model, model.id); assert.equal(payload.metadata, undefined);

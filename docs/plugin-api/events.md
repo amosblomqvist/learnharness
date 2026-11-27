@@ -29,12 +29,6 @@ export type ServerEvent<K extends ServerEventType = ServerEventType> = {
 
 Supporting declaration used by a public type. This is not an additional runtime API or SDK helper.
 
-Live app notifications for turn, job, record and availability changes.
-Consumers fetch authoritative state after a notification and refetch on
-reconnect; notifications are not a durable replay log. The plugin-message
-channel additionally carries plugin-scoped JSON data, with the same
-live-only delivery limitation.
-
 The core event vocabulary plus the namespaced plugin extension channel.
 
 ```ts
@@ -44,6 +38,14 @@ export interface ServerEvents {
     };
     "turn-settled": {
         chatId: string;
+    };
+    "chat-speed-result": {
+        chatId: string;
+        model: {
+            provider: string;
+            id: string;
+        };
+        result: FastModeResult;
     };
     "jobs-changed": {
         chatId?: string;
@@ -71,12 +73,20 @@ export interface ServerEvents {
 }
 ```
 
+**Related types:** [FastModeResult](native-chat-speed.md#fastmoderesult).
+
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - ["turn-started"](#serverevents-turn-started)
 - ["turn-started".chatId](#serverevents-turn-startedchatid)
 - ["turn-settled"](#serverevents-turn-settled)
 - ["turn-settled".chatId](#serverevents-turn-settledchatid)
+- ["chat-speed-result"](#serverevents-chat-speed-result)
+- ["chat-speed-result".chatId](#serverevents-chat-speed-resultchatid)
+- ["chat-speed-result".model](#serverevents-chat-speed-resultmodel)
+- ["chat-speed-result".model.provider](#serverevents-chat-speed-resultmodelprovider)
+- ["chat-speed-result".model.id](#serverevents-chat-speed-resultmodelid)
+- ["chat-speed-result".result](#serverevents-chat-speed-resultresult)
 - ["jobs-changed"](#serverevents-jobs-changed)
 - ["jobs-changed".chatId](#serverevents-jobs-changedchatid)
 - ["activity-changed"](#serverevents-activity-changed)
@@ -128,6 +138,54 @@ does not mean asynchronous extraction or background work has completed.
 
 ```ts
 chatId: string;
+```
+
+### ServerEvents "chat-speed-result"
+
+Actual processing of completed Fast-requested lesson responses, live-only.
+
+```ts
+"chat-speed-result": {
+    chatId: string;
+    model: {
+        provider: string;
+        id: string;
+    };
+    result: FastModeResult;
+};
+```
+
+### ServerEvents "chat-speed-result".chatId
+
+```ts
+chatId: string;
+```
+
+### ServerEvents "chat-speed-result".model
+
+```ts
+model: {
+    provider: string;
+    id: string;
+};
+```
+
+### ServerEvents "chat-speed-result".model.provider
+
+```ts
+provider: string;
+```
+
+### ServerEvents "chat-speed-result".model.id
+
+```ts
+id: string;
+```
+
+### ServerEvents "chat-speed-result".result
+
+```ts
+result: FastModeResult;
 ```
 
 ### ServerEvents "jobs-changed"

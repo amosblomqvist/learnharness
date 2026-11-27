@@ -21,6 +21,7 @@ export * from "./ports.ts";
 export * from "./chains.ts";
 export * from "./source-organization.ts";
 export * from "./source-selection.ts";
+export * from "./session-folders.ts";
 export * from "./source-label.ts";
 export * from "./render-settings.ts";
 
@@ -29,6 +30,7 @@ export * from "./question-core.ts";
 // for every layer; the browser shell consumes the types + the runtime names
 // through this barrel (shell law: pure core via @/src/core only).
 export * from "./events.ts";
+export * from "./native-chat-speed.ts";
 // clusters.ts (Louvain) is deliberately NOT re-exported: nothing in the
 // shell runs community detection — the snapshot carries the partition
 // from the server. Keeping it out keeps the heavy clustering deps out of the

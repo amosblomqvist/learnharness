@@ -13,8 +13,11 @@ export type CliEvent =
 	| { type: "blockStop"; index: number }
 	| { type: "messageDelta"; stopReason: string | null; usage: CliUsage }
 	| { type: "messageStop" }
+	/** The CLI gave up on a partial response; a retried message, an error or a non-streamed answer follows. */
+	| { type: "messageAbandoned" }
 	| { type: "assistantError"; error: string; text: string }
 	| { type: "resultError"; text: string }
+	| { type: "resultSuccess" }
 	| { type: "toolResults"; ids: string[] };
 
 type RawUsage = {
@@ -52,6 +55,7 @@ type RawCliLine = {
 	result?: string;
 	subtype?: string;
 	errors?: string[];
+	abandoned_blocks?: object;
 };
 
 function toUsage(raw: RawUsage): CliUsage {
@@ -166,6 +170,8 @@ export function parseCliLine(text: string): CliEvent | null {
 
 	switch (line.type) {
 		case "stream_event":
+			// The CLI closes a stream it is about to retry with a synthetic message_stop marked this way.
+			if (line.event?.type === "message_stop" && line.abandoned_blocks) return { type: "messageAbandoned" };
 			return line.event ? parseStreamEvent(line.event) : null;
 
 		case "assistant":
@@ -179,7 +185,7 @@ export function parseCliLine(text: string): CliEvent | null {
 		}
 
 		case "result":
-			if (line.is_error !== true) return null;
+			if (line.is_error !== true) return { type: "resultSuccess" };
 			return { type: "resultError", text: getResultErrorText(line) };
 
 		default:

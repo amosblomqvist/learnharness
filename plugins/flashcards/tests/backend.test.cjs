@@ -28,6 +28,8 @@ function workerService() {
     start(workerId, options) {
       assert.ok(definitions.has(workerId));
       assert.equal(options.purpose, 'user');
+      assert.deepEqual(options.options, { timeoutMs: 120000, maxRetries: 0 }, 'use native output handling without a plugin maxTokens override');
+      assert.equal(Object.hasOwn(options, 'maxTurns'), false, 'official workers omit the optional turn cap');
       assert.ok(options.requestId);
       const prior = [...tasks.values()].find(task => task.requestId === options.requestId);
       if (prior) return structuredClone(prior);
@@ -692,17 +694,30 @@ test('graph chunks budget selected target text only, independent of immediate ch
   assert.equal(JSON.stringify(state), before);
 });
 
-test('graph preflight estimates the full request and enforces the model context independently of the source budget', async t => {
+test('graph preflight retains full-request estimates but leaves context fit to native Pi', async t => {
   const h = harness(t);
   await h.call('save-settings', { chunkBudget: 1 });
   const [input] = pack(h.graph, ['p1'], { settings: { ...defaults(), chunkBudget: 1 }, propositions: {} });
   const tokens = estimate(input);
-  h.catalog.models[0].contextWindow = tokens + 256 + 1024;
+  h.catalog.models[0].contextWindow = tokens - 1;
   const plan = await h.call('preflight', { propositionIds: ['p1'] });
   assert.equal(plan.chunkCount, 1); assert.equal(plan.estimatedTokens, tokens); assert.ok(tokens > 1);
-  h.catalog.models[0].contextWindow--;
-  await assert.rejects(h.call('preflight', { propositionIds: ['p1'] }), /cannot fit this context and an output allowance/);
-  assert.equal(h.workers.starts, 0);
+  assert.equal(h.workers.starts, 0, 'preview does not start model work');
+});
+
+test('graph and file workers use native output handling for large, small and unknown model limits', async t => {
+  for (const limits of [
+    { maxTokens: 384000, contextWindow: 1000000 },
+    { maxTokens: 1, contextWindow: 1 },
+    { maxTokens: null, contextWindow: null },
+  ]) for (const kind of ['graph', 'file']) {
+    const h = harness(t);
+    Object.assign(h.catalog.models[0], limits);
+    if (kind === 'file') await h.startFile({ name: 'Native output.md', markdown: 'A supported synthetic fact.' });
+    else await h.start(['p1']);
+    assert.equal(h.workers.starts, 1, `${kind}: no plugin output minimum or context-fit gate`);
+    assert.equal(h.state().batch.status, 'running');
+  }
 });
 
 test('generation applies only accepted terminal success; invalid submissions repair and zero cards create no deck', async t => {

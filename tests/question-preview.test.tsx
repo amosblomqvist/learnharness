@@ -11,7 +11,7 @@ import { ProbeDoneCard } from "../components/artifacts/probe-done-card.tsx";
 
 const dom = (element: React.ReactElement) => parseHTML(`<html><body>${renderToStaticMarkup(element)}</body></html>`).document;
 const preview = (source: string) => dom(<QuestionPreview>{source}</QuestionPreview>);
-const annotations = (root: ParentNode) => [...root.querySelectorAll('annotation[encoding="application/x-tex"]')].map((node) => node.textContent);
+const annotations = (root: ParentNode) => [...root.querySelectorAll('.katex[data-tex]')].map((node) => node.getAttribute('data-tex'));
 
 // These controlled boxes test the measurement/cutoff lifecycle, not typography.
 // Real KaTeX geometry/centering/card-height comparisons require the browser check.
@@ -38,7 +38,7 @@ async function withGeometry(run: (fixture: {
 	Object.defineProperty(prototype, "getBoundingClientRect", { configurable: true, value(this: HTMLElement) {
 		let height = 0;
 		if (this.hasAttribute("data-question-preview")) height = metrics.budget;
-		else if (this.matches(".katex, .katex-error")) height = this.querySelector("annotation")?.textContent?.includes("\\begin") ? metrics.tall : 12;
+		else if (this.matches(".katex, .katex-error")) height = this.getAttribute("data-tex")?.includes("\\begin") ? metrics.tall : 12;
 		const width = this.matches(".katex, .katex-error") ? 12 : metrics.width;
 		return { x: 0, y: 0, top: 0, left: 0, width, height, right: width, bottom: height };
 	} });
