@@ -15,7 +15,7 @@ import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
 import type { ServerEvent } from "../core/events.ts";
 import { safePluginDataDirectory } from "../store/plugin-data-paths.ts";
-import { compareCommunityVersions, REPOSITORY_PATTERN, SHA256_PATTERN, type CommunityListing, type CommunityRelease } from "../core/community-catalog.ts";
+import { communityRevocation, compareCommunityVersions, parseCommunityRevocations, REPOSITORY_PATTERN, SHA256_PATTERN, type CommunityListing, type CommunityRelease, type CommunityRevocation } from "../core/community-catalog.ts";
 import { catalogTreeDigest, COMMUNITY_STAGE_PREFIX, publishCatalogFiles } from "./community-plugin-files.ts";
 
 /** Expected host/transport failure. Exceptions thrown by plugin handlers stay ordinary 500 errors. */
@@ -49,6 +49,8 @@ export interface PluginHostDependencies {
 	convertDocument?: (request: Request, signal: AbortSignal) => ReturnType<PluginFrontendContext["documents"]["toMarkdown"]>;
 	onChange?: () => void;
 	onNotification?: (notification: PluginNotification) => void;
+	/** Explicit opt-in just took effect, e.g. to refresh the catalog revocation list. */
+	onCommunityEnabled?: () => void;
 	subscribeEvents?: (listener: (event: ServerEvent) => void) => () => void;
 	/** Startup installation/recovery failures, including failures before a package directory exists. */
 	installationErrors?: Record<string, string>;
@@ -96,7 +98,8 @@ interface Package {
 	retiring?: Activation;
 }
 interface CatalogInstall { repository: string; revision: string; tree: string }
-interface State { version: 1; enabled: Record<string, boolean>; communityEnabled: boolean; catalog: Record<string, CatalogInstall> }
+/** revoked caches the last good catalog revocation list, applied before any activation. */
+interface State { version: 1; enabled: Record<string, boolean>; communityEnabled: boolean; catalog: Record<string, CatalogInstall>; revoked: CommunityRevocation[] }
 const errorText = (e: unknown) => e instanceof Error ? e.message : String(e);
 const exists = (p: string) => { try { fs.lstatSync(p); return true; } catch (e) { if ((e as NodeJS.ErrnoException).code === "ENOENT") return false; throw e; } };
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === "object" && !Array.isArray(v);
@@ -111,7 +114,7 @@ function targets(agents: PluginAgentKind[]): Set<PluginAgentKind> {
 const safeSegment = (p: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(p);
 
 function readState(filename: string): State {
-	if (!exists(filename)) return { version: 1, enabled: Object.create(null), communityEnabled: false, catalog: Object.create(null) };
+	if (!exists(filename)) return { version: 1, enabled: Object.create(null), communityEnabled: false, catalog: Object.create(null), revoked: [] };
 	if (!fs.lstatSync(filename).isFile() || fs.lstatSync(filename).isSymbolicLink()) throw new Error("Unsafe plugins-state.json");
 	const value: unknown = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ filename, "utf8"));
 	if (!object(value) || value.version !== 1 || !object(value.enabled)) throw new Error("Invalid or unsupported plugins-state.json");
@@ -129,13 +132,16 @@ function readState(filename: string): State {
 			catalog[id] = { repository: install.repository, revision: install.revision, tree: install.tree };
 		}
 	}
-	return { version: 1, enabled, communityEnabled: value.communityEnabled === true, catalog };
+	let revoked: CommunityRevocation[];
+	try { revoked = parseCommunityRevocations(value.revoked ?? []); } catch { throw new Error("Invalid catalog revocation state"); }
+	return { version: 1, enabled, communityEnabled: value.communityEnabled === true, catalog, revoked };
 }
 function writeState(filename: string, state: State): void {
 	const temp = `${filename}.${randomUUID()}.tmp`;
 	try {
 		const fd = fs.openSync(temp, "wx", 0o600);
-		try { fs.writeFileSync(fd, JSON.stringify(state)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
+		const { revoked, ...rest } = state; // Omit an empty revocation cache.
+		try { fs.writeFileSync(fd, JSON.stringify(revoked.length ? state : rest)); fs.fsyncSync(fd); } finally { fs.closeSync(fd); }
 		fs.renameSync(temp, filename);
 	} finally { if (exists(temp)) fs.unlinkSync(temp); }
 }
@@ -239,10 +245,20 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		}
 		return failures;
 	}
+	/** Only a build the catalog installed (recorded revision) can match a revocation. */
+	function revocationFor(pkg: Package, state: State): string | undefined {
+		const install = state.catalog[pkg.info.id];
+		if (pkg.info.origin !== "community" || !pkg.info.manifest || !pkg.info.revision || install?.revision !== pkg.info.revision) return undefined;
+		return communityRevocation(state.revoked, pkg.info.id, install.repository, pkg.info.manifest.version);
+	}
+	function markRevoked(pkg: Package, state: State) {
+		const reason = revocationFor(pkg, state);
+		if (reason) pkg.info.revoked = reason; else delete pkg.info.revoked;
+	}
 	async function activate(pkg: Package): Promise<void> {
 		assertOpen();
 		const gate = pkg.info.origin === "community" ? communityGeneration.signal : undefined;
-		if ((gate && !communityEnabled) || pkg.retiring) return;
+		if ((gate && !communityEnabled) || pkg.retiring || pkg.info.revoked) return;
 		if (!pkg.info.manifest || pkg.blocked || pkg.restart) {
 			pkg.info.status = "error";
 			return;
@@ -430,7 +446,8 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			}
 			const install = state.catalog[id];
 			if (origin === "community" && candidate.info.revision && install?.revision === candidate.info.revision) candidate.info.repository = install.repository;
-			candidate.info.enabled = state.enabled[id] === true && (origin === "core" || communityEnabled);
+			markRevoked(candidate, state);
+			candidate.info.enabled = state.enabled[id] === true && (origin === "core" || communityEnabled) && !candidate.info.revoked;
 			packages.set(id, candidate);
 			if (candidate.info.enabled && !candidate.blocked && (origin === "core" || resumeCommunity)) await activate(candidate);
 		}
@@ -443,7 +460,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		const gate = communityGeneration.signal;
 		for (const pkg of packages.values()) {
 			if (gate.aborted || !communityEnabled || disposed) break;
-			if (pkg.info.origin !== "community" || state.enabled[pkg.info.id] !== true || pkg.activation || pkg.blocked) continue;
+			if (pkg.info.origin !== "community" || state.enabled[pkg.info.id] !== true || pkg.activation || pkg.blocked || pkg.info.revoked) continue;
 			pkg.info.enabled = true;
 			await activate(pkg);
 			if (!gate.aborted) change();
@@ -498,6 +515,32 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		change();
 		if (backgroundCleanup) { background(stopped); return Promise.resolve(); }
 		return stopped;
+	}
+
+	/** Cache the list, then turn off and block every catalog install it now matches.
+	 * A withdrawn entry only unblocks Enable; it never turns a plugin back on. */
+	function applyRevocations(revoked: CommunityRevocation[]): Promise<void> {
+		return enqueue(async () => {
+			assertOpen(); await initializeInternal();
+			const state = readState(stateFile);
+			if (JSON.stringify(state.revoked) === JSON.stringify(revoked) && [...packages.values()].every(pkg => pkg.info.revoked === revocationFor(pkg, state))) return;
+			state.revoked = revoked;
+			const newly: Package[] = [];
+			for (const pkg of packages.values()) {
+				const was = pkg.info.revoked;
+				markRevoked(pkg, state);
+				if (pkg.info.revoked && !was) { newly.push(pkg); state.enabled[pkg.info.id] = false; }
+			}
+			writeState(stateFile, state);
+			for (const pkg of newly) {
+				pkg.info.enabled = false;
+				delete pkg.contributionWarning;
+				const failures = await deactivate(pkg);
+				pkg.info.status = failures.length || pkg.blocked ? "error" : "disabled";
+				pkg.info.error = failures.length ? `Cleanup: ${failures.join("; ")}` : pkg.restart ?? (pkg.blocked ? pkg.info.error : undefined);
+			}
+			change();
+		});
 	}
 
 	function catalogAction(listing: CommunityListing, release: CommunityRelease): "Install" | "Update" | null {
@@ -659,6 +702,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		},
 		communityEnabled: () => communityEnabled,
 		catalogAction,
+		applyRevocations,
 		installFromCatalog(listing: CommunityListing, release: CommunityRelease, action: "Install" | "Update", files: ReadonlyMap<string, Buffer>, signal: AbortSignal): Promise<void> {
 			return enqueue(async () => {
 				assertOpen(); await initializeInternal();
@@ -677,6 +721,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					});
 				} catch (error) { throw new PluginHostError(500, `Could not publish the plugin build: ${errorText(error)}`); }
 				candidate!.info.repository = listing.repository;
+				markRevoked(candidate!, state);
 				if (update) {
 					candidate!.restart = "Restart required before enabling this updated version";
 					candidate!.info.error = candidate!.restart;
@@ -708,6 +753,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				change();
 			});
 			if (resume) {
+				try { deps.onCommunityEnabled?.(); } catch { /* Observers do not own host lifecycle. */ }
 				if (options?.background) background(resume);
 				else await resume;
 			}
@@ -724,6 +770,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				const pkg = get(id);
 				if (enabled && pkg.info.origin === "community" && (!communityEnabled || pkg.retiring)) throw new PluginHostError(409, pkg.retiring ? "A previous plugin activation is still stopping." : "Community plugins are off.");
 				if (enabled && pkg.info.restartRequired) throw new PluginHostError(409, pkg.restart ?? "Restart required before enabling this build");
+				if (enabled && pkg.info.revoked) throw new PluginHostError(409, `The LearnHarness catalog revoked this plugin: ${pkg.info.revoked}`);
 				const state = readState(stateFile); // Recheck before overwriting externally changed state.
 				state.enabled[id] = enabled; writeState(stateFile, state);
 				if (enabled && pkg.activation?.ready) return;

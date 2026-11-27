@@ -79,18 +79,19 @@ function PluginRow({ plugin, onSettings }: { plugin: FrontendPlugin; onSettings:
 	const { info } = plugin;
 	const name = info.manifest?.name ?? info.id;
 	return <div className="border-t border-border/60 pt-3" data-testid={`plugin-${info.id}`}>
-		<SettingsRow label={name} hint={[info.origin === "community" ? info.manifest?.version : undefined, plugin.busy ? "Saving…" : plugin.error ? "Error" : plugin.phase === "loading" ? "Loading…" : info.enabled ? "Enabled" : "Disabled"].filter(Boolean).join(" · ")}>
+		<SettingsRow label={name} hint={[info.origin === "community" ? info.manifest?.version : undefined, plugin.busy ? "Saving…" : info.revoked ? "Revoked" : plugin.error ? "Error" : plugin.phase === "loading" ? "Loading…" : info.enabled ? "Enabled" : "Disabled"].filter(Boolean).join(" · ")}>
 			<div className="flex shrink-0 items-center gap-2">
 				{info.enabled && <button type="button" aria-label={`Settings for ${name}`} title={`Settings for ${name}`}
 					className="flex size-7 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					onClick={onSettings}><Settings className="size-3.5" aria-hidden="true" /></button>}
-				<Toggle label={`Enable ${name}`} checked={info.enabled} disabled={!manager || plugin.busy || snapshot.refreshing || (info.origin === "community" && snapshot.communityChanging) || (info.restartRequired && !info.enabled) || (!info.manifest && !info.enabled)} onChange={enabled => void manager?.setEnabled(info.id, enabled)} />
+				<Toggle label={`Enable ${name}`} checked={info.enabled} disabled={!manager || plugin.busy || snapshot.refreshing || (info.origin === "community" && snapshot.communityChanging) || (info.restartRequired && !info.enabled) || (!info.manifest && !info.enabled) || (!!info.revoked && !info.enabled)} onChange={enabled => void manager?.setEnabled(info.id, enabled)} />
 			</div>
 		</SettingsRow>
 		{info.origin === "community" && info.manifest && <p className="mt-1 text-xs text-muted-foreground">
 			Declared author: {info.manifest.author || "Not provided"} · {info.repository ? <>Catalog source: <a className={pluginLinkClass} href={communitySource(info.repository)} target="_blank" rel="noreferrer">{info.repository}</a></> : "Local package · source not verified"}
 		</p>}
 		{info.manifest?.description && <p className="mt-1 font-prose text-sm text-muted-foreground">{info.manifest.description}</p>}
+		{info.revoked && <p role="alert" data-testid={`plugin-revoked-${info.id}`} className="mt-2 break-words text-xs text-destructive">Revoked by the LearnHarness catalog. It stays off while revoked; its files and data were kept. Reason: {info.revoked}</p>}
 		{plugin.error && <p role="alert" className="mt-2 break-words text-xs text-destructive">{plugin.error}</p>}
 	</div>;
 }
