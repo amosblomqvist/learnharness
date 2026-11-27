@@ -30,6 +30,18 @@ The supported archive has built files at ZIP root or inside the exact `<id>/dist
 
 These checks gate a listing; they are not a review and do not make plugin code safe. A maintainer can approve a specific hit in `check-exceptions.json` with `id`, `version`, `rule`, optional `file`, and a written `reason`. An exception excuses only that release, so a new version is checked afresh, and an exception that no longer matches anything fails the run until it is removed.
 
+## Discovery
+
+Listings are found automatically. `npm run catalog:discover` (`.github/workflows/plugin-catalog-discovery.yml`, daily and on demand) looks at every repository with the GitHub topic `learnharness-plugin` and every repository already listed here. For each one it takes the newest stable GitHub Release (not a draft or prerelease) and lists it only if:
+
+- the release has exactly one uploaded `.zip` asset, whose download matches GitHub's digest;
+- the tag is the manifest version, with or without a leading `v`;
+- the package verifies as Install does and passes every check above, or a maintainer excused the hit in `check-exceptions.json`.
+
+A new listing takes `name` from the manifest, `author` from the manifest or else the repository owner, and `description` from the manifest or else the GitHub repository description. An id that is a Core id, already listed for another repository, or claimed by two new repositories in the same run is skipped until a maintainer edits this file. Existing listings keep their name, author and description; discovery only adds a release, newest first, and keeps at most 24 by dropping the lowest version. Discovery never removes anything: a listed repository or release that is gone, archived or changed is reported under "Needs attention", and delisting stays manual.
+
+The workflow keeps one rolling pull request from `bot/community-catalog-discovery` whose body is the run's report (added, failed checks, needs attention, skipped). A maintainer merges it; merging lists the releases and is not a code review. The job that parses plugin archives has a read-only token; a second job opens the pull request. A repository admin must turn on Settings → Actions → General → "Allow GitHub Actions to create and approve pull requests". Pull requests opened with the built-in token do not trigger `plugin-catalog.yml`, so the checks run in the discovery job, again on every push to main, and on demand on the bot branch with Run workflow. Run discovery locally with `GITHUB_TOKEN` set for higher API limits; it rewrites `community-plugins.json` in place and `--report <file>` writes the report.
+
 ## Install, update, and removal
 
 The desktop picks the highest compatible version, fetches the current catalog again when the user initiates installation, and downloads the pinned asset directly from GitHub. Install leaves the plugin off. Updates require a disabled, unchanged catalog installation from the same repo, replace only `dist/`, and require restart and explicit Enable. The host preserves its existing plugin-code lifetime model: turning community plugins off disables host registrations and invokes cleanup. It is not a sandbox and cannot undo side effects or stop arbitrary third-party code that ignores cleanup. If in doubt, turn community plugins off and restart.
