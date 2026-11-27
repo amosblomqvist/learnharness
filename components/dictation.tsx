@@ -4,7 +4,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
 import { useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
-import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
+import { deepgramListenUrl, encodeWav, LOCAL_STT_MAX_BYTES, type DictationLanguage } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
@@ -198,6 +198,28 @@ export function createWarmMinter(
 
 const warmTokens = createWarmMinter(mintFreshToken);
 
+/** Local provider: PCM is cut into clips of at most this many samples, each
+ * transcribed while recording continues. 5 min of 16 kHz linear16 ≈ 9.6 MB,
+ * well inside the route's upload cap. */
+const CAPTURE_SAMPLE_RATE = 16000;
+export const LOCAL_SEGMENT_SAMPLES = Math.min(5 * 60 * CAPTURE_SAMPLE_RATE, Math.floor((LOCAL_STT_MAX_BYTES - 44) / 2));
+
+/** One clip through this app's server to the configured local endpoint. */
+async function transcribeClip(wav: Uint8Array<ArrayBuffer>, language: DictationLanguage, signal: AbortSignal): Promise<string> {
+	const res = await fetch(`/api/stt/transcribe?language=${encodeURIComponent(language)}`, {
+		method: "POST",
+		headers: { "Content-Type": "audio/wav" },
+		body: wav,
+		signal,
+	});
+	const data = (await res.json().catch(() => ({}))) as { text?: unknown; message?: unknown; error?: unknown };
+	if (!res.ok || typeof data.text !== "string") {
+		const reason = typeof data.message === "string" ? data.message : typeof data.error === "string" ? data.error : null;
+		throw new Error(reason ?? `Transcription failed (${res.status})`);
+	}
+	return data.text;
+}
+
 /* Persistent capture graph (mitigation C, owner 2026-09-27): one
  * app-lifetime AudioContext + a module-load memo. Created under the
  * click gesture (autoplay policy) and NEVER closed — per-run nodes
@@ -345,7 +367,11 @@ export function useDictation({ append, destination = "primary", disabled = false
 }): Dictation {
 	const primary = destination === "primary";
 	const owner = useRef(Symbol("dictation")).current;
-	const { getLanguage } = useDictationLanguage();
+	const { getSettings } = useDictationLanguage();
+	/** Pre-mint a Deepgram token unless local dictation is selected. */
+	const warmDeepgram = useCallback(() => {
+		getSettings().then((settings) => { if (settings.provider !== "local") warmTokens.refresh(); }, () => warmTokens.refresh());
+	}, [getSettings]);
 	const [phase, setPhaseState] = useState<DictationPhase>("idle");
 	const phaseRef = useRef<DictationPhase>("idle");
 	const setPhase = useCallback((next: DictationPhase) => {
@@ -394,6 +420,27 @@ export function useDictation({ append, destination = "primary", disabled = false
 	const waitersRef = useRef<Array<{ resolve: () => void; reject: (error: unknown) => void }>>([]);
 	const appendFailureRef = useRef<{ error: unknown } | null>(null);
 	const appendPendingRef = useRef(false);
+	/** Local provider run: captured PCM not yet cut into a clip, and the
+	 *  in-flight transcriptions in recording order. Null for Deepgram runs. */
+	const localRef = useRef<{
+		language: DictationLanguage;
+		frames: Int16Array[];
+		samples: number;
+		clips: Promise<string>[];
+		abort: AbortController;
+	} | null>(null);
+
+	/** Cut the captured PCM into one clip and start its transcription. */
+	const cutLocalClip = useCallback(() => {
+		const local = localRef.current;
+		if (!local || local.samples === 0) return;
+		const wav = encodeWav(local.frames, CAPTURE_SAMPLE_RATE);
+		local.frames = [];
+		local.samples = 0;
+		const clip = transcribeClip(wav, local.language, local.abort.signal);
+		clip.catch(() => {}); // settled in stop(); no unhandled rejection meanwhile
+		local.clips.push(clip);
+	}, []);
 
 	/** Flush into this run's fixed destination. Called exactly once at cleanup; the
 	 *  buffer clears itself so double-cleanup is a no-op. */
@@ -424,6 +471,8 @@ export function useDictation({ append, destination = "primary", disabled = false
 			safetyRef.current = null;
 		}
 		pendingRef.current = [];
+		localRef.current?.abort.abort(); // cancel/dispose drops unfinished clips
+		localRef.current = null;
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
 		streamRef.current = null;
 		sourceRef.current?.disconnect();
@@ -455,7 +504,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 				if (failed) waiter.reject(failed.error);
 				else waiter.resolve();
 			}
-			if (warmNext) warmTokens.refresh();
+			if (warmNext) warmDeepgram();
 		};
 		if (appended && typeof (appended as PromiseLike<unknown>).then === "function") {
 			appendPendingRef.current = true;
@@ -463,7 +512,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 			// Both branches consume the promise, including stop-without-finish.
 			void Promise.resolve(appended).then(() => complete(null), (error: unknown) => complete({ error }));
 		} else complete(failure);
-	}, [flush, owner, setPhase]);
+	}, [flush, owner, setPhase, warmDeepgram]);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
@@ -548,10 +597,14 @@ export function useDictation({ append, destination = "primary", disabled = false
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
+		localRef.current = null;
 		const gen = ++genRef.current;
 		let language: DictationLanguage;
+		let local: boolean;
 		try {
-			language = await getLanguage();
+			const settings = await getSettings();
+			language = settings.language;
+			local = settings.provider === "local";
 		} catch (e) {
 			if (gen !== genRef.current) return;
 			setError(e instanceof Error ? e.message : "Dictation language unavailable");
@@ -566,7 +619,8 @@ export function useDictation({ append, destination = "primary", disabled = false
 		// the token runs concurrently with it. 127.0.0.1 is a secure
 		// context, so getUserMedia works without TLS; macOS TCC prompts on
 		// first use.
-		const tokenPromise = warmTokens.mint();
+		// Local runs need no token: audio stays here until a clip is cut.
+		const tokenPromise = local ? Promise.resolve("") : warmTokens.mint();
 		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
 		const micPromise = navigator.mediaDevices.getUserMedia({
 			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
@@ -595,6 +649,14 @@ export function useDictation({ append, destination = "primary", disabled = false
 				if (msg.type === "level") {
 					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
 				} else if (msg.type === "audio") {
+					const localRun = localRef.current;
+					if (localRun) {
+						const frame = msg.buffer as unknown as Int16Array;
+						localRun.frames.push(frame);
+						localRun.samples += frame.length;
+						if (localRun.samples >= LOCAL_SEGMENT_SAMPLES) cutLocalClip();
+						return;
+					}
 					const ws = wsRef.current;
 					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
 					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
@@ -605,6 +667,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 					}
 				}
 			};
+			if (local) localRef.current = { language, frames: [], samples: 0, clips: [], abort: new AbortController() };
 			const source = ctx.createMediaStreamSource(stream);
 			sourceRef.current = source;
 			source.connect(worklet);
@@ -624,6 +687,10 @@ export function useDictation({ append, destination = "primary", disabled = false
 			return;
 		}
 		if (gen !== genRef.current) return;
+		if (local) {
+			setPhase("recording"); // capture is live; nothing to connect
+			return;
+		}
 		let token: string;
 		try {
 			token = await tokenPromise;
@@ -637,7 +704,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 		// Mitigation B: the handshake fires the moment the graph is live,
 		// overlapping any remaining token wait — mic-gated, never before it.
 		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getLanguage, owner, primary, setPhase]);
+	}, [openSocket, cleanup, cutLocalClip, getSettings, owner, primary, setPhase]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
@@ -652,6 +719,23 @@ export function useDictation({ append, destination = "primary", disabled = false
 		sourceRef.current = null;
 		workletRef.current?.disconnect();
 		workletRef.current = null;
+
+		const local = localRef.current;
+		if (local) {
+			// The last clip covers speech since the previous cut. Transcripts
+			// join in recording order; a failed clip keeps the others.
+			cutLocalClip();
+			void Promise.allSettled(local.clips).then((results) => {
+				if (gen !== genRef.current) return;
+				for (const result of results) {
+					if (result.status === "fulfilled" && result.value) bufferRef.current.push(result.value);
+				}
+				const failed = results.find((result) => result.status === "rejected");
+				if (failed) setError(failed.reason instanceof Error ? failed.reason.message : "Transcription failed");
+				cleanup();
+			});
+			return;
+		}
 
 		const ws = wsRef.current;
 		if (ws && ws.readyState === WebSocket.OPEN) {
@@ -669,7 +753,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 		} else {
 			cleanup();
 		}
-	}, [cleanup, setPhase]);
+	}, [cleanup, cutLocalClip, setPhase]);
 
 	const cancel = useCallback(() => {
 		if (phaseRef.current === "idle") return;
@@ -718,14 +802,14 @@ export function useDictation({ append, destination = "primary", disabled = false
 	// focused plugin control first, otherwise core fallback; Esc always
 	// cancels the actual recording owner rather than the focused widget.
 	useEffect(() => {
-		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		warmDeepgram(); // pre-mint at mount (mitigation D) — silent if keyless
 		return () => {
 			// Navigation cancels capture: invalidate every pending await before
 			// releasing resources, and never append into a different page's input.
 			bufferRef.current = [];
 			cleanup(false);
 		};
-	}, [cleanup]);
+	}, [cleanup, warmDeepgram]);
 	useEffect(() => registerController(owner, { primary, toggle, cancel }), [owner, primary, toggle, cancel]);
 
 	return {

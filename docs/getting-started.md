@@ -33,6 +33,19 @@ Sessions are saved locally, including earlier messages when context is compacted
 
 Audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
 
+### Local dictation
+
+Choose **Local** as the dictation provider to transcribe on a server you run instead of Deepgram. Any server with the OpenAI-compatible `POST /v1/audio/transcriptions` endpoint works, for example [Speaches](https://speaches.ai/) (faster-whisper), the [whisper.cpp server](https://github.com/ggml-org/whisper.cpp/tree/master/examples/server), LocalAI or vLLM:
+
+```sh
+docker run --rm -p 8000:8000 ghcr.io/speaches-ai/speaches:latest-cpu
+# or: whisper-server -m models/ggml-base.en.bin --host 127.0.0.1 --port 8000 --inference-path /v1/audio/transcriptions
+```
+
+Under **Settings → Providers → Dictation**, set **Server URL** (default `http://127.0.0.1:8000/v1`) and **Model** (default `Systran/faster-whisper-base`; whisper.cpp ignores it). The optional **Local speech-to-text** key is sent as a bearer token. A Speaches server may need to download the model first; see its documentation.
+
+Local dictation records while you speak and transcribes when you stop, so the text appears after a short delay rather than as you talk. Recordings are sent as 16 kHz WAV from this app's server to the configured URL, never directly from the browser; long recordings are split into five-minute clips. A specific language is sent as its two-letter code (for example `en` for English (UK)); **Multilingual** lets the server detect the language.
+
 ## Use local files in a session
 
 In the desktop app, use the paperclip's **Files** or **Folder** choice, or drag files/folders into the content area, to insert their local paths. Files supports any file type and multiple selections; Folder attaches one directory path, including an empty folder, without expanding or reading its contents. Newly picked or dropped known folders get a trailing directory separator so their Folder icon survives saved messages and reloads; files stay unchanged. Older unmarked paths are not retrospectively classified. The agent can then locate/read supported content on the machine running LearnHarness under the existing file-access guards; attaching a path does not grant permissions. This is **not an upload**: originals stay where they are. Ordinary browsers cannot expose these local paths through the picker or drag-and-drop; you can paste a full path instead.
@@ -65,7 +78,7 @@ Chats, graph records, settings, and credentials live on your machine. Packaged d
 
 API-key files sit beside `data`, not inside it. They are plaintext with restrictive file permissions, not an encrypted vault. Keep complete profiles private; do not share credential files or raw debug captures in bug reports.
 
-**Local storage does not mean local-only processing.** Configured models, subscription/CLI services, web research, and dictation can receive content. A local custom model is a separate setup choice, not an offline guarantee for other enabled services.
+**Local storage does not mean local-only processing.** Configured models, subscription/CLI services, web research, and cloud dictation can receive content. A local custom model is a separate setup choice, not an offline guarantee for other enabled services.
 
 Click the context/cost row beneath the composer for Session stats. Dollar figures estimate known API costs; subscription, CLI, and custom-endpoint usage are not treated as free. See [context, caching, and costs](compaction-accounting.md) for the details.
 

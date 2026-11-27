@@ -28,10 +28,10 @@ import type {
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, isTranscriptMaxWidth, MODEL_SLOTS, TRANSCRIPT_WIDTH_MAX_REM, TRANSCRIPT_WIDTH_MIN_REM } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, isTranscriptMaxWidth, MODEL_SLOTS, normalizeBaseUrl, normalizeLocalSttModel, TRANSCRIPT_WIDTH_MAX_REM, TRANSCRIPT_WIDTH_MIN_REM } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
-import { isDictationLanguage } from "../core/dictation.ts";
+import { isDictationLanguage, isDictationProvider } from "../core/dictation.ts";
 import { parseFileAccessSettings } from "../core/file-access.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -460,13 +460,31 @@ export function parseCompactionSettingsBody(body: unknown): SettingsBodyResult<C
 	return { ok: true, settings };
 }
 
-/** dictation: { language?: one of Nova-3's supported language codes } */
+/** dictation: { language?: one of Nova-3's supported language codes,
+ *  provider?: "deepgram" | "local", localBaseUrl?: http(s) URL, localModel?: name } */
 export function parseDictationSettingsBody(body: unknown): SettingsBodyResult<DictationSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
-	if (raw.language === undefined) return { ok: true, settings: {} };
-	if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
-	return { ok: true, settings: { language: raw.language } };
+	const settings: DictationSettings = {};
+	if (raw.language !== undefined) {
+		if (!isDictationLanguage(raw.language)) return { ok: false, error: "Unsupported dictation language" };
+		settings.language = raw.language;
+	}
+	if (raw.provider !== undefined) {
+		if (!isDictationProvider(raw.provider)) return { ok: false, error: "Dictation provider must be deepgram or local" };
+		settings.provider = raw.provider;
+	}
+	if (raw.localBaseUrl !== undefined) {
+		const base = typeof raw.localBaseUrl === "string" ? normalizeBaseUrl(raw.localBaseUrl) : "";
+		if (!base) return { ok: false, error: "Local dictation URL must be http(s), with no credentials, query or fragment." };
+		settings.localBaseUrl = base;
+	}
+	if (raw.localModel !== undefined) {
+		const model = normalizeLocalSttModel(raw.localModel);
+		if (!model) return { ok: false, error: "Local dictation model must be a non-empty name of at most 200 characters." };
+		settings.localModel = model;
+	}
+	return { ok: true, settings };
 }
 
 /** The custom endpoint's per-model pins (PATCH /api/custom-provider): the

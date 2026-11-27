@@ -37,6 +37,12 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		docsUrl: "https://console.deepgram.com/",
 	},
 	{
+		id: "LOCAL_STT_API_KEY",
+		label: "Local speech-to-text",
+		description: "Optional bearer key for the local OpenAI-compatible transcription server used by local dictation. Most local servers need none.",
+		docsUrl: "https://github.com/amosblomqvist/learnharness/blob/main/docs/getting-started.md#local-dictation",
+	},
+	{
 		id: "TAVILY_API_KEY",
 		label: "Tavily",
 		description: "Web-search engine for the researcher sub-agent (AI-native search API). Setting the key activates it — no engine toggle needed.",
@@ -201,6 +207,9 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 			return value.startsWith("fc-")
 				? nonEmpty(20)
 				: { ok: false, error: `${id} must start with "fc-" (Firecrawl's key format)` };
+		case "LOCAL_STT_API_KEY":
+			// Self-chosen by the server operator: paste hygiene only.
+			return nonEmpty(1);
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);

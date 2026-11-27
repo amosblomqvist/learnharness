@@ -3,11 +3,24 @@
 import { useSyncExternalStore } from "react";
 import {
 	FACTORY_SETTINGS, isDictationLanguage, sanitizeUserSettings,
-	type DictationLanguage, type UserSettings,
+	type DictationLanguage, type DictationSettings, type UserSettings,
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 
-const INITIAL = { language: undefined as DictationLanguage | undefined, saving: false, error: null as string | null };
+const INITIAL = {
+	language: undefined as DictationLanguage | undefined,
+	/** The confirmed stored section; every write replaces it whole. */
+	section: undefined as DictationSettings | undefined,
+	saving: false,
+	error: null as string | null,
+};
+
+/** The effective dictation preference: stored values over factory defaults. */
+export type ResolvedDictation = Required<DictationSettings>;
+
+export function resolveDictation(section: DictationSettings | undefined): ResolvedDictation {
+	return { ...FACTORY_SETTINGS.dictation, ...section };
+}
 
 /** One confirmed preference and one write in flight, shared by every surface.
  * The factory keeps transport tests isolated without a second persistence path.
@@ -39,9 +52,10 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				const record = sanitizeUserSettings(body.settings);
 				if (body.settings !== null && record === null) throw new Error();
 				if (version !== revision) return getLanguage();
-				const language = record?.dictation?.language ?? FACTORY_SETTINGS.dictation.language;
+				const section = record?.dictation ?? {};
+				const language = section.language ?? FACTORY_SETTINGS.dictation.language;
 				needsRead = false;
-				publish({ language, error: null });
+				publish({ language, section, error: null });
 				return language;
 			} catch {
 				if (version !== revision) return getLanguage();
@@ -56,26 +70,37 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 	}
 
 	function save(language: DictationLanguage): Promise<boolean> {
+		return saveSection({ language });
+	}
+
+	/** Merge a patch onto the confirmed section and replace it whole. */
+	function saveSection(patch: DictationSettings): Promise<boolean> {
 		// A different selection must never inherit the previous write's success.
 		if (writing || snapshot.language === undefined) return Promise.resolve(false);
+		const next = { ...snapshot.section, ...patch };
 		revision++;
 		reading = null;
 		writing = Promise.resolve().then(async () => {
 			try {
 				const res = await request("/api/settings/dictation", {
 					method: "PUT", headers: { "Content-Type": "application/json" },
-					body: JSON.stringify({ language }),
+					body: JSON.stringify(next),
 				});
-				if (!res.ok) throw new Error();
+				if (!res.ok) {
+					const failure = await res.json().catch(() => ({})) as { error?: unknown };
+					throw new Error(typeof failure.error === "string" ? failure.error : "");
+				}
 				const body = await res.json() as { settings: UserSettings };
-				const confirmed = body.settings?.dictation?.language;
+				const section = sanitizeUserSettings({ version: 1, dictation: body.settings?.dictation })?.dictation ?? {};
+				const confirmed = section.language ?? FACTORY_SETTINGS.dictation.language;
 				if (!isDictationLanguage(confirmed)) throw new Error();
 				needsRead = false;
-				publish({ language: confirmed, error: null });
+				publish({ language: confirmed, section, error: null });
 				saved();
 				return true;
-			} catch {
-				publish({ error: "Could not save dictation language. Try again." });
+			} catch (error) {
+				const detail = error instanceof Error && error.message ? error.message : null;
+				publish({ error: detail ?? (patch.language !== undefined ? "Could not save dictation language. Try again." : "Could not save dictation settings. Try again.") });
 				return false;
 			} finally {
 				writing = null;
@@ -95,8 +120,14 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 		}
 	}
 
+	/** The effective preference for one recording, after any pending write. */
+	async function getSettings(): Promise<ResolvedDictation> {
+		await getLanguage();
+		return resolveDictation(snapshot.section);
+	}
+
 	return {
-		load, save, getLanguage,
+		load, save, saveSection, getLanguage, getSettings,
 		getSnapshot: () => snapshot,
 		getServerSnapshot: () => INITIAL,
 		subscribe(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
@@ -128,5 +159,8 @@ function subscribe(listener: () => void) {
 
 export function useDictationLanguage() {
 	const snapshot = useSyncExternalStore(subscribe, store.getSnapshot, store.getServerSnapshot);
-	return { ...snapshot, load: store.load, save: store.save, getLanguage: store.getLanguage };
+	return {
+		...snapshot, load: store.load, save: store.save, saveSection: store.saveSection,
+		getLanguage: store.getLanguage, getSettings: store.getSettings,
+	};
 }

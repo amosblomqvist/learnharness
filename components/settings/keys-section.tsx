@@ -29,6 +29,8 @@ import {
 	CUSTOM_MODEL_DEFAULT_CONTEXT_WINDOW,
 	CUSTOM_MODEL_DEFAULT_MAX_TOKENS,
 	CUSTOM_PROVIDER,
+	FACTORY_SETTINGS,
+	LOCAL_STT_KEY_ID,
 	normalizeBaseUrl,
 	type AuthKeyStatus,
 	type CustomModel,
@@ -43,6 +45,8 @@ import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
+import { DictationProviderSetting } from "@/components/dictation-provider";
+import { useDictationLanguage } from "@/components/dictation-preference";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -370,6 +374,9 @@ export function KeysSection({
 }: {
 	initialRow?: string;
 }) {
+	const dictationSection = useDictationLanguage().section;
+	const dictationKeyId = (dictationSection?.provider ?? FACTORY_SETTINGS.dictation.provider) === "local" ? LOCAL_STT_KEY_ID : "DEEPGRAM_API_KEY";
+	const isDictationKey = (id: string) => id === "DEEPGRAM_API_KEY" || id === LOCAL_STT_KEY_ID;
 	const [statuses, setStatuses] = useState<AuthKeyStatus[] | null>(null);
 	const [providers, setProviders] = useState<ProviderKeyInfo[] | undefined>(undefined);
 	const [loading, setLoading] = useState(true);
@@ -581,7 +588,8 @@ export function KeysSection({
 			</SettingsGroup>
 
 			{(["Dictation", "Search"] as const).map((label) => <SettingsGroup key={label} label={label} testid={label === "Dictation" ? "group-dictation" : "group-search"}>
-				{toolRows.filter((status) => label === "Dictation" ? status.id === "DEEPGRAM_API_KEY" : status.id !== "DEEPGRAM_API_KEY").map((status) => (
+				{label === "Dictation" && <DictationProviderSetting />}
+				{toolRows.filter((status) => label === "Dictation" ? status.id === dictationKeyId : !isDictationKey(status.id)).map((status) => (
 					<KeyTableRow
 						key={status.id}
 						label={status.info?.label ?? status.id}
@@ -601,14 +609,16 @@ export function KeysSection({
 				))}
 				{label === "Dictation" && <>
 					<DictationLanguageSetting />
-					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+					{dictationKeyId === LOCAL_STT_KEY_ID ? <p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
+						Recordings go from this app&apos;s server to the URL above; nothing is sent to Deepgram. The key is optional; most local servers need none.
+					</p> : <p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
 						Create a <a
 							href="https://console.deepgram.com/"
 							target="_blank"
 							rel="noreferrer"
 							className="underline underline-offset-2 hover:text-foreground"
 						>Deepgram API key</a> with the Member role or higher, then add it above.
-					</p>
+					</p>}
 				</>}
 			</SettingsGroup>)}
 

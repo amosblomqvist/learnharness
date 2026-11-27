@@ -35,7 +35,15 @@ import { CLAUDE_CODE_PROVIDER } from "./contracts/claude-code.ts";
 import type { ModelRole } from "../../config.ts";
 import type { ChatSettings } from "./contracts/chat.ts";
 import { isSearchEngineId, type SearchEngineId } from "./search.ts";
-import { isDictationLanguage, type DictationLanguage } from "./dictation.ts";
+import {
+	isDictationLanguage,
+	isDictationProvider,
+	LOCAL_STT_DEFAULT_BASE_URL,
+	LOCAL_STT_DEFAULT_MODEL,
+	LOCAL_STT_MODEL_MAX_LENGTH,
+	type DictationLanguage,
+	type DictationProvider,
+} from "./dictation.ts";
 import { parseFileAccessSettings, type FileAccessSettings } from "./file-access.ts";
 import { COLOR_OVERRIDE_KEYS, isThemeId, type AppearanceColorOverrides } from "./themes.ts";
 
@@ -345,6 +353,20 @@ export interface GeneralSettings {
 /** One app-wide dictation preference, shared by every composer. */
 export interface DictationSettings {
 	language?: DictationLanguage;
+	/** Absent = Deepgram, so existing records keep their behavior. */
+	provider?: DictationProvider;
+	/** Normalized base URL of an OpenAI-compatible transcription server. */
+	localBaseUrl?: string;
+	/** Model name sent to that server. */
+	localModel?: string;
+}
+
+/** A model name worth sending: trimmed, non-empty, bounded, no control characters. */
+export function normalizeLocalSttModel(raw: unknown): string {
+	if (typeof raw !== "string") return "";
+	const value = raw.trim();
+	if (!value || value.length > LOCAL_STT_MODEL_MAX_LENGTH || /[\u0000-\u001f\u007f]/.test(value)) return "";
+	return value;
 }
 
 /** Agent settings — everything about the non-conversation machinery. */
@@ -570,7 +592,12 @@ export const FACTORY_SETTINGS: FactorySettings = {
 	version: CURRENT_SETTINGS_VERSION,
 	agent: { workerRequestConcurrency: 8 },
 	general: { autoUpdate: true },
-	dictation: { language: "en" },
+	dictation: {
+		language: "en",
+		provider: "deepgram",
+		localBaseUrl: LOCAL_STT_DEFAULT_BASE_URL,
+		localModel: LOCAL_STT_DEFAULT_MODEL,
+	},
 	appearance: {
 		theme: "default",
 		background: null, // null = the active theme's background
@@ -706,6 +733,20 @@ export function sanitizeCustomModelOverrides(
 		const pin = sanitizeCustomModelOverride(value);
 		if (pin) Object.defineProperty(out, id, { value: pin, enumerable: true, configurable: true, writable: true });
 	}
+	return out;
+}
+
+/** The dictation section: each field kept only when valid, independently. */
+function sanitizeDictation(raw: Record<string, unknown>): DictationSettings {
+	const out: DictationSettings = {};
+	if (isDictationLanguage(raw.language)) out.language = raw.language;
+	if (isDictationProvider(raw.provider)) out.provider = raw.provider;
+	if (typeof raw.localBaseUrl === "string") {
+		const base = normalizeBaseUrl(raw.localBaseUrl);
+		if (base) out.localBaseUrl = base;
+	}
+	const model = normalizeLocalSttModel(raw.localModel);
+	if (model) out.localModel = model;
 	return out;
 }
 
@@ -907,9 +948,8 @@ export function sanitizeUserSettings(raw: unknown): UserSettings | null {
 	}
 	if (r.dictation !== undefined) {
 		const raw = r.dictation;
-		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw) &&
-			isDictationLanguage((raw as Record<string, unknown>).language)
-			? { language: (raw as DictationSettings).language }
+		out.dictation = raw !== null && typeof raw === "object" && !Array.isArray(raw)
+			? sanitizeDictation(raw as Record<string, unknown>)
 			: {};
 	}
 	if (r.claudeCode !== undefined) {
