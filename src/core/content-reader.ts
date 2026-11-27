@@ -2,6 +2,8 @@
  * mutates input or reserializes Markdown. Native literals are protected;
  * standalone extra-encoded fences have one explicit display-only recovery. */
 import katex from "katex";
+// Side effect: the renderer's chemistry extension, so the command probes below know \ce and \pu too.
+import "katex/contrib/mhchem";
 import { fromMarkdown } from "mdast-util-from-markdown";
 import { mathFromMarkdown } from "mdast-util-math";
 import { math } from "micromark-extension-math";

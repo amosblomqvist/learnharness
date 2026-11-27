@@ -164,6 +164,39 @@ describe("render — standard dollar math + legacy compatibility (streamdown + K
 	});
 });
 
+describe("render — \\ce chemistry formulas (KaTeX's mhchem extension)", () => {
+	// The three formulas in issue #896's screenshots. Without mhchem, "#" is a
+	// parse error (the raw source shows) and \ce prints as an undefined command.
+	const REACTION = "\\ce{HC#CH + NaNH2 -> HC#C^-Na^+ + NH3}";
+	const MECHANISM = "\\ce{CH3-CH=CH2 ->[H+] CH3-\\overset{+}{C}H-CH3 ->[Br^-] CH3-CHBr-CH3}";
+	const ACIDITY = "pK_a:\\quad \\ce{CH3CH3}\\ 50 \\quad > \\quad \\ce{CH2=CH2}\\ 44 \\quad > \\quad \\ce{HC#CH}\\ 25";
+
+	/** KaTeX prints the name of an undefined command as text in the formula. */
+	const printsCommandName = (html: string) => />\\(?:ce|pu)</.test(html);
+
+	it("renders the reported formulas inline, as display math and in legacy delimiters", () => {
+		const html = render(`Inline $${REACTION}$ and legacy \\(${ACIDITY}\\).\n\n$$\n${MECHANISM}\n$$`);
+		assert.equal((html.match(/class="katex"/g) ?? []).length, 3, "all three formulas render");
+		assert.ok(html.includes("katex-display"), "the fenced formula is display math");
+		assert.ok(!html.includes("katex-error"), "no KaTeX parse errors: # is a triple bond inside \\ce");
+		assert.ok(!printsCommandName(html), "\\ce expands instead of printing as an undefined command");
+		assert.ok(html.includes("≡"), "the triple bond renders");
+	});
+
+	it("renders \\pu physical units", () => {
+		const html = render("The enthalpy is $\\pu{123 kJ//mol}$.");
+		assert.ok(!html.includes("katex-error") && !printsCommandName(html), "\\pu expands");
+		assert.ok(html.includes(">kJ<"), "the unit is one upright word, not italic variables");
+	});
+
+	it("heals a doubled \\\\ce from tool arguments and renders it", () => {
+		const html = render(healOverescapedCommands(`$${REACTION.replace(/\\/g, "\\\\")}$`));
+		assert.equal((html.match(/class="katex"/g) ?? []).length, 1, "the healed formula renders");
+		assert.ok(!html.includes("katex-error") && !printsCommandName(html), "no error, no literal \\ce");
+		assert.ok(html.includes("≡"), "the triple bond renders");
+	});
+});
+
 describe("render — line breaks (remark-breaks)", () => {
 	it("renders a single newline as a visible line break", () => {
 		const html = render("line one\nline two");
