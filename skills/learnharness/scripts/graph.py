@@ -13,7 +13,17 @@ import argparse
 import json
 import re
 
-from _data import DataError, add_common_arguments, data_root, print_json, read_chat, read_json, safe_path
+from _data import (
+    DataError,
+    SUPPORTED_GRAPH_VERSION,
+    add_common_arguments,
+    configure_utf8_stdio,
+    data_root,
+    print_json,
+    read_chat,
+    read_json,
+    safe_path,
+)
 
 
 def warn(message):
@@ -84,8 +94,8 @@ def load_graph(root):
         version = stamp.get("version") if isinstance(stamp, dict) else None
         if isinstance(version, bool) or not isinstance(version, (int, float)) or version % 1:
             raise DataError("graph/format.json: invalid graph format version")
-        if version > 1:
-            raise DataError(f"Graph format version {version} is newer than supported version 1; upgrade this skill")
+        if version > SUPPORTED_GRAPH_VERSION:
+            raise DataError(f"Graph format version {version} is newer than supported version {SUPPORTED_GRAPH_VERSION}; upgrade this skill")
     nodes = {}
     for line in read_ledger(root, "graph/nodes.jsonl"):
         existing = nodes.get(line["id"])
@@ -247,6 +257,7 @@ def nonempty(value):
 
 
 def main(argv=None):
+    configure_utf8_stdio()
     parser = argparse.ArgumentParser(description=__doc__)
     add_common_arguments(parser)
     commands = parser.add_subparsers(dest="command", required=True)

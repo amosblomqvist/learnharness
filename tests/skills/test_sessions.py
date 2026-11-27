@@ -60,7 +60,7 @@ class SessionsTest(unittest.TestCase):
     def cli(self, root, *args):
         return subprocess.run([sys.executable, "-B", str(SCRIPTS / "sessions.py"),
                                "--data-dir", str(root), *args], capture_output=True,
-                              text=True, env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, check=False)
+                              text=True, encoding="utf-8", env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}, check=False)
 
     def save(self, root, value, filename=None):
         folder = root / "chats"
@@ -84,7 +84,7 @@ class SessionsTest(unittest.TestCase):
         for summary in index["sessions"]:
             response = self.cli(GOLDEN, "read", summary["id"])
             self.assertEqual(response.returncode, 0, response.stderr)
-            raw = json.loads((GOLDEN / "chats" / f"{summary['id']}.json").read_text())
+            raw = json.loads((GOLDEN / "chats" / f"{summary['id']}.json").read_text(encoding="utf-8"))
             text = response.stdout
             for message in raw["messages"]:
                 self.assertIn(message["id"], text)
@@ -337,11 +337,99 @@ class SessionsTest(unittest.TestCase):
         self.assertNotIn("<script>", self.render(source))
         self.assertIn("&lt;script&gt;", self.render(source))
 
+    def test_v2_session_preserves_side_chats_markers_and_redacts_image_snapshots(self):
+        secret_b64 = "BASE64_SECRET_PAYLOAD_DO_NOT_LEAK"
+        v2_record = record(
+            [
+                assistant({"type": "text", "text": "Every continuous function on a closed interval attains its bounds."}, message_id="m_teach"),
+                marker("side-question", "Learner side clarification summary", {"threadId": "sc_1"}, marker_id="m_sq"),
+                marker("side-question-told", "Side thread shared with teacher", {"threadId": "sc_1"}, marker_id="m_sqt"),
+                marker("plugin-problem-submission", "Submitted structured proof", {
+                    "kind": "plugin-problem-submission", "problemId": "prob_1", "submission": {"answer": "42"},
+                }, marker_id="m_pps"),
+            ],
+            session_id="chat_v2_demo",
+            version=2,
+            sideChats=[{
+                "id": "sc_1",
+                "anchor": {
+                    "messageId": "m_teach", "partId": "m_teach-t0", "blockIndex": 0,
+                    "blockText": "Every continuous function on a closed interval attains its bounds.",
+                },
+                "open": False,
+                "createdAt": "2026-11-02T10:00:00Z",
+                "messages": [
+                    {"id": "scm_1", "role": "user", "text": "Why does the interval need to be closed?", "at": "2026-11-02T10:00:05Z"},
+                    {"id": "scm_2", "role": "assistant", "text": "On (0, 1), f(x) = 1/x is continuous yet unbounded.", "at": "2026-11-02T10:00:10Z"},
+                ],
+            }],
+            imageSnapshots={
+                "sha256_demo": {
+                    "mimeType": "image/png",
+                    "data": secret_b64,
+                    "width": 100,
+                    "height": 100,
+                }
+            },
+        )
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            path = self.save(root, v2_record)
+            before = snapshot(root)
+            before_mtime = path.stat().st_mtime_ns
+            listing = self.cli(root, "--format", "json", "list")
+            self.assertEqual(listing.returncode, 0, listing.stderr)
+            index = json.loads(listing.stdout)
+            self.assertEqual(index["skipped_count"], 0)
+            self.assertEqual([s["id"] for s in index["sessions"]], ["chat_v2_demo"])
+            for extra_args in ((), ("--include-operations", "--include-agent-thinking")):
+                for fmt in ("json", "markdown"):
+                    with self.subTest(fmt=fmt, extra_args=extra_args):
+                        res = self.cli(root, "--format", fmt, "read", "chat_v2_demo", *extra_args)
+                        self.assertEqual(res.returncode, 0, res.stderr)
+                        self.assertNotIn(secret_b64, res.stdout)
+                        if fmt == "json":
+                            payload = json.loads(res.stdout)
+                            self.assertEqual(payload["record"]["version"], 2)
+                            self.assertEqual(payload["record"]["sideChats"][0]["messages"][0]["text"], "Why does the interval need to be closed?")
+                            self.assertEqual(payload["record"]["imageSnapshots"]["sha256_demo"], {"mimeType": "image/png", "width": 100, "height": 100})
+                            self.assertIn("imageSnapshots.sha256_demo.data", {o["source"] for o in payload["omissions"]})
+                        else:
+                            for phrase in (
+                                "Why does the interval need to be closed?",
+                                "On (0, 1), f(x) = 1/x is continuous yet unbounded.",
+                                "image/png",
+                                "Learner side clarification summary",
+                                "Side thread shared with teacher",
+                                "Submitted structured proof",
+                            ):
+                                self.assertIn(phrase, res.stdout)
+                            self.assertNotIn("unsupported/unrendered marker", res.stdout)
+            self.assertEqual(before, snapshot(root))
+            self.assertEqual(path.stat().st_mtime_ns, before_mtime)
+
+    def test_windows_cp1250_stdout_encodes_unicode_without_crash(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            self.save(root, record([{"id": "u1", "role": "user", "content": "Arrows → and en-dash –"}], session_id="chat_uni", version=2))
+            env = {**os.environ, "PYTHONIOENCODING": "cp1250", "PYTHONDONTWRITEBYTECODE": "1"}
+            env.pop("PYTHONUTF8", None)
+            for args in (("list",), ("read", "chat_uni")):
+                with self.subTest(args=args):
+                    completed = subprocess.run(
+                        [sys.executable, "-B", str(SCRIPTS / "sessions.py"), "--data-dir", str(root), *args],
+                        capture_output=True, env=env, check=False,
+                    )
+                    self.assertEqual(completed.returncode, 0, completed.stderr.decode("utf-8", errors="replace"))
+                    self.assertNotIn("UnicodeEncodeError", completed.stderr.decode("utf-8", errors="replace"))
+                    stdout_text = completed.stdout.decode("utf-8")
+                    self.assertIn("·", stdout_text)
+
     def test_cli_errors_isolated_list_and_missing_defaults(self):
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
             self.save(root, record())
-            self.save(root, record(session_id="future", version=2))
+            self.save(root, record(session_id="future", version=3))
             self.save(root, record(session_id="old", messages=[{"role": "assistant", "parts": []}]))
             (root / "chats" / "broken.json").write_text("{bad", encoding="utf-8")
             before = snapshot(root)

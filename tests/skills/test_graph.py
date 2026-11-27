@@ -147,13 +147,45 @@ class GraphTests(unittest.TestCase):
         self.assertEqual([item["id"] for item in self.result("propositions", "--session", "chat_old")], ["n_b"])
         self.assertEqual(self.result("propositions", "--session", "nonexistent"), [])
 
+    def test_v2_chat_metadata_resolves_without_warnings(self):
+        self.write_ledger("nodes", [node("n_v2", "chat_v2", provenance=[point("chat_v2", "m1")])])
+        self.write_json("chats/chat_v2.json", {
+            "id": "chat_v2", "title": "Version two conversation", "createdAt": "2026-11-01T00:00:00Z",
+            "updatedAt": "2026-11-02T00:00:00Z", "version": 2, "messages": [], "sideChats": [], "imageSnapshots": {},
+        })
+        before = snapshot(self.root)
+        sessions = self.result("sessions")
+        self.assertEqual(len(sessions), 1)
+        self.assertEqual(sessions[0]["id"], "chat_v2")
+        self.assertEqual(sessions[0]["name"], "Version two conversation")
+        self.assertEqual(sessions[0]["kind"], "chat")
+        status, output, diagnostics = self.invoke("propositions", format="markdown")
+        self.assertEqual(status, 0, diagnostics)
+        self.assertEqual(diagnostics, "")
+        self.assertIn("Version two conversation (chat)", output)
+        self.assertEqual(snapshot(self.root), before)
+
+    def test_windows_cp1250_stdout_encodes_unicode_chains_without_crash(self):
+        self.fixture()
+        env = {**os.environ, "PYTHONIOENCODING": "cp1250", "PYTHONDONTWRITEBYTECODE": "1"}
+        env.pop("PYTHONUTF8", None)
+        completed = subprocess.run(
+            [sys.executable, "-B", str(SCRIPTS / "graph.py"), "--data-dir", str(self.root), "chains"],
+            capture_output=True, env=env, check=False,
+        )
+        stderr_text = completed.stderr.decode("utf-8", errors="replace")
+        self.assertEqual(completed.returncode, 0, stderr_text)
+        self.assertNotIn("UnicodeEncodeError", stderr_text)
+        stdout_text = completed.stdout.decode("utf-8")
+        self.assertIn("→ Conclusion:", stdout_text)
+
     def test_bad_chat_metadata_is_isolated_and_diagnosed(self):
         self.fixture()
         corrupted = self.root / "chats" / "chat_old.json"
         corrupted.write_text("{torn", encoding="utf-8")
         self.write_json("chats/chat_future.json", {
             "id": "chat_future", "title": "Future metadata", "createdAt": "2026-01-01",
-            "updatedAt": "2026-01-01", "version": 2, "messages": [],
+            "updatedAt": "2026-01-01", "version": 3, "messages": [],
         })
         self.write_json("chats/src_notes.json", {
             "id": "src_notes", "title": "Older parts metadata", "createdAt": "2026-01-01",
@@ -170,7 +202,7 @@ class GraphTests(unittest.TestCase):
                 self.assertEqual(status, 0, diagnostics)
                 for name in ("chat_old.json", "chat_future.json", "src_notes.json", "chat_mismatch.json"):
                     self.assertIn(name, diagnostics)
-                for reason in ("format 2", "older UIMessage/parts", "filename/ID mismatch", "skipped"):
+                for reason in ("format 3", "older UIMessage/parts", "filename/ID mismatch", "skipped"):
                     self.assertIn(reason, diagnostics)
                 if format == "json":
                     sessions = {item["id"]: item for item in json.loads(output)["records"]}
