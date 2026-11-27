@@ -20,6 +20,7 @@
 		"lint": "eslint .",
 		"typecheck": "tsc --noEmit",
 		"plugins:setup": "node scripts/setup-plugins.mjs",
+		"catalog:check": "tsx scripts/check-community-catalog.ts",
 		"plugins:build-authoring": "node scripts/build-plugin-authoring.mjs",
 		"plugins:build-core": "node scripts/build-core-plugins.mjs",
 		"desktop:dev": "concurrently -k \"npm run dev\" \"LH_DEV_URL=http://localhost:3000 electron .\"",
