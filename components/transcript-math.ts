@@ -1,6 +1,8 @@
 import { createMathPlugin } from "@streamdown/math";
 import type { Element, Root } from "hast";
 import type { Plugin, Transformer } from "unified";
+// Side effect: defines \ce and \pu (chemistry) on the KaTeX instance rehype-katex renders with.
+import "katex/contrib/mhchem";
 
 const math = createMathPlugin({ singleDollarTextMath: true });
 type KatexOptions = { output?: "html"; errorColor?: string };
