@@ -146,12 +146,13 @@ it("25 MiB is per file, not per selection; oversized files fail locally while sm
 });
 it("picker stays enabled during imports, offers Files/Folder, and keeps PDF support", () => {
 	const html = renderToStaticMarkup(<NotesImportControl importing onImportFiles={() => {}} />);
-	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".txt,.md,.markdown,.rst,.org,.adoc,.tex,.pdf"/); assert.doesNotMatch(html, /disabled/);
+	assert.match(html, /webkitdirectory/); assert.match(html, /accept=".txt,.md,.markdown,.rst,.org,.adoc,.tex,.pdf,.docx"/); assert.doesNotMatch(html, /disabled/);
 });
 it("the Files picker's accept lists only types the queue takes, in any letter case", () => {
 	const accepted = renderToStaticMarkup(<NotesImportControl importing={false} onImportFiles={() => {}} />).match(/accept="([^"]*)"/)![1]!.split(",");
 	for (const extension of accepted) assert.ok(IMPORT_EXTENSIONS.test(`NOTES${extension.toUpperCase()}`), extension);
-	assert.ok(!IMPORT_EXTENSIONS.test("README") && !IMPORT_EXTENSIONS.test("notes.md.bak") && !IMPORT_EXTENSIONS.test("notes.docx"));
+	assert.ok(!IMPORT_EXTENSIONS.test("README") && !IMPORT_EXTENSIONS.test("notes.md.bak") && !IMPORT_EXTENSIONS.test("notes.pptx"));
+	assert.ok(IMPORT_EXTENSIONS.test("notes.docx"));
 });
 it("graph menu clearly distinguishes extraction from lesson material, above unchanged Files/Folder choices", async () => {
 	const selected: unknown[] = [];

@@ -20,7 +20,7 @@
  * healthy. The dock's chips + graph refetch track progress live through
  * /api/graph/status, as with session runs.
  */
-import { convertPdf, extraction, joinPages, NotesImportError, sourceDirectory } from "@/src/server";
+import { applyBaiduOcrToPdf, cleanRepeatingHeadersFooters, convertDocx, convertPdf, convertPdfWithMarkitdown, extraction, joinPages, NotesImportError, readSettingsRecord, sourceDirectory } from "@/src/server";
 import { IMPORT_EXTENSIONS, MAX_IMPORT_BODY_BYTES, MAX_IMPORT_BYTES, UNSUPPORTED_TYPE_MESSAGE, validNotesPath } from "@/lib/notes-import-limits.ts";
 import { FormBodyLimitError, readBoundedFormData } from "@/lib/bounded-form-data.ts";
 import {
@@ -58,12 +58,24 @@ const PDF_MAGIC = [0x25, 0x50, 0x44, 0x46, 0x2d]; // "%PDF-"
 type NotesFile = { kind: "notes"; text: string; notice?: string } | { kind: "refused"; error: string };
 
 /** A PDF becomes page-marked Markdown; any other accepted file is read as text. */
-async function readNotesFile(file: File): Promise<NotesFile> {
+async function readNotesFile(file: File, ocrEnabled: boolean = false): Promise<NotesFile> {
 	if (!IMPORT_EXTENSIONS.test(file.name)) return { kind: "refused", error: UNSUPPORTED_TYPE_MESSAGE };
 	const bytes = new Uint8Array(await file.arrayBuffer());
+	if (/\.docx$/i.test(file.name)) {
+		try {
+			const docx = await convertDocx(bytes, file.name);
+			return { kind: "notes", text: docx.markdown, notice: docx.notices.join(" ") };
+		} catch {
+			return { kind: "refused", error: "Could not open this DOCX document." };
+		}
+	}
 	if (!PDF_MAGIC.every((byte, i) => bytes[i] === byte)) {
 		if (bytes.subarray(0, 8192).includes(0)) return { kind: "refused", error: "This file isn't plain text." };
 		return { kind: "notes", text: new TextDecoder().decode(bytes) };
+	}
+	const markitdown = await convertPdfWithMarkitdown(bytes, file.name);
+	if (markitdown) {
+		return { kind: "notes", text: markitdown.markdown, notice: markitdown.notices.join(" ") };
 	}
 	const pdf = await convertPdf(bytes, MAX_PDF_PAGES);
 	switch (pdf.kind) {
@@ -72,11 +84,22 @@ async function readNotesFile(file: File): Promise<NotesFile> {
 		case "too-long":
 			return { kind: "refused", error: "Too long. Max 1,000 pages." };
 		case "converted": {
-			const text = joinPages(pdf.pages);
+			let pages = pdf.pages;
+			let ocrNotice = "";
+			const needsOcr = ocrEnabled && (pages.some((page) => page.kind === "image-only") || !pages.some((page) => page.kind === "text" && page.markdown.trim()));
+			if (needsOcr) {
+				const ocrResult = await applyBaiduOcrToPdf(bytes, pages);
+				pages = ocrResult.pages;
+				if (ocrResult.ocrCount > 0) {
+					ocrNotice = " Processed with Baidu OCR.";
+				}
+			}
+			pages = cleanRepeatingHeadersFooters(pages);
+			const text = joinPages(pages);
 			if (!text) return { kind: "refused", error: "OCR not supported yet." };
-			const skipped = pdf.pages.filter((page) => page.kind === "image-only").length;
+			const skipped = pages.filter((page) => page.kind === "image-only").length;
 			const omission = skipped > 0 ? ` Skipped ${skipped} image-only ${skipped === 1 ? "page" : "pages"}; OCR is not supported.` : "";
-			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}` };
+			return { kind: "notes", text, notice: `Scanned pages may have errors.${omission}${ocrNotice}` };
 		}
 	}
 }
@@ -117,7 +140,8 @@ export async function POST(request: Request) {
 			if (!next) return;
 			const { file, requestIndex, filePath } = next;
 			try {
-				const notes = await readNotesFile(file);
+				const ocrEnabled = readSettingsRecord()?.graph?.ocrBaiduEnabled === true;
+				const notes = await readNotesFile(file, ocrEnabled);
 				if (notes.kind === "refused") {
 					results.push({ filePath, requestIndex, outcome: "failed", ok: false, error: notes.error });
 					continue;

@@ -289,6 +289,56 @@ export async function documentToMarkdown(doc: PDFDocumentProxy, pageNumbers?: re
 	signal?.throwIfAborted();
 	return out;
 }
+/**
+ * Strips recurring running headers (exact first line repeated across >= 3 pages)
+ * and running footers / trailing page numbers from text pages.
+ */
+export function cleanRepeatingHeadersFooters(pages: readonly PdfPage[]): PdfPage[] {
+	const textPages = pages.filter((p): p is Extract<PdfPage, { kind: "text" }> => p.kind === "text");
+	if (textPages.length < 3) return [...pages];
+
+	const firstLines = new Map<string, number>();
+	const lastLines = new Map<string, number>();
+
+	for (const page of textPages) {
+		const lines = page.markdown.split("\n").map((l) => l.trim()).filter(Boolean);
+		if (lines.length > 0) {
+			const first = lines[0]!;
+			firstLines.set(first, (firstLines.get(first) ?? 0) + 1);
+			const last = lines.at(-1)!;
+			lastLines.set(last, (lastLines.get(last) ?? 0) + 1);
+		}
+	}
+
+	return pages.map((page) => {
+		if (page.kind !== "text") return page;
+		const lines = page.markdown.split("\n");
+		let start = 0;
+		while (start < lines.length) {
+			const trimmed = lines[start]!.trim();
+			if (!trimmed || (firstLines.get(trimmed) ?? 0) >= 3) {
+				start++;
+			} else {
+				break;
+			}
+		}
+		let end = lines.length;
+		while (end > start) {
+			const trimmed = lines[end - 1]!.trim();
+			const isFooter = (lastLines.get(trimmed) ?? 0) >= 3 || /^(?:page\s+)?\d+(?:\s*\/\s*\d+)?$/i.test(trimmed) || /^-\s*\d+\s*-$/.test(trimmed);
+			if (!trimmed || isFooter) {
+				end--;
+			} else {
+				break;
+			}
+		}
+		return {
+			...page,
+			markdown: lines.slice(start, end).join("\n").trim(),
+		};
+	});
+}
+
 
 /** The pages that carry text, each under a `--- Page N ---` marker (the pdf-reader's existing format). */
 export function joinPages(pages: readonly PdfPage[]): string {

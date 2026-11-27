@@ -218,6 +218,15 @@ describe("parseGraphSettingsBody", () => {
 		assert.deepEqual(absent.settings, { enabled: true });
 		assert.equal(parseGraphSettingsBody({ rendering: "off" }).ok, false, "rendering must be a boolean");
 	});
+	it("ocrBaiduEnabled: boolean switch for Baidu OCR on PDFs", () => {
+		const on = parseGraphSettingsBody({ enabled: true, ocrBaiduEnabled: true });
+		assert.ok(on.ok);
+		assert.deepEqual(on.settings, { enabled: true, ocrBaiduEnabled: true });
+		const off = parseGraphSettingsBody({ enabled: true, ocrBaiduEnabled: false });
+		assert.ok(off.ok);
+		assert.deepEqual(off.settings, { enabled: true, ocrBaiduEnabled: false });
+		assert.equal(parseGraphSettingsBody({ ocrBaiduEnabled: "yes" }).ok, false, "ocrBaiduEnabled must be a boolean");
+	});
 
 	it("extractionChunkTokens: whole tokens ≥ the 500 floor (extraction-UX redesign, 2026-09-24)", () => {
 		const ok = parseGraphSettingsBody({ enabled: true, extractionChunkTokens: 2048 });
