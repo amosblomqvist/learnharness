@@ -31,6 +31,7 @@ const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt
 const { createSubscriptions, loadSubscriptionSDK } = require("./subscriptions.cjs");
 const { attachSubscriptionChild, subscriptionControl } = require("./subscription-ipc.cjs");
 const { desktopAPIHeaders } = require("./desktop-api.cjs");
+const { pickDesktopPort } = require("./desktop-port.cjs");
 const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs");
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
@@ -691,7 +692,8 @@ async function main() {
 	// spawn, no packaging, full HMR. The rest of this shell still applies
 	// (guards, menu, single instance).
 	const devUrl = process.env.LH_DEV_URL;
-	const url = devUrl ?? `http://127.0.0.1:${await freePort()}`;
+	const serverPort = devUrl ? null : await pickDesktopPort({ env: process.env });
+	const url = devUrl ?? `http://127.0.0.1:${serverPort}`;
 	if (!devUrl) {
 		desktopAPISecret = randomBytes(32).toString("hex");
 		const ownedOrigin = new URL(url).origin;
@@ -719,7 +721,7 @@ async function main() {
 		await subscriptions.ready;
 		log(`starting server: ${serverEntry()}`);
 		log(`data dir: ${DATA_DIR()}${fs.existsSync(AUTH_FILE()) ? " · auth.json: present" : " · auth.json: ABSENT (no BYOK keys yet)"}`);
-		await startServer(new URL(url).port);
+		await startServer(serverPort);
 		await waitUntilUp(url);
 		log(`server up: ${url}`);
 	} else {
