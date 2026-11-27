@@ -270,16 +270,15 @@ describe("desktop packaging policy", () => {
 		await validateConfiguration(config, { isEnabled: false });
 	});
 
-	it("ships Mac arm64, Windows NSIS x64, and both Linux x64 channels", () => {
+	// we do not compare arch: a config arch would override each job's --x64/--arm64 flag.
+	it("ships Mac arm64, Windows NSIS x64, and both Linux channels for the job's arch", () => {
 		assert.deepEqual(config.mac.target, [
 			{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] },
 		]);
 		assert.deepEqual(config.win.target, [{ target: "nsis", arch: ["x64"] }]);
 		assert.equal(config.win.signExecutable, false);
 		assert.equal(config.win.verifyUpdateCodeSignature, false);
-		assert.deepEqual(config.linux.target, [
-			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
-		]);
+		assert.deepEqual(config.linux.target, [{ target: "AppImage" }, { target: "deb" }]);
 		assert.equal(config.linux.syncDesktopName, true);
 		assert.equal(config.publish[0].releaseType, "draft");
 	});
@@ -295,8 +294,8 @@ describe("desktop packaging policy", () => {
 
 describe("workflow action versions", () => {
 	type Step = { uses?: string; with?: Record<string, unknown> };
-	type Workflow = { jobs: Record<string, { steps: Step[] }> };
-	const yaml = require("js-yaml") as { load(source: string): Workflow };
+	type GitHubWorkflow = { jobs: Record<string, { steps: Step[] }> };
+	const yaml = require("js-yaml") as { load(source: string): GitHubWorkflow };
 
 	for (const filename of ["ci.yml", "release.yml"]) {
 		it(`${filename} uses supported Action runtimes without changing the app's Node 26`, () => {
@@ -330,14 +329,23 @@ describe("desktop release workflow", () => {
 		if?: string; run?: string; uses?: string; env?: Record<string, string>;
 		with?: { script?: string; "xcode-version"?: string };
 	};
-	type Workflow = {
-		concurrency: { group: string; "cancel-in-progress": boolean };
-		jobs: Record<string, {
-			needs?: string | string[]; steps: Step[]; "runs-on"?: string;
-			strategy?: { matrix: { include: { os: string; platform: string; builder_args?: string }[] } };
-		}>;
+	type PlatformBuild = {
+		os: string;
+		platform: string;
+		builder_args?: string;
+		linux_unpacked?: string;
 	};
-	const yaml = require("js-yaml") as { load(source: string): Workflow };
+	type GitHubJob = {
+		"runs-on"?: string;
+		needs?: string | string[];
+		steps: Step[];
+		strategy?: { matrix: { include: PlatformBuild[] } };
+	};
+	type GitHubWorkflow = {
+		concurrency: { group: string; "cancel-in-progress": boolean };
+		jobs: Record<string, GitHubJob>;
+	};
+	const yaml = require("js-yaml") as { load(source: string): GitHubWorkflow };
 	const workflow = yaml.load(readFileSync(new URL("../.github/workflows/release.yml", import.meta.url), "utf8"));
 	const draft = workflow.jobs.draft;
 	const packaging = workflow.jobs.package;
@@ -410,6 +418,42 @@ describe("desktop release workflow", () => {
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
 		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
+	});
+
+	const linuxJobs = [
+		{
+			platform: "linux-x64",
+			os: "ubuntu-24.04",
+			builderArgs: "--linux --x64",
+			unpacked: "dist/linux-unpacked",
+		},
+		{
+			platform: "linux-arm64",
+			os: "ubuntu-24.04-arm",
+			builderArgs: "--linux --arm64",
+			unpacked: "dist/linux-arm64-unpacked",
+		},
+	];
+
+	for (const expected of linuxJobs) {
+		it(`packages ${expected.platform} natively on ${expected.os}`, () => {
+			const job = packaging.strategy?.matrix.include
+				.find(entry => entry.platform === expected.platform);
+
+			assert.equal(job?.os, expected.os, "Next traces native binaries for the build host's arch");
+			assert.equal(job?.builder_args, expected.builderArgs);
+			assert.equal(job?.linux_unpacked, expected.unpacked);
+		});
+	}
+
+	it("builds and boots linux-arm64 natively in ordinary CI", () => {
+		const ciUrl = new URL("../.github/workflows/ci.yml", import.meta.url);
+		const ci = yaml.load(readFileSync(ciUrl, "utf8"));
+
+		const ciArm = ci.jobs.standalone?.strategy?.matrix.include
+			.find(entry => entry.platform === "linux-arm64");
+
+		assert.equal(ciArm?.os, "ubuntu-24.04-arm", "Next traces native binaries for the build host's arch");
 	});
 
 	it("creates exactly one unpublished draft when none matches", async () => {
