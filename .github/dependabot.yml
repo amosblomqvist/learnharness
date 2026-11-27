@@ -1,0 +1,56 @@
+# Dependabot version updates.
+# Security-fix PRs also need "Dependabot security updates" enabled in
+# Settings → Code security; this file only shapes how they are grouped.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: chore
+      prefix-development: chore
+      include: scope
+    groups:
+      # One weekly PR for routine minor/patch bumps. Majors arrive one per PR.
+      npm-minor-patch:
+        applies-to: version-updates
+        update-types: [minor, patch]
+        patterns: ["*"]
+        # Fragile dependencies get their own PRs:
+        # - electron-updater: its runtime tree is listed by hand in
+        #   electron-builder.yml and must be kept in sync.
+        # - @earendil-works/*: the price drift guard fails until the
+        #   catalog is re-synced after a pi-ai bump.
+        # - electron, electron-builder, next: platform/packaging changes.
+        exclude-patterns:
+          - electron
+          - electron-updater
+          - electron-builder
+          - next
+          - "@next/*"
+          - "@earendil-works/*"
+      npm-security:
+        applies-to: security-updates
+        patterns: ["*"]
+        exclude-patterns:
+          - electron
+          - electron-updater
+          - electron-builder
+          - next
+          - "@next/*"
+          - "@earendil-works/*"
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    commit-message:
+      prefix: ci
+      include: scope
+    groups:
+      actions:
+        patterns: ["*"]
