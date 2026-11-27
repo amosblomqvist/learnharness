@@ -8,6 +8,7 @@ import { crc32, deflateRawSync } from "node:zlib";
 import { COMMUNITY_FEED_URL, communityListingReport, compatibleCommunityRelease, parseCommunityFeed } from "../src/core/community-catalog.ts";
 import { createCommunityPluginCatalog } from "../src/server/community-plugin-catalog.ts";
 import { createPluginHost, type PluginHostDependencies } from "../src/server/plugin-host.ts";
+import { createPluginTransport } from "../src/server/plugin-transport.ts";
 import { readCommunityPluginZip } from "../src/server/community-plugin-zip.ts";
 import { publishCatalogFiles } from "../src/server/community-plugin-files.ts";
 import seed from "../plugin-catalog/community-plugins.json";
@@ -47,8 +48,9 @@ function fixture(t: TestContext) {
 	const root = fs.mkdtempSync(path.join(tmpdir(), "lh-catalog-test-"));
 	const directory = path.join(root, "plugins"), core = path.join(root, "core"), state = path.join(root, "plugins-state.json");
 	const history: string[] = [];
+	const hooks: { enter?: () => void; pending?: Promise<void> } = {};
 	const deps: PluginHostDependencies = { directory, appVersion: "0.7.0", core: { directory: core, dataDirectory: path.join(root, "core-data"), ids: ["official"] },
-		createServices: () => { history.push("activate"); return { learning: { history }, agents: { dispose() {} }, workers: { dispose() {} } } as never; } };
+		createServices: () => { history.push("activate"); return { learning: { history, hooks }, agents: { dispose() {} }, workers: { dispose() {} } } as never; } };
 	const hosts = new Set<ReturnType<typeof createPluginHost>>();
 	function newHost() { const h = createPluginHost(deps); hosts.add(h); return h; }
 	let host = newHost();
@@ -66,7 +68,7 @@ function fixture(t: TestContext) {
 		return assetResponse ?? new Response(Uint8Array.from(bytes));
 	} });
 	const request = () => new Request("http://localhost/api/plugin-catalog");
-	return { directory, core, state, history, fetched, get host() { return host; },
+	return { directory, core, state, history, hooks, fetched, get host() { return host; },
 		async restart() { await host.dispose(); host = newHost(); await host.initialize(); },
 		async browse() { const response = await catalog.list(request()); return { status: response.status, body: await response.json() }; },
 		install(action = "Install", sha256 = current.sha256) { return catalog.install(id, new Request(request(), { method: "POST", body: JSON.stringify({ action, sha256 }) })); },
@@ -116,6 +118,55 @@ test("global off migrates only execution; explicit opt-in resumes previously ena
 	await f.host.setCommunityEnabled(true); await f.restart(); assert.equal(await f.host.call(id, "proof"), id);
 });
 
+for (const startup of [false, true]) test(`global Off fences an unfinished saved activation and keeps Core usable (${startup ? "startup" : "opt-in"})`, { timeout: 3000 }, async t => {
+	const f = fixture(t);
+	let entered!: () => void, releasePending!: () => void;
+	const began = new Promise<void>(resolve => { entered = resolve; });
+	f.hooks.enter = entered;
+	f.hooks.pending = new Promise<void>(resolve => { releasePending = resolve; });
+	const add = (pluginId: string, code: string) => {
+		const target = pluginId === "official" ? path.join(f.core, pluginId) : path.join(f.directory, pluginId, "dist");
+		fs.mkdirSync(target, { recursive: true });
+		fs.writeFileSync(path.join(target, "manifest.json"), manifest("1.0.0", { id: pluginId }));
+		fs.writeFileSync(path.join(target, "main.js"), frontend);
+		fs.writeFileSync(path.join(target, "backend.cjs"), code);
+	};
+	add("official", backend("core"));
+	add("a-ready", backend("ready"));
+	add("b-paused", `exports.activate = async ctx => {
+		const { hooks, history } = ctx.learning;
+		ctx.cleanup(() => history.push('paused cleanup'));
+		hooks.enter(); await hooks.pending;
+		try { ctx.handle('late', () => 'not admitted'); } catch { history.push('late registration refused'); }
+		return () => history.push('late cleanup');
+	};`);
+	add("c-after", "exports.activate = ctx => ctx.learning.history.push('unexpected later activation');");
+	const enabled = { official: true, "a-ready": true, "b-paused": true, "c-after": true };
+	fs.writeFileSync(f.state, JSON.stringify({ version: 1, enabled, communityEnabled: startup }));
+	await f.host.initialize({ backgroundCommunity: true });
+	const transport = createPluginTransport({ getHost: async () => f.host, directory: f.directory });
+	const mode = (allowed: boolean) => transport.setCommunityEnabled(new Request("http://localhost/api/plugins", { method: "PUT", body: JSON.stringify({ enabled: allowed }) }));
+	if (!startup) assert.equal((await (await mode(true)).json()).communityEnabled, true);
+	await began;
+	assert.equal((await (await transport.list()).json()).communityEnabled, true);
+	assert.equal(await f.host.call("a-ready", "proof"), "ready");
+	assert.equal((await (await mode(false)).json()).communityEnabled, false);
+	assert.equal(f.host.communityEnabled(), false);
+	assert.deepEqual(JSON.parse(fs.readFileSync(f.state, "utf8")).enabled, enabled);
+	assert.throws(() => f.host.asset("a-ready", ["main.js"]), /disabled/);
+	await assert.rejects(f.host.call("a-ready", "proof"), /disabled/);
+	assert.equal(await f.host.call("official", "proof"), "core");
+	assert.ok(f.host.asset("official", ["main.js"]).bytes.length);
+	await f.host.setEnabled("official", false); // Can drain the host queue before the plugin cooperates.
+	assert.ok(f.history.includes("paused cleanup"));
+	assert.equal(f.history.includes("unexpected later activation"), false);
+	releasePending(); await new Promise<void>(resolve => setImmediate(resolve));
+	await f.host.refresh();
+	assert.ok(f.history.includes("late registration refused"));
+	assert.ok(f.history.includes("late cleanup"));
+	assert.equal(f.history.includes("unexpected later activation"), false);
+});
+
 test("browse, install, update and restart do not execute a downloaded build before explicit Enable; data survives", async t => {
 	const f = fixture(t);
 	// A removed local package can leave an old enable bit for this ID.
@@ -156,8 +207,20 @@ test("bad feed selection, partial data, unexpected redirects and invalid package
 	f.setBuild(build()); assert.equal((await f.install()).status, 200);
 	f.setBuild(build("1.1.0"), "1.1.0");
 	const local = path.join(f.directory, id, "dist", "local.txt"); fs.writeFileSync(local, "local change");
+	assert.equal((await f.browse()).body.offers[0].action, null);
+	const requests = f.fetched.length;
 	assert.equal((await f.install("Update")).status, 409);
+	assert.deepEqual(f.fetched.slice(requests), [COMMUNITY_FEED_URL]);
 	assert.equal(fs.readFileSync(local, "utf8"), "local change"); assert.deepEqual(f.history, []);
+	fs.rmSync(local);
+	assert.equal((await f.browse()).body.offers[0].action, "Update");
+	const update = build("1.1.0");
+	f.setResponse(new Response(new ReadableStream({ pull(controller) {
+		fs.writeFileSync(local, "edited during download");
+		controller.enqueue(Uint8Array.from(update)); controller.close();
+	} }, { highWaterMark: 0 })));
+	assert.equal((await f.install("Update")).status, 409);
+	assert.equal(fs.readFileSync(local, "utf8"), "edited during download");
 });
 
 test("ZIP reader admits documented builds but rejects invalid paths, conflicting members and non-regular entries", () => {

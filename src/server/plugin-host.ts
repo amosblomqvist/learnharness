@@ -92,6 +92,8 @@ interface Package {
 	restart?: string;
 	blocked?: boolean;
 	contributionWarning?: string;
+	/** An interrupted asynchronous backend has not yet returned its cleanup. */
+	retiring?: Activation;
 }
 interface CatalogInstall { repository: string; revision: string; tree: string }
 interface State { version: 1; enabled: Record<string, boolean>; communityEnabled: boolean; catalog: Record<string, CatalogInstall> }
@@ -208,6 +210,8 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	const questionControllers = new WeakMap<QuestionDefinition, AbortController>();
 	const problemControllers = new WeakMap<NativePluginProblemDefinition, AbortController>();
 	let initialized = false, disposed = false, communityEnabled = false;
+	let communityGeneration = new AbortController();
+	let communityOffEpoch = 0;
 	let serial: Promise<unknown> = Promise.resolve();
 	let disposing: Promise<void> | undefined;
 	const assertOpen = () => { if (disposed) throw new PluginHostError(503, "Plugin host is disposed"); };
@@ -216,7 +220,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		const result = serial.then(fn); serial = result.catch(() => {}); return result;
 	};
 	const get = (id: string) => { const pkg = packages.get(id); if (!pkg) throw new PluginHostError(404, `Unknown plugin: ${id}`); return pkg; };
-	const live = (pkg: Package, activation: Activation) => !disposed && pkg.activation === activation && !activation.controller.signal.aborted;
+	const live = (pkg: Package, activation: Activation) => !disposed && (pkg.info.origin === "core" || communityEnabled) && pkg.activation === activation && !activation.controller.signal.aborted;
 
 	async function deactivate(pkg: Package): Promise<string[]> {
 		const activation = pkg.activation;
@@ -237,7 +241,8 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	}
 	async function activate(pkg: Package): Promise<void> {
 		assertOpen();
-		if (pkg.info.origin === "community" && !communityEnabled) return;
+		const gate = pkg.info.origin === "community" ? communityGeneration.signal : undefined;
+		if ((gate && !communityEnabled) || pkg.retiring) return;
 		if (!pkg.info.manifest || pkg.blocked || pkg.restart) {
 			pkg.info.status = "error";
 			return;
@@ -249,6 +254,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		const cleanup = (fn: PluginCleanup) => {
 			if (typeof fn !== "function") throw new Error("Plugin cleanup must be a function");
 			if (live(pkg, activation)) activation.cleanups.push(fn);
+			else if (gate?.aborted) void enqueue(async () => { await fn(); }).catch(() => {});
 			else { try { Promise.resolve(fn()).catch(() => {}); } catch { /* Late cleanup still gets a chance to release resources. */ } }
 		};
 		try {
@@ -345,8 +351,36 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					pkg.backend = loader.load(entry);
 					if (!pkg.backend || typeof pkg.backend.activate !== "function") throw new Error("Plugin backend must export activate(context)");
 				}
-				const returned = await pkg.backend.activate(ctx);
-				if (returned !== undefined) cleanup(returned);
+				const pending = Promise.resolve(pkg.backend.activate(ctx));
+				if (gate) {
+					const interrupted = Symbol();
+					let abort!: () => void;
+					const stop = new Promise<typeof interrupted>(resolve => { abort = () => resolve(interrupted); });
+					if (gate.aborted) abort(); else gate.addEventListener("abort", abort, { once: true });
+					let returned: PluginCleanup | void | typeof interrupted;
+					try { returned = await Promise.race([pending, stop]); }
+					finally { gate.removeEventListener("abort", abort); }
+					if (returned === interrupted) {
+						// Retire the old generation without waiting for its promise. Do
+						// not overlap two activations of this same package. Serialize any
+						// late returned cleanup behind ordinary teardown.
+						pkg.retiring = activation;
+						const finish = (late: PluginCleanup | void) => enqueue(async () => {
+							try { if (typeof late === "function") await late(); }
+							finally { if (pkg.retiring === activation) delete pkg.retiring; }
+							if (!disposed && communityEnabled && pkg.info.enabled && !pkg.activation && packages.get(pkg.info.id) === pkg) {
+								await activate(pkg); change();
+							}
+						});
+						void pending.then(finish, () => finish()).catch(() => {});
+						// The queued Off owns cleanup (and its diagnostics).
+						return;
+					}
+					if (returned !== undefined) cleanup(returned);
+				} else {
+					const returned = await pending;
+					if (returned !== undefined) cleanup(returned);
+				}
 			}
 			if (!live(pkg, activation)) { await deactivate(pkg); pkg.info.status = "disabled"; return; }
 			activation.ready = true;
@@ -405,15 +439,65 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			pkg.info.error = [pkg.restart, pkg.contributionWarning].filter(Boolean).join("; ");
 		}
 	}
-	async function initializeInternal(): Promise<void> {
+	async function resumeCommunity(state: State) {
+		const gate = communityGeneration.signal;
+		for (const pkg of packages.values()) {
+			if (gate.aborted || !communityEnabled || disposed) break;
+			if (pkg.info.origin !== "community" || state.enabled[pkg.info.id] !== true || pkg.activation || pkg.blocked) continue;
+			pkg.info.enabled = true;
+			await activate(pkg);
+			if (!gate.aborted) change();
+		}
+	}
+	function background(task: Promise<void>) {
+		void task.catch(error => { if (!disposed) console.error("Community plugin lifecycle failed:", errorText(error)); });
+	}
+	async function initializeInternal(backgroundCommunity = false): Promise<void> {
 		assertOpen();
 		if (initialized) return;
 		const state = readState(stateFile); // Never hide corrupt/future state or execute code first.
 		fs.mkdirSync(directory, { recursive: true });
-		if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new Error("Unsafe plugins directory");
+		pluginRoot(directory);
 		communityEnabled = state.communityEnabled;
-		await discover(state);
+		await discover(state, false);
 		initialized = true; change();
+		if (!communityEnabled) return;
+		if (backgroundCommunity) {
+			const gate = communityGeneration.signal;
+			background(enqueue(async () => { if (!gate.aborted) await resumeCommunity(readState(stateFile)); }));
+		} else await resumeCommunity(state);
+	}
+
+	function disableCommunity(backgroundCleanup = false): Promise<void> {
+		assertOpen();
+		if (!initialized) return enqueue(async () => { await initializeInternal(true); }).then(() => disableCommunity(backgroundCleanup));
+		const state = readState(stateFile);
+		if (state.communityEnabled) {
+			state.communityEnabled = false;
+			writeState(stateFile, state);
+		}
+		communityOffEpoch++;
+		communityEnabled = false; // Fence admission/host surfaces before abort handlers or observers run.
+		const community = [...packages.values()].filter(pkg => pkg.info.origin === "community");
+		const previousGate = communityGeneration;
+		for (const pkg of community) {
+			pkg.info.enabled = false;
+			if (!pkg.blocked) pkg.info.status = "disabled";
+		}
+		const stopped = enqueue(async () => {
+			for (const pkg of community) {
+				delete pkg.contributionWarning;
+				const failures = await deactivate(pkg);
+				pkg.info.status = failures.length || pkg.blocked ? "error" : "disabled";
+				pkg.info.error = failures.length ? `Cleanup: ${failures.join("; ")}` : pkg.restart ?? (pkg.blocked ? pkg.info.error : undefined);
+			}
+			change();
+		});
+		previousGate.abort();
+		for (const pkg of community) pkg.activation?.controller.abort();
+		change();
+		if (backgroundCleanup) { background(stopped); return Promise.resolve(); }
+		return stopped;
 	}
 
 	function catalogAction(listing: CommunityListing, release: CommunityRelease): "Install" | "Update" | null {
@@ -424,7 +508,9 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		if (!exists(root)) return pkg && (!pkg.blocked || pkg.info.manifest) ? null : "Install";
 		if (!pkg?.info.manifest || pkg.info.enabled || pkg.activation || pkg.restart || pkg.blocked) return null;
 		const state = readState(stateFile), previous = state.catalog[listing.id];
-		return previous?.repository === listing.repository && previous.revision === pkg.info.revision && state.enabled[listing.id] !== true && compareCommunityVersions(release.version, pkg.info.manifest.version) > 0 ? "Update" : null;
+		if (previous?.repository !== listing.repository || previous.revision !== pkg.info.revision || state.enabled[listing.id] === true || compareCommunityVersions(release.version, pkg.info.manifest.version) <= 0 || pkg.retiring) return null;
+		try { pluginRoot(root); } catch { return null; }
+		return catalogTreeDigest(path.join(root, "dist")) === previous.tree ? "Update" : null;
 	}
 
 	/** One synchronous per-turn snapshot. Failed packages contribute nothing, not even instructions. */
@@ -536,7 +622,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	}
 
 	return {
-		initialize: () => enqueue(initializeInternal),
+		initialize: (options?: { backgroundCommunity: boolean }) => enqueue(() => initializeInternal(options?.backgroundCommunity)),
 		agentContributions,
 		resolveQuestionType(pluginId: string, typeId: string, contractVersion: number): PluginQuestionResolution {
 			assertOpen();
@@ -579,10 +665,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				if (signal.aborted || catalogAction(listing, release) !== action) throw new PluginHostError(409, "Plugin availability changed. Refresh Browse.");
 				const state = readState(stateFile), root = path.join(directory, listing.id), update = action === "Update";
 				if (!state.communityEnabled) throw new PluginHostError(409, "Community plugins are off.");
-				if (update) {
-					pluginRoot(root);
-					if (catalogTreeDigest(path.join(root, "dist")) !== state.catalog[listing.id]?.tree) throw new PluginHostError(409, "Local plugin files changed. The catalog did not overwrite them.");
-				}
+				// catalogAction above rechecks the on-disk build under the host queue.
 				// Clear any orphaned prior enable bit BEFORE the new code can appear on disk.
 				if (state.enabled[listing.id] !== false) { state.enabled[listing.id] = false; writeState(stateFile, state); }
 				let candidate: Package | undefined;
@@ -603,37 +686,31 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				change(); // Deliberately no discovery or activation here.
 			});
 		},
-		setCommunityEnabled(enabled: boolean): Promise<void> {
-			if (!enabled) for (const pkg of packages.values()) {
-				if (pkg.info.origin === "community" && pkg.activation && !pkg.activation.ready) pkg.activation.controller.abort();
-			}
-			return enqueue(async () => {
-				assertOpen(); await initializeInternal();
-				if (enabled === communityEnabled) return;
+		async setCommunityEnabled(enabled: boolean, options?: { background: boolean }): Promise<void> {
+			if (!enabled) return disableCommunity(options?.background);
+			const offEpoch = communityOffEpoch;
+			let resume: Promise<void> | undefined;
+			await enqueue(async () => {
+				assertOpen(); await initializeInternal(true);
+				if (communityEnabled || offEpoch !== communityOffEpoch) return;
 				const state = readState(stateFile);
-				state.communityEnabled = enabled;
+				state.communityEnabled = true;
 				writeState(stateFile, state);
-				communityEnabled = enabled;
-				if (!enabled) {
-					const community = [...packages.values()].filter(pkg => pkg.info.origin === "community");
-					for (const pkg of community) pkg.info.enabled = false;
-					const stopping = community.map(async pkg => {
-						delete pkg.contributionWarning;
-						const failures = await deactivate(pkg);
-						pkg.info.status = failures.length || pkg.blocked ? "error" : "disabled";
-						pkg.info.error = failures.length ? `Cleanup: ${failures.join("; ")}` : pkg.restart ?? (pkg.blocked ? pkg.info.error : undefined);
-					});
-					change(); await Promise.all(stopping);
-				} else {
-					await discover(state, false);
-					for (const pkg of packages.values()) {
-						if (pkg.info.origin !== "community" || state.enabled[pkg.info.id] !== true || pkg.activation) continue;
-						pkg.info.enabled = true;
-						await activate(pkg);
-					}
-				}
+				communityGeneration = new AbortController();
+				communityEnabled = true;
+				const gate = communityGeneration.signal;
+				resume = enqueue(async () => {
+					if (gate.aborted || disposed) return;
+					const current = readState(stateFile);
+					await discover(current, false);
+					if (!gate.aborted) await resumeCommunity(current);
+				});
 				change();
 			});
+			if (resume) {
+				if (options?.background) background(resume);
+				else await resume;
+			}
 		},
 		setEnabled(id: string, enabled: boolean): Promise<void> {
 			// Let a cooperative in-flight activation finish so queued teardown cannot deadlock.
@@ -645,7 +722,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				assertOpen(); await initializeInternal();
 				if (!PLUGIN_ID_PATTERN.test(id) || typeof enabled !== "boolean") throw new PluginHostError(400, "Invalid plugin enable request");
 				const pkg = get(id);
-				if (enabled && pkg.info.origin === "community" && !communityEnabled) throw new PluginHostError(409, "Community plugins are off.");
+				if (enabled && pkg.info.origin === "community" && (!communityEnabled || pkg.retiring)) throw new PluginHostError(409, pkg.retiring ? "A previous plugin activation is still stopping." : "Community plugins are off.");
 				if (enabled && pkg.info.restartRequired) throw new PluginHostError(409, pkg.restart ?? "Restart required before enabling this build");
 				const state = readState(stateFile); // Recheck before overwriting externally changed state.
 				state.enabled[id] = enabled; writeState(stateFile, state);
@@ -695,7 +772,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		asset(id: string, segments: string[]): { bytes: Uint8Array; contentType: string } {
 			assertOpen();
 			const pkg = get(id), manifest = pkg.info.manifest;
-			if (!pkg.info.enabled || pkg.info.status !== "active" || !manifest || pkg.blocked) throw new PluginHostError(409, "Plugin assets are disabled or unavailable");
+			if (!pkg.info.enabled || pkg.info.status !== "active" || !manifest || pkg.blocked || !pkg.activation?.ready || !live(pkg, pkg.activation)) throw new PluginHostError(409, "Plugin assets are disabled or unavailable");
 			if (!segments.length || !segments.every(safeSegment)) throw new PluginHostError(400, "Invalid plugin asset path");
 			const file = segments.join("/");
 			if (!(segments.length === 1 && (file === manifest.main || file === manifest.styles)) && !(segments.length > 1 && segments[0] === "assets")) throw new PluginHostError(404, "Plugin asset is not allowlisted");

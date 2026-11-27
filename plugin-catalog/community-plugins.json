@@ -5,7 +5,7 @@
       "id": "activity-heatmap",
       "name": "Activity heatmap",
       "author": "Huskhd",
-      "description": "A year-at-a-glance map of the days you studied, how intensely, and your streaks. Reads your sessions; never changes them.",
+      "description": "A year-at-a-glance heat map of study days, activity, and streaks.",
       "repository": "Huskhd/learnharness-activity-heatmap",
       "releases": []
     },

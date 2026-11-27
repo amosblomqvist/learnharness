@@ -562,6 +562,29 @@ describe("plugin management transport and window ownership", () => {
 		f.manager.dispose();
 	});
 
+	it("global Off remains actionable when the opt-in truth reload is still pending", async () => {
+		const stale = deferred<Response>();
+		const modes: boolean[] = [];
+		let reads = 0;
+		const f = fixture({ activate() {} }, { fetch: async (_url, init) => {
+			if (init?.method === "PUT") {
+				const { enabled } = JSON.parse(String(init.body)); modes.push(enabled);
+				return Response.json({ communityEnabled: enabled });
+			}
+			return ++reads === 2 ? stale.promise : Response.json({ plugins: [], directory: "/fixture", communityEnabled: false });
+		} });
+		await f.manager.reload();
+		const on = f.manager.setCommunityEnabled(true); await tick();
+		assert.equal(f.manager.getSnapshot().communityEnabled, true);
+		assert.equal(f.manager.getSnapshot().communityChanging, false);
+		await f.manager.setCommunityEnabled(false);
+		stale.resolve(Response.json({ plugins: [info()], communityEnabled: true })); await on;
+		assert.deepEqual(modes, [true, false]);
+		assert.equal(f.manager.getSnapshot().communityEnabled, false);
+		assert.equal(f.imports.length, 0);
+		f.manager.dispose();
+	});
+
 	it("failed management requests stay visible after the truth reload", async () => {
 		const f = fixture({ activate() {} }, { fetch: async (_url, init) => init?.method === "PUT"
 			? Response.json({ error: "cannot write plugin state" }, { status: 500 })

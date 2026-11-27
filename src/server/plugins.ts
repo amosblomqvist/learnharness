@@ -98,7 +98,8 @@ function runtime(): Runtime {
 		for (const [id, error] of Object.entries(recoverPluginTaskRecords(pluginDirectory, coreData))) {
 			installationErrors[id] = `Task recovery failed: ${error}`;
 		}
-		await host.initialize();
+		// List and Off stay available during asynchronous saved community activation.
+		await host.initialize({ backgroundCommunity: true });
 	});
 	global.__lhPlugins = { host, ready };
 	return global.__lhPlugins;

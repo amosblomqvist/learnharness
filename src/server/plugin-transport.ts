@@ -6,7 +6,7 @@ import type { PluginFrontendContext, PluginInfo } from "../core/plugins.ts";
 export interface PluginTransportHost {
 	list(): PluginInfo[];
 	communityEnabled?(): boolean;
-	setCommunityEnabled?(enabled: boolean): Promise<void>;
+	setCommunityEnabled?(enabled: boolean, options: { background: boolean }): Promise<void>;
 	conflicts(): { id: string; error: string }[];
 	refresh(): Promise<void>;
 	setEnabled(id: string, enabled: boolean): Promise<void>;
@@ -45,7 +45,7 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
 			if (typeof body.enabled !== "boolean") throw new InputError("enabled must be a boolean");
 			const host = await deps.getHost();
 			if (!host.setCommunityEnabled) return json({ error: "Community plugin mode unavailable" }, 503);
-			await host.setCommunityEnabled(body.enabled);
+			await host.setCommunityEnabled(body.enabled, { background: true });
 			return json(catalog(host));
 		}),
 		setEnabled: (id: string, request: Request) => guarded(async () => {

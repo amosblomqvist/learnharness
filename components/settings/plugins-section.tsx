@@ -17,17 +17,18 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 	const [browse, setBrowse] = useState(false);
 	const core = origin === "core";
 	const allowed = snapshot.communityEnabled === true;
-	const busy = snapshot.loading || snapshot.refreshing || snapshot.communityChanging || snapshot.plugins.some(plugin => plugin.busy);
+	const modeBusy = snapshot.loading || snapshot.communityChanging || (!allowed && (snapshot.refreshing || snapshot.plugins.some(plugin => plugin.busy)));
 	const plugins = snapshot.plugins.filter(plugin => plugin.info.origin === origin);
 	return <SettingsSection title={core ? "Core plugins" : "Community plugins"} testid={core ? "section-core-plugins" : "section-plugins"}>
 		{snapshot.error && <p role="alert" className="text-xs text-destructive">{snapshot.error}</p>}
 		{!core && <SettingsRow label="Allow community plugins" hint={allowed ? "On" : "Off"}>
-			<Toggle label="Allow community plugins" checked={allowed} disabled={!manager || busy} onChange={enabled => { setBrowse(false); void manager?.setCommunityEnabled(enabled); }} />
+			<Toggle label="Allow community plugins" checked={allowed} disabled={!manager || modeBusy} onChange={enabled => { setBrowse(false); void manager?.setCommunityEnabled(enabled); }} />
 		</SettingsRow>}
 		{!core && !allowed && <p className="font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING}</p>}
 		{!core && allowed && browse && !snapshot.communityChanging && <CommunityPluginBrowser onBack={() => setBrowse(false)} onInstall={() => { void manager?.reload(); }} />}
 		{(core || (allowed && !browse && !snapshot.communityChanging)) && <>
 		{!core && <><div className="flex items-center justify-between gap-3"><h3 className="text-sm font-semibold">Installed</h3><Button variant="outline" size="sm" onClick={() => setBrowse(true)}>Browse</Button></div>
+		<p className="text-xs text-muted-foreground">Community plugins are unreviewed and not sandboxed. Only enable plugins you trust.</p>
 		<details data-testid="plugin-install-help" className="text-xs text-muted-foreground">
 			<summary className="w-fit cursor-pointer list-none text-muted-foreground underline underline-offset-2 hover:text-foreground [&::-webkit-details-marker]:hidden">Manual installation and authoring</summary>
 			<ol className="mt-2 list-decimal space-y-2 pl-5">
@@ -76,7 +77,7 @@ function PluginRow({ plugin, onSettings }: { plugin: FrontendPlugin; onSettings:
 			</div>
 		</SettingsRow>
 		{info.origin === "community" && info.manifest && <p className="mt-1 text-xs text-muted-foreground">
-			Publisher: {info.manifest.author || info.repository?.split("/")[0] || "Unknown"} · {info.repository ? <a className={pluginLinkClass} href={communitySource(info.repository)} target="_blank" rel="noreferrer">GitHub source</a> : "Local package · source not verified"}
+			Declared author: {info.manifest.author || "Not provided"} · {info.repository ? <>Catalog source: <a className={pluginLinkClass} href={communitySource(info.repository)} target="_blank" rel="noreferrer">{info.repository}</a></> : "Local package · source not verified"}
 		</p>}
 		{info.manifest?.description && <p className="mt-1 font-prose text-sm text-muted-foreground">{info.manifest.description}</p>}
 		{plugin.error && <p role="alert" className="mt-2 break-words text-xs text-destructive">{plugin.error}</p>}

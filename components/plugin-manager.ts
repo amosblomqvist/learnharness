@@ -508,19 +508,22 @@ export class PluginFrontendManager {
 		}
 	}
 	async setCommunityEnabled(enabled: boolean) {
-		if (this.disposed || this.mutations) return;
+		if (this.disposed || this.snapshot.communityChanging || (enabled && this.mutations)) return;
 		this.mutations++; this.requestGeneration++;
 		if (!enabled) this.reconcile(this.infos.map(info => info.origin === "community" ? { ...info, enabled: false, status: "disabled" } : info));
 		this.publish({ communityChanging: true, error: undefined });
 		try {
-			await this.json("/api/plugins", {
+			const body = await this.json("/api/plugins", {
 				method: "PUT", headers: { "content-type": "application/json" }, body: JSON.stringify({ enabled }),
-			});
+			}) as { communityEnabled: boolean };
+			this.publish({ communityEnabled: body.communityEnabled === true });
 		} catch (error) { this.publish({ error: message(error) }); }
 		finally {
 			this.requestGeneration++; this.mutations--;
-			await this.reload(false);
+			// Off must be actionable as soon as opt-in is acknowledged, not
+			// after a truth reload or completion of any plugin activation.
 			this.publish({ communityChanging: false });
+			await this.reload(false);
 		}
 	}
 	async refresh() {
