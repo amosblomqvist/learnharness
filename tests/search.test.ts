@@ -11,7 +11,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider } from "../src/server/search.ts";
+import { resolveSearchEngineFor, tavilyProvider, braveProvider, exaProvider, firecrawlProvider, ollamaProvider, searxngProvider } from "../src/server/search.ts";
 import { SEARCH_ENGINES, isSearchEngineId, type SearchEngineId } from "../src/core/search.ts";
 
 describe("resolveSearchEngineFor (the auto-detect decision)", () => {
@@ -285,9 +285,63 @@ describe("ollamaProvider (hosted search only)", () => {
 	});
 });
 
-describe("five-engine catalog and resolution", () => {
+describe("searxngProvider (self-hosted, keyless — the value is the base URL)", () => {
+	it("GETs {instance}/search?format=json and maps the rows, slicing to count", async () => {
+		const provider = searxngProvider("http://127.0.0.1:8080/", stubFetch({ results: [
+			{ title: "Vikipedi", url: "https://tr.wikipedia.org/wiki/Türkiye", content: "line1\nline2", engine: "wikipedia" },
+			{ url: "https://example.org/untitled", content: "no title" },
+			{ title: "bad protocol", url: "javascript:alert(1)", content: "dropped" },
+			{ title: "No URL", content: "dropped" },
+			null,
+			{ title: "sixth", url: "https://example.com/6", content: "beyond count" },
+		] }, (url, init) => {
+			const parsed = new URL(url);
+			assert.equal(`${parsed.origin}${parsed.pathname}`, "http://127.0.0.1:8080/search");
+			assert.equal(parsed.searchParams.get("q"), "test query");
+			assert.equal(parsed.searchParams.get("format"), "json");
+			assert.equal(init.method, undefined);
+			assert.ok(init.signal);
+		}));
+		assert.deepEqual(await provider.search("test query", 5), [
+			{ title: "Vikipedi", url: "https://tr.wikipedia.org/wiki/Türkiye", snippet: "line1 line2" },
+			{ title: "https://example.org/untitled", url: "https://example.org/untitled", snippet: "no title" },
+		]);
+	});
+
+	it("keeps a path prefix on the base URL", async () => {
+		const seen: string[] = [];
+		const provider = searxngProvider("https://search.example.com/searxng", async (url) => {
+			seen.push(String(url));
+			return new Response(JSON.stringify({ results: [] }), { status: 200 });
+		});
+		await provider.search("q", 3);
+		assert.equal(seen[0], "https://search.example.com/searxng/search?q=q&format=json");
+	});
+
+	it("reports HTTP status without exposing the response body", async () => {
+		const provider = searxngProvider("http://127.0.0.1:8080", async () => new Response("Forbidden", { status: 403 }));
+		await assert.rejects(provider.search("q", 5), /SearXNG search API 403$/);
+	});
+
+	it("rejects a non-JSON body and an unusable base URL", async () => {
+		const badJson = searxngProvider("http://127.0.0.1:8080", async () => new Response("<html>", { status: 200 }));
+		await assert.rejects(badJson.search("q", 5), /invalid response/);
+		const badUrl = searxngProvider("not a url", async () => new Response("{}", { status: 200 }));
+		await assert.rejects(badUrl.search("q", 5), /not a valid http\(s\) address/);
+	});
+
+	it("pins the honest missing-variable wording", () => {
+		const out = resolveSearchEngineFor("searxng", { tavily: "tvly-throwaway-key-00001" });
+		assert.ok(!out.available);
+		assert.match(out.reason, /instance URL is missing/);
+		assert.match(out.reason, /SEARXNG_URL/);
+		assert.doesNotMatch(out.reason, /API key/);
+	});
+});
+
+describe("engine catalog and resolution", () => {
 	it("pins the approved Automatic order independently of table-driven tests", () => {
-		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama"]);
+		assert.deepEqual(SEARCH_ENGINES.map(({ id }) => id), ["tavily", "brave", "exa", "firecrawl", "ollama", "searxng"]);
 		assert.equal(isSearchEngineId("chatgpt"), false);
 		assert.equal(isSearchEngineId("deepseek"), false);
 		for (const value of [null, {}, 1, "", "toString"]) assert.equal(isSearchEngineId(value), false);
