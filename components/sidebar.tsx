@@ -4,9 +4,9 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { MenuShell } from "@/components/menu-shell";
-import { DeleteSessionDialog } from "@/components/delete-session-dialog";
+import { DeleteFolderDialog, DeleteSessionDialog, folderDeleteCopy, type DeleteDialogCopy } from "@/components/delete-session-dialog";
 import type { ChatDeleteMode, ThemeMode } from "@/src/core";
-import { DumbbellIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
+import { DumbbellIcon, FolderPlusIcon, PanelLeftCloseIcon, PanelLeftOpenIcon, PlusIcon, SearchIcon, SettingsIcon } from "lucide-react";
 import { ActivitySection } from "@/components/activity-dock";
 import { CoverageMenuBlock } from "@/components/extraction-coverage";
 import { LhMark } from "@/components/lh-mark";
@@ -17,7 +17,12 @@ import { Hint } from "@/components/ui/hint";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { cn } from "@/lib/utils";
-import { fuzzyScore } from "@/src/core";
+import { buildSessionTree, flattenSessionTree, folderDeletionScope, placementOf, type FolderDeletionScope, type SessionTreeNode } from "@/src/core";
+import { useSourceDirectory } from "@/components/source-directory";
+import { NewFolderRow, SidebarFolderRow, SidebarFolderRule, SIDEBAR_COMPACT_ROW, sidebarNameFont, sidebarRail, sidebarRowBox, useOpenFolders, useSidebarDrop } from "@/components/sidebar-folders";
+import { useAppearance } from "@/components/settings/appearance";
+import { SourceDragRow } from "@/components/source-folder-tree";
+import { OverlayScrollArea } from "@/components/overlay-scroll";
 import { useServerEvent, useServerResync } from "@/components/server-events";
 import type { ChatListItem } from "@/src/core";
 import { kbdEventForAction } from "@/src/core";
@@ -27,6 +32,7 @@ import { PluginSidebarActions } from "@/components/plugin-chrome";
 import { HostContentRootContext, HostRouteLifetimeProvider } from "@/components/host-content-root";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { InteractionLayersProvider, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
+import { StartupMessage, type StartupMessageOffer } from "@/components/startup-message";
 
 /**
  * Toggleable sidebar — NOT a modal drawer: no backdrop, no focus theft. It
@@ -90,6 +96,8 @@ declare global {
 			checkForUpdates?: () => Promise<void>;
 			installUpdate?: () => void;
 			onOpenSettings?: (cb: (section: string) => void) => () => void;
+			takeStartupMessage?: () => Promise<StartupMessageOffer | null>;
+			dismissStartupMessage?: (id: string) => Promise<boolean>;
 		};
 	}
 }
@@ -301,10 +309,15 @@ export function SessionRow({
 	onOpen,
 	kbdSelected = false,
 	onContextMenu,
+	depth = 0,
+	compact = false,
 }: {
 	chat: ChatListItem;
+	compact?: boolean;
 	active: boolean;
 	onOpen: () => void;
+	/** Folder depth in the sidebar tree (0 = unfiled). */
+	depth?: number;
 	/** Keyboard-cycle highlight (shortcut wave A: Alt+↑/↓ + Alt+Enter) —
 	 *  visually distinct from the active session, which stays filled. */
 	kbdSelected?: boolean;
@@ -317,21 +330,19 @@ export function SessionRow({
 			onClick={onOpen}
 			onContextMenu={onContextMenu}
 			data-testid={kbdSelected ? "session-row-kbd" : "session-row"}
+			data-session-id={chat.id}
 			className={cn(
-				"relative mb-0.5 flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left transition-colors hover:bg-accent",
+				"relative flex w-full items-center gap-2 pr-3 text-left hover:bg-accent",
+				compact ? SIDEBAR_COMPACT_ROW : "py-2",
 				active && "bg-accent",
-				kbdSelected && !active && "bg-accent/60 ring-1 ring-border",
+				kbdSelected && !active && "bg-accent/60 ring-1 ring-inset ring-border",
 			)}
+			style={{ paddingLeft: sidebarRowBox(depth).paddingLeft }}
 		>
 			<SessionStatus busy={chat.busy || chat.compacting} />
 			<span className="min-w-0 flex-1">
-				{/* Titles are the learner's/teacher's WORDS — Source Sans 3, the
-				    same voice the words were typed in (every input is lh-prose);
-				    the meta line below stays JetBrains Mono (machine data). One
-				    rule, finally applied to the picker too (owner, typography
-				    round): mono = chrome, Source Sans = human words. */}
-				<span className="block truncate font-prose text-(length:--lh-prose-size)">{chat.title}</span>
-				<span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				<span className={cn("block truncate", sidebarNameFont(compact))}>{chat.title}</span>
+				{!compact && <span className="block text-xs text-muted-foreground">{sessionMeta(chat)}</span>}
 			</span>
 			{/* The dumbbell rides the FAR RIGHT (owner round 6, 2026-10-05) —
 			    was left of the name; right-aligned keeps the titles flush with
@@ -346,8 +357,8 @@ export function SessionRow({
 /** The inline-rename row (wave 6): same geometry as SessionRow, but the
  *  title line becomes a text input — select-all on entry (the click means
  *  "replace", the header rename's rule), Enter/blur commits, Esc discards.
- *  The meta line stays so the row never changes height mid-edit. */
-export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; onCommit: (next: string) => void; onCancel: () => void }) {
+ *  The row retains the list's density mid-edit. */
+export function RenameRow({ chat, onCommit, onCancel, depth = 0, compact = false }: { chat: ChatListItem; onCommit: (next: string) => void; onCancel: () => void; depth?: number; compact?: boolean }) {
 	const [draft, setDraft] = useState(chat.title);
 	const interactions = useOptionalInteractionLayers();
 	const inputRef = useRef<HTMLInputElement | null>(null);
@@ -361,7 +372,8 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 	return (
 		<div
 			data-testid="session-rename-row"
-			className="relative mb-0.5 flex w-full items-center rounded-lg bg-accent px-3 py-2"
+			className={cn("relative flex w-full items-center bg-accent pr-3", compact ? SIDEBAR_COMPACT_ROW : "py-2")}
+			style={{ paddingLeft: sidebarRowBox(depth).paddingLeft }}
 		>
 			{/* NOTHING MOVES (owner, polish round): an idle row renders no
 			    status spacer (SessionStatus is null when not busy), so the
@@ -388,9 +400,9 @@ export function RenameRow({ chat, onCommit, onCancel }: { chat: ChatListItem; on
 					}}
 					aria-label="Rename session"
 					data-testid="session-rename-input"
-					className="lh-input w-full min-w-0 truncate border-0 border-b border-border bg-transparent px-0 text-foreground outline-none"
+					className={cn("w-full min-w-0 truncate border-0 border-b border-border bg-transparent px-0 text-foreground outline-none", compact ? sidebarNameFont(true) : "lh-input")}
 				/>
-				<span className="block truncate text-xs text-muted-foreground">{sessionMeta(chat)}</span>
+				{!compact && <span className="block truncate text-xs text-muted-foreground">{sessionMeta(chat)}</span>}
 			</span>
 		</div>
 	);
@@ -403,6 +415,7 @@ export type SessionKindFilter = "teach" | "all" | "practice";
 const KIND_FILTER_KEY = "lh:session-kind-filter";
 
 function SessionsSidebar() {
+	const { appearance: { compactSessionList } } = useAppearance();
 	const interactions = useInteractionLayers();
 	const { open, toggle } = useSidebar();
 	const [chats, setChats] = useState<ChatListItem[] | null>(null);
@@ -429,22 +442,40 @@ function SessionsSidebar() {
 	}, [router]);
 
 	/* FUZZY (owner round 8, 2026-10-05): subsequence match ranked by
-	 * fuzzyScore — prefix beats word-boundary beats scattered. Empty query
-	 * keeps the natural list order (scores are all 0, sort is stable). */
-	const shown = useMemo(() => {
-		const q = query.trim();
-		let list = chats;
-		if (list && kindFilter !== "all") {
-			list = list.filter((c) => (c.kind ?? "teach") === kindFilter);
+	 * fuzzyScore — prefix beats word-boundary beats scattered. FOLDERS
+	 * (approved plan): the list is the shared source organization's tree;
+	 * the type filter still narrows sessions first, search keeps matching
+	 * titles only, and each tree level ranks by match while searching.
+	 * Outside search every level orders by recent activity. Any active
+	 * filter or search hides folders without matches. */
+	const { directory, failure: folderFailure, clearFailure: clearFolderFailure, reportFailure: reportFolderFailure, change: changeFolders } = useSourceDirectory(open);
+	const organization = directory?.organization;
+	const { openFolders, setOpen: setFolderOpen } = useOpenFolders();
+	const searching = query.trim() !== "";
+	// Search shows every folder open; collapsing one there affects only that
+	// search, never the remembered open/closed state.
+	const [searchFolds, setSearchFolds] = useState<{ query: string; ids: ReadonlySet<string> }>({ query: "", ids: new Set() });
+	const searchFolded = useCallback((id: string) => searchFolds.query === query && searchFolds.ids.has(id), [searchFolds, query]);
+	const isFolderOpen = useCallback((id: string) => searching ? !searchFolded(id) : openFolders.has(id), [searching, searchFolded, openFolders]);
+	const toggleFolder = useCallback((id: string) => {
+		if (searching) {
+			setSearchFolds((previous) => {
+				const ids = new Set(previous.query === query ? previous.ids : []);
+				if (ids.has(id)) ids.delete(id); else ids.add(id);
+				return { query, ids };
+			});
+			return;
 		}
-		if (!list) return list;
-		if (!q) return list;
-		return list
-			.map((c) => ({ c, score: fuzzyScore(q, c.title) }))
-			.filter((r): r is { c: (typeof list)[number]; score: number } => r.score !== null)
-			.sort((a, b) => b.score - a.score)
-			.map((r) => r.c);
-	}, [chats, query, kindFilter]);
+		setFolderOpen(id, !openFolders.has(id));
+	}, [searching, query, openFolders, setFolderOpen]);
+	const tree = useMemo(() => {
+		if (!chats) return null;
+		const include = kindFilter === "all" ? undefined : (c: ChatListItem) => (c.kind ?? "teach") === kindFilter;
+		return buildSessionTree(chats, organization, { query, include });
+	}, [chats, kindFilter, organization, query]);
+	const rows = useMemo(() => tree && flattenSessionTree(tree, isFolderOpen), [tree, isFolderOpen]);
+	// The keyboard walk follows the visible session rows in tree order.
+	const shown = useMemo(() => rows?.flatMap((r) => r.type === "session" ? [r.session] : []) ?? null, [rows]);
 
 	const refreshInFlightRef = useRef(false);
 	const refresh = useCallback(async () => {
@@ -568,6 +599,7 @@ function SessionsSidebar() {
 	const openContext = (e: React.MouseEvent<HTMLButtonElement>, chat: ChatListItem) => {
 		e.preventDefault(); // suppress the native menu
 		ctxAnchorRef.current = e.currentTarget;
+		setCtxFolderId(null);
 		setCtxChatId(chat.id);
 	};
 
@@ -637,12 +669,12 @@ function SessionsSidebar() {
 		return () => window.removeEventListener("lh:kbd-sessions-search", onFocusSearch);
 	}, [open, toggle, interactions]);
 
-	// Keep the kbd-selected row in view (the rows are the container's only
-	// buttons, so the index matches).
+	// Keep the kbd-selected row in view.
+	const kbdId = kbdIndex === null ? null : shown?.[kbdIndex]?.id ?? null;
 	useEffect(() => {
-		if (kbdIndex === null) return;
-		listRef.current?.querySelectorAll("button")[kbdIndex]?.scrollIntoView({ block: "nearest" });
-	}, [kbdIndex]);
+		if (kbdId === null) return;
+		listRef.current?.querySelector(`[data-session-id="${CSS.escape(kbdId)}"]`)?.scrollIntoView({ block: "nearest" });
+	}, [kbdId]);
 
 	useEffect(() => {
 		if (!open) return;
@@ -650,6 +682,142 @@ function SessionsSidebar() {
 		// Opening + navigation refetch; while open, the events channel owns
 		// freshness (S6) — no interval, nothing standing.
 	}, [open, pathname, refresh]);
+
+	/* ── Folders (approved plan): drag to move, right-click a folder for
+	   Rename / New subfolder / Delete. ── */
+	const folderDrop = useSidebarDrop(organization, changeFolders);
+	const [creatingFolder, setCreatingFolder] = useState<{ parentId: string | null } | null>(null);
+	const [renamingFolderId, setRenamingFolderId] = useState<string | null>(null);
+	const [ctxFolderId, setCtxFolderId] = useState<string | null>(null);
+	const [deletingFolder, setDeletingFolder] = useState<{ id: string; name: string; copy: DeleteDialogCopy; scope: FolderDeletionScope } | null>(null);
+	const folderAnchorRef = useRef<HTMLElement | null>(null);
+	const openFolderContext = (e: React.MouseEvent<HTMLButtonElement>, id: string) => {
+		e.preventDefault();
+		folderAnchorRef.current = e.currentTarget;
+		setCtxChatId(null);
+		setCtxFolderId(id);
+	};
+	useEffect(() => {
+		if (ctxFolderId === null) return;
+		const onPointerDown = (e: PointerEvent) => {
+			if (!interactions.isElementEligible(document.querySelector<HTMLElement>('[data-testid="folder-context-menu"]'))) return;
+			const target = e.target as Node;
+			if (target instanceof Element && target.closest("[data-lh-menu]")) return;
+			if (folderAnchorRef.current?.contains(target)) return;
+			setCtxFolderId(null);
+		};
+		document.addEventListener("pointerdown", onPointerDown);
+		return () => document.removeEventListener("pointerdown", onPointerDown);
+	}, [ctxFolderId, interactions]);
+	// A folder deletion's success: the session Delete's, for every session
+	// that went (list patch, home if the open one died, graph refetch).
+	const onFolderDeleted = useCallback(({ deletedChatIds, graphRevision }: { deletedChatIds: string[]; graphRevision: number }) => {
+		setDeletingFolder(null);
+		const gone = new Set(deletedChatIds);
+		setChats((prev) => (prev ? prev.filter((c) => !gone.has(c.id)) : prev));
+		const openId = pathname.startsWith("/chat/") ? pathname.slice("/chat/".length) : null;
+		if (openId !== null && gone.has(openId)) router.push("/");
+		window.dispatchEvent(new CustomEvent("lh:graph-revision", { detail: { revision: graphRevision } }));
+	}, [pathname, router]);
+	// The folder Delete (owner, 2026-11-18): the folder, its subfolders and
+	// every session inside go — practice sessions hidden by the type filter
+	// included — after the session dialog's confirmation; imported notes
+	// inside move to the parent. A folder without sessions goes at once.
+	const deleteFolder = (id: string) => {
+		if (!directory) return;
+		const organization = directory.organization;
+		const folder = organization.folders.find((f) => f.id === id);
+		const scope = folderDeletionScope(directory, id);
+		if (!folder || !scope) return;
+		setCtxFolderId(null);
+		clearFolderFailure();
+		if (scope.chatIds.length === 0) {
+			void fetch(`/api/graph/sources/folders/${encodeURIComponent(id)}?mode=preserve-graph`, {
+				method: "DELETE",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(scope),
+			})
+				.then(async (res) => { if (!res.ok) reportFolderFailure(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Could not delete the folder (${res.status}).`); })
+				.catch(() => reportFolderFailure("Could not delete the folder — network error."));
+			return;
+		}
+		const copy = folderDeleteCopy({
+			sessions: scope.chatIds.length,
+			subfolders: scope.folderIds.length - 1,
+			notes: scope.noteIds.length,
+			parentName: folder.parentId === null ? null : organization.folders.find((f) => f.id === folder.parentId)?.name ?? null,
+		});
+		setDeletingFolder({ id, name: folder.name, copy, scope });
+	};
+
+	const renderTree = (nodes: SessionTreeNode<ChatListItem>[], depth: number): React.ReactNode => nodes.map((node, index) => {
+		if (node.type === "session") {
+			const c = node.session;
+			const placedIn = organization ? placementOf(organization, c.id)?.folderId ?? null : null;
+			return (
+				<SourceDragRow key={c.id} kind="source" id={c.id} name={c.title} enabled={Boolean(organization) && renamingId !== c.id}
+					className="relative" style={{ marginLeft: sidebarRowBox(depth).marginLeft }} {...folderDrop.dropProps(placedIn)}>
+					{renamingId === c.id ? (
+						<RenameRow
+							chat={c}
+							depth={depth}
+							compact={compactSessionList}
+							onCommit={(next) => void commitRename(c.id, next)}
+							onCancel={() => setRenamingId(null)}
+						/>
+					) : (
+						<SessionRow
+							chat={c}
+							depth={depth}
+							compact={compactSessionList}
+							active={pathname === `/chat/${c.id}`}
+							kbdSelected={kbdId === c.id}
+							onOpen={() => {
+								setKbdIndex(null);
+								router.push(`/chat/${c.id}`);
+							}}
+							onContextMenu={(e) => openContext(e, c)}
+						/>
+					)}
+				</SourceDragRow>
+			);
+		}
+		const folder = node.folder;
+		const folderOpen = isFolderOpen(folder.id);
+		const creatingHere = creatingFolder?.parentId === folder.id;
+		const contentsShown = folderOpen && (node.children.length > 0 || creatingHere);
+		return (
+			<div key={folder.id} data-testid={`sidebar-folder-branch-${folder.id}`} className="relative" {...folderDrop.dropProps(folder.id)}>
+				{/* Adjacent folders share one rule. Expanded folders use the
+				    same outer rules, with no line under the folder heading. */}
+				{nodes[index - 1]?.type !== "folder" && <SidebarFolderRule depth={depth} edge="top" />}
+				{/* Keep the guide joined to the bottom rule below the last item. */}
+				{contentsShown && (
+					<div aria-hidden="true" data-testid={`sidebar-folder-thread-${folder.id}`} className="pointer-events-none absolute top-[23px] bottom-0 w-px bg-border/50"
+						style={{ left: sidebarRail(depth) }} />
+				)}
+				<SidebarFolderRow
+					folder={folder}
+					depth={depth}
+					open={folderOpen}
+					compact={compactSessionList}
+					draggable={Boolean(organization)}
+					dropActive={folderDrop.dropTarget === folder.id}
+					renaming={renamingFolderId === folder.id}
+					onToggle={() => toggleFolder(folder.id)}
+					onContextMenu={(e) => openFolderContext(e, folder.id)}
+					onRename={(name) => changeFolders({ action: "rename-folder", id: folder.id, name })}
+					onRenameDone={() => setRenamingFolderId(null)}
+				/>
+				{folderOpen && creatingHere && (
+					<NewFolderRow depth={depth + 1} compact={compactSessionList} onDone={() => setCreatingFolder(null)}
+						onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: folder.id })} />
+				)}
+				{folderOpen && renderTree(node.children, depth + 1)}
+				<SidebarFolderRule depth={depth} edge="bottom" />
+			</div>
+		);
+	});
 
 	return (
 		<aside
@@ -785,6 +953,19 @@ function SessionsSidebar() {
 						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
 					</span>
 					</Hint>
+					{organization && (
+						<Hint label="Add folder" side="bottom">
+							<button
+								type="button"
+								aria-label="Add folder"
+								data-testid="sidebar-add-folder"
+								onClick={() => setCreatingFolder({ parentId: null })}
+								className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+							>
+								<FolderPlusIcon className="size-3.5" />
+							</button>
+						</Hint>
+					)}
 				</div>
 
 				{/* The three-way filter, HEADING THE LIST (owner round 8b,
@@ -794,6 +975,7 @@ function SessionsSidebar() {
 				    Practice / All — the real modes first, "All" as the escape
 				    hatch on the right, mirroring the create-buttons above.
 				    Persisted client-side. */}
+				<div data-testid="session-kind-filter-band" className="pb-2">
 				<div className="mx-3 flex items-center gap-0.5 rounded-md border border-border/60 bg-background p-0.5" data-testid="session-kind-filter">
 					{(["teach", "practice", "all"] as const).map((f) => (
 						<button
@@ -812,39 +994,41 @@ function SessionsSidebar() {
 						</button>
 					))}
 				</div>
+				</div>
 
-				<div ref={listRef} className="flex-1 overflow-y-auto p-2">
-					{shown === null ? (
-						<div className="px-2 py-4 text-xs text-muted-foreground">Loading…</div>
-					) : shown.length === 0 ? (
-						<div className="px-2 py-4 text-xs text-muted-foreground">
+				{folderFailure && (
+					<div role="alert" data-testid="sidebar-folder-error" className="mx-3 mt-2 flex items-start gap-2 text-xs text-error">
+						<span className="min-w-0 flex-1">{folderFailure}</span>
+						<button type="button" onClick={clearFolderFailure} className="shrink-0 text-muted-foreground hover:text-foreground">Dismiss</button>
+					</div>
+				)}
+
+				{/* The bar overlays the rows (owner polish round): rules and
+				    highlights run to the edge; it shows while scrolling/hovering. */}
+				<OverlayScrollArea scrollRef={listRef} data-testid="session-list" className="flex flex-col" {...folderDrop.containerProps}>
+					{(creatingFolder?.parentId === null || (rows !== null && rows.length > 0)) && (
+						<div data-testid="session-rows">
+							{creatingFolder?.parentId === null && (
+								<NewFolderRow depth={0} compact={compactSessionList} onDone={() => setCreatingFolder(null)}
+									onCreate={(name) => changeFolders({ action: "create-folder", name, parentId: null })} />
+							)}
+							{renderTree(tree ?? [], 0)}
+						</div>
+					)}
+					{rows === null ? (
+						<div className="px-4 py-4 text-xs text-muted-foreground">Loading…</div>
+					) : rows.length === 0 && (
+						<div className="px-4 py-4 text-xs text-muted-foreground">
 							{query.trim() ? "No sessions match." : "No sessions yet."}
 						</div>
-					) : (
-						shown.map((c, i) =>
-							renamingId === c.id ? (
-								<RenameRow
-									key={c.id}
-									chat={c}
-									onCommit={(next) => void commitRename(c.id, next)}
-									onCancel={() => setRenamingId(null)}
-								/>
-							) : (
-								<SessionRow
-									key={c.id}
-									chat={c}
-									active={pathname === `/chat/${c.id}`}
-									kbdSelected={i === kbdIndex}
-									onOpen={() => {
-										setKbdIndex(null);
-										router.push(`/chat/${c.id}`);
-									}}
-									onContextMenu={(e) => openContext(e, c)}
-								/>
-							),
-						)
 					)}
-				</div>
+					{/* Empty space below the list: drop here to move out of all folders. */}
+					{organization && (
+						<div data-testid="sidebar-root-drop" aria-label="Move outside folders" data-drop-active={folderDrop.dropTarget === null}
+							className={cn("min-h-16 flex-1 transition-colors", folderDrop.dropTarget === null && "bg-accent/30")}
+							{...folderDrop.dropProps(null)} />
+					)}
+				</OverlayScrollArea>
 
 					{/* Background agents (owner, sidebar round): the section is
 					    ALWAYS here — empty means empty (the header sits alone); it
@@ -938,12 +1122,64 @@ function SessionsSidebar() {
 					</MenuShell>
 				)}
 
+				{/* The folder menu (approved plan): Rename, New subfolder, Delete.
+				    Delete only removes folders that are empty everywhere and
+				    otherwise explains why, keeping the menu open. */}
+				{ctxFolderId !== null && (
+					<MenuShell onClose={() => { setCtxFolderId(null); return "closed"; }}
+						anchorRef={folderAnchorRef}
+						testid="folder-context-menu"
+						preferredSide="down"
+						menuClass="flex w-52 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl"
+					>
+						<button
+							type="button"
+							data-testid="folder-ctx-rename"
+							onClick={() => { setRenamingFolderId(ctxFolderId); setCtxFolderId(null); }}
+							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+						>
+							Rename
+						</button>
+						<button
+							type="button"
+							data-testid="folder-ctx-new-subfolder"
+							onClick={() => {
+								const id = ctxFolderId;
+								setCtxFolderId(null);
+								if (searching) setSearchFolds((previous) => ({ query, ids: new Set([...(previous.query === query ? previous.ids : [])].filter((f) => f !== id)) }));
+								else setFolderOpen(id, true);
+								setCreatingFolder({ parentId: id });
+							}}
+							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
+						>
+							New subfolder
+						</button>
+						<button
+							type="button"
+							data-testid="folder-ctx-delete"
+							onClick={() => deleteFolder(ctxFolderId)}
+							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
+						>
+							Delete
+						</button>
+					</MenuShell>
+				)}
+
 				{/* The two-option delete dialog (wave 6) — portaled to body
 				    by the component itself, lives here for state locality. */}
 				<DeleteSessionDialog
 					chat={deleting}
 					onClose={() => setDeleting(null)}
 					onDeleted={onDeleted}
+				/>
+				<DeleteFolderDialog
+					folder={deletingFolder}
+					onClose={() => setDeletingFolder(null)}
+					onStale={(message) => {
+						setDeletingFolder(null);
+						reportFolderFailure(message);
+					}}
+					onDeleted={onFolderDeleted}
 				/>
 			</aside>
 	);
@@ -964,6 +1200,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
 				    matters for the events it dispatches, never for DOM priority. */}
 				<KeyboardShortcuts />
 				<PluginWidgets />
+				<StartupMessage />
 			</SettingsDialogProvider></InteractionLayersProvider>
 		</HostContentRootContext.Provider>
 		</HostRouteLifetimeProvider>

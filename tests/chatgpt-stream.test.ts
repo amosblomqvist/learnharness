@@ -154,7 +154,7 @@ test("native identity/session/cache/fetch and awaited caller observers survive e
 	const events = []; for await (const event of stream) events.push(event);
 	assert.equal(delegated, 1); assert.equal(observed, 1); assert.equal(responses, 1);
 	assert.equal(headers.get("user-agent"), APP_IDENTITY.userAgent.custom);
-	assert.equal(headers.get("session_id"), "exact-native-chat-session");
+	assert.equal(headers.get("session-id"), "exact-native-chat-session");
 	assert.equal(headers.get("x-client-request-id"), "exact-native-chat-session");
 	assert.equal(headers.get("x-native-observer"), "retained"); assert.equal(headers.get("x-suppressed"), null);
 	assert.equal(payload.prompt_cache_key, "exact-native-chat-session"); assert.equal(payload.model, model.id); assert.equal(payload.metadata, undefined);

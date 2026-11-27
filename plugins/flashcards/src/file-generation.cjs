@@ -69,11 +69,8 @@ function validateFileInput(input) {
 const estimate = prompt => Math.ceil(Buffer.byteLength(instructions + JSON.stringify(resultSchema) + prompt, 'utf8') / 3) + 256;
 function prepareFileChunks(options) {
   const { name, markdown } = validateFileInput(options);
-  const { chunkBudget, entry, ranges } = options;
+  const { chunkBudget, ranges } = options;
   if (!Number.isSafeInteger(chunkBudget) || chunkBudget < 1) fail('Input budget must be a positive safe whole number.');
-  if (!entry || typeof entry !== 'object') fail('A model catalog entry is required.');
-  const outputLimit = entry.maxTokens ?? 8192, contextLimit = entry.contextWindow ?? Infinity;
-  if (!Number.isSafeInteger(outputLimit) || outputLimit < 1024 || (contextLimit !== Infinity && (!Number.isSafeInteger(contextLimit) || contextLimit < 1))) fail('The selected model cannot fit this context and an output allowance of at least 1024 tokens.');
   const boundary = offset => !(offset > 0 && offset < markdown.length && high(markdown.charCodeAt(offset - 1)) && low(markdown.charCodeAt(offset)));
   if (ranges !== undefined && !Array.isArray(ranges)) fail('Source ranges must be an array.');
   const spans = ranges === undefined ? [{ start: 0, end: markdown.length }] : ranges.map(range => {
@@ -84,9 +81,7 @@ function prepareFileChunks(options) {
   if (ordered.some((span, index) => index && span.start < ordered[index - 1].end)) fail('Source ranges must not overlap.');
   const plan = (start, end) => {
     const input = { name, markdown: markdown.slice(start, end) }, prompt = promptFor(input);
-    const tokens = estimate(prompt);
-    const maxTokens = Math.min(8192, outputLimit, contextLimit - tokens - 256);
-    return { start, end, input, prompt, tokens, maxTokens };
+    return { start, end, input, prompt, tokens: estimate(prompt) };
   };
   // Match core extraction's source-only chars/4 budget. Filename, JSON
   // escaping, instructions and schema remain in the full-request estimate.
@@ -105,9 +100,7 @@ function prepareFileChunks(options) {
         const preferred = paragraphEnd > 0 ? paragraphEnd : newlineEnd;
         if (preferred > 0) end = start + preferred;
       }
-      const chunk = plan(start, end);
-      if (chunk.maxTokens < 1024) fail('The selected model cannot fit this context and an output allowance. Reduce the chunk budget or choose another model.');
-      chunks.push(chunk); start = end;
+      chunks.push(plan(start, end)); start = end;
     }
   }
   return chunks;

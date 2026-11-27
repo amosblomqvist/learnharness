@@ -3,7 +3,7 @@ import type { AssistantMessage, ToolResultMessage, Usage } from "@earendil-works
 import { randomUUID } from "node:crypto";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "../models.ts";
 import { usageWasAdmitted } from "../subscription-request-cycle.ts";
-import { workerRequestStream } from "../worker-request-admission.ts";
+import { createWorkerRequestScope } from "../worker-request-admission.ts";
 import { providerEventObserver } from "../provider-events.ts";
 import { backgroundCaptureStream, createBackgroundCapture } from "../background-capture.ts";
 import type { ModelRole } from "../../../config.ts";
@@ -31,8 +31,8 @@ export interface SubagentRunOptions {
 	messages?: AgentMessage[];
 	/** Fresh-run prompt text (mutually exclusive with a continuation). */
 	prompt?: string;
-	/** Max model calls (the old stepCountIs safety net). */
-	maxTurns: number;
+	/** Optional assistant-turn cap. Omitted = run until natural completion or a stop rule. */
+	maxTurns?: number;
 	/** Abort mid-model-call (the real-kill semantics). */
 	abortSignal?: AbortSignal;
 	/** Money channel: one call per model request. */
@@ -82,6 +82,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 	// Captures have a core-role identity. Explicit plugin engines have no such
 	// role; do not misattribute them or invent a new capture product surface.
 	const capture = opts.role ? createBackgroundCapture({ role: opts.role, runId: sessionId, sourceId: opts.chatId }) : undefined;
+	const requests = opts.bypassWorkerRequestAdmission ? undefined : createWorkerRequestScope(engine.streamFn, opts.abortSignal);
 	const agent = new Agent({
 		identity: APP_IDENTITY,
 		// One unsaved conversation per invocation, stable through every turn.
@@ -93,10 +94,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 			tools,
 			messages: opts.messages ?? [],
 		},
-		streamFn: backgroundCaptureStream(
-			opts.bypassWorkerRequestAdmission ? engine.streamFn : workerRequestStream(engine.streamFn),
-			capture,
-		),
+		streamFn: backgroundCaptureStream(requests?.streamFn ?? engine.streamFn, capture),
 		prepareRequest: async () => {
 			if (opts.abortSignal?.aborted) throw Object.assign(new Error("aborted"), { name: "AbortError" });
 			await opts.beforeRequest?.();
@@ -106,7 +104,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 		// exits before the steering poll, exactly the old boolean-true).
 		finishTurn: (turn) => {
 			turns++;
-			return turns >= opts.maxTurns || opts.shouldStop?.(turn.message, turn.toolResults) === true
+			return (opts.maxTurns !== undefined && turns >= opts.maxTurns) || opts.shouldStop?.(turn.message, turn.toolResults) === true
 				? { action: "end" }
 				: undefined;
 		},
@@ -160,6 +158,7 @@ export async function runSubagent(tools: AgentTool<any, any>[], opts: SubagentRu
 		throw error;
 	} finally {
 		opts.abortSignal?.removeEventListener("abort", onAbort);
+		requests?.close();
 		capture?.finish(runFailure);
 	}
 

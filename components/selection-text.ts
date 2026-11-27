@@ -13,7 +13,7 @@ export const SOURCE_ATTRIBUTE = "data-source-message-id";
 
 const EXCLUDED = "button, input, textarea, select, [role=button], [contenteditable], [hidden], [aria-hidden=true], script, style, template, noscript, svg";
 const BLOCKS = new Set(["ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "DD", "DIV", "DL", "DT", "FIGCAPTION", "FIGURE", "FOOTER", "H1", "H2", "H3", "H4", "H5", "H6", "HEADER", "HR", "LI", "MAIN", "NAV", "OL", "P", "PRE", "SECTION", "TABLE", "TD", "TH", "TR", "UL"]);
-const TEX = 'annotation[encoding="application/x-tex"]';
+const LEGACY_TEX = 'annotation[encoding="application/x-tex"]';
 
 /** A run of the message text: a text node, or an atomic formula element. */
 export interface TextChunk {
@@ -66,7 +66,7 @@ export function readSourceText(sources: readonly Element[]): { text: string; chu
 		if (node.nodeType !== 1) return;
 		const element = node as Element;
 		if (isFormula(element)) {
-			const tex = element.querySelector(TEX)?.textContent;
+			const tex = element.getAttribute("data-tex") ?? element.querySelector(LEGACY_TEX)?.textContent;
 			if (tex) add(element, element.parentElement?.closest(".katex-display") ? `$$${tex}$$` : `$${tex}$`, true);
 			return;
 		}

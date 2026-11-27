@@ -45,6 +45,7 @@ interface OpeningLeaseState {
 	slot: string;
 	sequence: number;
 	opener: HTMLElement | null;
+	allowInitialMount?: () => boolean;
 	onRevoke: () => void;
 	notified: boolean;
 	exposed: boolean;
@@ -238,6 +239,11 @@ export function createInteractionLayers() {
 			// replacement uses the same ID in the same controlled-state batch.
 			if (input.openingLease && (!opening || !ownsLease(opening) || (opening.phase !== "claimed" && !reconnecting) ||
 				opening.retiring.size > 0 || (!reconnecting && opening.opener && !elementEligible(opening.opener)))) return () => {};
+			// Async admission can expire between claiming the lease and React's
+			// commit. Reject before publishing a layer that can acquire focus.
+			if (opening && !reconnecting && opening.allowInitialMount?.() === false) {
+				revoke(opening, true); publish(); return () => {};
+			}
 			if (get(input.id)) throw new Error(`Interaction layer already registered: ${input.id}`);
 			const layer = { ...input, order: layers.length + 1 };
 			layers = [...layers, layer];
@@ -287,7 +293,7 @@ export function createInteractionLayers() {
 			return intent.generation === generation && intent.sequence === intentSequence &&
 				(!intent.opener || elementEligible(intent.opener));
 		},
-		reserveOpening(slot: string, options: { opener?: HTMLElement | null; onRevoke: () => void }): OpeningLease | null {
+		reserveOpening(slot: string, options: { opener?: HTMLElement | null; allowInitialMount?: () => boolean; onRevoke: () => void }): OpeningLease | null {
 			const previous = slots.get(slot);
 			const current = typeof document === "undefined" ? null : document.activeElement;
 			const opener = options.opener === undefined && current?.nodeType === 1 ? current as HTMLElement : options.opener ?? null;
@@ -309,7 +315,7 @@ export function createInteractionLayers() {
 				},
 				release() { if (state.phase !== "revoked") { revoke(state, false); publish(); } },
 			};
-			state = { lease, slot, sequence, opener, onRevoke: options.onRevoke, notified: false, exposed: false,
+			state = { lease, slot, sequence, opener, allowInitialMount: options.allowInitialMount, onRevoke: options.onRevoke, notified: false, exposed: false,
 				phase: "pending", generation, retiring };
 			leaseStates.set(lease, state);
 			// Observe synchronous close callbacks too: only the exact old
@@ -378,7 +384,7 @@ export function createInteractionLayers() {
 			return requestClose(snapshot.owner.id, "escape");
 		},
 		/** Return only while this exact closing generation still owns focus. */
-		restoreFocus(opener: HTMLElement | null, expectedGeneration: number, expectedFocusRevision = focusRevision, openingLease?: OpeningLease) {
+		restoreFocus(opener: HTMLElement | null, expectedGeneration: number, expectedFocusRevision = focusRevision, openingLease?: OpeningLease, fallback?: HTMLElement) {
 			if (generation !== expectedGeneration || focusRevision !== expectedFocusRevision) return false;
 			if (openingLease) {
 				const opening = leaseStates.get(openingLease);
@@ -389,6 +395,7 @@ export function createInteractionLayers() {
 				opener = opening.opener;
 			}
 			if (elementEligible(opener)) { opener!.focus({ preventScroll: true }); return true; }
+			if (fallback && elementEligible(fallback)) { fallback.focus({ preventScroll: true }); return true; }
 			const active = activeModal();
 			active?.focusInitial?.();
 			return !!active;

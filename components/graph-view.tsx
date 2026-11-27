@@ -64,12 +64,15 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { GraphFolderFilterControl, useGraphFolderSelection } from "@/components/graph-folder-filter";
+import { useSourceDirectory } from "@/components/source-directory";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import { PluginGraphActions } from "@/components/plugin-chrome";
 import { SettingsSlider as SettingSlider } from "@/components/settings/controls";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { graphFolderIds, graphFolderVisibleIds, incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
 import { CLUSTER_LIGHTNESS, GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
 import { useAppearance } from "@/components/settings/appearance";
@@ -140,6 +143,21 @@ export function isNodeVisible(node: Pick<GraphNode, "name" | "statement">, query
 	const q = query.trim().toLowerCase();
 	if (!q) return true;
 	return node.name.toLowerCase().includes(q) || node.statement.toLowerCase().includes(q);
+}
+
+/** Search alone retains its existing behavior. With an active folder filter,
+ * a junction can only draw if every endpoint survives the combined view. */
+export function graphVisibleIds(snapshot: Pick<GraphSnapshot, "nodes" | "impLinks">, query: string, folderVisibleIds: ReadonlySet<string> | null): Set<string> {
+	const visible = new Set<string>();
+	for (const node of snapshot.nodes) {
+		if ((folderVisibleIds === null || folderVisibleIds.has(node.id)) && isNodeVisible(node, query)) visible.add(node.id);
+	}
+	if (folderVisibleIds !== null && query.trim()) {
+		for (const { id, premises, conclusion } of snapshot.impLinks) {
+			if (!visible.has(conclusion) || !premises.every((premise) => visible.has(premise))) visible.delete(id);
+		}
+	}
+	return visible;
 }
 
 /** In-place sessions patch for a live rename (rename-shuffle fix,
@@ -950,7 +968,11 @@ export function GraphView({
 	practiceSelection,
 	onPracticeSelectionChange,
 	onChainSelectClose,
+	folderFilterSlot,
 }: {
+	/** Where the folder filter control portals: the home header's top-left
+	 *  chrome, after the sidebar toggle. Absent → no folder filter control. */
+	folderFilterSlot?: HTMLElement | null;
 	/** PRACTICE SELECT (owner vision, 2026-10-04): the LIFTED, persistent
 	 *  pick set — every check/clear in the chain table (however opened)
 	 *  reports the full node list up immediately; the composer-side chip
@@ -1043,16 +1065,32 @@ export function GraphView({
 	const rendererRef = useRef<GraphCanvasRenderer | null>(null);
 	const posRef = useRef<Map<string, { x: number; y: number }> | null>(null);
 
-	// The id set that survives the current search — consumed by the
-	// visibility feed and the "no matches" hint.
-	const visibleIds = useMemo(() => {
-		const set = new Set<string>();
-		if (snapshot)
-			for (const node of snapshot.nodes) {
-				if (isNodeVisible(node, query)) set.add(node.id);
-			}
-		return set;
-	}, [snapshot, query]);
+	// FOLDER FILTER (approved plan): view only. The shared organization's
+	// placements map sources to folders; a proposition shows when ANY of its
+	// surviving sources sits in a ticked folder (subfolders included when
+	// ticked). Search and folder filter both apply.
+	const { directory: sourceDirectoryState } = useSourceDirectory(true);
+	const organization = sourceDirectoryState?.organization;
+	const { selected: folderSelection, setSelected: setFolderSelection } = useGraphFolderSelection(organization);
+	const listedFolders = useMemo(() => {
+		if (!organization || !snapshot) return new Set<string>();
+		const sources = new Set<string>();
+		for (const node of snapshot.propositions) for (const id of snapshot.nodeSessions[node.id] ?? []) sources.add(id);
+		return graphFolderIds(organization, sources);
+	}, [organization, snapshot]);
+	const folderVisibleIds = useMemo(() => !organization || !snapshot ? null : graphFolderVisibleIds({
+		organization,
+		selected: folderSelection,
+		listed: listedFolders,
+		propositionIds: snapshot.propositions.map((node) => node.id),
+		nodeSources: snapshot.nodeSessions,
+		impLinks: snapshot.impLinks,
+	}), [organization, snapshot, folderSelection, listedFolders]);
+	const filtering = query.trim() !== "" || folderVisibleIds !== null;
+	// The id set that survives the current search AND folder filter —
+	// consumed by the visibility feed and the "no matches" hint.
+	const visibleIds = useMemo(() => snapshot ? graphVisibleIds(snapshot, query, folderVisibleIds) : new Set<string>(),
+		[snapshot, query, folderVisibleIds]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
@@ -1437,10 +1475,10 @@ export function GraphView({
 	// Feed #3 — visibility: hidden nodes drop out of rendering, picking,
 	// hover, AND labels; edges drop when either endpoint is hidden.
 	useEffect(() => {
-		rendererRef.current?.setVisible(query.trim() ? visibleIds : null);
+		rendererRef.current?.setVisible(filtering ? visibleIds : null);
 		// The open detail card cannot outlive its node's visibility.
 		setSelected((sel) => (sel && visibleIds.has(sel.node.id) ? sel : null));
-	}, [visibleIds, query]);
+	}, [visibleIds, filtering, isEmpty]);
 
 	// Feed #4 — region tuning. `isEmpty` in the deps (same as Feed #2):
 	// the settings fetch resolves BEFORE the snapshot creates the renderer,
@@ -1581,6 +1619,11 @@ export function GraphView({
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
 				    settings only when nodes exist, fading in on their mount. */}
+				{folderFilterSlot && !isEmpty && organization && createPortal(
+					<GraphFolderFilterControl organization={organization} listed={listedFolders}
+						selected={folderSelection} onChange={setFolderSelection} />,
+					folderFilterSlot,
+				)}
 				<GraphChromeRow
 					isEmpty={isEmpty}
 					query={query}

@@ -13,7 +13,7 @@ const specimens = [
 	{ id: "openrouter/free", input: ["text", "image"] },
 ];
 
-describe("native 1.4 OpenRouter free catalog (offline, no live discovery)", { concurrency: false }, () => {
+describe("bundled OpenRouter free catalog (offline, no live discovery)", { concurrency: false }, () => {
 	for (const { id, input } of specimens) {
 		it(`${id}: shared listing, validation, tool-capable engine, native modality, and zero cost`, async () => {
 			const before = process.env;
@@ -52,7 +52,9 @@ describe("native 1.4 OpenRouter free catalog (offline, no live discovery)", { co
 		});
 	}
 	it("removed/unknown native models remain unpriced and unresolvable, never aliased to a paid fallback", () => {
-		assert.equal(callCost({ inputTokens: 1, outputTokens: 1 }, "openrouter:removed/no-such-model"), null);
-		assert.throws(() => piEngineForSpec({ provider: "openrouter", id: "removed/no-such-model" }), /catalog has no model/);
+		for (const id of ["openai/gpt-3.5-turbo", "removed/no-such-model"]) {
+			assert.equal(callCost({ inputTokens: 1, outputTokens: 1 }, `openrouter:${id}`), null);
+			assert.throws(() => piEngineForSpec({ provider: "openrouter", id }), /catalog has no model/);
+		}
 	});
 });

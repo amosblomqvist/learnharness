@@ -123,6 +123,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 	const setMessages = useCallback((record: LhMessage[], turnError?: string, availability?: Parameters<SessionModel["setMessages"]>[2], problemAvailability?: Parameters<SessionModel["setMessages"]>[3]) => model.setMessages(record, turnError, availability, problemAvailability), [model]);
 	const reconcile = useCallback(() => model.reconcile(), [model]);
 	const readRecord = useCallback((options?: Parameters<SessionModel["readRecord"]>[0]) => model.readRecord(options), [model]);
+	const readStats = useCallback((signal?: AbortSignal) => model.readStats(signal), [model]);
 	const pluginProblemDraft = useCallback((snapshot: Parameters<SessionModel["pluginProblemDraft"]>[0]) => model.pluginProblemDraft(snapshot), [model]);
 	const pluginQuestionDraft = useCallback((snapshot: Parameters<SessionModel["pluginQuestionDraft"]>[0]) => model.pluginQuestionDraft(snapshot), [model]);
 	const dismissPluginQuestion = useCallback((occurrence: Parameters<SessionModel["dismissPluginQuestion"]>[0], questionId?: string) => model.dismissPluginQuestion(occurrence, questionId), [model]);
@@ -138,6 +139,7 @@ export function useChatSession({ chatId, initialMessages, initialError, initiall
 		reconciliation: state.reconciliation,
 		reconcile,
 		readRecord,
+		readStats,
 		pluginQuestionAvailability: state.pluginQuestionAvailability,
 		pluginProblemAvailability: state.pluginProblemAvailability,
 		pluginProblemDraft,

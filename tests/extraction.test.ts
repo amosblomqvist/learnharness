@@ -870,7 +870,7 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 			createdAt: "2026-08-01T00:00:00.000Z",
 			provenance: [],
 		});
-		const usageSeen: (number | undefined)[] = [];
+		const usageSeen: ({ inputTokens?: number; cacheWriteTokens?: number } | undefined)[] = [];
 		const verdict: AuditVerdicts = {
 			links: [{ id: FINDINGS.propositions[0]!.id, linkTo: existingId }],
 		};
@@ -887,19 +887,20 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 			chatStore,
 			graphStore: ledgers,
 			// During the auditor's generate, the registry must already carry
-			// the extractor's fully accumulated live usage (2 steps × 10/5).
+			// the extractor's fully accumulated live usage.
 			extractor: recordUsage("extractor", submitModel("submit_findings", FINDINGS)),
 			auditor: recordUsage("auditor", submitModel("submit_review", verdict, () =>
-				usageSeen.push(extractionStatuses().find((r) => r.chatId === chatId)?.usage.extractor?.steps.at(-1)?.inputTokens),
+				usageSeen.push(extractionStatuses().find((r) => r.chatId === chatId)?.usage.extractor?.steps.at(-1)),
 			)),
 		});
 		await pipeline.runExtraction(chatId);
 
-		// Live: mid-audit the extractor's usage was fully accumulated (faux
-		// estimates tokens from the prompt/response text — deterministic,
-		// positive, with native first-conversation cache writes in 1.4).
+		// Pi's faux provider can attribute all prompt tokens to cache writes.
+		// Exercise real accounting without requiring a specific faux split.
 		assert.equal(usageSeen.length, 1);
-		assert.ok(typeof usageSeen[0] === "number" && usageSeen[0]! > 0, "the extractor's step billed input tokens");
+		assert.ok(usageSeen[0], "extractor usage is already available mid-audit");
+		assert.equal(usageSeen[0].inputTokens, nativeUsage.extractor[0]!.input);
+		assert.equal(usageSeen[0].cacheWriteTokens, nativeUsage.extractor[0]!.cacheWrite);
 
 		// Persisted: the run appended ONE usage entry to the chat's
 		// extractions log — per-stage model + steps, with merge stats.
@@ -911,7 +912,9 @@ describe("the extraction pipeline (extractor → auditor → merger)", () => {
 		assert.equal(run.stages.extractor.model, "faux:faux-1");
 		assert.equal(run.stages.extractor.steps.length, 1); // the submit call — the run STOPS after a clean submit
 		const step = run.stages.extractor.steps[0]!;
-		assert.ok(step.inputTokens! > 0 && step.outputTokens! > 0, "estimated usage captured");
+		assert.equal(step.inputTokens, nativeUsage.extractor[0]!.input);
+		assert.equal(step.outputTokens, nativeUsage.extractor[0]!.output);
+		assert.ok(step.outputTokens! > 0, "estimated output captured");
 		assert.equal(step.cacheReadTokens, 0);
 		assert.equal(nativeUsage.extractor.length, 1);
 		assert.ok(nativeUsage.extractor[0]!.cacheWrite > 0, "fresh native conversation writes its cached prefix");
@@ -1085,8 +1088,8 @@ describe("message anchors (session propositions carry their passage's id)", () =
 		const ledgers = memoryLedgers();
 		// The degraded shape: propositions without anchors, chains present —
 		// only the REQUIRED field is missing, and the schema refuses it on
-		// every turn until the budget is gone (the required-field doctrine,
-		// 2026-09-28, now covering the anchor too).
+		// every scripted attempt. The finite fixture then ends with a provider
+		// error; no invalid submission is ever accepted.
 		const bare = () =>
 			fauxEngine(
 				Array.from({ length: 4 }, () =>
@@ -1146,7 +1149,7 @@ describe("message anchors (session propositions carry their passage's id)", () =
 			getChunkTokens: () => 4096,
 			extractor,
 			// One review per batch job (the retry lives in the extractor's
-			// own turn budget, not the auditor's).
+			// own run, not the auditor's).
 			auditor: fauxEngine([passThroughAuditStep(), passThroughAuditStep()]),
 		});
 		assert.deepEqual(await pipeline.runExtraction(chatId), { nodes: 2, chains: 0 });
@@ -1663,8 +1666,8 @@ describe("the notes front door (importNotes — format-agnostic)", () => {
 		// The degraded-retry shape from the OpenRouter log: propositions
 		// only, edges omitted. Required schema → validation fails on every
 		// turn → the run rejects instead of merging a pile of structureless
-		// nodes. Four queued attempts exhaust the extractor's turn budget.
-		// Four queued attempts — one per turn of the extractor's budget.
+		// nodes. After four rejected attempts the finite fixture produces a
+		// provider error; the production extractor has no default turn cap.
 		const noEdges = () =>
 			fauxEngine(
 				Array.from({ length: 4 }, () => (context) => {
@@ -2179,6 +2182,30 @@ describe("digest-aware serialized extraction (the extractor is the assembler)", 
 		assert.match(digest, /n_a \| Self-ownership \| statement of Self-ownership/);
 		assert.doesNotMatch(digest, /Foreign key/, "other sources' material never leaks into the digest");
 		assert.doesNotMatch(digest, /DERIVATIONS ALREADY RECORDED/, "no same-source chains → no chain block");
+	});
+
+	it("the production extractor and auditor both pass their former default turn caps", async () => {
+		const ledgers = memoryLedgers(); let extractionCalls = 0, auditCalls = 0;
+		const findings = { propositions: [{ id: "p1", name: "Evaporation", statement: "Liquid changes into vapor.", aliases: [] }], chains: [] };
+		const extractor = fauxEngine([
+			...Array.from({ length: 6 }, (_, index) => () => {
+				extractionCalls++;
+				return fauxAssistantMessage([fauxToolCall("submit_findings", { propositions: [{ id: "p1", name: "Incomplete" }], chains: [] }, { id: `reject_${index}` })], { stopReason: "toolUse" });
+			}),
+			() => { extractionCalls++; return fauxAssistantMessage([fauxToolCall("submit_findings", findings, { id: "accepted" })], { stopReason: "toolUse" }); },
+		]);
+		const auditor = fauxEngine([
+			...Array.from({ length: 17 }, (_, index) => () => {
+				auditCalls++;
+				return fauxAssistantMessage([fauxToolCall("find_candidates", { propositions: [{ id: "p1" }] }, { id: `lookup_${index}` })], { stopReason: "toolUse" });
+			}),
+			() => { auditCalls++; return fauxAssistantMessage([fauxToolCall("submit_review", { links: [] }, { id: "review" })], { stopReason: "toolUse" }); },
+		]);
+		const pipeline = createExtractionPipeline({ chatStore, graphStore: ledgers, extractor, auditor });
+		const stats = await pipeline.importNotes({ filePath: "synthetic-uncapped.txt", text: "Liquid changes into vapor." });
+		assert.equal(extractionCalls, 7); assert.equal(auditCalls, 18);
+		assert.equal(stats.nodes, 1);
+		assert.equal(getGraph(ledgers).nodes[0]!.statement, "Liquid changes into vapor.");
 	});
 
 	it("the real auditor receives the proposed ids, batched candidate tool and practical-equivalence prompt", async () => {
