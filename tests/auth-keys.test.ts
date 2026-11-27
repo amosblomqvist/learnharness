@@ -15,7 +15,7 @@ describe("the catalog", () => {
 	it("lists the curated app-service keys (provider keys live in the provider table)", () => {
 		assert.deepEqual(
 			AUTH_KEYS.map((k) => k.id),
-			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY"],
+			["DEEPGRAM_API_KEY", "TAVILY_API_KEY", "BRAVE_API_KEY", "EXA_API_KEY", "FIRECRAWL_API_KEY", "OLLAMA_API_KEY", "SEARXNG_URL"],
 		);
 		for (const k of AUTH_KEYS) {
 			assert.ok(k.label.length > 0, `${k.id} has a label`);
@@ -37,6 +37,7 @@ describe("the catalog", () => {
 		assert.ok(isKnownAuthKey("EXA_API_KEY"));
 		assert.ok(isKnownAuthKey("FIRECRAWL_API_KEY"));
 		assert.ok(isKnownAuthKey("OLLAMA_API_KEY"));
+		assert.ok(isKnownAuthKey("SEARXNG_URL"));
 		assert.ok(!isKnownAuthKey("OPENROUTER_API_KEY"));
 		assert.ok(!isKnownAuthKey("OPENAI_API_KEY"), "provider vars are a separate surface");
 		assert.ok(!isKnownAuthKey("FUTURE_PLANS_TOKEN"));
@@ -83,6 +84,15 @@ describe("validateKeyShape (the 400 gate — curated keys)", () => {
 		assert.ok(!validateKeyShape("OLLAMA_API_KEY", "short").ok);
 		assert.ok(!validateKeyShape("OLLAMA_API_KEY", "ollama fake key 123456").ok);
 		assert.ok(!isKnownAuthKey("OLLAMA_BASE_URL"));
+	});
+
+	it("SearXNG: an http(s) instance base URL, not a key", () => {
+		for (const ok of ["http://127.0.0.1:8888", "  https://search.example.test/searxng/  ", "http://localhost:8080/"]) {
+			assert.ok(validateKeyShape("SEARXNG_URL", ok).ok, ok);
+		}
+		for (const bad of ["", "127.0.0.1:8888", "ftp://example.test", "http://u:p@example.test", "http://example.test/?q=1", "http://example.test/#x", "http://exa mple.test"]) {
+			assert.ok(!validateKeyShape("SEARXNG_URL", bad).ok, bad);
+		}
 	});
 
 	it("trims surrounding paste whitespace before checking", () => {

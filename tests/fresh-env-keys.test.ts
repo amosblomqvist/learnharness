@@ -37,6 +37,7 @@ for (const varName of [
 	"EXA_API_KEY",
 	"FIRECRAWL_API_KEY",
 	"OLLAMA_API_KEY",
+	"SEARXNG_URL",
 	"OPENAI_API_KEY",
 	"ZAI_API_KEY",
 ]) {
