@@ -8,6 +8,7 @@ import type { PluginInferenceOptions } from "../core/plugins.ts";
 import type { PluginTaskError, PluginTaskOutcome, PluginTaskRecord, PluginTaskSnapshot, PluginWorkerContext, PluginWorkerDefinition, PluginWorkerService, PluginWorkerStartOptions } from "../core/plugin-workers.ts";
 import { validatePluginInferenceOptions, validatePluginSchema } from "../core/plugin-validation.ts";
 import { accumulateJobUsage, piUsageToStep } from "../core/contracts/jobs.ts";
+import { appendLanguageDirective } from "../core/language.ts";
 import type { PiEngine } from "./models.ts";
 import { usageWasAdmitted } from "./subscription-request-cycle.ts";
 import { runSubagent } from "./subagents/pi-run.ts";
@@ -22,6 +23,7 @@ export interface PluginWorkerServiceDeps {
 	onUsage?: (model: PluginModelSpec, usage: Usage) => void;
 	signal?: AbortSignal;
 	onChange?: (metadata: PluginWorkerActivityMetadata) => void;
+	getLanguage?: () => string | undefined;
 }
 const clone = <T>(value: T): T => structuredClone(value);
 const terminal = (r: PluginTaskRecord) => r.status !== "queued" && r.status !== "running";
@@ -199,7 +201,7 @@ export function createPluginWorkerService(deps: PluginWorkerServiceDeps): Plugin
 				}
 				commit(t, { ...t.record, messages });
 			};
-			await runSubagent(tools, { engine, systemPrompt: d.instructions, messages: clone(t.record.messages), maxTurns: t.record.maxTurns, abortSignal: t.controller.signal,
+			await runSubagent(tools, { engine, systemPrompt: appendLanguageDirective(d.instructions, deps.getLanguage?.(), "plugin"), messages: clone(t.record.messages), maxTurns: t.record.maxTurns, abortSignal: t.controller.signal,
 				beforeRequest: active, shouldStop: () => terminal(t.record),
 				onEvent: (event: AgentEvent) => {
 					if (disposed || t.closed || t.poisoned || t.controller.signal.aborted) throw t.poisoned ?? new Error("Task writer is closed");

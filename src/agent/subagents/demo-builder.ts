@@ -5,6 +5,7 @@ import { serverExecute } from "../tool-execute.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
 import type { DemoResult } from "../../core/contracts.ts";
+import { appendLanguageDirective } from "../../core/language.ts";
 import { getHeadless, type DemoRunResult, type HeadlessApi } from "./headless.ts";
 import { healToolRecord } from "../tools/heal.ts";
 
@@ -44,6 +45,8 @@ export interface DemoBuilderOptions {
 	onUsage?: (usage: Usage) => void;
 	/** Debug: raw provider-event recording key (LH_PROVIDER_EVENTS=1). */
 	chatId?: string;
+	/** Optional explicit response language (absent/undefined = Auto). */
+	language?: string;
 }
 
 const INSTRUCTIONS = `You are a demo builder — a specialist sub-agent inside a learning application. You
@@ -60,6 +63,7 @@ Runtime contract (the document runs in a sandboxed iframe, sandbox="allow-script
 Build quality:
 - The demo must directly serve the brief: every control named in the brief must exist and do the thing.
 - Controls need labels; sliders/inputs need current-value readouts. A learner should operate it unguided.
+- Write all learner-visible labels, readouts, and diagram text in the language requested by the brief (keeping standard scientific terms and formulas intact).
 - Smooth enough interaction; requestAnimationFrame for animation, not setInterval when it matters.
 - Dark-mode neutral: pick a clean light background for the demo area so it reads on any card.
 
@@ -207,7 +211,7 @@ export async function runDemoBuilder(input: DemoBuilderInput, opts: DemoBuilderO
 		const result = await runSubagent(Object.values(createDemoBuilderTools(state, headless, opts.onActivity)), {
 			role: "demoBuilder",
 			engine: opts.engine,
-			systemPrompt: INSTRUCTIONS,
+			systemPrompt: appendLanguageDirective(INSTRUCTIONS, opts.language, "subagent"),
 			prompt,
 			maxTurns: opts.maxSteps,
 			abortSignal: opts.abortSignal,

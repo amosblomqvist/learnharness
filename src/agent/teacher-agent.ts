@@ -22,6 +22,7 @@ import { makeNarrationGuard, narrationGuardApplies, SEND_TO_USER_DELIVERY_RULE }
 import { createReadTool, readTool } from "./tools/read.ts";
 import { quizInputObject, quizInputProblems } from "../core/question-core.ts";
 import { QUESTION_TOOLS, TOGGLEABLE_TOOLS, type EnabledTools } from "../core/pending.ts";
+import { appendLanguageDirective } from "../core/language.ts";
 import type { PluginToolContext } from "../core/plugins.ts";
 import { toLlmMessages, nativeInputCause, PRACTICE_PROBLEM_TOOL } from "../core/native-messages.ts";
 import type { ChatGPTRequestCycle } from "./chatgpt-request-cycle.ts";
@@ -148,6 +149,8 @@ export interface AgentBuildOptions {
 	 *  fresh per turn, honoring enabled overrides (switch on + file
 	 *  exists); absent → the cached pure-source composition. */
 	promptSwitches?: Record<string, boolean>;
+	/** Optional explicit response language (absent/undefined = Auto). */
+	language?: string;
 	/** Native conversation identity: the existing persisted chat id, reused
 	 * across reconstructed prober, teacher, and practice Agents.
 	 * Debug: when set AND LH_PROVIDER_EVENTS=1, raw provider stream events
@@ -233,9 +236,10 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 	const problemTools = kind === "practice" && practice && opts.chatId
 		? pluginProblemTools(contributions?.problemTypes ?? [], opts.chatId, practice.gate, practice.graphNodes) : [];
 	// Never replace the builtin prompt or tools, or mutate an already-running Agent.
-	const systemPrompt = contributions?.instructions.length
+	const composedSystemPrompt = contributions?.instructions.length
 		? [builtinPrompt, ...contributions.instructions].join("\n\n---\n\n")
 		: builtinPrompt;
+	const systemPrompt = appendLanguageDirective(composedSystemPrompt, opts.language, "conversation");
 	// Debug recorder (owner, 2026-10-04): raw provider events when
 	// LH_PROVIDER_EVENTS=1 and the caller handed a chatId; undefined is
 	// the normal no-observer path (tests, env-off).

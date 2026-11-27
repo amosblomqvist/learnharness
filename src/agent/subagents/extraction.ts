@@ -27,6 +27,7 @@ import type { GraphStore } from "../../core/ports.ts";
 import { emit } from "../../core/events.ts";
 import { settleGraphLayout } from "../../core/layout-settle.ts";
 import { batchRuns, coverageOf, messageViewLines } from "../../core/coverage.ts";
+import { appendLanguageDirective } from "../../core/language.ts";
 import { failedOutputCallIds, type LhMessage } from "../../core/native-messages.ts";
 import { prepareAuditorReview } from "../tools/graph.ts";
 import { runSubmitAgent, healStringifiedArrays } from "./submit-agent.ts";
@@ -497,6 +498,7 @@ function runExtractor(
 	batchIds: ReadonlySet<string>,
 	signal: AbortSignal | undefined,
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
+	language?: string,
 ): Promise<SessionFindings> {
 	// Chains in (the wire), chains out (the store) — no translation seam
 	// since chains-primary. Validation runs at the submit seam (error-back)
@@ -512,7 +514,7 @@ function runExtractor(
 		parameters: sessionFindingsSchema,
 		fill: fillFindings,
 		validate: (value) => validateSessionAnchors(value, batchIds) ?? validateFindingsChains(value, existingIds),
-		systemPrompt: EXTRACTOR_INSTRUCTIONS,
+		systemPrompt: appendLanguageDirective(EXTRACTOR_INSTRUCTIONS, language, "extraction"),
 		prompt,
 		engine,
 		signal,
@@ -533,6 +535,7 @@ function runNotesExtractor(
 	existingIds: ReadonlySet<string>,
 	signal: AbortSignal | undefined,
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
+	language?: string,
 ): Promise<NotesFindings> {
 	return runSubmitAgent<FindingsSubmit>({
 		role: "extractor",
@@ -543,7 +546,7 @@ function runNotesExtractor(
 		parameters: findingsSchema,
 		fill: fillNotesFindings,
 		validate: (value) => validateFindingsChains(value, existingIds),
-		systemPrompt: NOTES_EXTRACTOR_INSTRUCTIONS,
+		systemPrompt: appendLanguageDirective(NOTES_EXTRACTOR_INSTRUCTIONS, language, "extraction"),
 		prompt,
 		engine,
 		signal,
@@ -591,6 +594,7 @@ function runAuditor(
 	signal: AbortSignal | undefined,
 	onStep: (usage: Usage, model: string, step: number, finishReason: string, tools: string) => void,
 	tools: Record<string, AgentTool<any>>,
+	language?: string,
 ): Promise<AuditVerdicts> {
 	return runSubmitAgent({
 		role: "auditor",
@@ -600,7 +604,7 @@ function runAuditor(
 		toolDescription: "Submit the identity verdicts ONLY (links) — never the propositions themselves.",
 		parameters: auditSchema,
 		fill: fillAudit,
-		systemPrompt: AUDITOR_INSTRUCTIONS,
+		systemPrompt: appendLanguageDirective(AUDITOR_INSTRUCTIONS, language, "extraction"),
 		prompt,
 		engine,
 		signal,
@@ -741,6 +745,8 @@ export interface ExtractionPipelineDeps extends GraphDeps, ExtractionModels {
 	 *  callers wire the live effective settings (extraction-UX redesign,
 	 *  2026-09-24). */
 	getChunkTokens?: () => number;
+	/** Optional live response language getter (absent/undefined = Auto). */
+	getLanguage?: () => string | undefined;
 }
 
 export interface NotesImportInput {
@@ -951,6 +957,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				recordStep(jobKey, "extractor", callUsage(usage), model);
 				console.info(`[extraction] extractor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
+			deps.getLanguage?.(),
 		);
 		console.info(`[extraction ${jobKey}] extractor done in ${Math.round(performance.now() - t0)}ms`);
 		return findings;
@@ -996,6 +1003,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				console.info(`[extraction] auditor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
 			review.tools,
+			deps.getLanguage?.(),
 		);
 		console.info(
 			`[extraction ${jobKey}] audit: ${findings.propositions.length} propositions through, ` +
@@ -1288,6 +1296,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				recordStep(jobKey, "extractor", callUsage(usage), model);
 				console.info(`[extraction] extractor step ${step}: ${finishReason}, tools: ${tools}`);
 			},
+			deps.getLanguage?.(),
 		);
 		console.info(`[extraction ${jobKey}] notes extractor done in ${Math.round(performance.now() - t0)}ms`);
 		return findings;

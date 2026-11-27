@@ -128,12 +128,14 @@ const jobRunner = createJobRunner({
 	// null = honestly unavailable; the dispatch-level drop (below) uses the
 	// same signal so keyless servers never see the research tool at all.
 	searchProvider,
+	getLanguage: () => effectiveSettings().agent.language,
 });
 /** The app's ONE extraction pipeline instance — both front doors share it:
  *  quiz-triggered session runs (turn-service) and notes imports
  *  (/api/graph/import) hit the same single-flight registry. */
 export const extraction = createExtractionPipeline({
 	...stores,
+	getLanguage: () => effectiveSettings().agent.language,
 	// BYOK (owner, 2026-09-22): the extraction stages resolve the chain —
 	// role override → slot → NOTHING — read FRESH per stage call; an empty
 	// chain flows through as undefined and the pipeline refuses the run
@@ -725,6 +727,7 @@ export async function handleChatInput(
 		// point as the tool delta — the agent layer composes the system
 		// prompt fresh per turn, swapping in any enabled override segments.
 		promptSwitches: effective.agent.prompts,
+		language: effective.agent.language,
 	};
 	// PRACTICE BRANCH (owner design, 2026-10-04): a kind:"practice"
 	// session builds the practitioner from turn 1 — no prober→teacher

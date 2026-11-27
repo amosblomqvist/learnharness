@@ -32,6 +32,7 @@ import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, C
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
+import { AGENT_LANGUAGES, isValidAgentLanguageInput, normalizeAgentLanguage } from "../core/language.ts";
 import { parseFileAccessSettings } from "../core/file-access.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
@@ -225,6 +226,14 @@ export function parseAgentSettingsBody(body: unknown): SettingsBodyResult<AgentS
 			return { ok: false, error: "fileAccess.folders must be absolute on the server filesystem (or start with ~/)" };
 		}
 		settings.fileAccess = parsed.settings;
+	}
+	if (raw.language !== undefined) {
+		if (!isValidAgentLanguageInput(raw.language)) {
+			const supported = AGENT_LANGUAGES.map((entry) => `"${entry.code}"`).join(", ");
+			return { ok: false, error: `language must be one of ${supported}, or null` };
+		}
+		const language = normalizeAgentLanguage(raw.language);
+		if (language !== undefined) settings.language = language;
 	}
 	return { ok: true, settings };
 }
