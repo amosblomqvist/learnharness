@@ -2,7 +2,15 @@ import { Agent } from "@earendil-works/pi-agent-core";
 import type { AgentEvent, AgentMessage, AgentTool } from "@earendil-works/pi-agent-core";
 import { invalidInputResult, questionResult } from "./tool-execute.ts";
 import { providerEventObserver } from "./provider-events.ts";
-import type { Usage } from "@earendil-works/pi-ai";
+import {
+	createAssistantMessageEventStream,
+	type Api,
+	type AssistantMessage,
+	type Model,
+	type StreamFunction,
+	type Usage,
+} from "@earendil-works/pi-ai";
+import { CUSTOM_PROVIDER } from "../core/auth-keys.ts";
 import { PATHS } from "../../config.ts";
 import { APP_IDENTITY, piEngineFor, type PiEngine } from "./models.ts";
 import { effectivePromptSegments } from "./prompt-segments.ts";
@@ -201,6 +209,106 @@ function makeQuestionStopper(kind: AgentKind) {
 	};
 }
 
+function isEmptyLengthResponse(message: AssistantMessage): boolean {
+	if (message.stopReason !== "length") return false;
+	return !message.content.some(
+		(block) =>
+			block.type === "toolCall" ||
+			(block.type === "text" && block.text.trim().length > 0),
+	);
+}
+
+function emptyLengthErrorMessage(message: AssistantMessage, model: Model<Api>): string {
+	const limit = Number.isFinite(model.maxTokens) && model.maxTokens > 0
+		? `${model.maxTokens}-token output limit`
+		: "output token limit";
+	const hasThinking = message.content.some((block) => block.type === "thinking");
+	const summary = hasThinking
+		? `The model reached its ${limit} while reasoning and produced no visible reply.`
+		: `The model reached its ${limit} before producing a reply.`;
+	const guidance = model.provider === CUSTOM_PROVIDER.id
+		? "Raise the model's max output tokens in Settings → Providers → Custom endpoint, lower the reasoning effort, or retry."
+		: "Lower the reasoning effort or retry.";
+	return `${summary} ${guidance}`;
+}
+
+function normalizeEmptyLengthResponse(message: AssistantMessage, model: Model<Api>): AssistantMessage {
+	if (!isEmptyLengthResponse(message)) return message;
+	return {
+		...message,
+		stopReason: "error",
+		errorMessage: emptyLengthErrorMessage(message, model),
+	};
+}
+
+/**
+ * Guard foreground turns against silent empty length-truncated responses
+ * (issue #642): when a model spends its entire output budget on thinking
+ * (or emits no visible text and no tool calls) and stops with `length`,
+ * surface it as a retryable provider error instead of ending the turn
+ * silently. Partial visible text and truncated tool calls pass through
+ * untouched (pi-agent-core handles truncated tool calls via error results).
+ */
+function guardEmptyLengthStream(streamFn: StreamFunction): StreamFunction {
+	return (model, context, options) => {
+		const source = streamFn(model, context, options);
+		const output = createAssistantMessageEventStream();
+		void (async () => {
+			let terminal = false;
+			try {
+				for await (const event of source) {
+					if (event.type === "done") {
+						terminal = true;
+						const normalized = normalizeEmptyLengthResponse(event.message, model);
+						output.push(
+							normalized === event.message
+								? event
+								: { type: "error", reason: "error", error: normalized },
+						);
+					} else {
+						if (event.type === "error") terminal = true;
+						output.push(event);
+					}
+				}
+				if (!terminal) {
+					const final = await source.result();
+					output.end(normalizeEmptyLengthResponse(final, model));
+					return;
+				}
+			} catch (err) {
+				if (!terminal) {
+					const reason = options?.signal?.aborted ? "aborted" : "error";
+					output.push({
+						type: "error",
+						reason,
+						error: {
+							role: "assistant",
+							api: model.api,
+							provider: model.provider,
+							model: model.id,
+							content: [],
+							usage: {
+								input: 0,
+								output: 0,
+								cacheRead: 0,
+								cacheWrite: 0,
+								totalTokens: 0,
+								cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+							},
+							stopReason: reason,
+							errorMessage: err instanceof Error ? err.message : String(err),
+							timestamp: Date.now(),
+						},
+					});
+				}
+			} finally {
+				output.end();
+			}
+		})();
+		return output;
+	};
+}
+
 function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: AgentTool<any, any>[], nodeExists?: (nodeId: string) => boolean,
 	practice?: { gate: PracticeGate; graphNodes: PracticeToolContext["graphNodes"] }) {
 	// Practice never reaches the role fallback (the handler ALWAYS injects
@@ -251,7 +359,7 @@ function baseAgentOptions(kind: AgentKind, opts: AgentBuildOptions, tools: Agent
 			tools: contributions ? [...builtinTools, ...contributions.tools, ...(questionLedger?.tools ?? []), ...problemTools] : builtinTools,
 			messages: opts.messages ?? [],
 		},
-		streamFn: engine.streamFn,
+		streamFn: guardEmptyLengthStream(engine.streamFn),
 		...(providerEvents ? { onProviderStreamEvent: providerEvents } : {}),
 		// Both policies share the SDK hook: preserve delivered-prose tracking
 		// and exact plugin occurrence binding rather than overwriting either.
