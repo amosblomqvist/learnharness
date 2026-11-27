@@ -141,7 +141,7 @@ test("the checker verifies each pinned release, scans it, and checks its lockfil
 	const pkg = (id: string, main = "export function activate() {}") => zip([["manifest.json", manifest(id)], ["main.js", main], ["backend.cjs", "exports.activate = () => {};"]], true);
 	const packages = { clean: pkg("clean"), sneaky: pkg("sneaky", 'eval(atob("eA=="));export function activate() {}'), handmade: pkg("handmade"), tampered: pkg("tampered") };
 	const release = (id: keyof typeof packages, sha256 = createHash("sha256").update(packages[id]).digest("hex")) =>
-		({ id, name: id, author: "Example", description: "Fixture", repository: `example/${id}`, releases: [{ version: "1.0.0", apiVersion: 1, minAppVersion: "0.7.0", publishedAt: "2026-11-26T01:00:00Z", tag: "v1.0.0", asset: `${id}.zip`, sha256 }] });
+		({ id, name: id, author: "Example", description: "Fixture", repository: `example/${id}`, downloads: 0, listedAt: "2026-11-26T01:00:00Z", releases: [{ version: "1.0.0", apiVersion: 1, minAppVersion: "0.7.0", publishedAt: "2026-11-26T01:00:00Z", tag: "v1.0.0", asset: `${id}.zip`, sha256 }] });
 	const feed = { schemaVersion: 1, plugins: [release("clean"), release("sneaky"), release("handmade"), release("tampered", "0".repeat(64))] };
 	const raw: Record<string, string> = {
 		"example/clean/v1.0.0/package-lock.json": JSON.stringify({ lockfileVersion: 3, packages: { "": {}, "node_modules/left-pad": { version: "1.3.0" } } }),
@@ -179,7 +179,7 @@ test("the checker verifies each pinned release, scans it, and checks its lockfil
 
 test("the checker stops when a lockfile cannot be fetched for a reason other than absence", async () => {
 	const body = zip([["manifest.json", JSON.stringify({ id: "p", version: "1.0.0", name: "p", minAppVersion: "0.7.0", apiVersion: 1, main: "main.js" })], ["main.js", "export function activate() {}"]], true);
-	const feed = { schemaVersion: 1, plugins: [{ id: "p", name: "p", author: "a", description: "d", repository: "example/p", releases: [{ version: "1.0.0", apiVersion: 1, minAppVersion: "0.7.0", publishedAt: "2026-11-26T01:00:00Z", tag: "v1.0.0", asset: "p.zip", sha256: createHash("sha256").update(body).digest("hex") }] }] };
+	const feed = { schemaVersion: 1, plugins: [{ id: "p", name: "p", author: "a", description: "d", repository: "example/p", downloads: 0, listedAt: "2026-11-26T01:00:00Z", releases: [{ version: "1.0.0", apiVersion: 1, minAppVersion: "0.7.0", publishedAt: "2026-11-26T01:00:00Z", tag: "v1.0.0", asset: "p.zip", sha256: createHash("sha256").update(body).digest("hex") }] }] };
 	const fetcher: typeof fetch = async input => String(input).startsWith("https://github.com/") ? new Response(Uint8Array.from(body)) : new Response("unavailable", { status: 503 });
 	await assert.rejects(checkCommunityCatalog({ feed, exceptions: { schemaVersion: 1, exceptions: [] }, fetch: fetcher }), /Could not fetch package-lock.json for p@1.0.0/);
 });
