@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
-import { ArrowLeft, Puzzle } from "lucide-react";
+import { useEffect, useId, useRef, useState } from "react";
+import { Puzzle, X } from "lucide-react";
+import { HostDialog } from "@/components/host-dialog";
 import { Button } from "@/components/ui/button";
 import { COMMUNITY_CREDIT_URL, COMMUNITY_SECURITY_URL, communityListingReport, communitySource, type CommunityOffer } from "@/src/core";
 
@@ -13,7 +14,7 @@ async function json(url: string, init?: RequestInit) {
 	if (!response.ok) throw new Error(body.error || "Community catalog request failed.");
 	return body;
 }
-export function CommunityPluginBrowser({ onBack, onInstall }: { onBack: () => void; onInstall: () => void }) {
+export function CommunityPluginBrowser({ onClose, onInstall }: { onClose: () => void; onInstall: () => void }) {
 	const [offers, setOffers] = useState<CommunityOffer[] | null>(null);
 	const [query, setQuery] = useState("");
 	const [busy, setBusy] = useState<string | null>(null);
@@ -21,8 +22,7 @@ export function CommunityPluginBrowser({ onBack, onInstall }: { onBack: () => vo
 	const [notice, setNotice] = useState<string | null>(null);
 	const [attempt, retry] = useState(0);
 	const controller = useRef<AbortController | null>(null);
-	const heading = useRef<HTMLHeadingElement>(null);
-	useEffect(() => { heading.current?.focus(); }, []);
+	const title = useId();
 	useEffect(() => {
 		const load = new AbortController();
 		void json("/api/plugin-catalog", { signal: load.signal }).then(body => {
@@ -50,9 +50,16 @@ export function CommunityPluginBrowser({ onBack, onInstall }: { onBack: () => vo
 	const match = query.trim().toLocaleLowerCase();
 	const visible = offers?.filter(({ listing }) => [listing.name, listing.author, listing.description, listing.id].some(value => value.toLocaleLowerCase().includes(match)))
 		.sort((a, b) => a.listing.name.localeCompare(b.listing.name) || a.listing.id.localeCompare(b.listing.id));
-	return <div className="space-y-4">
-		<Button variant="ghost" size="sm" disabled={busy !== null} onClick={onBack}><ArrowLeft aria-hidden="true" /> Installed</Button>
-		<h2 ref={heading} tabIndex={-1} className="text-lg font-semibold">Browse community plugins</h2>
+	return <HostDialog open aria-labelledby={title} onClose={() => {
+		if (controller.current) return "blocked";
+		onClose(); return "closed";
+	}}
+		backdropProps={{ className: "fixed inset-0 flex items-center justify-center bg-background/80" }}
+		frame={<div data-testid="community-plugin-browser" className="settings-dialog-pop mx-4 max-h-[85vh] w-full max-w-2xl space-y-4 overflow-y-auto rounded-md border border-border bg-card p-5 shadow-xl" />}>
+		<div className="flex items-center justify-between gap-3">
+			<h2 id={title} className="text-sm uppercase tracking-widest">Browse community plugins</h2>
+			<Button type="button" size="icon-sm" variant="ghost" aria-label="Close Browse" disabled={busy !== null} onClick={onClose}><X aria-hidden="true" /></Button>
+		</div>
 		<label className="block text-sm">Search plugins<input type="search" value={query} onChange={event => setQuery(event.target.value)} className="mt-1 block w-full rounded-md border border-border bg-background px-3 py-2 text-sm" /></label>
 		{problem && <div role="alert" className="space-y-2 text-sm text-destructive"><p>{problem}</p><Button type="button" variant="outline" size="sm" disabled={busy !== null} onClick={() => { setProblem(null); setOffers(null); retry(n => n + 1); }}>Refresh Browse</Button></div>}
 		{notice && <p role="status" className="text-sm">{notice}</p>}
@@ -77,5 +84,5 @@ export function CommunityPluginBrowser({ onBack, onInstall }: { onBack: () => vo
 		</div>
 		<p className="text-xs text-muted-foreground"><a className={pluginLinkClass} href={COMMUNITY_SECURITY_URL} target="_blank" rel="noreferrer">Report suspected malicious code or security issues privately</a>.</p>
 		<p className="text-xs text-muted-foreground">Seeded from the <a className={pluginLinkClass} href={COMMUNITY_CREDIT_URL} target="_blank" rel="noreferrer">awesome list by RA!DEN (tn-lorenz)</a>. Thanks to the plugin authors.</p>
-	</div>;
+	</HostDialog>;
 }

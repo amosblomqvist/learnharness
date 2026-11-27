@@ -1,6 +1,6 @@
 # Community plugin catalog v1
 
-Edit `community-plugins.json` **here**, in the app repository. The website keeps an exact deployment mirror, not a second list. The desktop Browse panel and `/plugins/` read the same public feed at `https://learnharness.ai/community-plugins.json`.
+Edit `community-plugins.json` **here**, in the app repository. The website keeps an exact deployment mirror, not a second list. The desktop Browse dialog and `/plugins/` read the same public feed at `https://learnharness.ai/community-plugins.json`.
 
 ```sh
 ./node_modules/.bin/tsx scripts/sync-community-catalog.ts <website-checkout>

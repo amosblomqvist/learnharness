@@ -36,7 +36,7 @@ explain the exact shapes. Neither requires importing private app runtime modules
 The primary source-development workflow is to **clone into the app's plugins directory
 and build there**. No LearnHarness repository clone is required.
 
-1. Open **Settings → Community plugins**, opt in to community code, and copy the plugins directory path under **Manual installation and authoring**.
+1. Open **Settings → Community plugins**, opt in to community code, and copy the visible **Plugins directory** path.
 2. Clone the plugin's repository into `<plugins-directory>/<plugin-id>`. The folder
    name must match `id` in its manifest, which may differ from the repository name.
 3. Follow the project's dependency setup, then run `npm run build` in that folder.
