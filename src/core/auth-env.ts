@@ -20,5 +20,9 @@ export function externalCliEnv(env: NodeJS.ProcessEnv = process.env): NodeJS.Pro
 	for (const name of fillGap) {
 		if (!realEnv.has(name)) delete result[name];
 	}
+	// The per-launch desktop API capability is for the trusted window only
+	// (same rule as the browser-service helper's spawn env).
+	delete result.LH_DESKTOP_API_SECRET;
+	delete result.LH_DESKTOP_SERVER;
 	return result;
 }

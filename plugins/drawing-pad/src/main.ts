@@ -25,12 +25,17 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   // Opaque public path strings are associated ONLY on an actual contextual click.
   // No route parsing or global-current-session inference is used for targeting.
   const pageSessions = new Map<string, string>();
-  const sheets = new Sheets(() => {
-    if (!disposed && !ctx.signal.aborted) {
-      ctx.refreshActions(); ctx.refreshSubmissions();
-      if (current && [...sheets.sessions.values()].some(state => state.draft && state.draft.palette !== appPalette().key))
-        void refreshPalette().catch(report);
-    }
+  // Everything the host reads from this plugin: the Draw label (pending),
+  // hasPendingInput (pending, plus seenPoses for practice problem targets).
+  // Undo/tool shortcut predicates are evaluated at invocation, not on refresh.
+  let hostKey: string | undefined;
+  const sheets = new Sheets(reason => {
+    if (disposed || ctx.signal.aborted || reason === "camera" || reason === "tool") return;
+    const key = [...sheets.sessions.values()].map(state => `${state.id}:${sheets.pending(state) ? 1 : 0}:${state.draft ? 1 : 0}:` +
+      `${state.draft?.strokes.length ? 1 : 0}:${state.seenPoses.size}`).join("|");
+    if (key !== hostKey) { hostKey = key; ctx.refreshActions(); ctx.refreshSubmissions(); }
+    if (reason === "sheet" && current && [...sheets.sessions.values()].some(state => state.draft && state.draft.palette !== appPalette().key))
+      void refreshPalette().catch(report);
   }, state => { if (open?.session === state) close(open); }, activeInk);
   function close(pad: OpenPad): void {
     if (pad.closed) return;

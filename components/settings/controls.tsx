@@ -105,6 +105,25 @@ export function SettingsMenuTrigger({
 	</button>;
 }
 
+export function SettingsSegmentedControl<T extends string>({ label, options, value, disabled, testidPrefix, onChange }: {
+	label: string;
+	options: readonly { value: T; label: string }[];
+	value: T;
+	disabled?: boolean;
+	testidPrefix?: string;
+	onChange: (value: T) => void;
+}) {
+	return <div role="radiogroup" aria-label={label} className="flex rounded-lg border border-border/60 bg-muted/30 p-0.5">
+		{options.map(option => <button key={option.value} type="button" role="radio" aria-checked={option.value === value}
+			data-testid={testidPrefix ? `${testidPrefix}-${option.value}` : undefined}
+			disabled={disabled} onClick={() => onChange(option.value)}
+			className={cn("h-8 rounded-md px-3 text-sm font-medium transition-colors",
+				option.value === value ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}>
+			{option.label}
+		</button>)}
+	</div>;
+}
+
 /** The on/off switch — a plain button in the switch role. */
 export function Toggle({
 	checked,

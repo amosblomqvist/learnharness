@@ -1,9 +1,10 @@
-import { deleteSourcesTraces } from "../core/graph-deletion.ts";
+import { deleteSourcesTraces, type ChatDeleteMode } from "../core/graph-deletion.ts";
 import { folderIsEmpty, type SourceDirectory } from "../core/source-organization.ts";
+import { folderDeletionScope, type FolderDeletionScope } from "../core/session-folders.ts";
 import { extractionStatuses } from "../agent/subagents/extraction.ts";
 import { stores } from "./stores.ts";
 import { sourceDirectory } from "./source-organization.ts";
-import { deleteIdleChatRecord, runningWorkBlocker } from "./chats.ts";
+import { deleteIdleChatRecord, runningWorkBlocker, settleChatsForDeletion } from "./chats.ts";
 import { graphRevision } from "./graph.ts";
 
 export class SourceDeletionError extends Error {
@@ -65,4 +66,92 @@ export function deleteSources(raw: unknown): SourceDirectory & { graphRevision: 
 	}
 	if (JSON.stringify(state) !== JSON.stringify(directory.organization)) stores.sourceOrganizationStore.write(state);
 	return { ...sourceDirectory.read(), graphRevision: graphRevision() };
+}
+
+function parseFolderDeletionScope(raw: unknown): FolderDeletionScope {
+	const invalid = () => new SourceDeletionError("A folder deletion must include the reviewed scope.", 400, "bad_folder_scope");
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw invalid();
+	const r = raw as Record<string, unknown>;
+	const ids = (value: unknown): string[] => {
+		if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id.length > 0)) throw invalid();
+		return [...value].sort();
+	};
+	if (r.parentId !== null && (typeof r.parentId !== "string" || !r.parentId)) throw invalid();
+	return { parentId: r.parentId, folderIds: ids(r.folderIds), chatIds: ids(r.chatIds), noteIds: ids(r.noteIds) };
+}
+
+function requireFolderDeletionScope(directory: SourceDirectory, folderId: string, expected: FolderDeletionScope) {
+	const actual = folderDeletionScope(directory, folderId);
+	if (!actual) throw new SourceDeletionError("This folder no longer exists.", 404, "not_found");
+	const equalIds = (a: string[], b: string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
+	if (actual.parentId !== expected.parentId || !equalIds(actual.folderIds, expected.folderIds)
+		|| !equalIds(actual.chatIds, expected.chatIds) || !equalIds(actual.noteIds, expected.noteIds)) {
+		throw new SourceDeletionError("The folder changed. Nothing was deleted. Open Delete again to review its current contents.", 409, "folder_scope_changed");
+	}
+	return actual;
+}
+
+function blockedIn(title: string | null, code: string, error: string): SourceDeletionError {
+	const name = `“${title ?? "Untitled"}”`;
+	const message = code === "turn_in_flight" ? `A turn is running in ${name} — try again when it finishes`
+		: code === "jobs_running" ? `Background jobs are still running in ${name} — try again when they finish`
+		: code === "extraction_winding_down" ? `The extraction of ${name} is still winding down — try again in a moment`
+		: error;
+	return new SourceDeletionError(message, code === "extraction_winding_down" ? 503 : 409, code);
+}
+
+/**
+ * The sidebar's folder Delete (owner, 2026-11-18): the folder, every
+ * subfolder, and every session inside (practice included) go; imported
+ * notes and other non-session placements inside move out to the deleted
+ * folder's parent (top level for a top-level folder), keeping their graph
+ * contribution. `mode` is the session dialog's choice, applied to every
+ * session: preserve-graph keeps their graph contributions, delete-nodes
+ * removes their traces. The single-session choreography, batched: gates
+ * (409, nothing touched) → the sessions' extraction runs cancelled and
+ * awaited (503 on timeout) → one synchronous block (one ledger rewrite,
+ * the session records, then the organization). Chains' source deletion is
+ * unchanged.
+ */
+export async function deleteFolderWithSessions(folderId: string, mode: ChatDeleteMode, rawScope: unknown): Promise<SourceDirectory & { graphRevision: number; deletedChatIds: string[] }> {
+	if (mode !== "preserve-graph" && mode !== "delete-nodes") throw new SourceDeletionError('mode must be "preserve-graph" or "delete-nodes"', 400, "bad_mode");
+	const expected = parseFolderDeletionScope(rawScope);
+	const initial = sourceDirectory.read();
+	const before = requireFolderDeletionScope(initial, folderId, expected);
+	const settled = await settleChatsForDeletion(before.chatIds);
+	if (settled) {
+		const title = initial.sources.find((c) => c.id === settled.chatId)?.label ?? null;
+		throw blockedIn(title, settled.failure.code, settled.failure.error);
+	}
+
+	// THE SYNC BLOCK — no awaits below. Re-read: the folder's contents may
+	// have changed during the wind-down; every target is checked before any
+	// write, so a refusal still touches nothing.
+	const directory = sourceDirectory.read();
+	const targets = requireFolderDeletionScope(directory, folderId, expected);
+	const running = new Set(extractionStatuses().map((run) => run.chatId));
+	const labels = new Map(directory.sources.map((source) => [source.id, source.label]));
+	for (const id of targets.chatIds) {
+		const title = labels.get(id) ?? null;
+		const blocker = runningWorkBlocker(id);
+		if (blocker) throw blockedIn(title, blocker.code, blocker.error);
+		if (running.has(id)) throw blockedIn(title, "extraction_winding_down", "");
+	}
+	const chatIds = new Set(targets.chatIds);
+	deleteSourcesTraces(stores.graphStore, chatIds, mode);
+	for (const id of chatIds) {
+		const outcome = deleteIdleChatRecord(id);
+		if (!outcome.ok) throw new SourceDeletionError(outcome.error, outcome.status, outcome.code);
+	}
+	const state = structuredClone(directory.organization);
+	const folderIds = new Set(targets.folderIds);
+	const parentId = targets.parentId;
+	state.folders = state.folders.filter((f) => !folderIds.has(f.id));
+	state.placements = Object.fromEntries(Object.entries(state.placements).flatMap(([id, placement]) => {
+		if (chatIds.has(id)) return [];
+		if (placement.folderId !== null && folderIds.has(placement.folderId)) return [[id, { ...placement, folderId: parentId }]];
+		return [[id, placement]];
+	}));
+	stores.sourceOrganizationStore.write(state);
+	return { ...sourceDirectory.read(), graphRevision: graphRevision(), deletedChatIds: [...chatIds] };
 }

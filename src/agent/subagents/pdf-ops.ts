@@ -56,7 +56,7 @@ export function standardFontsDir(): string {
 }
 
 async function openDocument(filePath: string) {
-	return openBytes(new Uint8Array(await fs.readFile(filePath)));
+	return openPdfBytes(new Uint8Array(await fs.readFile(filePath)));
 }
 
 type PdfLoadingTask = Pick<import("pdfjs-dist/legacy/build/pdf.mjs").PDFDocumentLoadingTask, "promise" | "destroy">;
@@ -73,7 +73,8 @@ async function loadBytes(data: Uint8Array, signal?: AbortSignal): Promise<PdfLoa
 	return pdfjs.getDocument({ data, standardFontDataUrl: standardFontsDir(), verbosity: 0 });
 }
 
-async function openBytes(data: Uint8Array, signal?: AbortSignal, loadTask: PdfTaskLoader = loadBytes) {
+/** Open caller-owned bytes (pdfjs may transfer them). The caller owns task destruction. */
+export async function openPdfBytes(data: Uint8Array, signal?: AbortSignal, loadTask: PdfTaskLoader = loadBytes) {
 	signal?.throwIfAborted();
 	const loadingTask = await loadTask(data, signal);
 	let destruction: Promise<void> | undefined;
@@ -81,14 +82,14 @@ async function openBytes(data: Uint8Array, signal?: AbortSignal, loadTask: PdfTa
 		signal?.removeEventListener("abort", onAbort);
 	});
 	const onAbort = () => { void destroy().catch(() => {}); };
-	signal?.addEventListener("abort", onAbort, { once: true });
-	// Covers cancellation while the loader itself was pending.
-	if (signal?.aborted) onAbort();
 	try {
-		// Do not race this promise against abort: opening and teardown must both
-		// settle before the caller can release conversion capacity.
+		// Opening bytes is a cooperative checkpoint. pdfjs's Node fake worker
+		// can leave the loading promise pending and reject internally without
+		// a handler if destroyed between setup and readiness. Let it settle
+		// before destroying, and never expose the opened doc after cancellation.
 		const doc = await loadingTask.promise;
 		signal?.throwIfAborted();
+		signal?.addEventListener("abort", onAbort, { once: true });
 		return { doc, task: { destroy } };
 	} catch (error) {
 		// Failed opens own a loading task too. Cleanup is best effort, without
@@ -209,11 +210,11 @@ function isAbortError(error: unknown): boolean {
 export function createPdfConverter(loadTask: PdfTaskLoader = loadBytes) {
 	return async (data: Uint8Array, maxPages: number, options?: { signal?: AbortSignal }): Promise<PdfConversion> => {
 		const signal = options?.signal;
-		let opened: Awaited<ReturnType<typeof openBytes>> | undefined;
+		let opened: Awaited<ReturnType<typeof openPdfBytes>> | undefined;
 		let result: PdfConversion | undefined;
 		let failure: unknown;
 		try {
-			opened = await openBytes(data, signal, loadTask);
+			opened = await openPdfBytes(data, signal, loadTask);
 			signal?.throwIfAborted();
 			result = opened.doc.numPages > maxPages
 				? { kind: "too-long", pageCount: opened.doc.numPages }

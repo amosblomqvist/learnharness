@@ -37,6 +37,20 @@ const worker = await build({
   ...common, entryPoints: ["src/tex-worker.ts"], outfile: path.join(output, "assets/tex-worker.js"),
   format: "esm", platform: "browser", alias: { "node:buffer": "buffer" },
   plugins: [{ name: "no-node-dom-or-optimizer-in-worker", setup(builder) {
+    builder.onLoad({ filter: /isomorphic-tikzjax[/\\]dist[/\\]bootstrap\.js$/ }, ({ path: file }) => {
+      const original = fs.readFileSync(file, "utf8");
+      const failure = "        deleteEverything();\n        throw new Error('TeX engine render failed. Set `options.showConsole` to `true` to see logs.');";
+      if (original.split(failure).length !== 2) throw new Error("Pinned TeX diagnostic adaptation no longer matches; review the dependency before building.");
+      return { contents: original.replace(failure, `        const failure = new Error('TeX compilation failed.');
+        try {
+            const log = Buffer.from(readFileSync('input.log'));
+            const first = log.indexOf('\\n!');
+            const start = first >= 0 ? first + 1 : 0;
+            failure.texLog = log.subarray(start, start + 4096).toString('utf8');
+        } catch { /* A missing log must not mask the compilation failure. */ }
+        deleteEverything();
+        throw failure;`), loader: "js" };
+    });
     builder.onLoad({ filter: /@prinsss[/\\]dvi2html[/\\]lib[/\\]html\.js$/ }, ({ path: file }) => {
       const original = fs.readFileSync(file, "utf8");
       const emission = "htmlText += String.fromCharCode(c);";

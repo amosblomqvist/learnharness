@@ -86,3 +86,42 @@ export function createDockMorph() {
 		},
 	};
 }
+
+/** Private max-width WAAPI owner for DockOverlay's bottom region (adaptive
+ * question layout). Same duration/easing as the height morph, started in the
+ * same layout pass after the height morph has measured its natural target.
+ * Animates from the width last PAINTED: widths committed and replaced before
+ * any paint (page load, a question's first measurement) never animate. */
+export function createDockWidthMorph() {
+	let painted: { el: HTMLElement; width: number } | null = null;
+	let pending: { el: HTMLElement; width: number } | null = null;
+	let frame = 0;
+	let running: Animation | null = null;
+	const live = () => !!running && running.playState !== "finished" && running.playState !== "idle";
+	return {
+		layout(el: HTMLElement, width: number, onFinish: () => void) {
+			const from = live() ? Number.parseFloat(getComputedStyle(el).maxWidth) : painted?.el === el ? painted.width : NaN;
+			const changed = pending?.el !== el || Math.abs(pending.width - width) > EPSILON;
+			pending = { el, width };
+			if (!frame && typeof requestAnimationFrame === "function") {
+				frame = requestAnimationFrame(() => { frame = 0; painted = pending; });
+			}
+			if (!changed) return;
+			running?.cancel();
+			running = null;
+			if (!Number.isFinite(from) || Math.abs(from - width) <= EPSILON) return;
+			const animation = el.animate([{ maxWidth: `${from}px` }, { maxWidth: `${width}px` }], { duration: DURATION, easing: EASING });
+			running = animation;
+			animation.finished.then(() => { if (running === animation) { running = null; onFinish(); } }, () => {});
+		},
+		/** A width morph is mid-flight: block heights are not settled. */
+		animating: live,
+		dispose() {
+			running?.cancel();
+			running = null;
+			if (frame) cancelAnimationFrame(frame);
+			frame = 0;
+			painted = pending = null;
+		},
+	};
+}

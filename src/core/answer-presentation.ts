@@ -1,9 +1,30 @@
 /** Read-only provenance for historical question cards. Never persist this
  * projection: answer identities, ordering, grading, and learner text remain
  * the recorded facts; only model-authored display text comes from the call. */
-import { normalizeOptions, type QuestionAnswerData } from "./question-core.ts";
+import { displayedOptionLetter, normalizeOptions, optionLetterAt, type QuestionAnswerData } from "./question-core.ts";
 import { parseAskInput, parseExplainInput, parseQuizInput } from "./tool-parts.ts";
 import { repairMathForDisplay } from "./math-delims.ts";
+
+/** Read-only lettering for the transcript and the side-chat lesson view.
+ *  Older rows already have their display indices; the call only verifies
+ *  eligibility. Never shuffle again or synthesize a model-result mapping. */
+export function answeredOptionLetters(answer: QuestionAnswerData, input: unknown): ReadonlyMap<number, string> {
+	const letters = new Map<number, string>();
+	const options = answer.options;
+	if (answer.dismissed || !options?.length) return letters;
+	if (answer.optionOrder) {
+		for (const { index } of options) {
+			const letter = displayedOptionLetter(answer.optionOrder, index);
+			if (letter) letters.set(index, letter);
+		}
+		return letters;
+	}
+	if (!optionLetterAt(options.length) || options.some(({ index }, i) => index !== i + 1)) return letters;
+	const source = answer.kind === "quiz" ? parseQuizInput(input) : answer.kind === "ask" ? parseAskInput(input) : undefined;
+	if (!source || source.multiSelect || source.options?.length !== options.length) return letters;
+	for (const { index } of options) letters.set(index, optionLetterAt(index)!);
+	return letters;
+}
 
 export function answerForPresentation(answer: QuestionAnswerData, input: unknown): QuestionAnswerData {
 	if (answer.dismissed) return answer;

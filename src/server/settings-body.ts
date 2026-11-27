@@ -28,7 +28,7 @@ import type {
 	ModelSlot,
 	RoleModelOverride,
 } from "../core/settings.ts";
-import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, MODEL_SLOTS } from "../core/settings.ts";
+import { BACKGROUND_MODEL_ROLES, CACHE_RETENTIONS, COMPACTION_THRESHOLD_FLOOR, CUSTOM_MODEL_PIN_FLOOR, EXTRACTION_CHUNK_TOKENS_FLOOR, isTranscriptMaxWidth, MODEL_SLOTS, TRANSCRIPT_WIDTH_MAX_REM, TRANSCRIPT_WIDTH_MIN_REM } from "../core/settings.ts";
 import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
@@ -239,7 +239,7 @@ function parseHexOrNull(value: unknown, field: string): { color?: string | null;
 }
 
 /** appearance: { theme?, background?, colors?, fontFamily?,
- *  proseFontSize?, codeLigatures?, sessionNameSerif?, mdRendering? } —
+ *  proseFontSize?, codeLigatures?, sessionNameSerif?, compactSessionList?, mdRendering? } —
  *  `theme` is shape-checked here (slug); whether it EXISTS is the route's check. */
 export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<AppearanceSettings> {
 	const raw = asRecord(body);
@@ -296,6 +296,27 @@ export function parseAppearanceSettingsBody(body: unknown): SettingsBodyResult<A
 			return { ok: false, error: "sessionNameSerif must be a boolean" };
 		}
 		settings.sessionNameSerif = raw.sessionNameSerif;
+	}
+	if (raw.compactSessionList !== undefined) {
+		if (typeof raw.compactSessionList !== "boolean") {
+			return { ok: false, error: "compactSessionList must be a boolean" };
+		}
+		settings.compactSessionList = raw.compactSessionList;
+	}
+	if (raw.transcriptMaxWidth !== undefined) {
+		if (!isTranscriptMaxWidth(raw.transcriptMaxWidth)) {
+			return {
+				ok: false,
+				error: `transcriptMaxWidth must be an even integer between ${TRANSCRIPT_WIDTH_MIN_REM} and ${TRANSCRIPT_WIDTH_MAX_REM} (rem); omit it for Full`,
+			};
+		}
+		settings.transcriptMaxWidth = raw.transcriptMaxWidth;
+	}
+	if (raw.adaptiveQuestions !== undefined) {
+		if (typeof raw.adaptiveQuestions !== "boolean") {
+			return { ok: false, error: "adaptiveQuestions must be a boolean" };
+		}
+		settings.adaptiveQuestions = raw.adaptiveQuestions;
 	}
 	if (raw.mdRendering !== undefined) {
 		const md = asRecord(raw.mdRendering);
