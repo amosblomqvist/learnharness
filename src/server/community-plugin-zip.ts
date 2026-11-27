@@ -11,7 +11,7 @@ const bad = (why: string): never => { throw new Error(`Invalid plugin ZIP: ${why
 
 /** Strict single-volume, non-ZIP64 stored/deflated ZIP subset. Central records
  * bind each local record before data is read. No platform/archive extraction. */
-export function readCommunityPluginZip(zip: Buffer, id: string): Map<string, Buffer> {
+function zipEntries(zip: Buffer) {
 	const u16 = (at: number) => zip.readUInt16LE(at);
 	const u32 = (at: number) => zip.readUInt32LE(at);
 	if (zip.length < 22 || zip.length > COMMUNITY_ZIP_LIMIT) bad("archive size");
@@ -68,6 +68,23 @@ export function readCommunityPluginZip(zip: Buffer, id: string): Map<string, Buf
 		expectedOffset = entry.limit;
 	}
 	if (expectedOffset !== start) bad("unexpected archive data");
+	return entries;
+}
+
+/** Plugin ids a valid package could be read as: "" for a root manifest.json,
+ * and `x` for each `x/dist/manifest.json`. Discovery needs the id before
+ * readCommunityPluginZip can pick the wrapped layout. */
+export function communityZipManifestIds(zip: Buffer): string[] {
+	return zipEntries(zip).flatMap(({ name, dir }) => {
+		if (dir) return [];
+		if (name === "manifest.json") return [""];
+		const wrapped = /^([^/]+)\/dist\/manifest\.json$/.exec(name);
+		return wrapped ? [wrapped[1]!] : [];
+	});
+}
+
+export function readCommunityPluginZip(zip: Buffer, id: string): Map<string, Buffer> {
+	const entries = zipEntries(zip);
 	const wrapped = `${id}/dist/`;
 	const prefixes = ["", wrapped].filter(prefix => entries.some(entry => !entry.dir && entry.name === `${prefix}manifest.json`));
 	if (prefixes.length !== 1) bad("expected one built manifest at the root or <id>/dist/");

@@ -8,7 +8,7 @@ type Host = ReturnType<typeof import("./plugin-host.ts").createPluginHost>;
 const noStore = { "Cache-Control": "no-store" };
 const redirectCodes = new Set([301, 302, 303, 307, 308]);
 const cdnHosts = new Set(["release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
-async function boundedBytes(fetcher: typeof fetch, url: string, limit: number, signal: AbortSignal, asset = false): Promise<Buffer> {
+export async function boundedBytes(fetcher: typeof fetch, url: string, limit: number, signal: AbortSignal, asset = false): Promise<Buffer> {
 	let target = new URL(url);
 	for (let hops = 0; hops <= 3; hops++) {
 		const response = await fetcher(target.href, { cache: "no-store", redirect: "manual", credentials: "omit", signal });
@@ -22,7 +22,7 @@ async function boundedBytes(fetcher: typeof fetch, url: string, limit: number, s
 		}
 		if (response.status !== 200 || !response.body || Number(response.headers.get("content-length")) > limit) {
 			void response.body?.cancel().catch(() => {});
-			throw new Error("Download failed or exceeds the size limit");
+			throw Object.assign(new Error("Download failed or exceeds the size limit"), { status: response.status });
 		}
 		const reader = response.body.getReader(), chunks: Uint8Array[] = [];
 		let total = 0;
@@ -39,6 +39,28 @@ async function boundedBytes(fetcher: typeof fetch, url: string, limit: number, s
 	throw new Error("Too many release redirects");
 }
 
+export class CommunityReleaseError extends Error {
+	constructor(readonly stage: "download" | "checksum" | "package", message: string) { super(message); }
+}
+
+/** Download, checksum and unpack a catalog release exactly as Install does.
+ * Returns the files the host would write. The catalog checks scan this map. */
+export async function verifyCommunityRelease(fetcher: typeof fetch, listing: CommunityListing, release: CommunityRelease, appVersion: string, signal: AbortSignal): Promise<Map<string, Buffer>> {
+	let zip: Buffer;
+	try { zip = await boundedBytes(fetcher, communityReleaseAsset(listing, release), COMMUNITY_ZIP_LIMIT, AbortSignal.any([signal, AbortSignal.timeout(45_000)]), true); }
+	catch (error) { throw new CommunityReleaseError("download", error instanceof Error ? error.message : "Download failed"); }
+	if (createHash("sha256").update(zip).digest("hex") !== release.sha256) throw new CommunityReleaseError("checksum", "The release ZIP does not match the catalog checksum");
+	try {
+		const files = readCommunityPluginZip(zip, listing.id);
+		const raw = files.get("manifest.json");
+		if (!raw || raw.length > 32 * 1024) throw new Error("Missing or oversized manifest");
+		const manifest = parsePluginManifest(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw)), listing.id, appVersion);
+		if (manifest.version !== release.version || manifest.apiVersion !== release.apiVersion || manifest.minAppVersion !== release.minAppVersion) throw new Error("Manifest does not match the catalog release");
+		for (const entry of [manifest.main, manifest.backend, manifest.styles]) if (entry && !files.get(entry)?.length) throw new Error(`Missing or empty build file: ${entry}`);
+		return files;
+	} catch (error) { throw new CommunityReleaseError("package", error instanceof Error ? error.message : "invalid ZIP"); }
+}
+
 export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHost(): Promise<Host>; appVersion: string; coreIds: readonly string[] }) {
 	const fetcher = deps.fetch ?? fetch;
 	async function feed(signal: AbortSignal) {
@@ -49,19 +71,13 @@ export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHo
 	}
 	const releaseFor = (listing: CommunityListing) => compatibleCommunityRelease(listing, deps.appVersion, PLUGIN_API_VERSION);
 	async function build(listing: CommunityListing, release: CommunityRelease, signal: AbortSignal) {
-		let zip: Buffer;
-		try { zip = await boundedBytes(fetcher, communityReleaseAsset(listing, release), COMMUNITY_ZIP_LIMIT, AbortSignal.any([signal, AbortSignal.timeout(45_000)]), true); }
-		catch { throw new PluginHostError(503, "Could not download the GitHub release ZIP. No plugin files changed."); }
-		if (createHash("sha256").update(zip).digest("hex") !== release.sha256) throw new PluginHostError(409, "The release ZIP does not match the catalog checksum. No plugin files changed.");
-		try {
-			const files = readCommunityPluginZip(zip, listing.id);
-			const raw = files.get("manifest.json");
-			if (!raw || raw.length > 32 * 1024) throw new Error("Missing or oversized manifest");
-			const manifest = parsePluginManifest(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(raw)), listing.id, deps.appVersion);
-			if (manifest.version !== release.version || manifest.apiVersion !== release.apiVersion || manifest.minAppVersion !== release.minAppVersion) throw new Error("Manifest does not match the catalog release");
-			for (const entry of [manifest.main, manifest.backend, manifest.styles]) if (entry && !files.get(entry)?.length) throw new Error(`Missing or empty build file: ${entry}`);
-			return files;
-		} catch (error) { throw new PluginHostError(409, `Cannot install this package: ${error instanceof Error ? error.message : "invalid ZIP"}. No plugin files changed.`); }
+		try { return await verifyCommunityRelease(fetcher, listing, release, deps.appVersion, signal); }
+		catch (error) {
+			const stage = error instanceof CommunityReleaseError ? error.stage : "package";
+			if (stage === "download") throw new PluginHostError(503, "Could not download the GitHub release ZIP. No plugin files changed.");
+			if (stage === "checksum") throw new PluginHostError(409, "The release ZIP does not match the catalog checksum. No plugin files changed.");
+			throw new PluginHostError(409, `Cannot install this package: ${error instanceof Error ? error.message : "invalid ZIP"}. No plugin files changed.`);
+		}
 	}
 	const json = (body: unknown, status = 200) => Response.json(body, { status, headers: noStore });
 	const handle = async (fn: () => Promise<Response>) => {
