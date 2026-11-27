@@ -1,22 +1,25 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { RefreshCw, Settings } from "lucide-react";
 import { usePlugins } from "@/components/plugins";
 import type { FrontendPlugin } from "@/components/plugin-manager";
+import { HostDialog } from "@/components/host-dialog";
 import { Button } from "@/components/ui/button";
 import { SettingsGroup, SettingsRow, SettingsSection, Toggle } from "./controls";
 
 import { CatalogOperationStatus, CommunityPluginBrowser, pluginLinkClass } from "./community-plugin-browser";
 import { communitySource } from "@/src/core";
 
-export const PLUGIN_TRUST_WARNING = "Community plugins run unreviewed third-party code. They are not sandboxed and can read or change local files LearnHarness can access, including your chats and credentials, and make network requests. Only enable plugins you trust. Turning this on resumes any plugins you previously enabled.";
+export const PLUGIN_TRUST_WARNING = "Community plugins run unreviewed third-party code. They are not sandboxed and can read or change local files LearnHarness can access, including your chats and credentials, and make network requests. Only enable plugins you trust.";
+export const PLUGIN_RESUME_NOTE = "Turning this on resumes any plugins you previously enabled.";
 
 export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpenSettings?: (pluginId: string) => void; origin?: "core" | "community" }) {
 	const { manager, snapshot } = usePlugins();
 	const core = origin === "core";
 	const allowed = snapshot.communityEnabled === true;
 	const modeBusy = snapshot.loading || snapshot.communityChanging || (!allowed && (snapshot.refreshing || snapshot.plugins.some(plugin => plugin.busy)));
+	const [confirming, setConfirming] = useState(false);
 	const plugins = snapshot.plugins.filter(plugin => plugin.info.origin === origin);
 	const installed = snapshot.loading ? <p role="status" className="text-xs text-muted-foreground">Loading plugins…</p>
 		: plugins.length === 0 ? <p className="text-xs text-muted-foreground">{core ? "No Core plugins available." : "No community plugins installed."}</p>
@@ -24,9 +27,10 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 	return <SettingsSection title={core ? "Core plugins" : "Community plugins"} testid={core ? "section-core-plugins" : "section-plugins"}>
 		{snapshot.error && <p role="alert" className="text-xs text-destructive">{snapshot.error}</p>}
 		{!core && <SettingsRow label="Allow community plugins" hint={allowed ? "On" : "Off"}>
-			<Toggle label="Allow community plugins" checked={allowed} disabled={!manager || modeBusy} onChange={enabled => void manager?.setCommunityEnabled(enabled)} />
+			<Toggle label="Allow community plugins" checked={allowed} disabled={!manager || modeBusy} onChange={enabled => enabled ? setConfirming(true) : void manager?.setCommunityEnabled(false)} />
 		</SettingsRow>}
-		{!core && !allowed && <p className="font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING}</p>}
+		{!core && <p className="font-prose text-sm text-muted-foreground">{allowed ? PLUGIN_TRUST_WARNING : `${PLUGIN_TRUST_WARNING} ${PLUGIN_RESUME_NOTE}`}</p>}
+		{!core && confirming && <CommunityOptInDialog allowed={allowed} busy={!manager || modeBusy} onCancel={() => setConfirming(false)} onConfirm={() => { setConfirming(false); void manager?.setCommunityEnabled(true); }} />}
 		{!core && (!allowed || snapshot.communityChanging) && <CatalogOperationStatus operation={snapshot.catalogOperation} />}
 		{!core && allowed && !snapshot.communityChanging && <>
 		<BrowseControl />
@@ -51,7 +55,6 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 		</div>
 		{snapshot.conflicts.map(conflict => <p role="alert" key={conflict.id} className="break-words text-xs text-destructive">{conflict.error}</p>)}
 		<SettingsGroup label="Installed" testid="group-installed-plugins">
-			<p className="text-xs text-muted-foreground">Community plugins are unreviewed and not sandboxed. Only enable plugins you trust.</p>
 			{installed}
 		</SettingsGroup>
 		</>}
@@ -60,6 +63,22 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 			<div><Button variant="outline" size="sm" asChild><a href="/plugin-authoring/learnharness-plugins.zip" download={`learnharness-plugins-${process.env.LH_VERSION ?? "authoring"}.zip`} data-testid="download-plugin-authoring">Download authoring skill</a></Button></div>
 		</SettingsGroup>}
 	</SettingsSection>;
+}
+
+// Opt-in is the only step that admits third-party code, so it is confirmed.
+// Off stays one click. A change from another window closes the dialog.
+function CommunityOptInDialog({ allowed, busy, onCancel, onConfirm }: { allowed: boolean; busy: boolean; onCancel: () => void; onConfirm: () => void }) {
+	useEffect(() => { if (allowed) onCancel(); }, [allowed, onCancel]);
+	return <HostDialog open aria-label="Turn on community plugins" onClose={() => { onCancel(); return "closed"; }}
+		backdropProps={{ className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80" }}
+		frame={<div data-testid="community-opt-in-dialog" className="settings-dialog-pop mx-4 w-[32rem] max-w-[calc(100vw-2rem)] rounded-md border border-border bg-card p-5 shadow-xl" />}>
+		<h2 className="text-sm font-semibold">Turn on community plugins?</h2>
+		<p className="mt-2 font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING} {PLUGIN_RESUME_NOTE}</p>
+		<div className="mt-4 flex justify-end gap-2">
+			<Button type="button" variant="ghost" size="sm" data-testid="community-opt-in-cancel" onClick={onCancel}>Cancel</Button>
+			<Button type="button" variant="outline" size="sm" data-testid="community-opt-in-confirm" disabled={busy} onClick={onConfirm}>Turn on community plugins</Button>
+		</div>
+	</HostDialog>;
 }
 
 // Off removes this subtree, including the open intent, even when the change
