@@ -242,13 +242,14 @@ async function setFont(page, stack, size) {
 				rule.id = "smoke-label-size";
 				document.head.appendChild(rule);
 			}
-			// The matrix reads every plan block, including offscreen ones. Lay out
-			// just those older rows while forcing sizes so their probes observe
+			// The matrix reads every plan block, including offscreen ones. Keep
+			// those older rows laid out for every font and size: a skipped row
+			// keeps its last layout until it is shown, so its probe must observe
 			// the new metrics before we compare the labels with their boxes.
-			rule.textContent = z ? `
+			rule.textContent = `
 				[data-older-transcript-row]:has([data-testid="plan-block-full"]) { content-visibility: visible; }
-				:is(svg[aria-label="Plan diagram"], svg[data-plan-probe]) .text-xs { font-size: ${z} !important; }
-			` : "";
+				${z ? `:is(svg[aria-label="Plan diagram"], svg[data-plan-probe]) .text-xs { font-size: ${z} !important; }` : ""}
+			`;
 		},
 		stack,
 		size,
