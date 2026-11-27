@@ -1,4 +1,10 @@
-import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
+import {
+	abortExtraction,
+	clearExtractionError,
+	extractionError,
+	extractionStatuses,
+	isChatExtractionRunning,
+} from "../agent/subagents/extraction.ts";
 import { isJobLive } from "../agent/subagents/aborts.ts";
 import { coverageOf } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
@@ -177,6 +183,7 @@ function finishChatRecordDeletion(chatId: string): number {
 	if (stores.chatStore.deleteChat(chatId)) {
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
+		clearExtractionError(chatId);
 		sideChats.stopAll(chatId); // a running side answer has nowhere left to land
 	}
 	return jobsRemoved;
@@ -198,10 +205,12 @@ export interface SessionCoverage {
 	uncoveredCount: number;
 	coveredTokens: number;
 	uncoveredTokens: number;
-	/** True while a chat-kind extraction run is registered for this session. */
+	/** True while a chat-kind extraction run is registered or starting for this session. */
 	running: boolean;
 	/** ISO of the newest fold in this session's coverage rows; null before any. */
 	lastFoldedAt: string | null;
+	/** Last sanitized extraction failure for this session; null when clear. */
+	lastError: string | null;
 }
 
 /** The per-session coverage block (see SessionCoverage). Null when the
@@ -224,7 +233,8 @@ export function sessionCoverage(chatId: string): SessionCoverage | null {
 		uncoveredCount: cov.uncoveredCount,
 		coveredTokens: cov.coveredTokens,
 		uncoveredTokens: cov.uncoveredTokens,
-		running: extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId),
+		running: isChatExtractionRunning(chatId),
 		lastFoldedAt,
+		lastError: extractionError(chatId),
 	};
 }

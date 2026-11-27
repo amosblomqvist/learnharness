@@ -28,7 +28,18 @@ import { jobCost } from "./pricing.ts";
 import { pluginWorkerActivities, type PluginWorkerActivity } from "./plugin-worker-activity.ts";
 import type { JobRecord } from "../core/contracts.ts";
 
-export { abortExtraction, extractionStatuses, type ExtractionPhase, type RunningExtraction } from "../agent/subagents/extraction.ts";
+export {
+	abortExtraction,
+	clearExtractionError,
+	extractionError,
+	ExtractionStageUnavailableError,
+	extractionStatuses,
+	formatExtractionError,
+	isChatExtractionRunning,
+	type ExtractionPhase,
+	type RunningExtraction,
+	type StartChatExtractionResult,
+} from "../agent/subagents/extraction.ts";
 export { chatStore } from "../store/chats.ts";
 
 /** A running sub-agent job, joined with its chat's title for the dock.
