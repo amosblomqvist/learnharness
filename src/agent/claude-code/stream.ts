@@ -26,6 +26,7 @@ import { parseStreamingJson, parseToolCallArguments } from "@earendil-works/pi-a
 
 import { externalCliEnv } from "../../core/auth-env.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
+import { offerWorkerContinuation } from "../worker-request-admission.ts";
 import { ClaudeLaunchError, createClaudeLauncher } from "./launch.ts";
 import { parseCliLine, type CliBlock, type CliEvent, type CliUsage } from "./cli-events.ts";
 import { ClaudeCodeError } from "./constants.ts";
@@ -71,6 +72,7 @@ const REFUSAL_MESSAGE = "The model refused to complete the request";
 const ABORT_MESSAGE = "Request was aborted";
 const START_FAILED_MESSAGE = "claude CLI failed to start";
 const NO_STOP_REASON_MESSAGE = "claude CLI ended the message without a stop reason";
+const NOT_STREAMED_MESSAGE = "claude CLI finished without streaming its response";
 const NOT_SIGNED_IN_ERROR = "authentication_failed";
 
 export function toEffort(level: ThinkingLevel | undefined): AnthropicEffort {
@@ -149,8 +151,12 @@ class ClaudeTurn {
 	private readonly partialJson = new Map<number, string>();
 	private readonly toolBlocks = new Map<number, ToolCall>();
 	private readonly intents: ToolCall[] = [];
+	/** Where the current CLI message began, so an abandoned attempt can be rolled back. */
+	private messageStart: { content: number; intents: number; stopReason: StopReason } = { content: 0, intents: 0, stopReason: "pending" };
 	/** The current message called a harness tool by its bare name; the CLI rejects that call itself. */
 	skippedBareCall = false;
+	/** The CLI abandoned the last message and has not started its retry yet. */
+	awaitingRetry = false;
 	started = false;
 	finished = false;
 
@@ -168,6 +174,8 @@ class ClaudeTurn {
 		switch (event.type) {
 			case "messageStart":
 				this.skippedBareCall = false;
+				this.awaitingRetry = false;
+				this.messageStart = { content: this.output.content.length, intents: this.intents.length, stopReason: this.output.stopReason };
 				this.updateUsage(event.usage);
 				this.start();
 				return;
@@ -228,12 +236,22 @@ class ClaudeTurn {
 				if (this.output.stopReason !== "toolUse") this.finish();
 				return;
 
+			case "messageAbandoned":
+				this.abandonMessage();
+				return;
+
 			case "assistantError":
 				this.fail(getAssistantErrorMessage(event.error, event.text), "error");
 				return;
 
 			case "resultError":
 				this.fail(event.text, "error");
+				return;
+
+			case "resultSuccess":
+				// The turn is still open, so the CLI answered without streaming: its non-streaming fallback
+				// sends one whole assistant line that this parser does not read.
+				this.fail(NOT_STREAMED_MESSAGE, "error");
 				return;
 		}
 	}
@@ -268,6 +286,18 @@ class ClaudeTurn {
 		this.output.errorMessage = message;
 		this.stream.push({ type: "error", reason, error: this.output });
 		this.stream.end();
+	}
+
+	/** Drop the abandoned attempt; the CLI's retried message streams the whole response again. */
+	private abandonMessage(): void {
+		this.output.content.splice(this.messageStart.content);
+		this.intents.splice(this.messageStart.intents);
+		this.output.stopReason = this.messageStart.stopReason;
+		delete this.output.errorMessage;
+		this.contentIndexes.clear();
+		this.partialJson.clear();
+		this.toolBlocks.clear();
+		this.awaitingRetry = true;
 	}
 
 	private start(): void {
@@ -414,6 +444,7 @@ class ClaudeProcess implements LiveProcess {
 	private stopping = false;
 	private killTimer: NodeJS.Timeout | undefined;
 	private signal: AbortSignal | undefined;
+	private workerOwner: AbortSignal | undefined;
 	private sourceCalls: ToolCall[] = [];
 	private sourceComplete = false;
 	private admitted: PendingToolCall[] = [];
@@ -475,6 +506,7 @@ class ClaudeProcess implements LiveProcess {
 		this.turn = turn;
 		this.turn.setContextWindow(this.contextWindow);
 		this.sourceComplete = this.sourceCalls.length > 0;
+		this.workerOwner = undefined;
 		this.setSignal(signal);
 		if (this.stopping) return;
 		for (const call of admitted) {
@@ -485,6 +517,13 @@ class ClaudeProcess implements LiveProcess {
 	}
 
 	kill(): void {
+		this.pendingError = undefined;
+		this.workerOwner = undefined;
+		this.setSignal(undefined);
+		this.stopChild();
+	}
+
+	private stopChild(): void {
 		removeLiveProcess(this);
 		if (this.stopping || this.closed) return;
 		this.stopping = true;
@@ -495,13 +534,18 @@ class ClaudeProcess implements LiveProcess {
 	}
 
 	fail(message: string): void {
+		// The bridge stays open until close. A late callback must not restore
+		// a retired continuation or replace an already queued failure.
+		if (this.stopping || this.closed) return;
 		// A parallel request can fail after the admitted slice was handed to
 		// Pi. Retain that failure for its continuation instead of silently
 		// replaying and hiding the compatibility error.
 		if (this.sessionId && this.turn.finished && this.toolCallIds.length > 0) this.pendingError = message;
 		this.turn.fail(message, "error");
-		this.kill();
-		if (this.pendingError) addLiveProcess(this);
+		if (this.pendingError) {
+			this.stopChild();
+			addLiveProcess(this);
+		} else this.kill();
 	}
 
 	consumeFailure(owner: symbol, turn: ClaudeTurn): boolean {
@@ -522,7 +566,12 @@ class ClaudeProcess implements LiveProcess {
 
 	/** Only authenticated MCP requests, never stdout intent alone, admit side effects. */
 	flushAdmissions(): void {
-		if (this.stopping || this.turn.finished || !this.sourceComplete) return;
+		if (this.stopping || this.turn.finished) return;
+		if (this.turn.awaitingRetry && this.bridge.getPendingToolCalls().length > 0) {
+			this.fail("claude CLI called a tool from a response it did not stream");
+			return;
+		}
+		if (!this.sourceComplete) return;
 		const pending = this.bridge.getPendingToolCalls();
 		if (pending.length === 0) return;
 		const calls: ToolCall[] = [];
@@ -539,8 +588,23 @@ class ClaudeProcess implements LiveProcess {
 		this.toolCallIds = pending.map((call) => call.id);
 		this.turn.admit(calls);
 		this.conversation.push(...structuredClone(conversationForReuse([this.turn.getMessage()])));
-		if (this.sessionId) addLiveProcess(this);
-		else this.kill(); // No trusted scope: return the batch, then use fresh replay.
+		if (this.sessionId) {
+			addLiveProcess(this);
+			const parkedTurn = this.turn;
+			const request = this.signal;
+			offerWorkerContinuation(request, {
+				message: parkedTurn.getMessage(),
+				handoff: owner => {
+					if (this.turn !== parkedTurn || this.signal !== request || (!this.pendingError && (this.stopping || this.closed))) return;
+					// Successful slice cleanup may still abort the request signal.
+					// A parked child (or its pending continuation error) now belongs
+					// to the worker; continueTurn installs the next request signal.
+					this.workerOwner = owner;
+					this.setSignal(owner);
+					return () => { if (this.turn === parkedTurn && this.workerOwner === owner) this.kill(); };
+				},
+			});
+		} else this.kill(); // No trusted scope: return the batch, then use fresh replay.
 	}
 
 	private readonly abort = () => {
@@ -600,7 +664,9 @@ class ClaudeProcess implements LiveProcess {
 		clearTimeout(this.killTimer);
 		removeLiveProcess(this);
 		if (this.pendingError) addLiveProcess(this);
-		this.signal?.removeEventListener("abort", this.abort);
+		// A parked worker still owns the pending error after the child exits.
+		// Keep the abort listener until that error is consumed or retired.
+		if (!this.pendingError || !this.workerOwner) this.setSignal(undefined);
 		if (this.stderr.trim()) console.error("claude CLI stderr:", this.stderr.trim());
 		this.turn.fail(message, "error");
 		removeTurnResources(this.bridge, this.files).catch((error: unknown) => {

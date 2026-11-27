@@ -419,7 +419,34 @@ export interface AppearanceSettings {
 	codeLigatures?: boolean;
 	/** Session names in CMU Serif (default true — today's look). */
 	sessionNameSerif?: boolean;
+	/** Single-line monospace rows in the session sidebar. Default false. */
+	compactSessionList?: boolean;
+	/** Session transcript maximum width in rem (TRANSCRIPT_WIDTH_MIN_REM–
+	 *  TRANSCRIPT_WIDTH_MAX_REM, even steps). Absent = Full (no cap). Caps
+	 *  everything in the transcript, centered; narrow windows keep the
+	 *  column's own margins. It is also the adapted question card's limit. */
+	transcriptMaxWidth?: number;
+	/** Native questions adapt the bottom region's width/layout while
+	 *  expanded (wide content; question/answers side by side). Default true. */
+	adaptiveQuestions?: boolean;
 	mdRendering?: MdRenderingSettings;
+}
+
+/** Transcript width bounds (rem). The minimum is the default composer
+ *  width; the slider's top step before Full is the maximum. */
+export const TRANSCRIPT_WIDTH_MIN_REM = 46;
+export const TRANSCRIPT_WIDTH_MAX_REM = 120;
+export const TRANSCRIPT_WIDTH_STEP_REM = 2;
+
+/** A valid stored transcript width: an even integer rem inside the bounds. */
+export function isTranscriptMaxWidth(value: unknown): value is number {
+	return (
+		typeof value === "number" &&
+		Number.isInteger(value) &&
+		value >= TRANSCRIPT_WIDTH_MIN_REM &&
+		value <= TRANSCRIPT_WIDTH_MAX_REM &&
+		(value - TRANSCRIPT_WIDTH_MIN_REM) % TRANSCRIPT_WIDTH_STEP_REM === 0
+	);
 }
 
 /** Knowledge-graph settings — a strict dependency ladder (owner decision
@@ -525,6 +552,10 @@ export interface FactorySettings {
 		proseFontSize: number;
 		codeLigatures: boolean;
 		sessionNameSerif: boolean;
+		compactSessionList: boolean;
+		/** null = Full (no transcript cap). */
+		transcriptMaxWidth: number | null;
+		adaptiveQuestions: boolean;
 		mdRendering: {
 			headingWeight: number;
 			boldColor: string | null;
@@ -548,6 +579,9 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		proseFontSize: 16,
 		codeLigatures: false,
 		sessionNameSerif: true,
+		compactSessionList: false,
+		transcriptMaxWidth: null, // Full
+		adaptiveQuestions: true,
 		mdRendering: { headingWeight: 900, boldColor: null, italicColor: null },
 	},
 	graph: { enabled: true, rendering: true, extractionChunkTokens: 4096 },
@@ -803,6 +837,12 @@ function sanitizeAppearance(raw: Record<string, unknown>): AppearanceSettings {
 	if (codeLigatures !== undefined) out.codeLigatures = codeLigatures;
 	const sessionNameSerif = boolOrDrop(raw.sessionNameSerif);
 	if (sessionNameSerif !== undefined) out.sessionNameSerif = sessionNameSerif;
+	const compactSessionList = boolOrDrop(raw.compactSessionList);
+	if (compactSessionList !== undefined) out.compactSessionList = compactSessionList;
+	// Invalid widths drop on read (= Full); the PUT parser rejects them.
+	if (isTranscriptMaxWidth(raw.transcriptMaxWidth)) out.transcriptMaxWidth = raw.transcriptMaxWidth;
+	const adaptiveQuestions = boolOrDrop(raw.adaptiveQuestions);
+	if (adaptiveQuestions !== undefined) out.adaptiveQuestions = adaptiveQuestions;
 	if (raw.mdRendering !== undefined) out.mdRendering = sanitizeMdRendering(raw.mdRendering);
 	return out;
 }

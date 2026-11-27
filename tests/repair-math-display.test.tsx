@@ -37,7 +37,7 @@ const dock = (input: { statement: string }, expanded = true) => (
 function math(html: string) {
 	const { document } = parseHTML(html);
 	return {
-		annotations: [...document.querySelectorAll('annotation[encoding="application/x-tex"]')].map((n) => n.textContent),
+		annotations: [...document.querySelectorAll('.katex[data-tex]')].map((n) => n.getAttribute('data-tex')),
 		glyphs: [...document.querySelectorAll(".katex-html")].map((n) => n.textContent).join(""),
 		errors: document.querySelectorAll(".katex-error").length,
 	};

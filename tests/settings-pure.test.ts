@@ -11,7 +11,6 @@ import { appearanceVars, resolveAppearance, staleVarNames } from "../components/
 import { clearColorOverrides, colorOverride, composeColorOverride } from "../components/settings/appearance-section.tsx";
 import { BUILTIN_THEMES, DEFAULT_THEME } from "../src/core";
 import {
-	PROMPT_IN_USE_HINT,
 	composePromptSwitch,
 	composeSearchEngine,
 	composeSlotModel,
@@ -443,9 +442,6 @@ describe("sectionedSegments — actual per-agent prompt membership", () => {
 		assert.equal(sectionedSegments({ teacher: [], prober: [], practice: [fragment] }).at(-1)!.segments[0]!.usageHint, "Used by Practice");
 	});
 
-	it("the indicator copy is pinned — it states WHICH VERSION IS IN USE (refined 2026-09-26)", () => {
-		assert.equal(PROMPT_IN_USE_HINT, "Your version is in use");
-	});
 });
 
 // ─── the quizzing-mechanics segmented control (owner 2026-09-27) ───────────

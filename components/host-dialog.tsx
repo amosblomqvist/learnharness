@@ -24,6 +24,8 @@ export interface HostDialogProps {
 	ownerId?: LayerId | null;
 	openingLease?: OpeningLease;
 	initialFocusRef?: RefObject<HTMLElement | null>;
+	/** Context to focus if the original opener is no longer eligible. */
+	returnFocusFallback?: HTMLElement;
 	headingRef?: RefObject<HTMLElement | null>;
 	/** Existing visual root: classes, styles, ref and test IDs are retained. */
 	frame?: ReactElement<FrameProps>;
@@ -45,7 +47,7 @@ function assignRef(ref: Ref<HTMLElement> | undefined, node: HTMLElement | null) 
 }
 
 function OpenHostDialog({
-	onClose, layerId, ownerId, openingLease, initialFocusRef, headingRef,
+	onClose, layerId, ownerId, openingLease, initialFocusRef, headingRef, returnFocusFallback,
 	frame = <div />, backdropProps = {}, children, ...labels
 }: HostDialogProps) {
 	const controller = useInteractionLayers();
@@ -116,8 +118,8 @@ function OpenHostDialog({
 		const generation = controller.getGeneration();
 		const focusRevision = controller.getFocusRevision();
 		const opener = openerRef.current;
-		setTimeout(() => { controller.restoreFocus(opener, generation, focusRevision, openingLease); }, 0);
-	}, [controller, openingLease]);
+		setTimeout(() => { controller.restoreFocus(opener, generation, focusRevision, openingLease, returnFocusFallback); }, 0);
+	}, [controller, openingLease, returnFocusFallback]);
 
 	const originalRef = frame.props.ref;
 	const frameRef = useCallback((node: HTMLElement | null) => {

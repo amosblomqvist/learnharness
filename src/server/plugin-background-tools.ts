@@ -1,7 +1,7 @@
 /** Native ack-now/result-steer-later adapter. Workers own execution and canonical outcomes. */
 import { createHash } from "node:crypto";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
-import type { TSchema } from "typebox";
+import type { Static, TSchema } from "typebox";
 import { buildJobFailureSteer, buildSubagentSteer, type JobRecord, type SteerMessage } from "../core/contracts/jobs.ts";
 import type { JobStore } from "../core/ports.ts";
 import type { PluginToolContext } from "../core/plugins.ts";
@@ -97,7 +97,9 @@ export function createPluginBackgroundTool<T extends TSchema>(deps: PluginBackgr
 		// preparation or execution when this host-derived acceptance is known.
 		let snapshot = workers.list().find((task) => task.requestId === requestId);
 		if (snapshot && (snapshot.definitionId !== workerId || snapshot.purpose !== "background")) throw new Error("Background request identity belongs to a different worker or purpose");
-		const options = snapshot ? undefined : await abortable(() => prepare.call(definition, input, context), preacceptSignal);
+		// Pi already validated the model arguments against definition.parameters.
+		// Keep the public TypeBox callback type; Pi's generic JSON Schema inference differs.
+		const options = snapshot ? undefined : await abortable(() => prepare.call(definition, input as Static<T>, context), preacceptSignal);
 		const accepted = jobStore.findJobByToolCallId(context.chatId, toolCallId);
 		if (accepted) return acknowledge(accepted);
 		if (preacceptSignal.aborted) throw new Error("Background tool call aborted before worker dispatch: plugin disabled or operation cancelled");

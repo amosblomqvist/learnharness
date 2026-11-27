@@ -2,13 +2,15 @@
 
 import { createContext, useContext, useLayoutEffect, useRef, useState, type DragEvent, type HTMLAttributes, type ReactNode } from "react";
 import { FolderIcon, FolderOpenIcon } from "lucide-react";
+import { cn } from "@/lib/utils";
 import { canMoveFolder, folderIsEmpty, fuzzyScore, placementOf, folderEntryCheck, type SourceEntrySelection, type OrganizationAction, type SourceDirectory } from "@/src/core";
 import type { ChainSort } from "./chain-table";
 import { chainRow } from "./chain-navigation";
 import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeSeparator, treeBranchLayout, treeRowLayout } from "./tree-presentation";
 
 export type OrganizationChange = (action: OrganizationAction) => Promise<string | void>;
-const DRAG_TYPE = "application/x-learnharness-source";
+export const SOURCE_DRAG_TYPE = "application/x-learnharness-source";
+const DRAG_TYPE = SOURCE_DRAG_TYPE;
 const RowEditing = createContext<((editing: boolean) => void) | null>(null);
 
 /** Keep the existing row as the drag surface, not the editor. A transient,
@@ -59,8 +61,8 @@ export function sourceNameMatches(directory: SourceDirectory | undefined, id: st
 
 /** Same Enter/blur commit and Escape cancel interaction as session titles.
  * The in-flight guard prevents Enter followed by blur from double-writing. */
-export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = false, muted = false }: {
-	name: string; onSave: (name: string) => Promise<unknown>; onCancel?: () => void; initiallyEditing?: boolean; muted?: boolean;
+export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = false, muted = false, inputClassName }: {
+	name: string; onSave: (name: string) => Promise<unknown>; onCancel?: () => void; initiallyEditing?: boolean; muted?: boolean; inputClassName?: string;
 }) {
 	const [editing, setEditing] = useState(initiallyEditing);
 	const [draft, setDraft] = useState(name);
@@ -83,7 +85,7 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 	};
 	return <span className="min-w-0 flex-1">
 		{editing ? <input ref={input} value={draft} placeholder="Folder name" aria-label="Source or folder name" data-testid="source-name-input"
-			className="block h-5 w-full min-w-0 border-0 bg-transparent p-0 text-sm font-medium leading-5 outline-none shadow-none focus:ring-0"
+			className={cn("block w-full min-w-0 border-0 bg-transparent p-0 font-medium outline-none shadow-none focus:ring-0", inputClassName ?? "h-5 text-sm leading-5")}
 			onChange={(e) => setDraft(e.target.value)} onBlur={() => { void commit(); }}
 			onKeyDown={(e) => {
 				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(""); onCancel?.(); }
@@ -179,7 +181,14 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 			return <div key={folder.id} data-testid={`source-folder-${folder.id}`} {...treeBranchLayout()} {...dropProps(folder.id)}>
 				<SourceDragRow {...chainRow(["folder", folder.id], depth, open)} kind="folder" id={folder.id} name={folder.name} enabled={Boolean(onAction)} data-testid={`folder-row-${folder.id}`}
 					data-drop-active={dropTarget === folder.id}
-					{...treeRowLayout({ depth, className: `transition-colors ${!open || !hasChildren ? "border-b border-transparent" : ""} ${dropTarget === folder.id ? "bg-accent/50" : ""}`, style: { paddingLeft: 12 + depth * 36 } })}>
+					{...treeRowLayout({ depth, className: `relative transition-colors ${dropTarget === folder.id ? "bg-accent/50" : ""}`,
+						// Inline: the unlayered global `* { border-color }` outranks
+						// Tailwind's transparent border, which drew this slot full width.
+						style: { paddingLeft: 12 + depth * 36, borderBottom: "1px solid transparent" } })}>
+					{/* An open folder's contents are framed top AND bottom (owner,
+					    polish round): a rule under the folder row starting at the
+					    rail, like every rule between its items. */}
+					{open && hasChildren && <TreeSeparator data-testid={`folder-head-separator-${folder.id}`} outside inset={(depth + 1) * 36 + 1} />}
 					<TreeCheckbox aria-label={`Select ${sourceSelection ? "folder" : "contents of"} ${folder.name}`} data-testid={`folder-checkbox-${folder.id}`}
 						disabled={entryCheck ? false : empty ? !allowEmptySelection : members.length === 0}
 						checked={entryCheck?.checked ?? (empty ? selectedFolders.has(folder.id) : members.length > 0 && selectedCount === members.length)}
@@ -196,7 +205,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 					<TreeCell widthClassName="w-14" align="right" className="text-xs tabular-nums text-muted-foreground">{members.length}</TreeCell>
 					<TreeCell widthClassName="w-20" align="right" className="text-xs tabular-nums text-muted-foreground">{folder.createdAt.slice(0, 10)}</TreeCell>
 				</SourceDragRow>
-				{open && hasChildren && <TreeGuide selectionColumn depth={depth} data-testid={`folder-thread-${folder.id}`} />}
+				{open && hasChildren && <TreeGuide selectionColumn through depth={depth} data-testid={`folder-thread-${folder.id}`} />}
 				{open && renderLevel(folder.id, depth + 1)}
 				<TreeSeparator data-testid={`folder-separator-${folder.id}`} inset={depth === 0 ? 0 : depth * 36 + 1} />
 			</div>;
