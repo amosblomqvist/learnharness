@@ -177,7 +177,9 @@ declarations in another block do not carry over. In particular, load
 Place the diagram environment directly inside `document`, without an outer
 `\[...\]`, `$$...$$`, or `equation` wrapper. TikZ node labels can use `$...$`;
 `tikzcd` cells already use math mode. The bundled PGFPlots version is **1.16**:
-use `\pgfplotsset{compat=1.16}`, not `compat=1.18` or a newer version.
+use `\pgfplotsset{compat=1.16}`, not `compat=1.18` or a newer version. Inside an
+`axis`, draw circles as `circle[radius=2pt]`: from `compat=1.5.1` the parenthesized
+`circle (2pt)` form does not compile there, although it works in a plain `tikzpicture`.
 These requirements are also included in the prober/teacher/practice system
 instructions when technical diagrams are enabled. Upstream also includes supporting
 math/array/3D/chemfig packages, but those are not additional advertised families.

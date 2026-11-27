@@ -36,6 +36,7 @@ test("technical-diagram instructions cover the observed TeX authoring failures",
   assert.match(instructions, /bundled PGFPlots version is 1\.16/);
   assert.ok(instructions.includes("\\pgfplotsset{compat=1.16}"));
   assert.match(instructions, /do not request 1\.18 or another newer version/);
+  assert.ok(instructions.includes("Inside an axis, draw circles as circle[radius=2pt]; the parenthesized form circle (2pt) does not compile there."));
 });
 
 test("UTF-8 source/output bounds are enforced without trimming valid payloads", () => {
