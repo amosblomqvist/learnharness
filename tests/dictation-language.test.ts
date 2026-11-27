@@ -29,7 +29,7 @@ describe("Nova-3 dictation language contract", () => {
 			assert.equal(url.origin + url.pathname, "wss://api.deepgram.com/v1/listen");
 			assert.deepEqual(Object.fromEntries(url.searchParams), {
 				model: "nova-3", encoding: "linear16", sample_rate: "16000", channels: "1",
-				smart_format: "true", punctuate: "true", endpointing: "300", language,
+				smart_format: "true", punctuate: "true", endpointing: "300", mip_opt_out: "true", language,
 			});
 		}
 	});
