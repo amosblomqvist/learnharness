@@ -199,7 +199,7 @@ function MermaidInline({ chart }: { chart: string }) {
 	return (
 		// data-streamdown="mermaid" keeps the house CSS hook (the svg
 		// max-width rule in globals.css) alive for this app-owned block.
-		<div data-testid="md-mermaid" data-streamdown="mermaid" className="group/md relative my-4">
+		<div dir="ltr" data-testid="md-mermaid" data-streamdown="mermaid" className="group/md relative my-4">
 			<div
 				ref={holderRef}
 				className="mx-auto flex w-full justify-center"
@@ -249,7 +249,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	// Inline code: no data-block (the pre handler stamps block fences only).
 	if (!("data-block" in props)) {
 		return (
-			<code className={cn("rounded px-1.5 py-0.5 font-mono text-sm text-(--lh-ink-code)", className)} data-streamdown="inline-code" {...rest}>
+			<code className={cn("rounded px-1.5 py-0.5 font-mono text-sm text-(--lh-ink-code)", className)} data-streamdown="inline-code" {...rest} dir="ltr">
 				{children}
 			</code>
 		);
@@ -265,7 +265,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const startLine = startMatch ? Number.parseInt(startMatch[1]!, 10) : undefined;
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	const fallback = (
-		<div className="group/md relative" data-testid="md-code">
+		<div dir="ltr" className="group/md relative" data-testid="md-code">
 			{!displayOnly && <CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />}
 			<CodeBlock
 				code={source}
@@ -348,7 +348,7 @@ export function parseAlertMarker(children: ReactNode): ParsedAlert | null {
  *  hugs its text (width: fit-content, capped at the column) instead of
  *  stretching full-width into empty space. */
 export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraProps) {
-	const { children, node, ...rest } = props;
+	const { children, node, dir, ...rest } = props;
 	const alert = parseAlertMarker(children);
 	if (!alert) {
 		// Plain quote — Streamdown's own styling, restored by hand: overriding
@@ -358,7 +358,8 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 		return (
 			<blockquote
 				{...rest}
-				className="my-4 border-l-4 border-muted-foreground/30 pl-4 text-muted-foreground italic"
+				dir={dir}
+				className="my-4 border-s-4 border-muted-foreground/30 ps-4 text-muted-foreground italic"
 				data-streamdown="blockquote"
 			>
 				{children}
@@ -367,6 +368,7 @@ export function MarkdownBlockquote(props: ComponentProps<"blockquote"> & ExtraPr
 	}
 	return (
 		<div
+			dir={dir}
 			data-testid="md-callout"
 			data-alert-kind={alert.kind}
 			className="my-4 w-fit max-w-full border border-line-strong px-4 py-3 [&> :first-child]:mt-0 [&> :last-child]:mb-0"
@@ -443,7 +445,7 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 		// land on it (owner report: the math corner neither highlights on hover
 		// nor copies; everything else works). display:block gives the corner a
 		// real box; z-10 keeps it above the equation spans it overlays.
-		<span className="group/md relative block z-0" data-testid="md-math">
+		<span dir="ltr" className="group/md relative block z-0" data-testid="md-math">
 			{!displayOnly && <CopyCorner
 				className="absolute top-0 right-0 z-10"
 				label="Copy equation source"
@@ -451,7 +453,7 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 					?? ref.current?.querySelector('annotation[encoding="application/x-tex"]')?.textContent
 					?? ""}
 			/>}
-			<span ref={ref} className={className} {...rest}>
+			<span ref={ref} className={className} {...rest} dir="ltr">
 				{children}
 			</span>
 		</span>

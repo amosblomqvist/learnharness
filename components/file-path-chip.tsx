@@ -38,6 +38,7 @@ export function FilePathChip({ path, contentEditable, className }: FilePathChipP
 	const Icon = isDirectoryReference(path) ? Folder : fileIcon(label);
 	return (
 		<span
+			dir="ltr"
 			role="img"
 			aria-label={path}
 			title={path}

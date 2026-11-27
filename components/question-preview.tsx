@@ -86,12 +86,12 @@ function remarkQuestionPreviewPrefix({ cutBeforeMath }: { cutBeforeMath: number 
 }
 
 const previewComponents = {
-	p: ({ children, title }: ComponentProps<"p"> & ExtraProps) => <span data-preview-cut={title === cutMarker}>{children}</span>,
+	p: ({ children, title }: ComponentProps<"p"> & ExtraProps) => <span dir="auto" data-preview-cut={title === cutMarker}>{children}</span>,
 	span: ({ children, title, node: _node, ...props }: ComponentProps<"span"> & ExtraProps) => title === linkLabelMarker
 		? <span className="text-primary underline underline-offset-4">{children}</span>
 		: <span title={title} {...props}>{children}</span>,
 	code: ({ children }: ComponentProps<"code"> & ExtraProps) => (
-		<code data-streamdown="inline-code" className="inline-block align-middle whitespace-pre rounded px-1.5 py-0.5 font-mono leading-none">{children}</code>
+		<code dir="ltr" data-streamdown="inline-code" className="inline-block align-middle whitespace-pre rounded px-1.5 py-0.5 font-mono leading-none">{children}</code>
 	),
 	strong: MarkdownStrong,
 };

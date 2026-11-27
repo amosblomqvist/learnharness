@@ -38,6 +38,7 @@ import {
 import { mdComponents } from "@/components/md-blocks";
 import { repairMathForDisplay, transformMathDelimiters } from "@/src/core";
 import { rehypeGluePunctuation } from "@/components/md-nobreak";
+import { rehypeBidi } from "@/components/md-bidi";
 
 export type MessageProps = HTMLAttributes<HTMLDivElement> & {
   from: LhViewMessage["role"];
@@ -382,6 +383,7 @@ export const streamdownRehypePlugins = [
     harden: [hardenPlugin, { ...hardenOptions, allowedImagePrefixes: [] }],
   }),
   rehypeGluePunctuation,
+  rehypeBidi,
 ] as NonNullable<StreamdownProps["rehypePlugins"]>;
 
 export const MessageResponse = memo(

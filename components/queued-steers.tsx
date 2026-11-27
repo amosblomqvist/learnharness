@@ -25,6 +25,7 @@ export function QueuedSteersBody({ steers }: { steers: QueuedSteerLine[] }) {
 			{steers.map((s) => (
 				<span
 					key={s.id}
+					dir="auto"
 					title={s.text}
 					className="block max-w-[240px] truncate font-ui text-[11px] text-muted-foreground/60"
 				>

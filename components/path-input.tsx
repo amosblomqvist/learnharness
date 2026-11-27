@@ -325,6 +325,7 @@ export const PathInput = React.forwardRef<HTMLDivElement, PathInputProps>(functi
 
 	return <>
 		<div
+			dir="auto"
 			{...props}
 			ref={rootRef}
 			role="textbox"

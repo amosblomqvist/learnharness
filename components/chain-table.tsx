@@ -514,6 +514,7 @@ export function ChainTableBody({
 																	/>
 																))}
 																<span
+																	dir="auto"
 																	data-testid={`prop-chip-${id}`}
 																	className="rounded border border-border/70 bg-muted/30 px-1.5 py-0.5"
 																>

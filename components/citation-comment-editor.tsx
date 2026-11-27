@@ -50,6 +50,7 @@ export function CitationCommentEditor({ initial, onDraftChange, onSave, onCancel
 	return (
 		<div className="flex flex-col gap-2">
 			<textarea
+				dir="auto"
 				ref={areaRef}
 				value={draft}
 				rows={2}
