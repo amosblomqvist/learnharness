@@ -1,21 +1,37 @@
 # Community plugin catalog v1
 
-Edit `community-plugins.json` **here**, in the app repository. The website keeps an exact deployment mirror, not a second list. The desktop Browse dialog and `/plugins/` read the same public feed at `https://learnharness.ai/community-plugins.json`.
+Edit `community-plugins.json` **here**, in the app repository. The website keeps an exact deployment mirror, not a second list. Browse (in the desktop Settings) and `/plugins/` read the same public feed at `https://learnharness.ai/community-plugins.json`.
 
 ```sh
 ./node_modules/.bin/tsx scripts/sync-community-catalog.ts <website-checkout>
 ./node_modules/.bin/tsx scripts/sync-community-catalog.ts --check <website-checkout>
 ```
 
-The sync command also generates `plugins/catalog-contract.js` from the desktop parser and Core ID list. Check in both outputs; `--check` verifies both byte-for-byte. Use the existing website deployment path after separately authorized publication. Catalog changes are independent of desktop releases. For initial rollout, deploy and verify the website feed before distributing the app feature. Create the `community-plugin` label in the app repository before launch so listing reports can be labeled. GitHub may require sufficient permissions to apply labels to a new issue; the issue still carries the ID and source in its body.
+The sync command also generates `plugins/catalog-contract.js` from the desktop parser and Core ID list, and copies each `details/<id>.json` to `community-plugins/<id>.json`. Check in all outputs; `--check` verifies them byte-for-byte. Sync fails if the feed's featured flags differ from `featured.json`, or if `details/` doesn't hold exactly one file per listing. Use the existing website deployment path after separately authorized publication. Catalog changes are independent of desktop releases. For initial rollout, deploy and verify the website feed before distributing the app feature. Create the `community-plugin` label in the app repository before launch so listing reports can be labeled. GitHub may require sufficient permissions to apply labels to a new issue; the issue still carries the ID and source in its body.
 
 ## Listing format
 
-The public UTF-8 JSON object has `schemaVersion: 1` and a `plugins` array. Each item has `id`, `name`, `author`, `description`, `repository` (`owner/name` on GitHub), and `releases`. Use existing manifest display fields where available and credit the repository author when the manifest omits `author`. Core IDs are reserved. Seeded from the [awesome list by RA!DEN (tn-lorenz)](https://github.com/tn-lorenz/awesome-learnharness); thanks to the plugin authors.
+The public UTF-8 JSON object has `schemaVersion: 1` and a `plugins` array. Each item has `id`, `name`, `author`, `description`, `repository` (`owner/name` on GitHub), `downloads`, `listedAt`, and `releases`. `downloads` is the sum of the GitHub `download_count` of each listed release ZIP when the feed was built. `listedAt` is the UTC time the plugin first entered the feed (same format as `publishedAt`), and it never changes afterwards; the first nine listings were backfilled with their oldest GitHub release date. Browse sorts Most downloaded by `downloads` and Newest by `listedAt`. Use existing manifest display fields where available and credit the repository author when the manifest omits `author`. Core IDs are reserved. Seeded from the [awesome list by RA!DEN (tn-lorenz)](https://github.com/tn-lorenz/awesome-learnharness); thanks to the plugin authors.
 
-For each verified package, record `version`, `apiVersion`, `minAppVersion`, UTC `publishedAt` (`YYYY-MM-DDTHH:mm:ssZ`), GitHub release `tag` (version with optional `v`), exact uploaded ZIP `asset` filename, and `sha256` (64 lowercase hex digits for the exact public download). Record only public stable GitHub Releases whose uploaded asset, digest, manifest, compatibility and built entry files have been verified. Do not list GitHub-generated source archives. A listing is not a code review or a safety endorsement. `releases: []` shows a source link but no Install; this is initially true of Meme Plugin (no package) and Activity heatmap (nonportable backslash archive paths).
+For each verified package, record `version`, `apiVersion`, `minAppVersion`, UTC `publishedAt` (`YYYY-MM-DDTHH:mm:ssZ`), GitHub release `tag` (version with optional `v`), exact uploaded ZIP `asset` filename, and `sha256` (64 lowercase hex digits for the exact public download). A release may carry `featured: true`. It is copied from `featured.json` and nothing else sets it.
+
+Record only public stable GitHub Releases whose uploaded asset, digest, manifest, compatibility and built entry files have been verified. Do not list GitHub-generated source archives. A listing is not a code review or a safety endorsement. `releases: []` shows a source link but no Install; this is initially true of Meme Plugin (no package) and Activity heatmap (nonportable backslash archive paths).
 
 The supported archive has built files at ZIP root or inside the exact `<id>/dist/` prefix. `manifest.json` identifies the plugin, version, minimum app and plugin API. Only built root files and the `assets/` tree are installed, not package wrappers, plugin data, or nested documentation. Use portable slash-separated paths and ordinary stored/deflated ZIP files (no links, encryption, ZIP64, or conflicting names). Compressed downloads are capped at 16 MiB; expanded entries are capped at 48 MiB total and 16 MiB per file. Use the application’s existing `dist/` build convention; there is no npm install or source build on the user's machine.
+
+## Featured
+
+`featured.json` (`{ "schemaVersion": 1, "featured": [{ "id", "sha256" }] }`) lists the releases a maintainer has reviewed. Only maintainers edit it, and auto-discovery never writes it. Featured is the only human-reviewed, endorsed tier. Browse shows the Featured mark only when the release it would install is a reviewed one. A newer, unreviewed release drops the mark, and its detail page names the older version that was reviewed. Add the new release's `sha256` after reviewing it.
+
+## Details
+
+`details/<id>.json` is a snapshot of the plugin's README at the newest listed release tag, plus the GitHub release notes for each listed version:
+
+```json
+{ "schemaVersion": 1, "id": "<id>", "readme": { "tag": "v1.0.0", "markdown": "…" }, "releases": [{ "version": "1.0.0", "notes": "…" }] }
+```
+
+`readme` is `null` when there is no release or no README. The tag and versions must exist in the listing. Each file is capped at 256 KiB, a README at 128 KiB, and each release's notes at 16 KiB. The desktop fetches a file only when someone opens a plugin's detail page in Browse. README images are never loaded: each one is shown as a link with its alt text, and relative links point at the repository at the snapshot tag.
 
 ## Install, update, and removal
 

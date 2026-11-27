@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { COMMUNITY_FEED_LIMIT, COMMUNITY_FEED_URL, COMMUNITY_ZIP_LIMIT, communityReleaseAsset, compatibleCommunityRelease, parseCommunityFeed, SHA256_PATTERN, type CommunityListing, type CommunityOffer, type CommunityRelease } from "../core/community-catalog.ts";
+import { COMMUNITY_DETAIL_LIMIT, COMMUNITY_FEED_LIMIT, COMMUNITY_FEED_URL, COMMUNITY_ZIP_LIMIT, communityDetailUrl, communityReleaseAsset, compatibleCommunityRelease, parseCommunityDetail, parseCommunityFeed, SHA256_PATTERN, type CommunityListing, type CommunityOffer, type CommunityRelease } from "../core/community-catalog.ts";
 import { PLUGIN_API_VERSION, PLUGIN_ID_PATTERN, parsePluginManifest } from "../core/plugins.ts";
 import { PluginHostError } from "./plugin-host.ts";
 import { readCommunityPluginZip } from "./community-plugin-zip.ts";
@@ -85,6 +85,17 @@ export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHo
 				return { listing, release, action: release ? host.catalogAction(listing, release) : null };
 			});
 			return json({ offers });
+		}),
+		detail: (id: string, request: Request) => handle(async () => {
+			if (id.length > 80 || !PLUGIN_ID_PATTERN.test(id)) throw new PluginHostError(400, "Invalid plugin ID");
+			const host = await deps.getHost();
+			if (!host.communityEnabled()) throw new PluginHostError(409, "Turn on community plugins before browsing.");
+			const listing = (await feed(request.signal)).plugins.find(plugin => plugin.id === id);
+			if (!listing) throw new PluginHostError(404, "This plugin is no longer listed. Refresh Browse.");
+			try {
+				const bytes = await boundedBytes(fetcher, communityDetailUrl(id), COMMUNITY_DETAIL_LIMIT, AbortSignal.any([request.signal, AbortSignal.timeout(10_000)]));
+				return json({ detail: parseCommunityDetail(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), listing) });
+			} catch { throw new PluginHostError(503, "Plugin details are unavailable. Try again later."); }
 		}),
 		install: (id: string, request: Request) => handle(async () => {
 			let selection: unknown;
