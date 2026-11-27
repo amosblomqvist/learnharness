@@ -8,7 +8,7 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 import { createPluginWindowOwner, PluginsProvider } from "../components/plugins.tsx";
 import { ServerEventsProvider } from "../components/server-events.tsx";
 import { SettingsDialogBody, SettingsDialogProvider } from "../components/settings/settings-dialog.tsx";
-import type { PluginFrontendModule, PluginInfo } from "../src/core/index.ts";
+import type { CommunityOffer, PluginFrontendModule, PluginInfo } from "../src/core/index.ts";
 import { InteractionLayersProvider } from "../components/interaction-layers.tsx";
 import { installModalDom } from "./modal-dom.ts";
 
@@ -26,9 +26,19 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 	const coreRequests: string[] = [];
 	let rejectCore!: (error: Error) => void;
 	const coreSettings = new Promise<Response>((_resolve, reject) => { rejectCore = reject; });
+	const listing = { id: "synthetic", name: "Synthetic", author: "Fixture", description: "Test listing", repository: "fixture/synthetic", releases: [] };
+	const offer: CommunityOffer = { listing, action: "Install", release: { version: "1.0.0", apiVersion: 1, minAppVersion: "0.7.0", publishedAt: "2026-10-01T00:00:00Z", tag: "v1.0.0", asset: "fixture.zip", sha256: "a".repeat(64) } };
+	let communityEnabled = true, catalogReads = 0;
+	let replyToInstall!: (response: Response) => void;
+	const pendingInstall = new Promise<Response>(resolve => { replyToInstall = resolve; });
 	Object.assign(globalThis, { window: dom.window, self: dom.window, document: dom.document, HTMLElement: dom.window.HTMLElement, Element: dom.window.Element,
-		fetch: (url: string) => { coreRequests.push(String(url)); return coreSettings; }, IS_REACT_ACT_ENVIRONMENT: true });
+		fetch: async (url: string) => {
+			if (url === "/api/plugin-catalog") { catalogReads++; return Response.json({ offers: [offer] }); }
+			coreRequests.push(String(url)); return coreSettings;
+		}, IS_REACT_ACT_ENVIRONMENT: true });
 	const restoreModalDom = installModalDom(dom);
+	const getSelection = Object.getOwnPropertyDescriptor(dom.window, "getSelection");
+	Object.defineProperty(dom.window, "getSelection", { configurable: true, value: () => ({ anchorNode: null, focusNode: null, anchorOffset: 0, focusOffset: 0 }) });
 	let customMounts = 0, customCleanups = 0;
 	const changes: boolean[] = [];
 	const loading = new Promise<void>(() => {});
@@ -43,7 +53,17 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		broken: { activate() { throw new Error("Fixture activation failed"); } },
 	};
 	const owner = createPluginWindowOwner({
-		fetch: async () => Response.json({ plugins: [info("schema"), info("custom"), info("backend"), info("loading"), info("broken"), info("disabled", false)], directory: "/fixtures/plugins", communityEnabled: true, conflicts: [{ id: "schema", error: "Community schema skipped: reserved Core plugin ID" }] }),
+		fetch: async (url, init) => {
+			if (url === "/api/plugin-catalog/synthetic") {
+				assert.equal(init?.method, "POST"); assert.equal(init?.signal, undefined);
+				return pendingInstall;
+			}
+			if (url === "/api/plugins" && init?.method === "PUT") {
+				communityEnabled = JSON.parse(String(init.body)).enabled;
+				return Response.json({ communityEnabled });
+			}
+			return Response.json({ plugins: [info("schema"), info("custom"), info("backend"), info("loading"), info("broken"), info("disabled", false)], directory: "/fixtures/plugins", communityEnabled, conflicts: [{ id: "schema", error: "Community schema skipped: reserved Core plugin ID" }] });
+		},
 		importModule: async url => modules[decodeURIComponent(url.split("/")[3]!)]!,
 		pathname: () => "/", navigate() {},
 	});
@@ -78,6 +98,41 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		await click('[data-testid="settings-nav-plugins"]');
 		assert.ok(page()!.textContent!.includes("Plugin custom")); assert.ok(!page()!.querySelector('[data-testid="plugin-schema"]'));
 		assert.ok(page()!.textContent!.includes("reserved Core plugin ID")); assert.ok(page()!.textContent!.includes("1.0.0"));
+		const browse = '[data-testid="section-plugins"] button[aria-haspopup="dialog"]';
+		const dialog = '[data-testid="community-plugin-browser"]';
+		const search = `${dialog} input[type="search"]`;
+		const install = `${dialog} [aria-label="Install Synthetic"]`;
+		const gate = '[aria-label="Allow community plugins"]';
+		const key = async (name: string, shiftKey = false) => {
+			const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
+			Object.assign(event, { key: name, shiftKey });
+			await act(async () => { document.activeElement?.dispatchEvent(event); });
+		};
+		(document.querySelector(browse) as HTMLElement).focus();
+		await click(browse);
+		assert.equal(document.activeElement, document.querySelector(search));
+		await key("Tab"); assert.equal(document.activeElement, document.querySelector(install));
+		await key("Tab"); assert.equal(document.activeElement?.textContent, "Source");
+		await key("Tab", true); assert.equal(document.activeElement, document.querySelector(install));
+		await click(install);
+		assert.match(document.querySelector(`${dialog} [role="status"]`)!.textContent!, /Installing Synthetic/);
+		assert.equal(document.querySelector(`${dialog} [aria-label="Close Browse"]`)?.hasAttribute("disabled"), false);
+		await click(`${dialog} [aria-label="Close Browse"]`);
+		await new Promise(resolve => setTimeout(resolve, 5));
+		assert.equal(document.activeElement, document.querySelector(browse));
+		assert.match(page()!.textContent!, /Installing Synthetic/);
+		await click(gate);
+		assert.equal(communityEnabled, false); assert.match(page()!.textContent!, /Installing Synthetic/);
+		await act(async () => { replyToInstall(Response.json({ error: "Community plugins are off." }, { status: 409 })); });
+		assert.match(page()!.textContent!, /Could not install Synthetic: Community plugins are off/);
+		await click(gate); await click(browse);
+		assert.equal(catalogReads, 2);
+		communityEnabled = false;
+		await act(async () => { await owner.manager.reload(); });
+		assert.equal(document.querySelector(dialog), null);
+		communityEnabled = true;
+		await act(async () => { await owner.manager.reload(); });
+		assert.ok(document.querySelector(browse)); assert.equal(document.querySelector(dialog), null); assert.equal(catalogReads, 2);
 		await click('[data-testid="settings-nav-plugin:schema"]');
 		await click('[data-testid="section-plugin-schema"] [role="switch"]');
 		assert.deepEqual(changes, [true]);
@@ -126,6 +181,7 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		// Let FocusScope finish its unmount event before restoring globals.
 		await new Promise(resolve => setTimeout(resolve, 5));
 		restoreModalDom();
+		if (getSelection) Object.defineProperty(dom.window, "getSelection", getSelection); else Reflect.deleteProperty(dom.window, "getSelection");
 		for (const key of keys) {
 			const descriptor = saved.get(key);
 			if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);

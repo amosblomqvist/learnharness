@@ -7,14 +7,13 @@ import type { FrontendPlugin } from "@/components/plugin-manager";
 import { Button } from "@/components/ui/button";
 import { SettingsGroup, SettingsRow, SettingsSection, Toggle } from "./controls";
 
-import { CommunityPluginBrowser, pluginLinkClass } from "./community-plugin-browser";
+import { CatalogOperationStatus, CommunityPluginBrowser, pluginLinkClass } from "./community-plugin-browser";
 import { communitySource } from "@/src/core";
 
 export const PLUGIN_TRUST_WARNING = "Community plugins run unreviewed third-party code. They are not sandboxed and can read or change local files LearnHarness can access, including your chats and credentials, and make network requests. Only enable plugins you trust. Turning this on resumes any plugins you previously enabled.";
 
 export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpenSettings?: (pluginId: string) => void; origin?: "core" | "community" }) {
 	const { manager, snapshot } = usePlugins();
-	const [browse, setBrowse] = useState(false);
 	const core = origin === "core";
 	const allowed = snapshot.communityEnabled === true;
 	const modeBusy = snapshot.loading || snapshot.communityChanging || (!allowed && (snapshot.refreshing || snapshot.plugins.some(plugin => plugin.busy)));
@@ -25,12 +24,12 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 	return <SettingsSection title={core ? "Core plugins" : "Community plugins"} testid={core ? "section-core-plugins" : "section-plugins"}>
 		{snapshot.error && <p role="alert" className="text-xs text-destructive">{snapshot.error}</p>}
 		{!core && <SettingsRow label="Allow community plugins" hint={allowed ? "On" : "Off"}>
-			<Toggle label="Allow community plugins" checked={allowed} disabled={!manager || modeBusy} onChange={enabled => { setBrowse(false); void manager?.setCommunityEnabled(enabled); }} />
+			<Toggle label="Allow community plugins" checked={allowed} disabled={!manager || modeBusy} onChange={enabled => void manager?.setCommunityEnabled(enabled)} />
 		</SettingsRow>}
 		{!core && !allowed && <p className="font-prose text-sm text-muted-foreground">{PLUGIN_TRUST_WARNING}</p>}
+		{!core && (!allowed || snapshot.communityChanging) && <CatalogOperationStatus operation={snapshot.catalogOperation} />}
 		{!core && allowed && !snapshot.communityChanging && <>
-		{browse && <CommunityPluginBrowser onClose={() => setBrowse(false)} onInstall={() => { void manager?.reload(); }} />}
-		<div><Button variant="outline" size="sm" aria-haspopup="dialog" onClick={() => setBrowse(true)}>Browse</Button></div>
+		<BrowseControl />
 		<details data-testid="plugin-install-help" className="text-xs text-muted-foreground">
 			<summary className="w-fit cursor-pointer list-none text-muted-foreground underline underline-offset-2 hover:text-foreground [&::-webkit-details-marker]:hidden">Manual installation</summary>
 			<ol className="mt-2 list-decimal space-y-2 pl-5">
@@ -61,6 +60,18 @@ export function PluginsSection({ onOpenSettings, origin = "community" }: { onOpe
 			<div><Button variant="outline" size="sm" asChild><a href="/plugin-authoring/learnharness-plugins.zip" download={`learnharness-plugins-${process.env.LH_VERSION ?? "authoring"}.zip`} data-testid="download-plugin-authoring">Download authoring skill</a></Button></div>
 		</SettingsGroup>}
 	</SettingsSection>;
+}
+
+// Off removes this subtree, including the open intent, even when the change
+// originated in another window. Operation status lives in the window manager.
+function BrowseControl() {
+	const { manager, snapshot } = usePlugins();
+	const [open, setOpen] = useState(false);
+	return <>
+		<div><Button variant="outline" size="sm" aria-haspopup="dialog" onClick={() => setOpen(true)}>Browse</Button></div>
+		{open ? <CommunityPluginBrowser onClose={() => setOpen(false)} operation={snapshot.catalogOperation} onInstall={offer => void manager?.installFromCatalog(offer)} />
+			: <CatalogOperationStatus operation={snapshot.catalogOperation} />}
+	</>;
 }
 
 function PluginRow({ plugin, onSettings }: { plugin: FrontendPlugin; onSettings: () => void }) {

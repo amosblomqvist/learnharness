@@ -1,7 +1,7 @@
 import type {
 	PluginAction, PluginCleanup, PluginFrontendContext, PluginFrontendModule, PluginInfo,
 	PluginNotification, PluginView, ServerEvent, PluginCodeBlockRenderer, PluginToolRenderer,
-	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration, PluginPageActionContext, PluginActionShortcut,
+	PluginActionContext, PluginActionPlacement, PluginSettingsRegistration, PluginPageActionContext, PluginActionShortcut, CommunityOffer,
 } from "@/src/core";
 
 import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
@@ -28,6 +28,7 @@ export interface FrontendPlugin {
 	settings?: PluginSettingsRegistration;
 	busy: boolean;
 }
+export type CatalogOperation = { id: string; phase: "pending" | "success" | "error"; message: string };
 export interface PluginSnapshot {
 	plugins: FrontendPlugin[];
 	readonly codeBlocks: readonly CodeBlockRegistration[];
@@ -40,6 +41,7 @@ export interface PluginSnapshot {
 	refreshing: boolean;
 	communityEnabled?: boolean;
 	communityChanging?: boolean;
+	catalogOperation?: CatalogOperation;
 	error?: string;
 }
 interface Lifecycle {
@@ -524,6 +526,24 @@ export class PluginFrontendManager {
 			// after a truth reload or completion of any plugin activation.
 			this.publish({ communityChanging: false });
 			await this.reload(false);
+		}
+	}
+	async installFromCatalog({ listing, release, action }: CommunityOffer) {
+		if (this.disposed || !this.snapshot.communityEnabled || this.snapshot.communityChanging || !release || !action || this.snapshot.catalogOperation?.phase === "pending") return;
+		const { id, name } = listing;
+		// Owned by this window, not by Browse. Dismissing the dialog neither
+		// cancels the request nor claims to undo a completed publication.
+		this.publish({ catalogOperation: { id, phase: "pending", message: `${action === "Update" ? "Updating" : "Installing"} ${name}…` } });
+		try {
+			const { restartRequired } = await this.json(`/api/plugin-catalog/${encodeURIComponent(id)}`, {
+				method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, sha256: release.sha256 }),
+			}) as { restartRequired: boolean };
+			this.publish({ catalogOperation: { id, phase: "success", message: restartRequired
+				? `${name} was updated and is off. Restart LearnHarness before enabling it.`
+				: `${name} was installed and is off. Enable it from Installed if you trust it.` } });
+			await this.reload(false);
+		} catch (error) {
+			this.publish({ catalogOperation: { id, phase: "error", message: `Could not ${action.toLowerCase()} ${name}: ${message(error)}` } });
 		}
 	}
 	async refresh() {
