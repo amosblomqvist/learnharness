@@ -300,6 +300,16 @@ C \arrow[r,"k"'] & D
 \end{axis}
 \end{tikzpicture}
 \end{document}`, invalid: source => source.replace('compat=1.16', 'compat=1.18') },
+    { id: 'axis-circle-authoring', source: String.raw`\usepackage{pgfplots}
+\pgfplotsset{compat=1.16}
+\begin{document}
+\begin{tikzpicture}
+\begin{axis}[xmin=0,xmax=10,ymin=0,ymax=10]
+\draw[thick] (1,8) -- (9,2);
+\filldraw (5,5) circle[radius=2.5pt] node[above right] {$P$};
+\end{axis}
+\end{tikzpicture}
+\end{document}`, invalid: source => source.replace('circle[radius=2.5pt]', 'circle (2.5pt)') },
   ];
   const authoringProof = [];
   for (const { id, source, invalid } of authoringCases) {

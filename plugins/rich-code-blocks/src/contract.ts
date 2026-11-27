@@ -25,7 +25,7 @@ export const INSTRUCTIONS: Record<Family, string> = {
     "Every block is compiled independently. Put all required package and library declarations before \\begin{document}, then the diagram, then \\end{document}. The engine supplies the standalone document class: never include \\documentclass or \\documentstyle, and never rely on declarations from another block.",
     "Explicitly load the packages required by the diagram: \\usepackage{tikz}, \\usepackage{circuitikz}, \\usepackage{tikz-cd}, or \\usepackage{pgfplots}. For labels using \\text{...} or aligned equations, also load \\usepackage{amsmath}. Declare needed TikZ libraries with \\usetikzlibrary in the preamble.",
     "Place the tikzpicture, circuitikz, or tikzcd environment directly inside document. Do not wrap the diagram in \\[...\\], $$...$$, or an equation environment. Use $...$ for math in TikZ node labels; tikzcd cells already use math mode.",
-    "The bundled PGFPlots version is 1.16. For plots, put \\pgfplotsset{compat=1.16} in the preamble; do not request 1.18 or another newer version.",
+    "The bundled PGFPlots version is 1.16. For plots, put \\pgfplotsset{compat=1.16} in the preamble; do not request 1.18 or another newer version. Inside an axis, draw circles as circle[radius=2pt]; the parenthesized form circle (2pt) does not compile there.",
     "Write explanations outside the block. Author notation, not raw SVG, JavaScript, or external resources.",
   ].join("\n\n"),
 };
