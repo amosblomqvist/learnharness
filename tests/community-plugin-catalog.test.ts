@@ -5,7 +5,7 @@ import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { test, type TestContext } from "node:test";
 import { crc32, deflateRawSync } from "node:zlib";
-import { COMMUNITY_FEED_URL, communityListingReport, compatibleCommunityRelease, parseCommunityFeed } from "../src/core/community-catalog.ts";
+import { COMMUNITY_FEED_URL, communityListingReport, communityRevocation, compatibleCommunityRelease, parseCommunityFeed, type CommunityRevocation } from "../src/core/community-catalog.ts";
 import { createCommunityPluginCatalog } from "../src/server/community-plugin-catalog.ts";
 import { createPluginHost, type PluginHostDependencies } from "../src/server/plugin-host.ts";
 import { createPluginTransport } from "../src/server/plugin-transport.ts";
@@ -48,32 +48,35 @@ function fixture(t: TestContext) {
 	const root = fs.mkdtempSync(path.join(tmpdir(), "lh-catalog-test-"));
 	const directory = path.join(root, "plugins"), core = path.join(root, "core"), state = path.join(root, "plugins-state.json");
 	const history: string[] = [];
-	const hooks: { enter?: () => void; pending?: Promise<void> } = {};
+	const hooks: { enter?: () => void; pending?: Promise<void>; communityEnabled?: () => void } = {};
 	const deps: PluginHostDependencies = { directory, appVersion: "0.7.0", core: { directory: core, dataDirectory: path.join(root, "core-data"), ids: ["official"] },
+		onCommunityEnabled: () => hooks.communityEnabled?.(),
 		createServices: () => { history.push("activate"); return { learning: { history, hooks }, agents: { dispose() {} }, workers: { dispose() {} } } as never; } };
 	const hosts = new Set<ReturnType<typeof createPluginHost>>();
 	function newHost() { const h = createPluginHost(deps); hosts.add(h); return h; }
 	let host = newHost();
 	t.after(async () => { await Promise.all([...hosts].map(h => h.dispose())); fs.rmSync(root, { recursive: true, force: true }); });
 	let bytes: Buffer = build();
-	let current = release(bytes), delisted = false;
+	let current = release(bytes), delisted = false, feedDown = false;
+	let revoked: CommunityRevocation[] | undefined;
 	let assetResponse: Response | undefined;
 	const fetched: string[] = [];
 	const catalog = createCommunityPluginCatalog({ appVersion: deps.appVersion, coreIds: ["official"], getHost: async () => { await host.initialize(); return host; }, fetch: async (input, options) => {
 		const url = String(input); fetched.push(url);
 		assert.equal(options?.credentials, "omit");
 		assert.equal(options?.redirect, "manual");
-		if (url === COMMUNITY_FEED_URL) return Response.json({ schemaVersion: 1, plugins: delisted ? [] : [{ id, name: "Fixture plugin", author: "Example", description: "A test fixture", repository: repo, releases: [current] }] });
+		if (url === COMMUNITY_FEED_URL) return feedDown ? new Response("missing", { status: 404 }) : Response.json({ schemaVersion: 1, plugins: delisted ? [] : [{ id, name: "Fixture plugin", author: "Example", description: "A test fixture", repository: repo, releases: [current] }], ...(revoked ? { revoked } : {}) });
 		assert.equal(url, `https://github.com/${repo}/releases/download/${current.tag}/${current.asset}`);
 		return assetResponse ?? new Response(Uint8Array.from(bytes));
 	} });
 	const request = () => new Request("http://localhost/api/plugin-catalog");
-	return { directory, core, state, history, hooks, fetched, get host() { return host; },
+	return { directory, core, state, history, hooks, fetched, catalog, get host() { return host; },
 		async restart() { await host.dispose(); host = newHost(); await host.initialize(); },
 		async browse() { const response = await catalog.list(request()); return { status: response.status, body: await response.json() }; },
 		install(action = "Install", sha256 = current.sha256) { return catalog.install(id, new Request(request(), { method: "POST", body: JSON.stringify({ action, sha256 }) })); },
 		setBuild(zipBytes: Buffer, version?: string) { bytes = zipBytes; current = release(bytes, version); },
 		setResponse(response?: Response) { assetResponse = response; }, delist() { delisted = true; },
+		revoke(list?: CommunityRevocation[]) { revoked = list; }, setFeedDown(down: boolean) { feedDown = down; },
 	};
 }
 
@@ -187,12 +190,96 @@ test("browse, install, update and restart do not execute a downloaded build befo
 	assert.equal(f.host.list().find(p => p.id === id)?.enabled, false);
 	await assert.rejects(f.host.setEnabled(id, true), /Restart required/);
 	await f.restart(); assert.deepEqual(f.history, ["activate", "cleanup"]);
-	// A delisting cannot revoke a local build.
+	// Delisting alone does not revoke a local build; a revocation entry does (tested below).
 	f.delist(); assert.equal((await f.browse()).body.offers.length, 0);
 	assert.equal((await f.install("Update")).status, 409);
 	await f.host.setEnabled(id, true);
 	// The test restarts the host but not Node's CJS module cache; a real process restart clears it.
 	assert.equal(f.host.list().find(p => p.id === id)?.manifest?.version, "1.1.0");
+});
+
+test("revocation entries parse strictly, stay optional, and match catalog installs by id, repository and version", () => {
+	assert.deepEqual(parseCommunityFeed({ schemaVersion: 1, plugins: [] }).revoked, []);
+	const revoked = parseCommunityFeed({ schemaVersion: 1, plugins: [], revoked: [{ id, repository: repo, versions: ["1.0.0"], reason: "Steals tokens", note: "ignored" }, { id: "gone-bad", repository: "evil/gone-bad", reason: "Malicious author" }] }).revoked;
+	assert.deepEqual(revoked, [{ id, repository: repo, versions: ["1.0.0"], reason: "Steals tokens" }, { id: "gone-bad", repository: "evil/gone-bad", reason: "Malicious author" }]);
+	for (const entry of [{ id, repository: "not a repo", reason: "x" }, { id, repository: repo, versions: [], reason: "x" }, { id, repository: repo, versions: ["1.0.0", "1.0.0"], reason: "x" }, { id, repository: repo, versions: ["v1"], reason: "x" }, { id, repository: repo, reason: " " }, { id: "Bad_ID", repository: repo, reason: "x" }]) {
+		assert.throws(() => parseCommunityFeed({ schemaVersion: 1, plugins: [], revoked: [entry] }), /revocation/, JSON.stringify(entry));
+	}
+	assert.throws(() => parseCommunityFeed({ schemaVersion: 1, plugins: [], revoked: {} }), /revocations/);
+	assert.equal(communityRevocation(revoked, id, repo, "1.0.0"), "Steals tokens");
+	assert.equal(communityRevocation(revoked, id, repo, "1.1.0"), undefined);
+	assert.equal(communityRevocation(revoked, id, "fork/fixture-plugin", "1.0.0"), undefined);
+	assert.equal(communityRevocation(revoked, "gone-bad", "evil/gone-bad", "9.9.9"), "Malicious author");
+});
+
+test("a revocation turns off and blocks a running catalog install, survives restart offline, and a fixed version can update", async t => {
+	const f = fixture(t); await f.host.setCommunityEnabled(true);
+	assert.equal((await f.install()).status, 200);
+	await f.host.setEnabled(id, true); assert.equal(await f.host.call(id, "proof"), "1.0.0");
+	f.revoke([{ id, repository: repo, versions: ["1.0.0"], reason: "Steals tokens" }]);
+	await f.catalog.refreshRevocations();
+	assert.deepEqual(f.history, ["activate", "cleanup"]);
+	const info = () => f.host.list().find(p => p.id === id)!;
+	assert.equal(info().enabled, false); assert.equal(info().revoked, "Steals tokens");
+	await assert.rejects(f.host.call(id, "proof"), /disabled/);
+	const saved = JSON.parse(fs.readFileSync(f.state, "utf8"));
+	assert.equal(saved.enabled[id], false); assert.deepEqual(saved.revoked, [{ id, repository: repo, versions: ["1.0.0"], reason: "Steals tokens" }]);
+	await assert.rejects(f.host.setEnabled(id, true), /catalog revoked this plugin: Steals tokens/);
+	const offer = (await f.browse()).body.offers[0];
+	assert.equal(offer.release, null, "Browse never offers a revoked version"); assert.equal(offer.action, null);
+	assert.equal((await f.install()).status, 409);
+	assert.ok(fs.existsSync(path.join(f.directory, id, "dist", "manifest.json")), "files are kept");
+	// The cached list applies before activation even when the feed is unreachable.
+	f.setFeedDown(true);
+	fs.writeFileSync(f.state, JSON.stringify({ ...saved, enabled: { [id]: true } }));
+	await f.restart(); await f.catalog.refreshRevocations();
+	assert.deepEqual(f.history, ["activate", "cleanup"]); assert.equal(info().revoked, "Steals tokens"); assert.equal(info().enabled, false);
+	await f.host.setEnabled(id, false); // Clear the hand-written enable bit; a real revocation already wrote false.
+	// An unrevoked release is the fix path.
+	f.setFeedDown(false); f.setBuild(build("1.1.0"), "1.1.0");
+	assert.equal((await f.browse()).body.offers[0].action, "Update");
+	assert.equal((await f.install("Update")).status, 200);
+	assert.equal(info().revoked, undefined);
+	await f.restart(); await f.host.setEnabled(id, true);
+	assert.equal(info().enabled, true); assert.equal(info().manifest?.version, "1.1.0");
+});
+
+test("withdrawing a revocation unblocks Enable without turning the plugin on; manual installs and Off are untouched", async t => {
+	const f = fixture(t);
+	let optIns = 0; f.hooks.communityEnabled = () => { optIns++; };
+	// Off: no feed request, even for the background check.
+	await f.host.initialize(); await f.catalog.refreshRevocations();
+	assert.deepEqual(f.fetched, []); assert.equal(optIns, 0);
+	await f.host.setCommunityEnabled(true); assert.equal(optIns, 1);
+	assert.equal((await f.install()).status, 200);
+	await f.host.setEnabled(id, true);
+	f.revoke([{ id, repository: repo, reason: "Every version is malicious" }]);
+	await f.catalog.refreshRevocations();
+	assert.equal(f.host.list().find(p => p.id === id)?.revoked, "Every version is malicious");
+	f.revoke([]); await f.catalog.refreshRevocations();
+	const info = f.host.list().find(p => p.id === id)!;
+	assert.equal(info.revoked, undefined); assert.equal(info.enabled, false);
+	await f.host.setEnabled(id, true); assert.equal(await f.host.call(id, "proof"), "1.0.0");
+	// A failed check keeps the cached list.
+	f.revoke([{ id, repository: repo, reason: "Cached" }]); await f.catalog.refreshRevocations();
+	f.setFeedDown(true); f.revoke([]); await f.catalog.refreshRevocations();
+	assert.equal(f.host.list().find(p => p.id === id)?.revoked, "Cached");
+	// A copy the catalog did not install never matches, even with the same ID.
+	const manual = fixture(t); await manual.host.setCommunityEnabled(true);
+	const dist = path.join(manual.directory, id, "dist"); fs.mkdirSync(dist, { recursive: true });
+	fs.writeFileSync(path.join(dist, "manifest.json"), manifest("1.0.0")); fs.writeFileSync(path.join(dist, "backend.cjs"), backend("manual")); fs.writeFileSync(path.join(dist, "main.js"), frontend);
+	await manual.host.refresh(); await manual.host.setEnabled(id, true);
+	manual.revoke([{ id, repository: repo, reason: "Not this copy" }]); await manual.catalog.refreshRevocations();
+	assert.equal(manual.host.list().find(p => p.id === id)?.revoked, undefined); assert.equal(manual.host.list().find(p => p.id === id)?.enabled, true);
+});
+
+test("background revocation checks repeat on their interval while community plugins are on", async t => {
+	const f = fixture(t); await f.host.setCommunityEnabled(true);
+	const stop = f.catalog.startRevocationChecks(5);
+	t.after(stop);
+	await new Promise(resolve => setTimeout(resolve, 40));
+	stop();
+	assert.ok(f.fetched.filter(url => url === COMMUNITY_FEED_URL).length >= 2);
 });
 
 test("bad feed selection, partial data, unexpected redirects and invalid packages leave no new files; locally edited builds are not overwritten", async t => {

@@ -22,7 +22,14 @@ export interface CommunityListing {
 	repository: string;
 	releases: CommunityRelease[];
 }
-export interface CommunityFeed { schemaVersion: 1; plugins: CommunityListing[] }
+/** Remote kill switch for catalog installs from `repository`. No versions = every version. */
+export interface CommunityRevocation {
+	id: string;
+	repository: string;
+	versions?: string[];
+	reason: string;
+}
+export interface CommunityFeed { schemaVersion: 1; plugins: CommunityListing[]; revoked: CommunityRevocation[] }
 export type CommunityOffer = { listing: CommunityListing; release: CommunityRelease | null; action: "Install" | "Update" | null };
 
 const versionPattern = /^(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})\.(0|[1-9]\d{0,7})$/;
@@ -51,7 +58,21 @@ export function parseCommunityFeed(data: unknown, reservedIds: readonly string[]
 			return { version, apiVersion, minAppVersion, publishedAt, tag, asset, sha256 };
 		}) };
 	});
-	return { schemaVersion: 1, plugins };
+	return { schemaVersion: 1, plugins, revoked: parseCommunityRevocations(feed.revoked ?? []) };
+}
+export function parseCommunityRevocations(data: unknown): CommunityRevocation[] {
+	if (!Array.isArray(data) || data.length > 256) throw new Error("Invalid community revocations");
+	return data.map((value: unknown): CommunityRevocation => {
+		const { id, repository, versions, reason } = record(value);
+		if (!like(id, /^[a-z0-9]+(?:-[a-z0-9]+)*$/) || id.length > 80 || !like(repository, REPOSITORY_PATTERN) || !text(reason, 512)) throw new Error("Invalid community revocation");
+		if (versions === undefined) return { id, repository, reason };
+		if (!Array.isArray(versions) || !versions.length || versions.length > 64 || new Set(versions).size !== versions.length || !versions.every(version => like(version, versionPattern))) throw new Error("Invalid community revocation versions");
+		return { id, repository, versions: [...versions] as string[], reason };
+	});
+}
+/** The reason a catalog install of `id` from `repository` at `version` is revoked, if it is. */
+export function communityRevocation(revoked: readonly CommunityRevocation[], id: string, repository: string, version: string): string | undefined {
+	return revoked.find(entry => entry.id === id && entry.repository === repository && (!entry.versions || entry.versions.includes(version)))?.reason;
 }
 export function compareCommunityVersions(a: string, b: string): number {
 	const left = a.split(".").map(Number), right = b.split(".").map(Number);

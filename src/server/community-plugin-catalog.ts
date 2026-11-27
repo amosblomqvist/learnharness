@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { COMMUNITY_FEED_LIMIT, COMMUNITY_FEED_URL, COMMUNITY_ZIP_LIMIT, communityReleaseAsset, compatibleCommunityRelease, parseCommunityFeed, SHA256_PATTERN, type CommunityListing, type CommunityOffer, type CommunityRelease } from "../core/community-catalog.ts";
+import { COMMUNITY_FEED_LIMIT, COMMUNITY_FEED_URL, COMMUNITY_ZIP_LIMIT, communityReleaseAsset, communityRevocation, compatibleCommunityRelease, parseCommunityFeed, SHA256_PATTERN, type CommunityListing, type CommunityOffer, type CommunityRelease, type CommunityRevocation } from "../core/community-catalog.ts";
 import { PLUGIN_API_VERSION, PLUGIN_ID_PATTERN, parsePluginManifest } from "../core/plugins.ts";
 import { PluginHostError } from "./plugin-host.ts";
 import { readCommunityPluginZip } from "./community-plugin-zip.ts";
@@ -8,6 +8,7 @@ type Host = ReturnType<typeof import("./plugin-host.ts").createPluginHost>;
 const noStore = { "Cache-Control": "no-store" };
 const redirectCodes = new Set([301, 302, 303, 307, 308]);
 const cdnHosts = new Set(["release-assets.githubusercontent.com", "objects.githubusercontent.com"]);
+export const COMMUNITY_REVOCATION_INTERVAL = 6 * 60 * 60 * 1000;
 async function boundedBytes(fetcher: typeof fetch, url: string, limit: number, signal: AbortSignal, asset = false): Promise<Buffer> {
 	let target = new URL(url);
 	for (let hops = 0; hops <= 3; hops++) {
@@ -41,13 +42,31 @@ async function boundedBytes(fetcher: typeof fetch, url: string, limit: number, s
 
 export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHost(): Promise<Host>; appVersion: string; coreIds: readonly string[] }) {
 	const fetcher = deps.fetch ?? fetch;
-	async function feed(signal: AbortSignal) {
+	/** Every successful read also applies its revocation list to installed copies. */
+	async function feed(signal: AbortSignal, host: Host) {
+		let parsed: ReturnType<typeof parseCommunityFeed>;
 		try {
 			const bytes = await boundedBytes(fetcher, COMMUNITY_FEED_URL, COMMUNITY_FEED_LIMIT, AbortSignal.any([signal, AbortSignal.timeout(10_000)]));
-			return parseCommunityFeed(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), deps.coreIds);
+			parsed = parseCommunityFeed(JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes)), deps.coreIds);
 		} catch { throw new PluginHostError(503, "The community plugin catalog is unavailable. Try again later."); }
+		await host.applyRevocations(parsed.revoked);
+		return parsed;
 	}
-	const releaseFor = (listing: CommunityListing) => compatibleCommunityRelease(listing, deps.appVersion, PLUGIN_API_VERSION);
+	const releaseFor = (listing: CommunityListing, revoked: readonly CommunityRevocation[]) => compatibleCommunityRelease(
+		{ ...listing, releases: listing.releases.filter(release => !communityRevocation(revoked, listing.id, listing.repository, release.version)) },
+		deps.appVersion, PLUGIN_API_VERSION);
+	let refreshing: Promise<void> | undefined;
+	/** Background check; a failure keeps the cached list. Never fetches while community plugins are off. */
+	function refreshRevocations(): Promise<void> {
+		refreshing ??= (async () => {
+			try {
+				const host = await deps.getHost();
+				if (host.communityEnabled()) await feed(AbortSignal.timeout(10_000), host);
+			} catch { /* Keep the last good list. */ }
+			finally { refreshing = undefined; }
+		})();
+		return refreshing;
+	}
 	async function build(listing: CommunityListing, release: CommunityRelease, signal: AbortSignal) {
 		let zip: Buffer;
 		try { zip = await boundedBytes(fetcher, communityReleaseAsset(listing, release), COMMUNITY_ZIP_LIMIT, AbortSignal.any([signal, AbortSignal.timeout(45_000)]), true); }
@@ -76,12 +95,20 @@ export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHo
 		}
 	};
 	return {
+		refreshRevocations,
+		/** Check now and every interval for the life of the process. */
+		startRevocationChecks(interval = COMMUNITY_REVOCATION_INTERVAL) {
+			void refreshRevocations();
+			const timer = setInterval(() => void refreshRevocations(), interval);
+			timer.unref?.();
+			return () => clearInterval(timer);
+		},
 		list: (request: Request) => handle(async () => {
 			const host = await deps.getHost();
 			if (!host.communityEnabled()) throw new PluginHostError(409, "Turn on community plugins before browsing.");
-			const { plugins } = await feed(request.signal);
+			const { plugins, revoked } = await feed(request.signal, host);
 			const offers: CommunityOffer[] = plugins.map(listing => {
-				const release = releaseFor(listing);
+				const release = releaseFor(listing, revoked);
 				return { listing, release, action: release ? host.catalogAction(listing, release) : null };
 			});
 			return json({ offers });
@@ -94,8 +121,9 @@ export function createCommunityPluginCatalog(deps: { fetch?: typeof fetch; getHo
 			if (id.length > 80 || !PLUGIN_ID_PATTERN.test(id) || typeof sha256 !== "string" || !SHA256_PATTERN.test(sha256) || (action !== "Install" && action !== "Update")) throw new PluginHostError(400, "Invalid install request");
 			const host = await deps.getHost();
 			if (!host.communityEnabled()) throw new PluginHostError(409, "Community plugins are off.");
-			const listing = (await feed(request.signal)).plugins.find(plugin => plugin.id === id);
-			const release = listing ? releaseFor(listing) : null;
+			const { plugins, revoked } = await feed(request.signal, host);
+			const listing = plugins.find(plugin => plugin.id === id);
+			const release = listing ? releaseFor(listing, revoked) : null;
 			if (!listing || !release || release.sha256 !== sha256) throw new PluginHostError(409, "This release is no longer available. Refresh Browse and choose again.");
 			if (host.catalogAction(listing, release) !== action) throw new PluginHostError(409, "This plugin cannot be installed or updated in its current state. Refresh Browse.");
 			const files = await build(listing, release, request.signal);

@@ -47,6 +47,8 @@ export interface PluginInfo {
 	/** Verified catalog source for the installed build, not a manifest claim. */
 	repository?: string;
 	restartRequired?: boolean;
+	/** Reason from the catalog's revocation list; the host keeps it off while set. */
+	revoked?: string;
 	enabled: boolean;
 	status: "disabled" | "active" | "error";
 	error?: string;

@@ -51,6 +51,7 @@ function runtime(): Runtime {
 		},
 	});
 	const installationErrors: Record<string, string> = Object.create(null);
+	let revocations: ReturnType<typeof createCommunityPluginCatalog> | undefined;
 	const host = createPluginHost({
 		directory: pluginDirectory, core, appVersion: packageJson.version, installationErrors,
 		// The process-global runtime owns one admission slot across all plugins
@@ -85,6 +86,7 @@ function runtime(): Runtime {
 		subscribeEvents: subscribe,
 		onChange: () => emit("plugins-changed", {}),
 		onNotification: (notification) => emit("plugin-message", notification),
+		onCommunityEnabled: () => void revocations?.refreshRevocations(),
 	});
 	// Defer recovery/activation until the process-wide holder is published.
 	const ready = Promise.resolve().then(async () => {
@@ -100,6 +102,9 @@ function runtime(): Runtime {
 		}
 		// List and Off stay available during asynchronous saved community activation.
 		await host.initialize({ backgroundCommunity: true });
+		// One process-wide checker, not one per route bundle's catalog instance.
+		revocations = createCommunityPluginCatalog({ getHost: async () => host, appVersion: packageJson.version, coreIds: core.ids });
+		revocations.startRevocationChecks();
 	});
 	global.__lhPlugins = { host, ready };
 	return global.__lhPlugins;

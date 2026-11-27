@@ -98,6 +98,13 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		await click('[data-testid="settings-nav-plugins"]');
 		assert.ok(page()!.textContent!.includes("Plugin custom")); assert.ok(!page()!.querySelector('[data-testid="plugin-schema"]'));
 		assert.ok(page()!.textContent!.includes("reserved Core plugin ID")); assert.ok(page()!.textContent!.includes("1.0.0"));
+		const listed = [info("schema"), info("custom"), info("backend"), info("loading"), info("broken")];
+		await act(async () => { owner.manager.reconcile([...listed, { ...info("disabled", false), revoked: "Steals tokens" }]); });
+		assert.match(page()!.querySelector('[data-testid="plugin-revoked-disabled"]')!.textContent!, /Revoked by the LearnHarness catalog.*Reason: Steals tokens/);
+		assert.match(page()!.querySelector('[data-testid="plugin-disabled"]')!.textContent!, /Revoked/);
+		assert.ok(page()!.querySelector('[aria-label="Enable Plugin disabled"]')!.hasAttribute("disabled"), "a revoked plugin cannot be enabled");
+		await act(async () => { owner.manager.reconcile([...listed, info("disabled", false)]); });
+		assert.equal(page()!.querySelector('[data-testid="plugin-revoked-disabled"]'), null);
 		const browse = '[data-testid="section-plugins"] button[aria-haspopup="dialog"]';
 		const dialog = '[data-testid="community-plugin-browser"]';
 		const search = `${dialog} input[type="search"]`;

@@ -1393,6 +1393,7 @@ export interface PluginInfo {
     manifest?: PluginManifest;
     repository?: string;
     restartRequired?: boolean;
+    revoked?: string;
     enabled: boolean;
     status: "disabled" | "active" | "error";
     error?: string;
@@ -1409,6 +1410,7 @@ export interface PluginInfo {
 - [manifest](#plugininfo-manifest)
 - [repository](#plugininfo-repository)
 - [restartRequired](#plugininfo-restartrequired)
+- [revoked](#plugininfo-revoked)
 - [enabled](#plugininfo-enabled)
 - [status](#plugininfo-status)
 - [error](#plugininfo-error)
@@ -1446,6 +1448,14 @@ repository?: string;
 
 ```ts
 restartRequired?: boolean;
+```
+
+### PluginInfo revoked
+
+Reason from the catalog's revocation list; the host keeps it off while set.
+
+```ts
+revoked?: string;
 ```
 
 ### PluginInfo enabled
