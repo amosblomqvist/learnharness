@@ -4,8 +4,9 @@
  * dedup: the chat-handler spawn hook never creates two jobs for the same
  * tool part. Implements core/ports.ts JobStore. Idioms: sync fs, id-guarded
  * filenames, JSON with tab indentation. Writes are small and rare (activity
- * line updates); read-modify-write sections contain no awaits, and every
- * file replacement is atomic and flushed before linkage is acknowledged.
+ * line updates); read-modify-write sections contain no awaits. Plugin-linked
+ * jobs require atomic replacement before linkage is acknowledged. Native jobs
+ * retain the Windows held-file compatibility fallback (owner integration q22).
  */
 
 import * as fs from "node:fs";
@@ -15,6 +16,7 @@ import { emit } from "../core/events.ts";
 import type { JobStore } from "../core/ports.ts";
 import type { CreateJobInit, JobPatch } from "../core/ports.ts";
 import type { JobRecord } from "../core/contracts.ts";
+import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
 /** Background jobs (data/jobs). Not in config.ts PATHS (orchestrator-owned). */
 const JOBS_DIR = path.join(/* turbopackIgnore: true */ PATHS.data, "jobs");
@@ -24,24 +26,19 @@ function jobFile(id: string): string {
 	return path.join(/* turbopackIgnore: true */ JOBS_DIR, `${id}.json`);
 }
 
-/** Atomic replacement keeps accepted linkage/results readable after a crash. */
+/** Use the shared retry/cleanup law, but never truncate a plugin-linked job.
+ * Metadata also makes a builtin job strict: accepted plugin linkage must stay
+ * readable even when its worker is native. A malformed/missing plugin identity
+ * cannot grant plugin-kind jobs permission to fall back in place. */
 function writeJob(record: JobRecord): void {
-	const target = jobFile(record.id);
-	const temporary = `${target}.${crypto.randomUUID()}.tmp`;
-	let descriptor: number | undefined;
-	try {
-		descriptor = fs.openSync(temporary, "wx", 0o600);
-		fs.writeFileSync(descriptor, JSON.stringify(record, null, "\t"), "utf-8");
-		fs.fsyncSync(descriptor);
-		fs.closeSync(descriptor); descriptor = undefined;
-		fs.renameSync(temporary, target);
-		if (process.platform !== "win32") {
-			const directory = fs.openSync(JOBS_DIR, "r");
-			try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
-		}
-	} finally {
-		if (descriptor !== undefined) fs.closeSync(descriptor);
-		fs.rmSync(temporary, { force: true });
+	const strict = record.kind === "plugin" || record.plugin !== undefined;
+	writeFileAtomicSync(jobFile(record.id), JSON.stringify(record, null, "\t"), {
+		allowInPlaceFallback: !strict,
+		...(strict ? { mode: 0o600 } : {}),
+	});
+	if (strict && process.platform !== "win32") {
+		const directory = fs.openSync(JOBS_DIR, "r");
+		try { fs.fsyncSync(directory); } finally { fs.closeSync(directory); }
 	}
 }
 
@@ -121,6 +118,7 @@ function deleteJobsForChat(chatId: string): number {
 	for (const job of listJobs(chatId)) {
 		try {
 			fs.unlinkSync(jobFile(job.id));
+			removeLeftoverTemps(jobFile(job.id));
 			removed++;
 		} catch {
 			/* already gone — the count is best-effort truth */

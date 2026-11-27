@@ -1,18 +1,38 @@
 # Flashcards
 
-A self-contained native LearnHarness plugin: generate fact-recall cues from your graph or uploaded PDF/text files, organize them in flat decks, and review them with FSRS-6. **No Anki integration.** No runtime npm dependencies, private app imports, core graph writes or provider credentials in the package.
+A Core LearnHarness plugin: generate fact-recall cues from your graph or uploaded PDF/text files, organize them in flat decks, and review them with FSRS-6. **No Anki integration.** No runtime npm dependencies, private app imports, core graph writes or provider credentials in the package.
 
-## Build and test
+## Core plugin and source reference
 
-From this folder:
+Enable Flashcards in **Settings → Core plugins**. The app supplies and updates its code;
+its writable records live under `<learning data>/core-plugin-data/flashcards/`.
+This source project is reference material, not an installable Community copy:
+`flashcards` is a reserved Core ID even when the Core plugin is disabled or missing.
+A Community fork needs its own manifest/folder ID and a review of contribution, tool
+and fence names that could conflict. Do not copy this build into a Community
+`plugins/flashcards/` folder.
+
+Requires a matching host exposing `mountKnowledgePicker`, `mountMarkdown`, `mountTree`,
+page-body `openSurface`, public `mountButton` icons (`icon` / `iconOnly`) and custom
+colors (`variant: 'custom'` / `colors`), the surface `data-plugin-initial-focus`
+contract, and `ctx.workers`. A version string alone does not establish capabilities.
+File generation additionally requires `ctx.documents.toMarkdown`; without it, only
+Generate from file is disabled, while graph generation and existing reviews remain available.
+
+## Build
+
+This JavaScript project needs no `.sdk/` or SDK generation. Set up the project's
+development dependencies separately; no npm setup is performed by LearnHarness.
+With dependencies already available, from this folder:
 
 ```sh
-npm ci
-npm test
 npm run build
 ```
 
-The build writes directly to this project's **`dist/`**. For distribution, copy its **contents** into `<learning data>/plugins/flashcards/dist/`, so the host finds `flashcards/dist/manifest.json`; never distribute persistent data. Or keep the source project at `<learning data>/plugins/flashcards/` and edit/build in that same workspace—no second install folder or development registration. Build cleanup only replaces `dist/`, refuses symlinked `dist/` or misplaced `dist/data/`, and leaves sibling **`flashcards/data/`** untouched. Refresh Settings → Plugins after installation or the first build, then enable Flashcards; restart LearnHarness after changing already loaded code. A root-only manifest is not loaded. This repository does not automatically install or enable it. Requires the app build exposing `mountKnowledgePicker`, `mountMarkdown`, `mountTree`, page-body `openSurface`, public `mountButton` icons (`icon` / `iconOnly`) and custom colors (`variant: 'custom'` / `colors`), the surface `data-plugin-initial-focus` contract, and `ctx.workers` (the version string alone does not establish those capabilities). File generation additionally requires `ctx.documents.toMarkdown`; on an older host, only Generate from file is disabled, while graph generation and existing reviews remain available.
+The build writes directly to this project's **`dist/`**, bundling the frontend and
+CommonJS backend and copying the manifest, styles and licenses. Cleanup replaces
+only `dist/`, refuses symlinked `dist/` or misplaced `dist/data/`, and preserves sibling
+`data/`. Building does not install, enable or update a Core plugin.
 
 ## Use
 
@@ -80,21 +100,63 @@ All generation prompt wording lives in **`src/generation-prompts.cjs`**:
 
 Both workers use composed instructions from that module. Like core extraction, the **chunk budget covers source material only**, estimated as characters divided by four (rounded up): graph generation sums each selected target's name plus newline plus statement, and file generation counts the Markdown being chunked. Instructions, output schemas, IDs/JSON wrappers, neighboring propositions/chains and existing active cards do not consume that source budget. Graph targets remain indivisible; a target exceeding the source budget gets its own chunk. File chunks retain the existing lossless paragraph/newline preferences and Unicode-safe splitting, including exact retry spans.
 
-The **full-request estimate is separate**: it still counts the composed instructions, actual output schema and complete user message using UTF-8 bytes divided by three (rounded up), plus the existing 256-token overhead allowance. Confirmation dialogs report this full input estimate for cost awareness, and model-context checks reserve output space against the full request, not just the source. Expanding the writing framework no longer changes source-chunk grouping. Result schemas, validators and chunking remain in `src/backend.cjs` and `src/file-generation.cjs`; those mechanics differ between graph targets and extracted file facts. Source-specific instructions still determine whether to use supplied targets or extract new facts, while safety and output mechanics remain separate from the writing framework.
+The **full-request estimate is separate**: it still counts the composed instructions, actual output schema and complete user message using UTF-8 bytes divided by three (rounded up), plus the existing 256-token overhead allowance. Confirmation dialogs report this full input estimate for cost awareness, and model-context checks reserve output space against the full request, not just the source. Changes to the writing framework do not change source-chunk grouping. Result schemas, validators and chunking remain in `src/backend.cjs` and `src/file-generation.cjs`; those mechanics differ between graph targets and extracted file facts. Source-specific instructions still determine whether to use supplied targets or extract new facts, while safety and output mechanics remain separate from the writing framework.
 
 ## Data and lifecycle
 
-Plugin-owned state is `data/flashcards.json`: a versioned JSON snapshot, atomically replaced after local mutations. It contains decks, cues, schedules, review records, generation progress and lightweight file-source metadata. Handwritten targets use a local origin; cue creation receipts make manual-save retries idempotent even after restart, subsequent editing or deletion. Converted file text is stored separately under `data/sources/`, keeping large documents out of the snapshot rewritten on each review. Existing graph-backed records remain compatible and retain their schedules and history. Host-owned task records remain under `data/tasks/`; the plugin does not overwrite them. Disable/update preserves live cards and progress. First activation of this version atomically purges legacy deleted-cue tombstones and old question/answer review snapshots, moves manual retry receipts out of cues, and forgets orphan upload records whose decks were deleted by older versions. Saved-source removal uses a durable cleanup queue, so a filesystem failure is reported and can be retried or completed on the next activation without restoring a deck. A corrupt/unsupported store is an error, never silently reset.
+Plugin-owned state is `data/flashcards.json`: a versioned JSON snapshot, atomically replaced after local mutations. It contains decks, cues, schedules, review records, generation progress and lightweight file-source metadata. Handwritten targets use a local origin; cue creation receipts make manual-save retries idempotent even after restart, subsequent editing or deletion. Converted file text is stored separately under `data/sources/`, keeping large documents out of the snapshot rewritten on each review. Existing graph-backed records remain compatible and retain their schedules and history. Host-owned task records remain under `data/tasks/`; the plugin does not overwrite them. Disable/update preserves live cards and progress. Store migration atomically purges legacy deleted-cue tombstones and old question/answer review snapshots, moves manual retry receipts out of cues, and forgets orphan upload records whose decks were deleted by older versions. Saved-source removal uses a durable cleanup queue, so a filesystem failure is reported and can be retried or completed on the next activation without restoring a deck. A corrupt/unsupported store is an error, never silently reset.
 
 Review content mounts own only their DOM, widgets and timers. Host presentation cleanup/remount (including development StrictMode replay) does not close the logical review session; actual close, reopen and owner abort still tear down its content scopes. Accepted review ratings and worker chunks are applied once. Cancel closes the batch's application gate before cancelling outstanding tasks; previously applied chunks remain. Restart reconciles durable worker outcomes without replaying unfinished model work. A failed save is visibly separate from successful model generation; retry saving does not make another model call. All content deletion waits until generation finishes or is cancelled to avoid stale results and destinations.
 
-The initial store is deliberately small and simple: one backend process owns writes. Simultaneously running independent app-server processes against the same plugin data directory is not supported. If dataset size makes rewriting the snapshot expensive, measure that concrete case before introducing more storage machinery.
+The store is deliberately small and simple: one backend process owns writes. Simultaneously running independent app-server processes against the same plugin data directory is not supported. If dataset size makes rewriting the snapshot expensive, measure that concrete case before introducing more storage machinery.
 
-## Verification
+## Tests and boundaries
 
-The focused test suite covers storage, permanent global content deletion, affected-empty-deck cleanup, legacy tombstone migration, text-free review statistics and retry receipts, deck-bound source cleanup/recovery, active-generation deletion guards, manual target/cue creation with durable save retries, generation, cancellation/recovery, cue-filtered review, shared-cap admission counts, memberships, scheduler fixtures, state/due/activity aggregates across DST, the dashboard, once-through read-only practice, tree selection/rename and frontend lifecycle. The initial package's isolated host proof covered actual knowledge selection → loopback worker → accepted cards → review → navigation and disable/re-enable persistence. File generation adds pure validation/chunking tests, backend tests with mocked durable workers, and frontend tests with a mocked document-conversion capability, including concurrent duplicate uploads, confirmation gating, cancellation/recovery, and failed-range retries. The new upload flow has not yet been browser-tested end to end with the actual host conversion endpoint or a real model provider.
+With test dependencies available:
 
-The UI pass also has a reproducible actual-host browser proof (`npm run test:native`, with `LH_STANDALONE` and `LH_APPROVED_HOST_DIGEST` pointing to an approved frozen host). It copies that host and the exact built package into a disposable profile, uses Electron's Node plus headless Chrome, and tests native tree columns/selection, shared cues, focused rename preservation during notifications, failed drafts, rich preview, centered dimmed review, marked-region focus/shortcuts, colored rating styles, Settings layering, shared scheduling, close/navigation and narrow-view scrolling. It checks unchanged source/package bytes, graph/settings, zero external requests, and catalog-only loopback traffic. No real provider/account or learner data is used. The latest layout run completed all six UI assertion groups, but failed its final strict network gate on one aborted navigation request; it is not a clean native-test pass, and no exception was added. That run preceded the public button-icon change, dashboard/extra-practice additions, initial-focus marker and custom-color buttons; the latest behavior still requires verification on the updated host. The deletion flow has also passed an isolated Chrome fixture at 1280px and 420px: conditional trash placement, confirmation/cancellation, checked versus unchecked container cleanup, explicit empty-deck deletion, and a generation starting while confirmation is open. This uses mocked host widgets/backend and normalized mock SVG geometry, not real-host widget styling or typography. Minimum card sizing has also been checked in an isolated browser fixture with mocked widgets at wide and narrow sizes: short answers preserve the card height, long answers expand without clipping, and practice/preview share the same minimum shape. This is not a full-host UI pass. Real-model cue quality and a native Electron-window/manual UX trial remain unverified.
+```sh
+npm test
+```
+
+The plugin tests cover storage/migrations, deletion and retry receipts, deck-bound
+source cleanup, manual creation, mocked generation/cancellation/recovery, cue-filtered
+review, memberships, scheduling and DST statistics, the dashboard, read-only practice,
+tree selection and frontend lifetimes. Document conversion and host widgets are mocked;
+these checks do not call a model or establish actual-host document conversion or cue quality.
+
+The DOM tests also require **`linkedom`**, which is supplied by the LearnHarness checkout
+but is not declared in this project's package manifest. A copied project needs that
+test prerequisite supplied separately; its build only needs the declared `esbuild`.
+
+`npm run test:native` is a checkout-oriented maintainer harness, not a standalone-kit
+check. It requires `puppeteer-core`, local Chrome, an Electron Node runtime (checkout
+path by default, or `LH_NODE_RUNTIME`), an already built matching host in
+`LH_STANDALONE` and its `LH_APPROVED_HOST_DIGEST`, plus the built plugin. It copies
+host/package bytes into disposable storage and exercises native widgets against
+synthetic records with loopback catalog traffic. The harness assumes a
+Community-loaded `flashcards` fixture; that admission assumption is not compatible
+with the reserved Core ID on a Core-packaged host. Do not treat it as an instruction
+to install a Community duplicate or as a portable Core smoke test. Browser fixtures
+are not physical Electron-window, real-provider or human UX acceptance.
+
+## Source reading route
+
+- [`src/main.js`](src/main.js): public view/actions/settings, knowledge selection,
+  document conversion and frontend/backend calls.
+- [`src/library-tree.js`](src/library-tree.js), [`src/review.js`](src/review.js),
+  [`src/practice-queue.js`](src/practice-queue.js) and [`src/dashboard.js`](src/dashboard.js):
+  controlled tree state, surface lifetimes, read-only practice and statistics UI.
+- [`src/backend.cjs`](src/backend.cjs), [`src/file-generation.cjs`](src/file-generation.cjs)
+  and [`src/generation-prompts.cjs`](src/generation-prompts.cjs): worker definitions,
+  chunking, validation, explicit confirmation and durable outcome application.
+- [`src/store.cjs`](src/store.cjs), [`src/scheduler.cjs`](src/scheduler.cjs) and
+  [`src/statistics.cjs`](src/statistics.cjs): plugin-owned records and domain algorithms,
+  not host API requirements.
+- [`scripts/build.mjs`](scripts/build.mjs) and [`tests/`](tests/): packaging guards and fixtures.
+
+See the [example map](../../docs/plugin-examples.md),
+[authoring guide](../../docs/plugin-authoring.md) and
+[API reference](../../docs/plugin-api/README.md).
 
 ## License
 

@@ -1,18 +1,12 @@
-import type { InkColor, Language } from "./contract.ts";
+import type { Language } from "./contract.ts";
 
 // Distinct variables retain the original paint when a definition is used by a
-// mask, while ordinary visible ink follows the user's single color choice.
+// mask, while ordinary visible ink inherits the host's theme Text color.
 const NEUTRALS = [
   { color: "rgb(0, 0, 0)", original: "#000000", variable: "--rich-code-blocks-black" },
   { color: "rgb(34, 34, 34)", original: "#222222", variable: "--rich-code-blocks-carbon" },
   { color: "rgb(102, 102, 102)", original: "#666666", variable: "--rich-code-blocks-hydrogen" },
 ] as const;
-
-export function setInkColor(root: HTMLElement, inkColor: InkColor): void {
-  const value = inkColor === "white" ? "#ffffff" : "#000000";
-  for (const neutral of NEUTRALS) root.style.setProperty(neutral.variable, value);
-  root.dataset.inkColor = inkColor;
-}
 
 /** Theme only a freshly sanitized tree. No model-authored CSS is admitted.
  * Colored paint, white fills, opacity and structural masking remain intact.
@@ -35,7 +29,7 @@ export function prepareInk(svg: SVGSVGElement, language: Language): void {
     return fallback;
   }
   // Capture all original inherited paints BEFORE modifying any ancestor. Mask
-  // luminance must not change when visible black ink becomes white. Freezing
+  // luminance must not change when visible ink follows theme Text. Freezing
   // paint-server inheritance also preserves authored gradients and patterns.
   const protectedRoots = elements.filter(element => element.localName === "mask" ||
     (language !== "smiles" && ["linearGradient", "radialGradient", "pattern"].includes(element.localName)))

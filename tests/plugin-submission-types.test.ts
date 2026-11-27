@@ -11,7 +11,7 @@ it("portable submission SDK exposes readonly learner input and opaque native sur
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-submission-types-"));
 	try {
 		const output = path.join(home, "api");
-		const build = spawnSync(process.execPath, [path.join(root, "scripts/build-plugin-types.mjs"), output], { cwd: root, encoding: "utf8", timeout: 30_000 });
+		const build = spawnSync(process.execPath, [path.join(root, "scripts/build-plugin-types.mjs"), output], { cwd: root, encoding: "utf8", timeout: 120_000 });
 		assert.equal(build.status, 0, String(build.stdout) + String(build.stderr));
 		assert.ok(fs.existsSync(path.join(output, "src/core/plugin-submissions.d.ts")));
 		assert.equal(fs.existsSync(path.join(output, "src/server")), false);

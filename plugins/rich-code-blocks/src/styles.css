@@ -1,6 +1,11 @@
 @import url("./assets/fonts/fonts.css");
 
 .rich-code-blocks {
+  /* Resolve at each mount so both existing and cached SVGs follow live theme
+     changes. Mask/paint-server subtrees keep their frozen original variables. */
+  --rich-code-blocks-black: var(--foreground, currentColor);
+  --rich-code-blocks-carbon: var(--foreground, currentColor);
+  --rich-code-blocks-hydrogen: var(--foreground, currentColor);
   min-width: 0;
   max-width: 100%;
 }
@@ -10,7 +15,7 @@
 }
 .rich-code-blocks--rendered {
   background: transparent;
-  color: var(--rich-code-blocks-black, #fff);
+  color: var(--foreground, inherit);
   padding: 12px;
   overflow: auto;
 }

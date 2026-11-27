@@ -80,7 +80,7 @@ const pin = { provider: "fixture", id: "integration-model", thinkingLevel: "off"
 const catalog: ModelCatalogResponse = {
 	models: [{ provider: pin.provider, id: pin.id, name: "Offline integration fixture", reasoning: false, input: ["text"], supportedLevels: ["off"], cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 1024 }],
 	providers: [{ id: pin.provider, envVar: "", keyPresent: true }], defaults: { model: pin, thinkingLevel: "off" },
-	rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null }, slots: { strong: { model: pin }, cheap: null, vision: null },
+	rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null }, slots: { strong: { model: pin }, cheap: null, vision: null },
 };
 const usage = { input: 2, output: 1, cacheRead: 0, cacheWrite: 0, totalTokens: 3, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } };
 const response = (content: AssistantMessage["content"]): AssistantMessage => ({ role: "assistant", api: "fixture" as never, provider: pin.provider, model: pin.id, content, stopReason: "toolUse", timestamp: 1, usage: structuredClone(usage) });

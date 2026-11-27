@@ -66,7 +66,7 @@ import {
 	SearchIcon,
 	XIcon,
 } from "lucide-react";
-import { chainsForSelection, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
+import { chainsForSelection, chainSourceDirectory, folderEntryCheck, toggleSourceEntries, formatChainLine, fuzzyScore, sourceFileLabel } from "@/src/core";
 import type { GraphChain, GraphNode, SourceDirectory, SourceEntry, SourceFolder, SourceEntrySelection } from "@/src/core";
 import { EditableSourceName, SourceDragRow, sourceNameMatches, SourceFolderTree, type OrganizationChange } from "./source-folder-tree";
 import { chainRow, useChainNavigation } from "./chain-navigation";
@@ -75,6 +75,7 @@ import { TopBar } from "@/components/top-bar";
 import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
 import { DeleteSourceDialog } from "@/components/delete-source-dialog";
 import { LatexGlyph } from "@/components/latex-glyph";
+import { ToolContentResponse } from "@/components/ai-elements/message";
 import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeHeader, TreeSelectionSpacer, TreeSeparator, treeBranchLayout, treeColumnLayout, treeRowLayout } from "./tree-presentation";
 
 /** The sortable columns (owner ruling: all three — consistency). */
@@ -120,15 +121,17 @@ export function ChainTableBody({
 	onClose,
 	selectMode,
 	onSelect,
-	directory,
+	directory: fullDirectory,
 	onOrganizationChange,
 	selectedFolders = new Set<string>(),
 	selectedSources = new Set<string>(),
 	onToggleSource = () => {},
 	onToggleFolder = () => {},
 	keyboardActive = true,
+	sourceInventoryPending = false,
 	pickerChrome = false,
 }: {
+	sourceInventoryPending?: boolean;
 	pickerChrome?: boolean;
 	keyboardActive?: boolean;
 	directory?: SourceDirectory;
@@ -181,15 +184,21 @@ export function ChainTableBody({
 		});
 	};
 	const byId = useMemo(() => new Map(nodes.map((n) => [n.id, n])), [nodes]);
+	const directory = useMemo(() => fullDirectory && chainSourceDirectory(fullDirectory), [fullDirectory]);
+	const hiddenSourceIds = useMemo(() => new Set(fullDirectory?.sources.filter((s) => s.chatKind === "practice").map((s) => s.id)), [fullDirectory]);
 	const sourceRecords = useMemo(() => new Map(directory?.sources.map((s) => [s.id, s])), [directory]);
 	const matchesSource = useCallback((birth: string) => sourceNameMatches(directory, birth,
 		sourceRecords.get(birth)?.label ?? sessions[birth] ?? (fileSources[birth] === undefined ? null : sourceFileLabel(fileSources[birth])), query),
 	[directory, sourceRecords, sessions, fileSources, query]);
 	const chains = useMemo(() => chainsForSelection(nodes, storedChains), [nodes, storedChains]);
+	// Filter source groups, not global nodes: shared premises remain visible
+	// in teaching/notes groups. Keep the graph-wide header and pick set intact.
+	const sourceChains = useMemo(() => chains.filter((chain) =>
+		!hiddenSourceIds.has(byId.get(chain.conclusion)?.provenance[0]?.chatId ?? "")), [chains, byId, hiddenSourceIds]);
 	const searching = query.trim() !== "";
 	const allSourceNodes = useMemo(() => {
 		const membership = new Map<string, Set<string>>();
-		for (const chain of chains) {
+		for (const chain of sourceChains) {
 			const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
 			if (!birth) continue;
 			const members = membership.get(birth) ?? new Set<string>();
@@ -197,13 +206,13 @@ export function ChainTableBody({
 			membership.set(birth, members);
 		}
 		return membership;
-	}, [chains, byId]);
+	}, [sourceChains, byId]);
 
 	// The fuzzy filter: a chain is visible when ANY member matches on
 	// name, aliases, or statement; chains rank by best member score.
 	const visibleChains = useMemo(() => {
-		if (!searching) return chains;
-		const scored = chains
+		if (!searching) return sourceChains;
+		const scored = sourceChains
 			.map((chain) => {
 				const birth = byId.get(chain.conclusion)?.provenance[0]?.chatId;
 				let best: number | null = birth && matchesSource(birth) ? 0 : null;
@@ -220,12 +229,14 @@ export function ChainTableBody({
 		return scored
 			.sort((a, b) => b.best - a.best || (a.chain.id < b.chain.id ? -1 : 1))
 			.map(({ chain }) => chain);
-	}, [chains, byId, query, searching, matchesSource]);
+	}, [sourceChains, byId, query, searching, matchesSource]);
 
 	// Group the visible chains by their CONCLUSION's birth (owner ruling).
 	// Unlabeled births (provenance gone / never named) form one honest
 	// muted group, sorted last under name-sort.
 	const groups = useMemo(() => {
+		// Session kinds must arrive before provenance-only source rows can render.
+		if (sourceInventoryPending) return [];
 		const map = new Map<string, ClusterGroup>();
 		for (const source of directory?.sources ?? []) {
 			if (searching && !matchesSource(source.id)) continue;
@@ -283,7 +294,7 @@ export function ChainTableBody({
 			);
 		}
 		return list;
-	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource]);
+	}, [visibleChains, byId, sessions, fileSources, sort, directory, sourceRecords, searching, matchesSource, sourceInventoryPending]);
 
 	// The derived shape under the floating bar (the agents' ACTUAL input).
 	const derived = useMemo(() => {
@@ -395,6 +406,7 @@ export function ChainTableBody({
 					renderSource={(group, depth) => {
 					const open = searching ? !foldedClusters.has(group.key) : expandedClusters.has(group.key);
 					const selectedCount = group.nodeIds.filter((id) => selection.has(id)).length;
+					const empty = group.birth === null ? group.nodeIds.length === 0 : !allSourceNodes.get(group.birth)?.size;
 					return (
 						<div
 							key={group.key}
@@ -426,12 +438,12 @@ export function ChainTableBody({
 								/>
 								<Expander open={open} onClick={() => toggleCluster(group.key)} testid={`cluster-toggle-${group.key}`} label={`Expand cluster ${group.label ?? "unlabeled"}`} />
 								<button type="button" data-source-icon data-testid={`source-icon-${group.key}`} aria-expanded={open} aria-label={`Expand source ${group.label ?? "unlabeled"}`}
-									onClick={() => toggleCluster(group.key)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
+									onClick={() => toggleCluster(group.key)} className={`flex h-5 w-3.5 shrink-0 items-center justify-center rounded ${empty ? "text-muted-foreground/60" : "text-muted-foreground"} transition-colors hover:bg-accent hover:text-foreground`}>
 									{open ? <BookOpenIcon className="size-3.5 shrink-0" /> : <BookIcon className="size-3.5 shrink-0" />}
 								</button>
 								{onOrganizationChange && group.birth && group.kind !== null
-									? <EditableSourceName name={group.label ?? ""} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
-									: <span className="min-w-0 flex-1 truncate text-sm font-medium">{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
+									? <EditableSourceName name={group.label ?? ""} muted={empty} onSave={(name) => onOrganizationChange({ action: "rename-source", id: group.birth!, name })} />
+									: <span className={`min-w-0 flex-1 truncate text-sm font-medium${empty ? " text-muted-foreground/60" : ""}`}>{group.label ?? <span className="text-muted-foreground/60">unlabeled</span>}</span>}
 								{group.kind === "notes" && <span className="text-[11px] uppercase tracking-widest text-muted-foreground/60">notes</span>}
 								<TreeCell widthClassName="w-14" align="right" className="text-xs tabular-nums text-muted-foreground">
 									{group.nodeIds.length}
@@ -533,6 +545,7 @@ export function ChainTableBody({
 															key={id}
 															{...chainRow(["prop", group.key, chain.id, id], depth + 2)}
 															data-testid={`prop-row-${id}`}
+															data-chain-statement
 															{...treeRowLayout({ depth: 2, variant: "detail" })}
 														>
 															{selectMode ? <RowCheckbox
@@ -541,9 +554,12 @@ export function ChainTableBody({
 																testid={`prop-checkbox-${id}`}
 																label={`Select node ${node.name}`}
 															/> : <TreeSelectionSpacer />}
-															<span className="min-w-0 flex-1 text-xs leading-relaxed text-muted-foreground">
+															<ToolContentResponse
+																mode="static"
+																className="min-w-0 flex-1 text-muted-foreground [--font-prose:var(--font-ui)] [--lh-prose-size:var(--text-xs)] [--lh-prose-leading:1.625] [&_[data-streamdown=inline-code]]:[font-size:inherit] [&_[data-streamdown=inline-code]]:[color:inherit]"
+															>
 																{node.statement}
-															</span>
+															</ToolContentResponse>
 															<TreeCell widthClassName="w-14" />
 															<TreeCell widthClassName="w-20" />
 														</div>
@@ -693,17 +709,20 @@ export function ChainTableOverlay({
 	const [deletion, setDeletion] = useState<{ sources: SourceEntry[]; folders: SourceFolder[] } | null>(null);
 	const deleteOpen = deletion !== null;
 	const [directory, setDirectory] = useState<SourceDirectory>();
+	const [directoryPending, setDirectoryPending] = useState(true);
+	const visibleDirectory = useMemo(() => directory && chainSourceDirectory(directory), [directory]);
 	const [directoryFailure, setDirectoryFailure] = useState("");
 	const [entrySelection, setEntrySelection] = useState<SourceEntrySelection>(() => ({ sources: new Set(), folders: new Set() }));
 	useEffect(() => {
-		if (!directory) return;
+		if (!visibleDirectory) return;
 		setEntrySelection((previous) => {
-			const sources = new Set([...previous.sources].filter((id) => directory.sources.some((s) => s.id === id)));
-			const folders = new Set([...previous.folders].filter((id) => directory.organization.folders.some((f) => f.id === id)));
+			const sources = new Set([...previous.sources].filter((id) => visibleDirectory.sources.some((s) => s.id === id)));
+			const folders = new Set([...previous.folders].filter((id) => visibleDirectory.organization.folders.some((f) => f.id === id)));
 			return sources.size === previous.sources.size && folders.size === previous.folders.size ? previous : { sources, folders };
 		});
-	}, [directory]);
+	}, [visibleDirectory]);
 	const requestVersion = useRef(0);
+	const directoryOpening = useRef(0);
 	const directoryRequest = useRef<AbortController | null>(null);
 	const mutationTail = useRef<Promise<unknown>>(Promise.resolve());
 	const readDirectory = useCallback(async () => {
@@ -715,26 +734,35 @@ export function ChainTableOverlay({
 			const response = await fetch("/api/graph/sources", { cache: "no-store", signal: request.signal });
 			if (!response.ok) throw new Error("Could not read source organization.");
 			const body = await response.json() as SourceDirectory;
-			if (!request.signal.aborted && version === requestVersion.current) { setDirectory(body); setDirectoryFailure(""); }
+			if (!request.signal.aborted && version === requestVersion.current) { setDirectory(body); setDirectoryPending(false); setDirectoryFailure(""); }
 		} catch (error) { if (!request.signal.aborted && version === requestVersion.current) setDirectoryFailure(error instanceof Error ? error.message : String(error)); }
 	}, []);
 	useEffect(() => {
 		if (open) void readDirectory();
-		return () => { requestVersion.current++; directoryRequest.current?.abort(); directoryRequest.current = null; };
+		return () => {
+			requestVersion.current++;
+			directoryOpening.current++;
+			directoryRequest.current?.abort();
+			directoryRequest.current = null;
+			// Keep cached organization, but require fresh source kinds on EACH opening.
+			setDirectoryPending(true);
+		};
 	}, [open, readDirectory]);
 	useServerEvent("sources-changed", () => { if (open) void readDirectory(); });
 	useServerEvent("chats-changed", () => { if (open) void readDirectory(); });
 	useServerResync(() => { if (open) void readDirectory(); });
 	const changeOrganization: OrganizationChange = (action) => {
+		const opening = directoryOpening.current;
 		// Serialize this page's edits, and invalidate older notify-then-fetch reads.
 		const operation = mutationTail.current.catch(() => {}).then(async () => {
 			try {
 				const response = await fetch("/api/graph/sources", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(action) });
 				const body = await response.json();
 				if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not save source organization.");
-				requestVersion.current++;
-				setDirectory(body as SourceDirectory);
-				setDirectoryFailure("");
+				if (opening === directoryOpening.current) {
+					requestVersion.current++;
+					setDirectory(body as SourceDirectory); setDirectoryPending(false); setDirectoryFailure("");
+				}
 				if (action.action === "rename-source") {
 					const entry = (body as SourceDirectory).sources.find((s) => s.id === action.id);
 					window.dispatchEvent(new CustomEvent(entry?.kind === "chat" ? "lh:chat-renamed" : "lh:source-renamed", { detail: { id: action.id, title: action.name } }));
@@ -745,11 +773,11 @@ export function ChainTableOverlay({
 		mutationTail.current = operation;
 		return operation;
 	};
-	const selectedSources = new Set([...entrySelection.sources].filter((id) => directory?.sources.some((s) => s.id === id)));
+	const selectedSources = new Set([...entrySelection.sources].filter((id) => visibleDirectory?.sources.some((s) => s.id === id)));
 	const selectedFolders = new Set([...entrySelection.folders].filter((id) => directory?.organization.folders.some((f) => f.id === id)));
-	const fullySelectedFolders = new Set([...selectedFolders].filter((id) => directory && folderEntryCheck(directory, id, { sources: selectedSources, folders: selectedFolders }).checked));
+	const fullySelectedFolders = new Set([...selectedFolders].filter((id) => visibleDirectory && folderEntryCheck(visibleDirectory, id, { sources: selectedSources, folders: selectedFolders }).checked));
 	const toggleEntries = (kind: "source" | "folder", id: string, checked: boolean) => {
-		if (directory) setEntrySelection((previous) => toggleSourceEntries(directory, previous, kind, id, checked));
+		if (visibleDirectory) setEntrySelection((previous) => toggleSourceEntries(visibleDirectory, previous, kind, id, checked));
 	};
 
 	// Controlled when the caller lifts the selection (the practice pick
@@ -792,7 +820,7 @@ export function ChainTableOverlay({
 				className="absolute inset-0 z-40 flex flex-col bg-background/80 backdrop-blur-sm"
 				style={registerInteraction ? { zIndex: 100 + layer.order } : undefined}
 			>
-				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-red-400">{directoryFailure}</p>}
+				{directoryFailure && <p role="alert" className="px-3 py-1 text-xs text-error">{directoryFailure}</p>}
 				<ChainTableBody
 					pickerChrome={pickerChrome}
 					keyboardActive={keyboardActive && !deleteOpen}
@@ -802,6 +830,7 @@ export function ChainTableOverlay({
 					selectedSources={selectedSources}
 					onToggleSource={(id, next) => toggleEntries("source", id, next)}
 					onToggleFolder={(id, next) => toggleEntries("folder", id, next)}
+					sourceInventoryPending={directoryPending}
 					nodes={nodes}
 					chains={storedChains}
 					sessions={sessions}
@@ -837,6 +866,7 @@ export function ChainTableOverlay({
 				folders={deletion?.folders ?? []}
 				onClose={() => setDeletion(null)}
 				onDelete={(deleteSessions) => {
+					const opening = directoryOpening.current;
 					const operation = mutationTail.current.catch(() => {}).then(async () => {
 						let graphRevision: number | undefined;
 						try {
@@ -845,7 +875,9 @@ export function ChainTableOverlay({
 							const body = await response.json();
 							if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not delete sources.");
 							graphRevision = body.graphRevision;
-							requestVersion.current++; setDirectory(body as SourceDirectory); setDirectoryFailure("");
+							if (opening === directoryOpening.current) {
+								requestVersion.current++; setDirectory(body as SourceDirectory); setDirectoryPending(false); setDirectoryFailure("");
+							}
 							setEntrySelection({ sources: new Set(), folders: new Set() });
 						} finally {
 							// A failed response can still follow partial disk writes.

@@ -25,6 +25,7 @@ fs.writeFileSync(process.env.LH_AUTH_FILE, "{}");
 const { SETTINGS_FILE } = await import("../config.ts");
 const { readSettings, writeSettings } = await import("../src/store/settings.ts");
 const { resolveSettings } = await import("../src/core/settings-resolution.ts");
+const { parseCompactionSettingsBody, parseAppearanceSettingsBody } = await import("../src/server/settings-body.ts");
 
 after(() => fs.rmSync(directory, { recursive: true, force: true }));
 
@@ -45,6 +46,38 @@ describe("the settings store", () => {
 		assert.equal(resolveSettings(readSettings()).agent.workerRequestConcurrency, 8);
 	});
 
+	it("code ligatures persist in either state; omitted and invalid existing settings resolve OFF", () => {
+		assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, false);
+		for (const codeLigatures of [true, false]) {
+			const parsed = parseAppearanceSettingsBody({ codeLigatures, proseFontSize: 20 });
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, appearance: parsed.settings });
+			assert.deepEqual(readSettings()?.appearance, { codeLigatures, proseFontSize: 20 });
+			assert.equal(JSON.parse(fs.readFileSync(SETTINGS_FILE, "utf8")).appearance.codeLigatures, codeLigatures);
+			assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, codeLigatures);
+		}
+		for (const appearance of [{ proseFontSize: 20 }, { proseFontSize: 20, codeLigatures: "true" }]) {
+			fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: 1, appearance }));
+			assert.deepEqual(readSettings()?.appearance, { proseFontSize: 20 });
+			assert.equal(resolveSettings(readSettings()).appearance.codeLigatures, false);
+		}
+	});
+
+	it("compact session list is off by default and persists either checkbox state", () => {
+		assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, false);
+		for (const compactSessionList of [true, false]) {
+			const appearance = { compactSessionList, fontFamily: "Georgia" };
+			const parsed = parseAppearanceSettingsBody(appearance);
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, appearance: parsed.settings });
+			assert.deepEqual(readSettings()?.appearance, appearance);
+			assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, compactSessionList);
+		}
+		assert.equal(parseAppearanceSettingsBody({ compactSessionList: "true" }).ok, false);
+		fs.writeFileSync(SETTINGS_FILE, JSON.stringify({ version: 1, appearance: { compactSessionList: "true" } }));
+		assert.equal(resolveSettings(readSettings()).appearance.compactSessionList, false);
+	});
+
 	it("reads null on first boot (no record)", () => {
 		fs.rmSync(SETTINGS_FILE, { force: true });
 		assert.equal(readSettings(), null);
@@ -55,6 +88,22 @@ describe("the settings store", () => {
 		const out = readSettings();
 		assert.ok(out);
 		assert.deepEqual(out.graph, { enabled: false });
+	});
+
+	it("reasoning estimation defaults off and explicit choices survive parsing, storage, and resolution", () => {
+		assert.equal(resolveSettings(null).compaction.includeReasoning, false);
+		writeSettings({ version: 1, compaction: { thresholdTokens: 120_000 } });
+		assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, false, "older records stay on the original estimator");
+		for (const includeReasoning of [true, false]) {
+			const parsed = parseCompactionSettingsBody({ thresholdTokens: 120_000, includeReasoning });
+			assert.ok(parsed.ok);
+			writeSettings({ version: 1, compaction: parsed.settings });
+			assert.deepEqual(readSettings()?.compaction, { thresholdTokens: 120_000, includeReasoning });
+			assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, includeReasoning);
+		}
+		writeSettings({ version: 1, compaction: { thresholdTokens: 120_000, includeReasoning: "true" } });
+		assert.deepEqual(readSettings()?.compaction, { thresholdTokens: 120_000 }, "invalid disk values are dropped");
+		assert.equal(resolveSettings(readSettings()).compaction.includeReasoning, false);
 	});
 
 	it("a chat section on disk is IGNORED — the field died with per-session models (owner, 2026-09-28)", () => {

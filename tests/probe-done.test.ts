@@ -1,5 +1,5 @@
 /**
- * probe_done — the probe→planning seam tool (docs/probe-teach-split.md §2).
+ * probe_done — the probe→planning seam tool (docs/archive/probe-teach-split.md §2).
  * Server-side; three outcomes: refusal while a question is open, refusal
  * after the probe is already concluded, ok + handoff queued. The handoff
  * rides the wake pipeline (deliver injected here — no server seam import).
@@ -84,6 +84,20 @@ describe("probe_done: the probe→planning seam", () => {
 		assert.equal(delivered[0]!.customType, "probe-handoff");
 		assert.equal(delivered[0]!.content, HANDOFF_TEXT);
 		assert.equal((delivered[0]!.details as { chatId: string }).chatId, chatId);
+	});
+
+	it("hands off an evidence-based assessment without a known ceiling", async () => {
+		const chatId = newChat("Probe: enough to plan");
+		const delivered: SteerMessage[] = [];
+		const tool = probeDoneTool({ chatId, chatStore, deliver: (s) => delivered.push(s) });
+		assert.match(tool.probe_done!.description, /A topic request alone isn't that evidence/);
+		assert.match(tool.probe_done!.description, /Report bounds supported by the evidence/);
+		const assessment = {
+			strands: [{ strand: "Instantaneous rate", assessment: "Explains how the secant approaches the tangent. Build from that intuition; formal limits untested." }],
+			summary: "The goal is to connect the geometric intuition to the derivative definition.",
+		};
+		assert.equal((await execute(tool, { assessment })).ok, true);
+		assert.equal(delivered.length, 1);
 	});
 
 	it("REFUSES while a question is still open — resolve it first", async () => {

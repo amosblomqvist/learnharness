@@ -1,8 +1,8 @@
 # Keyboard shortcuts
 
-This reference describes the shipped defaults. **Mod** means ⌘ on macOS and
-Ctrl on Windows/Linux; the dispatcher accepts either modifier on every platform.
-Press **?** outside a text field for the in-app cheat sheet.
+**Mod** means ⌘ on macOS and Ctrl on Windows/Linux; the dispatcher accepts
+either modifier on every platform. Press **?** outside a text field for the
+in-app cheat sheet. See [Getting started](getting-started.md) for setup.
 
 ## Default key map
 
@@ -144,21 +144,9 @@ submission conventions above.
   focus. Reopening retains the query and reading position within that session;
   changing sessions resets Find. A foreground menu/dialog takes priority.
 
-## Implementation sources
+## Maintainer entry points
 
-- [Registry and persistence](../src/core/keyboard.ts),
-  [window dispatcher and cheat sheet](../components/keyboard-shortcuts.tsx),
-  [Keyboard settings](../components/settings/keyboard-section.tsx).
-- [Field cycle](../components/field-cycle.ts),
-  [question dock](../components/question-dock.tsx),
-  [practice dock](../components/practice-dock.tsx),
-  [composer](../components/composer.tsx),
-  [chat focus and abort handling](../components/chat.tsx),
-  [reading-thinking field](../components/reading-thinking.tsx),
-  [Enter focus rules](../components/enter-submits.ts).
-- [Sidebar search](../components/sidebar.tsx),
-  [model menus](../components/settings/model-menu.tsx),
-  [menu shell](../components/menu-shell.tsx),
-  [session Find](../components/session-find.tsx),
-  [displayed-text matching](../components/session-find-dom.ts),
-  [chains navigation](../components/chain-navigation.ts).
+The [registry](../src/core/keyboard.ts) defines defaults/persistence; the
+[window dispatcher](../components/keyboard-shortcuts.tsx) handles global actions.
+Contextual behavior lives with its surface: question/practice docks, composer,
+menus, Find, and [chains navigation](../components/chain-navigation.ts).

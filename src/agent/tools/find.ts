@@ -3,85 +3,63 @@ import * as path from "node:path";
 import { Type } from "typebox";
 import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
-import {
-	capOutput,
-	formatSize,
-	MAX_OUTPUT_BYTES,
-	matchGlob,
-	resolveSourcePath,
-	walkFiles,
-} from "./fs-shared.ts";
+import { capOutput, formatSize, MAX_OUTPUT_BYTES, matchGlob, sourceSearchRoots, walkFiles, WALK_TIMEOUT_MS } from "./fs-shared.ts";
+import { resolvePolicy } from "./file-access.ts";
 
-/**
- * The find tool — sources v1 (2026-09-19): pi's dist/core/tools/find.js
- * ported to a pure-Node walker (pi shells out to fd; no binaries here —
- * Electron/Windows-safe, fs-shared.ts). Schemas, fd's glob semantics
- * (basename-mode without a slash, implied deep prefix with one), relativized output,
- * and the notice formats are pi-verbatim; the deltas: home-anchored
- * default, .gitignore replaced by hard noise exclusions, and a wall-clock
- * timeout with partial results. Read-only by construction.
- */
-
+/** Pure-Node pi/fd-style search: no shell, no symlink following, mandatory
+ * source denials. Restricted default searches share ONE budget/limit across
+ * all allowed roots; explicit paths keep their HOME-relative meaning. */
 const DEFAULT_LIMIT = 1000;
-
 const findInput = Type.Object({
-	pattern: Type.String({
-		minLength: 1,
-		description: "Glob pattern to match files, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'",
-	}),
-	path: Type.Optional(Type.String({ description: "Directory to search in (default: the learner's home directory)" })),
-	limit: Type.Optional(Type.Integer({ description: "Maximum number of results (default: 1000)" })),
+	pattern: Type.String({ minLength: 1, description: "Glob pattern, e.g. '*.ts', '**/*.json', or 'src/**/*.spec.ts'; matched relative to each search root" }),
+	path: Type.Optional(Type.String({ description: "Directory to search. Default: home when unrestricted, all allowed folders when restricted. Explicit relative paths are home-relative." })),
+	limit: Type.Optional(Type.Integer({ description: "Maximum total results across all roots (default: 1000)" })),
 });
 
 export const findTool: AgentTool<typeof findInput> = {
 	name: "find",
 	label: "find",
-	description: `Search for files by glob pattern. Returns matching file paths relative to the search directory. Ignores node_modules, .git, and Library directories. Output is truncated to ${DEFAULT_LIMIT} results or ${formatSize(MAX_OUTPUT_BYTES)} (whichever is hit first).`,
+	description: `Search for files by glob pattern. Returns paths relative to an explicit search directory, or absolute paths when searching the allowed folders by default. Use ls without a path to discover allowed roots. Ignores node_modules, .git, and Library directories, and skips known sensitive locations (including agent transcripts, credential stores and browser profiles), plus .env/.env.* files. Output is truncated to ${DEFAULT_LIMIT} total results or ${formatSize(MAX_OUTPUT_BYTES)} (whichever is hit first).`,
 	parameters: findInput,
 	execute: serverExecute("find", findInput, async (input, ctx) => {
 		if (ctx?.signal?.aborted) return "Operation aborted";
-		const searchPath = resolveSourcePath(input.path);
-		let stat;
-		try {
-			stat = await fs.stat(searchPath);
-		} catch {
-			throw new Error(`Path not found: ${searchPath}`);
+		const policy = resolvePolicy();
+		const { roots, notices, multiRoot } = sourceSearchRoots(input.path, policy);
+		for (const root of roots) {
+			let stat;
+			try { stat = await fs.stat(root); }
+			catch { throw new Error(`Path not found: ${root}`); }
+			if (!stat.isDirectory()) throw new Error(`Not a directory: ${root}`);
 		}
-		if (!stat.isDirectory()) throw new Error(`Not a directory: ${searchPath}`);
-
 		const effectiveLimit = input.limit ?? DEFAULT_LIMIT;
 		const matches: string[] = [];
+		const deadline = Date.now() + WALK_TIMEOUT_MS;
 		let limitReached = false;
-		const { timedOut, aborted } = await walkFiles(
-			searchPath,
-			(filePath) => {
-				const rel = path.relative(searchPath, filePath).split(path.sep).join("/");
+		let timedOut = false;
+		let aborted = false;
+		for (const root of roots) {
+			const result = await walkFiles(root, (filePath) => {
+				const rel = path.relative(root, filePath).split(path.sep).join("/");
 				if (!matchGlob(rel, input.pattern)) return false;
-				if (matches.length >= effectiveLimit) {
-					limitReached = true;
-					return true; // stop the walk
-				}
-				matches.push(rel);
+				if (matches.length >= effectiveLimit) { limitReached = true; return true; }
+				matches.push(multiRoot ? filePath : rel);
 				return false;
-			},
-			ctx?.signal,
-		);
-
-		if (aborted) {
-			return matches.length > 0
-				? `${matches.join("\n")}\n\n[search aborted — partial results]`
-				: "Search aborted before any results.";
+			}, ctx?.signal, { policy, deadline });
+			timedOut ||= result.timedOut;
+			aborted ||= result.aborted;
+			if (timedOut || aborted || limitReached) break;
 		}
-		if (matches.length === 0 && !limitReached) {
-			return timedOut
-				? `Search timed out after 10s with no matches yet. Narrow the search to a subdirectory.`
-				: "No files found matching pattern";
-		}
+		const finish = (body: string): string => notices.length ? `${body}\n\n[${notices.join(". ")}]` : body;
+		if (aborted) return finish(matches.length
+			? `${capOutput(matches).content}\n\n[search aborted — partial results]`
+			: "Search aborted before any results.");
+		if (!matches.length && !limitReached) return finish(timedOut
+			? "Search timed out after 10s with no matches yet. Narrow the search to a subdirectory."
+			: "No files found matching pattern");
 		const { content, truncated } = capOutput(matches);
-		const notices: string[] = [];
 		if (limitReached || matches.length >= effectiveLimit) notices.push(`${effectiveLimit} results limit reached`);
 		if (truncated) notices.push(`${formatSize(MAX_OUTPUT_BYTES)} limit reached`);
 		if (timedOut) notices.push("search timed out after 10s — partial results, narrow the directory");
-		return notices.length > 0 ? `${content}\n\n[${notices.join(". ")}]` : content;
+		return finish(content);
 	}),
 };

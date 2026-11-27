@@ -76,6 +76,8 @@ export function applyParkedDismissal(chatStore: ChatStore, chatId: string): void
 		const appends = (input as { type?: string }).type === "dismiss-plugin-question"
 			? preparePluginQuestionDismissal(record, input as PluginQuestionDismissInput)
 			: dismissAppends(record, input as Parameters<typeof dismissAppends>[1]);
+		// Settlement/dismissal does not run another model call. Keep new
+		// side exchanges pending until that call's context-budget gate.
 		chatStore.saveMessages(chatId, [...record.messages, ...appends]);
 		emit("record-changed", { chatId });
 	} catch (err) {

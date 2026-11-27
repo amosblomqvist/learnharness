@@ -9,9 +9,9 @@
  *   appearance edits restyle the chat LIVE behind the dialog). Escape,
  *   backdrop, and ✕ all close. Modal-only — /settings redirects, so
  *   nothing links into a dead surface.
- * - Left section nav in the app's mono chrome (text-only, session-list
- *   language — active = bg-accent), no icons, matching the minimal-color
- *   doctrine.
+ * - Left section nav in the app's mono chrome, with small decorative
+ *   Lucide icons for the built-in sections; active = bg-accent. Icons
+ *   inherit the row's color, without a separate palette.
  * - The dialog is surface-agnostic by construction: the sections talk to
  *   /api/settings* and localStorage only, so this shell can be re-mounted
  *   as a true OS window in the Electron round with near-zero churn.
@@ -33,11 +33,11 @@ import {
 	type ReactNode,
 	type RefObject,
 } from "react";
+import { BotIcon, KeyIcon, KeyboardIcon, PaletteIcon, PlugIcon, PuzzleIcon, SettingsIcon, WaypointsIcon, type LucideIcon } from "lucide-react";
 import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
 	CURRENT_SETTINGS_VERSION,
-	type AgentSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
@@ -46,7 +46,7 @@ import {
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
-import { AgentSection } from "./agent-section.tsx";
+import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
@@ -64,12 +64,12 @@ import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
  *  prose is out; only the keyboard note stays (storage location is a
  *  real question users ask). */
 const SECTIONS = [
-	{ id: "keys", label: "Providers" },
-	{ id: "agent", label: "Agent" },
-	{ id: "appearance", label: "Appearance" },
-	{ id: "graph", label: "Graph" },
-	{ id: "keyboard", label: "Keyboard", hint: "Stored on this device" },
-	{ id: "general", label: "General" },
+	{ id: "keys", label: "Providers", icon: KeyIcon },
+	{ id: "agent", label: "Agent", icon: BotIcon },
+	{ id: "appearance", label: "Appearance", icon: PaletteIcon },
+	{ id: "graph", label: "Graph", icon: WaypointsIcon },
+	{ id: "keyboard", label: "Keyboard", icon: KeyboardIcon, hint: "Stored on this device" },
+	{ id: "general", label: "General", icon: SettingsIcon },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 
@@ -85,7 +85,17 @@ interface SettingsWriteOrder {
 	issued: number;
 	acknowledged: number;
 	record?: UserSettings;
-	listeners: Set<(record: UserSettings) => void>;
+	fileAccessError?: string | null;
+	pendingWrites: number;
+	promptDeletion?: Promise<void>;
+	listeners: Set<(record: UserSettings, fileAccessError: string | null) => void>;
+}
+const newWriteOrder = (): SettingsWriteOrder => ({ issued: 0, acknowledged: 0, pendingWrites: 0, listeners: new Set() });
+// Settings runs on supported browsers that predate Promise.withResolvers.
+function settingsCompletion() {
+	let resolve!: () => void;
+	const promise = new Promise<void>(done => { resolve = done; });
+	return { promise, resolve };
 }
 const WriteOrderContext = createContext<RefObject<SettingsWriteOrder> | null>(null);
 
@@ -99,7 +109,7 @@ export function SettingsDialogProvider({
 }) {
 	const interactions = useInteractionLayers();
 	const layerId = useId();
-	const writeOrder = useRef<SettingsWriteOrder>({ issued: 0, acknowledged: 0, listeners: new Set() });
+	const writeOrder = useRef(newWriteOrder());
 	const [show, setShow] = useState(false);
 	const [landOn, setLandOn] = useState<SectionId>("keys");
 	const [landOnRow, setLandOnRow] = useState<string | null>(null);
@@ -185,13 +195,14 @@ export function SettingsDialogBody({
 }) {
 	const { onAppearanceChange } = useAppearance();
 	const inheritedWriteOrder = useContext(WriteOrderContext);
-	const standaloneWriteOrder = useRef<SettingsWriteOrder>({ issued: 0, acknowledged: 0, listeners: new Set() });
+	const standaloneWriteOrder = useRef(newWriteOrder());
 	const writeOrder = inheritedWriteOrder ?? standaloneWriteOrder;
 	const { snapshot } = usePlugins();
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
 	const [error, setError] = useState<string | null>(null);
+	const [fileAccessError, setFileAccessError] = useState<string | null>(null);
 	// MenuShell open-count — drives the content column's scroll lock.
 	const [openMenus, setOpenMenus] = useState(0);
 	const contentRef = useRef<HTMLDivElement | null>(null);
@@ -245,10 +256,10 @@ export function SettingsDialogBody({
 		if (missingPlugin) setActive(management);
 	}, [missingPlugin, management]);
 	const selected = missingPlugin ? management : active;
-	const navSections: { id: SectionId; label: string }[] = [
+	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = [
 		...SECTIONS,
-		{ id: "core-plugins", label: "Core plugins" },
-		{ id: "plugins", label: "Community plugins" },
+		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
+		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },
 		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
 	];
 
@@ -256,8 +267,12 @@ export function SettingsDialogBody({
 	// acknowledged snapshot to whichever Settings instance is mounted now.
 	useEffect(() => {
 		const authority = writeOrder.current;
-		authority.listeners.add(setRecord);
-		return () => { authority.listeners.delete(setRecord); };
+		const apply = (record: UserSettings, fileAccessError: string | null) => {
+			setRecord(record);
+			setFileAccessError(fileAccessError);
+		};
+		authority.listeners.add(apply);
+		return () => { authority.listeners.delete(apply); };
 	}, [writeOrder]);
 
 	// Fetch once per dialog mount. 200 {settings: null} is FIRST BOOT.
@@ -266,16 +281,22 @@ export function SettingsDialogBody({
 		const authority = writeOrder.current;
 		const acknowledgedAtRead = authority.acknowledged;
 		let alive = true;
-		const applyLoaded = (loaded: UserSettings | null) => {
+		const applyLoaded = (loaded: UserSettings | null, fileAccessError: string | null = null) => {
 			if (!alive) return;
-			setRecord(authority.acknowledged === acknowledgedAtRead ? loaded : authority.record ?? loaded);
+			const unchanged = authority.acknowledged === acknowledgedAtRead;
+			if (unchanged && loaded) {
+				authority.record = loaded;
+				authority.fileAccessError = fileAccessError;
+			}
+			setRecord(unchanged ? loaded : authority.record ?? loaded);
+			setFileAccessError(unchanged ? fileAccessError : authority.fileAccessError ?? null);
 		};
 		fetch("/api/settings")
 			.then((r) =>
 				r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)),
 			)
-			.then((body: { settings: UserSettings | null }) =>
-				applyLoaded(body.settings ?? { version: CURRENT_SETTINGS_VERSION }),
+			.then((body: { settings: UserSettings | null; fileAccessError?: string }) =>
+				applyLoaded(body.settings ?? { version: CURRENT_SETTINGS_VERSION }, body.fileAccessError ?? null),
 			)
 			.catch(() => applyLoaded(null));
 		return () => { alive = false; };
@@ -288,8 +309,12 @@ export function SettingsDialogBody({
 		async (
 			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
 			body: object,
+			confirms?: (stored: UserSettings) => boolean,
 		): Promise<boolean> => {
-			const ticket = ++writeOrder.current.issued;
+			const authority = writeOrder.current;
+			while (authority.promptDeletion) await authority.promptDeletion;
+			const ticket = ++authority.issued;
+			authority.pendingWrites++;
 			setError(null);
 			try {
 				const res = await fetch(`/api/settings/${section}`, {
@@ -306,9 +331,8 @@ export function SettingsDialogBody({
 				}
 				// Only the acknowledged record is canonical: never substitute the
 				// request body, including when normalization leaves the old value.
-				const stored = (
-					(await res.json().catch(() => null)) as { settings?: UserSettings } | null
-				)?.settings;
+				const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
+				const stored = reply?.settings;
 				if (!stored || typeof stored !== "object" || Array.isArray(stored) || stored.version !== 1 ||
 					!stored[section] || typeof stored[section] !== "object" || Array.isArray(stored[section])) {
 					if (ticket === writeOrder.current.issued) setError(`${section}: Could not confirm saved settings. Your input has been kept.`);
@@ -317,20 +341,46 @@ export function SettingsDialogBody({
 				if (ticket >= writeOrder.current.acknowledged) {
 					writeOrder.current.acknowledged = ticket;
 					writeOrder.current.record = stored;
-					for (const apply of writeOrder.current.listeners) apply(stored);
+					writeOrder.current.fileAccessError = reply?.fileAccessError ?? null;
+					for (const apply of writeOrder.current.listeners) apply(stored, writeOrder.current.fileAccessError);
 					// Every accepted response is a full canonical record, including
 					// appearance saved by an earlier, still-pending section request.
 					onAppearanceChange(stored.appearance);
 				}
 				notifySettingsSaved(section);
-				return true;
+				return confirms?.(stored) ?? true;
 			} catch (error) {
 				if (ticket === writeOrder.current.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
 				return false;
+			} finally {
+				authority.pendingWrites--;
 			}
 		},
 		[onAppearanceChange, writeOrder],
 	);
+
+	async function deletePromptOverride(path: string, remove: () => Promise<boolean>) {
+		const authority = writeOrder.current;
+		// DELETE only acknowledges a key removal. Don't patch a mirror that
+		// hasn't seen preceding full-record ACKs, and never queue a delete.
+		if (authority.promptDeletion || authority.pendingWrites) return "settings-busy" as const;
+		const settled = settingsCompletion();
+		authority.promptDeletion = settled.promise;
+		try {
+			if (!await remove()) return "delete-failed" as const;
+			const stored = authority.record;
+			if (stored?.agent?.prompts?.[path] !== undefined) {
+				const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
+				authority.acknowledged = ++authority.issued;
+				authority.record = patched;
+				for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
+			}
+			return "deleted" as const;
+		} finally {
+			authority.promptDeletion = undefined;
+			settled.resolve();
+		}
+	}
 
 	const frame = (
 		<div
@@ -372,12 +422,12 @@ export function SettingsDialogBody({
 			</header>
 
 			<div className="flex min-h-0 flex-1">
-				{/* Left nav — text-only, the session-list mono language,
+				{/* Left nav — mono labels and theme-inherited decorative icons,
 					    active = bg-accent. */}
 				<nav
 					aria-label="Settings sections"
 					data-testid="settings-nav"
-					className="flex min-h-0 w-44 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
+					className="flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
 				>
 					{navSections.map((s, index) => (
 						<div key={s.id} className="shrink-0">
@@ -386,14 +436,15 @@ export function SettingsDialogBody({
 								type="button"
 								data-testid={`settings-nav-${s.id}`}
 								aria-current={selected === s.id}
-								className={`w-full break-words rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
+								className={`flex w-full items-center gap-2 break-words rounded-sm px-3 py-1.5 text-left font-ui text-sm transition-colors ${
 									selected === s.id
 										? "bg-accent text-foreground"
 										: "text-muted-foreground hover:bg-accent hover:text-foreground"
 								}`}
 								onClick={() => setActive(s.id)}
 							>
-								{s.label}
+								{s.icon && <s.icon aria-hidden="true" focusable="false" className="size-3.5 shrink-0" />}
+								<span className="min-w-0">{s.label}</span>
 							</button>
 							{s.id === "plugins" && <hr className="my-2 border-border" />}
 						</div>
@@ -414,7 +465,7 @@ export function SettingsDialogBody({
 					{error && !activePluginId && selected !== "plugins" && selected !== "core-plugins" && (
 						<p
 							role="alert"
-							className="m-4 rounded-sm border border-red-500/40 px-3 py-2 text-xs text-red-500"
+							className="m-4 rounded-sm border border-error/40 px-3 py-2 text-xs text-error"
 							data-testid="settings-error"
 						>
 							{error}
@@ -458,15 +509,17 @@ export function SettingsDialogBody({
 								>
 									<AgentSection
 										agent={record.agent}
+										fileAccessError={fileAccessError}
 										models={record.models}
 										graph={record.graph}
 										compaction={record.compaction}
 										onModelsChange={(next: ModelsSettings) =>
 											void write("models", next)
 										}
-										onSectionChange={(next: AgentSettings) =>
-											write("agent", next)
+										onSectionChange={(next, confirms) =>
+											write("agent", next, confirms && (stored => confirms(stored.agent ?? {})))
 										}
+										onDeletePromptOverride={deletePromptOverride}
 										onCompactionChange={(next: CompactionSettings) =>
 											write("compaction", next)
 										}

@@ -55,7 +55,8 @@ export type ModelRole =
 	| "visualMaker"
 	| "pdfReader"
 	| "extractor"
-	| "auditor";
+	| "auditor"
+	| "sideQuestion";
 
 /**
  * The LIVE graph store (src/store/graph.ts) — owned by the app's extraction
@@ -130,6 +131,14 @@ export const SETTINGS_FILE = path.join(/* turbopackIgnore: true */ DATA_ROOT, "s
  * a vanished segment stops composing but stays on disk.
  */
 export const PROMPTS_OVERRIDE_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "prompts");
+
+/**
+ * Imported custom themes (theme wave, 2026-11-04): one `<id>.json` per
+ * theme (core/themes.ts ThemeFile shape), written by POST /api/themes and
+ * listed beside the built-in presets. The settings record names the
+ * active one by id (appearance.theme).
+ */
+export const THEMES_DIR = path.join(/* turbopackIgnore: true */ DATA_ROOT, "themes");
 
 /**
  * THE AUTH/KEY STORE (auth-keys wave, 2026-09-19): BYOK provider keys in a

@@ -7,6 +7,7 @@ import { mountSheet, type MountedSheet } from "./sheet.ts";
 import { Sheets, type SessionSheet } from "./state.ts";
 import { appendDrawing } from "./submission.ts";
 import { PEN } from "./icons.ts";
+import { appPalette, recolorReference } from "./theme.ts";
 type SessionAction = Extract<PluginActionContext, { surface: "session" }>;
 interface OpenPad {
   session: SessionSheet;
@@ -19,12 +20,23 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   let disposed = false, open: OpenPad | undefined, current: Settings | undefined;
   let settings: PluginWidgetHandle<PluginSettingsSchema> | undefined;
   const cleanups: (() => void)[] = [];
+  const paletteController = new AbortController();
+  let appliedPalette = appPalette().key, paletteTask: Promise<void> | undefined;
   // Opaque public path strings are associated ONLY on an actual contextual click.
   // No route parsing or global-current-session inference is used for targeting.
   const pageSessions = new Map<string, string>();
-  const sheets = new Sheets(() => {
-    if (!disposed && !ctx.signal.aborted) { ctx.refreshActions(); ctx.refreshSubmissions(); }
-  }, state => { if (open?.session === state) close(open); });
+  // Everything the host reads from this plugin: the Draw label (pending),
+  // hasPendingInput (pending, plus seenPoses for practice problem targets).
+  // Undo/tool shortcut predicates are evaluated at invocation, not on refresh.
+  let hostKey: string | undefined;
+  const sheets = new Sheets(reason => {
+    if (disposed || ctx.signal.aborted || reason === "camera" || reason === "tool") return;
+    const key = [...sheets.sessions.values()].map(state => `${state.id}:${sheets.pending(state) ? 1 : 0}:${state.draft ? 1 : 0}:` +
+      `${state.draft?.strokes.length ? 1 : 0}:${state.seenPoses.size}`).join("|");
+    if (key !== hostKey) { hostKey = key; ctx.refreshActions(); ctx.refreshSubmissions(); }
+    if (reason === "sheet" && current && [...sheets.sessions.values()].some(state => state.draft && state.draft.palette !== appPalette().key))
+      void refreshPalette().catch(report);
+  }, state => { if (open?.session === state) close(open); }, activeInk);
   function close(pad: OpenPad): void {
     if (pad.closed) return;
     pad.closed = true;
@@ -41,6 +53,9 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     sheets.observePoses(state, acceptedPoseKeys(context.view.messages), !hadState);
     if (wasOpen) { if (open?.session === state) close(open); return; }
     if (open) close(open);
+    // Acceptance can empty a sheet while it is closed. Apply the same empty-
+    // sheet policy as close before deciding whether this mount needs a reference.
+    sheets.dropUntouched(state);
     const pad: OpenPad = { session: state, controller: new AbortController(), closed: false };
     open = pad;
     try {
@@ -102,14 +117,14 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     disabled: context => !editingPad(context),
     run(context) { editingPad(context)?.selectHand(); },
   };
-  const rows = (value: Settings): PluginSettingsSchema["rows"] => [{
-    key: "inkColor", type: "text", label: "Ink color", value: value.inkColor,
-    description: "Six-digit hex color, for example #facc15. Recolors all unsent ink.", validate: colorError,
-    async onChange(inkColor) {
-      const accepted = await ctx.call("set-ink-color", { inkColor });
-      applySettings(accepted);
-    },
-  }, {
+  const rows = (value: Settings): PluginSettingsSchema["rows"] => [...([
+    { key: "darkInkColor", label: "Dark mode ink color" },
+    { key: "lightInkColor", label: "Light mode ink color" },
+  ] as const).map(({ key, label }) => ({
+    key, type: "text" as const, label, value: value[key],
+    description: "Six-digit hex color. Recolors all unsent ink when this app theme mode is active.", validate: colorError,
+    async onChange(color: string) { applySettings(await ctx.call("set-ink-color", { [key]: color })); },
+  })), {
     key: "imageScale", type: "number", label: "Image scale", value: value.imageScale, min: 0, max: 100,
     description: "Export percentage (default 50%). Applied before the fixed 2000 × 2000 pixel cap. Does not change the drawing surface.",
     validate: imageScaleError,
@@ -119,9 +134,34 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     if (disposed || ctx.signal.aborted) return;
     const next = parseSettings(value);
     if (current && next.revision <= current.revision) return;
-    current = next; sheets.setImageScale(next.imageScale); sheets.setColor(next.inkColor);
+    current = next; sheets.setImageScale(next.imageScale);
+    const palette = appPalette();
+    sheets.setInkForPalette(activeInk(), palette.key);
+    if (palette.key !== appliedPalette || [...sheets.sessions.values()].some(state => state.draft && state.draft.palette !== palette.key))
+      void refreshPalette().catch(report);
     if (settings) settings.update({ rows: rows(next) });
     else settings = ctx.registerSettings({ rows: rows(next) });
+  }
+  function activeInk(): string { return appPalette().mode === "light" ? current!.lightInkColor : current!.darkInkColor; }
+  function refreshPalette(): Promise<void> {
+    if (paletteTask) return paletteTask;
+    paletteTask = (async () => {
+      while (!disposed && !ctx.signal.aborted && current) {
+        const palette = appPalette();
+        const backgrounds = new Map<SessionSheet, { id: number; background: string; backgroundColor: string }>();
+        for (const state of sheets.sessions.values()) {
+          const draft = state.draft;
+          if (draft && draft.palette !== palette.key) backgrounds.set(state,
+            { id: draft.id, ...await recolorReference(draft, ctx, paletteController.signal) });
+        }
+        if (disposed || ctx.signal.aborted) return;
+        if (palette.key !== appPalette().key) continue;
+        appliedPalette = palette.key;
+        sheets.setPalette(activeInk(), palette.key, backgrounds);
+        if (palette.key === appPalette().key) return;
+      }
+    })().finally(() => { paletteTask = undefined; });
+    return paletteTask;
   }
   let settingsRead: Promise<void> = Promise.resolve();
   function refreshSettings(): Promise<void> {
@@ -141,6 +181,7 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   const dispose = () => {
     if (disposed) return;
     disposed = true;
+    paletteController.abort();
     if (open) close(open);
     for (const cleanup of cleanups.splice(0)) cleanup();
     settings?.dispose(); sheets.dispose(); pageSessions.clear();
@@ -158,6 +199,11 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     void refreshSettings().catch(report);
     for (const state of sheets.sessions.values()) if (state.kind === "practice") void refreshPoses(state, ctx.signal).catch(report);
   }));
+  if (typeof document !== "undefined" && typeof MutationObserver !== "undefined") {
+    const observer = new MutationObserver(() => { void refreshPalette().catch(report); });
+    observer.observe(document.documentElement, { attributes: true, attributeFilter: ["class", "style"] });
+    cleanups.push(() => observer.disconnect());
+  }
   try {
     await refreshSettings();
     if (disposed || ctx.signal.aborted) return dispose;
@@ -184,6 +230,12 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
           sheets.observePoses(state, acceptedPoseKeys(context.messages));
           await refreshPoses(state, context.signal);
         }
+        // Pose reads and palette rendering are asynchronous. Recheck the live
+        // palette after the last await, immediately before freezing the attempt.
+        do {
+          await abortable(refreshPalette(), context.signal);
+          paletteController.signal.throwIfAborted();
+        } while (appPalette().key !== appliedPalette || (state.draft && state.draft.palette !== appliedPalette));
         context.signal.throwIfAborted();
         const captured = sheets.capture(state);
         if (!captured) return;

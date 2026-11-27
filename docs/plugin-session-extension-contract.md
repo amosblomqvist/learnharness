@@ -1,7 +1,8 @@
 # Session extensions: submissions, images and page-body surfaces
 
-Current API v1 contract; use documentation/types matching the target app. This checkout
-includes additions beyond released 0.4.1. Exact types live in `src/core/plugin-submissions.ts`
+Current API v1 contract for the matching source/build; use documentation/types matching
+the target app. Use the downloaded skill's `bundle.json` to identify the app;
+API v1 alone does not identify every available capability. Exact types live in `src/core/plugin-submissions.ts`
 and `plugin-ui.ts`. Custom practice submissions additionally follow the
 [problem contract](plugin-problem-contract.md).
 
@@ -116,11 +117,17 @@ and native/custom practice submissions:
    preparation/delivery lease on acknowledgment/refusal, **not** model-stream completion.
    Fresh busy steers may prepare while earlier accepted work streams.
 
-Preparing UI shows `Preparing submission…` / Cancel. Pre-POST cancellation ignores late hook
-results, retains drafts/final dictated text, and works even if a hook ignores its signal.
+Preparation is silent: no progress row, label, spinner or preparation Cancel control is
+rendered. Existing submission-disabled states and preparation errors remain. Internal
+pre-POST cancellation (for example view disposal or interceptor unregistration) ignores late
+hook results, retains drafts/final dictated text, and works even if a hook ignores its signal.
+When no interceptors were captured, no history snapshot is allocated; payload validation,
+target capture, reservation and eligibility checks still run. With interceptors, the complete
+detached/frozen history snapshot is captured before the first hook, at the same preparation
+boundary, and shared by the ordered hooks.
 Failure uses `Could not prepare submission ({plugin name}): {message}. Your input has been kept.`
-Once POST starts, preserve native accepted-delivery/turn-abort semantics; Cancel is no longer
-preparation cancellation. Clear only captured draft revisions at confirmed boundaries;
+Once POST starts, preserve native accepted-delivery/turn-abort semantics; preparation
+cancellation no longer applies. Clear only captured draft revisions at confirmed boundaries;
 newer edits remain. Host never clears plugin-private material: its acceptance observer does.
 
 - Model Retry/Continue, malformed-question retry, control-only Next and silent dismissal
@@ -257,12 +264,11 @@ Dialogs share headerless/X presentation within their modal bounds. `onClose` is 
 not an async veto. Abort/programmatic disposal follows normal handle cleanup. Shared
 Escape/focus ownership follows the [interaction contract](dialog-overlay-contract.md).
 
-## 9. Verification
+## 9. Testing
 
 Cover ordering/immutable transforms, readiness, final speech publication, stale occurrence/
 model/view/registration, cancellation retaining drafts, busy fallback once-only interception,
 acknowledgment uncertainty, native image bytes/UI/model channels and unsupported engines.
 Surface checks include exact bounds, retained covered state, one-Escape ownership, focus return,
-page expiry, modal ordering, owner-scoped cleanup and late mounts. Packaged checks need isolated
-storage/providers; component fixtures alone are not release proof. Original test counts and
-browser evidence are preserved in the [implementation archive](archive/plugin-implementation-history.md#session-extension-checkpoints).
+page expiry, modal ordering, owner-scoped cleanup and late mounts. Use isolated storage
+and controlled providers when exercising the plugin in the app.

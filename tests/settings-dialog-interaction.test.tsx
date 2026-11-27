@@ -37,7 +37,7 @@ function fixture() {
 			return Response.json({ settings: { version: 1 } });
 		}
 		if (String(input) === "/api/keys") return Response.json({ keys: [], providers: [] });
-		if (String(input) === "/api/settings/prompts") return Response.json({ prober: [], teacher: [] });
+		if (String(input) === "/api/settings/prompts") return Response.json({ prober: [], teacher: [], practice: [] });
 		if (String(input) === "/api/models") return Response.json({ models: [], slots: {}, providers: [] });
 		if (String(input) === "/api/search") return Response.json({ available: false });
 		return Response.json({});

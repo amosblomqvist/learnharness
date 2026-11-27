@@ -211,7 +211,7 @@ test("Claude-conditional send_to_user stays reserved when hidden and plugins app
 			const opts = { engine: selected, chatId: `conditional-${role}` };
 			const core = build(opts), extended = build({ ...opts, pluginContributions: f.host.agentContributions });
 			assert.deepEqual(extended.state.tools.map(tool => tool.name), [...core.state.tools.map(tool => tool.name), "addon"]);
-			assert.equal(extended.state.tools.filter(tool => tool.name === "send_to_user").length, enabled ? 1 : 0);
+			assert.equal(extended.state.tools.filter(tool => tool.name === "send_to_user").length, enabled && role !== "practice" ? 1 : 0, "practice retains ordinary final prose; teaching retains the Claude output channel");
 			assert.equal(extended.state.systemPrompt, core.state.systemPrompt);
 			assert.match(f.host.list().find(info => info.id === "b-shadow")!.error!, /name collision/);
 			if (role === "prober") assert.notEqual(extended.state.tools.find(tool => tool.name === "read")!.execute, readTool.execute);

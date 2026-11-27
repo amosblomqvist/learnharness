@@ -64,14 +64,18 @@
  */
 
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { GraphFolderFilterControl, useGraphFolderSelection } from "@/components/graph-folder-filter";
+import { useSourceDirectory } from "@/components/source-directory";
 import { NotesImportControl, NotesImportErrors, NotesImportNotices, useNotesImport } from "@/components/notes-import.tsx";
 import { PluginGraphActions } from "@/components/plugin-chrome";
 import { SettingsSlider as SettingSlider } from "@/components/settings/controls";
 import Link from "next/link";
 import { FileTextIcon, ListTreeIcon, Loader2Icon, SearchIcon, SettingsIcon, WaypointsIcon } from "lucide-react";
-import { incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
+import { graphFolderIds, graphFolderVisibleIds, incrementalLayout, propositionSessionHref, type GraphCostSummary, type GraphNode, type GraphSnapshot } from "@/src/core";
 import { planCostLabel } from "@/components/usage-format";
-import { GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
+import { CLUSTER_LIGHTNESS, GraphCanvasRenderer, type GraphRenderSettings } from "./graph-canvas.ts";
+import { useAppearance } from "@/components/settings/appearance";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { useActivity } from "@/components/activity-dock";
@@ -81,6 +85,7 @@ import { useInteractionLayers } from "@/components/interaction-layers";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { DeleteNodeDialog } from "@/components/delete-node-dialog.tsx";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
+import { ToolContentResponse } from "@/components/ai-elements/message";
 import { Hint } from "@/components/ui/hint";
 import {
 	ARROW_LENGTH_LADDER,
@@ -138,6 +143,21 @@ export function isNodeVisible(node: Pick<GraphNode, "name" | "statement">, query
 	const q = query.trim().toLowerCase();
 	if (!q) return true;
 	return node.name.toLowerCase().includes(q) || node.statement.toLowerCase().includes(q);
+}
+
+/** Search alone retains its existing behavior. With an active folder filter,
+ * a junction can only draw if every endpoint survives the combined view. */
+export function graphVisibleIds(snapshot: Pick<GraphSnapshot, "nodes" | "impLinks">, query: string, folderVisibleIds: ReadonlySet<string> | null): Set<string> {
+	const visible = new Set<string>();
+	for (const node of snapshot.nodes) {
+		if ((folderVisibleIds === null || folderVisibleIds.has(node.id)) && isNodeVisible(node, query)) visible.add(node.id);
+	}
+	if (folderVisibleIds !== null && query.trim()) {
+		for (const { id, premises, conclusion } of snapshot.impLinks) {
+			if (!visible.has(conclusion) || !premises.every((premise) => visible.has(premise))) visible.delete(id);
+		}
+	}
+	return visible;
 }
 
 /** In-place sessions patch for a live rename (rename-shuffle fix,
@@ -889,12 +909,70 @@ export function GraphChromeRow({
 	);
 }
 
+/** The detail card's name and statement, as a pure seam for render pins
+ *  (the GraphChromeRow pattern). Both are extractor tool arguments, so
+ *  they render through ToolContentResponse like other tool content: math
+ *  and Markdown, never streamed. `.lh-prose` sets the chat font and size
+ *  in unlayered CSS that beats Tailwind's type utilities — the variable
+ *  overrides are what keep the card's own type. */
+const NODE_CARD_TYPE = "[--font-prose:var(--font-ui)] " +
+	"[&_[data-streamdown=inline-code]]:[font-size:inherit] [&_[data-streamdown=inline-code]]:[color:inherit]";
+export function NodeCardText({ name, statement }: Pick<GraphNode, "name" | "statement">) {
+	return (
+		<>
+			<ToolContentResponse
+				mode="static"
+				className={`${NODE_CARD_TYPE} font-medium [--lh-prose-size:var(--text-sm)] [--lh-prose-leading:1.375]`}
+			>
+				{name}
+			</ToolContentResponse>
+			<ToolContentResponse
+				mode="static"
+				className={`${NODE_CARD_TYPE} mt-1 text-muted-foreground [--lh-prose-size:var(--text-xs)] [--lh-prose-leading:1.625]`}
+			>
+				{statement}
+			</ToolContentResponse>
+		</>
+	);
+}
+
+/** Keep the existing placement policy as static Markdown finishes rendering:
+ * diagrams, plugin blocks and font reflow can resize a card after selection. */
+export function observeNodeCardPosition(card: HTMLDivElement, container: HTMLDivElement, anchor: { x: number; y: number }): () => void {
+	const place = () => {
+		const width = card.offsetWidth;
+		const height = card.offsetHeight;
+		const margin = 8;
+		const gap = 12;
+		const left = Math.min(
+			Math.max(anchor.x - width / 2, margin),
+			Math.max(container.clientWidth - width - margin, margin),
+		);
+		let top = anchor.y + gap;
+		if (top + height > container.clientHeight - margin) {
+			top = Math.max(anchor.y - gap - height, margin);
+		}
+		card.style.left = `${left}px`;
+		card.style.top = `${top}px`;
+		card.style.visibility = "visible";
+	};
+	place();
+	const observer = typeof ResizeObserver === "undefined" ? undefined : new ResizeObserver(place);
+	observer?.observe(card);
+	observer?.observe(container);
+	return () => observer?.disconnect();
+}
+
 export function GraphView({
 	chainSelectOpen = false,
 	practiceSelection,
 	onPracticeSelectionChange,
 	onChainSelectClose,
+	folderFilterSlot,
 }: {
+	/** Where the folder filter control portals: the home header's top-left
+	 *  chrome, after the sidebar toggle. Absent → no folder filter control. */
+	folderFilterSlot?: HTMLElement | null;
 	/** PRACTICE SELECT (owner vision, 2026-10-04): the LIFTED, persistent
 	 *  pick set — every check/clear in the chain table (however opened)
 	 *  reports the full node list up immediately; the composer-side chip
@@ -909,6 +987,7 @@ export function GraphView({
 	const interactions = useInteractionLayers();
 	const canvasRef = useRef<HTMLCanvasElement | null>(null);
 	const cardRef = useRef<HTMLDivElement | null>(null);
+	const { resolvedMode, colors } = useAppearance();
 	const [snapshot, setSnapshot] = useState<GraphSnapshot | null>(null);
 	const [selected, setSelected] = useState<Selection | null>(null);
 	// The latest snapshot for the renderer's click callbacks (they are
@@ -986,16 +1065,32 @@ export function GraphView({
 	const rendererRef = useRef<GraphCanvasRenderer | null>(null);
 	const posRef = useRef<Map<string, { x: number; y: number }> | null>(null);
 
-	// The id set that survives the current search — consumed by the
-	// visibility feed and the "no matches" hint.
-	const visibleIds = useMemo(() => {
-		const set = new Set<string>();
-		if (snapshot)
-			for (const node of snapshot.nodes) {
-				if (isNodeVisible(node, query)) set.add(node.id);
-			}
-		return set;
-	}, [snapshot, query]);
+	// FOLDER FILTER (approved plan): view only. The shared organization's
+	// placements map sources to folders; a proposition shows when ANY of its
+	// surviving sources sits in a ticked folder (subfolders included when
+	// ticked). Search and folder filter both apply.
+	const { directory: sourceDirectoryState } = useSourceDirectory(true);
+	const organization = sourceDirectoryState?.organization;
+	const { selected: folderSelection, setSelected: setFolderSelection } = useGraphFolderSelection(organization);
+	const listedFolders = useMemo(() => {
+		if (!organization || !snapshot) return new Set<string>();
+		const sources = new Set<string>();
+		for (const node of snapshot.propositions) for (const id of snapshot.nodeSessions[node.id] ?? []) sources.add(id);
+		return graphFolderIds(organization, sources);
+	}, [organization, snapshot]);
+	const folderVisibleIds = useMemo(() => !organization || !snapshot ? null : graphFolderVisibleIds({
+		organization,
+		selected: folderSelection,
+		listed: listedFolders,
+		propositionIds: snapshot.propositions.map((node) => node.id),
+		nodeSources: snapshot.nodeSessions,
+		impLinks: snapshot.impLinks,
+	}), [organization, snapshot, folderSelection, listedFolders]);
+	const filtering = query.trim() !== "" || folderVisibleIds !== null;
+	// The id set that survives the current search AND folder filter —
+	// consumed by the visibility feed and the "no matches" hint.
+	const visibleIds = useMemo(() => snapshot ? graphVisibleIds(snapshot, query, folderVisibleIds) : new Set<string>(),
+		[snapshot, query, folderVisibleIds]);
 
 	// Fetch the derived graph. Re-runs when a background pipeline run
 	// finishes (refreshTick) — its merges just landed in the ledger.
@@ -1340,6 +1435,9 @@ export function GraphView({
 	// Feed #1 — data: positions + edges + clusters + resolved colors. Runs
 	// after the layout effect (same commit, declaration order) and after
 	// the construct effect, so the renderer exists and positions are fresh.
+	// Palette changes (including same-mode theme switches and overrides)
+	// must refresh the canvas's captured paint, not just DOM CSS. The
+	// provider applies tokens in a layout effect before this passive feed.
 	useEffect(() => {
 		const renderer = rendererRef.current;
 		const positions = posRef.current;
@@ -1357,14 +1455,15 @@ export function GraphView({
 			clusters: snapshot.clusters.map((c) => ({ id: c.id, label: c.label, members: c.members })),
 			colors: {
 				node: tokenHex(NODE_COLOR_TOKEN),
-				edge: tokenHex("--ring"),
+				edge: tokenHex("--muted-foreground"),
 				label: tokenHex("--muted-foreground"),
 				hoverText: tokenHex("--foreground"),
+				clusterLightness: CLUSTER_LIGHTNESS[resolvedMode],
 			},
 			// Match the app typography (Geist via the body's stack).
 			fontFamily: getComputedStyle(document.body).fontFamily,
 		});
-	}, [snapshot, isEmpty]);
+	}, [snapshot, isEmpty, resolvedMode, colors]);
 
 	// Feed #2 — settings: just marks the frame dirty. No rebuild, no
 	// re-layout, no camera touch (the whole point of the new renderer).
@@ -1376,10 +1475,10 @@ export function GraphView({
 	// Feed #3 — visibility: hidden nodes drop out of rendering, picking,
 	// hover, AND labels; edges drop when either endpoint is hidden.
 	useEffect(() => {
-		rendererRef.current?.setVisible(query.trim() ? visibleIds : null);
+		rendererRef.current?.setVisible(filtering ? visibleIds : null);
 		// The open detail card cannot outlive its node's visibility.
 		setSelected((sel) => (sel && visibleIds.has(sel.node.id) ? sel : null));
-	}, [visibleIds, query]);
+	}, [visibleIds, filtering, isEmpty]);
 
 	// Feed #4 — region tuning. `isEmpty` in the deps (same as Feed #2):
 	// the settings fetch resolves BEFORE the snapshot creates the renderer,
@@ -1397,28 +1496,14 @@ export function GraphView({
 	}, [physicsTuning, isEmpty]);
 
 	// Position the detail card: below the clicked node, flipped above near
-	// the bottom edge, clamped horizontally. Imperative (ref + layout effect,
-	// before paint) because the flip needs the card's measured height.
+	// the bottom edge, clamped horizontally. Measure before paint, then keep
+	// the same placement policy when rich content or the container resizes.
 	useLayoutEffect(() => {
 		const card = cardRef.current;
 		const container = containerRef.current;
 		if (!selected || !card || !container) return;
-		const width = card.offsetWidth;
-		const height = card.offsetHeight;
-		const margin = 8;
-		const gap = 12;
-		const left = Math.min(
-			Math.max(selected.anchor.x - width / 2, margin),
-			Math.max(container.clientWidth - width - margin, margin),
-		);
-		let top = selected.anchor.y + gap;
-		if (top + height > container.clientHeight - margin) {
-			top = Math.max(selected.anchor.y - gap - height, margin);
-		}
-		card.style.left = `${left}px`;
-		card.style.top = `${top}px`;
-		card.style.visibility = "visible";
-	}, [selected]);
+		return observeNodeCardPosition(card, container, selected.anchor);
+	}, [selected, isEmpty]);
 
 	return (
 		<div className="relative h-full w-full">
@@ -1428,9 +1513,10 @@ export function GraphView({
 					<div className="flex flex-col items-center gap-3 text-center text-muted-foreground">
 						<WaypointsIcon className="size-10 opacity-40" strokeWidth={1.25} />
 						<div className="text-lg font-medium text-foreground">Knowledge graph</div>
-						<p className="max-w-sm text-sm">
-							Start a session or import notes to build your graph.
-						</p>
+						<div className="max-w-sm text-sm">
+							<p>Start a session to begin learning.</p>
+							<p className="mt-1 text-xs">Attach your material with the paperclip or drag and drop.</p>
+						</div>
 					</div>
 				</div>
 			) : (
@@ -1533,6 +1619,11 @@ export function GraphView({
 				{/* The actions row (empty-graph chrome wave, owner 2026-09-25):
 				    Import Notes always — the empty graph's entry point; search +
 				    settings only when nodes exist, fading in on their mount. */}
+				{folderFilterSlot && !isEmpty && organization && createPortal(
+					<GraphFolderFilterControl organization={organization} listed={listedFolders}
+						selected={folderSelection} onChange={setFolderSelection} />,
+					folderFilterSlot,
+				)}
 				<GraphChromeRow
 					isEmpty={isEmpty}
 					query={query}
@@ -1580,8 +1671,7 @@ export function GraphView({
 					// over home.tsx's drag surface (2026-09-17).
 					className="lh-no-drag absolute z-10 w-80 max-w-[calc(100%-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 				>
-					<div className="text-sm font-medium leading-snug">{selected.node.name}</div>
-					<div className="mt-1 text-xs leading-relaxed text-muted-foreground">{selected.node.statement}</div>
+					<NodeCardText name={selected.node.name} statement={selected.node.statement} />
 					{selected.sourceIds.length > 0 ? (
 						<div className="mt-3 flex flex-col gap-1">
 							<div className="text-xs text-muted-foreground">Sessions</div>

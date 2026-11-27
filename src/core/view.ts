@@ -42,12 +42,10 @@ import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
 import type { PlanBlockData } from "./contracts/chat.ts";
 
-/** A view part — the loose part vocabulary the renderers consume (the same
- *  shape names the pre-Wave-D UIMessage dialect used, so the renderer
- *  switch and the phase/pending scanners transplant unchanged). The common
- *  fields are optional-typed so the pre-Wave-D renderer code compiles
- *  against it with minimal casts; anything else stays `unknown` through
- *  the index signature. */
+/** One projected transcript part consumed by host renderers and phase/input
+ * scanners. type selects the part vocabulary; common fields are optional
+ * because text, tools and data parts carry different payloads. Additional
+ * fields remain unknown through the index signature and require narrowing. */
 export interface LhViewPart extends Record<string, unknown> {
 	type: string;
 	id?: string;
@@ -313,9 +311,9 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 			const group = lastAssistant();
 			if (group) {
 				// Same group: the step separator renders between the steps.
-				group.parts.push({ type: "step-start" }, ...parts);
+				group.parts.push({ type: "step-start", sourceMessageId: m.id }, ...parts);
 			} else {
-				out.push({ id: m.id, role: "assistant", parts: [{ type: "step-start" }, ...parts] });
+				out.push({ id: m.id, role: "assistant", parts: [{ type: "step-start", sourceMessageId: m.id }, ...parts] });
 			}
 			continue;
 		}
@@ -490,6 +488,12 @@ function projectMarker(marker: LhMarkerMessage, out: LhViewMessage[]): void {
 			});
 			return;
 		}
+		case "side-question":
+		case "side-question-told":
+			// Raw context entries do not split the teaching segment or render
+			// loud transcript pills. Its quiet speech-bubble reopens the saved
+			// conversation in the floating/docked companion.
+			return;
 		case "problem-dismissed":
 			// UI-only (the ask-style dismissal): the synthesized conclude
 			// pair — which rides the NEXT input — carries the record's face.

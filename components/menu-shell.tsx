@@ -98,12 +98,28 @@ export function computeMenuPlacement(
 	return { side, style: { ...horizontal, ...vertical }, maxHeight };
 }
 
-/** The shared shell. Exactly one anchor seam: pass `anchorRef` (a live
- *  element ref) or `anchorTestid` (the settings section's pattern — the
- *  trigger is queried by testid at place time). */
+type AnchorRect = { top: number; bottom: number; left: number; right: number };
+
+/** The rect a menu places against: a virtual anchor (a text range) wins
+ *  when it yields one, else the element seam. */
+export function menuAnchorRect(
+	{ getAnchorRect, anchorRef, anchorTestid }: { getAnchorRect?: () => AnchorRect | null; anchorRef?: RefObject<HTMLElement | null>; anchorTestid?: string },
+	doc: Pick<Document, "querySelector">,
+): AnchorRect | null {
+	const virtual = getAnchorRect?.();
+	if (virtual) return virtual;
+	const element = anchorRef ? anchorRef.current : anchorTestid !== undefined ? doc.querySelector(`[data-testid="${anchorTestid}"]`) : null;
+	return element?.getBoundingClientRect() ?? null;
+}
+
+/** The shared shell. One anchor seam: pass `anchorRef` (a live element
+ *  ref) or `anchorTestid` (the settings section's pattern — the trigger is
+ *  queried by testid at place time); `getAnchorRect` adds a virtual anchor
+ *  (e.g. the cited text's last line) that wins whenever it yields a rect. */
 export function MenuShell({
 	anchorRef,
 	anchorTestid,
+	getAnchorRect,
 	testid,
 	preferredSide,
 	align = "right",
@@ -114,6 +130,7 @@ export function MenuShell({
 }: {
 	anchorRef?: RefObject<HTMLElement | null>;
 	anchorTestid?: string;
+	getAnchorRect?: () => AnchorRect | null;
 	/** The menu body's own testid (sites assert it). */
 	testid: string;
 	/** Which way the menu opens from the anchor when both sides fit. */
@@ -162,7 +179,7 @@ export function MenuShell({
 		focusedOnceRef.current = true;
 		const el = menuRef.current;
 		if (!el) return;
-		const input = el.querySelector<HTMLElement>("input");
+		const input = el.querySelector<HTMLElement>("input, textarea");
 		(input ?? el).focus();
 	}, [placed, layer.isTop]);
 
@@ -200,16 +217,20 @@ export function MenuShell({
 		buttons[next]?.focus();
 	};
 
+	// Read through a ref so a fresh callback each render never re-runs placement.
+	const getAnchorRectRef = useRef(getAnchorRect);
+	getAnchorRectRef.current = getAnchorRect;
+
 	// Measure + (re)place: on mount, then on every capture-phase scroll and
 	// resize (rAF-throttled). scrollHeight keeps the flip decision honest
 	// after the content changes shape (a search filtering the list).
 	useLayoutEffect(() => {
 		let raf = 0;
 		const place = () => {
-			const el = anchor();
-			if (!el || !menuRef.current) return;
+			const rect = menuAnchorRect({ getAnchorRect: getAnchorRectRef.current, anchorRef, anchorTestid }, document);
+			if (!rect || !menuRef.current) return;
 			const p = computeMenuPlacement(
-				el.getBoundingClientRect(),
+				rect,
 				{ width: window.innerWidth, height: window.innerHeight },
 				menuRef.current.scrollHeight,
 				preferredSide,

@@ -40,13 +40,11 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 		throw err;
 	}
 
-	// Native dismissals keep their existing read/park contract. A plugin
-	// target, however, must still be current AFTER the body await: the old
-	// question may have been answered, replaced, or deleted in the meantime.
-	if (input.type === "dismiss-plugin-question") {
-		chat = getChat(id);
-		if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
-	}
+	// Body parsing yields: validate against current truth for every target,
+	// never overwrite entries appended while this body was arriving. Plugin
+	// targets additionally require exact saved-occurrence authority below.
+	chat = getChat(id);
+	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
 
 	let appends;
 	try {
@@ -76,8 +74,9 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 	}
 
 	// Write-ahead, turn-less: the record is the only state that moves.
-	const merged = [...chat.messages, ...appends];
-	stores.chatStore.saveMessages(id, merged);
+	// No teacher request runs here. Side exchanges remain pending for the
+	// next budget-checked call, never pre-published into compaction history.
+	stores.chatStore.saveMessages(id, [...chat.messages, ...appends]);
 	emit("record-changed", { chatId: id });
 	return Response.json({ ok: true });
 }

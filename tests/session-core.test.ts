@@ -26,8 +26,30 @@ import type { ChatInput } from "../src/core/input-events.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal, pendingQuestionOf } from "../src/core/native-messages.ts";
 import { endsInFailedTurn, newCompactionMarker, newPlanBlockMessage, projectView } from "../src/core/index.ts";
+import { buildProbeHandoffSteer, buildSubagentSteer } from "../src/core/contracts/jobs.ts";
 import { dismissedAnswer } from "../src/core/question-core.ts";
 import { buildAnswer, type QuestionData } from "../src/core/question-core.ts";
+
+it("usage-only reads neither adopt a transcript nor supersede a canonical read", async () => {
+	const transcript = Promise.withResolvers<Response>();
+	const lateStats = Promise.withResolvers<Response>();
+	let calls = 0;
+	const m = new SessionModel({ chatId: "chat_stats", initialMessages: [], fetch: async url => {
+		if (url === "/api/chats/chat_stats") return transcript.promise;
+		assert.equal(url, "/api/chats/chat_stats?view=stats");
+		return ++calls === 1 ? Response.json({ turns: [], messages: [newUserMessage("not canonical")] }) : lateStats.promise;
+	} });
+	const adoption = m.readRecord();
+	assert.deepEqual((await m.readStats())?.turns, []);
+	assert.deepEqual(m.getState().nativeMessages, []);
+	transcript.resolve(Response.json({ messages: [newUserMessage("canonical")] }));
+	assert.ok(await adoption, "a newer stats request did not invalidate the canonical read");
+	const cancel = new AbortController();
+	const read = m.readStats(cancel.signal);
+	cancel.abort();
+	lateStats.resolve(Response.json({ turns: [] }));
+	assert.equal(await read, undefined, "ignore a late stats response even if the fetch completed despite cancellation");
+});
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -1477,6 +1499,111 @@ describe("adoptRecord — append-only adoption", () => {
 		assert.deepEqual(ids.slice(0, 2), ["u1", "steer_1"], "the steer shows NOW");
 		assert.match(ids[2] ?? "", /^c_/, "the live streaming tail stays last (client slot id)");
 	});
+
+	it("drops a staged steer from the live tail when adoption returns the same server id", () => {
+		const m = model({ initialMessages: [userText("u1", "topic")] });
+		const steer = userText("steer_probe_chat_1", "plan the next step");
+		m.applyWireEvent({ type: "message_start", message: steer });
+		m.applyWireEvent({ type: "message_end", message: steer });
+		m.applyWireEvent({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "planning" }] } });
+
+		m.adoptRecord([userText("u1", "topic"), steer]);
+
+		const ids = m.getState().nativeMessages.map((x) => x.id);
+		assert.deepEqual(ids.slice(0, 2), ["u1", "steer_probe_chat_1"], "the server-stamped steer appears exactly once");
+		assert.match(ids[2] ?? "", /^c_/, "the unrelated live assistant tail stays last");
+		assert.equal(ids.length, 3);
+	});
+
+	const wakeMarkers = [
+		{ name: "probe", marker: buildProbeHandoffSteer("chat_x"), part: "data-probe-handoff" },
+		{
+			name: "job",
+			marker: buildSubagentSteer(
+				{ id: "job_x", kind: "research", toolCallId: "research_x" },
+				{ brief: "A synthetic research result.", sources: [] },
+			),
+			part: "data-subagent-artifact",
+		},
+	];
+
+	for (const { name, marker, part } of wakeMarkers) {
+		for (const order of ["wire-first", "record-first", "record-between-events"] as const) {
+			it(`reconciles a ${name} wake ${order}, including repeated events and adoption`, () => {
+				const initial = [userText("u1", "topic")];
+				const record = [...initial, marker];
+				const m = model({ initialMessages: initial });
+				const wire = (type: "message_start" | "message_end") => m.applyWireEvent({ type, message: marker });
+				if (order === "record-first") m.adoptRecord(record);
+				wire("message_start");
+				if (order === "record-between-events") m.adoptRecord(record);
+				wire("message_end");
+				m.applyWireEvent({ type: "message_start", message: { role: "assistant", content: [] } });
+				const assistantId = m.getState().nativeMessages.at(-1)!.id;
+				if (order === "wire-first") m.adoptRecord(record);
+
+				const assertReconciled = () => {
+					assert.deepEqual(m.getState().nativeMessages.map((message) => message.id), ["u1", marker.id, assistantId]);
+					assert.equal(m.getState().messages.filter((message) => message.id === marker.id).length, 1);
+					assert.equal(m.getState().messages.flatMap((message) => message.parts).filter((p) => p.type === part).length, 1);
+					assert.deepEqual(m.getState().nativeMessages[1], marker, "the canonical marker's ID and all saved fields are retained");
+					assert.ok(Object.isFrozen(m.getState().nativeMessages[1]), "canonical adoption owns an immutable copy rather than the caller's mutable object");
+				};
+				assertReconciled();
+				for (let repeat = 0; repeat < 2; repeat++) {
+					wire("message_start");
+					assertReconciled();
+					wire("message_end");
+					assertReconciled();
+					m.adoptRecord(record);
+					assertReconciled();
+				}
+				m.applyWireEvent(partial([{ type: "text", text: "still planning" }]));
+				assertReconciled();
+				assert.deepEqual(m.getState().nativeMessages.at(-1)!.content, [{ type: "text", text: "still planning" }]);
+				m.applyWireEvent({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "finished planning" }], stopReason: "stop" } });
+				assertReconciled();
+				assert.deepEqual(m.getState().nativeMessages.at(-1)!.content, [{ type: "text", text: "finished planning" }]);
+			});
+		}
+
+		for (const refetchRecordFirst of [true, false]) {
+			it(`reattaches a ${name} wake already in ${refetchRecordFirst ? "refetched" : "seeded"} history without duplicating its replay`, async () => {
+				const initial = [userText("u1", "topic")];
+				const record = [...initial, marker];
+				const requests: string[] = [];
+				const m = model({
+					initialMessages: refetchRecordFirst ? initial : record,
+					fetch: async (input) => {
+						const url = String(input);
+						requests.push(url);
+						if (url === "/api/chats/chat_x") return Response.json({ messages: requests.includes("/api/chats/chat_x/stream") ? [...record, assistantMsg("saved-assistant", "planned")] : record });
+						if (url === "/api/chats/chat_x/stream") return sseResponse(
+							{ type: "message_start", message: marker },
+							{ type: "message_end", message: marker },
+							{ type: "message_start", message: { role: "assistant", content: [] } },
+							partial([{ type: "text", text: "planning" }]),
+							{ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "planned" }], stopReason: "stop" } },
+							"[DONE]",
+						);
+						throw new Error(`unexpected fetch: ${url}`);
+					},
+				});
+				await m.resumeStream(refetchRecordFirst);
+				// Stream settlement now reconciles canonical saved authority as well as
+				// the optional pre-reattach read; no replacement teacher POST is sent.
+				assert.deepEqual(requests, refetchRecordFirst ? ["/api/chats/chat_x", "/api/chats/chat_x/stream", "/api/chats/chat_x"] : ["/api/chats/chat_x/stream", "/api/chats/chat_x"]);
+				const state = m.getState();
+				assert.equal(state.status, "ready");
+				assert.equal(state.error, null);
+				assert.deepEqual(state.nativeMessages.slice(0, 2), record);
+				assert.equal(state.nativeMessages.length, 3);
+				assert.equal(state.messages.flatMap((message) => message.parts).filter((p) => p.type === part).length, 1);
+				assert.equal(state.nativeMessages[2]!.id, "saved-assistant", "the terminal read adopts the persisted assistant, without duplicating its live replay");
+				assert.deepEqual(state.nativeMessages[2]!.content, [{ type: "text", text: "planned" }]);
+			});
+		}
+	}
 
 	it("a missing base id (record rewrite) bails — the idle full sync is the net", () => {
 		const m = model({ initialMessages: [userText("u1", "a"), userText("u2", "b")] });

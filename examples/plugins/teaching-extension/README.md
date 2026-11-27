@@ -3,7 +3,7 @@
 A deliberately small developer fixture for existing lessons—not an independent
 flashcard feature or a code-execution/learner-answer system.
 
-Copy this directory into the plugins directory shown in **Settings → Plugins**,
+Copy this directory into the plugins directory shown in **Settings → Community plugins**,
 keeping the `teaching-extension/` folder and its required `dist/manifest.json`. No build
 is needed. Refresh and enable **Teaching extension example**. Edit runtime files in
 `dist/` and restart LearnHarness after changing loaded code. Preserve sibling

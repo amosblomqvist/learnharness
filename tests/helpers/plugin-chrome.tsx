@@ -2,6 +2,7 @@ import React, { act, type ReactNode } from "react";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime.js";
+import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime.js";
 import { PluginsProvider, createPluginWindowOwner } from "../../components/plugins.tsx";
 import { ServerEventsProvider, type NotifySource } from "../../components/server-events.tsx";
 import type { PluginFrontendModule, PluginInfo } from "../../src/core/plugins.ts";
@@ -14,7 +15,7 @@ export const pluginInfo = (id = "fixture"): PluginInfo => ({
 });
 
 /** In-memory plugins/fetch only: never opens a real data directory or provider. */
-export async function mountPluginChrome(frontend: PluginFrontendModule, children: ReactNode) {
+export async function mountPluginChrome(frontend: PluginFrontendModule, children: ReactNode, { strictMode = false, pathname = "/plugins/fixture/overview", fetch: fixtureFetch = async () => { throw new Error("No real requests in chrome fixtures"); }, prepareDom }: { strictMode?: boolean; pathname?: string; fetch?: typeof globalThis.fetch; prepareDom?: (dom: ReturnType<typeof parseHTML>) => void | (() => void) } = {}) {
 	const dom = parseHTML("<html><head></head><body><div id='root'></div></body></html>");
 	const globals = {
 		window: dom.window, self: dom.window, document: dom.document, innerWidth: 900, innerHeight: 700,
@@ -28,7 +29,7 @@ export async function mountPluginChrome(frontend: PluginFrontendModule, children
 		}),
 		requestAnimationFrame: (callback: FrameRequestCallback) => setTimeout(() => callback(0), 0),
 		cancelAnimationFrame: (handle: ReturnType<typeof setTimeout>) => clearTimeout(handle),
-		fetch: async () => { throw new Error("No real requests in chrome fixtures"); },
+		fetch: fixtureFetch,
 		IS_REACT_ACT_ENVIRONMENT: true,
 	};
 	const saved = new Map(Object.keys(globals).map(key => [key, Object.getOwnPropertyDescriptor(globalThis, key)]));
@@ -47,16 +48,18 @@ export async function mountPluginChrome(frontend: PluginFrontendModule, children
 		const w = this.className.includes("h-9") ? 80 : 36;
 		return { top: 0, bottom: 36, left: 0, right: w, width: w, height: 36, x: 0, y: 0, toJSON() {} };
 	};
+	const restorePreparedDom = prepareDom?.(dom);
 	const owner = createPluginWindowOwner({
 		fetch: async () => Response.json({ plugins: [pluginInfo()], directory: "/in-memory-plugins" }),
-		importModule: async () => frontend, pathname: () => "/plugins/fixture/overview", navigate() {},
+		importModule: async () => frontend, pathname: () => pathname, navigate() {},
 	});
 	window.__lhPluginWindow = owner;
 	const connect = (): NotifySource => ({ close() {}, onOpen() {}, onEvent() {} });
 	const router = { bfcacheId: "fixture", back() {}, forward() {}, refresh() {}, hmrRefresh() {}, push() {}, replace() {}, async prefetch() {} };
 	const root = createRoot(document.querySelector("#root")!);
 	const render = async (content: ReactNode) => {
-		await act(async () => { root.render(<InteractionLayersProvider><AppRouterContext.Provider value={router}><ServerEventsProvider connect={connect}><PluginsProvider>{content}</PluginsProvider></ServerEventsProvider></AppRouterContext.Provider></InteractionLayersProvider>); });
+		const tree = <InteractionLayersProvider><AppRouterContext.Provider value={router}><PathnameContext.Provider value={pathname}><ServerEventsProvider connect={connect}><PluginsProvider>{content}</PluginsProvider></ServerEventsProvider></PathnameContext.Provider></AppRouterContext.Provider></InteractionLayersProvider>;
+		await act(async () => { root.render(strictMode ? <React.StrictMode>{tree}</React.StrictMode> : tree); });
 	};
 	try { await render(children); }
 	catch (error) {
@@ -65,6 +68,7 @@ export async function mountPluginChrome(frontend: PluginFrontendModule, children
 		restore(); throw error;
 	}
 	function restore() {
+		if (typeof restorePreparedDom === "function") restorePreparedDom();
 		restoreModalDom();
 		for (const [key, descriptor] of saved) {
 			if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key);

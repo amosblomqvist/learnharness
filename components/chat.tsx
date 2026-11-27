@@ -15,6 +15,7 @@ import { validatePluginBuiltinSubmissionAnswer } from "@/src/core";
 import { visibleQueuedSteers } from "@/components/session-core";
 import { SetupDialog } from "@/components/setup-dialog";
 import { Hint } from "@/components/ui/hint";
+import { cn } from "@/lib/utils";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { useStickToBottomContext, type StickToBottomContext } from "use-stick-to-bottom";
 import {
@@ -39,9 +40,11 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { dockStateKey } from "@/components/dock-state-key";
 import { clearOpeningPrompt, readOpeningPromptEntry, stashOpeningPrompt, OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { forwardDockWheel, useDockHeight } from "@/components/dock-height";
-import { createDockMorph } from "@/components/dock-morph";
+import { createDockMorph, createDockWidthMorph } from "@/components/dock-morph";
+import { useAppearance } from "@/components/settings/appearance";
+import { dockContainerMax, layoutFontKey, questionCardGeometry, rootRem, type QuestionLayout } from "@/components/question-layout";
 import { QueuedSteersBody, type QueuedSteerLine } from "@/components/queued-steers";
-import { DictationBar, finishDictation, joinDictation, useDictation } from "@/components/dictation";
+import { DictationBar, finishDictation, joinDictation, useDictation, type Dictation } from "@/components/dictation";
 import { useFieldCycle } from "@/components/field-cycle";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
@@ -53,6 +56,8 @@ import {
 	firstSourceTextParts,
 	cliContextWindowOf,
 	messageAnchorId,
+	sideEntryPoints,
+	sideSegmentId,
 	textPartMessageId,
 	kbdEventForAction as kbdEventForChat,
 	type ChatInput,
@@ -64,7 +69,7 @@ import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
-import { ArrowRightIcon, DumbbellIcon, WaypointsIcon } from "lucide-react";
+import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
 import { PluginQuestionDock } from "./plugin-question-dock";
@@ -76,6 +81,14 @@ import { pluginQuestionOccurrenceKey, type PluginQuestionSnapshot } from "@/src/
 import type { PluginQuestionDraft } from "./session-core";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
+import { SelectionToolbar } from "@/components/selection-toolbar";
+import { createCiteAction, type CitationEditTarget } from "@/components/citation-actions";
+import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
+import { CitationCommentPopover } from "@/components/citation-comment-popover";
+import { revealCitationSource } from "@/components/citation-source";
+import { createSideQuestionActions, SideThreadBody, SideThreadPanel, SideThreadPopover } from "@/components/side-thread";
+import { useSideThread, type SideThreadOpenArgs } from "@/components/use-side-thread";
+import { useRouter } from "next/navigation";
 import { PracticeDock } from "@/components/practice-dock";
 import { PluginProblemDock, type PluginProblemDockProps } from "./plugin-problem-dock";
 import { practiceProblemForCall } from "@/src/core";
@@ -84,12 +97,12 @@ import { readPluginProblemSubmission, pluginProblemById } from "@/src/core";
 import { ThinkingCard, ProblemCard, type PracticeThinkingData } from "@/components/practice-cards";
 import { GraphContextCard, type GraphContextData } from "@/components/graph-context-card";
 import { TopBar } from "@/components/top-bar";
-import { PluginTopBarActions } from "@/components/plugin-chrome";
+import { PluginSessionTopBarActions } from "@/components/plugin-chrome";
 import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
 import type { SessionInputViewReader, SessionViewTargets, NativeQuestionViewState, ViewReaderRef } from "./session-view-readers";
 import type { JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
-import type { LhViewMessage } from "@/src/core";
+import { isSubagentSteer, newestLearnerTurnFrom } from "./transcript-rows";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
 	CompactionCutDivider,
@@ -114,16 +127,22 @@ import {
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
 
-/** One width for everything: transcript, cards, and the bottom blob share this column. */
 /**
  * Width tokens (wave-5 reskin, owner decision): the teaching PROSE spans the
  * full session width with a thin px-6 margin; the composer/question DOCK is
  * deliberately narrower (~46rem centered) per the reference. Same ELEMENT,
  * same place — width polish only.
+ *
+ * Transcript width (Appearance, session-appearance-layout): an optional cap
+ * on the whole transcript, centered (globals.css .lh-transcript-column).
+ * Full (unset) is exactly the full-bleed column above.
  */
-const COLUMN = "mx-auto w-full max-w-none px-6";
+const COLUMN = "lh-transcript-column mx-auto w-full px-6";
 const DOCK = "mx-auto w-full max-w-[46rem] px-4";
-// The DOCK container's fixed width (46rem) and the plan marginalia's
+// The DOCK container's fixed width (46rem, questionCardGeometry at the
+// root font size — with its horizontal chrome, px-4 + the shell's 1px
+// borders: an adapted card's content width plus that chrome is the
+// container's max width) and the plan marginalia's
 // geometry (owner, plan-placement round): the bare diagram sits in the
 // dock band's RIGHT flank — MARGIN_GAP from the DOCK container's edge and
 // the same from the column's right edge. The box width is pure CSS, so
@@ -131,7 +150,6 @@ const DOCK = "mx-auto w-full max-w-[46rem] px-4";
 // the fade floor (owner, resize round) — below it the marginalia fades
 // out over the normal transition instead of popping away, and it stays
 // mounted while the question owns the band so widening fades it back.
-const DOCK_W = 46 * 16;
 const MARGIN_GAP = 16;
 const MARGIN_MIN_W = 220;
 // The dock overlay's gradient band (h-24) — part of the reserved tail.
@@ -237,10 +255,6 @@ export function PendingTurnIndicator({ evaluating }: { evaluating: boolean }) {
 	);
 }
 
-function isSubagentSteer(m: LhViewMessage): boolean {
-	return (m.metadata as { subagentResult?: unknown } | undefined)?.subagentResult != null;
-}
-
 /**
  * The teaching session. All chat state lives in useChat; the server persists
  * the canonical transcript after every turn.
@@ -295,7 +309,7 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
+	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, readStats, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
 		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
 
 	const controller = useOptionalInteractionLayers();
@@ -310,10 +324,14 @@ export function Chat({
 	const submissionMounted = useRef(true);
 	useEffect(() => { submissionMounted.current = true; return () => { submissionMounted.current = false; submissionRunner.dispose(); }; }, [submissionRunner]);
 	useEffect(() => () => submissionRunner.dispose(), [surfaceTarget, submissionRunner]);
-	const inputViewReader = useRef<(() => PluginSessionViewInput) | null>(null) as SessionInputViewReader;
-	const [, refreshViewContext] = useState(0);
-	const notifyViewChanged = useCallback(() => { if (submissionMounted.current) refreshViewContext(value => value + 1); }, []);
-	inputViewReader.changed = notifyViewChanged;
+	const refreshPluginActions = useRef<(() => void) | null>(null);
+	// One stable object with `changed` from the start: React's development
+	// server renderer seals useRef objects, so adding `changed` to a ref later
+	// threw "object is not extensible" and every chat page 500ed under next dev.
+	const [inputViewReader] = useState<SessionInputViewReader>(() => ({
+		current: null,
+		changed: () => { if (submissionMounted.current) refreshPluginActions.current?.(); },
+	}));
 	const submissionLive = useRef({ nativeMessages, surfaceTarget, ready: true });
 	submissionLive.current = { nativeMessages, surfaceTarget, ready: true };
 	const runSubmission = async (target: PluginSubmissionTarget, capture: () => PluginSubmission | Promise<PluginSubmission>, current: () => boolean, deliver: (prepared: PluginSubmission, attempt: SubmissionAttempt) => Promise<boolean>): Promise<boolean> => {
@@ -336,6 +354,8 @@ export function Chat({
 	const textTarget = (): Extract<PluginSubmissionTarget, { type: "text" }> | undefined => surfaceTarget ? { type: "text", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget, channels: ["content"] } : undefined;
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
+	const newestTurnFrom = newestLearnerTurnFrom(messages);
+	const sideEntries = useMemo(() => sideEntryPoints(nativeMessages, messages), [nativeMessages, messages]);
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
 	setReattachSettled(() => reattachSettledRef.current());
@@ -459,6 +479,7 @@ export function Chat({
 			const pluginQuestion = capturePluginQuestionDismissal(pluginDismissal.current.canonicalMessages);
 			const target = escAbortTarget({
 				abortAsk: abortAskRef.current !== null,
+				sideThread: sideThreadOpenRef.current,
 				mermaidFocus: mermaidFocusRef.current !== null || figureFocusRef.current !== null,
 				planOpen: planOpenRef.current,
 				setupOpen: setupOpenRef.current,
@@ -466,7 +487,8 @@ export function Chat({
 				problem: activeProblemRef.current !== null,
 				busy: busyRef.current,
 			});
-			if (target === "question") { pluginAbortTarget.current = pluginQuestion; setAbortAsk("question"); }
+			if (target === "side-thread") closeSideThreadRef.current();
+			else if (target === "question") { pluginAbortTarget.current = pluginQuestion; setAbortAsk("question"); }
 			else if (target === "problem") setAbortAsk("problem");
 			else if (target === "turn") setAbortAsk("turn");
 			else if (target === "mermaid") setMermaidFocus(null);
@@ -499,6 +521,7 @@ export function Chat({
 				const question = (p.input as { question?: string } | null)?.question ?? "";
 				const reading = readingThinkingRef.current.trim() || undefined;
 				clearReadingThinking();
+				void closeSideThreadRef.current(); // its note lands after the skip
 				const answer = dismissedAnswer(toolQuestionKind(p.tool), question);
 				void dismissQuestion(
 					p.toolCallId,
@@ -928,12 +951,18 @@ export function Chat({
 		];
 	}, []);
 	useFieldCycle(cycleChatFields);
-	const dictation = useDictation({
+	const recording = useDictation({
 		// Ref-first (see textRef): the join is computed from the mirror so a
 		// send resuming after `await finish()` reads the dictated tail.
 		append: (t) => { if (!pluginOwnsDock) applyText(joinDictation(textRef.current, t)); },
 		disabled: pluginOwnsDock && !pluginMicAvailable,
 	});
+	const dictation: Dictation = { ...recording,
+		phase: recording.destinationId === "main" ? recording.phase : "idle",
+		active: recording.destinationId === "main" && recording.active,
+		error: recording.destinationId === "main" ? recording.error : null,
+		blocked: recording.destinationId !== "main" && recording.active,
+	};
 	/* When a dictation run ends, the bare composer takes focus (owner
 	 * 2026-10-01) — the hands are already on the keyboard from the stop.
 	 * Falling edge of `active` only (idle→idle never focuses), and ONLY the
@@ -941,12 +970,121 @@ export function Chat({
 	 * is null, and the thinking field is left alone by design. */
 	const dictationWasActiveRef = useRef(false);
 	const composerInputRef = useRef<HTMLDivElement>(null);
+
+	// CITE (2026-10-31): selected tutor text → a citation chip in the
+	// composer, then its comment popover. The transcript's scroll element
+	// arrives late (StickToBottom attaches it), so it is reported up.
+	const [transcriptElement, setTranscriptElement] = useState<HTMLElement | null>(null);
+	const [citationEdit, setCitationEdit] = useState<CitationEditTarget | null>(null);
+	const lastCiteInputRef = useRef<HTMLElement | null>(null);
+	const citeInput = useCallback(() => {
+		const fields = cycleChatFields();
+		return fields.find((field) => field === lastCiteInputRef.current) ?? fields[0] ?? composerInputRef.current;
+	}, [cycleChatFields]);
+	useEffect(() => {
+		const remember = (event: FocusEvent) => {
+			const input = event.target instanceof Element ? event.target.closest<HTMLElement>("[data-file-path-input]") : null;
+			if (input && cycleChatFields().includes(input)) lastCiteInputRef.current = input;
+		};
+		document.addEventListener("focusin", remember);
+		return () => document.removeEventListener("focusin", remember);
+	}, [cycleChatFields]);
+	const citeAction = useMemo(
+		() => createCiteAction({ chatId, composer: citeInput, openEditor: setCitationEdit }),
+		[chatId, citeInput],
+	);
+	// One durable companion per explanation/check, in teaching AND practice.
+	// Main requests append new raw exchanges from every thread; closing only hides the UI.
+	const workingRef = useRef("");
+	const sideThread = useSideThread(chatId, nativeMessages, () => {
+		// Plugin editors own opaque answer/submission values. Only host Thinking
+		// is safe helper context; read its live draft without introspecting the renderer.
+		if (pendingPlugin) return pendingPlugin.showThinking ? pluginQuestionDraft(pendingPlugin).thinking : "";
+		if (activeProblem?.pluginProblem) return pluginProblemDraft(activeProblem.pluginProblem).thinking;
+		return workingRef.current;
+	});
+	const sideNavigation = useRef(0);
+	const closeSideThread = useCallback(() => {
+		const id = sideThread.state?.threadId;
+		if (!id) return;
+		const navigation = ++sideNavigation.current;
+		void recording.finishFor(`side:${id}`).then(() => {
+			if (navigation === sideNavigation.current) sideThread.close(id);
+		});
+	}, [recording.finishFor, sideThread.state?.threadId, sideThread.close]);
+	const openSideThread = useCallback((args: SideThreadOpenArgs) => {
+		const navigation = ++sideNavigation.current;
+		const current = sideThread.state;
+		const source = args.sourceMessageId ?? args.passage?.sourceMessageId ?? (args.questionCallId ? nativeMessages.find((message) => message.role === "assistant" &&
+			message.content.some((block) => block.type === "toolCall" && block.id === args.questionCallId))?.id : undefined);
+		if (current && current.segmentId !== sideSegmentId(nativeMessages, source) && recording.active && recording.destinationId === `side:${current.threadId}`) {
+			void recording.finishFor(`side:${current.threadId}`).then(() => {
+				if (navigation === sideNavigation.current) sideThread.open(args);
+			});
+		} else sideThread.open(args);
+	}, [nativeMessages, recording.active, recording.destinationId, recording.finishFor, sideThread.open, sideThread.state]);
+	const goToCurrentSideStep = sideThread.state && sideThread.currentSegmentId && sideThread.state.segmentId !== sideThread.currentSegmentId
+		? () => openSideThread({ sourceMessageId: sideThread.currentSegmentId!, anchor: sideThread.state!.anchor }) : undefined;
+	const sideDictationFor = (id: string) => {
+		const destinationId = `side:${id}`;
+		const owns = recording.destinationId === destinationId;
+		return { phase: owns ? recording.phase : "idle" as const, active: owns && recording.active,
+			blocked: !owns && recording.active, error: owns ? recording.error : null, levelRef: recording.levelRef,
+			toggle: () => recording.toggleFor({ id: destinationId, append: (text) => sideThread.saveDraft(id, joinDictation(sideThread.draftFor(id), text), true) }),
+			finish: () => recording.finishFor(destinationId) };
+	};
+	const renderSideEntry = (sourceMessageId?: string) => {
+		if (!sourceMessageId) return null;
+		const hasHistory = sideThread.threads.some((thread) => thread.anchor.messageId === sourceMessageId && thread.messages.length > 0);
+		return <div className="mt-1 flex justify-end">
+			<Button type="button" variant="ghost" size="icon-xs" data-testid="side-conversation-button" data-side-segment-id={sourceMessageId}
+				data-has-history={hasHistory} aria-label={hasHistory ? "Open side conversation" : "Ask a side question"}
+				title={hasHistory ? "Open side conversation" : "Ask a side question"}
+				className={hasHistory ? "border border-border/60 text-muted-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}
+				onClick={(event) => openSideThread({ sourceMessageId, anchor: { kind: "element", element: event.currentTarget } })}>
+				<MessageCircleQuestionIcon aria-hidden className="size-3.5" fill="currentColor" fillOpacity={hasHistory ? 0.12 : 0} />
+			</Button>
+		</div>;
+	};
+	const sideThreadOpenRef = useRef(false);
+	sideThreadOpenRef.current = sideThread.state !== null;
+	const closeSideThreadRef = useRef(closeSideThread);
+	closeSideThreadRef.current = closeSideThread;
+	const toggleQuestionThread = useCallback(() => {
+		if (!isInteractionScopeEligible(sessionFindScopeRef.current, controller)) return;
+		if (sideThreadOpenRef.current) closeSideThreadRef.current();
+		else openSideThread({ anchor: { kind: "composer" }, questionCallId: pendingRef.current?.toolCallId });
+	}, [controller, openSideThread]);
+	useEffect(() => {
+		window.addEventListener(kbdEventForChat("toggle-question-thread"), toggleQuestionThread);
+		return () => window.removeEventListener(kbdEventForChat("toggle-question-thread"), toggleQuestionThread);
+	}, [toggleQuestionThread]);
+	// Advancing the lesson does not close or disable an old conversation.
+	const sideActions = useMemo(() => createSideQuestionActions({ open: openSideThread }), [openSideThread]);
+	const selectionActions = useMemo(() => [citeAction, ...sideActions], [citeAction, sideActions]);
+	const router = useRouter();
+	const transcriptElementRef = useRef<HTMLElement | null>(null);
+	transcriptElementRef.current = transcriptElement;
+	const citationActions = useMemo<CitationActions>(() => ({
+		editComment: (citation, source) => setCitationEdit({ citation, link: source.link, start: source.start, host: source.host, input: source.host.closest<HTMLElement>("[data-file-path-input]") ?? undefined }),
+		openSource: (citation) => {
+			const context = scrollContextRef.current;
+			revealCitationSource({
+				transcript: transcriptElementRef.current,
+				scroll: context ? { scrollRef: context.scrollRef, stopScroll: context.stopScroll } : null,
+				citation,
+				currentChatId: chatId,
+				navigate: (href) => router.push(href),
+			});
+		},
+	}), [chatId, router]);
 	useEffect(() => {
 		if (dictation.active) {
 			dictationWasActiveRef.current = true;
 		} else if (dictationWasActiveRef.current) {
 			dictationWasActiveRef.current = false;
-			if (isInteractionScopeEligible(composerInputRef.current, controller)) composerInputRef.current!.focus();
+			// Do not steal focus from a helper or a newer interaction owner.
+			if (!document.activeElement?.closest('[data-testid="side-thread"]') && isInteractionScopeEligible(composerInputRef.current, controller)) composerInputRef.current!.focus();
 		}
 	}, [dictation.active, controller]);
 
@@ -1155,18 +1293,25 @@ export function Chat({
 	// guess so the static paint has a sane tail. The first layout effect
 	// replaces it with the measured truth before paint.
 	const [dockReserve, setDockReserve] = useState(208);
+	const statsRequest = useRef<AbortController | null>(null);
 	const syncTurns = useCallback(async () => {
+		statsRequest.current?.abort();
+		const request = new AbortController();
+		statsRequest.current = request;
 		try {
-			const record = await readRecord({ adoption: "none" });
-			if (!record) return;
-			if (Array.isArray(record.turns)) setTurns(record.turns);
-			setPricing(record.pricing);
+			const stats = await readStats(request.signal);
+			if (!stats || request.signal.aborted) return;
+			if (Array.isArray(stats.turns)) setTurns(stats.turns);
+			setPricing(stats.pricing);
 		} catch {
 			// transient blip: stats stay on the last known figures
+		} finally {
+			if (statsRequest.current === request) statsRequest.current = null;
 		}
-	}, [readRecord]);
+	}, [readStats]);
 	useEffect(() => {
 		void syncTurns();
+		return () => statsRequest.current?.abort();
 	}, [syncTurns]);
 	// After the learner's own turn ends the log has a fresh entry — and the
 	// Post-turn settle (the SLIMMED watch — push-architecture S3,
@@ -1453,7 +1598,6 @@ export function Chat({
 			input: readViewInput(),
 		};
 	}) : undefined;
-	const renderedActionContext = actionContext();
 	const captureActionContext = () => {
 		if (!submissionMounted.current || !surfaceTarget || !findSurfaceBoundary(surfaceTarget)) return;
 		const captured = actionContext();
@@ -1480,13 +1624,15 @@ export function Chat({
 			}}
 		>
 		<JobsContext.Provider value={jobs}>
+		<CitationActionsContext.Provider value={citationActions}>
 		{/* The session surface: the transcript column (header + scroller) and
 		    the plan-tree panel as full-height SIBLINGS — the panel spans top to
 		    bottom exactly like the left sidebar, and the header (name + phase
 		    chip) spans from the left sidebar's edge to the panel's edge. The
 		    dock overlays the column bottom (outside the scroller); a spacer in
-		    the transcript reserves its height. */}
-		<div className="flex h-dvh">
+		    the transcript reserves its height. data-session-surface scopes the
+		    session's reading rules (no-wrap inline code/math, globals.css). */}
+		<div data-session-surface="" className="flex h-dvh">
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1608,13 +1754,14 @@ export function Chat({
 					) : (
 						<PhaseChip phase={phases.at(-1) ?? "probe"} />
 					)}
-					{renderedActionContext && <PluginTopBarActions context={renderedActionContext} captureContext={captureActionContext} />}
+					<PluginSessionTopBarActions readContext={actionContext} captureContext={captureActionContext} refreshRef={refreshPluginActions} />
 				</TopBar>
 
 				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
 				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
 					<SessionMessageNavigation />
+					<TranscriptElementReporter onElement={setTranscriptElement} />
 					<ConversationContent className="min-h-full gap-0 p-0">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
@@ -1722,6 +1869,7 @@ export function Chat({
 										    Rendered WITHOUT the Message wrapper — that is the bubble. */
 											<div
 										data-testid="user-message"
+										data-older-transcript-row={mi < newestTurnFrom ? "" : undefined}
 										/* THE DOCUMENT, ALL-IN (owner rounds two+three, 2026-10-07):
 										    no chat side — the user message is a full-width card-color
 										    BAND, the IDENTICAL geometry as the thinking rows: 5px band
@@ -1741,7 +1889,7 @@ export function Chat({
 												<SubmittedImages images={m.parts.filter((part) => part.type === "image").map(part => ({ type: "image" as const, data: part.data as string, mimeType: part.mimeType as string }))} />
 											</div>
 									) : (
-									<Message from="assistant" className="max-w-full">
+									<Message from="assistant" className="max-w-full" data-older-transcript-row={mi < newestTurnFrom ? "" : undefined}>
 									<MessageContent className="w-full">
 											{m.parts.map((part, pi) => {
 												if (part.pluginProblem) return <ProblemCard key={pi} part={{ ...part, state: part.state ?? "input-available", toolCallId: part.toolCallId ?? "" }} />;
@@ -1792,9 +1940,10 @@ export function Chat({
 															</Reasoning>
 														);
 													case "step-start":
-														if (teachBoundary)
-															return <PhaseDivider key={`teach-step-${pi}`} phase="teach" />;
-														return pi > 0 ? <Separator key={pi} className="my-3" /> : null;
+														return <Fragment key={`step-${pi}`}>
+															{renderSideEntry(sideEntries.get(m.id)?.get(pi))}
+															{teachBoundary ? <PhaseDivider phase="teach" /> : pi > 0 ? <Separator className="my-3" /> : null}
+														</Fragment>;
 													case "data-plan-block":
 														// The plan in the chat (wave 4): a frozen snapshot
 														// block — rendered as carried, never re-derived.
@@ -1821,7 +1970,7 @@ export function Chat({
 														// transcript; answered ones render as graded records.
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} />
+																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} toolCallId={part.toolCallId} />
 															);
 														}
 														return null;
@@ -1835,6 +1984,7 @@ export function Chat({
 												}
 											})}
 										</MessageContent>
+										{m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length))}
 									</Message>
 									)}
 								</Fragment>
@@ -1909,7 +2059,6 @@ export function Chat({
 					onPreparePluginQuestion={preparePluginQuestion}
 					preparing={submissionRunner.occupied}
 					preparationStatus={<>
-						{submissionRunner.preparing && <div role="status" className="flex items-center justify-between gap-3 px-4 py-2 text-sm">Preparing submission…<Button type="button" variant="ghost" onClick={submissionRunner.cancel}>Cancel</Button></div>}
 						{preparationError && <p role="alert" className="px-4 py-2 text-sm text-destructive">{preparationError}</p>}
 					</>}
 					pluginQuestion={pendingPlugin}
@@ -1925,6 +2074,7 @@ export function Chat({
 					onRetrySync={() => { void reconcile(); }}
 					initialQuestionDraft={pending ? questionDraft(pending.key)?.form : undefined}
 					onSaveQuestionDraft={(form) => { if (pending) saveQuestionDraft(pending.key, { form }); }}
+					workingRef={workingRef}
 					practice={activeProblem}
 					pluginPractice={activeProblem?.pluginProblem && activeProblemOccurrence ? {
 						snapshot: activeProblem.pluginProblem, occurrence: activeProblemOccurrence, chatId, draft: pluginProblemDraft(activeProblem.pluginProblem),
@@ -2008,10 +2158,50 @@ export function Chat({
 						const reading = readingThinkingRef.current.trim() || undefined;
 						// The pending-id effect clears this only when the question
 						// actually leaves. An offline preflight keeps the draft visible.
-						submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
+						const send = () => submitAnswer(pending.tool, pending.toolCallId, reading ? { ...output, readingThinking: reading } : output, pending.key);
+						// Never wait for the helper. The server atomically appends new
+						// raw side updates with this main answer.
+						send();
 					}}
 				/>
 				</Conversation>
+				{sideThread.state?.mode === "panel" && (
+					<SideThreadPanel>
+						<SideThreadBody
+							key={sideThread.state.threadId}
+							state={sideThread.state}
+							chatId={chatId}
+							draft={sideThread.draftFor(sideThread.state.threadId)}
+							readDraft={sideThread.draftFor.bind(null, sideThread.state.threadId)}
+							dictation={sideDictationFor(sideThread.state.threadId)}
+							onDraftChange={sideThread.saveDraft.bind(null, sideThread.state.threadId)}
+							onAsk={(text, retry) => sideThread.ask(text, retry, sideThread.state!.threadId)}
+							onStop={sideThread.stop}
+							onExpand={sideThread.expand}
+							onFloat={sideThread.float}
+							onClose={closeSideThread}
+							onCurrentStep={goToCurrentSideStep}
+						/>
+					</SideThreadPanel>
+				)}
+
+				{sideThread.state?.mode === "popover" && (
+					<SideThreadPopover
+						state={sideThread.state}
+						chatId={chatId}
+						draft={sideThread.draftFor(sideThread.state.threadId)}
+						readDraft={sideThread.draftFor.bind(null, sideThread.state.threadId)}
+						dictation={sideDictationFor(sideThread.state.threadId)}
+						onDraftChange={sideThread.saveDraft.bind(null, sideThread.state.threadId)}
+						composer={() => composerInputRef.current}
+						onAsk={(text, retry) => sideThread.ask(text, retry, sideThread.state!.threadId)}
+						onStop={sideThread.stop}
+						onExpand={sideThread.expand}
+						onFloat={sideThread.float}
+						onClose={closeSideThread}
+						onCurrentStep={goToCurrentSideStep}
+					/>
+				)}
 
 				{/* The session-scoped focuses (chrome-melt wave, 2026-09-19): mounted
 				    INSIDE the session area — absolute inset-0 siblings of the scroller,
@@ -2028,11 +2218,27 @@ export function Chat({
 					/>
 				)}
 				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
+				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} />
+				{citationEdit && (
+					<CitationCommentPopover
+						key={`${citationEdit.start}:${citationEdit.link}`}
+						target={citationEdit}
+						transcript={transcriptElement}
+						composer={() => citationEdit.input?.isConnected ? citationEdit.input : citeInput()}
+						onClose={() => setCitationEdit(null)}
+						onSend={() => {
+							const input = citationEdit.input?.isConnected ? citationEdit.input : citeInput();
+							if (input === composerInputRef.current) onSend();
+							else if (input) requestAnimationFrame(() => input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true })));
+						}}
+					/>
+				)}
 				</SurfaceRegion>
 				<AbortTurnDialog mode={abortAsk} onClose={closeAbortAsk} onConfirm={confirmAbort} busy={busy} />
 				</div>
 			</div>
 		</div>
+		</CitationActionsContext.Provider>
 		</JobsContext.Provider>
 		</SessionMermaidContext.Provider>
 		{/* The BYOK setup flow (owner, 2026-09-22): one mount serves the
@@ -2093,7 +2299,7 @@ export function Chat({
  *  then the session overlays (mermaid paints above plan — later in DOM),
  *  then setup (self-closing — the gate only must not fire), then the
  *  2026-10-02 abort chain proper (question before turn). */
-export type EscAbortTarget = "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
+export type EscAbortTarget = "side-thread" | "mermaid" | "plan" | "setup" | "question" | "problem" | "turn" | null;
 	/**
  * Does the opening topic still owe its first send? The topic is the
  * server's ?prompt= or the sessionStorage stash. The gate is "no real
@@ -2110,6 +2316,9 @@ export function initialPromptOwed(messages: readonly { role: string }[], prompt:
 
 export function escAbortTarget(s: {
 	abortAsk: boolean;
+	/** An open side thread (#16, F11): Esc closes (and commits) it before
+	 *  anything else on the ladder. */
+	sideThread?: boolean;
 	mermaidFocus: boolean;
 	planOpen: boolean;
 	setupOpen: boolean;
@@ -2123,6 +2332,7 @@ export function escAbortTarget(s: {
 	busy: boolean;
 }): EscAbortTarget {
 	if (s.abortAsk) return null; // the popup's own Esc — claimed by the dialog
+	if (s.sideThread) return "side-thread";
 	if (s.mermaidFocus) return "mermaid";
 	if (s.planOpen) return "plan";
 	if (s.setupOpen) return "setup";
@@ -2163,6 +2373,22 @@ export function shouldStampGeometryMute(nextH: number, prevH: number, pending: b
 	return pending && nextH > prevH + 1;
 }
 
+/** Reports the transcript's scroll element once StickToBottom attaches it
+ *  (its ref lands after first render, like SessionMessageNavigation's). */
+function TranscriptElementReporter({ onElement }: { onElement: (element: HTMLElement | null) => void }) {
+	const { scrollRef } = useStickToBottomContext();
+	useEffect(() => {
+		if (scrollRef.current) { onElement(scrollRef.current); return () => onElement(null); }
+		const id = window.setInterval(() => {
+			if (!scrollRef.current) return;
+			window.clearInterval(id);
+			onElement(scrollRef.current);
+		}, 50);
+		return () => { window.clearInterval(id); onElement(null); };
+	}, [scrollRef, onElement]);
+	return null;
+}
+
 /** Host-only composition/test seam; never part of the plugin SDK. */
 export function DockOverlay({
 	viewReader, viewTargets, unavailableOccurrence,
@@ -2171,6 +2397,7 @@ export function DockOverlay({
 	pluginQuestion, pluginDraft, pluginAvailable, pluginReady, onPluginMicAvailable, onPluginSend, onPluginDismiss, unreadablePlugin, reconciliation, onRetrySync,
 	initialQuestionDraft,
 	onSaveQuestionDraft,
+	workingRef,
 	practice, pluginPractice,
 	compactionRunning,
 	onSubmitThinking,
@@ -2218,6 +2445,8 @@ export function DockOverlay({
 	onRetrySync(): void;
 	initialQuestionDraft?: QuestionFormDraft;
 	onSaveQuestionDraft: (draft: QuestionFormDraft) => void;
+	/** The dock's current unsubmitted working, for the side thread. */
+	workingRef?: { current: string };
 	/** Compaction running for this chat (round 14) — the docks' submit
 	 *  affordance gate (the server's registry is the real one). */
 	compactionRunning: boolean;
@@ -2289,10 +2518,14 @@ export function DockOverlay({
 	const readingInputRef = useRef<HTMLDivElement>(null);
 	const ownsDock = !!pending || !!pluginQuestion || unreadablePlugin || !!practice;
 	const initialPendingRef = useRef(pendingId);
-	const nativeViewReader = useRef<(() => NativeQuestionViewState) | null>(null) as ViewReaderRef<NativeQuestionViewState>;
-	const practiceViewReader = useRef<(() => string) | null>(null) as ViewReaderRef<string>;
-	const customViewReader = useRef<(() => { available: boolean }) | null>(null) as ViewReaderRef<{ available: boolean }>;
-	nativeViewReader.changed = practiceViewReader.changed = customViewReader.changed = viewReader?.changed;
+	// Stable reader objects with `changed` from the start (React's development
+	// server renderer seals useRef objects, so assigning `changed` onto refs
+	// threw under next dev). `changed` forwards to the latest parent reader.
+	const parentViewReader = useRef(viewReader);
+	parentViewReader.current = viewReader;
+	const [nativeViewReader] = useState<ViewReaderRef<NativeQuestionViewState>>(() => ({ current: null, changed: () => parentViewReader.current?.changed?.() }));
+	const [practiceViewReader] = useState<ViewReaderRef<string>>(() => ({ current: null, changed: () => parentViewReader.current?.changed?.() }));
+	const [customViewReader] = useState<ViewReaderRef<{ available: boolean }>>(() => ({ current: null, changed: () => parentViewReader.current?.changed?.() }));
 
 	// Teach-question ARRIVAL state, applied during render — BEFORE the
 	// first paint (owner, scroll-honesty round 2026-09-25). Until now the
@@ -2390,8 +2623,10 @@ export function DockOverlay({
 	// width instantly, so the fade floor never lags behind reality (the old
 	// render-time measurement went stale during drag-resizes and the mount
 	// decision popped late).
-	const [flankW, setFlankW] = useState(0);
-	const flankWRef = useRef(0);
+	const [blockW, setBlockW] = useState(0);
+	// The root font size: the dock's rem geometry in px.
+	const [rem, setRem] = useState(16);
+	const blockWRef = useRef(0);
 	// Part A of the same round (the resize mute): any block size change
 	// stamps this — the fold machine ignores scroll events for a beat after,
 	// because a resize/rewrap re-clamps scrollTop and emits PHANTOM scroll
@@ -2407,10 +2642,11 @@ export function DockOverlay({
 		const block = blockRef.current;
 		if (!block) return;
 		const measure = () => {
-			const next = Math.round(block.offsetWidth / 2 - DOCK_W / 2 - 2 * MARGIN_GAP);
-			if (Math.abs(next - flankWRef.current) > 1) {
-				flankWRef.current = next;
-				setFlankW(next);
+			setRem(rootRem(block.ownerDocument));
+			const next = Math.round(block.offsetWidth);
+			if (Math.abs(next - blockWRef.current) > 1) {
+				blockWRef.current = next;
+				setBlockW(next);
 				geometryAtRef.current = Date.now();
 			}
 		};
@@ -2419,6 +2655,37 @@ export function DockOverlay({
 		ro.observe(block);
 		return () => ro.disconnect();
 	}, []);
+
+	// ADAPT QUESTION LAYOUT (Appearance; owner-approved plan): while a NATIVE
+	// question is expanded, the whole bottom region takes the width the
+	// question card solved for (components/question-layout.ts), capped at the
+	// transcript width. Folded bars, reveal invitations, plugin questions,
+	// practice and the composer keep the default 46rem. The request carries
+	// only geometry/font inputs — never typing state (#674).
+	const { appearance } = useAppearance();
+	const adaptive = appearance.adaptiveQuestions && !!pending && !pluginQuestion && !unreadablePlugin;
+	// Full: the card's shell may line up with the transcript's text column
+	// (dockContainerMax: block - 1rem); a set width caps it there.
+	const containerMax = dockContainerMax(blockW, rem, appearance.transcriptMaxWidth);
+	const fontKey = layoutFontKey(appearance);
+	const geometry = questionCardGeometry(rem);
+	const DOCK_W = geometry.container;
+	const layoutRequest = useMemo(
+		() => (adaptive && blockW > 0
+			? { available: Math.max(containerMax - geometry.chrome, 0), base: geometry.base, floor: geometry.floor, key: fontKey }
+			: null),
+		[adaptive, blockW, containerMax, fontKey, geometry.chrome, geometry.base, geometry.floor],
+	);
+	const [questionLayout, setQuestionLayout] = useState<QuestionLayout | null>(null);
+	const adaptedW = adaptive && expanded && !revealPending && questionLayout && questionLayout.width + geometry.chrome > DOCK_W
+		? questionLayout.width + geometry.chrome
+		: null;
+	const dockW = Math.min(adaptedW ?? DOCK_W, blockW || Infinity);
+	const flankW = Math.round(blockW / 2 - dockW / 2 - 2 * MARGIN_GAP);
+	const dockRef = useRef<HTMLDivElement>(null);
+	const widthMorphRef = useRef<ReturnType<typeof createDockWidthMorph> | null>(null);
+	if (!widthMorphRef.current) widthMorphRef.current = createDockWidthMorph();
+	useIsoLayoutEffect(() => () => widthMorphRef.current?.dispose(), []);
 
 	// The reserve grows immediately, but never shrinks while a question or
 	// practice problem owns the dock: shrinking flow space could pin a nearby
@@ -2448,9 +2715,16 @@ export function DockOverlay({
 	if (!heightMorphRef.current) heightMorphRef.current = createDockMorph();
 	const retargetOpening = useCallback(() => heightMorphRef.current?.retarget(stateKey), [stateKey]);
 	useIsoLayoutEffect(() => () => heightMorphRef.current?.dispose(), []);
+	// Mid-width-morph block heights are not settled; the morph's finish
+	// offers the natural height instead (measureBlock below).
+	const offerSettled = useCallback((blockH: number) => {
+		if (!widthMorphRef.current?.animating()) offer(blockH);
+	}, [offer]);
 	useDockHeight({
 		scrollRef, blockRef, viewportRef, bodyRef, shellRef, contentRef,
-		expanded, enabled: ownsDock, mode, onScrollbarInset: setSbInset, onHeight: offer,
+		// The two-column row replaces the question scroll area as the
+		// height-variable region: reconnect the observers when it swaps.
+		expanded, enabled: ownsDock, mode: `${mode}:${questionLayout?.kind ?? "default"}`, onScrollbarInset: setSbInset, onHeight: offerSettled,
 		onLayout: retargetOpening,
 	});
 
@@ -2625,12 +2899,18 @@ export function DockOverlay({
 		// closing and ordinary typing retain their existing behavior.
 		heightMorphRef.current?.layout(el, stateKey, ownsDock && expanded, measureBlock);
 	});
+	// The width morph (adaptive question layout): AFTER the height morph has
+	// measured its natural target at the final width; same duration/easing.
+	useIsoLayoutEffect(() => {
+		const el = dockRef.current;
+		if (el) widthMorphRef.current?.layout(el, adaptedW ?? DOCK_W, measureBlock);
+	});
 
 	return (
 		<div className="pointer-events-none absolute inset-x-0 bottom-0" style={{ right: sbInset }}>
 			<div className="h-24 bg-gradient-to-t from-background via-background/85 to-transparent" />
 			<div ref={blockRef} className="relative bg-background pb-5">
-				<div className={DOCK}>
+				<div ref={dockRef} data-dock-width={adaptedW ?? undefined} className={DOCK} style={adaptedW ? { maxWidth: adaptedW } : undefined}>
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>
 					{setupCta}
@@ -2663,7 +2943,7 @@ export function DockOverlay({
 							claim={revealPending}
 						/>
 					)}
-					<div ref={shellRef} className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
+					<div ref={shellRef} data-attachment-composer="" className="pointer-events-auto overflow-hidden rounded-2xl border bg-card shadow-lg">
 						{preparationStatus}
 						{/* Include descendant margins (notably practice thinking's
 						    bottom margin) in the natural content measurement. */}
@@ -2695,9 +2975,12 @@ export function DockOverlay({
 									preparing={preparing}
 									initialDraft={initialQuestionDraft}
 									onSaveDraft={onSaveQuestionDraft}
+									workingRef={workingRef}
 									onEscape={dictationCancel}
 									dictationClaim={!revealPending}
 									compactionRunning={compactionRunning}
+									layoutRequest={layoutRequest}
+									onLayout={setQuestionLayout}
 								/>
 							) : pluginPractice ? (
 								<PluginProblemDock {...pluginPractice} viewReader={customViewReader} expanded={expanded} onExpand={() => { setExpanded(true); void suppressFoldDuringReveal(); }} />
@@ -2766,7 +3049,7 @@ export function DockOverlay({
 						type="button"
 						data-testid="plan-marginalia"
 						onClick={onOpenPlan}
-						style={{ left: `calc(50% + ${DOCK_W / 2 + MARGIN_GAP}px)` }}
+						style={{ left: `calc(50% + ${dockW / 2 + MARGIN_GAP}px)` }}
 						className={`absolute bottom-5 right-4 top-0 cursor-pointer transition-[filter,opacity] duration-300 ease-out ${
 							expanded && flankW >= MARGIN_MIN_W
 								? "pointer-events-auto opacity-100 blur-0"

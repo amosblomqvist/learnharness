@@ -72,10 +72,10 @@ test("durable agent PUT refreshes live admission; increases drain, decreases wai
 	let limitReads = 0;
 	configureWorkerRequestAdmission(() => { limitReads++; return effectiveSettings().agent.workerRequestConcurrency; });
 	const readsBeforeFailure = limitReads;
-	const originalWrite = fs.writeFileSync;
-	fs.writeFileSync = (file, data, options) => {
-		if (file === settingsFile) throw new Error("fixture settings write failure");
-		return originalWrite(file, data, options);
+	const originalRename = fs.renameSync;
+	fs.renameSync = (from, to) => {
+		if (to === settingsFile) throw new Error("fixture settings write failure");
+		return originalRename(from, to);
 	};
 	try {
 		await assert.rejects(put({ ...initial.agent, workerRequestConcurrency: 3 }), /fixture settings write failure/);
@@ -83,7 +83,7 @@ test("durable agent PUT refreshes live admission; increases drain, decreases wai
 		assert.deepEqual(JSON.parse(fs.readFileSync(settingsFile, "utf-8")), initial);
 		assert.equal(sources.length, 1);
 	} finally {
-		fs.writeFileSync = originalWrite;
+		fs.renameSync = originalRename;
 		configureWorkerRequestAdmission(() => effectiveSettings().agent.workerRequestConcurrency);
 	}
 

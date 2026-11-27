@@ -13,6 +13,7 @@ for (const name of ["chatgpt-credentials.json", "github-copilot-credentials.json
 			mkdirSync(path.join(root, "scripts")); mkdirSync(path.join(root, ".next", "standalone"), { recursive: true }); mkdirSync(path.join(root, ".next", "static"));
 			copyFileSync(new URL("../scripts/build-server.mjs", import.meta.url), path.join(root, "scripts", "build-server.mjs"));
 			copyFileSync(new URL("../scripts/build-core-plugins.mjs", import.meta.url), path.join(root, "scripts", "build-core-plugins.mjs"));
+			copyFileSync(new URL("../scripts/build-plugin-authoring.mjs", import.meta.url), path.join(root, "scripts", "build-plugin-authoring.mjs"));
 			mkdirSync(path.join(root, "src", "core"), { recursive: true });
 			copyFileSync(new URL("../src/core/plugins.ts", import.meta.url), path.join(root, "src", "core", "plugins.ts"));
 			writeFileSync(path.join(root, ".next", "standalone", "server.js"), "// fixture");

@@ -36,7 +36,7 @@ const b: ModelCatalogEntry = { ...a, id: "claude-opus-5-5", name: "Claude Opus 5
 function catalog(connected = true): ModelCatalogResponse {
 	return {
 		models: connected ? [a, b] : [], defaults: null,
-		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null },
+		rolePins: { researcher: null, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null },
 		slots: { strong: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low" }, cheap: { model: { provider: a.provider, id: a.id }, thinkingLevel: "high" }, vision: { model: { provider: a.provider, id: a.id }, thinkingLevel: "low" } },
 		providers: [{ ...provider, keyPresent: connected }],
 	};
@@ -50,7 +50,7 @@ function installFetch() {
 		if (path === "/api/models") { const request = deferred<Response>(); requests.push(request); return request.promise; }
 		if (path === "/api/settings/models") { writes.push(JSON.parse(String(init?.body))); return Response.json({ settings: { models: writes.at(-1) } }); }
 		if (path === "/api/keys") return Response.json({ providers: [provider], keys: [] });
-		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [] });
+		if (path === "/api/settings/prompts") return Response.json({ prober: [], teacher: [], practice: [] });
 		if (path === "/api/search") return Response.json({ available: false, engine: null, reason: "fixture" });
 		throw new Error(`Unexpected request ${path}`);
 	};

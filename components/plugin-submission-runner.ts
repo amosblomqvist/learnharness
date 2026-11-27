@@ -80,7 +80,7 @@ export class SubmissionAttempt {
 	async prepare(input: PluginSubmission, messages: readonly LhMessage[]): Promise<PluginSubmission | null> {
 		this.check();
 		let result = preparePluginSubmission(input, this.target);
-		const history = copyPluginSubmissionHistory(messages);
+		const history = this.registrations.length ? copyPluginSubmissionHistory(messages) : [];
 		for (const owner of this.registrations) {
 			this.check(); let open = true;
 			const context = Object.freeze({ ...this.target, messages: history, signal: this.signal, onAccepted: (callback: () => void | Promise<void>) => {

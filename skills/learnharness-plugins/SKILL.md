@@ -7,8 +7,10 @@ description: Build, inspect, or debug trusted-local LearnHarness plugins using t
 
 ## Read the matching contract
 
-Start with the [authoring guide](../../docs/plugin-authoring.md), then read only the
-contracts relevant to the task:
+Start with the [authoring guide and documentation map](../../docs/plugin-authoring.md),
+then use the [complete API reference](../../docs/plugin-api/README.md) for exact
+signatures, members and linked data/event types. Read the feature contracts relevant
+to the task:
 
 | Area | Reference |
 | --- | --- |
@@ -25,17 +27,38 @@ In a checkout, public types are under `src/core/`: `plugins.ts`, `plugin-ui.ts`,
 `plugin-submissions.ts`, `plugin-view-context.ts`, `plugin-tree.ts`.
 These paths are repository-relative. Use **type-only** imports, never private runtime
 modules. Emit portable declarations with `node scripts/build-plugin-types.mjs`.
-Without a checkout, use the target app's `plugin-authoring/` docs/types/examples bundle;
-do not invent host imports. API v1 additions in this checkout exceed released 0.4.1:
-check actual host compatibility rather than copying a stale `minAppVersion`.
+Without a checkout, download the complete authoring skill from **Settings → Community
+plugins → Download authoring skill**. Keep its root `SKILL.md`, `docs/`, `examples/`
+and `types/` together, including the portable `tools/`; use the included SDK rather than running repository build scripts.
+Read `bundle.json` for the producing app/API/SDK versions. API v1 can gain capabilities:
+check actual host compatibility rather than copying a stale `minAppVersion`. Exported
+Hello/recipe distributions conservatively require the producing app version; canonical
+official source manifests remain unchanged. Older targets need capability verification.
 
 ## Choose a starting point
 
-[No-build examples](../../examples/plugins/) include `hello-plugin` (view/settings),
-`managed-agent` (persistent conversations) and `teaching-extension` (native tools,
-renderers, detached workers). Repository `plugins/` contains larger feature source
-projects; inspect them as examples, not private APIs or a promise of bundled availability.
-Model-using examples may incur cost when explicitly run.
+Begin with [Hello](../../examples/plugins/hello-plugin/README.md) for the smallest
+view/settings plugin. The [example reading routes](../../docs/plugin-examples.md)
+lead to the canonical UI Showcase, Drawing Pad, Coding Questions, Flashcards and Rich
+Code Blocks source projects included in the skill. Use them as real-world public-API
+references, not private host APIs. Core project IDs are reserved: do not install unchanged
+Community copies. The example guide distinguishes standalone build prerequisites from
+checkout-dependent tests. Managed Agent and Teaching Extension are focused recipes,
+not the primary starting points. Model-using recipes may incur cost when explicitly run.
+
+## Build and install
+
+Prefer developing directly in `<plugins-directory>/<plugin-id>/`: clone/create the
+project there, install its build dependencies, and run `npm run build`. Its output is
+already the installed `dist/`; no copy step is needed. Find the directory in
+**Settings → Community plugins**. The installed folder must match the manifest ID.
+
+For an outside workspace, copy the skill's portable installer into the plugin project
+and wire `npm run install:local -- "<plugins-directory>"` as described in the
+[authoring guide](../../docs/plugin-authoring.md#develop-outside-the-plugins-directory).
+The command builds before replacing only installed `dist/`, preserving sibling `data/`.
+No destination autodiscovery, saved configuration, automatic enablement or restart.
+The included no-build examples can be copied directly; they do not need npm setup.
 
 ## Guardrails
 
@@ -99,7 +122,7 @@ Model-using examples may incur cost when explicitly run.
 - Notifications are live hints, not durable logs: use `onResync` plus current snapshots,
   and release observers rather than polling hidden views.
 
-## Verify without disturbing the installation
+## Test without disturbing the installation
 
 Check plugin types/tests/build, runtime layout, disabled discovery, activation/cleanup,
 restart/data preservation, stale/async generations and native lifecycle paths actually

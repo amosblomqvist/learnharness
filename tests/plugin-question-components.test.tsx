@@ -6,6 +6,7 @@ import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared
 import { KeyboardShortcuts } from "../components/keyboard-shortcuts.tsx";
 import { createInteractionLayers } from "../components/interaction-layers.tsx";
 import { PluginQuestionDockContent } from "../components/plugin-question-dock.tsx";
+import type { PreparePluginQuestionSubmission } from "../components/plugin-submission-adapters.ts";
 import { ReadingThinkingField } from "../components/reading-thinking.tsx";
 import { DictationBar, useDictation, type Dictation } from "../components/dictation.tsx";
 import { capturePluginQuestionKey, pluginQuestionKeySuppressed } from "../components/plugin-question-keys.ts";
@@ -31,7 +32,7 @@ let cleanup: (() => Promise<void>) | undefined;
 let restore: (() => void) | undefined;
 afterEach(async () => { await cleanup?.(); restore?.(); cleanup = undefined; restore = undefined; });
 
-async function fixture(options: { keyboard?: boolean; thinking?: boolean; check?: boolean; missing?: boolean; available?: boolean; append?: boolean; asyncMount?: boolean; deferPublication?: boolean; ready?: boolean; reconciliation?: "ready" | "syncing" | "failed"; editorFails?: boolean; handleKeyDown?: PluginQuestionEditorHandle["handleKeyDown"]; question?: PluginQuestionRenderer["mountQuestion"] } = {}) {
+async function fixture(options: { prepareSubmission?: PreparePluginQuestionSubmission; keyboard?: boolean; thinking?: boolean; check?: boolean; missing?: boolean; available?: boolean; append?: boolean; asyncMount?: boolean; deferPublication?: boolean; ready?: boolean; reconciliation?: "ready" | "syncing" | "failed"; editorFails?: boolean; handleKeyDown?: PluginQuestionEditorHandle["handleKeyDown"]; question?: PluginQuestionRenderer["mountQuestion"] } = {}) {
 	const dom = parseHTML("<html><body><div id='root'></div></body></html>");
 	let active: Element = dom.document.body;
 	Object.defineProperty(dom.document, "activeElement", { get: () => active });
@@ -65,7 +66,7 @@ async function fixture(options: { keyboard?: boolean; thinking?: boolean; check?
 		return <>
 			{options.check && <ReadingThinkingField inputRef={reading} value={draft.readingThinking} revision={0} onChange={value => { draft.readingThinking = value; }} claim={state.reveal} />}
 			<PluginQuestionDockContent snapshot={state.snapshot} chatId="chat" draft={draft} expanded={state.expanded} reveal={state.reveal} ready={state.ready} reconciliation={state.reconciliation} available={state.available} registration={registration} readingRef={reading} onMicAvailable={setMic}
-				onExpand={() => { state.reveal = false; state.expanded = true; }} send={async input => { state.sent.push(input); return true; }} dismiss={async () => { state.dismissed++; }} />
+				prepareSubmission={options.prepareSubmission} onExpand={() => { state.reveal = false; state.expanded = true; }} send={async input => { state.sent.push(input); return true; }} dismiss={async () => { state.dismissed++; }} />
 			<DictationBar dictation={dictation} disabled={!mic} />
 			{options.keyboard && <AppRouterContext.Provider value={{ bfcacheId: "plugin-question-fixture", back() {}, forward() {}, refresh() {}, push() {}, replace() {}, prefetch() {} }}><KeyboardShortcuts /></AppRouterContext.Provider>}
 		</>;
@@ -77,6 +78,22 @@ async function fixture(options: { keyboard?: boolean; thinking?: boolean; check?
 	const commandSubmit = async () => { await act(async () => { capturePluginQuestionKey({ key: "Enter", ctrlKey: true, target: document.getElementById("plugin-editor"), preventDefault() {} } as unknown as KeyboardEvent); }); };
 	return { state, draft, render, delivery, mount, get registration() { return registration; }, replaceRegistration(next: QuestionRendererRegistration | undefined) { registration = next; }, commandSubmit, get editorProps() { return editorProps; }, get dictation() { return dictation; }, get socket() { return Socket.all.at(-1)!; } };
 }
+
+test("silent plugin preparation keeps its submit latch and current draft without adding progress controls", async () => {
+	const gate = deferred<void>(); let preparations = 0, captured: ChatInput | undefined;
+	const f = await fixture({ prepareSubmission: async (capture, valid) => {
+		preparations++; await gate.promise; assert.equal(valid(), true); captured = capture(); return false;
+	} });
+	await f.commandSubmit(); await f.commandSubmit();
+	assert.equal(preparations, 1); assert.equal(document.querySelector('button[type="submit"]')!.hasAttribute("disabled"), true);
+	assert.doesNotMatch(document.body.textContent ?? "", /Preparing submission|Cancel/);
+	await act(async () => { f.editorProps.onChange({ status: "ready", value: "newer unsent code" }); });
+	gate.resolve(); await f.render();
+	assert.equal(captured?.type, "plugin-question-answer");
+	if (captured?.type === "plugin-question-answer") assert.equal(captured.answer, "newer unsent code");
+	assert.deepEqual(f.draft.answer, { status: "ready", value: "newer unsent code" });
+	assert.equal(f.state.sent.length, 0); assert.equal(document.querySelector('button[type="submit"]')!.hasAttribute("disabled"), false);
+});
 
 test("missing renderer keeps safe public fallback, thinking drafts and dismiss; no payload or raw errors", async () => {
 	const f = await fixture({ missing: true, thinking: true });

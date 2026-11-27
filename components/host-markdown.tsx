@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState, type ComponentProps } from "react";
 import type { ExtraProps } from "streamdown";
-import { MessageResponse } from "@/components/ai-elements/message";
+import { ToolContentResponse } from "@/components/ai-elements/message";
 import { MarkdownDisplayOnlyContext, mdComponents } from "@/components/md-blocks";
 import { cn } from "@/lib/utils";
 
@@ -46,14 +46,15 @@ function getComponents() {
 const linkSafety = { enabled: false };
 
 /** Complete, display-only Markdown snapshots through the actual host message
- * pipeline. The local profile never changes transcript controls or plugin
- * renderers. A new snapshot retires the old async code/diagram subtree. */
+ * pipeline, including its presentation-only tool-math recovery. The local
+ * profile never changes transcript controls or plugin renderers. A new snapshot
+ * retires the old async code/diagram subtree. */
 export function HostMarkdown({ text }: { text: string }) {
 	return (
 		<MarkdownDisplayOnlyContext.Provider value={true}>
-			<MessageResponse key={text} mode="static" isAnimating={false} controls={false} components={getComponents()} linkSafety={linkSafety}>
+			<ToolContentResponse key={text} mode="static" isAnimating={false} controls={false} components={getComponents()} linkSafety={linkSafety}>
 				{text}
-			</MessageResponse>
+			</ToolContentResponse>
 		</MarkdownDisplayOnlyContext.Provider>
 	);
 }

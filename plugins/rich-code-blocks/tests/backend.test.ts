@@ -21,7 +21,7 @@ function fixture(directory: string) {
   return { controller, handlers, instructions, events, activate: () => activate(ctx), call: (name: string, input?: unknown) => handlers.get(name)!(input) };
 }
 
-test("all-off startup is nonwriting; only accepted toggles contribute exact teacher/practice prompts and survive restart", () => {
+test("all-off startup is nonwriting; only accepted toggles contribute exact prober/teacher/practice prompts and survive restart", () => {
   const temporary = fs.mkdtempSync(path.join(os.tmpdir(), "lh-rich-backend-"));
   const directory = path.join(temporary, "data");
   try {
@@ -33,7 +33,7 @@ test("all-off startup is nonwriting; only accepted toggles contribute exact teac
       const accepted = parseSettings(host.call("set-family", { family, enabled: true }));
       assert.equal(accepted[family], true);
       assert.ok([...host.instructions].some(value => value.text === INSTRUCTIONS[family]));
-      assert.ok([...host.instructions].every(value => JSON.stringify(value.agents) === '["teacher","practice"]'));
+      assert.ok([...host.instructions].every(value => JSON.stringify(value.agents) === '["prober","teacher","practice"]'));
     }
     assert.equal(host.instructions.size, 3);
     assert.equal(host.events.length, 3);
@@ -51,37 +51,39 @@ test("all-off startup is nonwriting; only accepted toggles contribute exact teac
     second.call("set-family", { family: "chemicalStructures", enabled: false });
     const next = parseSettings(second.call("set-family", { family: "musicalNotation", enabled: false }));
     assert.equal(next.technicalDiagrams, true); assert.equal(next.chemicalStructures, false); assert.equal(next.revision, 5);
+    assert.deepEqual([...second.instructions], [{ agents: ["prober", "teacher", "practice"], text: INSTRUCTIONS.technicalDiagrams }]);
+    second.call("set-family", { family: "technicalDiagrams", enabled: false });
+    assert.equal(second.instructions.size, 0, "Disabling every family removes every role's instructions.");
     second.controller.abort(); assert.throws(() => second.call("set-family", { family: "technicalDiagrams", enabled: false }));
     disposeSecond();
   } finally { fs.rmSync(temporary, { recursive: true, force: true }); }
 });
 
-test("legacy settings are read without writes; ink saves preserve toggles and agent instructions", () => {
-  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-rich-ink-"));
+for (const inkColor of [undefined, "white", "black"]) test(`legacy ${inkColor ?? "absent"} ink is ignored without startup writes; real saves drop it and preserve families`, () => {
+  const directory = fs.mkdtempSync(path.join(os.tmpdir(), "lh-rich-theme-"));
   try {
     const file = path.join(directory, "settings.json");
-    const { inkColor: _inkColor, ...legacy } = { ...DEFAULT_SETTINGS, revision: 4, technicalDiagrams: true };
-    const original = JSON.stringify(legacy) + "\n";
+    const canonical = { ...DEFAULT_SETTINGS, revision: 4, technicalDiagrams: true };
+    const original = JSON.stringify({ ...canonical, inkColor }) + "\n";
     fs.writeFileSync(file, original);
     const host = fixture(directory); const dispose = host.activate();
-    assert.equal(parseSettings(host.call("get-settings")).inkColor, "white");
+    assert.deepEqual(host.call("get-settings"), canonical);
     assert.equal(fs.readFileSync(file, "utf8"), original, "Reading legacy settings must not rewrite them.");
+    assert.equal(host.handlers.has("set-ink-color"), false, "the obsolete write operation is removed");
     const instructions = [...host.instructions];
-    const next = parseSettings(host.call("set-ink-color", { inkColor: "black" }));
-    assert.deepEqual(next, { ...legacy, revision: 5, inkColor: "black" });
-    assert.deepEqual([...host.instructions], instructions);
-    assert.equal([...host.instructions][0], instructions[0], "Ink changes do not replace agent instructions.");
+    assert.equal(instructions.length, 1);
+    assert.equal(instructions[0]!.text, INSTRUCTIONS.technicalDiagrams);
+    host.call("set-family", { family: "technicalDiagrams", enabled: true });
+    assert.equal(fs.readFileSync(file, "utf8"), original, "No-op toggles remain nonwriting too.");
+    assert.equal([...host.instructions][0], instructions[0]);
+    const next = parseSettings(host.call("set-family", { family: "chemicalStructures", enabled: true }));
+    assert.deepEqual(next, { ...canonical, revision: 5, chemicalStructures: true });
     assert.deepEqual(JSON.parse(fs.readFileSync(file, "utf8")), next);
+    assert.equal("inkColor" in next, false);
     assert.deepEqual(host.events, [{ topic: "settings-changed", data: next }]);
-    host.call("set-ink-color", { inkColor: "black" }); assert.equal(host.events.length, 1);
-    assert.throws(() => host.call("set-ink-color", { inkColor: "auto" }));
-    assert.equal(host.events.length, 1);
-    const family = parseSettings(host.call("set-family", { family: "chemicalStructures", enabled: true }));
-    assert.equal(family.inkColor, "black"); assert.equal(family.technicalDiagrams, true);
-    host.controller.abort(); assert.throws(() => host.call("set-ink-color", { inkColor: "white" }));
     dispose(); assert.equal(host.handlers.size, 0);
     const restarted = fixture(directory); const off = restarted.activate();
-    assert.equal(parseSettings(restarted.call("get-settings")).inkColor, "black"); off();
+    assert.deepEqual(restarted.call("get-settings"), next); off();
   } finally { fs.rmSync(directory, { recursive: true, force: true }); }
 });
 
@@ -97,7 +99,6 @@ test("malformed/newer settings are refused without overwriting; failed atomic sa
     const host = fixture(directory); const dispose = host.activate();
     fs.mkdirSync(file); // rename cannot replace a directory
     assert.throws(() => host.call("set-family", { family: "technicalDiagrams", enabled: true }));
-    assert.throws(() => host.call("set-ink-color", { inkColor: "black" }));
     assert.deepEqual(host.call("get-settings"), DEFAULT_SETTINGS);
     assert.equal(host.instructions.size, 0); assert.equal(host.events.length, 0);
     assert.deepEqual(fs.readdirSync(directory), ["settings.json"]);

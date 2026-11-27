@@ -56,14 +56,19 @@ test("builtin pending input enables an initially empty selection and crosses pre
 	restore = () => { for (const [key, descriptor] of previous) if (descriptor) Object.defineProperty(globalThis, key, descriptor); else delete (globalThis as Record<string, unknown>)[key]; };
 	const { createRoot } = await import("react-dom/client"); const root = createRoot(document.getElementById("root")!);
 	cleanup = async () => { await act(async () => root.unmount()); };
-	let rendered: QuestionData | undefined, raw: AnswerRequest | undefined, pending = false;
+	let rendered: QuestionData | undefined, raw: AnswerRequest | undefined, pending = false, preparing = false, preparations = 0;
 	const render = async () => { await act(async () => root.render(<QuestionDock toolName="quiz" toolCallId="shuffle-call" input={{ question: "Which?", options: [{ label: "Left", value: "left" }, { label: "Right", value: "right" }], correctAnswer: "right", explanation: "Because" }} expanded onExpand={() => {}} onSubmit={() => assert.fail("must not pregrade before hooks")}
-		hasPendingInput={question => { rendered = question; return pending; }} onPrepareSubmission={capture => { rendered = capture.question; assert.equal(capture.isCurrent(), true); raw = capture.capture(); }} />)); };
+		preparing={preparing} initialDraft={{ selection: { selected: new Set(), otherSelected: false, dontKnow: false }, thinking: "retained native thinking", other: "", text: "", confidenceIndex: 0 }} hasPendingInput={question => { rendered = question; return pending; }} onPrepareSubmission={capture => { preparations++; rendered = capture.question; assert.equal(capture.isCurrent(), true); raw = capture.capture(); }} />)); };
 	await render(); const button = () => document.querySelector('button[type="submit"]')!;
 	assert.equal(button().hasAttribute("disabled"), true);
-	pending = true; await render(); assert.equal(button().hasAttribute("disabled"), false);
+	pending = true; preparing = true; await render(); assert.equal(button().hasAttribute("disabled"), true);
 	await act(async () => { document.querySelector("form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+	assert.equal(preparations, 0); assert.doesNotMatch(document.body.textContent ?? "", /Preparing submission|Cancel/);
+	preparing = false; await render(); assert.equal(button().hasAttribute("disabled"), false);
+	await act(async () => { document.querySelector("form")!.dispatchEvent(new dom.window.Event("submit", { bubbles: true, cancelable: true })); });
+	assert.equal(preparations, 1);
 	assert.ok(rendered); assert.ok(raw); assert.deepEqual(raw.values, []); assert.equal("correct" in raw, false);
+	assert.equal(raw.thinking, "retained native thinking");
 	const transformed = validatePluginBuiltinSubmissionAnswer(rendered, { values: ["right"], confidence: 67.8, images: [] });
 	const graded = buildAnswer(rendered, transformed, "quiz"); assert.equal(graded.correct, true); assert.equal(graded.confidence, 68);
 	assert.equal(graded.answers[0]!.index, rendered.options.findIndex(option => option.value === "right") + 1);

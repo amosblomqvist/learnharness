@@ -55,6 +55,7 @@ import { select } from "d3-selection";
 import { zoom, zoomIdentity, type ZoomBehavior, type ZoomTransform } from "d3-zoom";
 import type { Simulation, SimulationLinkDatum } from "d3-force";
 import { clusterHue, type Pt } from "./cluster-geometry.ts";
+import type { RenderedMode } from "@/src/core";
 import {
 	CHARGE_STRENGTH,
 	CLUSTER_PULL_STRENGTH,
@@ -110,6 +111,20 @@ export interface CanvasCluster {
 	members: string[];
 }
 
+/** Cluster region + label lightness (HSL %), per rendered mode — the
+ *  hues come from clusterHue, only the lightness follows the page. */
+export interface ClusterLightness {
+	ring: number;
+	label: number;
+}
+
+/** Dark keeps the original 60% regions / 78% labels; light darkens both so
+ *  the pastel regions and their labels read on the paper background. */
+export const CLUSTER_LIGHTNESS: Record<RenderedMode, ClusterLightness> = {
+	dark: { ring: 60, label: 78 },
+	light: { ring: 42, label: 30 },
+};
+
 /** Theme colors, resolved to #rrggbb by the caller (canvas wants hex,
  *  and the renderer must not read CSS itself). */
 export interface CanvasColors {
@@ -117,6 +132,7 @@ export interface CanvasColors {
 	edge: string;
 	label: string;
 	hoverText: string;
+	clusterLightness: ClusterLightness;
 }
 
 export interface CanvasData {
@@ -198,11 +214,11 @@ export function wrapRegionLabel(
 			if (!line) {
 				// The word alone overflows: char-split it, the remainder stays
 				// pending for the next line (paths have no spaces to help).
+				const chars = graphemes(word);
 				let chunk = "";
-				while (word.length > 0 && measure(chunk + word[0]) <= maxWidth) {
-					chunk += word[0];
-					word = word.slice(1);
-				}
+				let used = 0;
+				while (used < chars.length && measure(chunk + chars[used]) <= maxWidth) chunk += chars[used++];
+				word = chars.slice(used).join("");
 				if (chunk) {
 					lines.push(chunk);
 					pending[0] = word;
@@ -228,10 +244,17 @@ export function wrapRegionLabel(
 		lines.push(rest);
 		return lines;
 	}
-	let tail = rest;
-	while (tail.length > 1 && measure(`${tail}…`) > maxWidth) tail = tail.slice(0, -1);
-	lines.push(`${tail}…`);
+	const tail = graphemes(rest);
+	while (tail.length > 1 && measure(`${tail.join("")}…`) > maxWidth) tail.pop();
+	lines.push(`${tail.join("")}…`);
 	return lines;
+}
+
+const graphemeSegmenter = new Intl.Segmenter(undefined, { granularity: "grapheme" });
+/** The user-perceived characters of `s` (emoji, flags and accented letters
+ *  stay whole) — the only safe units to split a label between. */
+function graphemes(s: string): string[] {
+	return Array.from(graphemeSegmenter.segment(s), (g) => g.segment);
 }
 
 /** Label-only cluster patch (rename-shuffle fix, 2026-09-23): apply a set
@@ -516,7 +539,7 @@ function wrapLabel(context: CanvasRenderingContext2D, text: string, maxWidth: nu
 			}
 		}
 		let chunk = "";
-		for (const char of word) {
+		for (const char of graphemes(word)) {
 			if (chunk && context.measureText(`${chunk}${char}`).width > maxWidth) {
 				lines.push(chunk);
 				chunk = char;
@@ -1505,7 +1528,7 @@ export class GraphCanvasRenderer {
 			// counted spot (user report 2026-09-14). At alpha 1 the alpha
 			// channel is a pure coverage indicator: overlaps of any count
 			// contribute exactly 1.0.
-			rctx.strokeStyle = `hsla(${hue}, 65%, 60%, 1)`;
+			rctx.strokeStyle = `hsla(${hue}, 65%, ${data.colors.clusterLightness.ring}%, 1)`;
 			rctx.beginPath();
 			// Endpoints actually covered by a stroke's round caps.
 			const touched = new Set<string>();
@@ -1534,7 +1557,7 @@ export class GraphCanvasRenderer {
 			// radius as a round cap = dilation) covers exactly the members no
 			// stroke reached: every member is painted by its edges' caps OR
 			// one disc, never both — the no-double-counting rule survives.
-			rctx.fillStyle = `hsla(${hue}, 65%, 60%, 1)`;
+			rctx.fillStyle = `hsla(${hue}, 65%, ${data.colors.clusterLightness.ring}%, 1)`;
 			const discR = dilationW / cell;
 			for (const id of cluster.members) {
 				if (touched.has(id) || !isVisible(id)) continue;
@@ -1725,7 +1748,7 @@ export class GraphCanvasRenderer {
 			const lineH = (settings.clusterLabelSize * REGION_LABEL_LINE_HEIGHT) / k;
 			for (const rm of this.regionMeta) {
 				if (!rm.lines) continue;
-				ctx.fillStyle = `hsla(${rm.hue}, 55%, 78%, 0.85)`;
+				ctx.fillStyle = `hsla(${rm.hue}, 55%, ${data.colors.clusterLightness.label}%, 0.85)`;
 				const firstOffset = (-(rm.lines.length - 1) / 2) * lineH;
 				for (let i = 0; i < rm.lines.length; i++) {
 					ctx.fillText(rm.lines[i]!, rm.cx, rm.cy + firstOffset + i * lineH);

@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { filePathLabel, parseFilePaths, quoteFilePath } from "../src/core/file-paths.ts";
+import { directoryReferencePath, filePathLabel, isDirectoryReference, parseFilePaths, quoteFilePath } from "../src/core/file-paths.ts";
 
 function paths(text: string) {
 	return parseFilePaths(text).flatMap((part) => part.kind === "path" ? [part.path] : []);
@@ -110,6 +110,33 @@ describe("plain-text file path tokens", () => {
 				assert.deepEqual(paths(quoted), [path]);
 				assertLossless(quoted);
 			}
+		}
+	});
+});
+
+describe("known-directory path references", () => {
+	it("appends only a platform-appropriate separator and leaves existing roots/separators alone", () => {
+		for (const [original, expected] of [
+			["/course/notes", "/course/notes/"], ["/course/folder.pdf", "/course/folder.pdf/"],
+			["/course/has`tick", "/course/has`tick/"], ["/POSIX-name\\", "/POSIX-name\\/"],
+			["~/notes", "~/notes/"], ["/", "/"], ["~/", "~/"],
+			["C:\\notes", "C:\\notes\\"], ["C:\\", "C:\\"], ["C:/", "C:/"],
+			["\\\\server\\share", "\\\\server\\share\\"], ["\\\\server\\share\\", "\\\\server\\share\\"],
+		]) {
+			const marked = directoryReferencePath(original!);
+			assert.equal(marked, expected);
+			assert.equal(isDirectoryReference(marked), true);
+			const saved = JSON.parse(JSON.stringify({ text: quoteFilePath(marked) })).text;
+			assert.deepEqual(paths(saved), [marked]);
+			assertLossless(saved);
+		}
+	});
+	it("never infers directory type from an extensionless name or a literal POSIX backslash", () => {
+		for (const path of ["/course/README", "/historical/folder", "/POSIX-name\\", "C:\\unmarked", "\\\\server\\share"]) {
+			assert.equal(isDirectoryReference(path), false, path);
+		}
+		for (const invalid of ["relative", "", "file:///a", "C:relative", "/a\nb"]) {
+			assert.throws(() => directoryReferencePath(invalid), TypeError);
 		}
 	});
 });

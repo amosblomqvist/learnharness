@@ -2,7 +2,8 @@
 
 Custom **practice problem types** share the native practice lifecycle, not teaching
 questions, a second lifecycle, a separate conclusion tool or a new assessment system.
-This describes the current checkout, including additions beyond released 0.4.1. Public types live in
+This describes the matching source/build. Match the target app using the downloaded skill's
+`bundle.json`; API v1 alone does not identify every available capability. Public types live in
 `src/core/plugin-problems.ts` and the type-only `learnharness-plugin-api` SDK.
 
 ## Shared lifecycle
@@ -13,9 +14,8 @@ This describes the current checkout, including additions beyond released 0.4.1. 
   target validation. Failed/dangling poses do not activate a problem. An acknowledged
   pose ends the turn, including mixed tool batches, and owes no automatic continuation.
   Before acknowledgment, the generic collapsible tool trace is intentionally unchanged:
-  its expandable arguments may include the committed solution. The human explicitly
-  accepted this, like inspectable agent thinking; no streaming presentation hint or
-  additional pose protocol is required. Accepted poses use the statement-only problem card.
+  its expandable arguments may include the committed solution, like inspectable agent
+  thinking. Accepted poses use the statement-only problem card.
 - Every pose has `statement`, `mode: "recall" | "discrimination" | "composition"`, optional
   `target: string[]`, required `modelSolution: string`, and plugin-defined `payload`.
   Common fields and their model-facing descriptions come from the native practice schema.
@@ -208,10 +208,10 @@ is not applicable. Images go through existing structural, byte/MIME, model-capab
 and resize admission. Actual native image blocks reach the model alongside labeled text;
 base64 is not stuffed into the structured submission or model-facing JSON string.
 
-## Verification
+## Testing
 
 Cover saved contracts, the shared native/plugin lifecycle/gate/conclusion, registration
 revocation, processing ownership/cancellation/repeat submissions, images/interceptors,
-controlled dock cleanup/drafts, renderer slots and portable SDK inference. Browser
-component diagnostics with simulated HTTP do not establish packaged-app, real-provider
-or plugin-product release readiness. Native text-practice behavior remains independent.
+controlled dock cleanup/drafts, renderer slots and portable SDK inference. Exercise the
+plugin in an isolated app profile as well as component fixtures. Native text-practice
+behavior remains independent.

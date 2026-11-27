@@ -15,6 +15,7 @@ import type { ModelCatalogResponse } from "../src/core/contracts/models.ts";
 import type { PluginModelSpec } from "../src/core/plugin-agents.ts";
 import type { PluginInferenceOptions, PluginInferenceRequest } from "../src/core/plugins.ts";
 import { usageWasAdmitted, type SubscriptionDispatchLifecycle } from "../src/agent/subscription-request-cycle.ts";
+import { CLAUDE_CODE_PROVIDER } from "../src/agent/claude-code/constants.ts";
 
 const spec = { provider: "fixture", id: "explicit-model", thinkingLevel: "medium" } as const;
 const usage = () => ({ input: 3, output: 4, cacheRead: 1, cacheWrite: 0, totalTokens: 8, cost: { input: 0.1, output: 0.2, cacheRead: 0.01, cacheWrite: 0, total: 0.31 } });
@@ -24,7 +25,7 @@ function output(model: PluginModelSpec = spec): AssistantMessage {
 }
 function listing(model: PluginModelSpec = spec): ModelCatalogResponse {
 	return { models: [{ provider: model.provider, id: model.id, name: "Explicit fixture model", reasoning: true, input: ["text"], supportedLevels: ["off", "medium"], cost: { input: 1, output: 2, cacheRead: 0, cacheWrite: 0 }, contextWindow: 8192, maxTokens: 1024 }],
-		providers: [{ id: model.provider, envVar: "FIXTURE_KEY", keyPresent: true }], defaults: { model }, rolePins: { researcher: { model }, demoBuilder: null, visualMaker: null, extractor: null, auditor: null }, slots: { strong: { model }, cheap: null, vision: null } };
+		providers: [{ id: model.provider, envVar: "FIXTURE_KEY", keyPresent: true }], defaults: { model }, rolePins: { researcher: { model }, demoBuilder: null, visualMaker: null, extractor: null, auditor: null, sideQuestion: null }, slots: { strong: { model }, cheap: null, vision: null } };
 }
 function request(model: PluginModelSpec = spec): PluginInferenceRequest {
 	return { model, purpose: "background", context: { systemPrompt: "Plugin task instructions", messages: [{ role: "user", content: "Explicit task", timestamp: 1 }] } };
@@ -108,6 +109,32 @@ test("complete preserves native tool calls/signatures and appends per-model plug
 	assert.equal(ledger(f.directory).length, 2);
 });
 
+test("one-shot calls own distinct unsaved routing ids across stream/complete and user/background purposes", async (t) => {
+	const f = fixture(t);
+	await Promise.all([
+		f.adapter.inference.complete({ ...request(), purpose: "user" }),
+		f.adapter.inference.complete(request()),
+		collect(f.adapter.inference.stream({ ...request(), purpose: "user" })),
+		collect(f.adapter.inference.stream(request())),
+	]);
+	assert.equal(f.calls.length, 4);
+	const ids = f.calls.map((call) => call.options.sessionId);
+	for (const id of ids) assert.match(id ?? "", /^[0-9a-f-]{36}$/);
+	assert.equal(new Set(ids).size, 4);
+	assert.deepEqual(f.calls.map((call) => call.background).sort(), [false, false, true, true]);
+	assert.deepEqual(readdirSync(f.directory), ["usage.jsonl"], "routing ids create no persisted conversations");
+	for (const id of ids) assert(!readFileSync(join(f.directory, "usage.jsonl"), "utf8").includes(id!));
+});
+
+test("one-shot Claude Code calls never receive a reusable session id", async (t) => {
+	const pin = { ...spec, provider: CLAUDE_CODE_PROVIDER };
+	const f = fixture(t, { model: pin });
+	await f.adapter.inference.complete({ ...request(pin), purpose: "user" });
+	await collect(f.adapter.inference.stream(request(pin)));
+	assert.equal(f.calls.length, 2);
+	for (const call of f.calls) assert.equal(call.options.sessionId, undefined);
+});
+
 test("stream forwards native events without text-only conversion; native error states are returned by complete", async (t) => {
 	const events: AssistantMessageEvent[] = [];
 	const expected = { ...output(), stopReason: "error" as const, errorMessage: "Native provider quota error" };
@@ -154,7 +181,9 @@ test("allowed generation settings are forwarded without host sampling defaults; 
 	const f = fixture(t);
 	const options: PluginInferenceOptions = { temperature: 0.7, maxTokens: 128, cacheRetention: "none", reasoning: "medium", thinkingBudgets: { medium: 64 }, toolChoice: "none", timeoutMs: 1000, maxRetries: 0, maxRetryDelayMs: 0, metadata: { request: "plugin-task" } };
 	await f.adapter.inference.complete({ ...request(), options });
-	assert.deepEqual({ ...f.calls[0]?.options, signal: undefined }, { ...options, signal: undefined });
+	const { sessionId, ...forwarded } = f.calls[0]!.options;
+	assert.match(sessionId ?? "", /^[0-9a-f-]{36}$/);
+	assert.deepEqual({ ...forwarded, signal: undefined }, { ...options, signal: undefined });
 	await f.adapter.inference.complete(request());
 	assert.equal(f.calls[1]?.options.temperature, undefined);
 	assert.equal(f.calls[1]?.options.maxTokens, undefined);
@@ -242,14 +271,55 @@ test("activation abort closes an SDK source even while the plugin is paused betw
 	assert.deepEqual(ledger(f.directory), []);
 });
 
-test("managed engines do not forward Agent transport callbacks, credentials, or caching session identity", async (t) => {
+test("managed engines forward the host session id but not transport callbacks or credentials", async (t) => {
 	const f = fixture(t);
 	const engine = await f.adapter.engineFor(spec, "user");
-	const privateOptions = { apiKey: "secret-not-forwarded", headers: { Authorization: "secret-not-forwarded" }, sessionId: "not-a-plugin-session", fetch: () => { throw new Error("must not be invoked"); }, onPayload: () => { throw new Error("must not be invoked"); }, maxTokens: 64 };
+	const privateOptions = { apiKey: "secret-not-forwarded", headers: { Authorization: "secret-not-forwarded" }, sessionId: "host-session-1", identity: { attribution: { name: "not-forwarded", url: "https://invalid.example" } }, fetch: () => { throw new Error("must not be invoked"); }, onPayload: () => { throw new Error("must not be invoked"); }, onResponse: () => { throw new Error("must not be invoked"); }, onProviderStreamEvent: () => { throw new Error("must not be invoked"); }, maxTokens: 64 };
 	await collect(engine.streamFn(engine.model, normalizeContext({ messages: [] }), privateOptions as never));
 	assert.equal(f.calls[0]?.options.maxTokens, 64);
-	for (const key of ["apiKey", "headers", "sessionId", "fetch", "onPayload"]) assert(!(key in f.calls[0]!.options));
+	assert.equal(f.calls[0]?.options.sessionId, "host-session-1");
+	for (const key of ["apiKey", "headers", "identity", "fetch", "onPayload", "onResponse", "onProviderStreamEvent"]) assert(!(key in f.calls[0]!.options));
 	assert.equal(ledger(f.directory).length, 0, "managed engine usage is written only by its host callback");
+});
+
+for (const sessionId of [undefined, "", null, 123]) test(`managed engines omit invalid or absent host session id ${JSON.stringify(sessionId)}`, async t => {
+	const f = fixture(t);
+	const engine = await f.adapter.engineFor(spec, "user");
+	await collect(engine.streamFn(engine.model, normalizeContext({ messages: [] }), { sessionId } as never));
+	assert(!Object.hasOwn(f.calls[0]!.options, "sessionId"));
+});
+
+test("managed plugin conversations retain host identity across sends and restart without sharing sessions", { timeout: 3000 }, async t => {
+	const f = fixture(t, { produce(stream) {
+		const m = { ...output(), stopReason: "stop" as const, content: [{ type: "text" as const, text: "Done" }] };
+		stream.push({ type: "done", reason: "stop", message: m }); stream.end();
+	} });
+	const store = createPluginAgentRecordStore(join(f.directory, "agents"));
+	const create = () => createPluginAgentService({ store, engineFor: f.adapter.engineFor });
+	const definition = { id: "session-check", instructions: "Offline", model: spec };
+	let service = create();
+	t.after(() => service.dispose());
+	service.register(definition);
+	const first = service.create(definition.id).id, second = service.create(definition.id).id;
+	assert.notEqual(first, second);
+	const send = async (id: string, requestId: string) => {
+		await service.send(id, "Offline", { requestId });
+		await new Promise<void>(resolve => {
+			const unsubscribe = service.subscribe(id, snapshot => {
+				if (snapshot.status !== "running") queueMicrotask(() => { unsubscribe(); resolve(); });
+			});
+		});
+		assert.equal(service.get(id).status, "idle");
+	};
+	await send(first, "first-send");
+	await send(second, "separate-session");
+	await send(first, "second-send");
+	await service.dispose();
+	service = create();
+	service.register(definition);
+	assert.equal(f.calls.length, 3, "restoring conversations does not replay requests");
+	await send(first, "after-restart");
+	assert.deepEqual(f.calls.map(call => call.options.sessionId), [first, second, first, first]);
 });
 
 test("held managed engines inherit activation cancellation and revalidate provider availability at dispatch", async (t) => {
@@ -396,7 +466,7 @@ test("incomplete transport streams become explicit errors; usage persistence fai
 	assert.equal(readFileSync(join(g.directory, "usage.jsonl"), "utf8"), "existing ledger\n");
 });
 
-test("bound worker generation options survive every native runner turn without leaking transport identity or changing purpose", async t => {
+test("bound worker generation options survive every native runner turn with one host session id", async t => {
 	const f = fixture(t, { produce(stream, dispatched) {
 		const m = f.calls.length === 1 ? output(dispatched.model) : { ...output(dispatched.model), stopReason: "stop" as const, content: [{ type: "text" as const, text: "Finished" }] };
 		stream.push({ type: "done", reason: m.stopReason as "toolUse" | "stop", message: m }); stream.end();
@@ -409,18 +479,21 @@ test("bound worker generation options survive every native runner turn without l
 		onUsage: value => { assert(usageWasAdmitted(value)); f.adapter.onUsage(spec, value); },
 	});
 	assert.equal(result.text, "Finished"); assert.equal(f.calls.length, 2); assert.equal(ledger(f.directory).length, 2);
+	const sessionId = f.calls[0]!.options.sessionId;
+	assert.match(String(sessionId), /^[0-9a-f-]{36}$/);
 	for (const call of f.calls) {
 		assert.equal(call.background, true); assert.equal(call.options.temperature, 0.3); assert.equal(call.options.maxTokens, 77); assert.equal(call.options.cacheRetention, "long");
 		assert.deepEqual(call.options.metadata, { tag: "original" }); assert.equal(call.options.reasoning, "medium"); assert.equal(call.options.maxRetries, 0);
-		assert.equal(call.options.apiKey, undefined); assert.equal(call.options.headers, undefined); assert.equal(call.options.sessionId, undefined); assert(call.options.signal instanceof AbortSignal);
+		assert.equal(call.options.sessionId, sessionId); assert.equal(call.options.apiKey, undefined); assert.equal(call.options.headers, undefined); assert(call.options.signal instanceof AbortSignal);
 	}
 });
 
 test("engine option binding rejects unsupported transport fields and reasoning overrides before dispatch", async t => {
 	const f = fixture(t);
-	for (const invalid of [{ apiKey: "secret" }, { signal: new AbortController().signal }, { sessionId: "foreign" }, { temperature: NaN }]) {
-		await assert.rejects(f.adapter.engineFor(spec, "user", invalid as never), /Unsupported|Invalid/);
+	for (const key of ["sessionId", "identity", "apiKey", "headers", "fetch", "onPayload", "onResponse", "onProviderStreamEvent", "signal"]) {
+		await assert.rejects(f.adapter.engineFor(spec, "user", { [key]: "plugin-controlled" } as never), new RegExp(`Unsupported plugin inference option: ${key}`));
 	}
+	await assert.rejects(f.adapter.engineFor(spec, "user", { temperature: NaN }), /Invalid/);
 	await assert.rejects(f.adapter.engineFor(spec, "user", { reasoning: "high" }), /thinkingLevel/);
 	assert.equal(f.calls.length, 0);
 });

@@ -30,7 +30,7 @@ for (const status of ["succeeded", "failed", "cancelled", "interrupted"] as cons
 			const icon = header.querySelector("svg")!;
 			const expected = status === "succeeded" ? "lucide-check" : status === "failed" ? "lucide-x" : "lucide-circle-x";
 			assert.ok(icon.classList.contains(expected), `uses existing native ${expected} glyph`);
-			assert.equal(icon.classList.contains("text-red-500"), status === "failed");
+			assert.equal(icon.classList.contains("text-error"), status === "failed");
 			assert.equal(icon.getAttribute("aria-hidden"), "true", "status is announced once through text, not the glyph");
 			assert.match(html, /Readable result/);
 			if (presentation === "collapsed") {

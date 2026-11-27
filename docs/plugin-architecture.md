@@ -2,8 +2,7 @@
 
 This is the host-maintainer map. Start with the [authoring guide](plugin-authoring.md)
 for plugin code and use feature contracts for normative public behavior. It describes
-the current checkout, including additions beyond released 0.4.1; it is not a release
-verification report.
+the matching source/build's API v1.
 
 ## Boundaries and ownership
 
@@ -237,7 +236,7 @@ The existing per-window app notification connection carries availability/app eve
 namespaced plugin messages. It is not a durable arbitrary-event log. Reconnect invokes
 resync callbacks; observers fetch current snapshots and release subscriptions on cleanup.
 
-## Verification
+## Testing
 
 Maintain tests at each actual boundary:
 
@@ -254,8 +253,9 @@ Maintain tests at each actual boundary:
   including real input owners and inline/overflow top-bar actions.
 - Durable agent/task state, accepted-result preservation and fallback delivery recovery.
 - Portable SDK compilation and curated authoring docs/examples/type payload.
+- Complete generated API-reference coverage and canonical official-source export fidelity.
 
-Run root tests/typecheck/lint and relevant plugin tests. Production verification additionally
+Run root tests/typecheck/lint and relevant plugin tests. Production checks additionally
 needs a clean-checkout build, curated standalone/privacy audit and isolated packaged
 runtime/browser checks; passing component fixtures is not packaged-app proof. Use
 throwaway learner/auth directories and loopback providers rather than live accounts or
@@ -263,11 +263,27 @@ replacing the installed app. Relevant tools include `build-plugin-types.mjs`,
 `build-server.mjs`, `smoke-plugin-runtime.mjs`, `smoke-plugin-browser.mjs` and
 `smoke-server.mjs` under `scripts/`.
 
-Historical implementation/test counts and temporary evidence paths are preserved in
-[implementation history](archive/plugin-implementation-history.md), not mixed into the
-current contract. They describe their original scope and are not evidence that the
-current combined tree, signed installers, real providers, microphone/OS IME or every
-platform has been verified for release.
+### Maintaining the authoring reference
+
+The [API reference](plugin-api/README.md) is generated Markdown, not a second hand-written
+schema. Edit canonical public-contract JSDoc and behavioral guides, then regenerate from
+the matching declarations in a source checkout with its existing dependencies:
+
+```sh
+node scripts/build-plugin-types.mjs dist/plugin-sdk
+node scripts/build-plugin-api-reference.mjs dist/plugin-sdk docs/plugin-api
+```
+
+`tests/plugin-api-reference.test.ts` independently inventories SDK exports and checks
+the committed reference against fresh generation, including overloads, nested methods
+and referenced local supporting types. Context methods are callable host capabilities;
+the type-only SDK does not expose the host's implementation helpers at runtime.
+
+`npm run plugins:build-authoring` generates its reference directly from the staged SDK
+and exports the canonical official projects without their local builds/dependencies/data.
+Bundle tests check source-file identity, privacy/path admission, deterministic archives
+and self-contained links. Keep the API reference, [example map](plugin-examples.md) and
+project README instructions consistent when adding a capability or source example.
 
 ## Non-goals
 

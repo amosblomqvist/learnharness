@@ -48,6 +48,24 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 		description: "Web-search engine for the researcher sub-agent — the alternative to Tavily. Setting the key activates it.",
 		docsUrl: "https://brave.com/search/api/",
 	},
+	{
+		id: "EXA_API_KEY",
+		label: "Exa",
+		description: "Web-search engine for the researcher. Search requests use your Exa account and its pricing.",
+		docsUrl: "https://dashboard.exa.ai/api-keys",
+	},
+	{
+		id: "FIRECRAWL_API_KEY",
+		label: "Firecrawl",
+		description: "Web-search engine for the researcher sub-agent — an alternative to Tavily and Brave. Setting the key activates it.",
+		docsUrl: "https://www.firecrawl.dev/app/api-keys",
+	},
+	{
+		id: "OLLAMA_API_KEY",
+		label: "Ollama",
+		description: "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models.",
+		docsUrl: "https://ollama.com/settings/keys",
+	},
 ] as const;
 
 const AUTH_KEY_IDS: ReadonlySet<string> = new Set(AUTH_KEYS.map((k) => k.id));
@@ -81,7 +99,7 @@ export interface AuthProviderInfo {
  * account-scoped pair. Anthropic keeps ANTHROPIC_API_KEY only — its
  * AUTH_TOKEN/OAUTH_TOKEN alternates stay env-only. openai-codex exposes
  * no env-key (naturally absent). Providers sharing one env var (moonshotai
- * / moonshotai-cn, opencode / opencode-go, the qwen-token-plan pair,
+ * / moonshotai-cn, opencode / opencode-go, Qwen Token Plan variants,
  * xiaomi variants) each keep their own row — the UI groups as it wishes.
  */
 export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
@@ -109,6 +127,7 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 	{ id: "qwen-token-plan", envVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan" },
 	{ id: "qwen-token-plan-cn", envVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan CN" },
 	{ id: "qwen-token-plan-individual", envVar: "QWEN_TOKEN_PLAN_API_KEY", label: "Qwen Token Plan Individual" },
+	{ id: "qwen-token-plan-individual-cn", envVar: "QWEN_TOKEN_PLAN_CN_API_KEY", label: "Qwen Token Plan Individual CN" },
 	{ id: "radius", envVar: "RADIUS_API_KEY", label: "Radius" },
 	{ id: "together", envVar: "TOGETHER_API_KEY", label: "Together" },
 	{ id: "typesafe", envVar: "TYPESAFE_API_KEY", label: "TypeSafe" },
@@ -153,8 +172,8 @@ export type KeyShapeResult = { ok: true } | { ok: false; error: string };
  * a truncated or wrong-family key can never land in the store). Values are
  * TRIMMED first (paste hygiene); empty-after-trim always fails.
  *
- * CURATED keys carry family rules (Tavily's tvly-… prefix; Brave and
- * Deepgram publish no format — length floors + paste hygiene only).
+ * CURATED keys carry family rules (Tavily's tvly-… and Firecrawl's fc-…
+ * prefixes; Brave, Exa, Ollama and Deepgram use length floors + paste hygiene only).
  * MODEL-PROVIDER keys use genericProviderKeyGuard below instead (families
  * vary by provider — only paste hygiene applies; owner spec: min length
  * ~12, no whitespace). OPENROUTER_API_KEY moved to the generic guard with
@@ -174,6 +193,14 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "BRAVE_API_KEY":
 			// No public format — a length floor + paste hygiene only.
 			return nonEmpty(20);
+		case "EXA_API_KEY":
+		case "OLLAMA_API_KEY":
+			// No documented key prefix: use the provider-key paste guard.
+			return nonEmpty(12);
+		case "FIRECRAWL_API_KEY":
+			return value.startsWith("fc-")
+				? nonEmpty(20)
+				: { ok: false, error: `${id} must start with "fc-" (Firecrawl's key format)` };
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);

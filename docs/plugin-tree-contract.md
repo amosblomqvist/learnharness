@@ -178,10 +178,9 @@ return () => {
 };
 ```
 
-## Verification
+## Testing
 
 Test controlled controls/occurrence keys, content retention across updates, collapse/remount,
 late cleanup, editable/nested-widget keyboard isolation, native Chains regressions and
 fitting-width header/body alignment. Underconstrained layouts remain the caller's
-responsibility, not an alignment guarantee. Historical geometry/browser evidence and
-its scope are preserved in the [implementation archive](archive/plugin-implementation-history.md#shared-tree-checkpoint).
+responsibility, not an alignment guarantee.

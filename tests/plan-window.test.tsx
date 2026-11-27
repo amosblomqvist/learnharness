@@ -2,7 +2,8 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { PlanMarginalia, planExists } from "../components/plan-window.tsx";
-import { blockLayout, edgePathD, type LayoutNode, type PopupMessage } from "../components/plan-block.tsx";
+import type { PopupMessage } from "../components/plan-block.tsx";
+import { blockLayout, chartMeasure, edgePathD, type LayoutNode } from "../components/plan-layout.ts";
 import type { PlanTree } from "../src/core/contracts.ts";
 
 // The plan marginalia: the bare diagram in the dock band's right flank —
@@ -66,7 +67,7 @@ describe("PlanMarginalia render", () => {
 		const html = renderToStaticMarkup(<PlanMarginalia messages={transcript(CHAIN)} />);
 		// The viewBox covers the whole layout plus the glow-clearing pad —
 		// never the retired window's 2:1 crop.
-		const layout = blockLayout(CHAIN.nodes, CHAIN.edges);
+		const layout = blockLayout(CHAIN.nodes, CHAIN.edges, chartMeasure);
 		const pad = 24; // MARGIN_PAD: GRAPH_PAD + 16 (glow halo clearance)
 		const vb = `viewBox="${-pad} ${-pad} ${layout.width + 2 * pad} ${layout.height + 2 * pad}"`;
 		assert.ok(html.includes(vb), `expected ${vb} in the svg`);
@@ -133,7 +134,7 @@ const LINEAR_ALGEBRA_EDGES: ReadonlyArray<{ from: string; to: string }> = [
 
 describe("blockLayout ink extent", () => {
 	it("covers every edge path's control points — arrows never clip (owner, 2026-10-10)", () => {
-		const L = blockLayout(LINEAR_ALGEBRA_NODES, LINEAR_ALGEBRA_EDGES);
+		const L = blockLayout(LINEAR_ALGEBRA_NODES, LINEAR_ALGEBRA_EDGES, chartMeasure);
 		// The viewBox extent must reach the furthest control point of
 		// every drawn edge (a bezier never leaves its control-point hull).
 		let ctrlMaxX = -Infinity;
@@ -158,7 +159,7 @@ describe("blockLayout ink extent", () => {
 	});
 
 	it("the real plan's overhang actually EXTENDS the canvas past the node extent", () => {
-		const L = blockLayout(LINEAR_ALGEBRA_NODES, LINEAR_ALGEBRA_EDGES);
+		const L = blockLayout(LINEAR_ALGEBRA_NODES, LINEAR_ALGEBRA_EDGES, chartMeasure);
 		let nodeMaxX = -Infinity;
 		for (const n of LINEAR_ALGEBRA_NODES)
 			nodeMaxX = Math.max(nodeMaxX, (L.x.get(n.id) ?? 0) + (L.nodeW.get(n.id) ?? 0));

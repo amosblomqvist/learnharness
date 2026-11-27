@@ -27,6 +27,9 @@ for (const varName of [
 	"DEEPGRAM_API_KEY",
 	"TAVILY_API_KEY",
 	"BRAVE_API_KEY",
+	"EXA_API_KEY",
+	"FIRECRAWL_API_KEY",
+	"OLLAMA_API_KEY",
 	"GOOGLE_SEARCH_API_KEY",
 	"GOOGLE_CSE_ID",
 	"OPENAI_API_KEY",
@@ -74,6 +77,13 @@ describe("boot fill-gap + precedence", () => {
 		assert.equal(row.masked, `…${ENV_OWNED.slice(-4)} (${ENV_OWNED.length} chars)`);
 		assert.equal(authStore.authVars().OPENROUTER_API_KEY, "sk-or-v1-filefilefile", "file copy untouched");
 		assert.equal(externalCliEnv().OPENROUTER_API_KEY, ENV_OWNED, "external CLIs retain launch-env ownership");
+	});
+
+	it("external CLIs never receive the desktop API capability", () => {
+		const env = externalCliEnv({ ...process.env, PATH: "/usr/bin", LH_DESKTOP_SERVER: "1", LH_DESKTOP_API_SECRET: "d".repeat(64) });
+		assert.equal(env.LH_DESKTOP_API_SECRET, undefined);
+		assert.equal(env.LH_DESKTOP_SERVER, undefined);
+		assert.equal(env.PATH, "/usr/bin", "ordinary launch env is kept");
 	});
 
 	it("unknown file var: fill-gapped into env, surfaced as a generic row", () => {

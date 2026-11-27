@@ -10,28 +10,19 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
   const subscriptions: (() => void)[] = [];
   let disposed = false;
   let resync: Promise<void> = Promise.resolve();
-  const rows = (settings: Settings): PluginSettingsSchema["rows"] => [...FAMILIES.map(family => ({
+  const rows = (settings: Settings): PluginSettingsSchema["rows"] => FAMILIES.map(family => ({
     key: family, type: "toggle" as const, label: LABELS[family], value: settings[family],
     async onChange(enabled: boolean) {
       const accepted = await ctx.call("set-family", { family, enabled });
       if (!disposed && !ctx.signal.aborted) apply(accepted);
     },
-  })), {
-    key: "inkColor", type: "dropdown", label: "Ink color", value: settings.inkColor,
-    description: "Neutral text and linework on a transparent background. Intentional colors are preserved.",
-    options: [{ value: "white", label: "White" }, { value: "black", label: "Black" }],
-    async onChange(inkColor: string) {
-      const accepted = await ctx.call("set-ink-color", { inkColor });
-      if (!disposed && !ctx.signal.aborted) apply(accepted);
-    },
-  }];
+  }));
   function apply(value: unknown): void {
     if (disposed || ctx.signal.aborted) return;
     const next = parseSettings(value);
     if (current && next.revision <= current.revision) return;
     const familiesChanged = !current || FAMILIES.some(family => current![family] !== next[family]);
     current = next;
-    rendering.setInkColor(next.inkColor);
     for (const family of FAMILIES) {
       const unregister = renderers.get(family);
       if (next[family] && !unregister) renderers.set(family, ctx.registerCodeBlock({

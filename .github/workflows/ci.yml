@@ -67,5 +67,7 @@ jobs:
       - run: npm run build
       # Check the fresh trace before any static copying/curation.
       - run: node scripts/smoke-provider-runtime.mjs
+      # Plan map labels fit their boxes in real Chrome, in any font (#671).
+      - run: node scripts/smoke-plan-labels.mjs
       - run: node scripts/build-server.mjs
       - run: node scripts/smoke-server.mjs --electron

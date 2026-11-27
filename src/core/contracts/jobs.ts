@@ -4,14 +4,14 @@
  * Part of the domain-split contracts (src/core/contracts/): each domain file
  * is owned outright by its stream — cross-domain schema changes go through
  * master. Pure types + protocol docs + tiny pure helpers; type-only imports
- * of "ai" (safe everywhere: server, client, tests). See docs/vision.md.
+ * of "ai" (safe everywhere: server, client, tests). See docs/archive/vision.md.
  */
 import type { CallUsage } from "./chat.ts";
 import type { PluginBackgroundResult } from "../plugin-workers.ts";
 import type { LhMessage, LhMarkerMessage } from "../native-messages.ts";
 import { newHandoffMessage } from "../native-messages.ts";
 
-// ─── Async sub-agent jobs (vision §2.5; plan.md Wave 0 protocol) ────────────
+// ─── Async sub-agent jobs (docs/archive/vision.md §2.5; docs/archive/plan.md Wave 0 protocol) ────────────
 
 export type BuiltinJobKind = "research" | "demo" | "visual" | "pdf";
 export type JobKind = BuiltinJobKind | "plugin";
@@ -60,14 +60,11 @@ export interface JobRecord {
 	plugin?: PluginJobMetadata;
 }
 
-/** A sub-agent run's accumulated usage — the same accounting shape as a
- * chat turn (contracts/chat.ts CallUsage), flattened to one running total
- * plus a step count. Token fields are optional exactly like CallUsage: a
- * field NO model call reported stays undefined — absent is not zero (the
- * money-channel doctrine; cost renders "—", never $0). */
+/** Accumulated model usage for one worker run: token totals plus a call
+ * count, with optional per-call accounting. As with CallUsage, a token field
+ * no call reported remains undefined; missing usage must not imply zero cost. */
 export interface JobUsage {
-	/** The model that ran the sub-agent, provider-qualified ("provider:id" —
-	 *  model slots wave, 2026-09-20; matches Pi catalog lookup keys). */
+	/** Provider-qualified model identity (provider:id) for catalog lookup. */
 	model: string;
 	/** Running totals summed over the run's model calls so far. */
 	inputTokens: number | undefined;
@@ -81,12 +78,9 @@ export interface JobUsage {
 	calls?: CallUsage[];
 	/** How many model calls the run has made (each bills separately). */
 	steps: number;
-	/** The MOST RECENT model call's accounting (2026-09 dock contract): the
-	 *  per-blob context line reads last-step input+output against the
-	 *  model's LIVE catalog limit (server-joined onto the activity feed —
-	 *  never the cumulative totals, never a client-side table). Absent
-	 *  until the first call completes; absent provider fields stay absent
-	 *  (never zero). */
+	/** Most recent completed model call's accounting, used for current context
+	 * usage rather than cumulative totals. Absent until a call completes;
+	 * unreported provider fields remain undefined. */
 	lastStep?: CallUsage;
 }
 
@@ -213,7 +207,19 @@ export interface ResearchToolInput {
 
 export interface ResearchResult {
 	brief: string;
+	/** Rendered as links, so only http(s) URLs belong here (isWebSourceUrl).
+	 *  Records saved before that rule may still hold other schemes. */
 	sources: { title: string; url: string }[];
+}
+
+/** True for http(s) URLs: the only research sources that become links. */
+export function isWebSourceUrl(url: string): boolean {
+	try {
+		const { protocol } = new URL(url);
+		return protocol === "http:" || protocol === "https:";
+	} catch {
+		return false;
+	}
 }
 
 export interface DemoToolInput {
@@ -234,12 +240,24 @@ export interface DemoResult {
 export interface VisualToolInput {
 	/** Precise brief for ONE visual (what it must show, exactly). */
 	brief: string;
+	/** A learner image file to annotate (issue #363): the maker draws its
+	 *  marks on top of it instead of authoring a figure from scratch. */
+	image?: string;
+	/** A page of the learner's PDF: the maker crops the figure the brief
+	 *  names from it and annotates the crop. Never set with image. */
+	pdf?: { path: string; page: number };
 }
 
 export interface VisualResult {
-	/** Complete SVG markup (verified by the maker looking at the render). */
+	/** Complete SVG markup (verified by the maker looking at the render).
+	 *  Annotation SVGs retain a learner-image placeholder; image identifies the session snapshot. */
 	svg: string;
 	notes?: string;
+	/** Present when the figure annotates a learner image: its absolute
+	 *  path. Photos never invert, so the card hides the switch. From a PDF,
+	 *  path is the PDF, page is 1-based, and crop (page fractions from the
+	 *  top-left) is absent when the whole page was annotated. */
+	image?: { path: string; snapshotId: string; page?: number; crop?: { x: number; y: number; width: number; height: number } };
 }
 
 /** The pdf-reader (sources v0, 2026-09): reads a learner-provided PDF on
@@ -377,6 +395,10 @@ function steerText(kind: JobKind, result: JobResult): string {
 		return `The demo "${(result as DemoResult).title}" is built, headlessly tested, and rendered in the lesson. Builder notes: ${
 			(result as DemoResult).notes ?? "(none)"
 		}.\nTeach with it — reference its controls by name and point the learner at what to try.`;
+	if ((result as VisualResult).image)
+		return `The annotated image is drawn, verified by inspection, and rendered in the lesson. Maker notes: ${
+			(result as VisualResult).notes ?? "(none)"
+		}.\nReference its marks as you teach.`;
 	return `The figure is drawn, verified by inspection, and rendered in the lesson. Maker notes: ${
 		(result as VisualResult).notes ?? "(none)"
 	}.\nReference its elements as you teach.`;
@@ -451,7 +473,7 @@ function abortText(kind: JobKind): string {
 	return "The figure job was aborted by the learner — no figure is coming. Acknowledge it in one line and teach without it (a re-dispatch is fine if the learner wants it).";
 }
 
-// ─── the probe handoff steer (the probe→teach split, docs/probe-teach-split.md §2) ──
+// ─── the probe handoff steer (the probe→teach split, docs/archive/probe-teach-split.md §2) ──
 //
 // probe_done's execute queues this through the same wake pipeline; the
 // pump fires it once the prober's turn ends (gates + grace). It carries no

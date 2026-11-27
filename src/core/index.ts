@@ -16,10 +16,12 @@
  */
 
 export * from "./contracts.ts";
+export { embedLearnerImage } from "./learner-image-svg.ts";
 export * from "./ports.ts";
 export * from "./chains.ts";
 export * from "./source-organization.ts";
 export * from "./source-selection.ts";
+export * from "./session-folders.ts";
 export * from "./source-label.ts";
 export * from "./render-settings.ts";
 
@@ -46,8 +48,11 @@ export * from "./native-messages.ts";
 export { copyImmutableData } from "./immutable-data.ts";
 export * from "./compaction.ts";
 export * from "./input-events.ts";
-export { parseFilePaths, quoteFilePath, filePathLabel } from "./file-paths.ts";
+export { parseFilePaths, quoteFilePath, filePathLabel, isDirectoryReference, directoryReferencePath } from "./file-paths.ts";
 export type { FilePathPart } from "./file-paths.ts";
+export * from "./citations.ts";
+export { parseComposerTokens } from "./composer-tokens.ts";
+export type { ComposerToken } from "./composer-tokens.ts";
 // Wave D (owner-approved 2026-09-26): the client view model — the grouping
 // canon (one continuous assistant document, step separators) ported from
 // the deleted server projection to the client side. Pure, browser-safe.
@@ -66,6 +71,11 @@ export * from "./fuzzy.ts";
 // the user-settings record's shape/sanitizer (pure) and its fully-resolved
 // view. Browser-safe — the Wave-4 panel imports these directly.
 export * from "./settings.ts";
+export * from "./file-access.ts";
+// themes.ts (theme wave, 2026-11-04): the 12-color theme vocabulary, the
+// presets and the theme → CSS-token adapter — pure, shared by the layout,
+// the provider, Settings and the themes API.
+export * from "./themes.ts";
 export * from "./dictation.ts";
 // graph-deletion.ts (wave 6): the whole module is PURE but storage-port
 // driven — the deletion RUNS server-side only. The shell needs exactly one
@@ -89,6 +99,9 @@ export * from "./coverage.ts";
 // ONE session→markdown formatter — the extractor's view and the user-facing
 // export share it. Pure, browser-safe.
 export * from "./session-markdown.ts";
+// side-chat.ts (shared side conversations): ask-input validation,
+// thread lookup and the side model's lesson document. Pure, browser-safe.
+export * from "./side-chat.ts";
 export * from "./plugins.ts";
 export * from "./plugin-questions.ts";
 export * from "./plugin-problems.ts";

@@ -118,12 +118,13 @@ function boot() {
 		loadURL(url: string) { windows.push(url); }
 	}
 	const electron = {
-		app, BrowserWindow: FakeWindow, ipcMain: Object.assign(new EventEmitter(), { handle() {} }),
+		app, BrowserWindow: FakeWindow, nativeTheme: { themeSource: "system" }, ipcMain: Object.assign(new EventEmitter(), { handle() {} }),
 		Menu: { buildFromTemplate() {}, setApplicationMenu() {} },
 		session: { defaultSession: { setPermissionRequestHandler() {}, setPermissionCheckHandler() {} } },
 	};
 	const context = {
 		require: (id: string) => id === "electron" ? electron : id === "node:fs" ? { mkdirSync() {}, appendFileSync() {} }
+			: id === "./appearance-chrome.cjs" ? { ...mainRequire(id), readAppearance: () => ({ mode: "dark", background: "#141414" }) }
 			: id === "./dev-server-readiness.cjs" ? { waitForDevServer: (url: string, { signal }: { signal: AbortSignal }) => {
 				probes.push({ url, signal }); signal.addEventListener("abort", () => fail(signal.reason), { once: true }); return readiness;
 			} } : mainRequire(id),

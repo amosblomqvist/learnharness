@@ -35,6 +35,12 @@ test("config opts out each mutable path producer, retaining the shipped prompt a
 	for (const call of mutable) assert.ok(ignored(call), `Runtime path must not ship: ${call.getText(file)}`);
 });
 
+test("selected/imported custom theme filenames never become deployment assets", () => {
+	const { file, calls, ignored } = paths("src/store/themes.ts");
+	assert.equal(calls.length, 1);
+	assert.ok(ignored(calls[0]!), `Runtime theme path must not ship: ${calls[0]!.getText(file)}`);
+});
+
 test("plugin runtime and background capture paths never become deployment assets", () => {
 	for (const relative of ["src/server/plugins.ts", "src/agent/background-capture.ts"]) {
 		const { file, calls, ignored } = paths(relative);

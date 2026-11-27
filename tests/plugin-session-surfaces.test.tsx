@@ -10,6 +10,7 @@ import { SurfaceRegion, usePageSurfaceBoundary, useSurfaceChromeStyle } from "..
 import { findCurrentSurfaceBoundary, findSurfaceBoundary } from "../components/plugin-surface-targets.ts";
 import { isInteractionScopeEligible } from "../components/plugin-input-focus.ts";
 import { HostDialog } from "../components/host-dialog.tsx";
+import { SideThreadPopover } from "../components/side-thread.tsx";
 import { installModalDom } from "./modal-dom.ts";
 import type { PluginSurfaceProps, PluginSurfaceTarget, PluginUi, PluginUiContent, PluginWidgetHandle } from "../src/core/plugin-ui.ts";
 
@@ -23,7 +24,7 @@ const { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } = await impor
 for (const [key, descriptor] of bootstrapGlobals) { if (descriptor) Object.defineProperty(globalThis, key, descriptor); else Reflect.deleteProperty(globalThis, key); }
 
 type Handle = PluginWidgetHandle<PluginSurfaceProps>;
-interface ViewOptions { active?: boolean; viewKey?: string; nativeView?: boolean; settings?: boolean; retainedHidden?: boolean; tooltipContainer?: HTMLElement }
+interface ViewOptions { active?: boolean; viewKey?: string; nativeView?: boolean; settings?: boolean; retainedHidden?: boolean; helper?: boolean; tooltipContainer?: HTMLElement }
 interface Fixture {
 	ui: PluginUi;
 	store: ReturnType<typeof createPluginUiStore>;
@@ -33,7 +34,8 @@ interface Fixture {
 	render(options: ViewOptions): Promise<void>;
 	open(title: string, content?: PluginUiContent, ui?: PluginUi): Promise<Handle>;
 	openCurrent(title: string, content?: PluginUiContent, ui?: PluginUi): Promise<Handle>;
-	escape(): Promise<void>;
+	escape(target?: HTMLElement): Promise<void>;
+	readonly helperCloses: number;
 }
 function NativeFocus() {
 	const root = useRef<HTMLDivElement>(null);
@@ -58,7 +60,8 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>, onMount?: (
 	const root = createRoot(document.querySelector("#root")!);
 	let token: PluginSurfaceTarget | undefined;
 	let controller!: InteractionLayersController;
-	let state: Required<Omit<ViewOptions, "tooltipContainer">> & Pick<ViewOptions, "tooltipContainer"> = { active: true, viewKey: "session-a", nativeView: false, settings: false, retainedHidden: false };
+	let helperCloses = 0;
+	let state: Required<Omit<ViewOptions, "tooltipContainer">> & Pick<ViewOptions, "tooltipContainer"> = { active: true, viewKey: "session-a", nativeView: false, settings: false, retainedHidden: false, helper: false };
 	function Boundary() {
 		controller = useInteractionLayers();
 		const body = useRef<HTMLDivElement>(null);
@@ -68,6 +71,9 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>, onMount?: (
 			<main data-host-main="" style={{ isolation: "isolate" }}><div ref={body} data-session-body="" className="relative flex min-h-0 flex-1">
 				<div data-native-body=""><h2 tabIndex={-1}>Session</h2><input data-native-input="" /><button>Native Submit</button></div>
 				{onMount && <DirectViewMount ui={ui} mount={onMount} />}
+				{state.helper && <SideThreadPopover state={{ threadId: "helper", segmentId: "segment", messages: [], answering: false, streamText: "", mode: "popover", anchor: { kind: "element", element: document.body } }} chatId="fixture"
+					composer={() => document.querySelector("[data-native-input]")} draft="Retained helper draft"
+					onAsk={async () => true} onStop={() => {}} onExpand={() => {}} onFloat={() => {}} onClose={() => { helperCloses++; }} />}
 				<SurfaceRegion target={token}>{state.nativeView && <NativeFocus />}</SurfaceRegion>
 			</div><div data-floating-chrome="" style={chromeStyle}>Floating page chrome</div></main>
 			{state.tooltipContainer && createPortal(<TooltipProvider><Tooltip open><TooltipTrigger>Owned hint trigger</TooltipTrigger><TooltipContent>Owned passive hint</TooltipContent></Tooltip></TooltipProvider>, state.tooltipContainer)}
@@ -75,7 +81,7 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>, onMount?: (
 		</>;
 	}
 	const fixture: Fixture = {
-		ui, store, lifetime, get controller() { return controller; },
+		ui, store, lifetime, get controller() { return controller; }, get helperCloses() { return helperCloses; },
 		target() { assert.ok(token); return token; },
 		async render(options) {
 			state = { ...state, ...options };
@@ -92,10 +98,10 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>, onMount?: (
 			await act(async () => { handle = owner.openSurface({ title, content }, { signal: new AbortController().signal }); });
 			return handle;
 		},
-		async escape() {
+		async escape(target) {
 			const event = new dom.window.Event("keydown", { bubbles: true, cancelable: true });
 			Object.assign(event, { key: "Escape" });
-			await act(async () => { controller.captureKeyDown(event as KeyboardEvent); document.dispatchEvent(event); });
+			await act(async () => { controller.captureKeyDown(event as KeyboardEvent); (target ?? document).dispatchEvent(event); });
 		},
 	};
 	try { await fixture.render({}); await run(fixture); }
@@ -108,6 +114,30 @@ async function withFixture(run: (fixture: Fixture) => Promise<void>, onMount?: (
 		}
 	}
 }
+it("an already-open floating helper is native session content: covered and inactive, then restored without losing its draft", async () => withFixture(async f => {
+	await f.render({ helper: true });
+	const boundary = findSurfaceBoundary(f.target())!;
+	const helper = document.querySelector<HTMLElement>("[data-testid='side-thread-popover']")!;
+	const input = helper.querySelector<HTMLTextAreaElement>("textarea")!;
+	assert.equal(helper.parentElement === boundary.body, true, "fixed geometry does not escape native-body coverage via a body portal");
+	assert.equal(f.controller.getSnapshot().length, 0, "the companion is not a popup that blocks its main composer");
+	assert.equal(isInteractionScopeEligible(input, f.controller), true);
+	assert.equal(isInteractionScopeEligible(document.querySelector("[data-native-input]"), f.controller), true);
+	const handle = await f.open("Cover the native session", inputContent("Plugin input"));
+	assert.equal(helper.hasAttribute("inert"), true);
+	assert.equal(helper.getAttribute("aria-hidden"), "true");
+	assert.equal(isInteractionScopeEligible(input, f.controller), false);
+	assert.equal(input.value, "Retained helper draft");
+	await f.escape(input);
+	assert.equal(f.helperCloses, 0, "even a queued key targeting the covered field cannot close the helper");
+	assert.equal(helper.hasAttribute("inert"), false);
+	assert.equal(helper.hasAttribute("aria-hidden"), false);
+	assert.equal(isInteractionScopeEligible(input, f.controller), true);
+	assert.equal(document.querySelector("[data-testid='side-thread-popover']") === helper, true);
+	assert.equal(input.value, "Retained helper draft");
+	handle.dispose();
+}));
+
 const inputContent = (label: string): PluginUiContent => container => {
 	const input = document.createElement("input"); input.setAttribute("aria-label", label); container.append(input);
 };
@@ -667,6 +697,12 @@ for (const expiry of ["dispose", "leave"] as const) {
 			stale.update({ label: "Too late" }); stale.dispose();
 		});
 		assert.equal(f.store.getSnapshot().length, 0); assert.equal(f.controller.getTopLayer(), null); assert.equal(closes, 0);
+		if (expiry === "leave") await f.render({ active: true });
+		await f.open("Replacement menu parent", anchor);
+		await act(async () => otherUi.openMenu(anchor, { items: [], onClose() { closes++; } }, { signal: caller.signal }));
+		assert.equal(document.querySelectorAll('[role="menu"]').length, 1, "the exact reused anchor has no expired registration");
+		await act(async () => otherUi.openMenu(anchor, { items: [] }, { signal: caller.signal }));
+		assert.equal(document.querySelectorAll('[role="menu"]').length, 0); assert.equal(closes, 1);
 	}));
 }
 

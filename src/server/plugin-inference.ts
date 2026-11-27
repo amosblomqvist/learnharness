@@ -1,8 +1,10 @@
+import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { normalizeContext, type AssistantMessage, type AssistantMessageEvent, type SimpleStreamOptions, type Usage } from "@earendil-works/pi-ai";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import type { PiEngine } from "../agent/models.ts";
+import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
 import { markUnadmittedUsage, usageWasAdmitted, type SubscriptionDispatchLifecycle } from "../agent/subscription-request-cycle.ts";
 import type { PluginCallPurpose, PluginModelSpec } from "../core/plugin-agents.ts";
 import type { PluginInference, PluginInferenceOptions, PluginInferenceRequest } from "../core/plugins.ts";
@@ -146,13 +148,16 @@ export function createPluginInference(
 					check(combined);
 					// Managed Agent passes private runtime hooks/options in its config;
 					// do NOT forward that bag to provider transports. Auth stays host-owned.
-					const { temperature, maxTokens, cacheRetention, reasoning, thinkingBudgets, toolChoice, timeoutMs, maxRetries, maxRetryDelayMs, metadata } = (runtime ?? {}) as SimpleStreamOptions;
+					// sessionId is the host Agent's conversation id (stable across tool
+					// rounds). OpenCode Go will not route a request that omits it.
+					// Plugins still cannot set it: validatePluginInferenceOptions rejects it.
+					const { temperature, maxTokens, cacheRetention, reasoning, thinkingBudgets, toolChoice, timeoutMs, maxRetries, maxRetryDelayMs, metadata, sessionId } = (runtime ?? {}) as SimpleStreamOptions;
 					const safe = optionsFor(Object.fromEntries(Object.entries({ temperature, maxTokens, cacheRetention, reasoning, thinkingBudgets, toolChoice, timeoutMs, maxRetries, maxRetryDelayMs, metadata, ...boundOptions }).filter(([, value]) => value !== undefined)));
 					if (safe.reasoning !== undefined && safe.reasoning !== base.level) throw new Error("Set model.thinkingLevel instead of overriding engine reasoning");
 					const current = await available(spec, combined);
 					const engine = await bounded(current.engineForSpec(spec, classified === "background", lifecycle), combined);
 					if (engine.model.provider !== spec.provider || engine.model.id !== spec.id) throw new Error("Inference engine changed the explicitly selected model");
-					const providerOptions: SimpleStreamOptions = { ...safe, signal: combined, reasoning: engine.level === "off" ? undefined : engine.level };
+					const providerOptions: SimpleStreamOptions = { ...safe, signal: combined, reasoning: engine.level === "off" ? undefined : engine.level, ...(typeof sessionId === "string" && sessionId.length > 0 ? { sessionId } : {}) };
 					source = engine.streamFn(engine.model, context, providerOptions);
 					combined.addEventListener("abort", stopSource, { once: true });
 					if (combined.aborted) stopSource();
@@ -194,7 +199,11 @@ export function createPluginInference(
 		const options = optionsFor(request.options), model = modelSpec(request.model), purpose = purposeOf(request.purpose);
 		const engine = await bounded(engineFor(model, purpose), combined);
 		if (options.reasoning !== undefined && options.reasoning !== engine.level) throw new Error("Set model.thinkingLevel instead of overriding engine reasoning");
-		const source = engine.streamFn(engine.model, normalizeContext(request.context), { ...options, signal: combined });
+		// One-shot calls have no saved conversation. Own one routing identity per
+		// invocation (also stable across transport retries), never a plugin option.
+		// Claude Code must not retain/reuse a live process for a one-shot request.
+		const sessionId = model.provider === CLAUDE_CODE_PROVIDER ? undefined : randomUUID();
+		const source = engine.streamFn(engine.model, normalizeContext(request.context), { ...options, signal: combined, ...(sessionId ? { sessionId } : {}) });
 		for await (const event of source) {
 			if (event.type === "done" || event.type === "error") {
 				const message = event.type === "done" ? event.message : event.error;

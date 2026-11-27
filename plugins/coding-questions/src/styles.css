@@ -30,6 +30,9 @@
   max-height: min(24em, 40vh);
   overflow: auto;
   font-family: var(--font-mono, var(--font-ui, monospace));
+  /* Same Appearance policy as native inline/fenced code, for editable and
+     read-only CodeMirror instances. No plugin-local setting. */
+  font-variant-ligatures: var(--lh-code-ligatures, none);
   line-height: 1.6;
 }
 .lh-coding-question .cm-content { padding: 0.5rem 0; caret-color: var(--foreground, #e6e6e6); }

@@ -89,9 +89,9 @@ const OUTCOME_LABEL: Record<string, string> = {
  * cost), surrendered red (the problem beat the learner), moved on muted
  * (the agent's call, not a verdict against him). */
 const OUTCOME_COLOR: Record<string, string | undefined> = {
-	solved: "var(--color-green-500)",
-	solvedWithHints: "var(--color-amber-500)",
-	surrendered: "var(--color-red-500)",
+	solved: "var(--lh-success)",
+	solvedWithHints: "var(--lh-warning)",
+	surrendered: "var(--lh-error)",
 };
 
 export function ConcludeCard({ part }: ArtifactPartProps) {

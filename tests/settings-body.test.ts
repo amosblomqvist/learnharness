@@ -64,7 +64,7 @@ describe("parseAgentSettingsBody", () => {
 		});
 		const bad = parseAgentSettingsBody({ models: { teacher: {} } });
 		assert.equal(bad.ok, false);
-		if (!bad.ok) assert.match(bad.error, /unknown role "teacher" \(supported: researcher, demoBuilder, visualMaker, extractor, auditor\)/);
+		if (!bad.ok) assert.match(bad.error, /unknown role "teacher" \(supported: researcher, demoBuilder, visualMaker, extractor, auditor, sideQuestion\)/);
 		const malformed = parseAgentSettingsBody({ models: { researcher: { model: { provider: 1, id: "x" } } } });
 		assert.equal(malformed.ok, false);
 	});
@@ -80,10 +80,21 @@ describe("parseAgentSettingsBody", () => {
 		// cross-validation — the parser only sees shapes.
 	});
 
-	it("search: engine pin is tavily|brave; anything else is a 400 (search wave, 2026-09-20)", () => {
+	it("search: recognizes Exa, Firecrawl, and Ollama and rejects unknown engines", () => {
 		const ok = parseAgentSettingsBody({ search: { engine: "tavily" } });
 		assert.ok(ok.ok);
 		assert.deepEqual(ok.settings.search, { engine: "tavily" });
+		const exa = parseAgentSettingsBody({ search: { engine: "exa" } });
+		assert.ok(exa.ok);
+		assert.deepEqual(exa.settings.search, { engine: "exa" });
+		const fc = parseAgentSettingsBody({ search: { engine: "firecrawl" } });
+		assert.ok(fc.ok);
+		assert.deepEqual(fc.settings.search, { engine: "firecrawl" });
+		const ollama = parseAgentSettingsBody({ search: { engine: "ollama" } });
+		assert.ok(ollama.ok);
+		assert.deepEqual(ollama.settings.search, { engine: "ollama" });
+		assert.equal(parseAgentSettingsBody({ search: { engine: "deepseek" } }).ok, false);
+		assert.equal(parseAgentSettingsBody({ search: { engine: "chatgpt" } }).ok, false);
 		const clear = parseAgentSettingsBody({ search: {} });
 		assert.ok(clear.ok);
 		assert.equal(clear.settings.search, undefined, "absent engine = back to auto-detect");
@@ -114,7 +125,7 @@ describe("parseAgentSettingsBody", () => {
 describe("parseAppearanceSettingsBody", () => {
 	it("parses every field; hex-or-null colors; clamps happen at sanitize, rejects here", () => {
 		const r = parseAppearanceSettingsBody({
-			mode: "light",
+			theme: "catppuccin-latte",
 			background: "#ffffff",
 			fontFamily: "Some Font",
 			proseFontSize: 20,
@@ -123,7 +134,7 @@ describe("parseAppearanceSettingsBody", () => {
 		});
 		assert.ok(r.ok);
 		assert.deepEqual(r.settings, {
-			mode: "light",
+			theme: "catppuccin-latte",
 			background: "#ffffff",
 			fontFamily: "Some Font",
 			proseFontSize: 20,
@@ -134,7 +145,7 @@ describe("parseAppearanceSettingsBody", () => {
 
 	it("rejects bad enums, ranges, and colors — with specific messages, never clamps", () => {
 		const cases: unknown[] = [
-			{ mode: "sepia" },
+			{ theme: "Sepia!" },
 			{ background: "blue" },
 			{ background: 42 },
 			{ fontFamily: "" },
@@ -154,8 +165,28 @@ describe("parseAppearanceSettingsBody", () => {
 		assert.ok(parseAppearanceSettingsBody({ mdRendering: { headingWeight: 100 } }));
 		assert.ok(parseAppearanceSettingsBody({ mdRendering: { headingWeight: 900 } }));
 		assert.ok(parseAppearanceSettingsBody({ background: "#abc" }));
-		// null = "the mode's default" — explicit, valid
+		// null = "the theme's color" — explicit, valid
 		assert.ok(parseAppearanceSettingsBody({ background: null, fontFamily: null }));
+	});
+
+	it("accepts a theme id and color overrides, rejects bad values", () => {
+		const ok = parseAppearanceSettingsBody({ theme: "rose-pine-dawn", colors: { warning: "#f0f0f0", error: null } });
+		assert.ok(ok.ok);
+		assert.deepEqual(ok.ok && ok.settings, { theme: "rose-pine-dawn", colors: { warning: "#f0f0f0", error: null } });
+		const badTheme = parseAppearanceSettingsBody({ theme: "Rosé Pine" });
+		assert.equal(badTheme.ok, false);
+		assert.match(!badTheme.ok ? badTheme.error : "", /theme must be a theme id/);
+		const unknownColor = parseAppearanceSettingsBody({ colors: { sepia: "#000000" } });
+		assert.equal(unknownColor.ok, false);
+		assert.match(!unknownColor.ok ? unknownColor.error : "", /unknown color "sepia"/);
+		assert.equal(parseAppearanceSettingsBody({ colors: { error: "red" } }).ok, false);
+		assert.equal(parseAppearanceSettingsBody({ colors: "red" }).ok, false);
+	});
+
+	it("drops the light-mode wave's mode/lightBackground like any unknown key", () => {
+		const ok = parseAppearanceSettingsBody({ mode: "light", lightBackground: "#f0f0f0" });
+		assert.ok(ok.ok);
+		assert.deepEqual(ok.ok && ok.settings, {});
 	});
 
 	it("rejects non-object bodies and non-object mdRendering", () => {
@@ -221,6 +252,13 @@ describe("parseGraphSettingsBody", () => {
 });
 
 describe("parseCompactionSettingsBody (owner round 14)", () => {
+	it("rejects non-boolean reasoning choices rather than silently changing the estimator", () => {
+		for (const includeReasoning of ["true", "false", 0, 1, null, [], {}]) {
+			const result = parseCompactionSettingsBody({ includeReasoning });
+			assert.ok(!result.ok);
+			assert.match(result.error, /includeReasoning must be true or false/);
+		}
+	});
 	it("parses a threshold; absent = the empty section (factory default at resolution)", () => {
 		const r = parseCompactionSettingsBody({ thresholdTokens: 120000 });
 		assert.ok(r.ok);

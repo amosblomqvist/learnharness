@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* The bare .container utility is unused. Its viewport breakpoints still
+   trigger document-wide style/layout work on long transcripts. */
+@source not inline("container");
 
 @custom-variant dark (&:is(.dark *));
 
@@ -28,8 +31,15 @@
 }
 
 /* Palette (owner's hexes): main #141414, raised #1C1C1C, edges #434343.
-   Mono chrome = JetBrains Mono; prose = Source Sans 3; titles = CMU Serif. */
-:root {
+   Mono chrome = JetBrains Mono; prose = Source Sans 3; titles = CMU Serif.
+   Dark is the default variant (:root) and the `.dark` class on <html>.
+   THEMES (theme wave, 2026-11-04): the active theme's colors land as
+   inline variables on <html> (app/layout.tsx first paint, then the
+   appearance provider), so these literals are the Default theme's —
+   themeVars(DEFAULT_THEME) in src/core/themes.ts; tests/themes.test.ts
+   pins the two equal. */
+:root,
+.dark {
 	color-scheme: dark;
 	--radius: 8px;
 	--background: #141414;
@@ -46,16 +56,24 @@
 	--muted-foreground: #8d8d8d;
 	--accent: #2a2a2a;
 	--accent-foreground: #e6e6e6;
-	--destructive: oklch(0.704 0.191 22.216);
+	--destructive: #ef4444;
 	--border: #434343;
 	--input: #434343;
 	--ring: #8d8d8d;
+	/* The theme accent (rings, toggles, the selected theme card). The
+	   shadcn --accent above is the HOVER surface, not this. */
+	--lh-accent: #8d8d8d;
+	/* The strong line ink: plan-map outlines, callout borders, the LH mark. */
+	--lh-line-strong: #e6e6e6;
 	/* Emphasis inks default to the REGULAR TEXT COLOR (owner ruling,
-	   appearance wave 2026-09-26 — the old #ee928c/#6fa9d6 factory
-	   emphasis colors are gone). Explicit overrides land via the
-	   appearance settings vars. */
-	--lh-ink-strong: var(--foreground);
-	--lh-ink-italic: var(--foreground);
+	   appearance wave 2026-09-26); themes give them their own colors. */
+	--lh-ink-strong: #e6e6e6;
+	--lh-ink-italic: #e6e6e6;
+	--lh-ink-code: #e6e6e6;
+	/* Status inks (text-error, bg-success/15, border-warning/40, …). */
+	--lh-error: #ef4444;
+	--lh-success: #22c55e;
+	--lh-warning: #f59e0b;
 	/* THE READING SIZE = the ladder's 16px rung (--text-lg). Can't be
 	   var()-linked: @theme inline inlines literals into utilities without
 	   emitting runtime vars — so this is the one documented duplication:
@@ -67,39 +85,12 @@
 	--lh-heading-weight: 900;
 }
 
-/* The app is always dark (<html class="dark">); mirror the same values so
-   the block stays coherent under Tailwind's variant. */
-.dark {
-	--background: #141414;
-	--foreground: #e6e6e6;
-	--card: #1c1c1c;
-	--card-foreground: #e6e6e6;
-	--popover: #1c1c1c;
-	--popover-foreground: #e6e6e6;
-	--primary: #e6e6e6;
-	--primary-foreground: #141414;
-	--secondary: #1c1c1c;
-	--secondary-foreground: #e6e6e6;
-	--muted: #1c1c1c;
-	--muted-foreground: #8d8d8d;
-	--accent: #2a2a2a;
-	--accent-foreground: #e6e6e6;
-	--destructive: oklch(0.704 0.191 22.216);
-	--border: #434343;
-	--input: #434343;
-	--ring: #8d8d8d;
-	/* Same emphasis ruling as the block above: unset = text color. */
-	--lh-ink-strong: var(--foreground);
-	--lh-ink-italic: var(--foreground);
-	/* THE READING SIZE = the ladder's 16px rung (--text-lg). Can't be
-	   var()-linked: @theme inline inlines literals into utilities without
-	   emitting runtime vars — so this is the one documented duplication:
-	   change one, change both. (owner, typography round 4: snapped from
-	   the reskin's hand-tuned 16.5 to the ladder's 16.) */
-	--lh-prose-size: 16px;
-	--lh-prose-leading: 1.5;
-	/* Markdown heading weight (appearance settings; 900 = the Black cut). */
-	--lh-heading-weight: 900;
+/* The light variant: the colors come from the active light theme (inline
+   on <html>); the class only flips the UA color scheme and the `.light`
+   rules below. Must follow the block above: :root still matches
+   <html class="light">, and with equal specificity the later rule wins. */
+.light {
+	color-scheme: light;
 }
 
 /* CMU Serif bold (titles) — bundled local file, no CDN dependency. */
@@ -112,16 +103,13 @@
 }
 
 @theme inline {
-	/* Fonts: chrome = JetBrains Mono, prose = Source Sans 3, titles = CMU
-	   Serif bold. The JetBrains/SourceSans variables attach in app/layout.tsx.
-	   (owner, typography round) The Tailwind defaults are ALIASED to the app
-	   fonts: `font-mono`/`font-sans` utilities would otherwise fall to the
-	   SYSTEM stacks — a fourth font the app never chose — and streamdown's
-	   code-block chrome + mermaid-error + demo-card all use them. */
+	/* Chrome/code = JetBrains Mono; sans surfaces follow the reading font
+	   (Source Sans 3 by default). The loading-face variables attach in
+	   app/layout.tsx. Keep the sans alias pointed at the RUNTIME prose token,
+	   not the loading face, so font-sans also honors Appearance changes. */
 	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
 	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-sans: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
+	--font-sans: var(--font-prose);
 	/* The modular type ladder — each size carries its own line-height.
 	   Component sizes must pull from this ladder. (owner, typography
 	   round 4: the 10px rung is merged into 11 — one pixel apart was a
@@ -129,12 +117,9 @@
 	   legibility floor; quiet labels get their quiet from color +
 	   tracking, not a notch of size. Reading prose = the 16px rung via
 	   --lh-prose-size.) */
-	/* --font-title lives in the NON-inline @theme below: inline tokens get
-	   their literal values baked into the utilities (.font-title{font-family:
-	   lh-cmu,serif}), which made the appearance "session names in serif"
-	   toggle write a runtime --font-title no consumer ever read (owner, fix
-	   wave: toggle looked dead). Non-inline emits :root { --font-title: … }
-	   and the utility reads var(--font-title) — appearance overrides win. */
+	/* --font-prose and --font-title live in the NON-inline @theme below:
+	   their utilities must read the runtime variables, not bake in the
+	   defaults and bypass the Appearance reading-font/serif overrides. */
 	--text-xs: 11px;
 	--text-xs--line-height: 1.4;
 	--text-sm: 12.5px;
@@ -173,6 +158,10 @@
 	--color-border: var(--border);
 	--color-input: var(--input);
 	--color-ring: var(--ring);
+	--color-line-strong: var(--lh-line-strong);
+	--color-error: var(--lh-error);
+	--color-success: var(--lh-success);
+	--color-warning: var(--lh-warning);
 }
 
 * {
@@ -192,6 +181,16 @@ body {
 	font-family: var(--font-prose);
 	font-size: var(--lh-prose-size);
 	line-height: var(--lh-prose-leading);
+}
+
+/* Transcript width (Appearance → Transcript width; session pages). The
+   setting X (rem, on <html> as --lh-transcript-max) is a DOCK-container
+   width: at X the transcript's text column lines up with the edges of a
+   bottom-region card X wide (its px-4 + borders), so the column box is
+   X - 2rem of content plus its own px-6 (3rem). Unset = Full: the calc is
+   invalid at computed-value time and max-width falls back to none. */
+.lh-transcript-column {
+	max-width: calc(var(--lh-transcript-max) + 1rem);
 }
 
 /* Session-name weight (owner, fix wave round 3): with the serif toggle
@@ -319,6 +318,67 @@ body {
 	overflow-y: hidden;
 }
 
+/* Inline code and inline math never wrap on the session page (owner,
+ * session-appearance-layout): a split box or formula reads badly. A span
+ * moves to the next line whole; one wider than its column scrolls sideways
+ * as the last resort (the adaptive question layout widens the card first).
+ * inline-block + baseline-source:first keeps the text on the line's
+ * baseline; a scroller's baseline would otherwise drop to its bottom edge.
+ * (KaTeX's glyph room: below.) */
+[data-session-surface] [data-streamdown="inline-code"],
+[data-session-surface] :not(.katex-display) > .katex {
+	display: inline-block;
+	max-width: 100%;
+	overflow-x: auto;
+	overflow-y: hidden;
+	white-space: nowrap;
+	vertical-align: baseline;
+	baseline-source: first;
+}
+/* A table's wrapper scrolls sideways only. Inline formulas' glyph room
+ * (the padding above) may reach past the last row by a fraction of a pixel,
+ * which would otherwise make the wrapper scroll vertically. */
+[data-session-surface] [data-testid="md-table"] > .overflow-x-auto {
+	overflow-y: hidden;
+}
+
+/* Punctuation touching a span stays on its line (components/md-nobreak.ts):
+ * a line may otherwise break between an inline-block and a comma. The glued
+ * GROUP is then the unit that moves and, when wider than its column,
+ * scrolls — the punctuation included, never clipped outside it. Inside a
+ * group the spans themselves neither scroll nor cap their width. */
+[data-session-surface] .lh-nobreak {
+	display: inline-block;
+	max-width: 100%;
+	overflow-x: auto;
+	overflow-y: hidden;
+	white-space: nowrap;
+	vertical-align: baseline;
+	baseline-source: first;
+}
+[data-session-surface] .lh-nobreak [data-streamdown="inline-code"],
+[data-session-surface] .lh-nobreak .katex {
+	max-width: none;
+	overflow: visible;
+}
+/* KaTeX glyphs overhang their boxes: the padding (cancelled by the negative
+ * margin, so lines keep their height) keeps the clip and the scroller off
+ * them — on the formula's own scroller, or on its group's. */
+[data-session-surface] :not(.katex-display) > .katex,
+[data-session-surface] .lh-nobreak:has(.katex) {
+	padding: 0.5em 0.2em;
+	margin: -0.5em -0.2em;
+	/* The side margins shrink a shrink-to-fit parent (an option label) by
+	   0.4em; the cap gives that back so a formula never scrolls in its own
+	   label. The margin box still never exceeds the column. */
+	max-width: calc(100% + 0.4em);
+}
+/* (Display math is a block, never glued: every formula in a group is inline.) */
+[data-session-surface] .lh-nobreak .katex {
+	padding: 0;
+	margin: 0;
+}
+
 /* ============================================================
  * Chrome melt (owner wave, 2026-09-19) — tables and code blocks stop
  * being boxes: blocks read as part of the message. These rules override
@@ -331,11 +391,30 @@ body {
    background #141414 and read as raised — owner note, chrome-melt tweaks
    2026-09-19) plus a subtle hairline outline. (md-blocks renders its own
    hover copy corner.) */
+/* Shared code-only policy. font-variant-ligatures survives Tailwind's
+   code/pre font-feature-settings reset; prose and rendered diagrams do not
+   consume this token. The fallback also disables code ligatures before the
+   Appearance provider loads an existing profile. */
+[data-streamdown="inline-code"],
+[data-streamdown="code-block"] :is(pre, code) {
+	font-variant-ligatures: var(--lh-code-ligatures, none);
+}
+/* Inline code shares only the block surface, keeping its inline geometry. */
+[data-streamdown="inline-code"],
 [data-streamdown="code-block"] {
 	border: 1px solid var(--border);
 	background: color-mix(in oklab, var(--background) 86%, black);
+}
+[data-streamdown="code-block"] {
 	border-radius: 0.75rem;
 	padding: 0.375rem;
+}
+/* The same well on the light page, gentler: 14% black over #f5f5f3 reads as
+   a heavy gray slab, 4% keeps it just darker than the page. Inline code
+   shares the well, so it takes the gentler tint too. */
+.light [data-streamdown="inline-code"],
+.light [data-streamdown="code-block"] {
+	background: color-mix(in oklab, var(--background) 96%, black);
 }
 [data-streamdown="code-block-header"] {
 	display: none;
@@ -354,11 +433,15 @@ body {
 [data-streamdown="table"] {
 	border: 1px solid var(--border);
 	/* Tables HUG their contents (owner, callout round 2026-10-07): no more
-	   full-width stretch with dead space. max-content sizes to the cells
-	   (width:auto would still stretch — the classic table trap). No
-	   max-width cap: a max-width would squish-wrap wide tables instead of
-	   letting the md-blocks overflow-x scroller carry them. */
-	width: max-content;
+	   full-width stretch with dead space. fit-content = min(max-content,
+	   max(min-content, column)): a narrow table hugs its cells exactly as
+	   max-content did, a wide one wraps its body text to the column instead
+	   of being clipped at the edge (macOS hides the scrollbar, so clipped
+	   read as cut off). Only a table whose min-content still exceeds the
+	   column (long unbreakable code/URLs) falls to the md-blocks overflow-x
+	   scroller. No max-width cap — that would squish columns below their
+	   min-content. */
+	width: fit-content;
 	/* Tables run at the SESSION prose size (owner note, 2026-09-19: they
 	   visibly lagged the 16px chat text at streamdown's 12.5px text-sm).
 	   Unlayered CSS beats the cells' own utility-layer text-sm, and the
@@ -391,6 +474,13 @@ body {
 	max-width: none !important;
 	width: 100% !important;
 	height: auto !important;
+}
+
+/* Keep glyph advances (including fallback emoji) consistent between the
+   scaled plan and its unscaled label probe. Leave the HTML line breaker
+   and other SVGs alone. */
+:is(svg[aria-label="Plan diagram"], svg[data-plan-probe]) text {
+	text-rendering: geometricPrecision;
 }
 
 /* ============================================================
@@ -532,11 +622,16 @@ body {
 .lh-electron {
 	--lh-zoom: 1;
 }
+.lh-electron[data-lh-platform="darwin"] {
+	/* Shared with floating-panel clearance; physical dimensions, before zoom. */
+	--lh-traffic-lights-width: 92px;
+	--lh-traffic-lights-height: 60px;
+}
 .lh-electron[data-lh-platform="darwin"] .lh-lights-gutter {
-	padding-left: calc(92px / var(--lh-zoom));
+	padding-left: calc(var(--lh-traffic-lights-width) / var(--lh-zoom));
 }
 .lh-electron[data-lh-platform="darwin"] .lh-closed-toggle {
-	margin-left: calc(92px / var(--lh-zoom));
+	margin-left: calc(var(--lh-traffic-lights-width) / var(--lh-zoom));
 }
 /* Picker headers have no sidebar-reopen control. Clear only the portion of
    the physical traffic-light gutter that actually overlaps their pane;
@@ -577,10 +672,20 @@ body {
 	display: none;
 }
 
-/* --font-title deliberately NOT @theme inline (see comment above): the
-   session-name-serif toggle overrides this var at runtime, so the
-   .font-title utility must read it through var(), not carry a baked copy. */
+/* Overlay scroller (components/overlay-scroll.tsx): the native bar is hidden
+   so rows, rules and highlights run to the edge; a thin bar draws on top. */
+.lh-overlay-scroll {
+	scrollbar-width: none;
+}
+.lh-overlay-scroll::-webkit-scrollbar {
+	display: none;
+}
+
+/* Runtime font contracts: Appearance overrides the reading family and,
+   independently, whether titles use serif or the reading family. Non-inline
+   utilities read these vars; Source Sans 3 remains the default/loading face. */
 @theme {
+	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
 	--font-title: "lh-cmu", serif;
 }
 
@@ -608,6 +713,13 @@ body {
 	.lh-card-enter {
 		animation: none;
 	}
+}
+
+/* Preview estimate: Chromium remembers the measured height once a row is
+   shown. Don't contain the newest turn or the question dock. */
+[data-older-transcript-row] {
+	content-visibility: auto;
+	contain-intrinsic-block-size: auto 800px;
 }
 
 /* Source-message arrival: a brief, static theme-colored spotlight. */

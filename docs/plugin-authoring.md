@@ -5,34 +5,76 @@ LearnHarness's Node server with filesystem/network access; frontends run in the 
 page. Install only code you trust. The API does not expose provider credentials or
 relax Electron renderer isolation.
 
-This guide describes the current checkout's API v1, including additions not present in
-the released 0.4.1 app. Use documentation/types matching the target app, and set
-`minAppVersion` to a version that actually supplies every capability you use.
+This guide describes the matching source/build's API v1. API v1 can gain capabilities
+without changing its API number. Use documentation/types matching the target app, and
+set `minAppVersion` to a version that actually supplies every capability you use.
+The downloaded skill's `bundle.json` identifies its producing app, API and SDK versions;
+these are separate numbers, not interchangeable compatibility guarantees.
+
+## Documentation map
+
+| Need | Read |
+| --- | --- |
+| First plugin and installation | [Quick start](#quick-start), then [package layout](#package-and-installation) |
+| Every public signature, property and supporting type | [Complete API reference](plugin-api/README.md) |
+| Real projects and source reading routes | [Examples](plugin-examples.md) |
+| Teaching questions and grading | [Question contract](plugin-question-contract.md) |
+| Practice problems and processing | [Problem contract](plugin-problem-contract.md) |
+| Submission interception, images and surfaces | [Session extensions](plugin-session-extension-contract.md) |
+| Current session snapshots and drafts | [View context](plugin-view-context.md) |
+| Controlled trees | [Tree contract](plugin-tree-contract.md) |
+| Modal, menu, focus and Escape rules | [Interaction contract](dialog-overlay-contract.md) |
+| Host ownership and implementation boundaries | [Architecture](plugin-architecture.md) |
+
+The API reference is generated from the same public contracts as the portable SDK.
+It indexes every public type and declared member, including overloads and referenced
+local data/event types. Guides explain behavior and recovery; reference signatures
+explain the exact shapes. Neither requires importing private app runtime modules.
 
 ## Quick start
 
-1. Open **Settings → Community plugins** to find the writable plugins directory.
-2. Copy `examples/plugins/hello-plugin` there, keeping its folder name and `dist/`.
-3. Refresh the list, enable **Hello plugin**, and open its sidebar action.
-4. Edit the installed `hello-plugin/dist/` code and restart LearnHarness to load changes.
-   Refresh discovers packages; it does not hot-reload admitted JavaScript.
+The primary source-development workflow is to **clone into the app's plugins directory
+and build there**. No LearnHarness repository clone is required.
 
-LearnHarness runs no npm commands. For a TypeScript project, build before refreshing.
-The repository's `plugins/` projects demonstrate bundled production features; the
-no-build `examples/plugins/` packages are smaller starting points:
+1. Open **Settings → Community plugins** and copy the plugins directory path.
+2. Clone the plugin's repository into `<plugins-directory>/<plugin-id>`. The folder
+   name must match `id` in its manifest, which may differ from the repository name.
+3. Follow the project's dependency setup, then run `npm run build` in that folder.
+   The build writes directly to its `dist/`; no additional installation step is needed.
+4. Refresh the list and enable the plugin. Restart LearnHarness after changing
+   already-loaded code; Refresh discovers packages, not hot-reloaded JavaScript.
 
-| Example | Demonstrates |
-| --- | --- |
-| `hello-plugin` | Frontend view, actions and plugin settings |
-| `managed-agent` | Frontend/backend bridge and persistent interactive agents |
-| `teaching-extension` | Additive instructions, native tools, renderers and a detached worker |
+For a project that provides a lockfile and build script:
 
-Model-using examples may incur cost when explicitly run. These examples are authoring
-material, not automatically enabled plugins or a commitment to bundle every feature.
+```sh
+git clone <repository-url> "<plugins-directory>/my-plugin"
+cd "<plugins-directory>/my-plugin"
+npm ci
+npm run build
+```
 
-Packaged apps include matching docs, examples, a coding-agent skill and generated
-API types in `plugin-authoring/` beside the standalone server in app resources.
-That directory is read-only material, **not** the writable installed plugins directory.
+Only build code you trust: dependency installation and build scripts execute local code.
+LearnHarness itself runs no npm commands. Builds must preserve sibling `data/`.
+
+For a new plugin, download and extract **Download authoring skill**, then give the whole
+`learnharness-plugins/` folder to your coding agent and ask it to read `SKILL.md`. Its README
+explains agent setup. The included SDK works without a LearnHarness checkout; plugin
+build tools/dependencies are installed separately.
+
+Start with **Hello** for the smallest plugin. Then use [the example reading routes](plugin-examples.md)
+to explore **UI Showcase**, **Drawing Pad**, **Coding Questions**, **Flashcards** and
+**Rich Code Blocks**. The skill includes their actual source projects, not parallel
+example implementations. Managed Agent and Teaching Extension are focused recipes for
+capabilities the larger projects do not demonstrate as directly.
+
+Hello and the two focused recipes include no-build distributions that can be
+[installed directly](#install-a-prebuilt-package); their exported manifests require the
+producing app version in `bundle.json`. Official source-reference manifests remain
+unchanged. Four official projects are Core plugins with reserved IDs: read their code,
+not instructions to install unchanged Community copies. UI Showcase is a Community
+developer gallery. Model-using recipes may incur cost when explicitly run. Nothing is
+installed automatically; keep the skill together and never install the entire skill as
+a plugin.
 
 ## Choose the extension point
 
@@ -50,16 +92,21 @@ That directory is read-only material, **not** the writable installed plugins dir
 | Display a controlled hierarchy | `ctx.ui.mountTree`; [tree contract](plugin-tree-contract.md) |
 | Convert an uploaded PDF/text file | Frontend `ctx.documents.toMarkdown` below |
 | Read saved learning records | Backend `ctx.learning` below |
-| Call models, run conversations or bounded tasks | Backend `ctx.inference`, `ctx.agents`, `ctx.workers` below |
+| Call models, run conversations or result tasks | Backend `ctx.inference`, `ctx.agents`, `ctx.workers` below |
 
 Feature contracts define lifecycle and acceptance rules; this guide is the entry point.
-Exact public types are in `src/core/plugins.ts`, `plugin-ui.ts`, `plugin-agents.ts`,
+Browse the [complete API reference](plugin-api/README.md) for exact signatures and
+cross-linked types. The canonical public contracts are in `src/core/plugins.ts`, `plugin-ui.ts`, `plugin-agents.ts`,
 `plugin-workers.ts`, `plugin-questions.ts`, `plugin-problems.ts`, `plugin-submissions.ts`,
 `plugin-view-context.ts` and `plugin-tree.ts` (all under `src/core/`). Use **type-only**
 imports, never runtime imports of private host modules. The portable type-only SDK is
 emitted by `node scripts/build-plugin-types.mjs`. Repository TypeScript plugins use a
-local `.sdk/` and `npm run sdk`; outside a checkout, copy packaged
-`plugin-authoring/types/` into `.sdk/` before dependency installation. Pi native types
+local `.sdk/` and `npm run sdk`; outside a checkout, copy the extracted skill's
+`types/` into `.sdk/` before dependency installation. For example,
+use `"learnharness-plugin-api": "file:./.sdk"` in your development dependencies and
+`import type { PluginFrontendContext } from "learnharness-plugin-api"` in TypeScript.
+Supply the SDK package's declared peers when typechecking; do not import it at runtime.
+Building the SDK requires a checkout; using the downloaded SDK does not. Pi native types
 are intentionally part of API v1 and follow the app's pinned SDK, not arbitrary Pi versions.
 
 ## Package and installation
@@ -114,6 +161,59 @@ Repository source stays in `plugins/`. `npm run plugins:build-core` builds the s
 catalog in `core-plugins.json` and stages generated packages. UI Showcase remains a
 source/developer example, not a shipped core package. This build command never installs
 or enables a package in a learning-data directory.
+
+### Install a prebuilt package
+
+Copy/extract the plugin so its built files occupy
+`<plugins-directory>/<plugin-id>/dist/manifest.json` and sibling bundles/assets. The
+included no-build examples already have the `<plugin-id>/dist/` layout: copy an example's
+whole folder, refresh the list and enable it. No Node/npm setup is required for those
+examples. Do not add an extra nested `dist/<plugin-id>/` layer.
+
+When updating an existing plugin, replace only its `dist/` and preserve sibling `data/`.
+Restart LearnHarness to load updates to already-loaded code.
+
+### Develop outside the plugins directory
+
+Keep the same project layout and build locally. Either copy the completed `dist/` into
+`<plugins-directory>/<plugin-id>/dist/`, or use the portable local installer.
+
+1. Copy `tools/install-plugin-local.mjs` from the extracted authoring skill into your
+   project's `scripts/install-plugin-local.mjs`. In a LearnHarness checkout the same
+   helper lives at `scripts/install-plugin-local.mjs`.
+2. Add this script to the plugin's `package.json`, alongside its existing `build` script:
+
+   ```json
+   {
+     "scripts": {
+       "install:local": "npm run build && node scripts/install-plugin-local.mjs"
+     }
+   }
+   ```
+
+3. From the plugin project, supply the directory shown in Settings:
+
+   ```sh
+   npm run install:local -- "<plugins-directory>"
+   ```
+
+The command builds first. If the build fails, installation does not run. The helper uses
+only Node built-ins, checks the built manifest/entry files, and installs under the
+manifest's plugin ID. The supplied plugins directory must already exist. It does not
+infer a profile or save configuration. The host still decides app compatibility and
+reserved-ID admission when you refresh.
+
+For updates, the helper stages a complete replacement before moving the previous `dist/`
+aside; stale assets are removed rather than merged. If replacement fails, it restores the
+previous package. If rollback itself fails, the error reports the preserved backup path.
+Sibling `data/`, source files and enablement choices are untouched. Symlinked roots,
+package entries or target paths and misplaced `dist/data/` are refused. Non-distributable
+`data/`, `node_modules/`, `.git/` and credential files do not belong in `dist/`.
+
+If source and installed `dist/` are already the same directory, the helper reports an
+in-place build without copying. For that workflow, prefer plain `npm run build`.
+Refresh/enable a new plugin afterwards; restart LearnHarness for already-loaded code.
+The command does not automatically enable plugins or restart the app.
 
 ## Frontend lifecycle and navigation
 
@@ -273,6 +373,14 @@ plugin owns values and persistence; feed accepted values back through `update`.
 
 Mount methods take a container before props; `openMenu` takes an anchor. See the types
 for complete signatures. Callbacks may be async; errors surface rather than count as success.
+
+Calling `openMenu` again from the same UI owner with the exact same anchor element
+closes the existing menu instead of stacking another one, even before it renders.
+The existing menu's latest `onClose` runs once; the closing call returns an inert
+handle and does not use its incoming props or callback. Other UI owners and anchors
+remain independent. Outside clicks (including other buttons), menu actions and Escape
+keep their existing dismissal rules; only Escape restores anchor focus. Explicit
+handle disposal and caller/plugin/surface expiry remain disposal, without `onClose`.
 
 **Writing controls.** Model/thinking pickers use the host catalog without changing core
 defaults or choosing fallback models. Their compact typography is self-contained. The
@@ -517,14 +625,16 @@ exactly-once promise for external tool effects. See `examples/plugins/managed-ag
 
 ### Result-oriented workers and background tools
 
-`ctx.workers` runs bounded tasks with one validated result, not human-input conversations.
+`ctx.workers` runs tasks with one validated result, not human-input conversations.
 Register instructions, `resultSchema`, optional side-effect-free `validateResult` and
-native tools. `start(workerId, {requestId,input,prompt,model,purpose,maxTurns,...})`
+native tools. `start(workerId, {requestId,input,prompt,model,purpose,...})`
 persists acceptance synchronously and returns a snapshot, **not completion**.
 `options` use the inference allowlist; `timeoutMs` is wall-clock lifetime including
-admission waits, distinct from per-request `options.timeoutMs`. Model/purpose and
-`maxTurns` are explicit; an identical request ID/request returns the original task,
-while conflicting reuse errors. Retry with a new ID for a new attempt.
+admission waits, distinct from per-request `options.timeoutMs`. Model/purpose are
+explicit. Optional `maxTurns` limits assistant turns, including correction turns;
+omitting it means no turn-count limit. An explicit limit must be a positive safe
+integer and remains enforced. An identical request ID/request returns the original
+task, while conflicting reuse errors. Retry with a new ID for a new attempt.
 
 The host's `submit_result({result})` validates schema/refinements and supplies correction
 feedback in the same native context. First durably accepted valid JSON wins, including
@@ -570,7 +680,7 @@ Standalone tasks appear in Background agents as **plugin name · worker definiti
 without an invented session link; linked background-tool tasks do not duplicate rows.
 END cancels computing/queued work, not a completed result or pending delivery.
 
-## Events, recovery and verification
+## Events, recovery and testing
 
 Backend `ctx.events.on` / frontend `ctx.onAppEvent` observe supported app events.
 `turn-settled` follows turn persistence, not completion of asynchronous extraction.
@@ -582,7 +692,7 @@ Before distributing, check types, built package layout, disabled discovery, enab
 restart, cleanup/late awaits, missing-renderer fallback and data-preserving updates. Test
 native lifecycle paths your feature uses, not only its isolated UI. Prefer disposable
 profiles and loopback providers; do not overwrite an installed app just to test a plugin.
-See [host architecture and verification seams](plugin-architecture.md#verification).
+See [host architecture and testing seams](plugin-architecture.md#testing).
 
 ## Deliberate limits
 

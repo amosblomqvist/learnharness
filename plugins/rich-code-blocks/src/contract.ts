@@ -1,17 +1,15 @@
 export const FAMILIES = ["chemicalStructures", "musicalNotation", "technicalDiagrams"] as const;
 export type Family = typeof FAMILIES[number];
 export type Language = "smiles" | "abc" | "tikz";
-export type InkColor = "white" | "black";
 export interface Settings {
   version: 1;
   revision: number;
   chemicalStructures: boolean;
   musicalNotation: boolean;
   technicalDiagrams: boolean;
-  inkColor: InkColor;
 }
 export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({
-  version: 1, revision: 0, chemicalStructures: false, musicalNotation: false, technicalDiagrams: false, inkColor: "white",
+  version: 1, revision: 0, chemicalStructures: false, musicalNotation: false, technicalDiagrams: false,
 });
 export const LANGUAGES: Record<Family, Language> = {
   chemicalStructures: "smiles", musicalNotation: "abc", technicalDiagrams: "tikz",
@@ -22,7 +20,14 @@ export const LABELS: Record<Family, string> = {
 export const INSTRUCTIONS: Record<Family, string> = {
   chemicalStructures: "For chemical structures, use a smiles fenced code block containing one SMILES molecule. Write explanations outside the block; do not author raw SVG.",
   musicalNotation: "For musical notation, use an abc fenced code block containing one complete ABC tune with X:, M:, L: and K: headers. It renders a static score, not audio; do not author raw SVG.",
-  technicalDiagrams: "For static technical diagrams, use a tikz fenced code block containing self-contained TeX with \\begin{document} and \\end{document}. The engine already supplies the standalone document class: never include \\documentclass or \\documentstyle. Before \\begin{document}, explicitly load all packages needed by that block: \\usepackage{tikz} for physics/free-body diagrams and geometry, \\usepackage{circuitikz} for circuit schematics (not simulation), \\usepackage{tikz-cd} for commutative diagrams, and \\usepackage{pgfplots} for analytic function plots. For math labels using \\text{...} or aligned equations, also load \\usepackage{amsmath}. Load needed TikZ libraries with \\usetikzlibrary in that same preamble. Bundled packages are available, not automatically loaded; do not rely on declarations from another block. Author notation, not raw SVG, JavaScript or external resources.",
+  technicalDiagrams: [
+    "For static technical diagrams, use a tikz fenced code block containing one self-contained TeX document. These blocks support physics/free-body diagrams, geometry, circuit schematics (not simulation), commutative diagrams, and analytic function plots.",
+    "Every block is compiled independently. Put all required package and library declarations before \\begin{document}, then the diagram, then \\end{document}. The engine supplies the standalone document class: never include \\documentclass or \\documentstyle, and never rely on declarations from another block.",
+    "Explicitly load the packages required by the diagram: \\usepackage{tikz}, \\usepackage{circuitikz}, \\usepackage{tikz-cd}, or \\usepackage{pgfplots}. For labels using \\text{...} or aligned equations, also load \\usepackage{amsmath}. Declare needed TikZ libraries with \\usetikzlibrary in the preamble.",
+    "Place the tikzpicture, circuitikz, or tikzcd environment directly inside document. Do not wrap the diagram in \\[...\\], $$...$$, or an equation environment. Use $...$ for math in TikZ node labels; tikzcd cells already use math mode.",
+    "The bundled PGFPlots version is 1.16. For plots, put \\pgfplotsset{compat=1.16} in the preamble; do not request 1.18 or another newer version.",
+    "Write explanations outside the block. Author notation, not raw SVG, JavaScript, or external resources.",
+  ].join("\n\n"),
 };
 export const SOURCE_LIMITS: Record<Language, number> = { smiles: 2 * 1024, abc: 16 * 1024, tikz: 32 * 1024 };
 export const SVG_LIMIT = 2 * 1024 * 1024;
@@ -39,22 +44,10 @@ export function parseSettings(value: unknown): Settings {
   if (!Number.isSafeInteger(record.revision) || (record.revision as number) < 0 || FAMILIES.some(key => typeof record[key] !== "boolean")) {
     throw new Error("Invalid Rich code blocks settings.");
   }
+  // Legacy v1 inkColor is accepted above but deliberately omitted: theme Text
+  // now owns neutral ink. Reads never rewrite disk; normal saves drop the key.
   return { version: 1, revision: record.revision as number, chemicalStructures: record.chemicalStructures as boolean,
-    musicalNotation: record.musicalNotation as boolean, technicalDiagrams: record.technicalDiagrams as boolean,
-    // Existing v1 files remain valid and are not rewritten just by reading them.
-    inkColor: "inkColor" in record ? parseInkColor(record.inkColor) : DEFAULT_SETTINGS.inkColor };
-}
-
-function parseInkColor(value: unknown): InkColor {
-  if (value !== "white" && value !== "black") throw new Error("Ink color must be white or black.");
-  return value;
-}
-
-export function parseInkChange(value: unknown): InkColor {
-  if (!value || typeof value !== "object" || Array.isArray(value) || Object.keys(value).length !== 1 || !("inkColor" in value)) {
-    throw new Error("An inkColor value is required.");
-  }
-  return parseInkColor((value as Record<string, unknown>).inkColor);
+    musicalNotation: record.musicalNotation as boolean, technicalDiagrams: record.technicalDiagrams as boolean };
 }
 
 export function parseChange(value: unknown): { family: Family; enabled: boolean } {

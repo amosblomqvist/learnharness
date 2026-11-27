@@ -56,6 +56,8 @@ export interface SessionRecordSnapshot {
 	turns?: TurnUsage[];
 	pricing?: SessionPricing;
 }
+export type SessionStatsSnapshot = Pick<SessionRecordSnapshot, "turns" | "pricing">;
+
 export interface SessionRecordReadOptions {
 	adoption?: "replace" | "append" | "none";
 	signal?: AbortSignal;
@@ -124,7 +126,7 @@ class StreamReadError extends Error {
 }
 
 /** Wire events; return true ONLY for the explicit completion marker. */
-async function* sseEvents(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Record<string, unknown>, boolean> {
+export async function* sseEvents(reader: ReadableStreamDefaultReader<Uint8Array>): AsyncGenerator<Record<string, unknown>, boolean> {
 	const decoder = new TextDecoder();
 	let buf = "";
 	for (;;) {
@@ -478,6 +480,18 @@ export class SessionModel {
 		return record;
 	}
 
+	/** Usage-only read. Observe canonical ordering without adopting a record or
+	 * letting a stats response invalidate a pending transcript read. */
+	async readStats(signal?: AbortSignal): Promise<SessionStatsSnapshot | undefined> {
+		const ticket = ++this.canonicalIssued;
+		const epoch = this.canonicalEpoch;
+		const response = await this.fetch(`/api/chats/${encodeURIComponent(this.chatId)}?view=stats`, { signal });
+		if (!response.ok) throw new Error("Could not refresh session stats.");
+		const stats = await response.json() as SessionStatsSnapshot;
+		if (signal?.aborted || epoch !== this.canonicalEpoch || ticket < this.canonicalAcknowledged) return undefined;
+		return stats;
+	}
+
 	/** Read-only canonical adoption: never sends a replacement teacher turn. */
 	async reconcile(): Promise<boolean> {
 		if (this.reconciliationTask && this.reconciliationOwner === this.consumeAbort && this.reconciliationConnectionGeneration === this.connectionGeneration) return this.reconciliationTask;
@@ -623,6 +637,10 @@ export class SessionModel {
 					// live stream dropped the marker until the settle sync.
 					const mid = message.id;
 					if (mid === undefined) return false;
+					// Adoption/refetch may already carry this durable message before
+					// its start/end is replayed. The record owns that identity;
+					// adding it to the tail would duplicate it until the next sync.
+					if (this.base.some((m) => m.id === mid)) return false;
 					this.mutate(() => {
 						const idx = this.tail.findIndex((m) => m.id === mid);
 						this.tail =
@@ -1212,9 +1230,9 @@ export class SessionModel {
 	/**
 	 * Append-only adoption (the mid-turn steer/artifact ground rule): swap
 	 * in the record — every current base message must still be present
-	 * (the server appends only) — keeping the live tail, minus the
-	 * optimistic entries the record has absorbed (their server-stamped
-	 * copies just landed; without this the input bubble would double).
+	 * (the server appends only) — keeping the live tail, minus entries the
+	 * record already carries by id and optimistic entries it has absorbed
+	 * (their server-stamped copies just landed; without this messages double).
 	 */
 	adoptRecord(record: LhMessage[]): void {
 		this.invalidateCanonicalReads();
@@ -1231,7 +1249,7 @@ export class SessionModel {
 			this.base = record;
 			if (updateAvailability) { this.pluginQuestionAvailability = availability; this.pluginProblemAvailability = problemAvailability; }
 			this.forgetResolvedDrafts(record);
-			this.tail = this.tail.filter((m) => !absorbed(m, record));
+			this.tail = this.tail.filter((m) => !(typeof m.id === "string" && recordIds.has(m.id)) && !absorbed(m, record));
 		});
 		return true;
 	}

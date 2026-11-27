@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import type { PluginBackendContext } from "learnharness-plugin-api";
 import { activate } from "../src/backend.ts";
-import { colorError, imageScaleError, parseColor, parseImageScale, parseSettings } from "../src/settings.ts";
+import { colorError, imageScaleError, parseColor, parseColorChange, parseImageScale, parseSettings } from "../src/settings.ts";
 
 function fixture() {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "drawing-pad-test-"));
@@ -31,38 +31,71 @@ it("accepts only six-digit hex colors and normalizes case", () => {
     assert.ok(colorError(value)); assert.throws(() => parseColor(value));
   }
 });
-it("validates stored settings and does not coerce revisions", () => {
-  assert.deepEqual(parseSettings({ revision: 3, inkColor: "#ABCDEF" }), { revision: 3, inkColor: "#abcdef", imageScale: 50 });
-  for (const revision of [-1, .5, "1", Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => parseSettings({ revision, inkColor: "#facc15" }));
-  assert.throws(() => parseSettings({ revision: 0, inkColor: "#facc15", draft: [] }));
+it("validates both stored colors and does not coerce revisions", () => {
+  const colors = { darkInkColor: "#ABCDEF", lightInkColor: "#FEDCBA" };
+  assert.deepEqual(parseSettings({ revision: 3, ...colors }), { revision: 3, darkInkColor: "#abcdef", lightInkColor: "#fedcba", imageScale: 50 });
+  for (const revision of [-1, .5, "1", Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => parseSettings({ revision, ...colors }));
+  assert.throws(() => parseSettings({ revision: 0, ...colors, draft: [] }));
+  for (const field of ["darkInkColor", "lightInkColor"] as const) {
+    for (const value of ["#abc", "#ffffffff", "ffffff", "red", " #ffffff", "#ffffff;", 1, null, undefined]) {
+      assert.throws(() => parseSettings({ revision: 0, ...colors, [field]: value }));
+      assert.throws(() => parseColorChange({ [field]: value }));
+    }
+  }
+  assert.deepEqual(parseColorChange({ darkInkColor: "#ABCDEF" }), { darkInkColor: "#abcdef" });
+  assert.deepEqual(parseColorChange({ lightInkColor: "#FEDCBA" }), { lightInkColor: "#fedcba" });
 });
 it("loads defaults without creating any data or draft file", () => {
   const f = fixture(); try {
-    f.start(); assert.deepEqual(f.call("get-settings"), { revision: 0, inkColor: "#facc15", imageScale: 50 }); assert.equal(fs.existsSync(f.directory), false);
+    f.start(); assert.deepEqual(f.call("get-settings"), { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 });
+    assert.equal(fs.existsSync(f.directory), false); assert.deepEqual(f.events, []);
   } finally { f.close(); }
 });
-it("persists accepted preferences atomically and emits only accepted snapshots", () => {
+for (const field of ["darkInkColor", "lightInkColor"] as const) {
+  it(`persists ${field} independently and emits only accepted snapshots`, () => {
+    const f = fixture(); try {
+      f.start(); const result = f.call("set-ink-color", { [field]: "#ABCDEF" });
+      assert.deepEqual(result, { revision: 1, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50, [field]: "#abcdef" });
+      const file = path.join(f.directory, "settings.json"), saved = fs.readFileSync(file, "utf8");
+      assert.deepEqual(JSON.parse(saved), result);
+      assert.deepEqual(fs.readdirSync(f.directory), ["settings.json"]);
+      assert.deepEqual(f.events, [{ topic: "settings-changed", data: result }]);
+      assert.deepEqual(f.call("set-ink-color", { [field]: "#ABCDEF" }), result);
+      assert.equal(fs.readFileSync(file, "utf8"), saved); assert.equal(f.events.length, 1);
+      f.stop(); f.start(); assert.deepEqual(f.call("get-settings"), result);
+      assert.equal(f.events.length, 1);
+    } finally { f.close(); }
+  });
+}
+it("requires exactly one theme color and never publishes or persists invalid writes", () => {
   const f = fixture(); try {
-    f.start(); const result = f.call("set-ink-color", { inkColor: "#ABCDEF" });
-    assert.deepEqual(result, { revision: 1, inkColor: "#abcdef", imageScale: 50 });
-    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(f.directory, "settings.json"), "utf8")), result);
-    assert.deepEqual(fs.readdirSync(f.directory), ["settings.json"]); assert.equal(f.events.length, 1);
-    assert.deepEqual(f.call("set-ink-color", { inkColor: "#abcdef" }), result); assert.equal(f.events.length, 1);
-    f.stop(); f.start(); assert.deepEqual(f.call("get-settings"), result);
-  } finally { f.close(); }
-});
-it("invalid writes do not publish or persist changes", () => {
-  const f = fixture(); try {
-    f.start(); for (const input of [null, {}, { inkColor: "#abc" }, { inkColor: "#ffffff", draft: {} }]) assert.throws(() => f.call("set-ink-color", input));
+    f.start();
+    const invalid = [null, [], {}, { inkColor: "#ffffff" }, { darkInkColor: "#ffffff", lightInkColor: "#000000" },
+      { darkInkColor: "#ffffff", inkColor: "#abcdef" }, { lightInkColor: "#000000", inkColor: "#abcdef" },
+      { darkInkColor: "#abc" }, { lightInkColor: "red" }, { darkInkColor: "#ffffff", draft: {} },
+      { lightInkColor: "#000000", imageScale: 50 }];
+    for (const input of invalid) {
+      assert.throws(() => parseColorChange(input));
+      assert.throws(() => f.call("set-ink-color", input));
+    }
     assert.equal(fs.existsSync(f.directory), false); assert.equal(f.events.length, 0);
-    assert.deepEqual(f.call("get-settings"), { revision: 0, inkColor: "#facc15", imageScale: 50 });
+    assert.deepEqual(f.call("get-settings"), { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 });
+    const accepted = f.call("set-ink-color", { lightInkColor: "#123456" });
+    const file = path.join(f.directory, "settings.json"), saved = fs.readFileSync(file, "utf8");
+    for (const input of invalid) assert.throws(() => f.call("set-ink-color", input));
+    assert.deepEqual(f.call("get-settings"), accepted); assert.equal(fs.readFileSync(file, "utf8"), saved); assert.equal(f.events.length, 1);
   } finally { f.close(); }
 });
-it("write failures retain the accepted color and publish no success", () => {
+it("write failures retain both accepted colors and publish no success", () => {
   const f = fixture(); try {
     f.start(); fs.writeFileSync(f.directory, "not a directory");
-    assert.throws(() => f.call("set-ink-color", { inkColor: "#ffffff" }));
-    assert.equal(f.events.length, 0); assert.deepEqual(f.call("get-settings"), { revision: 0, inkColor: "#facc15", imageScale: 50 });
+    for (const field of ["darkInkColor", "lightInkColor"]) assert.throws(() => f.call("set-ink-color", { [field]: "#abcdef" }));
+    assert.equal(f.events.length, 0);
+    assert.deepEqual(f.call("get-settings"), { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 });
+    fs.rmSync(f.directory); fs.mkdirSync(path.join(f.directory, "settings.json"), { recursive: true });
+    assert.throws(() => f.call("set-ink-color", { darkInkColor: "#abcdef" }));
+    assert.deepEqual(fs.readdirSync(f.directory), ["settings.json"]); assert.equal(f.events.length, 0);
+    assert.deepEqual(f.call("get-settings"), { revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: 50 });
   } finally { f.close(); }
 });
 it("malformed stored preferences fail rather than silently overwrite user data", () => {
@@ -74,32 +107,63 @@ it("malformed stored preferences fail rather than silently overwrite user data",
 it("validates a positive downscaling percentage, including fractions, without coercion", () => {
   for (const value of [0, -1, 101, Infinity, NaN, "50", null, undefined]) {
     assert.ok(imageScaleError(value)); assert.throws(() => parseImageScale(value));
-    assert.throws(() => parseSettings({ revision: 0, inkColor: "#facc15", imageScale: value }));
+    assert.throws(() => parseSettings({ revision: 0, darkInkColor: "#ffffff", lightInkColor: "#000000", imageScale: value }));
   }
   for (const value of [.5, 25, 50, 100]) assert.equal(parseImageScale(value), value);
 });
-it("reads legacy color preferences as 50 percent without overwriting the existing file", () => {
+it("rejects legacy, mixed, and incomplete color schemas without overwriting stored data", () => {
+  for (const input of [
+    { revision: 4, inkColor: "#abcdef" }, { revision: 4, inkColor: "#abcdef", imageScale: 25 },
+    { revision: 4, darkInkColor: "#ffffff", lightInkColor: "#000000", inkColor: "#abcdef", imageScale: 50 },
+    { revision: 4, darkInkColor: "#ffffff" }, { revision: 4, lightInkColor: "#000000" }, { revision: 4 },
+  ]) {
+    const f = fixture(); try {
+      fs.mkdirSync(f.directory); const file = path.join(f.directory, "settings.json"), saved = JSON.stringify(input) + "\n";
+      fs.writeFileSync(file, saved);
+      assert.throws(() => parseSettings(input)); assert.throws(() => f.start());
+      assert.equal(fs.readFileSync(file, "utf8"), saved); assert.equal(f.handlers.size, 0); assert.equal(f.events.length, 0);
+    } finally { f.close(); }
+  }
+});
+it("keeps no-op revisions at the limit and refuses changes before writing or notifying", () => {
   const f = fixture(); try {
-    fs.mkdirSync(f.directory); const file = path.join(f.directory, "settings.json"), legacy = '{"revision":4,"inkColor":"#abcdef"}\n';
-    fs.writeFileSync(file, legacy); f.start();
-    assert.deepEqual(f.call("get-settings"), { revision: 4, inkColor: "#abcdef", imageScale: 50 });
-    assert.equal(fs.readFileSync(file, "utf8"), legacy);
-    f.call("set-image-scale", { imageScale: 25 }); f.call("set-ink-color", { inkColor: "#ffffff" });
-    const expected = { revision: 6, inkColor: "#ffffff", imageScale: 25 };
-    assert.deepEqual(f.call("get-settings"), expected); f.stop(); f.start(); assert.deepEqual(f.call("get-settings"), expected);
+    fs.mkdirSync(f.directory); const file = path.join(f.directory, "settings.json");
+    const settings = { revision: Number.MAX_SAFE_INTEGER, darkInkColor: "#abcdef", lightInkColor: "#123456", imageScale: 25 };
+    const saved = JSON.stringify(settings) + "\n"; fs.writeFileSync(file, saved); f.start();
+    for (const field of ["darkInkColor", "lightInkColor"] as const) {
+      assert.deepEqual(f.call("set-ink-color", { [field]: settings[field].toUpperCase() }), settings);
+      assert.throws(() => f.call("set-ink-color", { [field]: "#fedcba" }), /revision limit/);
+    }
+    assert.deepEqual(f.call("set-image-scale", { imageScale: 25 }), settings);
+    assert.throws(() => f.call("set-image-scale", { imageScale: 50 }), /revision limit/);
+    assert.deepEqual(f.call("get-settings"), settings); assert.equal(fs.readFileSync(file, "utf8"), saved);
+    assert.deepEqual(fs.readdirSync(f.directory), ["settings.json"]); assert.equal(f.events.length, 0);
   } finally { f.close(); }
 });
-it("scale changes persist atomically, preserve color, and refuse invalid writes or I/O failures", () => {
+it("scale changes persist atomically, preserve independent colors, and refuse invalid writes or I/O failures", () => {
   const f = fixture(); try {
     f.start();
-    for (const input of [null, {}, { imageScale: 0 }, { imageScale: 50, extra: true }]) assert.throws(() => f.call("set-image-scale", input));
+    for (const input of [null, {}, { imageScale: 0 }, { imageScale: 50, extra: true }, { imageScale: 50, darkInkColor: "#abcdef" }])
+      assert.throws(() => f.call("set-image-scale", input));
     assert.equal(fs.existsSync(f.directory), false); assert.equal(f.events.length, 0);
+    f.call("set-ink-color", { darkInkColor: "#abcdef" }); f.call("set-ink-color", { lightInkColor: "#123456" });
     const value = f.call("set-image-scale", { imageScale: 12.5 });
-    assert.deepEqual(value, { revision: 1, inkColor: "#facc15", imageScale: 12.5 });
-    assert.deepEqual(f.call("set-image-scale", { imageScale: 12.5 }), value); assert.equal(f.events.length, 1);
+    assert.deepEqual(value, { revision: 3, darkInkColor: "#abcdef", lightInkColor: "#123456", imageScale: 12.5 });
+    const file = path.join(f.directory, "settings.json"), saved = fs.readFileSync(file, "utf8");
+    assert.deepEqual(JSON.parse(saved), value); assert.deepEqual(fs.readdirSync(f.directory), ["settings.json"]);
+    assert.deepEqual(f.events, [
+      { topic: "settings-changed", data: { revision: 1, darkInkColor: "#abcdef", lightInkColor: "#000000", imageScale: 50 } },
+      { topic: "settings-changed", data: { revision: 2, darkInkColor: "#abcdef", lightInkColor: "#123456", imageScale: 50 } },
+      { topic: "settings-changed", data: value },
+    ]);
+    assert.deepEqual(f.call("set-image-scale", { imageScale: 12.5 }), value);
+    assert.equal(fs.readFileSync(file, "utf8"), saved); assert.equal(f.events.length, 3);
+    f.stop(); f.start(); assert.deepEqual(f.call("get-settings"), value);
+    const changed = f.call("set-ink-color", { darkInkColor: "#fedcba" });
+    assert.deepEqual(changed, { revision: 4, darkInkColor: "#fedcba", lightInkColor: "#123456", imageScale: 12.5 });
     fs.rmSync(f.directory, { recursive: true }); fs.writeFileSync(f.directory, "blocked");
     assert.throws(() => f.call("set-image-scale", { imageScale: 50 }));
-    assert.deepEqual(f.call("get-settings"), value); assert.equal(f.events.length, 1);
+    assert.deepEqual(f.call("get-settings"), changed); assert.equal(f.events.length, 4);
   } finally { f.close(); }
 });
 it("exposes read-only pose identities, never solutions or learner input", () => {

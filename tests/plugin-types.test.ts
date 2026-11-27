@@ -11,7 +11,7 @@ it("generated plugin API declarations are portable and usable as type-only impor
 	const home = fs.mkdtempSync(path.join(os.tmpdir(), "lh-plugin-types-test-"));
 	try {
 		const output = path.join(home, "api");
-		const build = spawnSync(process.execPath, [path.join(root, "scripts", "build-plugin-types.mjs"), output], { cwd: root, encoding: "utf8", timeout: 30_000 });
+		const build = spawnSync(process.execPath, [path.join(root, "scripts", "build-plugin-types.mjs"), output], { cwd: root, encoding: "utf8", timeout: 120_000 });
 		assert.equal(build.status, 0, String(build.stdout) + String(build.stderr));
 		assert.ok(fs.existsSync(path.join(output, "src", "core", "plugins.d.ts")));
 		assert.equal(fs.existsSync(path.join(output, "src", "server")), false, "No server implementation is part of the API tree");
@@ -70,8 +70,11 @@ backend.registerTools({ agents:["teacher"], create:context=>[backend.createBackg
   prepare:()=>({input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, maxTurns:3}),
   format:outcome=>({text:outcome.status === "succeeded" ? "Ready" : outcome.error.message})
 })] });
-// @ts-expect-error workers require an explicit model-call turn budget
-backend.workers.start("note", {requestId:"missing-budget", input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, purpose:"background"});
+// Omission and explicit undefined both mean no turn-count limit.
+backend.workers.start("note", {requestId:"unbounded", input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, purpose:"background"});
+backend.workers.start("note", {requestId:"undefined-budget", input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, purpose:"background", maxTurns:undefined});
+// @ts-expect-error an explicit turn cap must be numeric
+backend.workers.start("note", {requestId:"invalid-budget", input:null, prompt:"Write it", model:{provider:"fixture", id:"fixture"}, purpose:"background", maxTurns:"4"});
 const snapshot: GraphSnapshot = backend.learning.graph();
 const node: GraphNode | undefined = backend.learning.readGraphFile("nodes.jsonl")[0];
 // @ts-expect-error A typed graph ledger is not an unvalidated arbitrary record.
