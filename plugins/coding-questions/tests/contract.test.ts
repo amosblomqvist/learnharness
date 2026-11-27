@@ -66,6 +66,10 @@ test("new questions require a literal program/args/code test recipe, without add
   assert.match(instructions, /answer\.txt/);
   assert.match(instructions, /standard input/);
   assert.doesNotMatch(instructions, /version.check.*tool/i);
+  for (const text of [instructions, practiceInstructions]) {
+    assert.match(text, /learner sees tests\.program, tests\.args and tests\.code and must approve running them/);
+    assert.match(text, /secret-like environment variables are not available/);
+  }
 });
 
 test("new questions require a nonblank Markdown model solution, without changing the saved answer schema", () => {

@@ -5,6 +5,16 @@ import type { CodingTestResult, CodingTests } from "./test-result.ts";
 
 const TIMEOUT_MS = 30_000;
 const OUTPUT_LIMIT = 64 * 1024;
+const SECRET_NAME = /(?:_KEY|_TOKEN|_SECRET)$|PASSWORD/i;
+
+/** The app environment without saved API keys or other secret-like variables. */
+export function testEnvironment(env: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const result = { ...env };
+  for (const name of Object.keys(result)) {
+    if (SECRET_NAME.test(name)) delete result[name];
+  }
+  return result;
+}
 
 function checkAbort(signal?: AbortSignal): void {
   if (signal?.aborted) throw new DOMException("Test run aborted", "AbortError");
@@ -63,6 +73,7 @@ async function observeProcess(
   try {
     child = spawn(tests.program, tests.args, {
       cwd,
+      env: testEnvironment(),
       shell: false,
       // A separate POSIX process group lets us kill descendants even when the
       // driver exits first and its descendants still hold our output pipes.
