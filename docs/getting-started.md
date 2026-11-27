@@ -42,7 +42,7 @@ docker run --rm -p 8000:8000 ghcr.io/speaches-ai/speaches:latest-cpu
 # or: whisper-server -m models/ggml-base.en.bin --host 127.0.0.1 --port 8000 --inference-path /v1/audio/transcriptions
 ```
 
-Under **Settings → Providers → Dictation**, set **Server URL** (default `http://127.0.0.1:8000/v1`) and **Model** (default `Systran/faster-whisper-base`; whisper.cpp ignores it). The optional **Local speech-to-text** key is sent as a bearer token. A Speaches server may need to download the model first; see its documentation.
+Under **Settings → Providers → Dictation**, set **Server URL** (default `http://127.0.0.1:8000/v1`) and **Model** (default `Systran/faster-whisper-base`; whisper.cpp ignores it). The optional **Local speech-to-text** key is sent as a bearer token, only to the server URL it was saved for: changing the URL clears the key, so enter it again for the new server. It is saved in Settings only; an environment variable is not used. A Speaches server may need to download the model first; see its documentation.
 
 Local dictation records while you speak and transcribes when you stop, so the text appears after a short delay rather than as you talk. Recordings are sent as 16 kHz WAV from this app's server to the configured URL, never directly from the browser; long recordings are split into five-minute clips. A specific language is sent as its two-letter code (for example `en` for English (UK)); **Multilingual** lets the server detect the language.
 

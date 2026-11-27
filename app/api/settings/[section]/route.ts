@@ -30,7 +30,7 @@
  * lands here.
  */
 
-import { isBuiltinThemeId, type AgentSettings, type AppearanceSettings, type ChatSettings, type ModelsSettings } from "@/src/core";
+import { isBuiltinThemeId, type AgentSettings, type AppearanceSettings, type ChatSettings, type DictationSettings, type ModelsSettings } from "@/src/core";
 import {
 	SETTINGS_SECTIONS,
 	allSegmentPaths,
@@ -45,6 +45,7 @@ import {
 	validateChatSettings,
 	validateModelsSettings,
 	writeSettingsRecord,
+	clearLocalSttKeyOnRebind,
 	type SettingsBodyResult,
 } from "@/src/server";
 
@@ -143,11 +144,21 @@ export async function PUT(request: Request, ctx: { params: Promise<{ section: st
 
 	// Read-modify-write ONE section of the record; everything else rides
 	// along untouched (other sections, unknown keys — sanitize preserves).
+	// A new local dictation URL must never receive the key saved for the old
+	// one: clear the bound key first, so a failed write below fails closed.
+	let localSttKeyCleared = false;
+	if (section === "dictation") {
+		try {
+			localSttKeyCleared = clearLocalSttKeyOnRebind(record.dictation, sectionOut as DictationSettings);
+		} catch {
+			return Response.json({ error: "Could not clear the local dictation key for the new URL. No changes were saved." }, { status: 500 });
+		}
+	}
 	const next = { ...record, [section]: sectionOut };
 	const stored = writeSettingsRecord(next);
 	// Only a successful durable write changes admission. Increasing the
 	// limit immediately drains queued requests; decreasing never cancels active work.
 	refreshWorkerRequestAdmission();
 	const fileAccessError = fileAccessConfigurationError();
-	return Response.json({ settings: stored, ...(fileAccessError ? { fileAccessError } : {}) });
+	return Response.json({ settings: stored, ...(fileAccessError ? { fileAccessError } : {}), ...(localSttKeyCleared ? { localSttKeyCleared } : {}) });
 }

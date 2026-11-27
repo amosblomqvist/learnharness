@@ -307,3 +307,27 @@ test("clearing each search restores the complete catalog order with Multilingual
 		assert.deepEqual(order(), expected, `catalog order after clearing ${query}`);
 	}
 });
+
+test("a local URL change shows the bound key as cleared", async () => {
+	const f = await fixture();
+	f.state.record = { version: 1, dictation: { language: "en", provider: "local", localBaseUrl: "http://127.0.0.1:8000/v1" } } as UserSettings;
+	await act(async () => { notifySettingsSaved("dictation"); });
+	const info = AUTH_KEYS.find((key) => key.id === "LOCAL_STT_API_KEY")!;
+	f.state.keys = [{ id: "LOCAL_STT_API_KEY", info, present: true, masked: "••••", source: "file", shadowedByEnv: false }];
+	const { KeysSection } = await import("../components/settings/keys-section.tsx");
+	await f.render(<KeysSection />);
+	const row = () => byTest("key-local_stt_api_key");
+	assert.match(row().textContent!, /••••/);
+	// The server cleared the key with the URL change; the list re-reads on save.
+	f.state.keys = [{ id: "LOCAL_STT_API_KEY", info, present: false, masked: null, source: "none", shadowedByEnv: false }];
+	const input = byTest("input-dictation-local-url") as unknown as HTMLInputElement;
+	await act(async () => {
+		input.value = "http://127.0.0.1:9000/v1";
+		input.dispatchEvent(new window.Event("input", { bubbles: true }));
+		input.dispatchEvent(new window.Event("focusout", { bubbles: true }));
+	});
+	await act(async () => { await new Promise((resolve) => setTimeout(resolve, 10)); });
+	assert.equal((f.state.record.dictation as { localBaseUrl?: string }).localBaseUrl, "http://127.0.0.1:9000/v1");
+	assert.match(row().textContent!, /not set/);
+	assert.doesNotMatch(row().textContent!, /••••/);
+});

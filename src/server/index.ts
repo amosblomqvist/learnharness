@@ -67,3 +67,4 @@ export { claudeCodeInstallationResponse } from "./claude-code.ts";
 export * from "./custom-provider.ts";
 export { customProviderGet, customProviderMutation } from "./custom-provider-http.ts";
 export { transcribeLocalRequest } from "./local-stt.ts";
+export { clearLocalSttKeyOnRebind } from "./local-stt-auth.ts";

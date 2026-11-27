@@ -58,6 +58,9 @@ import { customProviderAvailable, installCustomProviderSource } from "./custom-p
 import { claudeCodeAvailable } from "./claude-code-config.ts";
 import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
 import { CUSTOM_AUTH_BINDING } from "../core/custom-provider-auth.ts";
+import { LOCAL_STT_KEY_ID } from "../core/dictation.ts";
+import { LOCAL_STT_AUTH_BINDING } from "../core/local-stt-auth.ts";
+import { deleteLocalSttKey, localSttKeyUsable, saveLocalSttKey } from "./local-stt-auth.ts";
 
 // Shared HMR-stable provenance lets external CLIs exclude file-only injections
 // without importing this store-backed module into the agent layer.
@@ -66,7 +69,7 @@ import { authEnvRecord as boot } from "../core/auth-env.ts";
 /** Ordinary writable key names. Custom auth writes must use the atomic
  * endpoint-binding seam, never the generic single-key API. */
 export function isWritableAuthKey(id: string): boolean {
-	return id !== CUSTOM_AUTH_BINDING && id !== CUSTOM_PROVIDER.envVar && (isKnownAuthKey(id) || isProviderEnvVar(id));
+	return id !== CUSTOM_AUTH_BINDING && id !== LOCAL_STT_AUTH_BINDING && id !== CUSTOM_PROVIDER.envVar && (isKnownAuthKey(id) || isProviderEnvVar(id));
 }
 
 /** The settings page's provider dropdown: every pi-ai provider that takes
@@ -92,7 +95,7 @@ export function envKeysIgnored(): boolean {
  */
 export function initAuthEnv(): void {
 	const record = boot();
-	const fileVars = Object.fromEntries(Object.entries(authStore.authVars()).filter(([name]) => name !== CUSTOM_AUTH_BINDING));
+	const fileVars = Object.fromEntries(Object.entries(authStore.authVars()).filter(([name]) => name !== CUSTOM_AUTH_BINDING && name !== LOCAL_STT_AUTH_BINDING && name !== LOCAL_STT_KEY_ID));
 	const managed = new Set<string>([
 		...Object.keys(fileVars),
 		...AUTH_KEYS.map((k) => k.id),
@@ -128,7 +131,7 @@ export function initAuthEnv(): void {
 /** Is this env-var name one the keys system manages (curated, provider,
  *  or held in the file)? */
 function isManagedName(name: string): boolean {
-	return name !== CUSTOM_AUTH_BINDING && (isWritableAuthKey(name) || name in authStore.authVars());
+	return name !== CUSTOM_AUTH_BINDING && name !== LOCAL_STT_AUTH_BINDING && (isWritableAuthKey(name) || name in authStore.authVars());
 }
 
 /**
@@ -150,7 +153,7 @@ export function resolveKeyStatuses(
 	}
 	const rows: AuthKeyStatus[] = [];
 	for (const id of ids) {
-		if (id === CUSTOM_AUTH_BINDING) continue;
+		if (id === CUSTOM_AUTH_BINDING || id === LOCAL_STT_AUTH_BINDING) continue;
 		const envValue = env[id];
 		const fileValue = fileVars[id];
 		const isRealEnv = realEnv.has(id);
@@ -164,7 +167,7 @@ export function resolveKeyStatuses(
 			present: live !== undefined,
 			// Custom keys may be one character: even a masked suffix can expose
 			// the entire credential. Preserve inventory, return no key characters.
-			masked: live !== undefined ? id === CUSTOM_PROVIDER.envVar ? "••••" : `${maskKey(live)} (${live.trim().length} chars)` : null,
+			masked: live !== undefined ? id === CUSTOM_PROVIDER.envVar || id === LOCAL_STT_KEY_ID ? "••••" : `${maskKey(live)} (${live.trim().length} chars)` : null,
 			source: isRealEnv ? "env" : live !== undefined ? "file" : "none",
 			shadowedByEnv: isRealEnv && fileValue !== undefined && envValue !== fileValue,
 		});
@@ -174,7 +177,14 @@ export function resolveKeyStatuses(
 
 /** The GET view: every curated key (present or not) + unknown file vars. */
 export function keyStatuses(): AuthKeyStatus[] {
-	return resolveKeyStatuses(authStore.authVars(), process.env, boot().realEnv, new Set([...AUTH_PROVIDER_ENV_VARS, CUSTOM_PROVIDER.envVar]));
+	const rows = resolveKeyStatuses(authStore.authVars(), process.env, boot().realEnv, new Set([...AUTH_PROVIDER_ENV_VARS, CUSTOM_PROVIDER.envVar]));
+	// The local transcription key counts only from the file and only while it
+	// is bound to the current URL: exactly when it would be sent.
+	return rows.map((row) => {
+		if (row.id !== LOCAL_STT_KEY_ID) return row;
+		const present = localSttKeyUsable();
+		return { ...row, present, masked: present ? "••••" : null, source: present ? "file" : "none", shadowedByEnv: false };
+	});
 }
 
 /** The live value for one var, env-first (the env-wins rule) — the canonical
@@ -182,7 +192,8 @@ export function keyStatuses(): AuthKeyStatus[] {
  *  STT route was the one cold-boot hole: a first-ever request to it would
  *  otherwise read env before any fill-gap ran). */
 export function keyValue(id: string): string | undefined {
-	if (id === CUSTOM_AUTH_BINDING) return undefined;
+	// The local transcription key is URL-bound: read it via localSttKeyFor.
+	if (id === CUSTOM_AUTH_BINDING || id === LOCAL_STT_AUTH_BINDING || id === LOCAL_STT_KEY_ID) return undefined;
 	// The fresh-user switch: ONLY the file store counts (belt-and-
 	// suspenders — the boot deletion already emptied the env; this guards
 	// any env key reintroduced after boot).
@@ -214,6 +225,10 @@ export function providerKeyPresent(provider: string): boolean {
  */
 export function saveKey(id: string, value: string): { ok: true; status: AuthKeyStatus } | { ok: false; error: string } {
 	if (id === CUSTOM_PROVIDER.envVar || id === CUSTOM_AUTH_BINDING) return { ok: false, error: "Use the custom endpoint editor" };
+	if (id === LOCAL_STT_KEY_ID) {
+		const saved = saveLocalSttKey(value);
+		return saved.ok ? { ok: true, status: keyStatuses().find((s) => s.id === id)! } : saved;
+	}
 	const shape = isProviderEnvVar(id) ? genericProviderKeyGuard(id, value) : validateKeyShape(id, value);
 	if (!shape.ok) return { ok: false, error: shape.error };
 	const trimmed = value.trim();
@@ -234,6 +249,10 @@ export function saveKey(id: string, value: string): { ok: true; status: AuthKeyS
  */
 export function deleteKey(id: string): AuthKeyStatus {
 	if (id === CUSTOM_PROVIDER.envVar || id === CUSTOM_AUTH_BINDING) throw new Error("Use the custom endpoint editor");
+	if (id === LOCAL_STT_KEY_ID) {
+		deleteLocalSttKey();
+		return keyStatuses().find((s) => s.id === id)!;
+	}
 	authStore.deleteAuthVar(id);
 	const record = boot();
 	if (record.fillGap.has(id) && !record.realEnv.has(id)) {

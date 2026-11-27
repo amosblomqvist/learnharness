@@ -43,7 +43,7 @@ import { ProviderMenuList } from "./model-menu.tsx";
 import { useInteractionLayer, useInteractionLayers, useOptionalInteractionLayers } from "@/components/interaction-layers";
 import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { MenuShell } from "@/components/menu-shell";
-import { notifySettingsSaved } from "@/components/settings-signal";
+import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
 import { DictationProviderSetting } from "@/components/dictation-provider";
 import { useDictationLanguage } from "@/components/dictation-preference";
@@ -432,6 +432,8 @@ export function KeysSection({
 	useEffect(() => {
 		void reload();
 	}, []);
+	// A new local dictation URL clears the key bound to the old one; show it.
+	useEffect(() => onSettingsSaved((section) => { if (section === "dictation") void reload(); }), []);
 
 	// The deep-link follow: a retarget while the section is open (the
 	// same while-open pattern the dialog's section nav uses) unfolds the

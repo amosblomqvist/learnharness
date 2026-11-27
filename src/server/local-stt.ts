@@ -4,12 +4,12 @@
  * (`POST {base}/audio/transcriptions`, multipart). The renderer never talks to
  * that endpoint, and an optional key stays server-side, as with Deepgram.
  */
-import { isDictationLanguage, LOCAL_STT_KEY_ID, LOCAL_STT_MAX_BYTES, localTranscriptionLanguage } from "../core/dictation.ts";
+import { isDictationLanguage, LOCAL_STT_MAX_BYTES, localTranscriptionLanguage } from "../core/dictation.ts";
 import { resolveSettings } from "../core/settings-resolution.ts";
 import { readSettings } from "../store/settings.ts";
 import { apiRequestRefusal } from "./desktop-access.ts";
 import { CustomBodyLimitError, readBoundedJson } from "./custom-provider-body.ts";
-import { keyValue } from "./keys.ts";
+import { localSttKeyFor } from "./local-stt-auth.ts";
 
 /** Accepted clip types; the renderer sends WAV. */
 const AUDIO_TYPES = new Set(["audio/wav", "audio/x-wav", "audio/wave", "audio/webm", "audio/ogg", "audio/mpeg", "audio/mp4", "audio/flac"]);
@@ -22,7 +22,8 @@ export const LOCAL_STT_TIMEOUT_MS = 120_000;
 
 export interface LocalSttDeps {
 	settings?: () => ReturnType<typeof resolveSettings>["dictation"];
-	apiKey?: () => string | undefined;
+	/** The key bound to exactly this base URL, if any. */
+	apiKey?: (baseUrl: string) => string | undefined;
 	fetch?: typeof fetch;
 	timeoutMs?: number;
 }
@@ -83,7 +84,7 @@ export async function transcribeLocalRequest(request: Request, deps: LocalSttDep
 	form.append("response_format", "json");
 	const iso = localTranscriptionLanguage(language);
 	if (iso) form.append("language", iso);
-	const key = (deps.apiKey ?? (() => keyValue(LOCAL_STT_KEY_ID)))()?.trim();
+	const key = (deps.apiKey ?? localSttKeyFor)(settings.localBaseUrl)?.trim();
 
 	const controller = new AbortController();
 	const timer = setTimeout(() => controller.abort(), deps.timeoutMs ?? LOCAL_STT_TIMEOUT_MS);
