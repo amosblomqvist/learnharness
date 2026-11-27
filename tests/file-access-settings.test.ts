@@ -93,7 +93,10 @@ describe("strict persisted file-access policy", () => {
 		await fs.symlink(path.join(root, "missing-settings.json"), SETTINGS_FILE, "file");
 		assert.equal(readFileAccessSettings().ok, false);
 		await fs.unlink(SETTINGS_FILE);
-		await fs.rmdir(data);
+		// Recursive: the attachments feature creates `<data>/attachments` on
+		// first use, so the data dir is no longer guaranteed empty here. The
+		// scenario under test is the dangling symlink, not emptiness.
+		await fs.rm(data, { recursive: true, force: true });
 		await fs.symlink(path.join(root, "missing-data"), data, process.platform === "win32" ? "junction" : "dir");
 		try { assert.equal(readFileAccessSettings().ok, false); }
 		finally { await fs.unlink(data); await fs.mkdir(data); }
