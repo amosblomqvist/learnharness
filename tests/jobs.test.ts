@@ -630,7 +630,9 @@ describe("research runner (async protocol §3)", () => {
 		assert.deepEqual(search.queries, ["sigma.js latest version (5)"]);
 	});
 
-	it("research beyond twelve tool turns delivers one final brief and accounts for every turn", async () => {
+	for (const recover of [false, true]) it(recover
+		? "research beyond twelve tool turns charges one closing request when the last response is truncated"
+		: "research beyond twelve tool turns delivers one final brief and accounts for every turn", async () => {
 		const chat = chatStore.createChat("Test: uncapped research"); trackChat(chat.id);
 		const toolCallId = "call-uncapped-research";
 		chatStore.saveMessages(chat.id, nativeToolMessages("which version?", "research", toolCallId, RESEARCH_INPUT));
@@ -642,6 +644,7 @@ describe("research runner (async protocol §3)", () => {
 				fauxText("Progress, not the final brief."),
 				fauxToolCall("web_search", { query: `source ${index}` }, { id: `search_${index}` }),
 			], { stopReason: "toolUse" })),
+			...(recover ? [fauxAssistantMessage("Partial brief", { stopReason: "length" })] : []),
 			fauxAssistantMessage(BRIEF),
 		]);
 		try { await runner.runJob(job.id); }
@@ -650,10 +653,12 @@ describe("research runner (async protocol §3)", () => {
 		assert.equal(done.status, "done"); assert.equal(done.error, undefined);
 		assert.equal((done.result as ResearchResult).brief, BRIEF);
 		assert.ok((done.result as ResearchResult).sources.some(source => source.url === "https://www.sigmajs.org/docs"));
-		assert.equal(done.usage?.steps, 16); assert.equal(done.usage?.calls?.length, 16);
+		const billed = recover ? 17 : 16;
+		assert.equal(done.usage?.steps, billed); assert.equal(done.usage?.calls?.length, billed);
 		assert.equal(search.queries.length, 15);
 		assert.equal(delivery.steers.length, 1);
 		assert.ok(delivery.steers[0]!.content.includes(BRIEF));
+		assert.ok(!delivery.steers[0]!.content.includes("Partial brief"));
 	});
 
 	it("a keyless fetch-only researcher still completes and delivers a sourced job result", async () => {
