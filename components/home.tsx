@@ -19,6 +19,7 @@ import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { PathInput } from "@/components/path-input";
 import { AttachFilesButton } from "@/components/attach-files-button";
 import { SessionStarter } from "@/components/start-session";
+import { useSavedDraft } from "@/components/saved-draft";
 import type { TurnUsage } from "@/src/core";
 
 /**
@@ -50,6 +51,15 @@ export function Home({
 	 * dictation flush lands via setState, invisible to a closure that
 	 * waited through `await finish()`. Kept current at every write. */
 	const topicRef = useRef("");
+	const restoreTopic = (value: string) => {
+		topicRef.current = value;
+		setTopic(value);
+	};
+	const saveTopic = useSavedDraft("home:composer", restoreTopic);
+	const applyTopic = (value: string) => {
+		restoreTopic(value);
+		saveTopic(value);
+	};
 	// First-run gate (model-slots wave, owner 2026-09-20): chats cannot
 	// start until the user has picked all three slots — no defaults for
 	// 33 providers. The dock shows the CTA while unconfigured; submitting
@@ -63,9 +73,7 @@ export function Home({
 		// Ref-first: the join reads the mirror so the send resuming after
 		// `await finish()` sees the dictated tail.
 		append: (t) => {
-			const v = joinDictation(topicRef.current, t);
-			topicRef.current = v;
-			setTopic(v);
+			applyTopic(joinDictation(topicRef.current, t));
 		},
 	});
 	const [busy, setBusy] = useState(false);
@@ -120,7 +128,8 @@ export function Home({
 		void dictation.finish().then(() => begin());
 	};
 	const begin = async () => {
-		const t = topicRef.current.trim();
+		const submitted = topicRef.current;
+		const t = submitted.trim();
 		if (!t || startingRef.current) return;
 		// Unconfigured: the send INTERCEPTS into the setup flow (the draft
 		// stays in the textarea; the learner sends it after Save).
@@ -158,6 +167,10 @@ export function Home({
 				...(mode === "practice" ? { kind: "practice" } : {}),
 				...(practiceProps.length > 0 ? { graphContext: { propositions: practiceProps } } : {}),
 			}, fetch, JSON.stringify(catalog?.slots.strong));
+			if (topicRef.current === submitted) {
+				restoreTopic("");
+				saveTopic("", submitted);
+			}
 			router.push(target);
 		} catch {
 			startingRef.current = false;
@@ -256,8 +269,7 @@ export function Home({
 						ref={topicInputRef}
 						value={topic}
 						onValueChange={(value) => {
-							topicRef.current = value;
-							setTopic(value);
+							applyTopic(value);
 						}}
 						defaultDropTarget
 						onKeyDown={(e) => {

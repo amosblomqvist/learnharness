@@ -46,6 +46,10 @@ contextBridge.exposeInMainWorld("lh", {
 	platform: process.platform,
 	takeStartupMessage: () => ipcRenderer.invoke("lh:startup-message:take"),
 	dismissStartupMessage: (id) => ipcRenderer.invoke("lh:startup-message:dismiss", id),
+	drafts: {
+		read: (key) => ipcRenderer.invoke("lh:drafts:read", key),
+		write: (key, text) => ipcRenderer.send("lh:drafts:write", key, text),
+	},
 	// Resolve only a renderer-supplied, OS-backed File. No filesystem API,
 	// uploads, copies, or DOM File IPC to main; sandbox/isolation stay on.
 	getPathForFile: (file) => webUtils.getPathForFile(file),

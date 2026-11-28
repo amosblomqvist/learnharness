@@ -42,6 +42,7 @@ import {
 	type Phase3,
 } from "@/src/core";
 import type { PrepareBuiltinSubmission } from "./plugin-submission-adapters";
+import { useSavedDraft } from "./saved-draft";
 import { CONFIDENCE_COLORS, confidenceRailStyle } from "@/components/confidence-rail";
 import {
 	ANSWER_COLUMN_FRAME,
@@ -193,6 +194,7 @@ export interface QuestionDockProps {
 	preparing?: boolean;
 	/** Restore only this call's unconfirmed submission after recovery. */
 	initialDraft?: QuestionFormDraft;
+	draftKey?: string;
 	onSaveDraft?: (draft: QuestionFormDraft) => void;
 	/** Escape in a question field stops dictation (STT wave) — threaded
 	 *  from the page that owns the dictation hook. */
@@ -235,6 +237,7 @@ export function QuestionDock({
 	hasPendingInput,
 	preparing,
 	initialDraft,
+	draftKey,
 	onSaveDraft,
 	onEscape,
 	phase = "probe",
@@ -284,6 +287,7 @@ export function QuestionDock({
 			)}
 			<div className={expanded ? "dock-variant" : "invisible h-0 overflow-hidden"}>
 				<QuestionDockForm
+					key={draftKey ?? toolCallId}
 					viewReader={viewReader}
 					toolName={toolName}
 					toolCallId={toolCallId}
@@ -295,6 +299,7 @@ export function QuestionDock({
 					hasPendingInput={hasPendingInput}
 					preparing={preparing}
 					initialDraft={initialDraft}
+					draftKey={draftKey}
 					onSaveDraft={onSaveDraft}
 					onEscape={onEscape}
 					workingRef={workingRef}
@@ -390,6 +395,7 @@ function QuestionDockForm({
 	hasPendingInput,
 	preparing,
 	initialDraft,
+	draftKey,
 	onSaveDraft,
 	onEscape,
 	dictationClaim = true,
@@ -479,6 +485,31 @@ function QuestionDockForm({
 	// deliberate (the same number, the same meaning). The dock unmounts
 	// between questions, so each question starts fresh at 50.
 	const [confIdx, setConfIdx] = useState<number>(initialDraft?.confidenceIndex ?? DEFAULT_CONFIDENCE_INDEX);
+	const saveDraft = useSavedDraft(draftKey, raw => {
+		try {
+			const draft = JSON.parse(raw);
+			const { selection, thinking, other, text, confidenceIndex } = draft;
+			if (typeof thinking !== "string" || typeof other !== "string" || typeof text !== "string" ||
+				!Array.isArray(selection?.selected) || typeof selection.otherSelected !== "boolean" ||
+				typeof selection.dontKnow !== "boolean" || !Number.isInteger(confidenceIndex) ||
+				CONFIDENCE_STOPS[confidenceIndex] === undefined) return;
+			setSel({ ...selection, selected: new Set(selection.selected.filter((index: number) => Number.isInteger(index) && !!qd.options[index])) });
+			thinkingTextRef.current = thinking;
+			answerTextRef.current = text;
+			setThinking(thinking);
+			setText(text);
+			setOther(other);
+			setConfIdx(confidenceIndex);
+		} catch { /* Ignore an unreadable saved form. */ }
+	});
+	const previousDraft = useRef<string | undefined>(undefined);
+	useLayoutEffect(() => {
+		if (!draftKey) return;
+		const draft = thinking || other || text || sel.selected.size || sel.otherSelected || sel.dontKnow || confIdx !== DEFAULT_CONFIDENCE_INDEX
+			? JSON.stringify({ selection: { ...sel, selected: [...sel.selected] }, thinking, other, text, confidenceIndex: confIdx }) : "";
+		if (previousDraft.current !== undefined && previousDraft.current !== draft) saveDraft(draft);
+		previousDraft.current = draft;
+	}, [draftKey, sel, text, thinking, other, confIdx, saveDraft]);
 	const selectMode: SelectMode = qd.mode === "multi-select" ? "multi-select" : "single-select";
 
 	// The PRIMARY dictation input (owner, STT round 1): while a question

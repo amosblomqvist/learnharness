@@ -17,6 +17,7 @@ import { ChainTableOverlay } from "@/components/chain-table.tsx";
 import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
+import { useSavedDraft } from "@/components/saved-draft";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
@@ -247,10 +248,15 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	 * landed via setState and may not have re-rendered yet. The send reads
 	 * the mirror; every write keeps it current. */
 	const textRef = useRef("");
-	const applyText = (v: string) => {
+	const restoreText = useCallback((v: string) => {
 		textRef.current = v;
 		setText(v);
-	};
+	}, []);
+	const saveText = useSavedDraft("new:composer", restoreText);
+	const applyText = useCallback((v: string) => {
+		restoreText(v);
+		saveText(v);
+	}, [restoreText, saveText]);
 	const [busy, setBusy] = useState(false);
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
@@ -291,7 +297,8 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 	const [setupOpen, setSetupOpen] = useState(false);
 
 	const send = useCallback(() => {
-		const draft = textRef.current.trim();
+		const submitted = textRef.current;
+		const draft = submitted.trim();
 		if (!draft || startingRef.current) return;
 		if (!configured) {
 			setSetupOpen(true);
@@ -318,7 +325,13 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
 			starterRef.current, JSON.stringify(catalog?.slots.strong))
 			.then((target) => {
-				if (target) router.push(target);
+				if (target) {
+					if (textRef.current === submitted) {
+						restoreText("");
+						saveText("", submitted);
+					}
+					router.push(target);
+				}
 				else { startingRef.current = false; setBusy(false); }
 			})
 			.catch(() => {
@@ -326,7 +339,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				setBusy(false);
 				setStartError(true);
 			});
-	}, [router, configured, zeroKeys, catalog, mode]);
+	}, [router, configured, zeroKeys, catalog, mode, restoreText, saveText]);
 
 	return (
 		<>

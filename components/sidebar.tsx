@@ -98,6 +98,7 @@ declare global {
 			onOpenSettings?: (cb: (section: string) => void) => () => void;
 			takeStartupMessage?: () => Promise<StartupMessageOffer | null>;
 			dismissStartupMessage?: (id: string) => Promise<boolean>;
+			drafts?: { read: (key: string) => Promise<string>; write: (key: string, text: string) => void };
 		};
 	}
 }
