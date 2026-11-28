@@ -58,6 +58,7 @@ import { customProviderAvailable, installCustomProviderSource } from "./custom-p
 import { claudeCodeAvailable } from "./claude-code-config.ts";
 import { CLAUDE_CODE_PROVIDER } from "../agent/claude-code/constants.ts";
 import { CUSTOM_AUTH_BINDING } from "../core/custom-provider-auth.ts";
+import { BEDROCK_AUTH_ENV_VARS, BEDROCK_PROVIDER, bedrockConfigured } from "../core/bedrock.ts";
 
 // Shared HMR-stable provenance lets external CLIs exclude file-only injections
 // without importing this store-backed module into the agent layer.
@@ -69,12 +70,12 @@ export function isWritableAuthKey(id: string): boolean {
 	return id !== CUSTOM_AUTH_BINDING && id !== CUSTOM_PROVIDER.envVar && (isKnownAuthKey(id) || isProviderEnvVar(id));
 }
 
-/** The settings page's provider dropdown: every pi-ai provider that takes
- *  a plain key ({id, envVar, label} — no-drift-pinned, see the table's doc
+/** The settings page's provider dropdown: plain-key providers plus Bedrock's
+ *  optional bearer token ({id, envVar, label} — no-drift-pinned, see the table's doc
  *  in core/auth-keys.ts and tests/auth-provider-keys.test.ts). Sorted by
  *  id for a stable payload. */
 export function providerKeyList() {
-	return [...AUTH_PROVIDER_KEYS].sort((a, b) => a.id.localeCompare(b.id));
+	return [...AUTH_PROVIDER_KEYS, BEDROCK_PROVIDER].sort((a, b) => a.id.localeCompare(b.id));
 }
 
 /** The fresh-user switch (owner, interlude 2026-09-22): env keys are
@@ -100,6 +101,7 @@ export function initAuthEnv(): void {
 		// an env-exported OPENAI_API_KEY with a file copy gets honest shadow
 		// semantics, exactly like the curated vars.
 		...AUTH_PROVIDER_KEYS.map((p) => p.envVar),
+		...BEDROCK_AUTH_ENV_VARS,
 		CUSTOM_PROVIDER.envVar,
 	]);
 	if (envKeysIgnored()) {
@@ -194,9 +196,12 @@ export function keyValue(id: string): string | undefined {
  * 2026-09-25): would this provider's key be present at request time?
  * Reads through keyValue — the SAME env-first lookup pi-ai performs
  * natively at every request — so an env-shadowed key counts as present
- * (gate by what would run). Providers absent from AUTH_PROVIDER_KEYS take
- * no key at all: nothing to gate, present by definition. */
+ * (gate by what would run). AWS and connection providers have explicit
+ * gates below; other providers absent from the plain-key table are admitted. */
 export function providerKeyPresent(provider: string): boolean {
+	if (provider === BEDROCK_PROVIDER.id) {
+		return bedrockConfigured(Object.fromEntries(BEDROCK_AUTH_ENV_VARS.map((name) => [name, keyValue(name)])));
+	}
 	if (provider === CUSTOM_PROVIDER.id) return customProviderAvailable();
 	// Explicit opt-in + installation only, never authentication readiness.
 	// Consulted at admission, not inside already-running agent loops.
