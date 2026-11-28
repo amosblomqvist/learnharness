@@ -27,7 +27,7 @@
  * EXPAND icon (opens the session overlay) when a chat page is mounted.
  */
 
-import { cloneElement, createContext, isValidElement, useContext, useEffect, useRef, useState, type ComponentProps, type ReactNode } from "react";
+import { cloneElement, createContext, isValidElement, useContext, useEffect, useId, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react";
 import { CheckIcon, CopyIcon, MaximizeIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import {
@@ -38,10 +38,9 @@ import {
 } from "streamdown";
 import type { ExtraProps } from "streamdown";
 import { MERMAID_FONT_SIZE, renderMermaid } from "@/components/mermaid-render";
-import { useAppearance } from "@/components/settings/appearance";
 import { MermaidError } from "@/components/mermaid-error";
 import { blurAfterPointerClick } from "@/components/focus-hygiene";
-import { chartSize, useSessionMermaid } from "@/components/session-overlay";
+import { chartSize, useChartFont, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
 import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
 
@@ -138,55 +137,35 @@ export function codeSource(children: ReactNode): string {
 	return "";
 }
 
-/** Mermaid, in the message flow: the bare chart (the rendered mode's theme, via
- *  the app's own plugin — components/mermaid-render.ts), the hover corner
- *  with copy + expand, the house error fallback. No container chrome, no
- *  zoom pill — the zoom/pan home is the session overlay. While the fence is
- *  still streaming (the trailing open fence), a quiet skeleton instead of a
- *  doomed parse. */
+/** Mermaid, in the message flow: the bare chart rendered synchronously via pele
+ *  (components/mermaid-render.ts, styled by --pele-* CSS tokens), the hover
+ *  corner with copy + expand, and the house error fallback. No container
+ *  chrome, no zoom pill — zoom/pan lives in the session overlay. While the
+ *  fence is still streaming, a quiet skeleton avoids doomed parses. */
 function MermaidInline({ chart }: { chart: string }) {
 	const displayOnly = useContext(MarkdownDisplayOnlyContext);
-	const [svg, setSvg] = useState<string | null>(null);
-	const [error, setError] = useState<string | null>(null);
+	const chartId = useId();
+	const holderRef = useRef<HTMLDivElement>(null);
 	const [attempt, setAttempt] = useState(0);
 	const overlay = useSessionMermaid();
 	const incomplete = useIsCodeFenceIncomplete();
-	const { resolvedMode } = useAppearance();
-	// The font-parity cap (owner rule, 2026-09-19): the house CSS
-	// (`max-width: 100% !important`) overrides mermaid's own natural-size cap,
-	// so a chart would otherwise stretch to the full column and render its
-	// text larger than the session's own text. Cap the holder at the width
-	// where the chart's 16px base font lands at the SESSION font (measured
-	// live from the wrapper — --lh-prose-size today): a chart may shrink to
-	// fit the column, but never blow its text up past the chat's.
-	const holderRef = useRef<HTMLDivElement>(null);
-	const [capW, setCapW] = useState<number | null>(null);
-	useEffect(() => {
-		if (!svg || !holderRef.current) return;
-		const fs = Number.parseFloat(getComputedStyle(holderRef.current).fontSize);
-		if (!Number.isFinite(fs) || fs <= 0) return;
-		const { w } = chartSize(svg);
-		setCapW((w * fs) / MERMAID_FONT_SIZE);
-	}, [svg]);
+	const { fontFamily: chartFont, fontEpoch } = useChartFont(holderRef);
+	const rendered = useMemo(() => {
+		if (incomplete) return null;
+		void attempt;
+		void fontEpoch;
+		return renderMermaid(chart, chartFont, `md-${chartId}`);
+	}, [chart, incomplete, chartFont, fontEpoch, chartId, attempt]);
+	const svg = rendered?.svg ?? null;
+	const error = rendered?.error ?? null;
+	// The font-parity cap (owner rule, 2026-09-19): express the holder's cap in
+	// `em` (natural svg width / 16px base font) while globals.css gives svg.pele
+	// `width: 100%`, so diagram text tracks the live session reading font size
+	// (including sizes above 16px) and shrinks to fit narrow columns — in SSR
+	// and on live font-size changes without an extra effect pass.
+	const capEm = useMemo(() => (svg ? chartSize(svg).w / MERMAID_FONT_SIZE : null), [svg]);
 
-	useEffect(() => {
-		if (incomplete) return;
-		let cancelled = false;
-		setSvg(null);
-		setError(null);
-		renderMermaid(chart, resolvedMode)
-			.then((s) => {
-				if (!cancelled) setSvg(s);
-			})
-			.catch((e) => {
-				if (!cancelled) setError(e instanceof Error ? e.message : String(e));
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [chart, attempt, incomplete, resolvedMode]);
-
-	if (incomplete || (svg === null && error === null)) {
+	if (incomplete) {
 		return (
 			<div data-testid="md-mermaid" className="my-4 flex justify-center p-4" aria-busy="true">
 				<span className="inline-block size-4 animate-spin rounded-full border border-current border-b-2 text-muted-foreground" />
@@ -198,12 +177,12 @@ function MermaidInline({ chart }: { chart: string }) {
 	}
 	return (
 		// data-streamdown="mermaid" keeps the house CSS hook (the svg
-		// max-width rule in globals.css) alive for this app-owned block.
+		// width/max-width rules in globals.css) alive for this app-owned block.
 		<div data-testid="md-mermaid" data-streamdown="mermaid" className="group/md relative my-4">
 			<div
 				ref={holderRef}
 				className="mx-auto flex w-full justify-center"
-				style={capW === null ? undefined : { maxWidth: `${capW}px` }}
+				style={capEm === null ? undefined : { maxWidth: `${capEm}em` }}
 				dangerouslySetInnerHTML={{ __html: svg ?? "" }}
 			/>
 			{!displayOnly && <div className="absolute top-0 right-0 flex items-start gap-0.5">
