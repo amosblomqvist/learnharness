@@ -5,11 +5,12 @@ import type { AdmissionScope, NoDispatchKind } from "./chatgpt-request-cycle.ts"
 export type { ChatGPTStatus } from "../core/contracts/chatgpt.ts";
 export interface Stamp { epoch: number; authorityRevision: number; revision: number }
 interface StatusValue extends Stamp { status: ChatGPTStatus }
-interface ModelsValue extends StatusValue { accountId: string | null; models: { id: string; name: string }[] }
+type ChatGPTModel = Model<"openai-responses"> & { supportsFastMode: boolean };
+interface ModelsValue extends StatusValue { accountId: string | null; models: { id: string; name: string; supportsFastMode?: true }[] }
 interface LeaseValue extends Stamp { accessToken: string; accountId: string }
 interface Pending { op: string; resolve: (v: unknown) => void; reject: (e: Error) => void; timer: ReturnType<typeof setTimeout> }
 interface BridgeState {
- status: ChatGPTStatus; stamp: Stamp; models: Model<"openai-responses">[]; catalogAccount: string | null;
+ status: ChatGPTStatus; stamp: Stamp; models: ChatGPTModel[]; catalogAccount: string | null;
  pending: Map<string, Pending>; controllers: Map<AbortController, boolean>; listeners: Set<() => void>; counter: number; catalogRequest: number;
 }
 const key = Symbol.for("lh.chatgpt.bridge");
@@ -83,8 +84,8 @@ export function chatGPTStatus(): ChatGPTStatus { return bridge().status; }
 export function chatGPTConnected(): boolean { const s = chatGPTStatus(); return runtimeConnected() && s.available && s.accounts.some((a) => a.id === s.activeId && a.connected && a.planEnabled === true); }
 export function chatGPTBackgroundAllowed(): boolean { const s = chatGPTStatus(); return chatGPTConnected() && s.allowBackgroundUse === true; }
 export function onChatGPTChange(listener: () => void): () => void { bridge().listeners.add(listener); return () => { bridge().listeners.delete(listener); }; }
-export function chatGPTModels(): Model<"openai-responses">[] { return bridge().models; }
-export function chatGPTModel(id: string): Model<"openai-responses"> | undefined { return chatGPTModels().find((m) => m.id === id); }
+export function chatGPTModels(): ChatGPTModel[] { return bridge().models; }
+export function chatGPTModel(id: string): ChatGPTModel | undefined { return chatGPTModels().find((m) => m.id === id); }
 export function chatGPTScope(selectedModelId: string): AdmissionScope {
  const state = bridge();
  if (!chatGPTConnected() || !state.catalogAccount || state.catalogAccount !== state.status.activeId || !chatGPTModel(selectedModelId)) throw new Error("ChatGPT account model catalog is unavailable");
@@ -124,7 +125,7 @@ export async function refreshChatGPTModels(supported: Model<"openai-responses">[
   state.catalogAccount = value.accountId;
   state.models = value.models.flatMap((entry) => {
    const known = supported.find((m) => m.id === entry.id && m.api === "openai-responses");
-   return known ? [{ ...known, provider: "chatgpt", name: entry.name, headers: undefined, samplingParams: undefined, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] : [];
+   return known ? [{ ...known, provider: "chatgpt", name: entry.name, supportsFastMode: entry.supportsFastMode === true, headers: undefined, samplingParams: undefined, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 } }] : [];
   });
  } catch { if (sequence === state.catalogRequest) clearCatalog(state); }
 }

@@ -6,6 +6,8 @@
  * live-only delivery limitation.
  */
 
+import type { FastModeResult } from "./native-chat-speed.ts";
+
 /** The core event vocabulary plus the namespaced plugin extension channel. */
 export interface ServerEvents {
 	/** A native conversation turn began server-side, including sends, wake
@@ -14,6 +16,8 @@ export interface ServerEvents {
 	/** A turn settled after turn persistence. Refetch the saved record; this
 	 * does not mean asynchronous extraction or background work has completed. */
 	"turn-settled": { chatId: string };
+	/** Actual processing of completed Fast-requested lesson responses, live-only. */
+	"chat-speed-result": { chatId: string; model: { provider: string; id: string }; result: FastModeResult };
 	/** A job record changed (dispatch, progress, settle, abort, recovery).
 	 *  chatId when known — consumers that own one chat filter on it. */
 	"jobs-changed": { chatId?: string };
@@ -50,6 +54,7 @@ export type ServerEventType = keyof ServerEvents;
 export const SERVER_EVENT_TYPES = [
 	"turn-started",
 	"turn-settled",
+	"chat-speed-result",
 	"jobs-changed",
 	"activity-changed",
 	"chats-changed",

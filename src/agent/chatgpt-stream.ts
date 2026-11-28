@@ -2,12 +2,14 @@ import type { Api, AssistantMessage, Model, SimpleStreamOptions, StreamFunction,
 import { streamSimple } from "@earendil-works/pi-ai/api/openai-responses";
 import { AssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
 import { transformMessages } from "@earendil-works/pi-ai/api/transform-messages";
-import { chatGPTAbortController, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTDenial } from "./chatgpt-bridge.ts";
+import { chatGPTAbortController, chatGPTModel, chatGPTScope, chatGPTScopeCurrent, chatGPTLease, chatGPTDenial } from "./chatgpt-bridge.ts";
 import type { AdmissionScope, ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 import { capturePreparedBackgroundPayload } from "./background-capture.ts";
+import { fastModeCompletionResult, mergeFastModeResults, type FastModeResult } from "../core/native-chat-speed.ts";
 
 const USAGE = "https://chatgpt.com/settings/usage";
 export function chatGPTStreamError(message: string): string {
+	if (/service[_ ]tier|priority processing|fast mode/i.test(message)) return "Fast processing is unavailable for this request. Turn off Fast mode or choose another model.";
 	if (/subscription_sharing_usage_limit_exceeded|quota|429/.test(message)) return `ChatGPT plan usage limit reached. Manage usage at ${USAGE}. No API-key fallback was used.`;
 	if (/scope|authorization_context|permission/.test(message)) return "ChatGPT plan permission is missing. Reconnect in Providers and authorize plan use. No API-key fallback was used.";
 	if (/expired|invalid_grant|401|invalid_user/.test(message)) return "Your ChatGPT session expired. Reconnect in Providers. No API-key fallback was used.";
@@ -20,9 +22,10 @@ export function chatGPTStreamError(message: string): string {
 }
 
 /** Restrict the body at the final payload seam, even if caller samplingParams add fields. */
-export function chatGPTPayload(raw: unknown, selectedModelId: string): Record<string, unknown> {
+export function chatGPTPayload(raw: unknown, selectedModelId: string, fastMode = false): Record<string, unknown> {
 	const payload = raw as Record<string, unknown>;
 	const out: Record<string, unknown> = { model: selectedModelId, store: false, stream: true };
+	if (fastMode && chatGPTModel(selectedModelId)?.supportsFastMode === true) out.service_tier = "priority";
 	for (const key of ["instructions", "reasoning", "include", "text", "tool_choice", "parallel_tool_calls", "prompt_cache_key"]) {
 		if (payload[key] !== undefined) out[key] = payload[key];
 	}
@@ -45,7 +48,7 @@ export function chatGPTHistory(context: TranscriptContext, logicalModel: Model<A
 function empty(model: Model<Api>): AssistantMessage {
 	return { role: "assistant", api: model.api, provider: "chatgpt", model: model.id, content: [], stopReason: "error", timestamp: Date.now(), usage: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } };
 }
-export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDispatchLifecycle): StreamFunction<Api, SimpleStreamOptions> {
+export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDispatchLifecycle, lessonFastMode = false, fastModeObserver?: (result: FastModeResult) => void): StreamFunction<Api, SimpleStreamOptions> {
 	return (logicalModel, context, options) => {
 		const output = new AssistantMessageEventStream();
 		const purpose = background();
@@ -58,6 +61,8 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 			let scope: AdmissionScope | undefined;
 			let committed = false;
 			let terminal = false;
+			let fastRequested = false;
+			let completedResult: FastModeResult | undefined;
 			const check = () => { if (signal.aborted || !scope || !chatGPTScopeCurrent(scope)) throw new Error("cancelled or catalog authority changed"); };
 			try {
 				if (logicalModel.provider !== "chatgpt") throw new Error("ChatGPT account catalog has no selected model");
@@ -84,16 +89,19 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 					},
 					onPayload: async (raw, model) => {
 						const replacement = await options?.onPayload?.(raw, model);
-						const payload = chatGPTPayload(replacement === undefined ? raw : replacement, logicalModel.id);
+						const payload = chatGPTPayload(replacement === undefined ? raw : replacement, logicalModel.id, lessonFastMode && !purpose);
+						fastRequested = payload.service_tier === "priority";
 						check();
 						capturePreparedBackgroundPayload(payload, logicalModel);
 						return payload;
 					},
 					onProviderStreamEvent: async (raw, model) => {
+						const result = fastRequested ? fastModeCompletionResult(raw) : undefined;
 						const event = raw as { type?: string; code?: string; error?: { code?: string }; response?: { error?: { code?: string }; status?: string } };
 						if (event.type === "response.completed" && event.response?.status === "completed" && !event.response?.error) completed = true;
 						if (["response.incomplete", "response.failed", "error"].includes(event.type ?? "") || event.response?.error) failure = event.code || event.error?.code || event.response?.error?.code || "incomplete terminal response";
 						await options?.onProviderStreamEvent?.(raw, model);
+						if (result) completedResult = mergeFastModeResults(completedResult, result);
 					},
 				});
 				for await (const event of source) {
@@ -103,6 +111,10 @@ export function chatGPTStream(background: () => boolean, lifecycle?: ChatGPTDisp
 					if (event.type === "done") {
 						if (!completed || failure) throw new Error(failure || "missing terminal response.completed");
 						terminal = true;
+						if (completedResult) {
+							try { void Promise.resolve(fastModeObserver?.(completedResult)).catch(() => {}); }
+							catch { /* Live UI observers do not affect completed answers. */ }
+						}
 						output.push({ ...event, message: partial });
 					} else if (event.type === "error") {
 						throw new Error(failure || event.error.errorMessage || "ChatGPT stream error");

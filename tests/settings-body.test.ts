@@ -9,6 +9,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { sanitizeUserSettings } from "../src/core/settings.ts";
 import {
 	parseAgentSettingsBody,
 	parseModelsSettingsBody,
@@ -286,15 +287,34 @@ describe("parseCompactionSettingsBody (owner round 14)", () => {
 });
 
 describe("SETTINGS_SECTIONS (the route's section map)", () => {
-	it("maps exactly the eight record sections", () => {
+	it("maps the supported record sections", () => {
 		// compaction joined (owner round 14): its own section PUT — the
 		// threshold is engine behavior, not an agent-section key. The custom
 		// endpoint is NOT a section: it is one more provider in the Keys list,
 		// connected through POST /api/custom-provider.
 		assert.deepEqual(
 			Object.keys(SETTINGS_SECTIONS),
-			["general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "claudeCode"],
+			["chatSpeed", "general", "chat", "agent", "appearance", "graph", "compaction", "models", "dictation", "claudeCode"],
 		);
+	});
+});
+
+describe("global chat speed", () => {
+	it("accepts explicit enable and disable, and rejects invalid writes", () => {
+		for (const fast of [true, false]) {
+			assert.deepEqual(SETTINGS_SECTIONS.chatSpeed({ fast }), { ok: true, settings: { fast } });
+		}
+		for (const body of [null, [], {}, { fast: "true" }, { fast: 1 }]) {
+			assert.equal(SETTINGS_SECTIONS.chatSpeed(body).ok, false);
+		}
+	});
+
+	it("preserves a saved choice without opting older or malformed records in", () => {
+		assert.equal(sanitizeUserSettings({ version: 1 })?.chatSpeed?.fast, undefined);
+		for (const fast of [true, false]) {
+			assert.deepEqual(sanitizeUserSettings({ version: 1, chatSpeed: { fast } })?.chatSpeed, { fast });
+		}
+		assert.equal(sanitizeUserSettings({ version: 1, chatSpeed: { fast: "true" } })?.chatSpeed?.fast, false);
 	});
 });
 

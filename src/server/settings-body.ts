@@ -83,6 +83,12 @@ function asRecord(body: unknown): Record<string, unknown> | null {
 	return body as Record<string, unknown>;
 }
 
+export function parseChatSpeedSettingsBody(body: unknown): SettingsBodyResult<{ fast: boolean }> {
+	const raw = asRecord(body);
+	if (typeof raw?.fast !== "boolean") return { ok: false, error: "fast must be a boolean" };
+	return { ok: true, settings: { fast: raw.fast } };
+}
+
 /** general: { autoUpdate?: boolean } */
 export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<GeneralSettings> {
 	const raw = asRecord(body);
@@ -511,6 +517,7 @@ export function parseCustomModelOverridesBody(
 /** The section→parser map for PUT /api/settings/[section]. The custom endpoint
  *  is NOT a section — it connects via POST /api/custom-provider. */
 export const SETTINGS_SECTIONS = {
+	chatSpeed: parseChatSpeedSettingsBody,
 	general: parseGeneralSettingsBody,
 	chat: parseSettingsBody,
 	agent: parseAgentSettingsBody,

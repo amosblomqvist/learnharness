@@ -12,6 +12,8 @@ import type { BackgroundModelRole, ModelSlotName, ModelSlot } from "../settings.
  *  pi-ai's catalog. Costs are USD per 1M tokens (the same catalog, the same
  *  units as Pi's server-side pricing calculator). */
 export interface ModelCatalogEntry {
+	/** Fast processing is available on this connection for this selected model. */
+	supportsFastMode?: true;
 	id: string;
 	name: string;
 	provider: string;

@@ -447,7 +447,10 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 			}
 			authorized(false, undefined, token.epoch);
 			if (sequence !== catalogSequence || active()?.id !== token.accountId || !Array.isArray(body.models)) throw fail("catalog");
-			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => ({ id: m.slug, name: m.display_name }));
+			const visible = body.models.filter((m) => m && m.visibility === "list" && nonempty(m.slug) && typeof m.display_name === "string").map((m) => ({
+				id: m.slug, name: m.display_name,
+				...(Array.isArray(m.service_tiers) && m.service_tiers.some((tier) => tier?.id === "priority") ? { supportsFastMode: true } : {}),
+			}));
 			const changed = JSON.stringify(visible) !== JSON.stringify(catalog);
 			catalog = visible;
 			if (changed) authorityRevision++;

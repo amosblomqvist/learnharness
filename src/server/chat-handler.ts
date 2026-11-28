@@ -62,6 +62,7 @@ import { ensureCompacted, kickCompaction, effectiveThresholdTokens, projectedCon
 import { COMPACTION_RESERVE_TOKENS } from "../core/compaction.ts";
 import { catalogContextLimits, refreshConnectionCatalog } from "./model-catalog.ts";
 import { emit } from "../core/events.ts";
+import { mergeFastModeResults, type FastModeResult } from "../core/native-chat-speed.ts";
 import { settledTurnResponse } from "./turn-runs.ts";
 import { asAgentMessages, type LhMessage } from "../core/native-messages.ts";
 import { QUESTION_TOOLS } from "../core/pending.ts";
@@ -335,8 +336,14 @@ export async function handleChatInput(
 	};
 	let conversationEngine: PiEngine;
 	let compactionEngine: PiEngine;
+	let speedResult: FastModeResult | undefined;
+	const reportSpeedResult = (result: FastModeResult) => {
+		speedResult = mergeFastModeResults(speedResult, result);
+		emit("chat-speed-result", { chatId, model: { provider: conversation.provider, id: conversation.id }, result: speedResult });
+	};
 	try {
-		conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong"));
+		const fastMode = stores.settingsStore.readSettings()?.chatSpeed?.fast === true;
+		conversationEngine = piEngineForSpec(conversation, () => callPurpose.background, lifecycle, retentionForSlot("strong"), fastMode, reportSpeedResult);
 		compactionEngine = piEngineForSpec(conversation, true, undefined, retentionForSlot("strong"));
 	}
 	catch { return Response.json({ error: conversation.provider === "chatgpt" ? chatGPTStreamError("model catalog") : isSubscriptionProvider(conversation.provider) ? nativeSubscriptionError(conversation.provider, "model catalog") : "The selected model is unavailable." }, { status: 503 }); }
