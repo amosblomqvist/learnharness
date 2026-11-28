@@ -66,6 +66,7 @@ export function sideThreadReducer(state: SideThreadState | null, action: SideThr
 export function useSideThread(chatId: string, messages: readonly LhMessage[], getWorking?: () => string) {
 	const [state, dispatch] = useReducer(sideThreadReducer, null);
 	const [threads, setThreads] = useState<SideChatThread[]>([]);
+	const [threadsLoaded, setThreadsLoaded] = useState(false);
 	const stateRef = useRef(state); stateRef.current = state;
 	const messagesRef = useRef(messages); messagesRef.current = messages;
 	const threadsRef = useRef(threads); threadsRef.current = threads;
@@ -96,6 +97,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 			const payload = await response.json() as { threads: SideChatThread[]; answering: Record<string, string> };
 			if (request !== refreshSerial.current || before !== revision.current) return;
 			setThreads(payload.threads);
+			setThreadsLoaded(true);
 			const current = stateRef.current;
 			const thread = current && payload.threads.find((entry) => entry.id === current.threadId);
 			if (thread) dispatch({ type: "snapshot", thread,
@@ -207,7 +209,7 @@ export function useSideThread(chatId: string, messages: readonly LhMessage[], ge
 		const current = stateRef.current;
 		if (current) void fetch(`/api/chats/${chatId}/side-chats/${current.threadId}/stop`, { method: "POST" }).catch(() => {});
 	}, [chatId]);
-	return { state, threads, open, close, ask, stop, draftFor, saveDraft, currentSegmentId: sideSegmentId(messages),
+	return { state, threads, threadsLoaded, open, close, ask, stop, draftFor, saveDraft, currentSegmentId: sideSegmentId(messages),
 		expand: () => dispatch({ type: "mode", mode: "panel" }),
 		float: () => dispatch({ type: "mode", mode: "popover" }),
 		hasHistory: (sourceMessageId: string) => {

@@ -13,12 +13,30 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
+import type { ChatDockUsage, ChatOpeningPresentation } from "../core/contracts/chat.ts";
+import type { CoverageBasis } from "../core/coverage.ts";
 import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
 import { phaseAt3Lh } from "../core/phases.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { deleteChatHistoryIndex, readChatHistoryIndex, rebuildChatHistoryIndex } from "./chat-history-index.ts";
+import { transcriptRows, type TranscriptRowSize } from "../core/transcript-layout.ts";
+import { projectView } from "../core/view.ts";
+
+const MIN_INDEXED_MESSAGES = 80;
+const OPENING_MESSAGES = 40;
+const OPENING_BYTES = 128 * 1024;
+
+type ChatOpening = (ChatRecord & { partial: false }) |
+	(Pick<ChatRecord, "id" | "title" | "kind" | "messages" | "settings" | "turns"> & {
+		partial: true;
+		openingLayout: TranscriptRowSize[];
+		dockUsage: ChatDockUsage;
+		presentation: ChatOpeningPresentation;
+		coverageBasis?: CoverageBasis;
+	});
 
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
@@ -57,7 +75,9 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
  *  lazy migration means existing files only get stamped on their next write.
  *  A future-version guard lives on the read side (getChat). */
 function writeChat(record: ChatRecord): void {
-	writeFileAtomicSync(chatFile(record.id), JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
+	const file = chatFile(record.id);
+	writeFileAtomicSync(file, JSON.stringify({ ...record, version: CURRENT_CHAT_VERSION }, null, "\t"), { allowInPlaceFallback: true });
+	if (record.messages.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, true, record);
 }
 
 function getChat(id: string): ChatRecord | null {
@@ -76,6 +96,47 @@ function getChat(id: string): ChatRecord | null {
 		return null;
 	}
 	return parsed as ChatRecord;
+}
+
+/** Indexed startup is optional. Older profiles take the canonical path once
+ * and leave an index for their next open without rewriting the chat. */
+export function getChatOpening(id: string): ChatOpening | null {
+	let file: string;
+	try { file = chatFile(id); } catch { return null; }
+	const indexed = readChatHistoryIndex(file, { limit: OPENING_MESSAGES, maxBytes: OPENING_BYTES, includeDock: true });
+	if (indexed?.opening?.length && indexed.dock && indexed.presentation &&
+		(indexed.chat.kind === "practice" || indexed.coverage) &&
+		indexed.chat.id === id && indexed.total >= MIN_INDEXED_MESSAGES && indexed.messages.length) {
+		// A learner message starts a complete presentation group and resets
+		// side conversation segments. Avoid a partial rendering of an older group.
+		const start = indexed.messages.findIndex(message => message.role === "user");
+		if (start >= 0) {
+			const messages = indexed.messages.slice(start);
+			const tail = transcriptRows(projectView(messages));
+			const first = indexed.opening.length - tail.length;
+			if (tail.length && first >= 0 && tail.every((row, i) => row.key === indexed.opening?.[first + i]?.[0])) {
+				const { settings, ...dockUsage } = indexed.dock;
+				const { phaseChanges, ...presentation } = indexed.presentation;
+				const phaseBeforeTail = phaseChanges.findLast(([row]) => row < first)?.[1] ?? "probe";
+				return {
+					...indexed.chat, messages, settings, turns: indexed.turns, dockUsage, partial: true, openingLayout: indexed.opening,
+					presentation: { ...presentation, phaseBeforeTail }, coverageBasis: indexed.coverage,
+				};
+			}
+		}
+	}
+	const chat = getChat(id);
+	if (!chat) return null;
+	if ((!indexed?.dock || indexed.opening === undefined || (chat.kind !== "practice" && !indexed.coverage)) &&
+		chat.messages?.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, false, chat);
+	return { ...chat, partial: false };
+}
+
+export function getChatCoverageBasis(id: string): CoverageBasis | undefined {
+	let file: string;
+	try { file = chatFile(id); } catch { return undefined; }
+	const indexed = readChatHistoryIndex(file, { before: 0, limit: 1, maxBytes: 1 });
+	return indexed?.chat.id === id ? indexed.coverage : undefined;
 }
 
 function listChats(): ChatSummary[] {
@@ -209,8 +270,10 @@ function renameChat(id: string, title: string): ChatRecord {
  *  choreography (core/graph-deletion.ts), not the store's. */
 function deleteChat(id: string): boolean {
 	try {
-		fs.unlinkSync(chatFile(id));
-		removeLeftoverTemps(chatFile(id));
+		const file = chatFile(id);
+		fs.unlinkSync(file);
+		removeLeftoverTemps(file);
+		deleteChatHistoryIndex(file);
 		emit("chats-changed", {}); // only a real removal — the present-entry law
 		return true;
 	} catch {

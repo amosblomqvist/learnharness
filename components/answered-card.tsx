@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranscriptState } from "./transcript-row-state";
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { ConfidenceRail } from "@/components/confidence-rail";
 import { GlyphMark } from "@/components/ui/glyph-mark";
@@ -40,10 +41,10 @@ function scrollParent(el: HTMLElement): HTMLElement | null {
  * client — the card reveals his answer, the committed correct answer, and
  * the explanation, with NO verdict chips (owner ruling 2026-09-27).
  */
-export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answer: QuestionAnswerData; input?: unknown; toolCallId?: string }) {
+export function AnsweredCard({ answer: savedAnswer, input, stateKey, toolCallId }: { answer: QuestionAnswerData; input?: unknown; stateKey?: string; toolCallId?: string }) {
 	const answer = answerForPresentation(savedAnswer, input);
 	const optionLetters = answeredOptionLetters(savedAnswer, input);
-	const [whyOpen, setWhyOpen] = useState(false); // the tucked explanation (predictions, owner 2026-10-03)
+	const [whyOpen, setWhyOpen] = useTranscriptState(`why:${stateKey ?? savedAnswer.questionText}`, false); // retained across virtual unmounts
 
 	// ADAPT QUESTION LAYOUT on the record (owner, session-appearance-layout):
 	// an answered question gets two columns exactly when its question card
@@ -313,6 +314,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 					<button
 						type="button"
 						onClick={() => setWhyOpen((v) => !v)}
+						aria-expanded={whyOpen}
 						className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 					>
 						{whyOpen ? "Hide why" : "Why"}

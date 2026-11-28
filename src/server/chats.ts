@@ -1,8 +1,9 @@
 import { abortExtraction, extractionStatuses } from "../agent/subagents/extraction.ts";
 import { isJobLive } from "../agent/subagents/aborts.ts";
-import { coverageOf } from "../core/coverage.ts";
+import { coverageBasisOf, coveredSet, summarizeCoverage, type CoverageBasis } from "../core/coverage.ts";
 import { deleteChatTraces, type ChatDeleteMode, type ChatDeletionStats } from "../core/graph-deletion.ts";
-import { titleFromPrompt } from "../core/contracts.ts";
+import { titleFromPrompt, type SessionCoverage } from "../core/contracts.ts";
+import { getChatCoverageBasis } from "../store/chats.ts";
 import { graphRevision } from "./graph.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
@@ -192,38 +193,18 @@ function finishChatRecordDeletion(chatId: string): number {
  *  lastFoldedAt: the newest coverage row's fold timestamp — a cheap single
  *  pass over the chat's ledger rows (the ring popover's "last extraction"
  *  line); null before the session's first fold. */
-export interface SessionCoverage {
-	totalMessages: number;
-	coveredCount: number;
-	uncoveredCount: number;
-	coveredTokens: number;
-	uncoveredTokens: number;
-	/** True while a chat-kind extraction run is registered for this session. */
-	running: boolean;
-	/** ISO of the newest fold in this session's coverage rows; null before any. */
-	lastFoldedAt: string | null;
-}
-
-/** The per-session coverage block (see SessionCoverage). Null when the
- *  chat doesn't exist — callers own the 404. */
-export function sessionCoverage(chatId: string): SessionCoverage | null {
-	const record = stores.chatStore.getChat(chatId);
-	if (!record) return null;
-	const entries = stores.graphStore.readCoverage();
-	// Wave B: the record is native history — coverage reads through the
-	// projection (same view the extraction pipeline folds).
-	const cov = coverageOf(record.messages, entries, chatId);
-	let lastFoldedAt: string | null = null;
-	for (const entry of entries) {
-		if (entry.chatId !== chatId) continue;
-		if (lastFoldedAt === null || entry.foldedAt > lastFoldedAt) lastFoldedAt = entry.foldedAt;
+export function sessionCoverage(chatId: string, basis: CoverageBasis | undefined = getChatCoverageBasis(chatId)): SessionCoverage | null {
+	if (!basis) {
+		const record = stores.chatStore.getChat(chatId);
+		if (!record) return null;
+		basis = coverageBasisOf(record.messages);
 	}
+	const entries = stores.graphStore.readCoverage();
+	const lastFoldedAt = entries.reduce<string | null>((latest, entry) =>
+		entry.chatId === chatId && (latest === null || entry.foldedAt > latest) ? entry.foldedAt : latest, null);
 	return {
-		totalMessages: cov.slots.length,
-		coveredCount: cov.coveredCount,
-		uncoveredCount: cov.uncoveredCount,
-		coveredTokens: cov.coveredTokens,
-		uncoveredTokens: cov.uncoveredTokens,
+		totalMessages: basis.totalMessages,
+		...summarizeCoverage(basis.slots, coveredSet(entries, chatId)),
 		running: extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId),
 		lastFoldedAt,
 	};

@@ -1,13 +1,33 @@
 import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
-import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
+import { pendingPluginQuestionOf, activeProblemOf, coverageBasisOf } from "@/src/core";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	if (new URL(req.url).searchParams.get("view") === "stats") {
+	const view = new URL(req.url).searchParams.get("view");
+	if (view === "coverage") {
+		const coverage = sessionCoverage(id);
+		return coverage ? Response.json({ coverage }) : Response.json({ error: "Not found" }, { status: 404 });
+	}
+	if (view === "stats") {
 		// Stats refreshes don't adopt history or need plugin availability.
 		const chat = getChat(id);
 		return chat ? Response.json({ turns: chat.turns, pricing: sessionCost(chat) })
 			: Response.json({ error: "Not found" }, { status: 404 });
+	}
+	if (view === "bootstrap") {
+		// Same native seed as the chat page's direct open. No plan, usage
+		// ledger, snapshots, or side-thread bodies are needed to mount Chat.
+		const chat = getChat(id);
+		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+		return Response.json({
+			chatId: chat.id,
+			title: chat.title,
+			kind: chat.kind ?? "teach",
+			initialMessages: chat.messages,
+			initialError: turnFailure(id),
+			initiallyInFlight: isTurnRunning(id),
+			initiallyCompacting: compactionInFlight(id),
+		});
 	}
 	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
 	let chat = getChat(id);
@@ -47,7 +67,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 		// Also reaches idle views that missed the failing turn's stream.
 		turnError: turnFailure(id),
 		compacting: compactionInFlight(id),
-		coverage: sessionCoverage(id),
+		coverage: sessionCoverage(id, coverageBasisOf(chat.messages)),
 	});
 }
 

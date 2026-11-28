@@ -65,7 +65,7 @@ import {
 	type LhMessage,
 	type ModelSlotName,
 } from "@/src/core";
-import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
+import { PlanBlock, PlanPopup } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
 import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
@@ -81,6 +81,10 @@ import { pluginQuestionOccurrenceKey, type PluginQuestionSnapshot } from "@/src/
 import type { PluginQuestionDraft } from "./session-core";
 import { SessionFind } from "@/components/session-find";
 import { SessionMessageNavigation } from "@/components/session-navigation";
+import { isSubagentSteer, newestLearnerTurnFrom, transcriptRows } from "./transcript-rows";
+import { VirtualTranscript, type VirtualTranscriptHandle } from "./virtual-transcript";
+import { useChatOpening, type ChatSeed } from "./chat-opening";
+import { projectView, type TranscriptRowSize } from "@/src/core";
 import { SelectionToolbar } from "@/components/selection-toolbar";
 import { createCiteAction, type CitationEditTarget } from "@/components/citation-actions";
 import { CitationActionsContext, type CitationActions } from "@/components/citation-chip";
@@ -101,15 +105,14 @@ import { PluginSessionTopBarActions } from "@/components/plugin-chrome";
 import { usePluginShortcutPage } from "@/components/plugin-shortcuts";
 import { createPluginSessionActionContext, type PluginSessionViewInput } from "@/src/core";
 import type { SessionInputViewReader, SessionViewTargets, NativeQuestionViewState, ViewReaderRef } from "./session-view-readers";
-import type { JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionPricing } from "@/src/core";
-import { isSubagentSteer, newestLearnerTurnFrom } from "./transcript-rows";
+import type { ChatDockSeed, ChatOpeningPresentation, JobRecord, Phase3, QuestionAnswerData, QuestionFormDraft, TurnUsage, SessionCoverage, SessionPricing } from "@/src/core";
 import { PhaseChip, PhaseDivider } from "@/components/phase-divider";
 import {
 	CompactionCutDivider,
 	CompactionMomentDivider,
 	type CompactionDividerData,
 } from "@/components/compaction-divider";
-import { CoverageRing } from "@/components/extraction-coverage";
+import { CoverageRing, type GraphRead } from "@/components/extraction-coverage";
 import { Button } from "@/components/ui/button";
 import {
 	activeProblemOf,
@@ -120,6 +123,7 @@ import {
 	findPendingToolCall,
 	phaseAt3,
 	phaseTimeline,
+	latestPlanTree,
 	teachStepIndex,
 	toolQuestionKind,
 	questionNeedsReveal,
@@ -268,16 +272,28 @@ export function Chat({
 	chatId,
 	title,
 	initialMessages,
+	openingLayout,
+	openingPresentation,
+	initialSideHistoryIds,
+	initialGraph,
+	initialCoverage,
 	initialError,
 	initialPrompt,
 	initiallyInFlight,
 	initiallyCompacting = false,
 	initialConfigured = false,
+	initialZeroKeys,
+	initialDock,
 	kind = "teach",
 }: {
 	chatId: string;
 	title: string;
 	initialMessages: LhMessage[];
+	openingLayout?: readonly TranscriptRowSize[];
+	openingPresentation?: ChatOpeningPresentation;
+	initialSideHistoryIds?: readonly string[];
+	initialGraph?: GraphRead;
+	initialCoverage?: SessionCoverage | null;
 	/** Memory-only settlement notice supplied on reopening. */
 	initialError?: string;
 	/** The session kind (practice sessions, owner 2026-10-04): practice
@@ -297,7 +313,12 @@ export function Chat({
 	 *  it (BYOK, owner 2026-09-22). The server gate stays the truth; this
 	 *  only decides whether the pill rides the composer. */
 	initialConfigured?: boolean;
+	initialZeroKeys?: boolean;
+	initialDock?: ChatDockSeed;
 }) {
+	const [historyLoading, setHistoryLoading] = useState(!!openingLayout);
+	const indexedPresentation = historyLoading ? openingPresentation : undefined;
+	const openingPlan = indexedPresentation?.plan ?? undefined;
 	// Reattach plumbing (background-turn runner wave): the hook holds the
 	// settled terminal's callback — a stable ref assigned below, once
 	// syncFromServer exists (refs, not closures: no stale capture).
@@ -309,13 +330,15 @@ export function Chat({
 	// (core/view.ts projectView); sends are ONE explicit input event each
 	// ({chatId, input} — the stash indirection died with the SDK), and the
 	// turn stream is the VERBATIM AgentEvent passthrough the server emits.
-	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, readStats, messages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled } =
-		useChatSession({ chatId, initialMessages, initialError, initiallyInFlight });
+	const { canonicalMessages, reconciliation, reconcile, pluginQuestionAvailability, pluginQuestionDraft, pluginProblemAvailability, pluginProblemDraft, dismissPluginQuestion, readRecord, readStats, messages: sessionMessages, nativeMessages, hasConfirmedConversation, contextTokens, send, continueIfOwed, steer, steerQueue, submitAnswer, dismissQuestion, dismissProblem, questionDraft, saveQuestionDraft, status, evaluating, error, stop, clearError, resumeStream, setReattachSettled, setMessages } =
+		useChatSession({ chatId, initialMessages: openingLayout ? [] : initialMessages, initialError: openingLayout ? undefined : initialError, initiallyInFlight });
+	const openingMessages = useMemo(() => openingLayout ? projectView(initialMessages) : [], [initialMessages, openingLayout]);
+	const messages = historyLoading ? openingMessages : sessionMessages;
 
 	const controller = useOptionalInteractionLayers();
 	const sessionFindScopeRef = useRef<HTMLDivElement | null>(null);
 	const pathname = usePathname();
-	const surfaceTarget = usePageSurfaceBoundary({ active: pathname === `/chat/${encodeURIComponent(chatId)}`, viewKey: chatId, bodyRef: sessionFindScopeRef });
+	const surfaceTarget = usePageSurfaceBoundary({ active: !historyLoading && pathname === `/chat/${encodeURIComponent(chatId)}`, viewKey: chatId, bodyRef: sessionFindScopeRef });
 	const { manager: pluginManager } = usePlugins();
 	const [, submissionChanged] = useState(0);
 	const [preparationError, setPreparationError] = useState<string>();
@@ -335,6 +358,7 @@ export function Chat({
 	const submissionLive = useRef({ nativeMessages, surfaceTarget, ready: true });
 	submissionLive.current = { nativeMessages, surfaceTarget, ready: true };
 	const runSubmission = async (target: PluginSubmissionTarget, capture: () => PluginSubmission | Promise<PluginSubmission>, current: () => boolean, deliver: (prepared: PluginSubmission, attempt: SubmissionAttempt) => Promise<boolean>): Promise<boolean> => {
+		if (historyLoading) return false;
 		const modelRevision = submissionModel.capture();
 		const attempt = submissionRunner.begin(target, pluginManager?.captureSubmissionInterceptors() ?? [], () => submissionMounted.current && submissionModel.isCurrent(modelRevision) && submissionLive.current.surfaceTarget === target.surfaceTarget && !!findSurfaceBoundary(target.surfaceTarget) && current());
 		if (!attempt) return false;
@@ -353,9 +377,13 @@ export function Chat({
 	};
 	const textTarget = (): Extract<PluginSubmissionTarget, { type: "text" }> | undefined => surfaceTarget ? { type: "text", sessionId: chatId, sessionKind: kind === "practice" ? "practice" : "teaching", surfaceTarget, channels: ["content"] } : undefined;
 	const scrollContextRef = useRef<StickToBottomContext | null>(null);
+	const virtualTranscriptRef = useRef<VirtualTranscriptHandle | null>(null);
+	useLayoutEffect(() => { virtualTranscriptRef.current?.positionInitialViewport(); }, []);
+	const rows = useMemo(() => transcriptRows(messages), [messages]);
 	const sourceTextParts = useMemo(() => firstSourceTextParts(messages), [messages]);
 	const newestTurnFrom = newestLearnerTurnFrom(messages);
-	const sideEntries = useMemo(() => sideEntryPoints(nativeMessages, messages), [nativeMessages, messages]);
+	const displayedNativeMessages = historyLoading ? initialMessages : nativeMessages;
+	const sideEntries = useMemo(() => sideEntryPoints(displayedNativeMessages, messages), [displayedNativeMessages, messages]);
 
 	// The reattach settled terminal → the sync-and-continue seam (below).
 	setReattachSettled(() => reattachSettledRef.current());
@@ -552,11 +580,10 @@ export function Chat({
 	// it; the poll below resumes instead).
 	const mountContinuation = useRef(false);
 	useEffect(() => {
-		if (mountContinuation.current) return;
+		if (historyLoading || mountContinuation.current) return;
 		mountContinuation.current = true;
-		if (!turnInFlight) continueIfOwed(initialMessages);
-		// mount-only by design (turnInFlight read at initial value)
-	}, []);
+		if (!turnInFlight) continueIfOwed(nativeMessages);
+	}, [historyLoading, turnInFlight, continueIfOwed, nativeMessages]);
 
 	const pendingPlugin = pendingPluginQuestionOf(canonicalMessages);
 	const unreadablePlugin = pluginQuestionCallsOf(canonicalMessages).find(call => call.status === "unreadable");
@@ -680,7 +707,8 @@ export function Chat({
 	// The phase at every message (one linear fold): the transcript draws a
 	// color-coded dotted divider at each boundary; the header chip reads the
 	// session's current phase.
-	const phases = useMemo(() => phaseTimeline(messages), [messages]);
+	const phaseBeforeTail = indexedPresentation?.phaseBeforeTail;
+	const phases = useMemo(() => phaseTimeline(messages, phaseBeforeTail), [messages, phaseBeforeTail]);
 
 	const [composerDraftRevision, setComposerDraftRevision] = useState(0);
 	/* The composer draft ref is synchronous, so sends and dictation flushes
@@ -697,10 +725,11 @@ export function Chat({
 	}, []);
 	// Saved slot completeness is live, but the session's selected route
 	// comes from its own ordinary model control, never today's Strong pin.
-	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
+	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured, initialZeroKeys);
 	const catalogRef = useRef(catalog);
 	catalogRef.current = catalog;
-	const [selectedModel, setSelectedModel] = useState<string | undefined>();
+	const initialSelection = initialDock?.model.settings?.model ?? initialDock?.model.strong?.model;
+	const [selectedModel, setSelectedModel] = useState(initialSelection ? `${initialSelection.provider}:${initialSelection.id}` : undefined);
 	const recordSelectedModel = useCallback((model: string | undefined) => { submissionModel.observe(model); setSelectedModel(model); }, [submissionModel]);
 	const [setupOpen, setSetupOpen] = useState(false);
 	/** The last explicitly-sent draft (composer send): the
@@ -1035,7 +1064,8 @@ export function Chat({
 	};
 	const renderSideEntry = (sourceMessageId?: string) => {
 		if (!sourceMessageId) return null;
-		const hasHistory = sideThread.threads.some((thread) => thread.anchor.messageId === sourceMessageId && thread.messages.length > 0);
+		const hasHistory = sideThread.threads.some((thread) => thread.anchor.messageId === sourceMessageId && thread.messages.length > 0) ||
+			(!sideThread.threadsLoaded && initialSideHistoryIds?.includes(sourceMessageId) === true);
 		return <div className="mt-1 flex justify-end">
 			<Button type="button" variant="ghost" size="icon-xs" data-testid="side-conversation-button" data-side-segment-id={sourceMessageId}
 				data-has-history={hasHistory} aria-label={hasHistory ? "Open side conversation" : "Ask a side question"}
@@ -1068,14 +1098,18 @@ export function Chat({
 	const citationActions = useMemo<CitationActions>(() => ({
 		editComment: (citation, source) => setCitationEdit({ citation, link: source.link, start: source.start, host: source.host, input: source.host.closest<HTMLElement>("[data-file-path-input]") ?? undefined }),
 		openSource: (citation) => {
-			const context = scrollContextRef.current;
-			revealCitationSource({
-				transcript: transcriptElementRef.current,
-				scroll: context ? { scrollRef: context.scrollRef, stopScroll: context.stopScroll } : null,
-				citation,
-				currentChatId: chatId,
-				navigate: (href) => router.push(href),
-			});
+			const reveal = async () => {
+				if (citation.chatId === chatId) await virtualTranscriptRef.current?.revealMessage(citation.messageId);
+				const context = scrollContextRef.current;
+				revealCitationSource({
+					transcript: transcriptElementRef.current,
+					scroll: context ? { scrollRef: context.scrollRef, stopScroll: context.stopScroll } : null,
+					citation,
+					currentChatId: chatId,
+					navigate: (href) => router.push(href),
+				});
+			};
+			void reveal();
 		},
 	}), [chatId, router]);
 	useEffect(() => {
@@ -1107,14 +1141,28 @@ export function Chat({
 	// server's registry mutex is the structural gate; this is the
 	// affordance).
 	const [compacting, setCompacting] = useState(initiallyCompacting);
-	submissionLive.current.ready = !compacting && reconciliation === "ready";
+	const finishHistoryOpening = useCallback((seed: ChatSeed) => {
+		const conversation = scrollContextRef.current;
+		const scroll = conversation?.scrollRef.current;
+		// Close-to-bottom is not the same as following the tail. Leave a
+		// reader's offset alone when the canonical record comes in.
+		if (scroll && scroll.scrollHeight - scroll.clientHeight - scroll.scrollTop > 2) conversation.stopScroll();
+		setMessages(seed.initialMessages, seed.initialError);
+		setTitleText(seed.title);
+		setTurnInFlight(!!seed.initiallyInFlight);
+		setCompacting(!!seed.initiallyCompacting);
+		setHistoryLoading(false);
+		if (seed.initiallyInFlight) resumeStream();
+	}, [setMessages, resumeStream]);
+	const historyOpening = useChatOpening(chatId, historyLoading, finishHistoryOpening);
+	submissionLive.current.ready = !historyLoading && !compacting && reconciliation === "ready";
 	// A failed model response (issue #110): Retry keeps the saved input
 	// and completed work, without another learner message. Offered from
 	// "error" too: a dropped stream leaves the model there, and send()
 	// recovers from it. Later compaction requires new input instead.
 	const retryable = !pluginOwnsDock && (status === "ready" || status === "error") && !busy && !compacting && endsInFailedTurn(nativeMessages);
 	const retryFailedTurn = () => retryFailedResponse(send, draftRef);
-	const sendAllowed = !pluginOwnsDock && reconciliation === "ready" && !pending && !activeProblem && !compacting && !submissionRunner.occupied;
+	const sendAllowed = !historyLoading && !pluginOwnsDock && reconciliation === "ready" && !pending && !activeProblem && !compacting && !submissionRunner.occupied;
 	const pendingTextTarget = textTarget();
 	const pendingTextInput = !!pendingTextTarget && !!pluginManager?.hasPendingSubmissionInput(pendingTextTarget);
 	const pendingThinkingTarget = thinkingTarget();
@@ -1188,12 +1236,13 @@ export function Chat({
 	// order, never rewrite a local one, keep the in-flight tail last. The
 	// full syncFromServer stays the net at idle (reorder, plan blocks, turns).
 	const adoptAppendOnly = useCallback(async () => {
+		if (historyLoading) return;
 		try {
 			await readRecord({ adoption: "append" });
 		} catch {
 			/* transient — the idle full sync is the net */
 		}
-	}, [readRecord]);
+	}, [historyLoading, readRecord]);
 
 	// Turn-start window: the server inserts claimed steers right after our
 	// outgoing message, BEFORE the stream produces anything — so a bounded,
@@ -1244,7 +1293,7 @@ export function Chat({
 	// element is always truthy; gating on the node alone mounted a phantom
 	// (invisible, clickable) button in the bottom-right whenever a question
 	// was pending with no plan yet (owner report, UI round 2026-10-01).
-	const hasPlan = useMemo(() => planExists(messages), [messages]);
+	const hasPlan = useMemo(() => planExists(messages, openingPlan), [messages, openingPlan]);
 	// The coverage ring's refresh chain (extraction-UX redesign): bumped at
 	// turn settle — the moment this session's uncovered mass changes.
 	const [coverageTick, setCoverageTick] = useState(0);
@@ -1274,14 +1323,12 @@ export function Chat({
 	setupOpenRef.current = setupOpen;
 	// The session's live plan (drives the top-bar chip; the marginalia
 	// derives its own from the same transcript).
-	const planTree = useMemo(() => latestTree(messages), [messages]);
+	const planTree = useMemo(() => indexedPresentation ? indexedPresentation.plan?.tree : latestPlanTree(messages), [messages, indexedPresentation]);
 
 	// ── Session usage (wave-4 stats bar) ──
-	// The money channel: the record's turns log and read-time server Pi
-	// pricing projection. Seeded once on mount (the page doesn't carry turns),
-	// refreshed when the local stream settles (each turn appends to the log
-	// server-side), and kept fresh by syncFromServer whenever it already
-	// fetches the record. No turns yet → the bar renders "—" everywhere.
+	// The page carries the initial summary. Load turn details once history
+	// is ready, then refresh when a turn settles or syncFromServer fetches
+	// the record.
 	const [turns, setTurns] = useState<TurnUsage[]>([]);
 	const [pricing, setPricing] = useState<SessionPricing | undefined>();
 	// The per-chat model control state (model-picker writes via PUT; the
@@ -1310,9 +1357,10 @@ export function Chat({
 		}
 	}, [readStats]);
 	useEffect(() => {
+		if (historyLoading) return;
 		void syncTurns();
 		return () => statsRequest.current?.abort();
-	}, [syncTurns]);
+	}, [historyLoading, syncTurns]);
 	// After the learner's own turn ends the log has a fresh entry — and the
 	// Post-turn settle (the SLIMMED watch — push-architecture S3,
 	// 2026-10-02): our own stream just ended. Two instant LOCAL actions
@@ -1508,7 +1556,7 @@ export function Chat({
 		// synchronous request flow; a GET /stream inside that sub-ms window
 		// gets a settled response — unwinnable by a network round-trip,
 		// self-healing via the eventual turn-settled. Do not engineer around.
-		if (p.chatId !== chatId) return;
+		if (historyLoading || p.chatId !== chatId) return;
 		if (localStreamRef.current) return; // our OWN turn — the 409-race guard
 		if (turnInFlightRef.current) return; // already attached
 		attachToRunningTurn();
@@ -1632,7 +1680,7 @@ export function Chat({
 		    dock overlays the column bottom (outside the scroller); a spacer in
 		    the transcript reserves its height. data-session-surface scopes the
 		    session's reading rules (no-wrap inline code/math, globals.css). */}
-		<div data-session-surface="" className="flex h-dvh">
+		<div data-session-surface="" data-chat-opening={historyLoading ? "" : undefined} className="flex h-dvh">
 			<div className="flex min-w-0 flex-1 flex-col">
 				{/* The top bar is its own block (owner, top-fade round 4): in flow
 				    above the scroller on the plain page background — no gradient. Its
@@ -1738,7 +1786,7 @@ export function Chat({
 					{/* Practice (owner, 2026-10-04): the coverage ring hides —
 				    practice never extracts, so an ever-filling ring with no
 				    run behind it would lie. */}
-					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} />}
+					{kind !== "practice" && <CoverageRing chatId={chatId} refreshKey={coverageTick} initialGraph={initialGraph} initialCoverage={initialCoverage} />}
 					{/* Practice sessions: no phase arc — a quiet Practice tag
 					    instead of the phase chip. */}
 					{kind === "practice" ? (
@@ -1757,12 +1805,16 @@ export function Chat({
 					<PluginSessionTopBarActions readContext={actionContext} captureContext={captureActionContext} refreshRef={refreshPluginActions} />
 				</TopBar>
 
-				<SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} />
+				{!historyLoading && <SessionFind scopeRef={sessionFindScopeRef} scrollContextRef={scrollContextRef} rows={rows} virtualTranscriptRef={virtualTranscriptRef} />}
 				<div ref={sessionFindScopeRef} className="relative flex min-h-0 flex-1">
-				<Conversation className="h-full min-w-0 flex-1" initial="instant" contextRef={scrollContextRef}>
-					<SessionMessageNavigation />
+				{historyOpening.failed && historyLoading && <div role="alert" className="absolute top-3 left-1/2 z-10 -translate-x-1/2 rounded-lg border bg-card px-3 py-2 text-sm">
+					Could not load chat history. <Button type="button" variant="ghost" onClick={historyOpening.retry}>Retry</Button>
+				</div>}
+				<Conversation className="h-full min-w-0 flex-1" initial="instant" resize={historyLoading ? "instant" : "smooth"}
+					contextRef={scrollContextRef} aria-busy={historyLoading || undefined}>
+					{!historyLoading && <SessionMessageNavigation virtualTranscriptRef={virtualTranscriptRef} />}
 					<TranscriptElementReporter onElement={setTranscriptElement} />
-					<ConversationContent className="min-h-full gap-0 p-0">
+					<ConversationContent className="min-h-full gap-0 p-0" scrollClassName="overflow-auto">
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
@@ -1771,7 +1823,7 @@ export function Chat({
 								/>
 							)}
 
-							{messages.map((m, mi) =>
+							<VirtualTranscript rows={rows} handleRef={virtualTranscriptRef} openingLayout={openingLayout} historyLoading={historyLoading}>{({ message: m, messageIndex: mi, start, end }) =>
 								m.role === "user" && isSubagentSteer(m) ? (
 									// Sub-agent delivery (wake-pipeline steer): NO message bubble — the
 									// artifact card sits in the transcript column directly, full width
@@ -1850,7 +1902,7 @@ export function Chat({
 									PREPENDED, never a replacement branch: the teach group is a real
 									message with content — a replacement ternary swallowed the entire
 									first lesson block (the Lacan session, 2026-09-27). */}
-									{m.role === "assistant" &&
+									{start === 0 && m.role === "assistant" &&
 									mi > 0 &&
 									phases[mi] === "teach" &&
 									phases[mi - 1] !== "teach" &&
@@ -1891,7 +1943,8 @@ export function Chat({
 									) : (
 									<Message from="assistant" className="max-w-full" data-older-transcript-row={mi < newestTurnFrom ? "" : undefined}>
 									<MessageContent className="w-full">
-											{m.parts.map((part, pi) => {
+											{m.parts.slice(start, end).map((part, offset) => {
+												const pi = start + offset;
 												if (part.pluginProblem) return <ProblemCard key={pi} part={{ ...part, state: part.state ?? "input-available", toolCallId: part.toolCallId ?? "" }} />;
 												if (part.pluginQuestion) return <PluginQuestionPart key={pi} part={part} chatId={chatId} />;
 												const isLastPart = mi === messages.length - 1 && pi === m.parts.length - 1;
@@ -1934,7 +1987,7 @@ export function Chat({
 													}
 													case "reasoning":
 														return (
-															<Reasoning key={pi} isStreaming={status === "streaming" && isLastPart} className="mb-2">
+															<Reasoning key={pi} stateKey={part.id ?? `reasoning-${pi}`} isStreaming={status === "streaming" && isLastPart} className="mb-2">
 																<ReasoningTrigger />
 																<ReasoningContent>{part.text ?? ""}</ReasoningContent>
 															</Reasoning>
@@ -1970,7 +2023,7 @@ export function Chat({
 														// transcript; answered ones render as graded records.
 														if (part.state === "output-available") {
 															return (
-																<AnsweredCard key={pi} answer={part.output as QuestionAnswerData} input={part.input} toolCallId={part.toolCallId} />
+															<AnsweredCard key={pi} stateKey={`${part.sourceMessageId}:${part.sourceContentIndex}`} answer={part.output as QuestionAnswerData} input={part.input} toolCallId={part.toolCallId} />
 															);
 														}
 														return null;
@@ -1984,11 +2037,11 @@ export function Chat({
 												}
 											})}
 										</MessageContent>
-										{m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length))}
+										{end === m.parts.length && m.role === "assistant" && renderSideEntry(sideEntries.get(m.id)?.get(m.parts.length))}
 									</Message>
 									)}
 								</Fragment>
-							))}
+							)}</VirtualTranscript>
 
 							{/* THE placeholder, ACTION-gated (owner, optimistic round
 							    3, 2026-10-02): spinner + shimmered Thinking… from the
@@ -2049,6 +2102,7 @@ export function Chat({
 				    height morph (typing, a question growing the band, the
 				    fold) and NEVER overlaps the composer. */}
 				<DockOverlay
+					onScrollToBottom={() => { void virtualTranscriptRef.current?.scrollToBottom(); }}
 					viewReader={inputViewReader}
 					viewTargets={surfaceTarget ? { text: textTarget()!, answer: builtinTarget, thinking: thinkingTarget(), pluginQuestion: pluginQuestionTarget(), pluginProblem: pluginProblemTarget() } : undefined}
 					pending={pending}
@@ -2086,7 +2140,7 @@ export function Chat({
 					onSubmitThinking={submitThinking}
 					chatId={chatId}
 					onModelChange={recordSelectedModel}
-					plan={hasPlan ? <PlanMarginalia messages={messages} /> : undefined}
+					plan={hasPlan ? <PlanMarginalia messages={messages} openingPlan={openingPlan} /> : undefined}
 					onOpenPlan={() => setPlanOpen(true)}
 					requiresReveal={requiresReveal}
 					readingThinking={readingThinkingSeed.value}
@@ -2094,9 +2148,10 @@ export function Chat({
 					onReadingThinking={(value) => { applyReadingThinking(value); if (pendingPlugin) pluginQuestionDraft(pendingPlugin).readingThinking = value; }}
 					phase={phases.at(-1) ?? "probe"}
 					turns={turns}
-					contextTokens={contextTokens}
-					cliContextWindow={cliContextWindowOf(nativeMessages)}
+					contextTokens={historyLoading ? initialDock?.contextTokens ?? null : contextTokens}
+					cliContextWindow={historyLoading ? initialDock?.cliContextWindow ?? null : cliContextWindowOf(nativeMessages)}
 					pricing={pricing}
+					initialDock={initialDock}
 					onReserve={setDockReserve}
 					dictationSlot={<DictationBar dictation={dictation} disabled={pluginOwnsDock && !pluginMicAvailable} />}
 					dictationCancel={dictation.cancel}
@@ -2217,7 +2272,7 @@ export function Chat({
 						onClose={() => setFigureFocus(null)}
 					/>
 				)}
-				{planOpen && <PlanPopup messages={messages} onClose={() => setPlanOpen(false)} />}
+				{planOpen && <PlanPopup messages={messages} openingPlan={openingPlan} onClose={() => setPlanOpen(false)} />}
 				<SelectionToolbar viewport={transcriptElement} actions={selectionActions} />
 				{citationEdit && (
 					<CitationCommentPopover
@@ -2391,6 +2446,7 @@ function TranscriptElementReporter({ onElement }: { onElement: (element: HTMLEle
 
 /** Host-only composition/test seam; never part of the plugin SDK. */
 export function DockOverlay({
+	onScrollToBottom,
 	viewReader, viewTargets, unavailableOccurrence,
 	pending,
 	onPrepareBuiltin, onBuiltinPendingInput, onPrepareThinking, pendingThinkingInput, onPreparePluginQuestion, preparing, preparationStatus,
@@ -2410,6 +2466,7 @@ export function DockOverlay({
 	contextTokens,
 	cliContextWindow,
 	pricing,
+	initialDock,
 	composer,
 	onSubmitAnswer,
 	chatId,
@@ -2423,6 +2480,7 @@ export function DockOverlay({
 	queuedSteers,
 }: {
 	viewReader?: SessionInputViewReader;
+	onScrollToBottom?: () => void;
 	viewTargets?: SessionViewTargets;
 	unavailableOccurrence?: import("@/src/core").PluginSubmissionOccurrence;
 	pending: ReturnType<typeof pendingQuestionOf>;
@@ -2471,6 +2529,7 @@ export function DockOverlay({
 	contextTokens: number | null;
 	cliContextWindow: ReturnType<typeof cliContextWindowOf>;
 	pricing?: SessionPricing;
+	initialDock?: ChatDockSeed;
 	composer: React.ReactNode;
 	onSubmitAnswer: (output: QuestionAnswerData) => void;
 	/** The model control's pass-through (the stats bar hosts it). */
@@ -3016,6 +3075,7 @@ export function DockOverlay({
 						contextTokens={contextTokens}
 						cliContextWindow={cliContextWindow}
 						pricing={pricing}
+						initialDock={initialDock}
 						dictationSlot={dictationSlot}
 						chatId={chatId}
 						onModelChange={onModelChange}
@@ -3031,7 +3091,7 @@ export function DockOverlay({
 					    overlay is none by default. The isAtBottom/scrollToBottom
 					    context still reaches it — DockOverlay is a Conversation
 					    child. */}
-					<ConversationScrollButton className="pointer-events-auto bottom-full mb-2" />
+					<ConversationScrollButton className="pointer-events-auto bottom-full mb-2" {...(onScrollToBottom ? { onClick: onScrollToBottom } : {})} />
 				</div>
 				{/* The plan marginalia (owner, plan-placement round): the bare
 				    diagram in the band's right flank — boundaless, meet-fitted, part

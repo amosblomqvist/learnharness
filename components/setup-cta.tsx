@@ -45,12 +45,18 @@ export function savedSlotsConfigured(slots: ModelCatalogResponse["slots"] | unde
 
 /** Keep the last known completeness during connection invalidation, but
  * follow ordinary slot repairs as soon as their shared snapshot arrives. */
-export function useModelSetup(initialConfigured: boolean) {
+export function useModelSetup(initialConfigured: boolean, initialZeroKeys = false) {
 	const { catalog } = useModelCatalog();
 	const [lastConfigured, setLastConfigured] = useState(initialConfigured);
+	const [lastZeroKeys, setLastZeroKeys] = useState(initialZeroKeys);
 	const configured = catalog ? savedSlotsConfigured(catalog.slots) : lastConfigured;
-	useEffect(() => { if (catalog) setLastConfigured(savedSlotsConfigured(catalog.slots)); }, [catalog]);
-	return { catalog, configured, zeroKeys: catalog ? !catalog.providers.some((p) => p.keyPresent) : false };
+	const zeroKeys = catalog ? !catalog.providers.some((p) => p.keyPresent) : lastZeroKeys;
+	useEffect(() => {
+		if (!catalog) return;
+		setLastConfigured(savedSlotsConfigured(catalog.slots));
+		setLastZeroKeys(!catalog.providers.some((p) => p.keyPresent));
+	}, [catalog]);
+	return { catalog, configured, zeroKeys };
 }
 
 /** A known unavailable route needs an explicit replacement, never an

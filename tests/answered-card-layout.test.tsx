@@ -5,6 +5,7 @@ import { test } from "node:test";
 import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { AnsweredCard } from "../components/answered-card.tsx";
+import { TranscriptRowState } from "../components/transcript-row-state.tsx";
 import { questionCardStandIn } from "../components/question-dock.tsx";
 import { AppearanceProvider } from "../components/settings/appearance.tsx";
 import { DEFAULT_THEME } from "../src/core/themes.ts";
@@ -58,13 +59,15 @@ const quizQD = (): QuestionData => {
 	};
 };
 
-async function mount(adaptiveQuestions: boolean, toolCallId = "q1") {
+async function mount(adaptiveQuestions: boolean, toolCallId = "q1", rowState: Map<string, unknown> | null = null) {
 	const host = document.createElement("div"); document.body.append(host);
 	const root = createRoot(host);
 	const answer = buildAnswer(quizQD(), { values: ["Zero"], confidence: 70, thinking: "Gravity keeps acting." });
 	await act(async () => root.render(
 		<AppearanceProvider initialAppearance={{ adaptiveQuestions }} initialTheme={DEFAULT_THEME}>
-			<AnsweredCard answer={answer} input={quizInput} toolCallId={toolCallId} />
+			<TranscriptRowState.Provider value={rowState}>
+				<AnsweredCard answer={answer} input={quizInput} toolCallId={toolCallId} stateKey={`${toolCallId}:record`} />
+			</TranscriptRowState.Provider>
 		</AppearanceProvider>,
 	));
 	return { host, root };
@@ -95,6 +98,33 @@ test("answered card: stacked until it nears the screen, then the question card's
 		assert.equal(grid.contains(card.querySelector('[data-testid="your-thinking"]')), false, "thinking stays full width below");
 		assert.equal(document.querySelector("[data-question-layout-probe]"), null, "probe removed");
 	} finally { await act(async () => root.unmount()); host.remove(); }
+});
+
+test("virtual remount retains Why while reusing the adaptive layout and option letters", async () => {
+	measurements = 0; near = [];
+	const rowState = new Map<string, unknown>();
+	const first = await mount(true, "virtual-question", rowState);
+	try {
+		await comeNear();
+		const why = first.host.querySelector<HTMLButtonElement>('[data-testid="tucked-explanation"] button')!;
+		await act(async () => { why.click(); });
+		assert.equal(why.getAttribute("aria-expanded"), "true");
+	} finally { await act(async () => first.root.unmount()); first.host.remove(); }
+	const before = measurements;
+	const again = await mount(true, "virtual-question", rowState);
+	try {
+		await comeNear();
+		assert.equal(again.host.querySelector('[data-testid="answered-card"]')!.getAttribute("data-question-layout"), "columns");
+		assert.equal(measurements, before, "virtual remount reuses the solved question layout");
+		const explanation = again.host.querySelector('[data-testid="tucked-explanation"]')!;
+		assert.equal(explanation.querySelector("button")!.getAttribute("aria-expanded"), "true");
+		assert.match(explanation.textContent!, /Gravity\./);
+		assert.deepEqual([...again.host.querySelectorAll("[data-option-letter]")].map(el => el.textContent), ["A", "B", "C"]);
+	} finally { await act(async () => again.root.unmount()); again.host.remove(); }
+	const other = await mount(true, "another-question", rowState);
+	try {
+		assert.equal(other.host.querySelector('[data-testid="tucked-explanation"] button')!.getAttribute("aria-expanded"), "false", "other question identities do not inherit Why");
+	} finally { await act(async () => other.root.unmount()); other.host.remove(); }
 });
 
 test("answered card: a remount reuses its solved layout; adaptation off keeps today's card", async () => {

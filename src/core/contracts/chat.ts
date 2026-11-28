@@ -8,8 +8,10 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { LhMessage } from "../native-messages.ts";
 import type { Phase3 } from "../phases.ts";
-import type { PlanNodeStatus, PlanTree } from "./plan.ts";
+import type { PlanNodeStatus, PlanOpening, PlanTree } from "./plan.ts";
 import type { EmissionStats } from "./graph.ts";
+import type { ModelCatalogEntry } from "./models.ts";
+import type { SessionPricing } from "../prices.ts";
 
 // ─── Chat records (the session store's on-disk format) ───────────────────────
 
@@ -17,6 +19,40 @@ import type { EmissionStats } from "./graph.ts";
  * Practice uses the adaptive-practice agent without teaching extraction or
  * graph writes. Reading an absent kind does not require a record migration. */
 export type ChatKind = "teach" | "practice";
+
+export interface ChatDockUsage {
+	contextTokens: number | null;
+	cliContextWindow: { model: string; tokens: number } | null;
+}
+
+/** First-render values. Per-turn details still come from the usage refresh. */
+export interface ChatDockSeed extends ChatDockUsage {
+	model: {
+		settings?: ChatSettings;
+		strong?: ChatSettings;
+		entry?: ModelCatalogEntry;
+	};
+	pricing: Omit<SessionPricing, "turnCosts">;
+	turnCount: number;
+	cliBilled: boolean;
+	cacheHitRate?: number | null;
+}
+
+export interface ChatOpeningPresentation {
+	phaseBeforeTail: Phase3;
+	plan: PlanOpening | null;
+	sideHistoryIds: string[];
+}
+
+export interface SessionCoverage {
+	totalMessages: number;
+	coveredCount: number;
+	uncoveredCount: number;
+	coveredTokens: number;
+	uncoveredTokens: number;
+	running: boolean;
+	lastFoldedAt: string | null;
+}
 
 /** One persisted native session under data/chats/<id>.json. Messages retain
  * native agent history; transcript rendering groups them into a separate view.

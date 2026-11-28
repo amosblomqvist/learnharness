@@ -1,5 +1,7 @@
 import type { LhViewMessage } from "@/src/core";
 
+export { transcriptRows, estimateTranscriptRow, type TranscriptRow } from "@/src/core";
+
 export function isSubagentSteer(message: LhViewMessage): boolean {
 	return (message.metadata as { subagentResult?: unknown } | undefined)?.subagentResult != null;
 }
