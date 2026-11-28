@@ -11,6 +11,7 @@ import {
 	keptIndexFor,
 	newCompactionMarker,
 	newUserMessage,
+	newUserSteer,
 	planTreeToText,
 	serializeForSummary,
 	serializeCitation,
@@ -495,5 +496,25 @@ describe("tutor citations leaving the record", () => {
 		const text = serializeForSummary([newUserMessage(`see ${link}`)]);
 		assert.ok(text.includes("[LEARNER] see \n\n> Tutor quote:\n> x y"));
 		assert.ok(!text.includes("lh-citation:"));
+	});
+
+	it("serializes image-bearing learner messages without crashing or leaking base64", () => {
+		const image = { type: "image" as const, data: "BASE64DATA", mimeType: "image/png" };
+		const text = serializeForSummary([newUserMessage(`see ${link}`, [image])]);
+		assert.ok(text.includes("[LEARNER] see \n\n> Tutor quote:\n> x y"));
+		assert.ok(text.includes("[image]"));
+		assert.ok(!text.includes("BASE64DATA"));
+		assert.ok(!text.includes("lh-citation:"));
+	});
+
+	it("serializes image-only learner messages and image-bearing steers", () => {
+		const image = { type: "image" as const, data: "BASE64DATA", mimeType: "image/png" };
+		const text = serializeForSummary([
+			newUserMessage("", [image]),
+			newUserSteer("check", "steer_1", [image]),
+		]);
+		assert.ok(text.includes("[LEARNER] [image]"));
+		assert.ok(text.includes("[LEARNER] check\n[image]"));
+		assert.ok(!text.includes("BASE64DATA"));
 	});
 });

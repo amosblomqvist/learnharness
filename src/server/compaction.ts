@@ -230,14 +230,20 @@ async function compact(deps: CompactionDeps, chatId: string): Promise<void> {
 	const summaryMessages = priorSummary
 		? span.filter((m) => m.role !== "custom" || m.customType !== "compaction")
 		: span;
-	const spanText = serializeForSummary(summaryMessages);
-	const fullSpan = priorSummary ? `[SYSTEM NOTE — prior compaction summary, still authoritative where not superseded]\n${priorSummary}\n\n${spanText}` : spanText;
+	let prompt: string;
+	try {
+		const spanText = serializeForSummary(summaryMessages);
+		const fullSpan = priorSummary ? `[SYSTEM NOTE — prior compaction summary, still authoritative where not superseded]\n${priorSummary}\n\n${spanText}` : spanText;
 
-	const prompt = buildCompactionPrompt({
-		spanText: fullSpan,
-		planTreeText: planTreeToText(record.tree, messages),
-		kind: deps.kind,
-	});
+		prompt = buildCompactionPrompt({
+			spanText: fullSpan,
+			planTreeText: planTreeToText(record.tree, messages),
+			kind: deps.kind,
+		});
+	} catch (err) {
+		console.error(`[chat ${chatId}] compaction failed:`, err);
+		return;
+	}
 
 	emit("compaction-changed", { chatId, running: true });
 	try {

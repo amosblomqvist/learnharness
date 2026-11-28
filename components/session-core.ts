@@ -727,6 +727,8 @@ export class SessionModel {
 	 *  terminal (stream-route only) fires the settle hook and ends. */
 	async consumeStream(res: Response, controller = this.consumeAbort, allowRecovery = true): Promise<void> {
 		if (!res.body) throw new Error("The turn stream body is empty.");
+		const connection = this.connectionGeneration;
+		const isOwner = () => this.consumeAbort === controller && this.connectionGeneration === connection;
 		const reader = res.body.getReader();
 		let sawEvent = false;
 		let sawDone = false;
@@ -739,7 +741,7 @@ export class SessionModel {
 					if (err instanceof StreamReadError) break;
 					throw err;
 				}
-				if (this.consumeAbort !== controller) return;
+				if (!isOwner()) return;
 				if (next.done) { sawDone = next.value; break; }
 				const event = next.value;
 				if (event.type === "turn-settled") {
@@ -759,18 +761,18 @@ export class SessionModel {
 			reader.releaseLock();
 			// A cancelled consume may finish after its replacement has entered
 			// Thinking. Only the current owner can settle shared state.
-			if (this.consumeAbort === controller) {
+			if (isOwner()) {
 				this.streamingIds = new Set();
 				this.executions = new Map();
 				if (sawDone) {
 					// Do not expose live annotations as canonical editor authority.
 					await this.reconcile();
-					if (this.consumeAbort === controller && this.statusValue !== "error") this.setStatus("ready");
-					if (this.consumeAbort === controller && this.reconciliationValue === "ready") this.onReattachSettled?.();
+					if (isOwner() && this.statusValue !== "error") this.setStatus("ready");
+					if (isOwner() && this.reconciliationValue === "ready") this.onReattachSettled?.();
 				}
 			}
 		}
-		if (this.consumeAbort !== controller || sawDone) return;
+		if (!isOwner() || sawDone) return;
 		if (!allowRecovery) throw new StreamReadError(new Error(STREAM_DROPPED));
 		// One read-only recovery: refresh the canonical base, then replay the
 		// SAME server-owned turn. Never resend the learner's input.
@@ -1077,6 +1079,8 @@ export class SessionModel {
 		const settleDelivery = () => { if (!deliverySettled) { deliverySettled = true; onDeliverySettled?.(); } };
 		const t = text.trim();
 		if (!t && !images?.length) { settleDelivery(); return false; }
+		const owner = this.consumeAbort;
+		const connection = this.connectionGeneration;
 		this.invalidateCanonicalReads();
 		const id = `steer_${localId()}`;
 		this.steerQueueValue = [...this.steerQueueValue, { id, text: t }];
@@ -1094,7 +1098,25 @@ export class SessionModel {
 			if (res.ok) { this.invalidateCanonicalReads(); onAccepted?.(); settleDelivery(); await res.text().catch(() => {}); return true; } // parked or delivered — the stream lands the card
 			if (res.status === 409) {
 				dropSteer();
-				return await this.send({ type: "text", text: t, ...(images?.length ? { images: images.map(image => ({ ...image })) } : {}) }, onAccepted, undefined, settleDelivery); // reuse the prepared payload
+				if (this.consumeAbort !== owner || this.connectionGeneration !== connection) {
+					settleDelivery();
+					return false;
+				}
+				if (!this.readyRef) {
+					this.stop();
+					const fallbackGeneration = this.connectionGeneration;
+					const reconciled = await this.reconcile();
+					if (!reconciled || this.connectionGeneration !== fallbackGeneration) {
+						settleDelivery();
+						return false;
+					}
+				}
+				return await this.send(
+					{ type: "text", text: t, ...(images?.length ? { images: images.map(image => ({ ...image })) } : {}) },
+					onAccepted,
+					undefined,
+					settleDelivery,
+				); // reuse the prepared payload
 			}
 			dropSteer();
 			settleDelivery();

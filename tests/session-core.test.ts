@@ -25,7 +25,7 @@ import { absorbed, pendingCallTool, SessionModel } from "../components/session-c
 import type { ChatInput } from "../src/core/input-events.ts";
 import type { LhMessage } from "../src/core/native-messages.ts";
 import { newUserMessage, newAnswerResult, newThinkingMessage, needsContinuation, endsInDismissal, pendingQuestionOf } from "../src/core/native-messages.ts";
-import { endsInFailedTurn, newCompactionMarker, newPlanBlockMessage, projectView } from "../src/core/index.ts";
+import { endsInFailedTurn, newCompactionMarker, newPlanBlockMessage, pendingPluginQuestionOf, projectView, type PluginQuestionSnapshot } from "../src/core/index.ts";
 import { buildProbeHandoffSteer, buildSubagentSteer } from "../src/core/contracts/jobs.ts";
 import { dismissedAnswer } from "../src/core/question-core.ts";
 import { buildAnswer, type QuestionData } from "../src/core/question-core.ts";
@@ -1922,5 +1922,258 @@ describe("absorbed — the custom role (the doubled thinking card)", () => {
 		const customs = m.getState().nativeMessages.filter((x) => (x as { role?: string }).role === "custom");
 		assert.equal(customs.length, 1, "the server copy replaced the optimistic one — no doubling");
 		assert.equal((customs[0] as { id?: string }).id, "srv_1");
+	});
+});
+
+// ─── steer 409 settle-race fallback ────────────────────────────────────────
+
+describe("steer 409 settle-race fallback", () => {
+	function openStreamResponse(): { response: Response; emit: (event: unknown) => void; close: () => void } {
+		const encoder = new TextEncoder();
+		let ctrl!: ReadableStreamDefaultController<Uint8Array>;
+		let closed = false;
+		const body = new ReadableStream<Uint8Array>({
+			start(controller) { ctrl = controller; },
+			cancel() { closed = true; },
+		});
+		return {
+			response: new Response(body, { status: 200 }),
+			emit: (event) => { if (!closed) ctrl.enqueue(encoder.encode(sse(event))); },
+			close: () => { if (!closed) { closed = true; ctrl.close(); } },
+		};
+	}
+
+	it("detaches a live stream, reconciles, and falls back to POST /api/chat on mid-stream 409", async () => {
+		const streaming = Promise.withResolvers<void>();
+		const firstStream = openStreamResponse();
+		let streamCalls = 0;
+		const posted: ChatInput[] = [];
+		const settledRecord = [newUserMessage("prior"), assistantMsg("a1", "settled reply")];
+
+		const m = model({
+			onChange: () => { if (m.status === "streaming") streaming.resolve(); },
+			fetch: async (input, init) => {
+				const url = String(input);
+				if (url === "/api/chats/chat_x/stream") {
+					if (++streamCalls === 1) return firstStream.response;
+					return sseResponse("[DONE]");
+				}
+				if (url === "/api/chats/chat_x/steer") {
+					return Response.json({ error: "no live turn to steer" }, { status: 409 });
+				}
+				if (url === "/api/chat") {
+					posted.push((JSON.parse(String(init?.body)) as { input: ChatInput }).input);
+					return Response.json({ ok: true });
+				}
+				if (url === "/api/chats/chat_x") {
+					const messages = posted.length > 0 ? [...settledRecord, newUserMessage("follow up")] : settledRecord;
+					return Response.json({ messages });
+				}
+				throw new Error(`unexpected fetch: ${url}`);
+			},
+		});
+
+		const live = m.resumeStream(false);
+		firstStream.emit({
+			type: "message_start",
+			message: { role: "assistant", content: [{ type: "text", text: "partial" }], usage: { input: 0, output: 0, total: 0, cacheReads: 0, cacheWrites: 0 }, timestamp: 0 },
+		});
+		await streaming.promise;
+		assert.equal(m.status, "streaming");
+		assert.equal(m.readyRef, false);
+
+		let accepted = 0;
+		let settled = 0;
+		const ok = await m.steer("follow up", undefined, () => { accepted++; }, () => { settled++; });
+		firstStream.close();
+		await live;
+
+		assert.equal(ok, true);
+		assert.equal(accepted, 1);
+		assert.equal(settled, 1);
+		assert.deepEqual(posted, [{ type: "text", text: "follow up" }]);
+		assert.deepEqual(m.getState().steerQueue, []);
+		assert.equal(m.getState().reconciliation, "ready");
+		assert.equal(m.status, "ready");
+		assert.equal(m.readyRef, true);
+		assert.equal(m.getState().error, null);
+	});
+
+	for (const oldGetResolvesBefore409 of [false, true] as const) {
+		it(`recovers terminal reconcile and sends text on 409 when old GET resolves ${oldGetResolvesBefore409 ? "before" : "after"} 409`, async () => {
+			const oldGetStarted = Promise.withResolvers<void>();
+			const oldGet = Promise.withResolvers<Response>();
+			const steerGate = Promise.withResolvers<Response>();
+			let reads = 0;
+			const posted: ChatInput[] = [];
+			const settledRecord = [newUserMessage("prior"), assistantMsg("a1", "settled reply")];
+
+			const m = model({
+				fetch: async (input, init) => {
+					const url = String(input);
+					if (url === "/api/chats/chat_x") {
+						if (++reads === 1) { oldGetStarted.resolve(); return oldGet.promise; }
+						const messages = posted.length > 0 ? [...settledRecord, newUserMessage("after done")] : settledRecord;
+						return Response.json({ messages });
+					}
+					if (url === "/api/chats/chat_x/steer") {
+						return oldGetResolvesBefore409 ? steerGate.promise : Response.json({ error: "no live turn to steer" }, { status: 409 });
+					}
+					if (url === "/api/chat") {
+						posted.push((JSON.parse(String(init?.body)) as { input: ChatInput }).input);
+						return Response.json({ ok: true });
+					}
+					if (url === "/api/chats/chat_x/stream") return sseResponse("[DONE]");
+					throw new Error(`unexpected fetch: ${url}`);
+				},
+			});
+
+			const terminal = m.consumeStream(sseResponse("[DONE]"));
+			await oldGetStarted.promise;
+			assert.equal(m.getState().reconciliation, "syncing");
+			assert.equal(m.readyRef, false);
+
+			let accepted = 0;
+			let settled = 0;
+			const steering = m.steer("after done", undefined, () => { accepted++; }, () => { settled++; });
+
+			if (oldGetResolvesBefore409) {
+				oldGet.resolve(Response.json({ messages: settledRecord }));
+				await terminal;
+				assert.equal(m.getState().reconciliation, "failed", "in-flight steer invalidated the older terminal GET");
+				assert.equal(m.readyRef, false);
+				steerGate.resolve(Response.json({ error: "no live turn to steer" }, { status: 409 }));
+			}
+
+			const ok = await steering;
+			if (!oldGetResolvesBefore409) {
+				oldGet.resolve(Response.json({ messages: [] }));
+				await terminal;
+			}
+
+			assert.equal(ok, true);
+			assert.equal(accepted, 1);
+			assert.equal(settled, 1);
+			assert.deepEqual(posted, [{ type: "text", text: "after done" }]);
+			assert.deepEqual(m.getState().steerQueue, []);
+			assert.equal(m.getState().reconciliation, "ready");
+			assert.equal(m.status, "ready");
+			assert.equal(m.readyRef, true);
+			assert.equal(m.getState().error, null);
+		});
+	}
+
+	it("does not fall back to POST /api/chat if stop() runs while /steer is in flight", async () => {
+		const streaming = Promise.withResolvers<void>();
+		const steerStarted = Promise.withResolvers<void>();
+		const steerRes = Promise.withResolvers<Response>();
+		const firstStream = openStreamResponse();
+		let chatPosts = 0;
+
+		const m = model({
+			onChange: () => { if (m.status === "streaming") streaming.resolve(); },
+			fetch: async (input) => {
+				const url = String(input);
+				if (url === "/api/chats/chat_x/stream") return firstStream.response;
+				if (url === "/api/chats/chat_x/steer") { steerStarted.resolve(); return steerRes.promise; }
+				if (url === "/api/chat") { chatPosts++; return Response.json({ ok: true }); }
+				throw new Error(`unexpected fetch: ${url}`);
+			},
+		});
+
+		const live = m.resumeStream(false);
+		firstStream.emit({
+			type: "message_start",
+			message: { role: "assistant", content: [{ type: "text", text: "partial" }], usage: { input: 0, output: 0, total: 0, cacheReads: 0, cacheWrites: 0 }, timestamp: 0 },
+		});
+		await streaming.promise;
+
+		let accepted = 0;
+		let settled = 0;
+		const steering = m.steer("unmounted", undefined, () => { accepted++; }, () => { settled++; });
+		await steerStarted.promise;
+
+		m.stop();
+		firstStream.close();
+		await live;
+
+		steerRes.resolve(Response.json({ error: "no live turn to steer" }, { status: 409 }));
+		const ok = await steering;
+
+		assert.equal(ok, false);
+		assert.equal(chatPosts, 0);
+		assert.equal(accepted, 0);
+		assert.equal(settled, 1);
+		assert.deepEqual(m.getState().steerQueue, []);
+	});
+
+	it("preserves the canonical plugin-question gate after fallback reconciliation on 409", async () => {
+		const streaming = Promise.withResolvers<void>();
+		const firstStream = openStreamResponse();
+		let chatPosts = 0;
+		const snapshot: PluginQuestionSnapshot = {
+			protocolVersion: 1,
+			pluginId: "fixture",
+			typeId: "code",
+			label: "Code",
+			variant: "probe",
+			questionId: "q1",
+			contractVersion: 1,
+			occurrence: { messageId: "a_pq", contentIndex: 0, toolCallId: "call_pq", toolName: "code" },
+			input: { question: "Solve this", payload: {} },
+			questionSchema: { type: "object" },
+			answerSchema: { type: "string" },
+			showThinking: false,
+			requiresAnswerRefinement: false,
+		};
+		const settledWithPluginQuestion = [
+			newUserMessage("start"),
+			{
+				id: "a_pq",
+				role: "assistant",
+				content: [{ type: "toolCall", id: "call_pq", name: "code", arguments: snapshot.input }],
+				stopReason: "toolUse",
+				timestamp: 2,
+				lhQuestions: { "0": snapshot },
+			} as unknown as LhMessage,
+		];
+
+		const m = model({
+			onChange: () => { if (m.status === "streaming") streaming.resolve(); },
+			fetch: async (input) => {
+				const url = String(input);
+				if (url === "/api/chats/chat_x/stream") return firstStream.response;
+				if (url === "/api/chats/chat_x/steer") return Response.json({ error: "no live turn to steer" }, { status: 409 });
+				if (url === "/api/chats/chat_x") {
+					return Response.json({
+						messages: settledWithPluginQuestion,
+						pluginQuestionAvailability: { questionId: "q1", status: "available" },
+					});
+				}
+				if (url === "/api/chat") { chatPosts++; return Response.json({ ok: true }); }
+				throw new Error(`unexpected fetch: ${url}`);
+			},
+		});
+
+		const live = m.resumeStream(false);
+		firstStream.emit({
+			type: "message_start",
+			message: { role: "assistant", content: [{ type: "text", text: "partial" }], usage: { input: 0, output: 0, total: 0, cacheReads: 0, cacheWrites: 0 }, timestamp: 0 },
+		});
+		await streaming.promise;
+
+		let accepted = 0;
+		let settled = 0;
+		const ok = await m.steer("should not bypass", undefined, () => { accepted++; }, () => { settled++; });
+		firstStream.close();
+		await live;
+
+		assert.equal(ok, false);
+		assert.equal(chatPosts, 0);
+		assert.equal(accepted, 0);
+		assert.equal(settled, 1);
+		assert.equal(m.getState().reconciliation, "ready");
+		assert.equal(m.readyRef, true);
+		assert.equal(pendingPluginQuestionOf(m.getState().canonicalMessages)?.questionId, "q1");
 	});
 });

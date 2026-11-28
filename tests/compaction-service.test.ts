@@ -701,6 +701,32 @@ describe("the compaction service", () => {
 		assert.ok(activeCompactionOf(chatStore.getChat(chatId)!.messages));
 		assert.equal(summarizeCalls, before + 1);
 	});
+
+	it("compacts an over-threshold chat with an image-bearing learner message before the cut", async () => {
+		const chat = chatStore.createChat("compact: image learner message");
+		const img = { type: "image" as const, data: "BASE64DATA", mimeType: "image/png" };
+		chatStore.saveMessages(chat.id, [
+			newUserMessage("Explain this diagram", [img]),
+			big("m1"),
+			big("m2"),
+			big("m3"),
+			newUserMessage("recent"),
+		]);
+		let seenPrompt = "";
+		const baseDeps = depsOf(chat.id, 40_000);
+		const deps: CompactionDeps = {
+			...baseDeps,
+			summarize: async (prompt, engine) => {
+				seenPrompt = prompt;
+				return baseDeps.summarize!(prompt, engine);
+			},
+		};
+		await ensureCompacted(deps, chat.id);
+		assert.ok(activeCompactionOf(chatStore.getChat(chat.id)!.messages), "compaction marker appended");
+		assert.ok(seenPrompt.includes("Explain this diagram"), "prompt includes learner text");
+		assert.ok(seenPrompt.includes("[image]"), "prompt includes [image] placeholder");
+		assert.ok(!seenPrompt.includes("BASE64DATA"), "prompt omits raw base64 image data");
+	});
 });
 
 // Issue #518: the learner can skip or toggle while the summary call runs.
