@@ -26,15 +26,14 @@ test("submitted images use explicit bytes, prose-sized previews, and no extra to
 });
 
 test("image-only practice thinking, question thinking, reading and answer containers remain visible at full pixel opacity", () => {
-	const thinking = renderToStaticMarkup(<ThinkingBlock text="" images={[image]} defaultOpen />);
+	const thinking = renderToStaticMarkup(<ThinkingBlock text="" images={[image]} />);
 	assert.match(thinking, /Submitted image/); assert.doesNotMatch(thinking, /text-foreground\/50[^>]*><[^>]*img/);
 	assert.match(renderToStaticMarkup(<ThinkingCard data={{ text: "", problemCallId: "problem", images: [image] }} />), /Submitted image/);
 	const html = renderToStaticMarkup(<AnsweredCard answer={{ ...answer, images: { answer: [image], thinking: [image], readingThinking: [image] } }} />);
 	assert.match(html, /reading-thinking-block/); assert.match(html, /your-thinking/);
-	// Answer and reading are open initially; question thinking retains its native collapse policy.
-	assert.equal((html.match(/alt="Submitted image"/g) ?? []).length, 2);
-	assert.match(renderToStaticMarkup(<ThinkingBlock text="drawing.png" defaultOpen />), /drawing.png/);
-	assert.doesNotMatch(renderToStaticMarkup(<ThinkingBlock text="drawing.png" defaultOpen />), /<img/);
+	assert.equal((html.match(/alt="Submitted image"/g) ?? []).length, 3);
+	assert.match(renderToStaticMarkup(<ThinkingBlock text="drawing.png" />), /drawing.png/);
+	assert.doesNotMatch(renderToStaticMarkup(<ThinkingBlock text="drawing.png" />), /<img/);
 });
 
 test("pending image input makes an empty between-problems composer send rather than Next", () => {

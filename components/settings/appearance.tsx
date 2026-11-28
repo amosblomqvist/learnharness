@@ -33,8 +33,10 @@ import {
 } from "react";
 import {
 	BUILTIN_THEMES,
+	DISCLOSURE_KINDS,
 	effectiveColors,
 	FACTORY_SETTINGS,
+	resolveExpandByDefault,
 	resolveTheme,
 	themeVars,
 	type AppearanceSettings,
@@ -42,6 +44,7 @@ import {
 	type Theme,
 	type ThemeColors,
 } from "@/src/core";
+import { applyExpandByDefault } from "@/components/disclosure-store";
 
 /** The resolved, fully-concrete appearance view (delta + factory merged). */
 export function resolveAppearance(delta: AppearanceSettings | undefined) {
@@ -62,6 +65,7 @@ export function resolveAppearance(delta: AppearanceSettings | undefined) {
 			boldColor: delta?.mdRendering?.boldColor ?? f.mdRendering.boldColor,
 			italicColor: delta?.mdRendering?.italicColor ?? f.mdRendering.italicColor,
 		},
+		expandByDefault: resolveExpandByDefault(delta?.expandByDefault),
 	};
 }
 
@@ -216,6 +220,17 @@ export function AppearanceProvider({
 			appliedNamesRef.current.add(name);
 		}
 	}, [key, vars]);
+
+	// A changed Start expanded switch becomes the state of every block of
+	// its kind, replacing any keyboard toggle of that kind.
+	const expandByDefault = appearance.expandByDefault;
+	const appliedExpandRef = useRef(expandByDefault);
+	useEffect(() => {
+		for (const kind of DISCLOSURE_KINDS) {
+			if (expandByDefault[kind] !== appliedExpandRef.current[kind]) applyExpandByDefault(kind, expandByDefault[kind]);
+		}
+		appliedExpandRef.current = expandByDefault;
+	}, [expandByDefault]);
 
 	// The desktop shell's native chrome (window background, Windows/Linux
 	// control overlay) follows the theme — absent in a browser.

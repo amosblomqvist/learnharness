@@ -38,6 +38,18 @@ describe("the ⌘B chain — keypress → binding → action → event", () => {
 		assert.equal(kbdEventForAction("toggle-user-thinking"), "lh:kbd-toggle-user-thinking");
 	});
 
+	it("mod+y is toggle-why; toggle-agent-thinking ships unbound", () => {
+		assert.equal(actionForBinding("mod+y"), "toggle-why");
+		assert.equal(bindingForAction("toggle-why"), "mod+y");
+		assert.equal(kbdEventForAction("toggle-why"), "lh:kbd-toggle-why");
+		assert.equal(bindingForAction("toggle-agent-thinking"), "");
+		assert.equal(kbdEventForAction("toggle-agent-thinking"), "lh:kbd-toggle-agent-thinking");
+		assert.equal(actionForBinding(""), undefined, "an empty binding never matches an event");
+		const labels = Object.fromEntries(KEYBOARD_ACTIONS.map((a) => [a.id, [a.label, a.scope]]));
+		assert.deepEqual(labels["toggle-why"], ["Toggle all Why", "chat"]);
+		assert.deepEqual(labels["toggle-agent-thinking"], ["Toggle all agent thinking", "chat"]);
+	});
+
 	it("mod+b is the toggle-sidebar action", () => {
 		assert.equal(actionForBinding("mod+b"), "toggle-sidebar");
 		assert.equal(bindingForAction("toggle-sidebar"), "mod+b");

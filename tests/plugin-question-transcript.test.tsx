@@ -52,11 +52,9 @@ async function mount(answer: PluginQuestionAnswer, registration?: QuestionRender
 	await act(async () => { root.render(<PluginQuestionAnswered snapshot={posed} answer={answer} chatId="chat" registration={registration} />); });
 	return dom.document;
 }
-async function expandAnswer(document: Document) {
+function assertAnswerExpanded(document: Document) {
 	const trigger = document.querySelector<HTMLButtonElement>('[data-testid="your-thinking-trigger"]')!;
-	assert.ok(trigger); assert.equal(trigger.getAttribute("aria-expanded"), "false");
-	await act(async () => { trigger.click(); });
-	assert.equal(trigger.getAttribute("aria-expanded"), "true");
+	assert.ok(trigger); assert.equal(trigger.getAttribute("aria-expanded"), "true", "answer thinking starts at the factory-expanded Your thinking setting");
 }
 
 test("saved reading thinking is above the actual answered card; answer thinking is a native in-card row", () => {
@@ -72,7 +70,7 @@ test("saved reading thinking is above the actual answered card; answer thinking 
 	assert.equal(reading.querySelector("button")?.textContent, "YOUR THINKING");
 	assert.equal(thinking.querySelector("button")?.textContent, "YOUR THINKING");
 	assert.equal(reading.querySelector("button")?.getAttribute("aria-expanded"), "true");
-	assert.equal(thinking.querySelector("button")?.getAttribute("aria-expanded"), "false");
+	assert.equal(thinking.querySelector("button")?.getAttribute("aria-expanded"), "true");
 	assert.ok(reading.classList.contains("bg-card"));
 	assert.equal(thinking.classList.contains("bg-card"), false, "inCard rows add no second background band");
 	assert.equal(reading.querySelector(".whitespace-pre-wrap")?.textContent, answer.readingThinking);
@@ -91,7 +89,7 @@ for (const value of [undefined, "", "  "]) test(`defined channel presence is aut
 	else {
 		assert.ok(reading); assert.ok(thinking);
 		assert.equal(reading.querySelector("button")?.getAttribute("aria-expanded"), "true");
-		await expandAnswer(document);
+		assertAnswerExpanded(document);
 		assert.equal(reading.querySelector(".whitespace-pre-wrap")?.textContent ?? "", value);
 		assert.equal(thinking.querySelector(".whitespace-pre-wrap")?.textContent ?? "", value);
 	}
@@ -101,7 +99,7 @@ for (const value of [undefined, "", "  "]) test(`defined channel presence is aut
 test("nonblank thinking preserves leading/trailing whitespace and line breaks in both native rows", async () => {
 	const answer = savedAnswer({ readingThinking: " \n reading  \n", thinking: "  answer\n  thought \n" });
 	const document = await mount(answer);
-	await expandAnswer(document);
+	assertAnswerExpanded(document);
 	assert.equal(document.querySelector('[data-testid="reading-thinking-block"] .whitespace-pre-wrap')?.textContent, answer.readingThinking);
 	assert.equal(document.querySelector('[data-testid="your-thinking"] .whitespace-pre-wrap')?.textContent, answer.thinking);
 });
@@ -113,8 +111,7 @@ for (const imageOnly of [false, true]) test(`${imageOnly ? "image-only" : "text 
 	const document = await mount(answer);
 	assert.equal(document.querySelectorAll('[data-testid="reading-thinking-block"]').length, 1);
 	assert.equal(document.querySelectorAll('[data-testid="your-thinking"]').length, 1);
-	assert.equal(document.querySelectorAll('[data-testid="your-thinking"] img').length, 0, "answer thinking keeps the existing closed default");
-	await expandAnswer(document);
+	assertAnswerExpanded(document);
 	for (const [testId, channel] of [["reading-thinking-block", "readingThinking"], ["your-thinking", "thinking"]] as const) {
 		const row = document.querySelector(`[data-testid="${testId}"]`)!;
 		assert.deepEqual(Array.from(row.querySelectorAll("img"), img => img.getAttribute("src")), images[channel].map(imageSrc));
@@ -156,7 +153,7 @@ test("custom answered code owns only its slot; native thinking and images remain
 	assert.equal(slot.querySelector('[data-testid="your-thinking"]'), null);
 	assert.equal(slot.querySelector("img"), null);
 	for (const key of ["thinking", "readingThinking", "images"]) assert.equal(contextKeys.includes(key), false, `${key} is host-owned, not plugin answered-slot context`);
-	await expandAnswer(document);
+	assertAnswerExpanded(document);
 	assert.equal(document.querySelectorAll("img").length, 2);
 	slot.replaceChildren();
 	assert.match(document.querySelector('[data-testid="reading-thinking-block"]')?.textContent ?? "", /host reading/);

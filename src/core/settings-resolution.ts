@@ -28,11 +28,14 @@ import type { ChatSettings } from "./contracts/chat.ts";
 import type { SearchEngineId } from "./search.ts";
 import {
 	BACKGROUND_MODEL_ROLES,
+	DISCLOSURE_KINDS,
 	FACTORY_SETTINGS,
 	MODEL_SLOTS,
 	ROLE_SLOT,
 	type AgentSettings,
+	type AppearanceSettings,
 	type BackgroundModelRole,
+	type DisclosureKind,
 	type FactorySettings,
 	type GeneralSettings,
 	type DictationSettings,
@@ -69,6 +72,11 @@ export interface EffectiveModelSpec {
 
 /** The concrete appearance view — same shape as the factory's. */
 export type EffectiveAppearance = FactorySettings["appearance"];
+
+export function resolveExpandByDefault(stored: AppearanceSettings["expandByDefault"]): Record<DisclosureKind, boolean> {
+	const factory = FACTORY_SETTINGS.appearance.expandByDefault;
+	return Object.fromEntries(DISCLOSURE_KINDS.map((kind) => [kind, stored?.[kind] ?? factory[kind]])) as Record<DisclosureKind, boolean>;
+}
 
 /** The concrete view: every knob resolved, no absent fields. */
 export interface EffectiveSettings {
@@ -230,6 +238,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 				boldColor: md.boldColor ?? factoryMd.boldColor,
 				italicColor: md.italicColor ?? factoryMd.italicColor,
 			},
+			expandByDefault: resolveExpandByDefault(appearance.expandByDefault),
 		},
 		graph: {
 			// Wave 7 collapse (owner ruling 2026-09-23): the master switch ONLY —

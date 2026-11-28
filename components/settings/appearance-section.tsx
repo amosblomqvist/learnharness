@@ -33,6 +33,8 @@
 
 import { useEffect, useRef, useState } from "react";
 import {
+	DISCLOSURE_KINDS,
+	DISCLOSURES,
 	EXTRACTION_CHUNK_TOKENS_FLOOR,
 	TRANSCRIPT_WIDTH_MAX_REM,
 	TRANSCRIPT_WIDTH_MIN_REM,
@@ -40,6 +42,7 @@ import {
 	resolveSettings,
 	THEME_COLOR_KEYS,
 	type AppearanceSettings,
+	type DisclosureKind,
 	type GraphSettings,
 	type ThemeColorKey,
 } from "@/src/core";
@@ -515,6 +518,24 @@ export function AppearanceSection({
 					onChange={(on) => onSectionChange({ ...appearance, adaptiveQuestions: on })}
 				/>
 			</SettingsRow>
+		</>
+	);
+}
+
+export function StartExpandedSwitches({ onToggle }: { onToggle: (kind: DisclosureKind) => void }) {
+	const { appearance } = useAppearance();
+	return (
+		<>
+			<p className="mt-5 mb-2 text-xs uppercase tracking-widest text-muted-foreground">Start expanded</p>
+			{DISCLOSURE_KINDS.map((kind) => (
+				<SettingsRow key={kind} label={DISCLOSURES[kind].label} testid={`row-expand-${kind}`}>
+					<Toggle
+						checked={appearance.expandByDefault[kind]}
+						label={DISCLOSURES[kind].label}
+						onChange={() => onToggle(kind)}
+					/>
+				</SettingsRow>
+			))}
 		</>
 	);
 }

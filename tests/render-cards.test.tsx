@@ -320,10 +320,8 @@ describe("render smoke tests", () => {
 		const html = renderToStaticMarkup(<AnsweredCard answer={answer} />);
 		assert.ok(html.includes('data-testid="your-thinking"'), "the thinking row exists");
 		assert.match(html, /YOUR THINKING/, "labeled as the learner's voice (all caps, owner round 3)");
-		// COLLAPSED ARRIVAL (owner round 2, 2026-10-05): the SSR output is the
-		// trigger row only — the thinking text is one click away, never loud.
 		assert.ok(html.includes('data-testid="your-thinking-trigger"'), "the trigger row");
-		assert.ok(html.includes('aria-expanded="false"'), "arrives collapsed");
+		assert.ok(html.includes('aria-expanded="true"'), "arrives expanded");
 		// ONE GEOMETRY, NO BAND IN CARDS (owner round five, 2026-10-07): the
 		// accent lift read too light — rail only, heights match everywhere.
 		const yourRow = html.slice(html.indexOf('data-testid="your-thinking"'));
@@ -333,7 +331,7 @@ describe("render smoke tests", () => {
 		const railAt = html.indexOf("border-l-[calc(3ch-14px)]");
 		const trigAt = html.indexOf("your-thinking-trigger");
 		assert.ok(railAt !== -1 && railAt < trigAt, "the rail opens before the label (same quote)");
-		assert.ok(!html.includes("brightness isn&#x27;t distance"), "the text is hidden until expanded");
+		assert.ok(html.includes("brightness isn&#x27;t distance"), "the text shows on arrival");
 		assert.ok(!html.includes("Note:"), "no longer a muted 'Note:' footnote");
 		// The thinking sits ABOVE the verdict's explanation — the dialogue of
 		// thinking, not an afterthought.
@@ -744,11 +742,9 @@ describe("predict vs check rendering", () => {
 		assert.ok(html.includes("YOUR THINKING"), "the plain label");
 		assert.ok(!html.includes("Your thinking while reading"), "the old verbose label is gone");
 		assert.ok(!html.includes("your-reading-thinking"), "the in-card inset is gone");
-		// EXPANDED ARRIVAL (owner round two, 2026-10-07): transcript rows
-		// render their text; the in-card answer thinking stays collapsed.
 		assert.ok(html.includes('data-testid="your-thinking-trigger"'), "the answer thinking stays inside the card");
 		assert.ok(html.includes("was unsure mid-paragraph"), "the lifted row arrives expanded");
-		assert.ok(!html.includes("answering thought"), "the in-card row stays collapsed");
+		assert.ok(html.includes("answering thought"), "the in-card row arrives expanded too");
 		const legacy = { ...buildAnswer(quizQD(), { values: ["Mercury"] }), note: "a 2026-09 answer" };
 		const legacyHtml = renderToStaticMarkup(<AnsweredCard answer={legacy} />);
 		assert.ok(legacyHtml.includes("a 2026-09 answer") || legacyHtml.includes('data-testid="your-thinking-trigger"'), "records from before the rename still render");
