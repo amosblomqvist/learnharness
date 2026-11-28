@@ -125,8 +125,10 @@ export function DraftShell({
 		Array.from(document.querySelectorAll<HTMLElement>('[data-testid="composer"] [data-file-path-input]')),
 		[]);
 	useFieldCycle(cycleComposer);
+	const draftText = useRef(text);
+	draftText.current = text;
 	const dictation = useDictation({
-		append: (t) => onChange(joinDictation(text, t)),
+		append: (t) => onChange(joinDictation(draftText.current, t)),
 	});
 	// A LIVE dictation keeps the composer sendable ("nothing gets lost"
 	// round, owner 2026-10-01): the spoken text is deferred in the run's
@@ -139,7 +141,7 @@ export function DraftShell({
 	 * re-render cannot eat the dictated tail. */
 	const handleSend = () => {
 		if (dictation.active) {
-			void dictation.finish().then(onSend);
+			void dictation.finish().then(onSend, () => {});
 			return;
 		}
 		onSend();

@@ -2,9 +2,9 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Loader2Icon, MicIcon } from "lucide-react";
-import { useSettingsDialog } from "@/components/settings/settings-dialog";
+import { getPendingDictationProviderSave, useSettingsDialog } from "@/components/settings/settings-dialog";
 import { Hint } from "@/components/ui/hint";
-import { deepgramListenUrl, type DictationLanguage } from "@/src/core";
+import { DICTATION_STOP_PCM_BYTES, MAX_DICTATION_WAV_BYTES, WAV_HEADER_BYTES, deepgramListenUrl, pcm16Wav, type DictationLanguage, type DictationProvider } from "@/src/core";
 import { useDictationLanguage } from "@/components/dictation-preference";
 import { setDictationActive } from "@/components/dictation-state";
 import { dispatchFocusedPluginShortcut } from "@/components/plugin-input-focus";
@@ -13,12 +13,11 @@ export { isDictationActive } from "@/components/dictation-state";
 /**
  * Voice dictation — the cloud engine (STT wave 1, 2026-09-17).
  *
- * Architecture (docs/research/stt.md): the renderer captures mic audio in
- * an AudioWorklet (public/worklets/pcm-capture.js → linear16 16kHz mono),
- * opens the Deepgram streaming WebSocket DIRECTLY (audio never loops
- * through our server) with a short-lived token minted by /api/stt/token
- * (the real key stays server-side), and streams frames while it listens.
- * Finals append into the PRIMARY INPUT (see below).
+ * The renderer captures 16 kHz mono PCM in an AudioWorklet. Deepgram streams
+ * directly using a short-lived token from /api/stt/token. OpenAI buffers a
+ * bounded recording and sends it through the local server after stop, using
+ * the explicitly selected Platform API key. Neither real key reaches the
+ * renderer. Finals append into the PRIMARY INPUT (see below).
  *
  * Ported patterns from the owner's pi `dictate` extension (his words:
  * "very well tuned") — see ~/.pi/agent/extensions/dictate:
@@ -110,6 +109,7 @@ export const DEEPGRAM_KEY_ID = "DEEPGRAM_API_KEY";
  * instead. Exported for pins; the errored idle button's click recognizes
  * it and deep-links Settings → Keys → the Deepgram row. */
 export const DICTATION_KEYLESS = "Dictation needs a Deepgram key";
+export const OPENAI_DICTATION_KEYLESS = "Dictation needs an OpenAI API key";
 export const DICTATION_ACTIVE_ELSEWHERE = "Dictation is active elsewhere";
 
 // Mounted controllers do not claim capture. Only start() acquires the single
@@ -279,14 +279,15 @@ export function usePluginQuestionDictationTarget(append: (text: string) => void 
 	}, [append, claimed]);
 }
 
-export function useDictationTarget(append: (text: string) => void, claimed: boolean) {
+export function useDictationTarget(append: (text: string) => void, claimed: boolean, cancelOnRelease = false) {
 	useEffect(() => {
 		if (!claimed) return;
 		questionTarget = append;
 		return () => {
+			if (cancelOnRelease && recordingTarget === append) cancelGlobalDictation();
 			if (questionTarget === append) questionTarget = null;
 		};
-	}, [append, claimed]);
+	}, [append, claimed, cancelOnRelease]);
 }
 
 export type DictationPhase = "idle" | "connecting" | "recording" | "stopping";
@@ -304,8 +305,9 @@ export type Dictation = {
 	error: string | null;
 	/** Latest observed RMS, 0..1 — sampled by the meter's own tick, never reset. */
 	levelRef: { current: number };
-	/** Not idle — from the click until the stop completes (the optimistic window). */
+	/** A recording, transcript delivery, or audio awaiting retry or discard. */
 	active: boolean;
+	retryable: boolean;
 	/** End + KEEP the transcript: flush the deferred buffer into the primary
 	 *  input (the Stop pill and ⌘D). */
 	toggle: () => void;
@@ -319,7 +321,8 @@ export type Dictation = {
 	 *  pays nothing). Every terminal path runs cleanup(), and cleanup()
 	 *  settles the waiters. Cancel (Esc) normally resolves after discarding
 	 *  buffered speech; cancel/dispose during asynchronous transcript delivery
-	 *  rejects instead, so a waiting submit cannot send stale text. */
+	 *  rejects instead. Pending OpenAI audio also blocks submission until
+	 *  transcription succeeds or the learner discards the recording. */
 	finish: () => Promise<void>;
 	/** End + DISCARD the transcript: no flush, immediate teardown. The Esc
 	 *  semantics (owner, 2026-09-17 round 3): Esc is a cancel, not a stop —
@@ -345,7 +348,7 @@ export function useDictation({ append, destination = "primary", disabled = false
 }): Dictation {
 	const primary = destination === "primary";
 	const owner = useRef(Symbol("dictation")).current;
-	const { getLanguage } = useDictationLanguage();
+	const { getLanguage, getProvider } = useDictationLanguage();
 	const [phase, setPhaseState] = useState<DictationPhase>("idle");
 	const phaseRef = useRef<DictationPhase>("idle");
 	const setPhase = useCallback((next: DictationPhase) => {
@@ -357,6 +360,9 @@ export function useDictation({ append, destination = "primary", disabled = false
 	const disabledRef = useRef(disabled);
 	disabledRef.current = disabled;
 	const [error, setError] = useState<string | null>(null);
+	const [retryable, setRetryable] = useState(false);
+	const retryableRef = useRef(false);
+	const providerRef = useRef<DictationProvider | null>(null);
 	/** Latest RMS from the worklet — the meter samples this (dictate pattern). */
 	const levelRef = useRef(0);
 	/** Fresh fallback for the next start; a live run retains its own target. */
@@ -382,7 +388,13 @@ export function useDictation({ append, destination = "primary", disabled = false
 	/** Frames captured before the socket is OPEN (mitigation A): flushed in
 	 *  order on open; capped at 256 frames (≈32s) with the oldest dropped;
 	 *  cleared at teardown so a dead run's audio can't leak into the next. */
-	const pendingRef = useRef<ArrayBuffer[]>([]);
+	const pendingRef = useRef<Array<ArrayBuffer | ArrayBufferView>>([]);
+	const pcmRef = useRef<Uint8Array[]>([]);
+	const pcmBytesRef = useRef(0);
+	const limitReachedRef = useRef(false);
+	const uploadRef = useRef<AbortController | null>(null);
+	const flushCaptureRef = useRef<(() => void) | null>(null);
+	const stopRef = useRef<() => void>(() => {});
 	const genRef = useRef(0); // stale-handler guard (dictate pattern)
 	const safetyRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 	const reconnectsRef = useRef(0);
@@ -404,24 +416,39 @@ export function useDictation({ append, destination = "primary", disabled = false
 		return (destinationRef.current?.append ?? appendRef.current)(text);
 	}, []);
 
-	/** Full teardown of one run's machinery. Idempotent; generation-guarded by callers. */
-	const cleanup = useCallback((warmNext = true) => {
+	/** A retry retains both the audio and the recording's original target. */
+	const cleanup = useCallback(({ error, canceled = false, retainAudio = false, warmNext = true }: {
+		error?: unknown; canceled?: boolean; retainAudio?: boolean; warmNext?: boolean;
+	} = {}) => {
 		const endGen = ++genRef.current;
-		let appended: unknown;
-		// A second cleanup (cancel/dispose) cannot turn an unfinished async
-		// append into a successful finish: that would send the old draft.
-		let failure: { error: unknown } | null = appendPendingRef.current
-			? { error: new DOMException("Dictation transcript delivery canceled", "AbortError") }
-			: null;
+		const keep = retainAudio && pcmBytesRef.current > 0;
+		const interruptedDelivery = appendPendingRef.current;
 		appendPendingRef.current = false;
-		try {
-			appended = flush(); // exactly one append, after the final transcript
-		} catch (error) {
-			failure = { error };
+		let failure: { error: unknown } | null = error !== undefined ? { error } : null;
+		if (interruptedDelivery || (canceled && providerRef.current !== "deepgram")) {
+			failure = { error: new DOMException("Dictation canceled", "AbortError") };
+		}
+		let deliveryFailed = false;
+		let appended: unknown;
+		if (failure || canceled) bufferRef.current = [];
+		else {
+			try {
+				appended = flush();
+			} catch (error) {
+				deliveryFailed = true;
+				failure = { error };
+			}
 		}
 		if (safetyRef.current) {
 			clearTimeout(safetyRef.current);
 			safetyRef.current = null;
+		}
+		flushCaptureRef.current = null;
+		uploadRef.current?.abort();
+		uploadRef.current = null;
+		if (!keep) {
+			pcmRef.current = [];
+			pcmBytesRef.current = 0;
 		}
 		pendingRef.current = [];
 		for (const track of streamRef.current?.getTracks() ?? []) track.stop();
@@ -438,12 +465,14 @@ export function useDictation({ append, destination = "primary", disabled = false
 				ws.close();
 			} catch {}
 		}
-		const complete = (failed: { error: unknown } | null) => {
+		const complete = (failed: { error: unknown } | null, rememberFailure = false) => {
 			if (endGen !== genRef.current) return;
 			appendPendingRef.current = false;
-			appendFailureRef.current = failed;
-			if (failed) setError(failed.error instanceof Error ? failed.error.message : "Dictation transcript could not be applied");
-			if (recordingOwner === owner) {
+			appendFailureRef.current = keep || rememberFailure ? failed : null;
+			retryableRef.current = keep;
+			setRetryable(keep);
+			if (failed && !canceled) setError(failed.error instanceof Error ? failed.error.message : "Dictation transcript could not be applied");
+			if (recordingOwner === owner && !keep) {
 				recordingOwner = null;
 				recordingTarget = null;
 				setDictationActive(false);
@@ -455,15 +484,41 @@ export function useDictation({ append, destination = "primary", disabled = false
 				if (failed) waiter.reject(failed.error);
 				else waiter.resolve();
 			}
-			if (warmNext) warmTokens.refresh();
+			if (warmNext && providerRef.current === "deepgram") warmTokens.refresh();
 		};
 		if (appended && typeof (appended as PromiseLike<unknown>).then === "function") {
 			appendPendingRef.current = true;
 			setPhase("stopping");
 			// Both branches consume the promise, including stop-without-finish.
-			void Promise.resolve(appended).then(() => complete(null), (error: unknown) => complete({ error }));
-		} else complete(failure);
+			void Promise.resolve(appended).then(() => complete(null), (error: unknown) => complete({ error }, true));
+		} else complete(failure, deliveryFailed);
 	}, [flush, owner, setPhase]);
+
+	const uploadOpenAI = useCallback(async (gen: number) => {
+		if (!pcmBytesRef.current) {
+			cleanup({ error: new Error("No audio was captured") });
+			return;
+		}
+		const controller = new AbortController();
+		uploadRef.current = controller;
+		try {
+			const wav = pcm16Wav(pcmRef.current);
+			const res = await fetch("/api/stt/openai", {
+				method: "POST", headers: { "content-type": "audio/wav" }, body: wav, signal: controller.signal,
+			});
+			const body = await res.json().catch(() => ({})) as { text?: unknown; message?: unknown };
+			if (!res.ok || typeof body.text !== "string") {
+				throw new Error(typeof body.message === "string" ? body.message : "OpenAI transcription failed");
+			}
+			if (gen !== genRef.current) return;
+			if (body.text.trim()) bufferRef.current.push(body.text.trim());
+			setError(limitReachedRef.current ? "Recording reached its limit and was transcribed" : null);
+			cleanup();
+		} catch (e) {
+			if (gen !== genRef.current || controller.signal.aborted) return;
+			cleanup({ error: e instanceof Error ? e : new Error("OpenAI transcription failed"), retainAudio: true });
+		}
+	}, [cleanup]);
 
 	/** Open the Deepgram socket and wire its messages. `gen` guards staleness. */
 	const openSocket = useCallback(
@@ -536,7 +591,8 @@ export function useDictation({ append, destination = "primary", disabled = false
 			setError(DICTATION_ACTIVE_ELSEWHERE);
 			return;
 		}
-		const target = destination ?? { id: "main", append: primary ? questionTarget ?? appendRef.current : (text: string) => appendRef.current(text) };
+		const appendToComposer = (text: string) => appendRef.current(text);
+		const target = destination ?? { id: "main", append: primary ? questionTarget ?? appendRef.current : appendToComposer };
 		destinationRef.current = target;
 		setDestinationId(target.id);
 		recordingOwner = owner;
@@ -548,96 +604,89 @@ export function useDictation({ append, destination = "primary", disabled = false
 		reconnectsRef.current = 0;
 		bufferRef.current = []; // fresh run, fresh buffer (round 2)
 		pendingRef.current = []; // fresh run, fresh queue (mitigation A)
+		providerRef.current = null;
+		pcmRef.current = [];
+		pcmBytesRef.current = 0;
+		limitReachedRef.current = false;
 		const gen = ++genRef.current;
-		let language: DictationLanguage;
 		try {
-			language = await getLanguage();
-		} catch (e) {
-			if (gen !== genRef.current) return;
-			setError(e instanceof Error ? e.message : "Dictation language unavailable");
-			cleanup();
-			return;
-		}
-		if (gen !== genRef.current) return;
-
-		// Mitigation D: the warm token (pre-minted at mount / after the last
-		// run) resolves ~instantly; a cold/keyless mint surfaces below. The
-		// mic is the long pole (macOS HAL + APM init) and gates everything —
-		// the token runs concurrently with it. 127.0.0.1 is a secure
-		// context, so getUserMedia works without TLS; macOS TCC prompts on
-		// first use.
-		const tokenPromise = warmTokens.mint();
-		tokenPromise.catch(() => {}); // surfaced below; no unhandled rejection
-		const micPromise = navigator.mediaDevices.getUserMedia({
-			audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-		});
-		let stream: MediaStream;
-		try {
-			stream = await micPromise;
-			if (gen !== genRef.current) {
-				for (const track of stream.getTracks()) track.stop();
-				return;
+			const providerSave = getPendingDictationProviderSave();
+			if (providerSave) {
+				const saved = await providerSave;
+				if (gen !== genRef.current) return;
+				if (!saved) throw new Error("Could not save the speech provider. Open Settings and try again.");
 			}
+			const provider = await getProvider();
+			if (gen !== genRef.current) return;
+			providerRef.current = provider;
+			if (provider === "openai") {
+				const keys = await fetch("/api/keys", { cache: "no-store" });
+				if (!keys.ok) throw new Error("Could not check the OpenAI API key");
+				const body = await keys.json() as { keys?: { id: string; present: boolean }[] };
+				if (!body.keys?.some((key) => key.id === "OPENAI_API_KEY" && key.present)) throw new Error(OPENAI_DICTATION_KEYLESS);
+			}
+			if (gen !== genRef.current) return;
+			// Deepgram uses the confirmed language for the entire run, including reconnects.
+			const language = provider === "deepgram" ? await getLanguage() : null;
+			if (gen !== genRef.current) return;
+			const tokenPromise = provider === "deepgram" ? warmTokens.mint() : null;
+			tokenPromise?.catch(() => {});
+			const stream = await navigator.mediaDevices.getUserMedia({
+				audio: { channelCount: 1, echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+			});
+			if (gen !== genRef.current) { for (const track of stream.getTracks()) track.stop(); return; }
 			streamRef.current = stream;
-
-			// Mitigation C: app-lifetime context + memoized worklet module —
-			// per-run costs (context creation, module fetch) are gone.
 			const { ctx, module } = ensureAudioGraph();
 			await module;
 			if (ctx.state === "suspended") await ctx.resume();
 			if (gen !== genRef.current) return;
-
+			if (provider === "openai" && ctx.sampleRate !== 16000) throw new Error("This microphone cannot capture 16 kHz audio");
 			const worklet = new AudioWorkletNode(ctx, "pcm-capture");
 			workletRef.current = worklet;
-			worklet.port.onmessage = (e) => {
+			worklet.port.onmessage = (event) => {
 				if (gen !== genRef.current) return;
-				const msg = e.data as { type: string; rms?: number; buffer?: ArrayBuffer };
-				if (msg.type === "level") {
-					levelRef.current = msg.rms ?? 0; // never reset to zero (dictate pattern)
-				} else if (msg.type === "audio") {
-					const ws = wsRef.current;
-					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer!);
-					// Mitigation A: not OPEN yet (handshake or reconnect gap) —
-					// queue, capped; the open handler flushes in order.
-					else {
-						pendingRef.current.push(msg.buffer!);
-						if (pendingRef.current.length > 256) pendingRef.current.shift();
+				const msg = event.data as { type: string; rms?: number; buffer?: ArrayBuffer | ArrayBufferView };
+				if (msg.type === "level") { levelRef.current = msg.rms ?? 0; return; }
+				if (msg.type === "flushed") { flushCaptureRef.current?.(); return; }
+				if (msg.type !== "audio" || !msg.buffer) return;
+				if (provider === "openai") {
+					const bytes = msg.buffer instanceof ArrayBuffer
+						? new Uint8Array(msg.buffer) : new Uint8Array(msg.buffer.buffer, msg.buffer.byteOffset, msg.buffer.byteLength);
+					if (pcmBytesRef.current + bytes.byteLength + WAV_HEADER_BYTES > MAX_DICTATION_WAV_BYTES) {
+						cleanup({ error: new Error("Recording exceeded the audio limit; retry the captured portion or discard it"), retainAudio: true });
+						return;
 					}
+					pcmRef.current.push(Uint8Array.from(bytes));
+					pcmBytesRef.current += bytes.byteLength;
+					if (pcmBytesRef.current >= DICTATION_STOP_PCM_BYTES && phaseRef.current === "recording") {
+						limitReachedRef.current = true;
+						stopRef.current();
+					}
+				} else {
+					const ws = wsRef.current;
+					if (ws && ws.readyState === WebSocket.OPEN) ws.send(msg.buffer);
+					else { pendingRef.current.push(msg.buffer); if (pendingRef.current.length > 256) pendingRef.current.shift(); }
 				}
 			};
 			const source = ctx.createMediaStreamSource(stream);
 			sourceRef.current = source;
 			source.connect(worklet);
-			// Pull the graph with silence out (the worklet writes no output) —
-			// an unconnected worklet node is never clocked.
 			worklet.connect(ctx.destination);
+			if (provider === "openai") {
+				setPhase("recording");
+				return;
+			}
+			if (tokenPromise && language) {
+				const token = await tokenPromise;
+				if (gen === genRef.current) openSocket(gen, token, language);
+			}
 		} catch (e) {
 			if (gen !== genRef.current) return;
-			const msg =
-				e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
-					? "Microphone permission denied"
-					: e instanceof Error
-						? e.message
-						: "mic unavailable";
-			setError(msg);
-			cleanup();
-			return;
+			const message = e instanceof DOMException && (e.name === "NotAllowedError" || e.name === "SecurityError")
+				? "Microphone permission denied" : e instanceof Error ? e.message : "Dictation unavailable";
+			cleanup({ error: new Error(message) });
 		}
-		if (gen !== genRef.current) return;
-		let token: string;
-		try {
-			token = await tokenPromise;
-		} catch (e) {
-			if (gen !== genRef.current) return;
-			setError(e instanceof Error ? e.message : "token unavailable");
-			cleanup();
-			return;
-		}
-		if (gen !== genRef.current) return;
-		// Mitigation B: the handshake fires the moment the graph is live,
-		// overlapping any remaining token wait — mic-gated, never before it.
-		openSocket(gen, token, language);
-	}, [openSocket, cleanup, getLanguage, owner, primary, setPhase]);
+	}, [cleanup, getLanguage, getProvider, openSocket, owner, primary, setPhase]);
 
 	const stop = useCallback(() => {
 		const gen = genRef.current;
@@ -650,6 +699,28 @@ export function useDictation({ append, destination = "primary", disabled = false
 		streamRef.current = null;
 		sourceRef.current?.disconnect();
 		sourceRef.current = null;
+		if (providerRef.current === "openai") {
+			const worklet = workletRef.current;
+			if (!worklet) {
+				cleanup({ error: new Error("No audio was captured") });
+				return;
+			}
+			flushCaptureRef.current = () => {
+				if (gen !== genRef.current) return;
+				flushCaptureRef.current = null;
+				if (safetyRef.current) clearTimeout(safetyRef.current);
+				safetyRef.current = null;
+				worklet.disconnect();
+				workletRef.current = null;
+				void uploadOpenAI(gen);
+			};
+			safetyRef.current = setTimeout(() => {
+				if (gen === genRef.current) cleanup({ error: new Error("Could not finish audio capture"), retainAudio: true });
+			}, 3000);
+			try { worklet.port.postMessage({ type: "flush" }); }
+			catch { cleanup({ error: new Error("Could not finish audio capture"), retainAudio: true }); }
+			return;
+		}
 		workletRef.current?.disconnect();
 		workletRef.current = null;
 
@@ -667,17 +738,15 @@ export function useDictation({ append, destination = "primary", disabled = false
 				if (gen === genRef.current) cleanup();
 			}, 3000);
 		} else {
-			cleanup();
+			cleanup(providerRef.current === null ? { canceled: true } : undefined);
 		}
-	}, [cleanup, setPhase]);
+	}, [cleanup, setPhase, uploadOpenAI]);
+	stopRef.current = stop;
 
 	const cancel = useCallback(() => {
-		if (phaseRef.current === "idle") return;
-		// Discard first, teardown second — cleanup() flushes, and the now-empty
-		// buffer makes that flush a no-op. Also kills a "stopping" run: the
-		// flush already underway is abandoned (its timer is cleared inside).
-		bufferRef.current = [];
-		cleanup();
+		if (phaseRef.current === "idle" && !retryableRef.current) return;
+		setError(null);
+		cleanup({ canceled: true });
 	}, [cleanup]);
 
 	const finishCurrent = useCallback((): Promise<void> => {
@@ -707,25 +776,31 @@ export function useDictation({ append, destination = "primary", disabled = false
 	}, [finish, primary]);
 
 	const toggleFor = useCallback((destination?: DictationDestination) => {
-		if (phaseRef.current === "idle") void start(destination);
+		if (phaseRef.current === "idle" && retryableRef.current) {
+			if (destinationRef.current?.id !== (destination?.id ?? "main")) return;
+			setError(null);
+			setPhase("stopping");
+			void uploadOpenAI(++genRef.current);
+		} else if (phaseRef.current === "idle") void start(destination);
 		else if (phaseRef.current === "recording" || phaseRef.current === "connecting") stop();
 		// Focus chooses where to START. An active run always stops into its
 		// original destination, even after focus moves to a different field.
-	}, [start, stop]);
+	}, [start, stop, setPhase, uploadOpenAI]);
 	const toggle = useCallback(() => toggleFor(), [toggleFor]);
 
 	// One shared pair of shortcut listeners, regardless of widget count:
 	// focused plugin control first, otherwise core fallback; Esc always
 	// cancels the actual recording owner rather than the focused widget.
 	useEffect(() => {
-		warmTokens.refresh(); // pre-mint at mount (mitigation D) — silent if keyless
+		let disposed = false;
+		void getProvider().then(provider => {
+			if (!disposed && provider === "deepgram") warmTokens.refresh();
+		}).catch(() => {});
 		return () => {
-			// Navigation cancels capture: invalidate every pending await before
-			// releasing resources, and never append into a different page's input.
-			bufferRef.current = [];
-			cleanup(false);
+			disposed = true;
+			cleanup({ canceled: true, warmNext: false });
 		};
-	}, [cleanup]);
+	}, [cleanup, getProvider]);
 	useEffect(() => registerController(owner, { primary, toggle, cancel }), [owner, primary, toggle, cancel]);
 
 	return {
@@ -735,7 +810,8 @@ export function useDictation({ append, destination = "primary", disabled = false
 		finishFor,
 		error,
 		levelRef,
-		active: phase !== "idle",
+		active: phase !== "idle" || retryable,
+		retryable,
 		toggle,
 		stop,
 		finish,
@@ -757,13 +833,14 @@ export function useDictation({ append, destination = "primary", disabled = false
  *             (full text in the tooltip), cleared on the next click.
  */
 export function DictationBar({ dictation, disabled = false }: { dictation: Dictation; disabled?: boolean }) {
-	const { phase, error, levelRef, toggle, active, clearError, blocked } = dictation;
+	const { phase, error, levelRef, toggle, retryable, cancel, clearError, blocked } = dictation;
+	const active = phase !== "idle";
 	const { open: openSettings } = useSettingsDialog();
 	/** The keyless click (zero-keys wave, owner dictation trio): the errored
 	 *  idle button deep-links Settings → Keys → the Deepgram row and clears
 	 *  the error — the surface is clean when the user returns. Any other
 	 *  error keeps the old behavior (click = retry, which clears). */
-	const keyless = error === DICTATION_KEYLESS;
+	const keyless = error === DICTATION_KEYLESS || error === OPENAI_DICTATION_KEYLESS;
 	const [levels, setLevels] = useState<number[]>(() => new Array(METER_CELLS).fill(0));
 	/** Adaptive cell count (owner round 2): derived from the meter's
 	 *  measured width — narrow rows show fewer bars instead of
@@ -805,6 +882,19 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 		return () => ro.disconnect();
 	}, [active]);
 
+	if (retryable && !active) {
+		return (
+			<div className="flex w-full min-w-0 items-center gap-2" data-testid="dictation-retry">
+				<Hint label={error ?? "OpenAI transcription failed"} side="top">
+					<button type="button" onClick={toggle} data-testid="dictation-retry-button" className="min-w-0 flex-1 rounded-md border border-border px-2 py-1 text-xs text-muted-foreground">
+						Retry transcription
+					</button>
+				</Hint>
+				<button type="button" onClick={cancel} data-testid="dictation-discard-button" className="rounded-md px-2 py-1 text-xs text-muted-foreground">Discard audio</button>
+			</div>
+		);
+	}
+
 	if (!active) {
 		return (
 			<Hint
@@ -818,7 +908,7 @@ export function DictationBar({ dictation, disabled = false }: { dictation: Dicta
 					onClick={() => {
 						if (keyless) {
 							clearError();
-							openSettings("keys", DEEPGRAM_KEY_ID);
+							openSettings("keys", error === DICTATION_KEYLESS ? DEEPGRAM_KEY_ID : "OPENAI_API_KEY");
 						} else {
 							toggle();
 						}

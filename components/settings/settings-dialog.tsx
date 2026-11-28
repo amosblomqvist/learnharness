@@ -38,13 +38,16 @@ import { HostDialog } from "@/components/host-dialog";
 import { useInteractionLayers, type CloseOutcome } from "@/components/interaction-layers";
 import {
 	CURRENT_SETTINGS_VERSION,
+	FACTORY_SETTINGS,
+	type DictationProvider,
+	type GeneralSettings,
 	type AppearanceSettings,
 	type CompactionSettings,
 	type GraphSettings,
 	type UserSettings,
 } from "@/src/core";
 import { useAppearance } from "./appearance.tsx";
-import { SettingsSection } from "./controls.tsx";
+import { SettingsGroup, SettingsRow, SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
 import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
@@ -52,6 +55,7 @@ import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { KeysSection } from "./keys-section.tsx";
 import { Hint } from "@/components/ui/hint";
+import { isDictationActive, useDictationActive } from "@/components/dictation-state";
 import { AppearanceSection, GraphSection } from "./appearance-section.tsx";
 import { KeyboardSection } from "./keyboard-section.tsx";
 import { PluginsSection } from "./plugins-section.tsx";
@@ -73,6 +77,21 @@ const SECTIONS = [
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 
+type WritableSection = "general" | "agent" | "models" | "appearance" | "graph" | "compaction";
+const queuedSections = new Set<WritableSection>(["agent", "general"]);
+const pendingSettingsWrites = new Set<Promise<boolean>>();
+let pendingDictationProviderSave: Promise<boolean> | undefined;
+
+/** Wait for queued edits, including writes from a dialog that has closed. */
+async function waitForPendingSettingsWrites() {
+	while (pendingSettingsWrites.size) await Promise.all(pendingSettingsWrites);
+}
+
+/** Dictation observes the latest explicit provider save even after Settings closes. */
+export function getPendingDictationProviderSave(): Promise<boolean> | undefined {
+	return pendingDictationProviderSave;
+}
+
 /** `open(section?, row?)` — the optional ROW deep-links into the Keys
  *  section with that row unfolded (zero-keys wave: the dictation error's
  *  click lands on the Deepgram row). `row` is the KEY ID (the env-var
@@ -86,11 +105,15 @@ interface SettingsWriteOrder {
 	acknowledged: number;
 	record?: UserSettings;
 	fileAccessError?: string | null;
+	pending: Map<WritableSection, Promise<boolean>>;
+	sectionAcknowledgements: Map<WritableSection, number>;
 	pendingWrites: number;
 	promptDeletion?: Promise<void>;
 	listeners: Set<(record: UserSettings, fileAccessError: string | null) => void>;
 }
-const newWriteOrder = (): SettingsWriteOrder => ({ issued: 0, acknowledged: 0, pendingWrites: 0, listeners: new Set() });
+function createWriteOrder(): SettingsWriteOrder {
+	return { issued: 0, acknowledged: 0, pending: new Map(), sectionAcknowledgements: new Map(), pendingWrites: 0, listeners: new Set() };
+}
 // Settings runs on supported browsers that predate Promise.withResolvers.
 function settingsCompletion() {
 	let resolve!: () => void;
@@ -109,7 +132,8 @@ export function SettingsDialogProvider({
 }) {
 	const interactions = useInteractionLayers();
 	const layerId = useId();
-	const writeOrder = useRef(newWriteOrder());
+	const writeOrder = useRef<SettingsWriteOrder>(null!);
+	writeOrder.current ??= createWriteOrder();
 	const [show, setShow] = useState(false);
 	const [landOn, setLandOn] = useState<SectionId>("keys");
 	const [landOnRow, setLandOnRow] = useState<string | null>(null);
@@ -195,9 +219,12 @@ export function SettingsDialogBody({
 }) {
 	const { onAppearanceChange } = useAppearance();
 	const inheritedWriteOrder = useContext(WriteOrderContext);
-	const standaloneWriteOrder = useRef(newWriteOrder());
+	const standaloneWriteOrder = useRef<SettingsWriteOrder>(null!);
+	standaloneWriteOrder.current ??= createWriteOrder();
 	const writeOrder = inheritedWriteOrder ?? standaloneWriteOrder;
 	const { snapshot } = usePlugins();
+	const dictationActive = useDictationActive();
+	const [pendingGeneralEdits, setPendingGeneralEdits] = useState<Array<(current: GeneralSettings | undefined) => GeneralSettings>>([]);
 	const [record, setRecord] = useState<UserSettings | null | undefined>(
 		undefined,
 	);
@@ -279,26 +306,35 @@ export function SettingsDialogBody({
 	// A GET started before a newer acknowledged save cannot roll it back.
 	useEffect(() => {
 		const authority = writeOrder.current;
-		const acknowledgedAtRead = authority.acknowledged;
 		let alive = true;
-		const applyLoaded = (loaded: UserSettings | null, fileAccessError: string | null = null) => {
+		const load = async () => {
+			await waitForPendingSettingsWrites();
 			if (!alive) return;
-			const unchanged = authority.acknowledged === acknowledgedAtRead;
-			if (unchanged && loaded) {
-				authority.record = loaded;
-				authority.fileAccessError = fileAccessError;
+			const recordAtRead = authority.record;
+			const applyLoaded = (loaded: UserSettings | null, diagnostic: string | null = null) => {
+				if (!alive) return;
+				if (authority.record !== recordAtRead) {
+					setRecord(authority.record ?? loaded);
+					setFileAccessError(authority.fileAccessError ?? null);
+					return;
+				}
+				if (loaded) {
+					authority.record = loaded;
+					authority.fileAccessError = diagnostic;
+				}
+				setRecord(loaded);
+				setFileAccessError(diagnostic);
+			};
+			try {
+				const response = await fetch("/api/settings");
+				if (!response.ok) throw new Error();
+				const body = await response.json() as { settings: UserSettings | null; fileAccessError?: string };
+				applyLoaded(body.settings ?? { version: CURRENT_SETTINGS_VERSION }, body.fileAccessError ?? null);
+			} catch {
+				applyLoaded(null);
 			}
-			setRecord(unchanged ? loaded : authority.record ?? loaded);
-			setFileAccessError(unchanged ? fileAccessError : authority.fileAccessError ?? null);
 		};
-		fetch("/api/settings")
-			.then((r) =>
-				r.ok ? r.json() : Promise.reject(new Error(`status ${r.status}`)),
-			)
-			.then((body: { settings: UserSettings | null; fileAccessError?: string }) =>
-				applyLoaded(body.settings ?? { version: CURRENT_SETTINGS_VERSION }, body.fileAccessError ?? null),
-			)
-			.catch(() => applyLoaded(null));
+		void load();
 		return () => { alive = false; };
 	}, [writeOrder]);
 
@@ -306,58 +342,112 @@ export function SettingsDialogBody({
 	 *  record mirror in sync, surface route errors inline (a 400 is a
 	 *  schema mistake caught by the validation surface). */
 	const write = useCallback(
-		async (
-			section: "general" | "agent" | "models" | "appearance" | "graph" | "compaction",
-			body: object,
+		<S extends WritableSection,>(
+			section: S,
+			change: object | ((current: UserSettings[S]) => object),
 			confirms?: (stored: UserSettings) => boolean,
 		): Promise<boolean> => {
 			const authority = writeOrder.current;
-			while (authority.promptDeletion) await authority.promptDeletion;
-			const ticket = ++authority.issued;
-			authority.pendingWrites++;
+			const queued = queuedSections.has(section);
 			setError(null);
-			try {
-				const res = await fetch(`/api/settings/${section}`, {
-					method: "PUT",
-					headers: { "content-type": "application/json" },
-					body: JSON.stringify(body),
-				});
-				if (!res.ok) {
-					const detail = (await res.json().catch(() => ({}))) as {
-						error?: string;
-					};
-					if (ticket === writeOrder.current.issued) setError(`${section}: ${detail.error ?? res.status}`);
+			authority.pendingWrites++;
+			const save = async () => {
+				while (authority.promptDeletion) await authority.promptDeletion;
+				const ticket = ++authority.issued;
+				const seenSections = new Map(authority.sectionAcknowledgements);
+				try {
+					const body = typeof change === "function" ? change(authority.record?.[section]) : change;
+					const res = await fetch(`/api/settings/${section}`, {
+						method: "PUT",
+						headers: { "content-type": "application/json" },
+						body: JSON.stringify(body),
+					});
+					if (!res.ok) {
+						const detail = (await res.json().catch(() => ({}))) as {
+							error?: string;
+						};
+						if (queued || ticket === authority.issued) setError(`${section}: ${detail.error ?? res.status}`);
+						return false;
+					}
+					// Only the acknowledged record is canonical: never substitute the
+					// request body, including when normalization leaves the old value.
+					const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
+					const stored = reply?.settings;
+					if (!stored || typeof stored !== "object" || Array.isArray(stored) || stored.version !== 1 ||
+						!stored[section] || typeof stored[section] !== "object" || Array.isArray(stored[section])) {
+						if (queued || ticket === authority.issued) setError(`${section}: Could not confirm saved settings. Your input has been kept.`);
+						return false;
+					}
+					const full = ticket >= authority.acknowledged;
+					const ownsSection = ticket >= (authority.sectionAcknowledgements.get(section) ?? 0);
+					const prior = authority.record;
+					if (full || ownsSection) {
+						// A PUT owns its section. An unrelated snapshot may have been
+						// taken before a different section finished saving.
+						const canonical = full || !prior ? stored : { ...prior, [section]: stored[section] };
+						let diagnostic = full || section === "agent" ? reply?.fileAccessError ?? null : authority.fileAccessError ?? null;
+						if (full && prior) {
+							for (const [name, acknowledged] of authority.sectionAcknowledgements) {
+								if (name === section || acknowledged === seenSections.get(name)) continue;
+								Object.assign(canonical, { [name]: prior[name] });
+								if (name === "agent") diagnostic = authority.fileAccessError ?? null;
+							}
+						}
+						if (full) authority.acknowledged = ticket;
+						authority.sectionAcknowledgements.set(section, ticket);
+						authority.record = canonical;
+						authority.fileAccessError = diagnostic;
+						for (const apply of authority.listeners) apply(canonical, diagnostic);
+						if (full || section === "appearance") onAppearanceChange(canonical.appearance);
+					}
+					notifySettingsSaved(section);
+					return confirms?.(stored) ?? true;
+				} catch (error) {
+					if (queued || ticket === authority.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
 					return false;
 				}
-				// Only the acknowledged record is canonical: never substitute the
-				// request body, including when normalization leaves the old value.
-				const reply = (await res.json().catch(() => null)) as { settings?: UserSettings; fileAccessError?: string } | null;
-				const stored = reply?.settings;
-				if (!stored || typeof stored !== "object" || Array.isArray(stored) || stored.version !== 1 ||
-					!stored[section] || typeof stored[section] !== "object" || Array.isArray(stored[section])) {
-					if (ticket === writeOrder.current.issued) setError(`${section}: Could not confirm saved settings. Your input has been kept.`);
-					return false;
-				}
-				if (ticket >= writeOrder.current.acknowledged) {
-					writeOrder.current.acknowledged = ticket;
-					writeOrder.current.record = stored;
-					writeOrder.current.fileAccessError = reply?.fileAccessError ?? null;
-					for (const apply of writeOrder.current.listeners) apply(stored, writeOrder.current.fileAccessError);
-					// Every accepted response is a full canonical record, including
-					// appearance saved by an earlier, still-pending section request.
-					onAppearanceChange(stored.appearance);
-				}
-				notifySettingsSaved(section);
-				return confirms?.(stored) ?? true;
-			} catch (error) {
-				if (ticket === writeOrder.current.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
-				return false;
-			} finally {
-				authority.pendingWrites--;
+			};
+			const previous = queued ? authority.pending.get(section) : undefined;
+			const pending = previous ? previous.then(save) : save();
+			if (queued) {
+				authority.pending.set(section, pending);
+				pendingSettingsWrites.add(pending);
 			}
+			const clear = () => {
+				authority.pendingWrites--;
+				if (!queued) return;
+				if (authority.pending.get(section) === pending) authority.pending.delete(section);
+				pendingSettingsWrites.delete(pending);
+			};
+			void pending.then(clear, clear);
+			return pending;
 		},
 		[onAppearanceChange, writeOrder],
 	);
+
+	const general = pendingGeneralEdits.reduce<GeneralSettings | undefined>((value, edit) => edit(value), record?.general);
+	const writeGeneral = (
+		edit: (current: GeneralSettings | undefined) => GeneralSettings,
+		confirms?: (stored: UserSettings) => boolean,
+	) => {
+		setPendingGeneralEdits((edits) => [...edits, edit]);
+		return write("general", edit, confirms).finally(() => {
+			setPendingGeneralEdits((edits) => edits.filter((item) => item !== edit));
+		});
+	};
+
+	function saveDictationProvider(dictationProvider: DictationProvider) {
+		if (isDictationActive()) return;
+		const pending = writeGeneral(
+			(current) => ({ ...current, dictationProvider }),
+			(stored) => (stored.general?.dictationProvider ?? FACTORY_SETTINGS.general.dictationProvider) === dictationProvider,
+		);
+		pendingDictationProviderSave = pending;
+		const clear = () => {
+			if (pendingDictationProviderSave === pending) pendingDictationProviderSave = undefined;
+		};
+		void pending.then(clear, clear);
+	}
 
 	async function deletePromptOverride(path: string, remove: () => Promise<boolean>) {
 		const authority = writeOrder.current;
@@ -372,6 +462,7 @@ export function SettingsDialogBody({
 			if (stored?.agent?.prompts?.[path] !== undefined) {
 				const patched = { ...stored, agent: composePromptSwitch(stored.agent, path, false) };
 				authority.acknowledged = ++authority.issued;
+				authority.sectionAcknowledgements.set("agent", authority.acknowledged);
 				authority.record = patched;
 				for (const apply of authority.listeners) apply(patched, authority.fileAccessError ?? null);
 			}
@@ -490,11 +581,31 @@ export function SettingsDialogBody({
 									testid="section-general"
 								>
 									<UpdateSettings
-										autoUpdate={record.general?.autoUpdate ?? true}
+										autoUpdate={general?.autoUpdate ?? true}
 										onAutoUpdateChange={(on) =>
-											void write("general", { ...record.general, autoUpdate: on })
+											void writeGeneral((current) => ({ ...current, autoUpdate: on }))
 										}
 									/>
+									<SettingsGroup label="Dictation" testid="group-dictation-settings">
+										<SettingsRow label="Speech provider" hint="OpenAI dictation uses your OpenAI API key and is billed separately from your ChatGPT plan.">
+											<select
+												aria-label="Speech provider"
+												data-testid="dictation-provider"
+												disabled={dictationActive}
+												value={general?.dictationProvider ?? FACTORY_SETTINGS.general.dictationProvider}
+											onChange={(event) => {
+												const dictationProvider = event.target.value;
+												if (dictationProvider === "deepgram" || dictationProvider === "openai") {
+													saveDictationProvider(dictationProvider);
+												}
+											}}
+												className="rounded-md border border-border bg-card px-2 py-1 text-sm text-foreground"
+											>
+												<option value="deepgram">Deepgram</option>
+												<option value="openai">OpenAI API</option>
+											</select>
+										</SettingsRow>
+									</SettingsGroup>
 								</SettingsSection>
 							)}
 							{active === "keys" && (
@@ -508,6 +619,12 @@ export function SettingsDialogBody({
 									testid="section-agent"
 								>
 									<AgentSection
+										onSectionEdit={(edit, confirms) => write("agent", (current) => {
+											const safeCurrent = writeOrder.current.fileAccessError
+												? { ...current, fileAccess: { restricted: true, folders: current?.fileAccess?.folders ?? [] } }
+												: current;
+											return edit(safeCurrent);
+										}, confirms && (stored => confirms(stored.agent ?? {})))}
 										agent={record.agent}
 										fileAccessError={fileAccessError}
 										models={record.models}

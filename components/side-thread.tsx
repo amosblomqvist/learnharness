@@ -34,7 +34,7 @@ export function sideThreadPlaceholder(state: SideThreadState): string {
 	return state.pendingPassage ? "Ask about this passage…" : state.messages.length ? "Ask a follow-up…" : "Ask a side question…";
 }
 export interface SideThreadHandlers {
-	dictation?: { phase: DictationPhase; active: boolean; blocked: boolean; error: string | null; levelRef?: { current: number }; toggle: () => void; finish: () => Promise<void> };
+	dictation?: { phase: DictationPhase; active: boolean; blocked: boolean; error: string | null; retryable?: boolean; discard?: () => void; levelRef?: { current: number }; toggle: () => void; finish: () => Promise<void> };
 	readDraft?: () => string;
 	draft?: string;
 	onDraftChange?: (text: string) => void;
@@ -93,15 +93,22 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 		const scroll = scrollRef.current;
 		if (scroll && scroll.scrollHeight - scroll.scrollTop - scroll.clientHeight < 160) scroll.scrollTop = scroll.scrollHeight;
 	}, [state.messages, state.streamText]);
+	const submitting = useRef(false);
 	const submit = async () => {
-		if (state.answering || !isInteractionScopeEligible(inputRef.current, controller)) return;
-		if (dictation?.active) await dictation.finish();
-		if (!isInteractionScopeEligible(inputRef.current, controller)) return;
-		// A dictation flush updates the saved draft synchronously, before
-		// React commits its new prop. Never submit the pre-flush local text.
-		const sent = readDraft?.() ?? draftRef.current;
-		if (!sent.trim()) return;
-		if (await onAsk(sent) && (readDraft?.() ?? draftRef.current) === sent) changeDraft("");
+		if (submitting.current || state.answering || !isInteractionScopeEligible(inputRef.current, controller)) return;
+		submitting.current = true;
+		try {
+			if (dictation?.active) {
+				try { await dictation.finish(); } catch { return; }
+			}
+			if (!isInteractionScopeEligible(inputRef.current, controller)) return;
+			// The flush may update the saved draft before React commits its prop.
+			const sent = readDraft?.() ?? draftRef.current;
+			if (!sent.trim()) return;
+			if (await onAsk(sent) && (readDraft?.() ?? draftRef.current) === sent) changeDraft("");
+		} finally {
+			submitting.current = false;
+		}
 	};
 	const last = state.messages.at(-1);
 	return (
@@ -149,6 +156,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				</button>}
 				{state.pendingPassage && <Passage text={state.pendingPassage.text} chatId={chatId} sourceMessageId={state.pendingPassage.sourceMessageId} selector={state.pendingPassage.selector} />}
 				{dictation?.error && <p role="alert" className="font-ui text-xs text-destructive">{dictation.error}</p>}
+				{dictation?.retryable && <button type="button" onClick={dictation.discard} className="self-start font-ui text-xs text-muted-foreground hover:text-foreground">Discard audio</button>}
 				<div className="flex items-end gap-1.5">
 					<div data-testid="side-composer-surface" className="relative min-w-0 flex-1 rounded-[10px] border bg-card focus-within:border-primary/50">
 					<Textarea ref={inputRef} aria-label="Side question" data-testid="side-thread-input" className="min-h-9 resize-none border-0 bg-transparent pr-14 font-prose text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
@@ -161,7 +169,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 					{dictation && <div className="absolute right-1 bottom-1 flex h-7 items-center gap-1">
 						{dictation.phase === "recording" && <SideInputMeter levelRef={dictation.levelRef} />}
 						<button type="button" data-testid="side-dictation-toggle"
-						aria-label={dictation.active ? "Stop side dictation" : "Start side dictation"} aria-pressed={dictation.active}
+						aria-label={dictation.retryable ? "Retry side transcription" : dictation.active ? "Stop side dictation" : "Start side dictation"} aria-pressed={dictation.active}
 						title={dictation.error ?? (dictation.active ? "Stop side dictation" : "Dictate side question")}
 						disabled={dictation.blocked || dictation.phase === "stopping"} onClick={dictation.toggle}
 						className={`flex size-7 items-center justify-center rounded-md transition-colors disabled:opacity-40 ${dictation.active ? "bg-error/15 text-error" : "text-muted-foreground hover:bg-accent hover:text-foreground"}`}>

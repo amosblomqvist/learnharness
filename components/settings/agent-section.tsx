@@ -368,6 +368,7 @@ export function AgentSection({
 	graph,
 	compaction,
 	onSectionChange,
+	onSectionEdit,
 	onDeletePromptOverride,
 	onModelsChange,
 	onCompactionChange,
@@ -387,11 +388,29 @@ export function AgentSection({
 	onSectionChange: (next: AgentSettings, confirms?: (stored: AgentSettings) => boolean) => boolean | Promise<boolean>;
 	/** Order the override DELETE against Settings' full-record acknowledgements. */
 	onDeletePromptOverride?: (path: string, remove: () => Promise<boolean>) => Promise<PromptDeleteOutcome>;
+	/** Queue an edit against the latest saved agent section when available. */
+	onSectionEdit?: (
+		edit: (current: AgentSettings | undefined) => AgentSettings,
+		confirms?: (stored: AgentSettings) => boolean,
+	) => boolean | Promise<boolean>;
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
 	onCompactionChange: (next: CompactionSettings) => boolean | Promise<boolean>;
 }) {
+	// A corrupt persisted policy is fail-closed for every whole-agent edit,
+	// not only for edits made from the File access controls.
+	const effectiveAgent: AgentSettings | undefined = fileAccessError
+		? { ...agent, fileAccess: { restricted: true, folders: agent?.fileAccess?.folders ?? [] } }
+		: agent;
+	const latestAgent = useRef(effectiveAgent);
+	latestAgent.current = effectiveAgent;
+	const editAgent = (
+		edit: (current: AgentSettings | undefined) => AgentSettings,
+		confirms?: (stored: AgentSettings) => boolean,
+	) => {
+		return onSectionEdit ? onSectionEdit(edit, confirms) : onSectionChange(edit(latestAgent.current), confirms);
+	};
 	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
 	const catalog = body?.models;
 	const slots = body?.slots;
@@ -405,8 +424,6 @@ export function AgentSection({
 	const [prompts, setPrompts] = useState<PromptView | null>(null);
 	const [promptListStatus, setPromptListStatus] = useState<"loading" | "ready" | "failed">("loading");
 	const promptRead = useRef<AbortController | null>(null);
-	const latestAgent = useRef(agent);
-	latestAgent.current = agent;
 	const [openSegment, setOpenSegment] = useState<{ info: SegmentInfo; mode: "view" | "edit"; row: HTMLElement } | null>(null);
 	const [switchPending, setSwitchPending] = useState(false);
 	const switchingPrompt = useRef(false);
@@ -511,7 +528,7 @@ export function AgentSection({
 		setSwitchError(null);
 		let saved = false;
 		try {
-			saved = await onSectionChange(composePromptSwitch(latestAgent.current, path, on), stored => (stored.prompts?.[path] === true) === on);
+			saved = await editAgent((current) => composePromptSwitch(current, path, on), stored => (stored.prompts?.[path] === true) === on);
 		} catch {
 			// A rejected write is handled below just like a negative acknowledgement.
 		} finally {
@@ -545,7 +562,7 @@ export function AgentSection({
 		try {
 			// A mirrored ON is not proof: the route can clear it (e.g. on
 			// deletion). Require the switch in the actual write acknowledgement.
-			const saved = await onSectionChange(composePromptSwitch(latestAgent.current, path, true), stored => stored.prompts?.[path] === true);
+			const saved = await editAgent((current) => composePromptSwitch(current, path, true), stored => stored.prompts?.[path] === true);
 			return saved ? "saved" : "activation-failed";
 		} catch {
 			return "activation-failed";
@@ -768,7 +785,14 @@ export function AgentSection({
 							onCommit={(value) => {
 								const next = composeWorkerRequestConcurrency(agent, value);
 								setWorkerConcurrencyError(next.ok ? null : next.error);
-								return next.ok ? onSectionChange(next.settings) : false;
+								if (!next.ok) return false;
+								return editAgent((current) => {
+									const updated = { ...current };
+									const concurrency = next.settings.workerRequestConcurrency;
+									if (concurrency === undefined) delete updated.workerRequestConcurrency;
+									else updated.workerRequestConcurrency = concurrency;
+									return updated;
+								});
 							}}
 						/>
 						{workerConcurrencyError && <p role="alert" className="text-xs text-error">{workerConcurrencyError}</p>}
@@ -797,7 +821,7 @@ export function AgentSection({
 								checked={agent?.graphTools?.enabled ?? true}
 								disabled={!graphOn}
 								label="graph tools"
-								onChange={(on) => onSectionChange(composeGraphTools(agent, on))}
+								onChange={(on) => editAgent((current) => composeGraphTools(current, on))}
 							/>
 						</SettingsRow>
 					);
@@ -816,7 +840,7 @@ export function AgentSection({
 						>
 							<SettingsSegmentedControl label="Quizzing mechanics" testidPrefix="quiz-mechanics"
 								options={[{ value: "choice", label: "Multiple choice" }, { value: "free", label: "Free recall" }]}
-								value={free ? "free" : "choice"} onChange={(next) => onSectionChange(composeQuizMechanics(agent, next))} />
+								value={free ? "free" : "choice"} onChange={(next) => editAgent((current) => composeQuizMechanics(current, next))} />
 						</SettingsRow>
 					);
 				})()}
@@ -829,18 +853,17 @@ export function AgentSection({
 						<Toggle
 							checked={agent?.tools?.[id] ?? true}
 							label={`tool ${id}`}
-							onChange={(on) => onSectionChange(composeTool(agent, id, on))}
+							onChange={(on) => editAgent((current) => composeTool(current, id, on))}
 						/>
 					</SettingsRow>
 				))}
 				{(() => {
 					const folders = agent?.fileAccess?.folders ?? [];
 					const restricted = Boolean(fileAccessError) || agent?.fileAccess?.restricted === true;
-					const effectiveAgent = fileAccessError ? { ...agent, fileAccess: { restricted: true, folders } } : agent;
 					const addFolder = () => {
 						const next = folderInput.trim();
 						if (!isFolderEntry(next)) { setFolderError("Enter an absolute path or ~/folder."); return; }
-						if (!folders.includes(next)) onSectionChange(composeAddFolder(effectiveAgent, next));
+						editAgent((current) => composeAddFolder(current, next));
 						setFolderInput("");
 						setFolderError(null);
 					};
@@ -852,7 +875,7 @@ export function AgentSection({
 									: "Restricted: no folders allowed. Add a folder to enable access."}>
 								<div className="flex items-center gap-2 text-xs">
 									<span>Restrict to listed folders</span>
-									<Toggle checked={restricted} label="Restrict to listed folders" onChange={(on) => onSectionChange(composeFileRestriction(effectiveAgent, on))} />
+									<Toggle checked={restricted} label="Restrict to listed folders" onChange={(on) => editAgent((current) => composeFileRestriction(current, on))} />
 								</div>
 							</SettingsRow>
 							{fileAccessError && <p role="alert" data-testid="file-access-config-error" className="text-xs text-error">{fileAccessError}</p>}
@@ -868,7 +891,7 @@ export function AgentSection({
 								<div key={folder} data-testid="file-access-folder" className="flex items-center justify-between gap-4 pl-3 text-xs">
 									<span title={folder} className="min-w-0 truncate font-ui text-muted-foreground">{folder}</span>
 									<button type="button" aria-label={`Remove ${folder}`} data-testid="file-access-remove"
-										onClick={() => onSectionChange(composeRemoveFolder(effectiveAgent, folder))}
+										onClick={() => editAgent((current) => composeRemoveFolder(current, folder))}
 										className="rounded-sm px-1.5 text-muted-foreground hover:text-foreground">Remove</button>
 								</div>
 							))}
@@ -906,12 +929,12 @@ export function AgentSection({
 										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										{engineOption("auto", "Automatic", engine === null, null, () => {
-											onSectionChange(composeSearchEngine(agent, null));
+											editAgent((current) => composeSearchEngine(current, null));
 											setOpenMenu(null);
 										})}
 										{SEARCH_ENGINES.map(({ id, label }) =>
 											engineOption(id, label, engine === id, engineKeys[id] ?? false, () => {
-												onSectionChange(composeSearchEngine(agent, id));
+												editAgent((current) => composeSearchEngine(current, id));
 												setOpenMenu(null);
 											}),
 										)}

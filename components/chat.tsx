@@ -960,6 +960,7 @@ export function Chat({
 	const dictation: Dictation = { ...recording,
 		phase: recording.destinationId === "main" ? recording.phase : "idle",
 		active: recording.destinationId === "main" && recording.active,
+		retryable: recording.destinationId === "main" && recording.retryable,
 		error: recording.destinationId === "main" ? recording.error : null,
 		blocked: recording.destinationId !== "main" && recording.active,
 	};
@@ -1010,7 +1011,7 @@ export function Chat({
 		const navigation = ++sideNavigation.current;
 		void recording.finishFor(`side:${id}`).then(() => {
 			if (navigation === sideNavigation.current) sideThread.close(id);
-		});
+		}, () => {});
 	}, [recording.finishFor, sideThread.state?.threadId, sideThread.close]);
 	const openSideThread = useCallback((args: SideThreadOpenArgs) => {
 		const navigation = ++sideNavigation.current;
@@ -1020,7 +1021,7 @@ export function Chat({
 		if (current && current.segmentId !== sideSegmentId(nativeMessages, source) && recording.active && recording.destinationId === `side:${current.threadId}`) {
 			void recording.finishFor(`side:${current.threadId}`).then(() => {
 				if (navigation === sideNavigation.current) sideThread.open(args);
-			});
+			}, () => {});
 		} else sideThread.open(args);
 	}, [nativeMessages, recording.active, recording.destinationId, recording.finishFor, sideThread.open, sideThread.state]);
 	const goToCurrentSideStep = sideThread.state && sideThread.currentSegmentId && sideThread.state.segmentId !== sideThread.currentSegmentId
@@ -1030,6 +1031,7 @@ export function Chat({
 		const owns = recording.destinationId === destinationId;
 		return { phase: owns ? recording.phase : "idle" as const, active: owns && recording.active,
 			blocked: !owns && recording.active, error: owns ? recording.error : null, levelRef: recording.levelRef,
+			retryable: owns && recording.retryable, discard: recording.cancel,
 			toggle: () => recording.toggleFor({ id: destinationId, append: (text) => sideThread.saveDraft(id, joinDictation(sideThread.draftFor(id), text), true) }),
 			finish: () => recording.finishFor(destinationId) };
 	};
@@ -2796,6 +2798,15 @@ export function DockOverlay({
 	};
 	const expandAndRevealRef = useRef(expandAndReveal);
 	expandAndRevealRef.current = expandAndReveal;
+	const pendingRevealId = useRef(pendingId);
+	pendingRevealId.current = pendingId;
+	const finishAndReveal = useCallback(() => {
+		void finishDictation().then(() => {
+			if (pendingRevealId.current === pendingId && isInteractionScopeEligible(blockRef.current, controller)) {
+				expandAndRevealRef.current();
+			}
+		}, () => {});
+	}, [pendingId, controller]);
 	// ENTER OPENS THE WAITING CHECK (owner, keyboard round 2026-10-06):
 	// while a question waits with the dock CLOSED — behind its reveal
 	// invitation or collapsed by scroll — Enter is never dead. Any live
@@ -2820,13 +2831,11 @@ export function DockOverlay({
 			)
 				return;
 			e.preventDefault();
-			void finishDictation().then(() => {
-				expandAndRevealRef.current();
-			});
+			finishAndReveal();
 		};
 		document.addEventListener("keydown", onKeyDown);
 		return () => document.removeEventListener("keydown", onKeyDown);
-	}, [pending, pluginQuestion, unreadablePlugin, expanded, controller]);
+	}, [pending, pluginQuestion, unreadablePlugin, expanded, controller, finishAndReveal]);
 
 	useEffect(() => {
 		const el = scrollRef.current;
@@ -2926,20 +2935,13 @@ export function DockOverlay({
 					    (the dock reclaims then). Rides the check answer on submit. */}
 					{(pending || pluginQuestion) && requiresReveal && (
 						<ReadingThinkingField
+							key={pendingId}
 							inputRef={readingInputRef}
 							value={readingThinking}
 							revision={readingThinkingRevision}
 							onChange={onReadingThinking}
 							onEscape={dictationCancel}
-							onOpen={
-								!expanded
-									? () => {
-											void finishDictation().then(() => {
-												expandAndRevealRef.current();
-											});
-										}
-									: undefined
-							}
+							onOpen={!expanded ? finishAndReveal : undefined}
 							claim={revealPending}
 						/>
 					)}
@@ -2957,7 +2959,7 @@ export function DockOverlay({
 							) : unreadablePlugin ? (
 								<div className="px-4 py-3">
 									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing question…</p>}
-									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>Dismiss question</Button></>}
+									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss, () => {}); }}>Dismiss question</Button></>}
 								</div>
 							) : pending ? (
 								<QuestionDock
@@ -2968,7 +2970,7 @@ export function DockOverlay({
 									expanded={expanded}
 									reveal={revealPending}
 									phase={phase}
-									onExpand={expandAndReveal}
+									onExpand={finishAndReveal}
 									onSubmit={onSubmitAnswer}
 									onPrepareSubmission={onPrepareBuiltin}
 									hasPendingInput={onBuiltinPendingInput}
