@@ -47,7 +47,8 @@ export const sendToUserTool: AgentTool<typeof sendToUserInput> = {
 		"Question content still belongs in the appropriate question tool; send any accompanying teaching or " +
 		"commentary through `send_to_user` before calling that tool.\n\n" +
 		"This tool does not pause or end your turn. Continue with other tools when needed. " +
-		"After delivering your final message, end the turn without additional ordinary response text.",
+		"After your final `send_to_user`, end the turn with an empty response. " +
+		"Never restate or summarize the delivered message in ordinary response text.",
 	parameters: sendToUserInput,
 	executionMode: "sequential",
 	execute: serverExecute(SEND_TO_USER_TOOL, sendToUserInput, () => "Message received for display."),
