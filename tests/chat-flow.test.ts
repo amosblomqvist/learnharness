@@ -1741,4 +1741,235 @@ describe("duplicate provider tool-call ids (the Lacan fix)", () => {
 		assert.equal(quizPart?.state, "output-available");
 		assert.equal(quizPart?.output?.kind, "quiz", "the quiz card got ITS answer (the pre-fix bug: it landed on the ask card)");
 	});
+
+	it("pre-start skip-probing selects the teacher on turn 1 and stays in plan", async () => {
+		const { newProbeSkippedMessage, reconstructRequestCause, toLlmMessages } = await import("../src/core/native-messages.ts");
+		const { phaseAt3, phaseAt3Lh, phaseTimeline } = await import("../src/core/phases.ts");
+		const { SKIP_PROBING_START_TEXT } = await import("../src/core/contracts/chat.ts");
+
+		const chat = createConfiguredChat("Pre-start skip fixture");
+		createdChats.push(chat.id);
+		chatStore.saveMessages(chat.id, [newProbeSkippedMessage(true)]);
+
+		const { engine } = scriptedTeacher(() => [
+			fauxAssistantMessage([fauxText("Here is the learning plan.")]),
+		]);
+		const roles: boolean[] = [];
+		const factory: NonNullable<Parameters<typeof handleChatRequest>[1]> = (opts) => {
+			roles.push(opts.teaching);
+			return createTeacherAgent(undefined, { engine, messages: opts.messages });
+		};
+
+		await drainTurn(post(chat.id, { type: "text", text: "Teach me TCP congestion control." }), factory);
+		const after = chatStore.getChat(chat.id)!.messages;
+		assert.deepEqual(roles, [true], "turn 1 builds the teacher directly");
+		assert.equal(phaseAt3Lh(after), "plan");
+		assert.equal(phaseAt3(projectView(after)), "plan");
+		assert.deepEqual(phaseTimeline(projectView(after)), ["plan", "plan", "plan"]);
+		assert.equal(reconstructRequestCause(after), "foreground");
+		const wire = toLlmMessages(after);
+		assert.equal(wire[0]?.role, "user");
+		assert.ok(JSON.stringify(wire[0]).includes(SKIP_PROBING_START_TEXT));
+	});
+
+	it("mid-probe skip-probing dismisses an open quiz ungraded, preserves earlier answers, and switches to teacher in one turn", async () => {
+		const { skipProbingAnchorId, reconstructRequestCause } = await import("../src/core/native-messages.ts");
+		const { phaseAt3, phaseAt3Lh, phaseTimeline } = await import("../src/core/phases.ts");
+
+		const chat = createConfiguredChat("Mid-probe skip fixture");
+		createdChats.push(chat.id);
+		const { engine } = scriptedTeacher(() => [
+			fauxAssistantMessage([fauxToolCall("quiz", QUIZ_INPUT, { id: "q1" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxToolCall("quiz", QUIZ_INPUT, { id: "q2" })], { stopReason: "toolUse" }),
+			fauxAssistantMessage([fauxText("Plan ready from your prior answer.")]),
+		]);
+		const roles: boolean[] = [];
+		const factory: NonNullable<Parameters<typeof handleChatRequest>[1]> = (opts) => {
+			roles.push(opts.teaching);
+			return createTeacherAgent(undefined, { engine, messages: opts.messages });
+		};
+
+		// Turn 1: prober poses q1; learner answers q1; prober poses q2.
+		await drainTurn(post(chat.id, { type: "text", text: "Teach me TCP." }), factory);
+		const q1Answer = gradedAnswer(QUIZ_INPUT, ["Mercury"]);
+		await drainTurn(post(chat.id, { type: "answer", toolCallId: "q1", answer: q1Answer }), factory);
+
+		const beforeSkip = chatStore.getChat(chat.id)!.messages;
+		const anchor = skipProbingAnchorId(beforeSkip)!;
+		assert.ok(anchor);
+
+		// Stale lastMessageId is refused cleanly.
+		const staleRes = await handleChatRequest(post(chat.id, { type: "skip-probing", lastMessageId: "stale_id" }), factory);
+		assert.equal(staleRes.status, 400);
+
+		// Valid mid-probe skip dismisses q2 ungraded and constructs teacher in the same turn.
+		await drainTurn(post(chat.id, { type: "skip-probing", lastMessageId: anchor }), factory);
+		const afterSkip = chatStore.getChat(chat.id)!.messages;
+		assert.deepEqual(roles, [false, false, true], "prober on turns 1-2, teacher on skip turn");
+		assert.deepEqual(afterSkip.slice(0, beforeSkip.length), beforeSkip, "prior transcript and q1 answer stay intact");
+		assert.equal(danglingQuestionOf(afterSkip), null, "open q2 is resolved");
+
+		const dismissedResult = afterSkip[beforeSkip.length]!;
+		assert.equal(dismissedResult.role, "toolResult");
+		assert.equal((dismissedResult as { toolCallId?: string }).toolCallId, "q2");
+		assert.equal((dismissedResult as { details?: { dismissed?: boolean; correct?: boolean } }).details?.dismissed, true);
+		assert.equal((dismissedResult as { details?: { correct?: boolean } }).details?.correct, undefined, "skipped quiz is never graded");
+
+		const marker = afterSkip[beforeSkip.length + 1]!;
+		assert.equal(marker.role, "custom");
+		assert.equal((marker as { customType?: string }).customType, "probe-skipped");
+		assert.equal(phaseAt3Lh(afterSkip), "plan");
+		assert.equal(phaseAt3(projectView(afterSkip)), "plan");
+		assert.equal(phaseTimeline(projectView(afterSkip)).at(-1), "plan");
+		assert.equal(reconstructRequestCause(afterSkip), "foreground");
+
+		// Repeat skip is refused cleanly (already past probe).
+		const repeatRes = await handleChatRequest(
+			post(chat.id, { type: "skip-probing", lastMessageId: skipProbingAnchorId(afterSkip)! }),
+			factory,
+		);
+		assert.equal(repeatRes.status, 400);
+
+		// Practice sessions refuse skip-probing.
+		const practice = chatStore.createChat("Practice: no skip", "practice");
+		createdChats.push(practice.id);
+		chatStore.saveSettings(practice.id, { model: { provider: "openrouter", id: "z-ai/glm-5.3-flash" } });
+		chatStore.saveMessages(practice.id, [{ id: "u_p", role: "user", content: "Drill me", timestamp: Date.now() }]);
+		const practiceRes = await handleChatRequest(
+			post(practice.id, { type: "skip-probing", lastMessageId: "u_p" }),
+			factory,
+		);
+		assert.equal(practiceRes.status, 400);
+	});
+
+	it("skip-probing edge cases: POST /api/chats, graphContext + atStart, no-open-question, malformed question, side-chat ordering, plugin lock, trailing compaction, and error retry", async () => {
+		const { POST: createChatRoute } = await import("../app/api/chats/route.ts");
+		const {
+			malformedQuestionsOf,
+			newGraphContextMessage,
+			newProbeSkippedMessage,
+			newUserMessage,
+			skipProbingAnchorId,
+		} = await import("../src/core/native-messages.ts");
+		const { endsInFailedTurn } = await import("../src/core/input-events.ts");
+		const { phaseAt3Lh } = await import("../src/core/phases.ts");
+		const { sessionMarkdown } = await import("../src/core/session-markdown.ts");
+		const { initialPromptOwed, escAbortTarget } = await import("../components/chat.tsx");
+
+		// 1. POST /api/chats with skipProbing:true starts in plan; practice ignores skipProbing
+		const createReq = (body: unknown) =>
+			new Request("http://localhost/api/chats", {
+				method: "POST",
+				headers: { "Content-Type": "application/json" },
+				body: JSON.stringify(body),
+			});
+		const teachCreated = (await (await createChatRoute(createReq({ title: "Skip at birth", skipProbing: true }))).json()) as { id: string };
+		createdChats.push(teachCreated.id);
+		const teachBirth = chatStore.getChat(teachCreated.id)!;
+		assert.equal(teachBirth.messages.length, 1);
+		assert.equal((teachBirth.messages[0] as { customType?: string }).customType, "probe-skipped");
+		assert.equal(phaseAt3Lh(teachBirth.messages), "plan");
+		assert.equal(initialPromptOwed(teachBirth.messages, "Skip at birth"), true, "birth probe-skipped marker never swallows initial prompt");
+
+		const practiceCreated = (await (await createChatRoute(createReq({ title: "Practice ignores skip", kind: "practice", skipProbing: true }))).json()) as { id: string };
+		createdChats.push(practiceCreated.id);
+		assert.equal(chatStore.getChat(practiceCreated.id)!.messages.length, 0);
+
+		// 2. Pre-start skip + graphContext combined runs teacher on Turn 1 and exports clean markdown
+		const graphCombo = createConfiguredChat("Pre-start skip + graphContext");
+		createdChats.push(graphCombo.id);
+		const gc = newGraphContextMessage([{ id: "n_pkt", name: "Packets", statement: "Data travels in packets." }], []);
+		chatStore.saveMessages(graphCombo.id, [gc, newProbeSkippedMessage(true)]);
+		assert.equal(initialPromptOwed(chatStore.getChat(graphCombo.id)!.messages, "TCP"), true);
+		const { engine: teacherOnly } = scriptedTeacher(() => [
+			fauxAssistantMessage([fauxText("Built plan using your picked node.")]),
+		]);
+		const comboRoles: boolean[] = [];
+		await drainTurn(post(graphCombo.id, { type: "text", text: "Teach me TCP." }), (opts) => {
+			comboRoles.push(opts.teaching);
+			return createTeacherAgent(undefined, { engine: teacherOnly, messages: opts.messages });
+		});
+		assert.deepEqual(comboRoles, [true]);
+		const md = sessionMarkdown(chatStore.getChat(graphCombo.id)!.messages);
+		assert.match(md, /Teach me TCP\./);
+		assert.match(md, /Built plan using your picked node\./);
+
+		// 3. Mid-probe skip with NO open question (plain text prober response) appends only probe-skipped
+		const noOpen = createConfiguredChat("Mid-probe no open question");
+		createdChats.push(noOpen.id);
+		const { engine: noOpenEngine } = scriptedTeacher(() => [
+			fauxAssistantMessage([fauxText("Tell me what you know first.")]),
+			fauxAssistantMessage([fauxText("Plan ready.")]),
+		]);
+		const noOpenFactory: NonNullable<Parameters<typeof handleChatRequest>[1]> = (opts) =>
+			createTeacherAgent(undefined, { engine: noOpenEngine, messages: opts.messages });
+		await drainTurn(post(noOpen.id, { type: "text", text: "TCP" }), noOpenFactory);
+		const beforeNoOpen = chatStore.getChat(noOpen.id)!.messages;
+		await drainTurn(post(noOpen.id, { type: "skip-probing", lastMessageId: skipProbingAnchorId(beforeNoOpen)! }), noOpenFactory);
+		const afterNoOpen = chatStore.getChat(noOpen.id)!.messages;
+		assert.equal((afterNoOpen[beforeNoOpen.length] as { customType?: string }).customType, "probe-skipped");
+		assert.equal(afterNoOpen.slice(beforeNoOpen.length).filter((m) => m.role === "toolResult").length, 0);
+		assert.equal(phaseAt3Lh(afterNoOpen), "plan");
+
+		// 4. Mid-probe skip with MALFORMED question + trailing compaction marker clears malformed & places side-chat AFTER toolResult
+		const malChat = createConfiguredChat("Mid-probe malformed + side chat + compaction");
+		createdChats.push(malChat.id);
+		const u1 = newUserMessage("Explain TCP");
+		const aMal = {
+			...fauxAssistantMessage([fauxToolCall("probe", { question: "Broken", options: [] }, { id: "q_mal" })], { stopReason: "toolUse" }),
+			id: "a_mal",
+		} as unknown as LhMessage;
+		const cmpTail: LhMessage = {
+			id: "cmp_tail",
+			role: "custom",
+			customType: "compaction",
+			content: "summary",
+			display: true,
+			details: { firstKeptMessageId: aMal.id, tokensBefore: 500 },
+			timestamp: Date.now(),
+		};
+		chatStore.saveMessages(malChat.id, [u1, aMal, cmpTail]);
+		assert.equal(malformedQuestionsOf(chatStore.getChat(malChat.id)!.messages).length, 1);
+		const anchorMal = skipProbingAnchorId(chatStore.getChat(malChat.id)!.messages);
+		assert.equal(anchorMal, "a_mal", "anchor skips trailing compaction marker");
+
+		// Also verify retry after a failed teacher turn immediately following skip-probing
+		const { engine: failThenRecover } = scriptedTeacher(() => [
+			fauxAssistantMessage([], { stopReason: "error", errorMessage: "transient 502" }),
+			fauxAssistantMessage([fauxText("Recovered plan.")]),
+		]);
+		const malRoles: boolean[] = [];
+		const failFactory: NonNullable<Parameters<typeof handleChatRequest>[1]> = (opts) => {
+			malRoles.push(opts.teaching);
+			return createTeacherAgent(undefined, { engine: failThenRecover, messages: opts.messages });
+		};
+		await drainTurn(post(malChat.id, { type: "skip-probing", lastMessageId: anchorMal! }), failFactory);
+		const failedRec = chatStore.getChat(malChat.id)!.messages;
+		assert.equal(malformedQuestionsOf(failedRec).length, 0, "malformed question was dismissed");
+		assert.equal(endsInFailedTurn(failedRec), true, "failed teacher turn after skip-probing is retryable");
+		await drainTurn(post(malChat.id, { type: "retry" }), failFactory);
+		const recoveredRec = chatStore.getChat(malChat.id)!.messages;
+		assert.deepEqual(malRoles, [true, true], "both skip turn and retry build the teacher");
+		assert.equal(endsInFailedTurn(recoveredRec), false);
+
+		// 5. Pending plugin question blocks skip-probing with 400
+		const pluginLocked = createConfiguredChat("Plugin lock blocks skip");
+		createdChats.push(pluginLocked.id);
+		const aPlugin = {
+			...fauxAssistantMessage([fauxToolCall("listening_quiz", { q: "listen" }, { id: "pq_1" })], { stopReason: "toolUse" }),
+			id: "a_pq",
+			lhQuestions: {
+				0: { status: "posed", snapshot: { pluginId: "listening", typeId: "listen", version: 1, questionId: "pq_1", variant: "probe", input: { q: "listen" }, occurrence: { messageId: "a_pq", contentIndex: 0, toolCallId: "pq_1", toolName: "listening_quiz" } } },
+			},
+		} as unknown as LhMessage;
+		chatStore.saveMessages(pluginLocked.id, [newUserMessage("Teach me French"), aPlugin]);
+		const lockRes = await handleChatRequest(post(pluginLocked.id, { type: "skip-probing", lastMessageId: "a_pq" }), noOpenFactory);
+		assert.equal(lockRes.status, 400);
+
+		// 6. escAbortTarget returns null while skipProbeConfirm (abortAsk:true) is open
+		assert.equal(
+			escAbortTarget({ abortAsk: true, mermaidFocus: false, planOpen: false, setupOpen: false, pending: true, problem: false, busy: true }),
+			null,
+		);
+	});
 });

@@ -14,7 +14,7 @@ import { SetupDialog } from "@/components/setup-dialog";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
 import { StatsBar } from "@/components/stats-bar";
 import { ChainTableOverlay } from "@/components/chain-table.tsx";
-import { ComposerActions, NodePickerControl } from "@/components/composer-actions";
+import { ComposerActions, NodePickerControl, SkipProbingToggle } from "@/components/composer-actions";
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
@@ -50,6 +50,7 @@ export async function startDraftSession(
 	picks?: readonly DraftPick[],
 	starter = new SessionStarter(),
 	settingsIdentity?: string,
+	skipProbing = false,
 ): Promise<string | null> {
 	const t = text.trim();
 	if (!t) return null;
@@ -60,7 +61,7 @@ export async function startDraftSession(
 	return starter.start(
 		mode === "practice"
 			? { title: t, kind: "practice", ...(picks && picks.length > 0 ? { graphContext: { propositions: picks } } : {}) }
-			: { title: t },
+			: { title: t, ...(skipProbing ? { skipProbing: true } : {}) },
 		fetchLike,
 		settingsIdentity,
 	);
@@ -79,6 +80,8 @@ export function DraftShell({
 	startError = false,
 	setupCta,
 	mode = "teach",
+	skipProbing = false,
+	onSkipProbingChange,
 	picks = [],
 	onOpenPicker,
 	onClearPicks,
@@ -93,6 +96,8 @@ export function DraftShell({
 	 *  created session carries kind:"practice" and the copy changes
 	 *  (the practice agent opens; no probing). */
 	mode?: "teach" | "practice";
+	skipProbing?: boolean;
+	onSkipProbingChange?: (next: boolean) => void;
 	/** The first-run CTA (fix wave chunk B): the same "Set up your models"
 	 *  affordance home carries, rendered above the draft shell — passed by
 	 *  NewSession, which owns the configured state and the SetupDialog. */
@@ -182,7 +187,9 @@ export function DraftShell({
 									description={
 										mode === "practice"
 											? "Pick nodes from your knowledge graph, describe what you want to practice, or bring your own problem."
-											: "The teacher will open by probing what you already know."
+											: skipProbing
+												? "The teacher will start by building your learning plan."
+												: "The teacher will open by probing what you already know."
 									}
 								/>
 							</ConversationContent>
@@ -218,6 +225,11 @@ export function DraftShell({
 								<StatsBar
 									dictationSlot={<DictationBar dictation={dictation} />}
 									turns={[]}
+									leadingSlot={
+										mode === "teach" && onSkipProbingChange ? (
+											<SkipProbingToggle checked={skipProbing} onChange={onSkipProbingChange} disabled={busy} />
+										) : undefined
+									}
 								/>
 							</div>
 						</div>
@@ -252,6 +264,12 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setText(v);
 	};
 	const [busy, setBusy] = useState(false);
+	const [skipProbing, setSkipProbing] = useState(false);
+	const skipProbingRef = useRef(false);
+	const applySkipProbing = (next: boolean) => {
+		skipProbingRef.current = next;
+		setSkipProbing(next);
+	};
 	const startingRef = useRef(false);
 	const starterRef = useRef(new SessionStarter());
 	const [startError, setStartError] = useState(false);
@@ -316,7 +334,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 		setBusy(true);
 		setStartError(false);
 		void startDraftSession(draft, fetch, mode === "practice" ? "practice" : undefined, mode === "practice" ? picksRef.current : undefined,
-			starterRef.current, JSON.stringify(catalog?.slots.strong))
+			starterRef.current, JSON.stringify(catalog?.slots.strong), mode === "teach" && skipProbingRef.current)
 			.then((target) => {
 				if (target) router.push(target);
 				else { startingRef.current = false; setBusy(false); }
@@ -337,6 +355,8 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 				onChange={applyText}
 				onSend={send}
 				mode={mode}
+				skipProbing={skipProbing}
+				onSkipProbingChange={applySkipProbing}
 				picks={picks}
 				onOpenPicker={openPicker}
 				onClearPicks={() => applyPicks([])}

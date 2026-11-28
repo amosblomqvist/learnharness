@@ -425,8 +425,9 @@ messageCount: number;
 
 ### ChatSummary phase
 
-Transcript-derived phase: probe ends at successful probe_done completion;
-plan ends at the first node-tagged teaching question call, not its answer.
+Transcript-derived phase: probe ends at successful probe_done completion
+or a probe-skipped marker; plan ends at the first node-tagged teaching
+question call, not its answer.
 
 ```ts
 phase: Phase3;

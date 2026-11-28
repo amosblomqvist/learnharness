@@ -22,7 +22,7 @@ keys rendering on customType; the flag documents intent).
 export interface LhMarkerMessage {
     id: string;
     role: "custom";
-    customType: "graph-context" | "probe-handoff" | "subagent-steer" | "subagent-abort" | "plan-block" | "practice-thinking" | "plugin-problem-submission" | "practice-next" | "problem-dismissed" | "compaction" | "side-question" | "side-question-told";
+    customType: "graph-context" | "probe-handoff" | "probe-skipped" | "subagent-steer" | "subagent-abort" | "plan-block" | "practice-thinking" | "plugin-problem-submission" | "practice-next" | "problem-dismissed" | "compaction" | "side-question" | "side-question-told";
     content: string;
     display: boolean;
     details: unknown;
@@ -57,7 +57,7 @@ role: "custom";
 ### LhMarkerMessage customType
 
 ```ts
-customType: "graph-context" | "probe-handoff" | "subagent-steer" | "subagent-abort" | "plan-block" | "practice-thinking" | "plugin-problem-submission" | "practice-next" | "problem-dismissed" | "compaction" | "side-question" | "side-question-told";
+customType: "graph-context" | "probe-handoff" | "probe-skipped" | "subagent-steer" | "subagent-abort" | "plan-block" | "practice-thinking" | "plugin-problem-submission" | "practice-next" | "problem-dismissed" | "compaction" | "side-question" | "side-question-told";
 ```
 
 ### LhMarkerMessage content

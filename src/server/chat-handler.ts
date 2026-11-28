@@ -416,7 +416,7 @@ export async function handleChatInput(
 					if (hasUnresolvedQuestion(after)) return current.messages;
 					const updates = sideConversationEntries({ messages: current.messages, sideChats: sideContext.snapshot(chatId) }, after);
 					if (!updates.length) return current.messages;
-					const projected = [...current.messages, ...(input.type === "answer" || input.type === "retry-question" ? [...next, ...updates] : [...updates, ...next])];
+					const projected = [...current.messages, ...(input.type === "skip-probing" || input.type === "answer" || input.type === "retry-question" ? [...next, ...updates] : [...updates, ...next])];
 					const omitted = input.type === "retry" ? retryDrops(current.messages) : new Set<string>();
 					return projected.filter((message) => !omitted.has(message.id));
 				} catch (error) {
@@ -580,7 +580,7 @@ export async function handleChatInput(
 	const sideQuestions = hasUnresolvedQuestion(afterInput) ? [] : sideConversationEntries({
 		messages: record.messages, sideChats: sideContextSnapshots,
 	}, afterInput);
-	const withSideQuestions = input.type === "answer" || input.type === "retry-question" || input.type === "plugin-question-answer" ? [...appends, ...sideQuestions] : [...sideQuestions, ...appends];
+	const withSideQuestions = input.type === "skip-probing" || input.type === "answer" || input.type === "retry-question" || input.type === "plugin-question-answer" ? [...appends, ...sideQuestions] : [...sideQuestions, ...appends];
 	const prospective = [...record.messages, ...withSideQuestions].filter((message) => !retryOmissions.has(message.id));
 	const sideContextBlocked = sideQuestions.length > 0 && !fitsSideContext(prospective);
 	// An automatic batch has not been admitted; refuse it without persisting
@@ -635,9 +635,9 @@ export async function handleChatInput(
 	};
 
 	// AGENT CONSTRUCTION BRANCH (docs/archive/probe-teach-split.md §2): the transcript
-	// is the seam — a probe_done call in the record means the probe is
-	// concluded: build the TEACHER (planning + the full toolset). Otherwise
-	// the session is still probing: build the PROBER (quiz/ask + probe_done).
+	// is the seam — a probe_done call or probe-skipped marker in the record means
+	// the probe is concluded: build the TEACHER (planning + the full toolset).
+	// Otherwise the session is still probing: build the PROBER (quiz/ask + probe_done).
 	// Both share this whole composition (write-ahead persist, liveness,
 	// steers, usage, extraction) — only the agent differs.
 	const teaching = hasProbeDone(agentMessages);

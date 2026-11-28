@@ -44,6 +44,8 @@ import {
 	CONCLUDE_ACK_TEXT,
 	HANDOFF_TEXT,
 	NEXT_PROBLEM_TEXT,
+	SKIP_PROBING_MID_TEXT,
+	SKIP_PROBING_START_TEXT,
 	THINKING_LABEL,
 } from "./contracts/chat.ts";
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
@@ -75,6 +77,7 @@ export interface LhMarkerMessage {
 	customType:
 		| "graph-context"
 		| "probe-handoff"
+		| "probe-skipped"
 		| "subagent-steer"
 		| "subagent-abort"
 		| "plan-block"
@@ -277,6 +280,37 @@ export function newHandoffMessage(chatId: string): LhMarkerMessage {
 		details: { chatId },
 		timestamp: Date.now(),
 	};
+}
+
+/** Learner-initiated skip of diagnostic probing (either at session creation
+ *  with atStart:true, or mid-probe with atStart:false). Advances probe→plan
+ *  without a prober-authored probe_done assessment. */
+export function newProbeSkippedMessage(atStart: boolean): LhMarkerMessage {
+	return {
+		id: newMessageId(),
+		role: "custom",
+		customType: "probe-skipped",
+		content: atStart ? SKIP_PROBING_START_TEXT : SKIP_PROBING_MID_TEXT,
+		display: true,
+		details: { atStart },
+		timestamp: Date.now(),
+	};
+}
+
+/** Canonical tail anchor for mid-probe skip concurrency checks (ignores
+ *  background compaction and side-chat delivery markers). */
+export function skipProbingAnchorId(messages: readonly LhMessage[]): string | null {
+	for (let i = messages.length - 1; i >= 0; i--) {
+		const m = messages[i]!;
+		if (
+			m.role === "custom" &&
+			(m.customType === "compaction" || m.customType === "side-question" || m.customType === "side-question-told")
+		) {
+			continue;
+		}
+		return m.id;
+	}
+	return null;
 }
 
 /** The plan presentation block: pure UI history (a frozen snapshot), no
@@ -917,9 +951,13 @@ export function probeDoneResultIds(messages: readonly LhMessage[]): Set<string> 
 }
 
 /** The probe→teach construction seam (chat-handler and the tool guard):
- *  only a concluded call plus a matching successful result means teach. */
+ *  a learner probe-skip marker or a concluded probe_done call plus matching
+ *  successful result selects the teacher. */
 export function hasProbeDone(messages: readonly LhMessage[]): boolean {
-	return probeDoneResultIds(messages).size > 0;
+	return (
+		messages.some((m) => m.role === "custom" && m.customType === "probe-skipped") ||
+		probeDoneResultIds(messages).size > 0
+	);
 }
 
 /** Every toolResult id in the record — answer-event validation (the call
@@ -987,6 +1025,9 @@ export function nativeInputCause(message: AgentMessage, history: readonly AgentM
 	if (message.role === "system" || message.role === "assistant") return "neutral";
 	if (message.role === "custom") {
 		if (["probe-handoff", "subagent-steer", "subagent-abort"].includes(message.customType)) return "automatic";
+		if (message.customType === "probe-skipped") {
+			return (message.details as { atStart?: unknown } | null)?.atStart === true ? "neutral" : "learner";
+		}
 		if (["practice-thinking", "plugin-problem-submission", "practice-next"].includes(message.customType)) return "learner";
 		return ["graph-context", "plan-block", "problem-dismissed", "compaction", "side-question", "side-question-told"].includes(message.customType) ? "neutral" : "unrecognizable";
 	}

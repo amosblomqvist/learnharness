@@ -28,7 +28,7 @@
  * turn rides one composition.
  */
 
-import type { QuestionAnswerData } from "./question-core.ts";
+import { dismissedAnswer, type QuestionAnswerData } from "./question-core.ts";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { validatePluginSubmissionImageArray, validatePluginSubmissionImages, type PluginSubmissionImages, type PluginSubmissionOccurrence } from "./plugin-submissions.ts";
 import type { LhMessage } from "./native-messages.ts";
@@ -36,10 +36,12 @@ import {
 	activeProblemOf,
 	activeProblemOccurrenceOf,
 	concludedByDismissalPair,
+	hasProbeDone,
 	isSideQuestionMarker,
 	danglingQuestionOf,
 	newAnswerResult,
 	newNextMessage,
+	newProbeSkippedMessage,
 	newProblemDismissedMarker,
 	newThinkingMessage,
 	newUserMessage,
@@ -47,6 +49,7 @@ import {
 	questionCallsOf,
 	pluginQuestionCallsOf,
 	pendingProblemDismissalOf,
+	skipProbingAnchorId,
 } from "./native-messages.ts";
 import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 import { isPluginQuestionJson, type JsonValue, type PluginQuestionOccurrence } from "./plugin-questions.ts";
@@ -62,6 +65,10 @@ export type ChatInput =
 	| PluginProblemSubmissionInput
 	| { type: "text"; text: string; images?: ImageContent[] }
 	| { type: "answer"; toolCallId: string; answer: QuestionAnswerData; occurrence?: PluginSubmissionOccurrence }
+	/** Learner-initiated mid-probe skip: dismisses any open native question
+	 *  ungraded, appends the probe-skipped marker, and hands straight off to
+	 *  the teacher in the same turn. */
+	| { type: "skip-probing"; lastMessageId: string }
 	| { type: "continue" }
 	/** The failed-turn retry (issue #110): the banner's Retry button. */
 	| { type: "retry" }
@@ -259,6 +266,12 @@ export function parseChatInput(input: unknown): ChatInput {
 			const { images: _images, ...fields } = answer;
 			return { type: "answer", toolCallId: i.toolCallId, answer: { ...fields, ...(images ? { images } : {}) }, ...(occurrence ? { occurrence } : {}) };
 		}
+		case "skip-probing": {
+			if (typeof i.lastMessageId !== "string" || i.lastMessageId.length === 0) {
+				throw new ChatInputError("skip-probing input requires lastMessageId");
+			}
+			return { type: "skip-probing", lastMessageId: i.lastMessageId };
+		}
 		case "continue":
 			return { type: "continue" };
 		case "retry":
@@ -315,6 +328,26 @@ export function inputAppends(
 				throw new ChatInputError("answer input targets no pending question call");
 			}
 			return [newAnswerResult(input.toolCallId, pending.tool, input.answer)];
+		}
+		case "skip-probing": {
+			if (record.kind === "practice" || hasProbeDone(record.messages)) {
+				throw new ChatInputError("This session is not probing");
+			}
+			const anchor = skipProbingAnchorId(record.messages);
+			if (!anchor || anchor !== input.lastMessageId) {
+				throw new ChatInputError("The session changed. Refresh before skipping probing.");
+			}
+			const skips = questionCallsOf(record.messages)
+				.filter((call) => call.status === "answerable" || call.status === "malformed")
+				.map((call) => {
+					const question = (call.input as { question?: unknown } | null)?.question;
+					return newAnswerResult(
+						call.toolCallId,
+						call.tool,
+						dismissedAnswer(toolQuestionKind(call.tool), typeof question === "string" ? question : ""),
+					);
+				});
+			return [...skips, newProbeSkippedMessage(false)];
 		}
 		case "continue":
 			return dismissalConclusion(record);

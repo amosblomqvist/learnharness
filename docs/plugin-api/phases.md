@@ -13,7 +13,7 @@ Supporting declaration used by a public type. This is not an additional runtime 
 Teaching-session phases derived sequentially from transcript events,
 not from plan-tree occupancy or an explicit plan-acceptance flag:
 
-- probe: until probe_done has a successful tool result.
+- probe: until a learner probe-skip marker or a successful probe_done tool result.
 - plan: after probe completion, until a node-tagged teaching question call.
 - teach: from that first call onward, without waiting for its answer.
 
