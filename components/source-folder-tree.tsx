@@ -7,6 +7,7 @@ import { canMoveFolder, folderIsEmpty, fuzzyScore, placementOf, folderEntryCheck
 import type { ChainSort } from "./chain-table";
 import { chainRow } from "./chain-navigation";
 import { TreeCell, TreeCheckbox, TreeDisclosure, TreeGuide, TreeSeparator, treeBranchLayout, treeRowLayout } from "./tree-presentation";
+import { tr } from "@/src/core";
 
 export type OrganizationChange = (action: OrganizationAction) => Promise<string | void>;
 export const SOURCE_DRAG_TYPE = "application/x-learnharness-source";
@@ -84,14 +85,14 @@ export function EditableSourceName({ name, onSave, onCancel, initiallyEditing = 
 		finally { submitting.current = false; }
 	};
 	return <span className="min-w-0 flex-1">
-		{editing ? <input ref={input} value={draft} placeholder="Folder name" aria-label="Source or folder name" data-testid="source-name-input"
+		{editing ? <input ref={input} value={draft} placeholder={tr("文件夹名称", "Folder name")} aria-label={tr("来源或文件夹名称", "Source or folder name")} data-testid="source-name-input"
 			className={cn("block w-full min-w-0 border-0 bg-transparent p-0 font-medium outline-none shadow-none focus:ring-0", inputClassName ?? "h-5 text-sm leading-5")}
 			onChange={(e) => setDraft(e.target.value)} onBlur={() => { void commit(); }}
 			onKeyDown={(e) => {
 				if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); cancelled.current = true; setEditing(false); setFailure(""); onCancel?.(); }
 				if (e.key === "Enter") { e.preventDefault(); e.stopPropagation(); void commit(); }
 			}} onDragStart={(e) => { e.preventDefault(); e.stopPropagation(); }} />
-			: <button type="button" className={`block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent${muted ? " text-muted-foreground/60" : ""}`} title="Rename"
+			: <button type="button" className={`block max-w-full truncate rounded-sm text-left text-sm font-medium leading-5 transition-colors hover:bg-accent${muted ? " text-muted-foreground/60" : ""}`} title={tr("重命名", "Rename")}
 				onClick={() => { cancelled.current = false; setDraft(name); setEditing(true); }}>{name}</button>}
 		{failure && <span role="alert" className="block text-xs text-error">{failure}</span>}
 	</span>;
@@ -189,14 +190,14 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 					    polish round): a rule under the folder row starting at the
 					    rail, like every rule between its items. */}
 					{open && hasChildren && <TreeSeparator data-testid={`folder-head-separator-${folder.id}`} outside inset={(depth + 1) * 36 + 1} />}
-					<TreeCheckbox aria-label={`Select ${sourceSelection ? "folder" : "contents of"} ${folder.name}`} data-testid={`folder-checkbox-${folder.id}`}
+					<TreeCheckbox aria-label={tr(sourceSelection ? `选择文件夹 ${folder.name}` : `选择 ${folder.name} 中的内容`, `Select ${sourceSelection ? "folder" : "contents of"} ${folder.name}`)} data-testid={`folder-checkbox-${folder.id}`}
 						disabled={entryCheck ? false : empty ? !allowEmptySelection : members.length === 0}
 						checked={entryCheck?.checked ?? (empty ? selectedFolders.has(folder.id) : members.length > 0 && selectedCount === members.length)}
 						indeterminate={entryCheck?.indeterminate ?? (!empty && selectedCount > 0 && selectedCount < members.length)}
 						onChange={(e) => { if (entryCheck || empty) onToggleFolder(folder.id, e.target.checked); else onToggleNodes(members, e.target.checked); }} />
-					<TreeDisclosure plain open={open} aria-label={`Expand folder ${folder.name}`} data-testid={`folder-toggle-${folder.id}`}
+					<TreeDisclosure plain open={open} aria-label={tr(`展开文件夹 ${folder.name}`, `Expand folder ${folder.name}`)} data-testid={`folder-toggle-${folder.id}`}
 						onClick={() => onToggleExpanded(folder.id)} />
-					<button type="button" data-source-icon data-testid={`folder-icon-${folder.id}`} aria-expanded={open} aria-label={`Expand folder ${folder.name}`}
+					<button type="button" data-source-icon data-testid={`folder-icon-${folder.id}`} aria-expanded={open} aria-label={tr(`展开文件夹 ${folder.name}`, `Expand folder ${folder.name}`)}
 						onClick={() => onToggleExpanded(folder.id)} className="flex h-5 w-3.5 shrink-0 items-center justify-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">
 						{open ? <FolderOpenIcon className="size-3.5 shrink-0" /> : <FolderIcon className="size-3.5 shrink-0" />}
 					</button>
@@ -218,7 +219,7 @@ export function SourceFolderTree<T extends TreeSource>({ groups, directory, quer
 		} catch { /* An unrelated native text/file drag is not an organization move. */ }
 	}} onDragEnd={() => { setDropTarget(undefined); setDraggedItem(undefined); }}>
 		<div>{renderLevel(null, 0)}</div>
-		{onAction && <div data-testid="source-root-drop" aria-label="Move outside folders" data-drop-active={dropTarget === null}
+		{onAction && <div data-testid="source-root-drop" aria-label={tr("移出所有文件夹", "Move outside folders")} data-drop-active={dropTarget === null}
 			className={`min-h-16 flex-1 transition-colors ${dropTarget === null ? "bg-accent/30" : ""}`} {...dropProps(null)} />}
 	</div>;
 }

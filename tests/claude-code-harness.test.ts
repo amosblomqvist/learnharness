@@ -173,7 +173,7 @@ test("disabled opt-in refuses a saved CLI chat before write-ahead, liveness, or 
 	const response = await handleChatRequest(new Request("http://test/api/chat", { method: "POST", headers: { "Content-Type": "application/json" },
 		body: JSON.stringify({ chatId, input: { type: "text", text: "must not start" } }) }), () => assert.fail("disabled work must not build an agent"));
 	assert.equal(response.status, 503);
-	assert.match((await response.json()).error, /Enable and set it up in Settings/);
+	assert.match((await response.json()).error, /请在“设置 → 服务商”中启用并完成设置/);
 	assert.equal(isTurnRunning(chatId), false); assert.equal(fakeRun.children.length, 0);
 	assert.deepEqual(chatStore.getChat(chatId)!.messages, before);
 	assert.deepEqual(chatStore.getChat(chatId)!.settings?.model, { provider: "claude-code", id: "sonnet" });

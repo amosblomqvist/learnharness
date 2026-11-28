@@ -27,6 +27,7 @@ import { ThinkingBlock } from "@/components/thinking-block";
 import { usePopoverDismiss } from "@/components/popover-dismiss";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { useInteractionLayers } from "@/components/interaction-layers";
+import { tr } from "@/src/core";
 
 /* TARGET NAMES (owner round 17, 2026-10-06): targets are normalized to
  * opaque node ids at the record seam (owner round 9 — the mastery trace
@@ -67,7 +68,7 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 	const statement = typeof input.statement === "string" ? input.statement : "";
 	return (
 		<div data-testid="problem-card" className="lh-card-enter my-1 rounded-xl border bg-card p-4">
-			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Problem</div>
+			<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{tr("题目", "Problem")}</div>
 			<div className="lh-prose text-[15px]">
 				<ToolContentResponse>{statement}</ToolContentResponse>
 			</div>
@@ -76,11 +77,11 @@ export function ProblemCard({ part }: ArtifactPartProps) {
 }
 
 const OUTCOME_LABEL: Record<string, string> = {
-	solved: "Solved",
-	solvedWithHints: "Solved with hints",
-	movedOn: "Moved on",
-	surrendered: "Surrendered",
-	dismissed: "Dismissed",
+	solved: tr("已解决", "Solved"),
+	solvedWithHints: tr("借助提示解决", "Solved with hints"),
+	movedOn: tr("已跳过", "Moved on"),
+	surrendered: tr("已放弃", "Surrendered"),
+	dismissed: tr("已忽略", "Dismissed"),
 };
 
 /* The outcome chips (owner round 3, 2026-10-05): the EXACT register of the
@@ -112,7 +113,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 	if (outcome === "dismissed") {
 		return (
 			<div data-testid="conclude-card" className="my-1 px-1 text-sm text-muted-foreground/70">
-				Problem dismissed.
+				{tr("题目已忽略。", "Problem dismissed.")}
 			</div>
 		);
 	}
@@ -123,7 +124,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 			    eyebrow + the outcome in the quiz cards' EXACT chip register —
 			    no more two same-weight headings stacked. */}
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				Concluded
+				{tr("已结束", "Concluded")}
 				{(OUTCOME_LABEL[outcome] ?? "") !== "" && outcome !== "dismissed" && (
 					<StatusBadge text={OUTCOME_LABEL[outcome] ?? ""} color={OUTCOME_COLOR[outcome]} />
 				)}
@@ -141,7 +142,7 @@ export function ConcludeCard({ part }: ArtifactPartProps) {
 				<>
 					<div className="my-3 border-t" />
 					<div>
-						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">Model solution</div>
+						<div className="mb-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground">{tr("参考解答", "Model solution")}</div>
 						<div className="lh-prose text-[15px]">
 							<ToolContentResponse>{reveal}</ToolContentResponse>
 						</div>
@@ -240,7 +241,7 @@ function MetadataPopover({
 				aria-expanded={open}
 				className="flex items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:text-foreground"
 			>
-				Metadata
+				{tr("元数据", "Metadata")}
 			</button>
 			{open &&
 				anchor &&
@@ -258,31 +259,31 @@ function MetadataPopover({
 						className="w-80 max-w-[calc(100vw-1rem)] rounded-xl border bg-card p-4 text-left shadow-lg"
 					>
 				<dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-xs">
-						<dt className="text-muted-foreground">Mode</dt>
+						<dt className="text-muted-foreground">{tr("模式", "Mode")}</dt>
 						<dd className="font-mono">{mode || "—"}</dd>
-						<dt className="text-muted-foreground">Targets</dt>
+						<dt className="text-muted-foreground">{tr("目标", "Targets")}</dt>
 						<dd className="font-mono">
 							{targets.length === 0 ? (
-								"untagged"
+								tr("未标注", "untagged")
 							) : (
 								<span>
 									{targets.map((t, i) => (
 										<span key={t}>
-											{i > 0 && ", "}
+											{i > 0 && tr("、", ", ")}
 											{names?.[t] ?? t}
 										</span>
 									))}
 								</span>
 							)}
 						</dd>
-						<dt className="text-muted-foreground">Outcome</dt>
+						<dt className="text-muted-foreground">{tr("结果", "Outcome")}</dt>
 						<dd className="font-mono">{outcome || "—"}</dd>
-						<dt className="text-muted-foreground">Hint rung</dt>
-						<dd className="font-mono">{rung || "none"}</dd>
-						<dt className="text-muted-foreground">Miss class</dt>
-						<dd className="font-mono">{miss || "none"}</dd>
-						<dt className="text-muted-foreground">Retest</dt>
-						<dd className="font-mono">{retest === undefined ? "—" : retest ? "yes" : "no"}</dd>
+						<dt className="text-muted-foreground">{tr("提示层级", "Hint rung")}</dt>
+						<dd className="font-mono">{rung || tr("无", "none")}</dd>
+						<dt className="text-muted-foreground">{tr("错误类型", "Miss class")}</dt>
+						<dd className="font-mono">{miss || tr("无", "none")}</dd>
+						<dt className="text-muted-foreground">{tr("重测", "Retest")}</dt>
+						<dd className="font-mono">{retest === undefined ? "—" : retest ? tr("是", "yes") : tr("否", "no")}</dd>
 					</dl>
 					</div>,
 					interactions.getPortalContainer(triggerRef.current)!,
@@ -296,5 +297,5 @@ export function ThinkingCard({ data }: { data: PracticeThinkingData }) {
 	// 50%-italic quote block on expand. Legacy records' commit flag is
 	// deliberately unread (one lane now). A TRANSCRIPT row (owner round,
 	// 2026-10-07): full-width band + rail, arriving expanded.
-	return <ThinkingBlock testId="thinking-card" label="YOUR THINKING" text={data.text} images={data.images} defaultOpen />;
+	return <ThinkingBlock testId="thinking-card" label={tr("你的思考", "YOUR THINKING")} text={data.text} images={data.images} defaultOpen />;
 }

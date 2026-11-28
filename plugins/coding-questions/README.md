@@ -1,54 +1,23 @@
-# Coding questions
+# 编程题
 
-A LearnHarness plugin for **teaching questions and coding practice**, with a syntax-colored
-code editor, optional starter code, committed Markdown model solutions, and agent-written
-tests that run automatically on submission. The agent reviews the exact code, separate
-thinking, and recorded test observations. Practice allows repeated attempts; only the
-native **conclude** tool assesses and closes the problem.
+一个用于 **教学问题和编程练习** 的 LearnHarness 插件，提供语法着色的代码编辑器、可选的初始代码、预先提交的 Markdown 参考解答，以及由智能体编写、在提交时自动运行的测试。智能体会审阅确切的代码、单独的思考内容以及记录下来的测试观察结果。练习允许多次尝试；只有原生的 **conclude** 工具会评估并结束题目。
 
-**Local code execution is not sandboxed.** Teacher test code and learner code run with
-LearnHarness's user permissions and inherited environment: they can access files,
-network, and installed programs. A temporary working directory, timeout, and output
-limits are operational safeguards, not security isolation. Use only with code you trust.
+**本地代码执行没有沙箱隔离。** 老师编写的测试代码和学习者的代码以 LearnHarness 的用户权限和继承的环境运行：它们可以访问文件、网络和已安装的程序。临时工作目录、超时和输出限制只是运行层面的保障，而不是安全隔离。只用于你信任的代码。
 
-## Core plugin and requirements
+## 核心插件与要求
 
-Enable Coding questions in **Settings → Core plugins**. Its code ships and updates
-with the app; writable plugin files live under
-`<learning data>/core-plugin-data/coding-questions/`. This source project is reference
-material, not an installable Community copy. `coding-questions` is a reserved Core ID,
-even when disabled or missing. A Community fork needs its own manifest/folder ID and
-must reconsider conflicting contribution/type IDs, tool names and fence names;
-changing the package ID alone does not rename `coding_question` or `coding_problem`.
-Do not install this build into a Community `plugins/coding-questions/` folder.
+在 **设置 → 核心插件**（Settings → Core plugins）中启用编程题（Coding questions）。它的代码随应用一起发布和更新；可写的插件文件位于 `<learning data>/core-plugin-data/coding-questions/` 下。这个源码项目是参考材料，而不是可安装的社区插件副本。`coding-questions` 是保留的核心插件 ID，即使被停用或缺失也是如此。社区分支需要自己的清单/文件夹 ID，并且必须重新考虑可能冲突的贡献项/类型 ID、工具名称和围栏代码块名称；仅仅修改软件包 ID 并不会重命名 `coding_question` 或 `coding_problem`。不要把此构建安装到社区插件的 `plugins/coding-questions/` 文件夹中。
 
 
-Requires a matching LearnHarness build with the public native-question grading API
-(`registerQuestionType` with `gradeAnswer`), `registerQuestionRenderer`, the practice APIs
-`registerProblemType` with `processSubmission` and `registerProblemRenderer`, and
-`ctx.ui.mountBadge`/`ctx.ui.mountMarkdown`. Both registrations are required for this version.
-Exact placement of Test output and teaching Model solution uses the optional answered/
-submitted `footerContainer` slots; compatible hosts without these slots keep a readable
-body fallback. The manifest's `minAppVersion` is only a numeric baseline, not proof that a host
-provides every required capability. Use matching host documentation and types.
+需要一个相匹配的 LearnHarness 构建，提供公开的原生问题评分 API（带 `gradeAnswer` 的 `registerQuestionType`）、`registerQuestionRenderer`、练习 API（带 `processSubmission` 的 `registerProblemType` 和 `registerProblemRenderer`），以及 `ctx.ui.mountBadge`/`ctx.ui.mountMarkdown`。此版本需要两种注册都可用。“测试输出”和教学中“参考解答”的确切放置位置使用可选的已回答/已提交 `footerContainer` 插槽；不提供这些插槽的兼容宿主会保留一个可读的正文回退方案。清单中的 `minAppVersion` 只是一个数字基线，并不能证明宿主提供了每一项所需的能力。请使用与宿主相匹配的文档和类型。
 
-Runtimes, compilers, shells, and any required libraries must already be installed on
-the user's machine. This plugin bundles none of them and installs nothing. Programs
-resolve through the app process's **PATH**, which may differ from an interactive
-terminal, or through an explicit executable path supplied by the teacher. There is no
-version-checker tool, runtime catalog, package installer, or per-language runner table.
+运行时、编译器、shell 以及任何所需的库都必须已经安装在用户的机器上。本插件不捆绑其中任何一项，也不安装任何东西。程序通过应用进程的 **PATH** 解析（它可能与交互式终端中的不同），或者通过老师提供的显式可执行文件路径解析。没有版本检查工具、运行时目录、软件包安装器或按语言划分的运行器表。
 
-The plugin-only build writes directly to this project's **`dist/`**, containing
-`manifest.json`, `main.js`, `backend.cjs`, `styles.css`, `assets/` and license notices.
-Cleanup replaces only `dist/` and refuses symlinked `dist/` or misplaced `dist/data/`;
-sibling `data/` is preserved. Building does not install, enable or update the Core
-plugin. App packaging is a separate host operation.
+仅构建插件的构建会直接写入本项目的 **`dist/`**，其中包含 `manifest.json`、`main.js`、`backend.cjs`、`styles.css`、`assets/` 和许可证声明。清理只替换 `dist/`，并会拒绝符号链接形式的 `dist/` 或放错位置的 `dist/data/`；同级的 `data/` 会被保留。构建不会安装、启用或更新核心插件。应用打包是单独的宿主操作。
 
-## Question and test contract
+## 问题与测试契约
 
-The plugin contributes `coding_question` only to the **teacher**, not the prober or
-practice agent. Practice agents separately receive `coding_problem` (see below). The native tool receives the host's `question`, `type`
-(`predict`/`check`), `nodeId`, and this payload:
+本插件只向 **老师** 提供 `coding_question`，不向摸底智能体或练习智能体提供。练习智能体另外获得 `coding_problem`（见下文）。原生工具会收到宿主的 `question`、`type`（`predict`/`check`）、`nodeId`，以及以下载荷：
 
 ```ts
 {
@@ -63,32 +32,19 @@ practice agent. Practice agents separately receive `coding_problem` (see below).
 }
 ```
 
-Every **new** question requires tests and a nonblank Markdown **modelSolution**, authored
-in the original question call. The solution contains fenced model code and may include
-an explanation; it is preserved with the question, hidden in the pending UI, and shown
-only after submission. It is not executed or automatically tested. Existing questions
-without it keep their original data and have no Model solution toggle.
+每个 **新** 问题都需要测试和一个非空的 Markdown **modelSolution**，并在最初的出题调用中编写。解答包含围栏代码块形式的参考代码，并可以附带讲解；它与问题一起保存，在待作答界面中隐藏，只在提交后显示。它不会被执行，也不会被自动测试。没有它的已有问题保留原始数据，并且没有“参考解答”展开开关。
 
-A missing/empty starter starts blank; the learner submits their full code, not a diff. Unchanged starter code is allowed.
-Readiness requires non-whitespace code, not passing syntax checks or passing tests.
-Editor line endings become LF; other whitespace is preserved.
+缺少或为空的初始代码会从空白开始；学习者提交的是完整代码，而不是差异。允许提交未修改的初始代码。就绪条件是代码中含有非空白内容，而不是通过语法检查或通过测试。编辑器的换行符会统一为 LF；其他空白字符保持不变。
 
-On a valid submission, before saving and continuing the teacher, the plugin:
+对于有效的提交，在保存并让老师继续之前，插件会：
 
-1. Creates a fresh `data/test-runs/<questionId>/attempt-…/` working directory.
-2. Writes the exact submitted code to **`answer.txt`** as UTF-8.
-3. Launches `tests.program` with the literal `tests.args`, **without an implicit shell**,
-   and sends `tests.code` to its standard input. The working directory is the fresh run.
-4. Records the exit status and up to **64 KiB per stream** of stdout/stderr, draining
-   excess output. Text is decoded as UTF-8; truncated incomplete final characters are
-   omitted. Enforces a **30-second** process deadline.
-5. Removes the attempt directory, including compiler output and other files written
-   inside it. Empty question directories can remain. The host saves the accepted
-   answer and grading outcome and continues the ordinary teacher.
+1. 创建一个全新的 `data/test-runs/<questionId>/attempt-…/` 工作目录。
+2. 以 UTF-8 把提交的确切代码写入 **`answer.txt`**。
+3. 用字面的 `tests.args` 启动 `tests.program`，**不使用隐式 shell**，并把 `tests.code` 发送到它的标准输入。工作目录就是这次全新的运行目录。
+4. 记录退出状态，以及 stdout/stderr **每个流最多 64 KiB** 的输出，多余的输出会被读取并丢弃。文本按 UTF-8 解码；被截断的不完整末尾字符会被省略。强制执行 **30 秒** 的进程期限。
+5. 删除这次尝试的目录，包括编译器输出和在其中写入的其他文件。空的问题目录可能会保留。宿主保存被接受的回答和评分结果，并让常规的老师继续。
 
-There is no language-specific execution convention to maintain. The teacher chooses
-an installed interpreter or shell and writes the complete driver/test code. For example,
-Python tests can be supplied in the original tool call as:
+不需要维护任何特定于语言的执行约定。老师选择一个已安装的解释器或 shell，并编写完整的驱动/测试代码。例如，Python 测试可以在最初的工具调用中这样提供：
 
 ```json
 {
@@ -103,18 +59,11 @@ Python tests can be supplied in the original tool call as:
 }
 ```
 
-For C++, the teacher can choose `program: "sh"`, `args: ["-s"]` and send a shell
-script that writes a small test driver including `answer.txt`, invokes the user's
-compiler, then runs the executable. JavaScript can use `node` with `["-"]`; other
-languages use whichever installed tools can interpret or compile the supplied driver.
-The teacher is responsible for genuinely checking the answer and exiting nonzero
-on test failure. A shell is an explicit program choice, never runner interpolation.
-Tests must not install/download runtimes, compilers, or packages or change machine
-configuration. No separate teacher tool call or workspace-management step is needed.
+对于 C++，老师可以选择 `program: "sh"`、`args: ["-s"]`，并发送一段 shell 脚本：它写出一个包含 `answer.txt` 的小型测试驱动，调用用户的编译器，然后运行可执行文件。JavaScript 可以使用 `node` 加 `["-"]`；其他语言则使用任何能够解释或编译所提供驱动代码的已安装工具。老师有责任切实地检查答案，并在测试失败时以非零状态退出。shell 是一种显式的程序选择，绝不是运行器的字符串插值。测试不得安装/下载运行时、编译器或软件包，也不得更改机器配置。不需要单独的老师工具调用或工作区管理步骤。
 
-### Results and lifecycle
+### 结果与生命周期
 
-The saved grading result has this product-owned JSON shape:
+保存的评分结果采用以下由产品定义的 JSON 结构：
 
 ```ts
 {
@@ -128,65 +77,21 @@ The saved grading result has this product-owned JSON shape:
 }
 ```
 
-Exit 0 shows a green **Tests passed** badge; nonzero shows red **Tests failed**.
-Missing programs, launch errors, timeouts, or unexpected signal termination show
-neutral **Could not run tests**. An unexpected grader/workspace failure is recorded by
-the host as `grading.error` and also gets the neutral presentation. All these completed
-outcomes accept the answer and continue the teacher; they are not validation rejections.
-They describe the supplied tests, **not correct/incorrect**, and there is no score.
+退出码为 0 时显示绿色的 **测试通过**（Tests passed）徽章；非零时显示红色的 **测试未通过**（Tests failed）。程序缺失、启动错误、超时或意外的信号终止会显示中性的 **无法运行测试**（Could not run tests）。意外的评分器/工作区故障会被宿主记录为 `grading.error`，同样采用中性的展示。所有这些已完成的结果都会接受回答并让老师继续；它们不是校验拒绝。它们描述的是所提供的测试，**而不是正确/错误**，也没有分数。
 
-The badge sits immediately after **Coding question** in the host's heading, like a
-native question result. The optional public `mountAnswered` `headerContainer` slot is
-owned by that mount's host generation; older hosts without it retain body-position
-fallback. No surrounding host DOM is queried or modified.
+徽章紧跟在宿主标题中的 **编程问题**（Coding question）之后，与原生问题的结果一样。可选的公开 `mountAnswered` `headerContainer` 插槽归该挂载所在的宿主代际所有；不提供它的旧版宿主会保留正文位置的回退方案。不会查询或修改周围的任何宿主 DOM。
 
-Inside an answered card the order is **original question → submitted code → Your thinking →
-Test output → Model solution**. The original saved `input.question` is always rendered
-above the code through the public host Markdown renderer, including in existing history;
-no new storage, migration, or question regeneration is needed. Both disclosures start closed and use quiet, content-width text buttons
-matching the native quiz's **Why** control: inherited UI font, 11px text, and text-only
-hover feedback. There is no chevron, uppercase styling, or full-row background. Expanded
-labels are **Hide test output** and **Hide model solution**; native button Enter/Space
-activation and visible keyboard focus are retained.
+在已回答的卡片中，顺序为 **原始问题 → 提交的代码 → 你的思考 → 测试输出 → 参考解答**。原始保存的 `input.question` 始终通过公开的宿主 Markdown 渲染器渲染在代码上方，已有的历史记录中也是如此；不需要新的存储、迁移或重新生成问题。两个展开项初始都是关闭的，并使用低调的、与内容同宽的文字按钮，与原生小测的 **为什么**（Why）控件一致：继承的 UI 字体、11px 文字，以及只改变文字的悬停反馈。没有展开箭头、大写样式或整行背景。展开后的标签为 **收起测试输出**（Hide test output）和 **收起参考解答**（Hide model solution）；原生按钮的 Enter/空格激活和可见的键盘焦点都会保留。
 
-Test output appears only for captured text, an error message, or a truncation notice.
-Nonempty stdout/stderr use matching code-block frames and code typography, with a 16rem
-scrolling cap per stream; whitespace is preserved and empty streams do not get boxes.
-Output is never interpreted as HTML. Model solution uses the public host Markdown
-renderer, including fenced code and explanation, mounted only while open. Both disclosures
-share the optional public `footerContainer`, a generation-owned block below host thinking;
-without that
-slot the plugin retains readable body fallback rather than moving or querying host DOM.
-There is no rerun control, automatic regrading, or reference-solution execution.
+只有在捕获到文本、错误消息或截断提示时才会显示测试输出。非空的 stdout/stderr 使用一致的代码块框和代码排版，每个流最高 16rem，超出后滚动；空白字符会被保留，空的流不会显示框。输出绝不会被当作 HTML 解释。参考解答使用公开的宿主 Markdown 渲染器（包括围栏代码和讲解），只在展开时挂载。两个展开项共享可选的公开 `footerContainer`，它是位于宿主思考输入框下方、归宿主代际所有的区块；没有这个插槽时，插件会保留可读的正文回退方案，而不是移动或查询宿主 DOM。没有重新运行控件、自动重新评分或参考解答的执行。
 
-The host owns submission admission, persistence, and continuation. Stop, plugin
-disable, and lost submission authority cancel grading without saving an answer;
-navigation alone does not cancel it. Failed-save/cancelled submissions require an
-explicit learner retry, which may run tests again. Tests should therefore be retry-safe;
-execution is not an exactly-once guarantee. Outside the code editor, Escape offers the
-host's existing **Dismiss this question?** confirmation. Cancel/Escape keeps the draft;
-confirmation skips only the captured question occurrence, without starting a teacher
-turn. If tests are running, the same server request validates the target, parks its
-dismissal, and stops the run before returning. A stale confirmation cannot stop or
-skip a successor question. Normal overlay/dictation Escape priority remains intact.
-Process-tree termination is best-effort:
-POSIX process groups are killed, but a process that creates a separate session may
-survive; Windows tree termination uses `taskkill`; platform behavior needs native testing. Escaped
-processes cannot keep the runner waiting indefinitely on inherited output pipes after
-the deadline or cancellation. Files written outside the run directory are not removed.
+宿主负责提交准入、持久化和后续继续。停止、停用插件以及失去提交权限都会取消评分，并且不保存回答；仅仅是页面导航不会取消它。保存失败/被取消的提交需要学习者显式重试，这可能会再次运行测试。因此，测试应当可以安全地重试；执行并不保证恰好一次。在代码编辑器之外，Escape 会弹出宿主现有的 **放弃这道题目？**（Dismiss this question?）确认框。“取消”/Escape 会保留草稿；确认只会跳过所捕获的那一次问题出现，而不会开始老师的回合。如果测试正在运行，同一个服务端请求会校验目标、暂存其放弃操作，并在返回之前停止这次运行。过期的确认无法停止或跳过后续的问题。常规的浮层/语音听写的 Escape 优先级保持不变。进程树终止是尽力而为的：POSIX 进程组会被终止，但创建了独立会话的进程可能会存活；Windows 的进程树终止使用 `taskkill`；平台行为需要原生测试。逃逸的进程无法在期限到达或取消之后，通过继承的输出管道让运行器无限期等待。写在运行目录之外的文件不会被删除。
 
-Historical questions without the saved grading requirement remain ungraded; they
-are not retroactively executed or rewritten. New graded snapshots use the host's
-protocol 2, while this plugin's compatible question contract remains version 1.
-**Do not downgrade the host with graded questions pending:** an older host can cancel
-an unreadable protocol-2 question rather than merely displaying it as unavailable.
+没有已保存评分要求的历史问题保持未评分状态；它们不会被追溯执行或改写。新的已评分快照使用宿主的协议 2，而本插件兼容的问题契约仍为版本 1。**在有待处理的已评分问题时，不要降级宿主：** 旧版宿主可能会取消一个无法读取的协议 2 问题，而不只是将其显示为不可用。
 
-## Coding practice
+## 编程练习
 
-Practice agents receive the **coding_problem** posing tool, registered separately as
-problem type `code`, label **Coding problem**, contract version 1. The plugin/package name
-remains **Coding questions**. Teacher tooling and existing teaching history are unchanged.
-The host supplies the common fields:
+练习智能体会获得 **coding_problem** 出题工具，它被单独注册为题目类型 `code`，标签为 **编程题目**（Coding problem），契约版本为 1。插件/软件包名称仍为 **编程题**（Coding questions）。老师的工具和已有的教学历史保持不变。宿主提供以下通用字段：
 
 ```ts
 {
@@ -202,116 +107,54 @@ The host supplies the common fields:
 }
 ```
 
-Language and tests are required. The model solution is a **host common field**, never
-repeated inside the plugin payload. It is committed at pose time and never executed.
-The statement remains in the host's durable problem card; it is not duplicated on every
-submission. The dock uses the same editor, diagnostics and editing keys, followed by
-host **Your thinking** and one **Submit** button. There is no reading/reveal stage.
+语言和测试是必需的。参考解答是 **宿主通用字段**，绝不会在插件载荷中重复。它在出题时就已提交，并且绝不会被执行。题目陈述保留在宿主持久化的题目卡片中；不会在每次提交时重复。输入区使用相同的编辑器、诊断和编辑按键，后面是宿主的 **你的思考**（Your thinking）和一个 **提交**（Submit）按钮。没有阅读/显示阶段。
 
-Each nonblank submission runs the same recipe against `answer.txt`, with the same
-limits, permissions and cleanup described above. Its fresh attempt directory is grouped
-under `data/test-runs/<problemId>/`. The exact submitted code, separate thinking and
-`processing: {result: CodingTestResult} | {error: string}` are saved by the host before
-one ordinary practice continuation. Test failures and run errors are observations on
-accepted attempts, not admission rejections or a final correctness assessment.
+每次非空的提交都会针对 `answer.txt` 运行相同的流程，具有上文描述的相同限制、权限和清理。每次全新的尝试目录都归组在 `data/test-runs/<problemId>/` 下。提交的确切代码、单独的思考内容以及 `processing: {result: CodingTestResult} | {error: string}` 会在一次常规的练习继续之前由宿主保存。测试失败和运行错误是对已接受尝试的观察结果，而不是准入拒绝或最终的正确性评估。
 
-The learner can revise and submit repeatedly on the same active problem. Acceptance
-retains the editor value/undo state for iteration; only captured thinking that has not
-changed is cleared by the host. Native/plugin problems share one active-problem gate.
-**Only the existing conclude tool** assesses/closes the problem and reveals the original
-committed model solution in the native conclusion card. Passing tests never auto-concludes,
-and individual attempts have no Model solution toggle.
+学习者可以在同一道活跃的题目上反复修改和提交。接受后会保留编辑器的值/撤销状态以便迭代；宿主只会清除未发生变化的已捕获思考内容。原生题目和插件题目共享同一个活跃题目闸门。**只有现有的 conclude 工具** 会评估/结束题目，并在原生的结束卡片中显示最初提交的参考解答。通过测试绝不会自动结束题目，单次尝试也没有“参考解答”展开开关。
 
-Each saved attempt shows read-only code and its Tests passed/Tests failed/Could not run
-tests heading badge. The order is **submitted code → Your thinking → Test output**.
-Test output uses the same quiet, initially closed disclosure and hidden-empty-output
-policy as teaching. It uses the public `mountSubmitted` `footerContainer` below host
-images/thinking and `headerContainer` for the badge; either missing slot has body fallback.
-Older attempts are never overwritten or reprocessed when a later revision is submitted.
-Processing absent from a saved record does not invent a badge or run tests retroactively.
+每次保存的尝试都会显示只读代码及其“测试通过/测试未通过/无法运行测试”的标题徽章。顺序为 **提交的代码 → 你的思考 → 测试输出**。测试输出使用与教学中相同的低调、初始关闭的展开项，以及隐藏空输出的策略。它使用公开 `mountSubmitted` 位于宿主图片/思考下方的 `footerContainer`，以及用于徽章的 `headerContainer`；任一插槽缺失时都有正文回退方案。提交后续修订时，较早的尝试绝不会被覆盖或重新处理。已保存记录中缺少处理结果时，不会凭空生成徽章，也不会追溯运行测试。
 
-Cancellation follows the host processing signal and existing runner cleanup; no late
-result may save after authority is lost. Navigation/disconnection alone does not cancel
-accepted work. Explicit retry may execute tests again. Missing/disabled/incompatible
-plugins keep an active problem unavailable rather than substituting a native text editor;
-the learner can use native practice dismissal. Escape in code leaves for thinking;
-Escape outside uses the native practice confirmation/layer precedence.
+取消遵循宿主的处理 signal 和现有的运行器清理；失去权限之后，迟到的结果都不得保存。仅仅是页面导航/断开连接不会取消已接受的工作。显式重试可能会再次执行测试。缺失/已停用/不兼容的插件会让活跃题目保持不可用，而不是用原生文本编辑器代替；学习者可以使用原生的练习放弃功能。在代码中按 Escape 会跳到思考输入框；在代码之外按 Escape 则使用原生练习的确认框/层级优先规则。
 
-## Editor and native question behavior
+## 编辑器与原生问题行为
 
-The host supplies Markdown question presentation, the card, reveal/folding, thinking
-and reading-thinking, microphone, model/thinking controls, Submit answer and
-recovery-only Dismiss, native persistence, and teacher continuation. **Dictation always
-targets host thinking, never code.** Checks retain reading-before-reveal. The host
-places the learner's thinking separately from the plugin's code/result presentation.
+宿主提供 Markdown 问题展示、卡片、显示/折叠、思考和阅读思考输入框、麦克风、模型/推理强度控件、“提交答案”（Submit answer）和仅用于恢复的“放弃”（Dismiss）、原生持久化，以及老师的后续继续。**语音听写始终指向宿主的思考输入框，绝不会指向代码。** 检查类问题保留“先阅读再显示”的流程。宿主会把学习者的思考与插件的代码/结果展示分开放置。
 
-The lean CodeMirror 6 editor includes quiet line numbers, undo/redo, bracket matching,
-four-space Tab indentation and newline auto-indentation. **Enter and Shift+Enter insert
-a newline inside code**; **Cmd/Ctrl+Enter submits** through the host. Host thinking
-keeps Enter-to-submit and Shift+Enter-to-newline. The plugin handles editing keys only
-and implements no submit action. **Escape in the active code editor moves focus to
-Your thinking**, without opening the dismissal dialog or changing the draft. From
-there Enter submits; Tab continues the host field cycle (reading thinking → code →
-Your thinking for checks; code → Your thinking for predictions). Tab inside code
-still indents. Shift+Tab keeps the host's model-thinking shortcut. This is field
-navigation only, not an app-wide browser Tab-order redesign. Long lines scroll horizontally. No autocomplete,
-automatic bracket insertion, formatter, fold controls, run/copy toolbar, or IDE services
-are included.
+精简的 CodeMirror 6 编辑器包含低调的行号、撤销/重做、括号匹配、四空格的 Tab 缩进以及换行自动缩进。**在代码中，Enter 和 Shift+Enter 都会插入换行**；**Cmd/Ctrl+Enter 通过宿主提交**。宿主的思考输入框保持 Enter 提交、Shift+Enter 换行。插件只处理编辑按键，不实现任何提交操作。**在活跃的代码编辑器中按 Escape 会把焦点移到“你的思考”**，不会打开放弃对话框，也不会改变草稿。在那里按 Enter 即可提交；Tab 继续宿主的字段循环（检查类问题为：阅读思考 → 代码 → 你的思考；预测类问题为：代码 → 你的思考）。在代码中按 Tab 仍然是缩进。Shift+Tab 保持为宿主的模型推理强度快捷键。这只是字段导航，并不是对应用范围内浏览器 Tab 顺序的重新设计。长行会水平滚动。不包含自动补全、自动插入括号、格式化工具、折叠控件、运行/复制工具栏或 IDE 服务。
 
-### Live syntax feedback
+### 实时语法反馈
 
-Python, JavaScript, TypeScript, C, C++, Java, Rust, Go, and JSON get advisory syntax
-feedback from bundled parsers. Catalog aliases such as `js`, `ts`, and `cpp` follow the
-canonical language policy. After a 300ms typing pause, parser problems appear as red
-underlines or point markers with a **“Syntax problem.”** hover message. There is no
-extra gutter, problems panel, shortcut, automatic fix, or code modification. Saved
-read-only answers do not show diagnostics.
+Python、JavaScript、TypeScript、C、C++、Java、Rust、Go 和 JSON 会从捆绑的解析器获得建议性的语法反馈。`js`、`ts` 和 `cpp` 等目录别名遵循规范语言策略。停止输入 300ms 后，解析器发现的问题会以红色下划线或点状标记显示，悬停时显示 **“语法问题。”**（“Syntax problem.”）提示。没有额外的边栏、问题面板、快捷键、自动修复或代码修改。已保存的只读回答不会显示诊断。
 
-This is parser feedback, not compiler validation or type checking. An unmarked answer
-may still contain errors; large answers use the available parsed region without
-forcing a full-document parse. Other languages retain highlighting only; in particular,
-the bundled SQL parser is not a SQL validator. Diagnostics never block submission.
+这是解析器反馈，而不是编译器校验或类型检查。没有标记的回答仍可能包含错误；大型回答使用可用的已解析区域，而不会强制解析整个文档。其他语言只保留语法高亮；特别是，捆绑的 SQL 解析器并不是 SQL 校验器。诊断绝不会阻止提交。
 
-The full standard `@codemirror/language-data` catalog ships locally. Language aliases
-load highlighting on demand; unknown languages or failed loads remain usable as plain
-text. There are no highlighting downloads, language settings, or language restrictions.
-CodeMirror One Dark colors sit inside a host-themed monospace frame.
+完整的标准 `@codemirror/language-data` 目录在本地随插件发布。语言别名会按需加载语法高亮；未知语言或加载失败时仍可作为纯文本使用。没有语法高亮下载、语言设置或语言限制。CodeMirror One Dark 配色位于一个跟随宿主主题的等宽字体框内。
 
-Pending questions/problems and submitted answers/attempts are durable host records. Unsubmitted code
-and thinking use **host in-memory drafts**: folding/remounting while the session model
-lives retains drafts, but model destruction, reload, and app restart need not. The
-plugin has no custom durable answer store, backend RPCs, views, or settings.
+待作答的问题/题目以及已提交的回答/尝试都是持久化的宿主记录。未提交的代码和思考内容使用 **宿主的内存草稿**：在会话模型存活期间折叠/重新挂载会保留草稿，但模型被销毁、重新加载和应用重启时则不一定保留。插件没有自定义的持久化回答存储、后端 RPC、视图或设置。
 
-## Development
+## 开发
 
-In the extracted authoring kit, copy the shared **kit-root `types/` contents** into
-this project's `.sdk/` **before dependency setup**. From `plugins/coding-questions/`:
+在解压后的编写工具包中，请在 **准备依赖之前**，把共享的 **工具包根目录下 `types/` 的内容** 复制到本项目的 `.sdk/` 中。在 `plugins/coding-questions/` 下运行：
 
 ```sh
 mkdir -p .sdk
 cp -R ../../types/. .sdk/
 ```
 
-In a LearnHarness source checkout instead, `npm run sdk` generates `.sdk/` using
-`../../scripts/build-plugin-types.mjs`. That command is **checkout-only**; the
-extracted kit does not include the host generator. The SDK is type-only and is never
-imported at runtime.
+如果是在 LearnHarness 源码检出中，则改用 `npm run sdk`，它会使用 `../../scripts/build-plugin-types.mjs` 生成 `.sdk/`。该命令 **仅限仓库检出**；解压后的工具包不包含宿主生成器。SDK 只包含类型，绝不会在运行时被导入。
 
-Set up development dependencies separately, including the SDK's declared
-peer dependencies/types. Neither this source reference nor LearnHarness installs them
-automatically. With dependencies already available, the build-only command is:
+请单独准备开发依赖，包括 SDK 声明的 peer 依赖/类型。这份源码参考和 LearnHarness 都不会自动安装它们。在依赖已就绪的情况下，仅构建的命令是：
 
 ```sh
 npm run build
 ```
 
-The build bundles JavaScript dependencies, emits ESM frontend/CommonJS backend and
-local `assets/` chunks, and includes third-party license notices. It needs no private
-host imports or host app build.
+构建会打包 JavaScript 依赖，输出 ESM 前端/CommonJS 后端以及本地的 `assets/` 分块，并包含第三方许可证声明。它不需要私有的宿主导入，也不需要构建宿主应用。
 
-## Tests and boundaries
+## 测试与边界
 
-After SDK/dependency setup, these are plugin-only checks:
+完成 SDK/依赖准备之后，以下是仅针对插件的检查：
 
 ```sh
 npm run typecheck            # strict public SDK consumer, skipLibCheck=false
@@ -320,61 +163,26 @@ npm run build
 npm run test:browser          # built plugin in a disposable Chrome fixture
 ```
 
-Unit tests cover contracts, parser diagnostics, runner bytes/arguments/environment,
-workspace cleanup, launch errors, output limits, timeout/cancellation, registration
-and result parsing. They execute real trusted test programs; they are not sandboxed.
-The browser fixture covers editing keys, drafts, saved teaching/practice presentation,
-badges, output/solution disclosures and cleanup. It requires local Chrome/Chromium
-(`CHROME_PATH` or a supported default path) and mocks the host, including Markdown
-mounts. It does not exercise actual host submission authority, Markdown rendering,
-practice continuation or native conclusion. Those need checkout host integration tests,
-not just this exported project.
+单元测试覆盖契约、解析器诊断、运行器的字节/参数/环境、工作区清理、启动错误、输出限制、超时/取消、注册以及结果解析。它们会执行真实的、受信任的测试程序；这些测试没有沙箱隔离。浏览器测试夹具覆盖编辑按键、草稿、已保存的教学/练习展示、徽章、输出/解答展开项以及清理。它需要本地的 Chrome/Chromium（`CHROME_PATH` 或受支持的默认路径），并模拟宿主（包括 Markdown 挂载）。它不会测试真实宿主的提交权限、Markdown 渲染、练习继续或原生的结束流程。这些需要在仓库检出中进行宿主集成测试，而不能只靠这个导出的项目。
 
-`npm run test:native` is a checkout-oriented teaching harness. It requires built plugin
-files, an already built matching host in `LH_STANDALONE`, local Chrome and the checkout's
-macOS Electron Node runtime. The host must supply question grading, practice registrations
-and answered header/footer slots. The harness copies the host into disposable storage
-and uses faux-agent traffic and installed Node test programs; it does not cover practice
-turns. Its fixture installs a Community `coding-questions` package, an admission assumption
-incompatible with the reserved Core ID on a Core-packaged host. It is not a portable
-Core smoke test or an instruction to install a Community duplicate.
+`npm run test:native` 是面向仓库检出的教学测试工具。它需要已构建的插件文件、`LH_STANDALONE` 中一个已构建好的匹配宿主、本地 Chrome，以及检出中的 macOS Electron Node 运行时。宿主必须提供问题评分、练习注册以及已回答状态的 header/footer 插槽。该工具会把宿主复制到一次性存储中，并使用模拟智能体流量和已安装的 Node 测试程序；它不覆盖练习回合。它的测试夹具会安装一个社区版的 `coding-questions` 软件包，这一准入假设与核心打包宿主上保留的核心插件 ID 不兼容。它不是可移植的核心插件冒烟测试，也不是安装社区重复副本的指示。
 
-Fixture checks do not establish real-provider correctness, microphone/IME behavior,
-physical Electron-window UX, signed-installer behavior or cross-platform execution.
-Use synthetic data and loopback fixtures, never real learner profiles or paid providers.
+测试夹具检查不能证明真实服务商下的正确性、麦克风/输入法行为、物理 Electron 窗口的 UX、签名安装包的行为或跨平台执行。请使用合成数据和回环测试夹具，绝不要使用真实的学习者档案或付费服务商。
 
-## API boundary
+## API 边界
 
-Only type-only `learnharness-plugin-api` imports and public registration/UI contracts
-are used. Backend execution uses Node built-ins, not private host imports. The public
-`gradeAnswer`/`processSubmission` hooks supply host-owned await/save lifecycles. Optional
-answered/submitted `headerContainer` and `footerContainer` supply bounded mounts beside
-the heading and below host thinking. Public `mountMarkdown` renders saved questions and
-teaching model solutions; native practice conclusion reveals its committed solution.
-The plugin adds no submission interceptor, worker, separate agent, custom question/problem
-lifecycle, or conclusion tool. Answers/submissions stay strings; grading/processing remain
-separate metadata. Unavailable/disabled behavior and
-safe dismissal remain host-owned. If the API cannot support a required behavior, stop
-and request an explicit host fix.
+只使用仅类型的 `learnharness-plugin-api` 导入以及公开的注册/UI 契约。后端执行使用 Node 内置模块，而不是私有的宿主导入。公开的 `gradeAnswer`/`processSubmission` hook 提供由宿主掌管的等待/保存生命周期。可选的已回答/已提交 `headerContainer` 和 `footerContainer` 提供位于标题旁边和宿主思考输入框下方的有界挂载点。公开的 `mountMarkdown` 渲染已保存的问题和教学中的参考解答；原生练习的结束流程会显示其预先提交的解答。插件不添加提交拦截器、worker、单独的智能体、自定义的问题/题目生命周期或结束工具。回答/提交始终是字符串；评分/处理结果始终是单独的元数据。不可用/已停用时的行为以及安全的放弃操作仍由宿主掌管。如果 API 无法支持某项必需的行为，请停下来，请求宿主进行显式修复。
 
-## Source reading route
+## 源码阅读路线
 
-- [`src/contract.ts`](src/contract.ts): separate teaching/practice definitions,
-  schemas and model-facing execution instructions.
-- [`src/backend.ts`](src/backend.ts) → [`src/runner.ts`](src/runner.ts): public
-  grading/processing hooks, process execution, cancellation and cleanup.
-- [`src/main.ts`](src/main.ts) → [`src/editor.ts`](src/editor.ts),
-  [`src/diagnostics.ts`](src/diagnostics.ts) and [`src/question-view.ts`](src/question-view.ts):
-  renderer registration, controlled editors, advisory syntax and saved prompts.
-- [`src/result-view.ts`](src/result-view.ts), [`src/solution-view.ts`](src/solution-view.ts)
-  and [`src/disclosure.ts`](src/disclosure.ts): bounded header/footer mounts and cleanup.
-- [`scripts/build.mjs`](scripts/build.mjs) and [`tests/`](tests/): bundles, licenses and fixtures.
+- [`src/contract.ts`](src/contract.ts)：分开的教学/练习定义、schema 以及面向模型的执行说明。
+- [`src/backend.ts`](src/backend.ts) → [`src/runner.ts`](src/runner.ts)：公开的评分/处理 hook、进程执行、取消和清理。
+- [`src/main.ts`](src/main.ts) → [`src/editor.ts`](src/editor.ts)、[`src/diagnostics.ts`](src/diagnostics.ts) 和 [`src/question-view.ts`](src/question-view.ts)：渲染器注册、受控编辑器、建议性语法检查以及已保存的问题。
+- [`src/result-view.ts`](src/result-view.ts)、[`src/solution-view.ts`](src/solution-view.ts) 和 [`src/disclosure.ts`](src/disclosure.ts)：有界的 header/footer 挂载及其清理。
+- [`scripts/build.mjs`](scripts/build.mjs) 和 [`tests/`](tests/)：打包产物、许可证和测试夹具。
 
-See the [example map](../../docs/plugin-examples.md),
-[authoring guide](../../docs/plugin-authoring.md) and
-[API reference](../../docs/plugin-api/README.md).
+参见[示例地图](../../docs/plugin-examples.md)、[编写指南](../../docs/plugin-authoring.md)和 [API 参考](../../docs/plugin-api/README.md)。
 
-## License
+## 许可证
 
-AGPL-3.0-only. Built packages include `THIRD-PARTY-LICENSES.txt` for bundled
-CodeMirror/Lezer and supporting libraries.
+AGPL-3.0-only。构建出的软件包包含 `THIRD-PARTY-LICENSES.txt`，用于捆绑的 CodeMirror/Lezer 及其支持库。

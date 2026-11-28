@@ -99,6 +99,7 @@ contextBridge.exposeInMainWorld("lh", {
 	installUpdate: () => ipcRenderer.send("lh:update-install"),
 	getUpdateState: () => ipcRenderer.invoke("lh:update:get"),
 	checkForUpdates: () => ipcRenderer.invoke("lh:update:check"),
+	relaunch: () => ipcRenderer.invoke("lh:relaunch"),
 	onOpenSettings: (cb) => {
 		openSettingsListener = cb;
 		if (pendingOpenSettings !== null) {

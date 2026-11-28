@@ -18,6 +18,7 @@ import { ComposerActions, NodePickerControl } from "@/components/composer-action
 import { OPENING_PROMPT_FAILURE } from "@/components/opening-prompt";
 import { SessionStarter } from "@/components/start-session";
 import type { ChatSettings, GraphSnapshot } from "@/src/core";
+import { tr } from "@/src/core";
 
 /** The draft's pick set (owner round 10): the SAME shape the home pick
  *  bar lifts — resolved nodes as the learner SAW them at pick time. */
@@ -178,11 +179,11 @@ export function DraftShell({
 						<Conversation className="h-full min-w-0 flex-1" initial="instant">
 							<ConversationContent className="min-h-full gap-0 p-0">
 								<ConversationEmptyState
-									title={mode === "practice" ? "New practice session" : "New session"}
+									title={mode === "practice" ? tr("新建练习会话", "New practice session") : tr("新建会话", "New session")}
 									description={
 										mode === "practice"
-											? "Pick nodes from your knowledge graph, describe what you want to practice, or bring your own problem."
-											: "The teacher will open by probing what you already know."
+											? tr("从知识图谱中选择节点、描述你想练习的内容，或者带上你自己的题目。", "Pick nodes from your knowledge graph, describe what you want to practice, or bring your own problem.")
+											: tr("老师会先摸底，了解你已经掌握了什么。", "The teacher will open by probing what you already know.")
 									}
 								/>
 							</ConversationContent>
@@ -212,7 +213,7 @@ export function DraftShell({
 										// input (owner refinement round, 2026-09-24) — no lesson has
 										// started yet, so the composer must not read like one is in
 										// flight.
-										placeholder={mode === "practice" ? "What do you want to practice?" : "What do you want to learn?"}
+										placeholder={mode === "practice" ? tr("你想练习什么？", "What do you want to practice?") : tr("你想学习什么？", "What do you want to learn?")}
 									/>
 								</div>
 								<StatsBar
@@ -376,7 +377,7 @@ export function NewSession({ initialConfigured, mode = "teach" }: { initialConfi
 								onClick={() => setSetupOpen(true)}
 								className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 							>
-								Set up your models
+								{tr("设置你的模型", "Set up your models")}
 							</button>
 						)
 					)

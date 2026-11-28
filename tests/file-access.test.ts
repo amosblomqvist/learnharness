@@ -313,18 +313,18 @@ describe("settings parsing and UI", () => {
 	it("SSR makes OFF, empty ON, editable folders and fail-closed errors explicit", () => {
 		const render = (agent?: Parameters<typeof AgentSection>[0]["agent"], fileAccessError?: string) => renderToStaticMarkup(React.createElement(AgentSection, { agent, fileAccessError, models: undefined, graph: undefined, compaction: undefined, onSectionChange: () => true, onModelsChange: () => {}, onCompactionChange: () => true }));
 		const off = render();
-		assert.match(off, /Broad local source access/);
-		assert.match(off, /aria-checked="false"[^>]*aria-label="Restrict to listed folders"/);
+		assert.match(off, /可广泛访问本地资料，受保护位置除外/);
+		assert.match(off, /aria-checked="false"[^>]*aria-label="仅限列出的文件夹"/);
 		const empty = render({ fileAccess: { restricted: true, folders: [] } });
-		assert.match(empty, /Restricted: no folders allowed/);
-		assert.match(empty, /aria-checked="true"[^>]*aria-label="Restrict to listed folders"/);
+		assert.match(empty, /已限制：当前不允许任何文件夹/);
+		assert.match(empty, /aria-checked="true"[^>]*aria-label="仅限列出的文件夹"/);
 		const populated = render({ fileAccess: { restricted: true, folders: [a] } });
-		assert.match(populated, />Only listed folders and subfolders\.<\/span>/);
-		assert.doesNotMatch(populated, /Protected locations remain blocked/);
-		assert.match(populated, /aria-checked="true"[^>]*aria-label="Restrict to listed folders"/);
+		assert.match(populated, />仅限列出的文件夹及其子文件夹。<\/span>/);
+		assert.doesNotMatch(populated, /Protected locations remain blocked|受保护位置/);
+		assert.match(populated, /aria-checked="true"[^>]*aria-label="仅限列出的文件夹"/);
 		assert.match(render({ fileAccess: { restricted: false, folders: [a] } }), /file-access-remove/);
 		const failed = render(undefined, "File-access configuration error: blocked");
 		assert.match(failed, /file-access-config-error/);
-		assert.match(failed, /aria-checked="true"[^>]*aria-label="Restrict to listed folders"/);
+		assert.match(failed, /aria-checked="true"[^>]*aria-label="仅限列出的文件夹"/);
 	});
 });

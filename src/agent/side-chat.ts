@@ -29,6 +29,8 @@ import { PATHS } from "../../config.ts";
 import type { SideModelTurn } from "../core/side-chat.ts";
 import type { PiEngine } from "./models.ts";
 import { readPromptOverride } from "./prompt-segments.ts";
+import { tr } from "../core/i18n.ts";
+import { VOICE_LANGUAGE_RULE, withOutputLanguage } from "./output-language.ts";
 
 const PROMPTS_DIR = path.join(PATHS.root, "src", "agent", "prompts");
 const SIDE_BASE = path.join(PROMPTS_DIR, "side-chat", "00-base.md");
@@ -53,10 +55,10 @@ export function composeSideChatInstructions(switches: Record<string, boolean> = 
 		segments.push(override ?? readSource(path.join(PROMPTS_DIR, ...key.split("/"))));
 	}
 	segments.push(readSource(SIDE_STYLE));
-	return segments
+	return withOutputLanguage(segments
 		.map((s) => s.trim())
 		.filter(Boolean)
-		.join("\n\n---\n\n");
+		.join("\n\n---\n\n"), VOICE_LANGUAGE_RULE);
 }
 
 export interface SideAnswerResult {
@@ -138,10 +140,10 @@ export async function streamSideAnswer(opts: {
 				failure = new Error(event.error.errorMessage ?? event.reason);
 				const partial = textOf(event.error) || text;
 				if (event.reason === "aborted") return { text: partial, usage: event.error.usage, outcome: "aborted" };
-				return { text: partial, usage: event.error.usage, outcome: "error", errorMessage: event.error.errorMessage ?? "The model call failed." };
+				return { text: partial, usage: event.error.usage, outcome: "error", errorMessage: event.error.errorMessage ?? tr("模型调用失败。", "The model call failed.") };
 			}
 		}
-		failure = new Error("The model stream ended without a result.");
+		failure = new Error(tr("模型流已结束，但未返回结果。", "The model stream ended without a result."));
 		return { text, outcome: "error", errorMessage: (failure as Error).message };
 	} catch (err) {
 		failure = err;

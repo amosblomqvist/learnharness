@@ -7,5 +7,11 @@
   "description": "Teaching questions and coding practice with syntax highlighting and automatic tests using your installed tools. Runs local code with your user permissions; not sandboxed.",
   "main": "main.js",
   "backend": "backend.cjs",
-  "styles": "styles.css"
+  "styles": "styles.css",
+  "locales": {
+    "zh": {
+      "name": "编程题",
+      "description": "支持语法高亮的教学编程问题与编程练习，并使用你已安装的工具自动运行测试。代码以你的用户权限在本地运行，未经沙箱隔离。"
+    }
+  }
 }

@@ -44,9 +44,9 @@ function fixture() {
 it("frontend activates without browser globals and registers controlled color and scale settings", async () => {
   const f = fixture(), off = await activate(f.ctx);
   try {
-    assert.equal(f.actions.get("draw")!.name, "Draw"); assert.equal(f.schema()!.rows.length, 3);
+    assert.equal(f.actions.get("draw")!.name, "绘图"); assert.equal(f.schema()!.rows.length, 3);
     assert.deepEqual(f.schema()!.rows.map(row => [row.type, row.label, row.value]), [
-      ["text", "Dark mode ink color", "#ffffff"], ["text", "Light mode ink color", "#000000"], ["number", "Image scale", 50],
+      ["text", "深色模式墨迹颜色", "#ffffff"], ["text", "浅色模式墨迹颜色", "#000000"], ["number", "图片缩放", 50],
     ]);
     for (const [index, key, color] of [[0, "darkInkColor", "#123456"], [1, "lightInkColor", "#abcdef"]] as const) {
       const row = f.schema()!.rows[index]!;
@@ -88,7 +88,7 @@ it("Draw declares the approved session shortcut and keyboard invocation toggles 
     await toggle.run(context);
     assert.equal((hand.disabled as (context: PluginActionContext) => boolean)(context), true); await hand.run(context);
     assert.equal(disabled(context), true); await undo.run(context); assert.equal(f.surface(), undefined);
-    await draw.run(context); assert.equal(f.surface()?.title, "Drawing pad");
+    await draw.run(context); assert.equal(f.surface()?.title, "画板");
     assert.equal(disabled(context), true, "an unmounted/not-ready surface cannot claim drawing Undo");
     await draw.run(context); assert.equal(f.surface(), undefined); assert.equal(f.closes(), 1);
     assert.equal(disabled({ placement: "keyboard", surface: "app", pathname: "/" }), true);
@@ -170,13 +170,13 @@ async function refreshFixture(kind: "teaching" | "practice") {
 it("teaching: only the first stroke, and Undo back to empty, refresh the host; later strokes, pans and tool switches do not", async () => {
   const f = await refreshFixture("teaching");
   try {
-    f.reset(); f.draw(0); assert.equal(f.pairs(), 1, "first stroke on an empty sheet"); assert.equal(f.actions.get("draw")!.name, "Draw (unsent)");
+    f.reset(); f.draw(0); assert.equal(f.pairs(), 1, "first stroke on an empty sheet"); assert.equal(f.actions.get("draw")!.name, "绘图（未发送）");
     f.reset(); for (let i = 2; i <= 20; i++) f.draw(i * 10); assert.equal(f.pairs(), 0, "strokes 2-20");
     for (let i = 0; i < 50; i++) f.sheets.setPan(f.state, { x: i, y: -i });
     for (const tool of ["eraser", "hand", "pen"] as const) f.sheets.setTool(f.state, tool);
     assert.equal(f.pairs(), 0, "pan x50 and tool switches");
     for (let i = 0; i < 19; i++) f.sheets.undo(f.state); assert.equal(f.pairs(), 0);
-    f.sheets.undo(f.state); assert.equal(f.pairs(), 1, "undo back to empty"); assert.equal(f.actions.get("draw")!.name, "Draw");
+    f.sheets.undo(f.state); assert.equal(f.pairs(), 1, "undo back to empty"); assert.equal(f.actions.get("draw")!.name, "绘图");
   } finally { f.off(); }
 });
 it("practice: sending, the next stroke, and Undo back to the sent drawing each refresh the host once", async () => {

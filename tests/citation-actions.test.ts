@@ -20,8 +20,8 @@ describe("createCiteAction", () => {
 		});
 		const opened: unknown[] = [];
 		const action = createCiteAction({ chatId: "c1", composer: () => composer, openEditor: (target) => opened.push(target) });
-		assert.equal(action.label, "Cite");
-		assert.equal(action.ariaLabel, "Cite selection in your input");
+		assert.equal(action.label, "引用");
+		assert.equal(action.ariaLabel, "将所选内容引用到输入框");
 		assert.equal(action.onSelect(capture("the chain")), true);
 		assert.deepEqual(seen, [{ version: 1, chatId: "c1", messageId: "m9", text: "the chain", start: 0, end: 9, prefix: "", suffix: "" }]);
 		assert.equal((opened[0] as { fresh: { start: number } }).fresh.start, 3);
@@ -31,7 +31,7 @@ describe("createCiteAction", () => {
 		const action = createCiteAction({ chatId: "c1", composer: () => null, openEditor: () => {} });
 		assert.equal(action.visible(capture("x")), false);
 		assert.equal(action.onSelect(capture("x")), false);
-		assert.equal(action.disabledLabel!(capture("x".repeat(8_001))), "Shorten selection");
+		assert.equal(action.disabledLabel!(capture("x".repeat(8_001))), "请缩短所选内容");
 		assert.equal(action.disabledLabel!(capture("x")), null);
 	});
 });

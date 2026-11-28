@@ -41,6 +41,7 @@ import { activeCompactionOf, type CompactionDetails } from "./compaction.ts";
 import { QUESTION_TOOLS } from "./pending.ts";
 import type { SubagentArtifactData, SubagentResultMeta } from "./contracts/jobs.ts";
 import type { PlanBlockData } from "./contracts/chat.ts";
+import { tr } from "./i18n.ts";
 
 /** One projected transcript part consumed by host renderers and phase/input
  * scanners. type selects the part vocabulary; common fields are optional
@@ -119,7 +120,7 @@ function applyResult(part: LhViewPart, result: ToolResultMessage): void {
 		part.state = "output-error";
 		part.rawInput = part.input;
 		const text = result.content.find((c) => c.type === "text");
-		part.errorText = text && text.type === "text" ? text.text : "The tool call failed.";
+		part.errorText = text && text.type === "text" ? text.text : tr("工具调用失败。", "The tool call failed.");
 	} else {
 		part.state = "output-available";
 		part.output = result.details;
@@ -359,7 +360,7 @@ function toolPartOf(
 			// crash: a malformed quiz must never mount).
 			part.state = "output-error";
 			part.rawInput = block.arguments;
-			part.errorText = exec.errorText ?? "The tool call failed.";
+			part.errorText = exec.errorText ?? tr("工具调用失败。", "The tool call failed.");
 		} else if (isQuestion) {
 			// Fork 2: the clean "Question posed" placeholder is IGNORED —
 			// question tools are client-owned; the dock mounts on the clean

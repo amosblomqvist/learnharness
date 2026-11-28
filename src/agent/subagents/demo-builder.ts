@@ -4,6 +4,8 @@ import type { Usage } from "@earendil-works/pi-ai";
 import { serverExecute } from "../tool-execute.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
+import { withOutputLanguage } from "../output-language.ts";
+import { tr } from "../../core/i18n.ts";
 import type { DemoResult } from "../../core/contracts.ts";
 import { getHeadless, type DemoRunResult, type HeadlessApi } from "./headless.ts";
 import { healToolRecord } from "../tools/heal.ts";
@@ -112,7 +114,7 @@ export function createDemoBuilderTools(
 			execute: serverExecute("write_demo", writeDemoInput, async ({ html }) => {
 				if (!html || html.trim().length === 0) return "ERROR: empty document — write the full HTML.";
 				state.html = html;
-				onActivity?.(`write_demo: ${(html.length / 1024).toFixed(1)} KB`);
+				onActivity?.(tr(`写入互动演示：${(html.length / 1024).toFixed(1)} KB`, `write_demo: ${(html.length / 1024).toFixed(1)} KB`));
 				return `Saved (${html.length} bytes). Now call run_demo to test it — never deliver untested.`;
 			}),
 		},
@@ -132,18 +134,27 @@ export function createDemoBuilderTools(
 					result = await headless.runDemo(state.html, probe ? { probe } : undefined);
 				} catch (err) {
 					const msg = err instanceof Error ? err.message : String(err);
-					onActivity?.("run_demo: browser error");
+					onActivity?.(tr("运行互动演示：浏览器错误", "run_demo: browser error"));
 					return `HEADLESS ERROR (retrying may help): ${msg}`;
 				}
 				state.testedHtml = state.html;
 				state.lastResult = result;
 				onActivity?.(
-					result.ok ? "run_demo: clean" : `run_demo: ${summarizeCounts(result)}`,
+					result.ok ? tr("运行互动演示：通过", "run_demo: clean") : tr(`运行互动演示：${activityCounts(result)}`, `run_demo: ${summarizeCounts(result)}`),
 				);
 				return formatRunResult(result);
 			}),
 		},
 	});
+}
+
+/** Human-facing (activity line) twin of summarizeCounts; the model keeps the English one. */
+function activityCounts(result: DemoRunResult): string {
+	return [
+		result.consoleErrors.length > 0 ? `${result.consoleErrors.length} 个控制台错误` : null,
+		result.pageErrors.length > 0 ? `${result.pageErrors.length} 个页面错误` : null,
+		result.failedRequests.length > 0 ? `${result.failedRequests.length} 个失败的请求` : null,
+	].filter(Boolean).join("、") || "正常";
 }
 
 function summarizeCounts(result: DemoRunResult): string {
@@ -183,7 +194,7 @@ function failureSummary(result: DemoRunResult | null): string {
 
 export async function runDemoBuilder(input: DemoBuilderInput, opts: DemoBuilderOptions = {}): Promise<DemoResult> {
 	const headless = opts.headless ?? getHeadless();
-	const title = input.title.trim() || "Interactive demo";
+	const title = input.title.trim() || tr("互动演示", "Interactive demo");
 	const brief = input.brief.trim() || "(no brief)";
 	const notes = (text: string) => (text.trim() ? text.trim() : undefined);
 
@@ -207,7 +218,7 @@ export async function runDemoBuilder(input: DemoBuilderInput, opts: DemoBuilderO
 		const result = await runSubagent(Object.values(createDemoBuilderTools(state, headless, opts.onActivity)), {
 			role: "demoBuilder",
 			engine: opts.engine,
-			systemPrompt: INSTRUCTIONS,
+			systemPrompt: withOutputLanguage(INSTRUCTIONS),
 			prompt,
 			maxTurns: opts.maxSteps,
 			abortSignal: opts.abortSignal,
@@ -234,7 +245,7 @@ export async function runDemoBuilder(input: DemoBuilderInput, opts: DemoBuilderO
 	// The verify gate: the delivered html must have a clean headless run —
 	// even when the model claims success or forgets the final run_demo.
 	if (state.testedHtml !== state.html || !state.lastResult?.ok) {
-		opts.onActivity?.("final verification");
+		opts.onActivity?.(tr("最终验证", "final verification"));
 		let verify: DemoRunResult;
 		try {
 			verify = await headless.runDemo(state.html);

@@ -34,10 +34,10 @@ describe("theme files — the import validator", () => {
 	it("names the first bad field", () => {
 		const { error: _drop, ...noError } = validFile.colors;
 		const cases: Array<[unknown, RegExp]> = [
-			[[1], /JSON object/],
+			[[1], /JSON 对象/],
 			[{ ...validFile, name: "  " }, /name/],
 			[{ ...validFile, mode: "sepia" }, /mode/],
-			[{ ...validFile, colors: "red" }, /colors must be an object/],
+			[{ ...validFile, colors: "red" }, /colors 必须是一个对象/],
 			[{ ...validFile, colors: noError }, /colors\.error/],
 			[{ ...validFile, colors: { ...validFile.colors, text: "white" } }, /colors\.text/],
 		];

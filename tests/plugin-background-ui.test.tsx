@@ -67,15 +67,15 @@ describe("persisted plugin worker result UI without an active plugin", () => {
 			assert.deepEqual(abort.data, marker.details);
 			const html = renderToStaticMarkup(<SubagentSteerCard message={message} />);
 			assert.match(html, /job-delivery-failure/); assert.match(html, /role="alert"/);
-			assert.match(html, /Background job recovery\/delivery failed/); assert.ok(html.includes(failure));
-			assert.doesNotMatch(html, /aborted by the learner|job-aborted-badge|plugin-worker-card|Background result/);
+			assert.match(html, /后台任务恢复或交付失败/); assert.ok(html.includes(failure));
+			assert.doesNotMatch(html, /已被学习者中止|job-aborted-badge|plugin-worker-card|Background result/);
 			assert.equal(message.parts.some(part => part.type === "data-subagent-artifact" || part.type.startsWith("tool-")), false);
 		}
 	});
 
 	it("keeps the existing learner-abort marker presentation for plugin jobs", () => {
 		const html = renderToStaticMarkup(<SubagentSteerCard message={projectView([buildAbortSteer(job)])[0]!} />);
-		assert.match(html, /job-aborted-badge/); assert.match(html, /plugin/); assert.match(html, /aborted by the learner/);
+		assert.match(html, /job-aborted-badge/); assert.match(html, /插件/); assert.match(html, /已被学习者中止/);
 	});
 });
 
@@ -87,15 +87,15 @@ describe("default plugin worker transcript presentation", () => {
 
 	it("uses native dispatch from ACK details before the job feed arrives", () => {
 		const html = renderToStaticMarkup(<ToolPartRenderer part={ack} />);
-		assert.match(html, /dispatch-card/); assert.match(html, /Plugin worker/); assert.match(html, /Dispatched/);
-		assert.doesNotMatch(html, /tool-call-card|Accepted; keep teaching|Task details/);
+		assert.match(html, /dispatch-card/); assert.match(html, /插件智能体/); assert.match(html, /已派出/);
+		assert.doesNotMatch(html, /tool-call-card|Accepted; keep teaching|任务详情/);
 	});
 
 	it("matches plugin jobs by original toolCallId and reuses active/settled dispatch", () => {
 		for (const status of ["running", "done", "error"] as const) {
 			const html = renderToStaticMarkup(<JobsContext.Provider value={[{ ...job, status, activity: "Checking sources" }]}><ToolPartRenderer part={{ ...ack, result: undefined }} /></JobsContext.Provider>);
 			assert.match(html, /Source checker/); assert.doesNotMatch(html, /tool-call-card/);
-			assert.match(html, status === "running" ? /Checking sources/ : status === "done" ? /finished/ : /failed/);
+			assert.match(html, status === "running" ? /Checking sources/ : status === "done" ? /已完成/ : /失败/);
 		}
 		const unrelated = renderToStaticMarkup(<JobsContext.Provider value={[{ ...job, toolCallId: "another-call" }]}><ToolPartRenderer part={{ ...ack, result: undefined }} /></JobsContext.Provider>);
 		assert.match(unrelated, /tool-call-card/); assert.doesNotMatch(unrelated, /dispatch-card/);
@@ -118,7 +118,7 @@ describe("default plugin worker transcript presentation", () => {
 		assert.doesNotMatch(html, /<details[^>]*data-testid="plugin-worker-result"[^>]*\sopen[\s=>]/);
 		assert.match(html, /<strong[^>]*>verified<\/strong>/); assert.match(html, /lucide-chevron-right/);
 		assert.doesNotMatch(html, /view result|hide result/);
-		assert.match(html, /Task details/); assert.match(html, /raw authoritative worker result/);
+		assert.match(html, /任务详情/); assert.match(html, /raw authoritative worker result/);
 		assert.doesNotMatch(html, /plugin-worker-result-card|dispatch-card/);
 	});
 
@@ -140,21 +140,21 @@ describe("plugin background job labels", () => {
 		const feed = { jobs: [job], extractions: [] };
 		assert.equal(toBlobs(feed)[0]!.title, "Source checker");
 		const html = renderToStaticMarkup(<ActivitySection feed={feed} />);
-		assert.match(html, /Source checker/); assert.match(html, /Plugin worker/); assert.match(html, /lucide-bot/);
-		assert.match(html, /End Plugin worker in Source checker/);
+		assert.match(html, /Source checker/); assert.match(html, /插件智能体/); assert.match(html, /lucide-bot/);
+		assert.match(html, /结束“Source checker”中的插件智能体/);
 		assert.doesNotMatch(html, /Researcher|Demo builder|Figure maker|PDF reader/);
 		assert.equal(toBlobs({ jobs: [{ ...job, plugin: { ...job.plugin!, label: undefined } }], extractions: [] })[0]!.title, "check_sources");
-		assert.equal(toBlobs({ jobs: [{ ...job, plugin: undefined }], extractions: [] })[0]!.title, "Plugin worker");
+		assert.equal(toBlobs({ jobs: [{ ...job, plugin: undefined }], extractions: [] })[0]!.title, "插件智能体");
 	});
 
 	it("extends the dispatch label map without assuming a built-in worker shape", () => {
 		const pending = renderToStaticMarkup(<DispatchCard kind="plugin" toolCallId="original-call" />);
-		assert.match(pending, /Plugin worker/); assert.match(pending, /Dispatched/);
+		assert.match(pending, /插件智能体/); assert.match(pending, /已派出/);
 		const active = renderToStaticMarkup(<JobsContext.Provider value={[job]}><DispatchCard kind="plugin" toolCallId="original-call" /></JobsContext.Provider>);
 		assert.match(active, /Source checker/);
 		for (const status of ["pending", "delivered"] as const) {
 			const done = renderToStaticMarkup(<JobsContext.Provider value={[{ ...job, status: "done", result, delivery: { kind: "result", status } }]}><DispatchCard kind="plugin" toolCallId="original-call" /></JobsContext.Provider>);
-			assert.match(done, /Source checker/); assert.match(done, /finished/);
+			assert.match(done, /Source checker/); assert.match(done, /已完成/);
 			assert.doesNotMatch(done, /delivered|dispatch-card/);
 		}
 	});

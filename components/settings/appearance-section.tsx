@@ -44,6 +44,7 @@ import {
 	type ThemeColorKey,
 } from "@/src/core";
 import { MenuShell } from "@/components/menu-shell";
+import { tr } from "@/src/core";
 import { useInteractionLayers } from "@/components/interaction-layers";
 import { Hint } from "@/components/ui/hint";
 import { BUNDLED_READING_FONTS, useAppearance } from "./appearance.tsx";
@@ -57,7 +58,7 @@ const TRANSCRIPT_FULL_POSITION = TRANSCRIPT_WIDTH_MAX_REM + TRANSCRIPT_WIDTH_STE
 /** The transcript width's label: px at the root's 16px rem, or Full.
  *  Exported for tests. */
 export function transcriptWidthLabel(rem: number | null): string {
-	return rem === null ? "Full" : `${rem * 16}px`;
+	return rem === null ? tr("全宽", "Full") : `${rem * 16}px`;
 }
 
 /**
@@ -88,7 +89,7 @@ function TranscriptWidthSlider({ value, onCommit }: { value: number | null; onCo
 			<input
 				ref={inputRef}
 				type="range"
-				aria-label="Transcript width"
+				aria-label={tr("对话区宽度", "Transcript width")}
 				aria-valuetext={transcriptWidthLabel(draftRem)}
 				data-testid="input-transcript-width"
 				min={TRANSCRIPT_WIDTH_MIN_REM}
@@ -151,18 +152,18 @@ export function composeFontFamily(
 
 /** The Colors grid's labels and the one hint that explains a key. */
 const COLOR_LABELS: Record<ThemeColorKey, { label: string; note?: string }> = {
-	background: { label: "Background" },
-	accent: { label: "Accent", note: "Focus rings, toggles, selection" },
-	surface: { label: "Surface", note: "Cards, inputs, sidebar" },
-	bold: { label: "Bold" },
-	border: { label: "Border" },
-	italic: { label: "Italic" },
-	text: { label: "Text" },
-	code: { label: "Inline code" },
-	textMuted: { label: "Muted text" },
-	error: { label: "Error" },
-	success: { label: "Success" },
-	warning: { label: "Warning" },
+	background: { label: tr("背景", "Background") },
+	accent: { label: tr("强调色", "Accent"), note: tr("焦点环、开关、选区", "Focus rings, toggles, selection") },
+	surface: { label: tr("表面", "Surface"), note: tr("卡片、输入框、侧边栏", "Cards, inputs, sidebar") },
+	bold: { label: tr("粗体", "Bold") },
+	border: { label: tr("边框", "Border") },
+	italic: { label: tr("斜体", "Italic") },
+	text: { label: tr("文本", "Text") },
+	code: { label: tr("行内代码", "Inline code") },
+	textMuted: { label: tr("次要文本", "Muted text") },
+	error: { label: tr("错误", "Error") },
+	success: { label: tr("成功", "Success") },
+	warning: { label: tr("警告", "Warning") },
 };
 
 /** The legacy test ids of the three pre-theme rows (kept stable). */
@@ -221,7 +222,7 @@ function ColorOverrideRow({
 	onCommit: (next: string) => boolean | Promise<boolean>;
 }) {
 	const { label, note } = COLOR_LABELS[colorKey];
-	const empty = `Empty = ${themeColor}`;
+	const empty = tr(`留空 = ${themeColor}`, `Empty = ${themeColor}`);
 	return (
 		<SettingsRow label={label} hint={note ? `${note} · ${empty}` : empty} testid={`row-color-${colorKey}`}>
 			<span className="flex items-center gap-2">
@@ -234,7 +235,7 @@ function ColorOverrideRow({
 				<CommitInput
 					value={value}
 					placeholder={themeColor}
-					ariaLabel={`${label.toLowerCase()} hex`}
+					ariaLabel={tr(`${label}十六进制值`, `${label.toLowerCase()} hex`)}
 					testid={LEGACY_TESTIDS[colorKey] ?? `input-color-${colorKey}`}
 					onCommit={onCommit}
 				/>
@@ -353,9 +354,9 @@ export function AppearanceSection({
 			<div data-testid="group-colors" className="mt-5 flex flex-col gap-2">
 				<div className="flex items-end justify-between gap-4">
 					<p className="text-xs uppercase tracking-widest text-muted-foreground">
-						Colors{" "}
+						{tr("颜色", "Colors")}{" "}
 						<span className="normal-case tracking-normal text-muted-foreground/70">
-							· overrides on top of the theme, kept when you switch
+							{tr("· 在主题之上覆盖，切换主题时保留", "· overrides on top of the theme, kept when you switch")}
 						</span>
 					</p>
 					<button
@@ -364,7 +365,7 @@ export function AppearanceSection({
 						onClick={() => onSectionChange(clearColorOverrides(appearance))}
 						className="h-6 shrink-0 rounded-sm px-2 font-ui text-xs text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
-						Reset all
+						{tr("全部重置", "Reset all")}
 					</button>
 				</div>
 				<div className="grid grid-cols-2 gap-x-10 gap-y-2">
@@ -380,10 +381,10 @@ export function AppearanceSection({
 					))}
 				</div>
 			</div>
-			<p className="mt-5 mb-2 text-xs uppercase tracking-widest text-muted-foreground">Typography</p>
+			<p className="mt-5 mb-2 text-xs uppercase tracking-widest text-muted-foreground">{tr("排版", "Typography")}</p>
 			<SettingsRow
-				label="Reading font"
-				hint={`Empty = ${DEFAULT_READING_FONT}`}
+				label={tr("阅读字体", "Reading font")}
+				hint={tr(`留空 = ${DEFAULT_READING_FONT}`, `Empty = ${DEFAULT_READING_FONT}`)}
 				testid="row-font"
 			>
 				<span ref={fontMenuOpen ? menuAnchorRef : undefined} className="relative flex items-center gap-2">
@@ -397,7 +398,7 @@ export function AppearanceSection({
 						const triggerButton = (
 							<SettingsMenuTrigger
 								value={appearance?.fontFamily || DEFAULT_READING_FONT}
-								aria-label="Reading font"
+								aria-label={tr("阅读字体", "Reading font")}
 								aria-expanded={fontMenuOpen}
 								data-testid="font-trigger"
 								onClick={openFontMenu}
@@ -407,7 +408,7 @@ export function AppearanceSection({
 						return fontMenuOpen ? (
 							triggerButton
 						) : (
-							<Hint label="Choose from your installed fonts" side="left">
+							<Hint label={tr("从已安装的字体中选择", "Choose from your installed fonts")} side="left">
 								{triggerButton}
 							</Hint>
 						);
@@ -429,21 +430,21 @@ export function AppearanceSection({
 										? undefined
 										: localFonts === null
 											? enumEmpty
-												? "Common families — installed fonts could not be read"
-												: "Common families — your installed list needs the desktop app"
-											: "Your installed fonts"
+												? tr("常用字体 — 无法读取已安装的字体", "Common families — installed fonts could not be read")
+												: tr("常用字体 — 需要桌面应用才能列出已安装的字体", "Common families — your installed list needs the desktop app")
+											: tr("你已安装的字体", "Your installed fonts")
 								}
 							/>
 						</MenuShell>
 					)}
 				</span>
 			</SettingsRow>
-			<SettingsRow label="Reading font size" hint={`${resolved.proseFontSize}px`} testid="row-prose-size">
+			<SettingsRow label={tr("阅读字号", "Reading font size")} hint={`${resolved.proseFontSize}px`} testid="row-prose-size">
 				<CommitInput
 					type="number"
 					value={String(appearance?.proseFontSize ?? "")}
 					placeholder="16"
-					ariaLabel="prose font size"
+					ariaLabel={tr("阅读字号", "prose font size")}
 					testid="input-prose-size"
 					onCommit={(v) => {
 						// Empty = factory default (owner, fix wave): omit the key so the record
@@ -458,33 +459,36 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Code ligatures" testid="row-code-ligatures">
+			<SettingsRow label={tr("代码连字", "Code ligatures")} testid="row-code-ligatures">
 				<Toggle
 					checked={resolved.codeLigatures}
-					label="Code ligatures"
+					label={tr("代码连字", "Code ligatures")}
+					testid="toggle-code-ligatures"
 					onChange={(on) => onSectionChange({ ...appearance, codeLigatures: on })}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Session names in serif" testid="row-session-serif">
+			<SettingsRow label={tr("会话名称使用衬线字体", "Session names in serif")} testid="row-session-serif">
 				<Toggle
 					checked={appearance?.sessionNameSerif ?? true}
-					label="session names serif"
+					label={tr("会话名称使用衬线字体", "session names serif")}
+					testid="toggle-session-names-serif"
 					onChange={(on) => onSectionChange({ ...appearance, sessionNameSerif: on })}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Compact session list" testid="row-compact-session-list">
+			<SettingsRow label={tr("紧凑会话列表", "Compact session list")} testid="row-compact-session-list">
 				<Toggle
 					checked={resolved.compactSessionList}
-					label="Compact session list"
+					label={tr("紧凑会话列表", "Compact session list")}
+					testid="toggle-compact-session-list"
 					onChange={(on) => onSectionChange({ ...appearance, compactSessionList: on })}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Heading weight" hint={`${resolved.mdRendering.headingWeight}`} testid="row-heading-weight">
+			<SettingsRow label={tr("标题字重", "Heading weight")} hint={`${resolved.mdRendering.headingWeight}`} testid="row-heading-weight">
 				<CommitInput
 					type="number"
 					value={String(md?.headingWeight ?? "")}
 					placeholder="900"
-					ariaLabel="heading weight"
+					ariaLabel={tr("标题字重", "heading weight")}
 					testid="input-heading-weight"
 					onCommit={(v) => {
 						// Empty = factory default (owner, fix wave): Number("") is 0, so
@@ -501,17 +505,18 @@ export function AppearanceSection({
 					}}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Transcript width" testid="row-transcript-width">
+			<SettingsRow label={tr("对话区宽度", "Transcript width")} testid="row-transcript-width">
 				<TranscriptWidthSlider
 					value={resolved.transcriptMaxWidth}
 					// Full = absence (the unset representation for numbers).
 					onCommit={(rem) => { void onSectionChange({ ...appearance, transcriptMaxWidth: rem ?? undefined }); }}
 				/>
 			</SettingsRow>
-			<SettingsRow label="Adapt question layout" testid="row-adaptive-questions">
+			<SettingsRow label={tr("自适应问题布局", "Adapt question layout")} testid="row-adaptive-questions">
 				<Toggle
 					checked={resolved.adaptiveQuestions}
-					label="Adapt question layout"
+					label={tr("自适应问题布局", "Adapt question layout")}
+					testid="toggle-adapt-question-layout"
 					onChange={(on) => onSectionChange({ ...appearance, adaptiveQuestions: on })}
 				/>
 			</SettingsRow>
@@ -546,10 +551,11 @@ export function GraphSection({
 			    switch below arrived: off ≠ no graph, off = the graph stops
 			    growing. The testid keeps the old name's shape (row-enabled) so
 			    this stays one rename, not a test re-pin. */}
-			<SettingsRow label="Extraction" hint="Off = the graph stops growing" testid="graph-row-enabled">
+			<SettingsRow label={tr("知识提取", "Extraction")} hint={tr("关闭 = 图谱停止增长", "Off = the graph stops growing")} testid="graph-row-enabled">
 				<Toggle
 					checked={graph?.enabled ?? true}
-					label="extraction enabled"
+					label={tr("启用知识提取", "extraction enabled")}
+					testid="toggle-extraction-enabled"
 					onChange={(on) =>
 						// Compose, never replace-whole (the section PUT is, but the
 					// row must not drop its sibling field — fixed with the budget
@@ -562,23 +568,24 @@ export function GraphSection({
 			    round): display-only. Off = the home shows the chains view
 			    instead of the canvas. The ledgers, the pipeline, everything
 			    data keeps working — that is the extraction switch above. */}
-			<SettingsRow label="Graph rendering" hint="Off = home shows the chains view" testid="graph-row-rendering">
+			<SettingsRow label={tr("图谱渲染", "Graph rendering")} hint={tr("关闭 = 首页显示推理链视图", "Off = home shows the chains view")} testid="graph-row-rendering">
 				<Toggle
 					checked={graph?.rendering ?? true}
-					label="graph rendering enabled"
+					label={tr("启用图谱渲染", "graph rendering enabled")}
+					testid="toggle-graph-rendering-enabled"
 					onChange={(on) => onSectionChange({ ...graph, rendering: on })}
 				/>
 			</SettingsRow>
 			<SettingsRow
-				label="Extraction chunk budget"
-				hint={`${resolved.extractionChunkTokens} tok`}
+				label={tr("提取分块预算", "Extraction chunk budget")}
+				hint={tr(`${resolved.extractionChunkTokens} token`, `${resolved.extractionChunkTokens} tok`)}
 				testid="graph-row-chunk-tokens"
 			>
 				<CommitInput
 					type="number"
 					value={String(graph?.extractionChunkTokens ?? "")}
 					placeholder={String(resolved.extractionChunkTokens)}
-					ariaLabel="extraction chunk budget"
+					ariaLabel={tr("提取分块预算", "extraction chunk budget")}
 					testid="input-chunk-tokens"
 					onCommit={(v) => {
 						// Empty = factory default (the fix-wave discipline): absence is

@@ -1,6 +1,7 @@
 import { isPluginHostError } from "./plugin-host.ts";
 import { apiRequestRefusal } from "./desktop-access.ts";
 import type { PluginFrontendContext, PluginInfo } from "../core/plugins.ts";
+import { tr } from "../core/i18n.ts";
 
 /** Thin HTTP adapter, separately injectable so its tests never boot plugins. */
 export interface PluginTransportHost {
@@ -25,7 +26,7 @@ export function createPluginTransport(deps: { getHost(): Promise<PluginTransport
 		try { return await handle(); }
 		catch (error) {
 			const status = error instanceof InputError ? 400 : isPluginHostError(error) ? error.status : 500;
-			return json({ error: error instanceof Error || isPluginHostError(error) ? error.message : "Plugin request failed" }, status);
+			return json({ error: error instanceof Error || isPluginHostError(error) ? error.message : tr("插件请求失败", "Plugin request failed") }, status);
 		}
 	};
 	const catalog = (host: PluginTransportHost) => ({ plugins: host.list(), directory: deps.directory, conflicts: host.conflicts() });

@@ -1,152 +1,79 @@
-# Keyboard shortcuts
+# 键盘快捷键
 
-**Mod** means ⌘ on macOS and Ctrl on Windows/Linux; the dispatcher accepts
-either modifier on every platform. Press **?** outside a text field for the
-in-app cheat sheet. See [Getting started](getting-started.md) for setup.
+**Mod** 在 macOS 上表示 ⌘，在 Windows/Linux 上表示 Ctrl；快捷键分发器在所有平台上都接受这两种修饰键。在文本框之外按 **?** 可打开应用内的快捷键速查表。设置相关内容请参阅[快速上手](getting-started.md)。
 
-## Default key map
+## 默认键位
 
-| Action | Binding |
+| 操作 | 绑定 |
 |---|---|
-| Toggle dictation | Mod+D |
-| Open settings | Mod+, |
-| Model selector | Mod+K |
-| Cycle thinking level | Shift+Tab |
-| Toggle sessions sidebar | Mod+B |
-| Search sessions | Mod+Shift+F |
-| Graph view | Mod+G |
-| New session | Mod+N |
-| Rename current session | F2 |
-| Toggle all your thinking in the session | Mod+T |
-| Find in session / search graph or chains view | Mod+F |
-| Shortcut cheat sheet | ? |
+| 开关语音听写 | Mod+D |
+| 打开设置 | Mod+, |
+| 模型选择器 | Mod+K |
+| 切换推理强度 | Shift+Tab |
+| 开关会话侧边栏 | Mod+B |
+| 搜索会话 | Mod+Shift+F |
+| 图谱视图 | Mod+G |
+| 新建会话 | Mod+N |
+| 重命名当前会话 | F2 |
+| 展开/收起会话中你的全部思考 | Mod+T |
+| 在会话中查找 / 搜索图谱或推理链视图 | Mod+F |
+| 快捷键速查表 | ? |
 
-Surface-specific actions require their surface to be mounted. Bare shortcuts
-such as **?** and **F2** do not fire while typing; modifier shortcuts still do.
+特定界面的操作需要对应界面已挂载才能使用。像 **?** 和 **F2** 这样不带修饰键的快捷键在输入时不会触发；带修饰键的快捷键仍然会触发。
 
-**Settings → Keyboard** displays the registry and offers Rebind, per-action
-Reset, and Reset all controls. Overrides are stored on this device in
-localStorage (`lh:keymap`), not in the learning-data settings file. Contextual
-question keys are shown as **Fixed — part of this screen**, not rebindable.
-Tab and Esc also have dedicated handling outside ordinary registry dispatch.
+**设置 → 键盘**（Settings → Keyboard）会显示快捷键注册表，并提供“重新绑定”（Rebind）、针对单个操作的“重置”（Reset）以及“全部重置”（Reset all）控件。覆盖设置存储在本设备的 localStorage（`lh:keymap`）中，而不是学习数据中的设置文件里。上下文相关的问题按键显示为 **固定 — 属于此界面**（Fixed — part of this screen），不可重新绑定。Tab 和 Esc 在常规的注册表分发之外还有专门的处理逻辑。
 
-## Keyboard layouts
+## 键盘布局
 
-Shortcut matching and Settings rebinding use the same normalization. With
-**Ctrl, ⌘, or Alt/Option** held, a single non-ASCII character falls back to its
-physical **A–Z or comma** key position when the event supplies that code. For
-example, Russian Ctrl+`л` at `KeyK` matches **Mod+K**, and ⌘+`б` at `Comma`
-matches **Mod+,**. This also covers non-ASCII characters produced by Alt/Option,
-such as Option+K reporting `˚` at `KeyK` and normalizing to `alt+k`.
+快捷键匹配和设置中的重新绑定使用相同的规范化规则。在按住 **Ctrl、⌘ 或 Alt/Option** 时，如果事件提供了物理按键码，单个非 ASCII 字符会回退到其物理的 **A–Z 或逗号** 按键位置。例如，俄语布局下在 `KeyK` 上按 Ctrl+`л` 会匹配 **Mod+K**，在 `Comma` 上按 ⌘+`б` 会匹配 **Mod+,**。这同样适用于由 Alt/Option 产生的非 ASCII 字符，例如 Option+K 在 `KeyK` 上报告 `˚`，会被规范化为 `alt+k`。
 
-ASCII characters still follow the reported character, not the physical position:
-an AZERTY event reporting `q` at `KeyA` stays `mod+q`. Bare typing is unchanged.
-Other physical codes and named keys (including dead keys) keep their existing
-handling; this is not a guarantee for every OS/IME or layout-specific key.
+ASCII 字符仍然以报告的字符为准，而不是物理位置：在 AZERTY 布局下，在 `KeyA` 上报告 `q` 的事件仍然是 `mod+q`。不带修饰键的普通输入不受影响。其他物理按键码和命名按键（包括死键）保持原有的处理方式；这并不保证适用于所有操作系统/输入法或特定布局的按键。
 
-## Focus and Esc
+## 焦点与 Esc
 
-- **Tab** does not use the browser's normal focus traversal. On composer-bearing
-  pages it cycles the live text fields forward, wrapping to the first. In a
-  session the order is reading-thinking → active dock fields → composer,
-  including only fields currently mounted. From elsewhere it enters the first
-  field. The expanded select-question dock has its own rows↔thinking cycle below.
-- **Shift+Tab** cycles the model's thinking level, including while typing; it is
-  not backward focus traversal. Connection dialogs can own their own Tab trap.
-- **Esc** acts on the active field or topmost surfaced layer first: for example,
-  leave a field, dismiss a menu/dialog, or close Find. Handlers claim the event
-  so one Esc does not also act on lower layers. With no layer claiming it, the
-  fallback closes the cheat sheet or cancels dictation (discarding its pending
-  transcript) before reaching the chat's confirmation to dismiss a pending
-  question/problem or abort a running turn. Confirmed turn abort signals the
-  server, including for background turns; it also detaches any local stream.
+- **Tab** 不使用浏览器常规的焦点遍历。在带有消息输入框的页面上，它会向前循环切换当前存在的文本框，到末尾后回到第一个。在会话中，顺序为 阅读时的思考栏 → 当前停靠面板中的字段 → 消息输入框，且只包括当前已挂载的字段。从其他位置按下时，它会进入第一个字段。展开的选择题停靠面板有它自己的 选项行↔思考 循环，见下文。
+- **Shift+Tab** 用于循环切换模型的推理强度，在输入时同样有效；它不是反向的焦点遍历。连接对话框可以拥有自己的 Tab 焦点陷阱。
+- **Esc** 优先作用于当前字段或最上层显示的图层：例如离开字段、关闭菜单/对话框，或关闭“查找”。处理程序会认领该事件，因此一次 Esc 不会同时作用于下层。如果没有图层认领它，回退逻辑会先关闭快捷键速查表或取消语音听写（丢弃尚未完成的转写内容），然后才轮到聊天中的确认提示：放弃待回答的问题/题目，或中止正在运行的回合。确认中止回合会向服务器发出信号，后台回合也是如此；它还会断开任何本地流。
 
-To keep dictated text, stop dictation with **Mod+D** / Stop rather than the
-fallback Esc cancellation.
+要保留听写的文本，请用 **Mod+D** / “停止”来结束语音听写，而不是使用回退的 Esc 取消。
 
-## Enter and submission
+## Enter 与提交
 
-- In the **chat composer**, **question answer/thinking fields**, and **practice
-  thinking field**, **Enter submits**; **Shift+Enter** inserts a newline;
-  **Mod+Enter** also submits. A question still needs an answer, and practice
-  needs nonempty thinking. Submission is disabled during compaction.
-- The composer's action follows its state: send text (or steer a running turn),
-  Stop when busy with no sendable text, or **Next problem** when empty in the
-  practice pause.
-- Plain **Enter outside a typing surface** also submits the active question or
-  practice response when valid, or advances from the practice pause. A
-  pointer-clicked transcript button does not steal this submit. Keyboard-focused
-  buttons and buttons in open menus/dialogs retain native Enter activation.
-- When a pending check is closed, **Enter** opens it rather than submitting a
-  hidden answer. In **Thinking while reading**, Enter / Mod+Enter opens that
-  waiting check; otherwise Enter makes a newline and Mod+Enter leaves the field.
-- The single-line **Other…** answer submits on Enter, including Shift+Enter.
-- Search/menu fields own their Enter; Find navigation never submits an answer.
+- 在 **聊天消息输入框**、**问题的回答/思考栏** 和 **练习的思考栏** 中，**Enter 提交**；**Shift+Enter** 插入换行；**Mod+Enter** 同样提交。问题仍然需要一个答案，练习需要非空的思考。上下文压缩期间禁用提交。
+- 消息输入框的操作取决于其状态：发送文本（或在回合运行中插话）；忙碌且没有可发送的文本时为“停止”；在练习暂停阶段为空时则为 **下一题**（Next problem）。
+- 在 **输入区域之外** 直接按 **Enter**，也会在有效时提交当前的问题或练习回答，或者从练习暂停阶段继续。用鼠标点击过的对话记录按钮不会抢走这个提交。通过键盘获得焦点的按钮，以及打开的菜单/对话框中的按钮，保留原生的 Enter 激活行为。
+- 当待完成的检验处于收起状态时，**Enter** 会打开它，而不是提交一个隐藏的答案。在 **阅读时的思考**（Thinking while reading）中，Enter / Mod+Enter 会打开那个等待中的检验；否则 Enter 换行，Mod+Enter 离开该字段。
+- 单行的 **其他…**（Other…）答案按 Enter 提交，Shift+Enter 也是如此。
+- 搜索/菜单字段自行处理 Enter；“查找”中的导航永远不会提交答案。
 
-## Question dock
+## 问题停靠面板
 
-While a select question is expanded and active:
+当一道选择题处于展开且激活状态时：
 
-- **↑/↓** walk answer rows: options first, then **I don't know** (quiz) or
-  **Other…** (ask). The walk stops at either end; it does not wrap.
-- **Space** acts like clicking the walked row: toggles a multi-select option or
-  picks a single-select option. Selecting Other focuses its input; Space on an
-  already selected Other row deselects it without erasing its text.
-- **←/→** adjust quiz confidence through its stops, except on **I don't know**.
-- **Tab** toggles between the thinking field and walked (or first) answer row.
-  Focus follows the arrow walk while in the rows. The confidence slider is not
-  part of this cycle. **Shift+Tab** remains the thinking-level shortcut.
-- Arrows and Space keep their text-editing meaning in typing fields; Alt/Ctrl/⌘
-  combinations do not walk the dock. In Other, **Esc** leaves the input but
-  keeps the answer selected.
+- **↑/↓** 在答案行之间移动：先是各个选项，然后是 **我不知道**（I don't know，小测）或 **其他…**（Other…，提问）。移动到任一端会停止，不会循环。
+- **Space** 的效果与点击当前所在行相同：切换多选题的选项，或选中单选题的选项。选择“其他”会聚焦其输入框；在已选中的“其他”行上按 Space 会取消选择，但不会清除其中的文字。
+- **←/→** 按刻度调整小测的把握度，在 **我不知道** 上除外。
+- **Tab** 在思考栏与当前所在（或第一个）答案行之间切换。在选项行中时，焦点跟随方向键移动。把握度滑块不在此循环中。**Shift+Tab** 仍然是切换推理强度的快捷键。
+- 在输入字段中，方向键和 Space 保留其文本编辑含义；Alt/Ctrl/⌘ 组合键不会在停靠面板中移动。在“其他”中，**Esc** 会离开输入框，但保持该答案处于选中状态。
 
-Text-only questions have no answer-row machine; their answer field uses the
-submission conventions above.
+纯文本问题没有答案行的状态机；其回答字段遵循上述提交约定。
 
-## Chains view
+## 推理链视图
 
-- **Mod+F** focuses the chains search while the view is open, rather than the
-  graph search underneath it. **↓** from that field enters the first result;
-  the other arrows retain their text-editing meaning there.
-- **↑/↓** move between siblings in the current layer, skipping expanded
-  descendants and stopping at either end without wrapping.
-- **→** expands the highlighted row and enters its first child: folders →
-  sources → chains → propositions. A leaf stays where it is.
-- **←** returns to the parent and collapses that parent's contents. At the top
-  level, it collapses the highlighted row if open.
-- **Space** toggles the highlighted row's checkbox, where available. Ordinary
-  browsing selects whole sources/folders; practice's Pick nodes also offers
-  chain/proposition checkboxes. Text inputs retain normal Space behavior.
-- Clicking blank space below the tree clears row focus/highlighting, not checked
-  items. Creating a folder clears any search and focuses the new folder.
-- The whole active row is highlighted and scrolled into view. This focus is
-  separate from checkbox selection; navigation does not select graph nodes.
-  Clicking a row establishes the navigation position. Rename inputs keep their
-  normal text-editing arrow keys; foreground menus/dialogs take priority.
+- 视图打开时，**Mod+F** 会聚焦推理链搜索，而不是其下方的图谱搜索。在该字段中按 **↓** 会进入第一个结果；其他方向键在那里保留文本编辑含义。
+- **↑/↓** 在当前层级的同级项之间移动，跳过已展开的子孙项，并在任一端停止，不会循环。
+- **→** 展开高亮的行并进入其第一个子项：文件夹 → 来源 → 推理链 → 命题。叶子节点保持不动。
+- **←** 返回父级，并收起该父级的内容。在顶层时，如果高亮的行已展开，则将其收起。
+- **Space** 切换高亮行的复选框（如有）。普通浏览时选择的是整个来源/文件夹；练习的 **选择节点**（Pick nodes）还提供推理链/命题的复选框。文本输入框保留正常的 Space 行为。
+- 点击树下方的空白处会清除行的焦点/高亮，但不会清除已勾选的项目。新建文件夹会清除所有搜索，并聚焦到新文件夹。
+- 整个当前行都会高亮，并滚动到可见区域。这种焦点与复选框选择是分开的；导航不会选中图谱节点。点击某一行会确定导航位置。重命名输入框保留其正常的文本编辑方向键；前台的菜单/对话框优先。
 
-## Search and menus
+## 搜索与菜单
 
-- **Sessions search (Mod+Shift+F):** opens the sidebar if needed and focuses its
-  search field. **↑/↓** walk the filtered sessions with wrap; **Enter** opens the
-  walked row, or the first match if none was walked, then leaves the field.
-  **Esc** leaves the field without clearing the query.
-- **Model search menus:** focus stays in search. **↑/↓** walk filtered results
-  without wrap; the first ↓ starts at the first result, the first ↑ at the last.
-  **Enter** picks the walked result or the first result. Editing the query resets
-  the walk. Menus without a search field instead move button focus with wrapping
-  **↑/↓**, support **Home/End**, and use native **Enter** activation.
-- **Find (Mod+F):** in the graph, focuses node search; with the chains view
-  open, focuses that view's search instead. In a session, opens a
-  literal, case-insensitive search of displayed session text, including offscreen
-  scroll content but excluding hidden/collapsed content, draft fields, and embedded
-  documents. **Enter / Shift+Enter** in the Find field move to the next/previous
-  match with wrap. **Esc** closes Find, clears highlights, and restores prior
-  focus. Reopening retains the query and reading position within that session;
-  changing sessions resets Find. A foreground menu/dialog takes priority.
+- **会话搜索（Mod+Shift+F）**：必要时打开侧边栏并聚焦其搜索框。**↑/↓** 在筛选后的会话之间移动，会循环；**Enter** 打开当前所在的行，如果没有移动过则打开第一个匹配项，然后离开该字段。**Esc** 离开该字段，但不清除查询内容。
+- **模型搜索菜单**：焦点保持在搜索框中。**↑/↓** 在筛选结果之间移动，不会循环；第一次按 ↓ 从第一个结果开始，第一次按 ↑ 从最后一个结果开始。**Enter** 选中当前所在的结果或第一个结果。编辑查询内容会重置移动位置。没有搜索框的菜单则改为用 **↑/↓** 在按钮之间移动焦点（会循环），支持 **Home/End**，并使用原生的 **Enter** 激活。
+- **查找（Mod+F）**：在图谱中，聚焦节点搜索；当推理链视图打开时，则改为聚焦该视图的搜索。在会话中，会打开一个针对会话中已显示文本的字面、不区分大小写的搜索，包括屏幕外的滚动内容，但不包括隐藏/收起的内容、草稿字段和嵌入的文档。在查找框中按 **Enter / Shift+Enter** 跳到下一个/上一个匹配项，会循环。**Esc** 关闭查找、清除高亮，并恢复之前的焦点。重新打开时会保留该会话中的查询内容和阅读位置；切换会话会重置查找。前台的菜单/对话框优先。
 
-## Maintainer entry points
+## 维护者入口
 
-The [registry](../src/core/keyboard.ts) defines defaults/persistence; the
-[window dispatcher](../components/keyboard-shortcuts.tsx) handles global actions.
-Contextual behavior lives with its surface: question/practice docks, composer,
-menus, Find, and [chains navigation](../components/chain-navigation.ts).
+[注册表](../src/core/keyboard.ts)定义了默认值和持久化方式；[窗口分发器](../components/keyboard-shortcuts.tsx)处理全局操作。上下文相关的行为与其所属界面放在一起：问题/练习停靠面板、消息输入框、菜单、查找，以及[推理链导航](../components/chain-navigation.ts)。

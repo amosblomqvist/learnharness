@@ -22,6 +22,7 @@ import type { AgentBuildOptions } from "../agent/teacher-agent.ts";
 import { stores } from "./stores.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import { compactionInFlight } from "./compaction.ts";
+import { tr } from "../core/i18n.ts";
 
 export const pluginDirectory = path.join(/* turbopackIgnore: true */ PATHS.data, "plugins");
 // Explicitly staged by build-server, not discovered by Next's filesystem tracer.
@@ -95,7 +96,7 @@ function runtime(): Runtime {
 		// Exclusive bootstrap sweep, including disabled packages whose services
 		// will not construct. Read-only job recovery never activates plugin code.
 		for (const [id, error] of Object.entries(recoverPluginTaskRecords(pluginDirectory, coreData))) {
-			installationErrors[id] = `Task recovery failed: ${error}`;
+			installationErrors[id] = tr(`任务恢复失败：${error}`, `Task recovery failed: ${error}`);
 		}
 		await host.initialize();
 	});

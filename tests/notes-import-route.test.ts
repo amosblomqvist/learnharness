@@ -103,7 +103,7 @@ it("real route plus in-memory ledgers and faux stages reprocess identical import
 it("route returns 400 without files", async () => {
 	const response = await POST(request([]));
 	assert.equal(response.status, 400);
-	assert.deepEqual(await response.json(), { results: [], error: "no files" });
+	assert.deepEqual(await response.json(), { results: [], error: "没有文件" });
 });
 
 function upload(files: { name: string; bytes: Uint8Array<ArrayBuffer> | string }[]) {
@@ -121,7 +121,7 @@ it("a PDF reaches the pipeline as page-marked Markdown and reports skipped image
 	assert.deepEqual(received.sort(), ["# plain notes", "--- Page 2 ---\n\n# Week 3\n\nPlants make sugar."]);
 	const byName = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
 	assert.equal(byName("lecture.pdf").outcome, "completed");
-	assert.equal(byName("lecture.pdf").notice, "Scanned pages may have errors. Skipped 1 image-only page; OCR is not supported.");
+	assert.equal(byName("lecture.pdf").notice, "扫描页面可能存在识别错误。已跳过 1 个纯图片页面；不支持 OCR。");
 	assert.equal(byName("notes.md").notice, undefined, "text files carry no notice");
 });
 
@@ -158,9 +158,9 @@ it("an off-list type and a non-text file are refused with a short message before
 		const zip = new Uint8Array([0x50, 0x4b, 0x03, 0x04, 0x00]);
 		const { results } = await (await POST(upload([{ name: "deck.pptx", bytes: "plain words" }, { name: "slides.pptx", bytes: pdf }, { name: "notes.txt", bytes: zip }]))).json();
 		assert.deepEqual(results.map((r: { filePath: string; ok: boolean; outcome: string; error: string }) => [r.filePath, r.ok, r.outcome, r.error]).sort(), [
-			["deck.pptx", false, "failed", "This file type isn't supported. Use text, Markdown, or PDF."],
-			["notes.txt", false, "failed", "This file isn't plain text."],
-			["slides.pptx", false, "failed", "This file type isn't supported. Use text, Markdown, or PDF."],
+			["deck.pptx", false, "failed", "不支持此文件类型。请使用文本、Markdown 或 PDF 文件。"],
+			["notes.txt", false, "failed", "此文件不是纯文本。"],
+			["slides.pptx", false, "failed", "不支持此文件类型。请使用文本、Markdown 或 PDF 文件。"],
 		]);
 		assert.equal(imports, 0); assert.deepEqual(registered, []);
 	} finally { sourceDirectory.registerImport = realRegister; }
@@ -172,7 +172,7 @@ it("only a zero byte in the first 8 KiB makes a file not plain text", async () =
 	const text = (nulAt: number) => { const bytes = new Uint8Array(8193).fill(0x61); bytes[nulAt] = 0; return bytes; };
 	const { results } = await (await POST(upload([{ name: "inside.txt", bytes: text(8191) }, { name: "outside.txt", bytes: text(8192) }]))).json();
 	const byName = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
-	assert.equal(byName("inside.txt").error, "This file isn't plain text.");
+	assert.equal(byName("inside.txt").error, "此文件不是纯文本。");
 	assert.equal(byName("outside.txt").outcome, "completed");
 	assert.deepEqual(received, ["outside.txt"]);
 });
@@ -197,7 +197,7 @@ it("PDFs with nothing to import are refused before any model call", async () => 
 	const { results } = await response.json();
 	assert.equal(calls, 0);
 	const errorOf = (name: string) => results.find((r: { filePath: string }) => r.filePath === name);
-	for (const [name, error] of [["scan.pdf", "OCR not supported yet."], ["broken.pdf", "Could not open this PDF."], ["huge.pdf", "Too long. Max 1,000 pages."]] as const) {
+	for (const [name, error] of [["scan.pdf", "暂不支持 OCR。"], ["broken.pdf", "无法打开此 PDF。"], ["huge.pdf", "页数过多，最多 1,000 页。"]] as const) {
 		assert.equal(errorOf(name).ok, false);
 		assert.equal(errorOf(name).outcome, "failed");
 		assert.equal(errorOf(name).error, error);
@@ -213,8 +213,8 @@ it("PDF notices count only image-only pages, not blanks, and preserve the scanne
 	]));
 	const { results } = await response.json();
 	assert.equal(results.find((r: { filePath: string }) => r.filePath === "mixed.pdf").notice,
-		"Scanned pages may have errors. Skipped 2 image-only pages; OCR is not supported.");
-	assert.equal(results.find((r: { filePath: string }) => r.filePath === "text.pdf").notice, "Scanned pages may have errors.");
+		"扫描页面可能存在识别错误。已跳过 2 个纯图片页面；不支持 OCR。");
+	assert.equal(results.find((r: { filePath: string }) => r.filePath === "text.pdf").notice, "扫描页面可能存在识别错误。");
 	assert.ok(results.every((r: { ok: boolean }) => r.ok));
 });
 
@@ -225,7 +225,7 @@ for (const image of ["mask", "inline"] as const) it(`mixed PDF notices include t
 	]) }]));
 	const { results } = await response.json();
 	assert.equal(results[0].outcome, "completed");
-	assert.equal(results[0].notice, "Scanned pages may have errors. Skipped 1 image-only page; OCR is not supported.");
+	assert.equal(results[0].notice, "扫描页面可能存在识别错误。已跳过 1 个纯图片页面；不支持 OCR。");
 });
 
 for (const split of [false, true]) it(`server refuses actual file bytes over 25 MiB (${split ? "aggregate" : "single file"}) before the pipeline`, async () => {
@@ -238,7 +238,7 @@ for (const split of [false, true]) it(`server refuses actual file bytes over 25 
 	req.headers.set("content-length", "1"); // not a trustworthy bound
 	const response = await POST(req);
 	assert.equal(response.status, 413);
-	assert.deepEqual(await response.json(), { results: [], error: "Too big. Max 25 MB." });
+	assert.deepEqual(await response.json(), { results: [], error: "文件过大，最大 25 MB。" });
 	assert.equal(calls, 0);
 });
 
@@ -265,7 +265,7 @@ for (const declared of [undefined, "1"]) it(`server bounds streamed body bytes w
 	} as RequestInit);
 	const response = await POST(req);
 	assert.equal(response.status, 413);
-	assert.deepEqual(await response.json(), { results: [], error: "Import request is too large. Select fewer files." });
+	assert.deepEqual(await response.json(), { results: [], error: "导入请求过大，请少选一些文件。" });
 	assert.equal(chunks, MAX_IMPORT_BODY_BYTES / (1024 * 1024) + 1);
 	assert.equal(cancelled, true);
 	assert.equal(calls, 0);
@@ -296,7 +296,7 @@ it("malformed or proxy-truncated multipart is refused before any file enters the
 	]) {
 		const response = await POST(req);
 		assert.equal(response.status, 400);
-		assert.deepEqual(await response.json(), { results: [], error: "Could not read the upload. It may be incomplete; please select the files again." });
+		assert.deepEqual(await response.json(), { results: [], error: "无法读取上传内容，可能不完整，请重新选择文件。" });
 	}
 	assert.equal(calls, 0);
 });

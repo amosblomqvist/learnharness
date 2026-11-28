@@ -25,7 +25,7 @@ function render(props: Partial<Parameters<typeof KnowledgeSummary>[0]> = {}) {
 describe("KnowledgeSummary — the quiet home summary (2026-10-06)", () => {
 	it("every count on its OWN line — no dot separators (owner refinement, same day)", () => {
 		const html = render();
-		for (const line of ["12 propositions", "5 chains", "3 teaching sessions", "2 practice sessions", "4 imported notes"]) {
+		for (const line of ["12 个命题", "5 条推理链", "3 个教学会话", "2 个练习会话", "4 份导入的笔记"]) {
 			const i = html.indexOf(line);
 			assert.ok(i !== -1, `${line} renders`);
 			// own-line: the count is its own text node — the char after the
@@ -38,8 +38,8 @@ describe("KnowledgeSummary — the quiet home summary (2026-10-06)", () => {
 
 	it("the two blocks part with an empty line — graph counts, then session counts", () => {
 		const html = render();
-		const graphBlock = html.indexOf("12 propositions");
-		const sessionsBlock = html.indexOf("3 teaching sessions");
+		const graphBlock = html.indexOf("12 个命题");
+		const sessionsBlock = html.indexOf("3 个教学会话");
 		assert.ok(graphBlock !== -1 && sessionsBlock !== -1);
 		assert.ok(sessionsBlock > graphBlock, "sessions come after the graph block");
 		// the parting is a dedicated spacer element (h-4), not a paragraph
@@ -48,30 +48,30 @@ describe("KnowledgeSummary — the quiet home summary (2026-10-06)", () => {
 
 	it("singularizes: one of each reads as single, not '1 sessions'", () => {
 		const html = render({ propositions: 1, chains: 1, teachSessions: 1, practiceSessions: 1, importedNotes: 1 });
-		assert.ok(html.includes("1 proposition"));
-		assert.ok(html.includes("1 chain"));
-		assert.ok(html.includes("1 teaching session"));
-		assert.ok(html.includes("1 practice session"));
-		assert.ok(html.includes("1 imported note"));
+		assert.ok(html.includes("1 个命题"));
+		assert.ok(html.includes("1 条推理链"));
+		assert.ok(html.includes("1 个教学会话"));
+		assert.ok(html.includes("1 个练习会话"));
+		assert.ok(html.includes("1 份导入的笔记"));
 	});
 
 	it("imported notes are a COUNT — never the file list (owner: 'the number of imported notes')", () => {
 		const html = render({ importedNotes: 7 });
-		assert.ok(html.includes("7 imported notes"));
+		assert.ok(html.includes("7 份导入的笔记"));
 		assert.ok(!html.includes(".md"), "no file paths render");
 		assert.ok(!html.includes("truncate"), "no truncating source rows");
 	});
 
 	it("the empty knowledge base points to sessions and path attachments, without dropping statistics", () => {
 		const html = render({ propositions: 0, chains: 0, teachSessions: 0, practiceSessions: 0, importedNotes: 0 });
-		assert.ok(html.includes("<p>Start a session to begin learning.</p>"));
-		assert.ok(html.includes("Attach your material with the paperclip or drag and drop.</p>"));
-		assert.ok(html.includes("0 propositions") && html.includes("0 imported notes"));
+		assert.ok(html.includes("<p>开始一个会话，开启学习。</p>"));
+		assert.ok(html.includes("点击回形针或直接拖放即可附加学习材料。</p>"));
+		assert.ok(html.includes("0 个命题") && html.includes("0 份导入的笔记"));
 		assert.ok(!html.includes("import notes to begin"));
 	});
 
 	it("non-empty shows no empty-state hint", () => {
 		const html = render();
-		assert.ok(!html.includes("Start a session to begin learning."));
+		assert.ok(!html.includes("开始一个会话，开启学习。"));
 	});
 });

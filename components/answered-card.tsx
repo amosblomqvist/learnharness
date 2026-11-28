@@ -21,6 +21,7 @@ import {
 	rootRem,
 } from "@/components/question-layout";
 import { useQuestionLayout, type QuestionLayoutRequest } from "@/components/use-question-layout";
+import { tr } from "@/src/core";
 
 /** The nearest scrolling ancestor (the transcript), for "near the screen". */
 function scrollParent(el: HTMLElement): HTMLElement | null {
@@ -126,7 +127,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 	if (answer.dismissed) {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				<span className="font-medium">{answer.questionText}</span> — skipped
+				<span className="font-medium">{answer.questionText}</span> {tr(" — 已跳过", " — skipped")}
 			</div>
 		);
 	}
@@ -153,7 +154,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 		    ThinkingBlock, instead of an inset inside the answer. Same muted
 		    rail as before; the label is now plain "Your thinking". */}
 		{(answer.readingThinking || answer.images?.readingThinking?.length) && (
-			<ThinkingBlock testId="reading-thinking-block" label="YOUR THINKING" text={answer.readingThinking ?? ""} images={answer.images?.readingThinking} defaultOpen />
+			<ThinkingBlock testId="reading-thinking-block" label={tr("你的思考", "YOUR THINKING")} text={answer.readingThinking ?? ""} images={answer.images?.readingThinking} defaultOpen />
 		)}
 		{/* [&>*:last-child]:mb-0 (owner round, 2026-10-07): on ask cards the
 		    thinking row is the last child — its my-3 stacked with the card's
@@ -178,11 +179,11 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 				{label}
 				{isQuiz &&
 					(answer.dontKnow ? (
-						<StatusBadge text="didn't know" />
+						<StatusBadge text={tr("不知道", "didn't know")} />
 					) : answer.correct ? (
-						<StatusBadge text="correct" color="var(--lh-success)" />
+						<StatusBadge text={tr("正确", "correct")} color="var(--lh-success)" />
 					) : (
-						<StatusBadge text="incorrect" color="var(--lh-error)" />
+						<StatusBadge text={tr("错误", "incorrect")} color="var(--lh-error)" />
 					))}
 			</div>
 			<div ref={questionTextRef} className="mb-3 font-medium">
@@ -282,7 +283,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 				</div>
 			)}
 			{answer.dontKnow && isQuiz && (
-				<div className="mt-2 text-sm text-muted-foreground">Answered “I don't know”.</div>
+				<div className="mt-2 text-sm text-muted-foreground">{tr("回答了“我不知道”。", "Answered “I don't know”.")}</div>
 			)}
 			</div>
 			</div>
@@ -294,7 +295,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 				    the accent lift read too light); rail only, heights identical. */
 				<ThinkingBlock
 					testId="your-thinking"
-					label="YOUR THINKING"
+					label={tr("你的思考", "YOUR THINKING")}
 					text={answer.thinking ?? answer.note ?? ""}
 					images={answer.images?.thinking}
 					inCard
@@ -315,11 +316,11 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 						onClick={() => setWhyOpen((v) => !v)}
 						className="text-xs font-medium text-muted-foreground transition-colors hover:text-foreground"
 					>
-						{whyOpen ? "Hide why" : "Why"}
+						{whyOpen ? tr("收起原因", "Hide why") : tr("为什么", "Why")}
 					</button>
 					{whyOpen && (
 						<div className="mt-1.5 rounded-lg bg-muted py-2 text-sm text-foreground/50">
-							<span className="font-medium text-muted-foreground">Why: </span>
+							<span className="font-medium text-muted-foreground">{tr("为什么：", "Why: ")}</span>
 							{/* Keep the first paragraph beside the label, not every paragraph:
 							   later paragraphs must retain their recovered document structure. */}
 							<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.explanation}</ToolContentResponse>
@@ -333,7 +334,7 @@ export function AnsweredCard({ answer: savedAnswer, input, toolCallId }: { answe
 			    the model's next reply IS the grading. */}
 			{isExplain && answer.committed && (
 				<div className="mt-3 rounded-lg bg-muted py-2 text-sm text-muted-foreground">
-					<span className="font-medium text-foreground">The answer: </span>
+					<span className="font-medium text-foreground">{tr("答案：", "The answer: ")}</span>
 					<ToolContentResponse className="inline [&>p:first-child]:inline [&>p:first-child]:m-0">{answer.committed}</ToolContentResponse>
 				</div>
 			)}

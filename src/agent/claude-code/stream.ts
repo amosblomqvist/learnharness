@@ -35,6 +35,7 @@ import { addLiveProcess, getLiveProcess, removeLiveProcess, type LiveProcess } f
 import { configurationForReuse, conversationForReuse } from "./reuse-context.ts";
 import { BRIDGE_SERVER_NAME, createToolBridge, toolNameFromMcp, type PendingToolCall, type ToolBridge } from "./tool-bridge.ts";
 import { toClaudeInput, toStreamJsonLine } from "./transcript.ts";
+import { tr } from "../../core/i18n.ts";
 
 type RunClaudeOptions = { cwd: string; env: NodeJS.ProcessEnv; signal?: AbortSignal };
 
@@ -68,11 +69,11 @@ const STOP_REASONS: Record<string, StopReason> = {
 	refusal: "error",
 };
 
-const REFUSAL_MESSAGE = "The model refused to complete the request";
+const REFUSAL_MESSAGE = tr("模型拒绝完成此请求", "The model refused to complete the request");
 const ABORT_MESSAGE = "Request was aborted";
-const START_FAILED_MESSAGE = "claude CLI failed to start";
-const NO_STOP_REASON_MESSAGE = "claude CLI ended the message without a stop reason";
-const NOT_STREAMED_MESSAGE = "claude CLI finished without streaming its response";
+const START_FAILED_MESSAGE = tr("claude CLI 启动失败", "claude CLI failed to start");
+const NO_STOP_REASON_MESSAGE = tr("claude CLI 结束了消息，但未给出停止原因", "claude CLI ended the message without a stop reason");
+const NOT_STREAMED_MESSAGE = tr("claude CLI 已结束，但未流式返回回复", "claude CLI finished without streaming its response");
 const NOT_SIGNED_IN_ERROR = "authentication_failed";
 
 export function toEffort(level: ThinkingLevel | undefined): AnthropicEffort {
@@ -330,7 +331,7 @@ class ClaudeTurn {
 						this.skippedBareCall = true;
 						return;
 					}
-					this.fail("claude CLI emitted an unsupported native tool call", "error");
+					this.fail(tr("claude CLI 发出了不受支持的原生工具调用", "claude CLI emitted an unsupported native tool call"), "error");
 					return;
 				}
 				this.toolBlocks.set(index, { type: "toolCall", id: block.id, name: toolNameFromMcp(block.name), arguments: {} });
@@ -385,7 +386,7 @@ class ClaudeTurn {
 
 		if (!mapped) {
 			this.output.stopReason = "error";
-			this.output.errorMessage = `Unhandled stop reason: ${stopReason}`;
+			this.output.errorMessage = tr(`无法处理的停止原因：${stopReason}`, `Unhandled stop reason: ${stopReason}`);
 			return;
 		}
 
@@ -465,7 +466,7 @@ class ClaudeProcess implements LiveProcess {
 	) {}
 
 	start(stdinLine: string, signal: AbortSignal | undefined): void {
-		this.child.once("close", (code: number | null) => this.handleClose(`claude CLI exited with code ${code}`));
+		this.child.once("close", (code: number | null) => this.handleClose(tr(`claude CLI 已退出，退出码 ${code}`, `claude CLI exited with code ${code}`)));
 		this.child.once("error", (error) => {
 			console.error("claude CLI process failed:", error);
 			this.turn.fail(START_FAILED_MESSAGE, "error");
@@ -481,7 +482,7 @@ class ClaudeProcess implements LiveProcess {
 		);
 		createInterface({ input: this.child.stdout }).on("line", (line) => {
 			try { this.handleLine(line); }
-			catch { this.fail("claude CLI emitted malformed stream output"); }
+			catch { this.fail(tr("claude CLI 输出了格式错误的流数据", "claude CLI emitted malformed stream output")); }
 		});
 		this.setSignal(signal);
 		if (!this.stopping) this.contextProbe.start();
@@ -568,7 +569,7 @@ class ClaudeProcess implements LiveProcess {
 	flushAdmissions(): void {
 		if (this.stopping || this.turn.finished) return;
 		if (this.turn.awaitingRetry && this.bridge.getPendingToolCalls().length > 0) {
-			this.fail("claude CLI called a tool from a response it did not stream");
+			this.fail(tr("claude CLI 调用了一个来自未流式返回回复的工具", "claude CLI called a tool from a response it did not stream"));
 			return;
 		}
 		if (!this.sourceComplete) return;
@@ -578,7 +579,7 @@ class ClaudeProcess implements LiveProcess {
 		for (const call of pending) {
 			const intent = this.sourceCalls.find((candidate) => candidate.id === call.id);
 			if (!intent || intent.name !== call.name || !isDeepStrictEqual(intent.arguments, call.arguments)) {
-				this.fail("claude CLI compatibility error: MCP call does not match its streamed tool intent");
+				this.fail(tr("claude CLI 兼容性错误：MCP 调用与其流式返回的工具意图不一致", "claude CLI compatibility error: MCP call does not match its streamed tool intent"));
 				return;
 			}
 			calls.push(intent);
@@ -626,18 +627,18 @@ class ClaudeProcess implements LiveProcess {
 		if (!event) return;
 		if (event.type === "toolResults") {
 			if (event.ids.some((id) => this.sourceCalls.some((call) => call.id === id))) {
-				this.fail("claude CLI refused a harness tool call before MCP admission");
+				this.fail(tr("claude CLI 在 MCP 接收前拒绝了 LearnHarness 工具调用", "claude CLI refused a harness tool call before MCP admission"));
 			}
 			return;
 		}
 		// Moving on before held calls were answered means the CLI did not
 		// honor this tool wait. Never execute further stdout-only intentions.
 		if (this.turn.finished) {
-			this.fail("claude CLI moved on while harness tool calls were waiting for results");
+			this.fail(tr("LearnHarness 工具调用仍在等待结果时，claude CLI 已继续执行", "claude CLI moved on while harness tool calls were waiting for results"));
 			return;
 		}
 		if (event.type === "messageStart" && this.sourceComplete && this.sourceCalls.length > 0) {
-			this.fail("claude CLI moved on without admitting its harness tool calls");
+			this.fail(tr("claude CLI 未接收其 LearnHarness 工具调用就继续执行了", "claude CLI moved on without admitting its harness tool calls"));
 			return;
 		}
 		if (event.type === "messageStart") this.contextProbe?.refresh();
@@ -648,7 +649,7 @@ class ClaudeProcess implements LiveProcess {
 			// Only rejected bare calls: keep the turn open for the model's retry in its next message.
 			if (intents.length === 0 && this.turn.skippedBareCall) return;
 			if (intents.length === 0 || new Set(intents.map((call) => call.id)).size !== intents.length) {
-				this.fail("claude CLI emitted an invalid tool batch");
+				this.fail(tr("claude CLI 发出了无效的工具调用批次", "claude CLI emitted an invalid tool batch"));
 				return;
 			}
 			this.sourceCalls = intents.filter((call) => !this.cancelledIds.has(call.id));

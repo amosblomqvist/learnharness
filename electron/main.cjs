@@ -24,7 +24,7 @@
  *     would shadow every settings-page key change until restart.
  */
 
-const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog } = require("electron");
+const { app, BrowserWindow, Menu, ipcMain, nativeTheme, session, shell, dialog, systemPreferences } = require("electron");
 const { pickAttachmentPath } = require("./attachment-picker.cjs");
 const { createChatGPT, fileStore } = require("./chatgpt.cjs");
 const { attachChatGPTChild, trustedSender, chatGPTControl } = require("./chatgpt-ipc.cjs");
@@ -35,6 +35,7 @@ const { openWebSubscriptionBrowser } = require("./web-subscription-browser.cjs")
 const { randomBytes } = require("node:crypto");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
+const { tr } = require("./i18n.cjs");
 const http = require("node:http");
 const net = require("node:net");
 const path = require("node:path");
@@ -542,6 +543,13 @@ function setupAutoUpdater() {
 		reportUpdateStatus("disabled");
 		return;
 	}
+	// Local builds packed without a publish config carry no app-update.yml;
+	// without a feed the updater could only error, so report it disabled.
+	if (!process.env.LH_UPDATE_FEED && process.resourcesPath && !fs.existsSync(path.join(process.resourcesPath, "app-update.yml"))) {
+		log("auto-update: no update feed in this build — updater disabled");
+		reportUpdateStatus("disabled");
+		return;
+	}
 	try {
 		autoUpdater = require("electron-updater").autoUpdater;
 	} catch (err) {
@@ -619,52 +627,69 @@ function installMenu() {
 		{
 			label: app.name,
 			submenu: [
-				{ role: "about" },
+				{ role: "about", label: tr(`关于 ${app.name}`, `About ${app.name}`) },
 				// Manual checks report their result in Settings → General.
-				{ label: "Check for Updates…", click: () => checkForUpdatesFromMenu() },
+				{ label: tr("检查更新…", "Check for Updates…"), click: () => checkForUpdatesFromMenu() },
 				{ type: "separator" },
-				{ role: "hide" },
-				{ role: "hideOthers" },
+				{ role: "hide", label: tr(`隐藏 ${app.name}`, `Hide ${app.name}`) },
+				{ role: "hideOthers", label: tr("隐藏其他", "Hide Others") },
 				{ type: "separator" },
-				{ role: "quit" },
+				{ role: "quit", label: tr(`退出 ${app.name}`, `Quit ${app.name}`) },
 			],
 		},
-		{ label: "Edit", submenu: [{ role: "undo" }, { role: "redo" }, { type: "separator" }, { role: "cut" }, { role: "copy" }, { role: "paste" }, { role: "selectAll" }] },
+		{ label: tr("编辑", "Edit"), submenu: [{ role: "undo", label: tr("撤销", "Undo") }, { role: "redo", label: tr("重做", "Redo") }, { type: "separator" }, { role: "cut", label: tr("剪切", "Cut") }, { role: "copy", label: tr("拷贝", "Copy") }, { role: "paste", label: tr("粘贴", "Paste") }, { role: "selectAll", label: tr("全选", "Select All") }] },
 		{
-			label: "View",
+			label: tr("显示", "View"),
 			submenu: [
-				{ role: "reload" },
-				{ role: "toggleDevTools" },
+				{ role: "reload", label: tr("重新加载", "Reload") },
+				{ role: "toggleDevTools", label: tr("开发者工具", "Toggle Developer Tools") },
 				{ type: "separator" },
 				// OWNED zoom (see applyZoom): the roles change zoomLevel
 				// silently; these broadcast the factor and re-seat the
 				// traffic lights. The renderer's --lh-zoom depends on
 				// hearing every change.
 				{
-					label: "Actual Size",
+					label: tr("实际大小", "Actual Size"),
 					accelerator: "CommandOrControl+0",
 					click: () => applyZoom(BrowserWindow.getAllWindows()[0], 1),
 				},
 				{
-					label: "Zoom In",
+					label: tr("放大", "Zoom In"),
 					accelerator: "CommandOrControl+Plus",
 					click: () => zoomStep(BrowserWindow.getAllWindows()[0], +1),
 				},
 				{
-					label: "Zoom Out",
+					label: tr("缩小", "Zoom Out"),
 					accelerator: "CommandOrControl+-",
 					click: () => zoomStep(BrowserWindow.getAllWindows()[0], -1),
 				},
 				{ type: "separator" },
-				{ role: "togglefullscreen" },
+				{ role: "togglefullscreen", label: tr("切换全屏", "Toggle Full Screen") },
 			],
 		},
-		{ role: "windowMenu" },
+		{ label: tr("窗口", "Window"), role: "window", submenu: [{ role: "minimize", label: tr("最小化", "Minimize") }, { role: "zoom", label: tr("缩放", "Zoom") }, { type: "separator" }, { role: "front", label: tr("前置全部窗口", "Bring All to Front") }] },
 	];
 	Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
+/** Interface language (src/core/i18n.ts), read once per launch from the same
+ * record the server reads; the spawned server inherits LH_LANG. Switching in
+ * Settings relaunches (lh:relaunch). AppleLanguages localizes the menu items
+ * macOS adds itself (AutoFill, Dictation…) from the next launch on. */
+function applyInterfaceLanguage() {
+	let lang = process.env.LH_LANG === "en" ? "en" : "zh";
+	try {
+		const saved = JSON.parse(fs.readFileSync(path.join(DATA_DIR(), "settings.json"), "utf8"))?.general?.language;
+		if (saved === "en" || saved === "zh") lang = saved;
+	} catch { /* absent/corrupt record: keep the default */ }
+	process.env.LH_LANG = lang;
+	if (process.platform === "darwin") {
+		try { systemPreferences.setUserDefault("AppleLanguages", "array", [lang === "en" ? "en" : "zh-Hans"]); } catch { /* cosmetic */ }
+	}
+}
+
 async function main() {
+	applyInterfaceLanguage();
 	app.on("window-all-closed", () => {
 		chatgpt?.pause();
 		subscriptions?.pause();
@@ -747,7 +772,7 @@ async function main() {
 	// child is the only recipient of credential leases over inherited IPC.
 	ipcMain.handle("lh:chatgpt:control", async (event, command) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) return { error: "Untrusted desktop request." };
-		if (!chatgpt || !serverProcess?.connected) return { available: false, pending: false, activeId: null, accounts: [], error: "ChatGPT sign-in requires the desktop app's private server connection. Browser-only and externally launched development servers keep API-key connections." };
+		if (!chatgpt || !serverProcess?.connected) return { available: false, pending: false, activeId: null, accounts: [], error: tr("ChatGPT 登录需要桌面应用的私有服务器连接。仅浏览器模式和外部启动的开发服务器只能使用 API 密钥连接。", "ChatGPT sign-in requires the desktop app's private server connection. Browser-only and externally launched development servers keep API-key connections.") };
 		return chatGPTControl(command, chatgpt);
 	});
 
@@ -755,7 +780,7 @@ async function main() {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
 		if (!subscriptions || !serverProcess?.connected) {
 			if (command?.op === "status") return [];
-			throw new Error("Subscription sign-in requires the desktop app's private server connection.");
+			throw new Error(tr("订阅登录需要桌面应用的私有服务器连接。", "Subscription sign-in requires the desktop app's private server connection."));
 		}
 		return subscriptionControl(command, subscriptions);
 	});
@@ -790,6 +815,13 @@ async function main() {
 	ipcMain.handle("lh:update:get", (event) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
 		return updateState;
+	});
+	// Settings → General → Language: the new language applies on a fresh launch.
+	ipcMain.handle("lh:relaunch", (event) => {
+		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");
+		applyInterfaceLanguage();
+		app.relaunch();
+		app.quit();
 	});
 	ipcMain.handle("lh:update:check", (event) => {
 		if (!trustedAppWindows.has(BrowserWindow.fromWebContents(event.sender)) || !trustedSender(event, new URL(url).origin, BrowserWindow)) throw new Error("Untrusted desktop request.");

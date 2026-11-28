@@ -46,6 +46,7 @@ import {
 import { useAppearance } from "./appearance.tsx";
 import { SettingsSection } from "./controls.tsx";
 import { UpdateSettings } from "./update-settings.tsx";
+import { LanguageSettings } from "./language-settings.tsx";
 import { AgentSection, composePromptSwitch } from "./agent-section.tsx";
 import type { ModelsSettings } from "@/src/core";
 import { MENU_CLOSE_EVENT, MENU_OPEN_EVENT } from "@/components/menu-shell";
@@ -59,17 +60,18 @@ import { PluginSettingsPage } from "./plugin-settings-page.tsx";
 import { usePlugins } from "@/components/plugins";
 import { ChatGPTUIProvider } from "./chatgpt-connection.tsx";
 import { NativeSubscriptionUIProvider } from "./subscription-connections.tsx";
+import { tr } from "@/src/core";
 
 /** Owner (2026-09-20): hints earn their place — mechanics-explaining
  *  prose is out; only the keyboard note stays (storage location is a
  *  real question users ask). */
 const SECTIONS = [
-	{ id: "keys", label: "Providers", icon: KeyIcon },
-	{ id: "agent", label: "Agent", icon: BotIcon },
-	{ id: "appearance", label: "Appearance", icon: PaletteIcon },
-	{ id: "graph", label: "Graph", icon: WaypointsIcon },
-	{ id: "keyboard", label: "Keyboard", icon: KeyboardIcon, hint: "Stored on this device" },
-	{ id: "general", label: "General", icon: SettingsIcon },
+	{ id: "keys", label: tr("服务商", "Providers"), icon: KeyIcon },
+	{ id: "agent", label: tr("智能体", "Agent"), icon: BotIcon },
+	{ id: "appearance", label: tr("外观", "Appearance"), icon: PaletteIcon },
+	{ id: "graph", label: tr("图谱", "Graph"), icon: WaypointsIcon },
+	{ id: "keyboard", label: tr("键盘", "Keyboard"), icon: KeyboardIcon, hint: tr("存储在此设备上", "Stored on this device") },
+	{ id: "general", label: tr("通用", "General"), icon: SettingsIcon },
 ] as const;
 type SectionId = (typeof SECTIONS)[number]["id"] | "plugins" | "core-plugins" | `plugin:${string}`;
 
@@ -167,7 +169,7 @@ function SettingsDialog({
 	return <SettingsDialogBody onClose={onClose} initialSection={initialSection}
 		initialRow={initialRow} navigationRequest={navigationRequest}
 		renderFrame={frame => <HostDialog open layerId={layerId} ownerId={null}
-			onClose={onClose} frame={frame} aria-label="Settings"
+			onClose={onClose} frame={frame} aria-label={tr("设置", "Settings")}
 			backdropProps={{
 				className: "fixed inset-0 z-50 flex items-center justify-center bg-background/80",
 				"data-testid": "settings-backdrop",
@@ -258,8 +260,8 @@ export function SettingsDialogBody({
 	const selected = missingPlugin ? management : active;
 	const navSections: { id: SectionId; label: string; icon?: LucideIcon }[] = [
 		...SECTIONS,
-		{ id: "core-plugins", label: "Core plugins", icon: PlugIcon },
-		{ id: "plugins", label: "Community plugins", icon: PuzzleIcon },
+		{ id: "core-plugins", label: tr("核心插件", "Core plugins"), icon: PlugIcon },
+		{ id: "plugins", label: tr("社区插件", "Community plugins"), icon: PuzzleIcon },
 		...enabledPlugins.map(plugin => ({ id: `plugin:${plugin.info.id}` as const, label: plugin.info.manifest?.name ?? plugin.info.id })),
 	];
 
@@ -316,6 +318,7 @@ export function SettingsDialogBody({
 			const ticket = ++authority.issued;
 			authority.pendingWrites++;
 			setError(null);
+			const name = tr(`${{ general: "通用", agent: "智能体", models: "模型", appearance: "外观", graph: "图谱", compaction: "上下文压缩" }[section]}：`, `${section}: `);
 			try {
 				const res = await fetch(`/api/settings/${section}`, {
 					method: "PUT",
@@ -326,7 +329,7 @@ export function SettingsDialogBody({
 					const detail = (await res.json().catch(() => ({}))) as {
 						error?: string;
 					};
-					if (ticket === writeOrder.current.issued) setError(`${section}: ${detail.error ?? res.status}`);
+					if (ticket === writeOrder.current.issued) setError(`${name}${detail.error ?? res.status}`);
 					return false;
 				}
 				// Only the acknowledged record is canonical: never substitute the
@@ -335,7 +338,7 @@ export function SettingsDialogBody({
 				const stored = reply?.settings;
 				if (!stored || typeof stored !== "object" || Array.isArray(stored) || stored.version !== 1 ||
 					!stored[section] || typeof stored[section] !== "object" || Array.isArray(stored[section])) {
-					if (ticket === writeOrder.current.issued) setError(`${section}: Could not confirm saved settings. Your input has been kept.`);
+					if (ticket === writeOrder.current.issued) setError(`${name}${tr("无法确认设置已保存。你的输入已保留。", "Could not confirm saved settings. Your input has been kept.")}`);
 					return false;
 				}
 				if (ticket >= writeOrder.current.acknowledged) {
@@ -350,7 +353,7 @@ export function SettingsDialogBody({
 				notifySettingsSaved(section);
 				return confirms?.(stored) ?? true;
 			} catch (error) {
-				if (ticket === writeOrder.current.issued) setError(`${section}: ${error instanceof Error ? error.message : String(error)}`);
+				if (ticket === writeOrder.current.issued) setError(`${name}${error instanceof Error ? error.message : String(error)}`);
 				return false;
 			} finally {
 				authority.pendingWrites--;
@@ -387,23 +390,23 @@ export function SettingsDialogBody({
 			tabIndex={-1}
 			role="dialog"
 			aria-modal="true"
-			aria-label="Settings"
+			aria-label={tr("设置", "Settings")}
 			data-testid="settings-dialog"
 			className="settings-dialog-pop flex h-[620px] max-h-[85vh] w-[920px] max-w-[90vw] flex-col overflow-hidden rounded-md border border-border bg-card shadow-xl"
 			onClick={(e) => e.stopPropagation()}
 		>
 			{/* Header — the app's quiet CMU title language. */}
 			<header className="flex h-15 shrink-0 items-center gap-3 border-b border-border px-5">
-				<h2 className="font-title text-2xl tracking-tight">Settings</h2>
+				<h2 className="font-title text-2xl tracking-tight">{tr("设置", "Settings")}</h2>
 				<Hint
 						// Esc closes through the shared interaction owner.
-						label="Close"
+						label={tr("关闭", "Close")}
 						binding="escape"
 						side="left"
 					>
 						<button
 					type="button"
-					aria-label="Close settings"
+					aria-label={tr("关闭设置", "Close settings")}
 					data-testid="settings-close"
 					className="ml-auto size-7 rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					onClick={onClose}
@@ -425,7 +428,7 @@ export function SettingsDialogBody({
 				{/* Left nav — mono labels and theme-inherited decorative icons,
 					    active = bg-accent. */}
 				<nav
-					aria-label="Settings sections"
+					aria-label={tr("设置分区", "Settings sections")}
 					data-testid="settings-nav"
 					className="flex min-h-0 w-48 shrink-0 flex-col gap-1 overflow-y-auto border-r border-border p-2"
 				>
@@ -473,22 +476,26 @@ export function SettingsDialogBody({
 					)}
 					{selected === "plugins" || selected === "core-plugins" ? <PluginsSection origin={selected === "core-plugins" ? "core" : "community"} onOpenSettings={pluginId => setActive(`plugin:${pluginId}`)} />
 						: activePlugin ? <PluginSettingsPage key={`${activePlugin.info.id}/${activePlugin.info.revision}`} plugin={activePlugin} />
-							: activePluginId !== null ? <p role="status" className="px-6 py-5 text-xs text-muted-foreground">Loading plugins…</p>
+							: activePluginId !== null ? <p role="status" className="px-6 py-5 text-xs text-muted-foreground">{tr("正在加载插件…", "Loading plugins…")}</p>
 								: record === undefined ? (
 						<p className="px-6 py-5 text-xs text-muted-foreground/70">
-							Loading settings…
+							{tr("正在加载设置…", "Loading settings…")}
 						</p>
 					) : record === null ? (
 						<p className="px-6 py-5 text-xs text-muted-foreground/70">
-							Settings could not be loaded — refresh to retry.
+							{tr("无法加载设置 — 请刷新重试。", "Settings could not be loaded — refresh to retry.")}
 						</p>
 					) : (
 						<div>
 							{active === "general" && (
 								<SettingsSection
-									title="General"
+									title={tr("通用", "General")}
 									testid="section-general"
 								>
+									<LanguageSettings
+										language={record.general?.language ?? "zh"}
+										save={(language) => write("general", { ...record.general, language })}
+									/>
 									<UpdateSettings
 										autoUpdate={record.general?.autoUpdate ?? true}
 										onAutoUpdateChange={(on) =>
@@ -498,13 +505,13 @@ export function SettingsDialogBody({
 								</SettingsSection>
 							)}
 							{active === "keys" && (
-								<SettingsSection title="Providers" testid="section-keys">
+								<SettingsSection title={tr("服务商", "Providers")} testid="section-keys">
 									<KeysSection initialRow={initialRow ?? undefined} />
 								</SettingsSection>
 							)}
 							{active === "agent" && (
 								<SettingsSection
-									title="Agent"
+									title={tr("智能体", "Agent")}
 									testid="section-agent"
 								>
 									<AgentSection
@@ -528,7 +535,7 @@ export function SettingsDialogBody({
 							)}
 							{active === "appearance" && (
 								<SettingsSection
-									title="Appearance"
+									title={tr("外观", "Appearance")}
 									testid="section-appearance"
 								>
 									<AppearanceSection
@@ -541,7 +548,7 @@ export function SettingsDialogBody({
 							)}
 							{active === "graph" && (
 								<SettingsSection
-									title="Graph"
+									title={tr("图谱", "Graph")}
 									testid="section-graph"
 								>
 									<GraphSection
@@ -554,8 +561,8 @@ export function SettingsDialogBody({
 							)}
 							{active === "keyboard" && (
 								<SettingsSection
-									title="Keyboard"
-									hint="Stored on this device"
+									title={tr("键盘", "Keyboard")}
+									hint={tr("存储在此设备上", "Stored on this device")}
 									testid="section-keyboard"
 								>
 									<KeyboardSection />

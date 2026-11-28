@@ -1,4 +1,5 @@
 import type { PluginSubmissionOccurrence } from "learnharness-plugin-api";
+import { tr } from "./i18n.ts";
 
 // Read only the small acknowledgment vocabulary; do not instantiate arbitrary
 // recursively immutable custom payload/solution types while inspecting identity.
@@ -42,6 +43,6 @@ export function acceptedPoseKeys(messages: History): string[] {
 export function parsePoseResponse(value: unknown, sessionId: string): string[] {
   const input = object(value);
   if (!input || input.sessionId !== sessionId || !Array.isArray(input.poses) || !input.poses.every(pose => typeof pose === "string"))
-    throw new Error("Could not confirm the current practice problem. Your drawing has been kept.");
+    throw new Error(tr("无法确认当前练习题目。你的绘图已保留。", "Could not confirm the current practice problem. Your drawing has been kept."));
   return input.poses as string[];
 }

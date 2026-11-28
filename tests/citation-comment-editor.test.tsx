@@ -42,15 +42,15 @@ describe("CitationCommentEditor", () => {
 	it("renders the labelled textarea and both buttons", () => {
 		const document = documentFor(<CitationCommentEditor initial={undefined} onDraftChange={() => {}} onSave={() => {}} onCancel={() => {}} />);
 		const area = document.querySelector("textarea")!;
-		assert.equal(area.getAttribute("aria-label"), "Comment on selected text");
-		assert.equal(area.getAttribute("placeholder"), "Add an optional comment...");
-		assert.deepEqual([...document.querySelectorAll("button")].map((b) => b.textContent), ["Cancel", "Save"]);
+		assert.equal(area.getAttribute("aria-label"), "为所选文本添加批注");
+		assert.equal(area.getAttribute("placeholder"), "添加批注（可选）…");
+		assert.deepEqual([...document.querySelectorAll("button")].map((b) => b.textContent), ["取消", "保存"]);
 	});
 	it("blocks saving an over-length comment and says why", () => {
 		const document = documentFor(<CitationCommentEditor initial={"x".repeat(8_001)} onDraftChange={() => {}} onSave={() => {}} onCancel={() => {}} />);
 		const save = [...document.querySelectorAll("button")].at(-1)!;
-		assert.equal(save.textContent, "Shorten comment");
+		assert.equal(save.textContent, "请缩短批注");
 		assert.ok(save.hasAttribute("disabled"));
-		assert.match(document.body.textContent!, /Comments can contain up to 8,000 characters\./);
+		assert.match(document.body.textContent!, /批注最多 8,000 个字符。/);
 	});
 });

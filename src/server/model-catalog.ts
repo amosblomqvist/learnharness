@@ -62,6 +62,7 @@ import {
 	type ModelSlotName,
 	type ModelsSettings,
 } from "../core/settings.ts";
+import { tr } from "../core/i18n.ts";
 
 /** The picker's client-safe model entry (contract: core/contracts/models.ts). */
 export type ModelDto = ModelCatalogEntry;
@@ -252,10 +253,10 @@ export function validateChatSettings(settings: ChatSettings): SettingsValidation
 	if (settings.model) {
 		const { provider, id } = settings.model;
 		if (!providers.includes(provider)) {
-			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
+			return { ok: false, error: tr(`未知的服务商“${provider}”——已配置：${providers.join("、")}`, `Unknown provider "${provider}" — configured: ${providers.join(", ")}`) };
 		}
 		if (!connectionModel(provider, id)) {
-			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
+			return { ok: false, error: tr(`${provider} 的模型目录中没有模型“${id}”`, `No model "${id}" in the ${provider} catalog`) };
 		}
 	}
 	// BYOK interlude (owner, 2026-09-22): thinking levels NEVER reject a
@@ -289,10 +290,10 @@ function validateSlotSpec(name: ModelSlotName, slot: { model?: { provider: strin
 	if (slot.model) {
 		const { provider, id } = slot.model;
 		if (!providers.includes(provider)) {
-			return { ok: false, error: `Unknown provider "${provider}" — configured: ${providers.join(", ")}` };
+			return { ok: false, error: tr(`未知的服务商“${provider}”——已配置：${providers.join("、")}`, `Unknown provider "${provider}" — configured: ${providers.join(", ")}`) };
 		}
 		if (!connectionModel(provider, id)) {
-			return { ok: false, error: `No model "${id}" in the ${provider} catalog` };
+			return { ok: false, error: tr(`${provider} 的模型目录中没有模型“${id}”`, `No model "${id}" in the ${provider} catalog`) };
 		}
 	}
 	// BYOK interlude (owner, 2026-09-22): the supported-level verdict is

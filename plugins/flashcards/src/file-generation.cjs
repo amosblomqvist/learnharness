@@ -1,5 +1,6 @@
 'use strict';
 const { createHash } = require('node:crypto');
+const { tr } = require('./i18n.cjs');
 
 const { fileInstructions: instructions, filePromptFor: promptFor } = require('./generation-prompts.cjs');
 const textSchema = { type: 'string', minLength: 1, pattern: '\\S' };
@@ -17,8 +18,8 @@ const resultSchema = {
   },
 };
 const fail = message => { throw new Error(message); };
-function nonblank(value, label) {
-  if (typeof value !== 'string' || !value.trim()) fail(`${label} must not be blank.`);
+function nonblank(value, label, message = `${label} must not be blank.`) {
+  if (typeof value !== 'string' || !value.trim()) fail(message);
 }
 function object(value, keys, label) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) fail(`${label} must be an object.`);
@@ -56,13 +57,13 @@ function validUnicode(text) {
   return true;
 }
 function validateFileInput(input) {
-  if (!input || typeof input !== 'object' || Array.isArray(input)) fail('File input must be an object.');
+  if (!input || typeof input !== 'object' || Array.isArray(input)) fail(tr('文件输入必须是对象。', 'File input must be an object.'));
   const { name, markdown } = input;
-  nonblank(name, 'File name');
-  if (/\p{Cc}/u.test(name)) fail('File name must not contain control characters.');
-  if (typeof markdown !== 'string' || !markdown.trim()) fail('Source Markdown must not be empty.');
-  if (!validUnicode(markdown)) fail('Source Markdown must contain valid Unicode, without unpaired surrogates.');
-  if (Buffer.byteLength(markdown, 'utf8') > 2 * 1024 * 1024) fail('Source Markdown exceeds the 2 MiB UTF-8 limit.');
+  nonblank(name, 'File name', tr('文件名不能为空。', 'File name must not be blank.'));
+  if (/\p{Cc}/u.test(name)) fail(tr('文件名不能包含控制字符。', 'File name must not contain control characters.'));
+  if (typeof markdown !== 'string' || !markdown.trim()) fail(tr('源 Markdown 不能为空。', 'Source Markdown must not be empty.'));
+  if (!validUnicode(markdown)) fail(tr('源 Markdown 必须是有效的 Unicode，不能包含未配对的代理字符。', 'Source Markdown must contain valid Unicode, without unpaired surrogates.'));
+  if (Buffer.byteLength(markdown, 'utf8') > 2 * 1024 * 1024) fail(tr('源 Markdown 超过了 2 MiB 的 UTF-8 上限。', 'Source Markdown exceeds the 2 MiB UTF-8 limit.'));
   const fingerprint = createHash('sha256').update(JSON.stringify([name, markdown]), 'utf8').digest('hex');
   return { name, markdown, fingerprint };
 }
@@ -70,7 +71,7 @@ const estimate = prompt => Math.ceil(Buffer.byteLength(instructions + JSON.strin
 function prepareFileChunks(options) {
   const { name, markdown } = validateFileInput(options);
   const { chunkBudget, ranges } = options;
-  if (!Number.isSafeInteger(chunkBudget) || chunkBudget < 1) fail('Input budget must be a positive safe whole number.');
+  if (!Number.isSafeInteger(chunkBudget) || chunkBudget < 1) fail(tr('输入预算必须是正的安全整数。', 'Input budget must be a positive safe whole number.'));
   const boundary = offset => !(offset > 0 && offset < markdown.length && high(markdown.charCodeAt(offset - 1)) && low(markdown.charCodeAt(offset)));
   if (ranges !== undefined && !Array.isArray(ranges)) fail('Source ranges must be an array.');
   const spans = ranges === undefined ? [{ start: 0, end: markdown.length }] : ranges.map(range => {

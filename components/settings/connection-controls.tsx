@@ -2,9 +2,10 @@
 import { HostDialog } from "@/components/host-dialog";
 import type { CloseOutcome } from "@/components/interaction-layers";
 import { Button } from "@/components/ui/button";
+import { tr } from "@/src/core";
 
 export function ConnectionRow({ label, action, actionVariant, disabled, onAction, children, testid, actionTestid, labelClassName }: { label: string; action: string; actionVariant?: "outline" | "ghost"; disabled: boolean; onAction: () => void; children?: React.ReactNode; testid?: string; actionTestid?: string; labelClassName?: string }) {
-	const variant = actionVariant ?? (action === "Connect" ? "outline" : "ghost");
+	const variant = actionVariant ?? (action === tr("连接", "Connect") ? "outline" : "ghost");
 	return <div className="flex flex-wrap items-center gap-3" data-testid={testid}>
 		<span className={labelClassName ?? "font-ui text-xs text-foreground"}>{label}</span>
 		{children}

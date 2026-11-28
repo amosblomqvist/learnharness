@@ -1,5 +1,6 @@
 import { IMPORT_EXTENSIONS, MAX_IMPORT_BYTES, validNotesPath } from "@/lib/notes-import-limits";
 import type { NotesImportResult } from "./notes-import";
+import { tr } from "@/src/core";
 
 export const notesPath = (file: File): string => file.webkitRelativePath || file.name;
 /** Folder imports silently exclude dot-prefixed files and directories below
@@ -8,13 +9,13 @@ const hiddenInFolder = (file: File): boolean => file.webkitRelativePath.split("/
 /** From the last dot of the file name, lower-cased. A dot that starts the name (".DS_Store") or ends it ("notes.") is not an extension. */
 const extensionLabel = (name: string): string => {
 	const dot = name.lastIndexOf(".");
-	return dot > 0 && dot < name.length - 1 ? name.slice(dot).toLowerCase() : "no extension";
+	return dot > 0 && dot < name.length - 1 ? name.slice(dot).toLowerCase() : tr("无扩展名", "no extension");
 };
 /** One line per reason for a whole pick, so a big folder cannot flood the error list. */
 const unsupportedSummary = (extensions: readonly string[]): string =>
-	`Skipped ${extensions.length} ${extensions.length === 1 ? "file that isn't" : "files that aren't"} text, Markdown, or PDF (${[...new Set(extensions)].join(", ")}).`;
+	tr(`已跳过 ${extensions.length} 个非文本、Markdown 或 PDF 的文件（${[...new Set(extensions)].join("、")}）。`, `Skipped ${extensions.length} ${extensions.length === 1 ? "file that isn't" : "files that aren't"} text, Markdown, or PDF (${[...new Set(extensions)].join(", ")}).`);
 const unsafeSummary = (count: number): string =>
-	`Skipped ${count} ${count === 1 ? "file with a name" : "files with names"} the import can't use (e.g. a ':' in the name).`;
+	tr(`已跳过 ${count} 个文件名无法导入的文件（例如文件名中含有“:”）。`, `Skipped ${count} ${count === 1 ? "file with a name" : "files with names"} the import can't use (e.g. a ':' in the name).`);
 export interface ImportQueueSnapshot {
 	importing: boolean;
 	errors: string[];
@@ -47,7 +48,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 			void (async () => {
 				try {
 					const [r] = await send(file);
-					if (!r) throw new Error("Invalid import response. Check the graph before retrying.");
+					if (!r) throw new Error(tr("导入响应无效。请先检查图谱再重试。", "Invalid import response. Check the graph before retrying."));
 					if (!r.ok) {
 						const details = [r.provider, r.missing?.join(", "), r.slots?.join(", ")].filter(Boolean);
 						failures.set(index, `${r.filePath}: ${r.error}${r.code ? `\n${[r.code, ...details].join(" — ")}` : ""}`);
@@ -77,7 +78,7 @@ export function createNotesImportQueue(post: (files: readonly File[]) => Promise
 				if (file.webkitRelativePath && hiddenInFolder(file)) continue;
 				if (!validNotesPath(path, file.name)) unsafe.push(index);
 				else if (!IMPORT_EXTENSIONS.test(file.name)) unsupported.push({ index, extension: extensionLabel(file.name) });
-				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, `${path}: Too big. Max 25 MB.`);
+				else if (file.size > MAX_IMPORT_BYTES) failures.set(index, tr(`${path}: 文件过大，最大 25 MB。`, `${path}: Too big. Max 25 MB.`));
 				else pending.push({ file, index });
 			}
 			if (unsafe.length > 0) failures.set(unsafe[0]!, unsafeSummary(unsafe.length));

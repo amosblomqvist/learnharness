@@ -40,7 +40,7 @@ describe("CompactionMomentDivider", () => {
 	it("renders the minimal centered note — no rule lines, retrying-message register", () => {
 		const html = renderToStaticMarkup(<CompactionMomentDivider data={data} />);
 		assert.ok(html.includes('data-testid="compaction-divider"'));
-		assert.ok(html.includes("Context compacted"));
+		assert.ok(html.includes("上下文已压缩"));
 		// NO horizontal rule (the owner ruling: minimal, unlike the cut)
 		assert.ok(!html.includes("border-t-2"));
 	});
@@ -51,9 +51,9 @@ describe("CompactionCutDivider", () => {
 		const html = renderToStaticMarkup(<CompactionCutDivider data={data} />);
 		assert.ok(html.includes('data-testid="compaction-cut-divider"'));
 		assert.ok(html.includes("border-t-2 border-dotted"));
-		assert.ok(html.includes("History compacted"));
-		// 152000 → 152k tok
-		assert.ok(html.includes("152k tok"));
+		assert.ok(html.includes("历史已压缩"));
+		// 152000 → 152k token
+		assert.ok(html.includes("152k token"));
 	});
 });
 

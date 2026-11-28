@@ -306,7 +306,7 @@ it("surfaces share the exact session body/local paint stratum, leaving chrome an
 	assert.doesNotMatch(frame(root).className, /\bp-4\b/);
 	const scroller = root.querySelector("input")!.parentElement!.parentElement!;
 	assert.match(scroller.className, /overflow-y-auto/);
-	const close = root.querySelector('button[aria-label="Close"]')!;
+	const close = root.querySelector('button[aria-label="关闭"]')!;
 	assert.equal(close.parentElement, frame(root), "floating X is outside the content scroller");
 	assert.match(close.className, /absolute right-2 top-2/);
 	assert.equal(root.querySelector("[data-plugin-ui-widget]"), null);

@@ -180,6 +180,6 @@ it("exposes read-only pose identities, never solutions or learner input", () => 
 it("cleanup is idempotent and captured operations refuse after disable", () => {
   const f = fixture(); try {
     f.start(); const operation = f.handlers.get("get-settings")!; f.stop(); f.stop();
-    assert.equal(f.handlers.size, 0); assert.throws(() => operation(undefined), /disabled/);
+    assert.equal(f.handlers.size, 0); assert.throws(() => operation(undefined), /已停用/);
   } finally { f.close(); }
 });

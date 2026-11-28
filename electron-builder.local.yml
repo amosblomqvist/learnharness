@@ -1,0 +1,10 @@
+# Local unsigned macOS build (no Developer ID / notarization): ad-hoc signed,
+# no hardened runtime (ad-hoc + library validation would block the server's
+# native modules), and no publish feed — the packaged app then has no
+# app-update.yml and its updater stays disabled instead of pulling upstream.
+extends: ./electron-builder.yml
+publish: null
+mac:
+  identity: "-"
+  hardenedRuntime: false
+  notarize: false

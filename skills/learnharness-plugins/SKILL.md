@@ -1,6 +1,6 @@
 ---
 name: learnharness-plugins
-description: Build, inspect, or debug trusted-local LearnHarness plugins using the public API. Covers views/actions/settings, host UI, teaching questions, practice problems, whole-session context, submission interception/images, page-body surfaces, renderers, document conversion, learning-data readers, model calls, managed agents, workers and plugin lifecycle.
+description: Build, inspect, or debug trusted-local LearnHarness plugins using the public API. Covers views/actions/settings, host UI, teaching questions, practice problems, whole-session context, submission interception/images, page-body surfaces, renderers, document conversion, learning-data readers, model calls, managed agents, workers and plugin lifecycle. 用于编写、检查或调试 LearnHarness 插件（视图、动作、设置、教学问题、练习题、渲染器、模型调用、后台 worker 等）。
 ---
 
 # LearnHarness plugin authoring
@@ -55,7 +55,7 @@ already the installed `dist/`; no copy step is needed. Find the directory in
 
 For an outside workspace, copy the skill's portable installer into the plugin project
 and wire `npm run install:local -- "<plugins-directory>"` as described in the
-[authoring guide](../../docs/plugin-authoring.md#develop-outside-the-plugins-directory).
+[authoring guide](../../docs/plugin-authoring.md#在插件目录之外开发).
 The command builds before replacing only installed `dist/`, preserving sibling `data/`.
 No destination autodiscovery, saved configuration, automatic enablement or restart.
 The included no-build examples can be copied directly; they do not need npm setup.

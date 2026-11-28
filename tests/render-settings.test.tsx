@@ -55,14 +55,14 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 	it("built-in navigation uses the agreed decorative Lucide icons without changing labels or selection", () => {
 		const { document } = parseHTML(renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />));
 		const expected = [
-			["keys", "Providers", "key"],
-			["agent", "Agent", "bot"],
-			["appearance", "Appearance", "palette"],
-			["graph", "Graph", "waypoints"],
-			["keyboard", "Keyboard", "keyboard"],
-			["general", "General", "settings"],
-			["core-plugins", "Core plugins", "plug"],
-			["plugins", "Community plugins", "puzzle"],
+			["keys", "服务商", "key"],
+			["agent", "智能体", "bot"],
+			["appearance", "外观", "palette"],
+			["graph", "图谱", "waypoints"],
+			["keyboard", "键盘", "keyboard"],
+			["general", "通用", "settings"],
+			["core-plugins", "核心插件", "plug"],
+			["plugins", "社区插件", "puzzle"],
 		];
 		assert.ok(document.querySelector('[data-testid="settings-nav"]')!.classList.contains("w-48"), "approved 192px sidebar leaves room for the icon and Community plugins label");
 		assert.ok(document.querySelector('[data-testid="settings-dialog"]')!.classList.contains("w-[920px]"), "overall dialog width is unchanged");
@@ -89,7 +89,7 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		const html = renderToStaticMarkup(<SettingsDialogBody onClose={() => {}} />);
 		assert.ok(html.includes('role="dialog"'));
 		assert.ok(html.includes('aria-modal="true"'));
-		assert.ok(html.includes('aria-label="Close settings"'));
+		assert.ok(html.includes('aria-label="关闭设置"'));
 		for (const id of ["general", "keys", "agent", "appearance", "graph", "keyboard"]) {
 			assert.ok(html.includes(`data-testid="settings-nav-${id}"`), id);
 		}
@@ -98,7 +98,7 @@ describe("SettingsDialog (the designed surface, SSR)", () => {
 		assert.ok(html.indexOf('data-testid="settings-nav-keys"') < html.indexOf('data-testid="settings-nav-general"'));
 		assert.ok(tagOf(html, "settings-nav-keyboard").includes('aria-current="false"'));
 		// Fetches don't run under SSR — the loading state IS the SSR state.
-		assert.ok(html.includes("Loading settings…"));
+		assert.ok(html.includes("正在加载设置…"));
 		// Modal-only doctrine: no link back to /settings anywhere in it.
 		assert.ok(!html.includes('href="/settings"'));
 	});
@@ -134,7 +134,7 @@ describe("the shared settings dropdown trigger", () => {
 describe("Providers settings-label typography", () => {
 	it("Language uses the standard sans SettingsRow label without changing its mono trigger", () => {
 		const html = renderToStaticMarkup(<DictationLanguageSetting />);
-		assert.ok(html.includes('<span class="block font-prose text-(length:--lh-prose-size)">Language</span>'));
+		assert.ok(html.includes('<span class="block font-prose text-(length:--lh-prose-size)">语言</span>'));
 		assert.ok(tagOf(html, "dictation-language").includes("font-ui text-xs"));
 	});
 
@@ -145,8 +145,8 @@ describe("Providers settings-label typography", () => {
 			assert.ok(settings.includes(`<span class="font-prose text-(length:--lh-prose-size) text-foreground">${label}</span>`), `${label}: settings sans label`);
 			assert.ok(setup.includes(`<span class="font-ui text-xs text-foreground">${label}</span>`), `${label}: unchanged setup label`);
 		}
-		assert.equal((settings.match(/>Connect<\/button>/g) ?? []).length, 3);
-		assert.equal((setup.match(/>Connect<\/button>/g) ?? []).length, 3);
+		assert.equal((settings.match(/>连接<\/button>/g) ?? []).length, 3);
+		assert.equal((setup.match(/>连接<\/button>/g) ?? []).length, 3);
 	});
 });
 
@@ -162,9 +162,9 @@ describe("AgentSection (thin SSR)", () => {
 			const toggle = tagOf(context, "toggle-include-reasoning-in-token-estimates-openai-responses-only-");
 			assert.ok(toggle.includes('role="switch"'));
 			assert.ok(toggle.includes(`aria-checked="${includeReasoning === true}"`));
-			assert.ok(toggle.includes('aria-label="Include reasoning in token estimates (OpenAI Responses only)"'));
-			assert.ok(context.includes(">Include reasoning in token estimates (OpenAI Responses only)</span>"));
-			assert.ok(context.includes("Off uses the original text-based estimate."));
+			assert.ok(toggle.includes('aria-label="在 token 估算中计入推理内容（仅限 OpenAI Responses）"'));
+			assert.ok(context.includes(">在 token 估算中计入推理内容（仅限 OpenAI Responses）</span>"));
+			assert.ok(context.includes("关闭时使用原有的基于文本的估算。"));
 			assert.ok(context.indexOf('data-testid="compaction-row-threshold"') < context.indexOf('data-testid="compaction-row-reasoning"'),
 				"the opt-in sits below the threshold within Context");
 		}
@@ -174,8 +174,8 @@ describe("AgentSection (thin SSR)", () => {
 			<AgentSection agent={agent} models={undefined} graph={undefined} compaction={undefined} onSectionChange={() => true} onModelsChange={() => {}} onCompactionChange={() => true} />,
 		);
 		const html = render(undefined);
-		assert.ok(html.includes("Concurrent worker requests"));
-		assert.ok(html.includes("Maximum simultaneous background-worker model requests. Direct conversations are not limited."));
+		assert.ok(html.includes("后台并发请求数"));
+		assert.ok(html.includes("后台智能体同时发起的模型请求上限。直接对话不受限制。"));
 		const input = tagOf(html, "input-worker-request-concurrency");
 		for (const attribute of ['type="number"', 'min="1"', 'step="1"', 'placeholder="8"', 'value=""']) assert.ok(input.includes(attribute), attribute);
 		assert.ok(!input.includes('max="'), "no arbitrary ceiling");
@@ -192,7 +192,7 @@ describe("AgentSection (thin SSR)", () => {
 			assert.ok(html.includes(`data-testid="slot-model-${slot}"`), `${slot} model trigger`);
 			assert.ok(html.includes(`data-testid="slot-thinking-${slot}"`), `${slot} thinking trigger`);
 			// the roster hint rides every row
-			assert.ok(html.includes("The main model for your sessions") || slot !== "strong", "strong roster");
+			assert.ok(html.includes("会话使用的主模型") || slot !== "strong", "strong roster");
 		}
 		// Fix wave: no Default anywhere — an unpicked slot reads "—"
 		// (the owner's no-factory-fallback language), and no menu
@@ -214,7 +214,7 @@ describe("AgentSection (thin SSR)", () => {
 		assert.ok(html.includes('data-testid="search-engine-row"'), "the row");
 		assert.ok(html.includes('data-testid="search-engine-trigger"'), "the trigger");
 		// SSR: /api/search never fired → no reason line yet, trigger reads Automatic
-		assert.ok(html.includes("Automatic"), "unset engine reads Automatic");
+		assert.ok(html.includes("自动"), "unset engine reads Automatic");
 		// the explicit preference shows the chosen engine in the trigger
 		const html2 = renderToStaticMarkup(
 			<AgentSection agent={{ search: { engine: "tavily" } }} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />,
@@ -242,7 +242,7 @@ describe("AgentSection (thin SSR)", () => {
 		const rows = [...toolsGroup.matchAll(/data-testid="(graph-tools-row|tool-row-\w+)"/g)].map((m) => m[1]);
 		assert.equal(rows[0], "graph-tools-row", "graph tools is the FIRST row of the Tools group");
 		// (the apostrophe in "sessions'" HTML-escapes — match up to it)
-		assert.ok(html.includes("Lets the tutor consult your knowledge map between sessions"), "the describing hint");
+		assert.ok(html.includes("让老师在不同会话之间参考你的知识图谱"), "the describing hint");
 		assert.ok((html.split('data-testid="graph-tools-row"')[1] ?? "").includes('aria-checked="true"'), "absent = on");
 		const rowHtml = html.split('data-testid="graph-tools-row"')[1]?.split('data-testid="tool-row-')[0] ?? "";
 		assert.ok(!rowHtml.includes("opacity-40"), "lit while the graph is on (the search row may dim — no keys in SSR)");
@@ -254,7 +254,7 @@ describe("AgentSection (thin SSR)", () => {
 		);
 		const row = html.split('data-testid="graph-tools-row"')[1]?.split('data-testid="tool-row-')[0] ?? "";
 		assert.ok(row.includes("opacity-40"), "row dims when the graph is off");
-		assert.ok(row.includes("Graph is disabled"), "the reason hint replaces the description");
+		assert.ok(row.includes("图谱已停用"), "the reason hint replaces the description");
 		assert.ok(row.includes("disabled"), "toggle untouchable while the graph is off");
 	});
 
@@ -297,7 +297,7 @@ describe("AgentSection (thin SSR)", () => {
 
 	it("prompts show the loading state under SSR (effects never fire)", () => {
 		const html = renderToStaticMarkup(<AgentSection agent={undefined} models={undefined} graph={undefined} onSectionChange={() => true} onModelsChange={() => {}} />);
-		assert.ok(html.includes("Loading prompt segments"));
+		assert.ok(html.includes("正在加载提示词片段"));
 	});
 });
 
@@ -312,7 +312,7 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 	it("renders the master-switch row — EXTRACTION since 2026-10-06 (the data channel, renamed when rendering split off)", () => {
 		const html = renderToStaticMarkup(<GraphSection graph={undefined} onSectionChange={() => true} />);
 		assert.ok(html.includes('data-testid="graph-row-enabled"'));
-		assert.ok(html.includes(">Extraction<"), "the row names the DATA channel, not 'Graph'");
+		assert.ok(html.includes(">知识提取<"), "the row names the DATA channel, not 'Graph'");
 		assert.ok(!html.includes("graph-row-embedding"), "the dead rungs render nothing");
 		assert.ok(!html.includes("Embedding model"), "the picker is gone");
 		assert.ok(!html.includes("graph-row-clustering"));
@@ -328,7 +328,7 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 	it("the GRAPH RENDERING row (2026-10-06): display-only — absent record = factory ON, stored off shows off", () => {
 		const html = renderToStaticMarkup(<GraphSection graph={undefined} onSectionChange={() => true} />);
 		assert.ok(html.includes('data-testid="graph-row-rendering"'));
-		assert.ok(html.includes(">Graph rendering<"));
+		assert.ok(html.includes(">图谱渲染<"));
 		assert.ok(tagOf(html, "toggle-graph-rendering-enabled").includes('aria-checked="true"'), "the home defaults to the canvas");
 		const off = renderToStaticMarkup(<GraphSection graph={{ rendering: false }} onSectionChange={() => true} />);
 		assert.ok(tagOf(html, "toggle-extraction-enabled").includes('aria-checked="true"'), "rendering off does NOT touch extraction");
@@ -340,7 +340,7 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 		const input = tagOf(html, "input-chunk-tokens");
 		assert.ok(input.includes('placeholder="4096"'), "the placeholder IS the resolved factory default");
 		assert.ok(!/value="\d/.test(input), "unset renders EMPTY, not a materialized 4096");
-		assert.ok(html.includes(">4096 tok</"), "the hint reports the resolved truth");
+		assert.ok(html.includes(">4096 token</"), "the hint reports the resolved truth");
 	});
 
 	it("a stored budget shows its value and denominates the hint", () => {
@@ -348,14 +348,14 @@ describe("GraphSection — master switch + chunk budget (wave 7 + 2026-10-02)", 
 			<GraphSection graph={{ enabled: true, extractionChunkTokens: 6000 }} onSectionChange={() => true} />,
 		);
 		assert.ok(tagOf(html, "input-chunk-tokens").includes('value="6000"'));
-		assert.ok(html.includes(">6000 tok</"));
+		assert.ok(html.includes(">6000 token</"));
 	});
 });
 
 describe("KeysSection (thin SSR)", () => {
 	it("SSR = the loading state (effects never fire)", () => {
 		const html = renderToStaticMarkup(<KeysSection />);
-		assert.ok(html.includes("Loading keys…"));
+		assert.ok(html.includes("正在加载密钥…"));
 	});
 });
 
@@ -388,7 +388,7 @@ describe("AppearanceSection (thin SSR)", () => {
 			assert.ok(tagOf(html, `theme-card-${t.id}`).includes('aria-pressed="false"'), t.id);
 		}
 		assert.equal((html.match(/lucide-check/g) ?? []).length, 1, "one check, on the selected card");
-		assert.match(html, /Catppuccin Latte · light · sets every color below/);
+		assert.match(html, /Catppuccin Latte · 浅色 · 决定下方所有颜色/);
 		assert.ok(html.includes('data-testid="theme-import"'));
 		assert.ok(html.includes('data-testid="theme-export"'));
 		assert.ok(!html.includes("theme-remove-"), "presets cannot be removed");
@@ -404,7 +404,7 @@ describe("AppearanceSection (thin SSR)", () => {
 		const html = renderAppearance({ theme: "my-ayu" }, [custom]);
 		assert.ok(tagOf(html, "theme-card-my-ayu").includes('aria-pressed="true"'));
 		assert.ok(html.includes('data-testid="theme-remove-my-ayu"'));
-		assert.match(html, />custom</);
+		assert.match(html, />自定义</);
 	});
 
 	it("the Colors block has one override row per theme color, hinting the theme's own hex", () => {
@@ -414,7 +414,7 @@ describe("AppearanceSection (thin SSR)", () => {
 		for (const id of ["input-background", "input-bold-color", "input-italic-color", "input-color-warning"]) {
 			assert.ok(html.includes(`data-testid="${id}"`), id);
 		}
-		assert.match(html, new RegExp(`Empty = ${mocha.colors.warning}`));
+		assert.match(html, new RegExp(`留空 = ${mocha.colors.warning}`));
 		assert.ok(tagOf(html, "input-color-surface").includes(`placeholder="${mocha.colors.surface}"`));
 		assert.ok(html.includes('data-testid="colors-reset"'));
 	});
@@ -424,7 +424,7 @@ describe("AppearanceSection (thin SSR)", () => {
 		assert.ok(tagOf(html, "input-background").includes('value="#101010"'));
 		assert.ok(tagOf(html, "input-color-warning").includes('value="#fab387"'));
 		assert.ok(tagOf(html, "swatch-warning").includes("#fab387"));
-		assert.match(html, /Empty = #1e1e2e/, "the background hint is Mocha's, not the override");
+		assert.match(html, /留空 = #1e1e2e/, "the background hint is Mocha's, not the override");
 	});
 
 	it("typography keeps its rows; prose size resolves against the factory", () => {
@@ -456,11 +456,11 @@ describe("KeyboardSection (thin SSR)", () => {
 
 	it("displayOnly actions list but never offer Rebind", () => {
 		const html = renderToStaticMarkup(<KeyboardSection />);
-		assert.ok(html.includes("Fixed — part of this screen"));
+		assert.ok(html.includes("固定 — 属于此界面"));
 		assert.ok(!html.includes(`data-testid="kbd-rebind-question-next-row"`), "surface keys stay put");
 		// The model-menu entries are GONE entirely (owner, 2026-10-10):
 		// obvious in-field navigation, not settings material.
-		assert.ok(!html.includes("Model menu"), "model-menu rows removed");
+		assert.ok(!html.includes("模型菜单"), "model-menu rows removed");
 		assert.ok(!KEYBOARD_ACTIONS.some((a) => a.id as string === "model-menu-walk"));
 		assert.ok(!KEYBOARD_ACTIONS.some((a) => a.id as string === "model-menu-pick"));
 	});

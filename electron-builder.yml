@@ -116,16 +116,17 @@ mac:
     - target: zip
       arch:
         - arm64
-  # Locale trim (payload wave, 2026-09-24): English-only app — cuts
-  # every non-en .lproj from the frameworks (the STT/mic entitlements
-  # don't depend on locales). Revisit only if localization ever lands.
+  # Locale trim (payload wave, 2026-09-24): cuts every other .lproj from
+  # the frameworks. zh_CN kept for the Simplified Chinese UI so macOS
+  # role menus (Undo, Copy, Hide…) localize too.
   electronLanguages:
     - en
+    - zh_CN
   category: public.app-category.education
   # Laid for the STT milestone (researcher-verified): the TCC mic prompt
   # reads this string; macOS asks regardless of Electron's own handlers.
   extendInfo:
-    NSMicrophoneUsageDescription: "LearnHarness uses the microphone only for speech-to-text input into your sessions."
+    NSMicrophoneUsageDescription: "LearnHarness 仅在语音听写时使用麦克风，将语音转为文字输入到你的会话中。"
   hardenedRuntime: true
   entitlements: build/entitlements.mac.plist
   # Signing + notarization (flipped 2026-10-08): identity auto-detects the

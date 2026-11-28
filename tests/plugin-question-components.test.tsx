@@ -86,7 +86,7 @@ test("silent plugin preparation keeps its submit latch and current draft without
 	} });
 	await f.commandSubmit(); await f.commandSubmit();
 	assert.equal(preparations, 1); assert.equal(document.querySelector('button[type="submit"]')!.hasAttribute("disabled"), true);
-	assert.doesNotMatch(document.body.textContent ?? "", /Preparing submission|Cancel/);
+	assert.doesNotMatch(document.body.textContent ?? "", /Preparing submission|Cancel|取消/);
 	await act(async () => { f.editorProps.onChange({ status: "ready", value: "newer unsent code" }); });
 	gate.resolve(); await f.render();
 	assert.equal(captured?.type, "plugin-question-answer");
@@ -97,17 +97,17 @@ test("silent plugin preparation keeps its submit latch and current draft without
 
 test("missing renderer keeps safe public fallback, thinking drafts and dismiss; no payload or raw errors", async () => {
 	const f = await fixture({ missing: true, thinking: true });
-	assert.match(document.body.textContent ?? "", /Public question/); assert.match(document.body.textContent ?? "", /Question unavailable/);
+	assert.match(document.body.textContent ?? "", /Public question/); assert.match(document.body.textContent ?? "", /问题不可用/);
 	assert.doesNotMatch(document.body.textContent ?? "", /PRIVATE_REFERENCE/);
 	assert.ok(document.querySelector('[type="submit"]')!.hasAttribute("disabled")); assert.equal(f.state.mic, true);
-	await act(async () => { (Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Dismiss question") as HTMLElement).click(); });
+	await act(async () => { (Array.from(document.querySelectorAll("button")).find(button => button.textContent === "跳过问题") as HTMLElement).click(); });
 	assert.equal(f.state.dismissed, 1); assert.equal(f.state.sent.length, 0);
 });
 
 test("new mounts wait for canonical readiness; a current generation survives reconciliation without remounting", async () => {
 	const f = await fixture({ ready: false }); assert.equal(f.state.mounts, 0);
 	assert.equal(document.querySelector('[role="status"]'), null, "canonical readiness is not a renderer failure");
-	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "Dismiss question"), false);
+	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "跳过问题"), false);
 	f.state.ready = true; await f.render(); assert.equal(f.state.mounts, 1);
 	f.state.ready = false; await f.render(); assert.equal(f.state.mounts, 1); assert.equal(f.state.updates.at(-1), false);
 	await f.commandSubmit(); assert.equal(f.state.sent.length, 0);
@@ -117,18 +117,18 @@ test("new mounts wait for canonical readiness; a current generation survives rec
 test("canonical unknown availability is preparing or read-only failure, never renderer recovery", async () => {
 	const f = await fixture({ reconciliation: "syncing", available: false, missing: true, ready: true });
 	assert.equal(f.state.mounts, 0);
-	assert.match(document.body.textContent ?? "", /Preparing question…/);
+	assert.match(document.body.textContent ?? "", /正在准备问题…/);
 	assert.match(document.body.textContent ?? "", /Public question/);
-	assert.doesNotMatch(document.body.textContent ?? "", /Question unavailable|Dismiss question|PRIVATE_/);
+	assert.doesNotMatch(document.body.textContent ?? "", /问题不可用|跳过问题|PRIVATE_/);
 	assert.ok(document.querySelector('button[type="submit"]')?.hasAttribute("disabled"));
 	await f.commandSubmit(); assert.equal(f.state.sent.length, 0);
 	f.state.reconciliation = "failed"; await f.render();
 	assert.match(document.body.textContent ?? "", /Public question/);
-	assert.doesNotMatch(document.body.textContent ?? "", /Preparing question|Question unavailable|Dismiss question|Retry|PRIVATE_/);
+	assert.doesNotMatch(document.body.textContent ?? "", /正在准备问题|问题不可用|跳过问题|Retry|重试|PRIVATE_/);
 	assert.equal(document.querySelector('[role="status"]'), null, "canonical failure is explained by the parent Retry banner only");
 	f.state.reconciliation = "ready"; f.state.ready = false; await f.render();
-	assert.match(document.body.textContent ?? "", /Question unavailable/);
-	const dismiss = Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Dismiss question");
+	assert.match(document.body.textContent ?? "", /问题不可用/);
+	const dismiss = Array.from(document.querySelectorAll("button")).find(button => button.textContent === "跳过问题");
 	assert.ok(dismiss); assert.equal(dismiss.disabled, true, "known unavailability is distinct from interaction readiness");
 });
 
@@ -137,7 +137,7 @@ test("new editor generations require canonical and interaction readiness indepen
 	assert.equal(f.state.mounts, 0);
 	f.state.reconciliation = "failed"; await f.render(); assert.equal(f.state.mounts, 0);
 	f.state.reconciliation = "ready"; f.state.ready = false; await f.render(); assert.equal(f.state.mounts, 0);
-	assert.doesNotMatch(document.body.textContent ?? "", /Question unavailable|Dismiss question/);
+	assert.doesNotMatch(document.body.textContent ?? "", /问题不可用|跳过问题/);
 	f.state.ready = true; await f.render(); assert.equal(f.state.mounts, 1);
 });
 
@@ -153,7 +153,7 @@ test("an admitted live editor survives reconciliation read-only and rejects publ
 	await f.commandSubmit(); assert.equal(f.state.sent.length, 0);
 	f.state.reconciliation = "failed"; await f.render();
 	assert.equal(f.state.disposed, 0); assert.equal(f.state.updates.at(-1), false);
-	assert.doesNotMatch(document.body.textContent ?? "", /Question unavailable|Dismiss question|Preparing question/);
+	assert.doesNotMatch(document.body.textContent ?? "", /问题不可用|跳过问题|正在准备问题/);
 	f.state.reconciliation = "ready"; f.state.available = true; await f.render();
 	assert.equal(f.state.updates.at(-1), false, "busy/compacting readiness is not canonical readiness");
 	await act(async () => { props.onChange({ status: "ready", value: "while busy" }); });
@@ -168,8 +168,8 @@ test("confirmed unavailability after reconciliation revokes the retained editor 
 	f.state.reconciliation = "syncing"; f.state.available = false; await f.render(); assert.equal(f.state.disposed, 0);
 	f.state.reconciliation = "ready"; await f.render();
 	assert.equal(f.state.disposed, 1); assert.equal(props.signal.aborted, true);
-	assert.match(document.body.textContent ?? "", /Question unavailable/);
-	assert.match(document.body.textContent ?? "", /Dismiss question/);
+	assert.match(document.body.textContent ?? "", /问题不可用/);
+	assert.match(document.body.textContent ?? "", /跳过问题/);
 	await act(async () => { props.onChange({ status: "ready", value: "revoked" }); });
 	assert.deepEqual(f.draft.answer, { status: "ready", value: "  code\n" });
 	await f.commandSubmit(); assert.equal(f.state.sent.length, 0);
@@ -307,7 +307,7 @@ test("a pending unadopted editor cannot claim Escape or move focus", async () =>
 test("folding/canonical replacement preserve editor generation, active updates and ready-state drafts", async () => {
 	const f = await fixture(); assert.equal(f.state.mounts, 1); assert.equal(f.state.mic, false);
 	assert.equal(document.querySelector('[data-testid="thinking-field"]'), null);
-	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "Dismiss question"), false, "healthy no-thinking questions have no dismissal action either");
+	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "跳过问题"), false, "healthy no-thinking questions have no dismissal action either");
 	f.state.expanded = false; await f.render(); assert.equal(f.state.updates.at(-1), false); await f.commandSubmit(); assert.equal(f.state.sent.length, 0);
 	f.state.snapshot = structuredClone(f.state.snapshot); f.state.expanded = true; await f.render();
 	assert.equal(f.state.mounts, 1); assert.equal(f.state.disposed, 0); assert.equal(f.state.updates.at(-1), true);
@@ -498,7 +498,7 @@ test("unrevealed check finishes reading speech before reveal, then shows disable
 	await act(async () => { f.socket.final("tail"); f.socket.end(); });
 	assert.equal(f.draft.readingThinking, "reading tail"); assert.equal(f.state.reveal, false);
 	await f.render(); assert.equal(f.state.mic, false); assert.ok(document.querySelector('[data-testid="reading-thinking-field"]'));
-	const mic = Array.from(document.querySelectorAll("button")).find(button => button.textContent?.includes("Dictate")); assert.ok(mic); assert.equal(mic.hasAttribute("disabled"), true);
+	const mic = Array.from(document.querySelectorAll("button")).find(button => button.textContent?.includes("语音听写")); assert.ok(mic); assert.equal(mic.hasAttribute("disabled"), true);
 	await f.commandSubmit(); const input = f.state.sent[0]!; if (input.type === "plugin-question-answer") { assert.equal(input.readingThinking, "reading tail"); assert.equal("thinking" in input, false); }
 	assert.deepEqual(f.state.fallback, []);
 });
@@ -513,23 +513,23 @@ for (const check of [false, true]) test(`healthy ${check ? "teach" : "probe"} th
 	assert.equal(frame.parentElement?.tagName, "FORM");
 	for (const token of ["border-t", "border-border/60", "p-1.5"]) assert.ok(frame.parentElement?.classList.contains(token), token);
 	const label = frame.firstElementChild!;
-	assert.equal(label.textContent?.toLowerCase(), "your thinking");
+	assert.equal(label.textContent, "你的思考");
 	for (const token of ["px-2.5", "pt-2", "text-xs", "font-medium", "uppercase"]) assert.ok(label.classList.contains(token), token);
 	const input = frame.querySelector<HTMLElement>("[data-file-path-input]")!;
 	assert.ok(input);
-	assert.equal(input.getAttribute("data-placeholder"), "Your thinking");
+	assert.equal(input.getAttribute("data-placeholder"), "你的思考");
 	for (const token of ["field-sizing-content", "lh-input", "max-h-48", "w-full", "resize-none", "bg-transparent", "px-2.5", "py-2", "outline-none", "placeholder:text-muted-foreground/70", "min-h-10"]) assert.ok(input.classList.contains(token), token);
 	const submit = frame.querySelector<HTMLButtonElement>('button[type="submit"]')!;
 	assert.ok(submit); assert.equal(submit.disabled, false);
-	assert.equal(submit.textContent, "Submit answer");
+	assert.equal(submit.textContent, "提交答案");
 	assert.equal(input.classList.contains("min-h-[4.5rem]"), false, "even teaching starts with the approved compact field");
 	const hint = submit.parentElement?.querySelector('span[aria-hidden="true"]')!;
-	assert.ok(hint); assert.equal(hint.textContent, "↵ submits · ⇧↵ newline");
+	assert.ok(hint); assert.equal(hint.textContent, "↵ 提交 · ⇧↵ 换行");
 	for (const token of ["pl-1.5", "text-xs", "text-muted-foreground"]) assert.ok(hint.classList.contains(token), token);
 	assert.ok(submit.parentElement?.classList.contains("p-1"));
 	for (const token of ["ml-auto", "h-9", "rounded-[6px]", "px-3.5", "text-sm", "font-medium"]) assert.ok(submit.classList.contains(token), token);
 	assert.equal(document.getElementById("plugin-editor")?.closest("form"), null, "arbitrary plugin DOM stays outside the host form");
-	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "Dismiss question"), false);
+	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "跳过问题"), false);
 	assert.equal(f.state.dismissed, 0);
 });
 
@@ -562,10 +562,10 @@ for (const failure of ["backend", "missing", "editor", "presentation"] as const)
 	const f = await fixture({ thinking: true, available: failure !== "backend", missing: failure === "missing", editorFails: failure === "editor",
 		...(failure === "presentation" ? { question: async () => { throw new Error("PRIVATE_PRESENTATION_FAILURE"); } } : {}),
 	});
-	assert.match(document.body.textContent ?? "", /Question unavailable/);
+	assert.match(document.body.textContent ?? "", /问题不可用/);
 	assert.doesNotMatch(document.body.textContent ?? "", /PRIVATE_/);
 	assert.ok(document.querySelector('button[type="submit"]')?.hasAttribute("disabled"));
-	const dismiss = Array.from(document.querySelectorAll("button")).find(button => button.textContent === "Dismiss question")!;
+	const dismiss = Array.from(document.querySelectorAll("button")).find(button => button.textContent === "跳过问题")!;
 	assert.ok(dismiss); assert.equal(dismiss.disabled, false);
 	await act(async () => { dismiss.click(); });
 	assert.equal(f.state.dismissed, 1); assert.equal(f.state.sent.length, 0);
@@ -578,7 +578,7 @@ for (const failure of ["backend", "missing", "editor", "presentation"] as const)
 	await f.render();
 	assert.equal(document.querySelector('[role="status"]'), null);
 	assert.match(document.body.textContent ?? "", /Recovered question/);
-	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "Dismiss question"), false);
+	assert.equal(Array.from(document.querySelectorAll("button")).some(button => button.textContent === "跳过问题"), false);
 	assert.equal(document.querySelector<HTMLButtonElement>('button[type="submit"]')?.disabled, false);
 	await f.commandSubmit(); assert.equal(f.state.sent.length, 1);
 });

@@ -99,10 +99,10 @@ test("Settings rebinds, clears and resets plugin overrides in the existing keyma
 	try {
 		await act(async () => saveOverrides({ "open-settings": "mod+shift+," }));
 		const button = (id: string) => f.document.querySelector<HTMLElement>(`[data-testid='${id}']`)!;
-		assert.match(f.document.body.textContent!, /Library/); assert.match(f.document.body.textContent!, /Unbound/);
+		assert.match(f.document.body.textContent!, /Library/); assert.match(f.document.body.textContent!, /未绑定/);
 		await f.click(button("kbd-rebind-plugin:fixture:draw"));
 		await f.key("k", { metaKey: true });
-		assert.match(f.document.querySelector("[role=alert]")!.textContent!, /core shortcut/);
+		assert.match(f.document.querySelector("[role=alert]")!.textContent!, /与核心快捷键冲突/);
 		assert.equal(loadOverrides()["plugin:fixture:draw"], undefined);
 		await f.key("j", { metaKey: true, shiftKey: true });
 		assert.equal(loadOverrides()["plugin:fixture:draw"], "mod+shift+j");

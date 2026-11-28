@@ -190,7 +190,7 @@ describe("agent section compose helpers — the replace-whole PUT body", () => {
 		for (const draft of ["0", "-1", "1.5", "1e-1", "8.0000000000000001", "99999999999999.99999", "9007199254740992", "1e999999", "1e", "NaN", "Infinity", "hello", "0x10"]) {
 			const result = composeWorkerRequestConcurrency(undefined, draft);
 			assert.equal(result.ok, false, draft);
-			if (!result.ok) assert.match(result.error, /positive, safely representable whole number/);
+			if (!result.ok) assert.match(result.error, /^请输入一个可安全表示的正整数。$/);
 		}
 	});
 
@@ -334,12 +334,12 @@ describe("keyStatusLine — the minimal at-a-glance state", () => {
 	it("env-owned key carries the 'env' marker (the row renders read-only)", () => {
 		assert.equal(
 			keyStatusLine({ id: "X", info: null, present: true, masked: "…ca10 (73 chars)", source: "env", shadowedByEnv: false }),
-			"…ca10 · 73 · env",
+			"…ca10 · 73 · 环境变量",
 		);
 	});
 
 	it("absent key reads 'not set'", () => {
-		assert.equal(keyStatusLine({ id: "X", info: null, present: false, masked: null, source: "none", shadowedByEnv: false }), "not set");
+		assert.equal(keyStatusLine({ id: "X", info: null, present: false, masked: null, source: "none", shadowedByEnv: false }), "未设置");
 	});
 });
 
@@ -430,16 +430,16 @@ describe("sectionedSegments — actual per-agent prompt membership", () => {
 
 	it("labels each shared fragment from actual membership, independently of override state", () => {
 		const shared = sectionedSegments(view).at(-1)!;
-		assert.equal(shared.segments[0]!.usageHint, "Used by Teacher and Prober");
-		assert.equal(shared.segments[2]!.usageHint, "Used by Teacher, Prober and Practice");
+		assert.equal(shared.segments[0]!.usageHint, "用于：老师和摸底");
+		assert.equal(shared.segments[2]!.usageHint, "用于：老师、摸底和练习");
 		assert.equal(shared.segments[2]!.enabled, true, "in-use state is not replaced by usage");
 		// A synthetic new path/membership proves there is no duplicated allowlist.
 		const fragment = { path: "shared/99-new.md", sourceText: "new", overrideText: null, enabled: false, shared: true };
 		const changed = { teacher: [fragment], prober: [fragment], practice: [fragment] };
-		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "Used by Teacher, Prober and Practice");
+		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "用于：老师、摸底和练习");
 		changed.practice = [];
-		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "Used by Teacher and Prober");
-		assert.equal(sectionedSegments({ teacher: [], prober: [], practice: [fragment] }).at(-1)!.segments[0]!.usageHint, "Used by Practice");
+		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "用于：老师和摸底");
+		assert.equal(sectionedSegments({ teacher: [], prober: [], practice: [fragment] }).at(-1)!.segments[0]!.usageHint, "用于：练习");
 	});
 
 });

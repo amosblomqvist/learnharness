@@ -47,11 +47,11 @@ it("image scale applies before the fixed cap rather than shrinking an already ca
   assert.deepEqual(exportRaster({ x: 0, y: 0, width: 6000, height: 4000 }, 1, 50), { width: 2000, height: 1333 });
   assert.deepEqual(exportRaster({ x: 0, y: 0, width: 6000, height: 4000 }, 1, 25), { width: 1500, height: 1000 });
   assert.deepEqual(exportRaster({ x: 0, y: 0, width: 1000, height: 600 }, 2, 50), { width: 1000, height: 600 });
-  for (const scale of [0, -1, 101, Infinity, NaN]) assert.throws(() => exportRaster({ x: 0, y: 0, width: 100, height: 100 }, 1, scale), /kept/);
+  for (const scale of [0, -1, 101, Infinity, NaN]) assert.throws(() => exportRaster({ x: 0, y: 0, width: 100, height: 100 }, 1, scale), /已保留/);
 });
 it("impossible export bounds fail closed before bitmap allocation", () => {
-  for (const width of [0, -1, Infinity, NaN]) assert.throws(() => exportRaster({ x: 0, y: 0, width, height: 100 }, 1, 100), /kept/);
-  assert.throws(() => exportRaster({ x: Infinity, y: 0, width: 100, height: 100 }, 1, 100), /kept/);
+  for (const width of [0, -1, Infinity, NaN]) assert.throws(() => exportRaster({ x: 0, y: 0, width, height: 100 }, 1, 100), /已保留/);
+  assert.throws(() => exportRaster({ x: Infinity, y: 0, width: 100, height: 100 }, 1, 100), /已保留/);
 });
 it("erased distant strokes do not expand the crop and Undo restores their bounds", () => {
   const far = pen(-100000, 4000), near = pen(0, 0), erase: Stroke = { tool: "eraser", points: far.points };

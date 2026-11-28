@@ -102,7 +102,7 @@ it("removing the active row by filtering safely restarts on the first visible re
 });
 it("rename arrows stay in the input, and modal-owned keyboard focus disables both Find and navigation", async () => {
 	await mount(); await point('[data-source-drag-row="b"]');
-	await act(async () => { (document.querySelector('[data-source-drag-row="b"] button[title="Rename"]') as HTMLElement).click(); });
+	await act(async () => { (document.querySelector('[data-source-drag-row="b"] button[title="重命名"]') as HTMLElement).click(); });
 	const input = document.querySelector('[data-testid="source-name-input"]')!;
 	for (const arrow of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"]) assert.equal((await key(arrow, input)).defaultPrevented, false);
 	assert.equal(focused, input); await act(async () => { setEnabled(false); });
@@ -136,7 +136,7 @@ it("rich statement actions keep native Space in both viewing and picking, while 
 			onToggleCluster={() => {}} onToggleChain={() => {}} onToggleNodes={(ids, next) => toggles.push({ ids, next })}
 			onClear={() => {}} onDelete={() => {}} onClose={() => {}} />); });
 		const row = document.querySelector<HTMLElement>('[data-testid="prop-row-n1"]')!;
-		for (const selector of ['[aria-label="Copy code"]', '[aria-label="Copy equation source"]', '[data-streamdown="link"]']) {
+		for (const selector of ['[aria-label="复制代码"]', '[aria-label="复制公式源码"]', '[data-streamdown="link"]']) {
 			const action = row.querySelector<HTMLElement>(selector)!; assert.ok(action, selector);
 			await act(async () => { action.dispatchEvent(new dom.window.Event("pointerdown", { bubbles: true })); });
 			action.focus();

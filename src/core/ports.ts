@@ -174,7 +174,7 @@ export interface CreateJobInit {
 	kind: JobKind;
 	chatId: string;
 	toolCallId: string;
-	/** First activity line (defaults to "starting"). */
+	/** First activity line (defaults to "启动中"). */
 	activity?: string;
 	/** Host-owned plugin worker linkage, not model-selected routing. */
 	plugin?: PluginJobMetadata;

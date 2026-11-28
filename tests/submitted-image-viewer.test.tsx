@@ -16,13 +16,13 @@ test("raster images reuse the figure viewport without SVG markup, white backing 
 	const html = renderToStaticMarkup(<InteractionLayersProvider><MermaidOverlay image={{ src: source, width: 2000, height: 1375 }} onClose={() => {}} /></InteractionLayersProvider>);
 	const { document } = parseHTML(html);
 	const overlay = document.querySelector('[data-testid="mermaid-overlay"]')!;
-	assert.equal(overlay.getAttribute("aria-label"), "Image focus");
+	assert.equal(overlay.getAttribute("aria-label"), "图片聚焦查看");
 	assert.equal(overlay.querySelector("img")?.getAttribute("src"), source);
 	assert.equal(overlay.querySelector("img")?.getAttribute("draggable"), "false");
 	assert.equal(overlay.querySelector("svg image"), null);
 	assert.equal(overlay.querySelector("[data-lh-overlay-chart]"), null);
-	assert.ok(overlay.querySelector('[aria-label="Zoom in"]'));
-	assert.ok(overlay.querySelector('[aria-label="Fit image to view"]'));
+	assert.ok(overlay.querySelector('[aria-label="放大"]'));
+	assert.ok(overlay.querySelector('[aria-label="图片适应视图"]'));
 	assert.doesNotMatch(html, /filter:invert|bg-white/);
 });
 
@@ -45,7 +45,7 @@ test("clicking a thumbnail opens the same accepted bytes in the shared viewer an
 		await act(async () => root.render(<InteractionLayersProvider><Harness /></InteractionLayersProvider>));
 		const thumbnail = document.querySelector('[data-testid="submitted-images"] img')!;
 		Object.defineProperties(thumbnail, { naturalWidth: { value: 2000 }, naturalHeight: { value: 1375 } });
-		await act(async () => { document.querySelector('[aria-label="Open submitted image fullscreen"]')!.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
+		await act(async () => { document.querySelector('[aria-label="全屏查看已提交的图片"]')!.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
 		const expanded = document.querySelector('[data-testid="mermaid-overlay"] img')!;
 		assert.equal(expanded.getAttribute("src"), thumbnail.getAttribute("src"));
 		await act(async () => { document.querySelector('[data-testid="mermaid-overlay-close"]')!.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });

@@ -5,6 +5,7 @@ import { checkPluginSchema, preparePluginSchema } from "./plugin-validation.ts";
 import { copyImmutableData, ImmutableReadCache } from "./immutable-data.ts";
 import { Format } from "typebox/format";
 import { validatePluginSubmissionImages, type PluginSubmissionImages } from "./plugin-submissions.ts";
+import { tr } from "./i18n.ts";
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };
 export type PluginQuestionVariant = "probe" | "teach";
@@ -409,14 +410,14 @@ function validateInput(definition: PluginQuestionTypeDefinition, context: { chat
 function validateAnswer(snapshot: PluginQuestionSnapshot, context: { chatId: string; answer: unknown }, definition?: PluginQuestionTypeDefinition): PluginQuestionValidationResult<JsonValue> {
 	try {
 		const saved = readPluginQuestionSnapshot(snapshot);
-		if (!saved) return problems("Question contract is unreadable.");
+		if (!saved) return problems(tr("无法读取问题约定。", "Question contract is unreadable."));
 		const answer = clonePluginQuestionJson(context.answer);
-		if (!schemaAccepts(saved.answerSchema, answer)) return problems("Answer does not satisfy the saved answer contract.");
-		if (saved.requiresAnswerRefinement && (!definition || definition.id !== saved.typeId || definition.contractVersion !== saved.contractVersion || !definition.validateAnswer)) return problems("The required question validation implementation is unavailable.");
+		if (!schemaAccepts(saved.answerSchema, answer)) return problems(tr("答案不符合已保存的答案约定。", "Answer does not satisfy the saved answer contract."));
+		if (saved.requiresAnswerRefinement && (!definition || definition.id !== saved.typeId || definition.contractVersion !== saved.contractVersion || !definition.validateAnswer)) return problems(tr("所需的问题校验实现不可用。", "The required question validation implementation is unavailable."));
 		const accepted = freezePluginQuestionValue(answer);
 		const errors = saved.requiresAnswerRefinement ? refinement(definition!.validateAnswer, { chatId: context.chatId, questionId: saved.questionId, variant: saved.variant, contractVersion: saved.contractVersion, input: saved.input, answer: accepted }) : [];
 		return errors.length ? { ok: false, problems: errors } : { ok: true, value: accepted };
-	} catch { return problems("Answer must be finite JSON satisfying its saved contract."); }
+	} catch { return problems(tr("答案必须是符合已保存约定的有限 JSON。", "Answer must be finite JSON satisfying its saved contract.")); }
 }
 
 function occurrenceOf(value: unknown): PluginQuestionOccurrence | null {

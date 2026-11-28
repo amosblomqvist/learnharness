@@ -1,35 +1,14 @@
-# Managed agent example
+# 托管智能体示例
 
-Copy this directory into the plugins directory shown in **Settings → Community plugins**,
-keeping the `managed-agent/` folder and its required `dist/manifest.json`. No build is
-needed. Refresh and enable **Managed agent example**. Edit runtime files in `dist/`
-and restart LearnHarness after changing loaded code. Preserve sibling `managed-agent/data/`
-when replacing `dist/`; never distribute that persistent data or place it in `dist/data/`.
-Open it using its explicit sidebar or graph action. Registration of the view itself does
-not place it anywhere.
+把此目录复制到 **设置 → 社区插件**（Settings → Community plugins）中显示的插件目录下，保留 `managed-agent/` 文件夹及其必需的 `dist/manifest.json`。无需构建。刷新后启用 **Managed agent example**。在 `dist/` 中编辑运行时文件，修改已加载的代码后需重启 LearnHarness。替换 `dist/` 时保留同级的 `managed-agent/data/`；绝不要分发这些持久化数据，也不要把它放进 `dist/data/`。通过它显式提供的侧边栏或图谱操作打开它。视图本身的注册不会把它放到任何位置。
 
-This is a small developer example, not a separate showcase application. The host's
-`mountStandardComposer` supplies controlled model/thinking selection, text input,
-and dictation. Select a configured model (and thinking level if supported), then
-click **New conversation**. Those choices apply to the new conversation, not an
-existing one. Creating or opening a conversation never runs the agent. Only **Send**,
-**Run as background task**, or answering a pending question starts explicit work.
-Model requests and dictation may incur configured-provider costs; background work
-also needs the configured connection's permission. Stop uses the host composer.
+这是一个小型开发者示例，而不是独立的展示应用。宿主的 `mountStandardComposer` 提供受控的模型/推理强度选择、文本输入和语音听写。选择一个已配置的模型（如支持，再选择推理强度），然后点击 **New conversation**（新对话）。这些选择作用于新对话，而不是已有对话。创建或打开对话绝不会运行智能体。只有 **Send**（发送）、**Run as background task**（作为后台任务运行）或回答待处理的问题才会启动显式的工作。模型请求和语音听写可能产生所配置服务商的费用；后台工作还需要所配置连接的权限。“停止”由宿主输入框提供。
 
-Try asking the agent to ask a question or save a note. Pending questions and the
-transcript deliberately remain simple plugin-owned DOM. Navigate away and return
-to observe an ongoing run; unmounting the view does not abort backend execution.
-All host widgets receive the view's `{ signal }` and are disposed on unmount.
+可以试着让智能体提一个问题或保存一条笔记。待处理的问题和对话记录有意保持为简单的插件自有 DOM。离开后再返回，可以观察正在进行的运行；卸载视图不会中止后端执行。所有宿主组件都会收到视图的 `{ signal }`，并在卸载时被销毁。
 
-The plugin controls its draft/model/thinking state; widgets do not write host defaults.
-The backend persists model/thinking definitions in its own `data/definitions.json`
-and demonstration notes in `data/notes.jsonl`; the host persists plugin-owned agent
-records separately from learning chats. No core learning data or model defaults are
-written. There are no unrelated configurable settings or automatic runs.
+插件自行控制其草稿/模型/推理强度状态；组件不会写入宿主默认值。后端把模型/推理强度定义持久化到自己的 `data/definitions.json`，把演示笔记持久化到 `data/notes.jsonl`；宿主则把插件自有的智能体记录与学习对话分开持久化。不会写入任何核心学习数据或模型默认值。没有无关的可配置设置，也没有自动运行。
 
-Maintainer check **from a LearnHarness repository checkout with its dependencies
-installed** (no provider requests; not a command supplied by the downloaded skill):
+维护者检查，**需在已安装依赖的 LearnHarness 仓库检出中运行**（不发出服务商请求；也不是下载的 skill 所提供的命令）：
 
 ```sh
 node --test examples/plugins/example-ui.test.js

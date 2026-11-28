@@ -1,3 +1,4 @@
+import { tr } from "./i18n.ts";
 export const FAMILIES = ["chemicalStructures", "musicalNotation", "technicalDiagrams"] as const;
 export type Family = typeof FAMILIES[number];
 export type Language = "smiles" | "abc" | "tikz";
@@ -15,7 +16,7 @@ export const LANGUAGES: Record<Family, Language> = {
   chemicalStructures: "smiles", musicalNotation: "abc", technicalDiagrams: "tikz",
 };
 export const LABELS: Record<Family, string> = {
-  chemicalStructures: "Chemical structures", musicalNotation: "Musical notation", technicalDiagrams: "Technical diagrams",
+  chemicalStructures: tr("化学结构", "Chemical structures"), musicalNotation: tr("乐谱", "Musical notation"), technicalDiagrams: tr("技术图表", "Technical diagrams"),
 };
 export const INSTRUCTIONS: Record<Family, string> = {
   chemicalStructures: "For chemical structures, use a smiles fenced code block containing one SMILES molecule. Write explanations outside the block; do not author raw SVG.",
@@ -37,12 +38,12 @@ export const CACHE_ENTRIES = 32;
 export const CACHE_BYTES = 8 * 1024 * 1024;
 
 export function parseSettings(value: unknown): Settings {
-  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("Invalid Rich code blocks settings.");
+  if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(tr("富代码块设置无效。", "Invalid Rich code blocks settings."));
   const record = value as Record<string, unknown>;
-  if (record.version !== 1) throw new Error("Unsupported Rich code blocks settings version; the saved file has not been changed.");
-  if (Object.keys(record).some(key => !["version", "revision", "inkColor", ...FAMILIES].includes(key))) throw new Error("Unknown Rich code blocks settings fields.");
+  if (record.version !== 1) throw new Error(tr("不支持的富代码块设置版本；已保存的文件未被修改。", "Unsupported Rich code blocks settings version; the saved file has not been changed."));
+  if (Object.keys(record).some(key => !["version", "revision", "inkColor", ...FAMILIES].includes(key))) throw new Error(tr("富代码块设置中包含未知字段。", "Unknown Rich code blocks settings fields."));
   if (!Number.isSafeInteger(record.revision) || (record.revision as number) < 0 || FAMILIES.some(key => typeof record[key] !== "boolean")) {
-    throw new Error("Invalid Rich code blocks settings.");
+    throw new Error(tr("富代码块设置无效。", "Invalid Rich code blocks settings."));
   }
   // Legacy v1 inkColor is accepted above but deliberately omitted: theme Text
   // now owns neutral ink. Reads never rewrite disk; normal saves drop the key.
@@ -60,10 +61,10 @@ export function parseChange(value: unknown): { family: Family; enabled: boolean 
 }
 
 export function checkSource(language: Language, source: string): void {
-  if (new TextEncoder().encode(source).byteLength > SOURCE_LIMITS[language]) throw new Error(`${language} source exceeds the ${SOURCE_LIMITS[language] / 1024} KiB limit.`);
-  if (!source.trim()) throw new Error(`Empty ${language} source.`);
+  if (new TextEncoder().encode(source).byteLength > SOURCE_LIMITS[language]) throw new Error(tr(`${language} 源码超出 ${SOURCE_LIMITS[language] / 1024} KiB 的上限。`, `${language} source exceeds the ${SOURCE_LIMITS[language] / 1024} KiB limit.`));
+  if (!source.trim()) throw new Error(tr(`${language} 源码为空。`, `Empty ${language} source.`));
 }
 
 export function checkSvgSize(svg: string): void {
-  if (new TextEncoder().encode(svg).byteLength > SVG_LIMIT) throw new Error("Rendered SVG exceeds the 2 MiB limit.");
+  if (new TextEncoder().encode(svg).byteLength > SVG_LIMIT) throw new Error(tr("渲染出的 SVG 超出 2 MiB 的上限。", "Rendered SVG exceeds the 2 MiB limit."));
 }

@@ -1,206 +1,89 @@
-# Drawing Pad
+# 画板
 
-A trusted-local Core LearnHarness plugin for drawing over read-only question references.
-Requires the public [session-view context](../../docs/plugin-view-context.md),
-[scoped action shortcuts](../../docs/plugin-authoring.md#action-shortcuts), surfaces
-and learner-submission interception APIs. A version number alone does not establish
-capabilities; use host documentation/types matching the target app.
+一个受信任的本地 LearnHarness 核心插件，用于在只读的问题参考内容上绘图。需要公开的[会话视图上下文](../../docs/plugin-view-context.md)、[作用域操作快捷键](../../docs/plugin-authoring.md#动作快捷键)、界面以及学习者提交拦截 API。仅凭版本号不能确定宿主具备这些能力；请使用与目标应用相匹配的宿主文档/类型。
 
-## Core plugin and source reference
+## 核心插件与源码参考
 
-Enable Drawing Pad in **Settings → Core plugins**. The app supplies and updates its
-code; writable preferences live under `<learning data>/core-plugin-data/drawing-pad/`.
-This source project is reference material, not an installable Community copy.
-`drawing-pad` is a reserved Core ID even when disabled or missing. A Community fork
-needs its own manifest/folder ID and a review of conflicting contribution, tool and
-fence names. Do not install this build into a Community `plugins/drawing-pad/` folder.
+在 **设置 → 核心插件**（Settings → Core plugins）中启用画板（Drawing Pad）。应用负责提供并更新其代码；可写的偏好设置位于 `<learning data>/core-plugin-data/drawing-pad/` 下。这个源码项目是参考材料，而不是可安装的社区插件副本。`drawing-pad` 是保留的核心插件 ID，即使被停用或缺失也是如此。社区分支需要自己的清单/文件夹 ID，并审查可能冲突的贡献项、工具和围栏代码块名称。不要把此构建安装到社区插件的 `plugins/drawing-pad/` 文件夹中。
 
-## Behavior
+## 行为
 
-- **Draw** in teaching/practice top bars toggles the pad. **Draw (unsent)** means
-  visible ink is eligible for the next learner content submission in that session.
-  X/Escape closes without sending or discarding. The normal top-bar overflow applies.
-- A revealed, available built-in question shows question/context/options in the host's
-  actual order. A native practice problem shows its statement. Public `mountMarkdown`
-  preserves the host's Markdown/math rendering. Unrevealed questions, custom question
-  or problem tools, unavailable input, and ordinary input start blank. No answer keys,
-  learner drafts/selections/confidence, custom payloads, or transcript are captured.
-- The window is a viewport onto unrestricted drawing coordinates, not a fitted sheet.
-  The reference uses the native composer's normal question-content width:
-  `calc(42rem - 2px)` (670 CSS pixels at a 16px root), derived from the current 46rem
-  dock column minus outer padding, shell borders, and question padding. It does not
-  use the window width, even when first opened in a narrow window. Height includes
-  the complete content. The reference center defines the world origin; the camera
-  places it bottom-center with a 24px gap. Resizing retains that bottom-center anchor
-  and the saved Hand-pan offset without scaling or rewrapping the reference or ink.
-  Pen and Eraser work over the whole surface, including beyond the reference.
-  Blank sheets retain their centered origin.
-- **Hand** drags the view at fixed scale, moving reference and ink together. Camera
-  position is retained with each held session sheet across closing/navigation/remounts.
-  Off-screen ink remains eligible for export; camera movement is not a content edit
-  or an Undo entry. Holding the **right mouse button** and dragging temporarily
-  pans with any selected tool; release or cancellation ends that gesture without
-  switching tools, drawing/erasing, or adding an Undo entry. Pointer capture keeps
-  panning/release working outside the canvas. Stylus-eraser behavior is unchanged.
-  No zoom or Redo.
-- Pen, whole-stroke Eraser, Undo, and Clear reuse the
-  handwriting contribution's pressure-sensitive pen/mouse mechanics. Touch is ignored.
-  Pen, Eraser, Hand, and Undo are icon-only controls with accessible names and tooltips;
-  Clear remains text. Controls form a compact top-left floating cluster, not a reserved
-  toolbar row: the canvas fills the surface, and transparent gaps/padding pass pointer
-  input through. Actual controls remain clickable above the ink. A held stylus eraser
-  button temporarily selects Eraser while using Pen/Eraser; Hand gestures pan rather
-  than drawing.
-- Clear removes ink/undo history but keeps the displayed background. Closing/reopening
-  an untouched or explicitly cleared sheet captures a fresh reference. An erased sheet
-  with undo history retains its original background until cleared/reset.
-- Existing work retains its original reference content and geometry when reopened/resized.
-  Live app theme/palette changes re-rasterize that same saved learner-visible reference,
-  never substitute later question/input content, and recolor ink for the active app mode.
-  Original strokes, dimensions, and Hand-pan position are preserved. The selected app
-  theme (`html.light`/`html.dark`), not the OS color preference, controls the palette.
-  Already submitted images remain unchanged.
-  Export tightly crops the union of the complete reference and all visible (not erased)
-  ink, including off-screen work, with 24 CSS pixels of padding. A blank reference
-  contributes no artificial canvas rectangle. No toolbar or camera/viewport extent is
-  included. Apply Image scale, then reduce further if needed to stay within the fixed
-  **2000 × 2000 pixel cap**, preserving aspect ratio to integer-pixel rounding. Display
-  canvases cover only the viewport; export canvases never exceed the cap. Original
-  strokes are retained at full precision. An untouched/fully erased sheet sends no image.
-- Drawings attach to the next learner content submission: ordinary message, practice
-  thinking, built-in answer, custom-question answer, or custom-problem submission.
-  Existing text, JSON, selections, confidence, and images remain unchanged. Native
-  readiness/validation and model image capability rules still apply.
-- Teaching: acknowledged acceptance clears only the captured unchanged revision.
-  Newer edits survive. Failed/refused/cancelled attempts and lost acknowledgment retain
-  work. Later model failure does not restore an already consumed drawing.
-- Practice: retain the board/undo history across submissions, conclusion, dismissal,
-  and generation abort. Send an image only when the current visible drawing differs
-  from the last acknowledged image. Undo back to that image does not resend it. Color
-  changes count. Only an **accepted new problem pose** resets the board; if open, the
-  old pad closes. Reopen Draw for the fresh host-selected reference. Failed/dangling
-  poses, conclusions, dismissals, and model prose do not reset it.
-- Automatic continuations, retries, silent dismissals and control-only Next do not run
-  learner-content interception. Image-only pending ordinary input is content, not a
-  control-only Next. Accepted image bytes are handled/stored by the host.
-- Each session's sheet lives only in this app window's memory across navigation.
-  Reload/restart/disable loses unsent work. No editable draft persistence.
+- 教学/练习顶栏中的 **绘图**（Draw）用于切换画板。**绘图（未发送）**（Draw (unsent)）表示可见的墨迹有资格随该会话中下一次学习者内容提交一起发送。X/Escape 会关闭画板，既不发送也不丢弃。常规的顶栏溢出规则同样适用。
+- 已显示且可用的内置问题会按宿主的实际顺序显示问题/上下文/选项。原生练习题目会显示其题目陈述。公开的 `mountMarkdown` 保留宿主的 Markdown/数学公式渲染。未显示的问题、自定义问题或题目工具、不可用的输入以及普通输入都从空白开始。不会捕获标准答案、学习者的草稿/选择/把握度、自定义载荷或对话记录。
+- 窗口是一个通向不受限制的绘图坐标的视口，而不是一张适配窗口的纸。参考内容使用原生输入框中问题内容的常规宽度：`calc(42rem - 2px)`（根字号为 16px 时为 670 个 CSS 像素），它由当前 46rem 的输入区列宽减去外边距、外壳边框和问题内边距得出。它不使用窗口宽度，即使第一次是在窄窗口中打开也是如此。高度包含完整的内容。参考内容的中心定义了世界坐标原点；镜头把它放在底部居中、留出 24px 间距的位置。调整窗口大小时会保留这一底部居中锚点和已保存的“抓手”平移偏移，而不会缩放参考内容或墨迹，也不会让它们重新换行。“画笔”和“橡皮擦”在整个界面上都可以使用，包括参考内容之外的区域。空白画纸保留其居中的原点。
+- **抓手**（Hand）以固定比例拖动视图，参考内容和墨迹一起移动。镜头位置会随每张保留的会话画纸一起保存，跨越关闭/页面导航/重新挂载。屏幕外的墨迹仍然有资格被导出；移动镜头不算内容编辑，也不会产生撤销条目。按住 **鼠标右键** 拖动可以在任何选中的工具下临时平移；松开或取消即结束该手势，不会切换工具、绘制/擦除或添加撤销条目。指针捕获确保在画布之外也能继续平移/松开。手写笔橡皮擦的行为不变。没有缩放或重做。
+- 画笔（Pen）、整笔擦除的橡皮擦（Eraser）、撤销（Undo）和清空（Clear）复用手写贡献项的压感画笔/鼠标机制。触摸会被忽略。画笔、橡皮擦、抓手和撤销是只有图标的控件，带有无障碍名称和提示框；清空仍为文字按钮。控件组成一个紧凑的、浮于左上角的控件组，而不是预留的工具栏行：画布填满整个界面，透明的间隙/内边距会让指针输入穿透过去。实际的控件仍可在墨迹之上点击。在使用画笔/橡皮擦时，按住手写笔的橡皮擦按钮会临时选中橡皮擦；抓手手势用于平移而不是绘制。
+- 清除会移除墨迹/撤销历史，但保留显示的背景。关闭/重新打开一张未改动过或已被显式清除的画纸，会捕获一份新的参考内容。一张经过擦除、仍有撤销历史的画纸会保留其原始背景，直到被清除/重置。
+- 已有的作品在重新打开/调整大小时会保留其原始参考内容和几何结构。实时的应用主题/配色变化会重新栅格化同一份已保存的、学习者可见的参考内容，绝不会替换为之后的问题/输入内容，并会按当前的应用模式为墨迹重新着色。原始笔画、尺寸和抓手平移位置都会保留。决定配色的是所选的应用主题（`html.light`/`html.dark`），而不是操作系统的颜色偏好。已经提交的图片保持不变。导出会紧密裁剪完整参考内容与所有可见（未被擦除）墨迹（包括屏幕外的作品）的并集，并留出 24 个 CSS 像素的内边距。空白的参考内容不会贡献人为的画布矩形。不包含工具栏或镜头/视口的范围。先应用“图片缩放”，如有需要再进一步缩小，以保持在固定的 **2000 × 2000 像素上限** 之内，并在整数像素取整范围内保持宽高比。显示用的画布只覆盖视口；导出用的画布绝不会超过上限。原始笔画以完整精度保留。未改动/已完全擦除的画纸不会发送图片。
+- 绘图会附加到下一次学习者内容提交中：普通消息、练习中的思考、内置问题的回答、自定义问题的回答或自定义题目的提交。已有的文本、JSON、选择、把握度和图片保持不变。原生的就绪/校验规则和模型的图片能力规则仍然适用。
+- 教学：被确认接受后，只会清除所捕获的那个未改动修订版本。更新的编辑会保留。失败/被拒绝/被取消的尝试以及丢失确认时都会保留作品。之后的模型失败不会恢复已经被消耗的绘图。
+- 练习：在提交、结束、放弃和生成中止之间保留画纸/撤销历史。只有当当前可见的绘图与上一次被确认的图片不同时才发送图片。撤销回到那张图片时不会重新发送它。颜色变化也算作变化。只有 **被接受的新出题** 才会重置画纸；如果画板是打开的，旧的画板会关闭。重新打开“绘图”即可获得宿主新选择的参考内容。失败/悬空的出题、结束、放弃和模型输出的文字都不会重置它。
+- 自动继续、重试、静默放弃以及仅含控制的“下一题”（Next）不会运行学习者内容拦截。只有图片的待发送普通输入算作内容，而不是仅含控制的“下一题”。被接受的图片字节由宿主处理/存储。
+- 每个会话的画纸只在该应用窗口的内存中跨页面导航保留。重新加载/重启/停用会丢失未发送的作品。没有可编辑的草稿持久化。
 
-## Keyboard shortcuts
+## 键盘快捷键
 
-Settings → Keyboard → Drawing Pad lists all four actions, including when the pad
-is closed. They use the host's shared action/shortcut registry, so Rebind, Clear,
-and Reset work without reloading.
+设置 → 键盘 → 画板（Settings → Keyboard → Drawing Pad）列出全部四个操作，即使画板处于关闭状态也会列出。它们使用宿主共享的操作/快捷键注册表，因此重新绑定、清除和重置无需重新加载即可生效。
 
-| Action | Default |
+| 操作 | 默认 |
 | --- | --- |
-| Draw (toggle open/closed) | Cmd/Ctrl+Shift+D |
-| Undo drawing | Cmd/Ctrl+Z |
-| Toggle pen/eraser | Cmd/Ctrl+Shift+E |
-| Hand (select, not toggle) | Cmd/Ctrl+Shift+H |
+| 绘图（切换打开/关闭） | Cmd/Ctrl+Shift+D |
+| 撤销绘图 | Cmd/Ctrl+Z |
+| 切换画笔/橡皮擦 | Cmd/Ctrl+Shift+E |
+| 抓手（选中，不切换） | Cmd/Ctrl+Shift+H |
 
-These shortcuts are scoped to teaching/practice pages. Undo and tool switching
-additionally require a ready, open pad with drawing focus and no active gesture.
-They do not steal Undo from inputs, textareas, contenteditable areas, or other
-focused editors. Switching from Hand selects Pen; switching tools never edits ink.
-The Hand shortcut selects Hand just like its toolbar button; pressing it again
-keeps Hand selected. Cmd/Ctrl+Shift+E returns from Hand to Pen. Native Cmd+H (Hide)
-and Cmd+E are not overridden.
-The host blocks shortcuts behind dialogs, menus, or foreign-plugin surfaces and
-ignores held-key repeats/IME input. There is no separate hard-coded Undo listener.
+这些快捷键的作用范围限于教学/练习页面。撤销和工具切换还额外要求画板已就绪、处于打开状态、拥有绘图焦点，并且没有正在进行的手势。它们不会从输入框、文本区域、contenteditable 区域或其他已聚焦的编辑器那里抢走撤销。从抓手切换会选中画笔；切换工具绝不会编辑墨迹。抓手快捷键与其工具栏按钮一样选中抓手；再按一次仍保持选中抓手。Cmd/Ctrl+Shift+E 会从抓手返回画笔。原生的 Cmd+H（隐藏）和 Cmd+E 不会被覆盖。宿主会在对话框、菜单或其他插件的界面之后屏蔽快捷键，并忽略按住按键时的重复触发/输入法输入。没有单独硬编码的撤销监听器。
 
-## Settings
+<a id="settings"></a>
+## 设置
 
-Settings → Drawing Pad:
+设置 → 画板（Settings → Drawing Pad）：
 
-- **Dark mode ink color**: default **white** (`#ffffff`).
-- **Light mode ink color**: default **black** (`#000000`).
-  Both fields require exactly six hex digits prefixed with `#`; case-insensitive input
-  is saved lowercase. Each preference is independent. Successful saves recolor held ink
-  when that app theme mode is active, including retained practice sheets; switching
-  app modes selects the corresponding saved ink color. Submitted images never change.
-- **Image scale**: default **50%**; a numeric percentage greater than 0 and at most 100.
-  Scales the uncapped export raster (including its captured device-pixel density)
-  **before** applying the fixed 2000 × 2000 cap. At 50%, a 1000 × 600 raster becomes
-  500 × 300; a 6000 × 4000 raster becomes about 2000 × 1333 after the cap. This never
-  scales the drawing surface, changes original strokes, or triggers unchanged practice
-  resends. Each submission attempt freezes its scale. Very small scales that produce
-  no visible ink refuse export and retain the drawing rather than sending a blank PNG.
+- **深色模式墨迹颜色**（Dark mode ink color）：默认 **白色**（`#ffffff`）。
+- **浅色模式墨迹颜色**（Light mode ink color）：默认 **黑色**（`#000000`）。两个字段都要求以 `#` 开头、恰好六位十六进制数字；输入不区分大小写，保存为小写。每项偏好相互独立。保存成功后，如果对应的应用主题模式处于活跃状态，会为当前保留的墨迹重新着色，包括保留的练习画纸；切换应用模式会选用对应的已保存墨迹颜色。已提交的图片绝不会改变。
+- **图片缩放**（Image scale）：默认 **50%**；取值为大于 0 且不超过 100 的数字百分比。它在应用固定的 2000 × 2000 上限 **之前**，对未设上限的导出栅格（包括其捕获时的设备像素密度）进行缩放。在 50% 时，1000 × 600 的栅格会变为 500 × 300；6000 × 4000 的栅格在应用上限后约为 2000 × 1333。它绝不会缩放绘图界面、改变原始笔画，也不会触发未改动练习内容的重新发送。每次提交尝试都会冻结其缩放比例。过小的缩放比例如果导致没有可见墨迹，会拒绝导出并保留绘图，而不是发送一张空白 PNG。
 
-The backend stores only `{revision, darkInkColor, lightInkColor, imageScale}` in its
-own `data/settings.json`. `set-ink-color` accepts exactly one `{darkInkColor}` or
-`{lightInkColor}` field per call; there is no legacy `inkColor` alias. Invalid/write-failed
-values are not published as saved settings.
+后端只在它自己的 `data/settings.json` 中存储 `{revision, darkInkColor, lightInkColor, imageScale}`。`set-ink-color` 每次调用只接受恰好一个 `{darkInkColor}` 或 `{lightInkColor}` 字段；没有旧版的 `inkColor` 别名。无效/写入失败的值不会作为已保存的设置发布。
 
-## Public-API boundary
+## 公开 API 边界
 
-Reference content comes solely from click-time `context.view.input`. Full history,
-solutions, custom payloads and unsent learner drafts are not used to build references.
-The backend's read-only `get-session-poses` operation returns **only accepted pose
-occurrence identifiers** from public native acknowledgment records. Existing
-`turn-settled`/`record-changed` notifications and resync reads detect new poses, including
-while the pad is closed. It does not reconstruct active-question state, interpret
-conclusion/dismissal, or duplicate host option projection/shuffling. Submission context
-also reconciles pose identity before image capture; missing lifecycle reads fail closed.
+参考内容只来自点击时的 `context.view.input`。完整历史、解答、自定义载荷和未发送的学习者草稿都不会用于构建参考内容。后端的只读操作 `get-session-poses` 只从公开的原生确认记录中返回 **被接受的出题出现标识符**。现有的 `turn-settled`/`record-changed` 通知和重新同步读取会检测新的出题，包括在画板关闭期间。它不会重建活跃问题的状态、解读结束/放弃，也不会重复实现宿主的选项投影/打乱。提交上下文也会在捕获图片之前核对出题身份；生命周期读取缺失时按未通过处理（fail closed）。
 
-Capture observes only plugin-owned DOM, generic ARIA busy state, fonts, and images.
-Font embedding reads browser-parsed stylesheet rules (including nested imports and
-active grouping rules), resolves font resources against their owning stylesheet,
-and supplies detached font CSS to the capture library. It does not fetch imported
-stylesheets as text or insert rules into live page stylesheets. HTML/failed font
-responses fail background preparation rather than silently dropping fonts; font
-fetches honor surface cancellation. This prevents relative-import 404 pages from
-injecting their error-page styles into the session.
-Background failures are shown on the surface; export/host preparation failures preserve
-work. Async work honors cancellation and cannot reopen a disposed surface. Host-managed
-image processing/limits and text-only-model refusals remain authoritative.
+捕获只观察插件自有的 DOM、通用的 ARIA 忙碌状态、字体和图片。字体嵌入会读取浏览器解析后的样式表规则（包括嵌套的导入和活跃的分组规则），根据其所属样式表解析字体资源，并把分离出来的字体 CSS 提供给捕获库。它不会以文本形式获取导入的样式表，也不会向页面中正在使用的样式表插入规则。返回 HTML/失败的字体响应会使背景准备失败，而不是静默地丢弃字体；字体获取会遵守界面的取消。这可以防止相对导入返回的 404 页面把错误页的样式注入到会话中。背景失败会显示在界面上；导出/宿主准备失败会保留作品。异步工作会遵守取消，并且无法重新打开已销毁的界面。宿主管理的图片处理/限制以及纯文本模型的拒绝仍然具有最终效力。
 
-No runtime host imports, native DOM scraping, global key hook, polling, inference,
-core-record writes, app replacement, or installer are included. Keyboard bindings
-are declared on public plugin actions; the host owns dispatch and Escape.
+不包含运行时的宿主导入、原生 DOM 抓取、全局按键 hook、轮询、推断、核心记录写入、应用替换或安装程序。键盘绑定声明在公开的插件操作上；宿主负责分发和 Escape。
 
-## Development
+## 开发
 
-In the extracted authoring kit, copy the shared **kit-root `types/` contents** into
-`.sdk/` **before dependency setup**. From `plugins/drawing-pad/`:
+在解压后的编写工具包中，请在 **准备依赖之前**，把共享的 **工具包根目录下 `types/` 的内容** 复制到 `.sdk/` 中。在 `plugins/drawing-pad/` 下运行：
 
 ```sh
 mkdir -p .sdk
 cp -R ../../types/. .sdk/
 ```
 
-In a LearnHarness source checkout instead, `npm run sdk` generates `.sdk/` via
-`../../scripts/build-plugin-types.mjs`. It is **checkout-only**, not a command available
-in the extracted kit. Runtime code does not import the SDK.
+如果是在 LearnHarness 源码检出中，则改用 `npm run sdk`，它会通过 `../../scripts/build-plugin-types.mjs` 生成 `.sdk/`。它 **仅限仓库检出**，在解压后的工具包中不可用。运行时代码不会导入 SDK。
 
-Set up development dependencies separately, including the SDK's declared
-peer dependencies/types. With dependencies already available, build without a host checkout:
+请单独准备开发依赖，包括 SDK 声明的 peer 依赖/类型。在依赖已就绪的情况下，无需宿主检出即可构建：
 
 ```sh
 npm run build
 ```
 
-The build writes `dist/` directly, bundles runtime dependencies and includes license
-notices. It refuses symlinked output or misplaced `dist/data/` and preserves sibling
-`data/`. It does not build the host or install, enable or update the Core plugin.
+构建会直接写入 `dist/`，打包运行时依赖，并包含许可证声明。它会拒绝符号链接形式的输出或放错位置的 `dist/data/`，并保留同级的 `data/`。它不会构建宿主，也不会安装、启用或更新核心插件。
 
-## Tests and boundaries
+## 测试与边界
 
-After SDK/dependency setup, plugin-only checks are:
+完成 SDK/依赖准备之后，仅针对插件的检查为：
 
 ```sh
 npm run typecheck            # strict SDK consumer, skipLibCheck=false
 npm test
 ```
 
-Unit tests cover settings, public reference projection, stroke/state/geometry logic,
-accepted-pose tracking, submission transformation, font parsing, frontend lifetimes
-and build-output guards. Host capabilities are mocked; these are not native host or
-hardware tests.
+单元测试覆盖设置、公开的参考内容投影、笔画/状态/几何逻辑、被接受出题的跟踪、提交转换、字体解析、前端生命周期以及构建输出保护。宿主能力是模拟的；这些不是原生宿主或硬件测试。
 
-The browser fixture is **checkout-only**: it imports private host modules and assets
-not supplied in the authoring kit, and requires the checkout's dependencies plus
-local Chrome (`CHROME_PATH` or the harness default). In that environment:
+浏览器测试夹具 **仅限仓库检出**：它导入了编写工具包中未提供的私有宿主模块和资源，并需要检出中的依赖以及本地 Chrome（`CHROME_PATH` 或测试工具的默认路径）。在该环境中：
 
 ```sh
 npm run test:browser
@@ -210,38 +93,21 @@ npm run test:browser -- --built
 npm run test:browser -- --built --serve
 ```
 
-The fixture uses actual host Markdown/math/Mermaid and action/shortcut/Keyboard
-components. Surface shells, preference fields, submission acceptance and event
-transport remain adapters, not an installed app. It inspects canvas pixels and
-composite PNGs, export limits, camera-independent geometry, practice image suppression,
-remount/cancellation cleanup, fonts, shortcuts and right-drag/pen gestures. `--built`
-loads `dist/main.js`; source-mode tests do not regenerate the bundle.
+该测试夹具使用真实的宿主 Markdown/数学公式/Mermaid 以及操作/快捷键/键盘组件。界面外壳、偏好设置字段、提交接受和事件传输仍是适配层，而不是已安装的应用。它会检查画布像素和合成的 PNG、导出限制、与镜头无关的几何结构、练习中的图片抑制、重新挂载/取消时的清理、字体、快捷键，以及右键拖动/画笔手势。`--built` 会加载 `dist/main.js`；源码模式的测试不会重新生成打包产物。
 
-Use disposable data and loopback fixtures, not real learning profiles or paid providers.
-These checks do not establish real-tablet, installed-app, microphone, real-model or
-cross-platform behavior. This project has no `test:native` script.
+请使用一次性数据和回环测试夹具，不要使用真实的学习档案或付费服务商。这些检查不能证明真实数位板、已安装应用、麦克风、真实模型或跨平台的行为。本项目没有 `test:native` 脚本。
 
-## Source reading route
+## 源码阅读路线
 
-- [`src/main.ts`](src/main.ts): contextual actions/shortcuts, surface ownership,
-  settings and submission interception.
-- [`src/reference.ts`](src/reference.ts) and [`src/poses.ts`](src/poses.ts):
-  host-selected input projection and accepted-pose occurrence tracking.
-- [`src/state.ts`](src/state.ts) and [`src/submission.ts`](src/submission.ts):
-  session sheets, captured revisions, acknowledgment and image attachment.
-- [`src/sheet.ts`](src/sheet.ts), [`src/strokes.ts`](src/strokes.ts) and
-  [`src/geometry.ts`](src/geometry.ts): plugin-owned gestures and world/export geometry.
-- [`src/capture.ts`](src/capture.ts) and [`src/fonts.ts`](src/fonts.ts):
-  cancellation-aware reference capture and font resources.
-- [`src/backend.ts`](src/backend.ts), [`src/settings.ts`](src/settings.ts),
-  [`scripts/build.mjs`](scripts/build.mjs) and [`tests/`](tests/): preferences,
-  validation, packaging and fixtures.
+- [`src/main.ts`](src/main.ts)：上下文相关的操作/快捷键、界面归属、设置以及提交拦截。
+- [`src/reference.ts`](src/reference.ts) 和 [`src/poses.ts`](src/poses.ts)：宿主选择的输入投影，以及被接受出题的出现跟踪。
+- [`src/state.ts`](src/state.ts) 和 [`src/submission.ts`](src/submission.ts)：会话画纸、捕获的修订版本、确认以及图片附加。
+- [`src/sheet.ts`](src/sheet.ts)、[`src/strokes.ts`](src/strokes.ts) 和 [`src/geometry.ts`](src/geometry.ts)：插件自有的手势以及世界/导出几何结构。
+- [`src/capture.ts`](src/capture.ts) 和 [`src/fonts.ts`](src/fonts.ts)：支持取消的参考内容捕获和字体资源。
+- [`src/backend.ts`](src/backend.ts)、[`src/settings.ts`](src/settings.ts)、[`scripts/build.mjs`](scripts/build.mjs) 和 [`tests/`](tests/)：偏好设置、校验、打包和测试夹具。
 
-See the [example map](../../docs/plugin-examples.md),
-[authoring guide](../../docs/plugin-authoring.md) and
-[API reference](../../docs/plugin-api/README.md).
+参见[示例地图](../../docs/plugin-examples.md)、[编写指南](../../docs/plugin-authoring.md)和 [API 参考](../../docs/plugin-api/README.md)。
 
-## License
+## 许可证
 
-AGPL-3.0-only. See [`LICENSE`](LICENSE) and [`THIRD-PARTY.md`](THIRD-PARTY.md)
-for the bundled capture library's attribution.
+AGPL-3.0-only。参见 [`LICENSE`](LICENSE) 和 [`THIRD-PARTY.md`](THIRD-PARTY.md)，了解捆绑的捕获库的署名信息。

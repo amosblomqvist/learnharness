@@ -342,7 +342,7 @@ test("dispatch-time host refusals retain safe Error.message while cancellation r
 	const engine = await f.adapter.engineFor(spec, "user");
 	f.removeKey();
 	const refused = await collect(engine.streamFn(engine.model, normalizeContext({ messages: [] }), {}));
-	assert.match((refused.at(-1) as { error: AssistantMessage }).error.errorMessage!, /key is set.*Settings/);
+	assert.match((refused.at(-1) as { error: AssistantMessage }).error.errorMessage!, /API 密钥——请在“设置/);
 	for (const thrown of [new Error("Selected connection disconnected mid-run; reconnect explicitly"), "opaque non-Error refusal"]) {
 		const adapter = createPluginInference({ signal: f.signal.signal, dataDirectory: f.directory }, {
 			...f.deps, providerKeyPresent: () => true,
@@ -506,6 +506,6 @@ test("Claude Code explicit pins retain host availability gating without forwardi
 	assert.equal(f.calls[0]!.background, false);
 	assert.equal(f.calls[0]!.options.apiKey, undefined); assert.equal(f.calls[0]!.options.sessionId, undefined);
 	f.removeKey();
-	await assert.rejects(f.adapter.inference.complete(request(pin)), /Claude Code is unavailable.*Settings/);
+	await assert.rejects(f.adapter.inference.complete(request(pin)), /Claude Code 不可用.*设置/);
 	assert.equal(f.calls.length, 1, "unavailable CLI never dispatches or falls back to an API provider");
 });

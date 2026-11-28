@@ -1,0 +1,20 @@
+{
+	"name": "learnharness",
+	"owner": {
+		"name": "LearnHarness"
+	},
+	"metadata": {
+		"description": "LearnHarness 的 Claude Code 插件：读取本机学习记录的技能。"
+	},
+	"plugins": [
+		{
+			"name": "learnharness",
+			"description": "只读访问本机 LearnHarness 学习记录（会话、回答、把握度、思考、命题与推理链）。Read-only access to local LearnHarness learning data.",
+			"source": "./skills/learnharness",
+			"strict": false,
+			"skills": [
+				"./"
+			]
+		}
+	]
+}

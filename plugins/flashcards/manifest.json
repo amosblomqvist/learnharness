@@ -7,5 +7,11 @@
   "description": "Generate fact-recall cues from your knowledge graph and review them with FSRS-6. Generation uses your configured model and may incur cost. Native only; no Anki integration.",
   "main": "main.js",
   "backend": "backend.cjs",
-  "styles": "styles.css"
+  "styles": "styles.css",
+  "locales": {
+    "zh": {
+      "name": "闪卡",
+      "description": "根据你的知识图谱生成事实回忆提示语，并用 FSRS-6 进行复习。生成会使用你配置的模型，可能产生费用。仅限内置功能，不集成 Anki。"
+    }
+  }
 }

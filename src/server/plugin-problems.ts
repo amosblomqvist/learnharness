@@ -4,12 +4,13 @@ import { clonePluginQuestionJson, freezePluginQuestionValue, samePluginQuestionO
 import { preparePluginProblemSubmissionImages } from "../core/plugin-submissions.ts";
 import { validatePluginProblemSubmission, readPluginProblemSubmission, type PluginProblemSnapshot, type PluginProblemProcessingOutcome, type PluginProblemSubmission } from "../core/plugin-problems.ts";
 import type { PluginProblemResolution } from "./plugin-host.ts";
+import { tr } from "../core/i18n.ts";
 
 export type ProblemTypeResolver = (pluginId: string, typeId: string, contractVersion: number) => PluginProblemResolution;
 export function requirePluginProblemTarget(record: { kind?: string; messages: readonly LhMessage[] }, input: Pick<PluginProblemSubmissionInput, "problemId" | "occurrence">): PluginProblemSnapshot {
   const active = activeProblemOf(record.messages), occurrence = activeProblemOccurrenceOf(record.messages);
   if (record.kind !== "practice" || !active?.pluginProblem || active.pluginProblem.problemId !== input.problemId || !occurrence || !samePluginQuestionOccurrence(occurrence, input.occurrence))
-    throw new ChatInputError("This problem is no longer active. Sync the saved session before trying again.");
+    throw new ChatInputError(tr("此题目已不再处于活动状态。请先同步已保存的会话，然后重试。", "This problem is no longer active. Sync the saved session before trying again."));
   return active.pluginProblem;
 }
 export interface PreparedPluginProblemSubmission {
@@ -23,19 +24,19 @@ export function preparePluginProblemSubmission(record: { id: string; kind?: stri
   const snapshot = requirePluginProblemTarget(record, input), chatId = record.id, captured = JSON.stringify(snapshot);
   const target = { problemId: snapshot.problemId, occurrence: freezePluginQuestionValue(clonePluginQuestionJson(input.occurrence)) as unknown as PluginProblemSubmissionInput["occurrence"] };
   const resolution = resolve(snapshot.pluginId, snapshot.typeId, snapshot.contractVersion);
-  if (resolution.status !== "available" || (snapshot.requiresProcessing && !resolution.definition.processSubmission)) throw new ChatInputError("Problem unavailable");
+  if (resolution.status !== "available" || (snapshot.requiresProcessing && !resolution.definition.processSubmission)) throw new ChatInputError(tr("题目不可用", "Problem unavailable"));
   const { signal: activationSignal, definition } = resolution;
   const requireAuthority = (signal?: AbortSignal) => {
-    try { resolution.requireActive(); } catch { throw new ChatInputError("Problem unavailable"); }
-    if (activationSignal.aborted || signal?.aborted) throw new ChatInputError("Problem unavailable");
+    try { resolution.requireActive(); } catch { throw new ChatInputError(tr("题目不可用", "Problem unavailable")); }
+    if (activationSignal.aborted || signal?.aborted) throw new ChatInputError(tr("题目不可用", "Problem unavailable"));
   };
   requireAuthority();
   const accepted = validatePluginProblemSubmission(snapshot, { chatId, submission: input.submission }, definition);
   if (!accepted.ok) throw new ChatInputError(accepted.problems.join("\n"));
-  if (input.thinking !== undefined && typeof input.thinking !== "string") throw new ChatInputError("Problem thinking must be text");
+  if (input.thinking !== undefined && typeof input.thinking !== "string") throw new ChatInputError(tr("题目的思考内容必须是文本", "Problem thinking must be text"));
   let images;
   try { images = input.images === undefined ? undefined : preparePluginProblemSubmissionImages(input.images); }
-  catch { throw new ChatInputError("Invalid problem submission images"); }
+  catch { throw new ChatInputError(tr("题目提交的图片无效", "Invalid problem submission images")); }
   const saved: Omit<PluginProblemSubmission, "submittedAt" | "processing"> = freezePluginQuestionValue({
     kind: "plugin-problem-submission", problemId: snapshot.problemId, pluginId: snapshot.pluginId,
     typeId: snapshot.typeId, contractVersion: snapshot.contractVersion, submission: accepted.value, thinking: input.thinking ?? "",
@@ -67,10 +68,10 @@ export function preparePluginProblemSubmission(record: { id: string; kind?: stri
     finish(current, processing) {
       requireAuthority(processingSignal);
       const pending = requirePluginProblemTarget(current, target);
-      if (current.id !== chatId || JSON.stringify(pending) !== captured) throw new ChatInputError("This problem changed. Sync the saved session before trying again.");
-      if (snapshot.requiresProcessing && !processingSettled) throw new ChatInputError("Submission processing has not completed");
+      if (current.id !== chatId || JSON.stringify(pending) !== captured) throw new ChatInputError(tr("此题目已更改。请先同步已保存的会话，然后重试。", "This problem changed. Sync the saved session before trying again."));
+      if (snapshot.requiresProcessing && !processingSettled) throw new ChatInputError(tr("提交尚未处理完成", "Submission processing has not completed"));
       const envelope = readPluginProblemSubmission({ ...saved, ...(snapshot.requiresProcessing ? { processing } : {}), submittedAt: new Date().toISOString() });
-      if (!envelope) throw new ChatInputError("Invalid problem submission outcome");
+      if (!envelope) throw new ChatInputError(tr("题目提交结果无效", "Invalid problem submission outcome"));
       return [{ id: newMessageId(), role: "custom", customType: "plugin-problem-submission", display: true,
         content: JSON.stringify({ ...envelope, images: undefined }), details: envelope, timestamp: Date.now() }];
     },

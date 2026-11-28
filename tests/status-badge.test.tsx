@@ -89,9 +89,9 @@ function question(kind: QuestionData["kind"] = "quiz"): QuestionData {
 }
 
 const quizBadges: Array<[string, Parameters<typeof buildAnswer>[1], string | undefined]> = [
-	["correct", { values: ["a"] }, "var(--lh-success)"],
-	["incorrect", { values: ["b"] }, "var(--lh-error)"],
-	["didn't know", { dontKnow: true }, undefined],
+	["正确", { values: ["a"] }, "var(--lh-success)"],
+	["错误", { values: ["b"] }, "var(--lh-error)"],
+	["不知道", { dontKnow: true }, undefined],
 ];
 for (const [label, submission, color] of quizBadges) {
 	it(`AnsweredCard preserves the ${label} badge label and color`, () => {
@@ -111,7 +111,7 @@ for (const kind of ["ask", "explain"] as const) {
 it("AnsweredCard keeps dismissed questions as a skipped line without a badge", () => {
 	const answer = { ...buildAnswer(question(), { dontKnow: true }), dismissed: true };
 	const html = renderToStaticMarkup(<AnsweredCard answer={answer} />);
-	assert.match(html, /skipped/);
+	assert.match(html, /已跳过/);
 	assert.equal(parseHTML(html).document.querySelector(badgeSelector), null);
 });
 
@@ -127,15 +127,15 @@ function conclude(outcome?: string) {
 }
 
 for (const [outcome, label, color] of [
-	["solved", "Solved", "var(--lh-success)"],
-	["solvedWithHints", "Solved with hints", "var(--lh-warning)"],
-	["surrendered", "Surrendered", "var(--lh-error)"],
-	["movedOn", "Moved on", undefined],
+	["solved", "已解决", "var(--lh-success)"],
+	["solvedWithHints", "借助提示解决", "var(--lh-warning)"],
+	["surrendered", "已放弃", "var(--lh-error)"],
+	["movedOn", "已跳过", undefined],
 ] as const) {
 	it(`ConcludeCard preserves the ${outcome} badge and surrounding content`, () => {
 		const html = conclude(outcome);
 		assertAppearance(badgeFrom(html), label, color);
-		assert.match(html, /Concluded/);
+		assert.match(html, /已结束/);
 		assert.match(html, /Verdict fixture/);
 		assert.match(html, /Reveal fixture/);
 	});
@@ -143,9 +143,9 @@ for (const [outcome, label, color] of [
 
 it("ConcludeCard preserves dismissal as one muted line without badge, verdict or reveal", () => {
 	const html = conclude("dismissed");
-	assert.match(html, /Problem dismissed\./);
+	assert.match(html, /题目已忽略。/);
 	assert.equal(parseHTML(html).document.querySelector(badgeSelector), null);
-	assert.doesNotMatch(html, /Verdict fixture|Reveal fixture|Concluded/);
+	assert.doesNotMatch(html, /Verdict fixture|Reveal fixture|已结束/);
 });
 
 it("ConcludeCard keeps absent and unknown outcomes free of badges", () => {

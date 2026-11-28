@@ -1,5 +1,6 @@
 import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
 import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
+import { tr } from "@/src/core";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
@@ -7,23 +8,23 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 		// Stats refreshes don't adopt history or need plugin availability.
 		const chat = getChat(id);
 		return chat ? Response.json({ turns: chat.turns, pricing: sessionCost(chat) })
-			: Response.json({ error: "Not found" }, { status: 404 });
+			: Response.json({ error: tr("未找到", "Not found") }, { status: 404 });
 	}
 	await reconcilePluginQuestionCompatibility(stores.chatStore, id);
 	let chat = getChat(id);
-	if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+	if (!chat) return Response.json({ error: tr("未找到", "Not found") }, { status: 404 });
 	let questionResolver: QuestionTypeResolver | undefined;
 	if (pendingPluginQuestionOf(chat.messages)) {
 		try { questionResolver = await getPluginQuestionTypeResolver(); } catch { /* unavailable fallback */ }
 		// No awaited plugin startup may separate this read from the response projection.
 		chat = getChat(id);
-		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+		if (!chat) return Response.json({ error: tr("未找到", "Not found") }, { status: 404 });
 	}
 	let problemResolver: ProblemTypeResolver | undefined;
 	if (activeProblemOf(chat.messages)?.pluginProblem) {
 		try { problemResolver = (await getPluginHost()).resolveProblemType; } catch { /* unavailable fallback */ }
 		chat = getChat(id);
-		if (!chat) return Response.json({ error: "Not found" }, { status: 404 });
+		if (!chat) return Response.json({ error: tr("未找到", "Not found") }, { status: 404 });
 	}
 	// turnInFlight lets a returning client re-attach to a running turn
 	// (chat-handler write-ahead + registry — see src/server/turn-liveness.ts).
@@ -54,16 +55,16 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 /**
  * Rename (2026-09-17): the header's click-to-edit title commits here.
  * Validation is a single rule — a non-empty string after trim (the store's
- * "Untitled session" floor is never reached from this route). updatedAt is
+ * "未命名会话" floor is never reached from this route). updatedAt is
  * deliberately NOT bumped: a rename must not reorder the sidebar (same
  * rule as the settings PUT).
  */
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	if (!getChat(id)) return Response.json({ error: "Not found" }, { status: 404 });
+	if (!getChat(id)) return Response.json({ error: tr("未找到", "Not found") }, { status: 404 });
 	const body = (await req.json().catch(() => null)) as { title?: unknown } | null;
 	if (typeof body?.title !== "string" || body.title.trim() === "") {
-		return Response.json({ error: "title must be a non-empty string" }, { status: 400 });
+		return Response.json({ error: tr("标题不能为空", "title must be a non-empty string") }, { status: 400 });
 	}
 	const title = body.title.trim();
 	const record = stores.chatStore.renameChat(id, title);
@@ -96,7 +97,7 @@ export async function DELETE(req: Request, { params }: { params: Promise<{ id: s
 	if (mode !== "preserve-graph" && mode !== "delete-nodes") {
 		return Response.json(
 			{
-				error: 'mode is required and must be "preserve-graph" or "delete-nodes"',
+				error: tr('必须提供 mode，且取值为 "preserve-graph" 或 "delete-nodes"', 'mode is required and must be "preserve-graph" or "delete-nodes"'),
 				code: "bad_mode",
 			},
 			{ status: 400 },

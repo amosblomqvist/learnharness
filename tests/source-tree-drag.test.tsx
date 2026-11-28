@@ -46,7 +46,7 @@ async function fire(selector: string, type: string, data: ReturnType<typeof tran
 
 it("dragging the name moves the item with an icon/name-only preview, not the whole row", async () => {
 	await mount(); const data = transfer();
-	await fire('[data-source-drag-row="b"] button[title="Rename"]', "dragstart", data);
+	await fire('[data-source-drag-row="b"] button[title="重命名"]', "dragstart", data);
 	assert.deepEqual(JSON.parse(data.getData("application/x-learnharness-source")), { kind: "source", id: "b" });
 	assert.equal(data.effectAllowed, "move"); assert.equal(data.preview?.textContent, "Source B");
 	assert.equal(data.preview?.querySelectorAll("svg").length, 1); assert.equal(data.preview?.querySelectorAll("input,button").length, 0);
@@ -80,7 +80,7 @@ it("dragging a folder onto its descendants neither highlights nor performs an in
 });
 
 it("rename mode removes the drag surface and input chrome, retaining native text-selection gestures", async () => {
-	await mount(); await act(async () => { (document.querySelector('[data-source-drag-row="b"] button[title="Rename"]') as HTMLElement).click(); });
+	await mount(); await act(async () => { (document.querySelector('[data-source-drag-row="b"] button[title="重命名"]') as HTMLElement).click(); });
 	const row = document.querySelector('[data-source-drag-row="b"]')!;
 	assert.equal(row.getAttribute("draggable"), "false");
 	const input = row.querySelector('[data-testid="source-name-input"]')!; assert.match(input.className, /border-0 bg-transparent p-0/); assert.doesNotMatch(input.className, /rounded|focus:border/);

@@ -4,6 +4,7 @@ import { detectSupportedImageMimeType, processImage } from "../agent/image-proce
 import { validatePluginSubmissionImageArray, validatePluginSubmissionImages, type PluginSubmissionImages } from "../core/plugin-submissions.ts";
 import { ChatInputError } from "../core/input-events.ts";
 import { preparePluginProblemSubmissionImages, type PluginProblemSubmissionImages } from "../core/plugin-submissions.ts";
+import { tr } from "../core/i18n.ts";
 
 type ImageEngine = Pick<PiEngine, "model">;
 
@@ -23,9 +24,9 @@ export async function prepareSubmissionImages(
 ): Promise<ImageContent[] | undefined> {
 	if (images === undefined) return undefined;
 	try { images = validatePluginSubmissionImageArray(images); }
-	catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid submitted images"); }
+	catch (error) { throw new ChatInputError(error instanceof Error ? error.message : tr("提交的图片无效", "Invalid submitted images")); }
 	if (images.length === 0) return undefined;
-	if (!engine.model.input.includes("image")) throw new ChatInputError("The selected model does not support images. Your input has been kept.");
+	if (!engine.model.input.includes("image")) throw new ChatInputError(tr("所选模型不支持图片。你的输入已保留。", "The selected model does not support images. Your input has been kept."));
 	// Capture bytes and policy before the first await; caller-owned mutations
 	// must not alter an in-flight submission or its later image channels.
 	const resizeOptions = { ...engine.model.inputLimits?.images?.resize };
@@ -36,7 +37,7 @@ export async function prepareSubmissionImages(
 		// silently narrow the approved PNG format family to static files.
 		const detected = detectSupportedImageMimeType(bytes) ?? (bytes.subarray(0, 8).equals(Buffer.from([137, 80, 78, 71, 13, 10, 26, 10])) ? "image/png" : null);
 		if (!bytes.length || bytes.toString("base64") !== image.data || detected !== image.mimeType)
-			throw new ChatInputError("Submitted image bytes do not match their declared format");
+			throw new ChatInputError(tr("提交的图片数据与声明的格式不符", "Submitted image bytes do not match their declared format"));
 		return { bytes, mimeType: image.mimeType };
 	});
 	const prepared: ImageContent[] = [];
@@ -48,7 +49,7 @@ export async function prepareSubmissionImages(
 			// become accepted native content. Never substitute an omission marker.
 			prepared.push({ type: "image", data: result.data, mimeType: result.mimeType });
 		} catch {
-			throw new ChatInputError("Could not prepare the submitted image. Your input has been kept.");
+			throw new ChatInputError(tr("无法处理提交的图片。你的输入已保留。", "Could not prepare the submitted image. Your input has been kept."));
 		}
 	}
 	return prepared;
@@ -57,7 +58,7 @@ export async function prepareSubmissionImages(
 export async function prepareProblemSubmissionImageChannels(images: PluginProblemSubmissionImages | undefined, engine: ImageEngine): Promise<PluginProblemSubmissionImages | undefined> {
 	if (images === undefined) return undefined;
 	try { images = preparePluginProblemSubmissionImages(images); }
-	catch { throw new ChatInputError("Invalid problem submission images"); }
+	catch { throw new ChatInputError(tr("题目提交的图片无效", "Invalid problem submission images")); }
 	const [submission, thinking] = await Promise.all([prepareSubmissionImages(images.submission, engine), prepareSubmissionImages(images.thinking, engine)]);
 	return submission || thinking ? { ...(submission ? { submission } : {}), ...(thinking ? { thinking } : {}) } : undefined;
 }
@@ -68,7 +69,7 @@ export async function prepareSubmissionImageChannels(
 ): Promise<PluginSubmissionImages | undefined> {
 	if (images === undefined) return undefined;
 	try { images = validatePluginSubmissionImages(images); }
-	catch (error) { throw new ChatInputError(error instanceof Error ? error.message : "Invalid submitted image channels"); }
+	catch (error) { throw new ChatInputError(error instanceof Error ? error.message : tr("提交的图片通道无效", "Invalid submitted image channels")); }
 	// Start all preparations synchronously so every channel is captured before
 	// processing yields; even direct server callers cannot mutate later ones.
 	const [answer, thinking, readingThinking] = await Promise.all([

@@ -62,7 +62,7 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		await act(async () => { root.render(shell(<SettingsDialogBody initialSection="plugin:schema" onClose={() => {}} />)); });
 		assert.ok(page()?.textContent?.includes("Feature enabled"), "deep link renders while core settings are pending");
 		const nav = document.querySelector('[data-testid="settings-nav"]')!;
-		assert.deepEqual([...nav.querySelectorAll("button")].map(button => button.textContent), ["Providers", "Agent", "Appearance", "Graph", "Keyboard", "General", "Core plugins", "Community plugins", "Plugin schema", "Plugin custom", "Plugin backend", "Plugin loading", "Plugin broken"]);
+		assert.deepEqual([...nav.querySelectorAll("button")].map(button => button.textContent), ["服务商", "智能体", "外观", "图谱", "键盘", "通用", "核心插件", "社区插件", "Plugin schema", "Plugin custom", "Plugin backend", "Plugin loading", "Plugin broken"]);
 		assert.equal(nav.querySelectorAll("svg").length, 8, "only built-in navigation entries receive icons");
 		for (const button of nav.querySelectorAll("button")) {
 			if (button.getAttribute("data-testid")?.startsWith("settings-nav-plugin:")) {
@@ -74,7 +74,7 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		await click('[data-testid="settings-nav-core-plugins"]');
 		const corePage = page()!.textContent!;
 		assert.ok(corePage.includes("Plugin schema"));
-		for (const absent of ["Plugin custom", "trusted local code", "Refresh plugins", "/fixtures/plugins", "1.0.0", "reserved Core plugin ID"]) assert.ok(!corePage.includes(absent), absent);
+		for (const absent of ["Plugin custom", "受信任的本地代码", "刷新插件", "/fixtures/plugins", "1.0.0", "reserved Core plugin ID"]) assert.ok(!corePage.includes(absent), absent);
 		await click('[data-testid="settings-nav-plugins"]');
 		assert.ok(page()!.textContent!.includes("Plugin custom")); assert.ok(!page()!.querySelector('[data-testid="plugin-schema"]'));
 		assert.ok(page()!.textContent!.includes("reserved Core plugin ID")); assert.ok(page()!.textContent!.includes("1.0.0"));
@@ -92,9 +92,9 @@ it("dedicated plugin settings pages cover schema/custom/empty/loading/error, dee
 		assert.equal(customMounts, 1); assert.ok(page()?.textContent?.includes("Custom preferences"));
 		await click('[data-testid="settings-nav-plugin:backend"]');
 		assert.equal(customCleanups, 1, "switching settings page tears down custom mount");
-		assert.ok(page()?.textContent?.includes("No settings available."));
+		assert.ok(page()?.textContent?.includes("暂无可用设置。"));
 		await click('[data-testid="settings-nav-plugin:loading"]');
-		assert.ok(page()?.textContent?.includes("Loading plugin settings…"));
+		assert.ok(page()?.textContent?.includes("正在加载插件设置…"));
 		await click('[data-testid="settings-nav-plugin:broken"]');
 		assert.ok(page()?.querySelector('[role="alert"]')?.textContent?.includes("Fixture activation failed"));
 		await click('[data-testid="settings-nav-plugin:custom"]');

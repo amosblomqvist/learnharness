@@ -135,7 +135,7 @@ describe("saveKey / deleteKey (immediate effect, no restart)", () => {
 		const before = JSON.stringify(authStore.authVars());
 		const r = saveKey("DEEPGRAM_API_KEY", "short");
 		assert.ok(!r.ok);
-		if (!r.ok) assert.match(r.error, /at least 20/);
+		if (!r.ok) assert.match(r.error, /至少需要 20 个字符/);
 		assert.equal(JSON.stringify(authStore.authVars()), before);
 		assert.equal(process.env.DEEPGRAM_API_KEY, "d".repeat(40));
 	});

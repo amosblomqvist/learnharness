@@ -58,8 +58,8 @@ test("plan plus unknown graph rows keep the existing unknown suffix without fabr
  await act(async () => { document.querySelector("button")!.click(); });
  const recent = [...document.querySelectorAll(".border-t .shrink-0.tabular-nums")];
  assert.equal(recent.length, 2);
- for (const row of recent) assert.equal(row.textContent, "ChatGPT +1 unpriced", "both recent two-stage runs disclose their unknown stage");
- assert.equal((document.body.textContent?.match(/\+1 unpriced/g) ?? []).length, 4, "both mixed stage rows also retain their unknown suffix");
+ for (const row of recent) assert.equal(row.textContent, "ChatGPT +1 次未计价", "both recent two-stage runs disclose their unknown stage");
+ assert.equal((document.body.textContent?.match(/\+1 次未计价/g) ?? []).length, 4, "both mixed stage rows also retain their unknown suffix");
  assert(!document.body.textContent?.includes("$0.00"));
 });
 

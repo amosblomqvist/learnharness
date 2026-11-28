@@ -14,6 +14,8 @@ import {
 } from "../../core/settings.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
+import { withOutputLanguage } from "../output-language.ts";
+import { tr } from "../../core/i18n.ts";
 import type {
 	AuditVerdicts,
 	CallUsage,
@@ -428,7 +430,7 @@ arguments. The tool's field descriptions carry the details.`,
 } as const;
 
 function composeExtractionInstructions(preamble: string, goal: string, selection: string): string {
-	return `${preamble}\n\n${goal}\n${EXTRACTION_CORE.entailment}\n\n${EXTRACTION_CORE.knowledge}\n\n${selection} ${EXTRACTION_CORE.standalone}\n\n${EXTRACTION_CORE.continuation}\n\n${EXTRACTION_CORE.submission}`;
+	return withOutputLanguage(`${preamble}\n\n${goal}\n${EXTRACTION_CORE.entailment}\n\n${EXTRACTION_CORE.knowledge}\n\n${selection} ${EXTRACTION_CORE.standalone}\n\n${EXTRACTION_CORE.continuation}\n\n${EXTRACTION_CORE.submission}`);
 }
 
 // Each front door owns its goal and selection wording independently of the
@@ -1370,7 +1372,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 						// Notes-only: never start a fresh chunk after user cancellation,
 						// even when usage cleanup replaced the original abort rejection.
 						// Keep the secondary failure visible in the final import error.
-						const aborted = new Error(`Notes import aborted; job cleanup failed: ${err instanceof Error ? err.message : String(err)}`, { cause: err });
+						const aborted = new Error(tr(`笔记导入已中止；清理任务失败：${err instanceof Error ? err.message : String(err)}`, `Notes import aborted; job cleanup failed: ${err instanceof Error ? err.message : String(err)}`), { cause: err });
 						aborted.name = "AbortError";
 						failure = aborted;
 					}
@@ -1388,7 +1390,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 				const aborted = rejected.some((r) => r.reason instanceof Error && r.reason.name === "AbortError");
 				const outcome = aborted ? "aborted" : settled.some((r) => r.status === "fulfilled") ? "partial" : "failed";
 				const details = rejected.map((r) => r.reason instanceof Error ? r.reason.message : String(r.reason)).join("; ");
-				throw new NotesImportError(outcome, mergedStats, details || "Notes import did not complete");
+				throw new NotesImportError(outcome, mergedStats, details || tr("笔记导入未完成", "Notes import did not complete"));
 			}
 			console.info(
 				`[extraction ${id}] merged: ${stats.nodes} nodes, ${stats.chains ?? 0} chains ` +
@@ -1410,7 +1412,7 @@ export function createExtractionPipeline(deps: ExtractionPipelineDeps): Extracti
 	async function importNotes(input: NotesImportInput): Promise<EmissionStats> {
 		const id = `src_${crypto.createHash("sha256").update(input.filePath).digest("hex").slice(0, 12)}`;
 		// Acquire BEFORE source upsert: overlapping contents must not alter metadata.
-		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, "This file is already being imported. Try again when it finishes.");
+		if (inFlight.has(id)) throw new NotesImportError("busy", { nodes: 0, chains: 0 }, tr("此文件正在导入中，请在完成后重试。", "This file is already being imported. Try again when it finishes."));
 		inFlight.add(id);
 		try {
 			const importedAt = new Date().toISOString();

@@ -56,7 +56,7 @@ it("shared native brief disclosure retains its default check and view/hide wordi
 	const html = renderToStaticMarkup(<WorkerResultDetails heading="Native brief">Full brief</WorkerResultDetails>);
 	const { document } = parseHTML(html);
 	const summary = document.querySelector("summary")!;
-	assert.equal(summary.textContent, "Native briefview briefhide brief");
+	assert.equal(summary.textContent, "Native brief查看简报收起简报");
 	assert.ok(summary.querySelector(".lucide-check"));
 	assert.equal(summary.querySelector(".lucide-chevron-right"), null);
 	assert.equal(summary.getAttribute("title"), null);
@@ -70,13 +70,13 @@ it("native Research and PDF completion callers keep their captions and brief dis
 			marker: buildSubagentSteer({ id: "research-fixture", kind: "research", toolCallId: "research-call" }, {
 				brief: "Synthetic research brief.", sources: [{ title: "Fixture", url: "https://example.invalid/source" }],
 			}),
-			testId: "research-complete-badge", caption: "Researchcomplete· 1 sourcesview briefhide brief",
+			testId: "research-complete-badge", caption: "调研已完成· 1 个来源查看简报收起简报",
 		},
 		{
 			marker: buildSubagentSteer({ id: "pdf-fixture", kind: "pdf", toolCallId: "pdf-call" }, {
 				path: "/fixture/example.pdf", question: "Fixture question", brief: "Synthetic PDF brief.", pagesRead: [1], pagesConsulted: [1],
 			}),
-			testId: "pdf-complete-badge", caption: "PDFreading complete· read 1 pageview briefhide brief",
+			testId: "pdf-complete-badge", caption: "PDF阅读完成· 已读 1 页查看简报收起简报",
 		},
 	];
 	for (const { marker, testId, caption } of cases) {

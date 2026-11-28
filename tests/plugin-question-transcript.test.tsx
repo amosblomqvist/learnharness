@@ -69,8 +69,8 @@ test("saved reading thinking is above the actual answered card; answer thinking 
 	assert.ok(card); assert.ok(reading); assert.ok(thinking);
 	assert.equal(reading.nextElementSibling, card, "reading is before the host card, not merely before a plugin subtree");
 	assert.equal(card.contains(reading), false); assert.equal(card.contains(thinking), true);
-	assert.equal(reading.querySelector("button")?.textContent, "YOUR THINKING");
-	assert.equal(thinking.querySelector("button")?.textContent, "YOUR THINKING");
+	assert.equal(reading.querySelector("button")?.textContent, "你的思考");
+	assert.equal(thinking.querySelector("button")?.textContent, "你的思考");
 	assert.equal(reading.querySelector("button")?.getAttribute("aria-expanded"), "true");
 	assert.equal(thinking.querySelector("button")?.getAttribute("aria-expanded"), "false");
 	assert.ok(reading.classList.contains("bg-card"));

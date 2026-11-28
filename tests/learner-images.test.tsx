@@ -493,7 +493,7 @@ describe("image cards", () => {
 		const html = renderToStaticMarkup(<VisualOutputCard output={{ svg, image: { path: "/a.png", snapshotId: "0".repeat(64) } }} initialInverted />);
 		assert.ok(!html.includes("toggle-invert-figure-brightness"), "no invert switch");
 		assert.ok(!html.includes("hue-rotate"), "a pinned inversion is ignored for photos");
-		assert.match(html, /Image snapshot could not be loaded/);
+		assert.match(html, /无法加载图片快照。/);
 	});
 
 	it("show_image renders the picture with its caption, download, and no invert switch", () => {
@@ -503,7 +503,7 @@ describe("image cards", () => {
 		assert.ok(html.includes(`src="data:image/png;base64,${details.data}"`));
 		assert.match(html, /alt="Your breadboard"/);
 		assert.match(html, /width="40" height="30"/);
-		assert.match(html, />Image</);
+		assert.match(html, />图片</);
 		assert.match(html, /data-testid="image-caption">Your breadboard</);
 		assert.match(html, /data-testid="image-download"/);
 		assert.ok(!html.includes("invert"), "no invert switch");
@@ -529,7 +529,7 @@ describe("image cards", () => {
 		const malformed = renderToStaticMarkup(
 			<ImageCard part={{ type: "tool-show_image", state: "output-available", toolCallId: "c3", output: { path: "x" } }} />,
 		);
-		assert.match(malformed, /Image shown, but it could not be displayed/);
+		assert.match(malformed, /已展示图片，但无法显示。/);
 	});
 
 	it("download names keep the stem with the stored format; the fullscreen document is a sized SVG", () => {

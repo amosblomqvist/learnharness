@@ -1,186 +1,111 @@
-# Dialog, popup, and interaction contract
+# 对话框、弹出层与交互契约
 
-Core UI and plugin UI share interaction ownership, keyboard routing, focus and dismissal
-rules. Plugins use public `ctx.ui` helpers; the implementation modules described below
-are private host infrastructure, not plugin imports.
+核心 UI 和插件 UI 共享交互归属、键盘路由、焦点和关闭规则。插件使用公开的 `ctx.ui` 辅助函数；下文描述的实现模块是宿主私有的基础设施，不供插件导入。
 
-## Plugin presentation
+## 插件展示
 
-Public plugin dialogs and page-body surfaces have no visible host title/header row.
-Their required title supplies the accessible name. A muted corner X floats above
-edge-aligned scrolling content; plugins own visible headings and bottom actions.
-Surfaces fill their page-body bounds. `background?: "dimmed" | "opaque"` controls the
-surface background; the default `"dimmed"` uses the Chains-like translucent/blurred paint.
+公开的插件对话框和页面主体界面没有可见的宿主标题/表头行。它们必需的标题用于提供无障碍名称。一个低调的角落 X 浮在贴边滚动的内容之上；可见的标题和底部操作由插件自行负责。界面会填满其页面主体区域。`background?: "dimmed" | "opaque"` 控制界面背景；默认的 `"dimmed"` 使用类似推理链视图的半透明/模糊效果。
 
-## Interaction ownership
+## 交互归属
 
-### Escape: one event, one owner
+### Escape：一个事件，一个归属者
 
-Only the topmost active interaction responds to a physical Escape event. This includes
-a focused editor that owns Escape, a menu above a dialog, or a child dialog above its parent.
+只有最顶层的活跃交互会响应一次物理 Escape 事件。这包括：拥有 Escape 的已聚焦编辑器、位于对话框之上的菜单，或位于父对话框之上的子对话框。
 
-- Leaf handlers get their normal opportunity before a containing surface dismisses.
-- A handled Escape cannot also dismiss a parent, cancel dictation or abort a turn.
-- Ownership is captured at the start of the event. Closing one surface does not let
-  the newly exposed surface handle that same key.
-- A surface that refuses dismissal still consumes Escape.
-- Explicit editor cancellation, including source/folder/session renaming, retains its
-  own semantics. There is no generic search-clear-first rule: model/provider/font/language
-  menus close, while sidebar search retains its query and leaves the field.
+- 叶子处理器会在外层界面关闭之前获得正常的处理机会。
+- 已被处理的 Escape 不能同时关闭父级、取消语音听写或中止回合。
+- 归属在事件开始时确定。关闭一个界面不会让新露出的界面处理同一次按键。
+- 拒绝关闭的界面仍然会消耗 Escape。
+- 显式的编辑器取消（包括来源/文件夹/会话重命名）保留其自身的语义。不存在通用的“先清空搜索”规则：模型/服务商/字体/语言菜单会关闭，而侧边栏搜索会保留查询内容并离开输入框。
 
-### Passive tooltips
+### 被动提示框
 
-Tooltips do not own interaction layers or intercept Escape. They remain associated with
-their owning modal so their paint, hover/focus behavior and accessibility relationships
-remain valid above its frame.
+提示框（tooltip）不拥有交互层，也不拦截 Escape。它们始终与所属的模态框关联，以便其绘制、悬停/焦点行为和无障碍关系在该模态框之上仍然有效。
 
-### Tab: no native navigation
+### Tab：没有原生导航
 
-Native browser Tab and Shift+Tab navigation is disabled, including in dialogs and popups.
-Explicit application bindings still apply within their eligible scope:
+原生浏览器的 Tab 和 Shift+Tab 导航被禁用，对话框和弹出层中也是如此。显式的应用绑定仍在其适用范围内生效：
 
-- Plain Tab invokes the configured forward field-cycle action or question-choice row/thinking action.
-- Shift+Tab invokes the thinking-level cycle.
-- Shortcut rebinding can record Tab as a binding candidate.
+- 普通 Tab 触发所配置的向前字段循环操作，或问题选项行/思考操作。
+- Shift+Tab 触发推理强度循环切换。
+- 快捷键重新绑定可以把 Tab 记录为候选绑定。
 
-Modal focus scopes do not add boundary looping. Covered fields and thinking controls
-cannot receive these actions. Native-default prevention does not suppress target handlers.
+模态框的焦点作用域不会添加边界循环。被遮挡的字段和思考控件无法接收这些操作。阻止原生默认行为并不会屏蔽目标处理器。
 
-### Settings fields: Escape retains and commits
+### 设置字段：Escape 保留并提交
 
-Escape in a focused settings text/number field claims the event, leaves the field through
-its normal blur/save path, and saves a valid value using the domain's validation and
-normalization. It does not close Settings or discard the typed value.
+在已聚焦的设置文本/数字字段中按 Escape 会占用该事件，通过其正常的失焦/保存路径离开字段，并使用该领域的校验和规范化规则保存有效值。它不会关闭设置，也不会丢弃已输入的值。
 
-Invalid values are not persisted; unsuccessful drafts and validation errors remain.
-Accepted saves display acknowledged canonical values, including normalization/clamping.
-A later Escape outside the field can close Settings. Explicit rename/cancel workflows
-remain separate.
+无效值不会被持久化；未成功的草稿和校验错误会保留。被接受的保存会显示已确认的规范值，包括规范化/截断到范围内的结果。之后在字段外按 Escape 可以关闭设置。显式的重命名/取消流程保持独立。
 
-Credential/custom-provider editors retain explicit Save/Cancel actions. Escape folds
-the expanded editor without saving credentials or closing Settings, after a focused leaf
-or higher menu has its turn. Unsaved drafts survive folding and switching editors until
-Settings closes.
+凭据/自定义服务商编辑器保留显式的保存/取消操作。在已聚焦的叶子元素或更上层的菜单处理过之后，Escape 会收起展开的编辑器，既不保存凭据，也不关闭设置。未保存的草稿在收起和切换编辑器时都会保留，直到设置关闭。
 
-A response without a valid canonical saved-settings record displays “Could not confirm
-saved settings. Your input has been kept.” Other HTTP/network errors retain their own
-messages. Late older responses cannot replace a newer acknowledged snapshot or its
-appearance. A pending save finishing after Settings reopens updates the current instance;
-older Settings/startup reads cannot undo an acknowledged save.
+如果响应中没有有效的规范化已保存设置记录，会显示“无法确认设置已保存。你的输入已保留。”（“Could not confirm saved settings. Your input has been kept.”）。其他 HTTP/网络错误保留各自的消息。迟到的旧响应不能替换较新的已确认快照或其外观。在设置重新打开后才完成的待处理保存会更新当前实例；较旧的设置/启动读取不能撤销已确认的保存。
 
-### Initial focus and return
+### 初始焦点与焦点返回
 
-Explicit initial-focus targets take precedence. Otherwise a modal focuses:
+显式的初始焦点目标优先。否则模态框会聚焦：
 
-1. Its first eligible editable text/number field.
-2. Its eligible content heading, if no field exists.
-3. Its accessible boundary or painted frame, not the close action.
+1. 它的第一个符合条件的可编辑文本/数字字段。
+2. 如果没有字段，则聚焦它符合条件的内容标题。
+3. 它的无障碍边界或绘制出的框体，而不是关闭操作。
 
-Disabled, read-only, hidden and inactive controls are ineligible. Headerless surfaces do
-not focus non-rendering `display: contents` wrappers. This does not enable native Tab.
+已禁用、只读、隐藏和非活跃的控件不符合条件。无表头的界面不会聚焦不渲染的 `display: contents` 包装元素。这不会启用原生 Tab。
 
-Closing a child returns focus to its eligible invoking element in the resumed parent.
-Detached, disabled, hidden or superseded targets cannot steal focus; if the invoker is
-unavailable, the active surface uses its initial-focus policy. Popups retain their
-explicit focus-return rules.
+关闭子级会把焦点返回到恢复后的父级中符合条件的触发元素。已分离、已禁用、隐藏或已被取代的目标不能抢占焦点；如果触发元素不可用，活跃界面会使用其初始焦点策略。弹出层保留其显式的焦点返回规则。
 
-### Nested modal parents
+### 嵌套模态框的父级
 
-A child modal does not close, remount or hide its parent with `display: none`. Parents
-remain painted and retain state and scroll position. Only the active modal and its owned
-interactive children receive interaction/accessibility access. A child may naturally
-cover its parent's paint.
+子模态框不会关闭、重新挂载其父级，也不会用 `display: none` 隐藏父级。父级保持绘制，并保留状态和滚动位置。只有活跃的模态框及其拥有的交互子元素可以获得交互/无障碍访问。子级可以自然地遮挡父级的绘制内容。
 
-### Busy operations and close guards
+### 忙碌操作与关闭保护
 
-Source/folder/session/node deletion confirmations consume Escape without closing while
-deletion is in progress, matching their disabled Cancel/backdrop dismissal paths.
-A generic `busy` flag does not imply a dismissal lock: abort confirmations, setup and
-provider connection/cancellation flows retain their domain-specific behavior.
-Closing a surface does not implicitly cancel an accepted write or other domain operation.
+来源/文件夹/会话/节点的删除确认框在删除进行期间会消耗 Escape 而不关闭，与其被禁用的取消按钮/点击背景关闭路径保持一致。通用的 `busy` 标志并不意味着关闭锁定：中止确认、初始设置以及服务商连接/取消流程保留各自领域特定的行为。关闭界面不会隐式取消已被接受的写入或其他领域操作。
 
-### Settings singleton and return-to navigation
+### 设置单例与返回导航
 
-There is one Settings instance. Opening Settings places it above the current surface
-without discarding that surface. Returning to Settings beneath child layers requests
-closure top-down through normal callbacks:
+只有一个设置实例。打开设置会把它放在当前界面之上，而不丢弃该界面。返回到位于子层之下的设置时，会通过常规回调自顶向下请求关闭：
 
-- Stop if a layer refuses, handles the request without closing, or remains open during
-  asynchronous cancellation.
-- Invoke each close callback at most once per request. Do not force cancellation, spin
-  until a layer disappears or queue deferred navigation.
-- Retarget Settings only after return-to succeeds, preserving section/deep-link state.
+- 如果某一层拒绝关闭、处理了请求但没有关闭，或在异步取消期间仍保持打开，则停止。
+- 每次请求最多调用每个关闭回调一次。不要强制取消、空转等待某一层消失，也不要排队延迟导航。
+- 只有在返回成功后才重新定位设置，并保留分区/深层链接状态。
 
-Paint order is not lifetime ownership: unloading a plugin dialog below global Settings
-does not destroy Settings.
+绘制顺序并不等于生命周期归属：卸载全局设置之下的插件对话框不会销毁设置。
 
-## Surface families
+## 界面类别
 
-| Family | Examples | Behavior |
+| 类别 | 示例 | 行为 |
 | --- | --- | --- |
-| Modal dialogs | Settings, setup, confirmations, provider connections, plugin dialogs, keyboard cheat sheet | Modal focus/accessibility/scroll isolation and domain-specific close guards. |
-| Anchored menus/popups | Model/thinking/provider/font/language menus, context menus, plugin menus, graph/statistics panels | Owner-scoped interaction with each popup's geometry, search/arrows, outside-pointer, scroll-close and focus-return rules. |
-| Content-area views | Chains browser, expanded diagrams/figures, expanded full plan | Main-content bounds with sidebar interaction, not viewport-modal isolation. |
-| Inline/noninteractive UI | Activity disclosures, notifications/update banners, drag previews | No modal interaction layer. |
+| 模态对话框 | 设置、初始设置、确认框、服务商连接、插件对话框、键盘快捷键速查表 | 模态的焦点/无障碍/滚动隔离，以及领域特定的关闭保护。 |
+| 锚定菜单/弹出层 | 模型/推理强度/服务商/字体/语言菜单、上下文菜单、插件菜单、图谱/统计面板 | 按归属者限定作用域的交互，并遵循各弹出层自身的几何位置、搜索/方向键、外部指针、滚动关闭和焦点返回规则。 |
+| 内容区视图 | 推理链浏览器、展开的图表/插图、展开的完整学习计划 | 位于主内容区域内，侧边栏仍可交互，而不是视口级的模态隔离。 |
+| 内联/非交互 UI | 活动详情展开项、通知/更新横幅、拖拽预览 | 没有模态交互层。 |
 
-### Plugin menu repeated-anchor toggle
+### 插件菜单的重复锚点切换
 
-Within one plugin UI owner, repeated `openMenu` calls for the exact same anchor element
-toggle the existing menu closed, synchronously even before React mounts it. Closing calls
-the existing menu's latest `onClose` once and returns an inert handle for the repeated call.
-The incoming props/callback do not create another menu. Different owners and anchors
-retain independent behavior.
+在同一个插件 UI 归属者内，对完全相同的锚点元素重复调用 `openMenu` 会把现有菜单切换为关闭，即使在 React 挂载它之前也会同步执行。关闭时会调用现有菜单最新的 `onClose` 一次，并为这次重复调用返回一个空操作句柄。传入的 props/回调不会创建另一个菜单。不同的归属者和锚点保持各自独立的行为。
 
-Outside clicks (including another button), action dismissal, Escape-only anchor focus
-return and error/async behavior retain their normal semantics. Caller/plugin/surface
-expiry or explicit disposal clears the anchor registration without synthesizing `onClose`;
-stale handles cannot affect a later menu.
+外部点击（包括点击另一个按钮）、操作触发的关闭、仅限 Escape 的锚点焦点返回，以及错误/异步行为都保留其常规语义。调用方/插件/界面的失效或显式销毁会清除锚点注册，而不会合成 `onClose` 调用；过期的句柄不能影响之后的菜单。
 
-### Plugin knowledge picker
+### 插件知识选择器
 
-The controlled `mountKnowledgePicker` uses the real Chains interface and selection/source
-organization operations. Presentation depends on the invocation owner:
+受控的 `mountKnowledgePicker` 使用真实的推理链界面以及选择/来源整理操作。其展示方式取决于调用归属者：
 
-- A plugin/native page or page-body surface opens a main-content-pane `view`, excluding
-  the sidebar and leaving it interactive.
-- A dialog, Settings or another modal ancestor opens a full-window modal, with its parent
-  painted and the background/sidebar inactive.
+- 插件/原生页面或页面主体界面会打开一个主内容窗格中的 `view`，不覆盖侧边栏，侧边栏仍可交互。
+- 对话框、设置或其他模态祖先会打开一个全窗口模态框，其父级保持绘制，背景/侧边栏处于非活跃状态。
 
-The host captures owner and bounds; plugins do not supply an origin option. Navigation
-away from the source page or expiry of the exact owner/widget closes pending/open pickers.
-Covering a live origin retains mounted state. A global-modal origin follows its actual
-modal/widget lifetime, not an unrelated background route.
+宿主会记录归属者和区域范围；插件不提供发起位置选项。离开发起页面，或确切的归属者/组件失效，都会关闭待打开/已打开的选择器。遮挡一个仍然存活的发起位置会保留已挂载的状态。全局模态发起位置遵循其实际的模态框/组件生命周期，而不是无关的背景路由。
 
-Both presentations reserve native-window control clearance without adding a sidebar-reopen
-control or changing the background sidebar preference. The selection action is **Done**.
-Local view paint follows interaction order, including surfaces and owned popups; global
-modal dialogs remain above this main-local stratum. Deck/library ownership stays with the
-plugin, not the picker.
+两种展示方式都会为原生窗口控件预留空间，但不会添加重新打开侧边栏的控件，也不会改变背景侧边栏的偏好设置。选择操作的按钮是 **完成**（Done）。局部视图的绘制遵循交互顺序，包括界面及其拥有的弹出层；全局模态对话框始终位于这一主区域局部层之上。卡组/卡片库的归属仍属于插件，而不是选择器。
 
-## Host implementation
+## 宿主实现
 
-Private implementation modules are `components/interaction-layers.tsx`,
-`components/host-dialog.tsx`, `components/menu-shell.tsx` and
-`components/popover-dismiss.ts`. They coordinate ownership and paint without owning domain
-validation, authentication cancellation, source mutations or plugin business logic.
+私有实现模块包括 `components/interaction-layers.tsx`、`components/host-dialog.tsx`、`components/menu-shell.tsx` 和 `components/popover-dismiss.ts`。它们协调归属和绘制，但不负责领域校验、认证取消、来源变更或插件业务逻辑。
 
-Modal composition uses non-looping Radix FocusScope containment, outside-content
-accessibility isolation, nested scroll isolation and host-owned portals/backdrops.
-Leaf-first dismissal replaces stock capture-phase Escape dismissal. Passive tooltips use
-Popper/Presence without registering an interaction owner.
+模态组合使用不循环的 Radix FocusScope 焦点限制、内容外部的无障碍隔离、嵌套滚动隔离，以及由宿主拥有的 portal/背景遮罩。叶子优先的关闭机制取代了默认的捕获阶段 Escape 关闭。被动提示框使用 Popper/Presence，而不注册交互归属者。
 
-Escape ownership is observed before routing unconsumed events after leaf handlers. Native
-Tab defaults are prevented without stopping propagation. Find, Enter submission,
-model/thinking shortcuts and fallback Escape actions use eligible interaction owners.
-Close outcomes distinguish closed, blocked, handled-without-closing and pending; pending
-cancellation never authorizes deferred stack traversal.
+在叶子处理器之后路由未被消耗的事件之前，会先检查 Escape 的归属。原生 Tab 默认行为会被阻止，但不会停止事件传播。查找、Enter 提交、模型/推理强度快捷键以及回退的 Escape 操作都使用符合条件的交互归属者。关闭结果区分为已关闭、被阻止、已处理但未关闭和待定；待定的取消绝不会授权延迟的栈遍历。
 
-Settings commits distinguish acceptance, validation rejection, blocked writes and
-persistence failure. Revision tickets protect newer drafts; native number inputs retain
-steppers and `badInput` handling so incomplete tokens are not mistaken for empty values.
-Disposed or superseded opening requests cannot activate after late responses. Covering a
-parent does not dispose its content. Portaled popup ownership keeps focus, accessibility,
-scrolling and paint aligned without manual React DOM relocation or unrelated z-index jumps.
+设置提交区分接受、校验拒绝、写入被阻止和持久化失败。修订票据保护较新的草稿；原生数字输入框保留步进器和 `badInput` 处理，因此不完整的输入不会被误认为空值。已销毁或已被取代的打开请求不能在迟到的响应之后激活。遮挡父级不会销毁其内容。通过 portal 渲染的弹出层归属让焦点、无障碍、滚动和绘制保持一致，而无需手动移动 React DOM，也不会出现无关的 z-index 跳变。
 
-Interaction providers live in the client AppShell. Module initialization/server rendering
-does not access browser globals or import private server/store code into the client graph.
+交互 provider 位于客户端的 AppShell 中。模块初始化/服务端渲染不会访问浏览器全局对象，也不会把私有的服务端/存储代码导入到客户端依赖图中。

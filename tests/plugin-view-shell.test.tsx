@@ -13,10 +13,10 @@ describe("plugin view host shell", () => {
 		const html = renderToStaticMarkup(<PluginViewScreen pluginId="fixture" viewId="overview" />);
 		assert.ok(html.includes("lh-wco-gutter"));
 		assert.ok(html.includes("lh-drag"));
-		assert.ok(html.includes('aria-label="Open sidebar"'));
+		assert.ok(html.includes('aria-label="打开侧边栏"'));
 		assert.ok(html.includes("font-title text-3xl tracking-tight"));
-		assert.ok(html.includes('aria-label="Plugin settings"'));
-		assert.ok(html.includes("Loading plugin…"));
+		assert.ok(html.includes('aria-label="插件设置"'));
+		assert.ok(html.includes("正在加载插件…"));
 		assert.ok(!html.includes("text-2xl"));
 	});
 
@@ -50,7 +50,7 @@ describe("plugin view host shell", () => {
 			assert.ok(f.document.querySelector('[data-plugin-action="fixture/own-top"]'));
 			assert.equal(f.document.querySelector('[data-plugin-action="fixture/other-top"]'), null);
 			assert.equal(settingsMounts, 0);
-			await f.click(f.document.querySelector<HTMLButtonElement>('[aria-label="Plugin settings"]')!);
+			await f.click(f.document.querySelector<HTMLButtonElement>('[aria-label="插件设置"]')!);
 			assert.equal(settingsMounts, 1);
 			assert.ok(f.document.body.textContent?.includes("Fixture settings content"));
 			assert.equal(f.document.querySelector('[data-testid="settings-nav-plugin:fixture"]')?.getAttribute("aria-current"), "true");
@@ -60,9 +60,9 @@ describe("plugin view host shell", () => {
 	it("unavailable views retain the host shell and home escape", async () => {
 		const f = await mountPluginChrome({ activate() {} }, <PluginViewScreen pluginId="fixture" viewId="missing" />);
 		try {
-			assert.ok(f.document.body.textContent?.includes("This plugin view is not available."));
-			assert.equal(f.document.querySelector('a[href="/"]')?.textContent, "Back to home");
-			assert.ok(f.document.querySelector('header.lh-wco-gutter [aria-label="Plugin settings"]'));
+			assert.ok(f.document.body.textContent?.includes("此插件视图不可用。"));
+			assert.equal(f.document.querySelector('a[href="/"]')?.textContent, "返回首页");
+			assert.ok(f.document.querySelector('header.lh-wco-gutter [aria-label="插件设置"]'));
 		} finally { await f.close(); }
 	});
 });

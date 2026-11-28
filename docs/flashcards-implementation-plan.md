@@ -1,29 +1,29 @@
-# Flashcards: native-first implementation
+# 闪卡：原生优先的实现
 
-**Authorized:** Begin implementation. Keep it simple; no Anki export/import, dependencies, assets, conversion or compatibility work in v1. The earlier exhaustive draft is superseded.
+**已授权：** 开始实现。保持简单；v1 不做 Anki 导出/导入、依赖、资源文件、转换或兼容性工作。之前那份详尽的草案已被取代。
 
-## Small package, existing host services
+## 小型软件包，复用现有宿主服务
 
-Source lives in `plugins/flashcards/`, with its own build manifest/lockfile. Build a normal installable `flashcards` folder; do not install over the person's live plugin/data or change root application dependencies.
+源码位于 `plugins/flashcards/`，带有自己的构建清单/lockfile。构建出一个常规的、可安装的 `flashcards` 文件夹；不要覆盖安装用户正在使用的插件/数据，也不要更改应用根目录的依赖。
 
-- **Local store:** one versioned JSON snapshot under `ctx.dataDirectory`, written by atomic replacement. It holds decks, proposition/cue collections, schedules, review history and generation progress. No database service, general repository framework or additional host API.
-- **Library:** flat source-based default decks, optional custom memberships, search, cue edits/deletion and Archive. Shared memberships reference one proposition collection/schedule. Preserve at least one membership; deleting a deck never deletes cards or progress.
-- **Generation:** use the actual host knowledge picker, read public graph propositions/immediate chains, include existing/deleted cues, and pack configurable ~4,000-token input chunks. Submit independent validated `ctx.workers` tasks through host admission. Follow the current cheap slot unless overridden. One active batch, no automatic model retries/replay. Successful chunks apply independently. Navigation does not cancel accepted work.
-- **Review:** think → reveal → Again/Hard/Good/Easy. A small attributed FSRS-6 port, published parameters, 90% retention, learning 1m/10m and relearning 10m. Schedule propositions, weight cues by latest result, and keep the same cue through learning/relearning. Daily new limit initially 20 per deck; due work uncapped. Introduction counts in every current membership but only the studied/admitting deck controls admission.
-- **Rendering/settings:** use `mountMarkdown`, host-controlled buttons/dialogs/pickers/settings and scoped cleanup. No private component imports, duplicate Markdown parser or plugin-local worker infrastructure.
+- **本地存储：** `ctx.dataDirectory` 下一份带版本号的 JSON 快照，以原子替换方式写入。它保存卡组、命题/提示语集合、复习计划、复习历史和生成进度。不使用数据库服务、通用仓储框架或额外的宿主 API。
+- **卡片库：** 扁平的、按来源划分的默认卡组，可选的自定义归属，搜索，提示语编辑/删除，以及归档（Archive）。共享归属引用同一个命题集合/复习计划。至少保留一个归属；删除卡组绝不会删除卡片或进度。
+- **生成：** 使用真实的宿主知识选择器，读取公开的图谱命题/直接相关的推理链，包含现有/已删除的提示语，并打包成可配置的约 4,000 token 输入分块。通过宿主准入机制提交独立且经过校验的 `ctx.workers` 任务。默认跟随当前的经济档位，除非被覆盖。同一时间只有一个活跃批次，不自动进行模型重试/重放。成功的分块各自独立应用。页面导航不会取消已接受的工作。
+- **复习：** 思考 → 显示答案 → 重来/困难/良好/简单（Again/Hard/Good/Easy）。一个注明出处的小型 FSRS-6 移植，使用已发布的参数、90% 记忆保持率、学习步骤 1m/10m、重新学习步骤 10m。按命题安排复习计划，按最近一次结果为提示语加权，并在学习/重新学习期间保持同一提示语。每日新命题上限初始为每个卡组 20 个；到期复习不设上限。新引入计入当前所有归属卡组，但只有正在学习/负责准入的卡组控制准入。
+- **渲染/设置：** 使用 `mountMarkdown`、宿主控制的按钮/对话框/选择器/设置以及作用域清理。不导入私有组件，不重复实现 Markdown 解析器，也不做插件本地的 worker 基础设施。
 
-## Practical safeguards, not another platform
+## 务实的保障措施，而不是另一个平台
 
-Validate backend inputs; retain failed edit drafts. Grade only revealed, current review tickets; make accepted ratings and model-task dispatch idempotent. Keep cancellation/application markers with the same local snapshot. Reconcile accepted results after restart without making a new model call. Use explicit errors instead of silent context truncation, fallback models or data reset.
+校验后端输入；保留编辑失败的草稿。只对已显示答案的当前复习票据评分；让已接受的评分和模型任务派发保持幂等。把取消/应用标记与同一份本地快照放在一起。重启后对已接受的结果进行核对，而不发起新的模型调用。使用显式错误，而不是静默截断上下文、回退到其他模型或重置数据。
 
-Use deterministic FSRS intervals initially (reference fuzz-off default). Local study days initially start at 04:00; intraday steps use actual elapsed minutes. Published equations remain reference-tested; local queue/calendar behavior is an adapter, not a claim of identical Anki scheduling.
+初始使用确定性的 FSRS 间隔（参考实现默认关闭随机扰动）。本地学习日初始从 04:00 开始；日内步骤使用实际经过的分钟数。已发布的公式仍以参考实现进行测试；本地队列/日历行为是一个适配层，并不声称与 Anki 的调度完全一致。
 
-## Infrastructure learning
+## 基础设施经验
 
-This plugin is a reference consumer of the still-evolving API. Report concrete excessive plumbing, awkward workarounds or missing capabilities to the human instead of hiding them behind a custom framework.
+本插件是仍在演进中的 API 的参考使用方。把具体的冗余管道代码、别扭的变通方法或缺失的能力报告给项目负责人，而不是把它们藏在自定义框架后面。
 
-Known limitation: the public graph reader exposes source titles/paths but not imported-source display-name overrides used by the host picker. Initial deck labels can use those public titles/basenames and remain editable. No private-store workaround.
+已知限制：公开的图谱读取器提供来源标题/路径，但不提供宿主选择器所使用的导入来源显示名称覆盖。初始卡组标签可以使用这些公开标题/文件名，并且之后仍可编辑。不使用私有存储的变通方法。
 
-## Verification and delivery
+## 验证与交付
 
-Run focused native tests for generation, persistence, scheduling, shared memberships, review, cancellation and recovery. Build the external package and exercise its UI in a disposable app/browser environment. Mock model transport; do not call paid providers or touch real learning data. Report observed results and remaining gaps honestly. No automatic installation, root-host edits, commit, push or release.
+针对生成、持久化、调度、共享归属、复习、取消和恢复运行有针对性的原生测试。构建外部软件包，并在一次性的应用/浏览器环境中操作其 UI。模拟模型传输；不要调用付费服务商，也不要触碰真实的学习数据。如实报告观察到的结果和剩余的缺口。不自动安装、不修改宿主根目录、不提交、不推送、不发布。

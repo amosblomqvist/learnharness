@@ -39,6 +39,7 @@ function withPayload(test: (fixture: {
 		write("core-plugins.json", fs.readFileSync(new URL("../core-plugins.json", import.meta.url), "utf8"));
 		write("scripts/build-core-plugins.mjs", fs.readFileSync(new URL("../scripts/build-core-plugins.mjs", import.meta.url), "utf8"));
 		write("src/core/plugins.ts", fs.readFileSync(new URL("../src/core/plugins.ts", import.meta.url), "utf8"));
+		write("src/core/i18n.ts", fs.readFileSync(new URL("../src/core/i18n.ts", import.meta.url), "utf8"));
 		for (const id of JSON.parse(fs.readFileSync(new URL("../core-plugins.json", import.meta.url), "utf8")) as string[]) {
 			write(`core-plugins/${id}/manifest.json`, JSON.stringify({ apiVersion: 1, id, name: id, version: "1.0.0", minAppVersion: "0.4.1", main: "main.js" }));
 			write(`core-plugins/${id}/main.js`, "export function activate() {};");

@@ -24,7 +24,7 @@ test("display equation Copy writes the TeX from the rendered formula, including 
 	try {
 		await act(async () => root.render(<MessageResponse>{`$$\n${tex}\n$$`}</MessageResponse>));
 		assert.equal(host.querySelector("annotation"), null, "the current renderer does not need MathML");
-		const copy = () => host.querySelector<HTMLButtonElement>('button[aria-label="Copy equation source"]')!.click();
+		const copy = () => host.querySelector<HTMLButtonElement>('button[aria-label="复制公式源码"]')!.click();
 		await act(async () => copy());
 		assert.deepEqual(writes, [tex]);
 

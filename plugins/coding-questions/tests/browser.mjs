@@ -179,7 +179,7 @@ try {
   await page.evaluate(() => window.host.mount({language:'SQL',starterCode:'SELECT id FROM example;'}));
   await page.waitForFunction(() => document.querySelector('#editor [role="status"]').textContent === "");
   await page.evaluate(() => window.host.mount({language:'unbundled-language',starterCode:'<script>literal</script>\n'}));
-  assert.equal(await page.$eval('#editor [role="status"]',node=>node.textContent),"Plain text");
+  assert.equal(await page.$eval('#editor [role="status"]',node=>node.textContent),"纯文本");
   assert.equal(await page.$$eval('#editor script',nodes=>nodes.length),0);
   const savedCode="  const value = '<script>';  \n\n";
   const savedQuestion='Implement **example** so it returns $42$.\n\n```javascript\nfunction example() {}\n```\n\nPreserve the requested result.  \n';
@@ -194,11 +194,11 @@ try {
   assert.equal(await page.$$eval('#answered-card .lh-coding-test-result',nodes=>nodes.length),0,'Historical ungraded answers have no invented result');
   const passResult={status:'passed',exitCode:0,stdout:'<script>literal output</script>  \n',stderr:'',stdoutTruncated:false,stderrTruncated:false};
   for(const [grading,label,color] of [
-    [{result:passResult},'Tests passed','var(--color-green-500, #22c55e)'],
-    [{result:{...passResult,status:'failed',exitCode:1,stderr:'Assertion failed',stdoutTruncated:true,stderrTruncated:true}},'Tests failed','var(--color-red-500, #ef4444)'],
-    [{result:{...passResult,status:'error',exitCode:null,message:'Missing installed runtime'}},'Could not run tests',''],
-    [{error:'Grading callback failed'},'Could not run tests',''],
-    [{result:false},'Could not run tests',''],
+    [{result:passResult},'测试通过','var(--color-green-500, #22c55e)'],
+    [{result:{...passResult,status:'failed',exitCode:1,stderr:'Assertion failed',stdoutTruncated:true,stderrTruncated:true}},'测试未通过','var(--color-red-500, #ef4444)'],
+    [{result:{...passResult,status:'error',exitCode:null,message:'Missing installed runtime'}},'无法运行测试',''],
+    [{error:'Grading callback failed'},'无法运行测试',''],
+    [{result:false},'无法运行测试',''],
   ]) {
     await page.evaluate(({grading,savedCode})=>window.host.showAnswered(savedCode,'JavaScript',grading),{grading,savedCode});
     assert.equal(await page.$eval('#answered-header [data-fixture-badge]',node=>node.textContent),label);
@@ -229,7 +229,7 @@ try {
     await page.mouse.move(row.x,row.y);
     await page.waitForFunction(()=>getComputedStyle(document.querySelector('#answered-footer .lh-coding-test-output > button')).color==='rgb(141, 141, 141)');
     await page.locator(toggle).click();
-    assert.equal(await page.$eval(toggle,node=>node.textContent),'Hide test output');
+    assert.equal(await page.$eval(toggle,node=>node.textContent),'收起测试输出');
     await page.focus(toggle);
     await page.keyboard.press('Enter');
     assert.equal(await page.$eval(toggle,node=>node.getAttribute('aria-expanded')),'false');
@@ -251,11 +251,11 @@ try {
       const fonts=await page.$eval('#answered-card',node=>{const keys=['fontFamily','fontSize','lineHeight'];const css=element=>Object.fromEntries(keys.map(key=>[key,getComputedStyle(element)[key]]));return{code:css(node.querySelector('.cm-scroller')),output:css(node.querySelector('pre'))}});
       assert.deepEqual(fonts.output,fonts.code,'Console output matches the submitted code typography');
       if(grading.result.stdoutTruncated) {
-        assert.ok(await page.$eval('#answered-footer .lh-coding-test-output',node=>node.textContent.includes('Stdout truncated at 64 KiB.')&&node.textContent.includes('Stderr truncated at 64 KiB.')));
+        assert.ok(await page.$eval('#answered-footer .lh-coding-test-output',node=>node.textContent.includes('Stdout 已在 64 KiB 处截断。')&&node.textContent.includes('Stderr 已在 64 KiB 处截断。')));
         await page.screenshot({path:path.join(evidence,'failed-tests-and-output.png')});
       }
     } else {
-      assert.ok(await page.$eval('#answered-footer .lh-coding-test-output',node=>node.textContent.includes('Grading callback failed')||node.textContent.includes('Saved test result is unavailable.')));
+      assert.ok(await page.$eval('#answered-footer .lh-coding-test-output',node=>node.textContent.includes('Grading callback failed')||node.textContent.includes('已保存的测试结果不可用。')));
     }
     assert.equal(await page.evaluate(()=>window.activeBadgeCount),1);
   }
@@ -280,12 +280,12 @@ try {
   const emptyResult={...passResult,stdout:'',stderr:''};
   await page.evaluate(({savedCode,emptyResult})=>window.host.showAnswered(savedCode,'JavaScript',{result:emptyResult}),{savedCode,emptyResult});
   assert.equal(await page.$$eval('#answered-card .lh-coding-test-output',nodes=>nodes.length),0,'Silent runs have no empty Test output control');
-  assert.equal(await page.$eval('#answered-header',node=>node.textContent),'Tests passed','A silent run still retains its badge');
+  assert.equal(await page.$eval('#answered-header',node=>node.textContent),'测试通过','A silent run still retains its badge');
   for(const stdout of [' \t\n','']) {
     await page.evaluate(({savedCode,emptyResult,stdout})=>window.host.showAnswered(savedCode,'JavaScript',{result:{...emptyResult,stdout,stdoutTruncated:stdout===''}}),{savedCode,emptyResult,stdout});
     await page.locator('#answered-footer .lh-coding-test-output > button').click();
     assert.deepEqual(await page.$$eval('#answered-footer pre',nodes=>nodes.map(node=>node.textContent)),stdout===''?[]:[stdout],'Preserve whitespace-only output and omit empty boxes');
-    if(stdout==='')assert.match(await page.$eval('#answered-footer .lh-coding-test-output',node=>node.textContent),/Stdout truncated at 64 KiB/);
+    if(stdout==='')assert.match(await page.$eval('#answered-footer .lh-coding-test-output',node=>node.textContent),/Stdout 已在 64 KiB 处截断/);
   }
 
   const modelSolution='  ```javascript\nfunction example() { return 42; }\n```\n\n**Why:** return the requested value. <script>literal model text</script>  \n';
@@ -294,7 +294,7 @@ try {
   assert.equal(await page.evaluate(()=>window.activeMarkdownCount),0);
   await page.evaluate(({savedCode,passResult,modelSolution})=>window.host.showAnswered(savedCode,'JavaScript',{result:passResult},true,modelSolution),{savedCode,passResult,modelSolution});
   const solution='#answered-footer .lh-coding-model-solution > button';
-  assert.equal(await page.$eval(solution,node=>node.textContent),'Model solution');
+  assert.equal(await page.$eval(solution,node=>node.textContent),'参考解答');
   assert.equal(await page.$eval(solution,node=>node.getAttribute('aria-expanded')),'false');
   assert.equal(await page.$$eval('#answered .lh-coding-model-solution',nodes=>nodes.length),0,'Model solution uses the supplied footer, not the answer body');
   assert.equal(await page.evaluate(()=>window.activeMarkdownCount),0,'Collapsed model solution mounts no Markdown widget');
@@ -310,7 +310,7 @@ try {
   assert.deepEqual(solutionFont,whyFont,'Both controls match the native Why typography');
   await page.screenshot({path:path.join(evidence,'quiet-disclosures-collapsed.png')});
   await page.locator(solution).click();
-  assert.equal(await page.$eval(solution,node=>node.textContent),'Hide model solution');
+  assert.equal(await page.$eval(solution,node=>node.textContent),'收起参考解答');
   assert.equal(await page.evaluate(()=>window.activeMarkdownCount),1);
   assert.equal(await page.evaluate(()=>window.markdownMounts.at(-1)),modelSolution,'Public Markdown helper receives exact authored text');
   assert.equal(await page.$eval('#answered-footer .lh-coding-test-output > button',node=>node.getAttribute('aria-expanded')),'false','Solution and output expand independently');
@@ -377,7 +377,7 @@ try {
   let heldTimer;
   try {await Promise.race([heldRequest,new Promise((_,reject)=>{heldTimer=setTimeout(()=>reject(new Error('No lazy Rust module request observed')),10000)})])}
   finally {clearTimeout(heldTimer)}
-  assert.equal(await page.$eval('#editor [role="status"]',node=>node.textContent),'Loading highlighting…');
+  assert.equal(await page.$eval('#editor [role="status"]',node=>node.textContent),'正在加载语法高亮…');
   await page.evaluate(() => {window.host.unmount();document.querySelector('#editor').textContent='sentinel'});
   mode='pass';
   for(const req of held)await req.continue();
@@ -386,7 +386,7 @@ try {
   assert.equal(await page.$eval('#editor',node=>node.textContent),'sentinel');
   mode='fail';
   await page.evaluate(() => {document.querySelector('#editor').textContent='';window.host.mount({language:'Ruby',starterCode:'value = 1'})});
-  await page.waitForFunction(() => document.querySelector('#editor [role="status"]').textContent === 'Plain text');
+  await page.waitForFunction(() => document.querySelector('#editor [role="status"]').textContent === '纯文本');
   assert.deepEqual(await state(),{status:'ready',value:'value = 1'});
   await fillCode('still editable');assert.equal((await state()).value,'still editable');
   mode='pass';
@@ -412,7 +412,7 @@ try {
     if (language === 'C') {
       await (await page.$('#editor .cm-lintRange-error')).hover();
       await page.waitForSelector('.cm-tooltip-lint .cm-diagnosticText', {visible:true});
-      assert.ok(await page.$$eval('.cm-tooltip-lint .cm-diagnosticText', nodes=>nodes.every(node=>node.textContent==='Syntax problem.')));
+      assert.ok(await page.$$eval('.cm-tooltip-lint .cm-diagnosticText', nodes=>nodes.every(node=>node.textContent==='语法问题。')));
       await page.screenshot({path:path.join(evidence,'syntax-diagnostics-hover.png')});
       await page.mouse.move(1050,800);
     }
@@ -467,7 +467,7 @@ try {
 
   for(const [language,starterCode] of [['TypeScript','const value: number = "not a number";'],['SQL','SELECT FROM WHERE ;'],['HTML','<div>'],['unbundled-language','not code']]) {
     await page.evaluate(({language,starterCode})=>window.host.mount({language,starterCode}), {language,starterCode});
-    await page.waitForFunction(()=>document.querySelector('#editor [role="status"]').textContent!=='Loading highlighting…');
+    await page.waitForFunction(()=>document.querySelector('#editor [role="status"]').textContent!=='正在加载语法高亮…');
     await new Promise(resolve=>setTimeout(resolve,450));
     assert.equal(await page.$$eval(marker,nodes=>nodes.length),0, `${language}: no unsupported or semantic diagnoses`);
     assert.deepEqual(await state(),{status:'ready',value:starterCode});
@@ -506,12 +506,12 @@ try {
   await page.evaluate(result=>{const h=window.host;h.update(undefined,false);h.addSubmitted(h.answer.value,{result})},practiceFailed);
   assert.equal(await page.$eval('#editor .cm-content',node=>node.contentEditable),'false');
   assert.deepEqual(await state(),{status:'ready',value:wrongCode});
-  assert.equal(await page.$eval('#practice-0 .practice-heading',node=>node.textContent),'Coding problemTests failed');
+  assert.equal(await page.$eval('#practice-0 .practice-heading',node=>node.textContent),'Coding problem测试未通过');
   assert.equal(await page.$$eval('#practice-0 .lh-coding-model-solution, #practice-0 .lh-coding-prompt',nodes=>nodes.length),0,'A practice attempt neither duplicates the statement nor reveals the committed solution');
   assert.equal(await page.evaluate(()=>window.activeMarkdownCount),0);
   assert.equal(await page.evaluate(()=>window.activeQuestionCount),0);
   assert.equal(await page.$$eval('#practice-history [contenteditable="true"]',nodes=>nodes.length),0,'Saved attempts are read-only');
-  assert.equal(await page.$eval('#practice-0 [data-submission-footer] > .lh-coding-test-result button',node=>node.textContent),'Test output');
+  assert.equal(await page.$eval('#practice-0 [data-submission-footer] > .lh-coding-test-result button',node=>node.textContent),'测试输出');
   const practiceOrder=await page.$eval('#practice-0',root=>{
     const code=root.querySelector('.lh-coding-question'),thinking=root.querySelector('[data-submission-thinking]'),output=root.querySelector('.lh-coding-test-result');
     const before=(a,b)=>!!(a.compareDocumentPosition(b)&Node.DOCUMENT_POSITION_FOLLOWING);
@@ -527,13 +527,13 @@ try {
   const practicePassed={status:'passed',exitCode:0,stdout:'Observed tests passed\n',stderr:'',stdoutTruncated:false,stderrTruncated:false};
   await page.evaluate(result=>{const h=window.host;h.update(undefined,false);h.addSubmitted(h.answer.value,{result});h.update(undefined,true)},practicePassed);
   assert.deepEqual(await state(),{status:'ready',value:revisedCode});
-  assert.equal(await page.$eval('#practice-1 .practice-heading',node=>node.textContent),'Coding problemTests passed');
+  assert.equal(await page.$eval('#practice-1 .practice-heading',node=>node.textContent),'Coding problem测试通过');
   assert.equal(await page.$$eval('#practice-0 .cm-line',nodes=>nodes.map(node=>node.textContent).join('\n')),wrongCode,'Later revisions do not rewrite earlier accepted attempts');
   assert.equal(await page.$$eval('#practice-1 .cm-line',nodes=>nodes.map(node=>node.textContent).join('\n')),revisedCode);
   assert.equal(await page.$eval('#practice-0 button',node=>node.getAttribute('aria-expanded')),'true');
   assert.equal(await page.$eval('#practice-1 button',node=>node.getAttribute('aria-expanded')),'false','Attempt disclosures are independent');
   await page.evaluate(()=>window.host.addSubmitted('saved code',{error:'Fixture workspace failure'}));
-  assert.equal(await page.$eval('#practice-2 .practice-heading',node=>node.textContent),'Coding problemCould not run tests');
+  assert.equal(await page.$eval('#practice-2 .practice-heading',node=>node.textContent),'Coding problem无法运行测试');
   await page.click('#practice-2 button');
   assert.match(await page.$eval('#practice-2 [data-submission-footer]',node=>node.textContent),/Fixture workspace failure/);
   await page.evaluate(()=>window.host.addSubmitted('historical unprocessed code'));

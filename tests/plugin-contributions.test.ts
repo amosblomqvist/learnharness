@@ -264,12 +264,12 @@ test("context-specific factory errors omit that turn only; successful re-evaluat
 	assert.match(f.host.list()[0]!.error!, /factory context rejected/);
 	fs.writeFileSync(path.join(f.directory, "example", "dist", "main.js"), "export const updated = true;");
 	await f.host.refresh();
-	assert.match(f.host.list()[0]!.error!, /Restart required.*factory context rejected/);
+	assert.match(f.host.list()[0]!.error!, /需要重启.*factory context rejected/);
 	const changes = f.changes();
 	assert.equal(f.host.agentContributions(turn("good"), []).tools[0]!.name, "recovered");
 	assert.equal(f.host.list()[0]!.status, "active");
-	assert.match(f.host.list()[0]!.error!, /Restart required/);
-	assert.doesNotMatch(f.host.list()[0]!.error!, /factory context rejected|Agent contributions/);
+	assert.match(f.host.list()[0]!.error!, /需要重启/);
+	assert.doesNotMatch(f.host.list()[0]!.error!, /factory context rejected|智能体扩展/);
 	assert.ok(f.changes() > changes);
 });
 

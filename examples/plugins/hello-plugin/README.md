@@ -1,17 +1,7 @@
-# Hello plugin
+# Hello 插件
 
-Copy this directory into the plugins directory shown in **Settings → Community plugins**,
-keeping the `hello-plugin/` folder and its required `dist/manifest.json`. No build is
-needed. Refresh and enable **Hello plugin**. Edit runtime files in `dist/` and restart
-LearnHarness after changing loaded code. Persistent data, if added, belongs in sibling
-`hello-plugin/data/`, never `dist/data/`; preserve it when replacing `dist/`.
-Nothing is installed or enabled automatically.
+把此目录复制到 **设置 → 社区插件**（Settings → Community plugins）中显示的插件目录下，保留 `hello-plugin/` 文件夹及其必需的 `dist/manifest.json`。无需构建。刷新后启用 **Hello plugin**。在 `dist/` 中编辑运行时文件，修改已加载的代码后需重启 LearnHarness。如需添加持久化数据，应放在同级的 `hello-plugin/data/` 中，绝不能放在 `dist/data/`；替换 `dist/` 时要保留它。不会自动安装或启用任何内容。
 
-This minimal frontend-only example registers a `hello` view and a separate `open`
-action. Explicit placements expose the action in the sidebar, graph, and teaching /
-practice session top bars. Registering a view or action alone adds no chrome.
+这个最小的纯前端示例注册了一个 `hello` 视图和一个独立的 `open` 操作。显式的放置位置会把该操作显示在侧边栏、图谱以及教学 / 练习会话的顶栏中。仅注册视图或操作不会添加任何界面元素。
 
-Open the view and click **Say hello** to see a host-owned button and standard dialog
-with plugin-owned DOM content. All widgets receive the view's `{ signal }`, so closing
-the view or disabling the plugin tears them down. The custom settings mount is just
-explanatory text: there are no invented schema settings, backend, or model requests.
+打开该视图并点击 **Say hello**，即可看到一个由宿主提供的按钮，以及包含插件自有 DOM 内容的标准对话框。所有组件都会收到视图的 `{ signal }`，因此关闭视图或停用插件会将它们销毁。自定义设置挂载点只是一段说明文字：没有虚构的 schema 设置、后端或模型请求。

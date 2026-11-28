@@ -1,3 +1,4 @@
+import { tr } from "../src/core/i18n.ts";
 /** One import request: file bytes plus a bounded allowance for multipart metadata. */
 export const MAX_IMPORT_BYTES = 25 * 1024 * 1024;
 export const MAX_IMPORT_BODY_BYTES = 26 * 1024 * 1024;
@@ -6,7 +7,7 @@ export const MAX_IMPORT_BODY_BYTES = 26 * 1024 * 1024;
 const IMPORT_EXTENSION_NAMES = ["txt", "md", "markdown", "rst", "org", "adoc", "tex", "pdf"];
 export const IMPORT_EXTENSIONS = new RegExp(`\\.(?:${IMPORT_EXTENSION_NAMES.join("|")})$`, "i");
 export const IMPORT_ACCEPT = IMPORT_EXTENSION_NAMES.map((name) => `.${name}`).join(",");
-export const UNSUPPORTED_TYPE_MESSAGE = "This file type isn't supported. Use text, Markdown, or PDF.";
+export const UNSUPPORTED_TYPE_MESSAGE = tr("不支持此文件类型。请使用文本、Markdown 或 PDF 文件。", "This file type isn't supported. Use text, Markdown, or PDF.");
 
 /** Contributor's relative-path contract: identity only, never a disk path.
  * Chromium may serialize the basename or the full webkitRelativePath. */

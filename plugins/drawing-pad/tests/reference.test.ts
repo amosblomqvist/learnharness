@@ -11,7 +11,7 @@ function input(extra = {}): PluginSessionViewInput {
 it("preserves exact host option order and Markdown without quiz descriptions", () => {
   const reference = referenceFor(input())!;
   assert.equal(reference.question, "$x^2$?"); assert.equal(reference.context, "**Context**");
-  assert.deepEqual(reference.options, [{ label: "$b$" }, { label: "$a$" }]); assert.equal(reference.extra, "I don't know");
+  assert.deepEqual(reference.options, [{ label: "$b$" }, { label: "$a$" }]); assert.equal(reference.extra, "我不知道");
 });
 it("unrevealed or unavailable native questions produce no reference", () => {
   assert.equal(referenceFor(input({ revealed: false })), undefined); assert.equal(referenceFor(input({ available: false })), undefined);
@@ -19,7 +19,7 @@ it("unrevealed or unavailable native questions produce no reference", () => {
 it("includes applicable non-quiz option descriptions without learner selections", () => {
   const reference = referenceFor(input({ question: { ...question, kind: "ask" }, draft: { values: ["a"], text: "private" } }))!;
   assert.equal(reference.options[0]!.description, "do not leak old quiz description");
-  assert.equal(JSON.stringify(reference).includes("private"), false); assert.equal(reference.extra, "Other…");
+  assert.equal(JSON.stringify(reference).includes("private"), false); assert.equal(reference.extra, "其他…");
 });
 it("text-mode questions have no artificial option rows", () => {
   const reference = referenceFor(input({ question: { ...question, mode: "text", kind: "explain" } }))!;

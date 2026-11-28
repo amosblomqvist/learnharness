@@ -6,6 +6,7 @@ import { buildJobFailureSteer, buildSubagentSteer, type JobRecord, type SteerMes
 import type { JobStore } from "../core/ports.ts";
 import type { PluginToolContext } from "../core/plugins.ts";
 import type { PluginBackgroundResult, PluginBackgroundTool, PluginTaskOutcome, PluginTaskRecord, PluginWorkerService } from "../core/plugin-workers.ts";
+import { tr } from "../core/i18n.ts";
 
 interface JobDeliveryDeps {
 	jobStore: JobStore;
@@ -79,7 +80,7 @@ async function notifyFailure(job: JobRecord, error: string, deps: JobDeliveryDep
 	// Not a worker outcome or learner cancellation. The teacher still needs to
 	// learn why its acknowledged dispatch cannot produce a delivered result.
 	if (deps.jobStore.getJob(job.id)?.status !== "running") return;
-	deps.jobStore.updateJob(job.id, { status: "error", error, activity: "delivery failed", delivery: { kind: "failure", status: "pending" } });
+	deps.jobStore.updateJob(job.id, { status: "error", error, activity: tr("交付失败", "delivery failed"), delivery: { kind: "failure", status: "pending" } });
 	void deps.deliver(buildJobFailureSteer(job, error)).catch(() => { /* retained session-owned failure notice */ });
 }
 
@@ -137,7 +138,7 @@ export function createPluginBackgroundTool<T extends TSchema>(deps: PluginBackgr
 				// the real generic outcome BEFORE asynchronous author formatting.
 				jobStore.updateJob(job.id, { result, status: outcome.status === "succeeded" ? "done" : "error",
 					error: outcome.status === "succeeded" ? undefined : outcome.error.message,
-					activity: outcome.status === "succeeded" ? "finished" : "failed",
+					activity: outcome.status === "succeeded" ? tr("已完成", "finished") : tr("失败", "failed"),
 					delivery: { kind: "result", status: "pending" },
 				});
 				if (deps.signal.aborted || !deps.isActive()) result = { ...result, formatError: "Plugin is disabled; using the persisted worker outcome" };
@@ -216,7 +217,7 @@ export async function recoverPluginBackgroundJob(job: JobRecord, deps: PluginBac
 			if (current.status === "running") deps.jobStore.updateJob(job.id, { result,
 				status: result.outcome.status === "succeeded" ? "done" : "error",
 				error: result.outcome.status === "succeeded" ? undefined : result.outcome.error.message,
-				activity: result.outcome.status === "succeeded" ? "finished" : "failed",
+				activity: result.outcome.status === "succeeded" ? tr("已完成", "finished") : tr("失败", "failed"),
 				delivery: { kind: "result", status: "pending" },
 			});
 			deliver(job, result, deps);

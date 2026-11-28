@@ -2,6 +2,7 @@ import { Quote } from "lucide-react";
 import { CITATION_MAX_TEXT_LENGTH, serializeCitation, type TutorCitation } from "@/src/core";
 import { INSERT_CITATION_EVENT, type CitationInsertedRange, type InsertCitationDetail } from "./path-input";
 import type { SelectionAction } from "./selection-toolbar";
+import { tr } from "@/src/core";
 
 /** A citation chip in the composer whose comment is being edited. `fresh`
  *  marks one inserted just now: Cancel removes it with the spaces it added. */
@@ -25,10 +26,10 @@ export function createCiteAction({ chatId, composer, openEditor }: {
 }): SelectionAction {
 	return {
 		id: "cite",
-		label: "Cite",
-		ariaLabel: "Cite selection in your input",
+		label: tr("引用", "Cite"),
+		ariaLabel: tr("将所选内容引用到输入框", "Cite selection in your input"),
 		icon: Quote,
-		disabledLabel: (capture) => (capture.selector.text.length > CITATION_MAX_TEXT_LENGTH ? "Shorten selection" : null),
+		disabledLabel: (capture) => (capture.selector.text.length > CITATION_MAX_TEXT_LENGTH ? tr("请缩短所选内容", "Shorten selection") : null),
 		visible: () => composer() !== null,
 		onSelect: (capture) => {
 			const root = composer();

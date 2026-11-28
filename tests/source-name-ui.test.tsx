@@ -41,7 +41,7 @@ it("one Escape cancels inline source/folder editing without closing the overlay 
 			assert.equal(document.querySelector('[data-testid="source-name-input"]'), null);
 			assert.equal(closed, 0); assert.equal(writes, 0); assert.equal(windowEscapes, 0);
 		};
-		await act(async () => { (document.querySelector('button[title="Rename"]') as HTMLElement).click(); });
+		await act(async () => { (document.querySelector('button[title="重命名"]') as HTMLElement).click(); });
 		await escape();
 		await act(async () => { (document.querySelector('[data-testid="add-source-folder"]') as HTMLElement).click(); });
 		await escape();

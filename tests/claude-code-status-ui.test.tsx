@@ -52,7 +52,7 @@ test("initial render is collapsed and off, with no setup prose or version probe 
 	const html = renderToStaticMarkup(<ClaudeCodeInstallationStatus />);
 	assert.match(html, /Claude Code/); assert.match(html, /aria-checked="false"/);
 	assert.equal((html.match(/<button/g) ?? []).length, 1);
-	assert(!html.includes("Check again")); assert(!html.includes("Authenticate")); assert(!html.includes("Setup ↗"));
+	assert(!html.includes("重新检查")); assert(!html.includes("Authenticate")); assert(!html.includes("登录")); assert(!html.includes("安装说明 ↗"));
 });
 
 test("off by default; enabling persists before probing and reveals the version/action row below the toggle", async () => {
@@ -61,15 +61,15 @@ test("off by default; enabling persists before probing and reveals the version/a
 	assert.equal(toggle().getAttribute("aria-checked"), "false"); assert(!button());
 	assert.deepEqual(calls, ["GET /api/settings"]);
 	await act(async () => toggle().click());
-	assert.equal(toggle().getAttribute("aria-checked"), "true"); assert.equal(label(), "Not found");
+	assert.equal(toggle().getAttribute("aria-checked"), "true"); assert.equal(label(), "未找到");
 	assert(calls.indexOf("PUT /api/settings/claudeCode") < calls.indexOf("GET /api/claude-code"));
 	assert.notEqual(toggle().parentElement, button().parentElement);
 	assert.equal(document.querySelector('[role="status"]')?.parentElement, button().parentElement);
-	assert.match(document.body.textContent ?? "", /no background process required/);
-	assert.match(document.body.textContent ?? "", /not authentication, model access, or quota/);
-	assert.match(document.body.textContent ?? "", /Claude Code controls billing/);
-	assert.match(document.body.textContent ?? "", /Verify AI claims independently—they may be inaccurate, incomplete, misleading, or outdated\./);
-	assert(document.querySelector("strong")?.textContent?.includes("Install and authenticate"));
+	assert.match(document.body.textContent ?? "", /无需常驻后台进程/);
+	assert.match(document.body.textContent ?? "", /不检查登录状态、模型权限或额度/);
+	assert.match(document.body.textContent ?? "", /计费由 Claude Code 负责/);
+	assert.match(document.body.textContent ?? "", /请独立核实 AI 给出的说法——它们可能不准确、不完整、有误导性或已过时。/);
+	assert(document.querySelector("strong")?.textContent?.includes("请先在终端中安装并登录 Claude Code"));
 	assert.equal(document.querySelector("a")?.getAttribute("href"), "https://code.claude.com/docs/en/setup");
 	await act(async () => toggle().click());
 	assert.equal(toggle().getAttribute("aria-checked"), "false"); assert(!button()); assert.equal(label(), undefined);
@@ -79,23 +79,23 @@ test("off by default; enabling persists before probing and reveals the version/a
 test("recheck matches Connect styling; Manage remains ghost", async () => {
 	fixture(async () => Response.json(status("not-found"))); await mount();
 	const row = (action: string) => parseHTML(renderToStaticMarkup(<ConnectionRow label="Fixture" action={action} disabled={false} onAction={() => {}} />)).document.querySelector("button")!;
-	assert.equal(button().getAttribute("class"), row("Connect").getAttribute("class"));
+	assert.equal(button().getAttribute("class"), row("连接").getAttribute("class"));
 	assert.equal(button().getAttribute("data-variant"), "outline");
-	assert.equal(row("Manage").getAttribute("data-variant"), "ghost");
+	assert.equal(row("管理…").getAttribute("data-variant"), "ghost");
 });
 
 for (const [value, text] of [
-	[status("not-found"), "Not found"],
-	[status("meets-minimum", "2.1.310"), "Version 2.1.310 · meets minimum"],
-	[status("update-required", "2.1.258"), "Version 2.1.258 · update required"],
-	[status("version-unchecked"), "Version could not be checked"],
+	[status("not-found"), "未找到"],
+	[status("meets-minimum", "2.1.310"), "版本 2.1.310 · 满足最低要求"],
+	[status("update-required", "2.1.258"), "版本 2.1.258 · 需要更新"],
+	[status("version-unchecked"), "无法检查版本"],
 ] as const) test(`installation display: ${text}`, () => assert.equal(claudeCodeStatusLabel(value), text));
 
 test("enabled mount checks once; outlined Check again refreshes without probing authentication", async () => {
 	let probes = 0;
 	const calls = fixture(async () => Response.json(++probes === 1 ? status("not-found") : status("meets-minimum", "2.1.310")));
-	await mount(); assert.equal(label(), "Not found");
-	await act(async () => button().click()); assert.equal(label(), "Version 2.1.310 · meets minimum");
+	await mount(); assert.equal(label(), "未找到");
+	await act(async () => button().click()); assert.equal(label(), "版本 2.1.310 · 满足最低要求");
 	assert.equal(calls.filter((call) => call === "GET /api/claude-code").length, 2);
 });
 
@@ -103,7 +103,7 @@ test("failed opt-in save stays collapsed/off and never probes", async () => {
 	const calls = fixture(async () => assert.fail("must not probe"), false, true);
 	await mount(); await act(async () => toggle().click());
 	assert.equal(toggle().getAttribute("aria-checked"), "false"); assert(!button());
-	assert.match(document.querySelector('[role="alert"]')?.textContent ?? "", /Could not save/);
+	assert.match(document.querySelector('[role="alert"]')?.textContent ?? "", /无法保存/);
 	assert(!calls.includes("GET /api/claude-code"));
 });
 
@@ -111,7 +111,7 @@ test("slow checks disable recheck; switching off aborts pending version work wit
 	let signal: AbortSignal | null | undefined;
 	let resolve!: (response: Response) => void;
 	fixture((init) => { signal = init?.signal; return new Promise<Response>((done) => { resolve = done; }); });
-	await mount(); assert.equal(label(), "Checking…"); assert(button().disabled); assert(!toggle().disabled);
+	await mount(); assert.equal(label(), "检查中…"); assert(button().disabled); assert(!toggle().disabled);
 	await act(async () => toggle().click()); assert(signal?.aborted); assert(!button());
 	await act(async () => resolve(Response.json(status("meets-minimum", "2.1.310")))); assert.equal(label(), undefined);
 });
@@ -123,8 +123,8 @@ for (const failure of ["network", "http", "payload"] as const) test(`${failure} 
 		if (failure === "network") throw new Error("offline");
 		return failure === "http" ? new Response(null, { status: 503 }) : Response.json({ state: "authenticated" });
 	});
-	await mount(); assert.equal(label(), "Version 2.1.310 · meets minimum");
-	await act(async () => button().click()); assert.equal(label(), "Version could not be checked"); assert(!button().disabled);
+	await mount(); assert.equal(label(), "版本 2.1.310 · 满足最低要求");
+	await act(async () => button().click()); assert.equal(label(), "无法检查版本"); assert(!button().disabled);
 });
 
 function CatalogReader() {

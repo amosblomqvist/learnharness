@@ -11,12 +11,13 @@ import { subscriptionRequestOrigin } from "./web-subscription-http.ts";
 import { discoverModels, mergeManualModels, syncCustomProvider } from "./custom-provider.ts";
 import { parseCustomModelOverridesBody } from "./settings-body.ts";
 import { CustomBodyLimitError, readBoundedJson } from "./custom-provider-body.ts";
+import { tr } from "../core/i18n.ts";
 
 const revisionKey = Symbol.for("learnharness.custom-provider-revision");
 const globals = globalThis as typeof globalThis & { [revisionKey]?: Buffer };
 const secret = globals[revisionKey] ??= randomBytes(32);
 const failure = (error: string, status = 400) => Response.json({ error }, { status });
-const stale = () => failure("Custom configuration or credentials changed. Reload configuration and retry.", 409);
+const stale = () => failure(tr("自定义配置或凭据已更改。请重新加载配置后重试。", "Custom configuration or credentials changed. Reload configuration and retry."), 409);
 
 function snapshot(inspectKey = false) {
 	const record = readSettings() ?? { version: 1 };
@@ -76,22 +77,22 @@ function commit(cp: CustomProviderSettings | undefined, binding?: CustomAuthBind
 		if (published && oldAuth) {
 			try { persistCustomAuth(oldAuth.binding, oldAuth.fileKey()); } catch { /* durable nonce mismatch fails closed after restart */ }
 		}
-		throw new Error("Unable to save custom configuration. Reload configuration and retry.");
+		throw new Error(tr("无法保存自定义配置。请重新加载配置后重试。", "Unable to save custom configuration. Reload configuration and retry."));
 	}
 	syncCustomProvider();
 }
 
 export async function customProviderMutation(request: Request): Promise<Response> {
-	if (!authorized(request)) return failure("Custom configuration requires a trusted same-origin request.", 403);
-	if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") return failure("JSON content-type is required.", 415);
+	if (!authorized(request)) return failure(tr("自定义配置需要受信任的同源请求。", "Custom configuration requires a trusted same-origin request."), 403);
+	if (request.headers.get("content-type")?.split(";")[0]?.trim().toLowerCase() !== "application/json") return failure(tr("Content-Type 必须为 JSON。", "JSON content-type is required."), 415);
 	try {
 		// Next can represent an empty DELETE as a zero-byte stream rather
 		// than null. Bound it either way; only DELETE permits an empty body.
 		const body = await readBoundedJson(request, 64 * 1024, request.method === "DELETE");
-		if (!body || typeof body !== "object" || Array.isArray(body)) return failure("Invalid JSON body");
+		if (!body || typeof body !== "object" || Array.isArray(body)) return failure(tr("无效的 JSON 请求体", "Invalid JSON body"));
 		const raw = body as Record<string, unknown>;
 		const before = snapshot(raw.authMode === "apiKey");
-		if (!before.auth.readable) return failure("Custom authorization storage is unavailable. No changes were saved.", 500);
+		if (!before.auth.readable) return failure(tr("自定义授权存储不可用，未保存任何更改。", "Custom authorization storage is unavailable. No changes were saved."), 500);
 		if (request.headers.get("if-match") !== before.etag) return stale();
 		if (request.method === "DELETE") {
 			commit(undefined, { version: 1, id: randomBytes(16).toString("hex"), authMode: "disabled" });
@@ -100,42 +101,42 @@ export async function customProviderMutation(request: Request): Promise<Response
 		if (request.method === "PATCH") {
 			const parsed = parseCustomModelOverridesBody(raw);
 			if (!parsed.ok) return failure(parsed.error);
-			if (!before.cp?.baseUrl) return failure("No custom endpoint configured", 409);
+			if (!before.cp?.baseUrl) return failure(tr("尚未配置自定义端点", "No custom endpoint configured"), 409);
 			const overrides = sanitizeCustomModelOverrides(parsed.settings, before.cp.models?.map((m) => m.id));
 			commit({ ...before.cp, overrides });
 			return response({ ok: true, overrides });
 		}
-		if (request.method !== "POST") return failure("Unsupported method", 405);
+		if (request.method !== "POST") return failure(tr("不支持的请求方法", "Unsupported method"), 405);
 		const base = normalizeBaseUrl(typeof raw.baseUrl === "string" ? raw.baseUrl : "");
-		if (!base) return failure("Base URL must be http(s), with no credentials, query or fragment.");
-		if (raw.authMode !== "keyless" && raw.authMode !== "apiKey") return failure("Choose Keyless or API key authentication.");
+		if (!base) return failure(tr("Base URL 必须是 http(s) 地址，且不能包含凭据、查询参数或片段。", "Base URL must be http(s), with no credentials, query or fragment."));
+		if (raw.authMode !== "keyless" && raw.authMode !== "apiKey") return failure(tr("请选择“无密钥”或“API 密钥”认证方式。", "Choose Keyless or API key authentication."));
 		const authMode = raw.authMode;
-		if (raw.key !== undefined && typeof raw.key !== "string") return failure("API key must be a string.");
+		if (raw.key !== undefined && typeof raw.key !== "string") return failure(tr("API 密钥必须是字符串。", "API key must be a string."));
 		const supplied = typeof raw.key === "string" ? raw.key.trim() : undefined;
-		if (authMode === "apiKey" && supplied === "") return failure("Choose Keyless to clear authentication.");
+		if (authMode === "apiKey" && supplied === "") return failure(tr("如需清除认证，请选择“无密钥”。", "Choose Keyless to clear authentication."));
 		const envOwned = before.auth.source === "env";
-		if (envOwned && supplied) return failure("Environment owns the effective key. Change the environment or explicitly reuse that key.");
+		if (envOwned && supplied) return failure(tr("当前生效的密钥来自环境变量。请修改环境变量，或明确选择复用该密钥。", "Environment owns the effective key. Change the environment or explicitly reuse that key."));
 		// A shadowed file key is not the key that will run. Require consent for
 		// the actual environment key when authorizing a different endpoint.
 		const hasNewEffectiveKey = Boolean(supplied) && !envOwned;
 		const changedTarget = before.cp?.baseUrl !== base;
 		if (authMode === "apiKey" && (changedTarget || !customKeyAuthorized(before.cp, before.auth)) && !hasNewEffectiveKey && raw.reuseKey !== true) {
-			return failure("Enter a new key or explicitly allow reuse of the effective existing key for this URL.");
+			return failure(tr("请输入新密钥，或明确允许此 URL 复用当前生效的现有密钥。", "Enter a new key or explicitly allow reuse of the effective existing key for this URL."));
 		}
 		const effectiveKey = authMode === "apiKey" ? (envOwned ? before.key : supplied || before.key) : undefined;
-		if (authMode === "apiKey" && !effectiveKey) return failure("API key mode requires an effective key.");
+		if (authMode === "apiKey" && !effectiveKey) return failure(tr("API 密钥模式需要一个有效的密钥。", "API key mode requires an effective key."));
 		const manualModels = parseModelIds(raw.manualModels);
-		if (manualModels.length > 10_000) return failure("Model list exceeds 10000 entries");
+		if (manualModels.length > 10_000) return failure(tr("模型列表超过 10000 项", "Model list exceeds 10000 entries"));
 		const found = await discoverModels(base, effectiveKey);
 		if (!found.ok && (found.fatal || found.status === 401 || found.status === 403)) return failure(found.error, 502);
-		if (!found.ok && !manualModels.length) return failure(`${found.error}. If this endpoint has no /models list, add model IDs manually.`, 502);
+		if (!found.ok && !manualModels.length) return failure(tr(`${found.error}。如果该端点没有 /models 列表，请手动添加模型 ID。`, `${found.error}. If this endpoint has no /models list, add model IDs manually.`), 502);
 		// Discovery yields; both the custom record and the credential must still
 		// match. Unrelated settings edits are preserved by commit's fresh merge.
 		const now = snapshot(authMode === "apiKey");
 		if (before.etag !== now.etag || JSON.stringify(before.auth) !== JSON.stringify(now.auth)) return stale();
 		const discovered = found.ok ? found.models : !changedTarget ? before.cp?.models ?? [] : [];
 		const models = mergeManualModels(discovered, manualModels);
-		if (models.length > 10_000) return failure("Model list exceeds 10000 entries");
+		if (models.length > 10_000) return failure(tr("模型列表超过 10000 项", "Model list exceeds 10000 entries"));
 		const overrides = sanitizeCustomModelOverrides(!changedTarget ? before.cp?.overrides : undefined, models.map((m) => m.id));
 		const id = randomBytes(16).toString("hex");
 		const fileKey = authMode === "keyless" ? undefined : supplied && !envOwned ? supplied : now.auth.fileKey;
@@ -144,6 +145,6 @@ export async function customProviderMutation(request: Request): Promise<Response
 		commit({ baseUrl: base, authMode, credentialBindingId: id, models, overrides, ...(manualModels.length ? { manualModels } : {}) }, binding, fileKey);
 		return response({ ok: true, models });
 	} catch (error) {
-		return failure(error instanceof CustomBodyLimitError ? "Configuration body exceeds 64 KiB." : error instanceof SyntaxError ? "Invalid JSON body." : "Unable to save custom configuration. Reload configuration and retry.", error instanceof CustomBodyLimitError ? 413 : error instanceof SyntaxError ? 400 : 500);
+		return failure(error instanceof CustomBodyLimitError ? tr("配置内容超过 64 KiB。", "Configuration body exceeds 64 KiB.") : error instanceof SyntaxError ? tr("无效的 JSON 请求体。", "Invalid JSON body.") : tr("无法保存自定义配置。请重新加载配置后重试。", "Unable to save custom configuration. Reload configuration and retry."), error instanceof CustomBodyLimitError ? 413 : error instanceof SyntaxError ? 400 : 500);
 	}
 }

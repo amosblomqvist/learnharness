@@ -3,6 +3,7 @@
 import { useLayoutEffect, useRef, type RefObject } from "react";
 import { HostMarkdown } from "@/components/host-markdown";
 import { cn } from "@/lib/utils";
+import { tr } from "@/src/core";
 
 export function PromptText({ text, preview, fieldRef, onChange, busy }: {
 	text: string;
@@ -46,7 +47,7 @@ export function PromptText({ text, preview, fieldRef, onChange, busy }: {
 				</div>
 				<textarea
 					ref={fieldRef}
-					aria-label={onChange ? "Override Markdown" : "Default Markdown"}
+					aria-label={onChange ? tr("覆盖 Markdown", "Override Markdown") : tr("默认 Markdown", "Default Markdown")}
 					value={text}
 					readOnly={!onChange || busy}
 					spellCheck={false}
@@ -57,7 +58,7 @@ export function PromptText({ text, preview, fieldRef, onChange, busy }: {
 				/>
 			</div>
 		</div>
-		{preview && <div className="h-full overflow-auto p-4" tabIndex={0} aria-label="Rendered Markdown">
+		{preview && <div className="h-full overflow-auto p-4" tabIndex={0} aria-label={tr("渲染后的 Markdown", "Rendered Markdown")}>
 			<HostMarkdown text={text} />
 		</div>}
 	</div>;

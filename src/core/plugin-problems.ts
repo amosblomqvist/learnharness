@@ -10,6 +10,7 @@ import {
 import { checkPluginSchema, preparePluginSchema } from "./plugin-validation.ts";
 import { copyImmutableData, ImmutableReadCache } from "./immutable-data.ts";
 import { practiceProblemInputSchema } from "./practice-problems.ts";
+import { tr } from "./i18n.ts";
 
 export interface PluginProblemInput<Q = JsonValue> {
   statement: string;
@@ -197,14 +198,14 @@ function readProblemSnapshot(value: unknown): PluginProblemSnapshot | null {
 export function validatePluginProblemSubmission(snapshot: PluginProblemSnapshot, context: { chatId: string; submission: unknown }, definition?: PluginProblemTypeDefinition): PluginQuestionValidationResult<JsonValue> {
   try {
     const saved = readPluginProblemSnapshot(snapshot);
-    if (!saved) return failed("Problem contract is unreadable.");
+    if (!saved) return failed(tr("无法读取题目约定。", "Problem contract is unreadable."));
     const submission = freezePluginQuestionValue(clonePluginQuestionJson(context.submission));
-    if (!checkPluginSchema(saved.submissionSchema, submission)) return failed("Submission does not satisfy the saved problem contract.");
-    if (saved.requiresSubmissionRefinement && (!definition || definition.id !== saved.typeId || definition.contractVersion !== saved.contractVersion || !definition.validateSubmission)) return failed("Required submission validation is unavailable.");
+    if (!checkPluginSchema(saved.submissionSchema, submission)) return failed(tr("提交内容不符合已保存的题目约定。", "Submission does not satisfy the saved problem contract."));
+    if (saved.requiresSubmissionRefinement && (!definition || definition.id !== saved.typeId || definition.contractVersion !== saved.contractVersion || !definition.validateSubmission)) return failed(tr("所需的提交校验不可用。", "Required submission validation is unavailable."));
     const errors = saved.requiresSubmissionRefinement ? refinement(definition!.validateSubmission as never,
       { chatId: context.chatId, problemId: saved.problemId, contractVersion: saved.contractVersion, input: saved.input, submission }) : [];
     return errors.length ? { ok: false, problems: errors } : { ok: true, value: submission };
-  } catch { return failed("Submission must be finite JSON satisfying its saved problem contract."); }
+  } catch { return failed(tr("提交内容必须是符合已保存题目约定的有限 JSON。", "Submission must be finite JSON satisfying its saved problem contract.")); }
 }
 
 const submissions = new ImmutableReadCache<PluginProblemSubmission | null>();

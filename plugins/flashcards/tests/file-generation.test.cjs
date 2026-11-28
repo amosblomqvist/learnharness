@@ -33,8 +33,8 @@ test('file validation preserves exact strings and returns a stable, pair-delimit
   assert.notEqual(fingerprint('Notes.md', 'Text'), fingerprint('Notes.md', 'Text '));
   assert.notEqual(fingerprint('Notes.md', 'é'), fingerprint('Notes.md', 'e\u0301'));
   for (const markdown of [' \n\t ', '\ufeff', '\ufeff \r\n\t ']) {
-    assert.throws(() => validateFileInput({ name: 'Whitespace.md', markdown }), /Markdown must not be empty/);
-    assert.throws(() => chunks(markdown), /Markdown must not be empty/);
+    assert.throws(() => validateFileInput({ name: 'Whitespace.md', markdown }), /源 Markdown 不能为空/);
+    assert.throws(() => chunks(markdown), /源 Markdown 不能为空/);
   }
 });
 
@@ -43,20 +43,20 @@ test('file validation rejects blank/control-containing names, missing text, and 
     assert.throws(() => validateFileInput(input));
   }
   for (const control of ['\0', '\n', '\r', '\t', '\x1f', '\x7f', '\u0085', '\u009f']) {
-    assert.throws(() => validateFileInput({ name: `Bad${control}name.md`, markdown: 'x' }), /name.*control/i);
+    assert.throws(() => validateFileInput({ name: `Bad${control}name.md`, markdown: 'x' }), /文件名不能包含控制字符/);
   }
 });
 
 test('the 2 MiB source cap counts UTF-8 bytes and rejects unpaired surrogates rather than repairing them', () => {
   const limit = 2 * 1024 * 1024;
   assert.equal(validateFileInput({ name: 'ascii.md', markdown: 'a'.repeat(limit) }).markdown.length, limit);
-  assert.throws(() => validateFileInput({ name: 'ascii.md', markdown: 'a'.repeat(limit + 1) }), /2 MiB UTF-8/);
+  assert.throws(() => validateFileInput({ name: 'ascii.md', markdown: 'a'.repeat(limit + 1) }), /超过了 2 MiB 的 UTF-8 上限/);
   const emoji = '😀'.repeat(limit / 4);
   assert.equal(Buffer.byteLength(validateFileInput({ name: 'emoji.md', markdown: emoji }).markdown), limit);
-  assert.throws(() => validateFileInput({ name: 'emoji.md', markdown: emoji + 'a' }), /2 MiB UTF-8/);
-  assert.throws(() => validateFileInput({ name: 'wide.md', markdown: '界'.repeat(Math.ceil(limit / 3)) }), /2 MiB UTF-8/);
+  assert.throws(() => validateFileInput({ name: 'emoji.md', markdown: emoji + 'a' }), /超过了 2 MiB 的 UTF-8 上限/);
+  assert.throws(() => validateFileInput({ name: 'wide.md', markdown: '界'.repeat(Math.ceil(limit / 3)) }), /超过了 2 MiB 的 UTF-8 上限/);
   for (const markdown of ['\ud800', '\udc00', 'x\ud800y', '😀\udfff', '\ud800\ud800']) {
-    assert.throws(() => validateFileInput({ name: 'bad.md', markdown }), /valid Unicode/);
+    assert.throws(() => validateFileInput({ name: 'bad.md', markdown }), /必须是有效的 Unicode/);
   }
 });
 
@@ -139,7 +139,7 @@ test('long blocks split only at code-point boundaries using source characters, w
 });
 
 test('positive source budgets are independent of prompt/schema and filename overhead', () => {
-  for (const chunkBudget of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => chunks('x', { chunkBudget }), /budget/);
+  for (const chunkBudget of [0, -1, 1.5, NaN, Infinity, Number.MAX_SAFE_INTEGER + 1]) assert.throws(() => chunks('x', { chunkBudget }), /输入预算必须是正的安全整数/);
   const source = 'a😀bc😀def';
   const shortName = chunks(source, { chunkBudget: 1 });
   const longName = chunks(source, { name: 'Very long file name '.repeat(1000), chunkBudget: 1 });

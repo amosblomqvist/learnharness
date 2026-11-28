@@ -1,5 +1,6 @@
 import { deleteFolderWithSessions, readOrganizationAction, SourceDeletionError, SourceOrganizationInputError } from "@/src/server";
 import { emit, type ChatDeleteMode } from "@/src/core";
+import { tr } from "@/src/core";
 
 export const dynamic = "force-dynamic";
 
@@ -17,7 +18,7 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
 	catch (error) {
 		if (error instanceof SourceDeletionError) return Response.json({ error: error.message, code: error.code }, { status: error.status });
 		if (error instanceof SourceOrganizationInputError) return Response.json({ error: error.message, code: "bad_folder_scope" }, { status: 400 });
-		return Response.json({ error: "Could not finish deleting the folder. Some sessions may already have been removed; refresh or retry.", code: "error" }, { status: 500 });
+		return Response.json({ error: tr("未能完成文件夹删除。部分会话可能已被移除，请刷新或重试。", "Could not finish deleting the folder. Some sessions may already have been removed; refresh or retry."), code: "error" }, { status: 500 });
 	} finally {
 		emit("sources-changed", {}); emit("chats-changed", {}); emit("activity-changed", {});
 	}

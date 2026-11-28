@@ -305,7 +305,7 @@ C \arrow[r,"k"'] & D
   for (const { id, source, invalid } of authoringCases) {
     const unsupported = invalid(source);
     const failure = await render(id + '-unsupported', 'tikz', unsupported);
-    assert.match(failure.error, /TeX compilation failed:/, id);
+    assert.match(failure.error, /TeX 编译失败：/, id);
     assert.doesNotMatch(failure.error, /showConsole|Emergency stop/);
     assert.equal(failure.source, unsupported, 'Failed source stays intact; genuine errors are not rewritten.');
     const corrected = await render(id, 'tikz', source);
@@ -348,7 +348,7 @@ C \arrow[r,"k"'] & D
   const diagnostic = await render('free-body-genuine-error', 'tikz', badSource);
   assert.match(diagnostic.error, /Undefined control sequence/);
   const line = badSource.split('\n').findIndex(line => line.includes('\\unknownForceCommand')) + 1;
-  assert.ok(diagnostic.error.includes(`Line ${line}: \\unknownForceCommand`), diagnostic.error);
+  assert.ok(diagnostic.error.includes(`第 ${line} 行：\\unknownForceCommand`), diagnostic.error);
   assert.equal(diagnostic.source, badSource, 'Class removal and package healing never change the raw-source fallback.');
   assert.ok(new TextEncoder().encode(diagnostic.error).length <= 2048);
   assert.equal(await page.$eval('#free-body-genuine-error', node => node.querySelector('script')), null);
@@ -376,11 +376,11 @@ C \arrow[r,"k"'] & D
     const sources=[wrap('<defs>'+defs+'</defs><use href="#a20"/>'),wrap('<g id="cycle"><use href="#cycle"/></g>'),'<svg xmlns="http://www.w3.org/2000/svg" id="root" viewBox="0 0 1 1"><use href="#root"/></svg>'];
     return sources.map(source=>{try{sanitizeSvg(source,'Reference safety');return 'unexpected admission'}catch(error){return error.message}});
   });
-  assert.match(referenceProof[0], /2 MiB expanded/); assert.match(referenceProof[1], /Cyclic/); assert.match(referenceProof[2], /Cyclic/);
+  assert.match(referenceProof[0], /展开后超出 2 MiB/); assert.match(referenceProof[1], /循环/); assert.match(referenceProof[2], /循环/);
   let amplifiedDefs = '<path id="a0" d="M0 0L1 1"/>';
   for (let i=1;i<=20;i++) amplifiedDefs += `<g id="a${i}"><use href="\\string#a${i-1}"/><use href="\\string#a${i-1}"/></g>`;
   const amplified = await render('amplified-tex', 'tikz', String.raw`\begin{document}\begin{tikzpicture}\draw (0,0) rectangle (1,1);\special{dvisvgm:raw <defs>${amplifiedDefs}</defs><use href="\string#a20"/>}\end{tikzpicture}\end{document}`);
-  assert.match(amplified.error, /2 MiB expanded/);
+  assert.match(amplified.error, /展开后超出 2 MiB/);
   const hostileTex = await render("hostile-tex", "tikz", String.raw`\begin{document}\begin{tikzpicture}\draw (0,0)--(1,1);\special{dvisvgm:raw <script>window.pwned=99</script><image href="https://example.invalid/tex.png" width="10" height="10"/>}\end{tikzpicture}\end{document}`);
   assert.ok(hostileTex.svg, JSON.stringify(hostileTex));
   assert.equal(await page.evaluate(() => window.pwned), undefined);
@@ -400,7 +400,7 @@ C \arrow[r,"k"'] & D
   await page.evaluate(source => { window.ticks=0;window.tickTimer=setInterval(()=>window.ticks++,20);window.pending=host.render('timeout','tikz',source); }, endless);
   const timeout = await page.evaluate(() => window.pending);
   const ticks = await page.evaluate(() => { clearInterval(window.tickTimer);return window.ticks; });
-  assert.match(timeout.error, /exceeded 10 seconds/); assert.ok(ticks > 100, `UI heartbeat continued (${ticks} ticks)`);
+  assert.match(timeout.error, /超过 10 秒/); assert.ok(ticks > 100, `UI heartbeat continued (${ticks} ticks)`);
   const recovered = await render("after-timeout", "tikz", String.raw`\begin{document}\begin{tikzpicture}\draw (0,0) circle (1);\end{tikzpicture}\end{document}`);
   assert.ok(recovered.svg, JSON.stringify(recovered));
   await page.evaluate(() => host.enable('technicalDiagrams', false));

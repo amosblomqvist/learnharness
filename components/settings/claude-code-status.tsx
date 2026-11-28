@@ -4,13 +4,14 @@ import { CLAUDE_CODE_MINIMUM_VERSION, type ClaudeCodeStatus, type UserSettings }
 import { notifySettingsSaved, useSettingsSaved } from "@/components/settings-signal";
 import { Button } from "@/components/ui/button";
 import { Toggle } from "./controls";
+import { tr } from "@/src/core";
 
 export function claudeCodeStatusLabel(status: ClaudeCodeStatus | null): string {
 	switch (status?.state) {
-		case "not-found": return "Not found";
-		case "meets-minimum": return `Version ${status.version} · meets minimum`;
-		case "update-required": return `Version ${status.version} · update required`;
-		default: return "Version could not be checked";
+		case "not-found": return tr("未找到", "Not found");
+		case "meets-minimum": return tr(`版本 ${status.version} · 满足最低要求`, `Version ${status.version} · meets minimum`);
+		case "update-required": return tr(`版本 ${status.version} · 需要更新`, `Version ${status.version} · update required`);
+		default: return tr("无法检查版本", "Version could not be checked");
 	}
 }
 
@@ -40,7 +41,7 @@ export function ClaudeCodeInstallationStatus() {
 				setError(null);
 			}
 		} catch {
-			if (!controller.signal.aborted) setError("Could not load Claude Code settings.");
+			if (!controller.signal.aborted) setError(tr("无法加载 Claude Code 设置。", "Could not load Claude Code settings."));
 		}
 	}, []);
 	useEffect(() => {
@@ -66,7 +67,7 @@ export function ClaudeCodeInstallationStatus() {
 				notifySettingsSaved("claudeCode");
 			}
 		} catch {
-			if (!controller.signal.aborted) setError("Could not save Claude Code settings.");
+			if (!controller.signal.aborted) setError(tr("无法保存 Claude Code 设置。", "Could not save Claude Code settings."));
 		} finally {
 			if (!controller.signal.aborted) setSaving(false);
 		}
@@ -106,12 +107,12 @@ export function ClaudeCodeInstallationStatus() {
 		{error && <p role="alert" className="text-xs text-error">{error}</p>}
 		{enabled && <>
 			<div className="flex flex-wrap items-center gap-3">
-				<span role="status" className="text-xs text-muted-foreground">{busy ? "Checking…" : claudeCodeStatusLabel(status)}</span>
-				<Button type="button" size="xs" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" disabled={busy} onClick={() => void refresh()} data-testid="claude-code-check-again">Check again</Button>
+				<span role="status" className="text-xs text-muted-foreground">{busy ? tr("检查中…", "Checking…") : claudeCodeStatusLabel(status)}</span>
+				<Button type="button" size="xs" variant="outline" className="cursor-pointer disabled:cursor-not-allowed" disabled={busy} onClick={() => void refresh()} data-testid="claude-code-check-again">{tr("重新检查", "Check again")}</Button>
 			</div>
-			<p className="text-xs leading-relaxed text-muted-foreground"><strong className="font-medium">Install and authenticate Claude Code in your terminal, then select a Claude Code model here.</strong> LearnHarness starts it when needed—no background process required.</p>
-			<p className="text-xs leading-relaxed text-muted-foreground">Checks installation/version only—not authentication, model access, or quota. Claude Code controls billing. Requires v{CLAUDE_CODE_MINIMUM_VERSION}+. <a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">Setup ↗</a></p>
-			<p className="text-xs leading-relaxed text-muted-foreground">Verify AI claims independently—they may be inaccurate, incomplete, misleading, or outdated.</p>
+			<p className="text-xs leading-relaxed text-muted-foreground"><strong className="font-medium">{tr("请先在终端中安装并登录 Claude Code，然后在此处选择一个 Claude Code 模型。", "Install and authenticate Claude Code in your terminal, then select a Claude Code model here.")}</strong>{tr("LearnHarness 会在需要时启动它，无需常驻后台进程。", " LearnHarness starts it when needed—no background process required.")}</p>
+			<p className="text-xs leading-relaxed text-muted-foreground">{tr("仅检查安装与版本，不检查登录状态、模型权限或额度。计费由 Claude Code 负责。需要 v", "Checks installation/version only—not authentication, model access, or quota. Claude Code controls billing. Requires v")}{CLAUDE_CODE_MINIMUM_VERSION}{tr("+。", "+. ")}<a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noreferrer" className="underline underline-offset-2 hover:text-foreground">{tr("安装说明 ↗", "Setup ↗")}</a></p>
+			<p className="text-xs leading-relaxed text-muted-foreground">{tr("请独立核实 AI 给出的说法——它们可能不准确、不完整、有误导性或已过时。", "Verify AI claims independently—they may be inaccurate, incomplete, misleading, or outdated.")}</p>
 		</>}
 	</div>;
 }

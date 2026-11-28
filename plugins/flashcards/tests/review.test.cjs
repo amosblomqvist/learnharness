@@ -35,7 +35,7 @@ async function setup({ delayedMount = false } = {}) {
     ui: {
       openSurface(props, { signal }) {
         assert.equal(arguments.length, 2, 'targetless public overload');
-        assert.ok(['Flashcard review', 'Flashcard practice'].includes(props.title));
+        assert.ok(['闪卡复习', '闪卡练习'].includes(props.title));
         assert.equal(props.background, 'dimmed');
         const frame = document.createElement('section'); frame.tabIndex = -1;
         const container = document.createElement('div'); frame.append(container); document.body.append(frame);
@@ -151,7 +151,7 @@ test('late old reveal after content replay cannot reveal or remove the fresh car
   try {
     h.controller.open({}); await flush();
     const reveal = deferred(); h.overrides['reveal-review'] = () => reveal.promise;
-    h.click('Reveal answer');
+    h.click('显示答案');
     const surface = h.surface, oldMount = surface.mounts[0];
     surface.unmountContent(); surface.mount(); await flush();
     const freshRoot = h.root;
@@ -243,12 +243,12 @@ test('host surface opens synchronously; question and answer use scoped host Mark
     assert.equal(h.stage.hidden, false);
     assert.equal(h.stage.tabIndex, -1);
     assert.equal(h.stage.getAttribute('role'), 'group');
-    assert.equal(h.stage.getAttribute('aria-label'), 'Flashcard review');
+    assert.equal(h.stage.getAttribute('aria-label'), '闪卡复习');
     assert.equal(h.stage.getAttribute('data-plugin-initial-focus'), '');
     assert.equal(h.card.contains(title), false);
     assert.equal(h.card.hidden, true);
     assert.equal(h.card.textContent, '', 'loading status is outside the QA-only card');
-    assert.ok(h.footer.textContent.includes('Loading next card…'));
+    assert.ok(h.footer.textContent.includes('正在加载下一张卡片…'));
     assert.equal(h.document.activeElement, h.document.body, 'plugin mount does not take focus');
     h.stage.focus(); // The host enters its visible marked target, not a heading.
     assert.equal(h.key(h.stage, ' ').defaultPrevented, true, 'local keys reach the marked stage while loading');
@@ -264,26 +264,26 @@ test('host surface opens synchronously; question and answer use scoped host Mark
     assert.equal(h.card.children.length, 2, 'only question Markdown and answer area belong in the card');
     assert.equal(h.card.lastElementChild.className, 'fc-answer');
     const remaining = h.bottom.querySelector('.fc-review-remaining');
-    assert.equal(remaining.textContent, '2 ready');
+    assert.equal(remaining.textContent, '2 张待复习');
     assert.equal(h.card.contains(remaining), false);
     assert.equal(h.footer.contains(remaining), false);
     assert.equal(h.card.nextElementSibling, h.bottom);
     assert.equal(h.bottom.nextElementSibling, h.footer);
     assert.equal(h.root.classList.contains('fc-practice-surface'), false);
     const reveal = h.footer.querySelector('.fc-rating');
-    assert.equal(reveal.querySelector('button').textContent, 'Reveal answer');
-    assert.equal(reveal.querySelector('.fc-shortcut').textContent, 'Space');
-    assert.equal(h.handles.find(item => item.node.textContent === 'Reveal answer').options.variant, 'outline');
+    assert.equal(reveal.querySelector('button').textContent, '显示答案');
+    assert.equal(reveal.querySelector('.fc-shortcut').textContent, '空格');
+    assert.equal(h.handles.find(item => item.node.textContent === '显示答案').options.variant, 'outline');
     assert.equal(reveal.querySelector('button .fc-shortcut'), null);
     assert.equal(h.document.querySelector('header'), null);
     assert.equal(h.document.body.textContent.includes('End review'), false);
-    h.click('Reveal answer'); await flush();
+    h.click('显示答案'); await flush();
     assert.equal(title.textContent, 'Fact', 'proposition name is shown only after reveal');
     assert.equal(title.hidden, false);
     assert.equal(h.card.textContent, 'QUESTION **markdown**SECRET ANSWER');
     assert.deepEqual(h.markdowns, ['QUESTION **markdown**', 'SECRET ANSWER']);
-    const ratings = h.handles.filter(item => item.kind === 'button' && /^(Again|Hard|Good|Easy) ·/.test(item.node.textContent));
-    assert.deepEqual(ratings.map(item => item.node.textContent), ['Again · 1m', 'Hard · 5m', 'Good · 10m', 'Easy · 1d']);
+    const ratings = h.handles.filter(item => item.kind === 'button' && /^(重来|困难|良好|简单) ·/.test(item.node.textContent));
+    assert.deepEqual(ratings.map(item => item.node.textContent), ['重来 · 1 分钟', '困难 · 5 分钟', '良好 · 10 分钟', '简单 · 1 天']);
     assert.ok(ratings.every(item => item.options.variant === 'custom'));
     for (const [index, item] of ratings.entries()) {
       const color = `var(--fc-rating-${['again', 'hard', 'good', 'easy'][index]})`;
@@ -300,11 +300,11 @@ test('host surface opens synchronously; question and answer use scoped host Mark
     const controls = [...h.footer.querySelectorAll('.fc-rating')];
     assert.deepEqual(controls.map(control => control.querySelector('.fc-shortcut').textContent), ['1', '2', '3', '4']);
     assert.ok(controls.every(control => !control.querySelector('button .fc-shortcut')));
-    assert.equal(h.footer.textContent.includes('Space'), false, 'scheduled ratings have no Space binding');
+    assert.equal(h.footer.textContent.includes('空格'), false, 'scheduled ratings have no Space binding');
     assert.equal(h.card.querySelector('button,h2,.fc-shortcut,.fc-review-remaining,.fc-error'), null);
-    assert.equal(h.handles.find(item => item.node.textContent === 'Reveal answer').disposed, true);
+    assert.equal(h.handles.find(item => item.node.textContent === '显示答案').disposed, true);
     const question = h.handles.find(item => item.kind === 'markdown');
-    h.click('Good · 10m'); await flush();
+    h.click('良好 · 10 分钟'); await flush();
     assert.equal(h.refreshed, 1);
     assert.equal(question.disposed, true);
     assert.equal(question.signal.aborted, true);
@@ -343,7 +343,7 @@ test('reopen and host close suppress late question and reveal responses', async 
     next.resolve({ ticket: { id: 'late', question: 'LATE QUESTION' } }); await flush();
     assert.equal(h.markdowns.includes('LATE QUESTION'), false);
     const reveal = deferred(); h.overrides['reveal-review'] = () => reveal.promise;
-    h.click('Reveal answer'); h.surface.close();
+    h.click('显示答案'); h.surface.close();
     reveal.resolve({ answer: 'LATE ANSWER', intervals: {} }); await flush();
     assert.equal(h.markdowns.includes('LATE ANSWER'), false);
     assert.equal(h.root, null);
@@ -353,19 +353,19 @@ test('reopen and host close suppress late question and reveal responses', async 
 test('failed ratings preserve diagnostics and stable per-rating transport retry identities', async () => {
   const h = await setup();
   try {
-    h.controller.open({}); await flush(); h.click('Reveal answer'); await flush();
+    h.controller.open({}); await flush(); h.click('显示答案'); await flush();
     h.overrides['rate-review'] = async () => { throw new Error('Save unavailable'); };
-    h.click('Good · 10m'); await flush();
+    h.click('良好 · 10 分钟'); await flush();
     assert.ok(h.footer.textContent.includes('Save unavailable'));
     assert.equal(h.card.textContent.includes('Save unavailable'), false);
     assert.equal(h.card.contains(h.footer.querySelector('button')), false);
-    h.click('Hard · 5m'); await flush();
-    h.click('Good · 10m'); await flush();
+    h.click('困难 · 5 分钟'); await flush();
+    h.click('良好 · 10 分钟'); await flush();
     const rates = h.calls.filter(([operation]) => operation === 'rate-review').map(([, input]) => input);
     assert.equal(rates[0].requestId, rates[2].requestId);
     assert.notEqual(rates[0].requestId, rates[1].requestId);
     assert.match(rates[0].requestId, /^[0-9a-f-]{36}$/);
-    h.click('Retry next card'); await flush();
+    h.click('重试下一张卡片'); await flush();
     assert.equal(h.card.textContent.includes('SECRET ANSWER'), false);
   } finally { h.dispose(); }
 });
@@ -379,14 +379,14 @@ test('failed next-card and reveal requests retain explicit retry controls', asyn
     assert.equal(h.card.hidden, true);
     assert.equal(h.card.textContent, '');
     hiddenTitle(h.title);
-    delete h.overrides['next-review']; h.click('Retry next card'); await flush();
+    delete h.overrides['next-review']; h.click('重试下一张卡片'); await flush();
     h.overrides['reveal-review'] = async () => { throw new Error('Card changed elsewhere'); };
-    h.click('Reveal answer'); await flush();
+    h.click('显示答案'); await flush();
     assert.ok(h.footer.textContent.includes('Card changed elsewhere'));
     assert.equal(h.card.textContent.includes('Card changed elsewhere'), false);
     assert.equal(h.root.textContent.includes('Fact'), false);
     assert.equal(h.markdowns.includes('SECRET ANSWER'), false);
-    h.click('Retry next card'); await flush();
+    h.click('重试下一张卡片'); await flush();
     assert.equal(h.footer.textContent.includes('Card changed elsewhere'), false);
   } finally { h.dispose(); }
 });
@@ -394,9 +394,9 @@ test('failed next-card and reveal requests retain explicit retry controls', asyn
 test('accepted in-flight grade still refreshes after navigation without rendering another card', async () => {
   const h = await setup();
   try {
-    h.controller.open({}); await flush(); h.click('Reveal answer'); await flush();
+    h.controller.open({}); await flush(); h.click('显示答案'); await flush();
     const grade = deferred(); h.overrides['rate-review'] = () => grade.promise;
-    h.click('Easy · 1d'); h.view.abort();
+    h.click('简单 · 1 天'); h.view.abort();
     grade.resolve({ ok: true }); await flush();
     assert.equal(h.refreshed, 1);
     assert.equal(h.calls.filter(([operation]) => operation === 'next-review').length, 1);
@@ -484,7 +484,7 @@ test('scheduled revealed Space suppresses root and focused rating-button activat
     if (!enter.defaultPrevented) ratingButtons[0].click();
     await flush();
     assert.equal(h.calls.filter(([operation]) => operation === 'rate-review').at(-1)[1].rating, 1);
-    h.click('Easy · 1d'); await flush();
+    h.click('简单 · 1 天'); await flush();
     assert.equal(h.calls.filter(([operation]) => operation === 'rate-review').at(-1)[1].rating, 4);
     h.key(h.root, '3'); await flush();
     assert.equal(h.calls.filter(([operation]) => operation === 'rate-review').at(-1)[1].rating, 3);
@@ -500,14 +500,14 @@ test('async results never steal focus from Settings, but replacing owned focused
     next.resolve({ ticket: { id: 't1', propositionName: 'Fact', question: 'Question' } }); await flush();
     assert.equal(h.document.activeElement, settings);
     const reveal = deferred(); h.overrides['reveal-review'] = () => reveal.promise;
-    h.click('Reveal answer'); settings.focus();
+    h.click('显示答案'); settings.focus();
     hiddenTitle(h.title);
     assert.equal(h.stage.getAttribute('data-plugin-initial-focus'), '');
     reveal.resolve({ answer: 'Answer', intervals: { 1: 60000, 2: 300000, 3: 600000, 4: 86400000 } }); await flush();
     assert.equal(h.document.activeElement, settings);
     delete h.overrides['next-review']; h.controller.open({}); await flush();
     delete h.overrides['reveal-review'];
-    const revealButton = h.document.querySelector('button'); revealButton.focus(); h.click('Reveal answer'); await flush();
+    const revealButton = h.document.querySelector('button'); revealButton.focus(); h.click('显示答案'); await flush();
     assert.equal(h.document.activeElement, h.root);
   } finally { h.dispose(); }
 });
@@ -518,25 +518,25 @@ test('actions move currently owned focus before disabling controls and never rec
     const intervals = { 1: 60000, 2: 300000, 3: 600000, 4: 86400000 };
     h.controller.open({}); await flush();
     const reveal = deferred(); h.overrides['reveal-review'] = () => reveal.promise;
-    const revealHandle = h.handles.find(item => item.node.textContent === 'Reveal answer');
+    const revealHandle = h.handles.find(item => item.node.textContent === '显示答案');
     const originalUpdate = revealHandle.update;
     revealHandle.update = props => {
       if (props.disabled) assert.equal(h.document.activeElement, h.root, 'focus moves before disabling');
       originalUpdate(props);
     };
-    revealHandle.node.focus(); h.click('Reveal answer');
+    revealHandle.node.focus(); h.click('显示答案');
     assert.equal(h.document.activeElement, h.root, 'focus is preserved synchronously, before response');
     reveal.resolve({ answer: 'Answer', intervals }); await flush();
     assert.equal(h.document.activeElement, h.root);
     const grade = deferred(); h.overrides['rate-review'] = () => grade.promise;
-    const gradeButton = [...h.document.querySelectorAll('button')].find(node => node.textContent === 'Good · 10m');
-    gradeButton.focus(); h.click('Good · 10m');
+    const gradeButton = [...h.document.querySelectorAll('button')].find(node => node.textContent === '良好 · 10 分钟');
+    gradeButton.focus(); h.click('良好 · 10 分钟');
     assert.equal(h.document.activeElement, h.root);
     grade.resolve({ ok: true }); await flush();
     assert.equal(h.document.activeElement, h.root);
     h.controller.open({}); await flush();
     const second = deferred(); h.overrides['reveal-review'] = () => second.promise;
-    h.document.querySelector('button').focus(); h.click('Reveal answer');
+    h.document.querySelector('button').focus(); h.click('显示答案');
     h.document.body.focus(); // Leaving owned focus must never be undone by a late result.
     second.resolve({ answer: 'Answer', intervals }); await flush();
     assert.equal(h.document.activeElement, h.document.body);
@@ -552,7 +552,7 @@ test('waiting review owns one timer only, clears on reopen/close/navigation and 
   try {
     h.overrides['next-review'] = async () => ({ ticket: null, nextDue: Date.now() + 60000 });
     h.controller.open({}); await flush(); assert.equal(timers.size, 1);
-    assert.ok(h.footer.textContent.includes('Next due'));
+    assert.ok(h.footer.textContent.includes('下次到期时间'));
     hiddenTitle(h.title);
     assert.equal(h.card.hidden, true);
     assert.equal(h.card.textContent, '');
@@ -580,17 +580,17 @@ test('practice visits snapshot cues once in order, reveals before Next, counts o
   try {
     h.controller.openPractice(cards);
     const title = h.title;
-    assert.equal(h.surface.props.title, 'Flashcard practice');
+    assert.equal(h.surface.props.title, '闪卡练习');
     hiddenTitle(title);
     assert.equal(title.matches('h2'), true);
-    assert.equal(h.stage.getAttribute('aria-label'), 'Flashcard practice');
+    assert.equal(h.stage.getAttribute('aria-label'), '闪卡练习');
     assert.equal(h.stage.getAttribute('role'), 'group');
     assert.equal(h.stage.getAttribute('data-plugin-initial-focus'), '');
     assert.equal(h.stage.tabIndex, -1);
     assert.equal(h.stage.hidden, false);
     assert.equal(h.document.activeElement, h.document.body, 'host owns surface entry focus');
     const note = h.root.querySelector('.fc-practice-note');
-    assert.equal(note.textContent, 'Practice mode does not change your review schedule.');
+    assert.equal(note.textContent, '练习模式不会改变你的复习计划。');
     assert.equal(note.parentElement, h.root);
     assert.equal(h.stage.nextElementSibling, note);
     assert.equal(h.stage.contains(note), false);
@@ -605,24 +605,24 @@ test('practice visits snapshot cues once in order, reveals before Next, counts o
       assert.equal(h.root.textContent.includes(cue.propositionName), false);
       assert.equal(h.markdowns.includes(cue.answer), false, 'snapshot answers are not mounted early');
       const remaining = cards.length - index - 1;
-      assert.equal(h.bottom.querySelector('.fc-review-remaining').textContent, `${remaining} ${remaining === 1 ? 'card' : 'cards'} remaining`);
+      assert.equal(h.bottom.querySelector('.fc-review-remaining').textContent, `还剩 ${remaining} 张卡片`);
       assert.equal(h.bottom.children.length, 1);
       assert.equal(h.bottom.firstElementChild.className, 'fc-review-remaining');
       assert.equal(h.footer.querySelector('.fc-review-remaining'), null);
-      assert.deepEqual([...h.footer.querySelectorAll('button')].map(node => node.textContent), ['Reveal answer']);
-      assert.equal(h.footer.querySelector('.fc-shortcut').textContent, 'Space');
+      assert.deepEqual([...h.footer.querySelectorAll('button')].map(node => node.textContent), ['显示答案']);
+      assert.equal(h.footer.querySelector('.fc-shortcut').textContent, '空格');
       assert.equal(h.handles.findLast(item => item.kind === 'button').options.variant, 'outline');
       assert.equal(h.card.querySelector('button,h2,.fc-shortcut,.fc-review-remaining,.fc-error'), null);
-      h.click('Reveal answer');
+      h.click('显示答案');
       assert.equal(title.textContent, cue.propositionName);
       assert.equal(title.hidden, false);
       assert.equal(h.card.textContent, cue.question + cue.answer);
-      assert.deepEqual([...h.footer.querySelectorAll('button')].map(node => node.textContent), ['Next']);
-      assert.equal(h.footer.querySelector('.fc-rating .fc-shortcut').textContent, 'Space');
+      assert.deepEqual([...h.footer.querySelectorAll('button')].map(node => node.textContent), ['下一张']);
+      assert.equal(h.footer.querySelector('.fc-rating .fc-shortcut').textContent, '空格');
       assert.equal(h.handles.findLast(item => item.kind === 'button').options.variant, 'outline');
       assert.equal(h.root.textContent.includes('Space rates Good'), false);
       assert.equal(h.root.querySelector('.fc-practice-note'), note);
-      h.click('Next');
+      h.click('下一张');
       assert.equal(questionHandle.disposed, true);
       assert.equal(questionHandle.signal.aborted, true);
     }
@@ -631,7 +631,7 @@ test('practice visits snapshot cues once in order, reveals before Next, counts o
     hiddenTitle(title);
     assert.equal(h.card.hidden, true);
     assert.equal(h.card.textContent, '');
-    assert.equal(h.footer.textContent, 'Practice complete.');
+    assert.equal(h.footer.textContent, '练习完成。');
     assert.equal(h.bottom.querySelector('.fc-review-remaining'), null);
     assert.equal(h.bottom.children.length, 0);
     assert.equal(h.root.querySelector('.fc-practice-note'), note);
@@ -650,15 +650,15 @@ test('empty practice completes locally with a marked visible stage and no headin
     h.controller.openPractice(Object.freeze([]));
     hiddenTitle(h.title);
     assert.equal(h.stage.hasAttribute('data-plugin-initial-focus'), true);
-    assert.equal(h.root.querySelector('.fc-practice-note').textContent, 'Practice mode does not change your review schedule.');
+    assert.equal(h.root.querySelector('.fc-practice-note').textContent, '练习模式不会改变你的复习计划。');
     assert.equal(h.stage.nextElementSibling, h.root.querySelector('.fc-practice-note'));
     assert.equal(h.bottom.children.length, 0);
     assert.equal(h.card.hidden, true);
     assert.equal(h.card.textContent, '');
-    assert.equal(h.footer.textContent, 'Practice complete.');
+    assert.equal(h.footer.textContent, '练习完成。');
     assert.equal(h.handles.length, 0);
     h.stage.focus(); h.key(h.stage, ' ');
-    assert.equal(h.footer.textContent, 'Practice complete.');
+    assert.equal(h.footer.textContent, '练习完成。');
     assert.deepEqual(h.calls, []);
     assert.equal(h.refreshed, 0);
   } finally { h.dispose(); }
@@ -683,7 +683,7 @@ test('practice Space reveals or advances, never rates; numeric and outside short
     h.key(h.root, ' ');
     assert.equal(h.card.textContent, 'PRACTICE Q2');
     hiddenTitle(h.title);
-    assert.equal(h.bottom.querySelector('.fc-review-remaining').textContent, '1 card remaining');
+    assert.equal(h.bottom.querySelector('.fc-review-remaining').textContent, '还剩 1 张卡片');
     assert.deepEqual(h.calls, []);
     assert.equal(h.refreshed, 0);
   } finally { h.dispose(); }
@@ -692,14 +692,14 @@ test('practice Space reveals or advances, never rates; numeric and outside short
 test('practice replay preserves logical progress, hides the current answer again, and ignores stale controls', async () => {
   const h = await setup();
   try {
-    h.controller.openPractice(practiceCards()); h.click('Reveal answer');
+    h.controller.openPractice(practiceCards()); h.click('显示答案');
     const firstNext = h.footer.querySelector('button'), surface = h.surface, firstMount = surface.mounts[0];
     surface.unmountContent(); surface.mount();
     assert.equal(h.card.textContent, 'PRACTICE Q1', 'unadvanced cue remains current after replay');
     hiddenTitle(h.title);
     firstNext.click(); firstMount.cleanup?.();
     assert.equal(h.card.textContent, 'PRACTICE Q1');
-    h.click('Reveal answer'); h.click('Next');
+    h.click('显示答案'); h.click('下一张');
     const oldMount = surface.mounts.at(-1), oldRoot = h.root, oldTitle = h.title;
     surface.unmountContent();
     assert.equal(surface.disposed, false);
@@ -711,8 +711,8 @@ test('practice replay preserves logical progress, hides the current answer again
     assert.notEqual(h.title, oldTitle);
     assert.equal(h.card.textContent, 'PRACTICE Q2', 'consumed cue must not return after replay');
     hiddenTitle(h.title);
-    assert.equal(h.bottom.querySelector('.fc-review-remaining').textContent, '1 card remaining');
-    assert.equal(h.root.querySelector('.fc-practice-note').textContent, 'Practice mode does not change your review schedule.');
+    assert.equal(h.bottom.querySelector('.fc-review-remaining').textContent, '还剩 1 张卡片');
+    assert.equal(h.root.querySelector('.fc-practice-note').textContent, '练习模式不会改变你的复习计划。');
     assert.equal(h.stage.contains(h.root.querySelector('.fc-practice-note')), false);
     assert.equal(h.stage.nextElementSibling, h.root.querySelector('.fc-practice-note'));
     oldMount.cleanup?.(); firstNext.click(); h.key(oldRoot, ' ');
@@ -737,13 +737,13 @@ test('overlapping practice presentations cannot reveal consumed cues or advance 
     const surface = h.surface, extra = h.document.createElement('div'); h.document.body.append(extra);
     const firstHost = new AbortController(), firstCleanup = surface.props.content(extra, firstHost.signal);
     extra.querySelector('button').click(); // Both presentations reveal cue 1.
-    h.click('Reveal answer'); h.click('Next');
+    h.click('显示答案'); h.click('下一张');
     assert.equal(h.card.textContent, 'PRACTICE Q2');
     extra.querySelector('button').click(); // Stale Next from cue 1 must not skip cue 2.
     firstCleanup?.(); surface.unmountContent(); surface.mount();
     assert.equal(h.card.textContent, 'PRACTICE Q2');
     const secondHost = new AbortController(), secondCleanup = surface.props.content(extra, secondHost.signal);
-    h.click('Reveal answer'); h.click('Next');
+    h.click('显示答案'); h.click('下一张');
     assert.equal(h.card.textContent, 'PRACTICE Q3');
     extra.querySelector('button').click(); // Unrevealed stale cue 2 must stay unrevealed.
     assert.equal(extra.querySelector('.fc-answer').textContent, '');
@@ -760,12 +760,12 @@ test('completed practice stays complete on replay; an explicit new practice sess
     const cards = practiceCards(); h.controller.openPractice(cards);
     for (const cue of cards) {
       assert.equal(h.card.textContent, cue.question);
-      h.click('Reveal answer'); h.click('Next');
+      h.click('显示答案'); h.click('下一张');
     }
     const surface = h.surface;
     surface.unmountContent(); surface.mount();
-    assert.equal(h.footer.textContent, 'Practice complete.');
-    assert.equal(h.stage.nextElementSibling?.textContent, 'Practice mode does not change your review schedule.');
+    assert.equal(h.footer.textContent, '练习完成。');
+    assert.equal(h.stage.nextElementSibling?.textContent, '练习模式不会改变你的复习计划。');
     assert.equal(h.stage.nextElementSibling?.parentElement, h.root);
     assert.equal(h.bottom.children.length, 0);
     assert.equal(h.card.hidden, true);
@@ -774,7 +774,7 @@ test('completed practice stays complete on replay; an explicit new practice sess
     assert.equal(surface.disposed, true);
     assert.equal(h.card.textContent, 'PRACTICE Q1');
     hiddenTitle(h.title);
-    assert.equal(h.bottom.querySelector('.fc-review-remaining').textContent, '2 cards remaining');
+    assert.equal(h.bottom.querySelector('.fc-review-remaining').textContent, '还剩 2 张卡片');
     assert.deepEqual(h.calls, []);
   } finally { h.dispose(); }
 });
@@ -782,7 +782,7 @@ test('completed practice stays complete on replay; an explicit new practice sess
 for (const termination of ['host close', 'view abort', 'plugin abort']) test(`practice ${termination} disposes every replayed scope and prevents revival`, async () => {
   const h = await setup();
   try {
-    h.controller.openPractice(practiceCards()); h.click('Reveal answer');
+    h.controller.openPractice(practiceCards()); h.click('显示答案');
     const surface = h.surface;
     surface.unmountContent(); surface.mount();
     const extra = h.document.createElement('div'); h.document.body.append(extra);
@@ -819,7 +819,7 @@ test('practice and scheduled review share one active surface and suppress respon
     assert.equal(h.card.textContent, 'PRACTICE Q1');
     delete h.overrides['next-review']; h.controller.open({}); await flush();
     assert.equal(practice.disposed, true);
-    assert.equal(h.surface.props.title, 'Flashcard review');
+    assert.equal(h.surface.props.title, '闪卡复习');
     hiddenTitle(h.title);
     assert.equal(h.card.textContent, 'QUESTION **markdown**');
     assert.equal(h.root.querySelector('.fc-practice-note'), null);
@@ -849,15 +849,15 @@ test('practice preserves currently owned focus without stealing focus from Setti
   const h = await setup();
   try {
     h.controller.openPractice(practiceCards());
-    h.footer.querySelector('button').focus(); h.click('Reveal answer');
+    h.footer.querySelector('button').focus(); h.click('显示答案');
     assert.equal(h.document.activeElement, h.root);
     const title = h.title;
-    h.footer.querySelector('button').focus(); h.click('Next');
+    h.footer.querySelector('button').focus(); h.click('下一张');
     assert.equal(h.document.activeElement, h.root);
     assert.equal(h.title, title);
     const settings = h.document.createElement('input'); h.document.body.append(settings); settings.focus();
-    h.click('Reveal answer'); assert.equal(h.document.activeElement, settings);
-    h.click('Next'); assert.equal(h.document.activeElement, settings);
+    h.click('显示答案'); assert.equal(h.document.activeElement, settings);
+    h.click('下一张'); assert.equal(h.document.activeElement, settings);
     assert.equal(h.title, title);
     assert.deepEqual(h.calls, []);
   } finally { h.dispose(); }

@@ -1,5 +1,6 @@
 import type { LhMessage, PluginSubmission, PluginSubmissionContext, PluginSubmissionInterceptor, PluginSubmissionTarget } from "../src/core/index.ts";
 import { copyPluginSubmissionHistory, copyPluginSubmissionTarget, preparePluginSubmission } from "../src/core/index.ts";
+import { tr } from "@/src/core";
 
 /** Captured registration identity, not just an interceptor ID. */
 export interface SubmissionInterceptorRegistration {
@@ -14,6 +15,11 @@ export function orderSubmissionInterceptors(a: SubmissionInterceptorRegistration
 	return (b.interceptor.priority ?? 0) - (a.interceptor.priority ?? 0) || (a.pluginId < b.pluginId ? -1 : a.pluginId > b.pluginId ? 1 : 0) || (a.interceptor.id < b.interceptor.id ? -1 : a.interceptor.id > b.interceptor.id ? 1 : 0);
 }
 const aborted = () => new DOMException("Submission preparation canceled", "AbortError");
+/** Server/chat errors may already carry the kept-input notice (English or Chinese). */
+const KEPT = /Your input has been kept\.|你的输入已保留。/;
+const kept = (message: string) => tr(KEPT.test(message) ? message : `${message}${/[.!?。！？]$/.test(message) ? "" : "。"}你的输入已保留。`, `${message}${message.includes("Your input has been kept.") ? "" : ". Your input has been kept."}`);
+const FAILURE_PREFIX = tr("无法准备提交（", "Could not prepare submission (");
+const failure = (pluginName: string, message: string) => tr(kept(`${FAILURE_PREFIX}${pluginName}）：${message}`), `Could not prepare submission (${pluginName}): ${message}. Your input has been kept.`);
 function abortable<T>(value: T | PromiseLike<T>, signal: AbortSignal): Promise<T> {
 	if (signal.aborted) return Promise.reject(aborted());
 	return new Promise((resolve, reject) => {
@@ -98,19 +104,19 @@ export class SubmissionAttempt {
 				open = false;
 				if (this.signal.aborted || !owner.isCurrent() || !this.current()) { this.cancel(); throw aborted(); }
 				owner.report(error); this.cancel();
-				throw new Error(`Could not prepare submission (${owner.pluginName}): ${error instanceof Error ? error.message : String(error)}. Your input has been kept.`);
+				throw new Error(failure(owner.pluginName, error instanceof Error ? error.message : String(error)));
 			}
 		}
 		this.check(); return result;
 	}
 	preparationFailure(error: unknown): Error {
 		const message = error instanceof Error ? error.message : String(error);
-		if (message.startsWith("Could not prepare submission (")) return error as Error;
+		if (message.startsWith(FAILURE_PREFIX)) return error as Error;
 		if (this.lastOwner) {
 			this.lastOwner.report(error);
-			return new Error(`Could not prepare submission (${this.lastOwner.pluginName}): ${message}. Your input has been kept.`);
+			return new Error(failure(this.lastOwner.pluginName, message));
 		}
-		return new Error(`${message}${message.includes("Your input has been kept.") ? "" : ". Your input has been kept."}`);
+		return new Error(kept(message));
 	}
 	/** Freeze observer registration before the first POST. */
 	deliver() { this.check(); this.phase = "delivering"; this.changed(); }

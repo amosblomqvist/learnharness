@@ -12,6 +12,8 @@ import type { LearnerImage } from "../tools/learner-image.ts";
 import type { PdfFigureImage, PdfFigureSource } from "../tools/pdf-figure.ts";
 import { embedLearnerImage, LEARNER_IMAGE_HREF } from "../../core/learner-image-svg.ts";
 import { annotationPlacementProblem } from "./annotation-svg.ts";
+import { withOutputLanguage } from "../output-language.ts";
+import { tr } from "../../core/i18n.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 
 /**
@@ -223,11 +225,11 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 	const capture = createBackgroundCapture({ role: "visualMaker", runId: sessionId, sourceId: opts.chatId });
 	/** The picture being annotated; in PDF mode crop_page replaces it. */
 	let learnerImage: LearnerImage | PdfFigureImage | undefined = input.image ?? pdf?.pageImage;
-	const systemPrompt = pdf
+	const systemPrompt = withOutputLanguage(pdf
 		? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}\n\n${PDF_INSTRUCTIONS}`
 		: learnerImage
 			? `${INSTRUCTIONS}\n\n${IMAGE_INSTRUCTIONS}`
-			: INSTRUCTIONS;
+			: INSTRUCTIONS);
 	const prompt = [
 		pdf
 			? "Brief for ONE annotated figure from the learner's PDF (from the teacher, verbatim — it is everything you know):"
@@ -322,7 +324,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 					const image = await processImage(png, "image/png", { resizeOptions: engine.model.inputLimits?.images?.resize });
 					opts.abortSignal?.throwIfAborted();
 					if (!image.ok) return { svg: "", notes: `FAILED: inspecting the final SVG failed — ${image.message}` };
-					opts.onActivity?.("render_svg: inspecting final render");
+					opts.onActivity?.(tr("渲染图示：正在检查最终渲染", "render_svg: inspecting final render"));
 					renderedSvg = currentSvg;
 					messages = [
 						...messages,
@@ -362,7 +364,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						continue;
 					}
 					currentSvg = svg;
-					opts.onActivity?.(`write_svg: ${(svg.length / 1024).toFixed(1)} KB`);
+					opts.onActivity?.(tr(`写入 SVG：${(svg.length / 1024).toFixed(1)} KB`, `write_svg: ${(svg.length / 1024).toFixed(1)} KB`));
 					toolResults.push(toolText(call.id, call.name, `Saved (${svg.length} bytes). Call render_svg to look at it.`));
 				} else if (call.name === "edit_svg") {
 					const edit = call.arguments as { old_text?: unknown; new_text?: unknown };
@@ -398,7 +400,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						continue;
 					}
 					currentSvg = edited;
-					opts.onActivity?.("edit_svg: applied");
+					opts.onActivity?.(tr("编辑 SVG：已应用", "edit_svg: applied"));
 					toolResults.push(toolText(call.id, call.name, "OK — replaced 1 occurrence. Call render_svg to look at the edited SVG."));
 				} else if (call.name === "render_svg") {
 					if (!currentSvg) {
@@ -412,11 +414,11 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 						if (!image.ok) throw new Error(image.message);
 						renderImage = image;
 						renderedSvg = currentSvg;
-						opts.onActivity?.("render_svg: inspecting render");
+						opts.onActivity?.(tr("渲染图示：正在检查渲染结果", "render_svg: inspecting render"));
 						toolResults.push(toolText(call.id, call.name, "Rendered — the PNG follows in the next message. Look at it."));
 					} catch (err) {
 						const msg = err instanceof Error ? err.message : String(err);
-						opts.onActivity?.("render_svg: render error");
+						opts.onActivity?.(tr("渲染图示：渲染出错", "render_svg: render error"));
 						toolResults.push(toolText(call.id, call.name, `RENDER ERROR (the SVG may be malformed): ${msg}. Fix it with write_svg and render again.`));
 					}
 				} else if (call.name === "crop_page" && pdf) {
@@ -449,7 +451,7 @@ export async function runVisualMaker(input: VisualMakerInput, opts: VisualMakerO
 							);
 						}
 						cropImage = { image: shown, width: cropped.width, height: cropped.height, resultIndex: toolResults.length, discardedSvg: discarded };
-						opts.onActivity?.(`crop_page: ${cropped.width}×${cropped.height} px`);
+						opts.onActivity?.(tr(`裁剪页面：${cropped.width}×${cropped.height} px`, `crop_page: ${cropped.width}×${cropped.height} px`));
 						toolResults.push(
 							toolText(
 								call.id,

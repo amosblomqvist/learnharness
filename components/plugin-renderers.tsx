@@ -9,6 +9,7 @@ import { LiveToolCard } from "@/components/artifacts/live-tool-card";
 import { ToolCallCard } from "@/components/artifacts/tool-call-card";
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { JobsContext } from "@/components/jobs-context";
+import { tr } from "@/src/core";
 
 /** The Markdown dispatch uses this same exclusive built-in language. */
 export const BUILTIN_MERMAID_LANGUAGE = "mermaid";
@@ -34,7 +35,7 @@ function RendererMount({ registration, mount, label, fallback }: {
 		return manager.mountRenderer(registration, mount, container.current, error => setFailure({ mount, error }));
 	}, [manager, registration, mount]);
 	if (!manager || failed) return <>
-		{failed && <p role="alert" className="text-xs text-destructive">{label}: {failure.error}</p>}
+		{failed && <p role="alert" className="text-xs text-destructive">{label}{tr("：", ": ")}{failure.error}</p>}
 		{fallback}
 	</>;
 	return <div ref={container} data-plugin-renderer={label} className="min-w-0" />;
@@ -46,14 +47,14 @@ export function PluginCodeBlock({ language, source, meta, incomplete, fallback }
 	const mount = useMemo<PluginMount>(() => (container, signal) => registration?.renderer.mount(container, { language, source, meta, incomplete, signal }),
 		[registration, language, source, meta, incomplete]);
 	if (!registration) return <>{fallback}</>;
-	return <RendererMount registration={registration} mount={mount} label={`Plugin code block (${language})`} fallback={fallback} />;
+	return <RendererMount registration={registration} mount={mount} label={tr(`插件代码块（${language}）`, `Plugin code block (${language})`)} fallback={fallback} />;
 }
 
 /** Preserve native text (and an honest image attachment note) when no details
  * payload exists. Never serialize image bytes/base64 into the transcript. */
 export function nativeToolResultText(result: PluginToolRenderProps["result"]): string | undefined {
 	if (!result) return;
-	return result.content.map(block => block.type === "text" ? block.text : `[Image attached to the model: ${block.mimeType}]`).join("\n");
+	return result.content.map(block => block.type === "text" ? block.text : tr(`[已附加给模型的图片：${block.mimeType}]`, `[Image attached to the model: ${block.mimeType}]`)).join("\n");
 }
 
 export function toolFallbackPart(part: LhViewPart): ArtifactPartProps["part"] {
@@ -90,12 +91,12 @@ export function PluginToolRenderer({ part, fallback: suppliedFallback }: { part:
 		jobs.some(job => job.kind === "plugin" && job.toolCallId === part.toolCallId) ||
 		(ack !== null && typeof ack === "object" && typeof ack.jobId === "string" && ack.dispatched === true)
 	);
-	if (part.pluginQuestion) return <p role="status" className="text-xs text-muted-foreground">Question unavailable</p>;
+	if (part.pluginQuestion) return <p role="status" className="text-xs text-muted-foreground">{tr("问题不可用", "Question unavailable")}</p>;
 	const fallback = suppliedFallback ?? (dispatched
 		? <DispatchCard kind="plugin" toolCallId={part.toolCallId ?? ""} />
 		: <ToolCallCard part={toolFallbackPart(part)} />);
 	if (!registration || !isToolState(part.state)) return fallback;
-	return <RendererMount registration={registration} mount={mount} label={`Plugin tool (${toolName})`} fallback={fallback} />;
+	return <RendererMount registration={registration} mount={mount} label={tr(`插件工具（${toolName}）`, `Plugin tool (${toolName})`)} fallback={fallback} />;
 }
 
 function isToolState(state: unknown): state is PluginToolRenderProps["state"] {
@@ -108,7 +109,7 @@ function isToolState(state: unknown): state is PluginToolRenderProps["state"] {
 export function ToolPartRenderer({ part }: { part: LhViewPart }) {
 	// Attempts/unreadable metadata must never fall through to raw payloads or
 	// validator error text, including when the renderer is missing.
-	if (part.pluginQuestion) return <p role="status" className="text-xs text-muted-foreground">Question unavailable</p>;
+	if (part.pluginQuestion) return <p role="status" className="text-xs text-muted-foreground">{tr("问题不可用", "Question unavailable")}</p>;
 	const toolName = part.type.slice("tool-".length);
 	const Builtin = Object.hasOwn(artifactRenderers, toolName) ? artifactRenderers[toolName] : undefined;
 	const reserved = Builtin || toolName === "plan_init" || (QUESTION_TOOLS as readonly string[]).includes(toolName);

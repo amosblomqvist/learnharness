@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import type { ModelCatalogRefreshResponse, ModelCatalogResponse } from "@/src/core";
 import { onSettingsSaved } from "@/components/settings-signal";
+import { tr } from "@/src/core";
 
 // Shared stale-while-revalidate catalog. Metadata refreshes retain the last
 // good snapshot; connection changes clear selectable models immediately.
@@ -35,7 +36,7 @@ function fetchCatalog(revalidate = false): void {
 export async function refreshRemoteModelCatalog() {
 	const generation = catalogGeneration;
 	const response = await fetch("/api/models", { method: "POST" });
-	if (!response.ok) throw new Error("Model catalog refresh failed");
+	if (!response.ok) throw new Error(tr("模型列表刷新失败", "Model catalog refresh failed"));
 	const { outcome, catalog } = await response.json() as ModelCatalogRefreshResponse;
 	if (generation === catalogGeneration) {
 		catalogGeneration++;

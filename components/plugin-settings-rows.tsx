@@ -3,6 +3,7 @@
 import { useRef, useState } from "react";
 import type { PluginSettingsRow, PluginSettingsSchema } from "@/src/core";
 import { CommitInput, SettingsRow, SettingsSlider, ThinSelect, Toggle } from "@/components/settings/controls";
+import { tr } from "@/src/core";
 
 function SchemaRow({ row, onError }: { row: PluginSettingsRow; onError?: (error: unknown) => void }) {
 	const [error, setError] = useState<string>();
@@ -18,7 +19,7 @@ function SchemaRow({ row, onError }: { row: PluginSettingsRow; onError?: (error:
 			if (typeof value === "number" && (!Number.isFinite(value) ||
 				("min" in row && row.min !== undefined && value < row.min) ||
 				("max" in row && row.max !== undefined && value > row.max))) {
-				setError("Value is outside the allowed range."); return false;
+				setError(tr("数值超出允许范围。", "Value is outside the allowed range.")); return false;
 			}
 			setError(undefined);
 			changing.current = true;

@@ -6,6 +6,7 @@ import { Composer } from "@/components/composer";
 import type { Dictation } from "@/components/dictation";
 import { claimPluginInputFocus, PluginDictationControl, usePluginDictation } from "@/components/plugin-dictation";
 import { PluginModelPicker, PluginThinkingPicker, type PickerCommand } from "@/components/plugin-model-picker";
+import { tr } from "@/src/core";
 
 /** Deferred transcript callbacks can be async; send must wait for all deliveries. */
 export function createTranscriptDelivery() {
@@ -48,7 +49,7 @@ function run(callback: () => void | Promise<void>, report: (error: unknown) => v
 }
 
 /** The exact core composer, with its learning/file defaults explicitly disabled. */
-export function PluginComposer({ value, onChange, onSend, busy = false, onStop, canSend, placeholder = "Message…", autoFocus, onError = reportDefault }: PluginComposerProps & Extra) {
+export function PluginComposer({ value, onChange, onSend, busy = false, onStop, canSend, placeholder = tr("输入消息…", "Message…"), autoFocus, onError = reportDefault }: PluginComposerProps & Extra) {
 	return <Composer value={value} onChange={(next) => run(() => onChange(next), onError)} onSend={() => run(onSend, onError)}
 		onStop={() => run(() => onStop?.(), onError)} busy={busy} canSend={canSend ?? value.trim().length > 0}
 		placeholder={placeholder} autoFocus={autoFocus} defaultDropTarget={false} fileInsertion={false} />;

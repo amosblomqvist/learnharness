@@ -43,6 +43,7 @@ import { blurAfterPointerClick } from "@/components/focus-hygiene";
 import { chartSize, useChartFont, useSessionMermaid } from "@/components/session-overlay";
 import { Hint } from "@/components/ui/hint";
 import { BUILTIN_MERMAID_LANGUAGE, PluginCodeBlock } from "@/components/plugin-renderers";
+import { tr } from "@/src/core";
 
 /** Local rendering profile for host-mounted, display-only Markdown. Ordinary
  * transcript rendering (including SSR/static Streamdown) stays interactive. */
@@ -186,17 +187,17 @@ function MermaidInline({ chart }: { chart: string }) {
 				dangerouslySetInnerHTML={{ __html: svg ?? "" }}
 			/>
 			{!displayOnly && <div className="absolute top-0 right-0 flex items-start gap-0.5">
-				<CopyCorner getText={() => chart} label="Copy diagram source" />
+				<CopyCorner getText={() => chart} label={tr("复制图表源码", "Copy diagram source")} />
 				{overlay && (
 					<Hint
 					// Full-screen overlay copy (tooltip wave) — "session view" was
 					// internal direction-speak for the same thing.
-					label="Open full-screen"
+					label={tr("全屏打开", "Open full-screen")}
 					side="bottom"
 				>
 <button
 						type="button"
-						aria-label="Expand diagram"
+						aria-label={tr("展开图表", "Expand diagram")}
 						data-testid="md-mermaid-expand"
 												className="flex size-6 items-center justify-center rounded-md text-muted-foreground/70 opacity-0 transition-opacity hover:bg-accent hover:text-foreground group-hover/md:opacity-100"
 						onClick={(e) => {
@@ -245,7 +246,7 @@ export function MarkdownCode(props: ComponentProps<"code"> & ExtraProps) {
 	const lineNumbers = !/\bnoLineNumbers\b/.test(meta);
 	const fallback = (
 		<div className="group/md relative" data-testid="md-code">
-			{!displayOnly && <CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label="Copy code" />}
+			{!displayOnly && <CopyCorner className="absolute top-1.5 right-2 z-10" getText={() => source} label={tr("复制代码", "Copy code")} />}
 			<CodeBlock
 				code={source}
 				language={language}
@@ -375,7 +376,7 @@ export function MarkdownTable(props: ComponentProps<"table"> & ExtraProps) {
 				// cells it hovers over; the scroll container stays under it (the
 				// corner is fixed to the wrapper, not the scrolling table).
 				className="absolute top-1 right-1 z-10"
-				label="Copy table"
+				label={tr("复制表格", "Copy table")}
 				getText={() => (ref.current ? tableDataToMarkdown(extractTableDataFromElement(ref.current)) : "")}
 			/>}
 			<div className="overflow-x-auto">
@@ -425,7 +426,7 @@ export function MathDisplay(props: ComponentProps<"span"> & ExtraProps) {
 		<span className="group/md relative block z-0" data-testid="md-math">
 			{!displayOnly && <CopyCorner
 				className="absolute top-0 right-0 z-10"
-				label="Copy equation source"
+				label={tr("复制公式源码", "Copy equation source")}
 				getText={() => ref.current?.querySelector(".katex[data-tex]")?.getAttribute("data-tex")
 					?? ref.current?.querySelector('annotation[encoding="application/x-tex"]')?.textContent
 					?? ""}

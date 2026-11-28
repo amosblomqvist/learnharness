@@ -9,6 +9,7 @@ import { PdfBriefCard, ResearchBriefCard } from "@/components/artifacts/job-card
 import { VisualOutputCard } from "@/components/artifacts/visual-card";
 import { PluginWorkerCard } from "@/components/artifacts/plugin-worker-card";
 import { WorkerResultDetails } from "@/components/artifacts/worker-result-presentation";
+import { tr } from "@/src/core";
 
 /**
  * The sub-agent result delivery card (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -43,14 +44,14 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 		// learner aborts and do not invent an outcome for an unreadable task.
 		if (typeof aborted?.data?.failure === "string") return (
 			<div data-testid="job-delivery-failure" role="alert" className="space-y-1 rounded-xl border bg-card p-4 text-sm">
-				<p className="font-medium">Background job recovery/delivery failed</p>
+				<p className="font-medium">{tr("后台任务恢复或交付失败", "Background job recovery/delivery failed")}</p>
 				<p className="whitespace-pre-wrap break-words text-muted-foreground">{aborted.data.failure}</p>
 			</div>
 		);
 		if (aborted?.data) return <AbortedBadge kind={aborted.data.kind ?? "job"} />;
 		return (
 				<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				A sub-agent finished, but its result could not be displayed.
+				{tr("子智能体已完成，但无法显示其结果。", "A sub-agent finished, but its result could not be displayed.")}
 			</div>
 		);
 	}
@@ -81,12 +82,14 @@ export function SubagentSteerCard({ message }: { message: LhViewMessage }) {
 /** The aborted-job chip: mirrors the complete-badge one-liner — the
  * teacher's wake turn acknowledges the abort in the lesson itself,
  * this just marks what happened. */
+const ABORTED_KIND_LABEL: Record<string, string> = { research: "调研", demo: "互动演示", visual: "插图", pdf: "PDF", plugin: "插件", job: "后台任务" };
+
 function AbortedBadge({ kind }: { kind: string }) {
 	return (
 		<div data-testid="job-aborted-badge" className="flex items-center gap-2 text-xs text-muted-foreground">
 			<CircleX className="size-3.5" />
-			<span className="font-medium uppercase tracking-wide">{kind}</span>
-			<span>aborted by the learner</span>
+			<span className="font-medium uppercase tracking-wide">{tr(ABORTED_KIND_LABEL[kind] ?? kind, kind)}</span>
+			<span>{tr("已被学习者中止", "aborted by the learner")}</span>
 		</div>
 	);
 }
@@ -102,10 +105,10 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
 	return (
 		<WorkerResultDetails testId="pdf-complete-badge" heading={<>
 				<span className="font-medium uppercase tracking-wide">PDF</span>
-				<span>reading complete</span>
+				<span>{tr("阅读完成", "reading complete")}</span>
 				{readPages.length > 0 && (
 					<span>
-						· read {readPages.length} page{readPages.length === 1 ? "" : "s"}
+						{tr(<>· 已读 {readPages.length} 页</>, <>· read {readPages.length} page{readPages.length === 1 ? "" : "s"}</>)}
 					</span>
 				)}
 			</>}>
@@ -122,9 +125,9 @@ function PdfCompleteBadge({ result }: { result: PdfResult }) {
 function ResearchCompleteBadge({ result }: { result: ResearchResult }) {
 	return (
 		<WorkerResultDetails testId="research-complete-badge" heading={<>
-				<span className="font-medium uppercase tracking-wide">Research</span>
-				<span>complete</span>
-				{result.sources.length > 0 && <span>· {result.sources.length} sources</span>}
+				<span className="font-medium uppercase tracking-wide">{tr("调研", "Research")}</span>
+				<span>{tr("已完成", "complete")}</span>
+				{result.sources.length > 0 && <span>· {result.sources.length} {tr("个来源", "sources")}</span>}
 			</>}>
 			<ResearchBriefCard output={result} />
 		</WorkerResultDetails>

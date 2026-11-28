@@ -1,5 +1,6 @@
 import { modelCatalog, refreshConnectionCatalog, refreshModelCatalog } from "@/src/server";
 import type { ModelCatalogRefreshResponse } from "@/src/core";
+import { tr } from "@/src/core";
 
 const headers = { "Cache-Control": "no-store" };
 
@@ -18,6 +19,6 @@ export async function GET() {
 export async function POST() {
 	let outcome;
 	try { outcome = await refreshModelCatalog(); }
-	catch { return Response.json({ error: "Model catalog refresh failed" }, { status: 502, headers }); }
+	catch { return Response.json({ error: tr("模型列表刷新失败", "Model catalog refresh failed") }, { status: 502, headers }); }
 	return Response.json({ outcome, catalog: modelCatalog() } satisfies ModelCatalogRefreshResponse, { headers });
 }

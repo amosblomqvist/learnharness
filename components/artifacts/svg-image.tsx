@@ -1,4 +1,5 @@
 import { svgImageSource } from "../../lib/svg-image-source";
+import { tr } from "@/src/core";
 
 // Preserve the component module's existing public export.
 export { svgImageSource };
@@ -16,5 +17,5 @@ export function SvgImage({
 }) {
 	// The source is already an in-memory vector image; no Next image optimization.
 	// eslint-disable-next-line @next/next/no-img-element
-	return <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgImageSource(svg))}`} alt="Figure" className={className} width={width} draggable={false} />;
+	return <img src={`data:image/svg+xml;charset=utf-8,${encodeURIComponent(svgImageSource(svg))}`} alt={tr("插图", "Figure")} className={className} width={width} draggable={false} />;
 }

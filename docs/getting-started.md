@@ -1,72 +1,76 @@
-# Getting started
+# 快速上手
 
-Download LearnHarness from [learnharness.ai](https://learnharness.ai) or [GitHub Releases](https://github.com/amosblomqvist/learnharness/releases). For running from source, see [Development](development.md).
+从 [learnharness.ai](https://learnharness.ai) 或 [GitHub Releases](https://github.com/amosblomqvist/learnharness/releases) 下载 LearnHarness。如需从源码运行，请参阅[开发](development.md)。
 
-## Connect models
+## 界面语言
 
-Open **Settings → Providers** and configure a connection:
+在 **设置 → 通用 → 语言 / Language** 中选择 **简体中文**（默认）或 **English**。它同时决定界面、菜单栏、内置插件，以及 AI 老师讲课和出题使用的语言（English 下与上游原版一致：AI 跟随你使用的语言）。切换后桌面应用会自动重启；从源码运行时需要重启服务器。
 
-- **Provider API keys:** use your own account and pay that provider's rates.
-- **Subscription connections:** ChatGPT, GitHub Copilot, and Grok use their respective sign-in flows and account limits. They do not silently fall back to API-key billing.
-- **[Claude Code](claude-code.md):** use a separately installed and authenticated CLI. Its own configuration controls routing and billing; this is not a subscription-only guarantee.
-- **[Custom endpoint](custom-providers.md):** connect one OpenAI-compatible server, including a local model server. LearnHarness does not install or download models.
+## 连接模型
 
-Choose **Strong**, **Cheap**, and **Vision** models in Settings. There are no factory model selections. New sessions start with Strong; background roles use their assigned slots or role overrides. A model selected inside an existing session belongs to that session and does not change background-role choices.
+打开 **设置 → 服务商**（Settings → Providers）并配置一个连接：
 
-Optional web search supports Tavily, Brave, Exa, Firecrawl, and hosted Ollama search; configure a key for the engine you want to use. Research can still fetch known URLs without a search key. Dictation has its own service key below.
+- **服务商 API 密钥**：使用你自己的账户，按该服务商的价格付费。
+- **订阅连接**：ChatGPT、GitHub Copilot 和 Grok 使用各自的登录流程和账户额度。它们不会在你不知情的情况下回退到按 API 密钥计费。
+- **[Claude Code](claude-code.md)**：使用单独安装并完成认证的 CLI。路由和计费由它自己的配置控制；这并不保证只走订阅。
+- **[自定义端点](custom-providers.md)**：连接一个 OpenAI 兼容的服务器，包括本地模型服务器。LearnHarness 不会安装或下载模型。
 
-## Start a session
+在设置中选择 **强力**（Strong）、**经济**（Cheap）和 **视觉**（Vision）模型。没有出厂预设的模型选择。新会话默认使用强力模型；后台角色使用为其分配的槽位或角色覆盖设置。在已有会话中选择的模型只属于该会话，不会改变后台角色的选择。
 
-Choose **Teach** and describe what you want to understand. The agent probes your starting point, presents a plan, and teaches through explanations and checks. Reply naturally to accept or revise the plan.
+可选的网页搜索支持 Tavily、Brave、Exa、Firecrawl 和托管的 Ollama 搜索；请为你想使用的搜索引擎配置密钥。即使没有搜索密钥，调研仍可抓取已知的 URL。语音听写有它自己的服务密钥，见下文。
 
-Use the thinking fields to explain your reasoning, uncertainty, or reaction—not only your selected answer. You can type or dictate. Your confidence is self-reported, not an independent assessment.
+## 开始会话
 
-Choose **Practice** for problems rather than a lesson. Start from selected graph material or describe material directly. Submit your thinking as you work; the model's committed solution is revealed when the problem concludes. Use **Next problem** when ready to continue.
+选择 **教学**（Teach），描述你想理解的内容。智能体会摸底你的起点，给出学习计划，并通过讲解和检验来教学。自然地回复即可接受或修改计划。
 
-Sessions are saved locally, including earlier messages when context is compacted. The [keyboard guide](keyboard.md) covers submission, focus, question controls, and cancellation.
+使用思考栏来解释你的推理、不确定之处或第一反应—而不只是你选中的答案。你可以打字或使用语音听写。你的把握度是自我报告的，并非独立的评估。
 
-## Dictation
+如果想做题而不是上课，请选择 **练习**（Practice）。可以从选定的图谱素材开始，也可以直接描述素材。在解题过程中提交你的思考；模型事先确定的解答会在题目结束时揭晓。准备好继续时，使用 **下一题**（Next problem）。
 
-1. Create a [Deepgram API key](https://console.deepgram.com/) with the **Member role or higher**, required for [short-lived token minting](https://developers.deepgram.com/reference/auth/tokens/grant).
-2. Add it under **Settings → Providers → Dictation** and choose the language below the key. **Multilingual** supports automatic recognition and mixed-language speech.
-3. Use the microphone or **Mod+D** to start and stop. Review the text before sending. **Esc cancellation discards the pending transcript**; stop normally to keep it.
+会话会保存在本地，包括上下文压缩时较早的消息。[键盘指南](keyboard.md)介绍了提交、焦点、问题控件和取消操作。
 
-Audio streams from your browser directly to Deepgram using a short-lived token. A `403 Insufficient permissions` error while obtaining that token can mean the key's role is insufficient.
+## 语音听写
 
-## Use local files in a session
+1. 创建一个具有 **Member 角色或更高权限** 的 [Deepgram API 密钥](https://console.deepgram.com/)，这是[签发短期 token](https://developers.deepgram.com/reference/auth/tokens/grant) 所必需的。
+2. 在 **设置 → 服务商 → 语音听写** 下添加该密钥，并在密钥下方选择语言。**多语言**（Multilingual）支持自动识别和混合语言的语音。
+3. 使用麦克风按钮或 **Mod+D** 开始和停止。发送前请检查文本。**按 Esc 取消会丢弃尚未完成的转写内容**；正常停止即可保留。
 
-In the desktop app, use the paperclip's **Files** or **Folder** choice, or drag files/folders into the content area, to insert their local paths. Files supports any file type and multiple selections; Folder attaches one directory path, including an empty folder, without expanding or reading its contents. Newly picked or dropped known folders get a trailing directory separator so their Folder icon survives saved messages and reloads; files stay unchanged. Older unmarked paths are not retrospectively classified. The agent can then locate/read supported content on the machine running LearnHarness under the existing file-access guards; attaching a path does not grant permissions. This is **not an upload**: originals stay where they are. Ordinary browsers cannot expose these local paths through the picker or drag-and-drop; you can paste a full path instead.
+音频使用短期 token 从你的浏览器直接流式传输到 Deepgram。获取该 token 时出现 `403 Insufficient permissions` 错误，可能意味着密钥的角色权限不足。
 
-The teacher can show a local raster image or request an annotated visual based on it. It can also annotate a figure on a page of a local PDF, such as a diagram on a lecture slide: the visual maker crops the figure from that page itself, so you don't have to screenshot it. Displayed/annotated pictures are saved as session-owned snapshots, so those saved results no longer depend on the original file. This does not snapshot every file attachment. Offline regression tests cover snapshot/payload behavior, not the quality of model-generated annotations.
+## 在会话中使用本地文件
 
-File tools are read-only but have broad filesystem access under the server's user; they are not confined to a selected folder. The sensitive-path guard blocks known credential/private locations, not all sensitive content. Review what you make available: file content read by an agent may be sent to its configured model provider. See [file-access boundaries](architecture.md#file-access-and-external-services).
+在桌面应用中，使用回形针按钮的 **文件**（Files）或 **文件夹**（Folder）选项，或将文件/文件夹拖入内容区域，即可插入它们的本地路径。“文件”支持任意文件类型和多选；“文件夹”附加一个目录路径（包括空文件夹），不会展开或读取其内容。新选取或拖入的已知文件夹会带上结尾的目录分隔符，这样它们的文件夹图标在保存的消息和重新加载后依然保留；文件保持不变。较早的未标记路径不会被追溯分类。之后，智能体可以在现有文件访问防护下，在运行 LearnHarness 的机器上定位/读取受支持的内容；附加路径并不会授予权限。这**不是上传**：原始文件保留在原处。普通浏览器无法通过文件选择器或拖放暴露这些本地路径；你可以改为粘贴完整路径。
 
-## Extract into the graph
+老师可以展示本地的栅格图片，或基于它请求一张带标注的图示。它也可以为本地 PDF 某一页上的插图添加标注，例如课件幻灯片上的图表：图示生成器会自己从该页裁剪出插图，因此你无需截图。展示过/标注过的图片会保存为归属于会话的快照，因此这些保存的结果不再依赖原始文件。这并不会为每个附加文件都创建快照。离线回归测试覆盖的是快照/载荷行为，而不是模型生成标注的质量。
 
-For lessons, attach material to a session instead. Use the graph's **Extract files… → Files** or **Folder** picker for Markdown, plain text, or PDFs. This is a separate import flow, not the session's path attachments. Extract files accepts `.txt`, `.md`, `.markdown`, `.rst`, `.org`, `.adoc`, `.tex` and `.pdf` (any letter case); other extensions are turned away with a short message. Each supported file is uploaded for processing; folders organize imported sources.
+文件工具是只读的，但在服务器所属用户的权限下拥有广泛的文件系统访问能力；它们并不局限于某个选定的文件夹。敏感路径防护会拦截已知的凭据/私密位置，但并不能拦截所有敏感内容。请检查你所开放的内容：智能体读取的文件内容可能会被发送给其配置的模型服务商。参阅[文件访问边界](architecture.md#file-access-and-external-services)。
 
-- Files are limited to **25 MiB each**. Imports queue independently, with up to three files in flight.
-- Within the accepted extensions, PDFs are recognized by their `%PDF-` header and converted locally, without OCR. Image-only pages are skipped and counted; scanner text can be inaccurate. Check the import's notices.
-- Other files are read as UTF-8. A zero byte in the first 8 KiB causes rejection before source registration or model calls. This catches many binary files renamed to `.txt`, but is not complete binary detection; UTF-16 text is not decoded correctly and is often rejected. Save text as UTF-8.
-- Imported text then goes through model-based proposition/chain extraction. Local PDF conversion does not make the whole import offline.
-- Completed chunks survive later failures. Retry is explicit and reprocesses the file; unchanged content is not automatically skipped. The file queue does not survive a page reload.
+## 提取到图谱
 
-The graph stores propositions and reasoning chains with source provenance, **not mastery scores**. A proposition's presence is not proof that you understood or retained it. Automatic session extraction can be disabled independently of graph rendering.
+如果是用于课程，请改为把资料附加到会话中。对于 Markdown、纯文本或 PDF，请使用图谱的 **提取文件… → 文件**（Extract files… → Files）或 **文件夹** 选择器。这是一个独立的导入流程，而不是会话的路径附件。“提取文件”接受 `.txt`、`.md`、`.markdown`、`.rst`、`.org`、`.adoc`、`.tex` 和 `.pdf`（不区分大小写）；其他扩展名会被拒绝，并附一条简短提示。每个受支持的文件都会被上传处理；文件夹用于组织导入的来源。
 
-## Data, privacy, and usage
+- 每个文件限制为 **25 MiB**。导入会各自独立排队，最多同时处理三个文件。
+- 在接受的扩展名范围内，PDF 通过其 `%PDF-` 文件头识别，并在本地转换，不进行 OCR。纯图片页面会被跳过并计数；扫描件中的文字可能不准确。请查看导入的提示信息。
+- 其他文件按 UTF-8 读取。如果前 8 KiB 中出现零字节，则会在注册来源或调用模型之前被拒绝。这能拦截许多被重命名为 `.txt` 的二进制文件，但并不是完整的二进制检测；UTF-16 文本无法被正确解码，并且常常会被拒绝。请将文本保存为 UTF-8。
+- 导入的文本随后会经过基于模型的命题/推理链提取。本地 PDF 转换并不意味着整个导入过程是离线的。
+- 已完成的分块在之后发生失败时会被保留。重试需要手动触发，并会重新处理该文件；未改变的内容不会被自动跳过。文件队列在页面重新加载后不会保留。
 
-Chats, graph records, settings, and credentials live on your machine. Packaged desktop data normally lives under:
+图谱存储的是带有来源出处的命题和推理链，**而不是掌握程度评分**。某个命题的存在并不能证明你理解或记住了它。会话的自动提取可以独立于图谱渲染单独关闭。
 
-| OS | Learning-data folder |
+## 数据、隐私与使用情况
+
+聊天记录、图谱记录、设置和凭据都保存在你的设备上。打包后的桌面应用数据通常位于：
+
+| 操作系统 | 学习数据文件夹 |
 | --- | --- |
 | macOS | `~/Library/Application Support/LearnHarness/data` |
 | Windows | `%APPDATA%\LearnHarness\data` |
-| Linux | `$XDG_CONFIG_HOME/LearnHarness/data`, or `~/.config/LearnHarness/data` |
+| Linux | `$XDG_CONFIG_HOME/LearnHarness/data`，或 `~/.config/LearnHarness/data` |
 
-API-key files sit beside `data`, not inside it. They are plaintext with restrictive file permissions, not an encrypted vault. Keep complete profiles private; do not share credential files or raw debug captures in bug reports.
+API 密钥文件位于 `data` 旁边，而不是其内部。它们是设置了严格文件权限的明文文件，而不是加密的密钥库。请妥善保管完整的配置目录；不要在缺陷报告中分享凭据文件或原始调试抓取数据。
 
-**Local storage does not mean local-only processing.** Configured models, subscription/CLI services, web research, and dictation can receive content. A local custom model is a separate setup choice, not an offline guarantee for other enabled services.
+**本地存储并不意味着只在本地处理**。已配置的模型、订阅/CLI 服务、网页调研和语音听写都可能接收到内容。使用本地自定义模型是一个单独的配置选择，并不能保证其他已启用的服务也离线运行。
 
-Click the context/cost row beneath the composer for Session stats. Dollar figures estimate known API costs; subscription, CLI, and custom-endpoint usage are not treated as free. See [context, caching, and costs](compaction-accounting.md) for the details.
+点击消息输入框下方的上下文/费用一栏，可查看 **会话统计**（Session stats）。美元金额是对已知 API 费用的估算；订阅、CLI 和自定义端点的用量不会被视为免费。详情请参阅[上下文、缓存与费用](compaction-accounting.md)。
 
-Packaged apps support updates under **Settings → General**. Development builds do not run the updater. Report problems through [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues), with reproduction steps and the app/OS version rather than private learning records or keys.
+打包后的应用支持在 **设置 → 通用**（Settings → General）下进行更新。开发构建不会运行更新程序。请通过 [GitHub Issues](https://github.com/amosblomqvist/learnharness/issues) 报告问题，附上复现步骤以及应用/操作系统版本，而不要附上私人学习记录或密钥。

@@ -6,6 +6,7 @@ import { usePlugins } from "./plugins";
 import type { FrontendPlugin, PluginFrontendManager } from "./plugin-manager";
 import type { InteractionLayersController } from "./interaction-layers";
 import { findCurrentSurfaceBoundary } from "./plugin-surface-targets";
+import { tr } from "@/src/core";
 
 export function pluginShortcutCandidates(plugins: readonly FrontendPlugin[]): PluginShortcutCandidate[] {
 	return plugins.flatMap(plugin => !plugin.info.enabled || plugin.phase !== "active" ? [] : (plugin.shortcuts ?? []).flatMap(({ actionId, shortcut }) => {
@@ -42,7 +43,7 @@ export function usePluginShortcutPage(pathname: string, read: () => PluginPageAc
 }
 export function pluginShortcutScopeLabel(candidate: PluginShortcutCandidate): string {
 	const scope = candidate.shortcut.scope;
-	return scope === "app" ? "App-wide" : [...(scope.sessions ?? []).map(kind => kind === "teaching" ? "Teaching" : "Practice"), ...(scope.views?.length ? [`Views: ${scope.views.join(", ")}`] : [])].join(" · ");
+	return scope === "app" ? tr("全局", "App-wide") : [...(scope.sessions ?? []).map(kind => kind === "teaching" ? tr("教学", "Teaching") : tr("练习", "Practice")), ...(scope.views?.length ? [tr(`视图：${scope.views.join("、")}`, `Views: ${scope.views.join(", ")}`)] : [])].join(" · ");
 }
 
 /** Window-bubble fallback only; never an independent low-level plugin listener. */

@@ -31,18 +31,18 @@ test('library-wide dashboard shows labeled current-state counts and neutral char
   try {
     h.dashboard.update(statistics());
     assert.equal(h.root.tagName, 'SECTION');
-    assert.equal(h.root.getAttribute('aria-label'), 'Spaced repetition');
-    assert.equal(h.root.querySelector('h2.fc-dashboard-heading').textContent, 'Spaced repetition');
-    assert.deepEqual([...h.root.querySelectorAll('.fc-state-legend li')].map(node => node.textContent), ['New 2', 'Learning 3', 'Review 4', 'Relearning 1']);
+    assert.equal(h.root.getAttribute('aria-label'), '间隔重复');
+    assert.equal(h.root.querySelector('h2.fc-dashboard-heading').textContent, '间隔重复');
+    assert.deepEqual([...h.root.querySelectorAll('.fc-state-legend li')].map(node => node.textContent), ['新卡片 2', '学习中 3', '复习 4', '重新学习 1']);
     const segments = [...h.root.querySelectorAll('.fc-state-segment')];
     assert.deepEqual(segments.map(node => node.dataset.state), ['new', 'learning', 'review', 'relearning']);
     assert.deepEqual(segments.map(node => node.style.width), ['20%', '30%', '40%', '10%']);
     assert.equal(h.root.querySelector('.fc-state-bar').getAttribute('aria-hidden'), 'true');
-    assert.ok(h.root.textContent.includes('Active propositions with at least one cue.'));
-    assert.deepEqual([...h.root.querySelectorAll('.fc-chart h3')].map(node => node.textContent), ['Scheduled due', 'Scheduled reviews']);
+    assert.ok(h.root.textContent.includes('至少有一条提示语的有效命题。'));
+    assert.deepEqual([...h.root.querySelectorAll('.fc-chart h3')].map(node => node.textContent), ['计划到期', '计划复习']);
     assert.equal(h.root.querySelectorAll('.fc-chart-grid > .fc-chart').length, 2);
     assert.deepEqual([...h.root.querySelectorAll('.fc-chart figcaption')].map(node => node.textContent), [
-      'Current scheduled due dates.', 'Scheduled review ratings recorded each day.',
+      '当前计划的到期日期。', '每天记录的计划复习评分。',
     ]);
     assert.equal(h.root.querySelector('button, input, select, a'), null, 'dashboard has no filters or actions');
   } finally { h.dashboard.dispose(); }
@@ -56,22 +56,22 @@ test('nine due bars and fourteen activity bars expose visible counts and accessi
     assert.equal(groups(due).length, 9); assert.equal(groups(activity).length, 14);
     assert.deepEqual(visibleCounts(due), data.due.map(row => row.count));
     assert.deepEqual(visibleCounts(activity), data.activity.map(row => row.count));
-    assert.equal(groups(due)[0].querySelector('tspan').textContent, 'Overdue');
-    assert.equal(groups(due)[1].querySelector('tspan').textContent, 'Today');
-    assert.equal(groups(activity).at(-1).querySelector('tspan').textContent, 'Today');
-    for (const [svg, rows, title] of [[due, data.due, 'Scheduled due'], [activity, data.activity, 'Scheduled reviews']]) {
+    assert.equal(groups(due)[0].querySelector('tspan').textContent, '已逾期');
+    assert.equal(groups(due)[1].querySelector('tspan').textContent, '今天');
+    assert.equal(groups(activity).at(-1).querySelector('tspan').textContent, '今天');
+    for (const [svg, rows, title] of [[due, data.due, '计划到期'], [activity, data.activity, '计划复习']]) {
       assert.equal(svg.namespaceURI, 'http://www.w3.org/2000/svg');
       assert.equal(svg.getAttribute('role'), 'img');
-      assert.ok(svg.getAttribute('aria-label').startsWith(`${title}: `));
+      assert.ok(svg.getAttribute('aria-label').startsWith(`${title}：`));
       assert.ok(svg.querySelector('title, [title]') === null, 'neither whole-chart nor per-bar native tooltips remain');
       assert.equal(svg.hasAttribute('title'), false);
-      const descriptions = svg.getAttribute('aria-label').slice(title.length + 2).split('; ');
+      const descriptions = svg.getAttribute('aria-label').slice(title.length + 1).split('；');
       assert.equal(descriptions.length, rows.length);
       assert.ok(svg.hasAttribute('viewBox')); assert.equal(svg.getAttribute('width'), '100%');
       assert.equal(svg.parentElement.className, 'fc-chart-scroll');
       groups(svg).forEach((group, index) => {
-        assert.ok(descriptions[index].endsWith(`: ${rows[index].count}`));
-        assert.ok(descriptions[index].split(': ')[0].length > 0, 'image summary retains each bar label and count');
+        assert.ok(descriptions[index].endsWith(`：${rows[index].count}`));
+        assert.ok(descriptions[index].split('：')[0].length > 0, 'image summary retains each bar label and count');
         assert.equal(group.getAttribute('data-day'), rows[index].day ?? 'overdue');
         const rect = group.querySelector('rect');
         assert.equal(rect.getAttribute('fill'), 'currentColor');
@@ -124,7 +124,7 @@ test('palette hooks target only bars and state segments; only future due dates e
       }
     }
     assert.equal(activity.querySelector('.fc-chart-date'), null, 'activity date labels are not dimmed');
-    assert.equal(groups(activity).at(-1).querySelector('tspan').textContent, 'Today');
+    assert.equal(groups(activity).at(-1).querySelector('tspan').textContent, '今天');
     h.dashboard.update(statistics());
     assert.deepEqual(charts(h).map(svg => svg.querySelectorAll('.fc-chart-bar').length), [9, 14]);
     assert.deepEqual(charts(h).map(svg => svg.querySelectorAll('.fc-chart-date').length), [7, 0]);
@@ -141,7 +141,7 @@ test('updates reuse the owned root and heading, replace chart data and leave sna
     h.dashboard.update(changed);
     assert.equal(h.root, root); assert.equal(root.querySelector('h2'), heading);
     assert.equal(h.container.querySelectorAll('.fc-dashboard').length, 1);
-    assert.equal(root.querySelector('.fc-state-legend [data-state=review]').textContent, 'Review 12');
+    assert.equal(root.querySelector('.fc-state-legend [data-state=review]').textContent, '复习 12');
     const [due, activity] = charts(h);
     assert.equal(groups(due).length, 9); assert.equal(visibleCounts(due)[0], 7);
     assert.equal(groups(activity).length, 14); assert.equal(visibleCounts(activity)[0], 8);
@@ -154,7 +154,7 @@ test('missing statistics show a loading state without invented dates or counts; 
   const h = await setup();
   try {
     assert.equal(h.root.querySelector('[role=status]').hidden, false);
-    assert.match(h.root.querySelector('[role=status]').textContent, /Loading/);
+    assert.match(h.root.querySelector('[role=status]').textContent, /正在加载统计/);
     assert.deepEqual(charts(h).map(svg => groups(svg).length), [0, 0]);
     assert.deepEqual([...h.root.querySelectorAll('.fc-state-legend strong')].map(node => node.textContent), ['0', '0', '0', '0']);
     h.dashboard.update({});

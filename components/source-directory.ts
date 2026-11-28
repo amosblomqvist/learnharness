@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { OrganizationAction, SourceDirectory } from "@/src/core";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { tr } from "@/src/core";
 
 /**
  * The shared source organization (folders + placements), read and changed
@@ -27,7 +28,7 @@ export function useSourceDirectory(enabled: boolean) {
 		request.current = controller;
 		try {
 			const response = await fetch("/api/graph/sources", { cache: "no-store", signal: controller.signal });
-			if (!response.ok) throw new Error("Could not read folders.");
+			if (!response.ok) throw new Error(tr("无法读取文件夹。", "Could not read folders."));
 			const body = await response.json() as SourceDirectory;
 			if (!controller.signal.aborted && current === version.current) setDirectory(body);
 		} catch {
@@ -54,7 +55,7 @@ export function useSourceDirectory(enabled: boolean) {
 					body: JSON.stringify(action),
 				});
 				const body = await response.json() as { createdFolderId?: unknown; error?: unknown };
-				if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : "Could not save folders.");
+				if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : tr("无法保存文件夹。", "Could not save folders."));
 				// The acknowledgement describes the directory at commit time; a
 				// later window's write may already be reflected in an SSE read.
 				// Never install the POST snapshot. Reconcile with a fresh GET.
