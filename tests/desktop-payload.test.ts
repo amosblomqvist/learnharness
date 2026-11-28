@@ -74,6 +74,15 @@ function withPayload(test: (fixture: {
 	}
 }
 
+/** Mirror Turbopack's .next/node_modules/<name>-<hash> link to a traced server external. */
+function linkExternal(root: string, write: (relative: string, content?: string) => void, name: string, target: string) {
+	const traced = path.join(root, STANDALONE, "node_modules", target);
+	write(path.join(STANDALONE, "node_modules", target, "package.json"), "{}");
+	const link = path.join(root, STANDALONE, ".next", "node_modules", name);
+	fs.mkdirSync(path.dirname(link), { recursive: true });
+	fs.symlinkSync(path.relative(path.dirname(link), traced), link, "junction");
+}
+
 describe("desktop standalone payload", () => {
 	it("ships no-build examples that the fixed-dist host discovers without evaluating code", async () => {
 		const root = fs.mkdtempSync(path.join(os.tmpdir(), "lh-example-layout-"));
@@ -191,6 +200,24 @@ describe("desktop standalone payload", () => {
 				assert.match(String(result.stderr), /REFUSING/);
 			});
 		}
+	});
+
+	it("accepts external-module links to top-level packages", () => {
+		withPayload(({ root, write, run }) => {
+			linkExternal(root, write, "pdfjs-dist-29912611d2e8a9df", "pdfjs-dist");
+			linkExternal(root, write, path.join("@earendil-works", "pi-ai-5e96b54476ded9ea"), path.join("@earendil-works", "pi-ai"));
+			const result = run();
+			assert.equal(result.status, 0, String(result.stderr));
+		});
+	});
+
+	it("refuses external-module links into a nested node_modules, which Windows installers break (#897)", () => {
+		withPayload(({ root, write, run }) => {
+			linkExternal(root, write, "shiki-6e88fe9ebf9cdd7c", path.join("@streamdown", "code", "node_modules", "shiki"));
+			const result = run();
+			assert.equal(result.status, 1);
+			assert.match(String(result.stderr), /REFUSING.*shiki-6e88fe9ebf9cdd7c/);
+		});
 	});
 
 	it("refuses user data accidentally placed inside a Core plugin", () => {

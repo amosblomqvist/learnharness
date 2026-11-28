@@ -73,6 +73,7 @@
 		"react-dom": "^19.2.8",
 		"react-remove-scroll": "2.7.2",
 		"remark-breaks": "^4.0.0",
+		"shiki": "^3.23.0",
 		"streamdown": "^2.5.0",
 		"tailwind-merge": "^3.6.0",
 		"temml": "0.14.0",
