@@ -1,0 +1,30 @@
+{
+	// Codespace do learnharness ligado ao repo privado de dados
+	// (learnharness-data): chats, grafo, settings e PDFs de sources/.
+	"name": "learnharness",
+	"image": "mcr.microsoft.com/devcontainers/base:ubuntu",
+	"features": {
+		"ghcr.io/devcontainers/features/node:1": { "version": "26" }
+	},
+	"customizations": {
+		"codespaces": {
+			"repositories": {
+				"GabrielSartoriMosquer/learnharness-data": {
+					"permissions": { "contents": "write" }
+				}
+			}
+		}
+	},
+	// O seam de dados do app (config.ts): chats/, graph/ e settings.json
+	// vivem no clone do repo de dados. auth.json continua na raiz do projeto.
+	// O login do Claude Code fica em /workspaces, que sobrevive a um Rebuild.
+	"remoteEnv": {
+		"LH_DATA_DIR": "/workspaces/learnharness-data",
+		"CLAUDE_CONFIG_DIR": "/workspaces/.lh/claude"
+	},
+	"forwardPorts": [3000],
+	"postCreateCommand": "bash .devcontainer/post-create.sh",
+	// Traz o que foi salvo em outro lugar; com mudanças locais não salvas,
+	// o fast-forward falha sem tocar em nada.
+	"postStartCommand": "git -C /workspaces/learnharness-data pull --ff-only || true"
+}

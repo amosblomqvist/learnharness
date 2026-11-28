@@ -40,6 +40,7 @@ Each `chats/*.json` file is an object with:
 | `version` | Format stamp; absent means v1 |
 | `messages` | Complete stored chronological history, including custom app markers |
 | `tree` | Optional session plan: nodes, prerequisite edges, revision number |
+| `imageSnapshots` | Optional session-local learner pictures keyed by snapshot ID (SHA-256): `{mimeType, data, width, height}`, `data` base64. A `show_image` result's `details.snapshotId` references one. Readers keep ID/type/size and omit `data` |
 | `turns`, `extractions` | Parallel usage/cost-observation logs, not learner answers |
 | `settings` | Per-session model/thinking overrides, not an understanding assessment |
 

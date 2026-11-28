@@ -283,6 +283,21 @@ class SessionsTest(unittest.TestCase):
         self.assertEqual(direct.count(brief), 2)
         self.assertIn("pagesRead", direct)
 
+    def test_image_snapshot_payload_omitted_metadata_kept(self):
+        value = record(imageSnapshots={"abc": {"mimeType": "image/png", "data": "QUJD", "width": 1, "height": 1}})
+        for flags in ({}, {"include_operations": True, "include_agent_thinking": True}):
+            selected = sessions.selected_record(value, **flags)
+            text = sessions.render_markdown(selected)
+            self.assertNotIn("QUJD", text)
+            self.assertNotIn("QUJD", json.dumps(selected))
+            self.assertEqual(selected["record"]["imageSnapshots"],
+                             {"abc": {"mimeType": "image/png", "width": 1, "height": 1}})
+            for phrase in ("abc", "image/png", "width", "height"):
+                self.assertIn(phrase, text)
+            self.assertEqual(selected["omissions"], [{"source": "imageSnapshots.abc.data", "reason": sessions.PAYLOAD_REASON}])
+            self.assertEqual(selected["omitted_field_count"], 1)
+        self.assertEqual(value["imageSnapshots"]["abc"]["data"], "QUJD")
+
     def test_graph_context_compact_default_and_full_operations(self):
         context = marker("graph-context", "VERBOSE INJECTED GRAPH PREAMBLE", {
             "propositions": [{"id": "node-a", "name": "Node A", "statement": "VERBOSE GRAPH STATEMENT"},
