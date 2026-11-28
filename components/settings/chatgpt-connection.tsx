@@ -13,10 +13,10 @@ export function chatGPTNotice(web = false): string { return web ? `${CHATGPT_NOT
 export const CHATGPT_BACKGROUND_HINT = "Background work counts toward your ChatGPT plan usage.";
 const BACKGROUND_LABEL = "Allow background use for all ChatGPT accounts";
 const REVOCATION_WARNING = "Account disconnected locally. Remote revocation could not be confirmed.";
-export const CHATGPT_DISCONNECT_COPY = { title: "Disconnect account?", body: "This removes the saved account and its credentials from this device." };
+export const CHATGPT_DISCONNECT_COPY = { title: "Disconnect from LearnHarness?", body: "This removes the saved account and its credentials from this device. LearnHarness will still appear in ChatGPT until you disconnect it there." };
 const empty: ChatGPTStatus = { available: false, pending: false, allowBackgroundUse: true, activeId: null, accounts: [], error: null };
 type Account = ChatGPTStatus["accounts"][number];
-type Dialog = { kind: "connect" } | { kind: "manage"; accountId: string; account: Account; confirm?: boolean } | { kind: "warning" };
+type Dialog = { kind: "connect" } | { kind: "manage"; accountId: string; account: Account; confirm?: boolean } | { kind: "disconnected" };
 type LoginAttempt = { generation: number; dialog: Dialog; registration: string; background: boolean; backgroundDirty: boolean; pending: boolean; accountId?: string; phase: "starting" | "pending" | "consent" };
 const CONTROL_ERROR = "The ChatGPT connection could not be changed. Try again.";
 function isStatus(value: unknown): value is ChatGPTStatus {
@@ -139,8 +139,10 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 
 	const managed = dialog?.kind === "manage" ? status.accounts.find((a) => a.id === dialog.accountId) ?? dialog.account : undefined;
 	const managedPresent = !!managed && status.accounts.some((a) => a.id === managed.id);
-	const visibleError = error || (status.error !== dismissedError ? status.error : null) || status.catalogError || null;
+	const statusError = status.error !== dismissedError ? status.error : null;
+	const visibleError = error || statusError || status.catalogError || null;
 	const warning = visibleError === REVOCATION_WARNING ? visibleError : null;
+	const resultError = [error, statusError, status.catalogError].find((message) => message && message !== REVOCATION_WARNING) ?? null;
 	function openConnect(accountId = "") {
 		if (operation.current) return;
 		setBackground(statusRef.current.allowBackgroundUse);
@@ -153,6 +155,13 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 	function close(): CloseOutcome {
 		if (operation.current === "disconnect" || operation.current === "change" || operation.current === "cancel") return "blocked";
 		const current = dialogRef.current;
+		if (current?.kind === "disconnected") {
+			// This informational result owns neither a later login nor its errors.
+			showDialog(null);
+			setError((message) => message === REVOCATION_WARNING ? null : message);
+			setDismissedError(REVOCATION_WARNING);
+			return "closed";
+		}
 		if (current?.kind === "manage" && current.confirm) { showDialog({ ...current, confirm: false }); setError(null); return "handled-without-close"; }
 		const cancel = loginAttempt.current !== null || statusRef.current.pending;
 		const intent = ++generation.current;
@@ -211,8 +220,8 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 			const failure = [value.error, next.error].find((message) => message && (kind === "disconnect" || message !== dismissedError)) ?? null;
 			if (kind === "disconnect" && !next.accounts.some((a) => a.id === target)) {
 				if (dialogRef.current === owner) {
-					if (failure === REVOCATION_WARNING) showDialog({ kind: "warning" });
-					else if (!failure) showDialog(null);
+					// Session revocation does not delete the app's ChatGPT registration.
+					if (!failure || failure === REVOCATION_WARNING) showDialog({ kind: "disconnected" });
 				}
 				setError(failure);
 			} else setError(failure || (kind === "disconnect" ? CONTROL_ERROR : null));
@@ -247,7 +256,7 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		// completion, failure, or explicit cancellation releases the attempt.
 	}
 	const context = {
-		status, busy, error: warning ? null : visibleError, inlineError: dialog || warning ? null : visibleError, warning: dialog?.kind === "warning" ? null : warning,
+		status, busy, error: warning ? null : visibleError, inlineError: dialog || warning ? null : visibleError, warning: dialog?.kind === "disconnected" ? null : warning,
 		connect: openConnect,
 		manage: (id: string) => {
 			const account = statusRef.current.accounts.find((a) => a.id === id);
@@ -260,17 +269,21 @@ export function ChatGPTUIProvider({ children }: { children: React.ReactNode }) {
 		{children}
 		{dialog && <AccountDialog key={`${dialog.kind}:${dialog.kind === "manage" && !!dialog.confirm}`} onClose={close} busy={busy && operation.current !== "login"}>
 			<h2 className="text-sm font-semibold text-foreground">ChatGPT</h2>
-			{dialog.kind === "warning" ? <>
-				<p role="alert" className="rounded-sm border border-border px-3 py-2 text-xs text-foreground" data-testid="chatgpt-revocation-warning">{REVOCATION_WARNING}</p>
-				<div className="mt-4 flex justify-end"><Button variant="outline" size="sm" onClick={() => { context.dismissWarning(); showDialog(null); }}>Dismiss</Button></div>
-			</> : dialog.kind === "manage" && dialog.confirm ? <div data-testid="chatgpt-disconnect-confirmation">
+			{dialog.kind === "disconnected" ? <div data-testid="chatgpt-disconnect-result">
+				<p className="mt-3 text-sm font-semibold text-foreground">Disconnected from LearnHarness.</p>
+				{warning && <p role="alert" className="mt-3 rounded-sm border border-border px-3 py-2 text-xs text-foreground" data-testid="chatgpt-revocation-warning">{warning}</p>}
+				{resultError && <p role="alert" className="mt-3 text-xs text-error">{resultError}</p>}
+				<p className="mt-3 text-xs leading-relaxed text-muted-foreground">To remove LearnHarness from ChatGPT, use the matching ChatGPT account and go to <span className="text-foreground">Settings → Security and login → Sign in with ChatGPT</span>, then choose the LearnHarness connection and confirm Disconnect again.</p>
+				<div className="mt-3 text-xs"><a href="https://chatgpt.com/" target="_blank" rel="noreferrer" className="underline underline-offset-2">Open ChatGPT</a></div>
+				<div className="mt-4 flex justify-end"><Button variant="outline" size="sm" onClick={close}>Dismiss</Button></div>
+			</div> : dialog.kind === "manage" && dialog.confirm ? <div data-testid="chatgpt-disconnect-confirmation">
 				<p className="mt-3 text-sm font-semibold text-error">{CHATGPT_DISCONNECT_COPY.title}</p>
 				<p className="mt-3 text-xs text-foreground">{managed?.email || "ChatGPT account"}</p>
 				<p className="mt-3 text-xs text-muted-foreground">{web ? CHATGPT_DISCONNECT_COPY.body.replace("from this device", "from the machine running LearnHarness") : CHATGPT_DISCONNECT_COPY.body}</p>
 				{context.error && <p role="alert" className="mt-3 text-xs text-error">{context.error}</p>}
 				<div className="mt-4 flex items-center justify-end gap-2">
 					<Button variant="ghost" size="sm" disabled={busy} onClick={close}>Cancel</Button>
-					<Button variant="destructive" size="sm" data-testid="chatgpt-confirm-disconnect" disabled={busy || !managedPresent} onClick={() => bridge && managed && void control("disconnect", () => bridge.disconnect(managed.id), managed.id)}>Disconnect account</Button>
+					<Button variant="destructive" size="sm" data-testid="chatgpt-confirm-disconnect" disabled={busy || !managedPresent} onClick={() => bridge && managed && void control("disconnect", () => bridge.disconnect(managed.id), managed.id)}>Disconnect from LearnHarness</Button>
 				</div>
 			</div> : <>
 				{dialog.kind === "connect" ? <>
