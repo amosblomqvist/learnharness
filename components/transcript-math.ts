@@ -40,10 +40,19 @@ const htmlWithSource: Plugin<[], Root> = function () {
 		for (const { parent, index, tex } of sources) {
 			const result = parent.children[index];
 			if (result?.type !== "element") continue;
+			if (hasClass(result, "katex") || hasClass(result, "katex-display") || hasClass(result, "katex-error")) {
+				// Explicit DOM `dir="ltr"` both isolates KaTeX layout from RTL
+				// blocks and instructs HTML's `dir="auto"` scan to skip formula
+				// tokens when determining a paragraph's base direction.
+				result.properties.dir = "ltr";
+			}
 			const formula = hasClass(result, "katex-display")
 				? result.children.find((child): child is Element => child.type === "element" && hasClass(child, "katex"))
 				: result;
-			if (formula && hasClass(formula, "katex")) formula.properties.dataTex = tex;
+			if (formula && hasClass(formula, "katex")) {
+				formula.properties.dataTex = tex;
+				formula.properties.dir = "ltr";
+			}
 		}
 	};
 };

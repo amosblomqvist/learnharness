@@ -47,12 +47,12 @@ export interface SideThreadHandlers {
 }
 function Passage({ text, chatId, sourceMessageId, selector, citation: savedCitation }: { text: string; chatId?: string; sourceMessageId?: string; selector?: Omit<TextSelector, "text">; citation?: TutorCitation }) {
 	const actions = useContext(CitationActionsContext);
-	const quote = <blockquote className="line-clamp-3 border-l-2 border-border pl-2 text-xs italic text-muted-foreground">{text}</blockquote>;
+	const quote = <blockquote dir="auto" className="line-clamp-3 border-s-2 border-border ps-2 text-xs italic text-muted-foreground">{text}</blockquote>;
 	if (!actions?.openSource || (!savedCitation && (!chatId || !sourceMessageId))) return quote;
 	const citation: TutorCitation = savedCitation ?? { version: 1, chatId: chatId!, messageId: sourceMessageId!, text,
 		...(selector ?? { start: 0, end: text.length, prefix: "", suffix: "" }) };
 	return <button type="button" data-testid="side-passage-link" aria-label="Show the quoted tutor text" title="Show in the lesson"
-		className="cursor-pointer rounded-sm text-left hover:bg-accent/50" onClick={(event) => actions.openSource!(citation, event.currentTarget)}>{quote}</button>;
+		className="cursor-pointer rounded-sm text-start hover:bg-accent/50" onClick={(event) => actions.openSource!(citation, event.currentTarget)}>{quote}</button>;
 }
 
 /** Sample locally: microphone frames must not rerender the chat/composer. */
@@ -130,7 +130,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				{state.messages.map((message) => (
 					<div key={message.id} data-testid={message.role === "user" ? "side-learner-message" : "side-helper-message"} className={message.role === "user" ? "ml-auto flex w-fit max-w-[70%] flex-col gap-1.5 rounded-xl bg-muted px-3 py-2 text-sm [overflow-wrap:anywhere]" : "flex flex-col gap-1.5 text-sm"}>
 						{message.quotes?.map((quote, index) => <Passage key={index} text={quote} citation={collectCitations(message.quoteCitations?.[index] ?? "")[0]?.citation} />)}
-						{message.role === "user" ? <p className="whitespace-pre-wrap font-medium">{message.text}</p> : <MessageResponse>{message.text}</MessageResponse>}
+						{message.role === "user" ? <p dir="auto" className="whitespace-pre-wrap font-medium">{message.text}</p> : <MessageResponse>{message.text}</MessageResponse>}
 						{message.stopped && <span className="font-ui text-xs text-muted-foreground">Stopped</span>}
 						{message.error && <span role="alert" className="text-xs text-destructive">{message.error}</span>}
 					</div>

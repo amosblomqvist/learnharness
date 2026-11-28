@@ -42,7 +42,7 @@ export function GraphContextCard({ data }: { data: GraphContextData }) {
 			{open && (
 				<div data-testid="graph-context-body" className="mt-1 space-y-1 rounded-lg border border-dashed border-border/70 px-4 py-3 text-xs">
 					{propositions.map((p) => (
-						<div key={p.id} data-testid={`graph-context-prop-${p.id}`} className="leading-relaxed">
+						<div key={p.id} dir="auto" data-testid={`graph-context-prop-${p.id}`} className="leading-relaxed">
 							<span className="font-medium text-foreground/80">{p.name}</span>
 							<span className="text-muted-foreground"> — {p.statement}</span>
 						</div>

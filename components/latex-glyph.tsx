@@ -42,6 +42,7 @@ export function LatexGlyph({
 }) {
 	return (
 		<span
+			dir="ltr"
 			data-testid={testid}
 			aria-hidden="true"
 			className={className}

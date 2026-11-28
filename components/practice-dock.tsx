@@ -132,7 +132,7 @@ export function PracticeDock({ viewReader, problemCallId, input, expanded, onExp
 			>
 				<ChevronRightIcon className="size-4 shrink-0 rotate-90" />
 				<span className="font-medium">Problem</span>
-				<span className="min-w-0 flex-1 truncate">{input.statement}</span>
+				<span dir="auto" className="min-w-0 flex-1 truncate">{input.statement}</span>
 			</button>
 		);
 	if (!expanded && !customInput) return bar;
