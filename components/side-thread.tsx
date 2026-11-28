@@ -14,6 +14,7 @@ import type { SelectionAction } from "./selection-toolbar";
 import type { SideThreadAnchor, SideThreadOpenArgs, SideThreadState } from "./use-side-thread";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { learningRequest } from "@/src/core";
 
 /** Ask always opens the selected teaching segment's ONE conversation. Cite
  * is an independent action that inserts a chip into the main/thinking field. */
@@ -31,6 +32,7 @@ export function createSideQuestionActions({ open }: { open: (args: SideThreadOpe
 	}];
 }
 export function sideThreadPlaceholder(state: SideThreadState): string {
+	if (state.learningMode === "feynman") return "Explain the idea in your own words…";
 	return state.pendingPassage ? "Ask about this passage…" : state.messages.length ? "Ask a follow-up…" : "Ask a side question…";
 }
 export interface SideThreadHandlers {
@@ -119,7 +121,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				data-testid="side-thread-header" onPointerDown={onDragStart}>
 				{onDragStart && <GripVertical aria-hidden="true" className="-ml-1 size-3.5 text-muted-foreground" />}
 				<MessageCircleQuestion aria-hidden="true" className="size-3.5 text-muted-foreground" />
-				<span className="flex-1 font-ui text-xs text-muted-foreground">Side question</span>
+				<span className="flex-1 font-ui text-xs text-muted-foreground">{state.learningMode === "feynman" ? "Feynman practice: one question at a time" : "Side question"}</span>
 				<Button type="button" size="icon-xs" variant="ghost" aria-label={state.mode === "popover" ? "Dock side conversation" : "Float side conversation"}
 					title={state.mode === "popover" ? "Pin to side" : "Unpin to float"} onClick={state.mode === "popover" ? onExpand : onFloat}>
 					{state.mode === "popover" ? <Pin aria-hidden="true" /> : <PinOff aria-hidden="true" />}
@@ -152,7 +154,7 @@ export function SideThreadBody({ state, chatId, draft, readDraft, dictation, onD
 				<div className="flex items-end gap-1.5">
 					<div data-testid="side-composer-surface" className="relative min-w-0 flex-1 rounded-[10px] border bg-card focus-within:border-primary/50">
 					<Textarea ref={inputRef} aria-label="Side question" data-testid="side-thread-input" className="min-h-9 resize-none border-0 bg-transparent pr-14 font-prose text-sm shadow-none focus-visible:ring-0 dark:bg-transparent" rows={1}
-						value={question} maxLength={SIDE_QUESTION_MAX_CHARS} placeholder={sideThreadPlaceholder(state)} onChange={(event) => changeDraft(event.target.value)}
+						value={question} maxLength={SIDE_QUESTION_MAX_CHARS - learningRequest("", state.learningMode).length} placeholder={sideThreadPlaceholder(state)} onChange={(event) => changeDraft(event.target.value)}
 						onKeyDown={(event) => {
 							if (event.nativeEvent.isComposing || !isInteractionScopeEligible(inputRef.current, controller)) return;
 							if (event.key === "Enter" && (!event.shiftKey || event.metaKey || event.ctrlKey)) { event.preventDefault(); event.stopPropagation(); void submit(); }
