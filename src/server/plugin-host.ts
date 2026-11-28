@@ -15,6 +15,7 @@ import type { PluginAgentService } from "../core/plugin-agents.ts";
 import type { PluginWorkerService } from "../core/plugin-workers.ts";
 import type { ServerEvent } from "../core/events.ts";
 import { safePluginDataDirectory } from "../store/plugin-data-paths.ts";
+import { tr } from "../core/i18n.ts";
 
 /** Expected host/transport failure. Exceptions thrown by plugin handlers stay ordinary 500 errors. */
 export class PluginHostError extends Error {
@@ -107,12 +108,12 @@ const safeSegment = (p: string) => /^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(p);
 
 function readState(filename: string): State {
 	if (!exists(filename)) return { version: 1, enabled: Object.create(null) };
-	if (!fs.lstatSync(filename).isFile() || fs.lstatSync(filename).isSymbolicLink()) throw new Error("Unsafe plugins-state.json");
+	if (!fs.lstatSync(filename).isFile() || fs.lstatSync(filename).isSymbolicLink()) throw new Error(tr("plugins-state.json 不安全", "Unsafe plugins-state.json"));
 	const value: unknown = JSON.parse(fs.readFileSync(/* turbopackIgnore: true */ filename, "utf8"));
-	if (!object(value) || value.version !== 1 || !object(value.enabled)) throw new Error("Invalid or unsupported plugins-state.json");
+	if (!object(value) || value.version !== 1 || !object(value.enabled)) throw new Error(tr("plugins-state.json 无效或不受支持", "Invalid or unsupported plugins-state.json"));
 	const enabled: Record<string, boolean> = Object.create(null);
 	for (const [id, flag] of Object.entries(value.enabled)) {
-		if (!PLUGIN_ID_PATTERN.test(id) || typeof flag !== "boolean") throw new Error("Invalid plugins-state.json enabled entry");
+		if (!PLUGIN_ID_PATTERN.test(id) || typeof flag !== "boolean") throw new Error(tr("plugins-state.json 中的 enabled 条目无效", "Invalid plugins-state.json enabled entry"));
 		enabled[id] = flag;
 	}
 	return { version: 1, enabled };
@@ -127,27 +128,27 @@ function writeState(filename: string, state: State): void {
 }
 function regularFile(root: string, relative: string): string {
 	const segments = relative.split("/");
-	if (!segments.every(safeSegment)) throw new Error("Invalid plugin file path");
+	if (!segments.every(safeSegment)) throw new Error(tr("无效的插件文件路径", "Invalid plugin file path"));
 	let current = root;
-	if (!fs.lstatSync(root).isDirectory() || fs.lstatSync(root).isSymbolicLink()) throw new Error("Unsafe plugin directory");
+	if (!fs.lstatSync(root).isDirectory() || fs.lstatSync(root).isSymbolicLink()) throw new Error(tr("插件目录不安全", "Unsafe plugin directory"));
 	const realRoot = fs.realpathSync(/* turbopackIgnore: true */ root);
 	for (let i = 0; i < segments.length; i++) {
 		current = path.join(current, segments[i]!);
 		const stat = fs.lstatSync(current);
-		if (stat.isSymbolicLink() || (i === segments.length - 1 ? !stat.isFile() : !stat.isDirectory())) throw new Error("Symlinks and non-files are not plugin assets");
+		if (stat.isSymbolicLink() || (i === segments.length - 1 ? !stat.isFile() : !stat.isDirectory())) throw new Error(tr("符号链接和非文件不能作为插件资源", "Symlinks and non-files are not plugin assets"));
 		const real = fs.realpathSync(/* turbopackIgnore: true */ current);
-		if (!real.startsWith(realRoot + path.sep)) throw new Error("Plugin file escapes its package");
+		if (!real.startsWith(realRoot + path.sep)) throw new Error(tr("插件文件超出了其所在包的范围", "Plugin file escapes its package"));
 	}
 	return current;
 }
 function pluginRoot(directory: string): void {
 	const stat = fs.lstatSync(directory);
-	if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error("Unsafe plugin directory");
+	if (!stat.isDirectory() || stat.isSymbolicLink()) throw new Error(tr("插件目录不安全", "Unsafe plugin directory"));
 }
 function snapshot(rootDirectory: string, id: string, appVersion: string, origin: "core" | "community"): Package {
 	pluginRoot(rootDirectory);
 	const directory = origin === "core" ? rootDirectory : path.join(/* turbopackIgnore: true */ rootDirectory, "dist");
-	if (!exists(directory)) throw new Error("Missing plugin build: expected dist/manifest.json. Build the plugin into dist/ or install a built package there.");
+	if (!exists(directory)) throw new Error(tr("缺少插件构建产物：未找到 dist/manifest.json。请将插件构建到 dist/，或在该处安装已构建的包。", "Missing plugin build: expected dist/manifest.json. Build the plugin into dist/ or install a built package there."));
 	pluginRoot(directory);
 	const files = new Map<string, Buffer>();
 	const manifestBytes = fs.readFileSync(/* turbopackIgnore: true */ regularFile(directory, "manifest.json"));
@@ -157,15 +158,15 @@ function snapshot(rootDirectory: string, id: string, appVersion: string, origin:
 			if (!safeSegment(name) || (!relative && name === "data")) continue;
 			const file = relative ? `${relative}/${name}` : name;
 			const stat = fs.lstatSync(path.join(directory, file));
-			if (stat.isSymbolicLink()) throw new Error(`Symlinks are not allowed in plugin package files: ${file}`);
+			if (stat.isSymbolicLink()) throw new Error(tr(`插件包文件中不允许使用符号链接：${file}`, `Symlinks are not allowed in plugin package files: ${file}`));
 			if (stat.isDirectory()) {
 				if (file === "assets" || file.startsWith("assets/")) collect(file);
 			} else if (stat.isFile()) files.set(file, fs.readFileSync(/* turbopackIgnore: true */ regularFile(directory, file)));
-			else throw new Error(`Invalid plugin file: ${file}`);
+			else throw new Error(tr(`无效的插件文件：${file}`, `Invalid plugin file: ${file}`));
 		}
 	}
 	collect("");
-	for (const entry of [manifest.main, manifest.backend, manifest.styles]) if (entry && !files.has(entry)) throw new Error(`Missing plugin entry: ${entry}`);
+	for (const entry of [manifest.main, manifest.backend, manifest.styles]) if (entry && !files.has(entry)) throw new Error(tr(`缺少插件入口文件：${entry}`, `Missing plugin entry: ${entry}`));
 	const hash = createHash("sha256");
 	for (const [file, bytes] of files) { hash.update(`${file.length}:${file}:${bytes.length}:`); hash.update(bytes); }
 	return { rootDirectory, directory, files, info: { id, origin, manifest, enabled: false, status: "disabled", revision: hash.digest("hex") } };
@@ -203,7 +204,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 	const enqueue = <T>(fn: () => Promise<T>): Promise<T> => {
 		const result = serial.then(fn); serial = result.catch(() => {}); return result;
 	};
-	const get = (id: string) => { const pkg = packages.get(id); if (!pkg) throw new PluginHostError(404, `Unknown plugin: ${id}`); return pkg; };
+	const get = (id: string) => { const pkg = packages.get(id); if (!pkg) throw new PluginHostError(404, tr(`未知插件：${id}`, `Unknown plugin: ${id}`)); return pkg; };
 	const live = (pkg: Package, activation: Activation) => !disposed && pkg.activation === activation && !activation.controller.signal.aborted;
 
 	async function deactivate(pkg: Package): Promise<string[]> {
@@ -330,7 +331,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					const nativeRequire = createRequire(sidecar);
 					const loader = nativeRequire(sidecar) as { load(filename: string): PluginBackendModule };
 					pkg.backend = loader.load(entry);
-					if (!pkg.backend || typeof pkg.backend.activate !== "function") throw new Error("Plugin backend must export activate(context)");
+					if (!pkg.backend || typeof pkg.backend.activate !== "function") throw new Error(tr("插件后端必须导出 activate(context)", "Plugin backend must export activate(context)"));
 				}
 				const returned = await pkg.backend.activate(ctx);
 				if (returned !== undefined) cleanup(returned);
@@ -343,7 +344,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		} catch (e) {
 			const failures = await deactivate(pkg);
 			pkg.info.status = "error";
-			pkg.info.error = [errorText(e), ...failures.map(f => `Cleanup: ${f}`)].join("; ");
+			pkg.info.error = [errorText(e), ...failures.map(f => tr(`清理：${f}`, `Cleanup: ${f}`))].join("; ");
 		}
 	}
 
@@ -354,14 +355,14 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			const stat = fs.lstatSync(path.join(/* turbopackIgnore: true */ directory, id));
 			return stat.isDirectory() || stat.isSymbolicLink();
 		});
-		conflicts = communityIds.filter(id => coreIds.has(id)).sort().map(id => ({ id, error: `Community package ${id} was skipped: this ID is reserved for a Core plugin. Its files were not changed.` }));
+		conflicts = communityIds.filter(id => coreIds.has(id)).sort().map(id => ({ id, error: tr(`已跳过社区插件包 ${id}：此 ID 为核心插件保留。其文件未被更改。`, `Community package ${id} was skipped: this ID is reserved for a Core plugin. Its files were not changed.`) }));
 		const ids = new Set([...communityIds.filter(id => !coreIds.has(id)), ...coreIds, ...Object.keys(installationErrors)]);
 		for (const id of [...ids].sort()) {
 			const origin = coreIds.has(id) ? "core" : "community";
 			const root = path.join(/* turbopackIgnore: true */ origin === "core" ? core!.directory : directory, id);
 			let candidate: Package;
 			try {
-				if (failed(id)) throw new Error(`Plugin startup failed: ${installationErrors[id]}`);
+				if (failed(id)) throw new Error(tr(`插件启动失败：${installationErrors[id]}`, `Plugin startup failed: ${installationErrors[id]}`));
 				if (origin === "core") pluginRoot(core!.directory);
 				candidate = snapshot(root, id, deps.appVersion, origin);
 			} catch (e) {
@@ -375,7 +376,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					await deactivate(current); current.blocked = true; current.info.status = "error";
 					current.info.error = candidate.info.error;
 				} else if (candidate.info.revision !== current.info.revision || candidate.info.error !== undefined) {
-					current.restart = `Restart required: plugin package changed${candidate.info.error ? ` (${candidate.info.error})` : ""}`;
+					current.restart = tr(`需要重启：插件包已更改${candidate.info.error ? `（${candidate.info.error}）` : ""}`, `Restart required: plugin package changed${candidate.info.error ? ` (${candidate.info.error})` : ""}`);
 					current.info.error = [current.restart, current.contributionWarning].filter(Boolean).join("; ");
 				}
 				continue;
@@ -385,7 +386,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			if (candidate.info.enabled && !candidate.blocked) await activate(candidate);
 		}
 		for (const [id, pkg] of packages) if (!ids.has(id)) {
-			pkg.restart = "Restart required: plugin package removed";
+			pkg.restart = tr("需要重启：插件包已移除", "Restart required: plugin package removed");
 			pkg.info.error = [pkg.restart, pkg.contributionWarning].filter(Boolean).join("; ");
 		}
 	}
@@ -394,7 +395,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		if (initialized) return;
 		const state = readState(stateFile); // Never hide corrupt/future state or execute code first.
 		fs.mkdirSync(directory, { recursive: true });
-		if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new Error("Unsafe plugins directory");
+		if (!fs.lstatSync(directory).isDirectory() || fs.lstatSync(directory).isSymbolicLink()) throw new Error(tr("插件文件夹不安全", "Unsafe plugins directory"));
 		await discover(state);
 		initialized = true; change();
 	}
@@ -496,7 +497,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 				}
 			} catch (e) {
 				if (!live(pkg, activation)) continue;
-				const warning = `Agent contributions (${turn.agent}): ${errorText(e)}`;
+				const warning = tr(`智能体扩展（${turn.agent}）：${errorText(e)}`, `Agent contributions (${turn.agent}): ${errorText(e)}`);
 				if (pkg.contributionWarning !== warning) {
 					pkg.contributionWarning = warning;
 					pkg.info.error = [pkg.restart, warning].filter(Boolean).join("; ");
@@ -551,7 +552,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 			}
 			return enqueue(async () => {
 				assertOpen(); await initializeInternal();
-				if (!PLUGIN_ID_PATTERN.test(id) || typeof enabled !== "boolean") throw new PluginHostError(400, "Invalid plugin enable request");
+				if (!PLUGIN_ID_PATTERN.test(id) || typeof enabled !== "boolean") throw new PluginHostError(400, tr("无效的插件启用请求", "Invalid plugin enable request"));
 				const pkg = get(id);
 				const state = readState(stateFile); // Recheck before overwriting externally changed state.
 				state.enabled[id] = enabled; writeState(stateFile, state);
@@ -561,7 +562,7 @@ export function createPluginHost(deps: PluginHostDependencies) {
 					delete pkg.contributionWarning;
 					const failures = await deactivate(pkg);
 					pkg.info.status = failures.length || pkg.blocked ? "error" : "disabled";
-					pkg.info.error = failures.length ? `Cleanup: ${failures.join("; ")}` : pkg.restart ?? (pkg.blocked ? pkg.info.error : undefined);
+					pkg.info.error = failures.length ? tr(`清理：${failures.join("; ")}`, `Cleanup: ${failures.join("; ")}`) : pkg.restart ?? (pkg.blocked ? pkg.info.error : undefined);
 				} else {
 					// Discover edits BEFORE first native evaluation or reactivation.
 					await discover(state);
@@ -574,23 +575,23 @@ export function createPluginHost(deps: PluginHostDependencies) {
 		async call(id: string, operation: string, input?: unknown): Promise<unknown> {
 			assertOpen();
 			const pkg = get(id), activation = pkg.activation;
-			if (!pkg.info.enabled || !activation?.ready || !live(pkg, activation)) throw new PluginHostError(409, "Plugin is disabled or unavailable");
-			if (!operationId.test(operation)) throw new PluginHostError(400, "Invalid plugin operation id");
+			if (!pkg.info.enabled || !activation?.ready || !live(pkg, activation)) throw new PluginHostError(409, tr("插件已停用或不可用", "Plugin is disabled or unavailable"));
+			if (!operationId.test(operation)) throw new PluginHostError(400, tr("无效的插件操作 ID", "Invalid plugin operation id"));
 			const handler = activation.handlers.get(operation);
-			if (!handler) throw new PluginHostError(404, `Unknown plugin operation: ${operation}`);
+			if (!handler) throw new PluginHostError(404, tr(`未知的插件操作：${operation}`, `Unknown plugin operation: ${operation}`));
 			return handler(input);
 		},
 		async convertDocument(id: string, request: Request): ReturnType<PluginFrontendContext["documents"]["toMarkdown"]> {
 			assertOpen();
 			const pkg = get(id), activation = pkg.activation;
-			if (!pkg.info.enabled || !activation?.ready || !live(pkg, activation)) throw new PluginHostError(409, "Plugin is disabled or unavailable");
+			if (!pkg.info.enabled || !activation?.ready || !live(pkg, activation)) throw new PluginHostError(409, tr("插件已停用或不可用", "Plugin is disabled or unavailable"));
 			const requireCurrent = () => {
 				assertOpen();
-				if (!pkg.info.enabled || !activation.ready || !live(pkg, activation)) throw new PluginHostError(409, "Plugin is disabled or unavailable");
-				if (request.signal.aborted) throw new PluginHostError(409, "Document conversion was cancelled");
+				if (!pkg.info.enabled || !activation.ready || !live(pkg, activation)) throw new PluginHostError(409, tr("插件已停用或不可用", "Plugin is disabled or unavailable"));
+				if (request.signal.aborted) throw new PluginHostError(409, tr("文档转换已取消", "Document conversion was cancelled"));
 			};
 			requireCurrent();
-			if (!deps.convertDocument) throw new PluginHostError(503, "Document conversion is unavailable");
+			if (!deps.convertDocument) throw new PluginHostError(503, tr("文档转换不可用", "Document conversion is unavailable"));
 			const signal = AbortSignal.any([activation.controller.signal, request.signal]);
 			try {
 				const result = await deps.convertDocument(request, signal);

@@ -6,6 +6,7 @@ import type {
 
 import { preparePluginShortcut, copyPluginSubmissionTarget, preparePluginSubmissionInterceptor, type PluginSubmissionInterceptor, type PluginSubmissionTarget } from "../src/core/index.ts";
 import { orderSubmissionInterceptors, type SubmissionInterceptorRegistration } from "./plugin-submission-runner.ts";
+import { tr } from "@/src/core";
 
 export type PluginMount = (container: HTMLElement, signal: AbortSignal) => ReturnType<PluginView["mount"]>;
 export interface PluginRendererRegistration<T> {
@@ -224,7 +225,7 @@ export class PluginFrontendManager {
 	private async json(url: string, init?: RequestInit): Promise<unknown> {
 		const response = await this.host.fetch(url, init);
 		const body = await response.json();
-		if (!response.ok) throw new Error((body as { error?: string }).error ?? `Request failed (${response.status})`);
+		if (!response.ok) throw new Error((body as { error?: string }).error ?? tr(`请求失败（${response.status}）`, `Request failed (${response.status})`));
 		return body;
 	}
 	async reload(clearError = true) {
@@ -472,7 +473,7 @@ export class PluginFrontendManager {
 		};
 		try {
 			if (manifest.styles && this.host.style) {
-				this.addCleanup(life, this.host.style(pluginAssetUrl(info, manifest.styles), () => this.report(life, new Error("Plugin stylesheet could not be loaded"))));
+				this.addCleanup(life, this.host.style(pluginAssetUrl(info, manifest.styles), () => this.report(life, new Error(tr("插件样式表加载失败", "Plugin stylesheet could not be loaded")))));
 			}
 			const frontend = await this.host.importModule(pluginAssetUrl(info, manifest.main!));
 			if (!this.current(life)) return;

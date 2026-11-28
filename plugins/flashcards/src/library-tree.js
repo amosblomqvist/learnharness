@@ -1,4 +1,5 @@
 // Plugin-owned data/actions inside the shared native tree. No host implementation imports.
+import { tr } from "./i18n.js";
 const el = (tag, className, text) => {
   const node = document.createElement(tag);
   if (className) node.className = className;
@@ -43,14 +44,14 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
   const run = action => async () => { try { await action(); } catch (error) { if (live()) onError(error instanceof Error ? error.message : String(error)); } };
   function rowSelection(tokens, label) {
     const count = tokens.filter(key => selected.has(key)).length;
-    return { label: `Select ${label}`, checked: count === tokens.length, indeterminate: count > 0 && count < tokens.length, onChange(value) {
+    return { label: tr(`选择 ${label}`, `Select ${label}`), checked: count === tokens.length, indeterminate: count > 0 && count < tokens.length, onChange(value) {
       if (!live()) return;
       for (const token of tokens) { if (value) selected.add(token); else selected.delete(token); }
       render();
     } };
   }
   function disclosure(key, label) {
-    return { label: `Toggle ${label}`, expanded: expanded.has(key) || !!query, onChange(value) {
+    return { label: tr(`展开/折叠 ${label}`, `Toggle ${label}`), expanded: expanded.has(key) || !!query, onChange(value) {
       if (!live()) return;
       if (value) expanded.add(key); else expanded.delete(key);
       // Explicit folds during search should not instantly reopen themselves.
@@ -63,13 +64,13 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
     const { kind, deck, p, cue, archive } = record;
     if (archive) return [];
     const items = kind === 'deck' ? [
-      { key: 'settings', label: 'Deck settings', onSelect: run(() => onDeckSettings(record.deck)) },
+      { key: 'settings', label: tr('卡组设置', 'Deck settings'), onSelect: run(() => onDeckSettings(record.deck)) },
     ]
-      : kind === 'proposition' ? [{ key: 'memberships', label: 'Decks…', onSelect: run(() => onMemberships(record.p)) }]
-      : [{ key: 'edit', label: 'Edit', onSelect: run(() => onEdit(record.p, record.cue)) }, { key: 'delete', label: 'Delete', disabled: ['running', 'cancelling'].includes(state.batch?.status), onSelect: run(() => onDelete(record.p, record.cue)) }];
+      : kind === 'proposition' ? [{ key: 'memberships', label: tr('卡组…', 'Decks…'), onSelect: run(() => onMemberships(record.p)) }]
+      : [{ key: 'edit', label: tr('编辑', 'Edit'), onSelect: run(() => onEdit(record.p, record.cue)) }, { key: 'delete', label: tr('删除', 'Delete'), disabled: ['running', 'cancelling'].includes(state.batch?.status), onSelect: run(() => onDelete(record.p, record.cue)) }];
     const ids = kind === 'deck' ? state.decks.map(d => d.id) : kind === 'proposition' ? deck.propositionIds.filter(id => state.propositions.some(p => p.id === id && !p.archived)) : p.cues.filter(c => !c.deleted).map(c => c.id);
     const id = kind === 'deck' ? deck.id : kind === 'proposition' ? p.id : cue.id;
-    for (const direction of [-1, 1]) items.push({ key: direction === -1 ? 'up' : 'down', label: direction === -1 ? 'Move up' : 'Move down', disabled: !!query || ids.indexOf(id) + direction < 0 || ids.indexOf(id) + direction >= ids.length, onSelect: run(() => onReorder({ kind, id, ...(kind === 'proposition' ? { deckId: deck.id } : kind === 'cue' ? { propositionId: p.id } : {}), direction })) });
+    for (const direction of [-1, 1]) items.push({ key: direction === -1 ? 'up' : 'down', label: direction === -1 ? tr('上移', 'Move up') : tr('下移', 'Move down'), disabled: !!query || ids.indexOf(id) + direction < 0 || ids.indexOf(id) + direction >= ids.length, onSelect: run(() => onReorder({ kind, id, ...(kind === 'proposition' ? { deckId: deck.id } : kind === 'cue' ? { propositionId: p.id } : {}), direction })) });
     return items;
   }
   function content(key) {
@@ -89,7 +90,7 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
       if (record.kind === 'deck') {
         if (!drafts.has(record.deck.id)) drafts.set(record.deck.id, { editing: false, value: '', saving: false, error: '' });
         draft = drafts.get(record.deck.id);
-        input = el('input', 'fc-tree-rename'); input.type = 'text'; input.setAttribute('aria-label', 'Deck name');
+        input = el('input', 'fc-tree-rename'); input.type = 'text'; input.setAttribute('aria-label', tr('卡组名称', 'Deck name'));
         error = el('span', 'fc-tree-rename-error'); error.setAttribute('role', 'alert');
         const commit = async () => {
           if (!live() || mountSignal.aborted || !draft.editing || draft.saving) return;
@@ -109,24 +110,24 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
           if (event.key === 'Enter') { event.preventDefault(); event.stopPropagation(); void commit(); }
         }, { signal: mountSignal });
         labelSlot.append(error);
-        button(root, 'Review', run(() => onReview({ deckIds: [record.deck.id] })), mountSignal, { size: 'xs', variant: 'outline' });
+        button(root, tr('复习', 'Review'), run(() => onReview({ deckIds: [record.deck.id] })), mountSignal, { size: 'xs', variant: 'outline' });
       } else if (record.kind === 'cue') {
         label.addEventListener('click', event => { event.stopPropagation(); onPreview(record.p, record.cue, record.archive); }, { signal: mountSignal });
       }
       if (!record.archive && record.kind !== 'archive') {
         const more = el('span', 'fc-tree-more'); root.append(more);
         if (record.kind === 'deck' || record.kind === 'proposition') {
-          const label = record.kind === 'deck' ? 'Create card' : 'Add cue';
+          const label = record.kind === 'deck' ? tr('新建卡片', 'Create card') : tr('添加提示语', 'Add cue');
           button(more, label, run(() => record.kind === 'deck' ? onCreateCard(record.deck) : onCreateCue(record.p, record.deck)), mountSignal, { icon: plusIcon, iconOnly: true, size: 'icon-sm', variant: 'ghost', title: label });
         }
-        const actionsLabel = `${record.kind === 'deck' ? 'Deck' : record.kind === 'proposition' ? 'Proposition' : 'Cue'} actions`;
+        const actionsLabel = tr(`${record.kind === 'deck' ? '卡组' : record.kind === 'proposition' ? '命题' : '提示语'}操作`, `${record.kind === 'deck' ? 'Deck' : record.kind === 'proposition' ? 'Proposition' : 'Cue'} actions`);
         button(more, actionsLabel, () => { ctx.ui.openMenu(more, { label: actionsLabel, items: menuItems(record) }, { signal: mountSignal }); }, mountSignal, { icon: settingsIcon, iconOnly: true, size: 'icon-sm', variant: 'ghost', title: actionsLabel });
       }
       function refresh() {
-        const title = record.kind === 'deck' ? record.deck.name : record.kind === 'proposition' ? record.p.name : record.kind === 'cue' ? record.cue.question.replace(/\s+/g, ' ').trim() || 'Cue' : 'Archive';
+        const title = record.kind === 'deck' ? record.deck.name : record.kind === 'proposition' ? record.p.name : record.kind === 'cue' ? record.cue.question.replace(/\s+/g, ' ').trim() || tr('提示语', 'Cue') : tr('归档', 'Archive');
         label.textContent = title;
-        label.title = record.kind === 'proposition' ? record.p.statement || title : record.kind === 'deck' ? 'Rename deck' : title;
-        metadata.textContent = record.kind === 'proposition' ? `${record.p.cues.filter(c => !c.deleted).length} cues` : '';
+        label.title = record.kind === 'proposition' ? record.p.statement || title : record.kind === 'deck' ? tr('重命名卡组', 'Rename deck') : title;
+        metadata.textContent = record.kind === 'proposition' ? tr(`${record.p.cues.filter(c => !c.deleted).length} 条提示语`, `${record.p.cues.filter(c => !c.deleted).length} cues`) : '';
         if (draft) {
           label.hidden = draft.editing;
           if (draft.editing) { if (input.parentElement !== labelSlot) labelSlot.prepend(input); if (input.value !== draft.value) input.value = draft.value; }
@@ -143,10 +144,10 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
     if (records.has(key)) Object.assign(records.get(key), data); else records.set(key, data);
     return content(key);
   }
-  let tree = ctx.ui.mountTree(inner, { label: 'Flashcards library', header: 'Name', rows: [], columns: [
-    { key: 'propositions', header: 'Propositions', width: '6.5rem', align: 'right' },
-    { key: 'due', header: 'Due', width: '3rem', align: 'right' },
-    { key: 'new', header: 'New today', width: '6rem', align: 'right' },
+  let tree = ctx.ui.mountTree(inner, { label: tr('闪卡库', 'Flashcards library'), header: tr('名称', 'Name'), rows: [], columns: [
+    { key: 'propositions', header: tr('命题', 'Propositions'), width: '6.5rem', align: 'right' },
+    { key: 'due', header: tr('到期', 'Due'), width: '3rem', align: 'right' },
+    { key: 'new', header: tr('今日新卡', 'New today'), width: '6rem', align: 'right' },
   ] }, { signal });
   function render() {
     if (!live() || !state) return;
@@ -178,12 +179,12 @@ export function mountLibraryTree({ ctx, container, signal, button, onReview, onP
     }
     const archived = state.propositions.filter(p => p.archived && includes(p));
     if (archived.length) {
-      const r = row('archive', { kind: 'archive', archive: true }, 'Archive', null, archived.map(p => proposition(p, null, true)));
+      const r = row('archive', { kind: 'archive', archive: true }, tr('归档', 'Archive'), null, archived.map(p => proposition(p, null, true)));
       r.cells = { propositions: String(archived.length) }; rows.push(r);
     }
     tree.update({ rows });
     for (const [key, refresh] of mounted) if (seen.has(key)) refresh();
-    empty.textContent = rows.length ? '' : query ? 'No matching flashcards.' : 'No flashcards yet. Pick knowledge or upload a file above to generate your first cues.';
+    empty.textContent = rows.length ? '' : query ? tr('没有匹配的闪卡。', 'No matching flashcards.') : tr('还没有闪卡。在上方选择知识或上传文件，生成你的第一批提示语。', 'No flashcards yet. Pick knowledge or upload a file above to generate your first cues.');
     empty.hidden = !!rows.length;
     onSelection(selection());
   }

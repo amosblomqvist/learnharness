@@ -89,7 +89,7 @@ test('malformed and unsupported stores fail closed without overwriting original 
   const dir = directory(t), file = path.join(dir, 'flashcards.json');
   for (const bytes of ['{"broken":', JSON.stringify({ version: 99, revision: 0, decks: [], reviews: [], batches: [], propositions: {}, settings: {} })]) {
     fs.writeFileSync(file, bytes);
-    assert.throws(() => openStore(dir), /Could not read Flashcards data|Unsupported or invalid/);
+    assert.throws(() => openStore(dir), /无法读取闪卡数据|闪卡数据无效或版本不受支持/);
     assert.equal(fs.readFileSync(file, 'utf8'), bytes);
     assert.deepEqual(fs.readdirSync(dir), ['flashcards.json']);
   }

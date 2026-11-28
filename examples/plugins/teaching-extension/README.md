@@ -1,46 +1,21 @@
-# Teaching extension example
+# 教学扩展示例
 
-A deliberately small developer fixture for existing lessons—not an independent
-flashcard feature or a code-execution/learner-answer system.
+一个刻意保持精简、面向现有课程的开发者测试夹具—不是独立的闪卡功能，也不是代码执行/学习者答题系统。
 
-Copy this directory into the plugins directory shown in **Settings → Community plugins**,
-keeping the `teaching-extension/` folder and its required `dist/manifest.json`. No build
-is needed. Refresh and enable **Teaching extension example**. Edit runtime files in
-`dist/` and restart LearnHarness after changing loaded code. Preserve sibling
-`teaching-extension/data/` when replacing `dist/`; never distribute that persistent data
-or place it in `dist/data/`. It is never installed/enabled automatically.
+把此目录复制到 **设置 → 社区插件**（Settings → Community plugins）中显示的插件目录下，保留 `teaching-extension/` 文件夹及其必需的 `dist/manifest.json`。无需构建。刷新后启用 **Teaching extension example**。在 `dist/` 中编辑运行时文件，修改已加载的代码后需重启 LearnHarness。替换 `dist/` 时保留同级的 `teaching-extension/data/`；绝不要分发这些持久化数据，也不要把它放进 `dist/data/`。它绝不会被自动安装/启用。
 
-In a teacher or practice session:
+在老师会话或练习会话中：
 
-1. Explicitly ask to try the teaching-extension echo tool. It returns a native Pi result
-   with a custom transcript card; no additional model request is made by the tool.
-2. Ask for a `plugin-note` fenced block. Its body is rendered with plain DOM/textContent.
-3. Explicitly ask for the **background-worker example** about a topic. The teacher calls
-   `teaching_extension_note`, which returns a dispatch acknowledgement immediately.
-   A small native worker writes a note and submits a schema/semantically validated result;
-   the result arrives later through the existing lesson delivery pipeline.
+1. 明确要求试用 teaching-extension 的 echo 工具。它会返回一个带自定义对话记录卡片的原生 Pi 结果；该工具不会发出额外的模型请求。
+2. 请求一个 `plugin-note` 围栏代码块。其内容用普通的 DOM/textContent 渲染。
+3. 明确要求就某个主题运行 **后台 worker 示例**（background-worker example）。老师会调用 `teaching_extension_note`，它会立即返回一个派发确认。一个小型原生 worker 会写一条笔记，并提交一个经过 schema 和语义校验的结果；该结果稍后通过现有的课程投递管线送达。
 
-Step 3 **may incur model cost** and requires a configured cheap model slot with permission
-for background use. Its limits (3 model turns, 1,024 output tokens per request, 60 seconds
-wall clock) are example choices, not host defaults. Nothing runs automatically merely
-because the plugin or its settings is opened.
+第 3 步 **可能产生模型费用**，并且需要一个已配置、拥有后台使用权限的经济档位。它的限制（3 个模型回合、每次请求 1,024 个输出 token、60 秒实际耗时）是示例的选择，而不是宿主默认值。仅仅打开插件或其设置不会自动运行任何内容。
 
-Disable removes instructions/tools/renderers from future turns and interrupts unfinished
-workers. Existing native calls/results remain saved. The original worker call stays a
-dispatch acknowledgement; the later result is a separate saved marker. Raw fallback
-remains readable without this plugin. Completed task records survive disable/restart.
+停用会从之后的回合中移除指令/工具/渲染器，并中断未完成的 worker。已有的原生调用/结果仍会保存。原来的 worker 调用仍是一个派发确认；之后的结果是一个单独保存的标记。没有此插件时，原始回退内容仍然可读。已完成的任务记录在停用/重启后仍然保留。
 
-This is a silent, chrome-less extension: it registers no view, action, or placement.
-Its custom `registerSettings((container, signal) => …)` mount is intentionally retained
-as an explanatory-content escape hatch. There are no configurable behaviors to expose
-as schema settings; opening this content does not start a worker.
+这是一个静默、无界面元素的扩展：它不注册视图、操作或放置位置。它的自定义 `registerSettings((container, signal) => …)` 挂载点被有意保留，作为展示说明性内容的后门。没有需要作为 schema 设置暴露的可配置行为；打开这段内容不会启动 worker。
 
-Files use only the supported public context, no private app imports or runtime npm install.
-The backend has no independent product storage or core learning-data writes. The host
-owns task records and usage accounting in the installed workspace's sibling `data/` directory.
+这些文件只使用受支持的公开上下文，没有私有应用导入，也不在运行时执行 npm install。后端没有独立的产品存储，也不写入核心学习数据。宿主在已安装工作区同级的 `data/` 目录中掌管任务记录和用量统计。
 
-Off-network integration coverage: `tests/plugin-teaching-integration.test.ts` loads this
-actual external CommonJS backend, constructs the real native teacher, runs a scripted
-worker through the inference adapter, observes separate delivery, and round-trips the
-native history through the normal stores. This is not a claim of real-provider or human
-functional acceptance.
+离线集成测试覆盖：`tests/plugin-teaching-integration.test.ts` 会加载这个实际的外部 CommonJS 后端，构造真实的原生老师，通过推理适配器运行一个脚本化的 worker，观察独立的投递，并让原生历史通过常规存储完成往返。这并不代表已通过真实服务商或真人的功能验收。

@@ -121,10 +121,10 @@ try {
 	}
 	async function submit() {
 		await page.waitForFunction(() => {
-			const button = document.querySelector('button[aria-label="Start session"], [data-testid="composer"] button[aria-label="Send"]');
+			const button = document.querySelector('button[aria-label="开始会话"], [data-testid="composer"] button[aria-label="发送"]');
 			return button && !button.disabled;
 		});
-		await page.locator('button[aria-label="Start session"], [data-testid="composer"] button[aria-label="Send"]').click();
+		await page.locator('button[aria-label="开始会话"], [data-testid="composer"] button[aria-label="发送"]').click();
 	}
 	async function stash(id) { return page.evaluate(chat => sessionStorage.getItem(`lh.openingPrompt.${chat}`), id); }
 	async function assertDraft(text) { await page.waitForFunction(value => {
@@ -242,7 +242,7 @@ try {
 	console.log(JSON.stringify({ checks, pageErrors: errors, isolation: "synthetic catalog/POST+streams; empty auth; no providers", origin }, null, 2));
 } catch (err) {
 	console.error(err);
-	console.error(JSON.stringify({ checks, errors, url: page?.url(), dom: await page?.evaluate(() => ({ inputs: [...document.querySelectorAll('[data-file-path-input]')].map(e => ({ length: [...e.childNodes].map(n => n.nodeType === 1 ? n.getAttribute('data-file-path-source') ?? n.textContent : n.textContent).join('').length, placeholder: e.getAttribute('data-placeholder') })), buttons: [...document.querySelectorAll('button[aria-label="Send"], button[aria-label="Start session"]')].map(e => ({ disabled: e.disabled, label: e.getAttribute('aria-label') })), alerts: [...document.querySelectorAll('[role="alert"]')].map(e => e.textContent), failStorage: window.failOpeningStorage, text: document.body.innerText.slice(-1200) })).catch(() => null) }, null, 2));
+	console.error(JSON.stringify({ checks, errors, url: page?.url(), dom: await page?.evaluate(() => ({ inputs: [...document.querySelectorAll('[data-file-path-input]')].map(e => ({ length: [...e.childNodes].map(n => n.nodeType === 1 ? n.getAttribute('data-file-path-source') ?? n.textContent : n.textContent).join('').length, placeholder: e.getAttribute('data-placeholder') })), buttons: [...document.querySelectorAll('button[aria-label="发送"], button[aria-label="开始会话"]')].map(e => ({ disabled: e.disabled, label: e.getAttribute('aria-label') })), alerts: [...document.querySelectorAll('[role="alert"]')].map(e => e.textContent), failStorage: window.failOpeningStorage, text: document.body.innerText.slice(-1200) })).catch(() => null) }, null, 2));
 	console.error(logs); process.exitCode = 1;
 } finally {
 	await browser?.close();

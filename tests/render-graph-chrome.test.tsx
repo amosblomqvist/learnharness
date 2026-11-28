@@ -39,10 +39,10 @@ describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => 
 	it("EMPTY graph: Import and source inventory render; canvas search/settings stay absent", () => {
 		const html = renderToStaticMarkup(createElement(GraphChromeRow, { ...PROPS, isEmpty: true }));
 		assert.ok(html.includes('data-testid="import-notes"'));
-		assert.ok(html.includes("Extract files…"));
+		assert.ok(html.includes("提取文件…"));
 		assert.ok(html.includes("lucide-waypoints"));
 		assert.ok(!html.includes("lucide-upload"));
-		assert.ok(!html.includes("Search nodes…"), "search is a lie on an empty graph");
+		assert.ok(!html.includes("搜索节点…"), "search is a lie on an empty graph");
 		// the settings gear is the lucide-settings svg (tooltip wave: its old
 		// native title is gone — the styled tooltip carries the label now)
 		assert.ok(!html.includes("lucide-settings"), "settings is a lie on an empty graph");
@@ -52,15 +52,15 @@ describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => 
 
 	it("empty graph uses the same session-first lead and secondary material guidance as home", () => {
 		const html = renderToStaticMarkup(createElement(ServerEventsProvider, { children: createElement(GraphView, {}) }));
-		assert.ok(html.includes("<p>Start a session to begin learning.</p>"));
-		assert.ok(html.includes("Attach your material with the paperclip or drag and drop.</p>"));
+		assert.ok(html.includes("<p>开始一个会话，开启学习。</p>"));
+		assert.ok(html.includes("点击回形针或直接拖放即可附加学习材料。</p>"));
 		assert.ok(!html.includes("import notes to build"));
 	});
 
 	it("POPULATED graph: all four render, the gated trio carries the fade", () => {
 		const html = renderToStaticMarkup(createElement(GraphChromeRow, { ...PROPS, isEmpty: false }));
 		assert.ok(html.includes('data-testid="import-notes"'));
-		assert.ok(html.includes("Search nodes…"));
+		assert.ok(html.includes("搜索节点…"));
 		assert.ok(html.includes("lucide-settings"), "the settings gear renders");
 		assert.ok(html.includes('data-testid="open-chain-table"'), "the chains entry renders");
 		// the appear-once fade rides exactly the three gated controls, never Import Notes
@@ -71,11 +71,11 @@ describe("GraphChromeRow — the empty-graph ruling (owner, 2026-09-25)", () => 
 		const html = renderToStaticMarkup(
 			createElement(GraphChromeRow, { ...PROPS, isEmpty: false, query: "zzz", noMatch: true }),
 		);
-		assert.ok(html.includes("No matching nodes."));
+		assert.ok(html.includes("没有匹配的节点。"));
 		const quiet = renderToStaticMarkup(
 			createElement(GraphChromeRow, { ...PROPS, isEmpty: false, query: "zzz", noMatch: false }),
 		);
-		assert.ok(!quiet.includes("No matching nodes."));
+		assert.ok(!quiet.includes("没有匹配的节点。"));
 	});
 });
 

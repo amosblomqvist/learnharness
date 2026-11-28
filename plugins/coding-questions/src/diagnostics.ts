@@ -1,6 +1,7 @@
 import { syntaxTree, syntaxTreeAvailable } from "@codemirror/language";
 import { linter, type Diagnostic } from "@codemirror/lint";
 import type { EditorState, Extension } from "@codemirror/state";
+import { tr } from "./i18n.ts";
 
 const supportedLanguages = new Set([
   "Python", "JavaScript", "TypeScript", "C", "C++", "Java", "Rust", "Go", "JSON",
@@ -25,7 +26,7 @@ export function syntaxDiagnostics(state: EditorState): Diagnostic[] {
       const key = `${node.from}:${node.to}`;
       if (seen.has(key)) return;
       seen.add(key);
-      diagnostics.push({ from: node.from, to: node.to, severity: "error", message: "Syntax problem." });
+      diagnostics.push({ from: node.from, to: node.to, severity: "error", message: tr("语法问题。", "Syntax problem.") });
     },
   });
   return diagnostics;

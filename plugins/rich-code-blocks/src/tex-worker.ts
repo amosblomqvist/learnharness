@@ -2,6 +2,7 @@ import { tex, dvi2svg, BrowserResourceLoader } from "isomorphic-tikzjax";
 import { checkSource, checkSvgSize } from "./contract.ts";
 import { prepareTexSource } from "./tex-source.ts";
 import { texErrorMessage } from "./tex-diagnostics.ts";
+import { tr } from "./i18n.ts";
 
 const worker = globalThis as unknown as {
   onmessage: ((event: MessageEvent<{ id: number; source: string; resourcesUrl: string }>) => void) | null;
@@ -14,7 +15,7 @@ worker.onmessage = async ({ data }) => {
     checkSource("tikz", data.source);
     // Always use the plugin's explicit local resource root, never the package CDN default.
     const url = new URL(data.resourcesUrl);
-    if (url.origin !== new URL(import.meta.url).origin) throw new Error("TeX resources must be local plugin assets.");
+    if (url.origin !== new URL(import.meta.url).origin) throw new Error(tr("TeX 资源必须是本地插件资源。", "TeX resources must be local plugin assets."));
     if (!loader || resourceUrl !== url.href) { resourceUrl = url.href; loader = new BrowserResourceLoader(url.href); }
     const dvi = await tex(prepareTexSource(data.source), { showConsole: false }, loader);
     // The library's DOM parse is NOT a sanitizer. Our main-thread static SVG

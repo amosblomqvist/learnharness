@@ -112,7 +112,7 @@ describe("POST /api/custom-provider — typed ids and a failed probe", () => {
 		assert.equal(res.status, 502);
 		const body = (await res.json()) as { error: string };
 		assert.match(body.error, /404/);
-		assert.match(body.error, /add model IDs manually/);
+		assert.match(body.error, /请手动添加模型 ID/);
 	});
 
 	it("reconnecting refreshes nested limits in storage and GET without replacing user pins", async () => {

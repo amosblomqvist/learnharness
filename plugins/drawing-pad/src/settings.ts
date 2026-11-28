@@ -1,3 +1,4 @@
+import { tr } from "./i18n.ts";
 export const DEFAULT_DARK_INK_COLOR = "#ffffff";
 export const DEFAULT_LIGHT_INK_COLOR = "#000000";
 export const DEFAULT_IMAGE_SCALE = 50;
@@ -7,7 +8,7 @@ export const DEFAULT_SETTINGS: Readonly<Settings> = Object.freeze({ revision: 0,
 
 export function imageScaleError(value: unknown): string | undefined {
   return typeof value === "number" && Number.isFinite(value) && value > 0 && value <= 100
-    ? undefined : "Enter a percentage greater than 0 and at most 100.";
+    ? undefined : tr("请输入大于 0 且不超过 100 的百分比。", "Enter a percentage greater than 0 and at most 100.");
 }
 export function parseImageScale(value: unknown): number {
   const error = imageScaleError(value);
@@ -22,7 +23,7 @@ export function parseImageScaleChange(value: unknown): number {
 
 export function colorError(value: unknown): string | undefined {
   return typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
-    ? undefined : "Use a six-digit hex color, for example #facc15.";
+    ? undefined : tr("请使用六位十六进制颜色，例如 #facc15。", "Use a six-digit hex color, for example #facc15.");
 }
 export function parseColor(value: unknown): string {
   const error = colorError(value);

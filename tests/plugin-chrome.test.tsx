@@ -114,17 +114,17 @@ describe("explicit plugin chrome", () => {
 			await act(async () => { release(); });
 			assert.equal(graphButton.disabled, false);
 			await f.resize(280);
-			const trigger = f.document.querySelector<HTMLButtonElement>('[aria-label="More plugin actions"]');
+			const trigger = f.document.querySelector<HTMLButtonElement>('[aria-label="更多插件操作"]');
 			assert.ok(trigger, "overflow trigger survives when the title consumes the available width");
 			await f.click(trigger);
-			assert.ok(f.document.querySelector('[data-testid="plugin-top-bar-menu"] [role="menu"][aria-label="More plugin actions"]'));
+			assert.ok(f.document.querySelector('[data-testid="plugin-top-bar-menu"] [role="menu"][aria-label="更多插件操作"]'));
 			assert.equal(f.document.querySelector('[data-testid="plugin-top-bar-menu"] [data-plugin-action="fixture/top"]')?.getAttribute("role"), "menuitem");
 			await f.click(f.document.querySelector<HTMLButtonElement>('[data-testid="plugin-top-bar-menu"] button')!);
 			assert.deepEqual(runs[1], session);
 			assert.equal(f.document.querySelector('[data-testid="plugin-top-bar-menu"]'), null);
 			await act(async () => { release(); });
 			await f.resize(900);
-			assert.equal(f.document.querySelector('[aria-label="More plugin actions"]'), null, "wide header restores inline action");
+			assert.equal(f.document.querySelector('[aria-label="更多插件操作"]'), null, "wide header restores inline action");
 		} finally { await f.close(); }
 	});
 });

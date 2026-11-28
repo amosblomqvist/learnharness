@@ -19,6 +19,7 @@ export type * from "./plugin-questions.ts";
 import type { PluginProblemTypeDefinition, PluginProblemRenderer } from "./plugin-problems.ts";
 export type * from "./plugin-problems.ts";
 import type { PluginSubmissionInterceptor } from "./plugin-submissions.ts";
+import { tr } from "./i18n.ts";
 export type * from "./plugin-submissions.ts";
 
 export const PLUGIN_API_VERSION = 1 as const;
@@ -374,32 +375,35 @@ export interface PluginFrontendModule {
 
 /** No loosely coercing malformed manifests or executing incompatible packages. */
 export function parsePluginManifest(value: unknown, folder: string, appVersion: string): PluginManifest {
-	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error("manifest.json must be an object");
+	if (!value || typeof value !== "object" || Array.isArray(value)) throw new Error(tr("manifest.json 必须是一个对象", "manifest.json must be an object"));
 	const m = value as Record<string, unknown>;
-	if (!PLUGIN_ID_PATTERN.test(folder) || m.id !== folder) throw new Error("Plugin id must match its lowercase-hyphen folder name");
-	if (m.apiVersion !== PLUGIN_API_VERSION) throw new Error("Unsupported plugin apiVersion (expected 1)");
+	if (!PLUGIN_ID_PATTERN.test(folder) || m.id !== folder) throw new Error(tr("插件 id 必须与其文件夹名一致（小写字母加连字符）", "Plugin id must match its lowercase-hyphen folder name"));
+	if (m.apiVersion !== PLUGIN_API_VERSION) throw new Error(tr("不支持的插件 apiVersion（应为 1）", "Unsupported plugin apiVersion (expected 1)"));
 	for (const key of ["name", "version", "minAppVersion"] as const) {
-		if (typeof m[key] !== "string" || !m[key].trim()) throw new Error(`Manifest ${key} is required`);
+		if (typeof m[key] !== "string" || !m[key].trim()) throw new Error(tr(`清单缺少必填字段 ${key}`, `Manifest ${key} is required`));
 	}
 	const version = (s: unknown): number[] => {
-		if (typeof s !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(s)) throw new Error("Versions must have three numeric components (x.y.z)");
+		if (typeof s !== "string" || !/^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(s)) throw new Error(tr("版本号必须由三段数字组成（x.y.z）", "Versions must have three numeric components (x.y.z)"));
 		return s.split(".").map(Number);
 	};
 	version(m.version);
 	const required = version(m.minAppVersion), actual = version(appVersion);
 	for (let i = 0; i < 3; i++) {
 		if (actual[i]! > required[i]!) break;
-		if (actual[i]! < required[i]!) throw new Error(`Requires LearnHarness ${m.minAppVersion} or newer`);
+		if (actual[i]! < required[i]!) throw new Error(tr(`需要 LearnHarness ${m.minAppVersion} 或更高版本`, `Requires LearnHarness ${m.minAppVersion} or newer`));
 	}
 	for (const key of ["description", "author"] as const) {
-		if (m[key] !== undefined && typeof m[key] !== "string") throw new Error(`Manifest ${key} must be a string`);
+		if (m[key] !== undefined && typeof m[key] !== "string") throw new Error(tr(`清单字段 ${key} 必须是字符串`, `Manifest ${key} must be a string`));
 	}
 	for (const [key, ext] of [["main", ".js"], ["backend", ".cjs"], ["styles", ".css"]] as const) {
-		if (m[key] !== undefined && (typeof m[key] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(m[key]) || !m[key].endsWith(ext))) throw new Error(`Manifest ${key} must name a root ${ext} file`);
+		if (m[key] !== undefined && (typeof m[key] !== "string" || !/^[a-zA-Z0-9][a-zA-Z0-9._-]*$/.test(m[key]) || !m[key].endsWith(ext))) throw new Error(tr(`清单字段 ${key} 必须指向根目录下的 ${ext} 文件`, `Manifest ${key} must name a root ${ext} file`));
 	}
-	if (!m.main && !m.backend) throw new Error("A plugin needs a main or backend entry");
-	if (m.styles && !m.main) throw new Error("styles requires a frontend main entry");
-	return { apiVersion: 1, id: folder, name: m.name as string, version: m.version as string, minAppVersion: m.minAppVersion as string,
-		...(m.description !== undefined ? { description: m.description as string } : {}), ...(m.author !== undefined ? { author: m.author as string } : {}),
+	if (!m.main && !m.backend) throw new Error(tr("插件需要 main 或 backend 入口", "A plugin needs a main or backend entry"));
+	if (m.styles && !m.main) throw new Error(tr("styles 需要前端 main 入口", "styles requires a frontend main entry"));
+	// Optional "locales": { "zh": { "name", "description" } } — shown in the Chinese interface.
+	const zh = tr((m.locales as { zh?: Record<string, unknown> } | undefined)?.zh, undefined);
+	const local = (key: "name" | "description") => typeof zh?.[key] === "string" && (zh[key] as string).trim() ? zh[key] as string : m[key] as string | undefined;
+	return { apiVersion: 1, id: folder, name: local("name")!, version: m.version as string, minAppVersion: m.minAppVersion as string,
+		...(m.description !== undefined ? { description: local("description")! } : {}), ...(m.author !== undefined ? { author: m.author as string } : {}),
 		...(m.main ? { main: m.main as string } : {}), ...(m.backend ? { backend: m.backend as string } : {}), ...(m.styles ? { styles: m.styles as string } : {}) };
 }

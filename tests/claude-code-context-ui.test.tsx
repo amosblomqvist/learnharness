@@ -33,12 +33,12 @@ test("compact CLI context is numeric only; effective-window explanation appears 
 	const render = (window: { model: string; tokens: number } | null) => root!.render(<StatsBar chatId="cli-session" turns={[turn]} contextTokens={42000} cliContextWindow={window} />);
 	await act(async () => render({ model: "claude-code:opus", tokens: 200000 }));
 	assert.equal(document.querySelector('[data-testid="stats-context"]')?.textContent, "42k / 200k");
-	assert(!document.body.textContent?.includes("auto-compaction"));
+	assert(!document.body.textContent?.includes("自动上下文压缩"));
 	assert.equal(document.querySelector('[data-testid="stats-cost"]')?.textContent, "CLI");
 	const summary = document.querySelector<HTMLButtonElement>('[data-testid="stats-summary"]')!;
-	assert(!summary.textContent?.includes("window")); assert(!summary.textContent?.includes("budget"));
+	assert(!summary.textContent?.includes("窗口")); assert(!summary.textContent?.includes("budget"));
 	await act(async () => summary.click());
-	assert.match(document.querySelector('[data-testid="stats-detail"]')?.textContent ?? "", /Window reported by Claude Code; may be lower for auto-compaction\./);
+	assert.match(document.querySelector('[data-testid="stats-detail"]')?.textContent ?? "", /窗口大小由 Claude Code 报告；自动上下文压缩时实际可能更小。/);
 	assert.equal(document.querySelector('[data-testid="stats-detail"] li > span:last-child > span:last-child')?.textContent, "CLI");
 	assert.equal(document.querySelector('[data-testid="stats-context"]')?.textContent, "42k / 200k");
 	await act(async () => render(null));

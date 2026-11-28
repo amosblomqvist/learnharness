@@ -98,7 +98,7 @@ test("strict admission verifies declared bytes and decodes images, rather than a
 	assert.equal(prepared!.length, 1);
 	assert.deepEqual(await prepareSubmissionImageChannels({ answer: [], thinking: [image()] }, { model }), { thinking: prepared });
 	assert.equal(await prepareSubmissionImageChannels({ answer: [] }, { model }), undefined);
-	await assert.rejects(prepareSubmissionImages([image()], { model: textModel }), /does not support images/);
+	await assert.rejects(prepareSubmissionImages([image()], { model: textModel }), /不支持图片/);
 	assert.equal(await prepareSubmissionImages(undefined, { model: textModel }), undefined, "historical images are not re-admitted");
 });
 
@@ -136,7 +136,7 @@ test("text-only effective model refuses fresh images without persistence or agen
 	const chat = stores.chatStore.createChat("Synthetic unsupported model");
 	stores.chatStore.saveSettings(chat.id, { model: { provider, id: "text" } });
 	const response = await handleChatInput(chat.id, { type: "text", text: "", images: [image()] }, () => { throw new Error("must not construct"); });
-	assert.equal(response.status, 400); assert.match(await response.text(), /does not support images/);
+	assert.equal(response.status, 400); assert.match(await response.text(), /不支持图片/);
 	assert.equal(stores.chatStore.getChat(chat.id)!.messages.length, 0);
 	assert.equal(isTurnRunning(chat.id), false);
 });
@@ -237,8 +237,8 @@ test("plugin answer images stay outside arbitrary answer JSON and retain native 
 	assert(!(saved as any).content[0].text.includes(images!.answer![0]!.data), "native bytes must not be duplicated in compact answer text");
 	assert.throws(() => preparePluginQuestionAnswer(record(snapshot), { ...input, answer: "wrong type" }, resolve));
 	const limited: PluginQuestionSnapshot = { ...snapshot, variant: "probe", showThinking: false, input: { question: "Synthetic?", payload: {} } };
-	assert.throws(() => preparePluginQuestionAnswer(record(limited), { ...input, images: { thinking: [image()] } }, resolve), /not applicable/);
-	assert.throws(() => preparePluginQuestionAnswer(record(limited), { ...input, images: { readingThinking: [image()] } }, resolve), /not applicable/);
+	assert.throws(() => preparePluginQuestionAnswer(record(limited), { ...input, images: { thinking: [image()] } }, resolve), /不适用/);
+	assert.throws(() => preparePluginQuestionAnswer(record(limited), { ...input, images: { readingThinking: [image()] } }, resolve), /不适用/);
 	const [empty] = preparePluginQuestionAnswer(record(limited), { ...input, images: { answer: [], thinking: [], readingThinking: [] } }, resolve);
 	assert.equal((empty as any).details.images, undefined);
 	assert.equal(Object.hasOwn((empty as any).details, "thinking"), false);

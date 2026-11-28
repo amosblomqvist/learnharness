@@ -6,6 +6,7 @@ import { JobsContext } from "@/components/jobs-context";
 import { ChatActionsContext } from "@/components/chat";
 import { isModelsRefusal, isProviderKeyRefusal, type JobKind, type JobRecord } from "@/src/core";
 import { BrailleSpinner } from "@/components/braille-spinner";
+import { tr } from "@/src/core";
 
 /**
  * The dispatch card (contracts.ts "THE ASYNC PROTOCOL" §4): the tool-call
@@ -20,11 +21,11 @@ import { BrailleSpinner } from "@/components/braille-spinner";
  *                 box must not duplicate it.
  */
 const KIND_LABEL: Record<JobKind, string> = {
-	research: "Research agent",
-	demo: "Demo agent",
-	visual: "Figure agent",
-	pdf: "PDF reader",
-	plugin: "Plugin worker",
+	research: tr("研究员", "Research agent"),
+	demo: tr("互动演示智能体", "Demo agent"),
+	visual: tr("插图智能体", "Figure agent"),
+	pdf: tr("PDF 阅读", "PDF reader"),
+	plugin: tr("插件智能体", "Plugin worker"),
 };
 
 export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: JobKind }) {
@@ -42,10 +43,10 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 	// whose key is gone reads as the key being needed — the deep-link
 	// lands on the SetupDialog's first-key stage on its own.
 	if (isModelsRefusal(job.error)) {
-		return <DispatchRefusedCard label={label} line="needs model setup" button="Set up models" />;
+		return <DispatchRefusedCard label={label} line={tr("需要设置模型", "needs model setup")} button={tr("设置模型", "Set up models")} />;
 	}
 	if (isProviderKeyRefusal(job.error)) {
-		return <DispatchRefusedCard label={label} line="needs a provider key" button="Add a key" />;
+		return <DispatchRefusedCard label={label} line={tr("需要服务商 API 密钥", "needs a provider key")} button={tr("添加密钥", "Add a key")} />;
 	}
 	const failed = job.status === "error";
 	return (
@@ -55,7 +56,7 @@ export function DispatchCard({ toolCallId, kind }: { toolCallId: string; kind: J
 		>
 			{failed ? <XIcon className="size-3.5 text-error" /> : <CheckIcon className="size-3.5" />}
 			<span className="font-medium uppercase tracking-wide">{label}</span>
-			<span>{failed ? "failed" : "finished"}</span>
+			<span>{failed ? tr("失败", "failed") : tr("已完成", "finished")}</span>
 		</div>
 	);
 }
@@ -100,7 +101,7 @@ function DispatchActivityCard({ job, label }: { job: JobRecord | null; label: st
 				    the Braille spinner replaces the pulsing dot — one indicator
 				    everywhere. This is the ONLY dispatch-card change; the card's
 				    shape is untouched. */}
-				<BrailleSpinner label={`${label} running`} />
+				<BrailleSpinner label={tr(`${label}运行中`, `${label} running`)} />
 				{label}
 				{elapsed !== null && <span className="font-normal">· {elapsed}s</span>}
 			</div>
@@ -111,7 +112,7 @@ function DispatchActivityCard({ job, label }: { job: JobRecord | null; label: st
 			)}
 			{!job && (
 				<div className="mt-1 text-sm text-muted-foreground" data-testid="dispatch-pending">
-					Dispatched…
+					{tr("已派出…", "Dispatched…")}
 				</div>
 			)}
 		</div>

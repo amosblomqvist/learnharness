@@ -36,7 +36,7 @@ function bodyAt(nodes: { id: string; name: string }[], extra?: { failure?: { cod
 
 describe("EXTRACTION_RETRY_LINE (the 409 phrasing, owner-locked)", () => {
 	it("names the activity dock — the surface the user watches drain", () => {
-		assert.equal(EXTRACTION_RETRY_LINE, "An extraction is running — try again when the activity dock drains.");
+		assert.equal(EXTRACTION_RETRY_LINE, "正在进行提取 — 请等活动面板中的任务完成后再试。");
 	});
 });
 
@@ -60,7 +60,7 @@ describe("DeleteNodeBody — the minimal screen (owner, 2026-09-30)", () => {
 		// kept, NO font-title serif; the NAME rides below in JetBrains
 		// Mono at normal text-sm size, NO code-block chrome — same shape
 		// as the session dialog.
-		assert.match(html, /Delete node\?/);
+		assert.match(html, /删除节点？/);
 		const title = html.match(/<h2[^>]*>/)?.[0] ?? "";
 		assert.match(title, /text-sm font-semibold text-destructive/);
 		assert.ok(!title.includes("font-title"), "no serif display title (owner, 2026-10-13)");
@@ -68,7 +68,7 @@ describe("DeleteNodeBody — the minimal screen (owner, 2026-09-30)", () => {
 		assert.match(name, /font-mono text-sm/);
 		assert.ok(!name.includes("bg-muted"), "no code-block chrome — the font already says code");
 		assert.match(html, /data-testid="node-name-code"[^>]*>Kepler&#x27;s three laws</);
-		assert.match(html, /data-testid="node-permanence-line"[^>]*>This permanently deletes the node — this cannot be undone\./);
+		assert.match(html, /data-testid="node-permanence-line"[^>]*>这会永久删除该节点 — 此操作无法撤销。/);
 		assert.match(html, /data-testid="node-delete-cancel"/);
 		assert.match(html, /data-testid="node-delete-confirm"/);
 		// the Delete button carries the destructive red (owner, polish round)
@@ -90,19 +90,19 @@ describe("DeleteNodeBody — the minimal screen (owner, 2026-09-30)", () => {
 			{ id: "newton", name: "Newton's second law" },
 			{ id: "hook", name: "Hooke's law" },
 		]);
-		assert.match(three, /Delete 3 nodes\?/); // plural title, NODES
+		assert.match(three, /删除 3 个节点？/); // plural title, NODES
 		assert.match(three, /data-testid="node-names-code"/);
 		assert.match(three, /Kepler&#x27;s three laws, Newton&#x27;s second law, Hooke&#x27;s law/);
 		assert.ok(!three.includes('data-testid="node-name-code"'), "the single-name testid is gone in multi");
-		assert.match(three, /This permanently deletes all 3 nodes — this cannot be undone\./);
-		assert.ok(!three.includes("proposition"), "the old word is gone from the dialog");
+		assert.match(three, /这会永久删除全部 3 个节点 — 此操作无法撤销。/);
+		assert.ok(!three.includes("proposition") && !three.includes("命题"), "the old word is gone from the dialog");
 
 		// the cap: 10 names render 8 + ", and 2 more"
 		const ten = bodyAt(Array.from({ length: 10 }, (_, i) => ({ id: `n${i}`, name: `Prop ${i}` })));
-		assert.match(ten, /Delete 10 nodes\?/);
+		assert.match(ten, /删除 10 个节点？/);
 		assert.match(ten, /Prop 7/); // the 8th name still listed
 		assert.doesNotMatch(ten, /Prop 8</); // the 9th is not
-		assert.match(ten, /, and 2 more/);
+		assert.match(ten, /，以及另外 2 个/);
 	});
 
 	it("failure: the 409 renders the activity-dock line with a Try-again; other codes state themselves", () => {
@@ -122,7 +122,7 @@ describe("DeleteNodeBody — the minimal screen (owner, 2026-09-30)", () => {
 
 	it("busy: the confirm reads 'Deleting…' and both buttons disable", () => {
 		const html = bodyAt([{ id: "kepler", name: "Kepler's three laws" }], { busy: true });
-		assert.match(html, /Deleting…</);
+		assert.match(html, /删除中…</);
 		assert.match(html, /data-testid="node-delete-cancel"[^>]*disabled/);
 		assert.match(html, /data-testid="node-delete-confirm"[^>]*disabled/);
 	});

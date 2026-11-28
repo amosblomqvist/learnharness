@@ -3,6 +3,7 @@
 import { DispatchCard } from "@/components/artifacts/dispatch-card";
 import { MessageResponse } from "@/components/ai-elements/message";
 import { isWebSourceUrl, type ArtifactPartProps, type PdfResult, type ResearchResult } from "@/src/core";
+import { tr } from "@/src/core";
 
 /**
  * The research tool-call box (contracts.ts "THE ASYNC PROTOCOL" §4).
@@ -39,7 +40,7 @@ export function PdfBriefCard({ output }: { output: unknown }) {
 	if (!result || typeof result.brief !== "string") {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				PDF reading completed, but the result could not be displayed.
+				{tr("PDF 阅读已完成，但无法显示结果。", "PDF reading completed, but the result could not be displayed.")}
 			</div>
 		);
 	}
@@ -52,20 +53,20 @@ export function PdfBriefCard({ output }: { output: unknown }) {
 	return (
 		<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="pdf-brief-card">
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				PDF brief
-				{failed && <span className="rounded bg-error/15 px-1.5 py-0.5 text-error">failed</span>}
+				{tr("PDF 摘要", "PDF brief")}
+				{failed && <span className="rounded bg-error/15 px-1.5 py-0.5 text-error">{tr("失败", "failed")}</span>}
 			</div>
 			<div className="text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
 				<MessageResponse>{result.brief}</MessageResponse>
 			</div>
 			{!failed && readList.length > 0 && (
 				<div className="mt-3 border-t pt-2 text-xs text-muted-foreground">
-					Pages read: {readList.join(", ")}
+					{tr("已读页码：", "Pages read: ")}{readList.join(tr("、", ", "))}
 				</div>
 			)}
 			{!failed && consultedList.length > readList.length && (
 				<div className="mt-3 border-t pt-2 text-xs text-muted-foreground">
-					Pages consulted: {consultedList.join(", ")}
+					{tr("参考页码：", "Pages consulted: ")}{consultedList.join(tr("、", ", "))}
 				</div>
 			)}
 		</div>
@@ -81,7 +82,7 @@ export function ResearchBriefCard({ output }: { output: unknown }) {
 	if (!result || typeof result.brief !== "string") {
 		return (
 			<div className="rounded-xl border bg-card p-4 text-sm text-muted-foreground">
-				Research completed, but the result could not be displayed.
+				{tr("调研已完成，但无法显示结果。", "Research completed, but the result could not be displayed.")}
 			</div>
 		);
 	}
@@ -89,15 +90,15 @@ export function ResearchBriefCard({ output }: { output: unknown }) {
 	return (
 		<div className="rounded-xl border bg-card p-4 text-card-foreground" data-testid="research-brief-card">
 			<div className="mb-1 flex items-center gap-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-				Research brief
-				{failed && <span className="rounded bg-error/15 px-1.5 py-0.5 text-error">failed</span>}
+				{tr("调研摘要", "Research brief")}
+				{failed && <span className="rounded bg-error/15 px-1.5 py-0.5 text-error">{tr("失败", "failed")}</span>}
 			</div>
 			<div className="text-sm [&_p:first-child]:mt-0 [&_p:last-child]:mb-0">
 				<MessageResponse>{result.brief}</MessageResponse>
 			</div>
 			{result.sources.length > 0 && (
 				<div className="mt-3 border-t pt-2">
-					<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">Sources</div>
+					<div className="mb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">{tr("来源", "Sources")}</div>
 					<ul className="flex flex-col gap-0.5 text-xs">
 						{result.sources.map((s) => (
 							<li key={s.url} className="truncate">

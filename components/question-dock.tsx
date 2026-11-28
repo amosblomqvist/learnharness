@@ -54,6 +54,7 @@ import {
 } from "@/components/question-layout";
 import { useQuestionLayout, type QuestionLayoutRequest } from "@/components/use-question-layout";
 import { captureReadingPosition, holdAcrossSwitch, restoreReadingPosition, revealFocused, trackReadingPosition, visibleFocused } from "@/components/dock-switch";
+import { tr } from "@/src/core";
 
 export type { QuestionLayoutRequest } from "@/components/use-question-layout";
 
@@ -70,7 +71,7 @@ const QC_OPTION_ROW = "flex items-center gap-3 rounded-lg border px-3 py-2 text-
 const QC_OPTION_MARK = "flex size-4 shrink-0 items-center justify-center border";
 const QC_OPTION_LETTER = "text-[0.625rem] font-medium leading-none";
 const QC_OTHER_INPUT = "lh-input w-full min-w-0 flex-1 bg-transparent outline-none placeholder:text-muted-foreground";
-const OTHER_PLACEHOLDER = "Type your own answer…";
+const OTHER_PLACEHOLDER = tr("输入你自己的答案…", "Type your own answer…");
 // The confidence row has no separator: its padding (CONFIDENCE_ROW_PAD,
 // question-layout.ts) centers the slider between the last option (whose
 // list ends in 8px) and whatever follows — 8+6 above, 14 below (owner).
@@ -85,11 +86,11 @@ const QC_CONFIDENCE_VALUE = "w-[4ch] shrink-0 text-center font-mono text-sm tabu
 
 /** The question card's label: the tool's own name for probe-phase calls. */
 export function questionCardLabel(tool: string | undefined, kind: string, questionType: string | undefined): string {
-	if (tool === "probe") return "Probe";
-	if (tool === "recall") return "Recall";
-	if (kind === "quiz") return questionType === "predict" ? "Prediction" : "Check";
-	if (kind === "explain") return "Explain";
-	return "Question";
+	if (tool === "probe") return tr("摸底", "Probe");
+	if (tool === "recall") return tr("回忆", "Recall");
+	if (kind === "quiz") return questionType === "predict" ? tr("预测", "Prediction") : tr("检验", "Check");
+	if (kind === "explain") return tr("解释", "Explain");
+	return tr("问题", "Question");
 }
 
 /** What an answered card knows of the question it answered. Rendered
@@ -121,7 +122,7 @@ export function questionCardStandIn(doc: Document, c: QuestionCardContent): { qu
 	};
 	const contents = (live: HTMLElement) => [...live.childNodes].map((n) => (n instanceof HTMLElement ? cloneWithImageSizes(n) : n.cloneNode(true)));
 	const question = el("div", "",
-		el("div", QC_LABEL, c.label + (c.multiSelect ? " · select all that apply" : "")),
+		el("div", QC_LABEL, c.label + (c.multiSelect ? tr(" · 可多选", " · select all that apply") : "")),
 		el("div", QC_QUESTION, ...contents(c.question)),
 	);
 	if (c.context) question.append(el("div", QC_CONTEXT, ...contents(c.context)));
@@ -133,7 +134,7 @@ export function questionCardStandIn(doc: Document, c: QuestionCardContent): { qu
 		if (letter) icon.append(el("span", QC_OPTION_LETTER, letter));
 		list.append(el("button", QC_OPTION_ROW, icon, el("span", "", ...contents(option))));
 	}
-	if (c.kind === "quiz") list.append(el("button", cn(QC_OPTION_ROW, "border-dashed"), mark(true), el("span", "", "I don't know")));
+	if (c.kind === "quiz") list.append(el("button", cn(QC_OPTION_ROW, "border-dashed"), mark(true), el("span", "", tr("我不知道", "I don't know"))));
 	if (c.kind === "ask") {
 		const input = el("div", cn(pathInputClassName(true), QC_OTHER_INPUT));
 		input.dataset.empty = "true";
@@ -144,7 +145,7 @@ export function questionCardStandIn(doc: Document, c: QuestionCardContent): { qu
 	const confidence = c.kind === "quiz"
 		? el("div", CONFIDENCE_ROW_PAD,
 			el("div", QC_CONFIDENCE_ROW,
-				el("span", QC_CONFIDENCE_LABEL, "Confidence"),
+				el("span", QC_CONFIDENCE_LABEL, tr("把握度", "Confidence")),
 				el("div", QC_CONFIDENCE_TRACK),
 				el("span", QC_CONFIDENCE_VALUE, "50%")))
 		: null;
@@ -253,7 +254,7 @@ export function QuestionDock({
 	// The chip's display name carries the tool's OWN name (owner
 	// 2026-10-09): probe-phase questions label Probe/Recall in the
 	// composer; teach tools keep the standing labels.
-	const toolLabel = toolName === "probe" ? "Probe" : toolName === "recall" ? "Recall" : undefined;
+	const toolLabel = toolName === "probe" ? tr("摸底", "Probe") : toolName === "recall" ? tr("回忆", "Recall") : undefined;
 	// Parse, don't cast (src/core/tool-parts.ts): the model authored this
 	// input, and only the schema the tool declared vouches for its shape.
 	// The dock mounts on input-available parts (already validated at the
@@ -277,7 +278,7 @@ export function QuestionDock({
 					label={
 						(canonical === "quiz" || canonical === "explain") &&
 						normalizeQuizType((parsed as { type?: unknown }).type) === "predict"
-							? "Prediction"
+							? tr("预测", "Prediction")
 							: undefined
 					}
 				/>
@@ -344,13 +345,13 @@ export function QuestionDockBar({
 					<PlayIcon className="size-3.5" />
 				</span>
 				<span className="min-w-0 flex-1">
-					<span className="block text-sm font-medium">Check your understanding</span>
+					<span className="block text-sm font-medium">{tr("检验你的理解", "Check your understanding")}</span>
 					<span className="block text-xs text-muted-foreground">
 						<QuestionPreview>{question}</QuestionPreview>
 					</span>
 				</span>
 				<span className="flex shrink-0 items-center gap-1 text-xs font-medium text-primary">
-					Open <ChevronRightIcon className="size-3.5" />
+					{tr("打开 ", "Open ")} <ChevronRightIcon className="size-3.5" />
 				</span>
 			</button>
 		);
@@ -365,13 +366,13 @@ export function QuestionDockBar({
 			<span className="shrink-0 text-xs font-medium uppercase tracking-wide text-muted-foreground">
 				{label ??
 							toolLabel ??
-							(toolName === "quiz" ? "Check" : toolName === "explain" ? "Explain" : "Question")}
+							(toolName === "quiz" ? tr("检验", "Check") : toolName === "explain" ? tr("解释", "Explain") : tr("问题", "Question"))}
 			</span>
 			<span className="min-w-0 flex-1 text-muted-foreground">
 				<QuestionPreview>{question}</QuestionPreview>
 			</span>
 			<span className="flex shrink-0 items-center gap-1 text-xs font-medium">
-				Answer <ArrowDownIcon className="size-3.5" />
+				{tr("作答 ", "Answer ")} <ArrowDownIcon className="size-3.5" />
 			</span>
 		</button>
 	);
@@ -815,7 +816,7 @@ function QuestionDockForm({
 							sel.dontKnow ? "text-muted-foreground/50" : "text-muted-foreground",
 						)}
 					>
-						Confidence
+						{tr("把握度", "Confidence")}
 					</span>
 					<div
 						className={cn(QC_CONFIDENCE_TRACK, sel.dontKnow && "opacity-40")}
@@ -844,9 +845,9 @@ function QuestionDockForm({
 							step={1}
 							value={CONFIDENCE_STOPS[confIdx]}
 							disabled={sel.dontKnow}
-							aria-label="Confidence — the probability your selected answer is correct"
-							aria-valuetext={`${CONFIDENCE_STOPS[confIdx]} percent`}
-							title="The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→."
+							aria-label={tr("把握度 — 你所选答案正确的概率", "Confidence — the probability your selected answer is correct")}
+							aria-valuetext={tr(`${CONFIDENCE_STOPS[confIdx]}%`, `${CONFIDENCE_STOPS[confIdx]} percent`)}
+							title={tr("你所选答案正确的概率 — 50% 相当于抛硬币。用 ←/→ 调整。", "The probability your selected answer is correct — 50% is a coin flip. Adjust with ←/→.")}
 							data-testid="confidence-slider"
 							onChange={(e) => {
 								// Snap to the nearest stop; the rendered VALUE is the stop's own
@@ -895,7 +896,7 @@ function QuestionDockForm({
 		<div ref={questionPartRef} data-question-part="">
 			<div className={QC_LABEL}>
 				{questionCardLabel(toolName, kind, qd.questionType)}
-				{qd.mode === "multi-select" && " · select all that apply"}
+				{qd.mode === "multi-select" && tr(" · 可多选", " · select all that apply")}
 			</div>
 			<div className={QC_QUESTION}>
 				<ToolContentResponse>{qd.question}</ToolContentResponse>
@@ -989,7 +990,7 @@ function QuestionDockForm({
 						>
 							{sel.dontKnow && <span className="size-1.5 rounded-full bg-current" />}
 						</span>
-						<span>I don't know</span>
+						<span>{tr("我不知道", "I don't know")}</span>
 					</button>
 				)}
 
@@ -1125,7 +1126,7 @@ function QuestionDockForm({
 					className="rounded-[10px] border border-border/70 bg-background/60 transition-colors focus-within:border-primary/50"
 				>
 					<div className="px-2.5 pt-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-						{qd.mode === "text" ? "Your answer" : "YOUR THINKING"}
+						{qd.mode === "text" ? tr("你的答案", "Your answer") : tr("你的思考", "YOUR THINKING")}
 					</div>
 					{qd.mode === "text" ? (
 						<PathInput
@@ -1153,7 +1154,7 @@ function QuestionDockForm({
 									submit();
 								}
 							}}
-							placeholder="Type your answer…"
+							placeholder={tr("输入你的答案…", "Type your answer…")}
 							className="field-sizing-content lh-input max-h-48 min-h-10 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground"
 						/>
 					) : (
@@ -1184,7 +1185,7 @@ function QuestionDockForm({
 									submit();
 								}
 							}}
-							placeholder="Why this answer? Whatever comes to mind."
+							placeholder={tr("为什么选这个答案？想到什么写什么。", "Why this answer? Whatever comes to mind.")}
 							className={cn(
 								"field-sizing-content lh-input max-h-48 w-full resize-none bg-transparent px-2.5 py-2 outline-none placeholder:text-muted-foreground/70",
 								// Phase-scaled prominence: teaching invites depth,
@@ -1195,14 +1196,14 @@ function QuestionDockForm({
 					)}
 					<div className="flex items-center justify-between gap-2 p-1">
 						<span aria-hidden className="pl-1.5 text-xs text-muted-foreground">
-								{compactionRunning ? "compacting session…" : "↵ submits · ⇧↵ newline"}
+								{compactionRunning ? tr("正在压缩上下文…", "compacting session…") : tr("↵ 提交 · ⇧↵ 换行", "↵ submits · ⇧↵ newline")}
 						</span>
 						<Button
 							type="submit"
 							disabled={!canSubmit || compactionRunning || preparing}
 							className="ml-auto h-9 rounded-[6px] px-3.5 text-sm font-medium"
 						>
-							Submit answer
+							{tr("提交答案", "Submit answer")}
 						</Button>
 					</div>
 				</div>

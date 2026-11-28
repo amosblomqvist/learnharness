@@ -71,7 +71,7 @@ describe("DeleteSessionDialog — the node-dialog shape (owner flow rework 2026-
 				onRun={() => {}}
 			/>,
 		);
-		assert.match(html, /Delete session\?/);
+		assert.match(html, /删除会话？/);
 		const title = html.match(/<h2[^>]*>/)?.[0] ?? "";
 		assert.match(title, /text-sm font-semibold text-destructive/); // red, abort-turn look (owner, 2026-10-13)
 		assert.ok(!title.includes("font-title"), "no serif display title");
@@ -99,8 +99,8 @@ describe("DeleteSessionDialog — the node-dialog shape (owner flow rework 2026-
 		assert.ok(!/"checked"/.test(html), "unchecked by default");
 		// plain-language consequences on the checkbox body
 		assert.ok(html.includes(TRACES_COPY.title));
-		assert.ok(html.includes("leave the graph too"));
-		assert.ok(html.includes("survive"));
+		assert.ok(html.includes("也会从图谱中移除"));
+		assert.ok(html.includes("会保留"));
 		// the old two-button design is gone
 		assert.ok(!html.includes("delete-option-preserve"));
 		assert.ok(!html.includes("delete-option-nodes"));
@@ -118,10 +118,10 @@ describe("DeleteSessionDialog — the node-dialog shape (owner flow rework 2026-
 				onRun={() => {}}
 			/>,
 		);
-		assert.match(html, /data-testid="delete-cancel"[^>]*>Cancel</);
+		assert.match(html, /data-testid="delete-cancel"[^>]*>取消</);
 		const del = html.match(/data-testid="delete-confirm"[^>]*>/)?.[0] ?? "";
 		assert.match(del, /border-destructive\/50/);
-		assert.match(html, /data-testid="delete-confirm"[^>]*>Deleting…</); // busy label on Delete
+		assert.match(html, /data-testid="delete-confirm"[^>]*>删除中…</); // busy label on Delete
 		// the checkbox survives a busy render (disabled, not unmounted)
 		assert.match(html, /data-testid="delete-traces-checkbox"[^>]*disabled=""/);
 	});

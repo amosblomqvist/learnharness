@@ -247,7 +247,7 @@ describe("append-only main-request delivery", () => {
 		const before = [user, failure];
 		const marker = newCompactionMarker("Older history summary", { firstKeptMessageId: user.id, tokensBefore: 200_000, model: "faux:test", at });
 		const after = [...before, marker];
-		assert.throws(() => retryDrops(after), /after compaction/);
+		assert.throws(() => retryDrops(after), /上下文压缩后无法重试此回复/);
 		assert.deepEqual([...sideBudgetRetryDrops(before, after)!], [failure.id]);
 		assert.equal(sideBudgetRetryDrops(after, after), undefined, "pre-existing compaction still blocks Retry");
 		assert.equal(sideBudgetRetryDrops(before, [...after, newUserMessage("An intervening input")]), undefined);

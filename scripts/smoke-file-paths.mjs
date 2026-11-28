@@ -234,7 +234,7 @@ try {
 			const event = new DragEvent("drop", { bubbles: true, cancelable: true, dataTransfer: transfer }); zone.dispatchEvent(event); return event.defaultPrevented;
 		});
 		assert.equal(prevented, true);
-		await page.waitForFunction(() => document.querySelector('[role="status"]')?.textContent.includes("desktop app"));
+		await page.waitForFunction(() => document.querySelector('[role="status"]')?.textContent.includes("桌面应用"));
 		await fill(page, "read "); await page.keyboard.type(token + " now");
 		await expectValue(page, `read ${token} now`);
 		assert.equal(await page.$$eval('[data-file-path-input] [role="img"]', elements => elements.length), 1);

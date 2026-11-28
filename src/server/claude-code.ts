@@ -2,6 +2,7 @@ import { inspectClaudeInstallation } from "../agent/claude-code/installation.ts"
 import { initAuthEnv } from "./keys.ts";
 import { subscriptionRequestOrigin } from "./web-subscription-http.ts";
 import { claudeCodeEnabled } from "./claude-code-config.ts";
+import { tr } from "../core/i18n.ts";
 
 /** The Settings status seam: initialize provenance before any child env is copied. */
 export async function claudeCodeInstallationStatus() {
@@ -23,8 +24,8 @@ export async function claudeCodeInstallationResponse(
 		|| request.headers.get("x-learnharness-claude-code") !== "1"
 		|| request.headers.get("sec-fetch-site") === "cross-site"
 		|| (supplied !== null && supplied !== origin)) {
-		return Response.json({ error: "Claude Code checks require a same-origin LearnHarness request." }, { status: 403, headers });
+		return Response.json({ error: tr("Claude Code 检查需要来自 LearnHarness 的同源请求。", "Claude Code checks require a same-origin LearnHarness request.") }, { status: 403, headers });
 	}
-	if (!enabled()) return Response.json({ error: "Claude Code is disabled." }, { status: 403, headers });
+	if (!enabled()) return Response.json({ error: tr("Claude Code 已停用。", "Claude Code is disabled.") }, { status: 403, headers });
 	return Response.json(await inspect(), { headers });
 }

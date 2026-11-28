@@ -72,7 +72,7 @@ it("multipart frontend-to-host flow converts a real renamed PDF and arbitrary-su
 	assert.equal(converted.name, "renamed.txt");
 	assert.match(converted.markdown, /^--- Page 1 ---/);
 	assert.match(converted.markdown, /Force equals mass times acceleration\./);
-	assert.ok(converted.notices.some(notice => /extraction.*errors/.test(notice)));
+	assert.ok(converted.notices.some(notice => /文本提取.*错误/.test(notice)));
 	assert.deepEqual(files(f.root), before, "conversion creates neither uploads nor plugin/graph/provider records");
 	assert.deepEqual(f.statuses, [200, 200]);
 });
@@ -80,9 +80,9 @@ it("multipart frontend-to-host flow converts a real renamed PDF and arbitrary-su
 it("multipart frontend-to-host flow refuses corrupt PDF/binary/oversize output without successful DTOs", async t => {
 	const f = await fixture(t), context = f.contexts.get("document-one")!;
 	const before = files(f.root);
-	await assert.rejects(context.documents.toMarkdown(new File(["Not a PDF."], "broken.PDF")), /Could not open this PDF/);
+	await assert.rejects(context.documents.toMarkdown(new File(["Not a PDF."], "broken.PDF")), /无法打开此 PDF/);
 	await assert.rejects(context.documents.toMarkdown(new File([new Uint8Array([0xff, 0xfe, 0x00])], "binary.unknown")), /UTF-8/);
-	await assert.rejects(context.documents.toMarkdown(new File(["é".repeat(1024 * 1024 + 1)], "large.any")), /Max 2 MiB/);
+	await assert.rejects(context.documents.toMarkdown(new File(["é".repeat(1024 * 1024 + 1)], "large.any")), /上限为 2 MiB/);
 	assert.deepEqual(f.statuses, [400, 400, 413]);
 	assert.deepEqual(files(f.root), before);
 });
@@ -98,7 +98,7 @@ it("one shared host converter remains busy across plugins until a cancelled unde
 	const rejected = assert.rejects(one.documents.toMarkdown(new File(["%PDF-fixture"], "pending.pdf"), { signal: caller.signal }), { name: "AbortError" });
 	await started.promise; caller.abort();
 	assert.equal(signal.aborted, true);
-	await assert.rejects(two.documents.toMarkdown(new File(["An independent document."], "second.txt")), /busy.*retry/);
+	await assert.rejects(two.documents.toMarkdown(new File(["An independent document."], "second.txt")), /正忙.*重试/);
 	assert.equal(calls, 1);
 	parser.resolve({ kind: "converted", pages: [{ kind: "text", number: 1, markdown: "Late text" }] });
 	await rejected;

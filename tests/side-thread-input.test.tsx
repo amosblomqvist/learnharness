@@ -52,7 +52,7 @@ async function fixture(recording: boolean, mode: "popover" | "panel" = "popover"
 
 test("side Send finishes speech before reading the authoritative draft, even before React commits", async () => {
 	const f = await fixture(true);
-	const send = document.querySelector<HTMLButtonElement>('[aria-label="Send side question"]')!;
+	const send = document.querySelector<HTMLButtonElement>('[aria-label="发送旁支提问"]')!;
 	assert.equal(send.disabled, false, "a speech-only draft can be submitted");
 	await act(async () => { send.click(); });
 	assert.equal(f.finishes(), 1);

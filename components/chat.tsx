@@ -126,6 +126,7 @@ import {
 } from "@/src/core";
 import { ReadingThinkingField } from "@/components/reading-thinking";
 import { currentUserThinkingOpen, setAllUserThinkingOpen } from "@/components/thinking-block";
+import { tr } from "@/src/core";
 
 /**
  * Width tokens (wave-5 reskin, owner decision): the teaching PROSE spans the
@@ -249,8 +250,8 @@ function SystemLine({ children, testId }: { children: React.ReactNode; testId?: 
 export function PendingTurnIndicator({ evaluating }: { evaluating: boolean }) {
 	return (
 		<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
-			<BrailleSpinner label={evaluating ? "Evaluating" : "Thinking"} />
-			<Shimmer duration={1}>{evaluating ? "EVALUATING…" : "THINKING…"}</Shimmer>
+			<BrailleSpinner label={evaluating ? tr("评估中", "Evaluating") : tr("思考中", "Thinking")} />
+			<Shimmer duration={1}>{evaluating ? tr("评估中…", "EVALUATING…") : tr("思考中…", "THINKING…")}</Shimmer>
 		</span>
 	);
 }
@@ -438,6 +439,17 @@ export function Chat({
 		window.addEventListener("lh:chat-renamed", onRenamed);
 		return () => window.removeEventListener("lh:chat-renamed", onRenamed);
 	}, [chatId]);
+	// Server-side renames (the AI title after the first reply / the goal)
+	// announce chats-changed; adopt this chat's title from the list.
+	useServerEvent("chats-changed", () => {
+		void fetch("/api/chats")
+			.then((r) => (r.ok ? (r.json() as Promise<{ chats?: Array<{ id: string; title: string }> }>) : null))
+			.then((body) => {
+				const title = body?.chats?.find((c) => c.id === chatId)?.title;
+				if (title) setTitleText((prev) => (title !== prev ? title : prev));
+			})
+			.catch(() => {});
+	});
 
 	// The Esc chain's last link: abort the turn. The background runner
 	// decoupled turns from views, so the abort is ALWAYS the remote kill
@@ -760,7 +772,7 @@ export function Chat({
 		let captured = "";
 		void runSubmission(target, () => ({ type: "thinking", content: { text: captured = capture(), images: [] } }), () => !busyRef.current && JSON.stringify(activeProblemOccurrenceOf(submissionLive.current.nativeMessages)) === JSON.stringify(target.problem.occurrence), async (prepared, attempt) => {
 			if (prepared.type !== "thinking") return false;
-			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error("Thinking text or images are required. Your input has been kept.");
+			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error(tr("思考内容或图片不能为空。你的输入已保留。", "Thinking text or images are required. Your input has been kept."));
 			attempt.deliver();
 			return send({ type: "thinking", problemCallId: target.problem.occurrence.toolCallId, occurrence: target.problem.occurrence, text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}) }, () => { clear(captured); attempt.accepted(); }, undefined, attempt.refused);
 		});
@@ -818,7 +830,7 @@ export function Chat({
 		let captured = "", capturedRevision = 0;
 		return runSubmission(target, () => { capturedRevision = composerEditRevision.current; return { type: "text", content: { text: captured = supplied ?? textRef.current.trim(), images: [] } }; }, () => submissionLive.current.ready && !pendingQuestionOf(submissionLive.current.nativeMessages) && !pendingPluginQuestionOf(submissionLive.current.nativeMessages) && !activeProblemOf(submissionLive.current.nativeMessages), async (prepared, attempt) => {
 			if (prepared.type !== "text") return false;
-			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error("Message text or images are required. Your input has been kept.");
+			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error(tr("消息文本或图片不能为空。你的输入已保留。", "Message text or images are required. Your input has been kept."));
 			if (beforePost && !beforePost(captured)) { attempt.cancel(); return false; }
 			draftRef.current = captured;
 			const accepted = () => { if (composerEditRevision.current === capturedRevision && textRef.current.trim() === captured) applyText(""); openingAccepted?.(); attempt.accepted(); };
@@ -1038,8 +1050,8 @@ export function Chat({
 		const hasHistory = sideThread.threads.some((thread) => thread.anchor.messageId === sourceMessageId && thread.messages.length > 0);
 		return <div className="mt-1 flex justify-end">
 			<Button type="button" variant="ghost" size="icon-xs" data-testid="side-conversation-button" data-side-segment-id={sourceMessageId}
-				data-has-history={hasHistory} aria-label={hasHistory ? "Open side conversation" : "Ask a side question"}
-				title={hasHistory ? "Open side conversation" : "Ask a side question"}
+				data-has-history={hasHistory} aria-label={hasHistory ? tr("打开旁支提问", "Open side conversation") : tr("发起旁支提问", "Ask a side question")}
+				title={hasHistory ? tr("打开旁支提问", "Open side conversation") : tr("发起旁支提问", "Ask a side question")}
 				className={hasHistory ? "border border-border/60 text-muted-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}
 				onClick={(event) => openSideThread({ sourceMessageId, anchor: { kind: "element", element: event.currentTarget } })}>
 				<MessageCircleQuestionIcon aria-hidden className="size-3.5" fill="currentColor" fillOpacity={hasHistory ? 0.12 : 0} />
@@ -1678,9 +1690,9 @@ export function Chat({
 								onBlur={() => void commitRename(titleDraft)}
 								spellCheck={false}
 								data-plugin-chrome-title
-								aria-label="Session title"
-								title="Rename this session"
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								aria-label={tr("会话标题", "Session title")}
+								title={tr("重命名此会话", "Rename this session")}
+								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title lh-session-title text-[18px] tracking-normal text-foreground/85 caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
@@ -1691,7 +1703,7 @@ export function Chat({
 					<>
 						<Hint
 							// F2 renames (registry) — surfaced on the hover.
-							label="Rename session"
+							label={tr("重命名会话", "Rename session")}
 							action="rename-session"
 							side="bottom"
 						>
@@ -1702,7 +1714,7 @@ export function Chat({
 								setRenaming(true);
 							}}
 							data-plugin-chrome-title
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title lh-session-title text-[18px] tracking-normal text-foreground/85 transition-colors hover:bg-accent"
 						>
 							{titleText}
 							</button>
@@ -1716,7 +1728,7 @@ export function Chat({
 					    structure beside the phase chip — access to the full-DAG popup
 					    at every width; the marginalia is the wide-screen glance view. */}
 					{planTree && (
-						<Hint label="Open the full plan" side="bottom">
+						<Hint label={tr("打开完整学习计划", "Open the full plan")} side="bottom">
 <button
 							type="button"
 							data-testid="plan-chip"
@@ -1727,7 +1739,7 @@ export function Chat({
 							className="lh-no-drag flex shrink-0 cursor-pointer items-center gap-1.5 rounded-full border border-border/80 px-2 py-0.5 text-xs font-medium uppercase tracking-wide text-muted-foreground transition-colors hover:border-border hover:text-foreground"
 						>
 							<WaypointsIcon className="size-3.5 text-primary" aria-hidden />
-							Plan
+							{tr("计划", "Plan")}
 						</button>
 </Hint>
 					)}
@@ -1749,7 +1761,7 @@ export function Chat({
 							className="pointer-events-none flex shrink-0 select-none items-center gap-1 text-xs font-medium uppercase tracking-wide text-muted-foreground"
 						>
 							<DumbbellIcon className="size-3" />
-							Practice
+							{tr("练习", "Practice")}
 						</span>
 					) : (
 						<PhaseChip phase={phases.at(-1) ?? "probe"} />
@@ -1766,8 +1778,8 @@ export function Chat({
 						<div data-session-find-root="" className={`${COLUMN} flex flex-1 flex-col gap-4 pt-4`}>
 							{messages.length === 0 && !busy && (
 								<ConversationEmptyState
-									title="New session"
-									description="The teacher will open by probing what you already know."
+									title={tr("新会话", "New session")}
+									description={tr("老师会先摸底，了解你已经掌握了什么。", "The teacher will open by probing what you already know.")}
 								/>
 							)}
 
@@ -1822,7 +1834,7 @@ export function Chat({
 														className="my-4 flex items-center justify-center gap-1.5 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground"
 													>
 														<ArrowRightIcon className="size-3" />
-														Next problem
+														{tr("下一题", "Next problem")}
 													</div>
 												);
 											default:
@@ -1882,7 +1894,7 @@ export function Chat({
 												{/* The rail GROUPS (owner round 4, 2026-10-05): the YOU heading
 												    sits INSIDE the rail, same mono-xs register and same 1ch
 												    rail as the thinking rows — one quote geometry. */}
-												<div className="font-medium uppercase tracking-wide text-muted-foreground">You</div>
+												<div className="font-medium uppercase tracking-wide text-muted-foreground">{tr("你", "You")}</div>
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
@@ -1918,7 +1930,7 @@ export function Chat({
 												) {
 													return (
 														<SystemLine key={`retry-${pi}`} testId="tool-retry">
-															Retrying…
+															{tr("正在重试…", "Retrying…")}
 														</SystemLine>
 													);
 												}
@@ -1961,7 +1973,7 @@ export function Chat({
 													case "tool-recall": {
 														const malformed = !busy && malformedQuestions.find(call => call.messageId === part.sourceMessageId && call.contentIndex === part.sourceContentIndex && call.toolCallId === part.toolCallId);
 														if (malformed) return <MalformedQuestion key={pi} disabled={!!pending || compacting}
-															reason={pending ? "Answer or discard the remaining question first." : undefined}
+															reason={pending ? tr("请先回答或放弃剩下的问题。", "Answer or discard the remaining question first.") : undefined}
 															onRetry={() => {
 																draftRef.current = null;
 																void send({ type: "retry-question", messageId: malformed.messageId, contentIndex: malformed.contentIndex, toolCallId: malformed.toolCallId });
@@ -2015,8 +2027,8 @@ export function Chat({
 						    BEFORE beginTurn; the settle kick runs after endTurn). */}
 							{compacting && (
 								<span className="flex items-center gap-2 font-ui text-xs font-medium uppercase tracking-wide text-muted-foreground">
-									<BrailleSpinner label="Compacting context" />
-									<Shimmer duration={1}>COMPACTING CONTEXT…</Shimmer>
+									<BrailleSpinner label={tr("正在压缩上下文", "Compacting context")} />
+									<Shimmer duration={1}>{tr("正在压缩上下文…", "COMPACTING CONTEXT…")}</Shimmer>
 								</span>
 							)}
 							{(status === "submitted" || turnInFlight) && (
@@ -2025,10 +2037,10 @@ export function Chat({
 							{openingError && <p role="alert" className="text-sm text-destructive">{OPENING_PROMPT_FAILURE}</p>}
 							{error && (
 								<div className="flex items-center justify-between gap-3 rounded-lg border border-destructive/50 bg-destructive/10 px-3 py-2 text-sm">
-									<span>Something went wrong: {error.message}</span>
+									<span>{tr("出错了：", "Something went wrong: ")}{error.message}</span>
 									{retryable && (
 										<Button variant="outline" size="xs" data-testid="retry-failed-turn" onClick={retryFailedTurn}>
-											Retry
+											{tr("重试", "Retry")}
 										</Button>
 									)}
 								</div>
@@ -2113,7 +2125,7 @@ export function Chat({
 										onClick={() => setSetupOpen(true)}
 										className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 									>
-										Set up your models
+										{tr("设置你的模型", "Set up your models")}
 									</button>
 								</div>
 							)
@@ -2141,7 +2153,7 @@ export function Chat({
 							// applies.
 							nextProblem={nextReady}
 							onNext={sendNext}
-							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+							placeholder={nextReady ? tr("随便问，或按 Enter 进入下一题。", "Ask anything, or press Enter for the next one.") : undefined}
 						/>
 					}
 					onSubmitAnswer={(output) => {
@@ -2914,7 +2926,7 @@ export function DockOverlay({
 					<div ref={viewportRef} data-dock-viewport="" className="pointer-events-auto">
 					<div ref={bodyRef}>
 					{setupCta}
-					{reconciliation === "failed" && <div role="alert" className="mb-2 rounded-2xl border bg-card px-4 py-3 text-sm">Could not sync the saved session. <Button type="button" variant="ghost" onClick={onRetrySync}>Retry syncing</Button></div>}
+					{reconciliation === "failed" && <div role="alert" className="mb-2 rounded-2xl border bg-card px-4 py-3 text-sm">{tr("无法同步已保存的会话。", "Could not sync the saved session. ")}<Button type="button" variant="ghost" onClick={onRetrySync}>{tr("重试同步", "Retry syncing")}</Button></div>}
 					{/* The queued-steer indicator (owner spec 2026-10-03): quiet
 					    one-liners above the shell - right-aligned to where its corner
 					    rounding starts, truncated, no background, no container. A
@@ -2956,8 +2968,8 @@ export function DockOverlay({
 								<PluginQuestionDock viewReader={customViewReader} snapshot={pluginQuestion} chatId={chatId} draft={pluginDraft} expanded={expanded} reveal={revealPending} onExpand={expandAndReveal} ready={pluginReady} available={pluginAvailable} reconciliation={reconciliation} readingRef={readingInputRef} onMicAvailable={onPluginMicAvailable} send={onPluginSend} dismiss={onPluginDismiss} prepareSubmission={onPreparePluginQuestion} />
 							) : unreadablePlugin ? (
 								<div className="px-4 py-3">
-									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing question…</p>}
-									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">Question unavailable</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>Dismiss question</Button></>}
+									{reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">{tr("正在准备问题…", "Preparing question…")}</p>}
+									{reconciliation === "ready" && <><p role="status" className="text-sm text-muted-foreground">{tr("问题不可用", "Question unavailable")}</p><Button type="button" variant="ghost" disabled={!pluginReady} onClick={() => { void finishDictation().then(onPluginDismiss); }}>{tr("跳过问题", "Dismiss question")}</Button></>}
 								</div>
 							) : pending ? (
 								<QuestionDock
@@ -3044,7 +3056,7 @@ export function DockOverlay({
 				    mid-question unmount), and widening past the floor fades it
 				    back in. */}
 				{(pending || pluginQuestion) && plan && (
-					<Hint label="Open the full plan" side="bottom">
+					<Hint label={tr("打开完整学习计划", "Open the full plan")} side="bottom">
 <button
 						type="button"
 						data-testid="plan-marginalia"

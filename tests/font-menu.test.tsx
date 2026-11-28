@@ -74,7 +74,7 @@ describe("FontMenuList (thin SSR)", () => {
 			<FontMenuList families={["Georgia", "Menlo"]} effectiveFamily={null} onPick={() => {}} />,
 		);
 		assert.ok(html.includes('data-testid="font-option-default"'), "the default row");
-		assert.ok(html.includes("default</span>"), "the default row carries its mark");
+		assert.ok(html.includes("默认</span>"), "the default row carries its mark");
 		assert.ok(html.includes('data-testid="font-option-Georgia"'), "a family row");
 		assert.ok(html.includes('data-testid="font-option-Menlo"'), "another family row");
 		assert.ok(html.includes('data-testid="font-search"'), "the search field");
@@ -84,7 +84,7 @@ describe("FontMenuList (thin SSR)", () => {
 		assert.ok(!html.includes('data-testid="font-custom-input"'), "no separate custom input");
 		assert.ok(!html.includes('data-testid="font-custom-set"'), "no Set button");
 		assert.ok(!html.includes("Type a family name"), "no second field placeholder");
-		assert.ok(html.includes("Search fonts…"), "the search placeholder");
+		assert.ok(html.includes("搜索字体…"), "the search placeholder");
 	});
 
 	it("the effective family's row carries the quiet highlight; the default row does when unset", () => {
@@ -107,7 +107,7 @@ describe("FontMenuList (thin SSR)", () => {
 		const html = renderToStaticMarkup(
 			<FontMenuList families={undefined} effectiveFamily={null} onPick={() => {}} />,
 		);
-		assert.ok(html.includes("Loading fonts…"));
+		assert.ok(html.includes("正在加载字体…"));
 	});
 });
 
@@ -151,10 +151,10 @@ describe("the emphasis-ink factory ruling (globals.css)", () => {
 		const html = renderToStaticMarkup(
 			<AppearanceSection appearance={undefined} onSectionChange={() => true} />,
 		);
-		const text = html.match(/data-testid="row-color-text"[\s\S]*?Empty = (#[0-9a-f]{6})/)?.[1];
+		const text = html.match(/data-testid="row-color-text"[\s\S]*?留空 = (#[0-9a-f]{6})/)?.[1];
 		assert.ok(text, "the text row's hint");
 		for (const key of ["bold", "italic"]) {
-			const hint = html.match(new RegExp(`data-testid="row-color-${key}"[\\s\\S]*?Empty = (#[0-9a-f]{6})`))?.[1];
+			const hint = html.match(new RegExp(`data-testid="row-color-${key}"[\\s\\S]*?留空 = (#[0-9a-f]{6})`))?.[1];
 			assert.equal(hint, text, `${key} row`);
 		}
 		assert.ok(!html.includes("#ee928c"));

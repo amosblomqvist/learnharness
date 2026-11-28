@@ -1,11 +1,12 @@
 import { strokeWidth, visibleStrokes, type Stroke } from "./strokes.ts";
+import { tr } from "./i18n.ts";
 
 export interface Offset { x: number; y: number }
 export interface Bounds extends Offset { width: number; height: number }
 /** Bound only the export raster, never world geometry or the display camera. */
 export function exportRaster(bounds: Bounds, pixelRatio: number, imageScale: number): { width: number; height: number } {
   if (![bounds.x, bounds.y, bounds.width, bounds.height, pixelRatio, imageScale].every(Number.isFinite) ||
-    bounds.width <= 0 || bounds.height <= 0 || pixelRatio <= 0 || imageScale <= 0 || imageScale > 100) throw new Error("The drawing bounds cannot be exported. Your drawing has been kept.");
+    bounds.width <= 0 || bounds.height <= 0 || pixelRatio <= 0 || imageScale <= 0 || imageScale > 100) throw new Error(tr("无法导出绘图范围。你的绘图已保留。", "The drawing bounds cannot be exported. Your drawing has been kept."));
   const scale = Math.min(pixelRatio * imageScale / 100, 2000 / bounds.width, 2000 / bounds.height);
   return { width: Math.max(1, Math.min(2000, Math.round(bounds.width * scale))),
     height: Math.max(1, Math.min(2000, Math.round(bounds.height * scale))) };

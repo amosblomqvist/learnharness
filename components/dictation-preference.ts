@@ -6,6 +6,7 @@ import {
 	type DictationLanguage, type UserSettings,
 } from "@/src/core";
 import { notifySettingsSaved, onSettingsSaved } from "@/components/settings-signal";
+import { tr } from "@/src/core";
 
 const INITIAL = { language: undefined as DictationLanguage | undefined, saving: false, error: null as string | null };
 
@@ -45,7 +46,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				return language;
 			} catch {
 				if (version !== revision) return getLanguage();
-				const message = "Could not load dictation language. Try again.";
+				const message = tr("无法加载语音听写语言，请重试。", "Could not load dictation language. Try again.");
 				publish({ error: message });
 				throw new Error(message);
 			} finally {
@@ -75,7 +76,7 @@ export function createDictationLanguageStore(request: typeof fetch, saved: () =>
 				saved();
 				return true;
 			} catch {
-				publish({ error: "Could not save dictation language. Try again." });
+				publish({ error: tr("无法保存语音听写语言，请重试。", "Could not save dictation language. Try again.") });
 				return false;
 			} finally {
 				writing = null;

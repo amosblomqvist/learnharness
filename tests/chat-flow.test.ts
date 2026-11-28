@@ -868,8 +868,8 @@ describe("canonical persistence failures", () => {
 			assert.equal(res.status, 500);
 			const client = new SessionModel({ chatId: chat.id, initialMessages: before, fetch: async () => res.clone() });
 			await client.submitAnswer("quiz", "call-1", gradedAnswer(QUIZ_INPUT, ["Mercury"]));
-			assert.equal(client.getState().error?.message, "Your input could not be saved. Please try again.");
-			assert.equal(await res.text(), "Your input could not be saved. Please try again.");
+			assert.equal(client.getState().error?.message, "无法保存你的输入，请重试。");
+			assert.equal(await res.text(), "无法保存你的输入，请重试。");
 			assert.equal(builds, 0);
 			assert.equal(isTurnRunning(chat.id), false);
 			assert.equal(runningTurn(chat.id), undefined);
@@ -892,15 +892,15 @@ describe("canonical persistence failures", () => {
 			const body = await drainTurn(post(chat.id, { type: "answer", toolCallId: "call-1", answer: gradedAnswer(QUIZ_INPUT, ["Mercury"]) }), agentFactory(engine));
 			const errors = eventsOf(body).filter(e => e.type === "error");
 			assert.equal(errors.length, 1);
-			assert.equal(errors[0]!.errorText, "The reply could not be saved.");
-			assert.ok(body.indexOf("The reply could not be saved.") < body.indexOf("[DONE]"));
+			assert.equal(errors[0]!.errorText, "无法保存回复。");
+			assert.ok(body.indexOf("无法保存回复。") < body.indexOf("[DONE]"));
 			assert.equal(isTurnRunning(chat.id), false);
 			assert.equal(runningTurn(chat.id), undefined);
 			assert.equal(chatStore.getChat(chat.id)!.messages.at(-1)?.role, "toolResult");
 			// The normal submitter may not reach GET /stream until AFTER the
 			// failing turn has left the live registry. It must still see it.
 			const late = await streamRoute.GET(new Request("http://test/stream"), { params: Promise.resolve({ id: chat.id }) });
-			assert.equal(eventsOf(await late.text()).find(e => e.type === "error")?.errorText, "The reply could not be saved.");
+			assert.equal(eventsOf(await late.text()).find(e => e.type === "error")?.errorText, "无法保存回复。");
 			// An already-open idle view can miss both the start and the wire
 			// error, then learn of settlement only via a record synchronization.
 			const snapshot = await (await recordRoute.GET(new Request("http://test/record"), { params: Promise.resolve({ id: chat.id }) })).json();
@@ -913,7 +913,7 @@ describe("canonical persistence failures", () => {
 			missedView.setMessages(snapshot.messages, snapshot.turnError);
 			await missedView.continueIfOwed(snapshot.messages);
 			assert.equal(automaticPosts, 0, "the record notice must block replacement even without a stream attachment");
-			assert.equal(missedView.getState().error?.message, "The reply could not be saved.");
+			assert.equal(missedView.getState().error?.message, "无法保存回复。");
 		} finally { chatStore.saveMessages = save; }
 	});
 
@@ -932,7 +932,7 @@ describe("canonical persistence failures", () => {
 				});
 				return agent;
 			});
-			assert.equal(eventsOf(body).find(e => e.type === "error")?.errorText, "An error occurred.");
+			assert.equal(eventsOf(body).find(e => e.type === "error")?.errorText, "发生错误。");
 			assert.ok(chatStore.getChat(chat.id)!.messages.some(m => m.id === steer.id), "the steer was saved before bookkeeping failed");
 			const delivered: LhMessage[] = [];
 			const next = { steer: (message: LhMessage) => delivered.push(message), state: { model: { provider: "faux" } } } as unknown as Parameters<typeof registerLiveAgent>[1];
@@ -1022,7 +1022,18 @@ describe("renameChat (the header's click-to-edit title)", () => {
 		const chat = chatStore.createChat("keep me");
 		createdChats.push(chat.id);
 		const renamed = chatStore.renameChat(chat.id, "   ");
-		assert.equal(renamed.title, "Untitled session");
+		assert.equal(renamed.title, "未命名会话");
+	});
+
+	it("automatic titles replace defaults and each other, never a hand-set title", () => {
+		const chat = chatStore.createChat("first prompt line");
+		createdChats.push(chat.id);
+		assert.equal(chatStore.renameChat(chat.id, "AI name", "auto").titleSource, "auto");
+		assert.equal(chatStore.renameChat(chat.id, "Goal name", "goal").title, "Goal name");
+		chatStore.renameChat(chat.id, "Mine");
+		assert.equal(chatStore.getChat(chat.id)!.titleSource, "user");
+		assert.equal(chatStore.renameChat(chat.id, "AI again", "goal").title, "Mine");
+		assert.equal(chatStore.getChat(chat.id)!.title, "Mine");
 	});
 });
 
@@ -1044,7 +1055,7 @@ describe("the BYOK turn gate (no factory floor — owner, 2026-09-22)", () => {
 			const body = (await res.json()) as { error: string; code: string; missing: string[] };
 			assert.equal(body.code, "models_not_configured");
 			assert.deepEqual(body.missing, ["strong"]);
-			assert.match(body.error, /No model configured/);
+			assert.match(body.error, /尚未配置模型/);
 		} else {
 			assert.equal(res.status, 200, "the record's strong slot satisfies the conversation chain");
 			await drainRunning(chat.id);
@@ -1090,7 +1101,7 @@ describe("the key-presence turn gate (provider-key interlude, 2026-09-25)", () =
 			assert.equal(body.code, "provider_key_missing");
 			assert.equal(body.provider, "together", "the envelope names whose key is gone");
 			assert.deepEqual(body.slots, ["strong"], "the conversation tier is the affected slot");
-			assert.equal(body.error, "No Together key is set — add one in Settings → Keys", "the human line names the provider");
+			assert.equal(body.error, "未设置 Together API 密钥——请在“设置 → 服务商”中添加", "the human line names the provider");
 			assert.equal(isTurnRunning(chat.id), false, "the refusal never registers a live turn");
 			assert.equal(chatStore.getChat(chat.id)!.messages.length, 0, "no write-ahead persist before the gate");
 		} finally {

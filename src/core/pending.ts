@@ -1,3 +1,4 @@
+import { tr } from "./i18n.ts";
 /**
  * Wave D: these scans read VIEW messages (core/view.ts LhViewMessage — the
  * client's grouped transcript). The part shapes are the same vocabulary the
@@ -160,16 +161,16 @@ export function findPendingToolCall(messages: UIMessage[], authority?: string | 
  * renders it as the quiet transcript shimmer.
  */
 const ACTIVITY_LABELS: Record<string, string> = {
-	read: "Reading a file…",
-	ls: "Listing a directory…",
-	find: "Finding files…",
-	grep: "Searching file contents…",
-	research: "Dispatching research…",
-	demo: "Building a demo…",
-	visual: "Making a visual…",
-	pdf: "Reading a PDF…",
-	plan_init: "Drawing up the plan…",
-	probe_done: "Concluding the assessment…",
+	read: tr("正在读取文件…", "Reading a file…"),
+	ls: tr("正在列出目录…", "Listing a directory…"),
+	find: tr("正在查找文件…", "Finding files…"),
+	grep: tr("正在搜索文件内容…", "Searching file contents…"),
+	research: tr("正在发起调研…", "Dispatching research…"),
+	demo: tr("正在构建互动演示…", "Building a demo…"),
+	visual: tr("正在制作图示…", "Making a visual…"),
+	pdf: tr("正在阅读 PDF…", "Reading a PDF…"),
+	plan_init: tr("正在制定学习计划…", "Drawing up the plan…"),
+	probe_done: tr("正在完成摸底评估…", "Concluding the assessment…"),
 };
 
 /** The activity label for ONE running tool (owner, streaming round
@@ -178,8 +179,8 @@ const ACTIVITY_LABELS: Record<string, string> = {
  *  bottom line. Question tools are excluded here: their input-streaming
  *  part renders in the dock, never a live card. */
 export function toolActivityLabel(tool: string): string {
-	if ((QUESTION_TOOLS as readonly string[]).includes(tool)) return "Writing a question…";
-	return ACTIVITY_LABELS[tool] ?? "Working…";
+	if ((QUESTION_TOOLS as readonly string[]).includes(tool)) return tr("正在编写问题…", "Writing a question…");
+	return ACTIVITY_LABELS[tool] ?? tr("处理中…", "Working…");
 }
 
 export function streamingToolActivity(messages: UIMessage[]): string | null {

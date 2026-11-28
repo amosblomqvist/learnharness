@@ -6,6 +6,7 @@ import { MenuShell } from "./menu-shell";
 import { citationLabel, type TutorCitation } from "@/src/core";
 import { useOptionalInteractionLayers } from "./interaction-layers";
 import { isInteractionScopeEligible } from "./plugin-input-focus";
+import { tr } from "@/src/core";
 
 /** Where a composer chip's link sits in the draft (for comment edits). */
 export type ComposerCitationSource = { start: number; end: number; link: string; host: HTMLElement };
@@ -34,7 +35,7 @@ export function CitationQuoteCard({ citation, onOpenSource }: { citation: TutorC
 			<blockquote className="max-h-64 overflow-y-auto whitespace-pre-wrap border-l-2 border-muted-foreground/30 pl-2 text-sm">{citation.text}</blockquote>
 			{citation.comment ? <p className="whitespace-pre-wrap text-sm">{citation.comment}</p> : null}
 			<button type="button" className="inline-flex items-center gap-1 self-start text-xs font-medium text-muted-foreground hover:text-foreground" onClick={onOpenSource}>
-				<ArrowUpRight aria-hidden="true" className="size-3.5" />Go to source
+				<ArrowUpRight aria-hidden="true" className="size-3.5" />{tr("跳转到原文", "Go to source")}
 			</button>
 		</div>
 	);
@@ -68,7 +69,7 @@ export function CitationChip({ citation, variant, contentEditable, source }: Cit
 			<button
 				ref={labelRef}
 				type="button"
-				aria-label={variant === "composer" ? `View cited tutor text: ${label}` : `Quoted tutor text: ${label}`}
+				aria-label={variant === "composer" ? tr(`查看引用的老师原文：${label}`, `View cited tutor text: ${label}`) : tr(`引用的老师原文：${label}`, `Quoted tutor text: ${label}`)}
 				aria-expanded={variant === "transcript" ? cardOpen : undefined}
 				title={citation.text}
 				className="inline-flex min-w-0 items-center gap-1 text-left"
@@ -81,7 +82,7 @@ export function CitationChip({ citation, variant, contentEditable, source }: Cit
 			{variant === "composer" ? (
 				<button
 					type="button"
-					aria-label={citation.comment ? "Edit citation comment" : "Add comment to citation"}
+					aria-label={citation.comment ? tr("编辑引用批注", "Edit citation comment") : tr("为引用添加批注", "Add comment to citation")}
 					className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-foreground"
 					onPointerDown={(event) => event.preventDefault()}
 					onClick={() => { if (source) actions?.editComment?.(citation, source); }}

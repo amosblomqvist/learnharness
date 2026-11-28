@@ -93,11 +93,11 @@ it("coding model solution lazily uses real host Markdown for fenced code and exp
 	let dispose!: () => void;
 	await act(async () => { dispose = mountModelSolution(target, ui, solution, scope.signal); });
 	const toggle = target.querySelector("button")!;
-	assert.equal(toggle.textContent, "Model solution");
+	assert.equal(toggle.textContent, "参考解答");
 	assert.equal(toggle.getAttribute("aria-expanded"), "false");
 	assert.equal(store.getSnapshot().length, 0);
 	await act(async () => { toggle.click(); });
-	assert.equal(toggle.textContent, "Hide model solution");
+	assert.equal(toggle.textContent, "收起参考解答");
 	assert.equal(store.getSnapshot().length, 1);
 	const widget = target.querySelector("[data-plugin-ui-widget]")!;
 	assert.match(widget.querySelector("[data-streamdown='code-block-body']")!.textContent!, /function square\(x\) \{ return x \* x; \}/);

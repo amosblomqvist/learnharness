@@ -13,12 +13,13 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ChatTitleSource, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
 import { phaseAt3Lh } from "../core/phases.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
+import { tr } from "../core/i18n.ts";
 
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
@@ -38,7 +39,7 @@ function createChat(title: string, kind?: "practice"): ChatRecord {
 	const now = new Date().toISOString();
 	const record: ChatRecord = {
 		id: `chat_${Date.now().toString(36)}_${crypto.randomUUID().slice(0, 8)}`,
-		title: title.trim() || "Untitled session",
+		title: title.trim() || tr("未命名会话", "Untitled session"),
 		createdAt: now,
 		updatedAt: now,
 		messages: [],
@@ -192,12 +193,15 @@ function saveSettings(id: string, settings: ChatSettings): void {
 /** Rename a session (the header's click-to-edit title, 2026-09-17). Like
  * saveSettings, a rename is NOT conversation activity: updatedAt stays put
  * so sidebar order never churns. Same fallback as createChat — the empty
- * string becomes "Untitled session" (the API gate rejects it first; this
+ * string becomes "未命名会话" (the API gate rejects it first; this
  * is the honest floor for any other caller). */
-function renameChat(id: string, title: string): ChatRecord {
+function renameChat(id: string, title: string, source: ChatTitleSource = "user"): ChatRecord {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
-	record.title = title.trim() || "Untitled session";
+	// A hand-set title is final: automatic names never replace it.
+	if (source !== "user" && record.titleSource === "user") return record;
+	record.title = title.trim() || tr("未命名会话", "Untitled session");
+	record.titleSource = source;
 	writeChat(record);
 	emit("chats-changed", {});
 	return record;

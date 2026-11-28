@@ -11,11 +11,12 @@
  */
 import { setSteerUiInverted, type SteerDetails } from "@/src/core";
 import { getChat, stores } from "@/src/server";
+import { tr } from "@/src/core";
 
 export async function POST(req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	const chat = getChat(id);
-	if (!chat) return Response.json({ error: "Unknown chat" }, { status: 404 });
+	if (!chat) return Response.json({ error: tr("找不到该会话", "Unknown chat") }, { status: 404 });
 
 	const body = (await req.json().catch(() => null)) as { input?: unknown } | null;
 	const input = body?.input as { messageId?: unknown; inverted?: unknown } | null | undefined;
@@ -25,14 +26,14 @@ export async function POST(req: Request, ctx: { params: Promise<{ id: string }> 
 		typeof input.messageId !== "string" ||
 		typeof input.inverted !== "boolean"
 	) {
-		return Response.json({ error: "input must be { messageId: string, inverted: boolean }" }, { status: 400 });
+		return Response.json({ error: tr("input 必须是 { messageId: string, inverted: boolean }", "input must be { messageId: string, inverted: boolean }") }, { status: 400 });
 	}
 
 	// Honesty: the target must actually be a demo/figure steer.
 	const target = chat.messages.find((m) => m.id === input.messageId);
 	const details = target ? ((target as { details?: unknown }).details as Partial<SteerDetails> | undefined) : undefined;
 	if (!details || (details.kind !== "demo" && details.kind !== "visual")) {
-		return Response.json({ error: "No demo/figure steer with that message id" }, { status: 400 });
+		return Response.json({ error: tr("找不到该消息 id 对应的互动演示或插图", "No demo/figure steer with that message id") }, { status: 400 });
 	}
 
 	const messages = setSteerUiInverted(chat.messages, input.messageId, input.inverted);

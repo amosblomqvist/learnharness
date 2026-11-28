@@ -7,6 +7,7 @@ import type { CallUsage, JobKind, JobRecord } from "@/src/core";
 import { isModelsRefusal, isProviderKeyRefusal, subscriptionLabel, subscriptionLabels } from "@/src/core";
 import { formatTokens, planCostLabel } from "@/components/usage-format";
 import { useServerEvent, useServerResync } from "@/components/server-events";
+import { tr } from "@/src/core";
 
 /**
  * THE BACKGROUND-AGENTS SECTION (owner, sidebar round — the successor of
@@ -91,6 +92,8 @@ export interface ActivityFeed {
 }
 
 const EMPTY_FEED: ActivityFeed = { jobs: [], pluginWorkers: [], extractions: [] };
+
+const EXTRACTION_PHASE_LABEL: Record<string, string> = { queued: "排队中", extracting: "提取中", waiting: "等待中", auditing: "审核中", merging: "合并中" };
 
 // ─── The activity feed (composition root: the root layout) ───────────────────
 
@@ -237,7 +240,7 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			id: job.id,
 			process: "job",
 			jobKind: job.kind,
-			title: job.kind === "plugin" ? job.plugin?.label || job.plugin?.toolName || "Plugin worker" : job.title,
+			title: job.kind === "plugin" ? job.plugin?.label || job.plugin?.toolName || tr("插件智能体", "Plugin worker") : job.title,
 			chatId: job.chatId,
 			startedAt: Date.parse(job.createdAt) || 0,
 			cost: job.costUsd ?? null,
@@ -249,9 +252,9 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			// 66dbea9): a pinned model whose key is gone reads as the key
 			// being needed, same quiet tone.
 			activity: isModelsRefusal(job.error)
-				? "needs model setup"
+				? tr("需要设置模型", "needs model setup")
 				: isProviderKeyRefusal(job.error)
-					? "needs a provider key"
+					? tr("需要服务商 API 密钥", "needs a provider key")
 					: (job.activity ?? ""),
 			model: usage?.model,
 			steps: usage?.steps,
@@ -266,7 +269,7 @@ export function toBlobs(feed: ActivityFeed): ActivityBlob[] {
 			context: task.contextLimit !== null && last?.inputTokens !== undefined
 				? { used: last.inputTokens + (last.outputTokens ?? 0) + (last.cacheReadTokens ?? 0) + (last.cacheWriteTokens ?? 0), limit: task.contextLimit }
 				: null,
-			activity: task.activity ?? task.status,
+			activity: task.activity ?? tr(task.status === "queued" ? "排队中" : "运行中", task.status),
 			model: task.usage?.model ?? `${task.model.provider}:${task.model.id}`,
 			steps: task.usage?.steps,
 		});
@@ -380,9 +383,9 @@ export function ActivitySection({ feed: feedProp }: { feed?: ActivityFeed }) {
 		<section data-testid="activity-section" className="border-t border-border px-3 pb-3 pt-2">
 			<div className="mb-1 flex items-center gap-1.5 text-xs uppercase tracking-widest text-muted-foreground/70">
 				<ActivityIcon className="size-3" />
-				Background agents
+				{tr("后台智能体", "Background agents")}
 				{blobs.length > 0 && (
-					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title="Total running cost (inferred)">
+					<span className="ml-auto tabular-nums" data-testid="activity-total-cost" title={tr("运行总费用（估算）", "Total running cost (inferred)")}>
 						{planCostLabel(totalCost, subscriptionLabels(blobs.map((blob) => blob.model)))}
 				</span>
 				)}
@@ -425,18 +428,18 @@ function ActivityBlobRow({
 	const Icon = blob.process === "extraction" ? WaypointsIcon : (blob.jobKind && KIND_ICON[blob.jobKind]) || BotIcon;
 	const label =
 		blob.process === "extraction"
-			? `Extraction — ${blob.phase ?? "running"}`
+			? tr(`提取 — ${(blob.phase && EXTRACTION_PHASE_LABEL[blob.phase]) ?? blob.phase ?? "运行中"}`, `Extraction — ${blob.phase ?? "running"}`)
 			: blob.jobKind === "research"
-				? "Researcher"
+				? tr("研究员", "Researcher")
 				: blob.jobKind === "demo"
-					? "Demo builder"
+					? tr("互动演示制作", "Demo builder")
 					: blob.jobKind === "visual"
-						? "Figure maker"
+						? tr("插图绘制", "Figure maker")
 						: blob.jobKind === "pdf"
-							? "PDF reader"
+							? tr("PDF 阅读", "PDF reader")
 							: blob.jobKind === "plugin"
-								? "Plugin worker"
-								: "Sub-agent";
+								? tr("插件智能体", "Plugin worker")
+								: tr("子智能体", "Sub-agent");
 	return (
 		<div
 			data-testid={`activity-blob-${blob.process}`}
@@ -476,8 +479,8 @@ function ActivityBlobRow({
 					data-testid="activity-abort"
 					onClick={onAbort}
 					disabled={abortState !== undefined}
-					title={abortState === "failed" ? "Abort failed — try again" : "End this background process"}
-					aria-label={`End ${label} in ${blob.title}`}
+					title={abortState === "failed" ? tr("中止失败——请重试", "Abort failed — try again") : tr("结束这个后台进程", "End this background process")}
+					aria-label={tr(`结束“${blob.title}”中的${label}`, `End ${label} in ${blob.title}`)}
 					className="absolute right-1 top-1/2 -translate-y-1/2 rounded-md p-1 text-muted-foreground/70 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:opacity-50"
 				>
 					<SquareIcon className="size-3" />
@@ -499,13 +502,13 @@ function ActivityBlobRow({
 					<div className="flex flex-col gap-1 text-muted-foreground">
 						{blob.activity && <div className="break-words">{blob.activity}</div>}
 						<div className="flex justify-between gap-2">
-							<span>Cost</span>
+							<span>{tr("费用", "Cost")}</span>
 							<span className="tabular-nums text-card-foreground">
 								{planCostLabel(blob.cost, subscriptionLabel(blob.model))}
 							</span>
 						</div>
 						<div className="flex justify-between gap-2">
-							<span>Context</span>
+							<span>{tr("上下文", "Context")}</span>
 							<span className="tabular-nums text-card-foreground" data-testid="activity-blob-context">
 								{blob.context === null
 									? "—"
@@ -514,25 +517,25 @@ function ActivityBlobRow({
 						</div>
 						{blob.model && (
 							<div className="flex justify-between gap-2">
-								<span>Model</span>
+								<span>{tr("模型", "Model")}</span>
 								<span className="truncate text-card-foreground">{blob.model}</span>
 							</div>
 						)}
 						{blob.steps !== undefined && (
 							<div className="flex justify-between gap-2">
-								<span>Steps</span>
+								<span>{tr("步数", "Steps")}</span>
 								<span className="tabular-nums text-card-foreground">{blob.steps}</span>
 							</div>
 						)}
 						{blob.chatId && (
 							<a href={`/chat/${blob.chatId}`} className="text-primary hover:underline">
-								Open session →
+								{tr("打开会话 →", "Open session →")}
 							</a>
 						)}
 					</div>
 					<div className="mt-2 text-muted-foreground/80">
-					{abortState === "failed" && "Abort failed — try again"}
-					{abortState === "pending" && "Stopping…"}
+					{abortState === "failed" && tr("中止失败——请重试", "Abort failed — try again")}
+					{abortState === "pending" && tr("正在停止…", "Stopping…")}
 				</div>
 				</div>
 			)}

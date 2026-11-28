@@ -7,6 +7,7 @@ import { cn } from "@/lib/utils";
 import type { ImageContent } from "@earendil-works/pi-ai";
 import { SubmittedImages } from "./submitted-images";
 import { PathText } from "@/components/file-path-chip";
+import { tr } from "@/src/core";
 
 /** The unified user-thinking row (owner round, 2026-10-05): ONE visual
  *  language for every surface where the learner's own thinking renders —
@@ -69,7 +70,7 @@ function subscribeUserThinking(fn: (open: boolean) => void): () => void {
 }
 
 export function ThinkingBlock({
-	label = "YOUR THINKING",
+	label = tr("你的思考", "YOUR THINKING"),
 	text,
 	images,
 	testId,

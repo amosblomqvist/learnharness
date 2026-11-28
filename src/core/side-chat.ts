@@ -46,6 +46,7 @@ import { QUESTION_TOOLS, toolQuestionKind } from "./pending.ts";
 import { parseQuestionInput } from "./tool-parts.ts";
 import { readPluginQuestionMessageAnnotation, readPluginQuestionAnswer, readPluginQuestionCancellation } from "./plugin-questions.ts";
 import { pluginProblemForCall, readPluginProblemSubmission } from "./plugin-problems.ts";
+import { tr } from "./i18n.ts";
 
 // ─── shared segment identity and main-agent history ──────────────────────────
 
@@ -173,7 +174,7 @@ export function sideConversationEntries(record: Pick<ChatRecord, "messages" | "s
 		// restart/save failure. Mark it incomplete once; never silently drop it.
 		for (const old of previous?.values() ?? []) {
 			if (old.pending && !current.has(old.id)) changes.push({ threadId: thread.id, previous: old,
-				message: { ...old, pending: false, error: "Reply interrupted before completion", at: new Date().toISOString() } });
+				message: { ...old, pending: false, error: tr("回复在完成前被中断", "Reply interrupted before completion"), at: new Date().toISOString() } });
 		}
 	}
 	changes.sort((a, b) => (Date.parse(a.message.at) || 0) - (Date.parse(b.message.at) || 0));
@@ -239,14 +240,14 @@ function clip(text: string, max: number): string {
 /** Validate the anchor shape; the server separately checks it points at
  *  real teacher prose in the record. */
 export function parseSideAnchor(raw: unknown): SideChatAnchor {
-	if (!raw || typeof raw !== "object") throw new SideChatInputError("anchor must be an object");
+	if (!raw || typeof raw !== "object") throw new SideChatInputError(tr("anchor 必须是一个对象", "anchor must be an object"));
 	const a = raw as Record<string, unknown>;
-	if (typeof a.messageId !== "string" || !ID_RE.test(a.messageId)) throw new SideChatInputError("anchor.messageId is invalid");
-	if (typeof a.partId !== "string" || !a.partId.startsWith(`${a.messageId}-t`)) throw new SideChatInputError("anchor.partId must belong to anchor.messageId");
+	if (typeof a.messageId !== "string" || !ID_RE.test(a.messageId)) throw new SideChatInputError(tr("anchor.messageId 无效", "anchor.messageId is invalid"));
+	if (typeof a.partId !== "string" || !a.partId.startsWith(`${a.messageId}-t`)) throw new SideChatInputError(tr("anchor.partId 必须属于 anchor.messageId", "anchor.partId must belong to anchor.messageId"));
 	if (typeof a.blockIndex !== "number" || !Number.isSafeInteger(a.blockIndex) || a.blockIndex < 0) {
-		throw new SideChatInputError("anchor.blockIndex must be a non-negative integer");
+		throw new SideChatInputError(tr("anchor.blockIndex 必须是非负整数", "anchor.blockIndex must be a non-negative integer"));
 	}
-	if (typeof a.blockText !== "string" || !a.blockText.trim()) throw new SideChatInputError("anchor.blockText must be non-empty");
+	if (typeof a.blockText !== "string" || !a.blockText.trim()) throw new SideChatInputError(tr("anchor.blockText 不能为空", "anchor.blockText must be non-empty"));
 	return {
 		messageId: a.messageId,
 		partId: a.partId,
@@ -257,46 +258,46 @@ export function parseSideAnchor(raw: unknown): SideChatAnchor {
 
 /** Parse the ask route's body. Throws SideChatInputError on bad shapes. */
 export function parseSideAskInput(raw: unknown): SideAskInput {
-	if (!raw || typeof raw !== "object") throw new SideChatInputError("body must be an object");
+	if (!raw || typeof raw !== "object") throw new SideChatInputError(tr("请求体必须是一个对象", "body must be an object"));
 	const body = raw as Record<string, unknown>;
-	if (body.requestId !== undefined && (typeof body.requestId !== "string" || !ID_RE.test(body.requestId))) throw new SideChatInputError("requestId is invalid");
-	if (body.working !== undefined && (typeof body.working !== "string" || body.working.length > SIDE_QUESTION_MAX_CHARS)) throw new SideChatInputError("working is invalid or too long");
+	if (body.requestId !== undefined && (typeof body.requestId !== "string" || !ID_RE.test(body.requestId))) throw new SideChatInputError(tr("requestId 无效", "requestId is invalid"));
+	if (body.working !== undefined && (typeof body.working !== "string" || body.working.length > SIDE_QUESTION_MAX_CHARS)) throw new SideChatInputError(tr("working 无效或过长", "working is invalid or too long"));
 	const extra = { ...(typeof body.requestId === "string" ? { requestId: body.requestId } : {}), ...(typeof body.working === "string" ? { working: body.working } : {}) };
 	if (body.retry === true) {
-		if (typeof body.threadId !== "string" || !ID_RE.test(body.threadId)) throw new SideChatInputError("retry needs a valid threadId");
+		if (typeof body.threadId !== "string" || !ID_RE.test(body.threadId)) throw new SideChatInputError(tr("重试需要有效的 threadId", "retry needs a valid threadId"));
 		return { threadId: body.threadId, text: "", quotes: [], retry: true, ...extra };
 	}
 	const text = typeof body.text === "string" ? body.text.trim() : "";
-	if (!text) throw new SideChatInputError("text must be a non-empty string");
-	if (text.length > SIDE_QUESTION_MAX_CHARS) throw new SideChatInputError(`text exceeds ${SIDE_QUESTION_MAX_CHARS} characters`);
+	if (!text) throw new SideChatInputError(tr("问题文本不能为空", "text must be a non-empty string"));
+	if (text.length > SIDE_QUESTION_MAX_CHARS) throw new SideChatInputError(tr(`问题文本超过 ${SIDE_QUESTION_MAX_CHARS} 个字符`, `text exceeds ${SIDE_QUESTION_MAX_CHARS} characters`));
 	const quotesRaw = body.quotes ?? [];
 	if (!Array.isArray(quotesRaw) || quotesRaw.some((q) => typeof q !== "string")) {
-		throw new SideChatInputError("quotes must be an array of strings");
+		throw new SideChatInputError(tr("quotes 必须是字符串数组", "quotes must be an array of strings"));
 	}
 	const quotes = (quotesRaw as string[]).map((q) => q.trim()).filter(Boolean);
-	if (quotes.length > SIDE_QUOTES_MAX) throw new SideChatInputError(`at most ${SIDE_QUOTES_MAX} quotes per question`);
+	if (quotes.length > SIDE_QUOTES_MAX) throw new SideChatInputError(tr(`每个问题最多引用 ${SIDE_QUOTES_MAX} 段内容`, `at most ${SIDE_QUOTES_MAX} quotes per question`));
 	const quoteCitations = body.quoteCitations;
 	if (quoteCitations !== undefined) {
-		if (!Array.isArray(quoteCitations) || quoteCitations.length !== quotes.length || quotes.length !== quotesRaw.length) throw new SideChatInputError("quoteCitations must match the quotes");
+		if (!Array.isArray(quoteCitations) || quoteCitations.length !== quotes.length || quotes.length !== quotesRaw.length) throw new SideChatInputError(tr("quoteCitations 必须与引用内容一致", "quoteCitations must match the quotes"));
 		for (const [index, value] of quoteCitations.entries()) {
 			const citation = typeof value === "string" && value.length <= 128_000 ? collectCitations(value) : [];
-			if (citation.length !== 1 || citation[0]!.source !== value || citation[0]!.citation.text.trim() !== clip(quotes[index]!, SIDE_QUOTE_MAX_CHARS)) throw new SideChatInputError("quote citation is invalid or does not match its passage");
+			if (citation.length !== 1 || citation[0]!.source !== value || citation[0]!.citation.text.trim() !== clip(quotes[index]!, SIDE_QUOTE_MAX_CHARS)) throw new SideChatInputError(tr("引用出处无效或与对应段落不符", "quote citation is invalid or does not match its passage"));
 		}
 	}
 	const references = quoteCitations === undefined ? {} : { quoteCitations: quoteCitations as string[] };
 	const threadId = body.threadId;
 	if (threadId !== undefined) {
-		if (typeof threadId !== "string" || !ID_RE.test(threadId)) throw new SideChatInputError("threadId is invalid");
+		if (typeof threadId !== "string" || !ID_RE.test(threadId)) throw new SideChatInputError(tr("threadId 无效", "threadId is invalid"));
 		return { threadId, text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)), ...extra, ...references };
 	}
-	if (body.anchor === undefined) throw new SideChatInputError("either threadId or anchor is required");
+	if (body.anchor === undefined) throw new SideChatInputError(tr("必须提供 threadId 或 anchor", "either threadId or anchor is required"));
 	return { anchor: parseSideAnchor(body.anchor), text, quotes: quotes.map((q) => clip(q, SIDE_QUOTE_MAX_CHARS)), ...extra, ...references };
 }
 
 /** Parse the window-state body ({open: boolean}). */
 export function parseSideOpenInput(raw: unknown): boolean {
 	const open = (raw as { open?: unknown } | null)?.open;
-	if (typeof open !== "boolean") throw new SideChatInputError("open must be a boolean");
+	if (typeof open !== "boolean") throw new SideChatInputError(tr("open 必须是布尔值", "open must be a boolean"));
 	return open;
 }
 

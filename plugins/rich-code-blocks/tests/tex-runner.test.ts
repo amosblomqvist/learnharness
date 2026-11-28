@@ -51,7 +51,7 @@ test("active cancellation terminates; queued cancellation removes only its waite
 
 test("deadline forcibly terminates an unresponsive worker; errors/output bounds replace the engine", async () => {
   const host = fixture(15);
-  await assert.rejects(host.render(), /exceeded/); assert.equal(host.workers[0]!.terminated, 1);
+  await assert.rejects(host.render(), /渲染超过/); assert.equal(host.workers[0]!.terminated, 1);
   const failed = assert.rejects(host.render(), /bad TeX/); host.workers[1]!.reply({ error: "bad TeX" }); await failed;
   assert.equal(host.workers[1]!.terminated, 1);
   const huge = assert.rejects(host.render(), /2 MiB/); host.workers[2]!.reply({ svg: "x".repeat(SVG_LIMIT + 1) }); await huge;
@@ -81,5 +81,5 @@ test("waiting queue is bounded at 16 and source/aborted inputs don't create work
   await assert.rejects(host.render("TeX", aborted.signal)); await assert.rejects(host.render("x".repeat(32 * 1024 + 1)));
   assert.equal(host.workers.length, 0);
   const accepted = Array.from({ length: TEX_QUEUE_LIMIT + 1 }, () => assert.rejects(host.render(), { name: "AbortError" }));
-  await assert.rejects(host.render(), /queue is full/); host.runner.dispose(); await Promise.all(accepted);
+  await assert.rejects(host.render(), /队列已满/); host.runner.dispose(); await Promise.all(accepted);
 });

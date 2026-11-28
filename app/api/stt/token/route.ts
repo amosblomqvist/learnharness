@@ -14,6 +14,7 @@
  * keys return FORBIDDEN here.
  */
 import { keyValue } from "@/src/server";
+import { tr } from "@/src/core";
 
 export async function GET() {
 	const key = keyValue("DEEPGRAM_API_KEY");
@@ -33,16 +34,16 @@ export async function GET() {
 		if (!res.ok) {
 			const detail = await res.text();
 			return Response.json(
-				{ message: `Deepgram token grant failed (${res.status}): ${detail.slice(0, 200)}` },
+				{ message: tr(`Deepgram 令牌签发失败（${res.status}）：${detail.slice(0, 200)}`, `Deepgram token grant failed (${res.status}): ${detail.slice(0, 200)}`) },
 				{ status: 502 },
 			);
 		}
 		const data = (await res.json()) as { access_token?: string };
 		if (!data.access_token) {
-			return Response.json({ message: "Deepgram grant returned no token" }, { status: 502 });
+			return Response.json({ message: tr("Deepgram 未返回令牌", "Deepgram grant returned no token") }, { status: 502 });
 		}
 		return Response.json({ token: data.access_token });
 	} catch {
-		return Response.json({ message: "Deepgram unreachable" }, { status: 502 });
+		return Response.json({ message: tr("无法连接 Deepgram", "Deepgram unreachable") }, { status: 502 });
 	}
 }

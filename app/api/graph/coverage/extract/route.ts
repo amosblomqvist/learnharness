@@ -11,6 +11,7 @@
  * by the pipeline and leave coverage untouched — the button stays honest.
  */
 import { extraction, extractionStatuses } from "@/src/server";
+import { tr } from "@/src/core";
 
 export const dynamic = "force-dynamic";
 
@@ -19,14 +20,14 @@ export async function POST(request: Request) {
 	try {
 		body = await request.json();
 	} catch {
-		return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+		return Response.json({ error: tr("请求体不是有效的 JSON", "Invalid JSON body") }, { status: 400 });
 	}
 	const chatId = (body as { chatId?: unknown }).chatId;
 	if (typeof chatId !== "string" || chatId === "") {
-		return Response.json({ error: 'Body must be {chatId: string}' }, { status: 400 });
+		return Response.json({ error: tr('请求体必须是 {chatId: string}', 'Body must be {chatId: string}') }, { status: 400 });
 	}
 	if (extractionStatuses().some((run) => run.kind === "chat" && run.chatId === chatId)) {
-		return Response.json({ error: "An extraction run is already in flight for this session" }, { status: 409 });
+		return Response.json({ error: tr("该会话已有正在进行的提取", "An extraction run is already in flight for this session") }, { status: 409 });
 	}
 	// Fire-and-forget, like the trigger: the dock + the coverage panel's
 	// running flags track progress; the promise never blocks the response.

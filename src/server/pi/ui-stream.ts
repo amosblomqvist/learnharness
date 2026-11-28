@@ -2,6 +2,7 @@ import type { Agent, AgentEvent, AgentMessage } from "@earendil-works/pi-agent-c
 import { ToolCallIdUniquifier } from "./call-ids.ts";
 import type { ChatGPTRequestCycle } from "../../agent/chatgpt-request-cycle.ts";
 import { pluginQuestionLedgerFor } from "../../agent/plugin-question-tools.ts";
+import { tr } from "../../core/i18n.ts";
 
 /**
  * THE NATIVE WIRE (Wave D, owner-approved 2026-09-26): one agent turn, streamed
@@ -241,7 +242,7 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 			try { onSettleFailure?.(err, reportedErrorText); }
 			catch (cleanupError) { console.error("[turn] settlement cleanup failed:", cleanupError); }
 			if (reportedErrorText === undefined) {
-				reportedErrorText = onSettleError?.(err) ?? "An error occurred.";
+				reportedErrorText = onSettleError?.(err) ?? tr("发生错误。", "An error occurred.");
 				send({ type: "error", errorText: reportedErrorText });
 			}
 		}
@@ -300,7 +301,7 @@ export function runPiTurn(spec: PiTurnSpec): PiTurnHandle {
 				return;
 			}
 			console.error("[turn] agent loop failed:", err);
-			reportedErrorText = onError?.(err) ?? "An error occurred.";
+			reportedErrorText = onError?.(err) ?? tr("发生错误。", "An error occurred.");
 			send({ type: "error", errorText: reportedErrorText });
 			settleWith();
 			closeAll();

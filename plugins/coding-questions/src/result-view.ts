@@ -1,6 +1,7 @@
 import type { PluginFrontendContext } from "learnharness-plugin-api";
 import { mountDisclosure } from "./disclosure.ts";
 import type { CodingTestResult } from "./test-result.ts";
+import { tr } from "./i18n.ts";
 
 /** The badge uses the host heading; output stays in the provided footer/body slot. */
 export function mountTestResult(container: HTMLElement, ui: Pick<PluginFrontendContext["ui"], "mountBadge">, result: CodingTestResult, signal: AbortSignal, headerContainer?: HTMLElement): () => void {
@@ -30,12 +31,12 @@ export function mountTestResult(container: HTMLElement, ui: Pick<PluginFrontendC
   signal.addEventListener("abort", dispose, { once: true });
   try {
     badge = ui.mountBadge(badgeRoot, {
-      text: result.status === "passed" ? "Tests passed" : result.status === "failed" ? "Tests failed" : "Could not run tests",
+      text: result.status === "passed" ? tr("测试通过", "Tests passed") : result.status === "failed" ? tr("测试未通过", "Tests failed") : tr("无法运行测试", "Could not run tests"),
       ...(result.status === "passed" ? { color: "var(--color-green-500, #22c55e)" } : result.status === "failed" ? { color: "var(--color-red-500, #ef4444)" } : {}),
     }, { signal });
     if (disposed) { badge.dispose(); return dispose; }
     if (result.stdout !== "" || result.stderr !== "" || result.message || result.stdoutTruncated || result.stderrTruncated) {
-      outputCleanup = mountDisclosure(root, "test-output", "Test output", signal, body => {
+      outputCleanup = mountDisclosure(root, "test-output", tr("测试输出", "Test output"), signal, body => {
         if (result.message) {
           const message = document.createElement("p");
           message.textContent = result.message;
@@ -55,7 +56,7 @@ export function mountTestResult(container: HTMLElement, ui: Pick<PluginFrontendC
           }
           if (truncated) {
             const notice = document.createElement("p");
-            notice.textContent = `${label} truncated at 64 KiB.`;
+            notice.textContent = tr(`${label} 已在 64 KiB 处截断。`, `${label} truncated at 64 KiB.`);
             body.append(notice);
           }
         }

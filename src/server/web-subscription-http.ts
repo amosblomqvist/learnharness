@@ -1,6 +1,7 @@
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { subscriptionRequestOrigin } from "./desktop-access.ts";
 import { webSubscriptionOwner, webSubscriptionsEnabled, webSubscriptionStatus } from "./web-subscriptions.ts";
+import { tr } from "../core/i18n.ts";
 
 // Lives in desktop-access.ts so proxy.ts can share it without loading the
 // subscription runtime; re-exported for existing callers.
@@ -16,46 +17,46 @@ function authorized(request: Request): boolean {
 }
 function error(message: string, status: number) { return Response.json({ error: message }, { status, headers: HEADERS }); }
 export async function subscriptionControlsResponse(request: Request): Promise<Response> {
-	if (!webSubscriptionsEnabled()) return error("Web subscription controls are unavailable in desktop-owned mode.", 404);
-	if (!authorized(request)) return error("Subscription controls require a same-origin LearnHarness request.", 403);
+	if (!webSubscriptionsEnabled()) return error(tr("桌面端托管模式下无法使用网页版订阅控制。", "Web subscription controls are unavailable in desktop-owned mode."), 404);
+	if (!authorized(request)) return error(tr("订阅控制需要来自 LearnHarness 的同源请求。", "Subscription controls require a same-origin LearnHarness request."), 403);
 	try {
 		if (request.method === "GET") return Response.json(await webSubscriptionStatus(), { headers: HEADERS });
-		if (request.method !== "POST") return error("Unsupported method.", 405);
-		if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error("Expected JSON.", 415);
+		if (request.method !== "POST") return error(tr("不支持的请求方法。", "Unsupported method."), 405);
+		if (request.headers.get("content-type")?.split(";")[0]?.trim() !== "application/json") return error(tr("请求体应为 JSON。", "Expected JSON."), 415);
 		// Bound both advertised and streamed input before parsing commands.
-		if (Number(request.headers.get("content-length")) > 16384) return error("Request too large.", 413);
+		if (Number(request.headers.get("content-length")) > 16384) return error(tr("请求过大。", "Request too large."), 413);
 		const reader = request.body?.getReader();
-		if (!reader) return error("Expected a command.", 400);
+		if (!reader) return error(tr("缺少命令。", "Expected a command."), 400);
 		const chunks: Uint8Array[] = []; let size = 0;
 		try {
 			for (;;) {
 				const next = await reader.read(); if (next.done) break;
 				size += next.value.byteLength;
-				if (size > 16384) { await reader.cancel(); return error("Request too large.", 413); }
+				if (size > 16384) { await reader.cancel(); return error(tr("请求过大。", "Request too large."), 413); }
 				chunks.push(next.value);
 			}
 		} finally { reader.releaseLock(); }
 		const command: unknown = JSON.parse(Buffer.concat(chunks).toString("utf8"));
-		if (!command || typeof command !== "object" || Array.isArray(command)) return error("Invalid command.", 400);
+		if (!command || typeof command !== "object" || Array.isArray(command)) return error(tr("无效的命令。", "Invalid command."), 400);
 		const fields = command as Record<string, unknown>;
 		const providerId = fields.providerId;
-		if (providerId !== "chatgpt" && !NATIVE_SUBSCRIPTIONS.some((provider) => provider.providerId === providerId)) return error("Unsupported connection.", 400);
+		if (providerId !== "chatgpt" && !NATIVE_SUBSCRIPTIONS.some((provider) => provider.providerId === providerId)) return error(tr("不支持的连接。", "Unsupported connection."), 400);
 		const allowed = providerId === "chatgpt" ? ["login", "cancel", "select", "disconnect", "logout", "consent"] : ["login", "cancel", "respond", "open", "retry", "disconnect", "consent"];
-		if (typeof fields.op !== "string" || !allowed.includes(fields.op)) return error("Unsupported control.", 400);
+		if (typeof fields.op !== "string" || !allowed.includes(fields.op)) return error(tr("不支持的控制操作。", "Unsupported control."), 400);
 		return Response.json(await webSubscriptionOwner().control(providerId as string, fields, subscriptionRequestOrigin(request)!), { headers: HEADERS });
 	} catch {
-		return error("The subscription connection could not be changed. Retry or reconnect in Providers.", 400);
+		return error(tr("无法更改订阅连接。请重试，或在“服务商”中重新连接。", "The subscription connection could not be changed. Retry or reconnect in Providers."), 400);
 	}
 }
 /** One-use same-origin navigation. Full provider authorization URLs go only to
  * a top-level browser redirect, never status JSON, the SSE bus or application JS. */
 export async function subscriptionBrowserResponse(request: Request): Promise<Response> {
-	if (!webSubscriptionsEnabled()) return error("Unavailable.", 404);
+	if (!webSubscriptionsEnabled()) return error(tr("不可用。", "Unavailable."), 404);
 	const origin = subscriptionRequestOrigin(request);
-	if (!origin || (request.method === "POST" ? !authorized(request) : request.headers.get("sec-fetch-site") !== "same-origin")) return error("Open sign-in from LearnHarness.", 403);
+	if (!origin || (request.method === "POST" ? !authorized(request) : request.headers.get("sec-fetch-site") !== "same-origin")) return error(tr("请从 LearnHarness 中打开登录。", "Open sign-in from LearnHarness."), 403);
 	const id = new URL(request.url).searchParams.get("id");
-	if (!id || !/^[0-9a-f-]{36}$/.test(id)) return error("This sign-in action is no longer available.", 410);
+	if (!id || !/^[0-9a-f-]{36}$/.test(id)) return error(tr("此登录操作已失效。", "This sign-in action is no longer available."), 410);
 	const target = await webSubscriptionOwner().takeBrowserAction(id, origin);
-	if (!target) return error("This sign-in action is no longer available.", 410);
+	if (!target) return error(tr("此登录操作已失效。", "This sign-in action is no longer available."), 410);
 	return new Response(null, { status: 303, headers: { ...HEADERS, Location: target } });
 }

@@ -23,8 +23,8 @@ function rowNode(h, key) { const node = [...h.app.querySelectorAll('[data-fixtur
 function openAll(h) { for (const item of allRows(tree(h).props.rows)) if (item.disclosure && !item.disclosure.expanded) item.disclosure.onChange(true); }
 function select(h, key, checked = true) { row(h, key).selection.onChange(checked); }
 function menu(h, key) {
-  const kind = key.includes(':cue:') ? 'Cue' : key.includes(':p:') ? 'Proposition' : 'Deck';
-  click(h, `${kind} actions`, rowNode(h, key)); return document.querySelector('[role=menu]');
+  const kind = key.includes(':cue:') ? '提示语' : key.includes(':p:') ? '命题' : '卡组';
+  click(h, `${kind}操作`, rowNode(h, key)); return document.querySelector('[role=menu]');
 }
 function closeSurface(h) { const surface = h.handles.findLast(handle => handle.kind === 'surface' && !handle.disposed); assert.ok(surface); click(h, 'Close', surface.container); }
 const surfaceRoot = h => h.handles.findLast(handle => handle.kind === 'surface' && !handle.disposed).container;
@@ -47,7 +47,7 @@ function settingsRow(h, key) {
 }
 const picker = (h, kind) => h.handles.findLast(handle => handle.kind === kind && !handle.disposed);
 const savedSettings = h => h.calls.filter(([operation]) => operation === 'save-settings');
-const fileButtonLabel = 'Generate from file…';
+const fileButtonLabel = '从文件生成…';
 const buttonNamed = (root, label) => [...root.querySelectorAll('button')].find(button => (button.getAttribute('aria-label') || button.textContent) === label);
 function fileInput(h) { const input = h.app.querySelector('input[type=file]'); assert.ok(input, 'library owns a file chooser'); return input; }
 function chooseFiles(h, files) {
@@ -91,7 +91,7 @@ test('manual creation uses icon-only plus controls directly left of deck and act
   const h = await setup();
   try {
     openAll(h);
-    for (const [id, labels] of [['deck:d1', ['Create card', 'Deck actions']], ['deck:d2', ['Create card', 'Deck actions']], ['deck:d1:p:p1', ['Add cue', 'Proposition actions']], ['deck:d1:p:p1:cue:c1', ['Cue actions']]]) {
+    for (const [id, labels] of [['deck:d1', ['新建卡片', '卡组操作']], ['deck:d2', ['新建卡片', '卡组操作']], ['deck:d1:p:p1', ['添加提示语', '命题操作']], ['deck:d1:p:p1:cue:c1', ['提示语操作']]]) {
       const buttons = [...rowNode(h, id).querySelectorAll('.fc-tree-more button')];
       assert.deepEqual(buttons.map(button => button.getAttribute('aria-label')), labels);
       for (const button of buttons) {
@@ -109,14 +109,14 @@ test('manual creation uses icon-only plus controls directly left of deck and act
 test('deck plus creates a named target and first cue together using the existing Markdown editor layout and reveals the saved card', async () => {
   const h = await setup();
   try {
-    click(h, 'Create card', rowNode(h, 'deck:d2'));
-    const dialog = document.querySelector('[role=dialog]'); assert.equal(dialog.getAttribute('aria-label'), 'Create card');
-    assert.deepEqual([...dialog.querySelectorAll('.fc-label')].map(node => node.textContent), ['Name', 'Question (Markdown)', 'Answer (Markdown)']);
+    click(h, '新建卡片', rowNode(h, 'deck:d2'));
+    const dialog = document.querySelector('[role=dialog]'); assert.equal(dialog.getAttribute('aria-label'), '新建卡片');
+    assert.deepEqual([...dialog.querySelectorAll('.fc-label')].map(node => node.textContent), ['名称', '问题（Markdown）', '答案（Markdown）']);
     assert.equal(dialog.querySelectorAll('textarea.fc-input').length, 2); assert.ok(!dialog.querySelector('select'));
     const [name, question, answer] = dialog.querySelectorAll('.fc-field .fc-input');
     change(name, 'My handwritten target'); change(question, 'A **question**?'); change(answer, '$x=1$');
     assert.equal(operationCalls(h, 'create-card').length, 0);
-    click(h, 'Save', dialog); await flush();
+    click(h, '保存', dialog); await flush();
     assert.ok(!document.querySelector('[role=dialog]'));
     const input = operationCalls(h, 'create-card')[0][1];
     assert.equal(input.deckId, 'd2'); assert.equal(input.name, 'My handwritten target'); assert.equal(input.question, 'A **question**?'); assert.equal(input.answer, '$x=1$'); assert.ok(input.requestId);
@@ -124,9 +124,9 @@ test('deck plus creates a named target and first cue together using the existing
     assert.ok(row(h, 'deck:d2').disclosure.expanded); assert.ok(row(h, `deck:d2:p:${p.id}`).disclosure.expanded);
     assert.ok(rowNode(h, `deck:d2:p:${p.id}:cue:${p.cues[0].id}`));
     assert.equal(operationCalls(h, 'preflight').length, 0); assert.equal(operationCalls(h, 'start-generation').length, 0); assert.equal(h.conversions.length, 0);
-    select(h, `deck:d2:p:${p.id}:cue:${p.cues[0].id}`); click(h, 'Practice selected'); await flush();
+    select(h, `deck:d2:p:${p.id}:cue:${p.cues[0].id}`); click(h, '练习所选'); await flush();
     assert.ok(surfaceRoot(h).querySelector('.fc-review-card').textContent.includes('A **question**?'));
-    click(h, 'Reveal answer', surfaceRoot(h)); await flush();
+    click(h, '显示答案', surfaceRoot(h)); await flush();
     assert.ok(surfaceRoot(h).querySelector('.fc-answer').textContent.includes('$x=1$'));
   } finally { h.dispose(); }
 });
@@ -136,11 +136,11 @@ test('target plus adds only a question and answer, preserving the target and sho
   try {
     sharedCards(h); await flush(); openAll(h);
     const before = structuredClone(h.state.propositions[0]);
-    click(h, 'Add cue', rowNode(h, 'deck:d2:p:p1'));
-    const dialog = document.querySelector('[role=dialog]'); assert.equal(dialog.getAttribute('aria-label'), 'Add cue');
-    assert.deepEqual([...dialog.querySelectorAll('.fc-label')].map(node => node.textContent), ['Question (Markdown)', 'Answer (Markdown)']);
+    click(h, '添加提示语', rowNode(h, 'deck:d2:p:p1'));
+    const dialog = document.querySelector('[role=dialog]'); assert.equal(dialog.getAttribute('aria-label'), '添加提示语');
+    assert.deepEqual([...dialog.querySelectorAll('.fc-label')].map(node => node.textContent), ['问题（Markdown）', '答案（Markdown）']);
     const [question, answer] = dialog.querySelectorAll('textarea'); change(question, 'Another question'); change(answer, 'Another answer');
-    click(h, 'Save', dialog); await flush();
+    click(h, '保存', dialog); await flush();
     const input = operationCalls(h, 'create-cue')[0][1]; assert.equal(input.propositionId, 'p1'); assert.equal(input.name, undefined); assert.ok(input.requestId);
     const p = h.state.propositions[0]; assert.equal(p.cues.length, before.cues.length + 1);
     for (const key of ['id', 'name', 'memberships', 'schedule']) assert.deepEqual(p[key], before[key]);
@@ -151,14 +151,14 @@ test('target plus adds only a question and answer, preserving the target and sho
 test('manual editor cancellation creates nothing and rejected blank saves retain editable fields', async () => {
   const h = await setup();
   try {
-    click(h, 'Create card', rowNode(h, 'deck:d2')); let dialog = document.querySelector('[role=dialog]');
-    click(h, 'Cancel', dialog); await flush(); assert.equal(operationCalls(h, 'create-card').length, 0);
-    click(h, 'Create card', rowNode(h, 'deck:d2')); dialog = document.querySelector('[role=dialog]');
+    click(h, '新建卡片', rowNode(h, 'deck:d2')); let dialog = document.querySelector('[role=dialog]');
+    click(h, '取消', dialog); await flush(); assert.equal(operationCalls(h, 'create-card').length, 0);
+    click(h, '新建卡片', rowNode(h, 'deck:d2')); dialog = document.querySelector('[role=dialog]');
     const fields = [...dialog.querySelectorAll('.fc-input')]; change(fields[0], 'Keep my draft');
-    click(h, 'Save', dialog); await flush();
+    click(h, '保存', dialog); await flush();
     assert.ok(dialog.querySelector('[role=alert]').textContent.includes('blank')); assert.equal(fields[0].value, 'Keep my draft');
     assert.equal(h.state.propositions.length, 1); assert.equal(h.state.decks[1].propositionIds.length, 0);
-    change(fields[1], 'Question'); change(fields[2], 'Answer'); click(h, 'Save', dialog); await flush();
+    change(fields[1], 'Question'); change(fields[2], 'Answer'); click(h, '保存', dialog); await flush();
     assert.equal(h.state.propositions.length, 2); assert.ok(!document.querySelector('[role=dialog]'));
   } finally { h.dispose(); }
 });
@@ -172,11 +172,11 @@ test('manual save retries reuse their request ID after a lost accepted response 
       if (operation === 'create-card' && loseResponse) { loseResponse = false; throw new Error('Synthetic lost response'); }
       return result;
     };
-    click(h, 'Create card', rowNode(h, 'deck:d2')); const dialog = document.querySelector('[role=dialog]');
+    click(h, '新建卡片', rowNode(h, 'deck:d2')); const dialog = document.querySelector('[role=dialog]');
     const fields = [...dialog.querySelectorAll('.fc-input')]; ['Target', 'Question', 'Answer'].forEach((value, i) => change(fields[i], value));
-    click(h, 'Save', dialog); await flush();
+    click(h, '保存', dialog); await flush();
     assert.equal(h.state.propositions.length, 2); assert.equal(fields[1].value, 'Question'); assert.ok(dialog.querySelector('[role=alert]').textContent.includes('lost response'));
-    click(h, 'Save', dialog); await flush();
+    click(h, '保存', dialog); await flush();
     const calls = operationCalls(h, 'create-card'); assert.equal(calls.length, 2); assert.equal(calls[0][1].requestId, calls[1][1].requestId);
     assert.equal(h.state.propositions.length, 2); assert.ok(!document.querySelector('[role=dialog]'));
   } finally { h.dispose(); }
@@ -186,12 +186,12 @@ test('late manual-save responses do not close a newer editor or navigate after t
   const h = await setup();
   try {
     openAll(h); const pending = deferred(); h.overrides['create-cue'] = () => pending.promise;
-    click(h, 'Add cue', rowNode(h, 'deck:d1:p:p1')); const old = document.querySelector('[role=dialog]');
-    const [question, answer] = old.querySelectorAll('textarea'); change(question, 'Question'); change(answer, 'Answer'); click(h, 'Save', old); await flush();
-    click(h, 'Cancel', old); click(h, 'Create card', rowNode(h, 'deck:d2')); const newer = document.querySelector('[role=dialog]');
+    click(h, '添加提示语', rowNode(h, 'deck:d1:p:p1')); const old = document.querySelector('[role=dialog]');
+    const [question, answer] = old.querySelectorAll('textarea'); change(question, 'Question'); change(answer, 'Answer'); click(h, '保存', old); await flush();
+    click(h, '取消', old); click(h, '新建卡片', rowNode(h, 'deck:d2')); const newer = document.querySelector('[role=dialog]');
     const search = h.app.querySelector('input[type=search]'); search.value = 'preserve search';
     pending.resolve({ state: structuredClone(h.state), propositionId: 'p1', cueId: 'late' }); await flush();
-    assert.equal(document.querySelector('[role=dialog]'), newer); assert.equal(newer.getAttribute('aria-label'), 'Create card'); assert.equal(search.value, 'preserve search');
+    assert.equal(document.querySelector('[role=dialog]'), newer); assert.equal(newer.getAttribute('aria-label'), '新建卡片'); assert.equal(search.value, 'preserve search');
   } finally { h.dispose(); }
 });
 
@@ -210,20 +210,20 @@ test('native library, host placements, explicit preflight and no navigation canc
       assert.ok(artwork.startsWith('M7 4h12'), 'deck rows use the stacked-card back outline, not the old folder');
       assert.ok(artwork.includes('M5 8'), 'deck rows include a separate front card');
     }
-    assert.equal(tree(h).props.label, 'Flashcards library');
-    assert.equal(tree(h).props.header, 'Name');
-    assert.deepEqual(tree(h).props.columns.map(column => column.header), ['Propositions', 'Due', 'New today']);
+    assert.equal(tree(h).props.label, '闪卡库');
+    assert.equal(tree(h).props.header, '名称');
+    assert.deepEqual(tree(h).props.columns.map(column => column.header), ['命题', '到期', '今日新卡']);
     assert.deepEqual(row(h, 'deck:d1').cells, { propositions: '1', due: '1', new: '0 / 20' });
     assert.ok(h.app.textContent.includes('Notes'));
     assert.equal(h.markdowns.length, 0, 'collapsed library mounts no card content');
-    click(h, 'Pick nodes'); click(h, 'Generate'); await flush();
+    click(h, 'Pick nodes'); click(h, '生成'); await flush();
     assert.equal(h.calls.filter(([op]) => op === 'start-generation').length, 0);
     const confirmation = document.querySelector('[role=dialog]');
     const summary = confirmation.querySelector('.fc-muted');
-    assert.equal(summary.textContent, '1 propositions (approximately 123 input tokens)');
+    assert.equal(summary.textContent, '1 个命题（约 123 个输入 token）');
     assert.deepEqual([...confirmation.querySelectorAll('.fc-dialog > p:not(.fc-error)')].map(p => p.textContent), [summary.textContent], 'one muted summary paragraph, no separate token or cost-warning line');
     assert.equal(/chunks?|Test model|preserving|Work continues|may incur costs| · /i.test(confirmation.textContent), false);
-    click(h, 'Start', confirmation); await flush();
+    click(h, '开始', confirmation); await flush();
     assert.equal(h.calls.filter(([op]) => op === 'start-generation').length, 1);
     h.unmount(); h.notify(); h.resync(); await flush();
     assert.equal(h.calls.filter(([op]) => op === 'cancel-generation').length, 0);
@@ -237,11 +237,11 @@ test('deck panel groups search, Create deck, selection and tree separately from 
   try {
     const toolbar = h.app.querySelector('.fc-toolbar'), panel = h.app.querySelector('section.fc-deck-panel');
     assert.ok(panel);
-    assert.deepEqual([...toolbar.querySelectorAll('button')].map(button => button.textContent).sort(), ['Pick nodes', 'Generate', fileButtonLabel].sort());
+    assert.deepEqual([...toolbar.querySelectorAll('button')].map(button => button.textContent).sort(), ['Pick nodes', '生成', fileButtonLabel].sort());
     assert.equal(toolbar.querySelector('input[type=search]'), null);
     const deckToolbar = panel.querySelector('.fc-deck-toolbar'); assert.ok(deckToolbar);
     assert.equal(deckToolbar.querySelector('input[type=search]'), h.app.querySelector('input[type=search]'));
-    assert.deepEqual([...deckToolbar.querySelectorAll('button')].map(button => button.textContent), ['Create deck']);
+    assert.deepEqual([...deckToolbar.querySelectorAll('button')].map(button => button.textContent), ['新建卡组']);
     assert.ok(panel.contains(h.app.querySelector('.fc-selection-actions')));
     assert.ok(panel.contains(tree(h).container));
     assert.equal(panel.contains(toolbar), false);
@@ -252,7 +252,7 @@ test('file chooser is independent of graph selection, single-file unrestricted a
   const h = await setup();
   try {
     const button = buttonNamed(h.app, fileButtonLabel); assert.ok(button); assert.equal(button.disabled, false);
-    assert.equal(buttonNamed(h.app, 'Generate').disabled, true);
+    assert.equal(buttonNamed(h.app, '生成').disabled, true);
     const input = fileInput(h); assert.ok(input.hidden || input.closest('[hidden]'));
     assert.equal(input.hasAttribute('multiple'), false); assert.equal(input.getAttribute('accept') || '', '');
     let openings = 0; input.addEventListener('click', () => openings++);
@@ -268,11 +268,11 @@ test('older hosts disable file conversion with an update hint but keep graph gen
   const h = await setup(h => { delete h.ctx.documents; });
   try {
     const fileButton = buttonNamed(h.app, fileButtonLabel); assert.ok(fileButton); assert.ok(fileButton.disabled);
-    assert.match(`${fileButton.title} ${h.app.textContent}`, /update LearnHarness/i);
-    click(h, 'Pick nodes'); click(h, 'Generate'); await flush();
+    assert.match(`${fileButton.title} ${h.app.textContent}`, /请更新 LearnHarness/);
+    click(h, 'Pick nodes'); click(h, '生成'); await flush();
     assert.equal(operationCalls(h, 'preflight').length, 1); assert.equal(operationCalls(h, 'preflight-file').length, 0);
-    click(h, 'Cancel', document.querySelector('[role=dialog]'));
-    click(h, 'Review', rowNode(h, 'deck:d1')); await flush();
+    click(h, '取消', document.querySelector('[role=dialog]'));
+    click(h, '复习', rowNode(h, 'deck:d1')); await flush();
     assert.equal(operationCalls(h, 'next-review').length, 1);
   } finally { h.dispose(); }
 });
@@ -284,10 +284,10 @@ test('file loading disables both generation routes through refreshes, then recov
     assert.equal(h.conversions.length, 1); assert.equal(h.conversions[0].file, file);
     assert.ok(h.conversions[0].signal instanceof AbortSignal); assert.equal(h.conversions[0].signal.aborted, false);
     click(h, 'Pick nodes'); h.notify(); await flush();
-    assert.ok(buttonNamed(h.app, fileButtonLabel).disabled); assert.ok(buttonNamed(h.app, 'Generate').disabled);
+    assert.ok(buttonNamed(h.app, fileButtonLabel).disabled); assert.ok(buttonNamed(h.app, '生成').disabled);
     wait.reject(new Error('This document format is not supported')); await flush();
     assert.ok(h.app.querySelector('[role=alert]').textContent.includes('This document format is not supported'));
-    assert.equal(buttonNamed(h.app, fileButtonLabel).disabled, false); assert.equal(buttonNamed(h.app, 'Generate').disabled, false);
+    assert.equal(buttonNamed(h.app, fileButtonLabel).disabled, false); assert.equal(buttonNamed(h.app, '生成').disabled, false);
     assert.equal(operationCalls(h, 'preflight-file').length, 0); assert.equal(operationCalls(h, 'start-generation').length, 0);
     assert.equal(document.querySelector('[role=dialog]'), null);
   } finally { h.dispose(); }
@@ -298,7 +298,7 @@ test('file conversion rejects multiple files before host conversion and remains 
   try {
     chooseFiles(h, [uploadedFile('One.pdf'), uploadedFile('Two.pdf')]); await flush();
     assert.equal(h.conversions.length, 0); assert.equal(operationCalls(h, 'preflight-file').length, 0);
-    assert.match(h.app.querySelector('[role=alert]').textContent, /one|single|1.*file/i);
+    assert.match(h.app.querySelector('[role=alert]').textContent, /一次只能选择一个文件/);
     assert.equal(buttonNamed(h.app, fileButtonLabel).disabled, false);
     chooseFiles(h, [uploadedFile()]); await flush(); assert.equal(h.conversions.length, 1);
   } finally { h.dispose(); }
@@ -313,16 +313,16 @@ test('file confirmation uses exact converted Markdown, filename, notices and tok
     assert.deepEqual(operationCalls(h, 'preflight-file').map(([, input]) => input), [{ name: file.name, markdown }]);
     assert.equal(operationCalls(h, 'preflight').length, 0); assert.equal(operationCalls(h, 'start-generation').length, 0);
     const confirmation = document.querySelector('[role=dialog]'); assert.ok(confirmation);
-    assert.equal(confirmation.getAttribute('aria-label'), 'Generate flashcards');
+    assert.equal(confirmation.getAttribute('aria-label'), '生成闪卡');
     const summary = confirmation.querySelector('.fc-file-name');
-    assert.equal(summary.textContent, `${file.name} (approximately 321 input tokens)`);
+    assert.equal(summary.textContent, `${file.name}（约 321 个输入 token）`);
     assert.ok(summary.classList.contains('fc-muted'), 'file summary uses the same muted body style as graph generation');
     const paragraphs = [...confirmation.querySelectorAll('.fc-dialog > p:not(.fc-error)')];
     assert.deepEqual(paragraphs.map(p => p.textContent), [summary.textContent, ...notices], 'filename and tokens share one paragraph; notices remain below it');
     assert.ok(paragraphs.every(p => p.classList.contains('fc-muted')));
     assert.equal(confirmation.querySelector('img'), null, 'conversion notices are plain text');
     assert.equal(/propositions|chunks|Test file model|may incur costs/.test(confirmation.textContent), false);
-    click(h, 'Start', confirmation); await flush();
+    click(h, '开始', confirmation); await flush();
     const starts = operationCalls(h, 'start-generation'); assert.equal(starts.length, 1);
     assert.equal(starts[0][1].preflightId, 'pf-file'); assert.match(starts[0][1].requestId, /\S+/);
     assert.equal(Object.keys(starts[0][1]).sort().join(','), 'preflightId,requestId');
@@ -335,7 +335,7 @@ test('cancelled file confirmation performs no generation and permits selecting t
   const h = await setup();
   try {
     const file = uploadedFile(); chooseFiles(h, [file]); await flush();
-    click(h, 'Cancel', document.querySelector('[role=dialog]')); await flush();
+    click(h, '取消', document.querySelector('[role=dialog]')); await flush();
     assert.equal(operationCalls(h, 'start-generation').length, 0);
     assert.equal(fileInput(h).value, '');
     chooseFiles(h, [file]); await flush();
@@ -364,15 +364,15 @@ test('file chunk failures use file retry preflight, with zero-card feedback dist
   const h = await setup();
   try {
     fileBatch(h, { status: 'partial', chunks: [{ id: 'file-chunk', status: 'failed', error: 'Chunk failed' }], failedChunkIds: ['file-chunk'] }); await flush();
-    click(h, 'Retry failed…'); await flush();
+    click(h, '重试失败项…'); await flush();
     assert.deepEqual(operationCalls(h, 'preflight-file-retry').map(([, input]) => input), [{ batchId: 'file-batch' }]);
     assert.equal(operationCalls(h, 'preflight').length, 0); assert.equal(h.conversions.length, 0);
     const confirmation = document.querySelector('[role=dialog]'); assert.ok(confirmation.textContent.includes('Lecture.pdf'));
-    click(h, 'Start', confirmation); await flush();
+    click(h, '开始', confirmation); await flush();
     assert.equal(operationCalls(h, 'start-generation').at(-1)[1].preflightId, 'pf-file-retry');
     fileBatch(h); await flush();
     const zero = h.app.querySelector('.fc-batch'); assert.ok(zero, 'completed zero-card file keeps a clear result panel');
-    assert.match(zero.textContent, /no (?:new )?(?:flashcards|cards|cues)|(?:zero|0) (?:flashcards|cards|cues) (?:were )?generated/i);
+    assert.match(zero.textContent, /未能从此文件生成任何闪卡/);
     assert.ok(h.app.textContent.includes('Lecture.pdf'));
     fileBatch(h, { added: 2 }); await flush(); assert.equal(h.app.querySelector('.fc-batch'), null);
     fileBatch(h, { kind: 'graph', failedTargetIds: [] }); await flush(); assert.equal(h.app.querySelector('.fc-batch'), null);
@@ -388,7 +388,7 @@ test('file lifecycle aborts conversion and suppresses late conversion/preflight/
     });
     try {
       chooseFiles(h, [uploadedFile()]); await flush();
-      if (boundary === 'start') { click(h, 'Start', document.querySelector('[role=dialog]')); await flush(); }
+      if (boundary === 'start') { click(h, '开始', document.querySelector('[role=dialog]')); await flush(); }
       const conversionSignal = h.conversions[0].signal; h.unmount(); assert.equal(conversionSignal.aborted, true);
       if (boundary === 'conversion') wait.resolve({ name: 'Late.pdf', markdown: 'LATE MARKDOWN', notices: [] });
       else if (boundary === 'preflight') wait.resolve({ id: 'late-pf', kind: 'file', name: 'Late.pdf', estimatedTokens: 999 });
@@ -413,12 +413,12 @@ test('context actions stay visible with stable handles, switch between all/selec
     const labels = () => [...actions.querySelectorAll('button')].map(button => button.getAttribute('aria-label') || button.textContent);
     const assertStable = () => {
       assert.equal(actions.hidden, false); assert.ok(actions.isConnected);
-      assert.deepEqual(h.handles.filter(handle => handle.kind === 'button' && handle.props.label !== 'Delete selected' && actions.contains(handle.container)), controls);
+      assert.deepEqual(h.handles.filter(handle => handle.kind === 'button' && handle.props.label !== '删除所选' && actions.contains(handle.container)), controls);
       assert.ok(controls.every(handle => !handle.disposed));
     };
-    assertStable(); assert.deepEqual(labels(), ['Review all', 'Practice all', 'Clear']);
+    assertStable(); assert.deepEqual(labels(), ['复习全部', '练习全部', '清除']);
     assert.equal(review.props.disabled, false); assert.equal(practice.props.disabled, false); assert.equal(clear.props.disabled, true);
-    const count = [...actions.querySelectorAll('span')].find(node => node.textContent === '0 selected'); assert.ok(count);
+    const count = [...actions.querySelectorAll('span')].find(node => node.textContent === '已选 0 项'); assert.ok(count);
     assert.equal(count.parentElement, clear.container.parentElement, 'count and Clear share a right-hand group');
     assert.equal(count.parentElement, actions.querySelector('.fc-selection-summary'));
     const scopeActions = actions.querySelector('.fc-scope-actions');
@@ -426,22 +426,22 @@ test('context actions stay visible with stable handles, switch between all/selec
     assert.equal(scopeActions.compareDocumentPosition(count.parentElement) & 4, 4);
     assert.notEqual(count.parentElement, actions); assert.equal(count.parentElement.contains(review.container), false);
     select(h, 'deck:d1');
-    assertStable(); assert.deepEqual(labels(), ['Review selected', 'Practice selected', 'Delete selected', 'Clear']);
-    assert.equal(count.textContent, '1 selected'); assert.equal(clear.props.disabled, false);
+    assertStable(); assert.deepEqual(labels(), ['复习所选', '练习所选', '删除所选', '清除']);
+    assert.equal(count.textContent, '已选 1 项'); assert.equal(clear.props.disabled, false);
     assert.equal(review.props.disabled, false); assert.equal(practice.props.disabled, false);
-    assert.equal([...actions.querySelectorAll('button')].some(node => /^(Review|Practice) all$/.test(node.textContent)), false);
+    assert.equal([...actions.querySelectorAll('button')].some(node => /^(复习|练习)全部$/.test(node.textContent)), false);
     h.state.revision++; h.notify(); await flush(); assertStable();
     change(h.app.querySelector('input[type=search]'), 'does not match anything'); assertStable();
-    assert.equal(count.textContent, '1 selected', 'search does not discard hidden selections');
-    click(h, 'Clear'); await flush(); assertStable(); assert.deepEqual(labels(), ['Review all', 'Practice all', 'Clear']);
-    assert.equal(count.textContent, '0 selected'); assert.equal(clear.props.disabled, true);
+    assert.equal(count.textContent, '已选 1 项', 'search does not discard hidden selections');
+    click(h, '清除'); await flush(); assertStable(); assert.deepEqual(labels(), ['复习全部', '练习全部', '清除']);
+    assert.equal(count.textContent, '已选 0 项'); assert.equal(clear.props.disabled, true);
     change(h.app.querySelector('input[type=search]'), '');
-    select(h, 'deck:d2'); assertStable(); assert.deepEqual(labels(), ['Review selected', 'Practice selected', 'Delete selected', 'Clear']);
-    assert.equal(count.textContent, '1 selected'); assert.equal(review.props.disabled, true); assert.equal(practice.props.disabled, true);
+    select(h, 'deck:d2'); assertStable(); assert.deepEqual(labels(), ['复习所选', '练习所选', '删除所选', '清除']);
+    assert.equal(count.textContent, '已选 1 项'); assert.equal(review.props.disabled, true); assert.equal(practice.props.disabled, true);
     assert.equal(clear.props.disabled, false);
     const calls = h.calls.length; actions.querySelectorAll('button')[0].click(); actions.querySelectorAll('button')[1].click(); await flush();
     assert.equal(h.calls.length, calls, 'empty selected branches never widen to all');
-    click(h, 'Clear'); assertStable(); assert.equal(review.props.disabled, false); assert.equal(practice.props.disabled, false);
+    click(h, '清除'); assertStable(); assert.equal(review.props.disabled, false); assert.equal(practice.props.disabled, false);
   } finally { h.dispose(); }
 });
 
@@ -451,16 +451,16 @@ test('empty or archived-only libraries disable Practice all but leave Review all
     h.state.propositions[0].archived = true; h.state.revision++; h.notify(); await flush();
     const actions = h.app.querySelector('.fc-selection-actions');
     const find = label => [...actions.querySelectorAll('button')].find(node => node.textContent === label);
-    assert.equal(actions.hidden, false); assert.equal(find('Review all').disabled, false); assert.equal(find('Practice all').disabled, true); assert.equal(find('Clear').disabled, true);
+    assert.equal(actions.hidden, false); assert.equal(find('复习全部').disabled, false); assert.equal(find('练习全部').disabled, true); assert.equal(find('清除').disabled, true);
     h.state.propositions = []; h.state.revision++; h.notify(); await flush();
-    assert.equal(find('Practice all').disabled, true); assert.equal(find('Review all').disabled, false);
+    assert.equal(find('练习全部').disabled, true); assert.equal(find('复习全部').disabled, false);
     h.overrides['next-review'] = async () => ({ ticket: null, remaining: 0 });
-    click(h, 'Review all'); await flush();
+    click(h, '复习全部'); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'next-review')[1], {});
-    assert.ok(surfaceRoot(h).textContent.includes('No cards due in this selection.'));
+    assert.ok(surfaceRoot(h).textContent.includes('所选范围内没有到期的卡片。'));
     closeSurface(h); select(h, 'deck:d1');
-    assert.equal(find('Review selected').disabled, true); assert.equal(find('Practice selected').disabled, true);
-    click(h, 'Clear'); assert.equal(find('Practice all').disabled, true);
+    assert.equal(find('复习所选').disabled, true); assert.equal(find('练习所选').disabled, true);
+    click(h, '清除'); assert.equal(find('练习全部').disabled, true);
   } finally { h.dispose(); }
 });
 
@@ -470,7 +470,7 @@ test('library-wide dashboard follows the deck panel and updates independently of
     const panel = h.app.querySelector('.fc-deck-panel'), dashboard = h.app.querySelector('.fc-dashboard');
     assert.ok(dashboard); assert.equal(panel.contains(dashboard), false);
     assert.equal(panel.compareDocumentPosition(dashboard) & 4, 4);
-    assert.equal(dashboard.getAttribute('aria-label'), 'Spaced repetition');
+    assert.equal(dashboard.getAttribute('aria-label'), '间隔重复');
     assert.equal(dashboard.querySelector('[data-state=review] strong').textContent, '1');
     assert.equal(dashboard.querySelectorAll('svg[role=img]').length, 2);
     const before = dashboard.textContent;
@@ -479,7 +479,7 @@ test('library-wide dashboard follows the deck panel and updates independently of
     h.state.statistics.states.new = 3; h.state.statistics.activity.at(-1).count = 5; h.state.revision++; h.notify(); await flush();
     assert.equal(h.app.querySelector('.fc-dashboard'), dashboard);
     assert.equal(dashboard.querySelector('[data-state=new] strong').textContent, '3');
-    assert.ok(dashboard.querySelectorAll('svg')[1].getAttribute('aria-label').includes('Today: 5'));
+    assert.ok(dashboard.querySelectorAll('svg')[1].getAttribute('aria-label').includes('今天：5'));
     h.unmount(); assert.equal(dashboard.isConnected, false);
   } finally { h.dispose(); }
 });
@@ -492,41 +492,41 @@ test('deck practice is a once-through read-only snapshot with reveal gating and 
     menu(h, 'deck:d1');
     assert.equal(document.querySelector('[role=menu]').textContent.includes('Practice anytime'), false, 'practice belongs in the scope toolbar, not the gear menu');
     document.querySelector('[role=menu]').remove();
-    select(h, 'deck:d1'); click(h, 'Practice selected'); await flush();
+    select(h, 'deck:d1'); click(h, '练习所选'); await flush();
     const stage = surfaceRoot(h).querySelector('.fc-review-stage');
-    assertInitialRegion(stage, 'Flashcard practice');
+    assertInitialRegion(stage, '闪卡练习');
     const title = stage.querySelector('h2'), footer = stage.querySelector('.fc-review-footer'), bottom = stage.querySelector('.fc-review-bottom');
     assert.equal(title.textContent, ''); assert.equal(title.hidden, true);
     assert.equal(bottom.previousElementSibling, stage.querySelector('.fc-review-card')); assert.equal(bottom.nextElementSibling, footer);
     const note = surfaceRoot(h).querySelector('.fc-practice-note');
-    assert.equal(note.textContent, 'Practice mode does not change your review schedule.');
+    assert.equal(note.textContent, '练习模式不会改变你的复习计划。');
     assert.equal(stage.contains(note), false); assert.equal(bottom.contains(note), false);
     assert.equal(note.previousElementSibling, stage);
-    assert.equal(bottom.querySelector('.fc-review-remaining').textContent, '1 card remaining');
+    assert.equal(bottom.querySelector('.fc-review-remaining').textContent, '还剩 1 张卡片');
     assert.equal(footer.querySelector('.fc-practice-note, .fc-review-remaining'), null);
-    const reveal = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && handle.props.label === 'Reveal answer');
+    const reveal = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && handle.props.label === '显示答案');
     assert.equal(reveal.props.variant, 'outline');
-    assert.deepEqual([...footer.querySelectorAll('.fc-shortcut')].map(node => node.textContent), ['Space']);
+    assert.deepEqual([...footer.querySelectorAll('.fc-shortcut')].map(node => node.textContent), ['空格']);
     assert.equal(stage.querySelector('.fc-review-card').textContent, 'Question **one**?');
     assert.equal(stage.querySelector('.fc-answer').textContent, '');
-    assert.ok(stage.textContent.includes('1 card remaining'));
-    assert.equal(stage.textContent.includes('Practice mode does not change your review schedule.'), false);
-    assert.equal([...stage.querySelectorAll('button')].some(b => b.textContent === 'Next'), false);
-    click(h, 'Reveal answer', surfaceRoot(h)); await flush();
+    assert.ok(stage.textContent.includes('还剩 1 张卡片'));
+    assert.equal(stage.textContent.includes('练习模式不会改变你的复习计划。'), false);
+    assert.equal([...stage.querySelectorAll('button')].some(b => b.textContent === '下一张'), false);
+    click(h, '显示答案', surfaceRoot(h)); await flush();
     assert.equal(stage.querySelector('.fc-answer').textContent, 'SECRET ANSWER');
     assert.equal(stage.querySelector('h2'), title); assert.equal(title.textContent, 'Fact one'); assert.equal(title.hidden, false);
-    const next = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && handle.props.label === 'Next');
+    const next = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && handle.props.label === '下一张');
     assert.equal(next.props.variant, 'outline');
-    assert.deepEqual([...footer.querySelectorAll('.fc-shortcut')].map(node => node.textContent), ['Space']);
+    assert.deepEqual([...footer.querySelectorAll('.fc-shortcut')].map(node => node.textContent), ['空格']);
     assert.equal(key(stage, ' ', { code: 'Space' }).defaultPrevented, true); await flush();
     assert.equal(stage.querySelector('h2'), title); assert.equal(title.textContent, ''); assert.equal(title.hidden, true);
     assert.equal(stage.querySelector('.fc-review-card').textContent, 'Second cue');
-    assert.ok(stage.textContent.includes('0 cards remaining'));
-    click(h, 'Reveal answer', surfaceRoot(h)); click(h, 'Next', surfaceRoot(h)); await flush();
-    assert.ok(stage.textContent.includes('Practice complete.'));
+    assert.ok(stage.textContent.includes('还剩 0 张卡片'));
+    click(h, '显示答案', surfaceRoot(h)); click(h, '下一张', surfaceRoot(h)); await flush();
+    assert.ok(stage.textContent.includes('练习完成。'));
     assert.equal(title.textContent, ''); assert.equal(title.hidden, true);
     assert.equal(surfaceRoot(h).querySelector('.fc-practice-note'), note);
-    assert.equal(note.textContent, 'Practice mode does not change your review schedule.');
+    assert.equal(note.textContent, '练习模式不会改变你的复习计划。');
     assert.equal(stage.contains(note), false);
     assert.equal(footer.querySelector('.fc-practice-note'), null);
     assert.equal(h.calls.length, calls, 'practice makes no backend calls, even for reveal/completion');
@@ -542,18 +542,18 @@ test('Practice selected uses exactly selected cues; Practice all deduplicates sh
     h.state.propositions.push({ id: 'archived', name: 'Old', archived: true, cues: [{ id: 'old', question: 'Archived cue', answer: 'Old answer' }] });
     h.state.decks[0].propositionIds.push('archived'); h.state.revision++; h.notify(); await flush(); openAll(h);
     select(h, 'deck:d1:p:p1:cue:c2'); const calls = h.calls.length;
-    click(h, 'Practice selected'); await flush();
+    click(h, '练习所选'); await flush();
     assert.equal(surfaceRoot(h).querySelector('.fc-review-card').textContent, 'Second cue');
-    assert.ok(surfaceRoot(h).textContent.includes('0 cards remaining'));
+    assert.ok(surfaceRoot(h).textContent.includes('还剩 0 张卡片'));
     closeSurface(h);
-    assert.equal([...h.app.querySelectorAll('button')].some(button => button.textContent === 'Practice all'), false);
-    click(h, 'Clear'); click(h, 'Practice all'); await flush();
+    assert.equal([...h.app.querySelectorAll('button')].some(button => button.textContent === '练习全部'), false);
+    click(h, '清除'); click(h, '练习全部'); await flush();
     assert.equal(surfaceRoot(h).querySelector('.fc-review-card').textContent, 'Question **one**?');
-    assert.ok(surfaceRoot(h).textContent.includes('1 card remaining'), 'shared cues appear only once');
+    assert.ok(surfaceRoot(h).textContent.includes('还剩 1 张卡片'), 'shared cues appear only once');
     assert.equal(h.calls.length, calls);
     closeSurface(h);
-    select(h, 'deck:d2'); click(h, 'Practice selected'); await flush();
-    assert.ok(surfaceRoot(h).textContent.includes('1 card remaining'), 'deck selection uses its own membership scope');
+    select(h, 'deck:d2'); click(h, '练习所选'); await flush();
+    assert.ok(surfaceRoot(h).textContent.includes('还剩 1 张卡片'), 'deck selection uses its own membership scope');
   } finally { h.dispose(); }
 });
 
@@ -561,14 +561,14 @@ test('practice keeps its opening snapshot across library updates; empty practice
   const h = await setup();
   try {
     select(h, 'deck:d2');
-    const selected = [...h.app.querySelectorAll('button')].find(b => b.textContent === 'Practice selected'); assert.ok(selected.disabled);
+    const selected = [...h.app.querySelectorAll('button')].find(b => b.textContent === '练习所选'); assert.ok(selected.disabled);
     menu(h, 'deck:d2'); assert.equal(document.querySelector('[role=menu]').textContent.includes('Practice anytime'), false);
     document.querySelector('[role=menu]').remove();
-    click(h, 'Clear'); select(h, 'deck:d1'); click(h, 'Practice selected'); await flush();
+    click(h, '清除'); select(h, 'deck:d1'); click(h, '练习所选'); await flush();
     h.state.propositions[0].cues[0].answer = 'CHANGED AFTER OPEN'; h.state.revision++; h.notify(); await flush();
-    click(h, 'Reveal answer', surfaceRoot(h)); await flush();
+    click(h, '显示答案', surfaceRoot(h)); await flush();
     assert.equal(surfaceRoot(h).querySelector('.fc-answer').textContent, 'SECRET ANSWER');
-    closeSurface(h); click(h, 'Practice selected'); click(h, 'Reveal answer', surfaceRoot(h)); await flush();
+    closeSurface(h); click(h, '练习所选'); click(h, '显示答案', surfaceRoot(h)); await flush();
     assert.equal(surfaceRoot(h).querySelector('.fc-answer').textContent, 'CHANGED AFTER OPEN');
   } finally { h.dispose(); }
 });
@@ -580,18 +580,18 @@ test('successful generation clears its banner while active progress, cancellatio
     const publishBatch = async value => { h.state.batch = value; h.state.revision++; h.notify(); await flush(); };
     await publishBatch(batch);
     assert.equal(h.app.querySelector('.fc-batch'), null, 'successful completed batch has no banner');
-    for (const status of ['running', 'pending', 'queued', 'cancelling']) {
+    for (const [status, label] of [['running', '进行中'], ['pending', '等待中'], ['queued', '排队中'], ['cancelling', '正在取消']]) {
       await publishBatch({ ...batch, status, completed: 0, chunks: [{ ...batch.chunks[0], status: 'running' }] });
       const panel = h.app.querySelector('.fc-batch'); assert.ok(panel);
-      assert.ok(panel.textContent.includes(status)); assert.ok(panel.textContent.includes('0/1'));
-      assert.ok([...panel.querySelectorAll('button')].some(button => button.textContent === 'Cancel generation'));
+      assert.ok(panel.textContent.includes(label)); assert.ok(panel.textContent.includes('0/1'));
+      assert.ok([...panel.querySelectorAll('button')].some(button => button.textContent === '取消生成'));
     }
     await publishBatch({ ...batch, status: 'partial', failedTargetIds: ['p1'], chunks: [{ ...batch.chunks[0], status: 'failed', error: 'Worker failed' }] });
     let panel = h.app.querySelector('.fc-batch'); assert.ok(panel.textContent.includes('Worker failed'));
-    assert.ok([...panel.querySelectorAll('button')].some(button => button.textContent === 'Retry failed…'));
+    assert.ok([...panel.querySelectorAll('button')].some(button => button.textContent === '重试失败项…'));
     await publishBatch({ ...batch, error: 'Disk write failed' });
     panel = h.app.querySelector('.fc-batch'); assert.ok(panel.textContent.includes('Disk write failed'));
-    assert.ok([...panel.querySelectorAll('button')].some(button => button.textContent === 'Retry saving'));
+    assert.ok([...panel.querySelectorAll('button')].some(button => button.textContent === '重试保存'));
     await publishBatch({ ...batch, chunks: [{ ...batch.chunks[0], error: 'Unresolved chunk error' }] });
     assert.ok(h.app.querySelector('.fc-batch').textContent.includes('Unresolved chunk error'));
     await publishBatch(batch); assert.equal(h.app.querySelector('.fc-batch'), null);
@@ -613,7 +613,7 @@ test('selection cascades to leaves, synchronizes shared cues and produces exact 
       assert.equal(row(h, `deck:${deck}`).selection.indeterminate, true);
       assert.equal(rowNode(h, `deck:${deck}:p:p1:cue:c1`).querySelector('input[type=checkbox]').checked, true);
     }
-    click(h, 'Review selected'); await flush();
+    click(h, '复习所选'); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'next-review')[1], { propositionIds: ['p1'], cueIds: ['c1'] });
     closeSurface(h);
     select(h, 'deck:d2:p:p1');
@@ -622,9 +622,9 @@ test('selection cascades to leaves, synchronizes shared cues and produces exact 
     select(h, 'deck:d1', false);
     assert.equal(row(h, 'deck:d2:p:p1:cue:c2').selection.checked, false);
     assert.equal(actions.hidden, false);
-    select(h, 'deck:d1'); click(h, 'Clear'); await flush(); assert.equal(actions.hidden, false);
+    select(h, 'deck:d1'); click(h, '清除'); await flush(); assert.equal(actions.hidden, false);
     assert.equal(row(h, 'deck:d2').selection.checked, false);
-    select(h, 'deck:d1'); click(h, 'Clear'); click(h, 'Review all'); await flush();
+    select(h, 'deck:d1'); click(h, '清除'); click(h, '复习全部'); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'next-review')[1], {});
   } finally { h.dispose(); }
 });
@@ -634,9 +634,9 @@ test('empty branches can be selected but cannot start a selected-cue review', as
   try {
     select(h, 'deck:d2');
     assert.equal(h.app.querySelector('.fc-selection-actions').hidden, false);
-    const review = [...h.app.querySelectorAll('button')].find(button => button.textContent === 'Review selected');
+    const review = [...h.app.querySelectorAll('button')].find(button => button.textContent === '复习所选');
     assert.ok(review.disabled); assert.equal(h.calls.some(([op]) => op === 'next-review'), false);
-    click(h, 'Clear'); assert.equal(h.app.querySelector('.fc-selection-actions').hidden, false);
+    click(h, '清除'); assert.equal(h.app.querySelector('.fc-selection-actions').hidden, false);
   } finally { h.dispose(); }
 });
 
@@ -647,17 +647,17 @@ test('scheduled review marks visible content before its RPC and keeps its headin
     h.overrides['next-review'] = () => {
       called = true;
       const stage = surfaceRoot(h).querySelector('.fc-review-stage');
-      assertInitialRegion(stage, 'Flashcard review');
+      assertInitialRegion(stage, '闪卡复习');
       assert.equal(stage.querySelector('h2').textContent, ''); assert.equal(stage.querySelector('h2').hidden, true);
       return next.promise;
     };
-    click(h, 'Review', rowNode(h, 'deck:d1')); assert.equal(called, true);
+    click(h, '复习', rowNode(h, 'deck:d1')); assert.equal(called, true);
     const stage = surfaceRoot(h).querySelector('.fc-review-stage'), title = stage.querySelector('h2');
-    assert.ok(stage.textContent.includes('Loading next card…'));
+    assert.ok(stage.textContent.includes('正在加载下一张卡片…'));
     next.resolve({ ticket: { id: 't1', question: 'Question **one**?', propositionName: 'Fact one' }, remaining: 1 }); await flush();
     assert.equal(stage.querySelector('h2'), title); assert.equal(title.textContent, ''); assert.equal(title.hidden, true);
     const reveal = deferred(); h.overrides['reveal-review'] = () => reveal.promise;
-    click(h, 'Reveal answer', surfaceRoot(h)); await flush();
+    click(h, '显示答案', surfaceRoot(h)); await flush();
     assert.equal(title.textContent, ''); assert.equal(title.hidden, true, 'pending reveal does not expose the proposition');
     reveal.resolve({ answer: 'SECRET ANSWER', intervals: { 1: 60000, 2: 300000, 3: 600000, 4: 86400000 } }); await flush();
     assert.equal(stage.querySelector('h2'), title); assert.equal(title.textContent, 'Fact one'); assert.equal(title.hidden, false);
@@ -667,33 +667,33 @@ test('scheduled review marks visible content before its RPC and keeps its headin
 test('outlined deck Review keeps QA separate from controls and bottom counts; ratings use four custom color palettes', async () => {
   const h = await setup();
   try {
-    const inline = h.handles.find(handle => handle.kind === 'button' && handle.props.label === 'Review');
-    click(h, 'Review', rowNode(h, 'deck:d1')); await flush();
+    const inline = h.handles.find(handle => handle.kind === 'button' && handle.props.label === '复习');
+    click(h, '复习', rowNode(h, 'deck:d1')); await flush();
     assert.deepEqual(h.calls.find(([op]) => op === 'next-review')[1], { deckIds: ['d1'] });
     assert.equal(h.handles.filter(handle => handle.kind === 'surface').length, 1);
     const stage = surfaceRoot(h).querySelector('.fc-review-stage'), title = stage.querySelector('h2'), card = stage.querySelector('.fc-review-card');
-    assertInitialRegion(stage, 'Flashcard review');
+    assertInitialRegion(stage, '闪卡复习');
     assert.equal(title.textContent, ''); assert.equal(title.hidden, true);
     const footer = stage.querySelector('.fc-review-footer'), bottom = stage.querySelector('.fc-review-bottom');
     assert.equal(bottom.previousElementSibling, card); assert.equal(bottom.nextElementSibling, footer);
     assert.equal(footer.contains(bottom), false);
-    assert.equal(bottom.querySelector('.fc-review-remaining').textContent, '1 ready');
+    assert.equal(bottom.querySelector('.fc-review-remaining').textContent, '1 张待复习');
     assert.equal(footer.querySelector('.fc-review-remaining'), null);
-    const reveal = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && handle.props.label === 'Reveal answer');
+    const reveal = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && handle.props.label === '显示答案');
     assert.equal(reveal.props.variant, 'outline');
-    assert.deepEqual([...footer.querySelectorAll('.fc-shortcut')].map(node => node.textContent), ['Space']);
+    assert.deepEqual([...footer.querySelectorAll('.fc-shortcut')].map(node => node.textContent), ['空格']);
     assert.equal(card.contains(title), false); assert.equal(card.querySelector('button, [role=alert], h2'), null);
     assert.equal(card.textContent, 'Question **one**?');
-    assert.ok(stage.textContent.includes('1 ready')); assert.equal(card.textContent.includes('ready'), false);
-    assert.ok(stage.textContent.includes('Space')); assert.equal(card.textContent.includes('Space'), false);
+    assert.ok(stage.textContent.includes('1 张待复习')); assert.equal(card.textContent.includes('待复习'), false);
+    assert.ok(stage.textContent.includes('空格')); assert.equal(card.textContent.includes('空格'), false);
     assert.equal(h.markdowns.some(item => item.text === 'SECRET ANSWER'), false);
     assert.equal([...surfaceRoot(h).querySelectorAll('button')].some(button => button.textContent === 'End review'), false);
-    click(h, 'Reveal answer', surfaceRoot(h)); await flush();
+    click(h, '显示答案', surfaceRoot(h)); await flush();
     assert.equal(stage.querySelector('h2'), title); assert.equal(title.textContent, 'Fact one'); assert.equal(title.hidden, false);
     assert.equal(h.markdowns.filter(item => item.text === 'SECRET ANSWER').length, 1);
     assert.ok(card.textContent.includes('SECRET ANSWER')); assert.equal(card.querySelector('button'), null);
-    const ratings = h.handles.filter(handle => handle.kind === 'button' && /^(Again|Hard|Good|Easy) · /.test(handle.props.label));
-    assert.deepEqual(ratings.map(handle => handle.props.label), ['Again · 1m', 'Hard · 5m', 'Good · 10m', 'Easy · 1d']);
+    const ratings = h.handles.filter(handle => handle.kind === 'button' && /^(重来|困难|良好|简单) · /.test(handle.props.label));
+    assert.deepEqual(ratings.map(handle => handle.props.label), ['重来 · 1 分钟', '困难 · 5 分钟', '良好 · 10 分钟', '简单 · 1 天']);
     for (const [index, label] of ['Again', 'Hard', 'Good', 'Easy'].entries()) {
       const color = `var(--fc-rating-${label.toLowerCase()})`, tint = percent => `color-mix(in srgb, ${color} ${percent}%, transparent)`;
       assert.equal(ratings[index].props.variant, 'custom');
@@ -708,11 +708,11 @@ test('outlined deck Review keeps QA separate from controls and bottom counts; ra
     assert.deepEqual([...footer.querySelectorAll('.fc-shortcut')].map(node => node.textContent), ['1', '2', '3', '4']);
     assert.equal(stage.textContent.includes('Space rates Good'), false);
     h.overrides['rate-review'] = async () => { throw new Error('Save unavailable'); };
-    click(h, 'Good · 10m', surfaceRoot(h)); await flush();
+    click(h, '良好 · 10 分钟', surfaceRoot(h)); await flush();
     assert.ok(stage.textContent.includes('Save unavailable')); assert.equal(card.textContent.includes('Save unavailable'), false);
     assert.equal(card.querySelector('button, [role=alert]'), null);
     h.overrides['rate-review'] = async () => ({ ok: true });
-    click(h, 'Good · 10m', surfaceRoot(h)); await flush();
+    click(h, '良好 · 10 分钟', surfaceRoot(h)); await flush();
     const rates = h.calls.filter(([op]) => op === 'rate-review');
     assert.equal(rates.length, 2); assert.equal(rates[0][1].requestId, rates[1][1].requestId);
     assert.equal(stage.querySelector('h2'), title); assert.equal(title.textContent, ''); assert.equal(title.hidden, true);
@@ -724,12 +724,12 @@ test('outlined deck Review keeps QA separate from controls and bottom counts; ra
 test('scheduled Space reveals but never rates, suppressing native rating-button Space while numeric grading remains', async () => {
   const h = await setup();
   try {
-    click(h, 'Review', rowNode(h, 'deck:d1')); await flush();
+    click(h, '复习', rowNode(h, 'deck:d1')); await flush();
     const stage = surfaceRoot(h).querySelector('.fc-review-stage');
     assert.equal(key(stage, ' ', { code: 'Space' }).defaultPrevented, true); await flush();
     assert.equal(h.calls.filter(([op]) => op === 'reveal-review').length, 1);
     assert.ok(stage.querySelector('.fc-answer').textContent.includes('SECRET ANSWER'));
-    const good = [...stage.querySelectorAll('button')].find(button => button.textContent === 'Good · 10m');
+    const good = [...stage.querySelectorAll('button')].find(button => button.textContent === '良好 · 10 分钟');
     for (const target of [stage, good]) for (const repeat of [false, true]) {
       const event = key(target, ' ', { code: 'Space', repeat });
       assert.equal(event.defaultPrevented, true, 'scheduled revealed Space cannot activate a native rating button');
@@ -745,13 +745,13 @@ test('scheduled Space reveals but never rates, suppressing native rating-button 
 test('host surface close blocks late reveal and next-card responses', async () => {
   const h = await setup();
   try {
-    click(h, 'Review', rowNode(h, 'deck:d1')); await flush();
+    click(h, '复习', rowNode(h, 'deck:d1')); await flush();
     const wait = deferred(); h.overrides['reveal-review'] = () => wait.promise;
-    click(h, 'Reveal answer', surfaceRoot(h)); closeSurface(h);
+    click(h, '显示答案', surfaceRoot(h)); closeSurface(h);
     wait.resolve({ answer: 'LATE SECRET', intervals: {} }); await flush();
     assert.equal(h.markdowns.some(item => item.text === 'LATE SECRET'), false);
     const next = deferred(); h.overrides['next-review'] = () => next.promise;
-    click(h, 'Review', rowNode(h, 'deck:d1')); closeSurface(h);
+    click(h, '复习', rowNode(h, 'deck:d1')); closeSurface(h);
     next.resolve({ ticket: { id: 'late', question: 'LATE QUESTION' } }); await flush();
     assert.equal(document.body.textContent.includes('LATE QUESTION'), false);
   } finally { h.dispose(); }
@@ -760,56 +760,56 @@ test('host surface close blocks late reveal and next-card responses', async () =
 test('cue menu editor retains failed drafts and sends version; preview and Archive stay distinct', async () => {
   const h = await setup();
   try {
-    openAll(h); click(h, 'Edit', menu(h, 'deck:d1:p:p1:cue:c1'));
+    openAll(h); click(h, '编辑', menu(h, 'deck:d1:p:p1:cue:c1'));
     const dialog = document.querySelector('[role=dialog]');
     const question = dialog.querySelector('textarea'); question.value = 'Edited draft';
     h.overrides['save-cue'] = async () => { throw new Error('Version conflict'); };
-    click(h, 'Save', dialog); await flush();
+    click(h, '保存', dialog); await flush();
     assert.equal(question.value, 'Edited draft'); assert.ok(dialog.textContent.includes('Version conflict'));
     assert.equal(h.calls.find(([op]) => op === 'save-cue')[1].version, 1);
-    click(h, 'Cancel', dialog);
+    click(h, '取消', dialog);
     click(h, 'Question **one**?', rowNode(h, 'deck:d1:p:p1:cue:c1'));
     let preview = document.querySelector('[role=dialog]');
     const card = assertPreview(preview);
-    assert.ok([...preview.querySelectorAll('button')].some(button => button.textContent === 'Edit'));
-    const deletion = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && preview.contains(handle.container) && handle.props.label === 'Delete');
+    assert.ok([...preview.querySelectorAll('button')].some(button => button.textContent === '编辑'));
+    const deletion = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && preview.contains(handle.container) && handle.props.label === '删除');
     assert.equal(deletion.props.variant, 'destructive');
     const calls = h.calls.length;
     assert.equal(key(card, ' ', { code: 'Space' }).defaultPrevented, false); key(card, '3'); await flush();
     assert.equal(h.calls.length, calls, 'preview installs no review keyboard behavior');
-    click(h, 'Edit', preview);
+    click(h, '编辑', preview);
     assert.equal(preview.isConnected, false);
-    const editor = document.querySelector('[role=dialog]'); assert.equal(editor.getAttribute('aria-label'), 'Edit cue');
+    const editor = document.querySelector('[role=dialog]'); assert.equal(editor.getAttribute('aria-label'), '编辑提示语');
     assert.equal(editor.querySelector('textarea').value, 'Question **one**?');
-    click(h, 'Cancel', editor);
+    click(h, '取消', editor);
     click(h, 'Question **one**?', rowNode(h, 'deck:d1:p:p1:cue:c1'));
-    preview = document.querySelector('[role=dialog]'); assertPreview(preview); click(h, 'Close', preview);
+    preview = document.querySelector('[role=dialog]'); assertPreview(preview); click(h, '关闭', preview);
     h.state.propositions[0].archived = true; h.state.revision++; h.notify(); await flush(); openAll(h);
-    assert.ok(h.app.textContent.includes('Archive'));
+    assert.ok(h.app.textContent.includes('归档'));
     assert.equal(row(h, 'archive:p:p1:cue:c1').selection, undefined);
-    assert.equal(rowNode(h, 'archive:p:p1:cue:c1').querySelector('button[title="Cue actions"]'), null);
+    assert.equal(rowNode(h, 'archive:p:p1:cue:c1').querySelector('button[title="提示语操作"]'), null);
     click(h, 'Question **one**?', rowNode(h, 'archive:p:p1:cue:c1'));
     preview = document.querySelector('[role=dialog]'); assertPreview(preview);
-    assert.equal([...preview.querySelectorAll('button')].some(button => ['Edit', 'Delete'].includes(button.textContent)), false);
+    assert.equal([...preview.querySelectorAll('button')].some(button => ['编辑', '删除'].includes(button.textContent)), false);
   } finally { h.dispose(); }
 });
 
 test('Delete selected is an icon-only trash control right of Review/Practice, visible only with selection, with cancellable checked cleanup', async () => {
   const h = await setup();
   try {
-    assert.equal(h.app.querySelector('[aria-label="Delete selected"]'), null);
+    assert.equal(h.app.querySelector('[aria-label="删除所选"]'), null);
     select(h, 'deck:d1');
     const actions = h.app.querySelector('.fc-scope-actions'), controls = [...actions.querySelectorAll('button')];
-    assert.deepEqual(controls.map(b => b.getAttribute('aria-label') || b.textContent), ['Review selected', 'Practice selected', 'Delete selected']);
+    assert.deepEqual(controls.map(b => b.getAttribute('aria-label') || b.textContent), ['复习所选', '练习所选', '删除所选']);
     assert.ok(controls[2].querySelector('svg')); assert.equal(controls[2].textContent, '');
-    click(h, 'Delete selected');
+    click(h, '删除所选');
     const confirmation = document.querySelector('[role=dialog]');
-    assert.equal(confirmation.getAttribute('aria-label'), 'Delete flashcards?');
+    assert.equal(confirmation.getAttribute('aria-label'), '删除闪卡？');
     assert.equal(confirmation.querySelector('input[type=checkbox]').checked, true);
-    assert.ok(confirmation.textContent.includes('Delete empty decks too'));
+    assert.ok(confirmation.textContent.includes('同时删除空卡组'));
     assert.ok(confirmation.querySelector('.fc-delete-description.fc-muted .fc-markdown'));
-    click(h, 'Cancel', confirmation); assert.equal(h.calls.some(([op]) => op === 'delete-content'), false);
-    click(h, 'Clear'); assert.equal(h.app.querySelector('[aria-label="Delete selected"]'), null);
+    click(h, '取消', confirmation); assert.equal(h.calls.some(([op]) => op === 'delete-content'), false);
+    click(h, '清除'); assert.equal(h.app.querySelector('[aria-label="删除所选"]'), null);
   } finally { h.dispose(); }
 });
 
@@ -819,15 +819,15 @@ test('bulk deletion deduplicates shared content and removes only affected empty 
     try {
       sharedCards(h); h.state.decks.push({ id: 'untouched', name: 'Unrelated empty', propositionIds: [], newLimit: 20, newToday: 0, due: 0 });
       h.state.revision++; h.notify(); await flush(); select(h, 'deck:d1'); select(h, 'deck:d2');
-      click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
-      assert.ok(confirmation.textContent.includes('2 cues will be deleted'));
+      click(h, '删除所选'); const confirmation = document.querySelector('[role=dialog]');
+      assert.ok(confirmation.textContent.includes('2 条提示语将从所有卡组中删除'));
       confirmation.querySelector('input[type=checkbox]').checked = cleanup;
-      click(h, 'Delete', confirmation); await flush();
+      click(h, '删除', confirmation); await flush();
       const input = h.calls.findLast(([op]) => op === 'delete-content')[1];
       assert.deepEqual(input.cueIds, ['c1', 'c2']); assert.equal(input.deleteEmptyDecks, cleanup);
       assert.equal(h.state.propositions.length, 0);
       assert.deepEqual(h.state.decks.map(d => d.id), cleanup ? ['untouched'] : ['d1', 'd2', 'untouched']);
-      assert.equal(confirmation.isConnected, false); assert.equal(h.app.querySelector('[aria-label="Delete selected"]'), null);
+      assert.equal(confirmation.isConnected, false); assert.equal(h.app.querySelector('[aria-label="删除所选"]'), null);
     } finally { h.dispose(); }
   }
 });
@@ -836,14 +836,14 @@ test('deletion keeps the confirmed selection frozen and supports deleting an exp
   const h = await setup();
   try {
     sharedCards(h); await flush(); openAll(h); select(h, 'deck:d1:p:p1:cue:c1');
-    click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
-    click(h, 'Clear'); select(h, 'deck:d1:p:p1:cue:c2');
-    click(h, 'Delete', confirmation); await flush();
+    click(h, '删除所选'); const confirmation = document.querySelector('[role=dialog]');
+    click(h, '清除'); select(h, 'deck:d1:p:p1:cue:c2');
+    click(h, '删除', confirmation); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'delete-content')[1].cueIds, ['c1']);
     assert.deepEqual(h.state.propositions[0].cues.map(c => c.id), ['c2']);
-    click(h, 'Clear'); h.state.decks.push({ id: 'empty', name: 'Empty', propositionIds: [], newLimit: 20, newToday: 0, due: 0 });
-    h.state.revision++; h.notify(); await flush(); select(h, 'deck:empty'); click(h, 'Delete selected');
-    const empty = document.querySelector('[role=dialog]'); click(h, 'Delete', empty); await flush();
+    click(h, '清除'); h.state.decks.push({ id: 'empty', name: 'Empty', propositionIds: [], newLimit: 20, newToday: 0, due: 0 });
+    h.state.revision++; h.notify(); await flush(); select(h, 'deck:empty'); click(h, '删除所选');
+    const empty = document.querySelector('[role=dialog]'); click(h, '删除', empty); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'delete-content')[1].deckIds, ['empty']);
     assert.equal(h.state.decks.some(d => d.id === 'empty'), false); assert.equal(h.state.propositions[0].cues.length, 1);
   } finally { h.dispose(); }
@@ -857,35 +857,35 @@ test('deletion lost-response retries reuse the accepted request and options with
       delete h.overrides['delete-content']; const value = await h.ctx.call('delete-content', input);
       if (first) { first = false; throw new Error('Response lost'); } return value;
     };
-    select(h, 'deck:d1'); click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
-    const checkbox = confirmation.querySelector('input[type=checkbox]'); click(h, 'Delete', confirmation); await flush();
+    select(h, 'deck:d1'); click(h, '删除所选'); const confirmation = document.querySelector('[role=dialog]');
+    const checkbox = confirmation.querySelector('input[type=checkbox]'); click(h, '删除', confirmation); await flush();
     assert.ok(confirmation.textContent.includes('Response lost')); assert.equal(checkbox.disabled, true);
     const firstInput = h.calls.find(([op]) => op === 'delete-content')[1];
-    click(h, 'Delete', confirmation); await flush();
+    click(h, '删除', confirmation); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'delete-content')[1], firstInput);
     assert.equal(h.state.propositions.length, 0); assert.equal(confirmation.isConnected, false);
-    select(h, 'deck:d2'); click(h, 'Delete selected'); const old = document.querySelector('[role=dialog]'), pending = deferred();
-    h.overrides['delete-content'] = () => pending.promise; click(h, 'Delete', old); click(h, 'Cancel', old);
-    click(h, 'Create deck'); const newer = document.querySelector('[role=dialog]'); pending.resolve(structuredClone(h.state)); await flush();
-    assert.equal(newer.isConnected, true); assert.equal(newer.getAttribute('aria-label'), 'Create deck');
+    select(h, 'deck:d2'); click(h, '删除所选'); const old = document.querySelector('[role=dialog]'), pending = deferred();
+    h.overrides['delete-content'] = () => pending.promise; click(h, '删除', old); click(h, '取消', old);
+    click(h, '新建卡组'); const newer = document.querySelector('[role=dialog]'); pending.resolve(structuredClone(h.state)); await flush();
+    assert.equal(newer.isConnected, true); assert.equal(newer.getAttribute('aria-label'), '新建卡组');
   } finally { h.dispose(); }
 });
 
 test('active generation disables deletion in the toolbar, cue menu, preview, deck settings and an already open confirmation', async () => {
   const h = await setup();
   try {
-    openAll(h); select(h, 'deck:d1'); click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
+    openAll(h); select(h, 'deck:d1'); click(h, '删除所选'); const confirmation = document.querySelector('[role=dialog]');
     h.state.batch = { id: 'running', status: 'running', chunks: [], completed: 0, total: 1, added: 0 }; h.state.revision++; h.notify(); await flush();
-    const deletion = [...confirmation.querySelectorAll('button')].find(b => b.textContent === 'Delete');
-    assert.equal(deletion.disabled, true); assert.ok(confirmation.textContent.includes('Wait for generation to finish or cancel'));
-    click(h, 'Cancel', confirmation);
-    assert.equal(h.app.querySelector('[aria-label="Delete selected"]').disabled, true);
-    const items = menu(h, 'deck:d1:p:p1:cue:c1'); assert.equal([...items.querySelectorAll('button')].find(b => b.textContent === 'Delete').disabled, true);
+    const deletion = [...confirmation.querySelectorAll('button')].find(b => b.textContent === '删除');
+    assert.equal(deletion.disabled, true); assert.ok(confirmation.textContent.includes('请等待生成完成或先取消生成'));
+    click(h, '取消', confirmation);
+    assert.equal(h.app.querySelector('[aria-label="删除所选"]').disabled, true);
+    const items = menu(h, 'deck:d1:p:p1:cue:c1'); assert.equal([...items.querySelectorAll('button')].find(b => b.textContent === '删除').disabled, true);
     h.handles.findLast(handle => handle.kind === 'menu').dispose();
     click(h, 'Question **one**?', rowNode(h, 'deck:d1:p:p1:cue:c1'));
-    const preview = document.querySelector('[role=dialog]'); assert.equal([...preview.querySelectorAll('button')].find(b => b.textContent === 'Delete').disabled, true);
-    click(h, 'Close', preview); click(h, 'Deck settings', menu(h, 'deck:d1'));
-    const settings = document.querySelector('[role=dialog]'); assert.equal([...settings.querySelectorAll('button')].find(b => b.textContent === 'Delete deck…').disabled, true);
+    const preview = document.querySelector('[role=dialog]'); assert.equal([...preview.querySelectorAll('button')].find(b => b.textContent === '删除').disabled, true);
+    click(h, '关闭', preview); click(h, '卡组设置', menu(h, 'deck:d1'));
+    const settings = document.querySelector('[role=dialog]'); assert.equal([...settings.querySelectorAll('button')].find(b => b.textContent === '删除卡组…').disabled, true);
     assert.equal(h.calls.some(([op]) => op === 'delete-content'), false);
   } finally { h.dispose(); }
 });
@@ -893,12 +893,12 @@ test('active generation disables deletion in the toolbar, cue menu, preview, dec
 test('stale deletion confirmation retains its error and never deletes content added after confirmation', async () => {
   const h = await setup();
   try {
-    select(h, 'deck:d1'); click(h, 'Delete selected'); const confirmation = document.querySelector('[role=dialog]');
+    select(h, 'deck:d1'); click(h, '删除所选'); const confirmation = document.querySelector('[role=dialog]');
     h.state.propositions[0].cues.push({ id: 'later', question: 'Added later', answer: 'Later answer' }); h.state.revision++; h.notify(); await flush();
-    click(h, 'Delete', confirmation); await flush();
+    click(h, '删除', confirmation); await flush();
     assert.ok(confirmation.textContent.includes('The library changed'));
     assert.equal(confirmation.isConnected, true); assert.deepEqual(h.state.propositions[0].cues.map(c => c.id), ['c1', 'later']);
-    click(h, 'Cancel', confirmation);
+    click(h, '取消', confirmation);
   } finally { h.dispose(); }
 });
 
@@ -919,19 +919,19 @@ test('preview Delete is destructive but only the explicit confirmation deletes a
     const openPreview = () => { click(h, 'Question **one**?', rowNode(h, 'deck:d1:p:p1:cue:c1')); return document.querySelector('[role=dialog]'); };
     const before = JSON.stringify(h.state), mutations = () => h.calls.filter(([op]) => op === 'delete-content');
     let preview = openPreview(); assertPreview(preview);
-    const deletion = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && preview.contains(handle.container) && handle.props.label === 'Delete');
+    const deletion = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && preview.contains(handle.container) && handle.props.label === '删除');
     assert.equal(deletion.props.variant, 'destructive');
-    click(h, 'Delete', preview);
+    click(h, '删除', preview);
     assert.equal(preview.isConnected, false);
-    let confirmation = document.querySelector('[role=dialog]'); assert.equal(confirmation.getAttribute('aria-label'), 'Delete flashcards?');
-    assert.ok(confirmation.textContent.includes('Past review statistics are kept'));
+    let confirmation = document.querySelector('[role=dialog]'); assert.equal(confirmation.getAttribute('aria-label'), '删除闪卡？');
+    assert.ok(confirmation.textContent.includes('过往复习统计会保留'));
     assert.equal(mutations().length, 0); assert.equal(JSON.stringify(h.state), before);
-    click(h, 'Cancel', confirmation); assert.equal(mutations().length, 0); assert.equal(JSON.stringify(h.state), before);
-    preview = openPreview(); click(h, 'Delete', preview);
+    click(h, '取消', confirmation); assert.equal(mutations().length, 0); assert.equal(JSON.stringify(h.state), before);
+    preview = openPreview(); click(h, '删除', preview);
     confirmation = document.querySelector('[role=dialog]'); assert.equal(mutations().length, 0);
-    const confirmButton = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && confirmation.contains(handle.container) && handle.props.label === 'Delete');
+    const confirmButton = h.handles.findLast(handle => handle.kind === 'button' && !handle.disposed && confirmation.contains(handle.container) && handle.props.label === '删除');
     assert.equal(confirmButton.props.variant, 'destructive');
-    click(h, 'Delete', confirmation); await flush();
+    click(h, '删除', confirmation); await flush();
     assert.equal(mutations().length, 1);
     assert.deepEqual(mutations()[0][1].cueIds, ['c1']); assert.equal(mutations()[0][1].deleteEmptyDecks, true);
     assert.equal(h.state.propositions.length, 0); assert.deepEqual(h.state.decks.map(d => d.id), ['d2']);
@@ -944,19 +944,19 @@ test('inline rename commits PATCH on Enter/blur, cancels on Escape and retains f
   const h = await setup();
   try {
     const deck = rowNode(h, 'deck:d1'); click(h, 'Notes', deck);
-    let input = deck.querySelector('input[aria-label="Deck name"]'); change(input, 'Renamed'); key(input, 'Enter'); await flush();
+    let input = deck.querySelector('input[aria-label="卡组名称"]'); change(input, 'Renamed'); key(input, 'Enter'); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'save-deck')[1], { id: 'd1', name: 'Renamed' });
-    click(h, 'Renamed', deck); input = deck.querySelector('input[aria-label="Deck name"]'); change(input, 'Cancel me'); key(input, 'Escape');
-    assert.equal(deck.querySelector('input[aria-label="Deck name"]'), null);
+    click(h, 'Renamed', deck); input = deck.querySelector('input[aria-label="卡组名称"]'); change(input, 'Cancel me'); key(input, 'Escape');
+    assert.equal(deck.querySelector('input[aria-label="卡组名称"]'), null);
     assert.equal(h.calls.filter(([op]) => op === 'save-deck').length, 1);
-    click(h, 'Renamed', deck); input = deck.querySelector('input[aria-label="Deck name"]'); change(input, 'Blur saved'); input.dispatchEvent(new document.defaultView.Event('blur')); await flush();
+    click(h, 'Renamed', deck); input = deck.querySelector('input[aria-label="卡组名称"]'); change(input, 'Blur saved'); input.dispatchEvent(new document.defaultView.Event('blur')); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'save-deck')[1], { id: 'd1', name: 'Blur saved' });
     h.overrides['save-deck'] = async () => { throw new Error('Rename failed'); };
-    click(h, 'Blur saved', deck); input = deck.querySelector('input[aria-label="Deck name"]'); change(input, 'Keep draft'); key(input, 'Enter'); await flush();
+    click(h, 'Blur saved', deck); input = deck.querySelector('input[aria-label="卡组名称"]'); change(input, 'Keep draft'); key(input, 'Enter'); await flush();
     assert.equal(input.value, 'Keep draft'); assert.ok(deck.textContent.includes('Rename failed'));
     const content = row(h, 'deck:d1').content; h.state.revision++; h.notify(); await flush();
     assert.equal(row(h, 'deck:d1').content, content, 'row content factory identity stays stable');
-    assert.equal(deck.querySelector('input[aria-label="Deck name"]'), input, 'controlled updates preserve mounted drafts');
+    assert.equal(deck.querySelector('input[aria-label="卡组名称"]'), input, 'controlled updates preserve mounted drafts');
     assert.equal(input.value, 'Keep draft'); assert.ok(deck.textContent.includes('Rename failed'));
   } finally { h.dispose(); }
 });
@@ -973,7 +973,7 @@ test('settings parse minutes/hours, retain failed drafts and use acknowledged va
     assert.equal(find('learningSteps').value, '1m 60m');
     await find('retention').onChange(95); assert.equal(h.state.settings.retention, .95);
     const before = h.calls.filter(([op]) => op === 'save-settings').length;
-    await assert.rejects(find('learningSteps').onChange('10m 1m'), /increasing/);
+    await assert.rejects(find('learningSteps').onChange('10m 1m'), /递增/);
     assert.equal(h.calls.filter(([op]) => op === 'save-settings').length, before);
     h.overrides['save-settings'] = async () => { throw new Error('Disk full'); };
     await assert.rejects(find('dayStart').onChange(7), /Disk full/);
@@ -991,7 +991,7 @@ test('Follow cheap slot has its own toggle row; OFF pins current slot atomically
     assert.equal(general.props.rows.some(row => row.key === 'followCheapSlot'), false);
     const toggle = () => settingsRow(h, 'followCheapSlot');
     assert.equal(toggle().type, 'toggle'); assert.equal(toggle().value, true); assertModelRows(h, true);
-    assert.equal([...h.settings.querySelectorAll('button')].some(node => node.textContent === 'Follow cheap slot'), false);
+    assert.equal([...h.settings.querySelectorAll('button')].some(node => node.textContent === '跟随经济档位'), false);
     assert.equal(savedSettings(h).length, 0, 'opening settings never pins the slot');
     await toggle().onChange(false);
     assert.deepEqual(savedSettings(h).at(-1)[1], { modelOverride: { provider: 'test', id: 'cheap' }, thinkingOverride: 'low' });
@@ -1020,16 +1020,16 @@ test('Model settings delegate the full label/toggle row to native rows and keep 
     assert.equal([...area.children].some(node => node.tagName === 'SPAN'), false);
     const toggle = h.handles.find(handle => handle.kind === 'rows' && !handle.disposed && handle.props.rows.some(row => row.key === 'followCheapSlot'));
     assert.equal(toggle.container, follow);
-    assert.deepEqual(toggle.props.rows.map(({ key, label, description, type }) => ({ key, label, description, type })), [{ key: 'followCheapSlot', label: 'Model', description: 'Follow cheap slot', type: 'toggle' }]);
+    assert.deepEqual(toggle.props.rows.map(({ key, label, description, type }) => ({ key, label, description, type })), [{ key: 'followCheapSlot', label: '模型', description: '跟随经济档位', type: 'toggle' }]);
     assert.equal(Object.hasOwn(settingsRow(h, 'followCheapSlot'), 'controlLabel'), false, 'uses the existing native description field, not a caption API');
     assert.equal(follow.getAttribute('style'), null, 'the native row slot adds no inline font or alignment overrides');
-    assert.ok(follow.textContent.includes('Model')); assert.ok(follow.textContent.includes('Follow cheap slot'));
+    assert.ok(follow.textContent.includes('模型')); assert.ok(follow.textContent.includes('跟随经济档位'));
     assert.equal(area.querySelector('p'), null, 'the plugin-owned explanatory paragraph is removed');
     assert.equal(area.querySelector('button'), null, 'there are no standalone follow/reset/default-thinking buttons');
     assertModelRows(h, true);
     await settingsRow(h, 'followCheapSlot').onChange(false);
-    assert.equal(settingsRow(h, 'followCheapSlot').label, 'Model');
-    assert.equal(settingsRow(h, 'followCheapSlot').description, 'Follow cheap slot');
+    assert.equal(settingsRow(h, 'followCheapSlot').label, '模型');
+    assert.equal(settingsRow(h, 'followCheapSlot').description, '跟随经济档位');
     const overrides = area.querySelector('.fc-model-overrides');
     assert.equal(overrides.parentElement, area); assert.equal(overrides.previousElementSibling, follow);
     assertModelRows(h, false); assert.equal(overrides.children.length, 2);
@@ -1039,7 +1039,7 @@ test('Model settings delegate the full label/toggle row to native rows and keep 
     assert.equal(overrides.querySelector('label,.fc-label,p,button'), null, 'only native picker mounts remain, with no duplicate labels or controls');
     assert.equal(area.querySelector('button'), null);
     await settingsRow(h, 'followCheapSlot').onChange(true); assertModelRows(h, true);
-    assert.equal(settingsRow(h, 'followCheapSlot').description, 'Follow cheap slot');
+    assert.equal(settingsRow(h, 'followCheapSlot').description, '跟随经济档位');
   } finally { h.dispose(); }
 });
 
@@ -1208,11 +1208,11 @@ test('snapshot revisions prevent rollback and failed generation retry requires c
     delete h.overrides['get-state'];
     h.state.batch = { id: 'b', status: 'partial', chunks: [{ id: 'ch', status: 'failed', targetIds: ['p1'], error: 'Worker failed' }], added: 2, completed: 1, total: 1, failedTargetIds: ['p1'], error: 'Disk write failed' };
     h.state.revision++; h.notify(); await flush();
-    click(h, 'Retry failed…'); await flush();
+    click(h, '重试失败项…'); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'preflight')[1].propositionIds, ['p1']);
     assert.equal(h.calls.filter(([op]) => op === 'start-generation').length, 0);
-    click(h, 'Cancel', document.querySelector('[role=dialog]'));
-    click(h, 'Retry saving'); await flush();
+    click(h, '取消', document.querySelector('[role=dialog]'));
+    click(h, '重试保存'); await flush();
     assert.equal(h.calls.filter(([op]) => op === 'resume-results').length, 1);
   } finally { h.dispose(); }
 });
@@ -1224,14 +1224,14 @@ test('native row menus preserve deck, proposition and cue reorder scopes', async
     h.state.decks[0].propositionIds = ['p2', 'p1'];
     h.state.propositions[0].cues.push({ id: 'c3', question: 'Third cue', answer: 'Third answer' });
     h.state.revision++; h.notify(); await flush(); openAll(h);
-    assert.deepEqual(row(h, 'deck:d1').children.map(row => row.selection.label), ['Select Fact two', 'Select Fact one']);
-    assert.equal(rowNode(h, 'deck:d1').querySelector('button[title="Deck actions"]').getAttribute('aria-label'), 'Deck actions');
-    click(h, 'Move down', menu(h, 'deck:d1')); await flush();
+    assert.deepEqual(row(h, 'deck:d1').children.map(row => row.selection.label), ['选择 Fact two', '选择 Fact one']);
+    assert.equal(rowNode(h, 'deck:d1').querySelector('button[title="卡组操作"]').getAttribute('aria-label'), '卡组操作');
+    click(h, '下移', menu(h, 'deck:d1')); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'reorder')[1], { kind: 'deck', id: 'd1', direction: 1 });
     assert.deepEqual(tree(h).props.rows.map(row => row.key), ['deck:d2', 'deck:d1']);
-    click(h, 'Move up', menu(h, 'deck:d1:p:p1')); await flush();
+    click(h, '上移', menu(h, 'deck:d1:p:p1')); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'reorder')[1], { kind: 'proposition', id: 'p1', deckId: 'd1', direction: -1 });
-    click(h, 'Move down', menu(h, 'deck:d1:p:p1:cue:c1')); await flush();
+    click(h, '下移', menu(h, 'deck:d1:p:p1:cue:c1')); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'reorder')[1], { kind: 'cue', id: 'c1', propositionId: 'p1', direction: 1 });
   } finally { h.dispose(); }
 });
@@ -1240,7 +1240,7 @@ test('every row menu uses an accessible icon-only gear with explicit icon geomet
   const h = await setup();
   try {
     openAll(h);
-    const occurrences = [['deck:d1', 'Deck actions'], ['deck:d2', 'Deck actions'], ['deck:d1:p:p1', 'Proposition actions'], ['deck:d1:p:p1:cue:c1', 'Cue actions']];
+    const occurrences = [['deck:d1', '卡组操作'], ['deck:d2', '卡组操作'], ['deck:d1:p:p1', '命题操作'], ['deck:d1:p:p1:cue:c1', '提示语操作']];
     for (const [key, label] of occurrences) {
       const node = rowNode(h, key);
       const gear = h.handles.find(handle => handle.kind === 'button' && !handle.disposed && node.contains(handle.container) && handle.props.label === label);
@@ -1269,20 +1269,20 @@ test('every row menu uses an accessible icon-only gear with explicit icon geomet
 test('memberships require one deck; deck deletion uses the shared content confirmation without replacement', async () => {
   const h = await setup();
   try {
-    openAll(h); click(h, 'Decks…', menu(h, 'deck:d1:p:p1'));
+    openAll(h); click(h, '卡组…', menu(h, 'deck:d1:p:p1'));
     const dialog = document.querySelector('[role=dialog]');
     const checkboxes = [...dialog.querySelectorAll('input')]; checkboxes.forEach(input => { input.checked = false; });
-    click(h, 'Save memberships', dialog); await flush();
-    assert.ok(dialog.textContent.includes('Choose at least one deck'));
+    click(h, '保存所属卡组', dialog); await flush();
+    assert.ok(dialog.textContent.includes('请至少选择一个卡组'));
     assert.equal(h.calls.some(([op]) => op === 'set-memberships'), false);
-    click(h, 'Cancel', dialog);
-    click(h, 'Deck settings', menu(h, 'deck:d1')); click(h, 'Delete deck…', document.querySelector('[role=dialog]'));
+    click(h, '取消', dialog);
+    click(h, '卡组设置', menu(h, 'deck:d1')); click(h, '删除卡组…', document.querySelector('[role=dialog]'));
     const deletion = [...document.querySelectorAll('[role=dialog]')].at(-1);
     assert.equal(document.querySelectorAll('[role=dialog]').length, 1, 'settings is replaced by one confirmation');
-    assert.equal(deletion.getAttribute('aria-label'), 'Delete flashcards?'); assert.equal(deletion.querySelector('select'), null);
+    assert.equal(deletion.getAttribute('aria-label'), '删除闪卡？'); assert.equal(deletion.querySelector('select'), null);
     assert.equal(deletion.querySelector('input[type=checkbox]').checked, true);
     assert.ok(deletion.querySelector('.fc-delete-description.fc-muted .fc-markdown'), 'explanation uses muted rendered body text');
-    click(h, 'Delete', deletion); await flush();
+    click(h, '删除', deletion); await flush();
     assert.deepEqual(h.calls.findLast(([op]) => op === 'delete-content')[1].deckIds, ['d1']);
     assert.equal(h.state.propositions.length, 0); assert.deepEqual(h.state.decks.map(d => d.id), ['d2']);
   } finally { h.dispose(); }
@@ -1293,9 +1293,9 @@ test('core source/extraction events refresh Archive only while mounted and dispo
   try {
     const nativeTree = tree(h);
     h.state.propositions[0].archived = true; h.state.revision++;
-    h.appEvent('sources-changed'); await flush(); assert.ok(h.app.textContent.includes('Archive'));
+    h.appEvent('sources-changed'); await flush(); assert.ok(h.app.textContent.includes('归档'));
     h.state.propositions[0].archived = false; h.state.revision++;
-    h.appEvent('activity-changed'); await flush(); assert.equal(h.app.textContent.includes('Archive'), false);
+    h.appEvent('activity-changed'); await flush(); assert.equal(h.app.textContent.includes('归档'), false);
     h.unmount(); assert.equal(nativeTree.disposed, true); const count = h.calls.length;
     h.appEvent('activity-changed'); h.appEvent('sources-changed'); await flush(); assert.equal(h.calls.length, count);
   } finally { h.dispose(); }
@@ -1309,10 +1309,10 @@ test('visible waiting review owns exactly one timer and clears it on host close 
   global.clearTimeout = id => timers.delete(id);
   try {
     h.overrides['next-review'] = async () => ({ ticket: null, nextDue: Date.now() + 60000 });
-    click(h, 'Review', rowNode(h, 'deck:d1')); await flush(); assert.equal(timers.size, 1);
+    click(h, '复习', rowNode(h, 'deck:d1')); await flush(); assert.equal(timers.size, 1);
     h.notify(); await flush(); assert.equal(timers.size, 1);
     closeSurface(h); assert.equal(timers.size, 0);
-    click(h, 'Review', rowNode(h, 'deck:d1')); await flush(); assert.equal(timers.size, 1);
+    click(h, '复习', rowNode(h, 'deck:d1')); await flush(); assert.equal(timers.size, 1);
     h.unmount(); assert.equal(timers.size, 0);
   } finally { global.setTimeout = realSet; global.clearTimeout = realClear; h.dispose(); }
 });
@@ -1322,7 +1322,7 @@ test('search keeps native hierarchy and disables ordering through menu items', a
   try {
     const search = h.app.querySelector('input[type=search]'); change(search, 'Fact');
     for (const id of ['deck:d1', 'deck:d1:p:p1', 'deck:d1:p:p1:cue:c1']) {
-      const popup = menu(h, id); const controls = [...popup.querySelectorAll('button')].filter(button => /^Move (up|down)$/.test(button.textContent));
+      const popup = menu(h, id); const controls = [...popup.querySelectorAll('button')].filter(button => /^(上移|下移)$/.test(button.textContent));
       assert.equal(controls.length, 2); assert.ok(controls.every(button => button.disabled));
       h.handles.findLast(handle => handle.kind === 'menu').dispose();
     }
@@ -1335,7 +1335,7 @@ test('activation reports missing public host capabilities clearly', async () => 
   const methods = ['mountMarkdown', 'mountKnowledgePicker', 'mountTree', 'openSurface', 'openMenu'];
   for (const missing of methods) {
     const ui = Object.fromEntries(methods.filter(method => method !== missing).map(method => [method, () => {}]));
-    assert.throws(() => activate({ ui }), error => error instanceof Error && !(error instanceof TypeError) && error.message.includes(missing) && error.message.includes('update LearnHarness'));
+    assert.throws(() => activate({ ui }), error => error instanceof Error && !(error instanceof TypeError) && error.message.includes(missing) && error.message.includes('请更新 LearnHarness'));
   }
 });
 

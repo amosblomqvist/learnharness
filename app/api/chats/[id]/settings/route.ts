@@ -7,6 +7,7 @@ import {
 	validateChatSettings,
 } from "@/src/server";
 import type { ChatSettings } from "@/src/core";
+import { tr } from "@/src/core";
 
 /**
  * The per-chat model control (model-control wave): replace-whole settings —
@@ -26,7 +27,7 @@ import type { ChatSettings } from "@/src/core";
  */
 export async function PUT(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
-	if (!getChat(id)) return Response.json({ error: "Not found" }, { status: 404 });
+	if (!getChat(id)) return Response.json({ error: tr("未找到", "Not found") }, { status: 404 });
 
 	const body = await req.json().catch(() => null);
 	const parsed = parseSettingsBody(body);

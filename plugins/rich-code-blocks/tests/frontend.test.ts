@@ -29,7 +29,7 @@ const flush = () => new Promise(resolve => setImmediate(resolve));
 test("all-off registrations and accepted cross-window revisions alone control families and settings", async () => {
   const host = fixture(); const activation = host.activate(); await flush();
   assert.equal(host.calls[0]!.operation, "get-settings"); host.calls[0]!.result.resolve(DEFAULT_SETTINGS); const dispose = await activation;
-  assert.equal(host.renderers.size, 0); assert.deepEqual(host.schema!.rows.map(row => [row.label, row.value]), [["Chemical structures", false], ["Musical notation", false], ["Technical diagrams", false]]);
+  assert.equal(host.renderers.size, 0); assert.deepEqual(host.schema!.rows.map(row => [row.label, row.value]), [["化学结构", false], ["乐谱", false], ["技术图表", false]]);
   const save = host.schema!.rows[0]!.onChange(true as never);
   assert.deepEqual(host.calls[1]!.input, { family: "chemicalStructures", enabled: true }); assert.equal(host.renderers.size, 0);
   host.calls[1]!.result.reject(new Error("disk failure")); await assert.rejects(Promise.resolve(save), /disk failure/);

@@ -49,7 +49,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   });
   const overlayChrome = (selector, title, surface = false) => page.$eval(selector, (content, { title, surface }) => {
     const frame = content.closest(surface ? '[data-plugin-session-surface-frame]' : '[data-plugin-ui-dialog]');
-    const close = frame.querySelector(surface ? 'button[aria-label="Close"]' : 'button[aria-label="Close dialog"]');
+    const close = frame.querySelector(surface ? 'button[aria-label="关闭"]' : 'button[aria-label="关闭对话框"]');
     let scroll = frame.querySelector('[data-plugin-ui-dialog-scroll]');
     if (surface) {
       scroll = content;
@@ -375,11 +375,11 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   evidence.assertions.push("Real host settings rows exercise five types, validation rejection, controlled acknowledgment, disabled row/local reset, and trusted continuous native slider drag with repeated progress, stable node identity and zero transient disabled mutations.");
 
   evidence.stage = "real pickers";
-  await page.locator(`${example("model-picker")} button[aria-label="Model selector"]`).click();
+  await page.locator(`${example("model-picker")} button[aria-label="模型选择器"]`).click();
   await page.waitForSelector('[data-testid="plugin-model-menu"]', { visible: true });
   await page.$$eval('[data-testid="plugin-model-menu"] button', (nodes, model) => { const chosen = nodes.find(node => node.textContent.includes(model)); if (!chosen) throw Error("Offline model missing"); chosen.click(); }, fixture.model);
   await waitState("pickers", { model: { provider: "custom", id: fixture.model } });
-  await page.locator(`${example("thinking-picker")} button[aria-label="Thinking"]`).click();
+  await page.locator(`${example("thinking-picker")} button[aria-label="推理强度"]`).click();
   await page.waitForSelector('[data-testid="thinking-option-high"]', { visible: true });
   await page.locator('[data-testid="thinking-option-high"]').click(); await waitState("pickers", { thinking: "high" });
   const knowledge = '[data-testid="chain-table-overlay"]';
@@ -389,13 +389,13 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
       const box = node => { const { x, y, width, height, right, bottom } = node.getBoundingClientRect(); return { x, y, width, height, right, bottom }; };
       const main = document.querySelector('main'), sidebar = document.querySelector('aside'), header = overlay.querySelector('header');
       const semantic = overlay.closest('[data-interaction-layer]');
-      const counts = [...header.children].find(node => /1 chain.*2 nodes/.test(node.textContent));
+      const counts = [...header.children].find(node => /1 条推理链.*2 个节点/.test(node.textContent));
       const side = box(sidebar), hit = side.width > 1 ? document.elementFromPoint(side.x + side.width / 2, 150) : null;
       return { overlay: box(overlay), main: box(main), sidebar: side, header: box(header), counts: counts ? box(counts) : null,
         close: box(overlay.querySelector('[data-testid="chain-table-close"]')), viewport: { x: 0, y: 0, width: innerWidth, height: innerHeight },
         modal: semantic?.getAttribute('aria-modal') === 'true', role: semantic?.getAttribute('role'), layer: semantic?.getAttribute('data-interaction-layer'),
         sidebarInert: !!sidebar.closest('[inert],[aria-hidden="true"]'), sidebarHit: !!hit && sidebar.contains(hit),
-        sidebarToggles: overlay.querySelectorAll('[aria-label="Open sidebar"],[aria-label="Close sidebar"]').length,
+        sidebarToggles: overlay.querySelectorAll('[aria-label="打开侧边栏"],[aria-label="关闭侧边栏"]').length,
         doneText: overlay.querySelector('[data-testid="chain-practice-done"]')?.textContent.trim(), doneIcons: overlay.querySelectorAll('[data-testid="chain-practice-done"] svg').length };
     });
     const expected = mode === 'main' ? geometry.main : geometry.viewport;
@@ -447,8 +447,8 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
       };
       const expectPill = async () => {
         await page.waitForSelector(selectionBar, { visible: true });
-        assert.equal((await page.$eval(summary, node => node.textContent)).replace(/\s+/g, ' ').trim(), '2 nodes → 1 chain');
-        assert.equal((await page.$eval(done, node => node.textContent)).trim(), 'Done');
+        assert.equal((await page.$eval(summary, node => node.textContent)).replace(/\s+/g, ' ').trim(), '2 个节点 → 1 条推理链');
+        assert.equal((await page.$eval(done, node => node.textContent)).trim(), '完成');
         assert.equal(await page.$$eval(`${done} svg`, nodes => nodes.length), 0, 'Selected native Done remains label-only');
       };
       await page.locator(checkboxSelector).click(); await expectValue(chosen); await keepOpen(true); await expectPill();
@@ -464,8 +464,8 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
       assert.equal(await overlay.evaluate((node, selector) => node !== document.querySelector(selector), knowledge), true, 'Reopening creates a fresh, usable presentation');
       await page.focus(searchSelector); await page.keyboard.press('Escape'); await page.waitForSelector(knowledge, { hidden: true }); await expectValue(chosen);
       await page.locator(triggerClear).click(); await expectValue([]); await page.waitForSelector(triggerClear, { hidden: true });
-      assert.equal((await page.$eval(trigger, node => node.textContent)).trim(), 'Pick nodes');
-      cycles.push({ cycle: cycle + 1, sameDomAcrossControlledSelectDeselectAndClear: true, selectedPill: '2 nodes → 1 chain', doneRetainsSelection: true, reopenRetainsSelection: true, triggerClear: true });
+      assert.equal((await page.$eval(trigger, node => node.textContent)).trim(), '选择节点');
+      cycles.push({ cycle: cycle + 1, sameDomAcrossControlledSelectDeselectAndClear: true, selectedPill: '2 个节点 → 1 条推理链', doneRetainsSelection: true, reopenRetainsSelection: true, triggerClear: true });
       for (const handle of [overlay, search, checkbox]) await handle.dispose();
     }
     (evidence.pickerLifetimeOrigins ??= []).push({ label, cycles });
@@ -537,19 +537,19 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   for (const id of ["composer", "standard-composer"]) {
     const field = `${example(id)} [contenteditable="true"]`;
     await fill(field, `Local ${id} draft`); await waitState(id, { draft: `Local ${id} draft` });
-    await page.locator(`${example(id)} button[aria-label="Send"]`).click(); await waitState(id, { busy: true, sends: 1 });
+    await page.locator(`${example(id)} button[aria-label="发送"]`).click(); await waitState(id, { busy: true, sends: 1 });
     // Native Composer intentionally retains Send while a busy draft is nonempty
     // (steering semantics). Clear via trusted input to expose its actual Stop.
     await fill(field, ""); await waitState(id, { draft: "" });
-    await page.locator(`${example(id)} button[aria-label="Stop"]`).click(); await waitState(id, { busy: false });
+    await page.locator(`${example(id)} button[aria-label="停止"]`).click(); await waitState(id, { busy: false });
     await fill(field, `Second local ${id} draft`);
-    await page.locator(`${example(id)} button[aria-label="Send"]`).click(); await waitState(id, { busy: true, sends: 2 });
+    await page.locator(`${example(id)} button[aria-label="发送"]`).click(); await waitState(id, { busy: true, sends: 2 });
     await click(`complete-${id}`); await waitState(id, { busy: false });
     await reset(id); await waitState(id, { draft: "", sends: 0 });
   }
   for (const id of ["dictation", "standard-composer"]) {
     assert.equal(await page.$$eval(`${example(id)} [data-testid="dictation-meter"]`, nodes => nodes.length), 0);
-    assert.equal(await page.$eval(`${example(id)} [data-testid="dictation-toggle"]`, node => node.getAttribute("aria-label")), "Start dictation");
+    assert.equal(await page.$eval(`${example(id)} [data-testid="dictation-toggle"]`, node => node.getAttribute("aria-label")), "开始语音听写");
   }
   await waitState("dictation", { deliveries: 0, transcript: "" });
   await page.$eval('[data-family="composer"]', node => node.scrollIntoView({ block: 'start' }));
@@ -623,7 +623,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.equal(await parentInput.evaluate(node => node.isConnected && node.value === "Retained dialog draft" && !!node.closest("[inert]")), true);
   // CommitInput deliberately claims Escape to blur/commit. Focus a native
   // non-editor control when testing the layer's top-only Escape contract.
-  await page.focus('[role="dialog"][aria-label="Ordinary dialog example"] button[aria-label="Close dialog"]');
+  await page.focus('[role="dialog"][aria-label="Ordinary dialog example"] button[aria-label="关闭对话框"]');
   await page.keyboard.press("Escape"); await page.waitForSelector('[data-showcase="dialog-ordinary"]', { hidden: true });
   assert.equal(await parentInput.evaluate(node => node.isConnected && node.value === "Retained dialog draft" && !node.closest("[inert]")), true);
   await page.keyboard.press("Escape"); await page.waitForSelector(parentDialog, { hidden: true }); await parentInput.dispose();
@@ -631,7 +631,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.ok(await page.$eval('[data-showcase="dialog-long"]', node => node.textContent.includes("Paragraph 32")));
   evidence.dialogScrolling = await assertPinnedWhileScrolling('[data-showcase="dialog-long"]', 'Long-scroll example');
   await screenshot('dialog-long-pinned-close', { fullPage: false });
-  await page.focus('[role="dialog"][aria-label="Long-scroll example"] button[aria-label="Close dialog"]');
+  await page.focus('[role="dialog"][aria-label="Long-scroll example"] button[aria-label="关闭对话框"]');
   await page.keyboard.press("Escape"); await page.waitForSelector('[data-showcase="dialog-long"]', { hidden: true });
   evidence.assertions.push("Native menus honor disabled items, selection, preferred-side examples and Escape focus return; nested dialogs retain the identical parent input while only top Escape closes; long-scroll content mounts.");
 
@@ -641,9 +641,9 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   const surface = '[data-showcase="surface"]', nested = '[data-showcase="surface-nested"]';
   const openSurface = async () => {
     const direct = '[data-testid="plugin-top-bar-actions"] [data-plugin-action="ui-showcase/surface-topbar"]';
-    await page.waitForFunction(selector => !!document.querySelector(selector) || !!document.querySelector('[aria-label="More plugin actions"]'), {}, direct);
+    await page.waitForFunction(selector => !!document.querySelector(selector) || !!document.querySelector('[aria-label="更多插件操作"]'), {}, direct);
     if (await page.$(direct)) await page.locator(direct).click();
-    else { await page.locator('[aria-label="More plugin actions"]').click(); await page.locator('[data-plugin-action="ui-showcase/surface-topbar"]').click(); }
+    else { await page.locator('[aria-label="更多插件操作"]').click(); await page.locator('[data-plugin-action="ui-showcase/surface-topbar"]').click(); }
     await page.waitForSelector(surface, { visible: true });
   };
   await openSurface();
@@ -695,7 +695,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.equal(coveredSource.pickerOwnsSourcePoint, true, 'Newer picker actually covers the older source field');
   assert.equal(coveredSource.sameNode && coveredSource.connected, true); assert.equal(coveredSource.draft, 'Retained native surface draft'); assert.equal(coveredSource.owner, retainedOwner);
   const coveredKeys = [];
-  await page.focus(`${knowledge} input[aria-label="Search nodes"]`);
+  await page.focus(`${knowledge} input[aria-label="搜索节点"]`);
   for (const command of ['Tab', 'Shift+Tab', 'Find']) {
     if (command === 'Tab') await page.keyboard.press('Tab');
     else if (command === 'Shift+Tab') { await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift'); }
@@ -722,7 +722,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   evidence.surfaceMenuOwner = menuOwner;
   await page.keyboard.press("Escape"); await page.waitForSelector('[data-testid="plugin-menu"]', { hidden: true }); assert.equal(await page.$$eval('[data-plugin-session-surface]', nodes => nodes.length), 2);
   await page.locator(button("dialog-ordinary", nested)).click(); await page.waitForSelector('[data-showcase="dialog-ordinary"]', { visible: true });
-  await page.focus('[role="dialog"][aria-label="Ordinary dialog example"] button[aria-label="Close dialog"]');
+  await page.focus('[role="dialog"][aria-label="Ordinary dialog example"] button[aria-label="关闭对话框"]');
   await page.keyboard.press("Escape"); await page.waitForSelector('[data-showcase="dialog-ordinary"]', { hidden: true });
   await chord(","); await page.waitForSelector('[data-testid="settings-dialog"]', { visible: true });
   assert.equal(await page.$eval('[data-testid="settings-dialog"]', node => { const box = node.getBoundingClientRect(); return node.contains(document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2)); }), true);
@@ -731,7 +731,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   await page.keyboard.press("Escape"); await page.waitForSelector(nested, { hidden: true });
   assert.equal(await retained.evaluate(node => node.isConnected && node.value === "Retained native surface draft" && !node.closest("[inert]")), true);
   await page.waitForFunction(selector => document.activeElement === document.querySelector(selector), {}, button("surface-nested", surface));
-  await page.locator('[data-plugin-session-surface] button[aria-label="Close"]').click(); await page.waitForSelector(surface, { hidden: true }); await retained.dispose();
+  await page.locator('[data-plugin-session-surface] button[aria-label="关闭"]').click(); await page.waitForSelector(surface, { hidden: true }); await retained.dispose();
   await openGallery(); await waitState("composer", { draft: "", sends: 0 });
   evidence.assertions.push("Real native session toolbar supplies opaque target. Painted surface frame exactly fills body, excludes header/sidebar and inerts native composer. Nested surface/menu/dialog/Settings stack retains parent DOM/value, closes only top Escape and restores trigger focus; host X closes parent; navigation remounts clean gallery.");
 
@@ -763,7 +763,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   await page.keyboard.press('Escape'); await page.waitForSelector('[data-testid="plugin-menu"]', { hidden: true });
   await page.locator(button('dialog-ordinary', nested)).click(); await page.waitForSelector('[data-showcase="dialog-ordinary"]', { visible: true });
   assert.equal(await paintedTop('[role="dialog"][aria-label="Ordinary dialog example"]'), true);
-  await page.focus('[role="dialog"][aria-label="Ordinary dialog example"] button[aria-label="Close dialog"]');
+  await page.focus('[role="dialog"][aria-label="Ordinary dialog example"] button[aria-label="关闭对话框"]');
   await page.keyboard.press('Escape'); await page.waitForSelector('[data-showcase="dialog-ordinary"]', { hidden: true });
   await chord(','); await page.waitForSelector('[data-testid="settings-dialog"]', { visible: true });
   assert.equal(await paintedTop('[data-testid="settings-dialog"]'), true);
@@ -772,7 +772,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.equal(await page.$$eval('[data-plugin-session-surface]', nodes => nodes.length), 2);
   // The parent is inert under the nested Surface; close the active frame's X
   // rather than attempting to focus a covered control.
-  await page.locator(`[data-plugin-session-surface-frame]:has(${nested}) button[aria-label="Close"]`).click();
+  await page.locator(`[data-plugin-session-surface-frame]:has(${nested}) button[aria-label="关闭"]`).click();
   await page.waitForSelector(nested, { hidden: true });
   assert.equal(await directDraft.evaluate(node => node.isConnected && node.value === 'Retained direct gallery Surface draft' && !node.closest('[inert]')), true);
   await page.waitForFunction(selector => document.activeElement === document.querySelector(selector), {}, button('surface-nested', surface));
@@ -796,7 +796,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   const proofAction = id => `[data-plugin-action="surface-proof/${id}"]`;
   const openProof = async id => { await page.waitForSelector(proofAction(id), { visible: true }); await page.locator(proofAction(id)).click(); };
   const closeProof = async () => {
-    await page.locator(`[data-plugin-session-surface-frame]:has(${proofSurface}) button[aria-label="Close"]`).click();
+    await page.locator(`[data-plugin-session-surface-frame]:has(${proofSurface}) button[aria-label="关闭"]`).click();
     await page.waitForSelector(proofSurface, { hidden: true });
   };
   const readProof = () => page.$eval(proofState, node => JSON.parse(node.textContent));
@@ -856,18 +856,18 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
       assert.equal((await page.goto(base + entry.route, { waitUntil: 'domcontentloaded' })).status(), 200);
       await page.waitForSelector(entry.ready, { visible: true }); await page.waitForSelector('[data-session-surface-region]'); await settleSurface();
       if (await page.$eval('aside', node => node.getAttribute('aria-hidden') === 'true')) {
-        await page.waitForSelector('header [aria-label="Open sidebar"]', { visible: true });
-        await page.locator('header [aria-label="Open sidebar"]').click();
+        await page.waitForSelector('header [aria-label="打开侧边栏"]', { visible: true });
+        await page.locator('header [aria-label="打开侧边栏"]').click();
       }
       await page.waitForFunction(() => document.querySelector('aside').getBoundingClientRect().width > 250);
       await settleSurface();
-      const composer = entry.route === '/' ? '[role="textbox"][contenteditable="true"][aria-label="What do you want to learn?"]'
+      const composer = entry.route === '/' ? '[role="textbox"][contenteditable="true"][aria-label="你想学习什么？"]'
         : entry.id === 'plugin-route' ? `${example('composer')} [contenteditable="true"]` : 'main [data-testid="composer"] [contenteditable="true"]';
       const priorDraft = await page.$eval(composer, node => node.textContent);
       await fill(composer, `Retained ${entry.id} body draft`);
       const underlyingDraft = await page.$(composer);
       if (entry.id === 'plugin-route') await page.$eval('[data-family="surfaces"]', node => node.scrollIntoView({ block: 'center' }));
-      const controls = entry.route === '/' ? ['[data-testid="open-chain-table"]', composer, ...(entry.rendering ? ['[aria-label="Search nodes"]'] : [])] : [entry.id === 'plugin-route' ? button('open-surface') : composer];
+      const controls = entry.route === '/' ? ['[data-testid="open-chain-table"]', composer, ...(entry.rendering ? ['[aria-label="搜索节点"]'] : [])] : [entry.id === 'plugin-route' ? button('open-surface') : composer];
       const bodyRegion = await page.$('[data-session-surface-region]');
       const heldGraphResponses = [];
       if (entry.draftPicker) {
@@ -919,10 +919,10 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
       }
       await fill(`${proofSurface} input`, `Local ${entry.id} Surface draft`);
       await page.locator(`${proofSurface} [data-surface-proof="count"] button`).click();
-      await page.locator('aside [aria-label="Close sidebar"]').click();
+      await page.locator('aside [aria-label="关闭侧边栏"]').click();
       await page.waitForFunction(() => document.querySelector('aside').getBoundingClientRect().width < 1);
       await settleSurface();
-      const reopen = 'header [aria-label="Open sidebar"]'; await page.waitForSelector(reopen, { visible: true });
+      const reopen = 'header [aria-label="打开侧边栏"]'; await page.waitForSelector(reopen, { visible: true });
       await assertPointerTarget(reopen);
       const chrome = await page.$eval(reopen, node => {
         const header = node.closest('header').getBoundingClientRect(), frame = document.querySelector('[data-surface-proof="surface"]').closest('[data-plugin-session-surface-frame]').getBoundingClientRect();
@@ -938,7 +938,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
       if (entry.draftPicker) { await page.locator('[data-testid="practice-props-chip"]').click(); await exerciseDraftPicker('no-plugin-surface'); assert.equal(await page.$(proofSurface), null); }
       await openProof('pending'); await page.waitForSelector(proofSurface, { visible: true });
       const expiredCount = await page.$(`${proofSurface} [data-surface-proof="count"] button`);
-      if (entry.id === 'native-teach') { await page.locator('aside [aria-label="Home"]').click(); await page.waitForFunction(() => location.pathname === '/'); }
+      if (entry.id === 'native-teach') { await page.locator('aside [aria-label="首页"]').click(); await page.waitForFunction(() => location.pathname === '/'); }
       else await openFixtureSession();
       await page.waitForSelector(proofSurface, { hidden: true });
       assert.equal(await expiredCount.evaluate(node => node.isConnected), false); await expiredCount.evaluate(node => node.click());
@@ -998,7 +998,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
     const modalTabEvents = await page.evaluate(() => window.__showcaseSurfaceModalTabs);
     assert.deepEqual(modalTabEvents, [{ shift: false, defaultPrevented: true }, { shift: true, defaultPrevented: true }]);
     await screenshot(`public-surface-behind-${origin}`, { fullPage: false });
-    await page.locator(origin === 'dialog' ? `${modal} button[aria-label="Close dialog"]` : '[data-testid="settings-close"]').click();
+    await page.locator(origin === 'dialog' ? `${modal} button[aria-label="关闭对话框"]` : '[data-testid="settings-close"]').click();
     await page.waitForSelector(modal, { hidden: true });
     assert.equal(await modalSurface.evaluate(node => node.isConnected && node === document.querySelector('[data-surface-proof="surface"]') && !node.closest('[inert]')), true, 'Closing modal mount must not abort a page/plugin-owned Surface');
     await fill(`${proofSurface} input`, `Survived ${origin} mount teardown`);
@@ -1018,7 +1018,7 @@ await runPackagedProof(async ({ page, api, base, fixture, evidence, screenshot }
   assert.equal((await api("/api/plugins")).payload.plugins.find(value => value.id === "ui-showcase").status, "disabled");
   // Disabled view renders a Back-to-home Link; it does not redirect.
   // Assert that native fallback before moving to the re-enabled session proof.
-  await page.waitForFunction(() => document.querySelector('main')?.textContent.includes('This plugin is disabled.'));
+  await page.waitForFunction(() => document.querySelector('main')?.textContent.includes('此插件已停用。'));
   await api("/api/plugins/ui-showcase", "PUT", { enabled: true });
   await page.goto(base + `/chat/${fixture.chatId}`, { waitUntil: "domcontentloaded" });
   await page.waitForSelector('main [data-testid="composer"] [contenteditable="true"]', { visible: true });

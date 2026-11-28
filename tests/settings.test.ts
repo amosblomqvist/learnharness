@@ -20,7 +20,7 @@ import {
 describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 	it("pins the owner-decided defaults", () => {
 		assert.equal(CURRENT_SETTINGS_VERSION, 1);
-		assert.deepEqual(FACTORY_SETTINGS.general, { autoUpdate: true });
+		assert.deepEqual(FACTORY_SETTINGS.general, { autoUpdate: true, language: "zh" });
 		assert.deepEqual(FACTORY_SETTINGS.agent, { workerRequestConcurrency: 8 });
 		// wave 7 collapse: the master switch ONLY + the extraction-UX
 		// redesign's chunk budget (2026-09-24); doubled to 8192 with the
@@ -33,7 +33,7 @@ describe("FACTORY_SETTINGS (the compiled factory layer)", () => {
 		assert.deepEqual(a.colors, {});
 		assert.equal(a.fontFamily, null); // Source Sans 3
 		assert.equal(a.proseFontSize, 16);
-		assert.equal(a.sessionNameSerif, true);
+		assert.equal(a.sessionNameSerif, false);
 		assert.equal(a.mdRendering.headingWeight, 900);
 		assert.equal(a.mdRendering.boldColor, null); // white
 		assert.equal(a.mdRendering.italicColor, null);
@@ -108,6 +108,11 @@ describe("sanitizeUserSettings", () => {
 		assert.equal(out.version, CURRENT_SETTINGS_VERSION);
 		assert.deepEqual((out as Record<string, unknown>).futureSection, { knob: 3 });
 		assert.deepEqual(out.general, { autoUpdate: true });
+	});
+
+	it("general.language keeps zh/en and drops anything else", () => {
+		assert.deepEqual(sanitizeUserSettings({ general: { language: "en" } })?.general, { language: "en" });
+		assert.deepEqual(sanitizeUserSettings({ general: { language: "fr" } })?.general, {});
 	});
 
 	it("wrong-typed fields DROP (resolve to factory), never crash", () => {

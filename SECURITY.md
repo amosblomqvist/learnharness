@@ -1,58 +1,58 @@
-# Security policy
+# 安全策略
 
-LearnHarness stores API keys, sign-in tokens, chats, and learning records on your machine, and its agent reads files and fetches web content on your behalf. If you find a way to abuse any of that, please tell us privately so a fix can ship before the details are public.
+LearnHarness 会在你的设备上存储 API 密钥、登录 token、聊天记录和学习记录，它的智能体还会代表你读取文件、抓取网页内容。如果你发现了滥用其中任何一项的方法，请私下告诉我们，以便在细节公开之前发布修复。
 
-## Reporting a vulnerability
+## 报告漏洞
 
-**Do not open a public issue, pull request, or Discord post for a security problem.**
+**不要为安全问题创建公开的 issue、pull request 或 Discord 帖子。**
 
-Report it through GitHub's private vulnerability reporting:
-[Security → Report a vulnerability](https://github.com/amosblomqvist/learnharness/security/advisories/new).
+请通过 GitHub 的私密漏洞报告功能提交：
+[Security → Report a vulnerability](https://github.com/amosblomqvist/learnharness/security/advisories/new)。
 
-If that page is unavailable, message a maintainer on [Discord](https://discord.gg/5tCHHQEB2e) and ask for a private channel. Do not include any details in that first message.
+如果该页面无法使用，请在 [Discord](https://discord.gg/5tCHHQEB2e) 上给维护者发消息，请求建立私密频道。第一条消息中不要包含任何细节。
 
-A useful report includes:
+一份有用的报告应包括：
 
-- the LearnHarness version and your OS;
-- what an attacker can do and what they need first (a web page the agent reads, a file the learner opens, network access, and so on);
-- steps to reproduce, or a proof of concept;
-- any fix or mitigation you have in mind.
+- LearnHarness 的版本和你的操作系统；
+- 攻击者能做什么，以及他们事先需要具备什么条件（智能体读取的网页、学习者打开的文件、网络访问等）；
+- 复现步骤或概念验证（proof of concept）；
+- 你设想的任何修复或缓解措施。
 
-## Security contacts
+## 安全联系人
 
 - [@amosblomqvist](https://github.com/amosblomqvist)
 - [@IsaacZhangg](https://github.com/IsaacZhangg)
 
-Use the private reporting process above for vulnerability reports. Do not report security details through public mentions.
+报告漏洞请使用上述私密报告流程。不要通过公开提及的方式透露安全细节。
 
-## What to expect
+## 预期流程
 
-These are targets, not guarantees:
+以下是目标，而非保证：
 
-| Step | Target |
+| 步骤 | 目标 |
 | --- | --- |
-| Acknowledge your report | within 7 days |
-| Initial assessment (confirmed or not, severity) | within 14 days |
-| Fix released and advisory published | within 90 days of the report |
+| 确认收到你的报告 | 7 天内 |
+| 初步评估（是否确认、严重程度） | 14 天内 |
+| 发布修复并公开安全公告 | 自报告起 90 天内 |
 
-The fix is developed privately in a GitHub security advisory. We will keep you updated, agree on a disclosure date with you, and credit you in the published advisory unless you prefer to stay anonymous. A CVE can be requested through GitHub when one is warranted.
+修复会在 GitHub 安全公告（security advisory）中私下开发。我们会随时向你通报进展，与你商定披露日期，并在发布的公告中致谢你，除非你希望保持匿名。在有必要时，可以通过 GitHub 申请 CVE。
 
-## Supported versions
+## 支持的版本
 
-Only the latest release receives security fixes. The desktop app updates itself, so fixes reach users through a new release. If you run from source, update to the latest `main` or the latest release tag.
+只有最新版本会获得安全修复。桌面应用会自动更新，因此修复会通过新版本送达用户。如果你从源码运行，请更新到最新的 `main` 或最新的发布标签。
 
-## Scope
+## 范围
 
-In scope:
+范围内：
 
-- the desktop app (Electron shell, window, and IPC);
-- the local API server, whether started by the desktop app or run from source;
-- the agent and its tools, including prompt injection from web pages, PDFs, or other content that leads to reading, changing, or sending your data;
-- rendered content such as demos, figures, and markdown;
-- the update and release pipeline.
+- 桌面应用（Electron 外壳、窗口和 IPC）；
+- 本地 API 服务器，无论是由桌面应用启动还是从源码运行；
+- 智能体及其工具，包括来自网页、PDF 或其他内容的提示词注入，导致读取、修改或发送你的数据；
+- 渲染的内容，例如互动演示、插图和 Markdown；
+- 更新与发布流水线。
 
-Out of scope:
+范围外：
 
-- attacks that already require running code as your OS user;
-- bugs in third-party model or service providers themselves (report those to the provider);
-- automated scanner output without a demonstrated impact on LearnHarness.
+- 已经需要以你的操作系统用户身份运行代码的攻击；
+- 第三方模型服务商或其他服务商自身的缺陷（请向相应服务商报告）；
+- 未证明对 LearnHarness 有实际影响的自动化扫描器输出。

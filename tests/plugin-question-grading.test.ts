@@ -190,7 +190,7 @@ test("operation cancellation after grading settlement still refuses finish", asy
 test("synchronous refinement loses exact authority before preparation can return", () => {
 	const f = fixture();
 	f.definition.validateAnswer = () => { f.reregister(); return []; };
-	assert.throws(() => preparePluginQuestionSubmission(f.record, f.input, f.resolve), /unavailable/);
+	assert.throws(() => preparePluginQuestionSubmission(f.record, f.input, f.resolve), /问题不可用/);
 	assert(pendingPluginQuestionOf(f.record.messages));
 });
 
@@ -215,9 +215,9 @@ test("protocol v1 never retroactively grades and the synchronous helper refuses 
 	assert.equal(details(preparePluginQuestionAnswer(old.record, old.input, old.resolve)).grading, undefined);
 	assert.equal(calls, 0);
 	const current = fixture();
-	assert.throws(() => preparePluginQuestionAnswer(current.record, current.input, current.resolve), /grad/i);
+	assert.throws(() => preparePluginQuestionAnswer(current.record, current.input, current.resolve), /需要先评分/);
 	const required = preparePluginQuestionSubmission(current.record, current.input, current.resolve);
-	assert.throws(() => required.finish(current.record, { result: false }), /not completed/);
+	assert.throws(() => required.finish(current.record, { result: false }), /问题评分尚未完成/);
 	await required.grade!(new AbortController().signal);
 	for (const bad of [undefined, {}, { error: 7 }, { result: NaN }, { result: null, error: "both" }])
 		assert.throws(() => required.finish(current.record, bad as PluginQuestionGradingOutcome));

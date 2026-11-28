@@ -1,78 +1,48 @@
-# Session extensions: submissions, images and page-body surfaces
+# 会话扩展：提交、图片与页面主体覆盖层
 
-Current API v1 contract for the matching source/build; use documentation/types matching
-the target app. Use the downloaded skill's `bundle.json` to identify the app;
-API v1 alone does not identify every available capability. Exact types live in `src/core/plugin-submissions.ts`
-and `plugin-ui.ts`. Custom practice submissions additionally follow the
-[problem contract](plugin-problem-contract.md).
+适用于对应源码/构建的当前 API v1 契约；请使用与目标应用匹配的文档/类型。用下载的 skill 中的 `bundle.json` 确定应用；仅凭 API v1 无法确定所有可用能力。确切类型位于 `src/core/plugin-submissions.ts` 和 `plugin-ui.ts`。自定义练习提交还需遵循[题目契约](plugin-problem-contract.md)。
 
-## 1. Boundary
+## 1. 边界
 
-Frontend interceptors prepare actual learner content; they do not provide native send/
-steer methods, mutable agents, backend hook registration or generic model-context events.
-Existing action placements launch UI. Only explicit native image data is an image: paths
-retain their ordinary text/attachment behavior. There is no image store, native file-picker/
-clipboard/drop importer, editable drawing format or new export-asset service.
+前端拦截器负责准备学习者实际提交的内容；它们不提供原生的发送/插话方法、可变的智能体、后端钩子注册或通用的模型上下文事件。现有的操作位置用于启动 UI。只有显式的原生图片数据才算图片：路径保留其普通的文本/附件行为。不提供图片存储、原生文件选择器/剪贴板/拖放导入器、可编辑的绘图格式或新的导出资源服务。
 
-The host owns routing, exact occurrences, derived builtin grading, acceptance and model
-capability. Plugins own external input, intentional transformations, UI and persistence.
-Surfaces cover page bodies, not arbitrary regions; no transcript-only coverage or navigation
-suspension/restoration is provided.
+宿主负责路由、确切出现位置（occurrence）、派生的内置评分、受理以及模型能力。插件负责外部输入、有意的内容变换、UI 和持久化。覆盖层（surface）覆盖的是页面主体，而非任意区域；不提供仅覆盖对话记录的方式，也不提供导航挂起/恢复。
 
-## 2. Learner content
+## 2. 学习者内容
 
-`PluginSubmissionContent` is `{text: string, images: readonly ImageContent[]}`. Images
-are Pi native `{type:"image",data:<base64>,mimeType:<string>}` blocks. Text precedes images;
-arbitrary interleaving is not promised.
+`PluginSubmissionContent` 为 `{text: string, images: readonly ImageContent[]}`。图片是 Pi 原生的 `{type:"image",data:<base64>,mimeType:<string>}` 块。文本位于图片之前；不保证任意交错排列。
 
-`PluginSubmission` is a readonly discriminated union:
+`PluginSubmission` 是只读的可辨识联合类型：
 
-| `type` | Mutable learner channels |
+| `type` | 可变的学习者通道 |
 | --- | --- |
-| `text` | `content` (send vs steer is host delivery) |
-| `thinking` | `content` on a captured native practice problem |
-| `answer` | `answer: PluginBuiltinSubmissionAnswer`, `thinking`, `readingThinking` |
-| `plugin-question-answer` | JSON `answer`, `answerImages`, `thinking`, `readingThinking` |
-| `plugin-problem-submission` | JSON `submission`, `submissionImages`, `thinking` |
+| `text` | `content`（发送还是插话由宿主投递决定） |
+| `thinking` | 已捕获的原生练习题目上的 `content` |
+| `answer` | `answer: PluginBuiltinSubmissionAnswer`、`thinking`、`readingThinking` |
+| `plugin-question-answer` | JSON `answer`、`answerImages`、`thinking`、`readingThinking` |
+| `plugin-problem-submission` | JSON `submission`、`submissionImages`、`thinking` |
 
-`PluginBuiltinSubmissionAnswer` contains optional `dontKnow`, stable option `values`
-(not display indices), `other`, `text`, `confidence`, plus `images`. Thinking stays
-separate. Correctness, commitments, timestamps, identities, question snapshots and native
-result envelopes are never mutable learner input. Preserve finite JSON/raw strings without
-coercion, trimming or truthiness filtering.
+`PluginBuiltinSubmissionAnswer` 包含可选的 `dontKnow`、稳定的选项 `values`（不是显示序号）、`other`、`text`、`confidence`，以及 `images`。思考保持独立。正确性、承诺、时间戳、身份标识、问题快照和原生结果封装永远不是可变的学习者输入。保留有限 JSON/原始字符串，不做类型强制转换、去除首尾空白或按真值过滤。
 
-## 3. Targets and context
+## 3. 目标与上下文
 
-`PluginSubmissionTarget` is the host-produced readonly target, sharing the input's `type`:
-`sessionId`, `sessionKind`, applicable `channels`, opaque `surfaceTarget` and variant data:
+`PluginSubmissionTarget` 是宿主生成的只读目标，与输入共享同一 `type`：包含 `sessionId`、`sessionKind`、适用的 `channels`、不透明的 `surfaceTarget` 以及各变体的数据：
 
-| Target | Additional data |
+| 目标 | 附加数据 |
 | --- | --- |
 | `text` | `channels:["content"]` |
-| `thinking` | `problem:{occurrence,statement}`, `channels:["content"]` |
-| `answer` | Learner-facing `ClientQuestion` plus `occurrence`, optional `questionType`, actual displayed options/stable values; applicable answer/thinking/reading channels |
-| `plugin-question-answer` | `question:{questionId,occurrence,pluginId,typeId,contractVersion,label,variant,showThinking}`; applicable answer/thinking/reading channels |
-| `plugin-problem-submission` | `problem:{problemId,occurrence,pluginId,typeId,contractVersion,label,statement}`; `channels:["submission","thinking"]` |
+| `thinking` | `problem:{occurrence,statement}`、`channels:["content"]` |
+| `answer` | 面向学习者的 `ClientQuestion`，外加 `occurrence`、可选的 `questionType`、实际显示的选项/稳定值；适用的回答/思考/阅读通道 |
+| `plugin-question-answer` | `question:{questionId,occurrence,pluginId,typeId,contractVersion,label,variant,showThinking}`；适用的回答/思考/阅读通道 |
+| `plugin-problem-submission` | `problem:{problemId,occurrence,pluginId,typeId,contractVersion,label,statement}`；`channels:["submission","thinking"]` |
 
-`PluginSubmissionOccurrence` is exactly `{messageId,contentIndex,toolCallId,toolName}`.
-`PluginSubmissionChannel` includes content, answer, submission, thinking and readingThinking.
-Learner-facing builtin presentation has no grading keys. Plugin presentation is not a
-promise of generic sanitization of arbitrary plugin payloads.
+`PluginSubmissionOccurrence` 恰好是 `{messageId,contentIndex,toolCallId,toolName}`。`PluginSubmissionChannel` 包括 content、answer、submission、thinking 和 readingThinking。面向学习者的内置呈现不包含评分键。插件呈现并不承诺对任意插件载荷做通用净化。
 
-`PluginSubmissionContext` adds detached/deeply readonly/frozen `messages`, preparation
-`signal`, and `onAccepted(callback)`. Messages are complete current browser-native history,
-including potentially streamed/not-yet-durable content, not rendered text or a canonical
-persistence guarantee. Full history is trusted-plugin visibility, not a secrecy boundary.
-Signals/opaque targets are live host references, not JSON to persist/clone.
+`PluginSubmissionContext` 额外提供分离的/深度只读/冻结的 `messages`、准备阶段的 `signal`，以及 `onAccepted(callback)`。消息是完整的当前浏览器原生历史，可能包含流式传输中/尚未持久化的内容，而不是渲染后的文本，也不保证与权威持久化一致。完整历史属于受信任插件的可见范围，并非保密边界。信号/不透明目标是活动的宿主引用，不是可供持久化/克隆的 JSON。
 
-`onAccepted` observes this attempt's acknowledged API acceptance, independent of later
-model success. It is live/best-effort, not durable replay or exactly-once delivery. Lost
-acknowledgment never fires it or authorizes clearing external input. Callback errors report
-a plugin error, not failure of an accepted submission. Snapshot eligible callbacks before
-delivery, invoke without blocking native stream consumption on async observers, and continue
-after individual observer failure. Late registrations/canceled-owner callbacks do not run.
+`onAccepted` 观察的是本次尝试经确认的 API 受理，与之后模型是否成功无关。它是实时/尽力而为的，不是持久重放，也不是恰好一次投递。确认丢失时永远不会触发它，也不授权清除外部输入。回调错误会报告为插件错误，而不是已受理提交的失败。在投递之前对符合条件的回调做快照，调用时不让异步观察者阻塞原生流的消费，并在单个观察者失败后继续执行。迟到的注册/所有者已取消的回调不会运行。
 
-## 4. Registration and ordering
+## 4. 注册与排序
 
 ```ts
 interface PluginSubmissionInterceptor {
@@ -87,129 +57,61 @@ registerSubmissionInterceptor(definition: PluginSubmissionInterceptor): () => vo
 refreshSubmissions(): void;
 ```
 
-IDs are lowercase-hyphen identifiers unique per activation. Priority is a finite integer,
-default 0; higher first, then plugin ID/interceptor ID. Capture the ordered hook set once
-per attempt; later hooks see earlier output. `undefined` passes through, same-type replacement
-transforms, `null` cancels without sending. Throws/rejection/invalid output fail closed.
-Validate/clone/freeze replacements before proceeding; late mutation cannot alter payloads.
+ID 是每次激活内唯一的小写连字符标识符。优先级是有限整数，默认为 0；数值高者优先，其次按插件 ID/拦截器 ID 排序。每次尝试只捕获一次有序的钩子集合；后面的钩子看到前面钩子的输出。`undefined` 表示原样通过，同类型替换表示变换，`null` 表示取消且不发送。抛错/拒绝/无效输出均按失败关闭处理。继续之前先校验/克隆/冻结替换值；之后的修改无法改变载荷。
 
-`hasPendingInput` is synchronous and side-effect-free. Call `refreshSubmissions()` when
-external state changes. True enables preparation, not final validity: builtin answers may
-prepare before native selection/text exists, but custom questions/problems still require
-a current ready editor value. Context-only attachments need not advertise native readiness.
-Predicate exceptions report errors and contribute no readiness. Captured unregister/unload
-cancels preparation, not silent omission; new registrations join the next attempt.
+`hasPendingInput` 是同步且无副作用的。外部状态变化时调用 `refreshSubmissions()`。返回 true 表示允许进入准备，而不代表最终有效：内置回答可以在原生选择/文本存在之前就开始准备，但自定义问题/题目仍要求编辑器当前有就绪值。仅作为上下文的附件无需声明原生就绪状态。谓词抛出的异常会被报告为错误，且不贡献任何就绪状态。已捕获的拦截器被注销/卸载时会取消准备，而不是静默略过；新注册的拦截器从下一次尝试开始加入。
 
-## 5. Preparation, acceptance and retries
+## 5. 准备、受理与重试
 
-One runner covers normal/contextual/opening messages, busy steers, builtin/custom answers
-and native/custom practice submissions:
+同一个执行器覆盖普通/带上下文/开场消息、忙碌时的插话、内置/自定义回答，以及原生/自定义练习提交：
 
-1. Capture the native view/occurrence and reserve one attempt **before any await**.
-2. Finish original-target dictation/editor publication. Recheck identity; capture final
-   learner input, form draft and readonly history. Never switch targets after an await.
-3. Keep preparation distinct from delivery; preserve visible drafts and prevent duplicates.
-4. Run ordered interceptors serially, validating each output.
-5. Recheck instance/occurrence/readiness/plugin ownership. Rebuild builtin derived answers
-   through native grading using captured rendered question data, not plugin-supplied fields.
-6. Create optimism from prepared content; use existing POST/admission/steer delivery.
-7. Notify acknowledged acceptance once, including internal steer fallback; release the
-   preparation/delivery lease on acknowledgment/refusal, **not** model-stream completion.
-   Fresh busy steers may prepare while earlier accepted work streams.
+1. 捕获原生视图/出现位置，并**在任何 await 之前**预留一次尝试。
+2. 完成原目标的语音听写/编辑器发布。重新检查身份；捕获最终的学习者输入、表单草稿和只读历史。await 之后永远不切换目标。
+3. 将准备与投递区分开；保留可见草稿并防止重复。
+4. 依次串行运行有序的拦截器，并校验每个输出。
+5. 重新检查实例/出现位置/就绪状态/插件归属。使用捕获的已渲染问题数据（而非插件提供的字段），通过原生评分重建内置派生答案。
+6. 基于准备好的内容创建乐观更新；使用现有的 POST/准入/插话投递。
+7. 对已确认的受理只通知一次，包括内部的插话回退；在确认/拒绝时释放准备/投递租约，**而不是**在模型流完成时释放。之前已受理的工作仍在流式输出时，新的忙碌插话也可以开始准备。
 
-Preparation is silent: no progress row, label, spinner or preparation Cancel control is
-rendered. Existing submission-disabled states and preparation errors remain. Internal
-pre-POST cancellation (for example view disposal or interceptor unregistration) ignores late
-hook results, retains drafts/final dictated text, and works even if a hook ignores its signal.
-When no interceptors were captured, no history snapshot is allocated; payload validation,
-target capture, reservation and eligibility checks still run. With interceptors, the complete
-detached/frozen history snapshot is captured before the first hook, at the same preparation
-boundary, and shared by the ordered hooks.
-Failure uses `Could not prepare submission ({plugin name}): {message}. Your input has been kept.`
-Once POST starts, preserve native accepted-delivery/turn-abort semantics; preparation
-cancellation no longer applies. Clear only captured draft revisions at confirmed boundaries;
-newer edits remain. Host never clears plugin-private material: its acceptance observer does.
+准备过程是静默的：不渲染进度行、标签、加载指示器或准备阶段的取消控件。现有的禁止提交状态和准备错误仍然保留。POST 之前的内部取消（例如视图销毁或拦截器注销）会忽略迟到的钩子结果，保留草稿/最终听写文本，即使某个钩子忽略了它的信号也同样有效。未捕获到任何拦截器时，不分配历史快照；载荷校验、目标捕获、预留和资格检查仍会执行。存在拦截器时，在同一准备边界、第一个钩子运行之前捕获完整的分离/冻结历史快照，并由有序钩子共享。失败时使用 `无法准备提交（{plugin name}）：{message}。你的输入已保留。`。POST 一旦开始，保持原生的已受理投递/回合中止语义；准备阶段的取消不再适用。只在已确认的边界清除已捕获的草稿修订；更新的编辑会保留。宿主永远不清除插件私有的材料：由插件的受理观察者负责清除。
 
-- Model Retry/Continue, malformed-question retry, control-only Next and silent dismissal
-  do not intercept content. Submit of a restored unaccepted form is a fresh attempt.
-- Busy-refusal resend / steer-to-send fallback reuse prepared content and observers.
-- Lost acknowledgment requires canonical reconciliation/exact-question guards, not guessed
-  clearing or automatic invention of another submission. A later explicit submission is
-  fresh; no global deduplication/exactly-once transaction is added.
-- Between problems, empty text with pending plugin content is a submission, not control-only Next.
+- 模型的重试/继续、格式错误问题的重试、仅控制的“下一题”以及静默关闭都不会拦截内容。提交一个已恢复但未被受理的表单属于新的尝试。
+- 忙碌拒绝后的重发 / 插话转发送回退会复用已准备的内容和观察者。
+- 确认丢失时需要基于权威记录重新同步并使用确切问题守卫，而不是猜测性地清除或自动另造一次提交。之后显式的提交属于新的尝试；不额外引入全局去重/恰好一次事务。
+- 两道题目之间，空文本加上待处理的插件内容算作一次提交，而不是仅控制的“下一题”。
 
-## 6. Validation and host authority
+## 6. 校验与宿主权威
 
-Capture native `QuestionData` privately with its actual shuffle/resolved grading. Combine
-final dictation/reading fields before hooks; afterward validate types, finite confidence,
-known unique values, cardinality/combinations, meaningful content and channel applicability.
-Reject unknown/duplicate selections rather than dropping them. Preserve legitimate existing
-confidence rounding/clamping. Build derived answers through existing `buildAnswer` against
-that same captured question. This is frontend recomputation, not a builtin HTTP grading migration.
+私下捕获原生 `QuestionData` 及其实际的打乱顺序/已解析评分。在钩子运行前合并最终的听写/阅读字段；之后校验类型、有限的把握度、已知且唯一的值、数量/组合、有意义的内容以及通道适用性。拒绝未知/重复的选择，而不是丢弃它们。保留现有合理的把握度取整/限幅。针对同一个已捕获的问题，通过现有的 `buildAnswer` 构建派生答案。这是前端重新计算，而不是把内置评分迁移到 HTTP。
 
-Builtin text answers need text or answer images; thinking/reading images do not satisfy it.
-Select answers need valid final selection/Other/dontKnow (possibly supplied by a hook).
-Plugin JSON follows canonical saved-schema/refinement/availability/occurrence checks.
+内置文本回答需要文本或回答图片；思考/阅读图片不能满足此要求。选择题回答需要有效的最终选择/“其他”/dontKnow（可能由钩子提供）。插件 JSON 遵循权威的已保存 schema/细化校验/可用性/出现位置检查。
 
-Builtin answer/thinking applicability follows native fields; reading follows existing reveal/
-phase policy. Plugin questions always have answer content, thinking only with `showThinking`,
-reading only on teach checks. Public DTOs have empty inapplicable channels; nonempty injected
-text/images reject. Transport/envelopes omit inapplicable channels, preserving absence versus
-presence. Practice custom submissions have submission/thinking, not reading-thinking.
+内置回答/思考的适用性遵循原生字段；阅读遵循现有的揭晓/阶段策略。插件问题始终有回答内容，只有 `showThinking` 时才有思考，只有教学检查（teach check）时才有阅读。公开 DTO 中不适用的通道为空；注入了非空文本/图片会被拒绝。传输/封装中省略不适用的通道，保留“不存在”与“存在”的区别。练习自定义提交有 submission/thinking 通道，没有 reading-thinking。
 
-## 7. Images, transport and model admission
+## 7. 图片、传输与模型准入
 
-Use additive optional native image fields beside existing strings; old records replay without
-migration. Text/steer/native-thinking inputs carry optional `images`; builtin/plugin answers
-carry channelled images; custom practice carries submission/thinking images. Empty arrays omit
-on write. Strings remain each channel's sole text authority. New builtin/thinking UI requests
-include exact occurrence; fresh image-bearing requests require that binding, while old
-non-image callers remain compatible. Recheck canonical target after server awaits.
+在现有字符串旁边使用新增的可选原生图片字段；旧记录无需迁移即可重放。文本/插话/原生思考输入携带可选的 `images`；内置/插件回答携带按通道划分的图片；自定义练习携带 submission/thinking 图片。空数组在写入时省略。字符串仍是各通道唯一的文本权威。新的内置/思考 UI 请求包含确切出现位置；新的携带图片的请求要求该绑定，而旧的不含图片的调用方保持兼容。服务端 await 之后重新检查权威目标。
 
-Require nonempty base64 native image blocks, not File/Blob/URLs/path strings. Accept PNG,
-JPEG, WebP, GIF only, sniffing bytes against MIME. Reuse actual model resize policy (existing
-defaults: 2000×2000 bounding box and 4.5 MiB processed base64 payload per image). Persist
-normalized accepted bytes for history and model; originals/editable drawings remain plugin-owned.
-No new arbitrary image-count setting/store is added. Processor failure refuses submission,
-not image-omitted success or synthetic learner hints.
+要求非空的 base64 原生图片块，不接受 File/Blob/URL/路径字符串。只接受 PNG、JPEG、WebP、GIF，并对照 MIME 嗅探字节。复用模型实际的缩放策略（现有默认值：每张图片 2000×2000 边界框、处理后 base64 载荷 4.5 MiB）。为历史和模型持久化经过规范化的已受理字节；原图/可编辑绘图仍归插件所有。不新增任意图片数量设置/存储。处理器失败会拒绝提交，而不是以省略图片的方式成功或合成学习者提示。
 
-Optimistic previews remain immediate. Defer canonical adoption while their image-bearing
-POST is unresolved to avoid duplicate normalized/original previews. On delivery settlement,
-discard deferred snapshots and reconcile afresh, including refusal/lost acknowledgment.
-Retire only that attempt's provisional entries; preserve drafts/external input and never
-infer acceptance from reconciliation.
+乐观预览保持即时显示。当携带图片的 POST 尚未完成时，推迟采纳权威记录，以避免出现重复的规范化/原始预览。投递结束时（包括拒绝/确认丢失），丢弃被推迟的快照并重新同步。只撤除本次尝试的临时条目；保留草稿/外部输入，永远不要根据同步结果推断已受理。
 
-| Channel | Saved/UI placement | Model placement |
+| 通道 | 保存/UI 位置 | 模型位置 |
 | --- | --- | --- |
-| Message/steer | Native user image blocks | Native user images |
-| Native practice thinking | Marker details / thinking block | Labelled text + native images |
-| Builtin/custom question answer | Host answer container | Native answer tool result |
-| Question thinking / reading | Separate host thinking containers | Separately labelled sections in tool result |
-| Custom practice submission / thinking | Marker details / submitted card and thinking | Labelled submission/thinking + native images |
+| 消息/插话 | 原生用户图片块 | 原生用户图片 |
+| 原生练习思考 | 标记详情 / 思考块 | 带标签的文本 + 原生图片 |
+| 内置/自定义问题回答 | 宿主回答容器 | 原生回答工具结果 |
+| 问题思考 / 阅读 | 独立的宿主思考容器 | 工具结果中分别带标签的段落 |
+| 自定义练习提交 / 思考 | 标记详情 / 已提交卡片与思考 | 带标签的提交/思考 + 原生图片 |
 
-Model bytes must be native image content, never metadata-only or base64 inside answer JSON.
-Question result channel order is answer, thinking, reading-thinking. Shared submitted images
-are centered thumbnails bounded in both dimensions by five lines of configured session prose,
-without cropping/upscaling or dimming with thinking text. Clicking opens the same accepted
-bytes in the existing session figure viewer with fit/pan/zoom and Escape/X close; without a
-session viewer, the preview remains noninteractive. Thinking images remain inside their
-thinking disclosure. Image-only channels stay visible, labelled `Submitted image`; text uses
-normal PathText/Markdown. Host images remain outside plugin-owned renderer slots.
+发给模型的字节必须是原生图片内容，绝不能只有元数据，也不能是回答 JSON 内的 base64。问题结果的通道顺序为 answer、thinking、reading-thinking。共享的已提交图片显示为居中缩略图，宽高均不超过配置的会话正文五行的高度，不裁剪/放大，也不随思考文本一起变暗。点击后会在现有的会话插图查看器中打开同一份已受理字节，支持适应/平移/缩放以及 Escape/X 关闭；没有会话查看器时，预览保持不可交互。思考图片保留在其思考折叠区内。仅含图片的通道保持可见，标签为 `已提交的图片`；文本使用常规的 PathText/Markdown。宿主图片始终位于插件拥有的渲染器插槽之外。
 
-Resolve the **actual effective dispatch engine**, not a parallel provider resolver. New-turn/
-save-only admission rechecks canonical target and effective model/resize policy after awaited
-preflight; no await intervenes before acceptance write/claim. Agent construction uses that
-checked engine. Busy steers capture live-agent identity/model, not future session settings,
-and synchronously verify it at handoff. Settled-run fallback prepares against the next engine
-without re-intercepting; changed/replaced targets refuse stale rather than silently retarget.
+解析**实际生效的调度引擎**，而不是另起一个并行的服务商解析器。新回合/仅保存的准入在 await 预检之后重新检查权威目标和实际生效的模型/缩放策略；在写入/声明受理之前不插入任何 await。智能体构造使用这个经过检查的引擎。忙碌插话捕获的是活动智能体的身份/模型，而不是未来的会话设置，并在交接时同步验证。运行结束后的回退针对下一个引擎准备，不重新拦截；已变化/被替换的目标会以过期为由拒绝，而不是静默地改投目标。
 
-Text-only engines refuse fresh images. Custom endpoints retain current attempt-transport
-policy; remote refusal is provider failure. Historical model-switch omission placeholders,
-ChatGPT/subscription/Claude CLI transport and CLI text-before-images ordering remain native.
-Parked steers retain existing memory-only tradeoffs: acknowledged acceptance can notify,
-but is not guaranteed durable history or a replayable notification.
+仅支持文本的引擎会拒绝新的图片。自定义端点保留当前的按尝试传输策略；远端拒绝属于服务商故障。历史上切换模型时的省略占位符、ChatGPT/订阅/Claude CLI 传输以及 CLI 文本在图片之前的顺序均保持原生行为。暂存的插话保留现有的仅内存权衡：已确认的受理可以发出通知，但不保证成为持久历史或可重放的通知。
 
-## 8. Public surface contract
+<a id="8-public-surface-contract"></a>
+## 8. 公开覆盖层契约
 
 ```ts
 interface PluginSurfaceProps {
@@ -222,53 +124,18 @@ openSurface(props: PluginSurfaceProps, options: PluginWidgetOptions): PluginWidg
 openSurface(target: PluginSurfaceTarget, props: PluginSurfaceProps, options: PluginWidgetOptions): PluginWidgetHandle<PluginSurfaceProps>;
 ```
 
-`PluginSurfaceTarget` is opaque host identity, not DOM, a persisted session ID or backend
-serializable token. Native action/submission context exposes it. Targetless invocation
-captures the active page boundary **once synchronously** (plugin views, chat, Home, New Draft),
-not a later page after awaits. Explicit targets identify one mounted native teaching/practice
-view. Missing/expired live boundaries throw `Surface target is no longer active`; returning
-to the same session never revives a token. Already-aborted signals return inert handles before
-boundary resolution. Recheck expiry at mount commit; late expiry disposes/reports.
+`PluginSurfaceTarget` 是不透明的宿主身份，不是 DOM、持久化的会话 ID 或可在后端序列化的令牌。原生的操作/提交上下文会提供它。不带目标的调用会**同步地捕获一次**当前活动的页面边界（插件视图、聊天、主页、新草稿），而不是 await 之后的某个页面。显式目标标识一个已挂载的原生教学/练习视图。缺失/已过期的活动边界会抛出 `Surface target is no longer active`；回到同一会话也永远不会让令牌复活。已中止的信号会在解析边界之前返回无效句柄。在挂载提交时重新检查是否过期；迟到的过期会销毁并报告。
 
-Coverage is only the page body. Top bars/sidebar remain usable; Home/New Draft preserve
-floating sidebar toggle/window chrome while body graph/composer stay mounted but inactive.
-Surfaces stack, retaining covered DOM/state/paint. Only eligible foreground content receives
-body interaction. Ordinary siblings do not own one another's lifetime: removing a lower
-plugin surface must not remove another plugin's foreground surface. Caller signals may
-intentionally bind lifetimes.
+覆盖范围仅限页面主体。顶栏/侧边栏仍可使用；主页/新草稿保留浮动的侧边栏切换按钮/窗口外框，而主体中的图谱/输入框保持挂载但处于非活动状态。覆盖层可以叠放，被覆盖的 DOM/状态/绘制会保留。只有符合条件的前景内容接收主体交互。普通的同级覆盖层互不拥有对方的生命周期：移除下层的插件覆盖层不得移除另一个插件的前景覆盖层。调用方的信号可以有意地绑定生命周期。
 
-Leave/hide of the owning page, unload, caller abort or dispose tears down the scope; re-entry
-creates a new boundary. No suspension/restoration or arbitrary DOM-parent injection. Content
-fills available width/height; controlled replacement disposes each old mount exactly once,
-including late async cleanup. Existing view layers own ordering/paint and covered-input
-routing, not another modal/overlay registry or viewport scroll lock.
+离开/隐藏所属页面、卸载、调用方中止或销毁都会拆除该作用域；重新进入会创建新的边界。不提供挂起/恢复，也不支持注入到任意 DOM 父节点。内容填满可用宽度/高度；受控替换会对每个旧挂载恰好销毁一次，包括迟到的异步清理。由现有视图层负责排序/绘制和被覆盖输入的路由，而不是另起一个模态/浮层注册表或视口滚动锁定。
 
-Dialogs/Settings always remain in front, even if a surface opens from their content. That
-surface belongs to the page, not the modal opener; it cannot inherit modal focus/Escape
-eligibility. If the dialog closes and the signal remains live, the surface can emerge.
-Do not dispatch submit/Tab/dictation into covered inputs. Closing/unloading a plugin removes
-only its surfaces; global Settings is not lifetime-owned merely by being painted above one.
+对话框/设置始终位于前方，即使覆盖层是从它们的内容中打开的。该覆盖层属于页面，而不属于打开它的模态框；它不能继承模态框的焦点/Escape 资格。如果对话框关闭而信号仍然有效，覆盖层就会显现。不要把提交/Tab/语音听写分派到被覆盖的输入中。关闭/卸载插件只会移除它自己的覆盖层；全局设置不会仅因为绘制在某个覆盖层上方就被视为由其拥有生命周期。
 
-Entry preserves eligible existing/remembered focus, then a synchronously mounted visible
-focusable `data-plugin-initial-focus` marker, then editable fields/headings/frame. No async
-retry or autofocus-on-update. Without content targets, focus the painted labelled frame,
-not its floating X/nonrendering wrapper. Late mounts cannot steal focus from newer layers.
-On close restore eligible uncovered opener, otherwise the surviving region's remembered/
-entry target. Covered disposal/page expiry cannot steal focus or restore into departed DOM.
-No focus trap across the exposed top bar/sidebar is added.
+进入时依次优先：保留符合条件的现有/记住的焦点，然后是同步挂载、可见且可聚焦的 `data-plugin-initial-focus` 标记，然后是可编辑字段/标题/外框。不做异步重试，也不在更新时自动聚焦。没有内容目标时，聚焦已绘制且带标签的外框，而不是其浮动的 X 或不渲染的包装元素。迟到的挂载不能从更新的层抢走焦点。关闭时恢复到符合条件且未被覆盖的打开者，否则恢复到幸存区域记住的/进入时的目标。被覆盖层的销毁/页面过期不能抢走焦点，也不能把焦点恢复到已离开的 DOM 中。不对暴露在外的顶栏/侧边栏添加焦点陷阱。
 
-Titles are accessible only. A quiet pinned X floats over content without a header row or
-inset scrollbar padding. Plugins own visible headings/actions. `dimmed` (default) uses native
-tint/blur; `opaque` is solid background without blur; invalid values reject on mount/update.
-Dialogs share headerless/X presentation within their modal bounds. `onClose` is notification,
-not an async veto. Abort/programmatic disposal follows normal handle cleanup. Shared
-Escape/focus ownership follows the [interaction contract](dialog-overlay-contract.md).
+标题仅用于无障碍访问。一个不显眼的固定 X 按钮浮在内容上方，没有标题行，也没有为滚动条预留的内边距。可见的标题/操作由插件负责。`dimmed`（默认）使用原生的着色/模糊；`opaque` 为不带模糊的实色背景；无效值会在挂载/更新时被拒绝。对话框在其模态边界内共享无标题/X 的呈现方式。`onClose` 是通知，而不是异步否决。中止/程序化销毁遵循常规的句柄清理。共享的 Escape/焦点归属遵循[交互契约](dialog-overlay-contract.md)。
 
-## 9. Testing
+## 9. 测试
 
-Cover ordering/immutable transforms, readiness, final speech publication, stale occurrence/
-model/view/registration, cancellation retaining drafts, busy fallback once-only interception,
-acknowledgment uncertainty, native image bytes/UI/model channels and unsupported engines.
-Surface checks include exact bounds, retained covered state, one-Escape ownership, focus return,
-page expiry, modal ordering, owner-scoped cleanup and late mounts. Use isolated storage
-and controlled providers when exercising the plugin in the app.
+覆盖排序/不可变变换、就绪状态、最终语音发布、过期的出现位置/模型/视图/注册、保留草稿的取消、忙碌回退时仅拦截一次、确认的不确定性、原生图片字节/UI/模型通道以及不受支持的引擎。覆盖层检查包括精确边界、保留被覆盖状态、单一 Escape 归属、焦点归还、页面过期、模态排序、按所有者作用域的清理以及迟到的挂载。在应用中运行插件时，使用隔离的存储和受控的服务商。

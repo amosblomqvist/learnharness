@@ -17,7 +17,7 @@ test("v1 settings tolerate and discard obsolete inkColor without changing revisi
     assert.deepEqual(parseSettings({ ...settings, inkColor }), settings);
   }
   assert.equal("inkColor" in DEFAULT_SETTINGS, false);
-  assert.throws(() => parseSettings({ ...settings, inkColour: "black" }), /Unknown/);
+  assert.throws(() => parseSettings({ ...settings, inkColour: "black" }), /未知字段/);
 });
 
 test("technical-diagram instructions cover the observed TeX authoring failures", () => {

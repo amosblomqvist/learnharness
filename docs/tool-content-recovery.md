@@ -1,42 +1,42 @@
-# Tool-content display recovery
+# 工具内容的显示恢复
 
-This is a developer reference for display-only recovery of model-authored escaping defects, not a general TeX repair system.
+这是一份开发者参考文档，介绍针对模型编写时产生的转义缺陷所做的仅限显示的恢复，而不是一个通用的 TeX 修复系统。
 
-## Boundary
+## 边界
 
-Tool arguments are shape-decoded, schema-converted, validated, and cleaned **before** presentation. `ToolContentResponse` then applies `repairMathForDisplay` and ordinary Markdown rendering. Teaching/probing questions, asks, recalls/explanations, and practice statements/solutions share this path; ordinary assistant prose does not.
+工具参数在呈现**之前**会依次经过形状解码、按 schema 转换、校验和清理。随后，`ToolContentResponse` 应用 `repairMathForDisplay` 和普通的 Markdown 渲染。教学/摸底问题、提问、回忆/讲解，以及练习的题目陈述/解答共享这条路径；普通的助手行文则不走这条路径。
 
-Recovery must not change persisted arguments, option identities, shuffling, grading, learner answers, or future answer snapshots. Those use source-derived, schema-parsed content.
+恢复不得改变持久化的参数、选项标识、乱序、评分、学习者的答案或将来的答案快照。这些使用的是源自原文、经 schema 解析的内容。
 
-## Supported recovery
+## 支持的恢复
 
-| Content | Behavior |
+| 内容 | 行为 |
 | --- | --- |
-| Native literal code | Copy CommonMark/math-parser source ranges verbatim, including fences, indentation, quotes, and lists. Do not serialize a replacement AST. |
-| Extra-encoded code fences | Complete standalone fences with consistently encoded line breaks may establish one local JSON-string layer. Decode that layer as a unit, preserving program quotes and literal backslashes; never globally replace code `\n` sequences. Keep mixed physical/encoded layout, invalid JSON escapes, incomplete fences, and outer literal examples unrepaired. Surrounding prose/math still use their existing recovery, not whole-question JSON decoding. |
-| Document escapes | Decode literal `\n` only with evidence such as repeated layout escapes or accompanying extra-escaped TeX. Protect code, recognized paths, comments, and complete known n-prefixed commands/macros such as `\nu` and `\nabla`. |
-| Display framing | Recovered `$$` framing puts the formula and closing fence on their own lines. |
-| JSON-swallowed prefixes | In math, reconstruct control-character + complete alphabetic word only when it names a known KaTeX command, such as TAB + `ext` → `\text`. |
-| Extra command escaping | Recover known commands using original TeX context; unknown words are not invented. Preserve genuine native row separators/comments; consistently over-escaped environments establish a factor for commands **and rows**. |
-| Percentages | Recover supported doubled percent escapes in numeric expressions, including at the end of display math; preserve genuine comments/rows. No blanket percent repair. |
+| 原生字面代码 | 逐字复制 CommonMark/数学解析器的源码范围，包括围栏、缩进、引号和列表。不要序列化替换后的 AST。 |
+| 被额外编码的代码围栏 | 完整的独立围栏，若其换行被一致地编码，可以确立一层局部的 JSON 字符串编码。将这一层作为一个整体解码，保留程序中的引号和字面反斜杠；绝不全局替换代码中的 `\n` 序列。物理/编码混合的排版、无效的 JSON 转义、不完整的围栏以及外层的字面示例保持不修复。周围的行文/数学公式仍使用其现有的恢复方式，而不是对整道题做 JSON 解码。 |
+| 文档转义 | 只有在有证据时才解码字面 `\n`，例如反复出现的排版转义，或伴随出现的被额外转义的 TeX。保护代码、可识别的路径、注释，以及完整的、以 n 开头的已知命令/宏，例如 `\nu` 和 `\nabla`。 |
+| 显示公式的定界 | 恢复后的 `$$` 定界会让公式和结束定界符各自独占一行。 |
+| 被 JSON 吞掉的前缀 | 在数学公式中，只有当“控制字符 + 完整的字母单词”构成一个已知的 KaTeX 命令时才进行重建，例如 TAB + `ext` → `\text`。 |
+| 命令被额外转义 | 利用原始的 TeX 上下文恢复已知命令；不会凭空编造未知的单词。保留真正的原生行分隔符/注释；被一致地过度转义的环境会为命令**和行**确立一个转义倍数。 |
+| 百分号 | 恢复数值表达式中受支持的双重百分号转义，包括位于显示公式末尾的情况；保留真正的注释/行。不做一刀切的百分号修复。 |
 
-Inline prefix recovery includes physical LF + `u` → `\nu` and TAB + `o` → `\to`, with no word-length cutoff. Display math keeps physical LF/CRLF as formatting but can recover recognized non-newline prefixes. Correctly written commands remain commands; unrelated whitespace stays unchanged.
+行内前缀恢复包括物理 LF + `u` → `\nu` 以及 TAB + `o` → `\to`，且没有单词长度上限。显示公式会把物理 LF/CRLF 保留为排版格式，但可以恢复可识别的非换行前缀。书写正确的命令仍保持为命令；无关的空白保持不变。
 
-This policy deliberately targets typical model-authored math: whitespace followed by a variable can ambiguously spell a command. TeX parse success cannot resolve that ambiguity. A guard rejects partial command changes that introduce a parse failure, but parse success alone does not prove semantic preservation. Unbalanced/unsupported content is not generally rewritten into new mathematics; there are no language-specific decoders.
+这一策略有意针对典型的由模型编写的数学公式：空白后跟一个变量，可能有歧义地拼成一个命令。TeX 能否解析成功无法消除这种歧义。有一个防护会拒绝引入解析失败的部分命令改动，但仅凭解析成功并不能证明语义得到保留。不平衡/不受支持的内容一般不会被改写成新的数学公式；不存在针对特定语言的解码器。
 
-Code recovery similarly uses a strict encoding profile as **evidence**, not proof of author intent. A single-quoted program string or regex containing a literal `\n` can be indistinguishable from misplaced layout escaping even when JSON decoding succeeds. This residual ambiguity is accepted for complete standalone encoded fences; there is no language-specific program repair. The layer-aware approach is informed by joneskim's PR #67, while the shared-reader foundation comes from chirag-panjabi's PR #401. Question parsers continue returning source text.
+代码恢复同样把严格的编码特征当作**证据**，而不是作者意图的证明。即使 JSON 解码成功，一个包含字面 `\n` 的单引号程序字符串或正则表达式，也可能与放错位置的排版转义无法区分。对于完整的独立编码围栏，这种残余歧义是可以接受的；不存在针对特定语言的程序修复。这种分层感知的方法借鉴了 joneskim 的 PR #67，而共享读取器的基础来自 chirag-panjabi 的 PR #401。题目解析器仍然返回原文。
 
-In labelled answer/Why reveals, only the first direct paragraph is inline with its label; later paragraphs keep normal layout.
+在带标签的答案/原因（Why）揭示中，只有第一个直接段落与其标签同行显示；之后的段落保持正常排版。
 
-## Historical answers
+## 历史答案
 
-`answerForPresentation` joins display fields to original calls without rewriting answer facts. Labels bind through unambiguous selected values, exact/source-recovered labels, or the uniquely remaining pair in a complete bijection. Ambiguous rows keep saved snapshots. Order, indices, values, verdicts, confidence, learner text, and dismissals remain intact. No migration is performed.
+`answerForPresentation` 把显示字段关联到原始调用上，而不改写答案事实。标签通过以下方式绑定：无歧义的所选值、精确的/从原文恢复的标签，或在完整双射中唯一剩下的那一对。有歧义的行保留已保存的快照。顺序、索引、值、判定、把握度、学习者的文本以及忽略操作都保持不变。不执行任何迁移。
 
-## Verification
+## 验证
 
-- `tests/content-recovery.test.ts`: recovery/preservation, code, rows, and comments.
-- `tests/escaped-code-recovery.test.tsx`: encoding profiles, exact code-copy contents, native literals/math, previews, and pending → saved/answered source preservation.
-- `tests/tool-content-presentation.test.tsx`: synthetic corpus, historical joins, ambiguity.
-- `tests/tool-content-interaction.test.tsx`: selection/submission/persistence/reveal and paragraphs.
+- `tests/content-recovery.test.ts`：恢复/保留、代码、行和注释。
+- `tests/escaped-code-recovery.test.tsx`：编码特征、精确的代码复制内容、原生字面量/数学公式、预览，以及“待回答 → 已保存/已回答”过程中的原文保留。
+- `tests/tool-content-presentation.test.tsx`：合成语料、历史关联、歧义。
+- `tests/tool-content-interaction.test.tsx`：选择/提交/持久化/揭示以及段落。
 
-`scripts/replay-tool-rendering-corpus.ts` can replay a separately supplied frozen corpus offline, checking hashes and source/render/answer preservation. Corpus collection and larger diagnostic runs are not prerequisites for unit tests. The Markdown, card, practice, shape, and grading suites remain relevant.
+`scripts/replay-tool-rendering-corpus.ts` 可以离线重放另外提供的冻结语料，检查哈希以及原文/渲染/答案的保留情况。语料收集和更大规模的诊断运行不是单元测试的前置条件。Markdown、卡片、练习、形状和评分测试套件仍然相关。

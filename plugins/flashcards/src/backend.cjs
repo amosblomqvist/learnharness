@@ -1,6 +1,7 @@
 'use strict';
 const { randomUUID, createHash } = require('node:crypto');
 const path = require('node:path');
+const { tr } = require('./i18n.cjs');
 const { openStore } = require('./store.cjs');
 const scheduler = require('./scheduler.cjs');
 const { statistics } = require('./statistics.cjs');
@@ -21,20 +22,20 @@ const memberships = (s, id) => s.decks.filter(d => d.propositionIds.includes(id)
 const isLocal = p => p.origin === 'file' || p.origin === 'manual';
 const reviewConfiguration = s => fingerprint({ retention: s.retention, learningSteps: s.learningSteps, relearningSteps: s.relearningSteps, dayStart: s.dayStart, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone });
 const fail = (message) => { throw new Error(message); };
-function requiredText(value, label) { if (typeof value !== 'string' || !value.trim()) fail(`${label} must not be blank.`); return value; }
+function requiredText(value, message) { if (typeof value !== 'string' || !value.trim()) fail(message); return value; }
 function validateSettings(patch, old) {
   const allowed = new Set(['retention', 'learningSteps', 'relearningSteps', 'dayStart', 'chunkBudget', 'modelOverride', 'thinkingOverride']);
-  for (const key of Object.keys(patch)) if (!allowed.has(key)) fail(`Unsupported setting: ${key}`);
+  for (const key of Object.keys(patch)) if (!allowed.has(key)) fail(tr(`不支持的设置：${key}`, `Unsupported setting: ${key}`));
   const s = { ...old, ...patch };
   if (s.thinkingOverride === null) delete s.thinkingOverride;
-  if (!Number.isFinite(s.retention) || s.retention < .7 || s.retention > .99) fail('Desired retention must be between 70% and 99%.');
+  if (!Number.isFinite(s.retention) || s.retention < .7 || s.retention > .99) fail(tr('目标记忆保持率必须介于 70% 到 99% 之间。', 'Desired retention must be between 70% and 99%.'));
   for (const key of ['learningSteps', 'relearningSteps']) {
-    if (!Array.isArray(s[key]) || !s[key].length || s[key].some((v, i, a) => !Number.isSafeInteger(v) || v < 1 || v >= 1440 || (i > 0 && v <= a[i - 1]))) fail('Use nonempty, increasing whole-minute steps shorter than one day.');
+    if (!Array.isArray(s[key]) || !s[key].length || s[key].some((v, i, a) => !Number.isSafeInteger(v) || v < 1 || v >= 1440 || (i > 0 && v <= a[i - 1]))) fail(tr('请使用非空、递增且每一步都短于一天的整数分钟步骤。', 'Use nonempty, increasing whole-minute steps shorter than one day.'));
   }
-  if (!Number.isInteger(s.dayStart) || s.dayStart < 0 || s.dayStart > 23) fail('Study-day start must be a whole hour from 0 to 23.');
-  if (!Number.isSafeInteger(s.chunkBudget) || s.chunkBudget < 1) fail('Input budget must be a positive safe whole number.');
-  if (s.modelOverride !== null && (!s.modelOverride || typeof s.modelOverride.provider !== 'string' || typeof s.modelOverride.id !== 'string')) fail('Invalid model override.');
-  if (s.thinkingOverride !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(s.thinkingOverride)) fail('Invalid thinking level.');
+  if (!Number.isInteger(s.dayStart) || s.dayStart < 0 || s.dayStart > 23) fail(tr('学习日起始时间必须是 0 到 23 之间的整点。', 'Study-day start must be a whole hour from 0 to 23.'));
+  if (!Number.isSafeInteger(s.chunkBudget) || s.chunkBudget < 1) fail(tr('输入预算必须是正的安全整数。', 'Input budget must be a positive safe whole number.'));
+  if (s.modelOverride !== null && (!s.modelOverride || typeof s.modelOverride.provider !== 'string' || typeof s.modelOverride.id !== 'string')) fail(tr('无效的模型覆盖设置。', 'Invalid model override.'));
+  if (s.thinkingOverride !== undefined && !['off', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(s.thinkingOverride)) fail(tr('无效的推理强度。', 'Invalid thinking level.'));
   return s;
 }
 function validateResult(result, context) {
@@ -47,7 +48,7 @@ function validateResult(result, context) {
     const known = input.cards.find(c => c.propositionId === row.propositionId);
     const questions = new Set((known?.active ?? []).map(c => c.question.trim()));
     for (const card of row.cards) {
-      requiredText(card.question, 'Question'); requiredText(card.answer, 'Answer');
+      requiredText(card.question, 'Question must not be blank.'); requiredText(card.answer, 'Answer must not be blank.');
       if (questions.has(card.question.trim())) fail(`Duplicate question for ${row.propositionId}; propose a distinct missing cue.`);
       questions.add(card.question.trim());
     }
@@ -57,19 +58,19 @@ function validateResult(result, context) {
 function pack(graph, ids, state) {
   const nodes = new Map(graph.propositions.map(n => [n.id, n]));
   const targets = [...new Set(ids)];
-  if (!targets.length) fail('Select at least one proposition.');
-  for (const id of targets) if (!nodes.has(id)) fail(`Selected proposition is no longer in the graph: ${id}`);
+  if (!targets.length) fail(tr('请至少选择一个命题。', 'Select at least one proposition.'));
+  for (const id of targets) if (!nodes.has(id)) fail(tr(`所选命题已不在图谱中：${id}`, `Selected proposition is no longer in the graph: ${id}`));
   function assemble(selected) {
     const selectedSet = new Set(selected);
     const chains = graph.chains.filter(c => selectedSet.has(c.conclusion) || c.premises.some(id => selectedSet.has(id)));
     const needed = new Set([...selected, ...chains.flatMap(c => [...c.premises, c.conclusion])]);
     const propositions = [...needed].map(id => {
-      const n = nodes.get(id); if (!n) fail(`Incomplete reasoning chain: ${id}`);
+      const n = nodes.get(id); if (!n) fail(tr(`推理链不完整：${id}`, `Incomplete reasoning chain: ${id}`));
       return { id, name: n.name, statement: n.statement };
     });
     const sources = selected.map(id => {
       const node = nodes.get(id), sourceId = node.provenance[0]?.chatId;
-      if (!sourceId) fail(`No birth source is recorded for ${node.name}.`);
+      if (!sourceId) fail(tr(`未记录“${node.name}”的初始来源。`, `No birth source is recorded for ${node.name}.`));
       const label = graph.sessions[sourceId] ?? (graph.fileSources[sourceId] ? path.basename(graph.fileSources[sourceId]) : sourceId);
       return { propositionId: id, sourceId, label, node };
     });
@@ -96,11 +97,11 @@ function pack(graph, ids, state) {
 }
 
 function activate(ctx) {
-  if (!ctx.workers?.register || !ctx.learning?.graph) fail('This app build does not provide the plugin capabilities required by Flashcards.');
+  if (!ctx.workers?.register || !ctx.learning?.graph) fail(tr('此应用版本未提供闪卡所需的插件功能。', 'This app build does not provide the plugin capabilities required by Flashcards.'));
   const store = openStore(ctx.dataDirectory);
   const preflights = new Map(), tickets = new Map(), observers = new Map(), applicationErrors = new Map();
   let disposed = false, sourceCleanupError = null;
-  const alive = () => { if (disposed || ctx.signal.aborted) fail('Flashcards is disabled.'); };
+  const alive = () => { if (disposed || ctx.signal.aborted) fail(tr('闪卡已停用。', 'Flashcards is disabled.')); };
   const notify = (topic = 'changed') => { if (!disposed && !ctx.signal.aborted) ctx.events.emit(topic); };
   function change(update, topic) { alive(); const result = store.change(update); notify(topic); return result; }
   // Commit metadata removal first; a durable queue makes file cleanup retryable
@@ -113,15 +114,15 @@ function activate(ctx) {
       change(s => { delete s.pendingSourceRemovals; });
       sourceCleanupError = null;
     } catch (error) {
-      sourceCleanupError = `Content was deleted, but saved-file cleanup is pending: ${error.message}. Retry deletion or reload Flashcards to finish cleanup.`;
+      sourceCleanupError = tr(`内容已删除，但已保存文件的清理尚未完成：${error.message}。请重试删除或重新加载闪卡以完成清理。`, `Content was deleted, but saved-file cleanup is pending: ${error.message}. Retry deletion or reload Flashcards to finish cleanup.`);
       throw new Error(sourceCleanupError);
     }
   }
   try { finishSourceCleanup(); } catch { /* expose pending cleanup in the view; retry on deletion or next activation */ }
-  function graphNow() { const g = ctx.learning.graph(); if (!Array.isArray(g.propositions) || !Array.isArray(g.chains)) fail('Could not read the knowledge graph.'); return g; }
-  const prop = (s, id) => Object.hasOwn(s.propositions, id) ? s.propositions[id] : fail('Proposition not found.');
-  const deck = (s, id) => s.decks.find(d => d.id === id) ?? fail('Deck not found.');
-  const fileSource = (s, id) => Object.hasOwn(s.fileSources ?? {}, id) ? s.fileSources[id] : fail('File source not found.');
+  function graphNow() { const g = ctx.learning.graph(); if (!Array.isArray(g.propositions) || !Array.isArray(g.chains)) fail(tr('无法读取知识图谱。', 'Could not read the knowledge graph.')); return g; }
+  const prop = (s, id) => Object.hasOwn(s.propositions, id) ? s.propositions[id] : fail(tr('未找到命题。', 'Proposition not found.'));
+  const deck = (s, id) => s.decks.find(d => d.id === id) ?? fail(tr('未找到卡组。', 'Deck not found.'));
+  const fileSource = (s, id) => Object.hasOwn(s.fileSources ?? {}, id) ? s.fileSources[id] : fail(tr('未找到文件来源。', 'File source not found.'));
   function liveIds(s) { return new Set([...graphNow().propositions.map(p => p.id), ...Object.values(s.propositions).filter(isLocal).map(p => p.id)]); }
   function counts(s, now) {
     const { start, end } = scheduler.dayBounds(now, s.settings.dayStart);
@@ -157,7 +158,7 @@ function activate(ctx) {
         const b = s.batches.find(b => b.id === batchId), c = b?.chunks.find(c => c.id === chunkId);
         if (!c || c.status === 'applied' || ['failed', 'cancelled', 'interrupted'].includes(c.status)) return;
         if (b.cancelRequested) { c.status = 'cancelled'; finishBatch(s, b); return; }
-        if (task.status !== 'succeeded') { c.status = task.status === 'cancelled' ? 'cancelled' : task.status === 'interrupted' ? 'interrupted' : 'failed'; c.error = `Worker did not return a result (${task.error?.code || task.status}). Check Background agents for details.`; finishBatch(s, b); return; }
+        if (task.status !== 'succeeded') { c.status = task.status === 'cancelled' ? 'cancelled' : task.status === 'interrupted' ? 'interrupted' : 'failed'; c.error = tr(`后台任务未返回结果（${task.error?.code || task.status}）。请在“后台智能体”中查看详情。`, `Worker did not return a result (${task.error?.code || task.status}). Check Background agents for details.`); finishBatch(s, b); return; }
         let added = 0;
         if (b.kind === 'file') {
           const source = fileSource(s, b.sourceId), destination = deck(s, source.deckId);
@@ -188,7 +189,7 @@ function activate(ctx) {
         c.status = 'applied'; c.added = added; finishBatch(s, b);
       }, 'batch-changed');
       applicationErrors.delete(chunkId);
-    } catch (error) { applicationErrors.set(chunkId, `Result could not be saved: ${error.message}`); notify('batch-changed'); }
+    } catch (error) { applicationErrors.set(chunkId, tr(`无法保存结果：${error.message}`, `Result could not be saved: ${error.message}`)); notify('batch-changed'); }
   }
   function watch(batchId, chunkId, taskId) {
     if (observers.has(taskId)) return;
@@ -210,7 +211,7 @@ function activate(ctx) {
       if (['applied', 'failed', 'cancelled', 'interrupted'].includes(c.status)) continue;
       const t = tasks.find(t => t.requestId === c.requestId);
       if (!t) {
-        if (c.taskId && !b.cancelRequested) { applicationErrors.set(c.id, 'The worker record could not be read. No result has been assumed.'); continue; }
+        if (c.taskId && !b.cancelRequested) { applicationErrors.set(c.id, tr('无法读取后台任务记录，未假定任何结果。', 'The worker record could not be read. No result has been assumed.')); continue; }
         change(s => { const batch = s.batches.find(x => x.id === b.id), chunk = batch.chunks.find(x => x.id === c.id); chunk.status = batch.cancelRequested ? 'cancelled' : 'interrupted'; finishBatch(s, batch); }, 'batch-changed'); continue;
       }
       if (['succeeded', 'failed', 'cancelled', 'interrupted'].includes(t.status)) applyOutcome(b.id, c.id, t);
@@ -227,28 +228,28 @@ function activate(ctx) {
   async function resolveModel(settings) {
     const catalog = await ctx.inference.catalog(); alive();
     const pin = settings.modelOverride ? { model: settings.modelOverride } : catalog.slots?.cheap;
-    if (!pin?.model) fail('Configure the cheap model slot or choose a Flashcards model override.');
+    if (!pin?.model) fail(tr('请配置经济档位，或为闪卡选择覆盖模型。', 'Configure the cheap model slot or choose a Flashcards model override.'));
     const entry = catalog.models.find(m => m.provider === pin.model.provider && m.id === pin.model.id);
-    if (!entry) fail('The selected model is unavailable. Choose a configured model.');
+    if (!entry) fail(tr('所选模型不可用。请选择已配置的模型。', 'The selected model is unavailable. Choose a configured model.'));
     const thinkingLevel = settings.thinkingOverride ?? pin.thinkingLevel;
-    if (thinkingLevel && !entry.supportedLevels.includes(thinkingLevel)) fail('The selected thinking level is not supported by this model.');
+    if (thinkingLevel && !entry.supportedLevels.includes(thinkingLevel)) fail(tr('此模型不支持所选的推理强度。', 'The selected thinking level is not supported by this model.'));
     return { spec: { ...pin.model, ...(thinkingLevel ? { thinkingLevel } : {}) }, entry };
   }
-  function register(name, handler) { ctx.handle(name, (input = {}) => { alive(); if (!input || typeof input !== 'object' || Array.isArray(input)) fail('Invalid operation input.'); return handler(input); }); }
+  function register(name, handler) { ctx.handle(name, (input = {}) => { alive(); if (!input || typeof input !== 'object' || Array.isArray(input)) fail(tr('无效的操作输入。', 'Invalid operation input.')); return handler(input); }); }
   register('get-state', view);
   register('get-catalog', () => ctx.inference.catalog());
   register('save-settings', patch => { change(s => { s.settings = validateSettings(patch, s.settings); }); return view(); });
-  register('create-deck', ({ name }) => { change(s => s.decks.push({ id: randomUUID(), name: requiredText(name, 'Deck name').trim(), newLimit: 20, propositionIds: [] })); return view(); });
+  register('create-deck', ({ name }) => { change(s => s.decks.push({ id: randomUUID(), name: requiredText(name, tr('卡组名称不能为空。', 'Deck name must not be blank.')).trim(), newLimit: 20, propositionIds: [] })); return view(); });
   function createManualCard(input, newTarget) {
-    const requestId = requiredText(input.requestId, 'Request ID');
-    const question = requiredText(input.question, 'Question'), answer = requiredText(input.answer, 'Answer');
+    const requestId = requiredText(input.requestId, tr('请求 ID 不能为空。', 'Request ID must not be blank.'));
+    const question = requiredText(input.question, tr('问题不能为空。', 'Question must not be blank.')), answer = requiredText(input.answer, tr('答案不能为空。', 'Answer must not be blank.'));
     const destination = newTarget
-      ? { deckId: requiredText(input.deckId, 'Deck ID'), name: requiredText(input.name, 'Name').trim() }
-      : { propositionId: requiredText(input.propositionId, 'Target ID') };
+      ? { deckId: requiredText(input.deckId, tr('卡组 ID 不能为空。', 'Deck ID must not be blank.')), name: requiredText(input.name, tr('名称不能为空。', 'Name must not be blank.')).trim() }
+      : { propositionId: requiredText(input.propositionId, tr('目标 ID 不能为空。', 'Target ID must not be blank.')) };
     const hash = fingerprint({ kind: newTarget ? 'create-card' : 'create-cue', ...destination, question, answer });
     const prior = store.get().creationReceipts?.find(r => r.requestId === requestId);
     if (prior) {
-      if (prior.hash !== hash) fail('This request ID was already used for different work.');
+      if (prior.hash !== hash) fail(tr('此请求 ID 已用于其他操作。', 'This request ID was already used for different work.'));
       return { state: view(), propositionId: prior.propositionId, cueId: prior.cueId };
     }
     const created = change(s => {
@@ -259,7 +260,7 @@ function activate(ctx) {
         s.propositions[p.id] = p; d.propositionIds.push(p.id);
       } else {
         p = prop(s, destination.propositionId);
-        if (!isLocal(p) && !graphNow().propositions.some(node => node.id === p.id)) fail('The target is no longer in the graph.');
+        if (!isLocal(p) && !graphNow().propositions.some(node => node.id === p.id)) fail(tr('该目标已不在图谱中。', 'The target is no longer in the graph.'));
       }
       const cue = { id: randomUUID(), question, answer, latestRating: null };
       p.cues.push(cue); p.version++;
@@ -274,34 +275,34 @@ function activate(ctx) {
   register('save-deck', patch => {
     change(s => {
       const d = deck(s, patch.id);
-      if (Object.hasOwn(patch, 'name')) d.name = requiredText(patch.name, 'Deck name').trim();
-      if (Object.hasOwn(patch, 'newLimit')) { if (!Number.isSafeInteger(patch.newLimit) || patch.newLimit < 0) fail('Daily limit must be a nonnegative safe whole number.'); d.newLimit = patch.newLimit; }
+      if (Object.hasOwn(patch, 'name')) d.name = requiredText(patch.name, tr('卡组名称不能为空。', 'Deck name must not be blank.')).trim();
+      if (Object.hasOwn(patch, 'newLimit')) { if (!Number.isSafeInteger(patch.newLimit) || patch.newLimit < 0) fail(tr('每日上限必须是非负的安全整数。', 'Daily limit must be a nonnegative safe whole number.')); d.newLimit = patch.newLimit; }
       for (const source of Object.values(s.fileSources ?? {})) if (source.deckId === d.id) { source.deckName = d.name; source.newLimit = d.newLimit; }
     }); return view();
   });
   function deleteContent(input) {
-    const requestId = requiredText(input.requestId, 'Request ID');
+    const requestId = requiredText(input.requestId, tr('请求 ID 不能为空。', 'Request ID must not be blank.'));
     const ids = key => {
       const values = input[key] === undefined ? [] : input[key];
-      if (!Array.isArray(values) || values.some(id => typeof id !== 'string' || !id.trim())) fail(`Invalid ${key} deletion selection.`);
+      if (!Array.isArray(values) || values.some(id => typeof id !== 'string' || !id.trim())) fail(tr(`无效的删除选择（${key}）。`, `Invalid ${key} deletion selection.`));
       return [...new Set(values)].sort();
     };
     const scope = { deckIds: ids('deckIds'), propositionIds: ids('propositionIds'), cueIds: ids('cueIds'), deleteEmptyDecks: input.deleteEmptyDecks, revision: input.revision };
-    if (typeof scope.deleteEmptyDecks !== 'boolean' || !Number.isSafeInteger(scope.revision)) fail('Invalid deletion options.');
-    if (!scope.deckIds.length && !scope.propositionIds.length && !scope.cueIds.length) fail('Select content to delete.');
+    if (typeof scope.deleteEmptyDecks !== 'boolean' || !Number.isSafeInteger(scope.revision)) fail(tr('无效的删除选项。', 'Invalid deletion options.'));
+    if (!scope.deckIds.length && !scope.propositionIds.length && !scope.cueIds.length) fail(tr('请选择要删除的内容。', 'Select content to delete.'));
     const hash = fingerprint(scope), prior = store.get().deletionReceipts?.find(r => r.requestId === requestId);
     if (prior) {
-      if (prior.hash !== hash) fail('This request ID was already used for different work.');
+      if (prior.hash !== hash) fail(tr('此请求 ID 已用于其他操作。', 'This request ID was already used for different work.'));
       finishSourceCleanup(); return view();
     }
     change(s => {
-      if (activeBatch(s)) fail('Wait for generation to finish or cancel it before deleting content.');
-      if (s.revision !== scope.revision) fail('The library changed. Reload and confirm the deletion again.');
+      if (activeBatch(s)) fail(tr('请等待生成完成或先取消生成，再删除内容。', 'Wait for generation to finish or cancel it before deleting content.'));
+      if (s.revision !== scope.revision) fail(tr('闪卡库已更改。请重新加载并再次确认删除。', 'The library changed. Reload and confirm the deletion again.'));
       const whole = new Set(scope.propositionIds), cueIds = new Set(scope.cueIds), affectedDecks = new Set(scope.deckIds);
       for (const id of scope.deckIds) for (const pid of deck(s, id).propositionIds) whole.add(pid);
       for (const id of whole) prop(s, id);
       const owners = new Map(Object.values(s.propositions).flatMap(p => p.cues.map(c => [c.id, p.id])));
-      for (const id of cueIds) if (!owners.has(id)) fail('Selected card no longer exists.');
+      for (const id of cueIds) if (!owners.has(id)) fail(tr('所选卡片已不存在。', 'Selected card no longer exists.'));
       const affected = new Set([...whole, ...[...cueIds].map(id => owners.get(id))]);
       for (const id of affected) {
         const p = prop(s, id);
@@ -329,12 +330,12 @@ function activate(ctx) {
   }
   register('delete-content', deleteContent);
   register('delete-deck', ({ id, replacementDeckId }) => {
-    if (replacementDeckId !== undefined) fail('Replacement decks are no longer used. Reload Flashcards.');
+    if (replacementDeckId !== undefined) fail(tr('已不再使用替代卡组。请重新加载闪卡。', 'Replacement decks are no longer used. Reload Flashcards.'));
     return deleteContent({ deckIds: [id], deleteEmptyDecks: true, revision: store.get().revision, requestId: randomUUID() });
   });
   register('set-memberships', ({ propositionId, deckIds }) => {
     change(s => {
-      if (!Array.isArray(deckIds) || !deckIds.length || deckIds.some(id => typeof id !== 'string')) fail('Keep at least one deck membership.');
+      if (!Array.isArray(deckIds) || !deckIds.length || deckIds.some(id => typeof id !== 'string')) fail(tr('请至少保留一个所属卡组。', 'Keep at least one deck membership.'));
       const selected = new Set(deckIds); for (const id of selected) deck(s, id);
       const p = prop(s, propositionId);
       for (const d of s.decks) { d.propositionIds = d.propositionIds.filter(id => id !== p.id || selected.has(d.id)); if (selected.has(d.id) && !d.propositionIds.includes(p.id)) d.propositionIds.push(p.id); }
@@ -342,30 +343,30 @@ function activate(ctx) {
     }); return view();
   });
   register('save-cue', ({ propositionId, cueId, question, answer, version }) => {
-    requiredText(question, 'Question'); requiredText(answer, 'Answer');
-    change(s => { const p = prop(s, propositionId); if (p.version !== version) fail('This card changed elsewhere. Reload before saving.'); const c = p.cues.find(c => c.id === cueId && !c.deleted) ?? fail('Card not found.'); c.question = question; c.answer = answer; p.version++; }); return view();
+    requiredText(question, tr('问题不能为空。', 'Question must not be blank.')); requiredText(answer, tr('答案不能为空。', 'Answer must not be blank.'));
+    change(s => { const p = prop(s, propositionId); if (p.version !== version) fail(tr('此卡片已在别处被修改。请重新加载后再保存。', 'This card changed elsewhere. Reload before saving.')); const c = p.cues.find(c => c.id === cueId && !c.deleted) ?? fail(tr('未找到卡片。', 'Card not found.')); c.question = question; c.answer = answer; p.version++; }); return view();
   });
   register('delete-cue', ({ propositionId, cueId, version }) => {
     const p = prop(store.get(), propositionId);
-    if (p.version !== version) fail('This card changed elsewhere. Reload before deleting.');
-    if (!p.cues.some(c => c.id === cueId)) fail('Card not found.');
+    if (p.version !== version) fail(tr('此卡片已在别处被修改。请重新加载后再删除。', 'This card changed elsewhere. Reload before deleting.'));
+    if (!p.cues.some(c => c.id === cueId)) fail(tr('未找到卡片。', 'Card not found.'));
     return deleteContent({ cueIds: [cueId], deleteEmptyDecks: true, revision: store.get().revision, requestId: randomUUID() });
   });
   register('reorder', ({ kind, id, deckId, propositionId, direction }) => {
-    if (![-1, 1].includes(direction)) fail('Invalid order direction.');
+    if (![-1, 1].includes(direction)) fail(tr('无效的排序方向。', 'Invalid order direction.'));
     const live = kind === 'proposition' ? liveIds(store.get()) : null;
     change(s => {
-      const list = kind === 'deck' ? s.decks : kind === 'proposition' ? deck(s, deckId).propositionIds : kind === 'cue' ? prop(s, propositionId).cues : fail('Invalid order kind.');
+      const list = kind === 'deck' ? s.decks : kind === 'proposition' ? deck(s, deckId).propositionIds : kind === 'cue' ? prop(s, propositionId).cues : fail(tr('无效的排序类型。', 'Invalid order kind.'));
       const positions = list.flatMap((x, i) => (kind === 'cue' ? !x.deleted : kind === 'proposition' ? live.has(x) : true) ? [i] : []);
       const index = positions.findIndex(i => (typeof list[i] === 'string' ? list[i] : list[i].id) === id);
-      if (index < 0) fail('Item not found.');
+      if (index < 0) fail(tr('未找到该项。', 'Item not found.'));
       const other = index + direction;
       if (other >= 0 && other < positions.length) { const a = positions[index], b = positions[other]; [list[a], list[b]] = [list[b], list[a]]; }
     }); return view();
   });
   register('preflight', async ({ propositionIds }) => {
-    if (!Array.isArray(propositionIds) || propositionIds.some(id => typeof id !== 'string')) fail('Select proposition IDs.');
-    if (activeBatch(store.get())) fail('A generation batch is already active.');
+    if (!Array.isArray(propositionIds) || propositionIds.some(id => typeof id !== 'string')) fail(tr('请选择命题 ID。', 'Select proposition IDs.'));
+    if (activeBatch(store.get())) fail(tr('已有生成批次正在进行。', 'A generation batch is already active.'));
     const resolved = await resolveModel(store.get().settings);
     const state = store.get(), chunks = pack(graphNow(), propositionIds, state);
     const plans = chunks.map(input => ({ input, prompt: promptFor(input), tokens: estimate(input) }));
@@ -385,11 +386,11 @@ function activate(ctx) {
     const file = fileGeneration.validateFileInput(input), state = store.get();
     const previous = Object.values(state.fileSources ?? {}).find(source => source.fingerprint === file.fingerprint);
     if (previous) return { existingSourceId: previous.id, ...(state.decks.some(d => d.id === previous.deckId) ? { deckId: previous.deckId } : {}), name: previous.name };
-    if (activeBatch(state)) fail('A generation batch is already active.');
+    if (activeBatch(state)) fail(tr('已有生成批次正在进行。', 'A generation batch is already active.'));
     const resolved = await resolveModel(state.settings);
     const latest = store.get(), concurrent = Object.values(latest.fileSources ?? {}).find(source => source.fingerprint === file.fingerprint);
     if (concurrent) return { existingSourceId: concurrent.id, ...(latest.decks.some(d => d.id === concurrent.deckId) ? { deckId: concurrent.deckId } : {}), name: concurrent.name };
-    if (activeBatch(latest)) fail('A generation batch is already active.');
+    if (activeBatch(latest)) fail(tr('已有生成批次正在进行。', 'A generation batch is already active.'));
     return rememberFilePlan(file, resolved, latest);
   });
   register('open-file-deck', ({ sourceId }) => {
@@ -399,42 +400,42 @@ function activate(ctx) {
   });
   register('preflight-file-retry', async ({ batchId }) => {
     const state = store.get(), batch = state.batches.find(b => b.id === batchId);
-    if (!batch || batch.kind !== 'file') fail('File generation batch not found.');
-    if (activeBatch(state)) fail('A generation batch is already active.');
+    if (!batch || batch.kind !== 'file') fail(tr('未找到文件生成批次。', 'File generation batch not found.'));
+    if (activeBatch(state)) fail(tr('已有生成批次正在进行。', 'A generation batch is already active.'));
     let ranges = batch.chunks.filter(c => ['failed', 'cancelled', 'interrupted'].includes(c.status)).map(({ start, end }) => ({ start, end }));
     // Old batch IDs cannot replay portions already accepted by a later retry.
     for (const b of state.batches.filter(b => b.sourceId === batch.sourceId)) for (const c of b.chunks.filter(c => c.status === 'applied')) {
       ranges = ranges.flatMap(r => c.end <= r.start || c.start >= r.end ? [r] : [r.start < c.start ? { start: r.start, end: c.start } : null, c.end < r.end ? { start: c.end, end: r.end } : null].filter(Boolean));
     }
-    if (!ranges.length) fail('No failed file chunks remain to retry.');
+    if (!ranges.length) fail(tr('没有可重试的失败文件分块。', 'No failed file chunks remain to retry.'));
     const source = fileSource(state, batch.sourceId), file = fileGeneration.validateFileInput({ name: source.name, markdown: store.readSource(source.id) });
-    if (file.fingerprint !== source.fingerprint) fail('The saved file source changed. Retry was not started.');
+    if (file.fingerprint !== source.fingerprint) fail(tr('已保存的文件来源已更改，未开始重试。', 'The saved file source changed. Retry was not started.'));
     const resolved = await resolveModel(state.settings);
     return rememberFilePlan(file, resolved, state, source, ranges, batch.id);
   });
   register('start-generation', async ({ preflightId, requestId }) => {
-    requiredText(requestId, 'Request ID');
+    requiredText(requestId, tr('请求 ID 不能为空。', 'Request ID must not be blank.'));
     const previous = store.get().batches.find(b => b.requestId === requestId);
-    if (previous) { if (previous.preflightId !== preflightId) fail('This request ID was already used for different work.'); return view(); }
-    const plan = preflights.get(preflightId) ?? fail('The generation plan expired. Run preflight again.');
+    if (previous) { if (previous.preflightId !== preflightId) fail(tr('此请求 ID 已用于其他操作。', 'This request ID was already used for different work.')); return view(); }
+    const plan = preflights.get(preflightId) ?? fail(tr('生成计划已过期。请重新运行预检。', 'The generation plan expired. Run preflight again.'));
     const resolved = await resolveModel(store.get().settings);
     const accepted = store.get().batches.find(b => b.requestId === requestId);
-    if (accepted) { if (accepted.preflightId !== preflightId) fail('This request ID was already used for different work.'); return view(); }
-    if (plan.revision !== store.get().revision || plan.settingsHash !== fingerprint(store.get().settings) || fingerprint(plan.model) !== fingerprint(resolved.spec)) fail('The library or model changed. Run preflight again.');
+    if (accepted) { if (accepted.preflightId !== preflightId) fail(tr('此请求 ID 已用于其他操作。', 'This request ID was already used for different work.')); return view(); }
+    if (plan.revision !== store.get().revision || plan.settingsHash !== fingerprint(store.get().settings) || fingerprint(plan.model) !== fingerprint(resolved.spec)) fail(tr('闪卡库或模型已更改。请重新运行预检。', 'The library or model changed. Run preflight again.'));
     if (plan.kind === 'file') {
       const checked = fileGeneration.validateFileInput(plan.file);
-      if (checked.fingerprint !== plan.file.fingerprint) fail('The file changed. Run preflight again.');
+      if (checked.fingerprint !== plan.file.fingerprint) fail(tr('文件已更改。请重新运行预检。', 'The file changed. Run preflight again.'));
       if (plan.retryOf) fileSource(store.get(), plan.sourceId);
     } else {
       const live = new Set(graphNow().propositions.map(n => n.id));
-      if (plan.plans.some(p => p.input.targets.some(id => !live.has(id)))) fail('Selected knowledge changed. Run preflight again.');
+      if (plan.plans.some(p => p.input.targets.some(id => !live.has(id)))) fail(tr('所选知识已更改。请重新运行预检。', 'Selected knowledge changed. Run preflight again.'));
     }
     const batchId = randomUUID();
     const newSource = plan.kind === 'file' && !Object.hasOwn(store.get().fileSources ?? {}, plan.sourceId);
     if (newSource) store.writeSource(plan.sourceId, plan.file.markdown);
     try {
       change(s => {
-        if (activeBatch(s)) fail('A generation batch is already active.');
+        if (activeBatch(s)) fail(tr('已有生成批次正在进行。', 'A generation batch is already active.'));
         if (plan.kind === 'file') {
           s.fileSources ??= {};
           s.fileSources[plan.sourceId] ??= { id: plan.sourceId, name: plan.file.name, fingerprint: plan.file.fingerprint, deckId: plan.deckId, deckName: plan.file.name, newLimit: 20 };
@@ -471,7 +472,7 @@ function activate(ctx) {
     return view();
   });
   register('cancel-generation', ({ batchId }) => {
-    const b = store.get().batches.find(b => b.id === batchId) ?? fail('Batch not found.');
+    const b = store.get().batches.find(b => b.id === batchId) ?? fail(tr('未找到批次。', 'Batch not found.'));
     change(s => { const current = s.batches.find(x => x.id === b.id); current.cancelRequested = true; current.status = 'cancelling'; for (const c of current.chunks) if (c.status === 'pending') c.status = 'cancelled'; finishBatch(s, current); }, 'batch-changed');
     for (const c of b.chunks) { const t = ctx.workers.list().find(t => t.requestId === c.requestId); if (t && !['succeeded', 'failed', 'cancelled', 'interrupted'].includes(t.status)) ctx.workers.cancel(t.id); }
     reconcile(); return view();
@@ -479,9 +480,9 @@ function activate(ctx) {
   register('resume-results', () => { reconcile(); return view(); });
 
   function scopeIds(s, scope) {
-    if (scope.deckIds !== undefined && (!Array.isArray(scope.deckIds) || scope.deckIds.some(id => !s.decks.some(d => d.id === id)))) fail('Selected deck no longer exists.');
-    if (scope.propositionIds !== undefined && !Array.isArray(scope.propositionIds)) fail('Invalid review selection.');
-    if (scope.cueIds !== undefined && (!Array.isArray(scope.cueIds) || scope.cueIds.some(id => typeof id !== 'string'))) fail('Invalid cue selection: use an array of cue IDs.');
+    if (scope.deckIds !== undefined && (!Array.isArray(scope.deckIds) || scope.deckIds.some(id => !s.decks.some(d => d.id === id)))) fail(tr('所选卡组已不存在。', 'Selected deck no longer exists.'));
+    if (scope.propositionIds !== undefined && !Array.isArray(scope.propositionIds)) fail(tr('无效的复习选择。', 'Invalid review selection.'));
+    if (scope.cueIds !== undefined && (!Array.isArray(scope.cueIds) || scope.cueIds.some(id => typeof id !== 'string'))) fail(tr('无效的提示语选择：请使用提示语 ID 数组。', 'Invalid cue selection: use an array of cue IDs.'));
     const ds = scope.deckIds ? s.decks.filter(d => scope.deckIds.includes(d.id)) : s.decks;
     let ids = [...new Set(ds.flatMap(d => d.propositionIds))];
     if (scope.propositionIds) ids = ids.filter(id => scope.propositionIds.includes(id));
@@ -496,16 +497,16 @@ function activate(ctx) {
     return active.filter(c => scope.cueIds.includes(c.id));
   }
   function validTicket(id, mustReveal = false, now = Date.now()) {
-    const t = tickets.get(id) ?? fail('This review expired. Load the next card.');
+    const t = tickets.get(id) ?? fail(tr('此次复习已过期。请加载下一张卡片。', 'This review expired. Load the next card.'));
     const s = store.get(), p = prop(s, t.propositionId);
-    if (p.version !== t.version || reviewConfiguration(s.settings) !== t.settingsHash || scheduler.studyDay(now, s.settings.dayStart) !== t.day) fail('This review changed elsewhere. Load the next card.');
-    if (!isLocal(p) && !graphNow().propositions.some(n => n.id === p.id)) fail('The proposition is no longer in the graph.');
+    if (p.version !== t.version || reviewConfiguration(s.settings) !== t.settingsHash || scheduler.studyDay(now, s.settings.dayStart) !== t.day) fail(tr('此次复习已在别处被更改。请加载下一张卡片。', 'This review changed elsewhere. Load the next card.'));
+    if (!isLocal(p) && !graphNow().propositions.some(n => n.id === p.id)) fail(tr('该命题已不在图谱中。', 'The proposition is no longer in the graph.'));
     const { ids } = scopeIds(s, t.scope);
-    if (!ids.includes(p.id)) fail('The review selection changed. Load the next card.');
-    const c = reviewCues(p, t.scope).find(c => c.id === t.cueId) ?? fail('This card is no longer available in the review selection.');
-    if (mustReveal && !t.revealed) fail('Reveal the answer before rating.');
-    if (p.schedule.state === 0) { const d = deck(s, t.admittingDeckId); if (counts(s, now)[d.id] >= d.newLimit) fail('The new-proposition limit has been reached for this deck.'); }
-    else if (!scheduler.isDue(p.schedule, now, s.settings.dayStart)) fail('This proposition is not due.');
+    if (!ids.includes(p.id)) fail(tr('复习范围已更改。请加载下一张卡片。', 'The review selection changed. Load the next card.'));
+    const c = reviewCues(p, t.scope).find(c => c.id === t.cueId) ?? fail(tr('此卡片已不在复习范围中。', 'This card is no longer available in the review selection.'));
+    if (mustReveal && !t.revealed) fail(tr('请先显示答案再评分。', 'Reveal the answer before rating.'));
+    if (p.schedule.state === 0) { const d = deck(s, t.admittingDeckId); if (counts(s, now)[d.id] >= d.newLimit) fail(tr('此卡组今日的新命题数量已达上限。', 'The new-proposition limit has been reached for this deck.')); }
+    else if (!scheduler.isDue(p.schedule, now, s.settings.dayStart)) fail(tr('此命题尚未到期。', 'This proposition is not due.'));
     return { t, p, c, s };
   }
   register('next-review', scope => {
@@ -549,10 +550,10 @@ function activate(ctx) {
     return { answer: c.answer, intervals: Object.fromEntries([1, 2, 3, 4].map(r => [r, previews[r].state === 2 ? previews[r].scheduled_days * 86400000 : previews[r].due - now])) };
   });
   register('rate-review', ({ ticketId, rating, requestId }) => {
-    requiredText(requestId, 'Request ID');
+    requiredText(requestId, tr('请求 ID 不能为空。', 'Request ID must not be blank.'));
     const previous = store.get().reviews.find(r => r.requestId === requestId);
-    if (previous) { if (previous.ticketId !== ticketId || previous.rating !== rating) fail('This request ID was already used for different work.'); return { ok: true }; }
-    if (![1, 2, 3, 4].includes(rating)) fail('Invalid rating.');
+    if (previous) { if (previous.ticketId !== ticketId || previous.rating !== rating) fail(tr('此请求 ID 已用于其他操作。', 'This request ID was already used for different work.')); return { ok: true }; }
+    if (![1, 2, 3, 4].includes(rating)) fail(tr('无效的评分。', 'Invalid rating.'));
     const now = Date.now(), { t } = validTicket(ticketId, true, now);
     change(s => {
       const p = prop(s, t.propositionId), c = p.cues.find(c => c.id === t.cueId);

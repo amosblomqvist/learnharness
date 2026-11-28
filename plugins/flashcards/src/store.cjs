@@ -2,6 +2,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { randomUUID } = require('node:crypto');
+const { tr } = require("./i18n.cjs");
 
 function atomicWrite(file, content) {
   const temporary = `${file}.${randomUUID()}.tmp`;
@@ -55,10 +56,10 @@ function openStore(directory) {
   let state;
   try { state = JSON.parse(fs.readFileSync(file, 'utf8')); }
   catch (error) {
-    if (error.code !== 'ENOENT') throw new Error(`Could not read Flashcards data: ${error.message}`);
+    if (error.code !== 'ENOENT') throw new Error(tr(`无法读取闪卡数据：${error.message}`, `Could not read Flashcards data: ${error.message}`));
     state = { version: 1, revision: 0, settings: defaults(), decks: [], propositions: {}, reviews: [], batches: [] };
   }
-  if (state.version !== 1 || !Number.isSafeInteger(state.revision) || !Array.isArray(state.decks) || !Array.isArray(state.reviews) || !Array.isArray(state.batches) || !state.propositions || !state.settings) throw new Error('Unsupported or invalid Flashcards data. No data was changed.');
+  if (state.version !== 1 || !Number.isSafeInteger(state.revision) || !Array.isArray(state.decks) || !Array.isArray(state.reviews) || !Array.isArray(state.batches) || !state.propositions || !state.settings) throw new Error(tr('闪卡数据无效或版本不受支持。未修改任何数据。', 'Unsupported or invalid Flashcards data. No data was changed.'));
   const migrated = structuredClone(state);
   if (migrate(migrated)) {
     migrated.revision++;

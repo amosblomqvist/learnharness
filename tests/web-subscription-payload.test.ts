@@ -16,6 +16,7 @@ for (const name of ["chatgpt-credentials.json", "github-copilot-credentials.json
 			copyFileSync(new URL("../scripts/build-plugin-authoring.mjs", import.meta.url), path.join(root, "scripts", "build-plugin-authoring.mjs"));
 			mkdirSync(path.join(root, "src", "core"), { recursive: true });
 			copyFileSync(new URL("../src/core/plugins.ts", import.meta.url), path.join(root, "src", "core", "plugins.ts"));
+			copyFileSync(new URL("../src/core/i18n.ts", import.meta.url), path.join(root, "src", "core", "i18n.ts"));
 			writeFileSync(path.join(root, ".next", "standalone", "server.js"), "// fixture");
 			writeFileSync(path.join(root, ".next", "standalone", secret), "fixture-not-real-credentials", { mode: 0o600 });
 			const result = spawnSync(process.execPath, [path.join(root, "scripts", "build-server.mjs")], { encoding: "utf8", env: process.env });

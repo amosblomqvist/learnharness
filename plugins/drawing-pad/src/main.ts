@@ -8,6 +8,7 @@ import { Sheets, type SessionSheet } from "./state.ts";
 import { appendDrawing } from "./submission.ts";
 import { PEN } from "./icons.ts";
 import { appPalette, recolorReference } from "./theme.ts";
+import { tr } from "./i18n.ts";
 type SessionAction = Extract<PluginActionContext, { surface: "session" }>;
 interface OpenPad {
   session: SessionSheet;
@@ -45,7 +46,7 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     sheets.dropUntouched(pad.session);
   }
   function toggle(context: SessionAction): void {
-    if (!context.view) throw new Error("This LearnHarness build does not expose the session view context required by Drawing Pad.");
+    if (!context.view) throw new Error(tr("此 LearnHarness 版本未提供画板所需的会话视图上下文。", "This LearnHarness build does not expose the session view context required by Drawing Pad."));
     const hadState = sheets.sessions.has(context.sessionId);
     const state = sheets.session(context.sessionId, context.kind);
     const wasOpen = open?.session === state;
@@ -60,7 +61,7 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     open = pad;
     try {
       pad.handle = ctx.ui.openSurface(context.surfaceTarget, {
-        title: "Drawing pad", background: "opaque",
+        title: tr("画板", "Drawing pad"), background: "opaque",
         content(container, signal) {
           if (pad.closed || signal.aborted) return;
           const mounted = mountSheet(container, ctx, sheets, state, context.view.input, signal);
@@ -89,7 +90,7 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     get name() {
       const id = pageSessions.get(ctx.app.pathname());
       const state = id ? sheets.sessions.get(id) : undefined;
-      return state && sheets.pending(state) ? "Draw (unsent)" : "Draw";
+      return state && sheets.pending(state) ? tr("绘图（未发送）", "Draw (unsent)") : tr("绘图", "Draw");
     },
     run(context) { if (context.surface === "session") toggle(context); },
   };
@@ -100,33 +101,33 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
     return mounted?.canUseEditingShortcuts() ? mounted : undefined;
   }
   const undoAction: PluginAction = {
-    id: "undo", name: "Undo drawing",
+    id: "undo", name: tr("撤销绘图", "Undo drawing"),
     shortcut: { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+z" },
     disabled: context => !editingPad(context)?.canUndo(),
     run(context) { editingPad(context)?.undo(); },
   };
   const toggleToolsAction: PluginAction = {
-    id: "toggle-pen-eraser", name: "Toggle pen/eraser",
+    id: "toggle-pen-eraser", name: tr("切换画笔/橡皮擦", "Toggle pen/eraser"),
     shortcut: { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+shift+e" },
     disabled: context => !editingPad(context),
     run(context) { editingPad(context)?.togglePenEraser(); },
   };
   const handAction: PluginAction = {
-    id: "hand", name: "Hand",
+    id: "hand", name: tr("抓手", "Hand"),
     shortcut: { scope: { sessions: ["teaching", "practice"] }, defaultBinding: "mod+shift+h" },
     disabled: context => !editingPad(context),
     run(context) { editingPad(context)?.selectHand(); },
   };
   const rows = (value: Settings): PluginSettingsSchema["rows"] => [...([
-    { key: "darkInkColor", label: "Dark mode ink color" },
-    { key: "lightInkColor", label: "Light mode ink color" },
+    { key: "darkInkColor", label: tr("深色模式墨迹颜色", "Dark mode ink color") },
+    { key: "lightInkColor", label: tr("浅色模式墨迹颜色", "Light mode ink color") },
   ] as const).map(({ key, label }) => ({
     key, type: "text" as const, label, value: value[key],
-    description: "Six-digit hex color. Recolors all unsent ink when this app theme mode is active.", validate: colorError,
+    description: tr("六位十六进制颜色。应用处于该主题模式时，所有未发送的墨迹都会改用此颜色。", "Six-digit hex color. Recolors all unsent ink when this app theme mode is active."), validate: colorError,
     async onChange(color: string) { applySettings(await ctx.call("set-ink-color", { [key]: color })); },
   })), {
-    key: "imageScale", type: "number", label: "Image scale", value: value.imageScale, min: 0, max: 100,
-    description: "Export percentage (default 50%). Applied before the fixed 2000 × 2000 pixel cap. Does not change the drawing surface.",
+    key: "imageScale", type: "number", label: tr("图片缩放", "Image scale"), value: value.imageScale, min: 0, max: 100,
+    description: tr("导出百分比（默认 50%）。在固定的 2000 × 2000 像素上限之前应用，不会改变绘图区域。", "Export percentage (default 50%). Applied before the fixed 2000 × 2000 pixel cap. Does not change the drawing surface."),
     validate: imageScaleError,
     async onChange(imageScale) { applySettings(await ctx.call("set-image-scale", { imageScale })); },
   }];
@@ -241,7 +242,7 @@ export async function activate(ctx: PluginFrontendContext): Promise<() => void> 
         if (!captured) return;
         const result = captured.sendImage ? appendDrawing(input, await exportSheet(captured, context.signal)) : input;
         context.signal.throwIfAborted();
-        if (state.draft?.id !== captured.draft.id) throw new Error("The captured drawing sheet was reset. Review the current input and submit again.");
+        if (state.draft?.id !== captured.draft.id) throw new Error(tr("已捕获的画纸已被重置。请检查当前输入后重新提交。", "The captured drawing sheet was reset. Review the current input and submit again."));
         context.onAccepted(() => { if (!disposed && !ctx.signal.aborted) sheets.accepted(captured); });
         return result;
       },

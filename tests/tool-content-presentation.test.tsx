@@ -145,7 +145,7 @@ test("historical source join restores matrices while retaining recorded order, a
 	assert.equal(projection.confidence, 70);
 	const html = renderToStaticMarkup(<AnsweredCard answer={answer} input={input} />);
 	assert.deepEqual(tex(html), [a.slice(1,-1), b.slice(1,-1), a.slice(1,-1)]);
-	assert.match(html, /incorrect/);
+	assert.match(html, /data-slot="status-badge"[^>]*>错误</);
 	assert.deepEqual({ answer, input }, before);
 });
 

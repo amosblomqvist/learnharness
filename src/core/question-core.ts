@@ -243,8 +243,8 @@ export function questionNeedsReveal(tool: string, rawInput: unknown, phase: stri
 const predictCheckType = Type.Union([Type.Literal("predict"), Type.Literal("check")], {
 	description:
 		"REQUIRED — the question's role in the teaching cycle, as a bare word (no quotes): predict = posed BEFORE " +
-		"you teach the step (arrives open, never collapsed); check = posed AFTER the step's teaching is complete " +
-		"(arrives collapsed behind the Check your understanding reveal)."
+		"you teach a step that is within the learner's reach (arrives open, never collapsed) — never before new material; " +
+		"check = posed AFTER the step's teaching is complete (arrives collapsed behind the Check your understanding reveal)."
 });
 
 

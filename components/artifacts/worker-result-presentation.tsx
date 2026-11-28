@@ -3,10 +3,11 @@
 import type { ReactNode } from "react";
 import { CheckIcon, ChevronRight } from "lucide-react";
 import { Hint } from "@/components/ui/hint";
+import { tr } from "@/src/core";
 
 /** Shared research/PDF completion grammar. The host owns the summary; only
  * the expanded body is replaceable by a plugin renderer. */
-export function WorkerResultDetails({ heading, children, icon = <CheckIcon className="size-3.5" />, testId, headerTestId, headerTooltip, disclosure = "labels", viewLabel = "view brief", hideLabel = "hide brief" }: {
+export function WorkerResultDetails({ heading, children, icon = <CheckIcon className="size-3.5" />, testId, headerTestId, headerTooltip, disclosure = "labels", viewLabel = tr("查看简报", "view brief"), hideLabel = tr("收起简报", "hide brief") }: {
 	heading: ReactNode;
 	children: ReactNode;
 	icon?: ReactNode;

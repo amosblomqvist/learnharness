@@ -6,21 +6,22 @@ import { stores } from "./stores.ts";
 import { sourceDirectory } from "./source-organization.ts";
 import { deleteIdleChatRecord, runningWorkBlocker, settleChatsForDeletion } from "./chats.ts";
 import { graphRevision } from "./graph.ts";
+import { tr } from "../core/i18n.ts";
 
 export class SourceDeletionError extends Error {
 	constructor(message: string, public status = 400, public code = "invalid_source_deletion") { super(message); }
 }
 export interface SourceDeletionRequest { sourceIds: string[]; folderIds: string[]; deleteSessions: boolean }
 export function parseSourceDeletion(raw: unknown): SourceDeletionRequest {
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new SourceDeletionError("Invalid source deletion request.");
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw new SourceDeletionError(tr("无效的来源删除请求。", "Invalid source deletion request."));
 	const r = raw as Record<string, unknown>;
 	const ids = (value: unknown) => {
-		if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id.length > 0)) throw new SourceDeletionError("Source and folder IDs must be arrays of non-empty strings.");
+		if (!Array.isArray(value) || !value.every((id) => typeof id === "string" && id.length > 0)) throw new SourceDeletionError(tr("来源和文件夹 ID 必须是由非空字符串组成的数组。", "Source and folder IDs must be arrays of non-empty strings."));
 		return [...new Set(value)] as string[];
 	};
-	if (typeof r.deleteSessions !== "boolean") throw new SourceDeletionError("Session deletion must be explicitly selected or declined.");
+	if (typeof r.deleteSessions !== "boolean") throw new SourceDeletionError(tr("必须明确选择是否删除会话。", "Session deletion must be explicitly selected or declined."));
 	const result = { sourceIds: ids(r.sourceIds), folderIds: ids(r.folderIds), deleteSessions: r.deleteSessions };
-	if (!result.sourceIds.length && !result.folderIds.length) throw new SourceDeletionError("Select at least one source or folder.");
+	if (!result.sourceIds.length && !result.folderIds.length) throw new SourceDeletionError(tr("请至少选择一个来源或文件夹。", "Select at least one source or folder."));
 	return result;
 }
 
@@ -31,7 +32,7 @@ export function deleteSources(raw: unknown): SourceDirectory & { graphRevision: 
 	const request = parseSourceDeletion(raw);
 	const directory = sourceDirectory.read(); // validate organization before any destructive write
 	const targets = directory.sources.filter((s) => request.sourceIds.includes(s.id));
-	if (targets.length && extractionStatuses().length) throw new SourceDeletionError("An extraction is running — try again when the activity dock drains.", 409, "extraction_running");
+	if (targets.length && extractionStatuses().length) throw new SourceDeletionError(tr("正在进行提取 — 请等待活动面板中的任务完成后再试。", "An extraction is running — try again when the activity dock drains."), 409, "extraction_running");
 	if (request.deleteSessions) for (const entry of targets) if (entry.kind === "chat") {
 		const blocker = runningWorkBlocker(entry.id);
 		if (blocker) throw new SourceDeletionError(blocker.error, blocker.status, blocker.code);
@@ -69,7 +70,7 @@ export function deleteSources(raw: unknown): SourceDirectory & { graphRevision: 
 }
 
 function parseFolderDeletionScope(raw: unknown): FolderDeletionScope {
-	const invalid = () => new SourceDeletionError("A folder deletion must include the reviewed scope.", 400, "bad_folder_scope");
+	const invalid = () => new SourceDeletionError(tr("删除文件夹时必须附带已确认的删除范围。", "A folder deletion must include the reviewed scope."), 400, "bad_folder_scope");
 	if (!raw || typeof raw !== "object" || Array.isArray(raw)) throw invalid();
 	const r = raw as Record<string, unknown>;
 	const ids = (value: unknown): string[] => {
@@ -82,20 +83,20 @@ function parseFolderDeletionScope(raw: unknown): FolderDeletionScope {
 
 function requireFolderDeletionScope(directory: SourceDirectory, folderId: string, expected: FolderDeletionScope) {
 	const actual = folderDeletionScope(directory, folderId);
-	if (!actual) throw new SourceDeletionError("This folder no longer exists.", 404, "not_found");
+	if (!actual) throw new SourceDeletionError(tr("此文件夹已不存在。", "This folder no longer exists."), 404, "not_found");
 	const equalIds = (a: string[], b: string[]) => a.length === b.length && a.every((id, i) => id === b[i]);
 	if (actual.parentId !== expected.parentId || !equalIds(actual.folderIds, expected.folderIds)
 		|| !equalIds(actual.chatIds, expected.chatIds) || !equalIds(actual.noteIds, expected.noteIds)) {
-		throw new SourceDeletionError("The folder changed. Nothing was deleted. Open Delete again to review its current contents.", 409, "folder_scope_changed");
+		throw new SourceDeletionError(tr("文件夹已更改，未删除任何内容。请重新打开“删除”以查看其当前内容。", "The folder changed. Nothing was deleted. Open Delete again to review its current contents."), 409, "folder_scope_changed");
 	}
 	return actual;
 }
 
 function blockedIn(title: string | null, code: string, error: string): SourceDeletionError {
-	const name = `“${title ?? "Untitled"}”`;
-	const message = code === "turn_in_flight" ? `A turn is running in ${name} — try again when it finishes`
-		: code === "jobs_running" ? `Background jobs are still running in ${name} — try again when they finish`
-		: code === "extraction_winding_down" ? `The extraction of ${name} is still winding down — try again in a moment`
+	const name = tr(`“${title ?? "未命名会话"}”`, `“${title ?? "Untitled"}”`);
+	const message = code === "turn_in_flight" ? tr(`${name}中有回合正在运行 — 请在其结束后再试`, `A turn is running in ${name} — try again when it finishes`)
+		: code === "jobs_running" ? tr(`${name}中仍有后台任务在运行 — 请在其结束后再试`, `Background jobs are still running in ${name} — try again when they finish`)
+		: code === "extraction_winding_down" ? tr(`${name}的提取仍在收尾 — 请稍后再试`, `The extraction of ${name} is still winding down — try again in a moment`)
 		: error;
 	return new SourceDeletionError(message, code === "extraction_winding_down" ? 503 : 409, code);
 }
@@ -114,7 +115,7 @@ function blockedIn(title: string | null, code: string, error: string): SourceDel
  * unchanged.
  */
 export async function deleteFolderWithSessions(folderId: string, mode: ChatDeleteMode, rawScope: unknown): Promise<SourceDirectory & { graphRevision: number; deletedChatIds: string[] }> {
-	if (mode !== "preserve-graph" && mode !== "delete-nodes") throw new SourceDeletionError('mode must be "preserve-graph" or "delete-nodes"', 400, "bad_mode");
+	if (mode !== "preserve-graph" && mode !== "delete-nodes") throw new SourceDeletionError(tr('mode 必须是 "preserve-graph" 或 "delete-nodes"', 'mode must be "preserve-graph" or "delete-nodes"'), 400, "bad_mode");
 	const expected = parseFolderDeletionScope(rawScope);
 	const initial = sourceDirectory.read();
 	const before = requireFolderDeletionScope(initial, folderId, expected);

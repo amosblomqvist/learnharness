@@ -116,7 +116,7 @@ describe("activity dock pure layer", () => {
 			error: "No OpenRouter key is set — add one in Settings → Keys",
 		});
 		const blob = toBlobs({ jobs: [refused], extractions: [] })[0]!;
-		assert.equal(blob.activity, "needs a provider key");
+		assert.equal(blob.activity, "需要服务商 API 密钥");
 	});
 
 	it("a models-refused job reads as info — 'needs model setup', not 'failed' (BYOK, 2026-09-22)", () => {
@@ -126,7 +126,7 @@ describe("activity dock pure layer", () => {
 			error: "No model configured — set up your models first (missing: vision)",
 		});
 		const blob = toBlobs({ jobs: [refused], extractions: [] })[0]!;
-		assert.equal(blob.activity, "needs model setup");
+		assert.equal(blob.activity, "需要设置模型");
 		// A real failure keeps the runner's honest wording.
 		const crashed = job({ status: "error", activity: "failed", error: "FAILED: headless crashed" });
 		const real = toBlobs({ jobs: [crashed], extractions: [] })[0]!;
@@ -219,7 +219,7 @@ describe("activity section render", () => {
 	it("renders the ALWAYS-PRESENT header when idle — empty means empty, nothing hides", () => {
 		const html = renderToStaticMarkup(<ActivitySection feed={{ jobs: [], extractions: [] }} />);
 		assert.match(html, /data-testid="activity-section"/);
-		assert.match(html, /Background agents/);
+		assert.match(html, /后台智能体/);
 		assert.doesNotMatch(html, /activity-blob-(job|extraction)/, "no rows while idle");
 		assert.doesNotMatch(html, /activity-total-cost/, "the cost span is population, not decoration");
 	});
@@ -238,12 +238,12 @@ describe("activity section render", () => {
 		assert.match(html, /data-testid="activity-blob-extraction"/);
 		assert.match(html, /Chain-rule demo/);
 		assert.match(html, /building sandbox…/);
-		assert.match(html, /Extraction — merging/);
+		assert.match(html, /提取 — 合并中/);
 		// Unpriced job → "—", never $0.0000 (doctrine); both blobs show it.
 		assert.match(html, /activity-blob-cost[^>]*>—</);
 		assert.match(html, /data-testid="activity-abort"/, "END on the blob face, popover-independent");
-		assert.match(html, /\bEnd\b/, "the explicit END button");
-		assert.match(html, /Background agents/);
+		assert.match(html, /aria-label="结束“/, "the explicit END button");
+		assert.match(html, /后台智能体/);
 		// Total cost: nothing priced → "—" in the header.
 		assert.match(html, /activity-total-cost[^>]*>—</);
 		// Truncation-reveals KEEP native title (tooltip wave mechanism rule):
@@ -343,14 +343,14 @@ describe("activity section render", () => {
 			const stop = dom.document.querySelector("[data-testid='activity-abort']")!;
 			assert.equal(face.contains(stop), false, "stop is a sibling control, never a nested button");
 			assert.equal(stop.getAttribute("type"), "button");
-			assert.match(stop.getAttribute("aria-label")!, /^End /);
+			assert.match(stop.getAttribute("aria-label")!, /^结束“/);
 			await act(async () => { face.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
 			assert.equal(face.getAttribute("aria-expanded"), "true");
 			await act(async () => { stop.dispatchEvent(new dom.window.Event("click", { bubbles: true })); });
 			assert.deepEqual(calls, [request]);
 			assert.equal(face.getAttribute("aria-expanded"), "true", "stop must not collapse the disclosure");
 			assert.equal(stop.hasAttribute("disabled"), true, "pending cancellation disables duplicate clicks");
-			assert.match(dom.document.querySelector("[data-testid='activity-blob-detail']")!.textContent!, /Stopping…/);
+			assert.match(dom.document.querySelector("[data-testid='activity-blob-detail']")!.textContent!, /正在停止…/);
 			await act(async () => { finish(Response.json({ ok: true })); });
 			await act(async () => { root.render(<ActivitySection feed={{ jobs: [], extractions: [] }} />); });
 			assert.equal(dom.document.querySelector("[data-testid='activity-abort']"), null, "settled feed removes the control");

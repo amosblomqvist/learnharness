@@ -38,7 +38,7 @@ export async function verifyCorePlugins({ root, standalone, dataDirectory, url }
 	const dataMarker = path.join(shadow, "data", "private.txt"); fs.mkdirSync(path.dirname(dataMarker)); fs.writeFileSync(dataMarker, "do not migrate or change");
 	try {
 		const refreshed = await request("/api/plugins", { action: "refresh" });
-		assert.ok(refreshed.conflicts.some(conflict => conflict.id === ids[0] && /reserved/i.test(conflict.error)));
+		assert.ok(refreshed.conflicts.some(conflict => conflict.id === ids[0] && /为核心插件保留/.test(conflict.error)));
 		for (const id of ids) {
 			const catalog = await request(`/api/plugins/${id}`, { enabled: true });
 			const info = catalog.plugins.find(p => p.id === id); assert.equal(info.origin, "core"); assert.equal(info.status, "active", JSON.stringify(info));

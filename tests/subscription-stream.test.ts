@@ -73,7 +73,7 @@ for (const p of NATIVE_SUBSCRIPTIONS) test(`${p.providerId}: every SDK transport
 			},
 		}).result();
 		assert(payloadObserved); assert.equal(requests, 1); assert.equal(result.provider, p.logicalId); assert.equal(result.stopReason, "error");
-		assert(!result.errorMessage?.includes("private-fixture-provider-detail")); assert(result.errorMessage?.includes("No API-key fallback"));
+		assert(!result.errorMessage?.includes("private-fixture-provider-detail")); assert(result.errorMessage?.includes("未回退到 API 密钥"));
 		capture.reply(result); capture.finish();
 		const record = JSON.parse(fs.readFileSync(path.join(dir, `researcher-${runId}.json`), "utf8"));
 		assert.deepEqual(record.request.payload, actualBody, "Observe after the selected model is enforced, not the caller replacement");

@@ -1,4 +1,5 @@
 'use strict';
+const { tr } = require('./i18n.cjs');
 
 // Edit source-agnostic card-writing guidance here. Both generation paths use it.
 const cardWriting = `Generate fact-recall flashcards, not multi-step reasoning exercises.
@@ -110,6 +111,7 @@ const outputProtocol = [
   'Diagrams: use ```mermaid fenced code when useful, with quoted labels for spaces or symbols, for example B["Commit transaction"].',
   'JSON strings: double backslashes (four for a TeX row break); "\\\\$20" preserves Markdown \\$20 and "\\\\frac{a}{b}" preserves LaTeX \\frac{a}{b}. Encode line breaks as \\n so fences and display math occupy real lines after decoding.',
   'Use concise Markdown; do not use raw HTML.',
+  ...tr(['Language: write questions and answers in Simplified Chinese (简体中文) unless the source material is clearly meant for another language; keep code, identifiers, formulas and proper names as they are.'], []),
   'Submit the complete result using submit_result; correct validation errors in the same conversation. Prose alone is not completion.',
 ].join('\n');
 

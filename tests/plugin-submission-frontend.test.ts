@@ -42,10 +42,10 @@ test("no hooks skip history access but retain payload validation, detachment, re
 	attempt.deliver(); assert.equal(runner.occupied, true); assert.equal(runner.preparing, false);
 	attempt.accepted(); assert.equal(runner.occupied, false);
 	const invalid = runner.begin(target, [], () => true)!;
-	await assert.rejects(invalid.prepare({ ...input, extra: true } as PluginSubmission, history), /Unexpected or missing/);
+	await assert.rejects(invalid.prepare({ ...input, extra: true } as PluginSubmission, history), /提交内容包含意外字段或缺少字段/);
 	assert.equal(historyReads, 0); invalid.refused();
 	const wrongType = runner.begin(target, [], () => true)!;
-	await assert.rejects(wrongType.prepare({ type: "thinking", content: { text: "wrong", images: [] } }, history), /Submission type cannot change/);
+	await assert.rejects(wrongType.prepare({ type: "thinking", content: { text: "wrong", images: [] } }, history), /提交类型不能更改/);
 	wrongType.refused(); assert.equal(runner.occupied, false);
 });
 
@@ -108,7 +108,7 @@ test("null cancellation, thrown error, invalid replacement and type changes all 
 		let later = 0; const runner = new PluginSubmissionRunner();
 		const attempt: SubmissionAttempt = runner.begin(target, [owner(intercept as never), { ...owner(() => { later++; }), pluginId: "later" }], () => true)!;
 		if (index === 0) assert.equal(await attempt.prepare(input, []), null);
-		else await assert.rejects(attempt.prepare(input, []), /Could not prepare submission \(Fixture\): .*Your input has been kept/);
+		else await assert.rejects(attempt.prepare(input, []), /无法准备提交（Fixture）：.*你的输入已保留/);
 		assert.equal(later, 0); assert.equal(input.content.text, "draft"); assert.equal(runner.occupied, false);
 	}
 });

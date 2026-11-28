@@ -3,6 +3,7 @@
 import type { ReactElement, ReactNode } from "react";
 import { HostDialog } from "@/components/host-dialog";
 import { useBackdropDismiss } from "@/components/backdrop-dismiss";
+import { tr } from "@/src/core";
 
 /**
  * The ESC-abort guard (owner, 2026-10-02): the global Esc → abort chain
@@ -29,19 +30,19 @@ export type AbortMode = "turn" | "question" | "problem";
 
 const COPY: Record<AbortMode, { title: string; line: string; action: string }> = {
 	turn: {
-		title: "Abort this turn?",
-		line: "The partial answer stays in the transcript.",
-		action: "Abort",
+		title: tr("中止这一回合？", "Abort this turn?"),
+		line: tr("已生成的部分回答会保留在对话记录中。", "The partial answer stays in the transcript."),
+		action: tr("中止", "Abort"),
 	},
 	question: {
-		title: "Dismiss this question?",
-		line: "Skipped — the teacher moves on without it.",
-		action: "Dismiss",
+		title: tr("跳过这个问题？", "Dismiss this question?"),
+		line: tr("已跳过——老师会直接继续。", "Skipped — the teacher moves on without it."),
+		action: tr("跳过", "Dismiss"),
 	},
 	problem: {
-		title: "Discard this problem?",
-		line: "The problem is dropped — no solution is revealed.",
-		action: "Discard",
+		title: tr("放弃这道题目？", "Discard this problem?"),
+		line: tr("这道题目将被放弃——不会显示解答。", "The problem is dropped — no solution is revealed."),
+		action: tr("放弃", "Discard"),
 	},
 };
 
@@ -74,7 +75,7 @@ export function AbortTurnBody({
 				</h2>
 				<p className="mt-1.5 text-xs text-muted-foreground" data-testid="abort-turn-line">
 					{copy.line}
-					{busy && mode !== "turn" ? " The working turn stops too." : ""}
+					{busy && mode !== "turn" ? tr("进行中的回合也会停止。", " The working turn stops too.") : ""}
 				</p>
 				<div className="mt-4 flex justify-end gap-2">
 					<button
@@ -83,7 +84,7 @@ export function AbortTurnBody({
 						onClick={onClose}
 						className="rounded-sm px-3 py-1.5 text-xs text-muted-foreground transition-colors hover:text-foreground"
 					>
-						Cancel
+						{tr("取消", "Cancel")}
 					</button>
 					<button
 						type="button"

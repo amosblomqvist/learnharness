@@ -64,11 +64,11 @@ it("registered renderers override native plugin dispatch/result bodies; disable 
 		await render(<PluginWorkerCard result={result} toolCallId="original-call" />);
 		await act(async () => { owner.manager.reconcile([{ ...info, enabled: false, status: "disabled" }]); });
 		assert.equal(seen[1]!.signal.aborted, true);
-		assert.match(document.querySelector('[data-testid="plugin-worker-fallback"]')!.textContent!, /Persisted result textTask details/);
+		assert.match(document.querySelector('[data-testid="plugin-worker-fallback"]')!.textContent!, /Persisted result text任务详情/);
 		assert.match(document.body.textContent!, /Authoritative outcome/);
 		assert.equal(document.querySelector("[data-plugin-renderer]"), null);
 		await render(<ToolPartRenderer part={ack} />);
-		assert.match(document.querySelector('[data-testid="dispatch-card"]')!.textContent!, /Plugin workerDispatched/);
+		assert.match(document.querySelector('[data-testid="dispatch-card"]')!.textContent!, /插件智能体已派出/);
 		assert.equal(document.querySelector('[data-testid="tool-call-card"]'), null);
 	} finally {
 		try { await act(async () => { root.unmount(); }); await owner.manager.dispose(); }

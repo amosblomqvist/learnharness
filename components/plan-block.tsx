@@ -22,6 +22,7 @@ import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "@/components/settings/appearance";
 import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
+import { tr } from "@/src/core";
 
 /**
  * PLAN BLOCKS — the plan lives in the chat (wave 4): persisted
@@ -374,7 +375,7 @@ export function PlanDiagram({
 						: {}),
 			}}
 			role="img"
-			aria-label="Plan diagram"
+			aria-label={tr("学习计划图", "Plan diagram")}
 		>
 			<defs>
 				<marker
@@ -519,11 +520,11 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 	const plan = usePlanLayout(data);
 	const { appearance } = useAppearance();
 	return (
-		<Hint label="Open the full plan" side="bottom">
+		<Hint label={tr("打开完整学习计划", "Open the full plan")} side="bottom">
 <button
 			type="button"
 			data-testid="plan-block-full"
-			aria-label="Open the full plan"
+			aria-label={tr("打开完整学习计划", "Open the full plan")}
 			onClick={onOpen}
 			className="block w-full text-left"
 		>
@@ -721,19 +722,19 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 			// Ranked inside the session's bounded view stack, below app modals.
 			style={{ zIndex: 100 + layer.order }}
 			role="region"
-			aria-label="The full plan"
+			aria-label={tr("完整学习计划", "The full plan")}
 			onClick={(e) => {
 				if (e.target === e.currentTarget) onClose();
 			}}
 		>
 			<div className="mb-2 flex items-center gap-2">
-				<span className="text-sm font-medium">The plan</span>
-				<span className="text-xs text-muted-foreground">live — statuses derive from your check outcomes</span>
-				<Hint label="Close" binding="escape" side="left">
+				<span className="text-sm font-medium">{tr("学习计划", "The plan")}</span>
+				<span className="text-xs text-muted-foreground">{tr("实时 — 状态根据你的检验结果得出", "live — statuses derive from your check outcomes")}</span>
+				<Hint label={tr("关闭", "Close")} binding="escape" side="left">
 <button
 					type="button"
 					onClick={onClose}
-					aria-label="Close"
+					aria-label={tr("关闭", "Close")}
 					data-testid="plan-popup-close"
 					className="ml-auto rounded-lg p-1.5 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 				>
@@ -783,22 +784,22 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 						</div>
 						<PlanLayoutProbe probe={plan.probe} />
 						<div className="pointer-events-none absolute inset-x-0 bottom-0 flex items-end justify-between p-2">
-							<span className="text-xs text-muted-foreground/60">Drag to pan · scroll to zoom</span>
+							<span className="text-xs text-muted-foreground/60">{tr("拖动平移 · 滚动缩放", "Drag to pan · scroll to zoom")}</span>
 							<div className="flex gap-1">
-								<Hint label="Zoom out" side="bottom">
+								<Hint label={tr("缩小", "Zoom out")} side="bottom">
 <button
 									type="button"
-									aria-label="Zoom out"
+									aria-label={tr("缩小", "Zoom out")}
 									onClick={() => stepZoom(1 / 1.25)}
 									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
 								>
 									<MinusIcon className="size-3.5" />
 								</button>
 </Hint>
-								<Hint label="Fit plan to screen" side="bottom">
+								<Hint label={tr("使学习计划适应屏幕", "Fit plan to screen")} side="bottom">
 <button
 									type="button"
-									aria-label="Fit plan to screen"
+									aria-label={tr("使学习计划适应屏幕", "Fit plan to screen")}
 									onClick={fitView}
 									data-testid="plan-popup-fit"
 									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
@@ -806,10 +807,10 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 									<MaximizeIcon className="size-3.5" />
 								</button>
 </Hint>
-								<Hint label="Zoom in" side="bottom">
+								<Hint label={tr("放大", "Zoom in")} side="bottom">
 <button
 									type="button"
-									aria-label="Zoom in"
+									aria-label={tr("放大", "Zoom in")}
 									onClick={() => stepZoom(1.25)}
 									className="pointer-events-auto flex size-7 items-center justify-center rounded-md border border-border/70 bg-card/80 text-muted-foreground backdrop-blur transition-colors hover:bg-accent hover:text-foreground"
 								>
@@ -821,7 +822,7 @@ export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessa
 					</>
 				) : (
 					<div className="flex h-full items-center justify-center text-sm text-muted-foreground">
-						No plan in this session yet.
+						{tr("此会话还没有学习计划。", "No plan in this session yet.")}
 					</div>
 				)}
 			</div>

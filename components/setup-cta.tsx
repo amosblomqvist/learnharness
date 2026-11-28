@@ -19,6 +19,7 @@ import { useEffect, useState } from "react";
 import { CUSTOM_PROVIDER, MODEL_SLOTS, type AuthKeyStatus, type ModelCatalogResponse } from "@/src/core";
 import { classifyKeys, type ProviderKeyInfo } from "@/components/settings/keys-section";
 import { useModelCatalog } from "@/components/model-catalog";
+import { tr } from "@/src/core";
 
 /** Pure: does a MODEL-PROVIDER key exist among the statuses? Reuses
  *  classifyKeys (the keys section's own classification — no drift):
@@ -86,7 +87,7 @@ export function ZeroKeysPill({ onOpen, inline = false }: { onOpen: () => void; i
 			onClick={onOpen}
 			className="rounded-sm border border-border bg-card px-3 py-1.5 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50 hover:bg-accent cursor-pointer"
 		>
-			Add a provider key
+			{tr("添加服务商密钥", "Add a provider key")}
 		</button>
 	);
 	return inline ? button : <div className="pointer-events-auto mb-2 flex justify-center">{button}</div>;

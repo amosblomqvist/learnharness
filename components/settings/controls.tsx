@@ -132,6 +132,7 @@ export function Toggle({
 	label,
 	discIcon,
 	title,
+	testid,
 }: {
 	checked: boolean;
 	disabled?: boolean;
@@ -144,6 +145,8 @@ export function Toggle({
 	discIcon?: ReactNode;
 	/** Optional native tooltip on the switch. */
 	title?: string;
+	/** Stable test id; defaults to one derived from an ASCII label. */
+	testid?: string;
 }) {
 	return (
 		<button
@@ -153,7 +156,7 @@ export function Toggle({
 			aria-label={label}
 			{...(title ? { title } : {})}
 			disabled={disabled}
-			data-testid={`toggle-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
+			data-testid={testid ?? `toggle-${label.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`}
 			onClick={() => onChange(!checked)}
 			className={cn(
 				"relative h-4.5 w-8 shrink-0 rounded-full border border-border transition-colors",

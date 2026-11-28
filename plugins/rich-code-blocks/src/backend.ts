@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { PluginBackendContext } from "learnharness-plugin-api";
 import { DEFAULT_SETTINGS, FAMILIES, INSTRUCTIONS, parseChange, parseSettings, type Settings } from "./contract.ts";
+import { tr } from "./i18n.ts";
 
 export function activate(ctx: PluginBackendContext): () => void {
   const file = path.join(ctx.dataDirectory, "settings.json");
@@ -19,7 +20,7 @@ export function activate(ctx: PluginBackendContext): () => void {
       instructionDisposers.push(ctx.registerInstructions({ agents: ["prober", "teacher", "practice"], text: INSTRUCTIONS[family] }));
     }
   };
-  const assertActive = () => { if (ctx.signal.aborted) throw new Error("Rich code blocks is disabled."); };
+  const assertActive = () => { if (ctx.signal.aborted) throw new Error(tr("富代码块已停用。", "Rich code blocks is disabled.")); };
   updateInstructions();
   const unregisterGet = ctx.handle("get-settings", () => { assertActive(); return { ...settings }; });
   const nextRevision = () => {

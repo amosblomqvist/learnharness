@@ -4,6 +4,7 @@ const path = require("node:path");
 const { createRequire, registerHooks } = require("node:module");
 const { pathToFileURL } = require("node:url");
 const { PROVIDERS, fileStore, validateCredential, safeHttps, failure } = require("./subscription-store.cjs");
+const { tr } = require("./i18n.cjs");
 
 const LABELS = { "github-copilot": "GitHub Copilot", xai: "Grok" };
 const APIS = new Set(["openai-responses", "openai-completions", "anthropic-messages"]);
@@ -157,7 +158,7 @@ function createSubscriptions(options) {
 					if (event.type === "auth_url") addBrowser(event.url);
 					if (event.type === "device_code") { addBrowser(event.verificationUri); attempt.public.userCode = event.userCode; }
 					// Native provider diagnostics are never forwarded. Public prompt wording comes from SDK-owned prompts.
-					attempt.public.progress = event.type === "device_code" || event.type === "auth_url" ? "Complete sign-in in your browser." : "Waiting for the provider…";
+					attempt.public.progress = event.type === "device_code" || event.type === "auth_url" ? tr("请在浏览器中完成登录。", "Complete sign-in in your browser.") : tr("正在等待服务商…", "Waiting for the provider…");
 					changed(entry);
 				},
 				prompt: (prompt) => new Promise((resolve, reject) => {

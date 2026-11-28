@@ -1,163 +1,123 @@
-# Flashcards
+# 闪卡
 
-A Core LearnHarness plugin: generate fact-recall cues from your graph or uploaded PDF/text files, organize them in flat decks, and review them with FSRS-6. **No Anki integration.** No runtime npm dependencies, private app imports, core graph writes or provider credentials in the package.
+一个 LearnHarness 核心插件：从你的图谱或上传的 PDF/文本文件生成事实回忆提示语，把它们组织到扁平的卡组中，并用 FSRS-6 进行复习。**不集成 Anki。** 软件包中没有运行时 npm 依赖、私有应用导入、核心图谱写入或服务商凭据。
 
-## Core plugin and source reference
+## 核心插件与源码参考
 
-Enable Flashcards in **Settings → Core plugins**. The app supplies and updates its code;
-its writable records live under `<learning data>/core-plugin-data/flashcards/`.
-This source project is reference material, not an installable Community copy:
-`flashcards` is a reserved Core ID even when the Core plugin is disabled or missing.
-A Community fork needs its own manifest/folder ID and a review of contribution, tool
-and fence names that could conflict. Do not copy this build into a Community
-`plugins/flashcards/` folder.
+在 **设置 → 核心插件**（Settings → Core plugins）中启用闪卡（Flashcards）。应用负责提供并更新其代码；其可写记录位于 `<learning data>/core-plugin-data/flashcards/` 下。这个源码项目是参考材料，而不是可安装的社区插件副本：即使核心插件被停用或缺失，`flashcards` 也是保留的核心插件 ID。社区分支需要自己的清单/文件夹 ID，并审查可能冲突的贡献项、工具和围栏代码块名称。不要把此构建复制到社区插件的 `plugins/flashcards/` 文件夹中。
 
-Requires a matching host exposing `mountKnowledgePicker`, `mountMarkdown`, `mountTree`,
-page-body `openSurface`, public `mountButton` icons (`icon` / `iconOnly`) and custom
-colors (`variant: 'custom'` / `colors`), the surface `data-plugin-initial-focus`
-contract, and `ctx.workers`. A version string alone does not establish capabilities.
-File generation additionally requires `ctx.documents.toMarkdown`; without it, only
-Generate from file is disabled, while graph generation and existing reviews remain available.
+需要一个相匹配的宿主，提供 `mountKnowledgePicker`、`mountMarkdown`、`mountTree`、页面主体的 `openSurface`、公开的 `mountButton` 图标（`icon` / `iconOnly`）和自定义颜色（`variant: 'custom'` / `colors`）、界面的 `data-plugin-initial-focus` 契约，以及 `ctx.workers`。仅凭版本字符串不能确定宿主具备这些能力。从文件生成还额外需要 `ctx.documents.toMarkdown`；缺少它时，只有“从文件生成”被禁用，图谱生成和已有的复习仍然可用。
 
-## Build
+## 构建
 
-This JavaScript project needs no `.sdk/` or SDK generation. Set up the project's
-development dependencies separately; no npm setup is performed by LearnHarness.
-With dependencies already available, from this folder:
+这个 JavaScript 项目不需要 `.sdk/` 或 SDK 生成。请单独准备项目的开发依赖；LearnHarness 不会执行任何 npm 安装。在依赖已就绪的情况下，在此文件夹中运行：
 
 ```sh
 npm run build
 ```
 
-The build writes directly to this project's **`dist/`**, bundling the frontend and
-CommonJS backend and copying the manifest, styles and licenses. Cleanup replaces
-only `dist/`, refuses symlinked `dist/` or misplaced `dist/data/`, and preserves sibling
-`data/`. Building does not install, enable or update a Core plugin.
+构建会直接写入本项目的 **`dist/`**：打包前端和 CommonJS 后端，并复制清单、样式和许可证。清理只替换 `dist/`，会拒绝符号链接形式的 `dist/` 或放错位置的 `dist/data/`，并保留同级的 `data/`。构建不会安装、启用或更新核心插件。
 
-## Use
+## 使用
 
-Open Flashcards from its stacked-card icon in the sidebar. Select propositions in the real host knowledge picker, run preflight, then confirm generation. It uses the current cheap model slot unless you set a plugin-specific override; calls can incur cost. Graph selection is manual; there are no automatic generation triggers. Each successful chunk adds useful missing cues without replacing existing cards or resetting schedules. Navigation does not cancel work. Failed/interrupted targets require an explicit new generation attempt.
+通过侧边栏中的叠卡图标打开闪卡。在真实的宿主知识选择器中选择命题，运行预检，然后确认生成。除非你设置了插件专用的覆盖，否则它会使用当前的经济档位；调用可能产生费用。图谱选择是手动的；没有自动生成触发器。每个成功的分块都会添加缺失的有用提示语，而不会替换已有卡片或重置复习计划。页面导航不会取消工作。失败/被中断的目标需要显式地重新发起一次生成。
 
-First-generation cards join a deck named after their original source. Initial names use public chat titles or notes-file basenames; host imported-source rename overrides are not yet exposed by the learning reader. Rename collections locally, create custom decks and change memberships without changing core sources. One proposition can occur in multiple decks while keeping one collection, schedule and history. Keep at least one membership when changing memberships. Deletion is a separate, explicit operation that removes Flashcards content, never learning-graph nodes.
+首次生成的卡片会加入一个以其原始来源命名的卡组。初始名称使用公开的对话标题或笔记文件名；宿主对导入来源的重命名覆盖尚未通过学习数据读取器提供。你可以在本地重命名集合、创建自定义卡组并更改归属，而不会改变核心来源。一个命题可以出现在多个卡组中，同时只保有一个集合、一份复习计划和一份历史。更改归属时至少保留一个归属。删除是一项单独的显式操作，只移除闪卡内容，绝不会删除学习图谱的节点。
 
-### Write cards by hand
+### 手动编写卡片
 
-The **+** immediately left of a deck's gear opens **Create card**: enter a Name followed by Question and Answer using the same Markdown fields as Edit cue. Saving creates a new Flashcards-only target and its first cue together in that deck. There is no separate target-creation step or existing-target dropdown. Each deliberate new save creates a new target rather than matching existing names; retrying a lost response does not create duplicates.
+卡组齿轮图标紧左侧的 **+** 会打开 **新建卡片**（Create card）：输入名称（Name），然后输入问题（Question）和答案（Answer），使用与“编辑提示语”（Edit cue）相同的 Markdown 字段。保存时会在该卡组中同时创建一个新的、仅属于闪卡的目标及其第一条提示语。没有单独的目标创建步骤，也没有选择已有目标的下拉框。每次有意的新保存都会创建一个新目标，而不是去匹配已有的名称；重试一次丢失的响应不会产生重复。
 
-The **+** on an active target row opens **Add cue**, with only Question and Answer. The new cue shares that target's existing schedule and memberships without resetting its history, learning cue or daily introduction count. All fields must be nonblank; Cancel creates nothing. Manual creation needs no configured model, makes no model calls and never writes to the graph. Handwritten targets remain active independently of graph contents, including after restart. Cue rows and the Archive have no creation controls.
+活跃目标行上的 **+** 会打开 **添加提示语**（Add cue），只有问题和答案两项。新提示语共享该目标已有的复习计划和归属，不会重置它的历史、学习中的提示语或每日引入计数。所有字段都必须非空；“取消”不会创建任何内容。手动创建不需要配置模型，不进行模型调用，也绝不写入图谱。手写的目标独立于图谱内容保持活跃，重启后也是如此。提示语行和归档中没有创建控件。
 
-### Library and review
+### 卡片库与复习
 
-The library uses the native Deck → Proposition → Cue tree, with search and Create deck grouped inside its bordered panel. Click a deck name to rename it inline (Enter/blur saves; Escape cancels); its adjacent outlined Review button starts deck review. Stacked-card glyphs mark decks and the Archive branch. Muted gear menus retain deck settings, memberships, editing/deletion and ordering. Click a cue for a rich question/answer preview, with the proposition name as its single dialog heading and the same centered question/divider/answer styling as review. The preview's red Delete button opens the shared content-deletion confirmation. Search disables ordering until cleared.
+卡片库使用原生的“卡组 → 命题 → 提示语”树，搜索和“新建卡组”（Create deck）放在它带边框的面板内。点击卡组名称可以就地重命名（Enter/失焦保存；Escape 取消）；旁边带描边的“复习”（Review）按钮会开始该卡组的复习。叠卡图标标记卡组和归档分支。低调的齿轮菜单保留卡组设置、归属、编辑/删除和排序。点击一条提示语可以预览富文本的问题/答案，以命题名称作为对话框唯一的标题，并采用与复习相同的居中问题/分隔线/答案样式。预览中红色的“删除”按钮会打开共享的内容删除确认框。搜索期间禁用排序，直到清空搜索。
 
-Branch selection includes descendants, mixed checkboxes show partial selection, and shared cues stay selected across decks. The action row is always visible: Review all / Practice all switch to Review selected / Practice selected when anything is selected, with natural button widths and a consistent gap as the labels expand. The selection count and Clear sit together on the right; Clear is disabled without a selection. A selection without active cues disables selected review/practice rather than falling back to the whole library; empty containers can still be selected for deletion. Selected review uses exactly the selected active cues, not all cues of their propositions. If a learning/relearning proposition's pinned cue is excluded, that proposition waits for a review scope containing that cue.
+选择分支会包含其后代，混合状态的复选框表示部分选中，共享的提示语在各卡组之间保持选中。操作行始终可见：有任何选中项时，“复习全部 / 练习全部”（Review all / Practice all）会切换为“复习所选 / 练习所选”（Review selected / Practice selected），按钮保持自然宽度，标签变长时间距保持一致。选中数量和“清除”（Clear）一起位于右侧；没有选中项时“清除”被禁用。如果所选内容中没有活跃的提示语，会禁用“复习所选/练习所选”，而不是回退到整个卡片库；空的容器仍可被选中以进行删除。复习所选内容时，严格只使用所选的活跃提示语，而不是它们所属命题的全部提示语。如果某个处于学习/重新学习阶段的命题被固定的提示语被排除在外，该命题会等待一个包含该提示语的复习范围。
 
-Review opens on the host's dimmed, blurred main-pane surface, leaving the sidebar and top bar available. The centered card contains only the question and revealed answer; the controls and dimmed shortcut hints sit outside it. Review, practice and preview cards have a landscape 16:9 minimum height based on their width, with short content centered vertically. A short revealed answer stays within that minimum-sized box; longer content expands it naturally rather than overflowing a fixed aspect ratio. No generic heading appears on the question side; the proposition name appears only after reveal. Close using the host X or Escape. The host focuses the visible card region through the public initial-focus marker. Space only reveals: after reveal it never submits a scheduled-review rating, including on focused rating buttons. Use 1–4 when focus is not in a control, click a rating, or press Enter on a focused rating button. Rating buttons use red/amber/green/blue tints for Again/Hard/Good/Easy through the shared custom-color API. Reveal is a quieter outlined button with a short “Space” hint. The ready count hugs the card's bottom edge, aligned right above the controls. Think, reveal, then self-rate Again/Hard/Good/Easy. Review is local and makes no model calls. The “N ready” count includes the current proposition, due propositions and new propositions admissible under the daily limits; future learning steps are not counted until ready. It counts shared propositions, not every cue.
+复习会在宿主变暗、模糊的主窗格界面上打开，侧边栏和顶栏仍可使用。居中的卡片只包含问题和显示出的答案；控件和变暗的快捷键提示位于卡片之外。复习、练习和预览卡片都有一个根据其宽度计算的横向 16:9 最小高度，内容较短时垂直居中。较短的答案在显示后仍保持在这个最小尺寸的框内；较长的内容会自然地撑大卡片，而不是溢出固定的宽高比。问题一侧不显示通用标题；命题名称只在显示答案后出现。使用宿主的 X 或 Escape 关闭。宿主通过公开的初始焦点标记聚焦可见的卡片区域。空格键只用于显示答案：显示答案后，它绝不会提交计划内复习的评分，即使焦点在评分按钮上也是如此。焦点不在控件上时可使用 1–4，也可以点击评分，或在已聚焦的评分按钮上按 Enter。评分按钮通过共享的自定义颜色 API，分别为重来/困难/良好/简单（Again/Hard/Good/Easy）使用红/琥珀/绿/蓝色调。“显示答案”（Reveal）是一个更低调的描边按钮，带有简短的“Space”提示。待复习数量紧贴卡片底边，右对齐，位于控件上方。先思考，再显示答案，然后用重来/困难/良好/简单自评。复习在本地进行，不进行模型调用。“N 张待复习”（N ready）的数量包括当前命题、到期命题以及在每日上限内可准入的新命题；未来的学习步骤在就绪之前不计入。它统计的是共享的命题，而不是每一条提示语。
 
-Ready learning/relearning comes first, then due reviews, then new propositions. New allowance defaults to 20 per deck/day; due reviews are uncapped. A first rating counts in every containing deck; only the admitting/studied deck controls admission. Whole-library review finds an eligible deck without creating a separate global allowance.
+先是已就绪的学习/重新学习，然后是到期复习，最后是新命题。新命题额度默认为每个卡组每天 20 个；到期复习不设上限。首次评分会计入每一个包含它的卡组；只有负责准入/正在学习的卡组控制准入。整个卡片库的复习会找到一个符合条件的卡组，而不会另外创建一个全局额度。
 
-### Delete Flashcards content
+### 删除闪卡内容
 
-Selecting anything reveals an accessible icon-only trash button immediately right of Review selected / Practice selected. Cue preview/menu Delete and Deck settings → Delete deck… use the same single confirmation, with a muted rendered body explanation and **Delete empty decks too** checked by default. No replacement-deck picker is needed.
+选中任何内容后，“复习所选 / 练习所选”紧右侧会出现一个带无障碍名称、只有图标的垃圾桶按钮。提示语预览/菜单中的“删除”以及“卡组设置 → 删除卡组…”（Deck settings → Delete deck…）都使用同一个确认框，带有一段低调的渲染说明文字，且 **同时删除空卡组**（Delete empty decks too）默认勾选。不需要选择替代卡组。
 
-Selected cues are physically deleted everywhere they are shared. Removing a target's last cue removes that Flashcards target and its active schedule; surviving targets retain their other cues, schedules and memberships. Past review ratings/timestamps remain available for statistics, but review records no longer retain question/answer snapshots. With empty-deck cleanup checked, only affected decks that become empty (or explicitly selected empty decks) are deleted; unrelated empty decks survive. Unchecking keeps emptied containers. Deck deletion selects the deck's contents, including targets shared with other decks. Learning-graph nodes and native sources are never deleted.
+选中的提示语会在所有共享它的地方被物理删除。移除一个目标的最后一条提示语，会移除该闪卡目标及其活跃的复习计划；保留下来的目标保有其他提示语、复习计划和归属。过往的复习评分/时间戳仍可用于统计，但复习记录不再保留问题/答案快照。勾选清理空卡组时，只会删除因此变空的相关卡组（或被显式选中的空卡组）；无关的空卡组会保留。取消勾选则保留变空的容器。删除卡组会选中该卡组的内容，包括与其他卡组共享的目标。学习图谱的节点和原生来源绝不会被删除。
 
-Deletion waits until generation finishes or is cancelled, both in the UI and at the backend, so late results cannot recreate deleted content. Confirmation freezes the selection and library revision; a changed library requires a new confirmation. Lost-response retries reuse a text-free durable receipt and do not apply another deletion. Deleted questions are not retained as tombstones or fed to subsequent generations, and are not a generation blacklist.
+删除会等到生成完成或被取消之后才执行，UI 和后端都是如此，因此迟到的结果不会重新创建已删除的内容。确认时会冻结选择和卡片库修订版本；卡片库发生变化后需要重新确认。针对丢失响应的重试会复用一个不含文本的持久化回执，不会再执行一次删除。已删除的问题不会作为墓碑记录保留，也不会提供给后续的生成，更不是生成黑名单。
 
-### Generate from a file
+### 从文件生成
 
-Choose **Generate from file…** and select one PDF or UTF-8 text file. The shared host converter uses the same PDF-to-Markdown engine as notes import and the PDF-reader tools; there is no second converter in this package. PDFs are identified by their header or `.pdf` filename, so a corrupt PDF is not silently treated as ordinary text. Other filenames are allowed when their content is valid UTF-8 text, rather than restricting uploads to a short extension list. Unsupported binary/invalid text, empty documents, and PDFs without extractable text are refused. There is no OCR; mixed PDFs may omit image-only pages and present notices before generation.
+选择 **从文件生成…**（Generate from file…）并选择一个 PDF 或 UTF-8 文本文件。共享的宿主转换器与导入笔记和 PDF 阅读工具使用相同的 PDF 转 Markdown 引擎；本软件包中没有第二个转换器。PDF 通过文件头或 `.pdf` 文件名识别，因此损坏的 PDF 不会被静默当作普通文本。其他文件名只要内容是有效的 UTF-8 文本就允许上传，而不是把上传限制在一份简短的扩展名列表内。不受支持的二进制/无效文本、空文档以及没有可提取文本的 PDF 都会被拒绝。没有 OCR；混合型 PDF 可能会略过纯图片页面，并在生成前给出提示。
 
-The confirmation shows the filename followed by the approximate input-token count in parentheses, together in one muted body paragraph. Graph generation uses the same format with the proposition count instead of a filename. File-conversion notices appear below the summary; neither dialog adds a separate cost-warning sentence. No model calls start until you confirm. Each confirmed new file creates one deck named with its filename, including extension, which you can rename normally. The agent creates atomic facts and recall cues **only inside Flashcards**: nothing is imported into the graph. Cues for one fact share its schedule, just like graph-backed cards; file facts remain active independently of graph contents. Review, practice, daily limits, memberships, editing and statistics work the same way for both origins.
+确认框在同一段低调的正文中显示文件名，后面用括号注明大致的输入 token 数量。图谱生成使用相同的格式，只是用命题数量代替文件名。文件转换的提示显示在摘要下方；两种对话框都不会额外添加单独的费用警告句。在你确认之前不会开始任何模型调用。每个确认的新文件都会创建一个以其文件名（包括扩展名）命名的卡组，你可以像平常一样重命名它。智能体 **只在闪卡内部** 创建原子事实和回忆提示语：不会向图谱导入任何内容。同一事实的多条提示语共享它的复习计划，与基于图谱的卡片一样；文件事实独立于图谱内容保持活跃。复习、练习、每日上限、归属、编辑和统计对两种来源的工作方式完全相同。
 
-Uploading the same filename and exact converted content reopens the existing file deck without another generation run; changed content creates a new deck without modifying existing cards or progress. Generation is chunked to the configured source-text budget and uses the current cheap slot or plugin override. Accepted work continues after navigation and uses the existing cancellation/recovery mechanisms. Explicit retries process failed/cancelled/interrupted chunks, never successful ones. A confirmed file keeps its deck even if generation fails or returns no cards, with a visible result/retry state.
+上传同名且转换后内容完全相同的文件，会重新打开已有的文件卡组，而不再运行一次生成；内容有变化则会创建一个新卡组，不会修改已有的卡片或进度。生成会按所配置的源文本预算分块，并使用当前的经济档位或插件覆盖。已接受的工作在页面导航后继续进行，并使用现有的取消/恢复机制。显式重试只处理失败/已取消/被中断的分块，绝不处理成功的分块。已确认的文件即使生成失败或没有返回卡片也会保留其卡组，并显示可见的结果/重试状态。
 
-Conversion limits are 25 MiB per file, 26 MiB actual multipart body, 1,000 PDF pages and 2 MiB final UTF-8 Markdown including page markers; excess is refused, never silently truncated. The host allows one conversion at a time and reports busy instead of queuing. Cancellation is best-effort: input/page/output limits are **not** a hard CPU timeout or peak-memory bound, and an aborted conversion may hold the slot until the underlying parser stops. Before generation confirmation, leaving the view aborts conversion or ignores late preparation results.
+转换限制为：每个文件 25 MiB、实际 multipart 请求体 26 MiB、1,000 个 PDF 页面，以及包含页面标记在内的最终 UTF-8 Markdown 2 MiB；超出限制会被拒绝，绝不会被静默截断。宿主同一时间只允许一个转换，忙碌时会报告忙碌而不是排队。取消是尽力而为的：输入/页面/输出限制 **不是** 硬性的 CPU 超时或内存峰值上限，被中止的转换可能会一直占用槽位，直到底层解析器停止。在确认生成之前离开该视图，会中止转换或忽略迟到的准备结果。
 
-Only the converted Markdown is retained under plugin data for retry and repeat-file identification, not the original upload. This text and the duplicate-detection record belong to the file deck: keeping an empty deck keeps both, and identical uploads reopen it without regeneration; deleting that deck removes both, so a later upload can offer fresh generation. Moving its targets to other decks does not transfer ownership of the saved source text; those local targets remain usable after the original file deck is deleted. Normal background-task records also retain their generation inputs. Uploads do not create graph sources or trigger the graph extraction pipeline.
+只有转换后的 Markdown 会保留在插件数据中，用于重试和识别重复文件，原始上传文件不会保留。这份文本和重复检测记录属于该文件卡组：保留一个空卡组会同时保留两者，相同的上传会重新打开它而不重新生成；删除该卡组会移除两者，因此之后的上传可以重新生成。把它的目标移动到其他卡组不会转移已保存源文本的归属；原文件卡组被删除后，这些本地目标仍然可用。常规的后台任务记录也会保留其生成输入。上传不会创建图谱来源，也不会触发图谱提取管线。
 
-### Spaced-repetition overview
+### 间隔重复概览
 
-Below the deck panel, the library-wide dashboard shows new/learning/review/relearning proposition counts, current due dates (overdue, today and the next seven study days), and fourteen study days of scheduled-review activity. Shared propositions count once; archived propositions and groups without active cues are excluded from the current-state and due charts. The due chart shows existing next due dates, not a prediction of future repetitions. Activity counts recorded ratings, including historical reviews of cards later archived or deleted, rather than unique propositions. Search and selection do not filter the overview. The overview shares the rating palette: New blue, Learning amber, Review green, Relearning red. Due bars use red for overdue, amber for today and blue for future days; activity bars are green. Only the due chart's second-line dates are dimmed, leaving weekdays and activity dates unchanged.
+在卡组面板下方，整个卡片库的仪表盘显示新/学习中/复习中/重新学习中的命题数量、当前的到期日期（逾期、今天以及接下来七个学习日），以及十四个学习日内计划内复习的活动情况。共享的命题只计一次；已归档的命题和没有活跃提示语的分组不计入当前状态图和到期图。到期图显示的是已有的下次到期日期，而不是对未来重复的预测。活动图统计的是已记录的评分次数（包括对之后被归档或删除的卡片的历史复习），而不是去重后的命题数量。搜索和选择不会筛选概览。概览与评分使用相同的配色：新（New）蓝色、学习中琥珀色、复习中绿色、重新学习中红色。到期柱状条用红色表示逾期、琥珀色表示今天、蓝色表示未来的日子；活动柱状条为绿色。只有到期图第二行的日期变暗，星期和活动图的日期保持不变。
 
-### Extra practice
+### 额外练习
 
-Choose **Practice selected / Practice all** in the selection row; practice is not duplicated in deck gear menus. Practice snapshots active cues in saved deck/proposition/cue order, deduplicating shared cues and excluding archived/deleted cards. It includes new and non-due cards without a daily limit. Reveal each answer, then select Next; Space reveals or advances. There are no ratings, schedule changes, introduction charges or history writes. Each cue appears once in that practice session. The practice counter counts other cues still in the snapshot, excluding the displayed cue. The counter hugs the card's bottom edge above the controls. “Practice mode does not change your review schedule.” sits centered near the bottom of the pane, flowing below long content instead of covering it. Reveal and Next are quiet outlined buttons with short “Space” hints. Close with the host X or Escape.
+在选择行中选择 **练习所选 / 练习全部**（Practice selected / Practice all）；练习不会在卡组齿轮菜单中重复出现。练习会按已保存的卡组/命题/提示语顺序为活跃提示语创建快照，对共享的提示语去重，并排除已归档/已删除的卡片。它包括新卡和未到期的卡片，不受每日上限限制。显示每个答案后，选择“下一张”（Next）；空格键用于显示答案或前进。没有评分、复习计划变更、引入计数或历史写入。在这次练习会话中，每条提示语只出现一次。练习计数器统计的是快照中剩余的其他提示语，不包括当前显示的这条。计数器紧贴卡片底边，位于控件上方。“练习模式不会改变你的复习计划。”居中显示在窗格底部附近，内容较长时会排在内容下方，而不会遮住内容。“显示答案”和“下一张”是低调的描边按钮，带有简短的“Space”提示。使用宿主的 X 或 Escape 关闭。
 
-Settings control desired retention (initially 90%), learning steps (1m 10m), relearning steps (10m), local study-day start (04:00), source chunk budget (approximately 4,000 tokens of source text, excluding instructions and additional context), and generation model/thinking overrides. The model section has its own Follow cheap slot toggle: on follows both model and thinking and hides the override rows; off pins the current cheap model/thinking when available, or opens an unsaved model-selection draft if no cheap model is available. The Model setting uses the native sans label and standard “Follow cheap slot” description underneath it, with the toggle on the right. When off, only the model and thinking pickers appear side by side below, aligned right, without extra labels or a separate default-thinking/reset button. This uses the existing settings API without custom fonts, private widget styling, or extra API fields. Turning the toggle back on clears both overrides; no extra setting or schedule change is introduced. FSRS-6 uses published parameters and deterministic intervals (no fuzz or optimizer). Learning repetitions use the same cue; normal review weights cue selection by its latest self-rating. The schedule is proposition-level, intentionally not identical to card-level Anki scheduling.
+设置项控制目标记忆保持率（初始为 90%）、学习步骤（1m 10m）、重新学习步骤（10m）、本地学习日开始时间（04:00）、源文本分块预算（约 4,000 个源文本 token，不包括指令和额外上下文），以及生成所用的模型/推理强度覆盖。模型部分有自己的“跟随经济档位”（Follow cheap slot）开关：开启时同时跟随模型和推理强度，并隐藏覆盖行；关闭时，如果有可用的经济档位模型，就固定使用当前的经济档位模型/推理强度，否则会打开一份未保存的模型选择草稿。“模型”设置使用原生无衬线标签，下方是标准的“跟随经济档位”说明，开关位于右侧。关闭时，下方只会并排显示模型和推理强度选择器，右对齐，没有额外的标签，也没有单独的默认推理强度/重置按钮。这使用现有的设置 API，没有自定义字体、私有组件样式或额外的 API 字段。重新打开开关会清除两项覆盖；不会引入额外的设置或复习计划变更。FSRS-6 使用已发布的参数和确定性的间隔（没有随机扰动或优化器）。学习阶段的重复使用同一条提示语；常规复习按每条提示语最近一次的自评为提示语选择加权。复习计划是命题级的，有意与 Anki 的卡片级调度不同。
 
-Questions/answers use the host's real Markdown rendering, including code, tables, math and Mermaid. Edit cards without resetting progress. Deleting a cue physically removes it from plugin card storage; generation sees only current active cards, never a deleted-card backlog. If its graph proposition disappears, its collection is archived and excluded from review; the same ID returning makes it active again. Source deletion does not reorganize surviving cards.
+问题/答案使用宿主真实的 Markdown 渲染，包括代码、表格、数学公式和 Mermaid。编辑卡片不会重置进度。删除一条提示语会把它从插件的卡片存储中物理移除；生成只能看到当前活跃的卡片，绝不会看到已删除卡片的积压。如果它对应的图谱命题消失，它的集合会被归档并排除在复习之外；同一个 ID 再次出现时会使其重新变为活跃。删除来源不会重组保留下来的卡片。
 
-## Generation prompts
+## 生成提示词
 
-All generation prompt wording lives in **`src/generation-prompts.cjs`**:
+所有生成提示词的措辞都位于 **`src/generation-prompts.cjs`** 中：
 
-- **`cardWriting`** — the shared retrieval-task framework: target selection versus cue design; coherent atomic facts; distinct access routes; focused, precise, consistent, tractable and effortful questions; fair self-assessment; false-positive/false-negative checks; and selective, nonredundant cue sets. Examples use request throughput and database transactions. Edit this to change both generation entry points together.
-- **`inputSafety`** — quoted-source handling and grounding requirements.
-- **`outputProtocol`** — concise Markdown capabilities, LaTeX delimiters, literal dollar signs (escaped prose/currency versus code tokens), Mermaid labels, JSON/backslash/newline escaping, and the shared `submit_result` completion/repair procedure. There is no callout or emphasis guidance.
-- **`graphSourceInstructions` / `fileSourceInstructions`** — source-specific tasks, context rules, cardinality and result-shape instructions.
-- **`graphPromptFor` / `filePromptFor`** — the per-chunk user messages and JSON payload wrappers.
+- **`cardWriting`** — 共享的提取任务框架：目标选择与提示语设计的区别；连贯的原子事实；不同的提取路径；聚焦、精确、一致、可解且需要付出努力的问题；公平的自我评估；假阳性/假阴性检查；以及有选择、不冗余的提示语集合。示例使用的是请求吞吐量和数据库事务。修改这里会同时改变两个生成入口。
+- **`inputSafety`** — 引用来源的处理方式和事实依据要求。
+- **`outputProtocol`** — 简洁的 Markdown 能力说明、LaTeX 分隔符、字面美元符号（需转义的正文/货币与代码中的符号的区别）、Mermaid 标签、JSON/反斜杠/换行转义，以及共享的 `submit_result` 完成/修复流程。没有关于标注框或强调的指导。
+- **`graphSourceInstructions` / `fileSourceInstructions`** — 特定于来源的任务、上下文规则、数量要求和结果结构说明。
+- **`graphPromptFor` / `filePromptFor`** — 每个分块的用户消息和 JSON 载荷包装。
 
-Both workers use composed instructions from that module. Like core extraction, the **chunk budget covers source material only**, estimated as characters divided by four (rounded up): graph generation sums each selected target's name plus newline plus statement, and file generation counts the Markdown being chunked. Instructions, output schemas, IDs/JSON wrappers, neighboring propositions/chains and existing active cards do not consume that source budget. Graph targets remain indivisible; a target exceeding the source budget gets its own chunk. File chunks retain the existing lossless paragraph/newline preferences and Unicode-safe splitting, including exact retry spans.
+两个 worker 都使用由该模块组合出的指令。与核心提取一样，**分块预算只涵盖源材料**，按字符数除以四（向上取整）估算：图谱生成累加每个选定目标的名称、换行符和陈述，文件生成则统计正在分块的 Markdown。指令、输出 schema、ID/JSON 包装、相邻的命题/推理链以及已有的活跃卡片都不占用该源材料预算。图谱目标始终不可拆分；超出源材料预算的目标会单独成为一个分块。文件分块保留现有的无损段落/换行优先策略和 Unicode 安全的拆分方式，包括精确的重试区间。
 
-The **full-request estimate is separate**: it still counts the composed instructions, actual output schema and complete user message using UTF-8 bytes divided by three (rounded up), plus the existing 256-token overhead allowance. Confirmation dialogs report this full input estimate for cost awareness, and model-context checks reserve output space against the full request, not just the source. Changes to the writing framework do not change source-chunk grouping. Result schemas, validators and chunking remain in `src/backend.cjs` and `src/file-generation.cjs`; those mechanics differ between graph targets and extracted file facts. Source-specific instructions still determine whether to use supplied targets or extract new facts, while safety and output mechanics remain separate from the writing framework.
+**完整请求的估算是单独进行的**：它仍会统计组合后的指令、实际的输出 schema 和完整的用户消息，按 UTF-8 字节数除以三（向上取整）计算，再加上现有的 256 token 额外开销余量。确认对话框报告的是这一完整输入估算，以便了解费用；模型上下文检查也会针对完整请求而不仅仅是源材料预留输出空间。修改写作框架不会改变源材料分块的分组方式。结果 schema、校验器和分块逻辑仍位于 `src/backend.cjs` 和 `src/file-generation.cjs` 中；这些机制在图谱目标与提取出的文件事实之间有所不同。特定于来源的指令仍然决定是使用提供的目标还是提取新的事实，而安全和输出机制则与写作框架保持分离。
 
-## Data and lifecycle
+## 数据与生命周期
 
-Plugin-owned state is `data/flashcards.json`: a versioned JSON snapshot, atomically replaced after local mutations. It contains decks, cues, schedules, review records, generation progress and lightweight file-source metadata. Handwritten targets use a local origin; cue creation receipts make manual-save retries idempotent even after restart, subsequent editing or deletion. Converted file text is stored separately under `data/sources/`, keeping large documents out of the snapshot rewritten on each review. Existing graph-backed records remain compatible and retain their schedules and history. Host-owned task records remain under `data/tasks/`; the plugin does not overwrite them. Disable/update preserves live cards and progress. Store migration atomically purges legacy deleted-cue tombstones and old question/answer review snapshots, moves manual retry receipts out of cues, and forgets orphan upload records whose decks were deleted by older versions. Saved-source removal uses a durable cleanup queue, so a filesystem failure is reported and can be retried or completed on the next activation without restoring a deck. A corrupt/unsupported store is an error, never silently reset.
+插件自有的状态是 `data/flashcards.json`：一份带版本号的 JSON 快照，在本地变更后以原子方式替换。它包含卡组、提示语、复习计划、复习记录、生成进度和轻量的文件来源元数据。手写的目标使用本地来源标识；提示语创建回执让手动保存的重试保持幂等，即使在重启、之后的编辑或删除之后也是如此。转换后的文件文本单独存放在 `data/sources/` 下，避免大型文档进入每次复习都会重写的快照。已有的基于图谱的记录保持兼容，并保留其复习计划和历史。宿主自有的任务记录仍位于 `data/tasks/` 下；插件不会覆盖它们。停用/更新会保留现有的卡片和进度。存储迁移会以原子方式清除旧版本遗留的已删除提示语墓碑记录和旧的问题/答案复习快照，把手动重试回执从提示语中移出，并丢弃那些卡组已被旧版本删除的孤立上传记录。已保存源文本的移除使用一个持久化的清理队列，因此文件系统故障会被报告，并可以重试或在下次激活时完成，而不会恢复卡组。损坏/不受支持的存储会报错，绝不会被静默重置。
 
-Review content mounts own only their DOM, widgets and timers. Host presentation cleanup/remount (including development StrictMode replay) does not close the logical review session; actual close, reopen and owner abort still tear down its content scopes. Accepted review ratings and worker chunks are applied once. Cancel closes the batch's application gate before cancelling outstanding tasks; previously applied chunks remain. Restart reconciles durable worker outcomes without replaying unfinished model work. A failed save is visibly separate from successful model generation; retry saving does not make another model call. All content deletion waits until generation finishes or is cancelled to avoid stale results and destinations.
+复习内容的挂载只拥有它们自己的 DOM、组件和计时器。宿主展示层的清理/重新挂载（包括开发环境中 StrictMode 的重放）不会关闭逻辑上的复习会话；真正的关闭、重新打开以及归属者中止仍会销毁其内容作用域。已接受的复习评分和 worker 分块只会被应用一次。“取消”会先关闭该批次的应用闸门，再取消未完成的任务；之前已应用的分块会保留。重启时会核对持久化的 worker 结果，而不会重放未完成的模型工作。保存失败会与模型生成成功明确区分开；重试保存不会再进行一次模型调用。所有内容删除都会等到生成完成或被取消之后才执行，以避免过期的结果和目标位置。
 
-The store is deliberately small and simple: one backend process owns writes. Simultaneously running independent app-server processes against the same plugin data directory is not supported. If dataset size makes rewriting the snapshot expensive, measure that concrete case before introducing more storage machinery.
+存储被有意设计得小而简单：由一个后端进程负责写入。不支持多个独立运行的应用服务端进程同时访问同一个插件数据目录。如果数据集规模使重写快照的开销变得很大，请先针对那个具体情况进行测量，再引入更多的存储机制。
 
-## Tests and boundaries
+## 测试与边界
 
-With test dependencies available:
+在测试依赖已就绪的情况下：
 
 ```sh
 npm test
 ```
 
-The plugin tests cover storage/migrations, deletion and retry receipts, deck-bound
-source cleanup, manual creation, mocked generation/cancellation/recovery, cue-filtered
-review, memberships, scheduling and DST statistics, the dashboard, read-only practice,
-tree selection and frontend lifetimes. Document conversion and host widgets are mocked;
-these checks do not call a model or establish actual-host document conversion or cue quality.
+插件测试覆盖存储/迁移、删除和重试回执、与卡组绑定的源文本清理、手动创建、模拟的生成/取消/恢复、按提示语筛选的复习、归属、调度和夏令时统计、仪表盘、只读练习、树选择以及前端生命周期。文档转换和宿主组件都是模拟的；这些检查不会调用模型，也不能证明真实宿主上的文档转换效果或提示语质量。
 
-The DOM tests also require **`linkedom`**, which is supplied by the LearnHarness checkout
-but is not declared in this project's package manifest. A copied project needs that
-test prerequisite supplied separately; its build only needs the declared `esbuild`.
+DOM 测试还需要 **`linkedom`**，它由 LearnHarness 检出提供，但没有在本项目的软件包清单中声明。复制出去的项目需要另外提供这一测试前提；其构建只需要已声明的 `esbuild`。
 
-`npm run test:native` is a checkout-oriented maintainer harness, not a standalone-kit
-check. It requires `puppeteer-core`, local Chrome, an Electron Node runtime (checkout
-path by default, or `LH_NODE_RUNTIME`), an already built matching host in
-`LH_STANDALONE` and its `LH_APPROVED_HOST_DIGEST`, plus the built plugin. It copies
-host/package bytes into disposable storage and exercises native widgets against
-synthetic records with loopback catalog traffic. The harness assumes a
-Community-loaded `flashcards` fixture; that admission assumption is not compatible
-with the reserved Core ID on a Core-packaged host. Do not treat it as an instruction
-to install a Community duplicate or as a portable Core smoke test. Browser fixtures
-are not physical Electron-window, real-provider or human UX acceptance.
+`npm run test:native` 是面向仓库检出的维护者测试工具，而不是独立工具包的检查。它需要 `puppeteer-core`、本地 Chrome、一个 Electron Node 运行时（默认使用检出中的路径，或 `LH_NODE_RUNTIME`）、`LH_STANDALONE` 中一个已构建好的匹配宿主及其 `LH_APPROVED_HOST_DIGEST`，以及已构建的插件。它会把宿主/软件包的字节复制到一次性存储中，并用回环的目录流量针对合成记录操作原生组件。该工具假定 `flashcards` 测试夹具以社区插件方式加载；这一准入假设与核心打包宿主上保留的核心插件 ID 不兼容。不要把它当作安装社区重复副本的指示，也不要当作可移植的核心插件冒烟测试。浏览器测试夹具不等于物理 Electron 窗口、真实服务商或真人 UX 验收。
 
-## Source reading route
+## 源码阅读路线
 
-- [`src/main.js`](src/main.js): public view/actions/settings, knowledge selection,
-  document conversion and frontend/backend calls.
-- [`src/library-tree.js`](src/library-tree.js), [`src/review.js`](src/review.js),
-  [`src/practice-queue.js`](src/practice-queue.js) and [`src/dashboard.js`](src/dashboard.js):
-  controlled tree state, surface lifetimes, read-only practice and statistics UI.
-- [`src/backend.cjs`](src/backend.cjs), [`src/file-generation.cjs`](src/file-generation.cjs)
-  and [`src/generation-prompts.cjs`](src/generation-prompts.cjs): worker definitions,
-  chunking, validation, explicit confirmation and durable outcome application.
-- [`src/store.cjs`](src/store.cjs), [`src/scheduler.cjs`](src/scheduler.cjs) and
-  [`src/statistics.cjs`](src/statistics.cjs): plugin-owned records and domain algorithms,
-  not host API requirements.
-- [`scripts/build.mjs`](scripts/build.mjs) and [`tests/`](tests/): packaging guards and fixtures.
+- [`src/main.js`](src/main.js)：公开的视图/操作/设置、知识选择、文档转换以及前端/后端调用。
+- [`src/library-tree.js`](src/library-tree.js)、[`src/review.js`](src/review.js)、[`src/practice-queue.js`](src/practice-queue.js) 和 [`src/dashboard.js`](src/dashboard.js)：受控的树状态、界面生命周期、只读练习和统计 UI。
+- [`src/backend.cjs`](src/backend.cjs)、[`src/file-generation.cjs`](src/file-generation.cjs) 和 [`src/generation-prompts.cjs`](src/generation-prompts.cjs)：worker 定义、分块、校验、显式确认以及持久化结果的应用。
+- [`src/store.cjs`](src/store.cjs)、[`src/scheduler.cjs`](src/scheduler.cjs) 和 [`src/statistics.cjs`](src/statistics.cjs)：插件自有的记录和领域算法，不是宿主 API 的要求。
+- [`scripts/build.mjs`](scripts/build.mjs) 和 [`tests/`](tests/)：打包保护和测试夹具。
 
-See the [example map](../../docs/plugin-examples.md),
-[authoring guide](../../docs/plugin-authoring.md) and
-[API reference](../../docs/plugin-api/README.md).
+参见[示例地图](../../docs/plugin-examples.md)、[编写指南](../../docs/plugin-authoring.md)和 [API 参考](../../docs/plugin-api/README.md)。
 
-## License
+## 许可证
 
-AGPL-3.0-only, matching LearnHarness. The dependency-free FSRS subset is selectively adapted from MIT-licensed `ts-fsrs@5.2.3`; see `FSRS-LICENSE.txt`.
+AGPL-3.0-only，与 LearnHarness 一致。无依赖的 FSRS 子集选择性地改编自采用 MIT 许可证的 `ts-fsrs@5.2.3`；参见 `FSRS-LICENSE.txt`。

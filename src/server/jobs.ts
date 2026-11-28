@@ -75,6 +75,7 @@ import { resolveConversationSpec } from "../core/settings-resolution.ts";
 import { connectionBackgroundAllowed, isSubscriptionProvider, onSubscriptionChange } from "../agent/subscription-connections.ts";
 import { isTurnRunning } from "./turn-liveness.ts";
 import type { Agent } from "@earendil-works/pi-agent-core";
+import { tr } from "../core/i18n.ts";
 
 /** Fires one server-side teacher turn: (chatId, input) → HTTP-ish status.
  *  Wave C: the input is the IDLE WAKE — every queued marker as the turn's
@@ -453,7 +454,7 @@ export function abortJob(jobId: string): AbortOutcome {
 	}
 
 	stores.jobStore.updateJob(jobId, {
-		status: "error", error: "Aborted by learner", activity: "aborted",
+		status: "error", error: "Aborted by learner", activity: tr("已中止", "aborted"),
 		delivery: { kind: "abort", status: "pending" },
 	});
 	fireJobAbort(jobId);
@@ -681,7 +682,7 @@ function normalizeLegacyResult(job: JobRecord): JobRecord {
 	if (job.delivery || job.status !== "running" || !job.result) return job;
 	const failed = isSubagentFailure(job.kind, job.result as never);
 	return stores.jobStore.updateJob(job.id, {
-		status: failed ? "error" : "done", activity: failed ? "failed" : "finished",
+		status: failed ? "error" : "done", activity: failed ? tr("失败", "failed") : tr("已完成", "finished"),
 		delivery: { kind: "result", status: "pending" },
 	}) ?? job;
 }
@@ -776,14 +777,14 @@ export function recoverStaleJobs(): void {
 						if (s.recoverPlugin) void s.recoverPlugin(job).catch((error: unknown) => {
 							if (stores.jobStore.getJob(job.id)?.status !== "running") return;
 							const failure = `Plugin job recovery failed: ${String(error)}`;
-							stores.jobStore.updateJob(job.id, { status: "error", error: failure, activity: "recovery failed", delivery: { kind: "failure", status: "pending" } });
+							stores.jobStore.updateJob(job.id, { status: "error", error: failure, activity: tr("恢复失败", "recovery failed"), delivery: { kind: "failure", status: "pending" } });
 							void deliverJobResult(buildJobFailureSteer(job, failure));
 						});
 						continue;
 					}
 					// The sub-agent loop itself died with the process: re-spawn.
 					if (!s.respawn) continue;
-					stores.jobStore.updateJob(job.id, { activity: "recovering: re-running" });
+					stores.jobStore.updateJob(job.id, { activity: tr("正在恢复：重新运行", "recovering: re-running") });
 					s.respawn(job.id);
 				}
 			}

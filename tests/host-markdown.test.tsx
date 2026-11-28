@@ -107,17 +107,17 @@ it("does not make ordinary transcript/static MessageResponse controls display-on
 	const html = renderToStaticMarkup(<><section id="host"><HostMarkdown text={source} /></section><section id="chat"><MessageResponse mode="static">{source}</MessageResponse></section></>);
 	const doc = parseHTML(`<html><body>${html}</body></html>`).document;
 	noControls(doc.querySelector("#host")!);
-	for (const label of ["Copy code", "Copy table", "Copy equation source"]) assert.ok(doc.querySelector(`#chat button[aria-label='${label}']`));
+	for (const label of ["复制代码", "复制表格", "复制公式源码"]) assert.ok(doc.querySelector(`#chat button[aria-label='${label}']`));
 });
 
 it("keeps invalid Mermaid heading/message and source visible with no disclosure or retry", () => {
 	const html = renderToStaticMarkup(<MermaidError displayOnly chart={"invalid <chart>\nA --> B"} error="Parse error on line 1" retry={() => assert.fail("static errors never retry")} />);
 	const doc = parseHTML(`<html><body>${html}</body></html>`).document;
-	assert.ok(doc.body.textContent?.includes("Diagram failed to render")); assert.ok(doc.body.textContent?.includes("Parse error on line 1"));
+	assert.ok(doc.body.textContent?.includes("图表渲染失败")); assert.ok(doc.body.textContent?.includes("Parse error on line 1"));
 	assert.equal(doc.querySelector("pre")?.textContent, "invalid <chart>\nA --> B"); assert.equal(doc.querySelector("chart"), null);
 	noControls(doc);
 	const interactive = renderToStaticMarkup(<MermaidError chart="broken" error="bad" retry={() => {}} />);
-	assert.match(interactive, /<details/); assert.match(interactive, /Show diagram source/); assert.match(interactive, />Retry</);
+	assert.match(interactive, /<details/); assert.match(interactive, /显示图表源码/); assert.match(interactive, />重试</);
 });
 
 it("blocks remote, same-origin and relative Markdown images before mounting any image or preload", async () => {
@@ -159,7 +159,7 @@ it("static and interactive instances isolate registered code renderers, controls
 		assert.equal(mounted, 1); assert.equal(cleaned, 0, "a static snapshot update does not remount or revoke its interactive sibling");
 		assert.ok(document.querySelector("#host")?.textContent?.includes("replacement raw source")); noControls(document.querySelector("#host")!);
 		await f.render(<MessageResponse mode="static">{"```js\nordinary transcript code\n```"}</MessageResponse>);
-		assert.equal(cleaned, 1); assert.ok(document.querySelector("button[aria-label='Copy code']"));
+		assert.equal(cleaned, 1); assert.ok(document.querySelector("button[aria-label='复制代码']"));
 	} finally { await f.close(); }
 });
 
@@ -172,7 +172,7 @@ it("static Mermaid uses the shared Pele renderer, suppresses overlay/copy contro
 		assert.ok(hostSvg, "Pele SVG renders inside #host");
 		assert.ok(hostSvg.textContent?.includes("Shared chart"));
 		noControls(document.querySelector("#host")!);
-		assert.ok(document.querySelector("#chat [data-testid='md-mermaid-expand']")); assert.ok(document.querySelector("#chat [aria-label='Copy diagram source']"));
+		assert.ok(document.querySelector("#chat [data-testid='md-mermaid-expand']")); assert.ok(document.querySelector("#chat [aria-label='复制图表源码']"));
 		assert.deepEqual(expanded, []);
 		await f.render(tree("```mermaid\ninvalid <diagram>\n```"));
 		const host = document.querySelector("#host")!;

@@ -59,7 +59,7 @@ it("refuses malformed UTF-8, binary and every disallowed C0/DEL/C1 control; reco
 	}
 	for (let code = 0; code <= 0x9f; code++) {
 		if (code >= 0x20 && code < 0x7f || [9, 10, 13].includes(code)) continue;
-		await assert.rejects(service.convert(upload(`a${String.fromCharCode(code)}b`), signal()), refusal(400, /control/));
+		await assert.rejects(service.convert(upload(`a${String.fromCharCode(code)}b`), signal()), refusal(400, /控制字符/));
 		await recovered(service);
 	}
 });
@@ -67,7 +67,7 @@ it("refuses malformed UTF-8, binary and every disallowed C0/DEL/C1 control; reco
 it("refuses empty/whitespace text without accepting the BOM as content", async () => {
 	const service = createPluginDocumentConverter();
 	for (const text of ["", " \t\n\r ", "\uFEFF", "\u2003\u00a0"]) {
-		await assert.rejects(service.convert(upload(text), signal()), refusal(400, /no text/));
+		await assert.rejects(service.convert(upload(text), signal()), refusal(400, /不含文本/));
 		await recovered(service);
 	}
 });
@@ -93,12 +93,12 @@ it("corrupt/encrypted PDFs and too-long PDFs refuse rather than fall back to tex
 	for (const result of [{ kind: "unreadable" }, { kind: "too-long", pageCount: 1001 }] as PdfConversion[]) {
 		const service = createPluginDocumentConverter({ convertPdf: stub(result) });
 		for (const [content, name] of [["%PDF-corrupt", "renamed.txt"], ["perfectly valid text", "broken.PDF"]]) {
-			await assert.rejects(service.convert(upload(content, name), signal()), refusal(400, result.kind === "too-long" ? /1,000/ : /Could not open/));
+			await assert.rejects(service.convert(upload(content, name), signal()), refusal(400, result.kind === "too-long" ? /1,000/ : /无法打开/));
 			await recovered(service);
 		}
 	}
 	const service = createPluginDocumentConverter({ convertPdf: async () => { throw new Error("parser exploded"); } });
-	await assert.rejects(service.convert(upload("%PDF-x"), signal()), refusal(400, /Could not open/));
+	await assert.rejects(service.convert(upload("%PDF-x"), signal()), refusal(400, /无法打开/));
 	await recovered(service);
 });
 
@@ -110,24 +110,24 @@ it("joins mixed PDF pages and gives truthful extraction/skipped-image notices, n
 	const service = createPluginDocumentConverter({ convertPdf: stub(converted(pages)) });
 	assert.deepEqual(await service.convert(upload("%PDF-x", "mixed.pdf"), signal()), {
 		name: "mixed.pdf", markdown: joinPages(pages), notices: [
-			"PDF text extraction may contain errors; check the result against the original.",
-			"Skipped 2 image-only pages; OCR is not supported.",
+			"PDF 文本提取可能存在错误，请对照原文检查结果。",
+			"已跳过 2 个纯图片页面；不支持 OCR。",
 		],
 	});
 	const textOnly = createPluginDocumentConverter({ convertPdf: stub() });
 	assert.equal((await textOnly.convert(upload("%PDF-x"), signal())).notices.length, 1);
 	const oneImage = createPluginDocumentConverter({ convertPdf: stub(converted([...pages.slice(0, 3)])) });
-	assert.match((await oneImage.convert(upload("%PDF-x"), signal())).notices[1]!, /1 image-only page;/);
+	assert.match((await oneImage.convert(upload("%PDF-x"), signal())).notices[1]!, /已跳过 1 个纯图片页面；/);
 });
 
 it("distinguishes all-image OCR refusal from blank/all-empty PDFs, including empty text pages", async () => {
 	for (const pages of [[], [{ kind: "empty", number: 1 }], [{ kind: "text", number: 1, markdown: " \n\t" }]] as PdfPage[][]) {
 		const service = createPluginDocumentConverter({ convertPdf: stub(converted(pages)) });
-		await assert.rejects(service.convert(upload("%PDF-x"), signal()), refusal(400, /blank/));
+		await assert.rejects(service.convert(upload("%PDF-x"), signal()), refusal(400, /空白/));
 		await recovered(service);
 	}
 	const service = createPluginDocumentConverter({ convertPdf: stub(converted([{ kind: "image-only", number: 1 }, { kind: "empty", number: 2 }])) });
-	await assert.rejects(service.convert(upload("%PDF-x"), signal()), refusal(400, /OCR is not supported/));
+	await assert.rejects(service.convert(upload("%PDF-x"), signal()), refusal(400, /不支持 OCR/));
 	await recovered(service);
 });
 
@@ -164,7 +164,7 @@ it("requires exactly one multipart File in field file (no duplicates, strings or
 	for (const fields of variants) {
 		const form = new FormData();
 		for (const [key, value] of fields) form.append(key, value);
-		await assert.rejects(service.convert(formRequest(form), signal()), refusal(400, /exactly one file/));
+		await assert.rejects(service.convert(formRequest(form), signal()), refusal(400, /只上传一个文件/));
 		await recovered(service);
 	}
 });
@@ -216,7 +216,7 @@ it("refuses malformed/truncated/missing/errored bodies and recovers the slot", a
 		new Request(complete.url, { method: "POST" }),
 		streamed(new ReadableStream({ pull(controller) { controller.error(new Error("broken stream")); } })),
 	]) {
-		await assert.rejects(service.convert(request, signal()), refusal(400, /Could not read/));
+		await assert.rejects(service.convert(request, signal()), refusal(400, /无法读取/));
 		await recovered(service);
 	}
 });
@@ -228,7 +228,7 @@ it("acquires global factory slot BEFORE buffering: simultaneous calls fail fast 
 	await entered.promise;
 	let reads = 0;
 	const other = streamed(new ReadableStream({ pull() { reads++; } }, { highWaterMark: 0 }));
-	await assert.rejects(service.convert(other, signal()), refusal(409, /^Document conversion is busy\. Please retry\.$/));
+	await assert.rejects(service.convert(other, signal()), refusal(409, /^文档转换正忙，请重试。$/));
 	assert.equal(reads, 0); assert.equal(other.bodyUsed, false);
 	finish.resolve(converted());
 	await first;

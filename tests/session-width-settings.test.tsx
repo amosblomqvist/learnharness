@@ -90,7 +90,7 @@ it("inline code and inline math never wrap on the session page; a span wider tha
 });
 
 it("labels: px at 16px per rem, or Full", () => {
-	assert.equal(transcriptWidthLabel(null), "Full");
+	assert.equal(transcriptWidthLabel(null), "全宽");
 	assert.equal(transcriptWidthLabel(46), "736px");
 	assert.equal(transcriptWidthLabel(120), "1920px");
 });
@@ -123,13 +123,13 @@ it("Appearance rows: the slider commits on release (Full = absent) and the toggl
 			slider().dispatchEvent(new dom.window.Event("change", { bubbles: true }));
 		});
 	};
-	const toggle = () => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="Adapt question layout"]')!;
+	const toggle = () => document.querySelector<HTMLButtonElement>('[role="switch"][aria-label="自适应问题布局"]')!;
 	try {
 		await act(async () => root.render(<InteractionLayersProvider><AppearanceProvider initialAppearance={{ proseFontSize: 20 }} initialTheme={DEFAULT_THEME}><Panel /></AppearanceProvider></InteractionLayersProvider>));
 		assert.equal(slider().getAttribute("min"), "46");
 		assert.equal(slider().getAttribute("max"), "122", "one step past 120rem is Full");
 		assert.equal(slider().getAttribute("step"), "2");
-		assert.equal(label(), "Full");
+		assert.equal(label(), "全宽");
 		await release(64);
 		assert.deepEqual(writes.at(-1), { proseFontSize: 20, transcriptMaxWidth: 64 });
 		assert.equal(document.documentElement.style.getPropertyValue("--lh-transcript-max"), "64rem");
@@ -137,7 +137,7 @@ it("Appearance rows: the slider commits on release (Full = absent) and the toggl
 		await release(122);
 		assert.equal("transcriptMaxWidth" in JSON.parse(JSON.stringify(writes.at(-1))), false, "Full is absence");
 		assert.equal(document.documentElement.style.getPropertyValue("--lh-transcript-max"), "", "the stale cap is removed");
-		assert.equal(label(), "Full");
+		assert.equal(label(), "全宽");
 		assert.equal(toggle().getAttribute("aria-checked"), "true");
 		await act(async () => toggle().click());
 		assert.equal(writes.at(-1)?.adaptiveQuestions, false);

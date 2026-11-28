@@ -1,3 +1,4 @@
+import { tr } from "./i18n.ts";
 export const TEX_ERROR_BYTES = 2048;
 
 /** Diagnostics cross the worker boundary as bounded plain text, never markup or
@@ -9,7 +10,7 @@ export function boundTexError(message: string): string {
 }
 
 export function texErrorMessage(error: unknown, source: string): string {
-  const message = error instanceof Error ? error.message : "TeX rendering failed.";
+  const message = error instanceof Error ? error.message : tr("TeX 渲染失败。", "TeX rendering failed.");
   const log = error && typeof error === "object" && "texLog" in error && typeof error.texLog === "string" ? error.texLog : "";
   const lines = log.slice(0, 4096).split(/\r\n|[\r\n]/);
   const first = lines.findIndex(line => line.startsWith("! "));
@@ -33,6 +34,6 @@ export function texErrorMessage(error: unknown, source: string): string {
   // A package's own error can report a line in its .sty file. Only attribute
   // it to saved source when the engine's actual excerpt agrees with that line.
   const agrees = originalLine && excerpt && originalLine.replace(/\s+/g, " ").includes(excerpt.replace(/\s+/g, " "));
-  const context = agrees ? ` Line ${lineNumber}: ${originalLine.slice(0, 400)}` : "";
-  return boundTexError(`TeX compilation failed: ${details.join(" ")}${context}`);
+  const context = agrees ? tr(` 第 ${lineNumber} 行：${originalLine.slice(0, 400)}`, ` Line ${lineNumber}: ${originalLine.slice(0, 400)}`) : "";
+  return boundTexError(tr(`TeX 编译失败：${details.join(" ")}${context}`, `TeX compilation failed: ${details.join(" ")}${context}`));
 }

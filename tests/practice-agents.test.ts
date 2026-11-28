@@ -213,7 +213,7 @@ describe("the practice agent", () => {
 		// not apply the teacher/prober user tool-toggle filter.
 		assert.deepEqual(
 			Object.keys(tools).sort(),
-			["conclude", "find", "grep", "list_propositions", "list_sessions", "ls", "pdf", "problem", "read", "research"],
+			["conclude", "find", "grep", "list_open_gaps", "list_propositions", "list_sessions", "ls", "pdf", "problem", "read", "research"],
 		);
 		const withSearch = practiceTools({ ...ctxOf([]), jobs: { ...jobs, searchAvailable: () => true }, graph });
 		assert.ok(withSearch.research, "a live engine also keeps research");

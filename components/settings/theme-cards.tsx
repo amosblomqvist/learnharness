@@ -17,10 +17,12 @@ import { useRef, useState } from "react";
 import { CheckIcon, DownloadIcon, Trash2Icon, UploadIcon } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { exportThemeFile, type AppearanceSettings, type Theme } from "@/src/core";
+import { tr } from "@/src/core";
 
 /** The selected card's frame: a 2px gap in the dialog surface, then a 1px
  *  ring in the theme accent (the check by the name does the rest). */
 const SELECTED_FRAME = "shadow-[0_0_0_2px_var(--card),0_0_0_3px_var(--lh-accent)]";
+const MODE_LABEL: Record<Theme["mode"], string> = { light: tr("浅色", "light"), dark: tr("深色", "dark") };
 
 function Dot({ color, edge }: { color: string; edge?: string }) {
 	return (
@@ -95,7 +97,7 @@ export function ThemeCards({
 		try {
 			body = JSON.parse(await file.text());
 		} catch {
-			setImportError(`${file.name} is not valid JSON`);
+			setImportError(tr(`${file.name} 不是有效的 JSON`, `${file.name} is not valid JSON`));
 			return;
 		}
 		setBusy(true);
@@ -107,12 +109,12 @@ export function ThemeCards({
 			});
 			const out = (await res.json().catch(() => ({}))) as { theme?: Theme; error?: string };
 			if (!res.ok || !out.theme) {
-				setImportError(out.error ?? `import failed (${res.status})`);
+				setImportError(out.error ?? tr(`导入失败（${res.status}）`, `import failed (${res.status})`));
 				return;
 			}
 			onImported(out.theme);
 		} catch {
-			setImportError("import failed (network)");
+			setImportError(tr("导入失败（网络错误）", "import failed (network)"));
 		} finally {
 			setBusy(false);
 		}
@@ -127,9 +129,9 @@ export function ThemeCards({
 		<div data-testid="row-theme" className="flex flex-col gap-3 py-1">
 			<div className="flex items-end justify-between gap-4">
 				<span className="min-w-0">
-					<span className="block font-prose text-(length:--lh-prose-size)">Theme</span>
+					<span className="block font-prose text-(length:--lh-prose-size)">{tr("主题", "Theme")}</span>
 					<span data-testid="theme-hint" className="block text-xs text-muted-foreground/70">
-						{active.name} · {active.mode} · sets every color below
+						{active.name} · {MODE_LABEL[active.mode]}{tr(" · 决定下方所有颜色", " · sets every color below")}
 					</span>
 				</span>
 				<button
@@ -139,7 +141,7 @@ export function ThemeCards({
 					className="flex h-7 shrink-0 items-center gap-2 rounded-sm border border-border bg-background px-2 font-ui text-xs text-foreground transition-colors hover:border-muted-foreground/50"
 				>
 					<DownloadIcon className="size-3.5" />
-					Export JSON
+					{tr("导出 JSON", "Export JSON")}
 				</button>
 			</div>
 			<div className="grid grid-cols-3 gap-3">
@@ -164,14 +166,14 @@ export function ThemeCards({
 										<span className="truncate">{theme.name}</span>
 									</span>
 									<span className="shrink-0 rounded-sm border border-border px-1.5 font-ui text-xs uppercase tracking-wider text-muted-foreground">
-										{theme.builtin ? theme.mode : "custom"}
+										{theme.builtin ? MODE_LABEL[theme.mode] : tr("自定义", "custom")}
 									</span>
 								</span>
 							</button>
 							{!theme.builtin && (
 								<button
 									type="button"
-									aria-label={`Remove ${theme.name}`}
+									aria-label={tr(`移除 ${theme.name}`, `Remove ${theme.name}`)}
 									data-testid={`theme-remove-${theme.id}`}
 									onClick={() => void remove(theme)}
 									className="absolute right-3 bottom-3 flex size-5 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:text-error"
@@ -190,11 +192,11 @@ export function ThemeCards({
 					className="flex min-h-27 flex-col items-center justify-center gap-1.5 rounded-lg border border-dashed border-muted-foreground/50 p-3 text-center font-ui text-xs text-muted-foreground transition-colors hover:text-foreground"
 				>
 					<UploadIcon className="size-4" />
-					<span>Import JSON</span>
+					<span>{tr("导入 JSON", "Import JSON")}</span>
 					{importError ? (
 						<span data-testid="theme-import-error" className="text-error">{importError}</span>
 					) : (
-						<span className="text-muted-foreground/70">name · mode · colors</span>
+						<span className="text-muted-foreground/70">{tr("名称 · 模式 · 颜色", "name · mode · colors")}</span>
 					)}
 				</button>
 				<input

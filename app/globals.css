@@ -120,8 +120,8 @@
 	   (Source Sans 3 by default). The loading-face variables attach in
 	   app/layout.tsx. Keep the sans alias pointed at the RUNTIME prose token,
 	   not the loading face, so font-sans also honors Appearance changes. */
-	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
-	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, monospace;
+	--font-ui: var(--font-jetbrains), ui-monospace, SFMono-Regular, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", monospace;
+	--font-mono: var(--font-jetbrains), ui-monospace, SFMono-Regular, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", monospace;
 	--font-sans: var(--font-prose);
 	/* The modular type ladder — each size carries its own line-height.
 	   Component sizes must pull from this ladder. (owner, typography
@@ -214,6 +214,13 @@ body {
    available weight — the same rendering it already had. */
 .font-title {
 	font-weight: 900;
+}
+
+/* Top-bar session/plugin names (2026-11): a quiet 18px semibold label,
+   not a 32px/900 display heading — declared after .font-title so it
+   wins at equal specificity. Dialog headings keep .font-title's 900. */
+.lh-session-title {
+	font-weight: 600;
 }
 
 .lh-prose :where(strong, b) {
@@ -807,8 +814,8 @@ body {
    independently, whether titles use serif or the reading family. Non-inline
    utilities read these vars; Source Sans 3 remains the default/loading face. */
 @theme {
-	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, sans-serif;
-	--font-title: "lh-cmu", serif;
+	--font-prose: var(--font-sans3), ui-sans-serif, system-ui, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", sans-serif;
+	--font-title: "lh-cmu", "Songti SC", "Noto Serif CJK SC", "Source Han Serif SC", SimSun, serif;
 }
 
 /* Card enter (owner round, 2026-10-05): the transcript cards' one-shot

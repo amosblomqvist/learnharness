@@ -39,5 +39,5 @@ test("graph stage/recent aggregates retain distinct subscription providers witho
 test("model menu distinguishes subscription connection and shows provider label rather than API prices", () => {
 	const native = piModels().getModels("xai")[0]!;
 	const html = renderToStaticMarkup(<ModelMenuList models={[toModelDto({ ...native, provider: "xai-subscription" })]} effectiveId={undefined} onPick={() => {}} />);
-	assert(html.includes("Grok (subscription)")); assert(html.includes(">Grok</span>")); assert(!html.includes("USD per 1M")); assert(!html.includes("$0"));
+	assert(html.includes("Grok（订阅）")); assert(html.includes(">Grok</span>")); assert(!html.includes("USD per 1M")); assert(!html.includes("$0"));
 });

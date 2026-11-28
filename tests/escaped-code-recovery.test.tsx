@@ -186,14 +186,14 @@ test("pending → exact copy → submit → saved/answered copy never changes so
 	try {
 		await act(async () => root.render(<QuestionDock toolName="probe" toolCallId="escaped_code" input={input} expanded
 			dictationClaim={false} onExpand={() => {}} onSubmit={result => { answer = result; }} />));
-		const copy = () => host.querySelector<HTMLButtonElement>('[aria-label="Copy code"]')!;
+		const copy = () => host.querySelector<HTMLButtonElement>('[aria-label="复制代码"]')!;
 		assert.ok(copy());
 		await act(async () => copy().click());
 		assert.equal(copies[0], body + "\n", "copied program is the native Markdown code source");
 		assert.equal(host.querySelectorAll(".katex").length, 0);
 		const yes = [...host.querySelectorAll<HTMLButtonElement>('[role="radio"]')].find(button => button.textContent?.includes("Yes"))!;
 		await act(async () => yes.click());
-		const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.includes("Submit answer"))!;
+		const submit = [...host.querySelectorAll<HTMLButtonElement>("button")].find(button => button.textContent?.includes("提交答案"))!;
 		assert.equal(submit.disabled, false);
 		await act(async () => submit.closest("form")!.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true })));
 		assert.ok(answer);

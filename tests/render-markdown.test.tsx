@@ -228,11 +228,11 @@ describe("render — mermaid", () => {
 				retry={() => {}}
 			/>,
 		);
-		assert.match(html, /Diagram failed to render/);
+		assert.match(html, /图表渲染失败/);
 		assert.match(html, /Parse error on line 1/);
-		assert.match(html, /Show diagram source/);
+		assert.match(html, /显示图表源码/);
 		assert.match(html, /not a diagram/);
-		assert.match(html, />Retry</);
+		assert.match(html, />重试</);
 	});
 });
 

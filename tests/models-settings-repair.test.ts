@@ -156,7 +156,7 @@ test("retained selections remain unavailable at runtime, with no API-key fallbac
 	try {
 		const result = await engine.streamFn(engine.model, normalizeContext({ messages: [] }), { fetch: async () => { requests++; throw new Error("Must not dispatch"); } }).result();
 		assert.equal(result.stopReason, "error");
-		assert.match(result.errorMessage ?? "", /No API-key fallback was used/);
+		assert.match(result.errorMessage ?? "", /未回退到 API 密钥。/);
 		assert.equal(requests, 0);
 		assert.equal(leases, before);
 	} finally {

@@ -13,7 +13,7 @@ const mainFile = fileURLToPath(new URL("../electron/main.cjs", import.meta.url))
 const mainSource = readFileSync(mainFile, "utf8");
 const mainRequire = createRequire(mainFile);
 
-function fixture({ packaged = true, updaterMissing = false } = {}) {
+function fixture({ packaged = true, updaterMissing = false, feedFile = undefined as boolean | undefined } = {}) {
 	let settings: string | Error = JSON.stringify({ version: 1, general: { autoUpdate: true } });
 	const settingsReads: string[] = [];
 	const order: string[] = [];
@@ -102,10 +102,11 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 					if (settings instanceof Error) throw settings;
 					return settings;
 				}, mkdirSync() {}, appendFileSync() {},
+				existsSync: (file: string) => feedFile === true && file === "/fixture/resources/app-update.yml",
 			};
 			return mainRequire(id);
 		},
-		process: { argv: [], env: { LH_DEV_URL: "http://127.0.0.1:9000" }, platform: "darwin", on() {} },
+		process: { argv: [], env: { LH_DEV_URL: "http://127.0.0.1:9000" }, platform: "darwin", on() {}, ...(feedFile === undefined ? {} : { resourcesPath: "/fixture/resources" }) },
 		__dirname: path.dirname(mainFile), URL, AbortController,
 		setInterval: (callback: () => void, delay: number) => intervals.push({ callback, delay }),
 		setTimeout() {},
@@ -121,9 +122,25 @@ function fixture({ packaged = true, updaterMissing = false } = {}) {
 		window: () => new FakeWindow(),
 		state: () => JSON.parse(JSON.stringify(run("updateState"))),
 		check: async (manual = false) => { run(`checkForUpdates({ manual: ${manual} })`); await Promise.resolve(); await Promise.resolve(); },
-		menuCheck: () => menu[0]!.submenu!.find(item => item.label === "Check for Updates…")!.click!(),
+		menuCheck: () => menu[0]!.submenu!.find(item => item.label === "检查更新…")!.click!(),
 	};
 }
+
+describe("update feed presence", () => {
+	it("a packaged build without app-update.yml never loads or runs the updater", async () => {
+		const f = fixture({ feedFile: false });
+		f.run("setupAutoUpdater()");
+		assert.equal(f.state().status, "disabled");
+		await f.check(true);
+		assert.equal(f.updater.checks, 0);
+	});
+	it("a packaged build with app-update.yml keeps the updater", async () => {
+		const f = fixture({ feedFile: true });
+		f.run("setupAutoUpdater()");
+		await f.check(true);
+		assert.equal(f.updater.checks, 1);
+	});
+});
 
 describe("automatic-update preference gate", () => {
 	it("explicit OFF skips automatic checks, but manual checks still run without reading the preference", async () => {

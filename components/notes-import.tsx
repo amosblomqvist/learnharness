@@ -7,6 +7,7 @@ import { IMPORT_ACCEPT } from "@/lib/notes-import-limits.ts";
 import { useInteractionLayer, useInteractionLayers } from "@/components/interaction-layers";
 import { INTERACTION_LAYER_Z_BASE } from "@/components/host-dialog";
 import { createNotesImportQueue, EMPTY_IMPORT_QUEUE, notesPath } from "./notes-import-queue";
+import { tr } from "@/src/core";
 
 export { MAX_IMPORT_BYTES } from "@/lib/notes-import-limits.ts";
 export { notesPath } from "./notes-import-queue";
@@ -29,7 +30,7 @@ export interface NotesImportResult {
 /** Contributor's strict attribution: validate the complete response before
  * applying any row, even when several files have identical basenames. */
 export function parseNotesImportResults(body: unknown, files: readonly File[]): NotesImportResult[] {
-	const invalid = () => new Error("Invalid import response. Check the graph before retrying.");
+	const invalid = () => new Error(tr("导入响应无效。请先检查图谱再重试。", "Invalid import response. Check the graph before retrying."));
 	if (!body || typeof body !== "object" || !("results" in body) || !Array.isArray(body.results) || body.results.length !== files.length) throw invalid();
 	const seen = new Set<number>();
 	for (const raw of body.results) {
@@ -56,10 +57,10 @@ export async function postNotesImport(files: readonly File[]): Promise<NotesImpo
 	const response = await fetch("/api/graph/import", { method: "POST", body: form });
 	let body: unknown;
 	try { body = await response.json(); }
-	catch { throw new Error("Invalid import response. Check the graph before retrying."); }
+	catch { throw new Error(tr("导入响应无效。请先检查图谱再重试。", "Invalid import response. Check the graph before retrying.")); }
 	if (!response.ok) {
-		const detail = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? `: ${body.error}` : "";
-		throw new Error(`Import request failed (HTTP ${response.status})${detail}${/[.!?]$/.test(detail) ? "" : "."} Check the graph before retrying.`);
+		const detail = body && typeof body === "object" && "error" in body && typeof body.error === "string" ? tr(`：${body.error}`, `: ${body.error}`) : "";
+		throw new Error(tr(`导入请求失败（HTTP ${response.status}）${detail}${/[.!?。！？]$/.test(detail) ? "" : "。"}请先检查图谱再重试。`, `Import request failed (HTTP ${response.status})${detail}${/[.!?]$/.test(detail) ? "" : "."} Check the graph before retrying.`));
 	}
 	return parseNotesImportResults(body, files);
 }
@@ -104,21 +105,21 @@ export function NotesImportControl({ importing, onImportFiles }: { importing: bo
 	const interactions = useInteractionLayers();
 	const popupLayer = useInteractionLayer({ kind: "popup", enabled: open, rootRef: panelRef, anchorRef: rootRef,
 		onClose: () => { setOpen(false); return "closed"; } });
-	const choices = [["Files", filesRef], ["Folder", folderRef]] as const;
+	const choices = [[tr("文件", "Files"), filesRef], [tr("文件夹", "Folder"), folderRef]] as const;
 	return (
 		<div ref={rootRef} className="relative shrink-0 rounded-xl border bg-card/85 px-1 py-[3px] shadow-lg backdrop-blur"
 			onBlur={(event) => { if (interactions.isElementEligible(panelRef.current) && !event.currentTarget.contains(event.relatedTarget)) setOpen(false); }}>
 			<input ref={filesRef} type="file" multiple accept={IMPORT_ACCEPT} className="hidden" onChange={onChange} />
 			<input ref={folderRef} type="file" {...{ webkitdirectory: "" }} className="hidden" onChange={onChange} />
-			<Hint label="Extract files into the graph" side="bottom">
+			<Hint label={tr("将文件提取到图谱", "Extract files into the graph")} side="bottom">
 				<button type="button" onClick={() => setOpen(!open)} aria-expanded={open} aria-haspopup="menu" data-testid="import-notes"
 					className="flex h-7 items-center gap-1.5 rounded-lg px-2.5 text-xs text-muted-foreground transition-colors hover:bg-accent">
-					<WaypointsIcon className="size-3" />{importing ? "Extracting…" : "Extract files…"}
+					<WaypointsIcon className="size-3" />{importing ? tr("提取中…", "Extracting…") : tr("提取文件…", "Extract files…")}
 				</button>
 			</Hint>
 			{open && (
-				<div ref={panelRef} role="menu" aria-label="Extract files into the graph" aria-describedby={hintId} style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }} className="absolute right-0 top-full mt-1 w-52 rounded-lg border bg-card p-1 shadow-lg">
-					<div role="none"><p id={hintId} className="px-2 py-1.5 text-xs leading-relaxed text-muted-foreground">For lessons, attach material to a session instead.</p></div>
+				<div ref={panelRef} role="menu" aria-label={tr("将文件提取到图谱", "Extract files into the graph")} aria-describedby={hintId} style={{ zIndex: INTERACTION_LAYER_Z_BASE + popupLayer.order }} className="absolute right-0 top-full mt-1 w-52 rounded-lg border bg-card p-1 shadow-lg">
+					<div role="none"><p id={hintId} className="px-2 py-1.5 text-xs leading-relaxed text-muted-foreground">{tr("如需用于课程，请改为将资料附加到会话。", "For lessons, attach material to a session instead.")}</p></div>
 					{choices.map(([label, input]) => <button key={label} type="button" role="menuitem" className="block w-full rounded px-2 py-1 text-left text-xs hover:bg-accent"
 						onClick={() => { setOpen(false); input.current?.click(); }}>{label}</button>)}
 				</div>

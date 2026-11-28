@@ -7,7 +7,7 @@ function failure(log: string) { return Object.assign(new Error("TeX compilation 
 test("reports the actual TeX error and original source line, without console instructions or the full log", () => {
   const source = "\\usepackage{tikz}\n\\begin{document}\n\\unknowncommand\n\\end{document}";
   const error = failure("private preamble\n! Undefined control sequence.\nl.4 \\unknowncommand\n? \n! Emergency stop.\nprivate transcript tail");
-  assert.equal(texErrorMessage(error, source), "TeX compilation failed: Undefined control sequence. Line 3: \\unknowncommand");
+  assert.equal(texErrorMessage(error, source), "TeX 编译失败：Undefined control sequence. 第 3 行：\\unknowncommand");
   assert.equal(texErrorMessage(failure("! Undefined control sequence.\r\nl.4 \\unknowncommand"), source.replaceAll("\n", "\r\n")), texErrorMessage(error, source));
 });
 
@@ -15,17 +15,17 @@ test("keeps wrapped package diagnostics but omits engine help and unrelated tran
   const error = failure("! Package pgfkeys Error: I do not know the key '/tikz/unknown',\n to which you passed 'abc', and I am going to ignore it.\n\nSee the pgfkeys package documentation for explanation.\nType H <return> for immediate help.\n ...\nl.2 \\begin{tikzpicture}[unknown=abc]\n! Emergency stop.");
   const message = texErrorMessage(error, String.raw`\begin{tikzpicture}[unknown=abc]`);
   assert.match(message, /I do not know the key '\/tikz\/unknown', to which you passed 'abc'/);
-  assert.match(message, /Line 1:/);
+  assert.match(message, /第 1 行：/);
   assert.doesNotMatch(message, /See the|Type H|Emergency stop/);
 });
 
 test("missing logs and loader errors retain an honest bounded message; invalid line numbers invent no source context", () => {
   assert.equal(texErrorMessage(new Error("Failed to fetch local asset: 404"), ""), "Failed to fetch local asset: 404");
   assert.equal(texErrorMessage(failure(""), ""), "TeX compilation failed.");
-  assert.equal(texErrorMessage(null, ""), "TeX rendering failed.");
-  assert.equal(texErrorMessage(failure("! Package example Error: invalid option.\nl.2 \\packageInternalCommand"), "original source line"), "TeX compilation failed: Package example Error: invalid option.");
+  assert.equal(texErrorMessage(null, ""), "TeX 渲染失败。");
+  assert.equal(texErrorMessage(failure("! Package example Error: invalid option.\nl.2 \\packageInternalCommand"), "original source line"), "TeX 编译失败：Package example Error: invalid option.");
   for (const location of ["0", "1", "9999999"]) {
-    assert.equal(texErrorMessage(failure(`! Undefined control sequence.\nl.${location} token`), "source"), "TeX compilation failed: Undefined control sequence.");
+    assert.equal(texErrorMessage(failure(`! Undefined control sequence.\nl.${location} token`), "source"), "TeX 编译失败：Undefined control sequence.");
   }
 });
 

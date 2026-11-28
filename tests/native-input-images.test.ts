@@ -38,7 +38,7 @@ test("builtin images require exact occurrence while legacy text answers remain c
 	assert.equal(input.type, "answer");
 	assert.deepEqual(input.type === "answer" && input.answer.images, { answer: [image] });
 	assert.doesNotThrow(() => assertNativeSubmissionTarget([pose()], input));
-	assert.throws(() => assertNativeSubmissionTarget([pose("ask_user_question", "replacement")], input), /no longer active/);
+	assert.throws(() => assertNativeSubmissionTarget([pose("ask_user_question", "replacement")], input), /提交目标已失效，请刷新会话。/);
 	assert.equal(inputAppends({ messages: [pose()] }, input)[0]!.role, "toolResult");
 	assert.doesNotThrow(() => inputAppends({ messages: [pose()] }, { type: "answer", toolCallId: "call", answer: dismissedAnswer("ask", "Why?") }));
 });
@@ -48,7 +48,7 @@ test("practice thinking images bind canonical problem and survive stored model r
 	const input = parseChatInput(raw);
 	const messages = activeProblem();
 	assert.doesNotThrow(() => assertNativeSubmissionTarget(messages, input));
-	assert.throws(() => assertNativeSubmissionTarget([{ ...messages[0]!, id: "replacement" }, messages[1]!], input), /no longer active/);
+	assert.throws(() => assertNativeSubmissionTarget([{ ...messages[0]!, id: "replacement" }, messages[1]!], input), /提交目标已失效，请刷新会话。/);
 	assert.throws(() => parseChatInput({ ...raw, occurrence: undefined }));
 	const [marker] = inputAppends({ messages }, input);
 	assert.deepEqual((marker as { details: unknown }).details, { problemCallId: "call", text: "", images: [image] });

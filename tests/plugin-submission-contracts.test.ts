@@ -30,8 +30,8 @@ describe("submission immutable boundary", () => {
 	});
 	it("rejects nonempty inapplicable channels but permits explicit empty DTO channels", () => {
 		assert.doesNotThrow(() => preparePluginSubmission(submission(), target));
-		assert.throws(() => preparePluginSubmission(submission({ readingThinking: { text: "reading", images: [] } }), target), /not applicable/);
-		assert.throws(() => preparePluginSubmission(submission({ readingThinking: { text: "", images: [image] } }), target), /not applicable/);
+		assert.throws(() => preparePluginSubmission(submission({ readingThinking: { text: "reading", images: [] } }), target), /该提交通道不适用/);
+		assert.throws(() => preparePluginSubmission(submission({ readingThinking: { text: "", images: [image] } }), target), /该提交通道不适用/);
 	});
 	it("preserves exact plugin JSON/string answers and deep-freezes nested JSON", () => {
 		const pluginTarget: PluginSubmissionTarget = { type: "plugin-question-answer", sessionId: "s", sessionKind: "teaching", surfaceTarget, channels: ["answer"], question: { questionId: "q", occurrence, pluginId: "p", typeId: "t", contractVersion: 1, label: "Question", variant: "probe", showThinking: false } };

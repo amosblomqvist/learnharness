@@ -30,7 +30,7 @@ for (const overflow of [false, true]) test(`top-bar ${overflow ? "overflow" : "i
     captured = action.view; await pending; after = action.view;
   } }); ctx.placeAction({ id: "view", actionId: "view", location: "top-bar", sessions: ["teaching"] }); } }, <Chrome />);
   try {
-    if (overflow) { await fixture.resize(120); await fixture.click(fixture.document.querySelector<HTMLElement>('[aria-label="More plugin actions"]')!); }
+    if (overflow) { await fixture.resize(120); await fixture.click(fixture.document.querySelector<HTMLElement>('[aria-label="更多插件操作"]')!); }
     (data.composer as { text: string }).text = "newer draft, without a render";
     await fixture.click(fixture.document.querySelector<HTMLElement>('[data-plugin-action="fixture/view"]')!);
     assert.equal(captured?.composer.text, "newer draft, without a render"); assert.equal(captured?.sessionId, "one");
@@ -85,7 +85,7 @@ for (const overflow of [false, true]) test(`question typing refreshes ${overflow
     assert.ok(connections[0]);
     assert.ok(refreshRefForTest.current);
     assert.notEqual(refreshRefForTest.current, connections[0], "reconnection must register a fresh refresh callback");
-    if (overflow) { await fixture.resize(120); await fixture.click(fixture.document.querySelector<HTMLElement>('[aria-label="More plugin actions"]')!); }
+    if (overflow) { await fixture.resize(120); await fixture.click(fixture.document.querySelector<HTMLElement>('[aria-label="更多插件操作"]')!); }
     const button = () => fixture.document.querySelector<HTMLButtonElement>('[data-plugin-action="fixture/draft"]')!;
     assert.equal(button().disabled, true);
     const baseline = { owner: ownerRenders, transcript: transcriptRenders };

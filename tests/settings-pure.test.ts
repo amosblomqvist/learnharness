@@ -35,7 +35,7 @@ describe("resolveAppearance — delta over factory", () => {
 		assert.deepEqual(a.colors, {});
 		assert.equal(a.fontFamily, null);
 		assert.equal(a.proseFontSize, 16);
-		assert.equal(a.sessionNameSerif, true);
+		assert.equal(a.sessionNameSerif, false);
 		assert.deepEqual(a.mdRendering, { headingWeight: 900, boldColor: null, italicColor: null });
 	});
 
@@ -57,7 +57,7 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-prose-size"], "16px");
 		assert.equal(vars["--lh-heading-weight"], "900");
 		assert.equal(vars["--font-prose"], undefined, "no font override at factory");
-		assert.equal(vars["--font-title"], undefined, "CMU stays");
+		assert.equal(vars["--font-title"], "var(--font-prose)", "factory: titles follow the prose font");
 	});
 
 	it("JetBrains Mono renders from the bundled face when it is not installed", () => {
@@ -105,7 +105,7 @@ describe("staleVarNames — the removal half of application (owner repro: resets
 			resolveAppearance({
 				background: "#101820",
 				fontFamily: "Georgia",
-				sessionNameSerif: false,
+				sessionNameSerif: true,
 				mdRendering: { headingWeight: 700, boldColor: "#ff0000", italicColor: "#00ff00" },
 			}),
 			DEFAULT_THEME,
@@ -113,7 +113,8 @@ describe("staleVarNames — the removal half of application (owner repro: resets
 		const factory = appearanceVars(resolveAppearance(undefined), DEFAULT_THEME);
 		const stale = staleVarNames(Object.keys(fullDelta), factory);
 		assert.ok(stale.includes("--font-prose"));
-		assert.ok(stale.includes("--font-title"), "serif toggle back ON must clear the title override");
+		assert.ok(!stale.includes("--font-title"), "serif off is the factory: the title override is set, not stale");
+		assert.equal(factory["--font-title"], "var(--font-prose)");
 		assert.ok(!stale.includes("--background"), "a theme always sets every color");
 		assert.equal(factory["--background"], "#141414", "an emptied background is the theme's again");
 		assert.ok(!stale.includes("--lh-prose-size"), "always-applied tokens never go stale");
@@ -190,7 +191,7 @@ describe("agent section compose helpers — the replace-whole PUT body", () => {
 		for (const draft of ["0", "-1", "1.5", "1e-1", "8.0000000000000001", "99999999999999.99999", "9007199254740992", "1e999999", "1e", "NaN", "Infinity", "hello", "0x10"]) {
 			const result = composeWorkerRequestConcurrency(undefined, draft);
 			assert.equal(result.ok, false, draft);
-			if (!result.ok) assert.match(result.error, /positive, safely representable whole number/);
+			if (!result.ok) assert.match(result.error, /^请输入一个可安全表示的正整数。$/);
 		}
 	});
 
@@ -334,12 +335,12 @@ describe("keyStatusLine — the minimal at-a-glance state", () => {
 	it("env-owned key carries the 'env' marker (the row renders read-only)", () => {
 		assert.equal(
 			keyStatusLine({ id: "X", info: null, present: true, masked: "…ca10 (73 chars)", source: "env", shadowedByEnv: false }),
-			"…ca10 · 73 · env",
+			"…ca10 · 73 · 环境变量",
 		);
 	});
 
 	it("absent key reads 'not set'", () => {
-		assert.equal(keyStatusLine({ id: "X", info: null, present: false, masked: null, source: "none", shadowedByEnv: false }), "not set");
+		assert.equal(keyStatusLine({ id: "X", info: null, present: false, masked: null, source: "none", shadowedByEnv: false }), "未设置");
 	});
 });
 
@@ -430,16 +431,16 @@ describe("sectionedSegments — actual per-agent prompt membership", () => {
 
 	it("labels each shared fragment from actual membership, independently of override state", () => {
 		const shared = sectionedSegments(view).at(-1)!;
-		assert.equal(shared.segments[0]!.usageHint, "Used by Teacher and Prober");
-		assert.equal(shared.segments[2]!.usageHint, "Used by Teacher, Prober and Practice");
+		assert.equal(shared.segments[0]!.usageHint, "用于：老师和摸底");
+		assert.equal(shared.segments[2]!.usageHint, "用于：老师、摸底和练习");
 		assert.equal(shared.segments[2]!.enabled, true, "in-use state is not replaced by usage");
 		// A synthetic new path/membership proves there is no duplicated allowlist.
 		const fragment = { path: "shared/99-new.md", sourceText: "new", overrideText: null, enabled: false, shared: true };
 		const changed = { teacher: [fragment], prober: [fragment], practice: [fragment] };
-		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "Used by Teacher, Prober and Practice");
+		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "用于：老师、摸底和练习");
 		changed.practice = [];
-		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "Used by Teacher and Prober");
-		assert.equal(sectionedSegments({ teacher: [], prober: [], practice: [fragment] }).at(-1)!.segments[0]!.usageHint, "Used by Practice");
+		assert.equal(sectionedSegments(changed).at(-1)!.segments[0]!.usageHint, "用于：老师和摸底");
+		assert.equal(sectionedSegments({ teacher: [], prober: [], practice: [fragment] }).at(-1)!.segments[0]!.usageHint, "用于：练习");
 	});
 
 });

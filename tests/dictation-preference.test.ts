@@ -11,7 +11,7 @@ test("all readers immediately receive the confirmed write without another GET", 
 		reads++;
 		return failReads ? Response.json({}, { status: 500 }) : Response.json({ settings: null });
 	}, () => { notifications++; });
-	assert.equal(await store.load(), "en");
+	assert.equal(await store.load(), "zh");
 	const observed: string[] = [];
 	const off = store.subscribe(() => { observed.push(`${store.getSnapshot().language}:${store.getSnapshot().saving}`); });
 	failReads = true;
@@ -48,8 +48,8 @@ test("a failed external refresh invalidates the cache until a successful retry",
 		: Response.json({ settings: { version: 1, dictation: { language: "pl" } } }));
 	await store.load();
 	fail = true;
-	await assert.rejects(store.load(true), /Could not load/);
-	await assert.rejects(store.getLanguage(), /Could not load/);
+	await assert.rejects(store.load(true), /无法加载/);
+	await assert.rejects(store.getLanguage(), /无法加载/);
 	fail = false;
 	assert.equal(await store.getLanguage(), "pl");
 	assert.equal(store.getSnapshot().error, null);

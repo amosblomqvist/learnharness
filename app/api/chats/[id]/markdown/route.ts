@@ -12,6 +12,7 @@
  */
 import { sessionMarkdown } from "@/src/core";
 import { getChat } from "@/src/server";
+import { tr } from "@/src/core";
 
 /** Filename-safe title (own module scope on purpose: tiny + pure). */
 function slugify(title: string): string {
@@ -26,7 +27,7 @@ function slugify(title: string): string {
 export async function GET(_req: Request, ctx: { params: Promise<{ id: string }> }): Promise<Response> {
 	const { id } = await ctx.params;
 	const record = getChat(id);
-	if (!record) return Response.json({ error: "Unknown chat" }, { status: 404 });
+	if (!record) return Response.json({ error: tr("找不到该会话", "Unknown chat") }, { status: 404 });
 	const markdown = sessionMarkdown(record.messages, { title: record.title, anchors: false });
 	return new Response(markdown, {
 		headers: {

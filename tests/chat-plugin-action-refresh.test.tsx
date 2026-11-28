@@ -64,7 +64,7 @@ for (const thinking of [false, true]) for (const overflow of [false, true]) test
     const editor = () => mounted.document.querySelector<HTMLElement>(`[data-testid="${thinking ? "thinking" : "answer"}-field"] [data-file-path-input]`)!;
     assert.ok(editor(), "production dock must expose the real field");
     await mounted.resize(overflow ? 120 : 2400);
-    if (overflow) await mounted.click(mounted.document.querySelector<HTMLElement>('[aria-label="More plugin actions"]')!);
+    if (overflow) await mounted.click(mounted.document.querySelector<HTMLElement>('[aria-label="更多插件操作"]')!);
     const button = () => mounted.document.querySelector<HTMLButtonElement>('[data-plugin-action="fixture/draft"]')!;
     assert.equal(button().closest('[role="menu"]') !== null, overflow);
     assert.equal(button().disabled, true);

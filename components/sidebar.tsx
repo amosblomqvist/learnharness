@@ -62,6 +62,7 @@ const STORAGE_KEY = "lh:sidebar-open";
 import type { ChatGPTControlBridge, NativeSubscriptionControlBridge } from "@/src/core";
 import type { UpdateState } from "@/components/settings/update-settings.tsx";
 import { FilePathDropZone } from "@/components/file-path-drop-zone";
+import { tr } from "@/src/core";
 const SIDEBAR_AUTOCLOSE = 928;
 
 // Module scope, guarded for SSR (the server has no navigator).
@@ -95,6 +96,8 @@ declare global {
 			/** Explicit manual check also downloads and stages available updates. */
 			checkForUpdates?: () => Promise<void>;
 			installUpdate?: () => void;
+			/** Fresh launch (Settings → General → Language). */
+			relaunch?: () => Promise<void>;
 			onOpenSettings?: (cb: (section: string) => void) => () => void;
 			takeStartupMessage?: () => Promise<StartupMessageOffer | null>;
 			dismissStartupMessage?: (id: string) => Promise<boolean>;
@@ -225,11 +228,11 @@ export function SidebarToggle() {
 				open ? "w-0 -mr-3" : "w-9 mr-0 lh-closed-toggle",
 			)}
 		>
-			<Hint label="Open sidebar" action="toggle-sidebar">
+			<Hint label={tr("打开侧边栏", "Open sidebar")} action="toggle-sidebar">
 			<Button
 				variant="ghost"
 				size="icon"
-				aria-label="Open sidebar"
+				aria-label={tr("打开侧边栏", "Open sidebar")}
 				aria-hidden={open}
 				tabIndex={open ? -1 : 0}
 				onClick={toggle}
@@ -270,13 +273,13 @@ function SessionStatus({ busy }: { busy: boolean }) {
  *  — trivial, a format function swap). Pure — exported for tests. */
 export function timeAgo(iso: string, now = new Date()): string {
 	const ms = now.getTime() - new Date(iso).getTime();
-	if (ms < 60_000) return "just now";
+	if (ms < 60_000) return tr("刚刚", "just now");
 	const min = Math.floor(ms / 60_000);
-	if (min < 60) return `${min}m ago`;
+	if (min < 60) return tr(`${min} 分钟前`, `${min}m ago`);
 	const h = Math.floor(min / 60);
-	if (h < 24) return `${h}h ago`;
+	if (h < 24) return tr(`${h} 小时前`, `${h}h ago`);
 	const d = Math.floor(h / 24);
-	if (d < 7) return `${d}d ago`;
+	if (d < 7) return tr(`${d} 天前`, `${d}d ago`);
 	const date = new Date(iso);
 	const mm = String(date.getMonth() + 1).padStart(2, "0");
 	const dd = String(date.getDate()).padStart(2, "0");
@@ -289,12 +292,12 @@ export function timeAgo(iso: string, now = new Date()): string {
  *  still rides the API payload, so this is a one-line flip back if it's
  *  ever wanted. */
 function sessionMeta(chat: ChatListItem): string {
-	if (chat.compacting) return `Compacting context · ${timeAgo(chat.updatedAt)}`;
-	if (chat.pendingQuestion) return `Waiting for input · ${timeAgo(chat.updatedAt)}`;
+	if (chat.compacting) return tr(`正在压缩上下文 · ${timeAgo(chat.updatedAt)}`, `Compacting context · ${timeAgo(chat.updatedAt)}`);
+	if (chat.pendingQuestion) return tr(`等待输入 · ${timeAgo(chat.updatedAt)}`, `Waiting for input · ${timeAgo(chat.updatedAt)}`);
 	if ((chat.kind ?? "teach") === "practice" && chat.pendingProblem) {
-		return `Problem waiting · ${timeAgo(chat.updatedAt)}`;
+		return tr(`题目待作答 · ${timeAgo(chat.updatedAt)}`, `Problem waiting · ${timeAgo(chat.updatedAt)}`);
 	}
-	if (chat.busy) return "Working…";
+	if (chat.busy) return tr("处理中…", "Working…");
 	return timeAgo(chat.updatedAt);
 }
 
@@ -348,7 +351,7 @@ export function SessionRow({
 			    was left of the name; right-aligned keeps the titles flush with
 			    the teaching rows and reads cleaner. */}
 			{(chat.kind ?? "teach") === "practice" && (
-				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label="Practice session" />
+				<DumbbellIcon className="size-3.5 shrink-0 text-muted-foreground/70" aria-label={tr("练习会话", "Practice session")} />
 			)}
 		</button>
 	);
@@ -398,7 +401,7 @@ export function RenameRow({ chat, onCommit, onCancel, depth = 0, compact = false
 							onCancel();
 						}
 					}}
-					aria-label="Rename session"
+					aria-label={tr("重命名会话", "Rename session")}
 					data-testid="session-rename-input"
 					className={cn("w-full min-w-0 truncate border-0 border-b border-border bg-transparent px-0 text-foreground outline-none", compact ? sidebarNameFont(true) : "lh-input")}
 				/>
@@ -737,8 +740,8 @@ function SessionsSidebar() {
 				headers: { "Content-Type": "application/json" },
 				body: JSON.stringify(scope),
 			})
-				.then(async (res) => { if (!res.ok) reportFolderFailure(((await res.json().catch(() => ({}))) as { error?: string }).error ?? `Could not delete the folder (${res.status}).`); })
-				.catch(() => reportFolderFailure("Could not delete the folder — network error."));
+				.then(async (res) => { if (!res.ok) reportFolderFailure(((await res.json().catch(() => ({}))) as { error?: string }).error ?? tr(`无法删除文件夹（${res.status}）。`, `Could not delete the folder (${res.status}).`)); })
+				.catch(() => reportFolderFailure(tr("无法删除文件夹 — 网络错误。", "Could not delete the folder — network error.")));
 			return;
 		}
 		const copy = folderDeleteCopy({
@@ -841,23 +844,23 @@ function SessionsSidebar() {
 						// of the logo, carrying its real shortcut: ⌘G jumps to
 						// the graph view (keyboard-shortcuts routes it to "/",
 						// the same destination as this logo).
-						label="Home"
+						label={tr("首页", "Home")}
 						action="jump-graph"
 						side="right"
 					>
 						<Link
 							href="/"
-							aria-label="Home"
+							aria-label={tr("首页", "Home")}
 							className="lh-no-drag flex size-9 shrink-0 items-center justify-center rounded-md transition-colors hover:bg-accent hover:text-accent-foreground dark:hover:bg-accent/50"
 						>
 							<LhMark className="size-6" />
 						</Link>
 					</Hint>
-					<Hint label="Close sidebar" action="toggle-sidebar">
+					<Hint label={tr("关闭侧边栏", "Close sidebar")} action="toggle-sidebar">
 						<Button
 							variant="ghost"
 							size="icon"
-							aria-label="Close sidebar"
+							aria-label={tr("关闭侧边栏", "Close sidebar")}
 							onClick={toggle}
 							className="lh-no-drag"
 						>
@@ -871,30 +874,30 @@ function SessionsSidebar() {
 					<button
 						type="button"
 						data-testid="new-session"
-						title="Teaching"
+						title={tr("教学", "Teaching")}
 						onClick={() => void newSession()}
 						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<PlusIcon className="size-3 shrink-0" />
-						<span className="min-w-0 truncate">Teaching</span>
-						<span className="sr-only">create a new teaching session</span>
+						<span className="min-w-0 truncate">{tr("教学", "Teaching")}</span>
+						<span className="sr-only">{tr("新建教学会话", "create a new teaching session")}</span>
 					</button>
 					<button
 						type="button"
 						data-testid="new-session-practice"
-						title="Practice"
+						title={tr("练习", "Practice")}
 						onClick={() => router.push("/chat/new?mode=practice")}
 						className="flex min-w-0 w-full items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 					>
 						<DumbbellIcon className="size-3 shrink-0" />
-						<span className="min-w-0 truncate">Practice</span>
-						<span className="sr-only">create a new practice session</span>
+						<span className="min-w-0 truncate">{tr("练习", "Practice")}</span>
+						<span className="sr-only">{tr("新建练习会话", "create a new practice session")}</span>
 					</button>
 				</PluginSidebarActions>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
-					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
-					<Hint label="Search sessions" action="sessions-search" side="bottom">
+					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">{tr("会话", "Sessions")}</span>
+					<Hint label={tr("搜索会话", "Search sessions")} action="sessions-search" side="bottom">
 					<span className="relative flex-1">
 						<Input
 							ref={searchRef}
@@ -946,18 +949,18 @@ function SessionsSidebar() {
 									e.currentTarget.blur();
 								}
 							}}
-							placeholder="Search…"
-							aria-label="Search sessions"
+							placeholder={tr("搜索…", "Search…")}
+							aria-label={tr("搜索会话", "Search sessions")}
 							className="h-6 rounded-sm border-border bg-background pl-6 text-xs placeholder:text-muted-foreground/60"
 						/>
 						<SearchIcon className="pointer-events-none absolute left-1.5 top-1/2 size-3 -translate-y-1/2 text-muted-foreground/70" />
 					</span>
 					</Hint>
 					{organization && (
-						<Hint label="Add folder" side="bottom">
+						<Hint label={tr("添加文件夹", "Add folder")} side="bottom">
 							<button
 								type="button"
-								aria-label="Add folder"
+								aria-label={tr("添加文件夹", "Add folder")}
 								data-testid="sidebar-add-folder"
 								onClick={() => setCreatingFolder({ parentId: null })}
 								className="flex size-6 shrink-0 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
@@ -990,7 +993,7 @@ function SessionsSidebar() {
 									: "text-muted-foreground hover:text-foreground",
 							)}
 						>
-							{f === "teach" ? "Teaching" : f === "all" ? "All" : "Practice"}
+							{f === "teach" ? tr("教学", "Teaching") : f === "all" ? tr("全部", "All") : tr("练习", "Practice")}
 						</button>
 					))}
 				</div>
@@ -999,7 +1002,7 @@ function SessionsSidebar() {
 				{folderFailure && (
 					<div role="alert" data-testid="sidebar-folder-error" className="mx-3 mt-2 flex items-start gap-2 text-xs text-error">
 						<span className="min-w-0 flex-1">{folderFailure}</span>
-						<button type="button" onClick={clearFolderFailure} className="shrink-0 text-muted-foreground hover:text-foreground">Dismiss</button>
+						<button type="button" onClick={clearFolderFailure} className="shrink-0 text-muted-foreground hover:text-foreground">{tr("关闭", "Dismiss")}</button>
 					</div>
 				)}
 
@@ -1016,15 +1019,15 @@ function SessionsSidebar() {
 						</div>
 					)}
 					{rows === null ? (
-						<div className="px-4 py-4 text-xs text-muted-foreground">Loading…</div>
+						<div className="px-4 py-4 text-xs text-muted-foreground">{tr("加载中…", "Loading…")}</div>
 					) : rows.length === 0 && (
 						<div className="px-4 py-4 text-xs text-muted-foreground">
-							{query.trim() ? "No sessions match." : "No sessions yet."}
+							{query.trim() ? tr("没有匹配的会话。", "No sessions match.") : tr("还没有会话。", "No sessions yet.")}
 						</div>
 					)}
 					{/* Empty space below the list: drop here to move out of all folders. */}
 					{organization && (
-						<div data-testid="sidebar-root-drop" aria-label="Move outside folders" data-drop-active={folderDrop.dropTarget === null}
+						<div data-testid="sidebar-root-drop" aria-label={tr("移出所有文件夹", "Move outside folders")} data-drop-active={folderDrop.dropTarget === null}
 							className={cn("min-h-16 flex-1 transition-colors", folderDrop.dropTarget === null && "bg-accent/30")}
 							{...folderDrop.dropProps(null)} />
 					)}
@@ -1041,7 +1044,7 @@ function SessionsSidebar() {
 					    New session — quiet, bottom-pinned, opens the centered
 					    dialog (also mod+, in the keyboard registry). */}
 					<div className="px-3 pb-3 pt-1">
-						<Hint label="Settings" action="open-settings" side="right">
+						<Hint label={tr("设置", "Settings")} action="open-settings" side="right">
 							<button
 								type="button"
 								onClick={() => openSettings()}
@@ -1049,7 +1052,7 @@ function SessionsSidebar() {
 								className="flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs uppercase tracking-wider text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
 							>
 								<SettingsIcon className="size-3" />
-								Settings
+								{tr("设置", "Settings")}
 							</button>
 						</Hint>
 					</div>
@@ -1081,7 +1084,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
-							Rename
+							{tr("重命名", "Rename")}
 						</button>
 						{/* Export as Markdown (owner, release polish 2026-10-06): the
 					    session-markdown engine's user-facing debut — same-origin
@@ -1103,7 +1106,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
-							Export as Markdown…
+							{tr("导出为 Markdown…", "Export as Markdown…")}
 						</button>
 						<button
 							type="button"
@@ -1115,7 +1118,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
 						>
-							Delete…
+							{tr("删除…", "Delete…")}
 						</button>
 						<div className="my-0.5 border-t border-border/60" aria-hidden="true" />
 						<CoverageMenuBlock chatId={ctxChatId} />
@@ -1138,7 +1141,7 @@ function SessionsSidebar() {
 							onClick={() => { setRenamingFolderId(ctxFolderId); setCtxFolderId(null); }}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
-							Rename
+							{tr("重命名", "Rename")}
 						</button>
 						<button
 							type="button"
@@ -1152,7 +1155,7 @@ function SessionsSidebar() {
 							}}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-foreground transition-colors hover:bg-accent"
 						>
-							New subfolder
+							{tr("新建子文件夹", "New subfolder")}
 						</button>
 						<button
 							type="button"
@@ -1160,7 +1163,7 @@ function SessionsSidebar() {
 							onClick={() => deleteFolder(ctxFolderId)}
 							className="flex items-center rounded-lg px-2.5 py-1.5 text-left text-muted-foreground/80 transition-colors hover:bg-accent hover:text-foreground"
 						>
-							Delete
+							{tr("删除", "Delete")}
 						</button>
 					</MenuShell>
 				)}

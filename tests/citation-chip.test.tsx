@@ -16,18 +16,18 @@ describe("CitationChip", () => {
 	it("composer variant offers the source and an add-comment pencil", () => {
 		const document = documentFor(<CitationChip citation={citation} variant="composer" contentEditable={false} />);
 		const buttons = [...document.querySelectorAll("button")].map((b) => b.getAttribute("aria-label"));
-		assert.deepEqual(buttons, ["View cited tutor text: the derivatives multiply", "Add comment to citation"]);
+		assert.deepEqual(buttons, ["查看引用的老师原文：the derivatives multiply", "为引用添加批注"]);
 	});
 
 	it("labels with the comment and switches the pencil to editing", () => {
 		const document = documentFor(<CitationChip citation={{ ...citation, comment: "I thought they add" }} variant="composer" />);
 		assert.match(document.body.textContent!, /I thought they add/);
-		assert.ok(document.querySelector('button[aria-label="Edit citation comment"]'));
+		assert.ok(document.querySelector('button[aria-label="编辑引用批注"]'));
 	});
 
 	it("transcript variant has no pencil", () => {
 		const document = documentFor(<CitationChip citation={citation} variant="transcript" />);
-		assert.equal(document.querySelector('button[aria-label="Add comment to citation"]'), null);
+		assert.equal(document.querySelector('button[aria-label="为引用添加批注"]'), null);
 		assert.ok(document.querySelector('[data-testid="citation-chip"]'));
 	});
 });
@@ -38,6 +38,6 @@ describe("CitationQuoteCard", () => {
 		const document = documentFor(<CitationQuoteCard citation={{ ...citation, text: "line one\nline two", comment: "why?" }} onOpenSource={() => {}} />);
 		assert.equal(document.querySelector("blockquote")!.textContent, "line one\nline two");
 		assert.match(document.body.textContent!, /why\?/);
-		assert.equal(document.querySelector("button")!.textContent, "Go to source");
+		assert.equal(document.querySelector("button")!.textContent, "跳转到原文");
 	});
 });

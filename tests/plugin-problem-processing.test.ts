@@ -39,7 +39,7 @@ test("each structured submission processes before saving, stays active and keeps
   } });
   for (let index = 0; index < 2; index++) {
     const prepared = preparePluginProblemSubmission(f.record, f.submission, f.resolve);
-    assert.throws(() => prepared.finish(f.record), /has not completed/);
+    assert.throws(() => prepared.finish(f.record), /尚未处理完成/);
     const outcome = await prepared.process!(new AbortController().signal);
     assert.deepEqual(outcome, { result: { passed: true } });
     const appends = prepared.finish(f.record, outcome); f.record.messages.push(...appends);
@@ -71,7 +71,7 @@ test("practice image channels reuse actual byte, resize and current-model admiss
   assert.equal(prepared!.submission!.length, 1); assert.equal(prepared!.thinking!.length, 1);
   assert.notEqual(prepared!.submission![0]!.data, source.data);
   const textOnly = { model: { ...model, input: ["text"] as ("text" | "image")[] } };
-  await assert.rejects(prepareProblemSubmissionImageChannels({ submission: [source] }, textOnly), /does not support images/);
+  await assert.rejects(prepareProblemSubmissionImageChannels({ submission: [source] }, textOnly), /不支持图片/);
   await assert.rejects(prepareProblemSubmissionImageChannels({ thinking: [{ ...source, mimeType: "image/jpeg" }] }, { model }));
   assert.equal(await prepareProblemSubmissionImageChannels({ submission: [], thinking: [] }, textOnly), undefined);
 });
@@ -83,19 +83,19 @@ test("processing errors are observations while cancellation and stale target pre
   assert.deepEqual(outcome, { error: "Tests could not run" });
   assert.ok(prepared.finish(f.record, outcome));
   f.record.messages.push({ id: "dismiss", role: "custom", customType: "problem-dismissed", content: "", display: true, details: { problemCallId: "call" }, timestamp: 0 });
-  assert.throws(() => prepared.finish(f.record, outcome), /no longer active/);
+  assert.throws(() => prepared.finish(f.record, outcome), /不再处于活动状态/);
   const cancelled = fixture({ processSubmission: async () => true });
   const pending = preparePluginProblemSubmission(cancelled.record, cancelled.submission, cancelled.resolve);
   cancelled.disable();
-  await assert.rejects(pending.process!(new AbortController().signal), /unavailable/);
-  assert.throws(() => pending.finish(cancelled.record, { result: true }), /unavailable/);
+  await assert.rejects(pending.process!(new AbortController().signal), /题目不可用/);
+  assert.throws(() => pending.finish(cancelled.record, { result: true }), /题目不可用/);
 });
 
 test("saved requirements and validation cannot be bypassed with a native practice send", () => {
   const f = fixture({ validateSubmission: () => ["Invalid code"] });
   assert.throws(() => preparePluginProblemSubmission(f.record, f.submission, f.resolve), /Invalid code/);
-  assert.throws(() => inputAppends(f.record, { type: "thinking", problemCallId: "call", text: "bypass" }), /registered submission editor/);
-  assert.throws(() => preparePluginProblemSubmission(f.record, { ...f.submission, occurrence: { ...occurrence, messageId: "older" } }, f.resolve), /no longer active/);
+  assert.throws(() => inputAppends(f.record, { type: "thinking", problemCallId: "call", text: "bypass" }), /注册的提交编辑器/);
+  assert.throws(() => preparePluginProblemSubmission(f.record, { ...f.submission, occurrence: { ...occurrence, messageId: "older" } }, f.resolve), /不再处于活动状态/);
   assert.equal(pluginProblemAvailabilityOf(f.record, () => ({ status: "incompatible" }))?.status, "unavailable");
   assert.equal(activeProblemOf(f.record.messages)?.toolCallId, "call");
 });
@@ -114,7 +114,7 @@ test("intercepted practice submissions keep native images separate from JSON and
   const blocks = wire[0]!.content as { type: string; text?: string }[];
   assert.equal(blocks.filter(block => block.type === "image").length, 2);
   assert.equal(blocks.some(block => block.type === "text" && block.text?.includes(image.data)), false);
-  assert.throws(() => parseChatInput({ ...f.submission, images: { readingThinking: [image] } }), /Invalid/);
+  assert.throws(() => parseChatInput({ ...f.submission, images: { readingThinking: [image] } }), /无效/);
 });
 
 test("plugin practice 409 responses never automatically repost processing", async () => {

@@ -11,6 +11,7 @@ import { createWorkerRequestScope } from "../worker-request-admission.ts";
 import type { PdfResult, PdfToolInput } from "../../core/contracts.ts";
 import { getHeadless, type HeadlessApi } from "./headless.ts";
 import { pdfExtract, pdfInfo, pdfProbe, pdfSearch, type PdfSearchHit } from "./pdf-ops.ts";
+import { tr } from "../../core/i18n.ts";
 
 /**
  * The pdf-reader sub-agent (sources v0, 2026-09): reads a learner-provided
@@ -265,12 +266,12 @@ export async function runPdfReaderAgent(
 				const args = (call.arguments ?? {}) as Record<string, unknown>;
 				try {
 					if (call.name === "pdf_info") {
-						opts.onActivity?.("pdf_info: triaging");
+						opts.onActivity?.(tr("读取 PDF 信息：正在初步分析", "pdf_info: triaging"));
 						const r = await pdfInfoText(pdfPath);
 						toolResults.push(toolText(call.id, call.name, String(r)));
 					} else if (call.name === "pdf_extract") {
 						const spec = String(args.pages ?? "all");
-						opts.onActivity?.(`pdf_extract: ${spec}`);
+						opts.onActivity?.(tr(`提取 PDF 文本：${spec}`, `pdf_extract: ${spec}`));
 						const r = await pdfExtractText(pdfPath, spec);
 						toolResults.push(toolText(call.id, call.name, String(r)));
 						for (const p of specNumbers(spec, Infinity)) {
@@ -281,7 +282,7 @@ export async function runPdfReaderAgent(
 						const query = String(args.query ?? "");
 						const contextLines = numOr(args.context_lines, 3);
 						const literal = Boolean(args.literal);
-						opts.onActivity?.(`pdf_search: "${query}"`);
+						opts.onActivity?.(tr(`搜索 PDF：“${query}”`, `pdf_search: "${query}"`));
 						// Direct call (not the tool's execute): the loop needs the hits'
 						// pages — a hit's context lines ARE consultation, so they join
 						// the citation set (the unread-finish gate counts them).
@@ -298,7 +299,7 @@ export async function runPdfReaderAgent(
 						const spec = String(args.pages ?? "1");
 						const dpi = numOr(args.dpi, 150);
 						const wanted = specNumbers(spec, RENDER_BATCH_CAP);
-						opts.onActivity?.(`pdf_render: ${spec} @${dpi}dpi`);
+						opts.onActivity?.(tr(`渲染 PDF 页面：${spec} @${dpi}dpi`, `pdf_render: ${spec} @${dpi}dpi`));
 						const pages = await headless.renderPdfPages(pdfPath, wanted, { dpi });
 						const processed: { page: number; image: ProcessImageResult }[] = [];
 						for (const p of pages) {

@@ -12,6 +12,7 @@ import { isInputShortcutScopeEligible } from "@/components/plugin-input-focus";
 import { prettyModel } from "@/components/usage-format";
 import { THINKING_LABEL } from "@/components/thinking-default";
 import { claimPluginInputFocus } from "@/components/plugin-dictation";
+import { tr } from "@/src/core";
 
 export type PickerCommand = { invoke(): void };
 type Extra = { onError?: (error: unknown) => void; commandRef?: RefObject<PickerCommand | null> };
@@ -51,7 +52,7 @@ export function PluginModelPicker({ value, onChange, disabled, onError, commandR
 		return () => { off?.(); if (commandRef) commandRef.current = null; };
 	});
 	return <div ref={root} className="relative inline-flex" data-plugin-model-picker="">
-		<ModelPickerPill disabled={disabled} aria-label="Model selector" aria-expanded={open} onClick={() => { if (open) close(); else invoke(); }}>
+		<ModelPickerPill disabled={disabled} aria-label={tr("模型选择器", "Model selector")} aria-expanded={open} onClick={() => { if (open) close(); else invoke(); }}>
 			{value ? prettyModel(value.id) : "—"}
 		</ModelPickerPill>
 		{open && !disabled && <MenuShell anchorRef={root} preferredSide="up" testid="plugin-model-menu" onClose={() => { close(); return "closed"; }} menuClass="flex w-[22rem] flex-col rounded-xl border bg-card p-2 text-xs shadow-xl">
@@ -92,11 +93,11 @@ export function PluginThinkingPicker({ model, value, onChange, disabled, onError
 		return () => { off?.(); if (commandRef) commandRef.current = null; };
 	});
 	return <div ref={root} className="relative inline-flex" data-plugin-thinking-picker="">
-		<ModelPickerPill disabled={disabled || !model} aria-label="Thinking" aria-expanded={open} onClick={() => setOpen(!open)}>
+		<ModelPickerPill disabled={disabled || !model} aria-label={tr("推理强度", "Thinking")} aria-expanded={open} onClick={() => setOpen(!open)}>
 			{value === undefined ? "—" : THINKING_LABEL[value] ?? value}
 		</ModelPickerPill>
 		{open && !disabled && <MenuShell anchorRef={root} preferredSide="up" testid="plugin-thinking-menu" onClose={() => { close(); return "closed"; }} menuClass="flex w-44 flex-col gap-0.5 rounded-xl border bg-card p-2 text-xs shadow-xl">
-			<ThinkingMenuList levels={levels} effectiveLevel={value} onPick={(level) => pick(level as ThinkingLevel)} empty={catalog ? "No thinking levels." : "Loading…"} />
+			<ThinkingMenuList levels={levels} effectiveLevel={value} onPick={(level) => pick(level as ThinkingLevel)} empty={catalog ? tr("没有可用的推理强度。", "No thinking levels.") : tr("加载中…", "Loading…")} />
 			{error && <div role="alert" className="text-destructive">{error}</div>}
 		</MenuShell>}
 	</div>;

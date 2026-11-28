@@ -1,5 +1,6 @@
 import { checkSource, checkSvgSize, TEX_QUEUE_LIMIT, TEX_TIMEOUT_MS } from "./contract.ts";
 import { boundTexError } from "./tex-diagnostics.ts";
+import { tr } from "./i18n.ts";
 
 interface Job {
   id: number;
@@ -10,7 +11,7 @@ interface Job {
   abort(): void;
 }
 export type WorkerLike = Pick<Worker, "postMessage" | "terminate" | "onmessage" | "onerror" | "onmessageerror">;
-const cancelled = () => new DOMException("Rendering cancelled.", "AbortError");
+const cancelled = () => new DOMException(tr("渲染已取消。", "Rendering cancelled."), "AbortError");
 
 /** One lazy, serial, forcibly terminable TeX engine per plugin/window activation. */
 export class TexRunner {
@@ -30,7 +31,7 @@ export class TexRunner {
   render(source: string, signal: AbortSignal): Promise<string> {
     if (this.disposed || signal.aborted) return Promise.reject(cancelled());
     try { checkSource("tikz", source); } catch (error) { return Promise.reject(error); }
-    if (this.queue.length >= TEX_QUEUE_LIMIT) return Promise.reject(new Error("The TeX render queue is full (16 waiting jobs)."));
+    if (this.queue.length >= TEX_QUEUE_LIMIT) return Promise.reject(new Error(tr("TeX 渲染队列已满（16 个等待任务）。", "The TeX render queue is full (16 waiting jobs).")));
     return new Promise((resolve, reject) => {
       const job: Job = { id: ++this.nextId, source, signal, resolve, reject, abort: () => {
         if (this.current === job) this.finish(undefined, cancelled(), true);
@@ -50,7 +51,7 @@ export class TexRunner {
     const job = this.queue.shift();
     if (!job) return;
     this.current = job;
-    this.timer = setTimeout(() => this.finish(undefined, new Error(`TeX rendering exceeded ${this.timeoutMs / 1000} seconds.`), true), this.timeoutMs);
+    this.timer = setTimeout(() => this.finish(undefined, new Error(tr(`TeX 渲染超过 ${this.timeoutMs / 1000} 秒。`, `TeX rendering exceeded ${this.timeoutMs / 1000} seconds.`)), true), this.timeoutMs);
     try {
       if (!this.worker) {
         const worker = this.createWorker(this.workerUrl);
@@ -60,13 +61,13 @@ export class TexRunner {
           if (typeof event.data.svg === "string") {
             try { checkSvgSize(event.data.svg); this.finish(event.data.svg); }
             catch (error) { this.finish(undefined, error as Error, true); }
-          } else this.finish(undefined, new Error(typeof event.data.error === "string" ? boundTexError(event.data.error) : "Invalid TeX worker result."), true);
+          } else this.finish(undefined, new Error(typeof event.data.error === "string" ? boundTexError(event.data.error) : tr("TeX 工作线程返回了无效结果。", "Invalid TeX worker result.")), true);
         };
-        worker.onerror = event => { event.preventDefault(); if (this.worker === worker) this.finish(undefined, new Error("The TeX worker failed."), true); };
-        worker.onmessageerror = () => { if (this.worker === worker) this.finish(undefined, new Error("The TeX worker returned an unreadable result."), true); };
+        worker.onerror = event => { event.preventDefault(); if (this.worker === worker) this.finish(undefined, new Error(tr("TeX 工作线程出错。", "The TeX worker failed.")), true); };
+        worker.onmessageerror = () => { if (this.worker === worker) this.finish(undefined, new Error(tr("TeX 工作线程返回了无法读取的结果。", "The TeX worker returned an unreadable result.")), true); };
       }
       this.worker.postMessage({ id: job.id, source: job.source, resourcesUrl: this.resourcesUrl.href });
-    } catch (error) { this.finish(undefined, error instanceof Error ? error : new Error("Could not start TeX rendering."), true); }
+    } catch (error) { this.finish(undefined, error instanceof Error ? error : new Error(tr("无法启动 TeX 渲染。", "Could not start TeX rendering.")), true); }
   }
 
   private finish(svg?: string, error?: Error, terminate = false): void {

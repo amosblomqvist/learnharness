@@ -19,6 +19,7 @@
  */
 
 /** One curated key entry. `id` is the env-var/file key name. */
+import { tr } from "./i18n.ts";
 export interface AuthKeyInfo {
 	id: string;
 	/** Human label for the settings page. */
@@ -33,37 +34,37 @@ export const AUTH_KEYS: readonly AuthKeyInfo[] = [
 	{
 		id: "DEEPGRAM_API_KEY",
 		label: "Deepgram",
-		description: "Speech-to-text key for dictation — needs ≥ Member permission in the Deepgram console to mint tokens.",
+		description: tr("用于语音听写的语音转文字密钥——需要在 Deepgram 控制台拥有 ≥ Member 权限才能签发 token。", "Speech-to-text key for dictation — needs ≥ Member permission in the Deepgram console to mint tokens."),
 		docsUrl: "https://console.deepgram.com/",
 	},
 	{
 		id: "TAVILY_API_KEY",
 		label: "Tavily",
-		description: "Web-search engine for the researcher sub-agent (AI-native search API). Setting the key activates it — no engine toggle needed.",
+		description: tr("研究员子智能体使用的网页搜索引擎（AI 原生搜索 API）。设置密钥即启用，无需切换引擎。", "Web-search engine for the researcher sub-agent (AI-native search API). Setting the key activates it — no engine toggle needed."),
 		docsUrl: "https://app.tavily.com/",
 	},
 	{
 		id: "BRAVE_API_KEY",
 		label: "Brave Search",
-		description: "Web-search engine for the researcher sub-agent — the alternative to Tavily. Setting the key activates it.",
+		description: tr("研究员子智能体使用的网页搜索引擎，可替代 Tavily。设置密钥即启用。", "Web-search engine for the researcher sub-agent — the alternative to Tavily. Setting the key activates it."),
 		docsUrl: "https://brave.com/search/api/",
 	},
 	{
 		id: "EXA_API_KEY",
 		label: "Exa",
-		description: "Web-search engine for the researcher. Search requests use your Exa account and its pricing.",
+		description: tr("研究员使用的网页搜索引擎。搜索请求使用你的 Exa 账户并按其价格计费。", "Web-search engine for the researcher. Search requests use your Exa account and its pricing."),
 		docsUrl: "https://dashboard.exa.ai/api-keys",
 	},
 	{
 		id: "FIRECRAWL_API_KEY",
 		label: "Firecrawl",
-		description: "Web-search engine for the researcher sub-agent — an alternative to Tavily and Brave. Setting the key activates it.",
+		description: tr("研究员子智能体使用的网页搜索引擎，可替代 Tavily 和 Brave。设置密钥即启用。", "Web-search engine for the researcher sub-agent — an alternative to Tavily and Brave. Setting the key activates it."),
 		docsUrl: "https://www.firecrawl.dev/app/api-keys",
 	},
 	{
 		id: "OLLAMA_API_KEY",
 		label: "Ollama",
-		description: "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models.",
+		description: tr("ollama.com 提供的托管网页搜索——需要 Ollama API 密钥。设置后启用的是搜索，而不是本地模型。", "Hosted web search at ollama.com — requires an Ollama API key. Setting it activates search, not local models."),
 		docsUrl: "https://ollama.com/settings/keys",
 	},
 ] as const;
@@ -151,7 +152,7 @@ export const AUTH_PROVIDER_KEYS: readonly AuthProviderInfo[] = [
 export const CUSTOM_PROVIDER = {
 	id: "custom",
 	envVar: "CUSTOM_OPENAI_API_KEY",
-	label: "Custom endpoint",
+	label: tr("自定义端点", "Custom endpoint"),
 } as const;
 
 /** Every distinct env var a model-provider key rides in (the write side's
@@ -184,12 +185,12 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 	const nonEmpty = (min: number) =>
 		value.length >= min && !/\s/.test(value)
 			? { ok: true as const }
-			: { ok: false as const, error: `${id} must be at least ${min} characters with no whitespace` };
+			: { ok: false as const, error: tr(`${id} 至少需要 ${min} 个字符，且不能包含空白字符`, `${id} must be at least ${min} characters with no whitespace`) };
 	switch (id) {
 		case "TAVILY_API_KEY":
 			return value.startsWith("tvly-")
 				? nonEmpty(20)
-				: { ok: false, error: `${id} must start with "tvly-" (Tavily's key format)` };
+				: { ok: false, error: tr(`${id} 必须以 “tvly-” 开头（Tavily 的密钥格式）`, `${id} must start with "tvly-" (Tavily's key format)`) };
 		case "BRAVE_API_KEY":
 			// No public format — a length floor + paste hygiene only.
 			return nonEmpty(20);
@@ -200,12 +201,12 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 		case "FIRECRAWL_API_KEY":
 			return value.startsWith("fc-")
 				? nonEmpty(20)
-				: { ok: false, error: `${id} must start with "fc-" (Firecrawl's key format)` };
+				: { ok: false, error: tr(`${id} 必须以 “fc-” 开头（Firecrawl 的密钥格式）`, `${id} must start with "fc-" (Firecrawl's key format)`) };
 		case "DEEPGRAM_API_KEY":
 			// No public format — the length floor only catches truncated pastes.
 			return nonEmpty(20);
 		default:
-			return { ok: false, error: `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})` };
+			return { ok: false, error: tr(`未知密钥 “${id}”（支持：${[...AUTH_KEY_IDS].join("、")}）`, `unknown key "${id}" (supported: ${[...AUTH_KEY_IDS].join(", ")})`) };
 	}
 }
 
@@ -214,7 +215,7 @@ export function validateKeyShape(id: string, rawValue: string): KeyShapeResult {
 export function genericProviderKeyGuard(id: string, rawValue: string): KeyShapeResult {
 	const value = rawValue.trim();
 	if (value.length >= 12 && !/\s/.test(value)) return { ok: true };
-	return { ok: false, error: `${id} must be at least 12 characters with no whitespace` };
+	return { ok: false, error: tr(`${id} 至少需要 12 个字符，且不能包含空白字符`, `${id} must be at least 12 characters with no whitespace`) };
 }
 
 /** A masked key never leaves the server as plaintext (owner decision:

@@ -40,7 +40,7 @@ it("source inventory includes unextracted chats and zero-graph imported books; o
 	assert.match(html, /data-testid="folder-icon-f2"[^>]*aria-expanded="true"/);
 	assert.match(html, /data-testid="source-icon-notes"[^>]*aria-expanded="false"/);
 	assert.match(html, /data-testid="cluster-group-notes"[^>]*style="margin-left:72px"/);
-	assert.doesNotMatch(html, /No matching chains/);
+	assert.doesNotMatch(html, /没有匹配的推理链/);
 });
 it("nested folders aggregate unique graph member counts, keep three-column sorting and expose root placement", () => {
 	const html = render({ nodes, expandedClusters: new Set(["f1", "f2", "notes"]), selectedSources: new Set(["notes"]), selectedFolders: new Set(["f1", "f2"]) });
@@ -105,7 +105,7 @@ it("folder selection means all its graph contents even while a search hides some
 });
 it("empty folder selection enables Delete outside practice, and practice never selects organizational folders", () => {
 	const html = render({ selectedFolders: new Set(["empty"]) });
-	assert.match(html, /1 folder/); assert.match(html, /data-testid="chain-delete"/);
+	assert.match(html, /1 个文件夹/); assert.match(html, /data-testid="chain-delete"/);
 	const practice = render({ selectMode: true });
 	assert.match(practice, /data-testid="folder-checkbox-empty"[^>]*disabled|disabled=""[^>]*data-testid="folder-checkbox-empty"/);
 	assert.doesNotMatch(practice, /data-testid="chain-delete"/);
@@ -138,7 +138,7 @@ it("both trees hide empty and graph-backed practice sources without suppressing 
 		for (const query of ["", "Hidden", "historical", "Course"]) {
 			const html = render({ selectMode, query, directory: withPractice, nodes: [...nodes, practiceNode, hiddenOnly], chains, expandedClusters: new Set(["f1", "f2", "notes", "practice"]), expandedChains: new Set(["arg_visible"]) });
 			assert.doesNotMatch(html, /cluster-group-practice|cluster-checkbox-practice|source-icon-practice|Hidden practice|Hidden empty practice/);
-			assert.match(html, /3 chains · 4 nodes/, "graph-wide counts still describe stored knowledge, not only visible sources");
+			assert.match(html, /3 条推理链 · 4 个节点/, "graph-wide counts still describe stored knowledge, not only visible sources");
 			if (!query) { assert.match(html, /chain-row-arg_visible/); assert.match(html, /prop-row-historical/); assert.match(html, /data-testid="folder-checkbox-f1"/); }
 			assert.doesNotMatch(html, /prop-row-practice-only|chain-row-practice-only/);
 		}
@@ -149,21 +149,21 @@ it("empty names and book icons use stronger matching dimming in both trees and e
 		const { document } = parseHTML(render({ selectMode, nodes, expandedClusters: new Set(["f1", "f2", ...(open ? ["chat", "notes"] : [])]) }));
 		const empty = document.querySelector('[data-testid="cluster-checkbox-chat"]')!.closest('[data-chain-nav-row]')!;
 		const populated = document.querySelector('[data-testid="cluster-checkbox-notes"]')!.closest('[data-chain-nav-row]')!;
-		assert.match(empty.querySelector('[title="Rename"]')!.className, /text-muted-foreground\/60/);
+		assert.match(empty.querySelector('[title="重命名"]')!.className, /text-muted-foreground\/60/);
 		const emptyIcon = empty.querySelector('[data-source-icon]')!;
 		assert.equal(emptyIcon.classList.contains("text-muted-foreground/60"), true);
 		assert.equal(emptyIcon.getAttribute("aria-expanded"), String(open));
 		assert.equal(emptyIcon.querySelector("svg")!.classList.contains("lucide-book-open"), open);
 		assert.equal(populated.querySelector('[data-source-icon]')!.classList.contains("text-muted-foreground/60"), false);
-		assert.doesNotMatch(populated.querySelector('[title="Rename"]')!.className, /text-muted-foreground/);
+		assert.doesNotMatch(populated.querySelector('[title="重命名"]')!.className, /text-muted-foreground/);
 		assert.doesNotMatch(empty.className, /opacity-|text-muted-foreground/);
 		assert.equal(empty.getAttribute("draggable"), "true");
 		if (!selectMode) assert.equal(empty.querySelector("input")!.hasAttribute("disabled"), false);
-		const folderName = document.querySelector('[data-testid="folder-row-f1"] [title="Rename"]')!;
+		const folderName = document.querySelector('[data-testid="folder-row-f1"] [title="重命名"]')!;
 		assert.doesNotMatch(folderName.className, /text-muted-foreground/);
 		assert.equal(document.querySelector('[data-testid="folder-icon-f1"]')!.classList.contains("text-muted-foreground/60"), false);
 		const filtered = parseHTML(render({ selectMode, nodes, query: "Named book" })).document;
-		const name = filtered.querySelector('[data-testid="cluster-checkbox-notes"]')!.closest('[data-chain-nav-row]')!.querySelector('[title="Rename"]')!;
+		const name = filtered.querySelector('[data-testid="cluster-checkbox-notes"]')!.closest('[data-chain-nav-row]')!.querySelector('[title="重命名"]')!;
 		assert.doesNotMatch(name.className, /text-muted-foreground/);
 	}
 	const readOnly = parseHTML(render({ onOrganizationChange: undefined })).document;
@@ -173,7 +173,7 @@ it("empty names and book icons use stronger matching dimming in both trees and e
 
 it("source confirmation explains shared-node survival and makes conversation deletion an unchecked opt-in", () => {
 	const html = renderToStaticMarkup(<DeleteSourceBody sources={directory.sources} folders={[]} deleteSessions={false} onDeleteSessions={() => {}} busy={false} failure="" onClose={() => {}} onRun={() => {}} />);
-	assert.match(html, /Knowledge supported by other sources survives/); assert.match(html, /can be extracted again/);
-	assert.match(html, /graph contributions and extraction coverage are cleared/); assert.match(html, /Also delete the 1 selected session/);
+	assert.match(html, /有其他来源支撑的知识会保留/); assert.match(html, /之后可以重新提取/);
+	assert.match(html, /它们对图谱的贡献和提取覆盖率都会被清除/); assert.match(html, /同时删除所选的 1 个会话/);
 	assert.doesNotMatch(html.match(/<input[^>]+>/)?.[0] ?? "", /checked/);
 });

@@ -13,6 +13,7 @@
  */
 
 import type { AppearanceSettings } from "./settings.ts";
+import { tr } from "./i18n.ts";
 
 /** The variant on screen: the `dark`/`light` class on <html>. */
 export type ThemeMode = "dark" | "light";
@@ -86,18 +87,18 @@ function isHex(value: unknown): value is string {
 /** Validate an imported theme: `{ ok: false, error }` names the first bad
  *  field so the import card can say what is wrong. Unknown keys drop. */
 export function parseThemeFile(raw: unknown): { ok: true; theme: ThemeFile } | { ok: false, error: string } {
-	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, error: "theme must be a JSON object" };
+	if (!raw || typeof raw !== "object" || Array.isArray(raw)) return { ok: false, error: tr("主题必须是一个 JSON 对象", "theme must be a JSON object") };
 	const r = raw as Record<string, unknown>;
-	if (typeof r.name !== "string" || !r.name.trim()) return { ok: false, error: "name must be a non-empty string" };
-	if (!themeIdFromName(r.name)) return { ok: false, error: "name must contain a letter or digit" };
-	if (r.mode !== "dark" && r.mode !== "light") return { ok: false, error: 'mode must be "dark" or "light"' };
+	if (typeof r.name !== "string" || !r.name.trim()) return { ok: false, error: tr("name 不能为空", "name must be a non-empty string") };
+	if (!themeIdFromName(r.name)) return { ok: false, error: tr("name 必须包含至少一个英文字母或数字", "name must contain a letter or digit") };
+	if (r.mode !== "dark" && r.mode !== "light") return { ok: false, error: tr('mode 必须是 "dark" 或 "light"', 'mode must be "dark" or "light"') };
 	if (!r.colors || typeof r.colors !== "object" || Array.isArray(r.colors)) {
-		return { ok: false, error: "colors must be an object" };
+		return { ok: false, error: tr("colors 必须是一个对象", "colors must be an object") };
 	}
 	const c = r.colors as Record<string, unknown>;
 	const colors = {} as ThemeColors;
 	for (const key of THEME_COLOR_KEYS) {
-		if (!isHex(c[key])) return { ok: false, error: `colors.${key} must be a #hex color` };
+		if (!isHex(c[key])) return { ok: false, error: tr(`colors.${key} 必须是 #hex 颜色值`, `colors.${key} must be a #hex color`) };
 		colors[key] = c[key];
 	}
 	return { ok: true, theme: { name: r.name.trim(), mode: r.mode, colors } };

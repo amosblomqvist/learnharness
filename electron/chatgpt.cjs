@@ -6,6 +6,7 @@ const crypto = require("node:crypto");
 const http = require("node:http");
 const fs = require("node:fs/promises");
 const path = require("node:path");
+const { tr } = require("./i18n.cjs");
 
 const ISSUER = "https://auth.openai.com";
 const RESOURCE = "https://api.openai.com/v1";
@@ -194,7 +195,7 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				const r = members.find((r) => r.id === state.activeId) ?? members.find((r) => !r.reconnectRequired && planScopes(r.tokens)) ?? members[0];
 				return {
 					id: r.id,
-					email: r.email || "ChatGPT account",
+					email: r.email || tr("ChatGPT 账号", "ChatGPT account"),
 					registration: r.clientId,
 					connected: !storageDenied && !closed && !paused && !suspended && !r.reconnectRequired && planScopes(r.tokens),
 					planEnabled: !storageDenied && !r.reconnectRequired && planScopes(r.tokens),
@@ -303,9 +304,9 @@ function createChatGPT({ store, openExternal, fetch: request = globalThis.fetch,
 				if (req.method !== "GET" || callback.origin !== new URL(redirectUri).origin || callback.pathname !== "/auth/callback" || req.headers.host !== new URL(redirectUri).host || consumed) { res.writeHead(404).end(); return; }
 				const params = callback.searchParams;
 				// Reject duplicate parameters and unsolicited callbacks without consuming a valid pending attempt.
-				if (["state", "code", "client_id", "error"].some((key) => params.getAll(key).length > 1) || params.get("state") !== expectedState) { res.writeHead(400).end("Sign-in could not be verified."); return; }
+				if (["state", "code", "client_id", "error"].some((key) => params.getAll(key).length > 1) || params.get("state") !== expectedState) { res.writeHead(400, tr({ "content-type": "text/plain; charset=utf-8" }, {})).end(tr("无法验证登录。", "Sign-in could not be verified.")); return; }
 				consumed = true;
-				res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end("Return to LearnHarness to view the sign-in result. You may close this tab.");
+				res.writeHead(200, { "content-type": "text/plain; charset=utf-8" }).end(tr("请返回 LearnHarness 查看登录结果。你可以关闭此标签页。", "Return to LearnHarness to view the sign-in result. You may close this tab."));
 				cleanup();
 				try {
 					if (params.has("error")) throw fail(params.get("error") === "access_denied" ? "cancelled" : "identity");

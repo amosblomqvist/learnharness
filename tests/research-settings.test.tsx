@@ -114,7 +114,7 @@ it(`a ${label}-only key enables the engine menu and selecting ${label} saves the
 		const option = document.querySelector<HTMLButtonElement>(`[data-testid="engine-option-${id}"]`);
 		assert.ok(option);
 		assert.ok(option.textContent?.includes(label));
-		assert.match(option.textContent ?? "", /key/);
+		assert.match(option.textContent ?? "", /有密钥/);
 		act(() => option.click());
 		assert.deepEqual(written?.search, { engine: id });
 		await act(async () => trigger.click());

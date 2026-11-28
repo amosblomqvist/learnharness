@@ -13,6 +13,7 @@ import { isInteractionScopeEligible } from "./plugin-input-focus";
 import { usePlugins } from "./plugins";
 import { finishDictation } from "./dictation";
 import type { PreparePluginProblemSubmission } from "./plugin-submission-adapters";
+import { tr } from "@/src/core";
 
 export function problemMountContext(snapshot: PluginProblemSnapshot, chatId: string, signal: AbortSignal): PluginProblemMountContext {
   return Object.freeze({ chatId, problemId: snapshot.problemId, contractVersion: snapshot.contractVersion,
@@ -86,7 +87,7 @@ export function PluginProblemDockContent(props: PluginProblemDockProps & { regis
     let captured = "", revision = 0;
     const capture = (): Extract<ChatInput, { type: "plugin-problem-submission" }> => {
       const now = current.current;
-      if (!valid() || now.draft.submission.status !== "ready") throw new Error("Problem is no longer ready");
+      if (!valid() || now.draft.submission.status !== "ready") throw new Error(tr("该题目当前无法提交", "Problem is no longer ready"));
       captured = readThinking ? readThinking() : now.draft.thinking; revision = thinkingRevision.current;
       return { type: "plugin-problem-submission", problemId: now.snapshot.problemId, occurrence: now.occurrence, submission: now.draft.submission.value, thinking: captured };
     };
@@ -122,8 +123,8 @@ export function PluginProblemDockContent(props: PluginProblemDockProps & { regis
       onSubmit={() => {}} preparing={props.preparing || submitting || !ready} compactionRunning={props.compactionRunning} onEscape={props.onEscape}
       customInput={{ thinking: draft.thinking, onThinkingChange(value) { draft.thinking = value; thinkingRevision.current++; render(); }, ready: canSubmit,
         editor: <div className="px-4 py-2">
-          {reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">Preparing problem…</p>}
-          {unavailable && <p role="status" className="text-sm text-muted-foreground">Problem unavailable</p>}
+          {reconciliation === "syncing" && <p role="status" className="text-sm text-muted-foreground">{tr("正在准备题目…", "Preparing problem…")}</p>}
+          {unavailable && <p role="status" className="text-sm text-muted-foreground">{tr("题目不可用", "Problem unavailable")}</p>}
           <div ref={editor} hidden={unavailable || failed} />
         </div>,
         prepare: (captureThinking, clearThinking) => { void latestSubmit.current(captureThinking, clearThinking); },

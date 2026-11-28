@@ -18,11 +18,12 @@ export function markdownProse(text: string): string {
 
 export function markdownAnchors(text: string): Set<string> {
 	const seen = new Map<string, number>();
-	return new Set([...markdownProse(text).matchAll(/^#{1,6} (.+)$/gm)].map(([, heading]) => {
+	const prose = markdownProse(text);
+	return new Set([...[...prose.matchAll(/^#{1,6} (.+)$/gm)].map(([, heading]) => {
 		const slug = heading!.toLowerCase().replace(/[^\p{L}\p{N}\p{M}_\- ]/gu, "").replace(/ /g, "-");
 		const count = seen.get(slug) ?? 0; seen.set(slug, count + 1);
 		return count ? `${slug}-${count}` : slug;
-	}));
+	}), ...[...prose.matchAll(/<a id="([^"]+)"><\/a>/g)].map(([, id]) => id!)]);
 }
 
 export function seedAuthoringReferenceFixture(root: string) {
