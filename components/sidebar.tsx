@@ -891,6 +891,7 @@ function SessionsSidebar() {
 						<span className="sr-only">create a new practice session</span>
 					</button>
 				</PluginSidebarActions>
+				<Link href="/materials" data-testid="materials-entry" className="mx-3 mb-4 flex min-h-9 items-center rounded-md px-2 text-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground">Study materials</Link>
 
 				<div className="mx-3 mb-2 flex items-center gap-2">
 					<span className="text-xs uppercase tracking-widest text-muted-foreground/70">Sessions</span>
