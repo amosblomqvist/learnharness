@@ -8,9 +8,12 @@
  */
 
 import assert from "node:assert/strict";
+import os from "node:os";
+import path from "node:path";
 import { describe, it } from "node:test";
 import {
 	parseAgentSettingsBody,
+	parseClaudeCodeSettingsBody,
 	parseModelsSettingsBody,
 	parseAppearanceSettingsBody,
 	parseGeneralSettingsBody,
@@ -341,5 +344,69 @@ describe("parseModelsSettingsBody (model slots wave, 2026-09-20)", () => {
 		assert.equal(parseModelsSettingsBody({ cheap: { model: { provider: "x" } } }).ok, false);
 		assert.equal(parseModelsSettingsBody({ vision: { thinkingLevel: 7 } }).ok, false);
 		assert.equal(parseModelsSettingsBody("nope").ok, false);
+	});
+});
+
+describe("parseClaudeCodeSettingsBody", () => {
+	it("parses empty body, enabled, and valid configDir values", () => {
+		assert.deepEqual(parseClaudeCodeSettingsBody({}), { ok: true, settings: {} });
+		assert.deepEqual(
+			parseClaudeCodeSettingsBody({ enabled: true, configDir: "~/.claude-work" }),
+			{ ok: true, settings: { enabled: true, configDir: "~/.claude-work" } },
+		);
+		const tmpProfile = path.join(os.tmpdir(), "claude-profile");
+		assert.deepEqual(
+			parseClaudeCodeSettingsBody({ enabled: true, configDir: `  ${tmpProfile}  ` }),
+			{ ok: true, settings: { enabled: true, configDir: tmpProfile } },
+		);
+		assert.deepEqual(
+			parseClaudeCodeSettingsBody({ configDir: "~" }),
+			{ ok: true, settings: { configDir: "~" } },
+		);
+		assert.deepEqual(
+			parseClaudeCodeSettingsBody({ configDir: "~/.claude" }),
+			{ ok: true, settings: { configDir: "~/.claude" } },
+		);
+		assert.deepEqual(
+			parseClaudeCodeSettingsBody({ configDir: path.join(os.tmpdir(), ".claude_2") }),
+			{ ok: true, settings: { configDir: path.join(os.tmpdir(), ".claude_2") } },
+		);
+	});
+
+	it("omits configDir on null or undefined to support resetting to default", () => {
+		assert.deepEqual(
+			parseClaudeCodeSettingsBody({ enabled: true, configDir: null }),
+			{ ok: true, settings: { enabled: true } },
+		);
+		assert.deepEqual(
+			parseClaudeCodeSettingsBody({ enabled: true, configDir: undefined }),
+			{ ok: true, settings: { enabled: true } },
+		);
+	});
+
+	it("rejects non-string, empty, NUL, relative, and dot-segment configDir values", () => {
+		for (const bad of [123, true, [], {}]) {
+			assert.equal(parseClaudeCodeSettingsBody({ enabled: true, configDir: bad }).ok, false);
+		}
+		for (const bad of [
+			"",
+			"   ",
+			"/tmp/a\0b",
+			".claude",
+			"./.claude",
+			"work",
+			"~other/.claude",
+			"/tmp/a/../b",
+			"/tmp/a/.",
+			"~/../etc",
+			"~/.",
+			"~/.claude/..",
+		]) {
+			assert.equal(parseClaudeCodeSettingsBody({ enabled: true, configDir: bad }).ok, false, `expected ${JSON.stringify(bad)} to be rejected`);
+		}
+		if (process.platform !== "win32") {
+			assert.equal(parseClaudeCodeSettingsBody({ enabled: true, configDir: "C:\\claude" }).ok, false);
+			assert.equal(parseClaudeCodeSettingsBody({ enabled: true, configDir: "\\\\server\\share\\claude" }).ok, false);
+		}
 	});
 });

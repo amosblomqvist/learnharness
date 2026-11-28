@@ -38,7 +38,8 @@ import { ClaudeCodeError } from "../src/agent/claude-code/constants.ts";
 import { LIVE_PROCESS_IDLE_TIMEOUT_MS, liveProcessIdleTimeoutMs } from "../src/agent/claude-code/live-processes.ts";
 import { CLAUDE_CODE_MODELS, createClaudeCodeProvider } from "../src/agent/claude-code/provider.ts";
 import { authEnvRecord } from "../src/core/auth-env.ts";
-import { ClaudeLaunchError } from "../src/agent/claude-code/launch.ts";
+import { configureClaudeConfigDir } from "../src/agent/claude-code/config-dir.ts";
+import { ClaudeLaunchError, createClaudeLauncher } from "../src/agent/claude-code/launch.ts";
 import { createClaudeCodeStreamFunction, toClaudeArgs, toEffort, type RunClaude } from "../src/agent/claude-code/stream.ts";
 import { toStreamJsonLine } from "../src/agent/claude-code/transcript.ts";
 import { runSubagent } from "../src/agent/subagents/pi-run.ts";
@@ -1617,4 +1618,121 @@ for (const sharedIdentity of [false, true]) test(`two concurrent stream owners k
 	assert.equal(getText(replyTwo), "from two");
 	assert.equal(one.calls.length, 1);
 	assert.equal(two.calls.length, 1);
+});
+
+test("CLAUDE_CONFIG_DIR precedence: configured overrides inherited env and unset preserves inherited env", async (t) => {
+	const saved = process.env.CLAUDE_CONFIG_DIR;
+	t.after(() => {
+		if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+		else process.env.CLAUDE_CONFIG_DIR = saved;
+	});
+
+	const profileA = mkdtempSync(join(tmpdir(), "claude-config-a-"));
+	const inherited = mkdtempSync(join(tmpdir(), "claude-config-inherited-"));
+	t.after(() => {
+		rmSync(profileA, { recursive: true, force: true });
+		rmSync(inherited, { recursive: true, force: true });
+	});
+
+	delete process.env.CLAUDE_CONFIG_DIR;
+	const run1 = createFakeRun(t, readFixtureLines("text.jsonl"));
+	const context = normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI] });
+	await collectEvents(createClaudeCodeStreamFunction(run1.runClaude, { getConfigDir: () => profileA })(getModel(), context, { sessionId: "cfg-1" }));
+	assert.equal(getOnlyCall(run1.calls).env.CLAUDE_CONFIG_DIR, profileA);
+
+	process.env.CLAUDE_CONFIG_DIR = inherited;
+	const run2 = createFakeRun(t, readFixtureLines("text.jsonl"));
+	await collectEvents(createClaudeCodeStreamFunction(run2.runClaude, { getConfigDir: () => profileA })(getModel(), context, { sessionId: "cfg-2" }));
+	assert.equal(getOnlyCall(run2.calls).env.CLAUDE_CONFIG_DIR, profileA);
+	assert.equal(process.env.CLAUDE_CONFIG_DIR, inherited, "parent env remains untouched");
+
+	const run3 = createFakeRun(t, readFixtureLines("text.jsonl"));
+	await collectEvents(createClaudeCodeStreamFunction(run3.runClaude, { getConfigDir: () => undefined })(getModel(), context, { sessionId: "cfg-3" }));
+	assert.equal(getOnlyCall(run3.calls).env.CLAUDE_CONFIG_DIR, inherited);
+
+	delete process.env.CLAUDE_CONFIG_DIR;
+	const run4 = createFakeRun(t, readFixtureLines("text.jsonl"));
+	await collectEvents(createClaudeCodeStreamFunction(run4.runClaude, { getConfigDir: () => undefined })(getModel(), context, { sessionId: "cfg-4" }));
+	assert.equal(getOnlyCall(run4.calls).env.CLAUDE_CONFIG_DIR, undefined);
+});
+
+test("configureClaudeConfigDir global Symbol.for seam updates child env and resets cleanly", async (t) => {
+	const saved = process.env.CLAUDE_CONFIG_DIR;
+	t.after(() => {
+		configureClaudeConfigDir(() => undefined);
+		if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+		else process.env.CLAUDE_CONFIG_DIR = saved;
+	});
+	delete process.env.CLAUDE_CONFIG_DIR;
+
+	const profileDir = mkdtempSync(join(tmpdir(), "claude-config-global-"));
+	t.after(() => rmSync(profileDir, { recursive: true, force: true }));
+
+	configureClaudeConfigDir(() => profileDir);
+	const { calls } = await runScenario(t, readFixtureLines("text.jsonl"));
+	assert.equal(getOnlyCall(calls).env.CLAUDE_CONFIG_DIR, profileDir);
+
+	configureClaudeConfigDir(() => undefined);
+	const resetRun = await runScenario(t, readFixtureLines("text.jsonl"));
+	assert.equal(getOnlyCall(resetRun.calls).env.CLAUDE_CONFIG_DIR, undefined);
+});
+
+for (const nextIsUnset of [false, true]) test(`held ClaudeProcess is killed and replaced with full replay when CLAUDE_CONFIG_DIR ${nextIsUnset ? "resets to default" : "switches profiles"}`, async (t) => {
+	const saved = process.env.CLAUDE_CONFIG_DIR;
+	t.after(() => {
+		if (saved === undefined) delete process.env.CLAUDE_CONFIG_DIR;
+		else process.env.CLAUDE_CONFIG_DIR = saved;
+	});
+	delete process.env.CLAUDE_CONFIG_DIR;
+
+	const profileA = mkdtempSync(join(tmpdir(), "claude-reuse-a-"));
+	const profileB = mkdtempSync(join(tmpdir(), "claude-reuse-b-"));
+	const stdinDir = mkdtempSync(join(tmpdir(), "claude-reuse-stdin-"));
+	t.after(() => {
+		rmSync(profileA, { recursive: true, force: true });
+		rmSync(profileB, { recursive: true, force: true });
+		rmSync(stdinDir, { recursive: true, force: true });
+	});
+	const stdinFile = join(stdinDir, "stdin.jsonl");
+
+	const readA: ToolUse = { id: "toolu_cfg_switch", name: "read", arguments: { path: "a" } };
+	const first = createFakeRun(t, [...toToolUseMessage([readA]), callTool(readA), REPLY]);
+	const second = createFakeRun(t, readFixtureLines("text.jsonl"), { FAKE_CLAUDE_STDIN: stdinFile });
+
+	let currentDir: string | undefined = profileA;
+	let spawns = 0;
+	const stream = createClaudeCodeStreamFunction(
+		(args, options) => (++spawns === 1 ? first : second).runClaude(args, options),
+		{ getConfigDir: () => currentDir },
+	);
+
+	const msg1 = await runTurn(stream, [HI], { sessionId: `cfg-reuse-${nextIsUnset ? "reset" : "switch"}` });
+	assert.equal(getOnlyCall(first.calls).env.CLAUDE_CONFIG_DIR, profileA);
+
+	currentDir = nextIsUnset ? undefined : profileB;
+	const msg2 = await runTurn(stream, [HI, msg1, toToolResult(readA, "replayed-tool-contents")], { sessionId: `cfg-reuse-${nextIsUnset ? "reset" : "switch"}` });
+	assert.equal(msg2.stopReason, "stop");
+	assert.equal(spawns, 2);
+	await assertCleanedUp(getOnlyCall(first.calls));
+	assert.equal(getOnlyCall(second.calls).env.CLAUDE_CONFIG_DIR, nextIsUnset ? undefined : profileB);
+	assert.match(readFileSync(stdinFile, "utf8"), /replayed-tool-contents/);
+	await assertCleanedUp(getOnlyCall(second.calls));
+});
+
+test("stream fails cleanly with ClaudeLaunchError when configured CLAUDE_CONFIG_DIR does not exist", async (t) => {
+	const missingBase = mkdtempSync(join(tmpdir(), "claude-missing-cfg-"));
+	t.after(() => rmSync(missingBase, { recursive: true, force: true }));
+	const missingDir = join(missingBase, "does-not-exist");
+
+	const launcher = createClaudeLauncher({
+		findBinary: () => "/fake/claude",
+		readVersion: async () => "2.1.310",
+		spawnProcess: (() => { assert.fail("must not spawn"); }) as typeof spawn,
+	});
+	const stream = createClaudeCodeStreamFunction(launcher, { getConfigDir: () => missingDir });
+	const context = normalizeContext({ systemPrompt: "You are a tutor.", messages: [HI] });
+	const events = await collectEvents(stream(getModel(), context, { sessionId: "missing-cfg-dir" }));
+	const message = getErrorMessage(events);
+	assert.ok(message);
+	assert.match(message, /does not exist|Claude Code/);
 });

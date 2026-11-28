@@ -27,6 +27,7 @@ import { parseStreamingJson, parseToolCallArguments } from "@earendil-works/pi-a
 import { externalCliEnv } from "../../core/auth-env.ts";
 import type { LhMessage } from "../../core/native-messages.ts";
 import { offerWorkerContinuation } from "../worker-request-admission.ts";
+import { getConfiguredClaudeConfigDir } from "./config-dir.ts";
 import { ClaudeLaunchError, createClaudeLauncher } from "./launch.ts";
 import { parseCliLine, type CliBlock, type CliEvent, type CliUsage } from "./cli-events.ts";
 import { ClaudeCodeError } from "./constants.ts";
@@ -693,17 +694,24 @@ function continueLiveProcess(turn: ClaudeTurn, owner: symbol, sessionId: string 
 	return true;
 }
 
-function toClaudeEnv(): NodeJS.ProcessEnv {
+export function toClaudeEnv(
+	getConfigDir: () => string | undefined = getConfiguredClaudeConfigDir,
+): NodeJS.ProcessEnv {
 	// Preserve native CLI auth/routing, including launch-environment credentials.
 	// Claude Code chooses the account and billing method, not LearnHarness.
 	// Loading user settings also loads ~/.claude/CLAUDE.md and memory files;
 	// the tutor's system prompt must not inherit them.
-	return {
+	const configuredDir = getConfigDir();
+	const env: NodeJS.ProcessEnv = {
 		...externalCliEnv(),
 		MCP_TOOL_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS),
 		CLAUDE_CODE_MCP_TOOL_IDLE_TIMEOUT: String(MCP_TOOL_TIMEOUT_MS),
 		CLAUDE_CODE_DISABLE_CLAUDE_MDS: "1",
 	};
+	if (configuredDir !== undefined && configuredDir.length > 0) {
+		env.CLAUDE_CONFIG_DIR = configuredDir;
+	}
+	return env;
 }
 
 async function startProcess(
@@ -762,13 +770,16 @@ async function startProcess(
 	cliProcess.start(toStreamJsonLine(input.userContent), options?.signal);
 }
 
-export function createClaudeCodeStreamFunction(runClaude: RunClaude): StreamFunction<Api, SimpleStreamOptions> {
+export function createClaudeCodeStreamFunction(
+	runClaude: RunClaude,
+	{ getConfigDir = getConfiguredClaudeConfigDir }: { getConfigDir?: () => string | undefined } = {},
+): StreamFunction<Api, SimpleStreamOptions> {
 	const owner = Symbol("claude-code stream owner");
 	return (model, context, options) => {
 		const stream = createAssistantMessageEventStream();
 		const turn = new ClaudeTurn(stream, model, new Set(getCurrentTools(context.messages).map((tool) => tool.name)));
 
-		const env = toClaudeEnv();
+		const env = toClaudeEnv(getConfigDir);
 		// An existing child must not retain stale authentication/routing after env changes.
 		const configuration = { request: configurationForReuse(model, context, toEffort(options?.reasoning)), env };
 		if (continueLiveProcess(turn, owner, options?.sessionId, configuration, context.messages, options?.signal)) return stream;

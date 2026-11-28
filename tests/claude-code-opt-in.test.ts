@@ -8,6 +8,7 @@ const testData = mkdtempSync(join(tmpdir(), "lh-cli-opt-in-data-"));
 process.env.LH_DATA_DIR = testData;
 after(() => rmSync(testData, { recursive: true, force: true }));
 const { SETTINGS_FILE } = await import("../config.ts");
+const { GET } = await import("../app/api/settings/route.ts");
 const { PUT } = await import("../app/api/settings/[section]/route.ts");
 const { sanitizeUserSettings, providerKeyMissing } = await import("../src/core/settings.ts");
 const { parseClaudeCodeSettingsBody } = await import("../src/server/settings-body.ts");
@@ -95,4 +96,45 @@ test("a saved CLI background job is refused before model execution while opt-in 
 	assert.equal(refused.status, "error");
 	assert.match(JSON.stringify(refused.result), /Enable and set it up in Settings/);
 	assert(!JSON.stringify(refused.result).includes("add one in Settings → Keys"));
+});
+
+test("claudeCode configDir persists across PUT/GET, rejects invalid values cleanly, and resets on null or omitted configDir", async (t) => {
+	setup(t);
+
+	const saveRes = await save({ enabled: true, configDir: "~/.claude-work" });
+	assert.equal(saveRes.status, 200);
+	assert.deepEqual(readSettings()?.claudeCode, { enabled: true, configDir: "~/.claude-work" });
+
+	const getBody = (await (await GET()).json()) as { settings: { claudeCode?: { enabled?: boolean; configDir?: string } } | null };
+	assert.deepEqual(getBody.settings?.claudeCode, { enabled: true, configDir: "~/.claude-work" });
+
+	for (const bad of ["relative", "", "~/../bad"]) {
+		const badRes = await save({ enabled: true, configDir: bad });
+		assert.equal(badRes.status, 400);
+		assert.deepEqual(readSettings()?.claudeCode, { enabled: true, configDir: "~/.claude-work" });
+	}
+
+	assert.equal((await save({ enabled: true, configDir: null })).status, 200);
+	assert.deepEqual(readSettings()?.claudeCode, { enabled: true });
+
+	assert.equal((await save({ enabled: true, configDir: "~/.claude-alt" })).status, 200);
+	assert.deepEqual(readSettings()?.claudeCode, { enabled: true, configDir: "~/.claude-alt" });
+
+	assert.equal((await save({ enabled: true })).status, 200);
+	assert.deepEqual(readSettings()?.claudeCode, { enabled: true });
+});
+
+test("sanitizeUserSettings validates configDir independently from enabled", () => {
+	assert.deepEqual(
+		sanitizeUserSettings({ version: 1, claudeCode: { enabled: true, configDir: "relative-bad" } })?.claudeCode,
+		{ enabled: true },
+	);
+	assert.deepEqual(
+		sanitizeUserSettings({ version: 1, claudeCode: { enabled: "yes", configDir: "  ~/.claude-work  " } })?.claudeCode,
+		{ configDir: "~/.claude-work" },
+	);
+	assert.deepEqual(
+		sanitizeUserSettings({ version: 1, claudeCode: { enabled: false, configDir: "/tmp/claude-profile" } })?.claudeCode,
+		{ enabled: false, configDir: "/tmp/claude-profile" },
+	);
 });

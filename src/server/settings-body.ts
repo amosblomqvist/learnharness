@@ -33,6 +33,7 @@ import { WRITABLE_TOOL_KEYS } from "../core/pending.ts";
 import { isSearchEngineId, SEARCH_ENGINES } from "../core/search.ts";
 import { isDictationLanguage } from "../core/dictation.ts";
 import { parseFileAccessSettings } from "../core/file-access.ts";
+import { isValidClaudeConfigDir, type ClaudeCodeSettings } from "../core/contracts/claude-code.ts";
 
 /** Parsed-or-rejected — `ok: false` carries the 400's error message. */
 export type SettingsBodyResult<T> =
@@ -97,13 +98,29 @@ export function parseGeneralSettingsBody(body: unknown): SettingsBodyResult<Gene
 	return { ok: true, settings };
 }
 
-/** claudeCode: explicit app-wide opt-in. Empty section resets to off. */
-export function parseClaudeCodeSettingsBody(body: unknown): SettingsBodyResult<{ enabled?: boolean }> {
+/** claudeCode: explicit app-wide opt-in and optional custom CLAUDE_CONFIG_DIR. */
+export function parseClaudeCodeSettingsBody(body: unknown): SettingsBodyResult<ClaudeCodeSettings> {
 	const raw = asRecord(body);
 	if (!raw) return { ok: false, error: "Invalid JSON body" };
-	if (raw.enabled === undefined) return { ok: true, settings: {} };
-	if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
-	return { ok: true, settings: { enabled: raw.enabled } };
+	const settings: ClaudeCodeSettings = {};
+	if (raw.enabled !== undefined) {
+		if (typeof raw.enabled !== "boolean") return { ok: false, error: "enabled must be a boolean" };
+		settings.enabled = raw.enabled;
+	}
+	if (raw.configDir !== undefined && raw.configDir !== null) {
+		if (typeof raw.configDir !== "string") {
+			return { ok: false, error: "configDir must be a string or null" };
+		}
+		const trimmed = raw.configDir.trim();
+		if (!isValidClaudeConfigDir(trimmed)) {
+			return { ok: false, error: "configDir must be an absolute path (or start with ~/), without NUL characters or dot segments" };
+		}
+		if (trimmed !== "~" && !trimmed.startsWith("~/") && !path.isAbsolute(trimmed)) {
+			return { ok: false, error: "configDir must be an absolute path on the server filesystem (or start with ~/)" };
+		}
+		settings.configDir = trimmed;
+	}
+	return { ok: true, settings };
 }
 
 /** agent.models: only the six known background roles; each override's
