@@ -439,6 +439,17 @@ export function Chat({
 		window.addEventListener("lh:chat-renamed", onRenamed);
 		return () => window.removeEventListener("lh:chat-renamed", onRenamed);
 	}, [chatId]);
+	// Server-side renames (the AI title after the first reply / the goal)
+	// announce chats-changed; adopt this chat's title from the list.
+	useServerEvent("chats-changed", () => {
+		void fetch("/api/chats")
+			.then((r) => (r.ok ? (r.json() as Promise<{ chats?: Array<{ id: string; title: string }> }>) : null))
+			.then((body) => {
+				const title = body?.chats?.find((c) => c.id === chatId)?.title;
+				if (title) setTitleText((prev) => (title !== prev ? title : prev));
+			})
+			.catch(() => {});
+	});
 
 	// The Esc chain's last link: abort the turn. The background runner
 	// decoupled turns from views, so the abort is ALWAYS the remote kill
@@ -1681,7 +1692,7 @@ export function Chat({
 								data-plugin-chrome-title
 								aria-label={tr("会话标题", "Session title")}
 								title={tr("重命名此会话", "Rename this session")}
-								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title text-3xl tracking-tight caret-current outline-none [field-sizing:content]"
+								className="lh-no-drag min-w-[8ch] max-w-[70%] shrink-0 bg-transparent font-title lh-session-title text-[18px] tracking-normal text-foreground/85 caret-current outline-none [field-sizing:content]"
 							/>
 							{/* flex-1 spacer during rename too, so the chips stay at
 							    the right edge; clicks here commit via the header
@@ -1703,7 +1714,7 @@ export function Chat({
 								setRenaming(true);
 							}}
 							data-plugin-chrome-title
-							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title text-3xl tracking-tight transition-colors hover:bg-accent"
+							className="lh-no-drag -mx-1.5 min-w-4 shrink cursor-text truncate rounded-md px-1.5 text-left font-title lh-session-title text-[18px] tracking-normal text-foreground/85 transition-colors hover:bg-accent"
 						>
 							{titleText}
 							</button>

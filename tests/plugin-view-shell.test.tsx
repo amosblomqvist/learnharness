@@ -14,7 +14,7 @@ describe("plugin view host shell", () => {
 		assert.ok(html.includes("lh-wco-gutter"));
 		assert.ok(html.includes("lh-drag"));
 		assert.ok(html.includes('aria-label="打开侧边栏"'));
-		assert.ok(html.includes("font-title text-3xl tracking-tight"));
+		assert.ok(html.includes("font-title lh-session-title text-[18px]"));
 		assert.ok(html.includes('aria-label="插件设置"'));
 		assert.ok(html.includes("正在加载插件…"));
 		assert.ok(!html.includes("text-2xl"));

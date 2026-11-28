@@ -45,7 +45,9 @@ import {
 	graphToolsEnabled,
 	resolveConversationSpec,
 	resolveRoleSpec,
+	resolveSlot,
 } from "../core/settings-resolution.ts";
+import { createAutoTitler } from "./auto-title.ts";
 import { modelsNotConfigured, providerKeyMissing as providerKeyMissingEnvelope, ROLE_SLOT, type ModelSlotName, type ProviderKeyMissing } from "../core/settings.ts";
 import { beginTurn, endTurn, isTurnRunning } from "./turn-liveness.ts";
 import { claimPreparingTurn, type TurnPreparation } from "./turn-preparation.ts";
@@ -174,6 +176,19 @@ function resolveEngine(role: ModelRole): PiEngine | undefined {
 function retentionForSlot(slot: ModelSlotName) {
 	return () => stores.settingsStore.readSettings()?.models?.[slot]?.cacheRetention;
 }
+
+/** AI session titles: the cheap slot, read fresh; skipped when it is not
+ *  configured, its key is gone, or a subscription disallows background use.
+ *  Off under NODE_ENV=test unless LH_AUTO_TITLE=1 (tests drive real stores). */
+const maybeAutoTitle = createAutoTitler({
+	chatStore: stores.chatStore,
+	engine: () => {
+		if (process.env.NODE_ENV === "test" && process.env.LH_AUTO_TITLE !== "1") return undefined;
+		const slot = resolveSlot(stores.settingsStore.readSettings()?.models?.cheap);
+		if (!slot || !providerKeyPresent(slot.provider) || !connectionBackgroundAllowed(slot.provider)) return undefined;
+		try { return piEngineForSpec(slot, true, undefined, retentionForSlot("cheap")); } catch { return undefined; }
+	},
+});
 
 setJobRespawn((jobId) => void jobRunner.runJob(jobId));
 // The learner-filesystem policy (file-access wave): every tool registry is
@@ -898,6 +913,7 @@ export async function handleChatInput(
 				// subsequent fetch reads the dismissal already in the record
 				// (the same ordering law as persistTurn itself).
 				applyParkedDismissal(stores.chatStore, chatId);
+				void maybeAutoTitle(chatId);
 				// Any helper activity after the last model call stays pending;
 				// settlement never injects it behind the agent's context.
 				// LAST: a poller that sees not-in-flight must read an already-persisted

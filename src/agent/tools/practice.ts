@@ -214,6 +214,6 @@ export function practiceTools(ctx: PracticeToolContext, gate: PracticeGate = cre
 		grep: grepTool,
 		...(jobs?.research ? { research: jobs.research } : {}),
 		...(jobs ? { pdf: jobs.pdf! } : {}),
-		...(ctx.graph ? proberGraphTools(ctx.graph) : {}),
+		...(ctx.graph ? proberGraphTools({ ...ctx.graph, chatId: ctx.chatId }) : {}),
 	});
 }

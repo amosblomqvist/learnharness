@@ -1024,6 +1024,17 @@ describe("renameChat (the header's click-to-edit title)", () => {
 		const renamed = chatStore.renameChat(chat.id, "   ");
 		assert.equal(renamed.title, "未命名会话");
 	});
+
+	it("automatic titles replace defaults and each other, never a hand-set title", () => {
+		const chat = chatStore.createChat("first prompt line");
+		createdChats.push(chat.id);
+		assert.equal(chatStore.renameChat(chat.id, "AI name", "auto").titleSource, "auto");
+		assert.equal(chatStore.renameChat(chat.id, "Goal name", "goal").title, "Goal name");
+		chatStore.renameChat(chat.id, "Mine");
+		assert.equal(chatStore.getChat(chat.id)!.titleSource, "user");
+		assert.equal(chatStore.renameChat(chat.id, "AI again", "goal").title, "Mine");
+		assert.equal(chatStore.getChat(chat.id)!.title, "Mine");
+	});
 });
 
 describe("the BYOK turn gate (no factory floor — owner, 2026-09-22)", () => {

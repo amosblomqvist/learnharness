@@ -94,6 +94,7 @@ describe("prober graph tools — registration", () => {
 			"ask_user_question",
 			"find",
 			"grep",
+			"list_open_gaps",
 			"list_propositions",
 			"list_sessions",
 			"ls",

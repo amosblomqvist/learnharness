@@ -35,7 +35,7 @@ describe("resolveAppearance — delta over factory", () => {
 		assert.deepEqual(a.colors, {});
 		assert.equal(a.fontFamily, null);
 		assert.equal(a.proseFontSize, 16);
-		assert.equal(a.sessionNameSerif, true);
+		assert.equal(a.sessionNameSerif, false);
 		assert.deepEqual(a.mdRendering, { headingWeight: 900, boldColor: null, italicColor: null });
 	});
 
@@ -57,7 +57,7 @@ describe("appearanceVars — the mapping the provider applies", () => {
 		assert.equal(vars["--lh-prose-size"], "16px");
 		assert.equal(vars["--lh-heading-weight"], "900");
 		assert.equal(vars["--font-prose"], undefined, "no font override at factory");
-		assert.equal(vars["--font-title"], undefined, "CMU stays");
+		assert.equal(vars["--font-title"], "var(--font-prose)", "factory: titles follow the prose font");
 	});
 
 	it("JetBrains Mono renders from the bundled face when it is not installed", () => {
@@ -105,7 +105,7 @@ describe("staleVarNames — the removal half of application (owner repro: resets
 			resolveAppearance({
 				background: "#101820",
 				fontFamily: "Georgia",
-				sessionNameSerif: false,
+				sessionNameSerif: true,
 				mdRendering: { headingWeight: 700, boldColor: "#ff0000", italicColor: "#00ff00" },
 			}),
 			DEFAULT_THEME,
@@ -113,7 +113,8 @@ describe("staleVarNames — the removal half of application (owner repro: resets
 		const factory = appearanceVars(resolveAppearance(undefined), DEFAULT_THEME);
 		const stale = staleVarNames(Object.keys(fullDelta), factory);
 		assert.ok(stale.includes("--font-prose"));
-		assert.ok(stale.includes("--font-title"), "serif toggle back ON must clear the title override");
+		assert.ok(!stale.includes("--font-title"), "serif off is the factory: the title override is set, not stale");
+		assert.equal(factory["--font-title"], "var(--font-prose)");
 		assert.ok(!stale.includes("--background"), "a theme always sets every color");
 		assert.equal(factory["--background"], "#141414", "an emptied background is the theme's again");
 		assert.ok(!stale.includes("--lh-prose-size"), "always-applied tokens never go stale");

@@ -469,7 +469,7 @@ export function AppearanceSection({
 			</SettingsRow>
 			<SettingsRow label={tr("会话名称使用衬线字体", "Session names in serif")} testid="row-session-serif">
 				<Toggle
-					checked={appearance?.sessionNameSerif ?? true}
+					checked={appearance?.sessionNameSerif ?? false}
 					label={tr("会话名称使用衬线字体", "session names serif")}
 					testid="toggle-session-names-serif"
 					onChange={(on) => onSectionChange({ ...appearance, sessionNameSerif: on })}

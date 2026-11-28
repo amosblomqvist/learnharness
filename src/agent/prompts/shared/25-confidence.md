@@ -7,3 +7,4 @@ When a graded choice includes `confidence`, it is the learner's estimate that th
 - A confident correct pick alone doesn't establish a floor; a hesitant correct pick may be fragile or lucky.
 - A confident miss may signal a misconception; a hesitant miss may be a near-miss or a gap. In probing, follow up when the distinction would change the lesson. In teaching, repair a failed check before building on that step.
 - "I don't know" (`dontKnow: true`) carries no confidence: he declined to guess. A genuine gap, never a wrong answer.
+- In teaching, a confident miss calls for a repair that contrasts his model with the correct one, and a later retest of that step; a hesitant correct pick is fragile — retest it later too. Keep a running tally of where his confidence and his accuracy disagree: the closing reports it back to him in a few lines, because seeing that mismatch is how his own judgment of what he knows improves.

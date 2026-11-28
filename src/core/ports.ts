@@ -14,6 +14,7 @@ import type { PluginAgentRecord } from "./plugin-agents.ts";
 import type { PluginTaskRecord } from "./plugin-workers.ts";
 import type {
 	ChatRecord,
+	ChatTitleSource,
 	ImageSnapshot,
 	ChatSettings,
 	ChatSummary,
@@ -81,7 +82,8 @@ export interface ChatStore {
 	/** Rename a session (the header's click-to-edit title, 2026-09-17).
 	 * Like saveSettings: a rename is NOT conversation activity — updatedAt
 	 * stays put, so sidebar order never churns on a rename. */
-	renameChat(id: string, title: string): ChatRecord;
+	/** source defaults to "user"; an automatic source never replaces a user title. */
+	renameChat(id: string, title: string, source?: ChatTitleSource): ChatRecord;
 	/** Delete the session record entirely (session-deletion wave 6, owner
 	 *  2026-09-22). False when the id is unknown. The graph-ledger purge and
 	 *  job cleanup are the caller's choreography (core/graph-deletion.ts +

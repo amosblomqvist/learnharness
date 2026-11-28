@@ -594,7 +594,7 @@ export const FACTORY_SETTINGS: FactorySettings = {
 		fontFamily: null, // Source Sans 3
 		proseFontSize: 16,
 		codeLigatures: false,
-		sessionNameSerif: true,
+		sessionNameSerif: false,
 		compactSessionList: false,
 		transcriptMaxWidth: null, // Full
 		adaptiveQuestions: true,

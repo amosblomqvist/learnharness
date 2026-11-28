@@ -10,6 +10,7 @@
 - [ChatRecord](#chatrecord)
 - [ChatSettings](#chatsettings) — supporting declaration
 - [ChatSummary](#chatsummary) — supporting declaration
+- [ChatTitleSource](#chattitlesource) — supporting declaration
 - [ExtractionRunUsage](#extractionrunusage) — supporting declaration
 - [ExtractionStageUsage](#extractionstageusage) — supporting declaration
 - [ImageSnapshot](#imagesnapshot) — supporting declaration
@@ -145,14 +146,11 @@ compacting: boolean;
 
 Public SDK type, exported as `ChatRecord`. Import with `import type`; the SDK has no runtime exports.
 
-One persisted native session under data/chats/<id>.json. Messages retain
-native agent history; transcript rendering groups them into a separate view.
-Usage, images, plan state and side conversations are session-owned records.
-
 ```ts
 export interface ChatRecord {
     id: string;
     title: string;
+    titleSource?: ChatTitleSource;
     createdAt: string;
     updatedAt: string;
     messages: LhMessage[];
@@ -167,12 +165,13 @@ export interface ChatRecord {
 }
 ```
 
-**Related types:** [ChatKind](contracts-chat.md#chatkind), [ChatSettings](contracts-chat.md#chatsettings), [ExtractionRunUsage](contracts-chat.md#extractionrunusage), [ImageSnapshot](contracts-chat.md#imagesnapshot), [LhMessage](native-messages.md#lhmessage), [PlanTree](contracts-plan.md#plantree), [SideChatThread](contracts-chat.md#sidechatthread), [TurnUsage](contracts-chat.md#turnusage).
+**Related types:** [ChatKind](contracts-chat.md#chatkind), [ChatSettings](contracts-chat.md#chatsettings), [ChatTitleSource](contracts-chat.md#chattitlesource), [ExtractionRunUsage](contracts-chat.md#extractionrunusage), [ImageSnapshot](contracts-chat.md#imagesnapshot), [LhMessage](native-messages.md#lhmessage), [PlanTree](contracts-plan.md#plantree), [SideChatThread](contracts-chat.md#sidechatthread), [TurnUsage](contracts-chat.md#turnusage).
 
 **Member index** (including nested object members; inherited members are defined in the linked base types):
 
 - [id](#chatrecord-id)
 - [title](#chatrecord-title)
+- [titleSource](#chatrecord-titlesource)
 - [createdAt](#chatrecord-createdat)
 - [updatedAt](#chatrecord-updatedat)
 - [messages](#chatrecord-messages)
@@ -195,6 +194,14 @@ id: string;
 
 ```ts
 title: string;
+```
+
+### ChatRecord titleSource
+
+Absent = the first-prompt default title.
+
+```ts
+titleSource?: ChatTitleSource;
 ```
 
 ### ChatRecord createdAt
@@ -454,6 +461,22 @@ Saved per-session model/thinking choices included in the list payload.
 
 ```ts
 settings?: ChatSettings;
+```
+
+## ChatTitleSource
+
+Supporting declaration used by a public type. This is not an additional runtime API or SDK helper.
+
+One persisted native session under data/chats/<id>.json. Messages retain
+native agent history; transcript rendering groups them into a separate view.
+Usage, images, plan state and side conversations are session-owned records.
+
+Who set the title: absent = the first-prompt default; "auto" = named by
+the model after the first reply; "goal" = renamed from the probe's goal;
+"user" = set by hand (final — never overwritten automatically).
+
+```ts
+export type ChatTitleSource = "auto" | "goal" | "user";
 ```
 
 ## ExtractionRunUsage

@@ -53,4 +53,5 @@ export const artifactRenderers: Record<string, ComponentType<ArtifactPartProps>>
 	// discipline (their results are pre-formatted strings too).
 	list_sessions: ToolCallCard,
 	list_propositions: ToolCallCard,
+	list_open_gaps: ToolCallCard,
 };

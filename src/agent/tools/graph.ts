@@ -4,6 +4,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { serverExecute } from "../tool-execute.ts";
 import { getGraph, graphSessionIndex, graphSessionPropositions } from "../../core/graph.ts";
 import type { ChatStore, GraphStore } from "../../core/ports.ts";
+import { formatOpenGaps, openGaps } from "../../core/open-gaps.ts";
 import { createPropositionCandidateSearch, propositionCandidateBatch, type CandidateBatch, type CandidateProposition, type CandidateRequest } from "../../core/proposition-candidates.ts";
 
 /**
@@ -29,6 +30,8 @@ import { createPropositionCandidateSearch, propositionCandidateBatch, type Candi
 export interface GraphToolContext {
 	chatStore: ChatStore;
 	graphStore: GraphStore;
+	/** The calling session — excluded from list_open_gaps (its own gaps are live context). */
+	chatId?: string;
 }
 
 const listSessionsInput = Type.Object({});
@@ -75,6 +78,22 @@ export function proberGraphTools(ctx: GraphToolContext): Record<string, AgentToo
 				}
 				const lines = propositions.map((p) => `- ${p.name}`);
 				return `${propositions.length} proposition(s) covered in this session:\n${lines.join("\n")}`;
+			}),
+		},
+		list_open_gaps: {
+			name: "list_open_gaps",
+			label: "list_open_gaps",
+			description:
+				"List what earlier TEACHING sessions left unresolved, most recent first: per plan node, the last graded check was missed, " +
+				"missed at high confidence, answered \"I don't know\", or answered correctly but hesitantly — and no later clean pass closed it. " +
+				"Each line carries the node, the status, the confidence, the date, and the last check's question. " +
+				"Use it to test the gaps this session's goal depends on COLD (no hints, fresh surface) before building on them; ignore gaps on unrelated strands.",
+			parameters: listSessionsInput,
+			execute: serverExecute("list_open_gaps", listSessionsInput, async (): Promise<string> => {
+				// ponytail: reads the 40 most recent teaching records per call; an index if libraries grow huge.
+				const recent = ctx.chatStore.listChats().filter((c) => c.kind !== "practice").slice(0, 40);
+				const records = recent.map((c) => ctx.chatStore.getChat(c.id)).filter((r): r is NonNullable<typeof r> => r !== null);
+				return formatOpenGaps(openGaps(records, { excludeChatId: ctx.chatId, limit: 8 }));
 			}),
 		},
 	};

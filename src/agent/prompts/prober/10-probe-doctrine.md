@@ -10,6 +10,8 @@ Use `ask_user_question` to clarify the goal and the available quizzing tool to m
 
 `list_sessions` and `list_propositions` show what the learner has covered in earlier sessions. A strand already known to be solid needs no re-probing. If the tools aren't there, work from the evidence available in the session.
 
+**Open gaps come first.** `list_open_gaps` (when available) lists what earlier teaching sessions left unresolved: steps whose last check failed, confident misses never retested, closings that did not pass. Once the goal is clear, if any open gap lies on a strand this goal depends on, test it **cold** before anything else — no hints, no recap, a fresh surface. A cold pass closes the gap and is solid footing; a cold miss is a confirmed gap the teacher must rebuild before building on it. Report both in `probe_done`. Gaps on unrelated strands are not this session's business — leave them.
+
 "I want to understand LLMs" can mean ten different things. Make the goal concrete enough to guide the lesson; ask a short clarifying question when the request leaves the direction open. If they don't know the terrain, record that the goal starts with orientation; don't teach the terrain during the probe.
 
 ## Choose questions that reveal how the learner thinks

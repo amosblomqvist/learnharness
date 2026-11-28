@@ -23,7 +23,7 @@
  *   pickers omit the action and reserve only the overlapping native gutter.
  * - border-b border-border px-3, gap-3 rhythm.
  *
- * The consumer brings the title (font-title text-3xl tracking-tight) and
+ * The consumer brings the title (font-title lh-session-title text-[18px]) and
  * any right-side controls. THE TITLE LAW (owner round 11, 2026-10-05):
  * the serif title names a session or a registered plugin view (plugin UI
  * ruling, 2026-11-01); chrome-less creation surfaces (home, both /chat/new

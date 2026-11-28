@@ -29,7 +29,7 @@ export function PluginViewScreen({ pluginId, viewId }: { pluginId: string; viewI
 	const unavailable = !plugin ? tr("插件未安装。", "Plugin is not installed.") : !plugin.info.enabled ? tr("此插件已停用。", "This plugin is disabled.") : tr("此插件视图不可用。", "This plugin view is not available.");
 	return <div className="flex h-dvh min-w-0 flex-col">
 		<TopBar>
-			<h1 data-plugin-chrome-title className="min-w-0 truncate font-title text-3xl tracking-tight">{view?.name ?? plugin?.info.manifest?.name ?? tr("插件", "Plugin")}</h1>
+			<h1 data-plugin-chrome-title className="min-w-0 truncate font-title lh-session-title text-[18px] tracking-normal text-foreground/85">{view?.name ?? plugin?.info.manifest?.name ?? tr("插件", "Plugin")}</h1>
 			<div className="min-w-4 flex-1" aria-hidden="true" />
 			<PluginTopBarActions context={{ placement: "top-bar", surface: "plugin-view", pluginId, viewId }} />
 			<Hint label={tr("插件设置", "Plugin settings")} side="bottom">

@@ -21,9 +21,16 @@ export type ChatKind = "teach" | "practice";
 /** One persisted native session under data/chats/<id>.json. Messages retain
  * native agent history; transcript rendering groups them into a separate view.
  * Usage, images, plan state and side conversations are session-owned records. */
+/** Who set the title: absent = the first-prompt default; "auto" = named by
+ * the model after the first reply; "goal" = renamed from the probe's goal;
+ * "user" = set by hand (final — never overwritten automatically). */
+export type ChatTitleSource = "auto" | "goal" | "user";
+
 export interface ChatRecord {
 	id: string;
 	title: string;
+	/** Absent = the first-prompt default title. */
+	titleSource?: ChatTitleSource;
 	createdAt: string;
 	updatedAt: string;
 	messages: LhMessage[];

@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
+import type { ChatRecord, ChatSettings, ChatSummary, ChatTitleSource, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
 import { activeProblemOf, danglingQuestionOf } from "../core/native-messages.ts";
@@ -195,10 +195,13 @@ function saveSettings(id: string, settings: ChatSettings): void {
  * so sidebar order never churns. Same fallback as createChat — the empty
  * string becomes "未命名会话" (the API gate rejects it first; this
  * is the honest floor for any other caller). */
-function renameChat(id: string, title: string): ChatRecord {
+function renameChat(id: string, title: string, source: ChatTitleSource = "user"): ChatRecord {
 	const record = getChat(id);
 	if (!record) throw new Error(`Chat not found: ${id}`);
+	// A hand-set title is final: automatic names never replace it.
+	if (source !== "user" && record.titleSource === "user") return record;
 	record.title = title.trim() || tr("未命名会话", "Untitled session");
+	record.titleSource = source;
 	writeChat(record);
 	emit("chats-changed", {});
 	return record;

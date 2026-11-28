@@ -120,7 +120,7 @@ it("a server palette refresh cannot overwrite newer live colors or mode; typogra
 		await act(async () => live.onAppearanceChange({ theme: dawn.id }));
 		assert.equal(document.documentElement.style.getPropertyValue("--foreground"), dawn.colors.text);
 		assert.equal(document.documentElement.style.getPropertyValue("--font-prose"), "");
-		assert.equal(document.documentElement.style.getPropertyValue("--font-title"), "");
+		assert.equal(document.documentElement.style.getPropertyValue("--font-title"), "var(--font-prose)", "factory: serif titles off");
 	} finally {
 		await act(async () => root.unmount());
 		for (const [key, descriptor] of saved) {
