@@ -5,7 +5,6 @@ import { it } from "node:test";
 import { createRoot } from "react-dom/client";
 import { renderToStaticMarkup } from "react-dom/server";
 import { parseHTML } from "linkedom";
-import mermaid from "mermaid";
 import { code, type HighlightResult } from "@streamdown/code";
 import { AppRouterContext } from "next/dist/shared/lib/app-router-context.shared-runtime.js";
 import { PathnameContext } from "next/dist/shared/lib/hooks-client-context.shared-runtime.js";
@@ -24,12 +23,6 @@ const noControls = (container: ParentNode) => {
 	assert.equal(container.querySelector("button, details, summary, input, select, textarea, [role='button'], [data-streamdown='link-safety-modal']"), null, "display-only means controls never mount, not CSS-hidden controls");
 	assert.equal(container.querySelector("[data-testid='md-copy'], [data-testid='md-mermaid-expand'], [data-plugin-renderer], [data-streamdown='code-block-actions']"), null);
 };
-function deferred<T>() {
-	let resolve!: (value: T) => void;
-	let reject!: (error: Error) => void;
-	const promise = new Promise<T>((yes, no) => { resolve = yes; reject = no; });
-	return { promise, resolve, reject };
-}
 function highlighted(content: string): HighlightResult {
 	return { tokens: [[{ content, offset: 0, color: "#aabbcc" }]], fg: "#eeeeee", bg: "#111111" };
 }
@@ -170,44 +163,36 @@ it("static and interactive instances isolate registered code renderers, controls
 	} finally { await f.close(); }
 });
 
-it("static Mermaid uses the shared renderer, suppresses overlay/copy controls and shows invalid source without retry", async t => {
-	t.mock.method(mermaid, "initialize", () => {});
-	t.mock.method(mermaid, "render", async (_id: string, chart: string) => {
-		if (chart.includes("invalid")) throw new Error("Parse error: invalid source");
-		return { svg: '<svg viewBox="0 0 160 80"><text>Shared chart</text></svg>', diagramType: "flowchart-v2" };
-	});
+it("static Mermaid uses the shared Pele renderer, suppresses overlay/copy controls and shows invalid source without retry", async () => {
 	const f = await fixture(); const expanded: string[] = [];
-	const tree = (text: string) => <SessionMermaidContext.Provider value={{ openMermaid: chart => { expanded.push(chart); }, openFigure() {} }}><section id="host"><HostMarkdown text={text} /></section><section id="chat"><MessageResponse mode="static">{"```mermaid\ngraph TD\nA --> B\n```"}</MessageResponse></section></SessionMermaidContext.Provider>;
+	const tree = (text: string) => <SessionMermaidContext.Provider value={{ openMermaid: chart => { expanded.push(chart); }, openFigure() {} }}><section id="host"><HostMarkdown text={text} /></section><section id="chat"><MessageResponse mode="static">{"```mermaid\ngraph TD\nA[Shared chart] --> B[End]\n```"}</MessageResponse></section></SessionMermaidContext.Provider>;
 	try {
-		await f.render(tree("```mermaid\ngraph TD\nA --> B\n```"));
-		assert.equal(document.querySelector("#host svg text")?.textContent, "Shared chart"); noControls(document.querySelector("#host")!);
+		await f.render(tree("```mermaid\ngraph TD\nA[Shared chart] --> B[End]\n```"));
+		const hostSvg = document.querySelector("#host svg.pele");
+		assert.ok(hostSvg, "Pele SVG renders inside #host");
+		assert.ok(hostSvg.textContent?.includes("Shared chart"));
+		noControls(document.querySelector("#host")!);
 		assert.ok(document.querySelector("#chat [data-testid='md-mermaid-expand']")); assert.ok(document.querySelector("#chat [aria-label='Copy diagram source']"));
 		assert.deepEqual(expanded, []);
 		await f.render(tree("```mermaid\ninvalid <diagram>\n```"));
 		const host = document.querySelector("#host")!;
-		assert.ok(host.querySelector("[data-streamdown='mermaid-error']")); assert.ok(host.textContent?.includes("Parse error: invalid source"));
+		assert.ok(host.querySelector("[data-streamdown='mermaid-error']")); assert.ok(host.textContent?.includes("No diagram type detected"));
 		assert.equal(host.querySelector("pre")?.textContent, "invalid <diagram>\n"); noControls(host);
 	} finally { await f.close(); }
 });
 
-it("late diagram results cannot promote after a complete-text update or disposal", async t => {
-	t.mock.method(mermaid, "initialize", () => {});
-	type Result = Awaited<ReturnType<typeof mermaid.render>>;
-	const old = deferred<Result>(), disposed = deferred<Result>();
-	t.mock.method(mermaid, "render", async (_id: string, chart: string) => chart.includes("old") ? old.promise : chart.includes("disposed") ? disposed.promise : { svg: '<svg viewBox="0 0 160 80"><text>Current chart</text></svg>', diagramType: "flowchart-v2" });
+it("synchronous diagram updates replace prior SVG output immediately without stale frames", async () => {
 	const f = await fixture();
 	try {
-		await f.render(<HostMarkdown text={"```mermaid\ngraph TD\nold --> result\n```"} />);
-		assert.ok(document.querySelector("[aria-busy='true']"));
-		await f.render(<HostMarkdown text={"```mermaid\ngraph TD\ncurrent --> result\n```"} />);
-		assert.equal(document.querySelector("svg text")?.textContent, "Current chart");
-		await act(async () => old.resolve({ svg: '<svg><text>Stale chart</text></svg>', diagramType: "flowchart-v2" }));
-		assert.equal(document.querySelector("svg text")?.textContent, "Current chart"); assert.ok(!document.body.textContent?.includes("Stale chart"));
-		await f.render(<HostMarkdown text={"```mermaid\ngraph TD\ndisposed --> result\n```"} />);
+		await f.render(<HostMarkdown text={"```mermaid\ngraph TD\nA[First chart] --> B[End]\n```"} />);
+		assert.ok(document.querySelector("svg.pele")?.textContent?.includes("First chart"));
+		await f.render(<HostMarkdown text={"```mermaid\nsequenceDiagram\nA->>B: Second chart\n```"} />);
+		const svg = document.querySelector("svg.pele");
+		assert.ok(svg?.textContent?.includes("Second chart"));
+		assert.ok(!svg?.textContent?.includes("First chart"));
 		await f.render(<p>Unmounted</p>);
-		await act(async () => disposed.resolve({ svg: '<svg><text>Disposed chart</text></svg>', diagramType: "flowchart-v2" }));
 		assert.equal(document.querySelector("#root")?.textContent, "Unmounted"); noControls(document);
-	} finally { old.resolve({ svg: "", diagramType: "flowchart-v2" }); disposed.resolve({ svg: "", diagramType: "flowchart-v2" }); await f.close(); }
+	} finally { await f.close(); }
 });
 
 it("shared asynchronous highlighting paints current tokens, never callbacks from retired snapshots", async t => {
