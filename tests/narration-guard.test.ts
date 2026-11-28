@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { QUESTION_TOOLS } from "../src/core/pending.ts";
 import {
-	isNarrationBlock, makeNarrationGuard, narrationGuardApplies, NARRATION_BLOCK_REASON,
+	BARE_SEND_TO_USER_BLOCK_REASON, isNarrationBlock, makeNarrationGuard, narrationGuardApplies, NARRATION_BLOCK_REASON,
 	NARRATION_GUARD_MAX_BLOCKS, SEND_TO_USER_DELIVERY_RULE,
 } from "../src/agent/narration-guard.ts";
 import { sendToUserApplies } from "../src/agent/tools/send-to-user.ts";
@@ -17,6 +17,7 @@ const output = (message: unknown = "A complete synthetic explanation.") => ({
 	type: "toolCall", id: "s", name: "send_to_user", arguments: { message },
 });
 const msg = (...content: unknown[]) => ({ role: "assistant", content }) as never;
+const rejectedBare = (names: string[], ...content: unknown[]) => ({ role: "assistant", content, cliRejectedBareCalls: names }) as never;
 const ask = (g: ReturnType<typeof makeNarrationGuard>, m: never, name = "quiz") =>
 	g.beforeToolCall!({ assistantMessage: m, toolCall: { ...quiz, name } } as never);
 const delivered = (g: ReturnType<typeof makeNarrationGuard>, m: never, call = output(), isError = false, resultError = isError) =>
@@ -45,6 +46,7 @@ describe("narrationGuardApplies", () => {
 	}
 	it("pins the approved delivery and retry wording", () => {
 		assert.equal(SEND_TO_USER_DELIVERY_RULE, "## Delivering your prose\n\nDeliver learner-facing prose through `send_to_user`; ordinary response text may be converted into summarized thinking instead of reaching the learner. Send the complete explanation, example, or commentary before calling the accompanying question tool. Question-only turns do not require an extra message. A question whose response contains narration but no delivered prose may be rejected so you can deliver the missing explanation and retry.");
+		assert.equal(BARE_SEND_TO_USER_BLOCK_REASON, "Your `send_to_user` call used the bare tool name, so it was rejected and the learner has not seen that message. Resend it through `send_to_user` (exposed as `mcp__learnharness__send_to_user`), then retry this question.");
 		assert.equal(NARRATION_BLOCK_REASON, "This response contains narration but no delivered learner-facing prose. Write the explanation or commentary the learner needs through `send_to_user`, then retry this question. Deliver learner-facing content, not internal reasoning.");
 	});
 });
@@ -121,5 +123,34 @@ describe("makeNarrationGuard", () => {
 		}
 		assert.equal(await ask(g, msg(thinking("narration"), quiz)), undefined);
 		assert.equal((await ask(makeNarrationGuard(), msg(thinking("narration"), quiz)))?.block, true);
+	});
+
+	for (const name of QUESTION_TOOLS) {
+		it(`blocks ${name} when the CLI rejected a bare send_to_user in the same response (#791)`, async () => {
+			const r = await ask(makeNarrationGuard(), rejectedBare(["send_to_user"], quiz), name);
+			assert.equal(r?.block, true);
+			assert.equal(r?.reason, BARE_SEND_TO_USER_BLOCK_REASON);
+		});
+	}
+	it("prefers the bare-name reason when the response also has undelivered narration", async () => {
+		const r = await ask(makeNarrationGuard(), rejectedBare(["send_to_user"], thinking("narration"), quiz));
+		assert.equal(r?.reason, BARE_SEND_TO_USER_BLOCK_REASON);
+	});
+	it("allows the question once a send_to_user in the same response is delivered", async () => {
+		const g = makeNarrationGuard();
+		const m = rejectedBare(["send_to_user"], output(), quiz);
+		await delivered(g, m);
+		assert.equal(await ask(g, m), undefined);
+	});
+	it("ignores other rejected bare names and non-question tools", async () => {
+		const g = makeNarrationGuard();
+		assert.equal(await ask(g, rejectedBare(["read", "quiz"], quiz)), undefined);
+		assert.equal(await ask(g, rejectedBare(["send_to_user"], quiz), "read"), undefined);
+	});
+	it("shares one block budget with the narration check", async () => {
+		const g = makeNarrationGuard();
+		assert.equal((await ask(g, rejectedBare(["send_to_user"], quiz)))?.block, true);
+		assert.equal((await ask(g, msg(thinking("narration"), quiz)))?.block, true);
+		assert.equal(await ask(g, rejectedBare(["send_to_user"], quiz)), undefined);
 	});
 });

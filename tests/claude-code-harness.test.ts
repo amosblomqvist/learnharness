@@ -35,6 +35,7 @@ const { handleChatRequest } = await import("../src/server/chat-handler.ts");
 const { isTurnRunning } = await import("../src/server/turn-liveness.ts");
 const { runningTurn } = await import("../src/server/turn-runs.ts");
 const { chatStore } = await import("../src/store/chats.ts");
+const { projectView } = await import("../src/core/view.ts");
 
 const FAKE_CLAUDE = fileURLToPath(new URL("./fixtures/claude-code/fake-claude.mjs", import.meta.url));
 const TEXT_FIXTURE = fileURLToPath(new URL("./fixtures/claude-code/text.jsonl", import.meta.url));
@@ -316,4 +317,64 @@ test("a question answered after the idle timeout starts a fresh CLI process that
 	assert.ok(replay.includes(ASK_INPUT.question), replay);
 	assert.ok(replay.includes("[tool result ask_user_question]"), replay);
 	assert.ok(replay.includes(ANSWER_TEXT), replay);
+});
+
+function toolUseLines(index: number, id: string, name: string, input: object): string[] {
+	return [
+		streamEvent({ type: "content_block_start", index, content_block: { type: "tool_use", id, name, input: {} } }),
+		streamEvent({ type: "content_block_delta", index, delta: { type: "input_json_delta", partial_json: JSON.stringify(input) } }),
+		streamEvent({ type: "content_block_stop", index }),
+	];
+}
+
+function toolBatch(...blocks: string[][]): string[] {
+	return [
+		streamEvent({ type: "message_start", message: { usage: {} } }),
+		...blocks.flat(),
+		streamEvent({ type: "message_delta", delta: { stop_reason: "tool_use" }, usage: {} }),
+		streamEvent({ type: "message_stop" }),
+	];
+}
+
+test("a bare send_to_user beside a question holds the question until the message is resent through MCP (#791)", async (t) => {
+	const explanation = "A SYN carries the client's initial sequence number.";
+	const quiz = {
+		type: "check", nodeId: "tcp-syn", question: "What does a SYN carry?",
+		options: [{ label: "The client's initial sequence number" }, { label: "A port number" }],
+		correctAnswer: "The client's initial sequence number", explanation: "The SYN announces where the client's numbering starts.",
+	};
+	const bareId = "toolu_bare_send";
+	const firstQuizId = "toolu_quiz_before_resend";
+	const resendId = "toolu_send_resent";
+	const quizId = "toolu_quiz_after_resend";
+	const scenario = [
+		// The model's first response: the message under its bare name, the question through MCP.
+		...toolBatch(toolUseLines(0, bareId, "send_to_user", { message: explanation }), toolUseLines(1, firstQuizId, "mcp__learnharness__quiz", quiz)),
+		JSON.stringify({ type: "user", message: { content: [{ type: "tool_result", tool_use_id: bareId, is_error: true, content: "<tool_use_error>Error: No such tool available: send_to_user</tool_use_error>" }] } }),
+		JSON.stringify({ fake: "call", id: firstQuizId, name: "quiz", arguments: quiz }),
+		// Its correction once both errors are back: the message through MCP, then the question.
+		...toolBatch(toolUseLines(0, resendId, "mcp__learnharness__send_to_user", { message: explanation }), toolUseLines(1, quizId, "mcp__learnharness__quiz", quiz)),
+		JSON.stringify({ fake: "call", id: resendId, name: "send_to_user", arguments: { message: explanation } }),
+		JSON.stringify({ fake: "start-call", id: quizId, name: "quiz", arguments: quiz }),
+		JSON.stringify({ fake: "hold" }),
+	];
+	const fakeRun = createFakeRun(t, [scenario]);
+	const chatId = createClaudeCodeChat(t);
+
+	await runChatTurn(chatId, { type: "text", text: "teach me the TCP handshake" }, createAgentFactory(fakeRun));
+
+	const messages = chatStore.getChat(chatId)?.messages ?? [];
+	assert.equal(danglingQuestionOf(messages)?.toolCallId, quizId, "the question waits only after the resent message");
+	const firstQuizResult = messages.find((message) => message.role === "toolResult" && message.toolCallId === firstQuizId);
+	assert.ok(firstQuizResult?.role === "toolResult" && firstQuizResult.isError, "the first question is rejected");
+	assert.match(JSON.stringify(firstQuizResult.content), /bare tool name/);
+	const firstResponse = messages.find((message) => message.role === "assistant" && message.content.some((block) => block.type === "toolCall" && block.id === firstQuizId));
+	assert.deepEqual((firstResponse as { cliRejectedBareCalls?: string[] } | undefined)?.cliRejectedBareCalls, ["send_to_user"]);
+
+	const parts = projectView(messages).flatMap((message) => message.parts);
+	const prose = parts.flatMap((part, index) => (part.type === "text" && part.text === explanation ? [index] : []));
+	const question = parts.findIndex((part) => part.type === "tool-quiz" && "toolCallId" in part && part.toolCallId === quizId);
+	assert.equal(prose.length, 1, "the learner sees the message once");
+	assert.ok(question > prose[0]!, "the message comes before the question");
+	assert.equal(fakeRun.children.length, 1);
 });

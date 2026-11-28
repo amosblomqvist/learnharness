@@ -476,6 +476,31 @@ test("a bare harness call beside a prefixed one admits only the prefixed call", 
 	await assertCleanedUp(getOnlyCall(calls));
 });
 
+test("bare harness calls are recorded on the response, and a clean response records none (#791)", async (t) => {
+	const bare: ToolUse = { id: "toolu_bare_recorded", name: "send_to_user", arguments: { message: "lost" } };
+	const prefixed: ToolUse = { id: "toolu_prefixed_recorded", name: "read", arguments: { path: "a" } };
+	const prefixedMessage = toToolUseMessage([prefixed]);
+	const { runClaude, calls } = createFakeRun(t, [
+		...prefixedMessage.slice(0, -2),
+		...bareToolUse(1, bare),
+		...prefixedMessage.slice(-2),
+		rejectBareCall(bare),
+		callTool(prefixed),
+		REPLY,
+	]);
+	const tools: Tool[] = ["read", "send_to_user"].map((name) => ({ name, description: "Test harness tool", parameters: { type: "object", properties: {} } }));
+	const streamFunction = createClaudeCodeStreamFunction(runClaude);
+	const first = await collectEvents(streamFunction(getModel(), normalizeContext({ messages: [HI], tools }), { sessionId: SESSION_ID }));
+	const done = getLastEvent(first);
+	assert.ok(done.type === "done");
+	assert.deepEqual((done.message as { cliRejectedBareCalls?: string[] }).cliRejectedBareCalls, ["send_to_user"]);
+	const next = await collectEvents(streamFunction(getModel(), normalizeContext({ messages: [HI, done.message, toToolResult(prefixed, "contents of a")], tools }), { sessionId: SESSION_ID }));
+	const reply = getLastEvent(next);
+	assert.ok(reply.type === "done");
+	assert.equal("cliRejectedBareCalls" in reply.message, false);
+	await assertCleanedUp(getOnlyCall(calls));
+});
+
 function toBareToolUseMessage(toolUses: ToolUse[]): string[] {
 	return toToolUseMessage(toolUses, new Set(toolUses.map((call) => call.id)));
 }
