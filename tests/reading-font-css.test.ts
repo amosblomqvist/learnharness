@@ -62,3 +62,15 @@ it("reading-family repair does not change reading/input size, leading, or title 
 		assert.doesNotMatch(rules(selector).join("\n"), /font-size:|line-height:/);
 	}
 });
+
+it("uses plaintext bidi resolution for prose, headings, and editable text controls", () => {
+	assert.match(rules(".lh-prose")[0]!, /unicode-bidi:\s*plaintext;/);
+	assert.match(
+		rules(":where(p, h1, h2, h3, h4, h5, h6, li, blockquote, th, td)")[0]!,
+		/unicode-bidi:\s*plaintext;/,
+	);
+	assert.match(
+		css,
+		/:where\([^{}]*input:not\(\[type\]\)[^{}]*\)\s*\{\s*unicode-bidi:\s*plaintext;/s,
+	);
+});
