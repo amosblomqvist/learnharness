@@ -21,6 +21,7 @@ import { chatGPTStream } from "./chatgpt-stream.ts";
 import type { ChatGPTDispatchLifecycle } from "./chatgpt-request-cycle.ts";
 import { createClaudeCodeProvider } from "./claude-code/provider.ts";
 import { streamClaudeCode } from "./claude-code/stream.ts";
+import { streamWatchdog } from "./stream-watchdog.ts";
 import { nativeSubscriptionId, nativeSubscriptionModel } from "./subscription-bridge.ts";
 import { nativeSubscriptionStream } from "./subscription-stream.ts";
 
@@ -181,7 +182,7 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 		// The agent loop forwards state.thinkingLevel as `reasoning` (undefined
 		// = off on pi-ai's scale). Built-ins keep the factory clamp; custom
 		// requests re-resolve thinking against their current metadata below.
-		streamFn: (requestModel, context, options) => {
+		streamFn: streamWatchdog((requestModel, context, options) => {
 			// Read the slot preference for every operation, not just engine creation.
 			// Unset adds NOTHING: native defaults/env and explicit caller options survive.
 			const retention = cacheRetention?.();
@@ -211,7 +212,7 @@ export function piEngineForSpec(spec: ResolvedModelSpec, background: boolean | (
 				? { ...requestModel, compat: { ...requestModel.compat, supportsMessageThreads: false } }
 				: requestModel;
 			return stream(wireModel, context, requestOptions);
-		},
+		}),
 	};
 }
 
