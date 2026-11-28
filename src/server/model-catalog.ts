@@ -26,10 +26,37 @@ import { chatGPTConnected, chatGPTModel, chatGPTModels, refreshChatGPTModels } f
 import { NATIVE_SUBSCRIPTIONS } from "../core/contracts/subscriptions.ts";
 import { nativeSubscriptionId, nativeSubscriptionConnected, nativeSubscriptionModel, nativeSubscriptionModels, refreshSubscriptionModels } from "../agent/subscription-bridge.ts";
 
+/**
+ * GPT-6.2 Responses metadata for the ChatGPT subscription lookup (#891).
+ * Pi 1.5.2's bundled catalog has no GPT-6.2 entries; upstream pi-ai 1.6.0
+ * (earendil-works/pi@e56d35c) gives them the same OpenAI family rules as
+ * GPT-6.1 Sol (272k context, no "none"/"minimal" effort, tool search,
+ * additional tools, mid-conversation effort). So each entry is derived
+ * from the bundled GPT-6.1 Sol record rather than hand-copied, with
+ * upstream's list prices (the bridge zeroes cost for subscription use).
+ * A bundled entry with the same id wins, so a Pi upgrade replaces these.
+ * The account's live offer still decides eligibility and display name.
+ */
+const GPT_6_2_BACKPORTS = [
+	{ id: "gpt-6.2-astra", name: "GPT-6.2 Astra", cost: { input: 8, output: 40, cacheRead: 0.4, cacheWrite: 10 } },
+	{ id: "gpt-6.2-sol", name: "GPT-6.2 Sol", cost: { input: 2, output: 10, cacheRead: 0.1, cacheWrite: 2.5 } },
+] as const;
+
+/** The bundled OpenAI Responses catalog plus the GPT-6.2 backports. */
+export function chatGPTSupportedModels(): Model<"openai-responses">[] {
+	const bundled = getBuiltinModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses");
+	const base = bundled.find((m) => m.id === "gpt-6.1-sol");
+	if (!base) return bundled;
+	const backports = GPT_6_2_BACKPORTS.filter((b) => !bundled.some((m) => m.id === b.id)).map(
+		(b): Model<"openai-responses"> => ({ ...base, id: b.id, name: b.name, cost: { ...b.cost } }),
+	);
+	return [...bundled, ...backports];
+}
+
 export async function refreshConnectionCatalog(provider?: string): Promise<void> {
 	await Promise.all([
-		// The subscription bridge still trusts only the bundled OpenAI catalog.
-		!provider || provider === "chatgpt" ? refreshChatGPTModels(getBuiltinModels("openai").filter((m): m is Model<"openai-responses"> => m.api === "openai-responses")) : Promise.resolve(),
+		// The subscription bridge trusts only known OpenAI Responses metadata.
+		!provider || provider === "chatgpt" ? refreshChatGPTModels(chatGPTSupportedModels()) : Promise.resolve(),
 		!provider || nativeSubscriptionId(provider) ? refreshSubscriptionModels() : Promise.resolve(),
 	]);
 }
