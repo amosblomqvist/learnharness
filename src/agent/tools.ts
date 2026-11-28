@@ -24,8 +24,10 @@ import { lsTool } from "./tools/ls.ts";
 import { findTool } from "./tools/find.ts";
 import { grepTool } from "./tools/grep.ts";
 import { createShowImageTool } from "./tools/show-image.ts";
+import { createShowMediaTool, type MediaTranscriber } from "./tools/show-media.ts";
+import { searchYouTubeTool } from "./tools/search-youtube.ts";
 import { healToolRecord } from "./tools/heal.ts";
-import type { GraphStore } from "../core/ports.ts";
+import type { GraphStore, MediaStore } from "../core/ports.ts";
 
 export { jobTools };
 export type { ProbeDoneContext } from "./tools/probe.ts";
@@ -393,6 +395,10 @@ export interface TeacherToolContext extends PlanToolContext {
 	/** Job-tool wiring (sub-agent dispatch): the job store + the runner's
 	 *  spawn seam. The composition root injects both. */
 	jobStore: JobStore;
+	/** Optional session-scoped binary media store for `show_media`. */
+	mediaStore?: Pick<MediaStore, "saveMedia" | "getMediaMeta" | "updateMediaTranscript" | "getMediaFilePath">;
+	/** Optional STT transcription fallback for `show_media` when local media has no .vtt/.srt file. */
+	transcribeMedia?: MediaTranscriber;
 	/** Fire the background runner for a freshly created job. The tool input
 	 *  rides along — the spawn fires mid-stream, before the tool part is
 	 *  persisted to the transcript (a transcript scan would race it). */
@@ -459,6 +465,9 @@ export function createTeacherTools(
 			// The learner-image display twin of read (issue #363): teacher
 			// only, always on — it shows the learner their own file.
 			show_image: createShowImageTool(ctx),
+			// Audio/video + YouTube playback twin of show_image, plus keyless captioned YouTube search.
+			show_media: createShowMediaTool(ctx),
+			search_youtube: searchYouTubeTool,
 			...planTools(ctx),
 			...jobTools({ chatId: ctx.chatId, jobStore: ctx.jobStore, spawn: ctx.spawn, searchAvailable: ctx.searchAvailable }),
 		},

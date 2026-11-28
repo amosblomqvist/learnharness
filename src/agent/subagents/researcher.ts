@@ -2,6 +2,7 @@ import type { AgentTool } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
 import { createWebTools } from "../tools/web.ts";
 import { createPdfReadTools } from "../tools/pdf-read.ts";
+import { searchYouTubeTool } from "../tools/search-youtube.ts";
 import type { SearchProvider } from "../../core/search.ts";
 import type { PiEngine } from "../models.ts";
 import { runSubagent } from "./pi-run.ts";
@@ -51,6 +52,8 @@ in the brief instead of inventing facts.
 
 If web_search reports that search is unavailable because credentials are missing, do not retry it with different queries. Use web_fetch when you have source URLs, and continue with any other available sources. If the missing search capability materially limits your work, state the limitation and the missing-key setup needed in your brief. Never invent search results or sources.
 
+For captioned YouTube videos, you also have search_youtube, which works without a web-search API key.
+
 Your FINAL assistant message is your entire deliverable — it must stand alone, using this format:
 
 ## Summary
@@ -92,7 +95,7 @@ export interface ResearcherRunOptions {
  * the loop scripted.
  */
 export async function runResearcherAgent(prompt: string, opts: ResearcherRunOptions = {}): Promise<string> {
-	const tools = Object.values(createWebTools(opts.search ?? (() => null)));
+	const tools = [...Object.values(createWebTools(opts.search ?? (() => null))), searchYouTubeTool];
 	if (opts.pdfDir) tools.push(...Object.values(createPdfReadTools(opts.pdfDir)));
 	const { text } = await runSubagent(tools, {
 		role: "researcher",

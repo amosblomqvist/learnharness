@@ -203,11 +203,16 @@ export function projectView(messages: readonly LhMessage[], live?: LiveTurnState
 
 		if (role === "user") {
 			const content = m.content as string | Array<{ type: string; text?: string }>;
-			const parts = typeof content === "string" ? [textPart(content)] : content.flatMap((block): LhViewPart[] => {
+			const parts = typeof content === "string" ? (content ? [textPart(content)] : []) : content.flatMap((block): LhViewPart[] => {
 				if (block.type === "text") return [textPart(block.text as string)];
 				if (block.type === "image") return [{ ...block as ImageContent }];
 				return [];
 			});
+			const media = (m as LhMessage).lhMedia;
+			if (media?.length) {
+				for (const item of media) parts.push({ type: "media", media: item });
+			}
+			if (parts.length === 0) parts.push(textPart(""));
 			out.push({ id: m.id, role: "user", parts });
 			continue;
 		}

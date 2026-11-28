@@ -381,11 +381,18 @@ function createWindow(url, beforeLoad) {
 	// loopback-origin only — Electron's default is auto-approve-everything,
 	// and we do not ship that.
 	// "local-fonts": the appearance section's reading-font picker (2026-09-26).
-	const allowedPermissions = new Set(["media", "clipboard-sanitized-write", "local-fonts"]);
+	// "fullscreen": video players (local media-chrome + YouTube embeds).
+	const allowedPermissions = new Set(["media", "clipboard-sanitized-write", "local-fonts", "fullscreen"]);
+	const fullscreenEmbedOrigins = new Set(["https://www.youtube-nocookie.com", "https://www.youtube.com"]);
+	const originOf = (raw) => {
+		try { return raw ? new URL(raw).origin : null; }
+		catch { return null; }
+	};
 	const fromOwnOrigin = (origin, permission) =>
-		origin === allowedOrigin() && allowedPermissions.has(permission);
+		(origin === allowedOrigin() && allowedPermissions.has(permission)) ||
+		(permission === "fullscreen" && fullscreenEmbedOrigins.has(origin));
 	session.defaultSession.setPermissionRequestHandler((_wc, permission, callback, details) => {
-		const requestOrigin = details.requestingUrl ? new URL(details.requestingUrl).origin : null;
+		const requestOrigin = originOf(details.requestingUrl);
 		callback(fromOwnOrigin(requestOrigin, permission));
 	});
 	session.defaultSession.setPermissionCheckHandler((_wc, permission, origin) => {

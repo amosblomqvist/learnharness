@@ -1,6 +1,6 @@
 ## Interactive demos and precise figures — build the instrument, don't describe it
 
-If the concept is DYNAMIC — a parameter to sweep, a process to animate, a distribution to sample, a system to simulate — build the learner the instrument rather than describing its behavior in prose. Ten seconds of dragging a slider teaches more than a paragraph about frequency response. Two artifact tools, both fire-and-forget (same async discipline as research).
+If the concept is DYNAMIC — a parameter to sweep, a process to animate, a distribution to sample, a system to simulate — build the learner the instrument rather than describing its behavior in prose. Ten seconds of dragging a slider teaches more than a paragraph about frequency response. Two async artifact tools, both fire-and-forget (same async discipline as research); for real-world audio/video footage or verified captioned YouTube clips, use `show_media` instead.
 
 ### `demo` — interactive teaching instruments
 

@@ -7,6 +7,8 @@ import { usePlugins } from "./plugins";
 import { PluginSubmissionRunner, SubmissionModelEpoch, type SubmissionAttempt } from "./plugin-submission-runner";
 import { submissionImages, type BuiltinSubmissionCapture, type PrepareBuiltinSubmission, type PrepareThinkingSubmission, type PreparePluginQuestionSubmission, type PreparePluginProblemSubmission } from "./plugin-submission-adapters";
 import { SubmittedImages } from "./submitted-images";
+import { SubmittedMedia } from "@/components/artifacts/media-card";
+import { detectClientMediaType, MAX_MEDIA_ATTACHMENTS_PER_MESSAGE, prepareMediaFileForChat, type PendingMediaItem } from "@/lib/client-media";
 import { usePageSurfaceBoundary, SurfaceRegion } from "./plugin-surfaces";
 import { findSurfaceBoundary } from "./plugin-surface-targets";
 import { scheduleOpeningSubmission } from "./plugin-submission-opening";
@@ -63,6 +65,7 @@ import {
 	type ChatInput,
 	type ChatSettings,
 	type LhMessage,
+	type MediaAttachment,
 	type ModelSlotName,
 } from "@/src/core";
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
@@ -695,6 +698,64 @@ export function Chat({
 	const recordComposerText = useCallback((v: string) => {
 		textRef.current = v; composerEditRevision.current++;
 	}, []);
+	const [pendingMedia, setPendingMedia] = useState<PendingMediaItem[]>([]);
+	const pendingMediaRef = useRef<PendingMediaItem[]>([]);
+	pendingMediaRef.current = pendingMedia;
+	const mediaAbortRef = useRef<Map<string, AbortController>>(new Map());
+	useEffect(() => {
+		const aborts = mediaAbortRef.current;
+		return () => {
+			for (const ac of aborts.values()) ac.abort();
+			aborts.clear();
+			for (const item of pendingMediaRef.current) {
+				if (item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+			}
+		};
+	}, [chatId]);
+	const removePendingMedia = useCallback((localId: string) => {
+		const ac = mediaAbortRef.current.get(localId);
+		if (ac) { ac.abort(); mediaAbortRef.current.delete(localId); }
+		setPendingMedia((prev) => {
+			const target = prev.find((item) => item.localId === localId);
+			if (target?.previewUrl) URL.revokeObjectURL(target.previewUrl);
+			return prev.filter((item) => item.localId !== localId);
+		});
+	}, []);
+	const attachMediaFiles = useCallback((files: File[]) => {
+		if (!files.length) return;
+		const remaining = Math.max(0, MAX_MEDIA_ATTACHMENTS_PER_MESSAGE - pendingMediaRef.current.length);
+		const batch = files.slice(0, remaining);
+		for (const file of batch) {
+			const localId = `media_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
+			const detected = detectClientMediaType(file);
+			const placeholder: PendingMediaItem = {
+				localId,
+				kind: detected?.kind ?? "image",
+				filename: file.name || "media",
+				mimeType: detected?.mimeType ?? file.type ?? "application/octet-stream",
+				sizeBytes: file.size,
+				status: "preparing",
+			};
+			setPendingMedia((prev) => [...prev, placeholder]);
+			const ac = new AbortController();
+			mediaAbortRef.current.set(localId, ac);
+			void prepareMediaFileForChat(chatId, file, ac.signal)
+				.then((prepared) => {
+					mediaAbortRef.current.delete(localId);
+					if (ac.signal.aborted) {
+						if (prepared.previewUrl) URL.revokeObjectURL(prepared.previewUrl);
+						return;
+					}
+					setPendingMedia((prev) => prev.map((item) => (item.localId === localId ? { localId, ...prepared } : item)));
+				})
+				.catch((error) => {
+					mediaAbortRef.current.delete(localId);
+					if (ac.signal.aborted) return;
+					const message = error instanceof Error ? error.message : "Could not attach media file.";
+					setPendingMedia((prev) => prev.map((item) => (item.localId === localId ? { ...item, status: "error", error: message } : item)));
+				});
+		}
+	}, [chatId]);
 	// Saved slot completeness is live, but the session's selected route
 	// comes from its own ordinary model control, never today's Strong pin.
 	const { catalog, configured, zeroKeys } = useModelSetup(initialConfigured);
@@ -815,16 +876,40 @@ export function Chat({
 		if (!target || pendingRef.current || pluginOwnsDock || activeProblemRef.current || compacting) return Promise.resolve(false);
 		if (!busyRef.current && zeroKeys) { setSetupOpen(true); return Promise.resolve(false); }
 		if (!busyRef.current && selectedModelUnavailable(catalog, selectedModel)) { openModelPicker(); return Promise.resolve(false); }
+		if (pendingMediaRef.current.some((item) => item.status === "preparing")) return Promise.resolve(false);
 		let captured = "", capturedRevision = 0;
-		return runSubmission(target, () => { capturedRevision = composerEditRevision.current; return { type: "text", content: { text: captured = supplied ?? textRef.current.trim(), images: [] } }; }, () => submissionLive.current.ready && !pendingQuestionOf(submissionLive.current.nativeMessages) && !pendingPluginQuestionOf(submissionLive.current.nativeMessages) && !activeProblemOf(submissionLive.current.nativeMessages), async (prepared, attempt) => {
+		const capturedMediaItems = supplied === undefined ? pendingMediaRef.current.filter((item) => item.status === "ready") : [];
+		const capturedMediaIds = new Set(capturedMediaItems.map((item) => item.localId));
+		const composerImages = capturedMediaItems.flatMap((item) => (item.image ? [item.image] : []));
+		const videoKeyframes = capturedMediaItems.flatMap((item) => item.keyframes ?? []);
+		const mediaAttachments: MediaAttachment[] = capturedMediaItems.flatMap((item) => (item.attachment ? [item.attachment] : []));
+		return runSubmission(target, () => { capturedRevision = composerEditRevision.current; return { type: "text", content: { text: captured = supplied ?? textRef.current.trim(), images: composerImages.map(image => ({ ...image })) } }; }, () => submissionLive.current.ready && !pendingQuestionOf(submissionLive.current.nativeMessages) && !pendingPluginQuestionOf(submissionLive.current.nativeMessages) && !activeProblemOf(submissionLive.current.nativeMessages), async (prepared, attempt) => {
 			if (prepared.type !== "text") return false;
-			if (!prepared.content.text.trim() && !prepared.content.images.length) throw new Error("Message text or images are required. Your input has been kept.");
+			const allImages = [...prepared.content.images, ...videoKeyframes];
+			if (!prepared.content.text.trim() && !allImages.length && !mediaAttachments.length) throw new Error("Message text, images, or media are required. Your input has been kept.");
 			if (beforePost && !beforePost(captured)) { attempt.cancel(); return false; }
 			draftRef.current = captured;
-			const accepted = () => { if (composerEditRevision.current === capturedRevision && textRef.current.trim() === captured) applyText(""); openingAccepted?.(); attempt.accepted(); };
+			const accepted = () => {
+				if (composerEditRevision.current === capturedRevision && textRef.current.trim() === captured) applyText("");
+				if (capturedMediaIds.size > 0) {
+					setPendingMedia((prev) => {
+						for (const item of prev) {
+							if (capturedMediaIds.has(item.localId) && item.previewUrl) URL.revokeObjectURL(item.previewUrl);
+						}
+						return prev.filter((item) => !capturedMediaIds.has(item.localId));
+					});
+				}
+				openingAccepted?.();
+				attempt.accepted();
+			};
 			attempt.deliver();
-			if (busyRef.current) return steer(prepared.content.text, prepared.content.images, accepted, attempt.refused);
-			return send({ type: "text", text: prepared.content.text, ...(prepared.content.images.length ? { images: prepared.content.images.map(image => ({ ...image })) } : {}) }, accepted, undefined, attempt.refused);
+			if (busyRef.current) return steer(prepared.content.text, allImages, accepted, attempt.refused, mediaAttachments.length ? mediaAttachments : undefined);
+			return send({
+				type: "text",
+				text: prepared.content.text,
+				...(allImages.length ? { images: allImages.map(image => ({ ...image })) } : {}),
+				...(mediaAttachments.length ? { media: mediaAttachments.map(item => ({ ...item })) } : {}),
+			}, accepted, undefined, attempt.refused);
 		});
 	};
 
@@ -1886,7 +1971,25 @@ export function Chat({
 												<div className="lh-prose whitespace-pre-wrap text-foreground">
 													<PathText text={m.parts.filter((p) => p.type === "text").map((p) => p.text).join("\n")} />
 												</div>
-												<SubmittedImages images={m.parts.filter((part) => part.type === "image").map(part => ({ type: "image" as const, data: part.data as string, mimeType: part.mimeType as string }))} />
+												{(() => {
+													const mediaItems = m.parts
+														.filter((part) => part.type === "media" && part.media)
+														.map((part) => part.media as MediaAttachment);
+													const keyframeCount = mediaItems.reduce((sum, item) => sum + (item.keyframeCount ?? 0), 0);
+													const allImages = m.parts
+														.filter((part) => part.type === "image")
+														.map((part) => ({ type: "image" as const, data: part.data as string, mimeType: part.mimeType as string }));
+													// Keep trailing video keyframes out of SubmittedImages when their video player renders.
+													const displayImages = keyframeCount > 0 && allImages.length >= keyframeCount
+														? allImages.slice(0, allImages.length - keyframeCount)
+														: allImages;
+													return (
+														<>
+															<SubmittedImages images={displayImages} />
+															<SubmittedMedia chatId={chatId} items={mediaItems} />
+														</>
+													);
+												})()}
 											</div>
 									) : (
 									<Message from="assistant" className="max-w-full" data-older-transcript-row={mi < newestTurnFrom ? "" : undefined}>
@@ -2142,6 +2245,9 @@ export function Chat({
 							nextProblem={nextReady}
 							onNext={sendNext}
 							placeholder={nextReady ? "Ask anything, or press Enter for the next one." : undefined}
+							attachments={pendingMedia}
+							onAttachMedia={attachMediaFiles}
+							onRemoveAttachment={removePendingMedia}
 						/>
 					}
 					onSubmitAnswer={(output) => {

@@ -175,6 +175,7 @@ function finishChatDeletion(chatId: string, mode: ChatDeleteMode): Extract<ChatD
 function finishChatRecordDeletion(chatId: string): number {
 	const jobsRemoved = stores.jobStore.deleteJobsForChat(chatId);
 	if (stores.chatStore.deleteChat(chatId)) {
+		stores.mediaStore.deleteMediaForChat(chatId);
 		discardChatDeliveries(chatId);
 		clearTurnFailure(chatId);
 		sideChats.stopAll(chatId); // a running side answer has nowhere left to land

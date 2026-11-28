@@ -48,6 +48,7 @@ import {
 } from "./contracts/chat.ts";
 import { compactAnswerForModel, type QuestionAnswerData } from "./question-core.ts";
 import { activeCompactionOf, keptIndexFor } from "./compaction.ts";
+import { formatMediaForModel, type MediaAttachment } from "./contracts/media.ts";
 import { parseQuestionInput } from "./tool-parts.ts";
 import { expandCitationsForModel } from "./citations.ts";
 import { readPluginQuestionMessageAnnotation, readPluginQuestionAnswer, readPluginQuestionCancellation, samePluginQuestionOccurrence, type PluginQuestionAnnotationRead, type PluginQuestionOccurrence, type PluginQuestionOccurrenceMap, type PluginQuestionSnapshot } from "./plugin-questions.ts";
@@ -110,6 +111,8 @@ export type LhMessage = (UserMessage | AssistantMessage | ToolResultMessage | Lh
 	lhQuestions?: PluginQuestionOccurrenceMap;
 	/** Exact binding for genuine plugin-question results (details stays public envelope). */
 	lhQuestionOccurrence?: PluginQuestionOccurrence;
+	/** Lightweight media attachment metadata (audio/video); binary bytes live in MediaStore. */
+	lhMedia?: MediaAttachment[];
 };
 
 /** Latest response only: never borrow an older process/model's window when
@@ -222,11 +225,16 @@ export function nativeAnswerContent(answerText: string, images?: PluginSubmissio
 	return content;
 }
 
-export function newUserMessage(text: string, images?: readonly ImageContent[]): LhMessage & UserMessage {
+export function newUserMessage(
+	text: string,
+	images?: readonly ImageContent[],
+	media?: readonly MediaAttachment[],
+): LhMessage & UserMessage {
 	return {
 		id: newMessageId(),
 		role: "user",
 		content: nativeInlineImageContent(text, images),
+		...(media?.length ? { lhMedia: media.map(item => ({ ...item })) } : {}),
 		timestamp: Date.now(),
 	};
 }
@@ -236,8 +244,19 @@ export function newUserMessage(text: string, images?: readonly ImageContent[]): 
  *  rides agent.steer(), the live stream's message events, and the settled
  *  record, so the optimistic queued indicator and the transcript card
  *  upsert by one identity. */
-export function newUserSteer(text: string, id: string, images?: readonly ImageContent[]): LhMessage & UserMessage {
-	return { id, role: "user", content: nativeInlineImageContent(text, images), timestamp: Date.now() };
+export function newUserSteer(
+	text: string,
+	id: string,
+	images?: readonly ImageContent[],
+	media?: readonly MediaAttachment[],
+): LhMessage & UserMessage {
+	return {
+		id,
+		role: "user",
+		content: nativeInlineImageContent(text, images),
+		...(media?.length ? { lhMedia: media.map(item => ({ ...item })) } : {}),
+		timestamp: Date.now(),
+	};
 }
 
 /** The learner's answer — the question call's tool result (fork 1).
@@ -627,9 +646,18 @@ function resultIdsFrom(messages: readonly AgentMessage[]): Set<string> {
 	return ids;
 }
 
-function expandUserCitations(message: UserMessage): UserMessage {
-	if (typeof message.content === "string") return { ...message, content: expandCitationsForModel(message.content) };
-	return { ...message, content: message.content.map((block) => (block.type === "text" ? { ...block, text: expandCitationsForModel(block.text) } : block)) };
+function expandUserWireMessage(message: UserMessage, media?: readonly MediaAttachment[]): UserMessage {
+	const mediaContext = media?.length ? formatMediaForModel(media) : "";
+	if (typeof message.content === "string") {
+		const expanded = expandCitationsForModel(message.content);
+		const combined = mediaContext ? (expanded ? `${expanded}\n\n${mediaContext}` : mediaContext) : expanded;
+		return { ...message, content: combined };
+	}
+	const blocks = message.content.map((block) => (block.type === "text" ? { ...block, text: expandCitationsForModel(block.text) } : block));
+	if (mediaContext) {
+		blocks.unshift({ type: "text", text: mediaContext });
+	}
+	return { ...message, content: blocks };
 }
 
 /**
@@ -713,11 +741,11 @@ export function toLlmMessages(messages: readonly AgentMessage[]): Message[] {
 			});
 			continue;
 		}
-		// Strip app-only id/CLI context metadata: the wire carries the native shape only.
-		const { id: _id, cliContextWindow: _cliContextWindow, lhQuestions: _lhQuestions, lhQuestionOccurrence: _lhQuestionOccurrence, ...native } = m as LhMessage;
+		// Strip app-only id/CLI context/media metadata: the wire carries the native shape only.
+		const { id: _id, cliContextWindow: _cliContextWindow, lhQuestions: _lhQuestions, lhQuestionOccurrence: _lhQuestionOccurrence, lhMedia, ...native } = m as LhMessage;
 		// Learner citations are links in the record; the wire carries them
-		// expanded (core/citations.ts) — the one model-facing rewrite.
-		out.push(role === "user" ? expandUserCitations(native as UserMessage) : (native as Message));
+		// expanded (core/citations.ts), and attached media carries its metadata/transcript.
+		out.push(role === "user" ? expandUserWireMessage(native as UserMessage, lhMedia) : (native as Message));
 		// Repair unanswered calls from completed generations, not calls in
 		// failed generations. Pi filters error/aborted assistants itself;
 		// adding results for their unexecuted calls would leave orphans.

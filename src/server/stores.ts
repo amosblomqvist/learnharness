@@ -7,6 +7,7 @@
  */
 
 import { chatStore } from "../store/chats.ts";
+import { mediaStore } from "../store/media.ts";
 import { graphStore } from "../store/graph.ts";
 import { sourceOrganizationStore } from "../store/source-organization.ts";
 import { jobStore } from "../store/jobs.ts";
@@ -18,6 +19,7 @@ import { configureWorkerRequestAdmission } from "../agent/worker-request-admissi
 /** The wired adapters. Satisfies core/graph.ts's GraphDeps structurally. */
 export const stores = {
 	chatStore,
+	mediaStore,
 	graphStore,
 	sourceOrganizationStore,
 	jobStore,
