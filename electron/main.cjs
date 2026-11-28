@@ -450,8 +450,8 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  * baked + signed into the bundle). macOS needs the app signed (it is —
  * Developer ID) and updates ride the zip target (Squirrel.Mac); blockmaps
  * give differential downloads for free. Windows uses NSIS; Linux uses
- * AppImage or DebUpdater (6.8.9 supports deb; installation can request
- * administrator permission via the package manager — owner 2026-10-11).
+ * AppImage, DebUpdater, or PacmanUpdater (6.8.9 supports deb and pacman;
+ * installation can request administrator permission via the package manager).
  *
  * Hard rules:
  *  - DEV NEVER UPDATES: !app.isPackaged skips the updater entirely — the
@@ -466,10 +466,9 @@ const ZOOM_LADDER = [0.75, 0.9, 1, 1.1, 1.25, 1.5, 1.75, 2];
  *
  * Install path: the downloaded update applies on quit (autoInstallOnAppQuit
  * — Squirrel.Mac stages natively and swaps on relaunch). The renderer
- * banner asks for an immediate restart via "lh:update-install"; we kill
- * the child server FIRST — deterministic ordering: the server lives
- * inside the .app bundle Squirrel is about to replace (extraResources),
- * and before-quit alone would race the swap. */
+ * banner asks for an immediate restart via "lh:update-install"; on macOS/
+ * Windows we kill the child server FIRST so Squirrel's bundle swap cannot
+ * race before-quit, while on Linux before-quit stops it after install succeeds. */
 const UPDATE_CHECK_INTERVAL_MS = 24 * 60 * 60 * 1000;
 let autoUpdater = null; // electron-updater's, packaged builds only
 // Observational only: this snapshot NEVER gates a check, download or install.
@@ -527,11 +526,14 @@ function checkForUpdates({ manual = false } = {}) {
 }
 
 function installUpdateNow() {
-	// Kill the server BEFORE the quit-and-install (see block comment).
-	try {
-		killServer();
-	} catch {
-		/* already dead */
+	// Kill server before quitAndInstall on macOS/Windows (Squirrel swaps the bundle);
+	// on Linux keep it alive if install/elevation fails (before-quit stops it on success).
+	if (process.platform !== "linux") {
+		try {
+			killServer();
+		} catch {
+			/* already dead */
+		}
 	}
 	autoUpdater?.quitAndInstall();
 }
@@ -543,7 +545,14 @@ function setupAutoUpdater() {
 		return;
 	}
 	try {
-		autoUpdater = require("electron-updater").autoUpdater;
+		const updaterModule = require("electron-updater");
+		autoUpdater = updaterModule.autoUpdater;
+		// Strip electron-updater's pacman -Sy fallback (unsupported partial upgrade on Arch).
+		if (typeof updaterModule.PacmanUpdater?.installWithCommandRunner === "function") {
+			updaterModule.PacmanUpdater.installWithCommandRunner = (installerPath, commandRunner) => {
+				commandRunner(["pacman", "-U", "--noconfirm", installerPath]);
+			};
+		}
 	} catch (err) {
 		log(`auto-update: electron-updater unavailable (${err?.message ?? err}) — updates disabled`);
 		reportUpdateStatus("disabled");

@@ -270,7 +270,7 @@ describe("desktop packaging policy", () => {
 		await validateConfiguration(config, { isEnabled: false });
 	});
 
-	it("ships Mac arm64, Windows NSIS x64, and both Linux x64 channels", () => {
+	it("ships Mac arm64, Windows NSIS x64, and all three Linux x64 channels", () => {
 		assert.deepEqual(config.mac.target, [
 			{ target: "dmg", arch: ["arm64"] }, { target: "zip", arch: ["arm64"] },
 		]);
@@ -278,18 +278,29 @@ describe("desktop packaging policy", () => {
 		assert.equal(config.win.signExecutable, false);
 		assert.equal(config.win.verifyUpdateCodeSignature, false);
 		assert.deepEqual(config.linux.target, [
-			{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] },
+			{ target: "AppImage", arch: ["x64"] },
+			{ target: "deb", arch: ["x64"] },
+			{ target: "pacman", arch: ["x64"] },
 		]);
 		assert.equal(config.linux.syncDesktopName, true);
 		assert.equal(config.publish[0].releaseType, "draft");
 	});
 
-	it("deb has public maintainer metadata and a matching desktop identity", () => {
+	it("deb and pacman have public maintainer metadata, desktop identity, and updater support", () => {
 		const pkg = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8"));
 		assert.equal(pkg.author.name, "Amos Blomqvist");
 		assert.equal(pkg.author.email, "255718537+amosblomqvist@users.noreply.github.com");
 		assert.equal(pkg.homepage, "https://github.com/amosblomqvist/learnharness");
 		assert.equal(pkg.desktopName, "learnharness.desktop");
+		const FpmTarget = require("app-builder-lib/out/targets/FpmTarget.js").default;
+		assert.equal(FpmTarget.prototype.supportsAutoUpdate("deb"), true);
+		assert.equal(FpmTarget.prototype.supportsAutoUpdate("pacman"), true);
+		const { DebUpdater, PacmanUpdater } = require("electron-updater");
+		assert.equal(typeof DebUpdater, "function");
+		assert.equal(typeof PacmanUpdater, "function");
+		assert.equal(typeof PacmanUpdater.installWithCommandRunner, "function");
+		assert.ok(Array.isArray(config.pacman?.depends) && config.pacman.depends.length > 0);
+		assert.ok(!config.pacman.depends.includes("http-parser"));
 	});
 });
 
@@ -328,7 +339,7 @@ describe("workflow action versions", () => {
 describe("desktop release workflow", () => {
 	type Step = {
 		if?: string; run?: string; uses?: string; env?: Record<string, string>;
-		with?: { script?: string; "xcode-version"?: string };
+		with?: { script?: string; "xcode-version"?: string; path?: string };
 	};
 	type Workflow = {
 		concurrency: { group: string; "cancel-in-progress": boolean };
@@ -410,6 +421,15 @@ describe("desktop release workflow", () => {
 		const ci = yaml.load(readFileSync(new URL("../.github/workflows/ci.yml", import.meta.url), "utf8"));
 		const ciMac = ci.jobs.standalone?.strategy?.matrix.include.find(entry => entry.platform === "mac-arm64");
 		assert.equal(ciMac?.os, "macos-15", "ordinary CI keeps older macOS build/boot coverage");
+	});
+
+	it("installs bsdtar before Linux packaging and uploads .pacman artifacts", () => {
+		const buildIndex = packaging.steps.findIndex(step => step.run?.includes("electron-builder"));
+		const bsdtarIndex = packaging.steps.findIndex(step => step.run?.includes("libarchive-tools"));
+		assert.ok(bsdtarIndex >= 0 && bsdtarIndex < buildIndex, "install bsdtar on Linux before electron-builder builds pacman");
+		assert.equal(packaging.steps[bsdtarIndex]?.if, "runner.os == 'Linux'");
+		const upload = packaging.steps.find(step => step.uses === "actions/upload-artifact@v7");
+		assert.match(upload?.with?.path ?? "", /dist\/\*\.pacman/);
 	});
 
 	it("creates exactly one unpublished draft when none matches", async () => {

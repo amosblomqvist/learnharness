@@ -174,12 +174,29 @@ linux:
     - target: deb
       arch:
         - x64
+    - target: pacman
+      arch:
+        - x64
   artifactName: "${productName}-${version}-${arch}.${ext}"
   category: Education
   # Match Electron's app_id/WM_CLASS to the installed desktop launcher.
   syncDesktopName: true
-  # Both targets update via electron-updater 6.8.9. AppImage replaces its
-  # own file; deb uses dpkg/apt and may request administrator permission.
+  # All three targets update via electron-updater 6.8.9. AppImage replaces its
+  # own file; deb and pacman use the system package manager and may request
+  # administrator permission.
+pacman:
+  # Runtime libraries dynamically linked by the bundled Electron binary on Arch.
+  depends:
+    - gtk3
+    - nss
+    - alsa-lib
+    - mesa
+    - libxss
+    - libxtst
+    - libnotify
+    - xdg-utils
+    - at-spi2-core
+    - libsecret
 publish:
   # Update feed = GitHub Releases (decided 2026-10-08): latest-mac.yml +
   # zip/blockmap live on releases; electron-updater reads them anonymously.

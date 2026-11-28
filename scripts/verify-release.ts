@@ -9,7 +9,7 @@
  * downloaded by the workflow's own gh steps).
  *
  * Every expected file name below was verified against the INSTALLED
- * builder (app-builder-lib 26.15.3) — these are the artifacts it actually
+ * builder (app-builder-lib 26.16.1) — these are the artifacts it actually
  * emits for this repo's electron-builder.yml, not pattern guesses:
  *
  *   mac (dmg + zip, arm64; no user artifactName there):
@@ -22,13 +22,14 @@
  *   win (nsis x64; artifactName "${productName}-${version}-${arch}-setup.${ext}"):
  *     exe    LearnHarness-<v>-x64-setup.exe   + .blockmap (createBlockmap)
  *     feed   latest.yml — a single file entry, the exe.
- *   linux (AppImage + deb, x64; artifactName "${productName}-${version}-${arch}.${ext}"
- *            is user-forced at the linux level, so it overrides BOTH targets'
+ *   linux (AppImage + deb + pacman, x64; artifactName "${productName}-${version}-${arch}.${ext}"
+ *            is user-forced at the linux level, so it overrides all three targets'
  *            default name formats, and ${arch} expands per target ext:
- *            x64→x86_64 for AppImage, x64→amd64 for deb):
- *     image  LearnHarness-<v>-x86_64.AppImage (no blockmap in 26.15.3)
+ *            x64→x86_64 for AppImage, x64→amd64 for deb, x64→x64 for pacman):
+ *     image  LearnHarness-<v>-x86_64.AppImage (no blockmap in 26.16.1)
  *     deb    LearnHarness-<v>-amd64.deb       (no blockmap)
- *     feed   latest-linux.yml — the AppImage and deb entries merged by
+ *     pacman LearnHarness-<v>-x64.pacman      (no blockmap)
+ *     feed   latest-linux.yml — the AppImage, deb, and pacman entries merged by
  *            writeUpdateInfoFiles (order not deterministic; checked as a set).
  *
  * GitHub asset names equal these file names (all are already "safe" GitHub
@@ -87,12 +88,12 @@ export type DraftSelection =
 	| { ok: true; release: ReleaseRecord; warnings: string[] }
 	| Failures;
 
-/** The full expected asset inventory for one version (11 files). */
+/** The full expected asset inventory for one version (12 files). */
 export type ExpectedAssets = {
 	version: string;
 	mac: { dmg: string; zip: string; feed: string };
 	win: { exe: string; feed: string };
-	linux: { appImage: string; deb: string; feed: string };
+	linux: { appImage: string; deb: string; pacman: string; feed: string };
 	/** Every asset name the draft must hold, and no others. */
 	files: string[];
 };
@@ -130,17 +131,18 @@ export function expectedAssets(version: string): ExpectedAssets {
 	const linux = {
 		appImage: `${PRODUCT_NAME}-${version}-x86_64.AppImage`,
 		deb: `${PRODUCT_NAME}-${version}-amd64.deb`,
+		pacman: `${PRODUCT_NAME}-${version}-x64.pacman`,
 		feed: "latest-linux.yml",
 	};
-	// Sidecar differential-update blockmaps: emitted for dmg, mac zip and
-	// NSIS exe (createBlockmap); AppImage/deb have none in app-builder-lib 26.15.3.
+	// Sidecar differential-update blockmaps: emitted for dmg, mac zip, and
+	// NSIS exe; AppImage/deb/pacman have none in app-builder-lib 26.16.1.
 	const blockmaps = [mac.dmg, mac.zip, win.exe].map((name) => `${name}.blockmap`);
 	return {
 		version,
 		mac,
 		win,
 		linux,
-		files: [mac.dmg, mac.zip, win.exe, linux.appImage, linux.deb, ...blockmaps, mac.feed, win.feed, linux.feed],
+		files: [mac.dmg, mac.zip, win.exe, linux.appImage, linux.deb, linux.pacman, ...blockmaps, mac.feed, win.feed, linux.feed],
 	};
 }
 
@@ -288,7 +290,11 @@ export function verifyConfigAssumptions(config: unknown, pkg: unknown): { ok: tr
 		if (config.linux.artifactName !== "${productName}-${version}-${arch}.${ext}") {
 			bad(`linux.artifactName changed (${JSON.stringify(config.linux.artifactName)}) — expected names no longer hold`);
 		}
-		if (!sameTargets(config.linux.target, [{ target: "AppImage", arch: ["x64"] }, { target: "deb", arch: ["x64"] }])) {
+		if (!sameTargets(config.linux.target, [
+			{ target: "AppImage", arch: ["x64"] },
+			{ target: "deb", arch: ["x64"] },
+			{ target: "pacman", arch: ["x64"] },
+		])) {
 			bad(`linux.target changed (${JSON.stringify(config.linux.target)}) — expected names no longer hold`);
 		}
 	}
@@ -343,7 +349,7 @@ export function feedExpectations(expected: ExpectedAssets): FeedExpectation[] {
 	return [
 		{ file: expected.mac.feed, urls: [expected.mac.zip, expected.mac.dmg], first: expected.mac.zip },
 		{ file: expected.win.feed, urls: [expected.win.exe] },
-		{ file: expected.linux.feed, urls: [expected.linux.appImage, expected.linux.deb] },
+		{ file: expected.linux.feed, urls: [expected.linux.appImage, expected.linux.deb, expected.linux.pacman] },
 	];
 }
 
