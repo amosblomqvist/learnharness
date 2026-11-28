@@ -64,6 +64,7 @@ import { PromptSegmentRow, promptSegmentName } from "./prompt-segment-row";
 import type React from "react";
 import {
 	COMPACTION_THRESHOLD_FLOOR,
+	COMPACTION_RESERVE_TOKENS,
 	MODEL_SLOTS,
 	SEARCH_ENGINES,
 	resolveSettings,
@@ -263,6 +264,18 @@ export function composeSearchEngine(
 	return { ...agent, search: { engine } };
 }
 
+/** Write an account/model window choice without disturbing other settings. */
+export function composeContextWindow(compaction: CompactionSettings | undefined, key: string, value: string, max: number): CompactionSettings | null {
+	const windows = { ...compaction?.contextWindows };
+	if (!value) delete windows[key];
+	else {
+		const n = Number(value);
+		if (!Number.isFinite(n) || n <= 0) return null;
+		windows[key] = Math.min(max, Math.max(COMPACTION_THRESHOLD_FLOOR, Math.floor(n)));
+	}
+	return { ...compaction, contextWindows: Object.keys(windows).length ? windows : undefined };
+}
+
 /** Prompt sections in display order; Shared is deduplicated and last. */
 export interface PromptSection {
 	id: keyof PromptView | "shared";
@@ -368,9 +381,11 @@ export function AgentSection({
 	graph,
 	compaction,
 	onSectionChange,
+	onSectionEdit,
 	onDeletePromptOverride,
 	onModelsChange,
 	onCompactionChange,
+	onCompactionEdit,
 }: {
 	agent: AgentSettings | undefined;
 	fileAccessError?: string | null;
@@ -387,14 +402,37 @@ export function AgentSection({
 	onSectionChange: (next: AgentSettings, confirms?: (stored: AgentSettings) => boolean) => boolean | Promise<boolean>;
 	/** Order the override DELETE against Settings' full-record acknowledgements. */
 	onDeletePromptOverride?: (path: string, remove: () => Promise<boolean>) => Promise<PromptDeleteOutcome>;
+	/** Queue an edit against the latest saved agent section when available. */
+	onSectionEdit?: (
+		edit: (current: AgentSettings | undefined) => AgentSettings,
+		confirms?: (stored: AgentSettings) => boolean,
+	) => boolean | Promise<boolean>;
 	/** Writes the composed models section (slots — replace-PUT discipline). */
 	onModelsChange: (next: ModelsSettings) => void;
 	/** Writes the whole compaction section (replace-PUT discipline). */
 	onCompactionChange: (next: CompactionSettings) => boolean | Promise<boolean>;
+	onCompactionEdit?: (edit: (current: CompactionSettings | undefined) => CompactionSettings) => boolean | Promise<boolean>;
 }) {
+	// A corrupt persisted policy is fail-closed for every whole-agent edit,
+	// not only for edits made from the File access controls.
+	const effectiveAgent: AgentSettings | undefined = fileAccessError
+		? { ...agent, fileAccess: { restricted: true, folders: agent?.fileAccess?.folders ?? [] } }
+		: agent;
+	const latestAgent = useRef(effectiveAgent);
+	latestAgent.current = effectiveAgent;
+	const editAgent = (
+		edit: (current: AgentSettings | undefined) => AgentSettings,
+		confirms?: (stored: AgentSettings) => boolean,
+	) => {
+		return onSectionEdit ? onSectionEdit(edit, confirms) : onSectionChange(edit(latestAgent.current), confirms);
+	};
+	const editCompaction = (edit: (current: CompactionSettings | undefined) => CompactionSettings) => {
+		return onCompactionEdit ? onCompactionEdit(edit) : onCompactionChange(edit(compaction));
+	};
 	const { catalog: body, failed: catalogFailed, refresh: refreshCatalog } = useModelCatalog();
 	const catalog = body?.models;
 	const slots = body?.slots;
+	const [contextSelection, setContextSelection] = useState("");
 	/** The live search state (/api/search) — the row's reason line. */
 	const [folderInput, setFolderInput] = useState("");
 	const [folderError, setFolderError] = useState<string | null>(null);
@@ -405,8 +443,6 @@ export function AgentSection({
 	const [prompts, setPrompts] = useState<PromptView | null>(null);
 	const [promptListStatus, setPromptListStatus] = useState<"loading" | "ready" | "failed">("loading");
 	const promptRead = useRef<AbortController | null>(null);
-	const latestAgent = useRef(agent);
-	latestAgent.current = agent;
 	const [openSegment, setOpenSegment] = useState<{ info: SegmentInfo; mode: "view" | "edit"; row: HTMLElement } | null>(null);
 	const [switchPending, setSwitchPending] = useState(false);
 	const switchingPrompt = useRef(false);
@@ -511,7 +547,7 @@ export function AgentSection({
 		setSwitchError(null);
 		let saved = false;
 		try {
-			saved = await onSectionChange(composePromptSwitch(latestAgent.current, path, on), stored => (stored.prompts?.[path] === true) === on);
+			saved = await editAgent((current) => composePromptSwitch(current, path, on), stored => (stored.prompts?.[path] === true) === on);
 		} catch {
 			// A rejected write is handled below just like a negative acknowledgement.
 		} finally {
@@ -545,7 +581,7 @@ export function AgentSection({
 		try {
 			// A mirrored ON is not proof: the route can clear it (e.g. on
 			// deletion). Require the switch in the actual write acknowledgement.
-			const saved = await onSectionChange(composePromptSwitch(latestAgent.current, path, true), stored => stored.prompts?.[path] === true);
+			const saved = await editAgent((current) => composePromptSwitch(current, path, true), stored => stored.prompts?.[path] === true);
 			return saved ? "saved" : "activation-failed";
 		} catch {
 			return "activation-failed";
@@ -768,7 +804,14 @@ export function AgentSection({
 							onCommit={(value) => {
 								const next = composeWorkerRequestConcurrency(agent, value);
 								setWorkerConcurrencyError(next.ok ? null : next.error);
-								return next.ok ? onSectionChange(next.settings) : false;
+								if (!next.ok) return false;
+								return editAgent((current) => {
+									const updated = { ...current };
+									const concurrency = next.settings.workerRequestConcurrency;
+									if (concurrency === undefined) delete updated.workerRequestConcurrency;
+									else updated.workerRequestConcurrency = concurrency;
+									return updated;
+								});
 							}}
 						/>
 						{workerConcurrencyError && <p role="alert" className="text-xs text-error">{workerConcurrencyError}</p>}
@@ -797,7 +840,7 @@ export function AgentSection({
 								checked={agent?.graphTools?.enabled ?? true}
 								disabled={!graphOn}
 								label="graph tools"
-								onChange={(on) => onSectionChange(composeGraphTools(agent, on))}
+								onChange={(on) => editAgent((current) => composeGraphTools(current, on))}
 							/>
 						</SettingsRow>
 					);
@@ -816,7 +859,7 @@ export function AgentSection({
 						>
 							<SettingsSegmentedControl label="Quizzing mechanics" testidPrefix="quiz-mechanics"
 								options={[{ value: "choice", label: "Multiple choice" }, { value: "free", label: "Free recall" }]}
-								value={free ? "free" : "choice"} onChange={(next) => onSectionChange(composeQuizMechanics(agent, next))} />
+								value={free ? "free" : "choice"} onChange={(next) => editAgent((current) => composeQuizMechanics(current, next))} />
 						</SettingsRow>
 					);
 				})()}
@@ -829,18 +872,17 @@ export function AgentSection({
 						<Toggle
 							checked={agent?.tools?.[id] ?? true}
 							label={`tool ${id}`}
-							onChange={(on) => onSectionChange(composeTool(agent, id, on))}
+							onChange={(on) => editAgent((current) => composeTool(current, id, on))}
 						/>
 					</SettingsRow>
 				))}
 				{(() => {
 					const folders = agent?.fileAccess?.folders ?? [];
 					const restricted = Boolean(fileAccessError) || agent?.fileAccess?.restricted === true;
-					const effectiveAgent = fileAccessError ? { ...agent, fileAccess: { restricted: true, folders } } : agent;
 					const addFolder = () => {
 						const next = folderInput.trim();
 						if (!isFolderEntry(next)) { setFolderError("Enter an absolute path or ~/folder."); return; }
-						if (!folders.includes(next)) onSectionChange(composeAddFolder(effectiveAgent, next));
+						editAgent((current) => composeAddFolder(current, next));
 						setFolderInput("");
 						setFolderError(null);
 					};
@@ -852,7 +894,7 @@ export function AgentSection({
 									: "Restricted: no folders allowed. Add a folder to enable access."}>
 								<div className="flex items-center gap-2 text-xs">
 									<span>Restrict to listed folders</span>
-									<Toggle checked={restricted} label="Restrict to listed folders" onChange={(on) => onSectionChange(composeFileRestriction(effectiveAgent, on))} />
+									<Toggle checked={restricted} label="Restrict to listed folders" onChange={(on) => editAgent((current) => composeFileRestriction(current, on))} />
 								</div>
 							</SettingsRow>
 							{fileAccessError && <p role="alert" data-testid="file-access-config-error" className="text-xs text-error">{fileAccessError}</p>}
@@ -868,7 +910,7 @@ export function AgentSection({
 								<div key={folder} data-testid="file-access-folder" className="flex items-center justify-between gap-4 pl-3 text-xs">
 									<span title={folder} className="min-w-0 truncate font-ui text-muted-foreground">{folder}</span>
 									<button type="button" aria-label={`Remove ${folder}`} data-testid="file-access-remove"
-										onClick={() => onSectionChange(composeRemoveFolder(effectiveAgent, folder))}
+										onClick={() => editAgent((current) => composeRemoveFolder(current, folder))}
 										className="rounded-sm px-1.5 text-muted-foreground hover:text-foreground">Remove</button>
 								</div>
 							))}
@@ -906,12 +948,12 @@ export function AgentSection({
 										menuClass="flex w-44 flex-col gap-0.5 rounded-xl border border-border bg-card p-2 text-xs shadow-xl"
 									>
 										{engineOption("auto", "Automatic", engine === null, null, () => {
-											onSectionChange(composeSearchEngine(agent, null));
+											editAgent((current) => composeSearchEngine(current, null));
 											setOpenMenu(null);
 										})}
 										{SEARCH_ENGINES.map(({ id, label }) =>
 											engineOption(id, label, engine === id, engineKeys[id] ?? false, () => {
-												onSectionChange(composeSearchEngine(agent, id));
+												editAgent((current) => composeSearchEngine(current, id));
 												setOpenMenu(null);
 											}),
 										)}
@@ -924,9 +966,47 @@ export function AgentSection({
 			</SettingsGroup>
 
 			<SettingsGroup label="Context" testid="group-context">
+				{(() => {
+					const candidates = catalog?.filter((m) => m.provider === "chatgpt" && m.contextWindowKey && (m.maxContextWindow ?? 0) >= COMPACTION_THRESHOLD_FLOOR) ?? [];
+					const strong = slots?.strong?.model;
+					const selected = candidates.find((m) => m.contextWindowKey === contextSelection)
+						?? candidates.find((m) => m.provider === strong?.provider && m.id === strong.id)
+						?? candidates[0];
+					if (!selected?.contextWindowKey || selected.maxContextWindow === undefined) return null;
+					const key = selected.contextWindowKey;
+					const max = selected.maxContextWindow;
+					return (
+						<SettingsRow label="Model context window" testid="context-window-row"
+							hint={`Account default ${selected.defaultContextWindow ?? selected.contextWindow}; maximum ${max}; effective ${selected.contextWindow}. Applies only to this account and model.`}>
+							<span className="flex items-center gap-2">
+								<select aria-label="Context model" data-testid="context-model" value={key}
+									onChange={(event) => setContextSelection(event.target.value)}
+									className="max-w-44 rounded-md border border-border bg-card px-2 py-1 text-xs text-foreground">
+									{candidates.map((model) => <option key={model.contextWindowKey} value={model.contextWindowKey}>{model.name}</option>)}
+								</select>
+								<CommitInput key={key} type="number" ariaLabel="model context window" testid="input-context-window"
+									value={String(compaction?.contextWindows?.[key] ?? "")}
+									placeholder={String(selected.defaultContextWindow ?? selected.contextWindow)}
+									onCommit={(value) => {
+										if (!composeContextWindow(undefined, key, value, max)) return false;
+										return editCompaction((current) => composeContextWindow(current, key, value, max)!);
+									}} />
+							</span>
+						</SettingsRow>
+					);
+				})()}
 				<SettingsRow
 					label="Compaction threshold"
-					hint={`${resolvedCompaction.thresholdTokens} tok`}
+					hint={(() => {
+						const candidates = catalog?.filter((m) => m.provider === "chatgpt" && m.contextWindowKey && (m.maxContextWindow ?? 0) >= COMPACTION_THRESHOLD_FLOOR) ?? [];
+						const strong = slots?.strong?.model;
+						const model = candidates.find((m) => m.contextWindowKey === contextSelection)
+							?? candidates.find((m) => m.provider === strong?.provider && m.id === strong?.id)
+							?? candidates[0];
+						if (!model || model.contextWindow === null) return `${resolvedCompaction.thresholdTokens} tok`;
+						const effective = Math.min(resolvedCompaction.thresholdTokens, Math.max(model.contextWindow - COMPACTION_RESERVE_TOKENS, 1));
+						return `${effective} tok effective for ${model.name} (${COMPACTION_RESERVE_TOKENS} reserved)`;
+					})()}
 					testid="compaction-row-threshold"
 				>
 					<CommitInput
@@ -939,17 +1019,17 @@ export function AgentSection({
 							// Empty = factory default (the budget row's discipline):
 							// absence is the unset for numbers.
 							if (v === "") {
-								return onCompactionChange({ ...compaction, thresholdTokens: undefined });
+								return editCompaction((current) => ({ ...current, thresholdTokens: undefined }));
 							}
 							const n = Number(v);
 							if (!Number.isFinite(n) || n <= 0) return false; // bad input: no write
 							// Mirror the server floor (anti-churn: each compaction
 							// keeps a ~20k-token tail); no ceiling — the effective
 							// trigger is min(threshold, contextWindow − 16k) anyway.
-							return onCompactionChange({
-								...compaction,
+							return editCompaction((current) => ({
+								...current,
 								thresholdTokens: Math.max(COMPACTION_THRESHOLD_FLOOR, Math.round(n)),
-							});
+							}));
 						}}
 					/>
 				</SettingsRow>
@@ -961,7 +1041,7 @@ export function AgentSection({
 					<Toggle
 						label="Include reasoning in token estimates (OpenAI Responses only)"
 						checked={resolvedCompaction.includeReasoning}
-						onChange={(includeReasoning) => onCompactionChange({ ...compaction, includeReasoning })}
+						onChange={() => editCompaction((current) => ({ ...current, includeReasoning: !current?.includeReasoning }))}
 					/>
 				</SettingsRow>
 			</SettingsGroup>

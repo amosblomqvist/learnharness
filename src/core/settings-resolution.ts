@@ -247,6 +247,7 @@ export function resolveSettings(record: UserSettings | null): EffectiveSettings 
 		compaction: {
 			thresholdTokens: record?.compaction?.thresholdTokens ?? FACTORY_SETTINGS.compaction.thresholdTokens,
 			includeReasoning: record?.compaction?.includeReasoning ?? FACTORY_SETTINGS.compaction.includeReasoning,
+			contextWindows: record?.compaction?.contextWindows ?? FACTORY_SETTINGS.compaction.contextWindows,
 		},
 		customProvider: {
 			baseUrl: record?.customProvider?.baseUrl ?? "",

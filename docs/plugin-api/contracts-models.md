@@ -129,6 +129,10 @@ export interface ModelCatalogEntry {
         cacheWrite: number;
     } | null;
     contextWindow: number | null;
+    defaultContextWindow?: number;
+    maxContextWindow?: number;
+    contextWindowSource?: "account";
+    contextWindowKey?: string;
     maxTokens: number | null;
 }
 ```
@@ -147,6 +151,10 @@ export interface ModelCatalogEntry {
 - [cost.cacheRead](#modelcatalogentry-costcacheread)
 - [cost.cacheWrite](#modelcatalogentry-costcachewrite)
 - [contextWindow](#modelcatalogentry-contextwindow)
+- [defaultContextWindow](#modelcatalogentry-defaultcontextwindow)
+- [maxContextWindow](#modelcatalogentry-maxcontextwindow)
+- [contextWindowSource](#modelcatalogentry-contextwindowsource)
+- [contextWindowKey](#modelcatalogentry-contextwindowkey)
 - [maxTokens](#modelcatalogentry-maxtokens)
 
 ### ModelCatalogEntry id
@@ -230,6 +238,34 @@ Null for native CLI aliases whose effective limits are session-specific.
 
 ```ts
 contextWindow: number | null;
+```
+
+### ModelCatalogEntry defaultContextWindow
+
+Account-advertised default and optional ceiling for explicit opt-in.
+
+```ts
+defaultContextWindow?: number;
+```
+
+### ModelCatalogEntry maxContextWindow
+
+```ts
+maxContextWindow?: number;
+```
+
+### ModelCatalogEntry contextWindowSource
+
+```ts
+contextWindowSource?: "account";
+```
+
+### ModelCatalogEntry contextWindowKey
+
+Opaque account-and-model key for a persisted explicit window choice.
+
+```ts
+contextWindowKey?: string;
 ```
 
 ### ModelCatalogEntry maxTokens
