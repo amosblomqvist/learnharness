@@ -43,6 +43,7 @@ import { isInteractionScopeEligible } from "@/components/plugin-input-focus";
 import { MenuShell } from "@/components/menu-shell";
 import { notifySettingsSaved } from "@/components/settings-signal";
 import { DictationLanguageSetting } from "@/components/dictation-language";
+import { LocalDictationRow } from "@/components/settings/local-dictation-row";
 
 /** One pi-ai provider with plain API-key auth (the Platform seam —
  *  derived from pi-ai's own env-key table; no drift possible). */
@@ -600,7 +601,9 @@ export function KeysSection({
 					/>
 				))}
 				{label === "Dictation" && <>
-					<DictationLanguageSetting />
+					{/* Only Deepgram takes a language; the on-device model detects it. */}
+					{toolRows.some((status) => status.id === "DEEPGRAM_API_KEY" && status.present) && <DictationLanguageSetting />}
+					<LocalDictationRow />
 					<p data-testid="dictation-setup-hint" className="px-1 text-[11px] leading-relaxed text-muted-foreground/70">
 						Create a <a
 							href="https://console.deepgram.com/"

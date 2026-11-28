@@ -105,6 +105,9 @@ for (const asset of [
 	path.join("scripts", "plugin-loader.cjs"),
 	path.join("public", "plugin-loader.js"),
 	path.join("src", "agent", "system-prompt.md"),
+	path.join("src", "server", "local-stt", "worker.cjs"),
+	path.join("src", "server", "local-stt", "split.cjs"),
+	path.join("node_modules", "sherpa-onnx-node", "addon.js"),
 	path.join("src", "agent", "prompts", "teacher", "20-teaching.md"),
 	path.join("src", "agent", "prompts", "side-chat", "00-base.md"),
 	path.join("src", "agent", "prompts", "side-chat", "90-style.md"),
@@ -113,6 +116,31 @@ for (const asset of [
 		console.error(`[build-server] prompt asset missing from the trace: ${asset}`);
 		process.exit(1);
 	}
+}
+
+// On-device dictation's native addon: the trace must carry this build's own
+// platform package (sherpa-onnx names Windows "win").
+const sherpaPlatform = `sherpa-onnx-${process.platform === "win32" ? "win" : process.platform}-${process.arch}`;
+if (!exists(path.join(STANDALONE, "node_modules", sherpaPlatform, "sherpa-onnx.node"))) {
+	console.error(`[build-server] native dictation addon missing from the trace: node_modules/${sherpaPlatform}`);
+	process.exit(1);
+}
+// sherpa-onnx-node finds its platform package as a sibling directory. The
+// Windows installer (NSIS) flattens symlinks, which broke that lookup when
+// the app bundle imported sherpa through Next's hashed .next/node_modules
+// link (reported on #478). Only the dictation worker may load it, from
+// real directories.
+for (const pkg of ["sherpa-onnx-node", sherpaPlatform]) {
+	if (fs.lstatSync(path.join(STANDALONE, "node_modules", pkg)).isSymbolicLink()) {
+		console.error(`[build-server] REFUSING: node_modules/${pkg} is a symlink; the Windows installer would break its sibling lookup.`);
+		process.exit(1);
+	}
+}
+const hashedModules = path.join(STANDALONE, ".next", "node_modules");
+const hashedSherpa = exists(hashedModules) ? fs.readdirSync(hashedModules).filter((name) => name.startsWith("sherpa-onnx")) : [];
+if (hashedSherpa.length > 0) {
+	console.error(`[build-server] REFUSING: the app bundle imports sherpa-onnx (.next/node_modules/${hashedSherpa[0]}); only src/server/local-stt/worker.cjs may load it.`);
+	process.exit(1);
 }
 
 console.log("[build-server] server payload ready:", STANDALONE);

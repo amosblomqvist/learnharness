@@ -88,3 +88,20 @@ export function deepgramListenUrl(language: DictationLanguage): string {
 		"&smart_format=true&punctuate=true&endpointing=300" +
 		`&language=${encodeURIComponent(language)}`;
 }
+
+/** On-device dictation (no Deepgram key): the model's state on the server. */
+export type LocalSttModelState =
+	| { state: "missing"; totalBytes: number; error?: string }
+	| { state: "downloading"; receivedBytes: number; totalBytes: number }
+	| { state: "ready"; totalBytes: number };
+
+/** GET /api/stt/local. A Deepgram key decides the engine: with one, dictation uses Deepgram. */
+export interface LocalSttStatus {
+	deepgramKey: boolean;
+	model: LocalSttModelState & { id: string; label: string };
+}
+
+export const LOCAL_STT_SAMPLE_RATE = 16_000;
+/** Recordings stop themselves here; the server refuses anything longer. */
+export const LOCAL_STT_MAX_SECONDS = 600;
+export const LOCAL_STT_MAX_BYTES = LOCAL_STT_MAX_SECONDS * LOCAL_STT_SAMPLE_RATE * 2;
