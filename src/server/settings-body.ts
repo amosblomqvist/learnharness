@@ -1,3 +1,4 @@
+import { isSidebarWidth } from "../core/sidebar-width.ts";
 /**
  * The shared settings-PUT body parsers — one seam per settings surface.
  * Extracted verbatim from the per-chat route (default-settings wave,
@@ -511,6 +512,10 @@ export function parseCustomModelOverridesBody(
 /** The section→parser map for PUT /api/settings/[section]. The custom endpoint
  *  is NOT a section — it connects via POST /api/custom-provider. */
 export const SETTINGS_SECTIONS = {
+	sidebar: (body: unknown): SettingsBodyResult<{width: number}> => {
+		const width = asRecord(body)?.width;
+		return isSidebarWidth(width) ? {ok:true, settings:{width}} : {ok:false, error:"Invalid sidebar width"};
+	},
 	general: parseGeneralSettingsBody,
 	chat: parseSettingsBody,
 	agent: parseAgentSettingsBody,
