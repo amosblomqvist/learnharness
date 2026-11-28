@@ -17,8 +17,8 @@ import {
 	type LayoutNode,
 	type PlanLayout,
 } from "@/components/plan-layout";
-import type { PlanBlockData, PlanNodeStatus, PlanTree } from "@/src/core";
-import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
+import type { PlanBlockData, PlanMessage, PlanNodeStatus, PlanOpening, PlanTree } from "@/src/core";
+import { derivedNodeStatus, derivePlanStatuses, latestPlanTree } from "@/src/core";
 import { Hint } from "@/components/ui/hint";
 import { useAppearance } from "@/components/settings/appearance";
 import { InteractionLayerOwner, useInteractionLayer } from "./interaction-layers";
@@ -548,24 +548,16 @@ export function PlanBlock({ data, onOpen }: { data: PlanBlockData; onOpen: () =>
 
 // ─── The live plan popup ──────────────────────────────────────────────────────
 
-/** Minimal structural message slice (same trick as phases.ts). */
-export interface PopupMessage {
-	parts: ReadonlyArray<{ type: string; state?: string; input?: unknown; output?: unknown }>;
-}
+export type { PlanMessage as PopupMessage } from "@/src/core";
 
-/** The latest plan tree in the transcript (latest tool-plan_ output). */
-export function latestTree(messages: readonly PopupMessage[]): PlanTree | null {
-	for (let m = messages.length - 1; m >= 0; m--) {
-		const parts = messages[m]?.parts;
-		if (!parts) continue;
-		for (let p = parts.length - 1; p >= 0; p--) {
-			const part = parts[p]!;
-			if (!part.type.startsWith("tool-plan_") || part.state !== "output-available") continue;
-			const output = part.output as { tree?: PlanTree } | undefined;
-			if (output?.tree && Array.isArray(output.tree.nodes)) return output.tree;
+export function usePlanPresentation(messages: readonly PlanMessage[], openingPlan?: PlanOpening) {
+	return useMemo(() => {
+		if (openingPlan) {
+			return { tree: openingPlan.tree, statuses: { current: openingPlan.current, visited: new Set(openingPlan.visited) } };
 		}
-	}
-	return null;
+		const tree = latestPlanTree(messages);
+		return { tree, statuses: tree ? derivePlanStatuses(tree, messages) : null };
+	}, [messages, openingPlan]);
 }
 
 /** The popup shows the glow, so its frame pads by the glow's reach —
@@ -589,12 +581,10 @@ const POPUP_PAD = GLOW_REACH;
  * territory. Surface 80% + blur (owner decision): the transcript ghosts
  * through while the focus owns the session area.
  */
-export function PlanPopup({ messages, onClose }: { messages: readonly PopupMessage[]; onClose: () => void }) {
-	const tree = useMemo(() => latestTree(messages), [messages]);
-	const statuses = useMemo(
-		() => (tree ? derivePlanStatuses(tree, messages as Parameters<typeof derivePlanStatuses>[1]) : null),
-		[tree, messages],
-	);
+export function PlanPopup({ messages, openingPlan, onClose }: {
+	messages: readonly PlanMessage[]; openingPlan?: PlanOpening; onClose: () => void;
+}) {
+	const { tree, statuses } = usePlanPresentation(messages, openingPlan);
 	const statusOf = (id: string): PlanNodeStatus => (statuses ? derivedNodeStatus(statuses, id) : "upcoming");
 
 	const rootRef = useRef<HTMLDivElement>(null);

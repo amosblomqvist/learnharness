@@ -61,8 +61,22 @@ export type PlanNodeStatus = "current" | "visited" | "upcoming";
 
 /** Minimal structural message slice — anything with typed parts (mirrors
  * phases.ts: pure, no runtime deps, safe on server, client, and in tests). */
-interface PartsCarrier {
-	parts: Array<{ type: string; state?: string; input?: unknown; output?: unknown; pluginQuestion?: unknown }>;
+export interface PlanMessage {
+	parts: ReadonlyArray<{ type: string; state?: string; input?: unknown; output?: unknown; pluginQuestion?: unknown }>;
+}
+
+/** The most recent successful plan output, in the same view the panel renders. */
+export function latestPlanTree(messages: readonly PlanMessage[]): PlanTree | null {
+	for (let m = messages.length - 1; m >= 0; m--) {
+		const parts = messages[m]!.parts;
+		for (let p = parts.length - 1; p >= 0; p--) {
+			const part = parts[p]!;
+			if (!part.type.startsWith("tool-plan_") || part.state !== "output-available") continue;
+			const output = part.output as { tree?: PlanTree } | undefined;
+			if (output?.tree && Array.isArray(output.tree.nodes)) return output.tree;
+		}
+	}
+	return null;
 }
 
 export interface DerivedPlanStatuses {
@@ -72,6 +86,12 @@ export interface DerivedPlanStatuses {
 	visited: ReadonlySet<string>;
 }
 
+export interface PlanOpening {
+	tree: PlanTree;
+	current: string | null;
+	visited: string[];
+}
+
 /** Statuses of a node: the derived view the plan panel should render. */
 export function derivedNodeStatus(statuses: DerivedPlanStatuses, nodeId: string): PlanNodeStatus {
 	if (statuses.current === nodeId) return "current";
@@ -79,7 +99,7 @@ export function derivedNodeStatus(statuses: DerivedPlanStatuses, nodeId: string)
 	return "upcoming";
 }
 
-export function derivePlanStatuses(tree: PlanTree, messages: readonly PartsCarrier[]): DerivedPlanStatuses {
+export function derivePlanStatuses(tree: PlanTree, messages: readonly PlanMessage[]): DerivedPlanStatuses {
 	const ids = new Set(tree.nodes.map((n) => n.id));
 	const runs: string[] = []; // distinct tagged nodes in call order, CONSECUTIVE
 	// duplicates collapsed (several checks on one node = one stay on it)

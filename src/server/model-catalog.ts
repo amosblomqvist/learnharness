@@ -174,8 +174,9 @@ function keyedProviderIds(): Set<string> {
 }
 
 /** Seed just the selected entry so the dock can paint before the catalog fetch. */
-export function catalogEntryForSelection(selection: NonNullable<ChatSettings["model"]>): ModelDto | undefined {
-	if (selection.provider !== "chatgpt" && !nativeSubscriptionId(selection.provider) && !keyedProviderIds().has(selection.provider)) return undefined;
+export function catalogEntryForSelection(selection: NonNullable<ChatSettings["model"]>, providers: readonly CatalogProvider[]): ModelDto | undefined {
+	if (selection.provider !== "chatgpt" && !nativeSubscriptionId(selection.provider) &&
+		!providers.some(provider => provider.id === selection.provider && provider.keyPresent)) return undefined;
 	const model = connectionModel(selection.provider, selection.id);
 	return model && toModelDto(model);
 }

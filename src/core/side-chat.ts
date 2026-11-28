@@ -94,6 +94,11 @@ function scanSideSegments(messages: readonly LhMessage[]) {
 	}
 	return { byMessage, current: segment };
 }
+export function sideChatHistoryIds(threads: readonly SideChatThread[] | undefined): string[] {
+	return [...new Set(threads?.flatMap(thread =>
+		thread?.messages?.length && thread.anchor?.messageId ? [thread.anchor.messageId] : []) ?? [])];
+}
+
 export function sideSegmentId(messages: readonly LhMessage[], sourceMessageId?: string): string | null {
 	const segments = scanSideSegments(messages);
 	return sourceMessageId ? segments.byMessage.get(sourceMessageId) ?? null : segments.current;

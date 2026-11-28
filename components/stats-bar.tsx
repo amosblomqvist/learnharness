@@ -91,7 +91,8 @@ export function StatsBar({
 	const limits = useMemo(() => catalog ? catalogLimits(catalog) : initialEntry ? catalogLimits({ models: [initialEntry] }) : undefined, [catalog, initialEntry]);
 	const limit = contextLimitForModel(selectedModel, limits, cliContextWindow);
 	const contextLabel = formatContextMeasurement(contextTokens, limit);
-	const cacheHitRate = useMemo(() => sessionCacheHitRate({ turns }), [turns]);
+	const measuredCacheHitRate = useMemo(() => sessionCacheHitRate({ turns }), [turns]);
+	const cacheHitRate = pricing ? measuredCacheHitRate : initialDock?.cacheHitRate ?? measuredCacheHitRate;
 	const shownPricing = pricing ?? initialDock?.pricing;
 	const turnCount = pricing ? turns.length : initialDock?.turnCount ?? turns.length;
 	const { cost = 0, unpriced = turnCount, subscription = 0 } = shownPricing ?? {};

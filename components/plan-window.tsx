@@ -1,14 +1,13 @@
 "use client";
 
-import { useId, useMemo } from "react";
-import { derivedNodeStatus, derivePlanStatuses } from "@/src/core";
+import { useId } from "react";
+import { derivedNodeStatus, latestPlanTree, type PlanMessage, type PlanOpening } from "@/src/core";
 import {
 	PlanDiagram,
 	PlanLayoutProbe,
 	GRAPH_PAD,
-	latestTree,
 	usePlanLayout,
-	type PopupMessage,
+	usePlanPresentation,
 } from "@/components/plan-block";
 import { useAppearance } from "@/components/settings/appearance";
 
@@ -38,18 +37,14 @@ const MARGIN_PAD = GRAPH_PAD + 16;
  *  always truthy, so gating on it alone left a phantom click target in
  *  the bottom-right whenever a question was pending with no plan
  *  (owner report, UI round 2026-10-01). */
-export function planExists(messages: readonly PopupMessage[]): boolean {
-	const tree = latestTree(messages);
+export function planExists(messages: readonly PlanMessage[], openingPlan?: PlanOpening): boolean {
+	const tree = openingPlan?.tree ?? latestPlanTree(messages);
 	return !!tree && tree.nodes.length > 0;
 }
 
-export function PlanMarginalia({ messages }: { messages: readonly PopupMessage[] }) {
+export function PlanMarginalia({ messages, openingPlan }: { messages: readonly PlanMessage[]; openingPlan?: PlanOpening }) {
 	const markerId = useId().replace(/[^a-zA-Z0-9-]/g, "");
-	const tree = useMemo(() => latestTree(messages), [messages]);
-	const statuses = useMemo(
-		() => (tree ? derivePlanStatuses(tree, messages as Parameters<typeof derivePlanStatuses>[1]) : null),
-		[tree, messages],
-	);
+	const { tree, statuses } = usePlanPresentation(messages, openingPlan);
 	const plan = usePlanLayout(tree);
 	const { appearance } = useAppearance();
 	if (!tree || tree.nodes.length === 0) return null; // no plan yet: nothing in the margin

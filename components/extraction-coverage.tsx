@@ -8,7 +8,8 @@ import { useSettingsSaved } from "@/components/settings-signal";
 import { formatTokens } from "@/components/usage-format";
 import { Hint } from "@/components/ui/hint";
 import { timeAgo } from "@/components/sidebar";
-import { resolveSettings } from "@/src/core";
+import { resolveSettings, type SessionCoverage } from "@/src/core";
+export type { SessionCoverage } from "@/src/core";
 
 /**
  * The extraction-coverage surfaces (extraction-UX redesign, owner-locked
@@ -16,7 +17,7 @@ import { resolveSettings } from "@/src/core";
  * block in the sidebar's session context menu — the two replacements for
  * the graph view's coverage panel (components/graph-coverage.tsx, retired
  * with this wave). Coverage is the SAME derivation, scoped to one session:
- * GET /api/chats/[id] now carries `coverage` (Platform's eed4b4e).
+ * GET /api/chats/[id]?view=coverage carries the live coverage snapshot.
  *
  * The ring fills with uncoveredTokens / extractionChunkTokens — the chunk
  * budget the threshold setting (Graph ▸ extractionChunkTokens) pins: the
@@ -30,23 +31,11 @@ import { resolveSettings } from "@/src/core";
  * start-site nudge seam refreshes either way).
  */
 
-/** Client-safe mirror of the server's SessionCoverage (src/server/chats.ts
- *  — the GET /api/chats/[id] `coverage` block). */
-export interface SessionCoverage {
-	totalMessages: number;
-	coveredCount: number;
-	uncoveredCount: number;
-	coveredTokens: number;
-	uncoveredTokens: number;
-	running: boolean;
-	lastFoldedAt: string | null;
-}
-
 /** One session's coverage read — null on transport/404 (callers render
  *  nothing rather than a fake zero; the honest-render doctrine). */
 async function fetchCoverage(chatId: string): Promise<SessionCoverage | null> {
 	try {
-		const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}`);
+		const res = await fetch(`/api/chats/${encodeURIComponent(chatId)}?view=coverage`);
 		if (!res.ok) return null;
 		const body = (await res.json()) as { coverage?: SessionCoverage | null };
 		return body.coverage ?? null;
@@ -241,9 +230,15 @@ export function ringFill(uncoveredTokens: number, chunkTokens: number): number {
  * (resets as the fold drains coverage) + the settings signal (the
  * threshold/kill-switch re-read live).
  */
-export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refreshKey?: number }) {
-	const [graph, setGraph] = useState<GraphRead | null>(null);
-	const [coverage, setCoverage] = useState<SessionCoverage | null>(null);
+export function CoverageRing({ chatId, refreshKey = 0, initialGraph = null, initialCoverage = null }: {
+	chatId: string;
+	refreshKey?: number;
+	initialGraph?: GraphRead | null;
+	initialCoverage?: SessionCoverage | null;
+}) {
+	const [graph, setGraph] = useState(initialGraph);
+	const [coverage, setCoverage] = useState(initialCoverage);
+	const enabled = graph?.enabled === true;
 	const [open, setOpen] = useState(false);
 	const [nonce, setNonce] = useState(0);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -264,19 +259,20 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 
 	useEffect(() => {
 		let alive = true;
-		void fetchGraphRead().then((g) => alive && setGraph(g));
+		void fetchGraphRead().then((g) => { if (alive && g !== null) setGraph(g); });
 		return () => {
 			alive = false;
 		};
 	}, [nonce]);
 
 	useEffect(() => {
+		if (!enabled) return;
 		let alive = true;
-		void fetchCoverage(chatId).then((c) => alive && setCoverage(c));
+		void fetchCoverage(chatId).then((c) => { if (alive && c !== null) setCoverage(c); });
 		return () => {
 			alive = false;
 		};
-	}, [chatId, refreshKey, nonce, runHere]);
+	}, [chatId, refreshKey, nonce, runHere, enabled]);
 
 	// While a run is in flight: poll at 2s so the ring DRAINS as folds land
 	// and settles at zero when the run completes (the "resets on
@@ -285,14 +281,14 @@ export function CoverageRing({ chatId, refreshKey = 0 }: { chatId: string; refre
 	// and the events channel is per phase — that granularity gap is why
 	// this bounded, run-scoped poll stays.
 	useEffect(() => {
-		if (coverage?.running !== true) return;
+		if (!enabled || coverage?.running !== true) return;
 		const timer = setInterval(() => {
 			void fetchCoverage(chatId).then((c) => {
 				if (c !== null) setCoverage(c);
 			});
 		}, 2000);
 		return () => clearInterval(timer);
-	}, [chatId, coverage?.running]);
+	}, [chatId, coverage?.running, enabled]);
 
 	// Vanishes entirely when the graph is off, or before the first honest
 	// read (no fake zeros — the doctrine).

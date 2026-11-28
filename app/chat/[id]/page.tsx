@@ -1,7 +1,7 @@
 import { notFound } from "next/navigation";
 import { Chat } from "@/components/chat";
-import { CLAUDE_CODE_PROVIDER, cliContextWindowOf, measuredContextTokens, slotsConfigured } from "@/src/core";
-import { catalogEntryForSelection, compactionInFlight, getChat, getChatOpening, isTurnRunning, readSettingsRecord, sessionCost, turnFailure } from "@/src/server";
+import { CLAUDE_CODE_PROVIDER, cliContextWindowOf, coverageBasisOf, measuredContextTokens, resolveSettings, sessionCacheHitRate, sideChatHistoryIds, slotsConfigured } from "@/src/core";
+import { catalogEntryForSelection, catalogProviders, compactionInFlight, getChat, getChatOpening, isTurnRunning, readSettingsRecord, sessionCost, sessionCoverage, turnFailure } from "@/src/server";
 
 export const dynamic = "force-dynamic";
 
@@ -22,10 +22,17 @@ export default async function ChatPage({
 	// server's 503 stays the truth; this only decides whether the pill rides.
 	const record = readSettingsRecord();
 	const initialConfigured = slotsConfigured(record?.models);
+	const providers = catalogProviders();
+	const initialZeroKeys = !providers.some(provider => provider.keyPresent);
 	const strong = record?.models?.strong;
 	const selection = chat.settings?.model ?? strong?.model;
 	const { turnCosts: _turnCosts, ...pricing } = sessionCost(chat);
-	const usage = ("dockUsage" in chat ? chat.dockUsage : undefined) ?? {
+	const opening = "partial" in chat && chat.partial ? chat : undefined;
+	const graph = resolveSettings(record).graph;
+	const coverage = chat.kind !== "practice" && graph.enabled
+		? sessionCoverage(chat.id, opening?.coverageBasis ?? coverageBasisOf(chat.messages))
+		: null;
+	const usage = opening?.dockUsage ?? {
 		contextTokens: measuredContextTokens(chat.messages), cliContextWindow: cliContextWindowOf(chat.messages),
 	};
 	return (
@@ -36,13 +43,19 @@ export default async function ChatPage({
 			kind={chat.kind ?? "teach"}
 			// The record is native agent history; the client derives its view.
 			initialMessages={chat.messages}
-			openingLayout={"openingLayout" in chat ? chat.openingLayout : undefined}
+			openingLayout={opening?.openingLayout}
+			openingPresentation={opening?.presentation}
+			initialSideHistoryIds={opening?.presentation.sideHistoryIds ?? sideChatHistoryIds("sideChats" in chat ? chat.sideChats : undefined)}
+			initialCoverage={coverage}
+			initialGraph={{ enabled: graph.enabled, chunkTokens: graph.extractionChunkTokens }}
 			initialError={turnFailure(chat.id)}
 			initialConfigured={initialConfigured}
+			initialZeroKeys={initialZeroKeys}
 			initialDock={{
 				...usage,
-				model: { settings: chat.settings, strong, entry: selection && catalogEntryForSelection(selection) },
+				model: { settings: chat.settings, strong, entry: selection && catalogEntryForSelection(selection, providers) },
 				pricing, turnCount: chat.turns?.length ?? 0,
+				cacheHitRate: sessionCacheHitRate(chat),
 				cliBilled: chat.turns?.some(turn => turn.model.startsWith(`${CLAUDE_CODE_PROVIDER}:`)) ?? false,
 			}}
 			initialPrompt={prompt}

@@ -207,9 +207,12 @@ test("Agent opens with cached thinking metadata; refresh and disconnect never cl
 
 test("saved completeness follows ordinary repairs and survives temporary connection invalidation", async () => {
 	installFetch(); let state: ReturnType<typeof useModelSetup>;
-	function StateReader() { state = useModelSetup(false); return null; }
-	await render(<StateReader />); await answer(0, catalog());
+	function StateReader() { state = useModelSetup(false, true); return null; }
+	await render(<StateReader />);
+	assert.equal(state!.zeroKeys, true, "the provider-key CTA shows before the catalog arrives");
+	await answer(0, catalog());
 	assert.equal(state!.configured, true);
+	assert.equal(state!.zeroKeys, false);
 	await act(async () => notifySettingsSaved("keys")); assert.equal(state!.configured, true);
 	const partial = catalog(false); partial.slots.vision = null;
 	await answer(1, partial); assert.equal(state!.configured, false); assert.equal(state!.zeroKeys, true);
@@ -226,8 +229,10 @@ test("blocked session recovery opens its ordinary picker, never changes Strong o
 	const requestsOnly = globalThis.fetch; const sessionWrites: unknown[] = [];
 	globalThis.fetch = async (input, init) => {
 		if (input === "/api/settings") return Response.json({ settings: { models: globals } });
-		if (input === "/api/chats/fixture") return Response.json({ settings: session });
-		if (input === "/api/chats/fixture/settings") { const next = JSON.parse(String(init?.body)); sessionWrites.push(next); return Response.json({ settings: next }); }
+		if (input === "/api/chats/fixture/settings") {
+			if (init?.method !== "PUT") return Response.json({ settings: session });
+			const next = JSON.parse(String(init.body)); sessionWrites.push(next); return Response.json({ settings: next });
+		}
 		return requestsOnly(input, init);
 	};
 	await warm(body); let selected: string | undefined;
@@ -255,7 +260,7 @@ for (const result of ["override", "legacy", "http-failure", "network-failure"] a
 	const requestsOnly = globalThis.fetch;
 	globalThis.fetch = async (input, init) => {
 		if (input === "/api/settings") return Response.json({ settings: { models: globals } });
-		if (input === "/api/chats/fixture") return sessionRead;
+		if (input === "/api/chats/fixture/settings") return sessionRead;
 		return requestsOnly(input, init);
 	};
 	await warm(body); const identities: Array<string | undefined> = [];

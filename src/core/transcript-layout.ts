@@ -67,7 +67,7 @@ export type TranscriptRowSize = readonly [key: string, height: number];
 
 /** Saved alongside the file offsets. Chats with a dock-owned question or
  * problem use the canonical opening path so the dock never changes shape. */
-export function transcriptOpeningLayout(messages: readonly LhMessage[]): TranscriptRowSize[] | null {
+export function transcriptOpeningLayout(messages: readonly LhMessage[], rows?: readonly TranscriptRow[]): TranscriptRowSize[] | null {
 	if (pendingQuestionOf(messages) || pendingPluginQuestionOf(messages) || activeProblemOf(messages)) return null;
-	return transcriptRows(projectView(messages)).map(row => [row.key, estimateTranscriptRow(row)]);
+	return (rows ?? transcriptRows(projectView(messages))).map(row => [row.key, estimateTranscriptRow(row)]);
 }

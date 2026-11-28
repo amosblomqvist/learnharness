@@ -8,7 +8,7 @@
 import type { ThinkingLevel } from "@earendil-works/pi-agent-core";
 import type { LhMessage } from "../native-messages.ts";
 import type { Phase3 } from "../phases.ts";
-import type { PlanNodeStatus, PlanTree } from "./plan.ts";
+import type { PlanNodeStatus, PlanOpening, PlanTree } from "./plan.ts";
 import type { EmissionStats } from "./graph.ts";
 import type { ModelCatalogEntry } from "./models.ts";
 import type { SessionPricing } from "../prices.ts";
@@ -35,6 +35,23 @@ export interface ChatDockSeed extends ChatDockUsage {
 	pricing: Omit<SessionPricing, "turnCosts">;
 	turnCount: number;
 	cliBilled: boolean;
+	cacheHitRate?: number | null;
+}
+
+export interface ChatOpeningPresentation {
+	phaseBeforeTail: Phase3;
+	plan: PlanOpening | null;
+	sideHistoryIds: string[];
+}
+
+export interface SessionCoverage {
+	totalMessages: number;
+	coveredCount: number;
+	uncoveredCount: number;
+	coveredTokens: number;
+	uncoveredTokens: number;
+	running: boolean;
+	lastFoldedAt: string | null;
 }
 
 /** One persisted native session under data/chats/<id>.json. Messages retain

@@ -13,7 +13,8 @@ import { createHash } from "node:crypto";
 import { PATHS } from "../../config.ts";
 import { emit } from "../core/events.ts";
 import type { ChatStore } from "../core/ports.ts";
-import type { ChatDockUsage } from "../core/contracts/chat.ts";
+import type { ChatDockUsage, ChatOpeningPresentation } from "../core/contracts/chat.ts";
+import type { CoverageBasis } from "../core/coverage.ts";
 import type { ChatRecord, ChatSettings, ChatSummary, ExtractionRunUsage, ImageSnapshot, PlanTree, SideChatThread, TurnUsage } from "../core/contracts.ts";
 import { CURRENT_CHAT_VERSION } from "../core/contracts.ts";
 import type { LhMessage } from "../core/native-messages.ts";
@@ -27,6 +28,15 @@ import { projectView } from "../core/view.ts";
 const MIN_INDEXED_MESSAGES = 80;
 const OPENING_MESSAGES = 40;
 const OPENING_BYTES = 128 * 1024;
+
+type ChatOpening = (ChatRecord & { partial: false }) |
+	(Pick<ChatRecord, "id" | "title" | "kind" | "messages" | "settings" | "turns"> & {
+		partial: true;
+		openingLayout: TranscriptRowSize[];
+		dockUsage: ChatDockUsage;
+		presentation: ChatOpeningPresentation;
+		coverageBasis?: CoverageBasis;
+	});
 
 function chatFile(id: string): string {
 	if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error(`Invalid chat id: ${id}`);
@@ -90,13 +100,13 @@ function getChat(id: string): ChatRecord | null {
 
 /** Indexed startup is optional. Older profiles take the canonical path once
  * and leave an index for their next open without rewriting the chat. */
-export function getChatOpening(id: string): (Pick<ChatRecord, "id" | "title" | "kind" | "messages" | "settings" | "turns"> & {
-	partial: boolean; openingLayout?: TranscriptRowSize[]; dockUsage?: ChatDockUsage;
-}) | null {
+export function getChatOpening(id: string): ChatOpening | null {
 	let file: string;
 	try { file = chatFile(id); } catch { return null; }
 	const indexed = readChatHistoryIndex(file, { limit: OPENING_MESSAGES, maxBytes: OPENING_BYTES, includeDock: true });
-	if (indexed?.opening?.length && indexed.dock && indexed.chat.id === id && indexed.total >= MIN_INDEXED_MESSAGES && indexed.messages.length) {
+	if (indexed?.opening?.length && indexed.dock && indexed.presentation &&
+		(indexed.chat.kind === "practice" || indexed.coverage) &&
+		indexed.chat.id === id && indexed.total >= MIN_INDEXED_MESSAGES && indexed.messages.length) {
 		// A learner message starts a complete presentation group and resets
 		// side conversation segments. Avoid a partial rendering of an older group.
 		const start = indexed.messages.findIndex(message => message.role === "user");
@@ -106,14 +116,27 @@ export function getChatOpening(id: string): (Pick<ChatRecord, "id" | "title" | "
 			const first = indexed.opening.length - tail.length;
 			if (tail.length && first >= 0 && tail.every((row, i) => row.key === indexed.opening?.[first + i]?.[0])) {
 				const { settings, ...dockUsage } = indexed.dock;
-				return { ...indexed.chat, messages, settings, turns: indexed.turns, dockUsage, partial: true, openingLayout: indexed.opening };
+				const { phaseChanges, ...presentation } = indexed.presentation;
+				const phaseBeforeTail = phaseChanges.findLast(([row]) => row < first)?.[1] ?? "probe";
+				return {
+					...indexed.chat, messages, settings, turns: indexed.turns, dockUsage, partial: true, openingLayout: indexed.opening,
+					presentation: { ...presentation, phaseBeforeTail }, coverageBasis: indexed.coverage,
+				};
 			}
 		}
 	}
 	const chat = getChat(id);
 	if (!chat) return null;
-	if ((!indexed?.dock || indexed.opening === undefined) && chat.messages?.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, false, chat);
-	return { id: chat.id, title: chat.title, kind: chat.kind, messages: chat.messages, settings: chat.settings, turns: chat.turns, partial: false };
+	if ((!indexed?.dock || indexed.opening === undefined || (chat.kind !== "practice" && !indexed.coverage)) &&
+		chat.messages?.length >= MIN_INDEXED_MESSAGES) void rebuildChatHistoryIndex(file, false, chat);
+	return { ...chat, partial: false };
+}
+
+export function getChatCoverageBasis(id: string): CoverageBasis | undefined {
+	let file: string;
+	try { file = chatFile(id); } catch { return undefined; }
+	const indexed = readChatHistoryIndex(file, { before: 0, limit: 1, maxBytes: 1 });
+	return indexed?.chat.id === id ? indexed.coverage : undefined;
 }
 
 function listChats(): ChatSummary[] {

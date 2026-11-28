@@ -4,13 +4,16 @@ import os from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import { readChatHistoryIndex, rebuildChatHistoryIndex } from "../src/store/chat-history-index.ts";
-import { newUserMessage } from "../src/core/native-messages.ts";
+import { newUserMessage, type LhMessage } from "../src/core/native-messages.ts";
+import { phaseTimeline } from "../src/core/phases.ts";
+import { projectView } from "../src/core/view.ts";
+import { coverageOf } from "../src/core/coverage.ts";
 import { transcriptOpeningLayout } from "../src/core/transcript-layout.ts";
-import type { TurnUsage } from "../src/core/contracts.ts";
+import type { PlanTree, TurnUsage } from "../src/core/contracts.ts";
 
 const data = fs.mkdtempSync(path.join(os.tmpdir(), "lh-history-index-"));
 process.env.LH_DATA_DIR = data;
-const { chatStore, getChatOpening } = await import("../src/store/chats.ts");
+const { chatStore, getChatCoverageBasis, getChatOpening } = await import("../src/store/chats.ts");
 after(() => fs.rmSync(data, { recursive: true, force: true }));
 
 const fileFor = (id: string) => path.join(data, "chats", `${id}.json`);
@@ -45,6 +48,7 @@ test("warm open reads a bounded byte range from the original, with one offset pe
 		id: chat.id, title: chat.title, kind: "practice", messages: messages.slice(-40), partial: true,
 		openingLayout: transcriptOpeningLayout(messages),
 		settings, turns: [turn], dockUsage: { contextTokens: null, cliContextWindow: null },
+		presentation: { phaseBeforeTail: "probe", plan: null, sideHistoryIds: [] }, coverageBasis: undefined,
 	});
 	assert.ok(sourceBytes > 0 && sourceBytes < fileSize / 10, `read ${sourceBytes} of ${fileSize} bytes`);
 	const tail = readChatHistoryIndex(file, { limit: 4, maxBytes: 128 * 1024 })!;
@@ -57,6 +61,58 @@ test("warm open reads a bounded byte range from the original, with one offset pe
 	assert.deepEqual(bounded.messages, messages.slice(39, 40));
 });
 
+test("a warm preview carries earlier phase, plan progress, side badges, and exact live coverage", async t => {
+	const chat = chatStore.createChat("Opening presentation");
+	const timestamp = Date.now();
+	const call = (name: string, id: string, args: object): LhMessage => ({
+		id, role: "assistant", timestamp, stopReason: "toolUse",
+		content: [{ type: "toolCall", id: `call-${id}`, name, arguments: args }],
+	} as LhMessage);
+	const result = (toolName: string, id: string, details: object): LhMessage => ({
+		id: `result-${id}`, role: "toolResult", timestamp, toolName, toolCallId: `call-${id}`, isError: false,
+		content: [{ type: "text", text: "ok" }], details,
+	} as LhMessage);
+	const prose = { id: "prose", role: "assistant", timestamp, stopReason: "stop", content: [{ type: "text", text: "Saved teacher explanation." }] } as LhMessage;
+	const tree: PlanTree = { nodes: [{ id: "a", title: "First" }, { id: "b", title: "Second" }], edges: [{ from: "a", to: "b" }], version: 1 };
+	const history = [
+		messages[0]!, call("probe_done", "probe", {}), result("probe_done", "probe", { ok: true }),
+		call("plan_init", "plan", {}), result("plan_init", "plan", { ok: true, tree }), prose,
+		call("quiz", "quiz-a", { nodeId: "a" }), result("quiz", "quiz-a", { ok: true }),
+		call("quiz", "quiz-b", { nodeId: "b" }), result("quiz", "quiz-b", { ok: true }),
+		...messages.slice(1),
+	];
+	chatStore.saveMessages(chat.id, history);
+	chatStore.updateSideChats(chat.id, () => [{
+		id: "side", anchor: { messageId: prose.id, partId: "prose-t0", blockIndex: 0, blockText: "Saved teacher explanation." },
+		open: false, createdAt: chat.createdAt, messages: [{ id: "question", role: "user", text: "Saved side question", at: chat.createdAt }],
+	}]);
+	await rebuildChatHistoryIndex(fileFor(chat.id));
+	const opening = getChatOpening(chat.id);
+	assert.ok(opening?.partial);
+	assert.deepEqual(opening.presentation, {
+		phaseBeforeTail: "teach", plan: { tree, current: "b", visited: ["a"] }, sideHistoryIds: [prose.id],
+	});
+	assert.ok(phaseTimeline(projectView(opening.messages), opening.presentation.phaseBeforeTail).every(phase => phase === "teach"));
+	assert.ok(!opening.messages.some(message => message.id === prose.id));
+	const basis = getChatCoverageBasis(chat.id);
+	assert.deepEqual(basis, opening.coverageBasis);
+	assert.equal(basis?.totalMessages, history.length);
+	assert.equal(basis?.slots.length, 1);
+	const { sessionCoverage } = await import("../src/server/chats.ts");
+	const { stores } = await import("../src/server/stores.ts");
+	const oldIndex = fs.readFileSync(indexFor(chat.id), "utf8");
+	assert.ok(!oldIndex.includes("Saved teacher explanation") && !oldIndex.includes("Saved side question"));
+	t.mock.method(chatStore, "getChat", () => { throw new Error("Warm coverage must not read the canonical record"); });
+	assert.equal(sessionCoverage(chat.id)?.uncoveredCount, 1);
+	const entry = { ...basis!.slots[0]!, chatId: chat.id, foldedAt: new Date().toISOString() };
+	stores.graphStore.appendCoverage(entry);
+	const expected = coverageOf(history, [entry], chat.id);
+	assert.deepEqual(sessionCoverage(chat.id), {
+		totalMessages: history.length, coveredCount: expected.coveredCount, uncoveredCount: expected.uncoveredCount,
+		coveredTokens: expected.coveredTokens, uncoveredTokens: expected.uncoveredTokens, running: false, lastFoldedAt: entry.foldedAt,
+	});
+});
+
 test("old files backfill the index without rewriting the original", async () => {
 	const chat = chatStore.createChat("Legacy");
 	const legacy = JSON.stringify({ ...chat, version: 1, messages, sideChats: ["nested JSON \" ], {"] });
@@ -64,6 +120,11 @@ test("old files backfill the index without rewriting the original", async () => 
 	assert.deepEqual(getChatOpening(chat.id)?.messages, messages);
 	await rebuildChatHistoryIndex(fileFor(chat.id));
 	assert.equal(fs.readFileSync(fileFor(chat.id), "utf8"), legacy);
+	assert.equal(getChatOpening(chat.id)?.partial, true);
+	const current = JSON.parse(fs.readFileSync(indexFor(chat.id), "utf8"));
+	fs.writeFileSync(indexFor(chat.id), JSON.stringify({ ...current, format: 1 }));
+	assert.equal(getChatOpening(chat.id)?.partial, false);
+	await rebuildChatHistoryIndex(fileFor(chat.id));
 	assert.equal(getChatOpening(chat.id)?.partial, true);
 	assert.equal(chatStore.listChats().filter(entry => entry.id === chat.id).length, 1);
 	assert.equal(chatStore.deleteChat(chat.id), true);

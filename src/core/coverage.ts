@@ -75,9 +75,11 @@ export function viewTokens(lines: string[]): number {
  * the teacher prose of the message changes — nothing else can re-open it.
  */
 export function messageFingerprint(message: LhMessage, failedOutputCalls?: ReadonlySet<string>): string {
-	const h = createHash("sha256");
-	h.update(JSON.stringify([(message as { role?: string }).role, messageViewLines(message, message.id, failedOutputCalls)]));
-	return h.digest("hex");
+	return fingerprintLines(message.role, messageViewLines(message, message.id, failedOutputCalls));
+}
+
+function fingerprintLines(role: string, lines: string[]): string {
+	return createHash("sha256").update(JSON.stringify([role, lines])).digest("hex");
 }
 
 /** One message's coverage-relevant projection. */
@@ -87,15 +89,30 @@ export interface CoverageSlot {
 	tokens: number;
 }
 
+export interface CoverageBasis {
+	totalMessages: number;
+	slots: Pick<CoverageSlot, "fp" | "tokens">[];
+}
+
+/** Durable fingerprints for visible slots, without the original messages. */
+export function coverageBasisOf(messages: readonly LhMessage[]): CoverageBasis {
+	const failedOutputCalls = failedOutputCallIds(messages);
+	const slots: CoverageBasis["slots"] = [];
+	for (const message of messages) {
+		const lines = messageViewLines(message, message.id, failedOutputCalls);
+		if (lines.length) slots.push({ fp: fingerprintLines(message.role, lines), tokens: viewTokens(lines) });
+	}
+	return { totalMessages: messages.length, slots };
+}
+
 /** Fingerprint a whole transcript, in order (used by the trigger, the run,
  *  and the coverage view — one derivation everywhere). */
 export function coverageSlots(messages: ReadonlyArray<LhMessage>): CoverageSlot[] {
 	const failedOutputCalls = failedOutputCallIds(messages);
-	return messages.map((message) => ({
-		message,
-		fp: messageFingerprint(message, failedOutputCalls),
-		tokens: viewTokens(messageViewLines(message, message.id, failedOutputCalls)),
-	}));
+	return messages.map((message) => {
+		const lines = messageViewLines(message, message.id, failedOutputCalls);
+		return { message, fp: fingerprintLines(message.role, lines), tokens: viewTokens(lines) };
+	});
 }
 
 /** The covered-fingerprint set for one chat, from the ledger. */
@@ -127,26 +144,31 @@ export function coverageOf(
 	const covered = coveredSet(entries, chatId);
 	const slots = coverageSlots(messages);
 	const uncovered: number[] = [];
+	return { slots, uncovered, ...summarizeCoverage(slots, covered, i => uncovered.push(i)) };
+}
+
+export function summarizeCoverage(
+	slots: ReadonlyArray<Pick<CoverageSlot, "fp" | "tokens">>,
+	covered: ReadonlySet<string>,
+	onUncovered?: (index: number) => void,
+) {
+	let coveredCount = 0;
+	let uncoveredCount = 0;
 	let coveredTokens = 0;
 	let uncoveredTokens = 0;
 	for (let i = 0; i < slots.length; i++) {
 		const slot = slots[i]!;
 		if (slot.tokens === 0) continue; // invisible (including failed output calls)
-		if (covered.has(slot.fp)) coveredTokens += slot.tokens;
-		else {
-			uncovered.push(i);
+		if (covered.has(slot.fp)) {
+			coveredCount++;
+			coveredTokens += slot.tokens;
+		} else {
+			uncoveredCount++;
 			uncoveredTokens += slot.tokens;
+			onUncovered?.(i);
 		}
 	}
-	const visibleCount = slots.filter((s) => s.tokens > 0).length;
-	return {
-		slots,
-		uncovered,
-		coveredTokens,
-		uncoveredTokens,
-		coveredCount: visibleCount - uncovered.length,
-		uncoveredCount: uncovered.length,
-	};
+	return { coveredTokens, uncoveredTokens, coveredCount, uncoveredCount };
 }
 
 /**

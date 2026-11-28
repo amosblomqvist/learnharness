@@ -1,9 +1,13 @@
 import { compactionInFlight, deleteChatSession, getChat, isTurnRunning, sessionCoverage, sessionCost, stores, turnFailure, type ChatDeleteMode, pluginQuestionAvailabilityOf, reconcilePluginQuestionCompatibility, type QuestionTypeResolver, getPluginQuestionTypeResolver, getPluginHost, pluginProblemAvailabilityOf, type ProblemTypeResolver } from "@/src/server";
-import { pendingPluginQuestionOf, activeProblemOf } from "@/src/core";
+import { pendingPluginQuestionOf, activeProblemOf, coverageBasisOf } from "@/src/core";
 
 export async function GET(req: Request, { params }: { params: Promise<{ id: string }> }) {
 	const { id } = await params;
 	const view = new URL(req.url).searchParams.get("view");
+	if (view === "coverage") {
+		const coverage = sessionCoverage(id);
+		return coverage ? Response.json({ coverage }) : Response.json({ error: "Not found" }, { status: 404 });
+	}
 	if (view === "stats") {
 		// Stats refreshes don't adopt history or need plugin availability.
 		const chat = getChat(id);
@@ -63,7 +67,7 @@ export async function GET(req: Request, { params }: { params: Promise<{ id: stri
 		// Also reaches idle views that missed the failing turn's stream.
 		turnError: turnFailure(id),
 		compacting: compactionInFlight(id),
-		coverage: sessionCoverage(id),
+		coverage: sessionCoverage(id, coverageBasisOf(chat.messages)),
 	});
 }
 

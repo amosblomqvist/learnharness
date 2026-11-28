@@ -1,13 +1,18 @@
 import fs from "node:fs";
 import type { FileHandle } from "node:fs/promises";
 import { Tokenizer, TokenType } from "@streamparser/json";
-import { CURRENT_CHAT_VERSION, type ChatDockUsage, type ChatRecord } from "../core/contracts/chat.ts";
+import { CURRENT_CHAT_VERSION, type ChatDockUsage, type ChatOpeningPresentation, type ChatRecord } from "../core/contracts/chat.ts";
+import { derivePlanStatuses, latestPlanTree } from "../core/contracts/plan.ts";
+import { coverageBasisOf, type CoverageBasis } from "../core/coverage.ts";
+import { phaseTimeline, type Phase3 } from "../core/phases.ts";
 import { cliContextWindowOf, type LhMessage } from "../core/native-messages.ts";
 import { measuredContextTokens } from "../core/context-usage.ts";
-import { transcriptOpeningLayout, type TranscriptRowSize } from "../core/transcript-layout.ts";
+import { sideChatHistoryIds } from "../core/side-chat.ts";
+import { transcriptOpeningLayout, transcriptRows, type TranscriptRowSize } from "../core/transcript-layout.ts";
+import { projectView } from "../core/view.ts";
 import { removeLeftoverTemps, writeFileAtomicSync } from "./atomic-write.ts";
 
-const FORMAT = 1;
+const FORMAT = 2;
 const CHUNK_BYTES = 64 * 1024;
 const MAX_INDEX_BYTES = 1024 * 1024;
 const OPENING_FIELDS = new Set(["id", "title", "kind", "version"]);
@@ -20,6 +25,8 @@ interface HistoryIndex {
 	fields: Record<string, unknown>;
 	opening?: TranscriptRowSize[] | null;
 	dock?: ChatDockUsage & { settings?: ChatRecord["settings"] };
+	presentation?: Omit<ChatOpeningPresentation, "phaseBeforeTail"> & { phaseChanges: [row: number, phase: Phase3][] };
+	coverage?: CoverageBasis;
 	turnsRange?: [start: number, end: number];
 }
 
@@ -73,8 +80,35 @@ async function locate(source: FileHandle) {
 	return { offsets, fields, turnsRange };
 }
 
-type OpeningRecord = Pick<ChatRecord, "messages" | "settings">;
+type OpeningRecord = Pick<ChatRecord, "messages" | "settings" | "sideChats" | "kind">;
 type OpeningSnapshot = { revision: string; record: OpeningRecord };
+
+function openingPresentation(record: OpeningRecord) {
+	const view = projectView(record.messages);
+	const rows = transcriptRows(view);
+	const opening = transcriptOpeningLayout(record.messages, rows);
+	if (!opening) return { opening };
+	const phases = phaseTimeline(view);
+	const phaseChanges: NonNullable<HistoryIndex["presentation"]>["phaseChanges"] = [];
+	let previous: Phase3 = "probe";
+	rows.forEach(({ messageIndex }, index) => {
+		const phase = phases[messageIndex]!;
+		if (phase !== previous) {
+			phaseChanges.push([index, phase]);
+			previous = phase;
+		}
+	});
+	const tree = latestPlanTree(view);
+	const statuses = tree && derivePlanStatuses(tree, view);
+	return {
+		opening,
+		presentation: {
+			phaseChanges,
+			sideHistoryIds: sideChatHistoryIds(record.sideChats),
+			plan: tree && statuses && { tree, current: statuses.current, visited: [...statuses.visited] },
+		},
+	};
+}
 
 async function buildIndex(file: string, snapshot: OpeningSnapshot | undefined): Promise<void> {
 	try {
@@ -83,9 +117,10 @@ async function buildIndex(file: string, snapshot: OpeningSnapshot | undefined): 
 			const revision = revisionOf(await source.stat({ bigint: true }));
 			const layout = await locate(source);
 			const record = snapshot?.revision === revision && snapshot.record.messages.length === layout.offsets.length - 1 ? snapshot.record : undefined;
-			const opening = record && transcriptOpeningLayout(record.messages);
+			const display = record && openingPresentation(record);
 			const dock = record && { settings: record.settings, contextTokens: measuredContextTokens(record.messages), cliContextWindow: cliContextWindowOf(record.messages) };
-			const text = JSON.stringify({ format: FORMAT, revision, ...layout, opening, dock } satisfies HistoryIndex);
+			const coverage = record && record.kind !== "practice" ? coverageBasisOf(record.messages) : undefined;
+			const text = JSON.stringify({ format: FORMAT, revision, ...layout, ...display, dock, coverage } satisfies HistoryIndex);
 			if (Buffer.byteLength(text) > MAX_INDEX_BYTES) return;
 			if (revision === revisionOf(fs.statSync(/* turbopackIgnore: true */ file, { bigint: true }))) writeFileAtomicSync(indexFile(file), text);
 		} finally { await source.close(); }
@@ -152,6 +187,8 @@ export interface IndexedChatHistory {
 	revision: string;
 	opening?: TranscriptRowSize[] | null;
 	dock?: HistoryIndex["dock"];
+	presentation?: HistoryIndex["presentation"];
+	coverage?: CoverageBasis;
 	turns?: ChatRecord["turns"];
 }
 
@@ -188,6 +225,15 @@ export function readChatHistoryIndex(
 			if (messages.length !== end - start) return null;
 			const opening = index.opening;
 			if (opening && (!Array.isArray(opening) || opening.some(row => !Array.isArray(row) || typeof row[0] !== "string" || !Number.isFinite(row[1]) || row[1] <= 0))) return null;
+			const { presentation, coverage } = index;
+			if (opening && (!presentation || !Array.isArray(presentation.phaseChanges) ||
+				presentation.phaseChanges.some(change => !Array.isArray(change) || !Number.isSafeInteger(change[0]) ||
+					change[0] < 0 || change[0] >= opening.length || !["plan", "teach"].includes(change[1])) ||
+				!Array.isArray(presentation.sideHistoryIds) || presentation.sideHistoryIds.some(id => typeof id !== "string") ||
+				(presentation.plan !== null && (!Array.isArray(presentation.plan?.tree?.nodes) ||
+					!Array.isArray(presentation.plan.tree.edges) || !Array.isArray(presentation.plan.visited))))) return null;
+			if (coverage && (coverage.totalMessages !== total || !Array.isArray(coverage.slots) ||
+				coverage.slots.some(slot => typeof slot?.fp !== "string" || !Number.isSafeInteger(slot.tokens) || slot.tokens <= 0))) return null;
 			let turns: ChatRecord["turns"];
 			if (includeDock && index.turnsRange) {
 				const [start, end] = index.turnsRange;
@@ -197,7 +243,7 @@ export function readChatHistoryIndex(
 				if (!Array.isArray(turns)) return null;
 			}
 			if (revision !== revisionOf(fs.fstatSync(source, { bigint: true }))) return null;
-			return { chat: { id, title, kind }, messages, start, total, revision, opening, dock: index.dock, turns };
+			return { chat: { id, title, kind }, messages, start, total, revision, opening, dock: index.dock, turns, presentation, coverage };
 		} finally { fs.closeSync(source); }
 	} catch { return null; }
 }
