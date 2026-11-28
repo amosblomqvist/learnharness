@@ -1,6 +1,6 @@
 "use client";
 
-import { createContext, Fragment, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { createContext, Fragment, Suspense, lazy, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
 import { useChatSession } from "@/components/session";
 import { usePlugins } from "./plugins";
@@ -13,7 +13,9 @@ import { scheduleOpeningSubmission } from "./plugin-submission-opening";
 import { activeProblemOccurrenceOf, buildAnswer, toClientQuestion, type PluginSubmission, type PluginSubmissionTarget, type QuestionData } from "@/src/core";
 import { validatePluginBuiltinSubmissionAnswer } from "@/src/core";
 import { visibleQueuedSteers } from "@/components/session-core";
-import { SetupDialog } from "@/components/setup-dialog";
+const SetupDialog = lazy(() =>
+	import("@/components/setup-dialog").then((m) => ({ default: m.SetupDialog })),
+);
 import { Hint } from "@/components/ui/hint";
 import { cn } from "@/lib/utils";
 import { useModelSetup, selectedModelUnavailable, openModelPicker, ZeroKeysPill } from "@/components/setup-cta";
@@ -68,7 +70,10 @@ import {
 import { PlanBlock, PlanPopup, latestTree } from "@/components/plan-block";
 import { PlanMarginalia, planExists } from "@/components/plan-window";
 import { MermaidOverlay, SessionMermaidContext, type SessionImage } from "@/components/session-overlay";
-import { AbortTurnDialog, type AbortMode } from "@/components/abort-turn-dialog";
+import type { AbortMode } from "@/components/abort-turn-dialog";
+const AbortTurnDialog = lazy(() =>
+	import("@/components/abort-turn-dialog").then((m) => ({ default: m.AbortTurnDialog })),
+);
 import { ArrowRightIcon, DumbbellIcon, MessageCircleQuestionIcon, WaypointsIcon } from "lucide-react";
 import type { PlanBlockData } from "@/src/core";
 import { QuestionDock } from "@/components/question-dock";
@@ -2234,7 +2239,11 @@ export function Chat({
 					/>
 				)}
 				</SurfaceRegion>
-				<AbortTurnDialog mode={abortAsk} onClose={closeAbortAsk} onConfirm={confirmAbort} busy={busy} />
+				{abortAsk !== null && (
+					<Suspense fallback={null}>
+						<AbortTurnDialog mode={abortAsk} onClose={closeAbortAsk} onConfirm={confirmAbort} busy={busy} />
+					</Suspense>
+				)}
 				</div>
 			</div>
 		</div>
@@ -2246,6 +2255,8 @@ export function Chat({
 		    deep-link. Save keeps the draft in the composer — it never sends
 		    (owner ruling 2026-10-09); Esc also keeps it (the dialog is
 		    closable by design — the gate is the server, not this modal). */}
+		{setupOpen && (
+			<Suspense fallback={null}>
 		<SetupDialog
 			open={setupOpen}
 			onClose={() => setSetupOpen(false)}
@@ -2256,6 +2267,8 @@ export function Chat({
 				// the learner sends it themselves.
 			}}
 		/>
+			</Suspense>
+		)}
 		</ChatActionsContext.Provider>
 	);
 }
