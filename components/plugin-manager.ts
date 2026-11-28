@@ -464,6 +464,12 @@ export class PluginFrontendManager {
 			onResync: listener => listen(life.resyncs, listener),
 			app: {
 				pathname: () => this.host.pathname(),
+				currentSession: () => {
+					if (!this.current(life)) return undefined;
+					let page: PluginPageActionContext | undefined;
+					try { page = this.shortcutPageContext(); } catch { return undefined; }
+					return page?.surface === "session" ? page : undefined;
+				},
 				openHome: () => { if (this.current(life)) this.host.navigate("/"); },
 				openSession: id => { if (this.current(life)) this.host.navigate(`/chat/${encodeURIComponent(id)}`); },
 				openView: id => { if (this.current(life)) this.host.navigate(pluginViewPath(info.id, id)); },

@@ -355,6 +355,11 @@ export interface PluginFrontendContext {
 	app: {
 		/** Read the current host pathname, not a captured invocation-page snapshot. */
 		pathname(): string;
+		/** Read the teaching/practice session page in front right now: the same
+		 * detached context a session action receives, captured at this call. Returns
+		 * undefined on every other page, or while that page cannot supply its context;
+		 * never a guessed, retained or hidden session. Call it again for newer state. */
+		currentSession(): Extract<PluginPageActionContext, { surface: "session" }> | undefined;
 		/** Navigate to a native session by ID; does not create or run a session. */
 		openSession(id: string): void;
 		/** Navigate to the host home page. */
